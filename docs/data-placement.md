@@ -348,7 +348,7 @@ use and proposes the slices; none is approved yet.
 | Table | Rows / sample mean B | Logical / indexed GB model | What remains to assess |
 | --- | ---: | ---: | --- |
 | `projectHostedRecordBodies` | 109,335 / 1,279 | 0.140 / 0.839 | Immutable journal/Work bodies, including planning/audit, must stay forever; exact R2 body plus compact hot pointer is a candidate (~0.70 GB ceiling). |
-| `projectHostedActionsResults` | 20,490 / 2,151 | 0.044 / 0.176 | Report detail is operational; lossless row compaction landed. Further R2 detail placement (~0.15 GB original ceiling) is undecided. |
+| `projectHostedActionsResults` | 20,490 / 2,151 | 0.044 / 0.176 | Report detail is operational; lossless row compaction landed. R2 detail placement (~0.15 GB original ceiling) is decided and not built: one server-only report object per run, a bounded summary in the run header ([S3 report transport](research/placement-review.md#s3-report-transport)). |
 | `projectHostedLandingObservations` | 44,941 / 2,293 | 0.103 / 0.412 | Versioned observation copies include committed recovery/audit history; assess deltas/references (~0.35 GB ceiling), not blanket expiry. |
 | `projectHostedRecords` | 109,335 / 487 | 0.053 / 0.426 | Immutable versions/audit stay; deduplicate inline body copies only with equal read-call cost (~0.06 GB ceiling). |
 | `projectHostedOperations` | 18,368 / 1,860 | 0.034 / 0.171 | Retry outcomes/receipts stay; bulk transport body pointers are an option (~0.14 GB ceiling), with no proven extra-R2-read win. |

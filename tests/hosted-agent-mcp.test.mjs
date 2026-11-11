@@ -20,6 +20,115 @@ import { startMcp } from '../dist/mcp.js';
 import { agentCli } from '../dist/agent-cli.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { slimReceipt } from '../dist/receipt-slim.js';
+import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
+import { replies } from './agent-reply-fixture.mjs';
+
+test('MCP replyDetail preserves every receipt field and body without changing the dispatched action', async t => {
+  const s = agentFixture(t),
+    transport = s.transport(),
+    tools = new Map();
+  const close = registerHostedAgentWorkflow(
+    {
+      registerTool(name, config, call) {
+        tools.set(name, { ...config, call });
+      },
+    },
+    transport,
+  );
+  t.after(close);
+  const expected = {};
+  t.mock.method(transport, 'dispatch', async (action, input) => {
+    assert(!('replyDetail' in input), 'the local reply option never reaches the hosted action');
+    assert.equal(action, expected.action);
+    return expected.receipt;
+  });
+  const controller = new AbortController();
+  for (const [name, receipt] of Object.entries(replies)) {
+    const action =
+      name === 'land' ? 'finish' : name === 'conflict' ? 'sync' : name === 'wait' ? 'observe' : name;
+    expected.action = action;
+    expected.receipt = receipt;
+    const tool = tools.get(
+      action === 'observe' ? 'forge_check' : action === 'board' ? 'forge_work_overview' : 'forge_task',
+    );
+    const fields = {
+      start: { outcome: 'Synthetic reply' },
+      save: {},
+      sync: { laneId: s.lane.laneId },
+      resolve: { laneId: s.lane.laneId },
+      finish: { laneId: s.lane.laneId },
+      observe: { operationId: receipt.operationId },
+      preflight: { laneId: s.lane.laneId, run: false },
+      board: {},
+    }[action];
+    for (const replyDetail of [false, true]) {
+      const command = z
+        .object(tool.inputSchema)
+        .parse({ command: { action, ...fields, replyDetail } }).command;
+      const response = await tool.call({ command }, { signal: controller.signal });
+      assert(!response.isError, response.content[0].text);
+      assert.deepEqual(
+        body(response),
+        replyDetail ? receipt : slimReceipt(receipt),
+        `${name}: replyDetail=${replyDetail}`,
+      );
+    }
+  }
+  const message = { id: replies.board.result.messages[0].id, text: 'Read the entire note '.repeat(10) };
+  const reply = { id: replies.board.result.messages[1].id, text: 'Read the entire reply '.repeat(10) };
+  expected.action = 'board';
+  expected.receipt = {
+    ...replies.board,
+    result: { message, replies: [reply], moreReplies: false, notices: ['short summaries'] },
+  };
+  const readMore = await tools
+    .get('forge_work_overview')
+    .call({ command: { action: 'board', id: message.id } }, { signal: controller.signal });
+  assert.deepEqual(
+    body(readMore).result.message,
+    message,
+    'MCP board id read reveals full text without another detail request',
+  );
+  assert.deepEqual(body(readMore).result.replies, [reply]);
+});
+
+test('forge_wait replyDetail returns the complete terminal run receipt and releases its wait', async t => {
+  const s = agentFixture(t),
+    transport = s.transport(),
+    tools = new Map();
+  const close = registerHostedAgentWorkflow(
+    {
+      registerTool(name, config, call) {
+        tools.set(name, { ...config, call });
+      },
+    },
+    transport,
+  );
+  t.after(close);
+  const runId = randomUUID();
+  const run = { id: runId, projectId: s.address.projectId, status: 'passed', details: 'complete run detail' };
+  t.mock.method(transport, 'dispatch', async (action, input) => {
+    assert.equal(action, 'observe');
+    assert.deepEqual(input, { runId });
+    return {
+      schema: 1,
+      transport: 'hosted',
+      action: 'observe',
+      operationId: null,
+      resolved: null,
+      result: run,
+    };
+  });
+  const tool = tools.get('forge_wait');
+  for (const replyDetail of [false, true]) {
+    const input = z.object(tool.inputSchema).parse({ runId, replyDetail, maxWaitMs: 0 });
+    const response = await tool.call(input, { signal: new AbortController().signal });
+    assert(!response.isError, response.content[0].text);
+    const receipt = body(response);
+    assert.deepEqual(receipt.result, { status: 'terminal', run });
+    assert.equal(receipt.schema, replyDetail ? 1 : undefined);
+  }
+});
 
 function syntheticAuth(t) {
   const previous = process.env.FORGE_AUTH_TOKEN;

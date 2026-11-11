@@ -8,8 +8,11 @@ import { memberDataNotice } from './member-data-notice.js';
 import {
   boardNoticeLine,
   readBoardCursor,
+  readBoardProjectCursor,
   readBoardServerFeatures,
+  unreadBoardNotes,
   writeBoardCursor,
+  writeBoardProjectCursor,
 } from './board-local.js';
 import { ForgeError, invariant } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
@@ -108,7 +111,12 @@ export async function boardHostedSource(
     (transport.address ? readBoardServerFeatures(transport.address.projectId) : []);
   if (action === 'board') {
     const id = command.id as string | undefined;
-    const after = id || command.all || !laneId ? 0 : readBoardCursor(transport.root, laneId);
+    const after =
+      id || command.all
+        ? 0
+        : laneId
+          ? readBoardCursor(transport.root, laneId)
+          : readBoardProjectCursor(transport.root);
     const result = await transport
       .query<Record<string, unknown>>('projectBoard:read', {
         ...(id ? { id: id.toLowerCase() } : {}),
@@ -125,7 +133,11 @@ export async function boardHostedSource(
       : result.message
         ? [result.message]
         : [];
-    const notices = [...messages, ...(Array.isArray(result.replies) ? result.replies : [])].map(message =>
+    const parsedMessages = messages.map(message => boardMessageSchema.parse(message));
+    const shown = id || command.all ? parsedMessages : unreadBoardNotes(transport.root, parsedMessages);
+    for (const message of shown)
+      if (message.target === 'project') writeBoardProjectCursor(transport.root, message.at);
+    const notices = [...shown, ...(Array.isArray(result.replies) ? result.replies : [])].map(message =>
       boardNoticeLine(boardMessageSchema.parse(message), laneId),
     );
     // One marker per read, only when it carries member text (S-17).

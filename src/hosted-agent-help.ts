@@ -99,7 +99,7 @@ export function hostedAgentHelp(action?: string) {
             'land --save from the Lane folder saves, updates from main, checks and lands; LANDED is acceptance, CHECK PASSED alone is not.',
             'Keep this turn active while your work is unfinished: run the receipt waitCommand in the foreground; exit 3 means run the same wait again.',
             'Replaying an operationId keeps every original parameter, including message; use the receipt replay command.',
-            'Errors print {code,message,next,learn}: run next, and run learn once for the topic. Receipts are brief; --detail prints the full receipt.',
+            'Errors print {code,message,next,learn}: run next, and run learn once for the topic. Receipts are brief; --detail prints all fields and available bodies (replay mutations with the original operationId). MCP: command.replyDetail:true; forge_wait: top level.',
             helpTopicIndex(),
             'MCP: forge_work_overview {action:"help",topic} returns any action\'s exact schema, or a topic.',
             '',

@@ -1,0 +1,28 @@
+{
+  "issue": "b078515d",
+  "unit": "UTF-8 JSON bytes including newline",
+  "before": {
+    "start": 254,
+    "save": 200,
+    "sync": 174,
+    "resolve": 1183,
+    "land": 314,
+    "wait": 371,
+    "conflict": 47557,
+    "preflight": 15555,
+    "board": 1117
+  },
+  "maxBytes": {
+    "start": 254,
+    "save": 200,
+    "sync": 174,
+    "resolve": 1183,
+    "land": 314,
+    "wait": 371,
+    "conflict": 1522,
+    "preflight": 577,
+    "board": 552
+  },
+  "source": "Synthetic hosted boundary receipts in tests/agent-reply-fixture.mjs; measured before reply shaping and ratcheted after it.",
+  "reason": "Issue b078515d preserves compact replies without removing full detail, recovery commands or source pins."
+}

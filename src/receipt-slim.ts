@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { compactReplyDetail } from './receipt-detail.js';
 type Json = Record<string, unknown>;
 const omit = (value: Json, ...keys: string[]): Json =>
   Object.fromEntries(Object.entries(value).filter(([key]) => !keys.includes(key)));
@@ -317,6 +318,9 @@ function brief(out: Json): Json {
             : action === 'observe'
               ? briefObserved(result, out.operationId)
               : undefined;
-  if (slim) out.result = slim;
+  out.result = compactReplyDetail(action, slim ?? result);
+  // Board lists keep one rendering per note; a read-more by id keeps full notes and replies.
+  if (action === 'board' && Array.isArray(result.messages) && Array.isArray(result.notices))
+    out.result = omit(out.result as Json, 'messages');
   return out;
 }

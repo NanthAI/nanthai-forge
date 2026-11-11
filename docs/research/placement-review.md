@@ -2,7 +2,7 @@
 
 Independent architecture review for Issue [4c8dfe6a](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4c8dfe6a-3511-4d01-a36b-1158c4e42c69), 11 November 2026. The owner's yardstick: Convex should (1) orchestrate CI and landing, (2) be the realtime message board for agents and (3) power the web app and a future iOS app. Is it doing more, and should it?
 
-This page proposes; it decides nothing. No slice below is filed, approved or built. It changes no retention rule, plan, service or product limit.
+This page proposes; it decides nothing, except where a section says a contract is decided ([S3 report transport](#s3-report-transport), the [S8a result](#s8-byte-plane-beside-r2-owner-decision-adds-5-a-month)). No slice below was filed, approved or built when the review was written. It changes no retention rule, plan, service or product limit.
 
 ## Verdict
 
@@ -114,7 +114,7 @@ All 182 tables in `convex/` at review time, grouped where rows are alike. "Per l
 | `projectHostedDecisions`, `projectHostedDecisionMaintainers`, `projectHostedFriction`, `projectHostedFrictionHints` | Owner decisions and friction | RT yes; Tx yes | Not written by a landing | **Stay** | None; small product data |
 | `projectHostedStates`, `projectHostedSaves`, `projectHostedSavePages`, `projectHostedSyncs`, `projectHostedSeeds`, `projectHostedSeedPages` | Saves, syncs and their paged inputs | RT for the Lane head; Tx yes | — / 735 B. Dev: 3,054 saves, mean 3.1 KB | States and save receipts **stay**. Input pages and completed protocol copies: **expire** into the Lane's capsule at close (S2) | 0.03 to 0.16 GB modelled. Risk: low |
 | `projectSourceSteps`, `projectSourceTasks`, `projectSourceBatches`, `projectSourcePools` | Source-job cursor, fan-out and pool | RT no; Tx yes | — / 1,193 B. Tasks and batches already expire after 7 days | **Stay** with the Convex provider. Under a Worker provider (S8) tasks, batches and pools are unused: **move with the compute** | 240 KB of I/O per source commit today (measured, one dev window); S5 removes most of it |
-| `projectHostedCheckRuns`, `projectHostedCheckShards`, `projectHostedCheckCallbacks`, `projectHostedCheckWorkers`, `projectHostedCheckSettings`, `projectHostedCheckSettingVersions`, `projectHostedTestTimings`, `projectHostedActionsExports`, `projectHostedActionsResults`, `projectCheckRequests`, `projectCheckRunners` | Job 1: check runs, results, settings | Status RT; Tx yes | 5,456 immediate and 4,520 retained / 577,020 immediate and 9,096 retained B. Runs: 9 indexes, dev mean 27 KB, 2.01 GB on the dashboard | Run header, callback receipts, settings, timings, runners **stay**. Report detail and result pages: **pointer plus R2 at write time** (S3): the runner already uploads results to R2, so stop copying them into rows | Removes about 570 KB written and later expired per dogfood-shaped landing (two large checks). Detail views add one R2 GET. Risk: verdict reuse and shard restore read detail inside mutations today |
+| `projectHostedCheckRuns`, `projectHostedCheckShards`, `projectHostedCheckCallbacks`, `projectHostedCheckWorkers`, `projectHostedCheckSettings`, `projectHostedCheckSettingVersions`, `projectHostedTestTimings`, `projectHostedActionsExports`, `projectHostedActionsResults`, `projectCheckRequests`, `projectCheckRunners` | Job 1: check runs, results, settings | Status RT; Tx yes | 5,456 immediate and 4,520 retained / 577,020 immediate and 9,096 retained B. Runs: 9 indexes, dev mean 27 KB, 2.01 GB on the dashboard | Run header, callback receipts, settings, timings, runners **stay**. Report detail and result pages: **pointer plus R2 at write time** (S3): the runner already uploads results to R2, so stop copying them into rows | Removes about 570 KB written and later expired per dogfood-shaped landing (two large checks). Detail views add one server action and one R2 GET. Risk: verdict reuse and shard restore read detail inside mutations today; [S3 report transport](#s3-report-transport) settles both |
 | `projectHostedOutputStreams`, `projectHostedOutputChunks`, `projectHostedOutputHeads`, `projectHostedOutputSummaries`, `projectCheckLogCleanups`, `projectCheckLogCleanupPages`, `projectCheckLogRetentions`, `projectCheckLogSourcePins` | Live check output and log cleanup | Chunks RT while a run is live; Tx no | 326 / 990 B (source pins only) | Logs are in R2. Chunk rows **expire** when the run ends; the rest **stay** | Small. No change for Actions runs, which write no chunks |
 | `projectHostedOverlapLanes`, `projectHostedOverlapMain`, `projectHostedOverlapMainLog`, `projectHostedStackDependents`, `projectHostedConflictNotices`, `projectHostedPresence`, `projectLaneSnapshots`, `projectBoardClaims` | Job 2: who is touching what | RT yes; Tx yes for the trial merge | 525 / 97,122 B. Almost all of it is one `projectHostedOverlapMain` row per project, rewritten in place, not growth per landing | **Stay** | None proposed. Interning paths was modelled at 0.03 to 0.12 GB; not worth a slice |
 | `projectBoardMessages`, `projectBoardInboxes`, `projectBoardSenders`, `projectBoardProjects`, `boardAccounts`, `boardSwitches`, `boardAudit`, `boardEvidence` | Job 2: the agent board | RT yes; Tx yes | Not written by a landing; bounded at 14 days and 5,000 notes per project | **Stay** | None. This is the cheapest job in the system |
@@ -257,7 +257,65 @@ Done when: the same storage ratchets as S1 hold; event pages and provenance for 
 
 Split `projectHostedLandingRequests` into an indexed ticket and an unindexed body. Keep `projectHostedCheckRuns` as a header (verdict, pins, counts, timings) and leave report detail in the R2 objects the runner already uploads, with a pointer, instead of `projectHostedActionsResults` pages and inline reports.
 
-Done when: bytes written per phase transition and per check callback fall by the factor S0 predicts, guarded in `tests/landing-cost-guard.test.mjs`; all 24 and 9 index readers pass unchanged; calls per landing do not rise; verdict reuse and shard restore still work from the header or one bounded read. Removes: about 570 KB written then expired per dogfood-shaped landing; the 30-day detail expiry for new runs; `projectHostedActionsResults` once old rows expire (minus one table).
+Done when: bytes written per phase transition and per check callback fall as S0's fit predicts, guarded in `tests/landing-cost-guard.test.mjs`; all 24 and 9 index readers pass unchanged, except that the check status query returns the run header under the contract below; calls per landing do not rise on the healthy path; verdict reuse works from the header and shard restore from one collector fold. Removes: about 570 KB written then expired per dogfood-shaped landing; the 30-day detail expiry for new runs; `projectHostedActionsResults` once old rows expire (minus one table).
+
+#### S3 report transport
+
+Decided for Issue 324f1d97; not built. The slice left one contract open: the status query returns every per-file report, queries and mutations cannot read R2, and shard restore replays report rows inside a mutation.
+
+**Decision: the summary lives in Convex, the reports live in one R2 object, and report bytes never become rows.** A run's per-file reports are written once, by the party that already holds them, as one immutable object pinned by digest in the run header. A mutation gets what it needs as arguments; no transaction reads report bytes from the database. The raw result slots are not that object: they embed log bytes, and reading them needs the fold, which would freeze today's fold rules into every client and every later release.
+
+**What stays in Convex per run**, bounded whatever the file count and however many files fail:
+
+- verdict, pins, counts, timings, pool-pending names and `reportFlakes`, as today;
+- `testFiles`: exact `total`, `failed` and `flaky` counts, and the failed and flaky lists in stable order with today's clipped first errors, shortened until `testFiles` is at most 8 KiB, the unlisted remainder counted;
+- the five slowest files, so the `summary` query needs no reports;
+- pass or fail and duration for each test the run's own semantic plan names: no more entries than the plan already holds;
+- the pointer: the report digest (the same `checkPin` of the folded reports as today's `reportDigest`), byte size and file count. No key and no URL.
+
+Guard: on the 20,000-file fixture the run row stays under 12 KiB when every file passes and when every file fails. The all-fail case is new. Read from the code, not run: today's unbounded `testFiles.failed` would take that row past the 1 MiB document limit.
+
+**What the status query returns.** `projectHostedCheckRead:status` returns the header: today's run without `contractReports`, plus the pointer. It stays one reactive read of one row, so web, CLI waits and a future iOS client keep realtime status, and each update carries the header instead of every report. `summary` keeps its reply and its 8 KB bound.
+
+**How full detail is read, and by whom.** One server action, reached as `status {runId, reports}` from the CLI and MCP and called by the web or iOS detail view when it opens. It reads the object with server credentials, checks the digest against the header, checks current project access exactly as `status` does, applies the same public-identity mapping and returns reports in today's `contractReports` shape, at most 256 KiB per reply:
+
+- `failed`: every failed and flaky file with its capped excerpt. One call covers any ordinary failure; `nextCursor` appears only when more files fail than one reply holds.
+- `files`: up to 256 named files.
+- No selector: every file, paged.
+
+The object is server-only, as S1 decided for capsules. First-error excerpts are runner output, a signed URL can neither re-check access nor be mapped, and one policy path is easier to keep correct than two. The same action serves older runs from their inline or paged rows, so clients have one detail path. A missing or differing object fails the detail read alone (`SOURCE_UNAVAILABLE`, `EVIDENCE_CHANGED`); verdict and summary do not depend on it. An agent gets the failing files and clipped errors with the landing receipt, with no extra read, and the full excerpts in one action call.
+
+**Who writes the object.**
+
+- *Sharded runs (GitHub Actions).* The collector action already reads every result slot. It folds them in shard order with the shared fold, PUTs the folded reports once under a content address (a retry writes the same bytes), then calls one mutation with the per-shard receipts and the bounded fields above. The inbox is deleted as today. A settlement covering fewer shards than the header records is ignored; a different digest on a terminal run is refused, as today.
+- *Single-callback runs (machine runner, worker).* The runner PUTs the reports it is about to send into a fenced immutable slot, with a target returned in a reply it already receives, then sends its callback as today. The mutation hashes the reports in its arguments, derives the header and stores the pointer. No call is added.
+- Any server action that hands reports to a callback mutation (the callback API, reconcile) writes the object before that mutation.
+
+The object lives as long as the run's check logs and is removed by the same cleanup; no new retention rule.
+
+**Restore and reuse.**
+
+- *Verdict reuse* reads the header only: `verdictKey` and the reuse alias, as now.
+- *Shard restore.* A run that ends by cancel, watchdog or provider conclusion keeps the reports its shards sent: the collector that terminal already schedules folds the slots present, attaches pointer and summary in one mutation, then cleans the inbox. No mutation replays report rows.
+- *Semantic verdict, failure diagnosis, culprit failures, proof and the gate* read header fields.
+- *Test timings* take durations as an argument of the settling mutation (paged above 768 KiB), which replaces the scheduled `record` mutation and its re-read. A run that waits for the provider's conclusion records timings at collection, under a stamp the header keeps for the gate's comparison.
+- *Culprit bisection* is the one transaction that asks another run about files that passed. On that red-main path one action reads the object and passes the named files (at most the red run's listed failures) as arguments, with the digest as a compare-and-set.
+
+**Budget, modelled until built.** Healthy path per check run: no added call (one settling mutation; the scheduled timing mutation goes); no report bytes written to or read from Convex rows; one more Class A request, which S7's ratchet counts, and about 0.1 MB of egress per 1,000 reported files. Collector memory becomes proportional to the run's reports, a few MB at 20,000 files; assert it. A detail read is one action and one Class B request, on demand. Idle is zero.
+
+**Migration: expand, then contract.**
+
+1. *Readers.* Header fields are written for every run from the reports its transaction already holds, and internal readers move to them. The detail action lands, serving all three stored shapes. CLI, MCP and web send a `check-report-detail` feature on `status` and read detail through the action.
+2. *Writer*, behind a server setting, default off, enabled on dev once step 1 is deployed. Actions runs need no runner change: the slots are the same. A machine runner declares the feature to get its slot.
+3. *Contract.* A client without the feature that reads a run whose reports are in R2 gets `CLI_UPGRADE_REQUIRED`, never a silently thinner answer; runs without reports are unaffected. The per-shard direct result entry and inline-report callbacks from older runners get the same error. Once the older rows have expired (30 days), `projectHostedActionsResults`, the replay and hydrate code and the detail compaction go (minus one table).
+
+**Contract tests that change, and their replacement guards.**
+
+- `tests/hosted-actions-result-growth.test.mjs`, "batched reports: 20,000 files". The status assertion of 20,000 inline reports and the paged-row assertions (`reportParts > 1`, each document under 300 KiB, compact against legacy bytes) change because the decision removes both. Replacement in the same test: no `projectHostedActionsResults` row for the run, one report object whose digest equals the header pointer, the detail action pages all 20,000 reports equal to the fold, and `status` carries no `contractReports`. Kept: head under 12 KiB, webhook reads and writes under 24 KiB, the flaky metric projection. Added: the all-fail case.
+- `tests/hosted-checks.test.mjs`, exact reports after one failed shard. The `testFiles` assertions stay on `status`; the exact-report equality moves to the detail action.
+- Shard-restore tests. New runs assert the collector's fold of the slots present at cancel, watchdog and conclusion; row-replay cases stay for older rows until step 3.
+- New negative tests: no feature on a run with R2 reports gives `CLI_UPGRADE_REQUIRED`; a viewer without access gets the same refusal from the action as from `status`; no reply contains an object key or URL.
+- `tests/landing-cost-guard.test.mjs` and the storage fixture: new runs write 0 B to `projectHostedActionsResults`, and bytes per check callback follow S0's fit (write is about document bytes + 181 + 128 per index) on the measured header.
 
 ### S4. Per-file projections leave Convex
 

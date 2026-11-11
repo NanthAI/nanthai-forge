@@ -12,6 +12,7 @@ import { ForgeError } from '../dist/errors.js';
 import { memberDataNotice } from '../dist/member-data-notice.js';
 import { planningDataNotice } from '../dist/hosted-agent-planning.js';
 import { stackNoticeText } from '../dist/hosted-stack-notice.js';
+import { rememberBoardReader, readBoardProjectCursor } from '../dist/board-local.js';
 
 function fake(t, reply) {
   const root = join(mkdtempSync(join(tmpdir(), 'forge-board-')), 'client');
@@ -86,6 +87,46 @@ test('board reads advance the local cursor; delivery renders lines; an older ser
     throw new Error("Could not find public function for 'projectBoard:read'");
   });
   await assert.rejects(boardHostedSource(old, 'board', {}), e => e.code === 'HOSTED_ACTION_UNSUPPORTED');
+});
+
+test("historical project notes do not repeat across this actor's Lanes; Lane and Issue notes remain relevant", async t => {
+  const f = fake(t, (_name, args) => ({
+    status: 'ok',
+    messages: args.all ? messages : [],
+    more: 0,
+    cursor: 60,
+  }));
+  f.advertisedFeatures = ['agent-board', 'board-resolve'];
+  const a = randomUUID(),
+    b = randomUUID();
+  const messages = [
+    { id: randomUUID(), target: 'project', text: 'Project history', at: 50 },
+    { id: randomUUID(), target: `lane:${b}`, text: 'Relevant Lane', at: 40 },
+    { id: randomUUID(), target: `issue:${b}`, text: 'Relevant Issue', at: 45 },
+  ];
+  rememberBoardReader(f.root, 'project-a', 'actor-a');
+  const first = boardEnvelope(f.root, a, { messages: [messages[0]], more: 0, cursor: 50 });
+  assert.equal(first.notices.length, 1);
+  const second = boardEnvelope(f.root, b, { messages, more: 0, cursor: 50 });
+  assert.equal(second.notices.length, 2);
+  assert(second.notices.every(line => !line.includes('Project history')));
+  assert.equal(readBoardCursor(f.root, b), 50);
+  assert.equal(readBoardProjectCursor(f.root), 50);
+  const repeated = boardEnvelope(f.root, b, { messages: [messages[0]], more: 0, cursor: 50 });
+  assert.deepEqual(repeated, { notices: [], more: 0 });
+  assert(Buffer.byteLength(JSON.stringify(second)) < 650, 'two relevant notices have a bounded byte cost');
+  const newer = boardEnvelope(f.root, b, { messages: [{ ...messages[0], at: 60 }], more: 0, cursor: 60 });
+  assert.equal(newer.notices.length, 1, 'a new project note still arrives');
+  const all = await boardHostedSource(f, 'board', { laneId: b, all: true });
+  assert.equal(all.messages.length, 3, 'full history remains accessible');
+  assert.equal(all.notices.length, 3);
+  assert.equal(f.calls.length, 1, 'delivery performs no network call; the explicit read performs one');
+  rememberBoardReader(f.root, 'project-a', 'actor-b');
+  assert.equal(readBoardProjectCursor(f.root), 0, 'another actor has independent read state');
+  rememberBoardReader(f.root, 'project-b', 'actor-a');
+  assert.equal(readBoardProjectCursor(f.root), 0, 'another project has independent read state');
+  rememberBoardReader(f.root, 'project-a', 'actor-a');
+  assert.equal(readBoardProjectCursor(f.root), 60, 'switching back retains the actor cursor');
 });
 
 test('typed server refusals reach the agent with their code, never as INTERNAL_ERROR (fd8dc28e, ce974f90)', async t => {

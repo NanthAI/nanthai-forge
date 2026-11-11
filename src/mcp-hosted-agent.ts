@@ -51,9 +51,12 @@ const progressLine = (event: unknown) => {
   return { ...waitEventLine(event)?.line, ...(typeof cursor === 'string' ? { cursor } : {}) };
 };
 const read = { readOnlyHint: true, idempotentHint: true, openWorldHint: true };
-async function result(action: () => Promise<unknown>) {
+async function result(action: () => Promise<unknown>, replyDetail = false) {
   try {
-    return { content: [{ type: 'text' as const, text: JSON.stringify(slimReceipt(await action())) }] };
+    const value = await action();
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify(replyDetail ? value : slimReceipt(value)) }],
+    };
   } catch (error) {
     const safe =
       error instanceof z.ZodError
@@ -164,6 +167,9 @@ export function registerHostedAgentWorkflow(
     return value;
   };
   prose.forge_task += rules(effectiveAgentDefaults(undefined));
+  for (const group of groups)
+    prose[group.name] +=
+      ' command.replyDetail:true returns the full receipt, including available inline bodies; replay mutations with their original operationId.';
   for (const group of groups) {
     const options = group.actions.map(action => {
       const canonical = action === 'checkpoint' ? 'save' : action === 'run' ? 'check' : action;
@@ -178,7 +184,9 @@ export function registerHostedAgentWorkflow(
       return body.extend({ action: z.literal(action), operationId: z.uuid().optional() }).strict();
     });
     // New verb forms come first: the older action objects strip unknown keys such as `mode`.
-    const all = [...verbInputSchemas(true, group.actions, false), ...options];
+    const all = [...verbInputSchemas(true, group.actions, false), ...options].map(schema =>
+      schema.extend({ replyDetail: z.boolean().optional() }),
+    );
     server.registerTool(
       group.name,
       {
@@ -187,19 +195,24 @@ export function registerHostedAgentWorkflow(
         annotations: { ...read, readOnlyHint: group.name === 'forge_work_overview' },
       },
       async ({ command }, extra) =>
-        result(async () => {
-          if ((command as { action?: string }).action === 'help')
-            return toolHelp(await fullTools(), help, (command as { topic?: string }).topic);
-          const { action, ...body } = lowerMcpCommand(command as Record<string, unknown>, true);
-          return hostedAgentCli(
-            transport.root,
-            action as string,
-            body,
-            transport.address,
-            transport,
-            extra?.signal,
-          ).then(refreshRules);
-        }),
+        result(
+          async () => {
+            if ((command as { action?: string }).action === 'help')
+              return toolHelp(await fullTools(), help, (command as { topic?: string }).topic);
+            const { replyDetail: _, ...request } = command as Record<string, unknown>;
+            void _;
+            const { action, ...body } = lowerMcpCommand(request, true);
+            return hostedAgentCli(
+              transport.root,
+              action as string,
+              body,
+              transport.address,
+              transport,
+              extra?.signal,
+            ).then(refreshRules);
+          },
+          (command as { replyDetail?: boolean }).replyDetail,
+        ),
     );
   }
   const planning = (['planning', 'put-planning-item', 'comment-planning-item'] as const).map(action =>
@@ -281,11 +294,12 @@ export function registerHostedAgentWorkflow(
 
       inputSchema: {
         ...hostedWaitSchema.shape,
+        replyDetail: z.boolean().optional(),
         maxWaitMs: z.number().int().nonnegative().max(86_400_000).optional(),
       },
       annotations: read,
     },
-    async ({ maxWaitMs, ...input }, extra) => {
+    async ({ maxWaitMs, replyDetail, ...input }, extra) => {
       const controller = new AbortController();
       const cancel = () => controller.abort();
       extra.signal.addEventListener('abort', cancel, { once: true });
@@ -453,7 +467,7 @@ export function registerHostedAgentWorkflow(
             };
           }
           return { ...observed, result: { ...observed.result, ...single } };
-        });
+        }, replyDetail);
         await notifications;
         return response;
       } finally {

@@ -2,7 +2,7 @@
 // Board state kept on this machine. Light on purpose: the first-write hook loads it on every first
 // write (CPU budget), so it imports Node builtins, root paths and the pure notice renderer only:
 // no schema library, no Convex client.
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -37,6 +37,35 @@ const cursorAt = (file: string) => {
   const value = readJson(file) as { after?: unknown } | undefined;
   return typeof value?.after === 'number' && Number.isFinite(value.after) ? value.after : 0;
 };
+/** Account/project scope learned from the capability read already made by Lane actions. The hook
+ * reuses this local marker. Hash it so the cursor contains no account identity. */
+export function rememberBoardReader(root: string, projectId: string, actor: string) {
+  const reader = createHash('sha256')
+    .update(JSON.stringify([projectId, actor]))
+    .digest('hex');
+  const file = join(boardDir(root), 'reader.json');
+  if ((readJson(file) as { reader?: unknown } | undefined)?.reader !== reader) writeJson(file, { reader });
+}
+const projectCursorFile = (root: string) => {
+  const reader = (readJson(join(boardDir(root), 'reader.json')) as { reader?: unknown } | undefined)?.reader;
+  return typeof reader === 'string' && /^[a-f0-9]{64}$/.test(reader)
+    ? join(boardDir(root), `project-${reader}.json`)
+    : undefined;
+};
+export function readBoardProjectCursor(root: string): number {
+  const file = projectCursorFile(root);
+  return file ? cursorAt(file) : 0;
+}
+export function writeBoardProjectCursor(root: string, after: number) {
+  const file = projectCursorFile(root);
+  if (file && after > cursorAt(file)) writeJson(file, { after });
+}
+/** Lane/Issue notes retain the Lane cursor; project notes already read by this actor in another
+ * Lane do not repeat. Filter only bytes already returned by the existing query. */
+export function unreadBoardNotes(root: string, messages: BoardNote[]): BoardNote[] {
+  const after = readBoardProjectCursor(root);
+  return messages.filter(message => message.target !== 'project' || message.at > after);
+}
 export function readBoardCursor(root: string, laneId: string): number {
   const shared = cursorFile(root, laneId);
   const nested = nestedCursorFile(root, laneId);
@@ -78,8 +107,10 @@ export const boardNoticeLine = (message: BoardNote, laneId?: string) =>
 /** Envelope field for delivered notes: one line per note (≤240 chars each, ≤2 per reply). Writes
  * the local cursor, so the same notes are not shown again on this machine. */
 export function boardEnvelope(root: string, laneId: string, delivered: BoardDeliveryValue) {
+  const messages = unreadBoardNotes(root, delivered.messages);
   writeBoardCursor(root, laneId, delivered.cursor);
-  const notices = delivered.messages.map(message => boardNoticeLine(message, laneId));
+  for (const message of messages) if (message.target === 'project') writeBoardProjectCursor(root, message.at);
+  const notices = messages.map(message => boardNoticeLine(message, laneId));
   return {
     notices: delivered.more ? [...notices, `${delivered.more}+ more: board '{}'`] : notices,
     more: delivered.more,

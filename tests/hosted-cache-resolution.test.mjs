@@ -154,7 +154,7 @@ for (const wrapper of ['cli', 'mcp'])
             transport,
           ),
         );
-        const invoke = async (action, command) => {
+        const invoke = async (action, command, replyDetail = false) => {
           if (wrapper === 'cli') {
             try {
               return await hostedAgentCli(conflict.root, action, command, s.address, transport);
@@ -162,7 +162,7 @@ for (const wrapper of ['cli', 'mcp'])
               return { error: describeFailure(error) };
             }
           }
-          const reply = await tools.get('forge_task')({ command: { action, ...command } }, {});
+          const reply = await tools.get('forge_task')({ command: { action, ...command, replyDetail } }, {});
           return JSON.parse(reply.content[0].text);
         };
         const mutation = s.exchange.client.mutation;
@@ -257,6 +257,15 @@ for (const wrapper of ['cli', 'mcp'])
         );
         assert.equal(replay.result.next.action, 'finish');
         assert.equal(replay.result.applied.head, retained.applied.head);
+        if (wrapper === 'mcp' && retained.next.action === 'resolve') {
+          const detailed = await invoke(
+            retained.next.action,
+            Object.fromEntries(Object.entries(retained.next).filter(([key]) => key !== 'action')),
+            true,
+          );
+          assert.equal(detailed.result.applied.head, retained.applied.head);
+          assert.equal(detailed.result.source.outcome.result.status, 'resolved');
+        }
         assert.equal(
           s.calls.filter(call => call.name === 'projectHostedSyncJobs:submit').length,
           jobs,

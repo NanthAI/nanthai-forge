@@ -23,6 +23,7 @@ import { resolutionFinishSelection } from './hosted-resolution-selection.js';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { TextDecoder } from 'node:util';
+import { TEXT_SNIFF_BYTES } from './text-bytes.js';
 import { z } from 'zod';
 import { HostedObjectStore } from './hosted-object-store.js';
 import { composeConflictPageSchema } from './hosted-compose.js';
@@ -102,7 +103,7 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
   const listed = conflictPages(objects, source);
   listed.catch(() => {});
   const placed = await placeResolution(session, source, selection);
-  const { paths, reasons } = await listed;
+  const { paths, reasons, kinds } = await listed;
   const { root } = placed;
   // The run that resolves owns the resolution Lane's idle listing (d730121f).
   recordLane({ laneId: source.lane.laneId, root, ...session.address, agent: sessionAgentSlug() ?? null });
@@ -116,19 +117,24 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
   if (skippedNotice) process.stderr.write(`${skippedNotice}\n`);
   let remaining = 128 * 1024;
   const files = paths.slice(0, 100).map(path => {
+    const kind = kinds.get(path) ?? 'content';
     let bytes: Buffer | null;
     try {
       bytes = readSource(root, path, remaining);
     } catch (error) {
       if (!(error instanceof ForgeError) || error.code !== 'FILE_LIMIT') throw error;
-      return { path, content: null };
+      return { path, kind, content: null };
     }
-    if (!bytes) return { path, content: null };
+    if (!bytes) return { path, kind, content: null };
     remaining -= bytes.length;
     try {
-      return { path, content: new TextDecoder('utf-8', { fatal: true }).decode(bytes) };
+      return {
+        path,
+        kind: bytes.subarray(0, TEXT_SNIFF_BYTES).includes(0) ? 'binary' : kind,
+        content: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+      };
     } catch {
-      return { path, content: null };
+      return { path, kind, content: null };
     }
   });
   const command = { laneId: source.lane.laneId, operationId: await session.journal.id('next-resolve') };
@@ -173,6 +179,7 @@ async function conflictPages(objects: HostedObjectStore, source: z.infer<typeof 
   const resolution = source.resolution!,
     paths: string[] = [],
     reasons: { path: string; reason: string }[] = [],
+    kinds = new Map<string, string>(),
     seen = new Set<string>();
   let pin: { sha256: string; size: number } | null = resolution.conflicts;
   while (pin) {
@@ -189,11 +196,22 @@ async function conflictPages(objects: HostedObjectStore, source: z.infer<typeof 
     for (const file of page.paths) {
       invariant(safeRelative(file.path), 'UNSAFE_PATH', 'Conflict paths must be relative source files.');
       paths.push(file.path);
+      kinds.set(
+        file.path,
+        file.reason ??
+          (!file.left || !file.right
+            ? 'delete-modify'
+            : !file.base
+              ? 'add-add'
+              : file.left.mode !== file.right.mode
+                ? 'mode'
+                : 'content'),
+      );
       reasons.push(...conflictReasons([file]));
     }
     pin = page.next;
   }
-  return { paths, reasons };
+  return { paths, reasons, kinds };
 }
 const parseValue = (value: unknown) => (typeof value === 'string' ? JSON.parse(value) : value);
 /** A replayed recovery whose resolution Lane is no longer active. Completed: its landing

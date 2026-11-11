@@ -373,8 +373,11 @@ for (const wrapper of ['cli', 'mcp'])
             transport,
           ),
         );
-        invoke = async () => {
-          const reply = await tools.get('forge_task')({ command: { action: 'finish', ...command } }, {});
+        invoke = async (replyDetail = false) => {
+          const reply = await tools.get('forge_task')(
+            { command: { action: 'finish', ...command, replyDetail } },
+            {},
+          );
           assert(!reply.isError, reply.content[0].text);
           return JSON.parse(reply.content[0].text);
         };
@@ -398,7 +401,18 @@ for (const wrapper of ['cli', 'mcp'])
         void _original;
         assert.deepEqual(next.body, { ...selection, retry: true, reason: 'other' });
         assert.equal(replay.result.next.operationId, undefined);
-        assert.deepEqual(replay.result.submission, submission);
+        if (wrapper === 'mcp') {
+          const compact = replay.result.submission;
+          for (const field of ['id', 'operationId', 'phase', 'observation', 'error'])
+            assert.deepEqual(compact[field], submission[field], `compact failure retains ${field}`);
+          assert.equal(compact.actor, undefined, 'actor bookkeeping is detail-only');
+          const detailed = await invoke(true);
+          assert.deepEqual(
+            detailed.result.submission,
+            submission,
+            'full terminal record remains available on request',
+          );
+        } else assert.deepEqual(replay.result.submission, submission);
         const again = await invoke();
         assert.deepEqual(again.result, replay.result, 'terminal replay remains stable');
         const { landSummary } = await import('../dist/hosted-land-summary.js');

@@ -669,7 +669,9 @@ test('preflight timing reaches the existing landing request without another Conv
       JSON.stringify({ laneId: s.lane.laneId, head: marker.selection.head, saveMs: 15000 }),
     );
     const before = s.calls.length;
-    await s.transport().dispatch('preflight', { laneId: s.lane.laneId, run: false });
+    const planned = await s.transport().dispatch('preflight', { laneId: s.lane.laneId, run: false });
+    assert.equal(planned.result.next.laneId, s.lane.laneId);
+    assert.match(planned.result.command, /nforge agent .* (preflight|land --save) /);
     await s.transport().dispatch('finish', { laneId: s.lane.laneId });
     calls.push(s.calls.slice(before).map(call => call.name));
     const submit = s.calls.find(call =>

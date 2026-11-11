@@ -33,12 +33,17 @@ import { readHostedOverlapAdvice } from './hosted-overlap-client.js';
 import { rememberStackOffer } from './hosted-coordination-client.js';
 import { presenceDelivery, presenceSince, type PresenceDelivery } from './hosted-presence-client.js';
 import { boardEnvelope, boardHostedSource, hostedBoardSchemas, readBoardCursor } from './hosted-board.js';
+import { rememberBoardReader } from './board-local.js';
 import { rememberBoardServerFeatures } from './board-local.js';
 import { restackAfterSave, type StackHint } from './hosted-stack-restack.js';
 import { memberDataNotice } from './member-data-notice.js';
 import { exactConflictNotice, type ExactConflictNotice } from './hosted-conflict-notice.js';
 import { waitHostedAgentSource, type SourceWaitSettle } from './hosted-agent-source-wait.js';
-import { recoverHostedFinish, hostedConflictAdvice } from './hosted-agent-resolution.js';
+import {
+  recoverHostedFinish,
+  hostedConflictAdvice,
+  hostedRecoveryCommand,
+} from './hosted-agent-resolution.js';
 import { observedConflictRecovery, terminalConflict } from './hosted-observed-conflict.js';
 import type { HostedRunSubscription } from './hosted-agent-observe.js';
 import { executeHostedRecords } from './hosted-agent-records.js';
@@ -791,6 +796,7 @@ export class HostedAgentTransport {
         this.serverFeatures.includes('agent-presence') &&
         ['start', 'save', 'sync', 'compose', 'finish'].includes(action);
       this.boardVersion = this.serverFeatures.includes('agent-board');
+      if (this.boardVersion) rememberBoardReader(this.root, this.address.projectId, capabilities.actor);
       // The first-write hook reads this marker instead of a capability call (written on change only).
       rememberBoardServerFeatures(this.address.projectId, this.serverFeatures);
       this.receiptActor = capabilities.metricReceiptVersion === 1 ? capabilities.actor : undefined;
@@ -1520,6 +1526,8 @@ export class HostedAgentTransport {
       advice?.presence && overlapLaneId ? presenceDelivery(overlapLaneId, advice.presence) : undefined;
     const conflictNotice =
       advice?.conflicts && overlapLaneId ? exactConflictNotice(overlapLaneId, advice.conflicts) : undefined;
+    const board =
+      advice?.board && overlapLaneId ? boardEnvelope(this.root, overlapLaneId, advice.board) : undefined;
     // Conflict advice first, so the continuation never offers wait beside a recovery.
     // Finite canonical reads never hydrate conflict/advice source; a terminal conflict on
     // a landing read gets the same one-query sync recovery as wait. Mutating flows may
@@ -1553,14 +1561,10 @@ export class HostedAgentTransport {
         : {}),
       ...(conflictNotice ? { conflictNotice } : {}),
       ...(presence ? { presence } : {}),
-      ...(advice?.board && overlapLaneId
-        ? { board: boardEnvelope(this.root, overlapLaneId, advice.board) }
-        : {}),
+      ...(board?.notices.length ? { board } : {}),
       // One marker per receipt, not per note: board notes (stack notices arrive as board notes) and
       // conflict and presence peers name member-written text. A stack hint holds Lane ids only.
-      ...(conflictNotice || presence || (overlapLaneId && advice?.board?.messages.length)
-        ? { notice: memberDataNotice }
-        : {}),
+      ...(conflictNotice || presence || board?.notices.length ? { notice: memberDataNotice } : {}),
       ...this.nudge(action, result),
       ...(action === 'status' ? keptApplyEnvelope(this.root) : {}),
       ...this.identity(action),
@@ -1685,8 +1689,21 @@ export class HostedAgentTransport {
       { budgetSeconds: command.budgetSeconds, trim: command.trim, only: stopped },
     );
     const head = marker.selection.head;
+    const landNext = {
+      next: { action: 'land', mode: 'save', laneId },
+      command: hostedRecoveryCommand(root, 'land --save', { laneId }),
+    };
+    const planNext = {
+      next: { action: 'preflight', ...command, laneId, run: true },
+      command: hostedRecoveryCommand(root, 'preflight', { ...command, laneId, run: true }),
+    };
     if (plan.status === 'unavailable' || !command.run)
-      return this.response(action, null, { laneId, head, plan });
+      return this.response(action, null, {
+        laneId,
+        head,
+        plan,
+        ...(plan.status === 'unavailable' ? landNext : planNext),
+      });
     const minutes = unsavedMinutes(root);
     invariant(
       minutes === null,
@@ -1701,11 +1718,14 @@ export class HostedAgentTransport {
       'LANE_DIRTY',
       'Save first: preflight records a result for the saved head, and the files here differ from it.',
     );
+    const receipt = runPreflight(root, laneId, head, plan, marker.tree ?? sourceTree(marker.state.files));
+    const next = receipt.passed || receipt.environment ? landNext : planNext;
     return this.response(action, null, {
       laneId,
       head,
       plan,
-      receipt: runPreflight(root, laneId, head, plan, marker.tree ?? sourceTree(marker.state.files)),
+      receipt,
+      ...next,
     });
   }
   async query<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {

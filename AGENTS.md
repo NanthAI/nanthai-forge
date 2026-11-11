@@ -47,6 +47,8 @@ Before filing an Issue or friction, search planning and comment on an existing m
 
 Hosted source reads: `show {"channel":"main","path":"FILE"}` returns exact accepted bytes; `show {"laneId":"…","path":"FILE"}` returns exact saved Lane bytes, excluding unsaved edits. `show {state,path}` or `{candidateId,path}` selects exact retained source without substitution. `diff` returns `nextCursor` for the original pair and identifies byte-budget omissions; see the [command reference](docs/agents/workflow.md).
 
+Agent replies are compact by default: conflict files report paths, kinds and hunk counts; preflight reports counts and outcomes. Add CLI `--detail` for every field and available inline body (replay the original mutation with its original operation id), or MCP `replyDetail:true` in the command (`forge_wait`: top level). Read all board history with `board {"all":true}`; project notes already read by this actor on this machine do not repeat across Lanes.
+
 ## Hard rules
 
 **Privacy and safety**
