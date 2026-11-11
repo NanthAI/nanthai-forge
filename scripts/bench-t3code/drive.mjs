@@ -45,6 +45,7 @@ import {
 } from './plan.mjs';
 import { snapshot, snapshotProblems, moved, differences, benchFreeze, benchHoldText } from './versions.mjs';
 import { benchRootOrExit } from './bench-root.mjs';
+import { driverProgress } from './driver-progress.mjs';
 import { benchCli } from './cli-install.mjs';
 import { usageGate, usageProblems, diskFreeGb, diskNeed } from './gates.mjs';
 import { agentOf } from './agent.mjs';
@@ -64,11 +65,14 @@ const fakeChange = dry && flags.includes('--fake-version-change');
 export const BUDGET_USD = 5;
 const RETRY_MS = Number(process.env.BENCH_DRIVE_RETRY_MS ?? 300_000);
 let lastWait = '';
+let writeProgress = () => {};
+let progressState;
 const say = line => {
   // A repeated wait prints once; any other line resets it.
   const shape = line.replace(/\d+(\.\d+)?%?/g, '#');
   if (line.startsWith('WAIT') && shape === lastWait) return;
   lastWait = line.startsWith('WAIT') ? shape : '';
+  progressState = writeProgress({ status: line.startsWith('ALL DONE') ? 'complete' : 'running', line });
   console.log(`CELL ${line} (${new Date().toISOString().slice(11, 19)})`);
 };
 const alive = pid => {
@@ -124,6 +128,10 @@ async function main() {
     process.exit(2);
   }
   writeFileSync(lock, String(process.pid));
+  if (!dry) {
+    writeProgress = driverProgress(B, coordination);
+    progressState = writeProgress();
+  }
   if (existsSync(FREEZE) && staleBenchFreeze(readFileSync(FREEZE, 'utf8'))) {
     say(`FREEZE removed a stale bench freeze (${readFileSync(FREEZE, 'utf8').trim()})`);
     rmSync(FREEZE, { force: true });
@@ -138,6 +146,7 @@ async function main() {
     holding = false;
   };
   process.on('exit', () => {
+    writeProgress({ status: progressState?.status === 'complete' ? 'complete' : 'stopped' });
     release();
     rmSync(lock, { force: true });
   });

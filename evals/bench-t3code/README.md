@@ -66,9 +66,92 @@ What setup cannot do for you, and says so: it cannot rebuild base **fa3b7349** (
 
 **Installed CLI.** The harness finds the Forge CLI the way the product installs it (`cli-install.mjs`, [CLI updates](../../docs/operations/cli-update.md)): `FORGE_CLI_HOME` (an installation directory or one build), else the build of `config.forge.cli`, else the installation the `nforge` launcher on `PATH` enters, else `~/.local/share/forge-cli`. The pin links its `node_modules` to that installation's selected build. The batch hold is that installation's measurement hold, `.freeze`: while it exists the CLI holds its own updates and other projects' `land`/`finish`, and between batches the driver updates the CLI with `nforge update --directory INSTALLATION --bin INSTALLATION/bin/nforge`. The bench runs on an installation of its own, `BENCH_ROOT/cli` (setup step `bench-cli`, which installs it from Forge main and points `config.forge.cli` at it), so the hold never reaches builders: `benchCli` refuses (`BENCH_CLI_SHARED`) an installation that the `nforge` on `PATH`, `~/.local/bin/nforge` or the product default uses, and `BENCH_CLI_MISMATCH` when `FORGE_CLI_HOME` and `config.forge.cli` name different installations. The driver and each cell write the bench project (`config.forge.projectId`) into the hold as a `project ID` line, so the bench agents' own landings run on the held build while dogfood landings wait; preflight's `landing hold` check refuses a CLI build without scoped holds.
 
+## Run the bench
+
+These commands are for the owner after setup and dry qualification have passed, the harness
+has been pinned, and the run's resources and spend have been approved. `run.mjs` starts real
+scored work. It never invokes setup, dry qualification, pinning or teardown.
+
+In the first terminal, select the already-set-up folder, enter its pinned harness checkout,
+and start the registered sequence:
+
+```sh
+export BENCH_ROOT=/absolute/path/to/restored-inputs
+cd "$BENCH_ROOT/harness/<sha12>"  # the checkout printed by pin.mjs
+node scripts/bench-t3code/run.mjs
+```
+
+`run.mjs` takes no run flags (`--help` only); it does not silently forward partial or dry-run options. It prints `BENCH plan check` and `plan ok`, then `BENCH preflight` and the existing
+preflight's `OK` / `WARN` / `NO-GO` lines. A failing plan check or NO-GO stops immediately,
+with its reason above `BENCH STOP`; no driver starts. On GO it runs `drive.mjs` for scored
+cells, then `drive.mjs --coordination` for the registered convoy and overlap cells, then
+`summarize.mjs`. The driver's `CELL START`, `WAIT`, `DONE`, `BATCH`, `REP3`, `OUTLIER` and
+`ALL DONE` lines stream to the terminal. The runner exits with the first failing stage's
+exit code. On success it prints `BENCH DONE summary.json`.
+
+In a second terminal, select the same folder and checkout, then read progress:
+
+```sh
+export BENCH_ROOT=/absolute/path/to/restored-inputs
+cd "$BENCH_ROOT/harness/<sha12>"
+node scripts/bench-t3code/progress.mjs
+```
+
+Repeat the last command to refresh, or use this optional local display loop (Ctrl-C ends
+only the display):
+
+```sh
+while :; do node scripts/bench-t3code/progress.mjs; sleep 30; done
+```
+
+The view reports done/total and valid cells per arm, N and coordination kind (including
+Forge offer/auto separately), every unfinished cell's elapsed time, the driver's latest
+recorded status, live usage/disk/freeze waits, completed-batch wait reasons, cell/batch/task
+voids, failures and ETA. `--json` prints the same snapshot as JSON. Done means the driver has
+settled a batch with a valid attempt or exhausted the registered retries; an exhausted void
+is done with zero valid cells. The initial schedule has 40 cells (16 scored, 24 coordination).
+Totals grow only when the driver's saved rep-3 and outlier decisions register extra cells;
+the view never makes those decisions. ETA uses finished cell elapsed times, preferring the
+same arm/N/kind, and respects concurrent versus sequential batches. It is unknown before a
+finished timed cell exists, and excludes future retries, undecided extra cells, setup
+overhead and gate waits. It is an estimate, not a completion deadline.
+
+The snapshot reads only metadata and results under `BENCH_ROOT`: `runs/*/result.json`,
+unfinished `cell.json`, `batches/*/batch.json`, saved decisions and `drive-progress.json`.
+It never reads config, tasks, secrets, transcripts or workspaces, follows result symlinks,
+or contacts a service. Each invocation reports exact bytes/files read and exits: zero
+network, Convex, R2 or database operations; idle zero. It parses one result at a time and
+retains compact projections. Partial JSON is disclosed as unreadable/in-progress and can
+be refreshed. Status is the last recorded event: after a hard kill it can remain stale;
+the view does not probe processes or repair files.
+
+All attempts remain at `BENCH_ROOT/runs/<cellId>/result.json` and
+`BENCH_ROOT/batches/<batchId>/batch.json`; decisions remain at `rep3-n<N>.json` and
+`outlier-n<N>.json`. The driver atomically replaces its small `drive-progress.json` at
+existing status events, with no extra probes or timer. The final summary is atomically
+written to `BENCH_ROOT/summary.json`; a failed summary keeps any previous complete file.
+The display's read volume is the sum of those selected result/metadata bytes, not the
+workspace size. The synthetic 40-cell budget fixture reads 390,358 bytes in 66 files; actual
+read volume depends on the retained result sizes and attempts.
+
+To stop the run, press Ctrl-C in the first terminal. The runner forwards the signal to its
+active stage and stops before later stages. The driver's existing hold release and
+interruption recovery apply; an abruptly stopped driver's cells may still be settling.
+After resolving a reported NO-GO or stop reason, resume from the same checkout and shell:
+
+```sh
+node scripts/bench-t3code/run.mjs
+```
+
+This rechecks the plan and preflight, then lets the existing driver skip completed valid
+batches, reconcile interrupted attempts and apply the registered retry, rep-3 and outlier
+rules. Nothing is reset or deleted. Resume can create a registered replacement for an
+interrupted batch; it does not score that interrupted attempt. Setup and teardown remain
+separate owner operations.
+
 ## What each harness file does
 
-`tasks.mjs` constructs the manifest; `plan.mjs` fixes digest/order/repetition rules; `deps.mjs` prepares shared dependencies; `oracle.mjs`, `oracle.sh` and `score.mjs` qualify and score; `drive.mjs` schedules `run-cell.mjs`; `github-arm.mjs` and `forge-arm.mjs` implement the arms; `preflight.mjs`, `versions.mjs`, `meter.mjs`, `samplers.mjs` and `summarize.mjs` capture conditions and results. `bench-root.mjs` and `cli-install.mjs` hold the folder and CLI rules every script shares. `phases.mjs` classifies each turn of an agent session (coding, landing, rework, waiting, done) and `rework.mjs` turns that into rework tokens per landing, the convoy pass rule and order waits; `cells.mjs` generates the coordination cells (convoy, overlap with the stacking A/B) from the base's workspace manifest. Both are in the [exit bench plan](../../docs/research/p6-exit-bench-plan.md).
+`tasks.mjs` constructs the manifest; `plan.mjs` fixes digest/order/repetition rules; `deps.mjs` prepares shared dependencies; `oracle.mjs`, `oracle.sh` and `score.mjs` qualify and score; `run.mjs` joins the registered sequence, `progress.mjs` reads its local progress, and `drive.mjs` schedules `run-cell.mjs`; `github-arm.mjs` and `forge-arm.mjs` implement the arms; `preflight.mjs`, `versions.mjs`, `meter.mjs`, `samplers.mjs` and `summarize.mjs` capture conditions and results. `bench-root.mjs` and `cli-install.mjs` hold the folder and CLI rules every script shares. `phases.mjs` classifies each turn of an agent session (coding, landing, rework, waiting, done) and `rework.mjs` turns that into rework tokens per landing, the convoy pass rule and order waits; `cells.mjs` generates the coordination cells (convoy, overlap with the stacking A/B) from the base's workspace manifest. Both are in the [exit bench plan](../../docs/research/p6-exit-bench-plan.md).
 
 `preflight.mjs --dry` and `drive.mjs --dry` are **live qualification**, not offline recovery: they inspect external services and can prepare workspaces. Recover private configuration through the owner, authorize its resources/spend, review those scripts and preconditions, and qualify the exact harness before using them. This handover runs neither a dry cell nor a scored cell. The Phase 6 exit repeat has its own registered plan (the outlier rule, Claude Code in both arms); the historical result is unchanged.
 

@@ -297,13 +297,18 @@ minutes billed). The driver stops when the Forge arm's Convex spend reaches its 
 3. `node scripts/bench-t3code/preflight.mjs` → must print `GO`.
 4. Dry run (no model, scripted agents): `node scripts/bench-t3code/drive.mjs --dry --only n3-r1`;
    then set `config.qualifiedHarness`.
-5. `node scripts/bench-t3code/drive.mjs` (resumable: re-run the same command after any stop).
-   Its `CELL` lines (START, WAIT, DONE, BATCH, REP3, OUTLIER, ALL DONE) are the lead's
-   Monitor feed.
-6. `node scripts/bench-t3code/drive.mjs --coordination` (resumable like step 5): the convoy and
-   overlap cells.
-7. `node scripts/bench-t3code/summarize.mjs`: `rework` holds lines 10-12 and the stacking A/B.
-   `node scripts/bench-t3code/rework.mjs RUN_DIR...` re-reads retained cells offline.
+5. `node scripts/bench-t3code/run.mjs`: plan check → preflight (stop on NO-GO) → scored
+   `drive.mjs` → `drive.mjs --coordination` → summarize to `BENCH_ROOT/summary.json`.
+   Resumable: re-run the same command after any stop. It never invokes setup or teardown.
+   The existing drivers retain scheduling, holds, retries, rep-3 and outlier decisions.
+   Their `CELL` lines stream to the terminal. In a second terminal pointed at the same
+   `BENCH_ROOT` and pinned checkout, `node scripts/bench-t3code/progress.mjs` reads a finite
+   local snapshot (per arm/N counts, current cells, waits, voids/failures and ETA).
+   [Run the bench](../../evals/bench-t3code/README.md#run-the-bench) gives the exact commands,
+   stop/resume behavior and result paths. This runbook consolidation changes no registered
+   cells or scoring rules.
+6. `node scripts/bench-t3code/rework.mjs RUN_DIR...` re-reads retained cells offline;
+   the summary's `rework` holds lines 10-12 and the stacking A/B.
 
 ## Deviation log
 
