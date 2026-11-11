@@ -10,6 +10,8 @@ import { invariant } from '../src/errors';
 import { findObjects } from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
 import { signRecipeClosure } from './projectRecipeClosure';
+import { signRuns, type RunBinding } from './projectObjectRuns';
+import type { ObjectPack } from '../src/object-pack-range';
 /** One bounded descriptor+GET window. Bytes go storage→runner, never via Convex. */
 export const resolve = internalMutation({
   args: {
@@ -17,6 +19,7 @@ export const resolve = internalMutation({
     digests: v.array(v.string()),
     batch: v.optional(v.literal(true)),
     closures: v.optional(v.literal(true)),
+    runs: v.optional(v.literal(true)),
   },
   returns: v.any(),
   handler: async (ctx, input) => {
@@ -27,7 +30,34 @@ export const resolve = internalMutation({
       'BAD_ARGUMENT',
       'Resolve one source window.',
     );
-    const result = [];
+    const result: {
+      descriptor: {
+        object: { sha256: string; size: number };
+        recipe: { sha256: string; size: number } | null;
+      };
+      url: string | null;
+      range?: { offset: number; total: number };
+      closure?: Awaited<ReturnType<typeof signRecipeClosure>>;
+      run?: RunBinding;
+    }[] = [];
+    const packed: { index: number; size: number; pack: ObjectPack; key: string }[] = [];
+    const reply = async () => {
+      for (;;) {
+        if (input.runs) await signRuns(result, packed);
+        const text = JSON.stringify(result);
+        const bytes = new TextEncoder().encode(text).length;
+        if (!input.batch || result.length === 1 || bytes <= 4 * 1024 * 1024)
+          return input.batch ? text : result;
+        // Keep the existing bounded-prefix protocol even with unusually long
+        // storage URLs. Re-sign only retained members, so no run gets split.
+        result.length = Math.max(1, Math.floor((result.length * (4 * 1024 * 1024 - 1024)) / bytes));
+        while (packed.length && packed.at(-1)!.index >= result.length) packed.pop();
+        for (const row of packed) {
+          result[row.index]!.url = null;
+          delete result[row.index]!.run;
+        }
+      }
+    };
     let sourceBytes = 0;
     let replyBytes = 2;
     invariant(
@@ -55,12 +85,18 @@ export const resolve = internalMutation({
         );
         sourceBytes += row.size;
         const url =
-          row.location === 'r2' && row.r2Key
-            ? await presignGet(r2Config(), row.r2Key, packHeaders(packRange(row), row.size))
-            : row.storageId
-              ? await blobStore(ctx).getUrl(row.storageId)
-              : null;
-        invariant(url || row.recipe, 'SOURCE_UNAVAILABLE', 'Source storage binding is unavailable.');
+          input.runs && row.pack && row.location === 'r2' && row.r2Key
+            ? null
+            : row.location === 'r2' && row.r2Key
+              ? await presignGet(r2Config(), row.r2Key, packHeaders(packRange(row), row.size))
+              : row.storageId
+                ? await blobStore(ctx).getUrl(row.storageId)
+                : null;
+        invariant(
+          url || row.recipe || (input.runs && row.pack && row.r2Key),
+          'SOURCE_UNAVAILABLE',
+          'Source storage binding is unavailable.',
+        );
         const value = {
           descriptor: {
             object: { sha256: row.digest, size: row.size },
@@ -75,12 +111,13 @@ export const resolve = internalMutation({
         // Signed leaves can outweigh their parent descriptor. Keep the existing
         // prefix protocol below the Convex value limit without capping the tree.
         const bytes = new TextEncoder().encode(JSON.stringify(value)).length + 1;
-        if (input.batch && result.length && replyBytes + bytes > 4 * 1024 * 1024)
-          return JSON.stringify(result);
+        if (input.batch && result.length && replyBytes + bytes > 4 * 1024 * 1024) return reply();
+        if (input.runs && row.pack && row.location === 'r2' && row.r2Key)
+          packed.push({ index: result.length, size: row.size, pack: row.pack, key: row.r2Key });
         result.push(value);
         replyBytes += bytes;
       }
     }
-    return input.batch ? JSON.stringify(result) : result;
+    return reply();
   },
 });

@@ -51,6 +51,7 @@ export function runGroups(pins: ContentPin[], row: (digest: string) => RunRow | 
 export async function readCompleteRuns(
   files: File[],
   rows: ReadonlyMap<string, RunRow>,
+  request?: typeof exchangeRequest,
 ): Promise<Set<string>> {
   const runs = new Map<string, { run: PackRunBinding; files: (File & { offset: number })[] }>(),
     urls = new Map<string, string>(),
@@ -73,7 +74,9 @@ export async function readCompleteRuns(
     complete,
     8,
     async entry => {
-      if ((await readPackRun({ ...entry.run, url: urls.get(entry.run.key)! }, entry.files)) === 'done')
+      if (
+        (await readPackRun({ ...entry.run, url: urls.get(entry.run.key)! }, entry.files, request)) === 'done'
+      )
         for (const file of entry.files) read.add(file.pin.sha256);
     },
     { bytes: 64 * 1024 * 1024, size: entry => entry.run.length },
@@ -108,9 +111,13 @@ export function orderedRunMembers(run: Omit<SignedRun, 'url'>, members: RunMembe
 /** One ranged GET streamed into each member's file, each digest checked as it completes.
  * A failed or retried attempt removes every file it opened. `expired` means a 403: the
  * caller signs the members again (per object). */
-export async function readPackRun(run: SignedRun, members: RunMember[]): Promise<'done' | 'expired'> {
+export async function readPackRun(
+  run: SignedRun,
+  members: RunMember[],
+  request: typeof exchangeRequest = exchangeRequest,
+): Promise<'done' | 'expired'> {
   const ordered = orderedRunMembers(run, members);
-  return exchangeRequest(
+  return request(
     'Checkout pack run download',
     run.url,
     { headers: { 'accept-encoding': 'identity', ...packHeaders(run, run.length) } },

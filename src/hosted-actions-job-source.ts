@@ -17,7 +17,10 @@ import {
   type SubmoduleAccess,
   type MaterializedSubmodule,
 } from './submodule-materialize.js';
-import { actionsSubmoduleAccessCapability } from './hosted-actions-capabilities.js';
+import {
+  actionsSubmoduleAccessCapability,
+  actionsSourceRunsCapability,
+} from './hosted-actions-capabilities.js';
 import { submoduleAccessReplySchema } from './hosted-actions-direct.js';
 import { executableBitMatches } from './file-mode.js';
 
@@ -40,6 +43,8 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
   };
   const connection = client.transport(cache),
     { transport, resolve, resolveWindow, prepareRecipes } = connection;
+  const runReads =
+    client.sourceWindow !== directSourceWindow && client.capabilities.includes(actionsSourceRunsCapability);
   let reader = new SourceWorkerReader(cache, transport, undefined, actionsReadConcurrency);
   // A scoped recheck also needs the checked base inventory; a cohort recheck each member basis's
   // checked base and head (Issue 28f08555). They share this window: no added Convex call.
@@ -139,10 +144,31 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
   }
   if (!packed && selected.length > 1000)
     console.log(
-      `source: no usable source pack (${reason}); reading ${selected.length} objects individually. ` +
+      `source: no usable source pack (${reason}); reading ${selected.length} objects ` +
+        (runReads ? 'from the catalog in runs where available. ' : 'individually. ') +
         'The pack job publishes one after this plan; repair now with: nforge x ROOT source-pack',
     );
   const download = async () => {
+    if (runReads) {
+      // Keep a complete signed window together: slicing it into the old 400-object
+      // workers would split runs and force every member back to a singleton GET.
+      const objects = sourceWindowOrder(selected.map(file => file.blob));
+      for (let at = 0; at < objects.length;) {
+        const count = await resolveWindow(objects.slice(at, at + client.sourceWindow));
+        const hashes = objects.slice(at, at + count);
+        await prepareRecipes(hashes);
+        await connection.prepareRuns(hashes);
+        const windows = Array.from({ length: Math.ceil(hashes.length / directSourceWindow) }, (_, index) =>
+          hashes.slice(index * directSourceWindow, (index + 1) * directSourceWindow),
+        );
+        await mapExchange(windows, 3, page => reader.resolveMany(page));
+        at += count;
+        console.log(
+          `Actions source: ${at}/${objects.length} objects, ${reader.metrics.downloadedBytes} bytes`,
+        );
+      }
+      return;
+    }
     // Each object once, in digest order: a window then reads a few neighbouring object catalog rows
     // instead of up to one per object (686ecdde). Files are written from state.files below.
     const objects = sourceWindowOrder(selected.map(file => file.blob));

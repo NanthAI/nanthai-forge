@@ -7,6 +7,8 @@ export const actionsPreflightCapability = 'session.preflight';
 export const actionsSourceBatchCapability = 'source.batch';
 /** Trusted recipe leaves arrive in the same current-access descriptor window. */
 export const actionsSourceClosureCapability = 'source.closures';
+/** Neighbouring packed objects share one exact-range grant and verified download. */
+export const actionsSourceRunsCapability = 'source.runs';
 /** The result call carries the log bytes; the server stores them, so a job skips
  * its separate output call and the result's session read. */
 export const actionsInlineLogCapability = 'results.inlineLog';
@@ -32,6 +34,7 @@ export const hostedActionsCapabilities = [
   'sourcePack',
   actionsSourceBatchCapability,
   actionsSourceClosureCapability,
+  actionsSourceRunsCapability,
   actionsPreflightCapability,
   actionsInlineLogCapability,
   actionsPoolCapability,
@@ -55,6 +58,7 @@ export const actionsJobCalls = (capabilities: readonly string[]) =>
 export const actionsCapabilityFields: Readonly<Record<string, string>> = {
   'source.batch': actionsSourceBatchCapability,
   'source.closures': actionsSourceClosureCapability,
+  'source.runs': actionsSourceRunsCapability,
   'session.timings': 'session.timingHistory',
   'result.result.testFiles': 'results.testFiles',
   'result.result.testFiles.truncated': 'results.testFiles.truncated',

@@ -288,6 +288,169 @@ function fixture(
   };
 }
 
+// The runner receives the same run shape as hosted checkout. Repository bytes
+// never choose the URL or intervals; this fake server owns both.
+function packedRunner(t, count = 3, fault = null) {
+  const s = fixture(t);
+  const files = Array.from({ length: count }, (_, index) =>
+    s.entry(`packed/${index}.txt`, `member-${index}`),
+  );
+  const pins = files.map(file => ({ sha256: file.blob, size: s.objects.get(file.blob).length }));
+  const body = Buffer.concat(pins.map(pin => s.objects.get(pin.sha256)));
+  const locations = new Map();
+  let offset = 0,
+    gets = 0;
+  for (const pin of pins) {
+    locations.set(pin.sha256, { offset, total: body.length });
+    offset += pin.size;
+  }
+  const state = s.state(files);
+  s.run.request.expectedHead = state.sha256;
+  s.run.candidate.base.head = state.sha256;
+  const original = s.client.request;
+  t.mock.method(s.client, 'request', async (url, init) => {
+    if (url === 'https://packed.invalid/source') {
+      gets++;
+      assert.equal(new Headers(init.headers).get('range'), `bytes=0-${body.length - 1}`);
+      if (fault === 'expired') return new Response(null, { status: 403 });
+      const bytes = Buffer.from(body);
+      if (fault === 'corrupt') bytes[0] ^= 1;
+      return new Response(bytes, {
+        status: 206,
+        headers: { 'content-range': `bytes ${fault === 'range' ? 1 : 0}-${body.length - 1}/${body.length}` },
+      });
+    }
+    const response = await original(url, init);
+    if (url !== 'https://convex.invalid/checks/actions') return response;
+    const { command } = JSON.parse(init.body);
+    if (command.kind !== 'source' || !command.runs) return response;
+    const rows = await response.json();
+    const members = rows.filter(row => locations.has(row.descriptor.object.sha256));
+    // This fixture resolves all members together, as the complete-window reader must.
+    assert.equal(members.length === 0 || members.length === pins.length, true);
+    for (const [index, row] of members.entries()) {
+      row.url = null;
+      row.range = locations.get(row.descriptor.object.sha256);
+      row.run = {
+        id: 0,
+        offset: 0,
+        length: body.length,
+        total: body.length,
+        ...(index ? {} : { url: 'https://packed.invalid/source' }),
+      };
+    }
+    return Response.json(rows);
+  });
+  return { ...s, pins, files, gets: () => gets };
+}
+
+test('Actions materialization keeps a run across the old 400-member worker boundary (e7e35328)', async t => {
+  const s = packedRunner(t, 1001);
+  await s.client.session();
+  const cache = join(s.directory, 'objects');
+  mkdirSync(cache);
+  const target = join(s.directory, 'candidate');
+  await materializeActionsSource(s.client, target, cache);
+  assert.equal(s.gets(), 1, 'one exact-range GET for the whole run');
+  assert.equal(s.calls.filter(call => call.kind === 'source').length, 2, 'one State and one member window');
+  assert.equal(s.traffic.downloads, 1, 'only the State uses the raw path');
+  for (const file of s.files)
+    assert.deepEqual(readFileSync(join(target, file.path)), s.objects.get(file.blob));
+  assert(
+    readdirSync(cache).every(path => /^[a-f0-9]{64}$/.test(path)),
+    'no run staging survives success',
+  );
+});
+
+for (const fault of ['corrupt', 'range'])
+  test(`Actions pack run refuses ${fault} bytes and cleans staging (e7e35328)`, async t => {
+    const s = packedRunner(t, 3, fault);
+    await s.client.session();
+    const cache = join(s.directory, 'objects');
+    mkdirSync(cache);
+    await assert.rejects(materializeActionsSource(s.client, join(s.directory, 'candidate'), cache), {
+      code: fault === 'corrupt' ? 'INVALID_NATIVE_SOURCE' : 'INVALID_WORK_BACKUP',
+    });
+    assert.equal(s.gets(), 1);
+    assert(
+      readdirSync(cache).every(path => /^[a-f0-9]{64}$/.test(path)),
+      'failed runs leave no staged member',
+    );
+  });
+
+test('Actions expired run falls back to exact member grants, never a narrower Range on its URL (e7e35328)', async t => {
+  const s = packedRunner(t, 3, 'expired');
+  await s.client.session();
+  const cache = join(s.directory, 'objects');
+  mkdirSync(cache);
+  await materializeActionsSource(s.client, join(s.directory, 'candidate'), cache);
+  assert.equal(s.gets(), 1);
+  const members = new Set(s.pins.map(pin => pin.sha256));
+  const singles = s.calls.filter(
+    call => call.kind === 'source' && !call.runs && call.digests.some(id => members.has(id)),
+  );
+  assert.equal(singles.length, 3);
+  assert(singles.every(call => call.digests.length === 1));
+});
+
+test('Actions metadata readers receive individual grants without preparing a run (e7e35328)', async t => {
+  const s = packedRunner(t);
+  await s.client.session();
+  const cache = join(s.directory, 'objects');
+  mkdirSync(cache);
+  const connection = s.client.transport(cache);
+  await connection.resolve(s.pins.map(pin => pin.sha256));
+  const { SourceWorkerReader } = await import('../dist/hosted-source-worker-reader.js');
+  const reader = new SourceWorkerReader(cache, connection.transport);
+  assert.deepEqual(await reader.bytes({ object: s.pins[1], recipe: null }), s.objects.get(s.pins[1].sha256));
+  assert.equal(s.gets(), 0);
+  const calls = s.calls.filter(call => call.kind === 'source');
+  assert.equal(calls.length, 1, 'metadata requires no singleton re-sign round');
+  assert.equal(calls[0].runs, undefined);
+});
+
+test('Actions fallback reset drops run staging paths before refetching into a fresh cache (e7e35328)', async t => {
+  const s = packedRunner(t);
+  await s.client.session();
+  const cache = join(s.directory, 'objects');
+  mkdirSync(cache);
+  const connection = s.client.transport(cache);
+  const hashes = s.pins.map(pin => pin.sha256);
+  await connection.resolveWindow(hashes);
+  await connection.prepareRuns(hashes);
+  assert.equal(s.gets(), 1);
+  // A source-pack fallback removes this directory before resetting the reader.
+  rmSync(cache, { recursive: true, force: true });
+  mkdirSync(cache);
+  connection.resetCache();
+  await connection.prepareRuns(hashes);
+  const { SourceWorkerReader } = await import('../dist/hosted-source-worker-reader.js');
+  const reader = new SourceWorkerReader(cache, connection.transport);
+  await reader.resolveMany(hashes);
+  assert.equal(s.gets(), 2, 'the reset cannot retain paths into the deleted cache');
+  for (const pin of s.pins)
+    assert.deepEqual(readFileSync(join(cache, pin.sha256)), s.objects.get(pin.sha256));
+  assert(readdirSync(cache).every(path => /^[a-f0-9]{64}$/.test(path)));
+});
+
+test('Actions partial run signs only the requested singleton on the fallback path (e7e35328)', async t => {
+  const s = packedRunner(t);
+  await s.client.session();
+  const cache = join(s.directory, 'objects');
+  mkdirSync(cache);
+  const connection = s.client.transport(cache);
+  await connection.resolveWindow(s.pins.map(pin => pin.sha256));
+  await connection.prepareRuns([s.pins[1].sha256]);
+  const { SourceWorkerReader } = await import('../dist/hosted-source-worker-reader.js');
+  const reader = new SourceWorkerReader(cache, connection.transport);
+  assert.deepEqual(await reader.bytes({ object: s.pins[1], recipe: null }), s.objects.get(s.pins[1].sha256));
+  assert.equal(s.gets(), 0);
+  assert.deepEqual(
+    s.calls.filter(call => call.kind === 'source' && !call.runs).map(call => call.digests),
+    [[s.pins[1].sha256]],
+  );
+});
+
 test('proof off adds no planning output, artifact data, source bytes or Convex calls', async t => {
   const { prepareLandingProof } = await import('../dist/hosted-actions-job-proof.js');
   const absent = new Proxy(

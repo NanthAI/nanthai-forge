@@ -18,7 +18,7 @@ export type RunBinding = { id: number; offset: number; length: number; total: nu
 /** Signs one interval per run of requested neighbours (exactly their bytes, never a gap)
  * and one range per remaining packed row, so a page costs runs + singletons signatures. */
 export async function signRuns(
-  result: { url?: string; run?: RunBinding }[],
+  result: { url?: string | null; run?: RunBinding }[],
   packed: { index: number; size: number; pack: ObjectPack; key: string }[],
 ) {
   const config = r2Config(),

@@ -26,9 +26,17 @@ import {
 } from './hosted-actions-retry.js';
 import { parseTimingHistory, timingDurations } from '../scripts/test-shards.mjs';
 import { createReadStream } from 'node:fs';
+import { mkdir, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { readCompleteRuns, type PackRunBinding } from './hosted-checkout-runs.js';
+import type { exchangeRequest } from './exchange-request.js';
 import { SourceWorkerReader } from './hosted-source-worker-reader.js';
 import type { SignedDownload } from './blob-download-format.js';
-import { actionsSourceClosureCapability } from './hosted-actions-capabilities.js';
+import {
+  actionsSourceClosureCapability,
+  actionsSourceRunsCapability,
+} from './hosted-actions-capabilities.js';
 /** The Actions job tokens the supervisor's environment holds: OIDC requests and the cache/artifact service. */
 export const runnerTokenNames = ['ACTIONS_ID_TOKEN_REQUEST_TOKEN', 'ACTIONS_RUNTIME_TOKEN'] as const;
 export class ActionsJobClient {
@@ -260,12 +268,15 @@ export class ActionsJobClient {
         };
         url: string | null;
         range?: PackRange;
+        run?: PackRunBinding & { id: number };
         closure?: SignedDownload[];
       }
     >();
+    let sourcePage = 0;
+    const runFiles = new Map<string, string>();
     const signedLeaves = new Map<string, NonNullable<ReturnType<typeof rows.get>>>();
     const pending = new Map<string, Promise<void>>();
-    const resolve = async (digests: string[], oneWindow = false): Promise<number> => {
+    const resolve = async (digests: string[], oneWindow = false, runs = false): Promise<number> => {
       const unique = [...new Set(digests)],
         waiting = unique.flatMap(id => (pending.has(id) ? [pending.get(id)!] : [])),
         missing = unique.filter(id => !rows.has(id) && !pending.has(id));
@@ -277,6 +288,9 @@ export class ActionsJobClient {
             kind: 'source',
             digests: page,
             ...(batch ? { batch: true } : {}),
+            ...(runs && batch && cache && this.capabilities.includes(actionsSourceRunsCapability)
+              ? { runs: true }
+              : {}),
             ...(batch && cache && this.capabilities.includes(actionsSourceClosureCapability)
               ? { closures: true }
               : {}),
@@ -286,12 +300,14 @@ export class ActionsJobClient {
             'SOURCE_HASH_MISMATCH',
             'Source descriptor window is incomplete.',
           );
+          const pageKey = sourcePage++;
           found.forEach((row, index) => {
             invariant(
               row.descriptor.object.sha256 === page[index],
               'SOURCE_HASH_MISMATCH',
               'Source descriptor changed.',
             );
+            if (row.run) row.run = { ...row.run, key: `${pageKey}:${row.run.id}` };
             rows.set(page[index]!, row);
             if (row.closure && cache) {
               invariant(
@@ -340,13 +356,25 @@ export class ActionsJobClient {
       const missingAt = unique.findIndex(id => !rows.has(id));
       // A concurrent single-window request may have returned only a prefix.
       // Full readers reconcile the remainder after that shared request settles.
-      if (!oneWindow && missingAt >= 0) return resolve(unique);
+      if (!oneWindow && missingAt >= 0) return resolve(unique, false, runs);
       return missingAt < 0 ? unique.length : missingAt;
     };
     const readRaw = async (
       pin: { sha256: string; size: number },
       row: NonNullable<ReturnType<typeof rows.get>>,
     ): Promise<AsyncIterable<Uint8Array>> => {
+      if (!row.url && row.run) {
+        // A partial or expired run retains the existing exact-object path. A run
+        // URL cannot sign a member range, so request one fresh singleton grant.
+        const [single] = await this.call({ kind: 'source', digests: [pin.sha256] });
+        invariant(
+          single?.descriptor.object.sha256 === pin.sha256,
+          'SOURCE_HASH_MISMATCH',
+          'Source descriptor changed.',
+        );
+        row = single;
+        rows.set(pin.sha256, row);
+      }
       invariant(
         row.url && row.descriptor.object.size === pin.size,
         'SOURCE_UNAVAILABLE',
@@ -396,6 +424,16 @@ export class ActionsJobClient {
       read: async pin => {
         await resolve([pin.sha256]);
         const row = rows.get(pin.sha256)!;
+        const staged = runFiles.get(pin.sha256);
+        if (staged)
+          return (async function* () {
+            try {
+              yield* createReadStream(staged);
+            } finally {
+              runFiles.delete(pin.sha256);
+              await rm(staged, { force: true });
+            }
+          })();
         if (cache && row.closure) {
           invariant(
             row.descriptor.object.size === pin.size,
@@ -503,14 +541,42 @@ export class ActionsJobClient {
         }
       }
     };
+    const prepareRuns = async (digests: string[]) => {
+      if (!cache || !this.capabilities.includes(actionsSourceRunsCapability)) return;
+      const files = digests.flatMap(id => {
+        const row = rows.get(id);
+        return row?.run && !runFiles.has(id)
+          ? [{ pin: row.descriptor.object, path: join(cache, randomUUID()) }]
+          : [];
+      });
+      if (!files.length) return;
+      await mkdir(cache, { recursive: true });
+      const request: typeof exchangeRequest = async (_call, url, init, consume) =>
+        retryActionsInfrastructure(async signal =>
+          consume(
+            await actionsInfrastructureResponse(await this.request(url, { ...init, signal })),
+            () => {},
+          ),
+        );
+      try {
+        const read = await readCompleteRuns(files, rows, request);
+        for (const file of files) if (read.has(file.pin.sha256)) runFiles.set(file.pin.sha256, file.path);
+      } catch (error) {
+        // The shared scheduler drains all active runs before it rejects.
+        await Promise.all(files.map(file => rm(file.path, { force: true })));
+        throw error;
+      }
+    };
     return {
       transport,
       resolve,
-      resolveWindow: (digests: string[]) => resolve(digests, true),
+      prepareRuns,
+      resolveWindow: (digests: string[]) => resolve(digests, true, true),
       prepareRecipes,
       resetCache: () => {
         leaves = undefined;
         leafReads.clear();
+        runFiles.clear();
       },
     };
   }

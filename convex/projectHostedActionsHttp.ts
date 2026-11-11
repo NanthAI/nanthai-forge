@@ -109,6 +109,7 @@ export const handle = httpAction(async (ctx, request) => {
           digests: command.digests,
           ...(command.batch ? { batch: true } : {}),
           ...(command.closures ? { closures: true } : {}),
+          ...(command.runs ? { runs: true } : {}),
         },
       );
       value = command.batch ? JSON.parse(reply as string) : reply;

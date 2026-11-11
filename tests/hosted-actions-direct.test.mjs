@@ -1033,12 +1033,85 @@ test('Actions signed recipe leaves yield a bounded prefix before the response va
   assert(rows.every(row => row.closure.length === 100));
 });
 
+test('HTTP source forwards only negotiated run metadata in the existing resolver call (e7e35328)', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  t.mock.method(globalThis, 'fetch', async () => jwks());
+  const pin = s.put('HTTP run fixture');
+  let calls = 0;
+  const ctx = {
+    runMutation: (ref, input) => {
+      assert.equal(getFunctionName(ref), 'projectHostedActionsSource:resolve');
+      assert.equal(input.runs, true);
+      calls++;
+      return s.raw(source, 'resolve', input);
+    },
+  };
+  const response = await handle._handler(
+    ctx,
+    new Request(`${audience}/checks/actions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${oidc()}` },
+      body: JSON.stringify({
+        ...s.id,
+        command: { kind: 'source', digests: [pin.sha256], batch: true, runs: true },
+      }),
+    }),
+  );
+  assert.equal(response.status, 200);
+  assert.equal(calls, 1);
+  assert.equal((await response.json())[0].descriptor.object.sha256, pin.sha256);
+});
+
+test('CI run grants cover only requested adjacent packed bytes and preserve legacy replies (e7e35328)', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  await s.call(sessions, 'session', s.input());
+  const pins = ['first', 'middle', 'last'].map(text => s.put(text));
+  const total = pins.reduce((n, pin) => n + pin.size, 0);
+  let offset = 0;
+  for (const pin of pins) {
+    const row = [...s.tables.projectObjects.values()].find(row => row.digest === pin.sha256);
+    s.patch('projectObjects', row._id, {
+      r2Key: 'synthetic/pack',
+      pack: { digest: '8'.repeat(64), size: total, offset },
+    });
+    offset += pin.size;
+  }
+  const input = { ...s.input(), batch: true, digests: pins.map(pin => pin.sha256) };
+  const legacy = await s.call(source, 'resolve', input);
+  const legacyMeter = s.counts.at(-1);
+  assert(legacy.every(row => row.url && !row.run));
+  const grouped = await s.call(source, 'resolve', { ...input, runs: true });
+  const runMeter = s.counts.at(-1);
+  assert.equal(grouped.filter(row => row.run?.url).length, 1);
+  assert(grouped.every(row => row.url === null && row.run.offset === 0 && row.run.length === total));
+  assert.deepEqual(
+    grouped.map(row => row.descriptor),
+    legacy.map(row => row.descriptor),
+  );
+  assert.equal(runMeter.readBytes, legacyMeter.readBytes, 'run signing adds no descriptor DB reads');
+  assert.equal(runMeter.writes, 0);
+  const gap = await s.call(source, 'resolve', {
+    ...input,
+    runs: true,
+    digests: [pins[0].sha256, pins[2].sha256],
+  });
+  assert(
+    gap.every(row => row.url && !row.run),
+    'never grant an unrequested neighbour between members',
+  );
+  assert.equal(gap[0].range.offset, 0);
+  assert.equal(gap[1].range.offset, pins[0].size + pins[1].size);
+});
+
 test('CI cold descriptor and exact-key grant budgets include raw fallback, stored packs and a source pack delta (298f9675, e7e35328)', async t => {
   const shapes = [
     ...[false, true].flatMap(catalogued =>
       [4000, 6000, 29000].map(files => ({ files, catalogued, shape: 'raw', delta: null })),
     ),
     { files: 29000, catalogued: true, shape: 'stored-packs', delta: null },
+    { files: 29000, catalogued: true, shape: 'fragmented-packs', delta: null },
     { files: 29000, catalogued: true, shape: 'source-pack', delta: 20 },
     { files: 29000, catalogued: true, shape: 'source-pack', delta: 300 },
   ];
@@ -1070,12 +1143,16 @@ test('CI cold descriptor and exact-key grant budgets include raw fallback, store
     // Match client/import storage: 1,000 back-to-back small files per pack.
     // A source-pack delta remains raw here: ordinary source writes may emit raw
     // changed blobs, so the 300-path contract must cover that legal shape too.
-    if (shape === 'stored-packs') {
+    if (shape === 'stored-packs' || shape === 'fragmented-packs') {
       const rows = [...objects.values()];
-      for (let at = 0; at < rows.length; at += 1000) {
-        const group = rows.slice(at, at + 1000),
+      const width = shape === 'fragmented-packs' ? 1 : 1000;
+      for (let at = 0; at < rows.length; at += width) {
+        const group = rows.slice(at, at + width),
           pack = createHash('sha256').update(`synthetic pack ${at}`).digest('hex'),
-          size = group.reduce((n, row) => n + row.size, 0);
+          // One retained member beside a non-State neighbour is a legal packed
+          // State after small uploads and edits. Never read the neighbour to
+          // reduce grant count; the State-bound contract excludes its bytes.
+          size = group.reduce((n, row) => n + row.size, shape === 'fragmented-packs' ? 1 : 0);
         let offset = 0;
         for (const row of group) {
           row.pack = { digest: pack, size, offset };
@@ -1129,7 +1206,14 @@ test('CI cold descriptor and exact-key grant budgets include raw fallback, store
             schema: 1,
             kind: 'forge-source-state',
             parents: [],
-            files: [],
+            files:
+              shape === 'fragmented-packs'
+                ? [...objects.values()].map((row, index) => ({
+                    path: `source/file-${String(index).padStart(5, '0')}.txt`,
+                    blob: row.digest,
+                    mode: 'file',
+                  }))
+                : [],
             at: '2026-01-01T00:00:00.000Z',
             message,
           }),
@@ -1137,14 +1221,15 @@ test('CI cold descriptor and exact-key grant budgets include raw fallback, store
     );
     const digests = [...objects.keys()].sort().slice(0, delta ?? files);
     const expectedSizes = new Map([...objects].map(([digest, row]) => [digest, row.size]));
-    const measure = async closures => {
+    const measure = async (closures, runs = false) => {
       const baseline = s.counts.length,
         bytes = objectBytes,
         reads = objectReads;
       let replyBytes = 0,
         maxReplyBytes = 0,
         getGrants = 0,
-        grantBytes = 0;
+        grantBytes = 0,
+        signatureBytes = 0;
       const account = rows => {
         // Parsed logical payload bytes, before Convex/HTTP envelope encoding;
         // never emit signed URLs or infer executed R2 GETs from issued grants.
@@ -1152,10 +1237,11 @@ test('CI cold descriptor and exact-key grant budgets include raw fallback, store
         replyBytes += size;
         maxReplyBytes = Math.max(maxReplyBytes, size);
         for (const row of rows) {
-          for (const url of [row.url, ...(row.closure ?? []).map(leaf => leaf.url)]) {
+          for (const url of [row.url, row.run?.url, ...(row.closure ?? []).map(leaf => leaf.url)]) {
             if (!url) continue;
             getGrants++;
             grantBytes += Buffer.byteLength(url);
+            signatureBytes += new URL(url).searchParams.get('X-Amz-Signature').length / 2;
           }
         }
         return rows;
@@ -1180,6 +1266,7 @@ test('CI cold descriptor and exact-key grant budgets include raw fallback, store
           batch: true,
           digests: heads,
           ...(closures ? { closures: true } : {}),
+          ...(runs ? { runs: true } : {}),
         }),
       );
       let calls = 1;
@@ -1190,6 +1277,7 @@ test('CI cold descriptor and exact-key grant budgets include raw fallback, store
             batch: true,
             digests: digests.slice(at, at + 3200),
             ...(closures ? { closures: true } : {}),
+            ...(runs ? { runs: true } : {}),
           }),
         );
         assert(rows.length > 0);
@@ -1217,6 +1305,7 @@ test('CI cold descriptor and exact-key grant budgets include raw fallback, store
         maxReplyBytes,
         getGrants,
         grantBytes,
+        signatureBytes,
       };
     };
     if (shape === 'source-pack')
@@ -1252,7 +1341,7 @@ test('CI cold descriptor and exact-key grant budgets include raw fallback, store
         });
       objects.clear();
     }
-    const after = await measure(true);
+    const after = await measure(true, shape === 'fragmented-packs');
     assert.equal(after.calls, delta === null ? (files <= 6000 ? 3 : 11) : 2);
     if (catalogued) {
       assert.equal(after.objectReads, 0, 'catalog-backed blobs read no full per-object documents');
@@ -1263,7 +1352,7 @@ test('CI cold descriptor and exact-key grant budgets include raw fallback, store
       );
       assert(
         after.bytes <=
-          (shape === 'stored-packs'
+          (shape === 'stored-packs' || shape === 'fragmented-packs'
             ? 5_700_000
             : files === 4000
               ? 325_000
@@ -1296,6 +1385,18 @@ test('CI cold descriptor and exact-key grant budgets include raw fallback, store
     }
     if (shape === 'stored-packs')
       assert(after.replyBytes <= 17_310_000, 'stored-pack per-member reply baseline');
+    if (shape === 'fragmented-packs') {
+      assert.equal(
+        after.getGrants,
+        files + 2,
+        'separate pack keys still require separate exact-key signatures',
+      );
+      assert(after.signatureBytes >= files * 32, 'the independent 32-byte signatures alone exceed 100 KB');
+      assert(
+        after.signatureBytes > 100_000,
+        'a compact URL encoding cannot satisfy the general packed-State budget',
+      );
+    }
     assert.equal(s.scheduled.length, scheduled, 'zero idle/background work');
     t.diagnostic(
       JSON.stringify({

@@ -572,6 +572,46 @@ also need a compact representation of the existing independent signatures if the
 are to meet the same budget. This does not prove a bound on all encodings and does
 not change the selected five-minute exact-key authority or the acceptance target.
 
+The negotiated CI run reader now uses the same range/member verifier as clones.
+It groups a complete signed window before splitting download work; State and
+recipe metadata keep individual grants, avoiding a re-sign call for a partial
+metadata run. A 1,001-member materialization guard crosses the old 400-member
+worker boundary with one ranged body GET and two source resolver calls. Corrupt
+members, wrong ranges, expiry, partial runs and the legacy failure/drain path are
+guarded. This step changes no stored format or State writer.
+
+There is a remaining **packed-State coverage boundary**. A valid State can retain
+one live blob from each of 29,000 different small-upload packs; each pack can also
+contain a historical neighbour that is absent from that State. A pack's maximum
+capacity does not bound how many packs its live members occupy. The guard now
+constructs this State with all 29,000 file entries and resolves it with run signing
+enabled. It still needs 29,002 grants including the two States, 11 resolver calls,
+5,454,276 serialized DB B and 17,111,093 parsed reply B. The signature fields alone
+are 928,064 B: 29,000 independent 32-byte blob signatures plus two State signatures.
+Even signing the entire State at once cannot group different object keys.
+Granting whole packs would include the non-State neighbour bytes. A physical
+manifest can remove the descriptor reads, but cannot remove this signature floor.
+These are synthetic resolver/signing observations, not executed body GETs or bills.
+
+The general no-source-pack, stored-in-packs acceptance line therefore needs lead
+review before the writer rollout. The cheapest existing-stack alternative is to
+name fragmented packs alongside all-raw States in the one-time windowed fallback
+whose check run publishes a source pack, while retaining the 100 KB / three-call
+target for compact packed States and source-pack deltas. This is a proposal,
+**not an amended contract or enabled behavior**. No restriction, wider grant,
+credential, service, repack job or setting is introduced by the run reader.
+All physical-manifest implementation acceptance lines remain open.
+
+`tests/hosted-actions-runs-scale.test.mjs` measures the shared run signer in fresh
+Node processes at 29k and 100k files (one sample per shape). It includes the whole
+State-sized descriptor and packed-member arrays; it excludes future manifest
+fetching, State parsing and access checks. It is core memory evidence only, not a
+measurement of the unimplemented State/manifest signer or a peak-memory gain.
+The fixture asserts 29/100 grants for 29k/100k members in 1,000-member packs, and
+29,000 grants for the fragmented 29k shape; no body bytes or live requests run.
+Full signer memory, imported-project run counts, billing and byte placement remain
+unverified, and no writer setting is enabled.
+
 **Fetch and verify.** Unchanged in substance. Each State is hashed against its pin; the
 manifest is hashed against the pin stored beside the State before the signer or a reader
 uses it; every object is hashed and sized against the State, whichever pack, run or raw

@@ -561,6 +561,14 @@ signed as downloads advance. The runner continues with the unresolved hashes; an
 Metadata batches share authorization and catalog reads without hydrating test
 reports. Three 400-object download pages still overlap verified streaming reads
 and disk copies; symlinks are created only after all pages succeed.
+With `source.runs`, the same resolver groups only back-to-back requested members
+of each stored pack into one signed range. The runner keeps the complete signed
+window together, uses the checkout run reader to stream each range into private
+files, checks every member's hash and size, and then materializes the tree.
+A gap never becomes part of a grant. Partial or expired runs use fresh individual
+grants; a run URL is never reused for a member's narrower range. Old runners
+receive their existing per-object reply. This reader rollout changes no stored
+format or State writer; catalog reads and the all-raw path remain.
 Failures drain in-flight pages before returning without publishing a plan.
 Each completed page logs files, downloaded bytes and elapsed time. Source bytes
 go directly from object storage to the runner. The Candidate is transferred once as an artifact, preserving modes and
