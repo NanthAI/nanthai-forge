@@ -504,13 +504,13 @@ export const candidate = query({
             : null,
         });
       }
-      const { state } = await loadLanding(ctx, {
+      const { state, row: selectedRow } = await loadLanding(ctx, {
         projectId: input.projectId,
         submissionId: row.submissionId,
       });
       const attemptKey = { projectId: input.projectId, attemptId: state.attemptId };
       const liveAttempt = await landingAttemptRow(ctx, attemptKey);
-      const archived = !!row.capsule && !liveAttempt;
+      const archived = !!selectedRow.capsule && !liveAttempt;
       const attempt = archived ? null : await loadLandingAttempt(ctx, attemptKey, liveAttempt);
       const run = attempt?.check
         ? (await loadHostedCheck(ctx, { projectId: input.projectId, runId: attempt.check.runId })).run
@@ -567,7 +567,7 @@ export const candidate = query({
             : null,
       };
       return archived
-        ? capsuleHistoryContext(ctx, project, row.capsule!, input.capsuleProtocol, state.id, payload)
+        ? capsuleHistoryContext(ctx, project, selectedRow.capsule!, input.capsuleProtocol, state.id, payload)
         : canonicalPayload(payload);
     } catch (error) {
       return report(error);

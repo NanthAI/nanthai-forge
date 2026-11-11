@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { wakeLandingCapsule, landingCapsuleGraceMs } from './projectLandingCapsuleWake';
+import { withLandingCapsule } from './projectLandingCapsuleStore';
 import { unsealedBy } from '../src/landing-overtake';
 export { landingAttemptRow, loadLandingAttempt } from './projectHostedLandingAttemptRead';
 import { landingAttemptRow, loadLandingAttempt, pinsFor } from './projectHostedLandingAttemptRead';
@@ -39,13 +41,15 @@ export type LandingIdentity = {
   submissionId: string;
 };
 export type LandingRow = Doc<'projectHostedLandingRequests'>;
-export const landingRow = (ctx: QueryCtx | MutationCtx, input: LandingIdentity) =>
-  ctx.db
+export const landingRow = async (ctx: QueryCtx | MutationCtx, input: LandingIdentity, capsule = true) => {
+  const row = await ctx.db
     .query('projectHostedLandingRequests')
     .withIndex('by_project_and_submission', q =>
       q.eq('projectId', input.projectId).eq('submissionId', input.submissionId),
     )
     .unique();
+  return capsule ? withLandingCapsule(ctx, row) : row;
+};
 export async function loadLanding(ctx: QueryCtx | MutationCtx, input: LandingIdentity) {
   const row = await landingRow(ctx, input);
   invariant(row, 'NOT_FOUND', 'Hosted landing request not found.');
@@ -332,6 +336,15 @@ export async function writeLanding(
         },
       );
   }
+  if (
+    ['landed', 'terminal-failed'].includes(state.phase) &&
+    !['landed', 'terminal-failed'].includes(previous.phase)
+  )
+    await wakeLandingCapsule(ctx, {
+      projectId: row.projectId,
+      submissionId: state.id,
+      dueAt: Date.parse(state.timing!.settledAt!) + landingCapsuleGraceMs,
+    });
   await notifyFinish(ctx, state);
   // Lanes stacked on a Lane this landing carried are told once (Issue dc62b120): failed and cancelled alike.
   if (state.phase === 'terminal-failed' && previous.phase !== 'terminal-failed')
@@ -427,6 +440,7 @@ export async function retainLandingProgress(
     }
   }
   await ctx.db.patch(row._id, {
+    ...(row.sourceCreatedAt === undefined ? { sourceCreatedAt: row._creationTime, value: row.value } : {}),
     progress: semanticPayload({
       ...(state.semanticConflicts ? { semanticConflicts: state.semanticConflicts } : {}),
       ...(state.batchDiagnostic ? { batchDiagnostic: state.batchDiagnostic } : {}),

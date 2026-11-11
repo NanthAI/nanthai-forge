@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { capsuleMetricsPage } from './projectLandingCapsuleMetrics';
+import { capsuleAttempt } from './projectLandingCapsuleStore';
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import type { QueryCtx } from './_generated/server';
@@ -121,6 +123,17 @@ export const page = query({
           cutover: project.sourceCutover?.at ?? null,
           authority: project.sourceAuthority ?? { mode: 'native-owner', epoch: 0 },
         });
+      if (input.stream === 'attempts') {
+        const page = await capsuleMetricsPage(ctx, input.projectId, context, to, input.cursor);
+        if (page)
+          return canonicalPayload({
+            ...page,
+            runProjectionVersion: 1,
+            contextFrom: new Date(context).toISOString(),
+            cutover: project.sourceCutover?.at ?? null,
+            authority: project.sourceAuthority ?? { mode: 'native-owner', epoch: 0 },
+          });
+      }
       if (input.stream === 'receipts') {
         const rows = await ctx.db
           .query('projectSelfMetricReceipts')
@@ -232,7 +245,9 @@ export const page = query({
               )
               .unique();
             const submitted = request ? (JSON.parse(request.value) as HostedLandingState) : null;
-            const selected = attempt ? (JSON.parse(attempt.value) as HostedLandingAttempt) : null;
+            const selected = attempt
+              ? (JSON.parse(attempt.value) as HostedLandingAttempt)
+              : await capsuleAttempt(ctx, { projectId: input.projectId, attemptId: move.attemptId });
             return {
               id: move.id,
               at: move.at,
@@ -256,7 +271,7 @@ export const page = query({
               landedOnAdmissionRun: move.firstCheck ? move.firstCheck.landedOn === 'admission-run' : null,
               // The submitting agent run's declared client: harness and model (81d12a32).
               agentClient: move.agentClient ?? null,
-              costs: landingCosts(submitted, attempt?.number),
+              costs: landingCosts(submitted, attempt?.number ?? selected?.number),
               ...(submitted?.timing?.ms?.[0] == null ? {} : { saveMs: submitted.timing.ms[0] }),
               ...(submitted?.timing?.ms?.[1] == null ? {} : { preflightMs: submitted.timing.ms[1] }),
               settleSeconds: submitted ? (landingSpeedSample(submitted)?.settle ?? null) : null,

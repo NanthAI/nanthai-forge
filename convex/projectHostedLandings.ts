@@ -5,6 +5,7 @@ import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
 import { report } from './errors';
+import { landingCapsulePointer } from './projectLandingCapsuleStore';
 import { landingRow } from './projectHostedLandingStore';
 import { finishRow } from './projectHostedFinishWake';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
@@ -65,24 +66,46 @@ async function evidence(
   sequence: number,
 ) {
   let bytes = 0;
-  const request = await landingRow(ctx, { projectId, submissionId: receipt.submissionId });
+  const request = await landingRow(ctx, { projectId, submissionId: receipt.submissionId }, false);
   const state = request ? (JSON.parse(request.value) as HostedLandingState) : null;
   bytes += request?.value.length ?? 0;
-  const chain = await ctx.db
+  // Use the existing attempt read first: ordinary landings add no pointer seek. A partial
+  // removal has lost the immutable first attempt, so its complete archived chain wins.
+  const liveChain = await ctx.db
     .query('projectHostedLandingAttempts')
     .withIndex('by_project_and_submission_and_number', q =>
       q.eq('projectId', projectId).eq('submissionId', receipt.submissionId),
     )
     .order('asc')
     .take(LANDINGS_ATTEMPTS);
+  const pointer =
+    request?.capsule ??
+    (request &&
+    (!liveChain.length || (state?.firstAttemptId && liveChain[0]!.attemptId !== state.firstAttemptId))
+      ? await landingCapsulePointer(ctx, { projectId, submissionId: receipt.submissionId })
+      : null);
+  const archived = pointer?.summary
+    ? (JSON.parse(pointer.summary).evidence as
+        | {
+            chain: Array<{ number: number; value: string; progress?: string }>;
+            lastNumber: number | null;
+            bytes: number;
+          }
+        | undefined)
+    : undefined;
+  const chain = archived?.chain ?? liveChain;
   const attempts = chain.map(row => {
-    bytes += row.value.length + (row.progress?.length ?? 0);
+    if (!archived) bytes += row.value.length + (row.progress?.length ?? 0);
     return JSON.parse(row.value) as HostedLandingAttempt;
   });
   const progress = chain.map(row => (row.progress ? (JSON.parse(row.progress) as AttemptProgress) : null));
+  if (archived) bytes += archived.bytes;
   // A longer chain than we read: take the true last number from one more indexed read.
-  const last =
-    chain.length === LANDINGS_ATTEMPTS
+  const last = archived
+    ? archived.lastNumber === null
+      ? null
+      : { number: archived.lastNumber }
+    : chain.length === LANDINGS_ATTEMPTS
       ? await ctx.db
           .query('projectHostedLandingAttempts')
           .withIndex('by_project_and_submission_and_number', q =>

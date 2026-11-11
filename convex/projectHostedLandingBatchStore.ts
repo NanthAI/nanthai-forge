@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { wakeLandingCapsule } from './projectLandingCapsuleWake';
 import { releaseBatchMembers } from './projectHostedLandingBatchRelease';
 import { orderHostedLandingRows } from './projectHostedLandingOrder';
 import { pipelinePredecessor, invalidatePipeline } from './projectHostedLandingPipeline';
@@ -51,6 +52,11 @@ export async function writeBatch(
     composeOperationId: batch.composeOperationId,
     value: canonicalPayload(batchSchema.parse(replace ? batch : { ...JSON.parse(row.value), ...batch })),
   });
+  if (row.capsuleWaits && ['landed', 'superseded', 'split', 'failed'].includes(batch.phase)) {
+    for (const wait of row.capsuleWaits)
+      await wakeLandingCapsule(ctx, { projectId: input.projectId, ...wait });
+    await ctx.db.patch(row._id, { capsuleWaits: undefined });
+  }
   if (['fallback', 'superseded', 'split', 'failed'].includes(batch.phase))
     await invalidatePipeline(ctx, input, batch);
   if (batch.phase === 'fallback' || batch.phase === 'landed') await releaseBatchMembers(ctx, input, batch);

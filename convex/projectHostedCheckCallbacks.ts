@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { capsuleReceiptDigest } from './projectLandingCapsuleLedger';
 import { isMachineRunner } from '../src/hosted-machine-runner';
 import { checkFileSummary } from '../src/check-file-summary';
 import { callbackReceipt, capCheckReports } from '../src/check-report-cap';
@@ -95,8 +96,13 @@ export async function receiveHostedCheckCallback(
       q.eq('projectId', input.projectId).eq('runId', run.id).eq('eventId', callback.eventId),
     )
     .unique();
-  if (old) {
-    invariant(old.digest === digest, 'WORK_OPERATION_CHANGED', 'Retry the original provider event.');
+  const priorDigest =
+    old?.digest ??
+    (hostedCheckTerminal(run)
+      ? await capsuleReceiptDigest(ctx, input.projectId, `check:${run.id}`, callback.eventId)
+      : null);
+  if (priorDigest) {
+    invariant(priorDigest === digest, 'WORK_OPERATION_CHANGED', 'Retry the original provider event.');
     return run;
   }
   invariant(!hostedCheckTerminal(run), 'EVIDENCE_CHANGED', 'The original terminal result is immutable.');

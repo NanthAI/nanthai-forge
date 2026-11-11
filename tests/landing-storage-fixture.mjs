@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { finishFixture } from './hosted-finish-fixture.mjs';
 import { synthetic } from './hosted-landing-batches-fixture.mjs';
+import { capsuleMaintenanceFixture } from './landing-capsule-maintenance-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 export function inflateDogfoodChecks(f) {
   const reports = Object.fromEntries(
@@ -34,7 +35,11 @@ function storedBytes(f) {
       .map(([name, rows]) => [
         name,
         [...rows.values()].reduce(
-          (n, row) => n + Buffer.byteLength(JSON.stringify({ ...row, _creationTime: 0 })),
+          (n, row) =>
+            n +
+            (name === 'projectFinishReadRows' && row.kind === 'projectLandingCapsuleIndex'
+              ? 0
+              : Buffer.byteLength(JSON.stringify({ ...row, _creationTime: 0 }))),
           0,
         ),
       ]),
@@ -52,9 +57,20 @@ export const storageBudgets = JSON.parse(
 );
 export function fixedProjectStorage(f) {
   const bytes = storedBytes(f);
-  return Object.fromEntries(
-    [...fixedProjectTables].map(table => [table, { rows: f.tables[table].size, bytes: bytes[table] }]),
-  );
+  return Object.fromEntries([
+    ...[...fixedProjectTables].map(table => [table, { rows: f.tables[table].size, bytes: bytes[table] }]),
+    [
+      'projectLandingCapsuleIndex',
+      {
+        rows: [...f.tables.projectFinishReadRows.values()].filter(
+          row => row.kind === 'projectLandingCapsuleIndex',
+        ).length,
+        bytes: [...f.tables.projectFinishReadRows.values()]
+          .filter(row => row.kind === 'projectLandingCapsuleIndex')
+          .reduce((n, row) => n + Buffer.byteLength(JSON.stringify({ ...row, _creationTime: 0 })), 0),
+      },
+    ],
+  ]);
 }
 export function assertFixedProjectStorage(actual, budget, label) {
   assert.deepEqual(Object.keys(actual).sort(), Object.keys(budget).sort(), `${label}: fixed tables`);
@@ -65,7 +81,7 @@ export function assertFixedProjectStorage(actual, budget, label) {
         `${label}/${table}: ${stored[metric]} > ${budget[table][metric]} ${metric} per project; fixed rows must not grow with landing history`,
       );
 }
-export async function landingStorage(t, dogfood, { fileCount = 4096 } = {}) {
+export async function landingStorage(t, dogfood, { fileCount = 4096, capsules = false, capsuleSample } = {}) {
   const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
   Object.assign(process.env, synthetic);
   t.after(() => {
@@ -134,6 +150,23 @@ export async function landingStorage(t, dogfood, { fileCount = 4096 } = {}) {
   const immediate = delta();
   const fixedImmediate = fixedProjectStorage(f);
   caller = 'maintenance';
+  let capsule = null;
+  if (capsules) {
+    const previous = process.env.FORGE_LANDING_CAPSULES;
+    const maintenance = await capsuleMaintenanceFixture(t, { f, state });
+    const packed = await maintenance.pack().finally(() => {
+      if (previous === undefined) delete process.env.FORGE_LANDING_CAPSULES;
+      else process.env.FORGE_LANDING_CAPSULES = previous;
+    });
+    if (capsuleSample) await capsuleSample(maintenance, packed);
+    capsule = {
+      ...packed.metrics,
+      classA: maintenance.requests.filter(method => method === 'PUT').length,
+      classB: maintenance.requests.filter(method => method === 'GET').length,
+    };
+    r2.maintenance.classA += capsule.classA;
+    r2.maintenance.classB += capsule.classB;
+  }
   const expiry = await import(moduleUrl('../convex/projectOperationalExpiry.ts'));
   const checks = [...f.tables.projectHostedCheckRuns.values()];
   // Controlled clock, no sleeps: maintenance is due after the landing has completed.
@@ -141,7 +174,7 @@ export async function landingStorage(t, dogfood, { fileCount = 4096 } = {}) {
   Date.now = () => realNow() + 31 * 86_400_000;
   try {
     for (const row of checks)
-      for (const phase of ['callbacks', 'detail']) {
+      for (const phase of capsules ? ['detail'] : ['callbacks', 'detail']) {
         let more = true;
         for (let i = 0; more && i < 100; i++)
           more = (
@@ -181,5 +214,6 @@ export async function landingStorage(t, dogfood, { fileCount = 4096 } = {}) {
     perLanding: { immediate, retained },
     perProject: { immediate: fixedImmediate, retained: fixedProjectStorage(f) },
     r2,
+    ...(capsule ? { capsule } : {}),
   };
 }

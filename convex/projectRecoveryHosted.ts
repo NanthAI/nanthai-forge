@@ -13,6 +13,12 @@ import {
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import {
+  capsuleOwnsRecoveryRow,
+  recoveryCapsuleCursor,
+  readRecoveryCapsuleCursor,
+  recoveryCapsulePage,
+} from './projectLandingCapsuleRecovery';
 
 // Explicit indexed branches keep table/index pairings checked by the generated model.
 async function readPage(
@@ -186,6 +192,7 @@ export const page = query({
   args: {
     projectId: v.id('hostedProjects'),
     selection: v.string(),
+    capsuleProtocol: v.optional(v.literal(1)),
     table: v.string(),
     cursor: v.union(v.string(), v.null()),
   },
@@ -200,13 +207,29 @@ export const page = query({
         'WORK_STALE',
         'Hosted recovery pins changed; retain the original staging and request.',
       );
+      invariant(
+        !expected.capsuleRevision || input.capsuleProtocol === 1,
+        'CLI_UPGRADE_REQUIRED',
+        'This recovery includes landing capsules. Run nforge update and retry.',
+      );
       const table = recoveryTableSchema.parse(input.table);
-      const result = await readPage(ctx, input.projectId, table, input.cursor);
+      const selected = readRecoveryCapsuleCursor(table, input.cursor);
+      if (selected.phase === 'capsules')
+        return recoveryCapsulePage(ctx, project, table, selected, input.capsuleProtocol);
+      const result = await readPage(ctx, input.projectId, table, selected.cursor);
+      const rows = [];
+      for (const row of result.page)
+        if (!expected.capsuleRevision || !(await capsuleOwnsRecoveryRow(ctx, input.projectId, table, row)))
+          rows.push(canonicalPayload(row));
       return canonicalPayload({
         table,
-        rows: result.page.map(row => canonicalPayload(row)),
-        cursor: result.isDone ? null : result.continueCursor,
-        done: result.isDone,
+        rows,
+        cursor: !result.isDone
+          ? result.continueCursor
+          : expected.capsuleRevision
+            ? recoveryCapsuleCursor({ table, phase: 'capsules', cursor: null })
+            : null,
+        done: result.isDone && !expected.capsuleRevision,
       });
     } catch (error) {
       return report(error);

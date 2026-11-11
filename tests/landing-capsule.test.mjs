@@ -10,6 +10,10 @@ import { moduleUrl } from './convex-module.mjs';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { encodeLandingCapsule, decodeLandingCapsule } from '../dist/landing-capsule-bytes.js';
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
+const capsuleStore = await import(moduleUrl('../convex/projectLandingCapsuleStore.ts'));
+const ledger = await import(moduleUrl('../convex/projectLandingCapsuleLedger.ts'));
+const acceptanceStore = await import(moduleUrl('../convex/projectHostedAcceptanceStore.ts'));
+const attemptStore = await import(moduleUrl('../convex/projectHostedLandingAttemptRead.ts'));
 const cold = await import(moduleUrl('../convex/projectLandingCapsuleRead.ts'));
 const people = await import(moduleUrl('../convex/publicPeople.ts'));
 const finish = await import(moduleUrl('../convex/projectHostedFinish.ts'));
@@ -116,6 +120,10 @@ test('landing capsule round trip preserves exact original row bytes and every ta
         h.f.projectId,
         h.state.id,
       ),
+    code('EVIDENCE_CHANGED'),
+  );
+  assert.throws(
+    () => encodeLandingCapsule({ ...h.capsule, tables: { projectHostedLandingAttempts: ['{'] } }),
     code('EVIDENCE_CHANGED'),
   );
   const changed = Buffer.from(h.encoded.body);
@@ -274,7 +282,34 @@ test('cold finish inputs retain exact selected heads and current Lane-relative s
     tables,
   });
   f.patch('projectHostedLandingRequests', row._id, { capsule: encoded.pointer });
+  for (const text of tables.projectHostedAcceptancePages) {
+    const page = JSON.parse(text);
+    f.insert('projectFinishReadRows', {
+      kind: ledger.capsulePageKind,
+      projectId: f.projectId,
+      sourceId: ledger.capsulePageKey(f.projectId, page.receiptId, page.kind, page.index),
+      submissionId: state.id,
+      value: ledger.compactCapsulePage(page),
+    });
+  }
   for (const name of names) f.tables[name].clear();
+  for (const text of tables.projectHostedAcceptancePages) {
+    const page = JSON.parse(text);
+    const restored = await f.tx(
+      'capsuleTransactionInput',
+      {
+        _handler: ctx =>
+          acceptanceStore.acceptancePage(ctx, {
+            projectId: f.projectId,
+            receiptId: page.receiptId,
+            kind: page.kind,
+            index: page.index,
+          }),
+      },
+      {},
+    );
+    assert.equal(canonicalPayload(restored), text, 'transactional Lane pins and page identity remain exact');
+  }
   t.mock.method(globalThis, 'fetch', async () => new Response(encoded.body));
   const result = await cold.history._handler(
     {
@@ -447,4 +482,55 @@ test('declaring capsule support retains a valid native cursor on uncapsuled atte
   );
   assert.deepEqual(capable.page, legacy.page);
   assert.equal(capable.isDone, legacy.isDone);
+});
+
+test('the separate capsule pointer preserves exact server transaction pins without adding its private summary to public replies', async t => {
+  const h = await fixture(t);
+  const expected = await h.f.call(
+    'capsulePointerBaseline',
+    api.status,
+    {
+      projectId: h.f.projectId,
+      submissionId: h.state.id,
+    },
+    owner,
+  );
+  const raw = JSON.parse(h.capsule.tables.projectHostedLandingAttempts[0]);
+  const attempt = JSON.parse(raw.value);
+  // External pointers are published only after the approved grace; legacy inline pins remain readable immediately.
+  t.mock.method(Date, 'now', () => Date.parse(h.capsule.anchor.at) + 8 * 86_400_000);
+  h.relocate(true);
+  h.f.patch('projectHostedLandingRequests', h.row._id, { capsule: undefined });
+  h.f.insert('projectFinishReadRows', {
+    kind: capsuleStore.capsuleKind,
+    projectId: h.f.projectId,
+    sourceId: h.row._id,
+    submissionId: h.state.id,
+    attemptId: attempt.id,
+    value: canonicalPayload({ ...h.encoded.pointer, summary: canonicalPayload({ attempt }) }),
+  });
+  const pins = await h.f.run(
+    'capsulePrivateAttempt',
+    ctx =>
+      attemptStore.loadLandingAttempt(ctx, {
+        projectId: h.f.projectId,
+        attemptId: attempt.id,
+      }),
+    {},
+  );
+  assert.deepEqual(pins, attempt);
+  const marker = await h.f.call(
+    'capsulePointerMarker',
+    api.status,
+    {
+      projectId: h.f.projectId,
+      submissionId: h.state.id,
+      capsuleProtocol: 1,
+    },
+    owner,
+  );
+  assert(!marker.includes('summary'));
+  assert(!marker.includes(owner));
+  t.mock.method(globalThis, 'fetch', async () => new Response(h.encoded.body));
+  assert.equal(await h.run(owner, 'projectHostedLanding:status', { submissionId: h.state.id }), expected);
 });

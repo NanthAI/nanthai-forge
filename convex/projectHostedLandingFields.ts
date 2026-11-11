@@ -45,6 +45,7 @@ export const hostedLandingTables = {
     value: v.string(),
   }).index('by_project_and_submission', ['projectId', 'submissionId']),
   projectHostedLandingBatches: defineTable({
+    capsuleWaits: v.optional(v.array(v.object({ submissionId: v.string(), dueAt: v.number() }))),
     projectId: v.id('hostedProjects'),
     batchId: v.string(),
     composeOperationId: v.string(),
@@ -316,6 +317,7 @@ export const hostedLandingTables = {
     .index('by_project_and_run_and_phase', ['projectId', 'runId', 'phase'])
     .index('by_project_run_phase_checkWakeVersion', ['projectId', 'runId', 'phase', 'checkWakeVersion']),
   projectHostedLandingAttempts: defineTable({
+    sourceCreatedAt: v.optional(v.number()),
     projectId: v.id('hostedProjects'),
     submissionId: v.string(),
     attemptId: v.string(),

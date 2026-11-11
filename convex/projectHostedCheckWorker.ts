@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { capsuleReceiptDigest } from './projectLandingCapsuleLedger';
 import { assertHostedCheckActive } from './projectHostedCheckStore';
 import { isMachineRunner } from '../src/hosted-machine-runner';
 import { macMachine, requireMacMachine } from './projectHostedCheckMachines';
@@ -219,12 +220,13 @@ export const heartbeat = mutation({
           q.eq('projectId', input.projectId).eq('runId', run.id).eq('eventId', value.eventId),
         )
         .unique();
-      if (prior) {
-        invariant(
-          prior.digest === checkPin(value),
-          'WORK_OPERATION_CHANGED',
-          'Retry the original heartbeat.',
-        );
+      const priorDigest =
+        prior?.digest ??
+        (hostedCheckTerminal(run)
+          ? await capsuleReceiptDigest(ctx, input.projectId, `check:${run.id}`, value.eventId)
+          : null);
+      if (priorDigest) {
+        invariant(priorDigest === checkPin(value), 'WORK_OPERATION_CHANGED', 'Retry the original heartbeat.');
         return canonicalPayload(run);
       }
       invariant(

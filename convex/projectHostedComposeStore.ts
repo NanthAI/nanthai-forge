@@ -85,7 +85,10 @@ export async function writeComposeState(
   id: Id<'projectHostedComposes'>,
   state: ComposeState,
 ) {
-  await ctx.db.patch(id, { value: semanticPayload(composeStateSchema.parse(state), true) });
+  await ctx.db.patch(id, {
+    candidateId: state.candidateId,
+    value: semanticPayload(composeStateSchema.parse(state), true),
+  });
   if (state.status === 'completed' || state.status === 'failed') {
     const row = (await ctx.db.get(id))!;
     await notifyFinishCompose(ctx, row.projectId, row.operationId);

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { capsuleAttempt } from './projectLandingCapsuleStore';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id, Doc } from './_generated/dataModel';
 import { hostedLandingAttemptSchema, type HostedLandingAttempt } from '../src/hosted-landing';
@@ -32,7 +33,12 @@ export async function loadLandingAttempt(
   const retained = pins.get(key);
   if (retained) return retained;
   const row = known === undefined ? await landingAttemptRow(ctx, input) : known;
-  invariant(row, 'SOURCE_UNAVAILABLE', 'The original landing attempt is unavailable.');
+  if (!row) {
+    const stored = await capsuleAttempt(ctx, input);
+    invariant(stored, 'SOURCE_UNAVAILABLE', 'The original landing attempt is unavailable.');
+    pins.set(key, stored);
+    return stored;
+  }
   const attempt = hostedLandingAttemptSchema.parse(JSON.parse(row.value));
   invariant(
     attempt.projectId === row.projectId &&

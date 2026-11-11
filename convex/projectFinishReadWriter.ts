@@ -15,8 +15,8 @@ import {
  * Steady-state patches read the narrow projection, not the large source row.
  * Only a legacy row's first relevant write needs its selected source document. */
 const wrapped = new WeakMap<object, () => MutationCtx['db']>();
-/** Only the validated permanent purge uses the original writer. Its inventory deletes
- * every companion itself, including companions erased by an earlier purge page.
+/** Validated permanent purge and verified capsule removal own companion disposition.
+ * Their inventories remove or retain each companion explicitly, including prior-page work.
  * Keeping ordinary projection upkeep here would double-delete or recreate them. */
 export function projectPurgeWriter(ctx: MutationCtx): MutationCtx {
   const original = wrapped.get(workRecordOriginalDb(ctx.db));

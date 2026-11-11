@@ -1674,7 +1674,43 @@ capability read; browser reads negotiate only after the existing
 `CLI_UPGRADE_REQUIRED` history error. An old-protocol history request that needs a
 capsule receives that error; uncapsuled reads and past-end current-state probes
 retain their existing calls. Attempt ordinal cursors remain stable across
-relocation. No capsule writer or automatic relocation is installed in this stage.
+relocation.
+
+The writer is gated by the default-off server setting `FORGE_LANDING_CAPSULES=1`.
+Readers must be deployed before enabling it. A terminal transition schedules one
+wake at settlement plus seven days; mutable acceptance completion or shared checks
+retain an event-driven waiter, not a poll. Existing completion/expiry events wake
+those waiters. A bounded, resumable project bootstrap indexes compose identities
+and original attempt creation times once. New writes maintain those fields in their
+existing transaction, adding no hot-path function call.
+
+The internal Node action captures canonical row strings in bounded pages, gzip
+encodes one complete content-addressed object, reconciles an unknown write by its
+content pin, and verifies a complete GET plus all table digests before publishing.
+The pointer and original transaction pins live outside the request document in
+`projectFinishReadRows`, so adding metadata cannot overflow a formerly valid
+request. Oversized policy pins continue automatically through internal storage
+pages. Publication removes its first verified page atomically; later pages commit
+their original offset and return it on replay. A changed captured row is retained
+with `WORK_STALE`. No history object or reuse alias is deleted.
+
+Canonical acceptance receipts and compose selections stay. Compact exact accepted
+Lane/state ledgers, frozen plan/attempt pins, original metric timestamps/scalars,
+landing evidence and callback/compose replay digests stay readable by transactions.
+Receipt leaves split automatically when their storage page fills. Shared run,
+project, Channel and queue projections remain transactional; they are never packed.
+Future expiry receipts reuse the compact owner ledger, retaining their original
+request and numeric result rather than recreating global cleanup rows.
+
+Recovery preparation and every page bind a capsule revision in addition to their
+existing source/Work/Channel pins. Publishing a capsule advances that revision,
+fencing an export already in progress. Published capsules own their whole logical
+corpus throughout resumable physical removal: live pages exclude those copies and
+then enumerate verified server-side capsule pages. The action rechecks owner and
+exact pins after R2 IO, applies the ordinary identity mapping and returns the same
+row shape. Raw per-table hashes are checked before redaction. No client sees the
+compressed object, a storage grant or private transaction metadata. Old clients
+receive `CLI_UPGRADE_REQUIRED` when the selected recovery needs capsules.
 
 `projectHostedLanding:enqueue` records a durable submission, immutable first attempt,
 original H01 operation and coalesced Channel wake in one transaction. The request

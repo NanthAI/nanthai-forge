@@ -7,6 +7,7 @@ import { landingReservationForReader } from './projectHostedLandingReservation';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { withLandingCapsule } from './projectLandingCapsuleStore';
 import { capsuleHistoryContext } from './projectLandingCapsuleContext';
 import { readLandingTransition } from '../src/hosted-landing';
 import { landingAlias } from './projectHostedLandingIdentity';
@@ -138,7 +139,7 @@ async function observePage(
     }
     invariant(rows.length === 1 || alias, 'NOT_FOUND', 'Select one hosted landing operation.');
     stage = 'landing';
-    const selectedRow = rows[0];
+    const selectedRow = await withLandingCapsule(ctx, rows[0] ?? null);
     invariant(selectedRow, 'NOT_FOUND', 'Hosted landing request not found.');
     const state = landingStateFromRow(selectedRow);
     const cold = selectedRow.capsule && input.nextVersion <= selectedRow.capsule.version;

@@ -265,7 +265,12 @@ export async function finishFixture(
   const pending = () =>
     [...f.tables._scheduled_functions.values()]
       // Retention runs weeks after this landing; expiry has its own time-controlled tests.
-      .filter(x => x.state.kind === 'pending' && !x.name.startsWith('projectOperationalExpiry:'))
+      .filter(
+        x =>
+          x.state.kind === 'pending' &&
+          !x.name.startsWith('projectOperationalExpiry:') &&
+          !x.name.startsWith('projectLandingCapsule'),
+      )
       .sort((a, b) => a.scheduledTime - b.scheduledTime);
   const reuseDecisions = [];
   const runReuseAction = async (ref, args) => {

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { capsuleReceiptDigest } from './projectLandingCapsuleLedger';
 import { sourceProgress } from './projectSourceProgress';
 import { semanticPayload } from '../src/semantic-payload';
 import {
@@ -120,6 +121,7 @@ export const prepare = mutation({
       await ctx.db.insert('projectHostedComposes', {
         ...auth,
         jobId: prepared.operation.firstAttempt.ids.job!,
+        candidateId: state.candidateId,
         value: semanticPayload(state),
       });
       return canonicalPayload({ state, terminal: null });
@@ -155,8 +157,18 @@ export const stage = mutation({
             .eq('index', input.index),
         )
         .unique();
-      if (old) {
-        invariant(old.digest === pin.sha256, 'WORK_OPERATION_CHANGED', 'Retry the original compose page.');
+      const priorDigest =
+        old?.digest ??
+        (operation.terminal
+          ? await capsuleReceiptDigest(
+              ctx,
+              input.projectId,
+              `compose:${auth.actor}:${auth.operationId}`,
+              `${input.kind}:${input.index}`,
+            )
+          : null);
+      if (priorDigest) {
+        invariant(priorDigest === pin.sha256, 'WORK_OPERATION_CHANGED', 'Retry the original compose page.');
         return canonicalPayload(state);
       }
       invariant(

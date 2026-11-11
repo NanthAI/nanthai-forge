@@ -469,3 +469,25 @@ elect a collector through a create-only marker. One completion notification coll
 bounded metadata pages before optional pack/proof jobs finish; signed workflow
 completion remains recovery. Packed mode removes LISTs and duplicate log PUTs. The legacy batch path remains for
 older supervisors. See [the CI request guard](operations/github-actions-checks.md#ci-byte-guard-and-serving-estimate).
+
+
+## Terminal landing capsules
+
+S1 (`bea7868d`) keeps the default-off writer separate from reader deployment.
+After the approved seven-day terminal grace, one complete private gzip object
+holds canonical observations, attempts, landing-owned finish projections,
+acceptance events/pages/plans/snapshots, compose pages and expired callback digest
+receipts. Relocated per-landing expiry receipts travel in that object too. A
+verified pointer precedes bounded removal of duplicate Convex copies. Reuse
+aliases, canonical acceptance receipts/compose selections, exact transaction
+ledgers and shared metric/control projections remain in Convex. A fixed bootstrap
+cursor/revision is charged per project, separately from landing history.
+
+Capsule objects use the private project `landing-capsules` namespace, outside the
+client-readable object namespace. Server actions alone open them, verify complete
+raw bytes/table hashes and return currently authorized, identity-mapped logical
+history. Recovery uses that path and retains the full raw server object; its
+fixture drill also restores hosted source. Disabling the writer stops future
+packing; existing capsules continue through the reader/recovery path. Logical
+history is preserved indefinitely. This does not enable a deployed setting or
+claim measured billing savings.

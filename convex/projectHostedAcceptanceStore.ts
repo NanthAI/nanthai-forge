@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { capsuleAcceptancePage } from './projectLandingCapsuleLedger';
+import { capsulePlan } from './projectLandingCapsuleStore';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
@@ -21,18 +23,18 @@ export const acceptanceRow = (ctx: QueryCtx | MutationCtx, input: ReceiptIdentit
       q.eq('projectId', input.projectId).eq('receiptId', input.receiptId),
     )
     .unique();
-export const acceptancePlan = (ctx: QueryCtx | MutationCtx, input: ReceiptIdentity) =>
-  ctx.db
+export const acceptancePlan = async (ctx: QueryCtx | MutationCtx, input: ReceiptIdentity) =>
+  (await ctx.db
     .query('projectHostedAcceptancePlans')
     .withIndex('by_project_and_receipt', q =>
       q.eq('projectId', input.projectId).eq('receiptId', input.receiptId),
     )
-    .unique();
-export const acceptancePage = (
+    .unique()) ?? capsulePlan(ctx, input);
+export const acceptancePage = async (
   ctx: QueryCtx | MutationCtx,
   input: ReceiptIdentity & { kind: 'inputs' | 'dependencies'; index: number },
 ) =>
-  ctx.db
+  (await ctx.db
     .query('projectHostedAcceptancePages')
     .withIndex('by_project_and_receipt_and_kind_and_index', q =>
       q
@@ -41,9 +43,14 @@ export const acceptancePage = (
         .eq('kind', input.kind)
         .eq('index', input.index),
     )
-    .unique();
+    .unique()) ?? capsuleAcceptancePage(ctx, input);
 export async function acceptanceSelection(ctx: QueryCtx | MutationCtx, input: AcceptanceIdentity) {
   const { row, state } = await loadLanding(ctx, input);
+  invariant(
+    state.attemptId === input.attemptId,
+    'WORK_STALE',
+    'Select the current attempt of this original landing request.',
+  );
   const attempt = await loadLandingAttempt(ctx, input);
   invariant(
     state.attemptId === attempt.id && attempt.submissionId === state.id && attempt.actor.id === state.actor,

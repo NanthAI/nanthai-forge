@@ -32,6 +32,7 @@ export const hostedAcceptanceTables = {
     value: v.string(),
   }).index('by_project_and_sequence', ['projectId', 'sequence']),
   projectHostedAcceptancePlans: defineTable({
+    capsuleWake: v.optional(v.object({ submissionId: v.string(), dueAt: v.number() })),
     ...identity,
     submissionId: v.string(),
     attemptId: v.string(),

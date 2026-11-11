@@ -803,7 +803,9 @@ singletons this fixture writes: `projectHostedChannels` (main),
 `projectHostedLandingQueues` (main) and `projectHostedOverlapMain`. Each stays at
 one row per project. Reading full rows here includes the seeded Channel bytes,
 which a delta would miss. Mixed tables, including shared finish projections and
-the bounded overlap history log, remain in the per-landing map. The history guard
+the bounded overlap history log, remain in the per-landing map. The fixed capsule bootstrap cursor/revision is also accounted separately by kind
+inside `projectFinishReadRows`; all other rows in that mixed table remain per landing.
+The history guard
 advances the same paths through 128 more accepted sequences and rejects both a
 duplicate singleton and history appended inside its row.
 This is a fixture measurement, not billed physical storage: indexes, Convex
@@ -812,8 +814,8 @@ The fixtures do not model every save, large source fan-out or a whole user month
 
 | Fixture | Per-landing immediate ceiling | Per-landing retained ceiling, including page receipts | Fixed per-project full rows, each phase |
 | --- | ---: | ---: | ---: |
-| Fresh project, two test shards | 41,781 B | 42,213 B | 1,070 B / 3 rows |
-| Dogfood-shaped, main race / two large checks | 812,712 B | 247,964 B | 97,716 B / 3 rows |
+| Fresh project, two test shards | 42,067 B | 30,288 B | 1,070 B / 3 rows immediate; +240 B / 1 index row retained |
+| Dogfood-shaped, main race / two large checks | 813,380 B | 226,443 B | 97,716 B / 3 rows immediate; +240 B / 1 index row retained |
 
 These are the committed fixture ceilings, not an observed saving. The fixed
 rows' respective byte ceilings are 638 / 279 / 153 B (fresh) and
@@ -828,9 +830,44 @@ dogfood-shaped, by sharing immutable request fields with the current snapshot.
 History answers and selected document-read counts remain identical; these are
 serialized fixture bytes, not a billed storage or performance claim.
 
-The retained totals include 1,368 / 3,176 bytes of maintenance audit receipts in
-`legacyStorageCleanupPages`; these remain durable. The dominant reclaimed table
-is `projectHostedCheckRuns` (dogfood 573,484 → 7,440 bytes). Callback rows retain 822 / 1,656 bytes of digest receipts after raw-payload compaction; shards fall from
+The retained scenario explicitly enables S1 in the fixture, packs after eight days,
+then runs the existing detail/source expiry windows. Its original callback expiry
+receipts are verified in the capsule; future detail/source replay records remain
+in compact transaction ledgers. Global cleanup-row ceilings are 320 / 320 B.
+S1 alone observes 30,269 / 226,261 B retained and complete capsules of approximately
+4.4 / 5.9 KB (one PUT and two verification/reconciliation GETs). These are N=1
+observations per shape, not paired performance measurements or billed savings.
+The guard rejects a dogfood capsule above 100 KB and compressed egress above
+relocated row bytes plus a fixed 2 MiB document/header envelope; schema-valid
+incompressible historical errors travel whole, without a new user limit. A synthetic
+360,000-character error measured 277,020 compressed B (381,805 relocated row B),
+with one complete object.
+
+An isolated Node-action probe replays the actual fixture's V8 mutation replies
+and uses local fake R2, excluding the DB fake's heap from the action process.
+Two fresh/dogfood samples measured process peak RSS of
+110,919,680–114,917,376 / 111,525,888–116,211,712 B, including module loading
+(baseline RSS about 70 MB). Action walls were 27.5–37.8 / 23.9–43.0 ms;
+replayed page-call maxima were 0.34–0.47 / 0.63–1.25 ms, excluding provider latency. The real in-process mutation fixture observed maximum page
+walls of 2.66 / 25.84 ms in a separate run. These N=2 observations per shape ran on a shared
+machine (preceding load/swap samples 4.85/6.07/7.71 with 4,655 MiB used,
+and 5.38/5.38/6.78 with 3,943 MiB used at the second launch); they establish no
+latency benefit, provider peak or billed GB-seconds. Complete capsule encoding
+retains O(total landing history bytes) in the Node action, while DB capture and
+removal use bounded pages. Very long attempt chains and provider limits beyond
+these fixtures remain unverified.
+
+Immediate attempt/projection ceilings increase by 21 / 46 timestamp bytes and
+246 / 558 metric-projection bytes, and the dogfood compose row carries its
+Candidate identity (+53 B), all written in existing transactions. Relocated
+canonical history tables ratchet to zero; exact policy/acceptance pins, metric
+scalars and replay ledgers explain the retained finish-projection ceiling.
+S2 still owns superseded Work record/body and operation history (90,887 and
+87,504 B respectively in this dogfood observation); the joint 15,000 / 60,000 B
+targets remain open. No S1 history is dropped to reach those targets.
+
+The dominant reclaimed table
+is `projectHostedCheckRuns` (dogfood 573,484 → 7,440 bytes). Callback digest receipts then live in the capsule with compact retry pins; shards fall from
 720 / 1,448 to zero. The larger
 retained dogfood footprint includes its changed-path index, canonical Work and
 operation records; expiry does not cut that source/audit history. Every other table's

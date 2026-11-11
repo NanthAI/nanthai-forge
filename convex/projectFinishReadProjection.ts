@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { metricAttemptRow } from './projectMetricReadProjection';
 import { digest } from '../src/state/hash';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { finishPendingForReader } from '../src/hosted-finish';
@@ -28,7 +29,14 @@ export const finishReadFields = {
   ],
   projectHostedFinishes: ['projectId', 'submissionId', 'value', 'composeOperationId', 'wake'],
   projectHostedLandingQueues: ['projectId', 'channel', 'status', 'lease', 'wake'],
-  projectHostedLandingAttempts: ['projectId', 'submissionId', 'attemptId', 'number', 'value'],
+  projectHostedLandingAttempts: [
+    'projectId',
+    'submissionId',
+    'attemptId',
+    'number',
+    'sourceCreatedAt',
+    'value',
+  ],
   projectHostedCheckRuns: ['projectId', 'runId', 'value'],
   projectHostedChannels: ['projectId', 'name', 'selection'],
   projectHostedLandingDesired: ['projectId', 'submissionId', 'operationId', 'actor', 'value'],
@@ -59,6 +67,7 @@ export function finishReadProjection(kind: FinishReadKind, row: Record<string, u
     const attempt = JSON.parse(row.value as string);
     result.value = canonicalPayload({
       candidate: { head: attempt.candidate.head, inputs: attempt.candidate.inputs },
+      metric: attempt.metric ?? metricAttemptRow(attempt),
     });
   }
   if (kind === 'projectHostedCheckRuns')
@@ -84,6 +93,8 @@ export function finishReadProjection(kind: FinishReadKind, row: Record<string, u
     'runId',
   ] as const)
     if (typeof row[key] === 'string') Object.assign(selection, { [key]: row[key] });
+  if (kind === 'projectHostedLandingAttempts' && typeof row.sourceCreatedAt === 'number')
+    selection.sourceCreatedAt = row.sourceCreatedAt;
   if (kind === 'projectHostedChannels') selection.channel = (row.name ?? row.channel) as string;
   return selection;
 }

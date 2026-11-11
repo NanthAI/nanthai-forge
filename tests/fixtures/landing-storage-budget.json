@@ -1,7 +1,7 @@
 {
   "fresh": {
     "immediate": {
-      "projectFinishReadRows": 7679,
+      "projectFinishReadRows": 7936,
       "legacyStorageCleanupWindows": 0,
       "legacyStorageCleanupPages": 0,
       "projectGithubMirrors": 0,
@@ -88,7 +88,7 @@
       "projectHostedLandingObservations": 7473,
       "projectHostedLandingCheckWakes": 163,
       "projectHostedLandingRequests": 3092,
-      "projectHostedLandingAttempts": 3299,
+      "projectHostedLandingAttempts": 3328,
       "projectLandingSpeed": 233,
       "projectHostedFinishes": 1208,
       "projectHostedApprovals": 0,
@@ -182,9 +182,9 @@
       "projectObjectReceipts": 0
     },
     "retained": {
-      "projectFinishReadRows": 7679,
+      "projectFinishReadRows": 12688,
       "legacyStorageCleanupWindows": 0,
-      "legacyStorageCleanupPages": 1368,
+      "legacyStorageCleanupPages": 320,
       "projectGithubMirrors": 0,
       "projectGithubMirrorJobs": 0,
       "projectGithubBindings": 0,
@@ -251,7 +251,7 @@
       "projectHostedCheckSettings": 0,
       "projectHostedCheckSettingVersions": 0,
       "projectHostedCheckRuns": 3698,
-      "projectHostedCheckCallbacks": 822,
+      "projectHostedCheckCallbacks": 0,
       "projectHostedCheckShards": 0,
       "projectHostedMainAudits": 0,
       "projectHostedMainAuditEvents": 0,
@@ -266,18 +266,18 @@
       "projectHostedLandingBatches": 0,
       "projectHostedLandingDesired": 0,
       "projectHostedLandingAliases": 0,
-      "projectHostedLandingObservations": 7473,
+      "projectHostedLandingObservations": 0,
       "projectHostedLandingCheckWakes": 163,
       "projectHostedLandingRequests": 3092,
-      "projectHostedLandingAttempts": 3299,
+      "projectHostedLandingAttempts": 0,
       "projectLandingSpeed": 233,
       "projectHostedFinishes": 1208,
       "projectHostedApprovals": 0,
       "projectHostedAcceptances": 2442,
-      "projectHostedAcceptanceSnapshots": 343,
-      "projectHostedAcceptanceEvents": 2342,
-      "projectHostedAcceptancePlans": 457,
-      "projectHostedAcceptancePages": 1150,
+      "projectHostedAcceptanceSnapshots": 0,
+      "projectHostedAcceptanceEvents": 0,
+      "projectHostedAcceptancePlans": 0,
+      "projectHostedAcceptancePages": 0,
       "projectHostedLifecyclePlans": 0,
       "projectHostedLifecycleGuards": 0,
       "projectHostedLifecyclePointers": 0,
@@ -375,6 +375,10 @@
         "projectHostedOverlapMain": {
           "rows": 1,
           "bytes": 153
+        },
+        "projectLandingCapsuleIndex": {
+          "rows": 0,
+          "bytes": 0
         }
       },
       "retained": {
@@ -389,13 +393,17 @@
         "projectHostedOverlapMain": {
           "rows": 1,
           "bytes": 153
+        },
+        "projectLandingCapsuleIndex": {
+          "rows": 1,
+          "bytes": 240
         }
       }
     }
   },
   "dogfood": {
     "immediate": {
-      "projectFinishReadRows": 9665,
+      "projectFinishReadRows": 10224,
       "legacyStorageCleanupWindows": 0,
       "legacyStorageCleanupPages": 0,
       "projectGithubMirrors": 0,
@@ -454,7 +462,7 @@
       "projectHostedSaves": 0,
       "projectHostedSavePages": 0,
       "projectHostedStates": 735,
-      "projectHostedComposes": 1316,
+      "projectHostedComposes": 1376,
       "projectHostedComposePages": 0,
       "projectHostedComposeSelections": 0,
       "projectHostedSyncs": 0,
@@ -482,7 +490,7 @@
       "projectHostedLandingObservations": 15654,
       "projectHostedLandingCheckWakes": 330,
       "projectHostedLandingRequests": 3206,
-      "projectHostedLandingAttempts": 6975,
+      "projectHostedLandingAttempts": 7024,
       "projectLandingSpeed": 231,
       "projectHostedFinishes": 1210,
       "projectHostedApprovals": 0,
@@ -576,9 +584,9 @@
       "projectObjectReceipts": 0
     },
     "retained": {
-      "projectFinishReadRows": 9665,
+      "projectFinishReadRows": 21168,
       "legacyStorageCleanupWindows": 0,
-      "legacyStorageCleanupPages": 3176,
+      "legacyStorageCleanupPages": 320,
       "projectGithubMirrors": 0,
       "projectGithubMirrorJobs": 0,
       "projectGithubBindings": 0,
@@ -635,7 +643,7 @@
       "projectHostedSaves": 0,
       "projectHostedSavePages": 0,
       "projectHostedStates": 735,
-      "projectHostedComposes": 1316,
+      "projectHostedComposes": 1376,
       "projectHostedComposePages": 0,
       "projectHostedComposeSelections": 0,
       "projectHostedSyncs": 0,
@@ -645,7 +653,7 @@
       "projectHostedCheckSettings": 0,
       "projectHostedCheckSettingVersions": 0,
       "projectHostedCheckRuns": 7440,
-      "projectHostedCheckCallbacks": 1656,
+      "projectHostedCheckCallbacks": 0,
       "projectHostedCheckShards": 0,
       "projectHostedMainAudits": 0,
       "projectHostedMainAuditEvents": 0,
@@ -660,18 +668,18 @@
       "projectHostedLandingBatches": 0,
       "projectHostedLandingDesired": 0,
       "projectHostedLandingAliases": 0,
-      "projectHostedLandingObservations": 15654,
+      "projectHostedLandingObservations": 0,
       "projectHostedLandingCheckWakes": 330,
       "projectHostedLandingRequests": 3206,
-      "projectHostedLandingAttempts": 6975,
+      "projectHostedLandingAttempts": 0,
       "projectLandingSpeed": 231,
       "projectHostedFinishes": 1210,
       "projectHostedApprovals": 0,
       "projectHostedAcceptances": 2473,
-      "projectHostedAcceptanceSnapshots": 344,
-      "projectHostedAcceptanceEvents": 2373,
-      "projectHostedAcceptancePlans": 916,
-      "projectHostedAcceptancePages": 2310,
+      "projectHostedAcceptanceSnapshots": 0,
+      "projectHostedAcceptanceEvents": 0,
+      "projectHostedAcceptancePlans": 0,
+      "projectHostedAcceptancePages": 0,
       "projectHostedLifecyclePlans": 0,
       "projectHostedLifecycleGuards": 0,
       "projectHostedLifecyclePointers": 0,
@@ -769,6 +777,10 @@
         "projectHostedOverlapMain": {
           "rows": 1,
           "bytes": 96767
+        },
+        "projectLandingCapsuleIndex": {
+          "rows": 0,
+          "bytes": 0
         }
       },
       "retained": {
@@ -783,6 +795,10 @@
         "projectHostedOverlapMain": {
           "rows": 1,
           "bytes": 96767
+        },
+        "projectLandingCapsuleIndex": {
+          "rows": 1,
+          "bytes": 240
         }
       }
     }

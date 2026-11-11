@@ -6,6 +6,7 @@ export const capsuleHistoryQueries = new Set([
   'projectHostedLanding:attempts',
   'projectHostedLanding:candidate',
   'projectHostedFinish:inputs',
+  'projectRecoveryHosted:page',
 ]);
 export const hasLandingCapsule = (value: unknown): boolean => {
   const parsed = typeof value === 'string' ? JSON.parse(value) : value;

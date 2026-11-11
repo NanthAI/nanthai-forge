@@ -24,3 +24,34 @@ export function metricReadProjection(row: Record<string, unknown>) {
     value: canonicalPayload(metricRunRow(run, row.reportFlakes)),
   };
 }
+
+export function metricAttemptRow(attempt: import('../src/hosted-landing').HostedLandingAttempt) {
+  return [
+    attempt.at,
+    attempt.parentAttemptId ?? null,
+    attempt.main?.head ?? null,
+    attempt.check?.runId ?? null,
+    attempt.recheckReason ?? null,
+    attempt.scopedFallback ?? null,
+    attempt.actor?.kind ?? null,
+    attempt.memberCandidate?.inputs ?? null,
+  ];
+}
+export function readMetricAttempt(row: import('./_generated/dataModel').Doc<'projectFinishReadRows'>) {
+  const value = JSON.parse(row.value);
+  const attempt = JSON.parse(value.value);
+  const [at, parentAttemptId, mainHead, runId, recheckReason, scopedFallback, actorKind, memberInputs] =
+    attempt.metric;
+  return {
+    id: value.attemptId,
+    submissionId: value.submissionId,
+    at,
+    parentAttemptId,
+    mainHead,
+    inputPin: memberInputs ?? attempt.candidate.inputs,
+    runId,
+    recheckReason,
+    scopedFallback,
+    actorKind,
+  };
+}

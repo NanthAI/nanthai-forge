@@ -11,6 +11,7 @@ import { recoverySelectionSchema, recoveryConnectionSchema } from '../src/recove
 import { hostedStartMain } from './projectHostedChannels';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { capsuleRecoveryRevision } from './projectLandingCapsuleRecovery';
 
 const scope = { projectId: v.id('hostedProjects'), operationId: v.string() };
 export async function recoveryOwned(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
@@ -34,6 +35,7 @@ export async function recoverySelection(ctx: QueryCtx | MutationCtx, original: D
     'SOURCE_AUTHORITY_CHANGED',
     'Hosted recovery main and project authority differ.',
   );
+  const capsuleRevision = await capsuleRecoveryRevision(ctx, project._id);
   return recoverySelectionSchema.parse({
     projectId: project._id,
     ownerId: project.key,
@@ -42,6 +44,7 @@ export async function recoverySelection(ctx: QueryCtx | MutationCtx, original: D
     checkpointSize: backup.size,
     manifestSha256: backup.preview.manifestDigest,
     revision: project.work!.revision,
+    ...(capsuleRevision ? { capsuleRevision } : {}),
     authority,
     ...(hostedMain ? { hostedMain } : {}),
     transport: backup.transport ?? 'archive',
@@ -60,7 +63,7 @@ const find = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>, oper
 
 /** Current account authority is checked even when reconciling a saved connection. */
 export const prepare = query({
-  args: scope,
+  args: { ...scope, capsuleProtocol: v.optional(v.literal(1)) },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
@@ -68,6 +71,12 @@ export const prepare = query({
         old = serverRecoveryAuthority({ binding: project })
           ? null
           : await find(ctx, input.projectId, input.operationId);
+      const selection = old ? null : await recoverySelection(ctx, project);
+      invariant(
+        !selection?.capsuleRevision || input.capsuleProtocol === 1,
+        'CLI_UPGRADE_REQUIRED',
+        'This recovery includes landing capsules. Run nforge update and retry.',
+      );
       return JSON.stringify(
         old
           ? {
@@ -77,7 +86,7 @@ export const prepare = query({
             }
           : {
               authority: sourceAuthority(project),
-              selection: await recoverySelection(ctx, project),
+              selection,
               receipt: null,
             },
       );

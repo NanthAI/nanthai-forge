@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { wakeLandingCapsule } from './projectLandingCapsuleWake';
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -50,8 +51,9 @@ export async function scheduleAcceptanceCompletion(
  * tick. A plan with nothing retained (legacy or already complete) writes nothing. */
 async function settleCompletion(ctx: MutationCtx, plan: Plan, patch: Partial<Plan> = {}) {
   if (plan.completion?.guard) await ctx.scheduler.cancel(plan.completion.guard);
-  if (plan.completion || Object.keys(patch).length)
-    await ctx.db.patch(plan._id, { ...patch, completion: undefined });
+  if (plan.capsuleWake) await wakeLandingCapsule(ctx, { projectId: plan.projectId, ...plan.capsuleWake });
+  if (plan.completion || plan.capsuleWake || Object.keys(patch).length)
+    await ctx.db.patch(plan._id, { ...patch, completion: undefined, capsuleWake: undefined });
   return { complete: true };
 }
 /** The stall guard (Issue 13c63abe), one stall window after publication or its

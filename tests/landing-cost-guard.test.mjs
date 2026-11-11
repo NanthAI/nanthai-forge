@@ -742,9 +742,14 @@ test('GitHub inbound cost: one changed blob imports, composes, checks, lands and
 
 test('storage per landing ratchets every table on fresh and dogfood-shaped checks before and after exhaust expiry', async t => {
   fixedClock(t);
-  const scenarios = { fresh: await landingStorage(t, false), dogfood: await landingStorage(t, true) };
+  const scenarios = {
+    fresh: await landingStorage(t, false, { capsules: true }),
+    dogfood: await landingStorage(t, true, { capsules: true }),
+  };
   t.diagnostic(`storagePerLanding ${JSON.stringify(scenarios)}`);
   for (const [name, scenario] of Object.entries(scenarios)) {
+    assert.equal(scenario.capsule.classA, 1, `${name}: one complete capsule PUT`);
+    assert(scenario.capsule.compressedBytes < 100_000, `${name}: capsule egress budget`);
     for (const [phase, tables] of Object.entries(scenario.perProject))
       assertFixedProjectStorage(tables, storageBudgets[name].perProject[phase], `${name}/${phase}`);
     for (const [phase, tables] of Object.entries(scenario.perLanding)) {

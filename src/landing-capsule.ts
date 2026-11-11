@@ -44,7 +44,17 @@ export function landingCapsuleText(input: LandingCapsule) {
   for (const [name, rows] of Object.entries(value.tables)) {
     const ids = new Set<string>();
     for (const text of rows!) {
-      const row = JSON.parse(text);
+      let row: Record<string, unknown>;
+      try {
+        row = JSON.parse(text);
+      } catch {
+        invariant(false, 'EVIDENCE_CHANGED', 'Capsule row JSON is invalid.');
+      }
+      invariant(
+        row !== null && typeof row === 'object' && !Array.isArray(row),
+        'EVIDENCE_CHANGED',
+        'Capsule row metadata is invalid.',
+      );
       invariant(
         typeof row._id === 'string' &&
           !ids.has(row._id) &&
@@ -52,7 +62,7 @@ export function landingCapsuleText(input: LandingCapsule) {
         'EVIDENCE_CHANGED',
         'Capsule rows differ from their project or repeat an identity.',
       );
-      ids.add(row._id);
+      ids.add(row._id as string);
       invariant(
         name !== 'projectHostedCheckCallbacks' || !String(row.eventId).startsWith('reuse:'),
         'EVIDENCE_CHANGED',

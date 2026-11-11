@@ -1,4 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
+import {
+  capsuleExpiryScope,
+  capsuleControlKey,
+  capsuleControlRow,
+  capsuleReceiptDigest,
+  retainCapsuleReceipts,
+  readCapsuleExpiry,
+} from './projectLandingCapsuleLedger';
+import { digest } from '../src/state/hash';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './server';
@@ -44,7 +53,14 @@ type Outcome = ReturnType<typeof empty> & {
   nextCursor?: string | null;
   tables?: { table: string; rows: number; bytes: number }[];
 };
-type PageIdentity = { operationId: string; part?: number; continue?: boolean };
+type PageIdentity = {
+  projectId: Id<'hostedProjects'>;
+  operationId: string;
+  part?: number;
+  continue?: boolean;
+  runId?: string;
+  jobId?: string;
+};
 /** Reuse the existing maintenance receipt store. A lost reply replays its numeric result;
  * it cannot silently spend another page's delete-write budget. No per-row receipt. */
 async function expiryPage(ctx: MutationCtx, input: PageIdentity, kind: string, work: () => Promise<Outcome>) {
@@ -58,6 +74,13 @@ async function expiryPage(ctx: MutationCtx, input: PageIdentity, kind: string, w
     invariant(old.request === request, 'WORK_OPERATION_CHANGED', 'Retry the original expiry page.');
     return JSON.parse(old.result) as Outcome;
   }
+  const scope = await capsuleExpiryScope(ctx, input);
+  const archived = scope
+    ? await capsuleReceiptDigest(ctx, input.projectId, scope, `expiry:${input.operationId}:${part}`)
+    : null;
+  if (archived) return readCapsuleExpiry(archived, request) as Outcome;
+  const control = scope ? await capsuleControlRow(ctx, capsuleControlKey(input.projectId, scope)) : null;
+  const claimed = control && !!JSON.parse(control.value).submissionId;
   const outcome = await work();
   // Reuse this scheduled transaction and its receipt; never schedule diagnostics alone.
   if (!outcome.kept && kind !== 'source') {
@@ -77,13 +100,25 @@ async function expiryPage(ctx: MutationCtx, input: PageIdentity, kind: string, w
       (outcome.tables ??= []).push({ table: 'clientErrors', rows: errors.length, bytes: removedBytes });
     }
   }
-  if (!outcome.kept)
-    await ctx.db.insert('legacyStorageCleanupPages', {
-      operationId: input.operationId,
-      part,
-      request,
-      result: JSON.stringify(outcome),
-    });
+  if (!outcome.kept) {
+    if (scope && claimed) {
+      // The existing owner control is the retry receipt after packing. Retain future audit inputs
+      // too: a later detail-expiry wake must not recreate a global row or lose its original request.
+      await retainCapsuleReceipts(ctx, input.projectId, scope, [
+        [
+          `expiry:${input.operationId}:${part}`,
+          JSON.stringify([digest(request), JSON.stringify(outcome), request]),
+        ],
+      ]);
+    } else {
+      await ctx.db.insert('legacyStorageCleanupPages', {
+        operationId: input.operationId,
+        part,
+        request,
+        result: JSON.stringify(outcome),
+      });
+    }
+  }
   if (outcome.more && input.continue !== false)
     await ctx.scheduler.runAfter(
       0,

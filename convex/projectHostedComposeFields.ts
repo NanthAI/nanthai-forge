@@ -5,12 +5,14 @@ const identity = { projectId: v.id('hostedProjects'), actor: v.string(), operati
 export const hostedComposeTables = {
   projectHostedComposes: defineTable({
     culpritRunId: v.optional(v.string()),
+    candidateId: v.optional(v.string()),
     ...identity,
     jobId: v.string(),
     value: v.string(),
   })
     .index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId'])
-    .index('by_project_and_job', ['projectId', 'jobId']),
+    .index('by_project_and_job', ['projectId', 'jobId'])
+    .index('by_project_and_candidate', ['projectId', 'candidateId']),
   projectHostedComposePages: defineTable({
     ...identity,
     kind: v.string(),

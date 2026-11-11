@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { settleCapsuleCheck } from './projectLandingCapsuleWake';
 import { internalMutation } from './server';
 import {
   checkExpiryArgs,
@@ -14,7 +15,9 @@ export const check = internalMutation({
   returns: expiryResult,
   handler: async (ctx, input) => {
     if (input.continue !== false && !input.part) await armExpiryCatchup(ctx, input.projectId);
-    return expireCheck(ctx, input);
+    const result = await expireCheck(ctx, input);
+    if (input.phase === 'callbacks' && !result.more && !result.kept) await settleCapsuleCheck(ctx, input);
+    return result;
   },
 });
 export const source = internalMutation({
