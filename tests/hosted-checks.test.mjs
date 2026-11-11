@@ -866,3 +866,122 @@ test('client error maintenance expires only older than 30 days in one retry-safe
   assert.deepEqual([...s.tables.clientErrors.keys()].sort(), ['clientErrors-boundary', 'clientErrors-young']);
   assert.deepEqual([...s.tables.agentEvents], audit);
 });
+
+test('incident f5c45985: existing maintenance backfills null discard samples once from operation stamps and preserves unknowns', async t => {
+  const s = await checksFixture();
+  const expiry = await import(moduleUrl('../convex/projectOperationalExpiry.ts'));
+  const { armExpiryCatchup } = await import(moduleUrl('../convex/projectOperationalExpiryCatchup.ts'));
+  const operationId = `exhaust-catchup:v1:${s.projectId}`;
+  const at = Date.now() - 1000;
+  const samples = Array.from({ length: 40 }, (_, i) => [
+    at + i,
+    null,
+    null,
+    `receipt-${String(i).padStart(2, '0')}`,
+    null,
+    null,
+    null,
+    [null, null, null, null, null, null],
+  ]);
+  samples[1][7][4] = 555; // A known retained value must never be overwritten.
+  const speed = await s.run(
+    'seedDiscardRepair',
+    async ctx => {
+      const id = await ctx.db.insert('projectLandingSpeed', {
+        projectId: s.projectId,
+        value: JSON.stringify({ schema: 2, samples, broken: {} }),
+      });
+      for (let i = 0; i < 39; i++) {
+        const submissionId = `submission-${i}`;
+        await ctx.db.insert('projectHostedAcceptances', {
+          projectId: s.projectId,
+          receiptId: samples[i][3],
+          submissionId,
+          attemptId: 'a',
+          sequence: i,
+          value: '{}',
+        });
+        await ctx.db.insert('projectHostedLandingRequests', {
+          projectId: s.projectId,
+          submissionId,
+          channel: 'main',
+          actor: 'synthetic',
+          sequence: i,
+          operationId: submissionId,
+          phase: 'landed',
+          runnable: false,
+          runId: null,
+          attemptId: 'a',
+          value: JSON.stringify({
+            id: submissionId,
+            attemptId: 'a',
+            counts: i === 38 ? {} : { discardedRunnerSeconds: 3317 },
+          }),
+        });
+      }
+      await ctx.db.insert('legacyStorageCleanupPages', {
+        operationId,
+        part: 'cursor',
+        request: s.projectId,
+        result: JSON.stringify({
+          step: 7,
+          cutoff: Date.now() - 86400_000,
+          phase: 'done',
+          after: '',
+          cursor: null,
+          totals: [],
+          queue: 0,
+          serviceMs: 0,
+          paused: false,
+        }),
+      });
+      return id;
+    },
+    {},
+  );
+  await s.run('armDiscardRepair', ctx => armExpiryCatchup(ctx, s.projectId), {});
+  assert(s.scheduled.some(w => getFunctionName(w.fn) === 'projectOperationalExpiry:catchup'));
+  const call = step =>
+    s.store
+      .call('repairDiscard', expiry.catchup, {
+        projectId: s.projectId,
+        operationId,
+        step,
+        pages: 1,
+        continue: false,
+      })
+      .then(JSON.parse);
+  let p = await call(7);
+  const read = () => JSON.parse(s.tables.projectLandingSpeed.get(speed).value).samples;
+  const meter = s.counts.at(-1);
+  t.diagnostic(
+    JSON.stringify({
+      kind: 'discard-backfill-page',
+      documents: meter.documents,
+      readBytes: meter.readBytes,
+      writes: meter.writes,
+      writeBytes: meter.writeBytes,
+    }),
+  );
+  assert.equal(meter.readDocumentsByTable.projectLandingSpeed, 1);
+  assert.equal(meter.readDocumentsByTable.projectHostedAcceptances, 1);
+  assert.equal(meter.readDocumentsByTable.projectHostedLandingRequests, 1);
+  assert(
+    meter.readBytes < 64 * 1024 && meter.writes <= 2,
+    'bounded repair plus its existing progress receipt',
+  );
+  assert.equal(read().filter(row => row[7][4] !== null).length, 2, 'one sample repaired per bounded page');
+  assert.deepEqual(await call(7), p, 'same step reconciles without another page');
+  for (let i = 0; i < 41 && p.speedAfter !== null; i++) p = await call(p.step);
+  assert.equal(p.speedAfter, null);
+  assert.equal(read()[1][7][4], 555);
+  assert.equal(read().filter(row => row[7][4] === 3317).length, 37);
+  assert.equal(
+    read().filter(row => row[7][4] === null).length,
+    2,
+    'missing operation or stamp stays unknown',
+  );
+  const wakes = s.scheduled.length;
+  await s.run('armCompletedDiscardRepair', ctx => armExpiryCatchup(ctx, s.projectId), {});
+  assert.equal(s.scheduled.length, wakes, 'completed repair creates no idle work');
+});

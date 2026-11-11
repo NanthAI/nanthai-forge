@@ -117,18 +117,22 @@ export function speedBudgetRows(
       };
     const rows = samples(b.metric as LandingMetric);
     const value = windowValue(rows, b.metric as LandingMetric, b.stat!, budgets.window.landings);
+    const unknown = rows
+      .slice(-budgets.window.landings)
+      .filter(row => windowValue([row], b.metric as LandingMetric, b.stat!, 1) === null).length;
+    const coverage = unknown ? `; ${unknown} newest landings have unknown stamps (excluded, never zero)` : '';
     return value === null
       ? {
           ...base,
           value,
           status: 'unrun',
-          note: `fewer than ${budgets.window.landings} ${b.metric === 'check' ? 'passed check runs' : 'landings with this stamp'} in the period`,
+          note: `fewer than ${budgets.window.landings} ${b.metric === 'check' ? 'passed check runs' : 'landings with this stamp'} in the period${coverage}`,
         }
       : {
           ...base,
           value,
           status: value > b.max ? 'fail' : 'pass',
-          note: `last ${budgets.window.landings} ${b.metric === 'check' ? 'passed check runs' : 'landings with this stamp'} in the period${b.metric === 'runnerAudit' ? '; audit seconds attributed by run end (delayed reports can shift the live stamp)' : ''}`,
+          note: `last ${budgets.window.landings} ${b.metric === 'check' ? 'passed check runs' : 'landings with this stamp'} in the period${coverage}${b.metric === 'runnerAudit' ? '; audit seconds attributed by run end (delayed reports can shift the live stamp)' : ''}`,
         };
   });
 }

@@ -1980,3 +1980,41 @@ test('planning count page cap labels incomplete totals and continues without los
   assert.equal(last.nextCursor, null);
   assert.equal(last.next, undefined);
 });
+
+test('incident 1018d0f8: alert refresh preserves every outstanding Done-when line and reconciliation holds it open', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const { write } = await import(moduleUrl('../convex/projectLandingSpeedIssue.ts'));
+  const { speedBudgetIssue } = await import('../dist/landing-speed-alerts.js');
+  const event = {
+    kind: 'broken',
+    budget: speedBudgets.budgets.find(b => b.metric === 'runnerDiscarded'),
+    value: 60,
+    landing: 'first',
+    since: '2026-11-04T12:00:00.000Z',
+  };
+  const issue = speedBudgetIssue(event, s.projectId, speedBudgets);
+  const send = issue =>
+    write._handler(s.ctx, { projectId: s.projectId, owner: 'owner', issue: JSON.stringify(issue) });
+  await send(issue);
+  const body =
+    'Owner diagnosis\n\nDone when:\n- [x] Root cause fixed\n- [ ] Measured on the next smoke and dogfood\n1. [ ] Compare discarded runner minutes\n[ ] Independent measurement still pending';
+  const original = (await list(p, { id: issue.itemId, reconcile: false })).item;
+  await put(p, { itemId: issue.itemId, expectedVersion: original.version, body });
+  await send(speedBudgetIssue({ ...event, landing: 'second' }, s.projectId, speedBudgets));
+  await send(speedBudgetIssue({ ...event, kind: 'recovered', landing: 'second' }, s.projectId, speedBudgets));
+  assert.equal((await list(p, { id: issue.itemId, reconcile: false })).item.body, body);
+  p.states.set(issue.itemId, 'completed');
+  const read = await list(p, { id: issue.itemId });
+  assert.equal(read.item.status, 'open');
+  assert.equal(read.reconciled.held[0].openLines, 3);
+  // Any writer can supply a body with a bare unchecked line; ticked lists must not hide it.
+  await put(p, {
+    itemId: issue.itemId,
+    expectedVersion: read.item.version,
+    body: 'Done when:\n- [x] Code fixed\n[ ] Evidence pending',
+  });
+  const held = await list(p, { id: issue.itemId });
+  assert.equal(held.item.status, 'open');
+  assert.deepEqual(held.reconciled.held[0].lines, ['Evidence pending']);
+});

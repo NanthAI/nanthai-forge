@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { discardedRunnerSeconds } from './cost-budgets.js';
 import type { HostedLandingState } from './hosted-landing.js';
 
 /** Counts already carried by the landing row. Missing stamps stay unknown, including on old servers. */
@@ -21,8 +22,7 @@ export function landingCosts(state: HostedLandingState | null, attempt: number |
     r2ClassB: state?.counts?.r2?.[1] ?? null,
     r2BytesPut: state?.counts?.r2?.[2] ?? null,
     runnerAccepted: state?.counts?.runnerSeconds === undefined ? null : state.counts.runnerSeconds / 60,
-    runnerDiscarded:
-      state?.counts?.runnerSeconds === undefined ? null : (state.counts.discardedRunnerSeconds ?? 0) / 60,
+    runnerDiscarded: discardedRunnerSeconds(state) === null ? null : discardedRunnerSeconds(state)! / 60,
   };
 }
 

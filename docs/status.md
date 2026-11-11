@@ -81,6 +81,11 @@ unregistered old continuations need migration. R2 reads add no ownership RPC.
 
 Per-landing [speed and cost budgets](agents/speed-budgets.md) cover submit-to-main, checks, settlement, save/preflight, attempts, Work writes, R2 compose I/O and runner minutes; rolling-window breaks and recoveries share the existing alert and Issue path. [Flip 5's Work store](architecture.md) supports item versions and independent primary writers, with explicit reader/writer cutover and comparison rather than a claim that every deployment has switched.
 
+Speed-alert refreshes retain owner-written Issue bodies and unticked acceptance lines.
+Discarded-runner projections use their own operation stamp even when the accepted run has
+no execution stamp; reports name unknown coverage. Existing expiry maintenance repairs
+retained null alert samples in bounded pages from available operation stamps.
+
 The [batched CI result inbox](operations/github-actions-checks.md#batched-result-inbox) folds shard results by metadata page and keeps per-file reports off run heads. Negotiated packed results retain one combined object per shard and elect early collection with required-shard HEAD discovery and one conditional marker, with a 14-Class-A twelve-shard fixture guard; independent provider conclusions authorize exact-verdict reuse. A landing records its [first-check proof](pre-queue-checks.md#decision) or the reason it rechecks. Identical shared entries clear overlap but retain the existing global/declared-input and shared-folder risk checks; unchanged complete trees retain exact-tree reuse. The exit bench uses its [own manually pinned deployment](workflows.md#automatic-main-mirror), while pushed mirror commits touching deploy paths deploy dev automatically.
 
 Docs-only coverage preserves the full audit run's exact source pin, so it cannot create a false audit-baseline refusal on the next race.

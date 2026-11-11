@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import type { HostedLandingState } from './hosted-landing.js';
 
 /** Cost ledger (Issue 3e3f9fe6): per-landing quantities in src/speed-budgets.json `costs`, each with its
  * value, source and the decision Issue it protects. The landing check measures them on a scripted
@@ -150,4 +151,9 @@ export function formatCostVerdicts(verdicts: CostVerdict[]) {
     ),
     ...verdicts.flatMap(v => (v.message ? [v.message] : [])),
   ];
+}
+
+/** A discarded check is known independently of the accepted check's execution report. */
+export function discardedRunnerSeconds(state: Pick<HostedLandingState, 'counts'> | null) {
+  return state?.counts?.discardedRunnerSeconds ?? (state?.counts?.runnerSeconds === undefined ? null : 0);
 }

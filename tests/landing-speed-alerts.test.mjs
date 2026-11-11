@@ -706,3 +706,66 @@ for (const id of ['save', 'preflight']) {
     assert.match(speedBudgetWarning(rows), new RegExp(id));
   });
 }
+
+test('incident f5c45985: discarded operation stamp survives a missing accepted-run stamp and joins the alert window', async () => {
+  const { landingCosts } = await import('../dist/hosted-landings-view.js');
+  const state = {
+    id: 'synthetic',
+    version: 10,
+    timing: { submittedAt: '2026-11-04T10:00:00.000Z', committedAt: '2026-11-04T10:12:00.000Z' },
+    counts: carriedCostCounts({ runnerSeconds: 3317 }, undefined, false),
+  };
+  const sample = landingSpeedSample(state, 2);
+  assert.equal(sample.counts[3], null);
+  assert.equal(sample.counts[4], 3317);
+  assert.equal(landingCosts(state, 1).runnerDiscarded, 3317 / 60);
+  let history = null;
+  const feed = counts =>
+    (history = observeLandingSpeed(
+      history,
+      { ...sample, at: noon + n * minute, id: `sample-${n++}`, counts },
+      budgets,
+    ).state);
+  for (let i = 0; i < WINDOW - 1; i++) feed([null, null, null, null, 600, null]);
+  feed(sample.counts);
+  assert.equal(
+    windowValue(history.samples, 'runnerDiscarded', 'mean', WINDOW),
+    Math.round((((WINDOW - 1) * 600 + 3317) / 60 / WINDOW) * 10) / 10,
+  );
+  const unknown = landingSpeedSample({ ...state, counts: undefined });
+  assert.equal(unknown.counts[4], null);
+  feed(unknown.counts);
+  const records = {
+    finishTimings: history.samples.map(row => ({
+      id: row[3],
+      at: new Date(row[0]).toISOString(),
+      minutes: row[1],
+      costs: { runnerDiscarded: row[7][4] === null ? null : row[7][4] / 60 },
+    })),
+    runs: [],
+  };
+  const period = { from: new Date(noon).toISOString(), to: new Date(noon + (n + 1) * minute).toISOString() };
+  const report = speedBudgetRows(records, period, budgets).find(
+    b => b.id === 'landing-runner-discarded-mean',
+  );
+  assert.match(report.note, /1 newest landings have unknown stamps/);
+  assert.equal(report.value, windowValue(history.samples, 'runnerDiscarded', 'mean', WINDOW));
+  // A transition based on known samples names recent missing stamps instead of pretending they cost zero.
+  const previous = { ...history, broken: {} };
+  previous.samples = previous.samples.map(row => {
+    const next = structuredClone(row);
+    if (next[7][4] !== null) next[7][4] = 6000;
+    return next;
+  });
+  const { events } = observeLandingSpeed(
+    previous,
+    { ...sample, at: noon + n++ * minute, id: 'crossing' },
+    budgets,
+  );
+  const event = events.find(e => e.budget.metric === 'runnerDiscarded');
+  assert.equal(event.unknown, 1);
+  assert.match(
+    speedBudgetMessage(event, 'synthetic', budgets).text,
+    /unknown runnerDiscarded stamp; excluded, never counted as zero/,
+  );
+});

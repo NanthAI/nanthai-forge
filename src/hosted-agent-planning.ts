@@ -467,11 +467,12 @@ async function reconcile(
 export const openDoneWhenLines = (body: string): string[] => {
   const lineText = (line: string) =>
     line
-      .replace(/^[ \t>]*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s*)?/, '')
+      .replace(/^[ \t>]*(?:(?:[-*+]|\d+[.)])\s+)?(?:\[[ xX]\]\s*)?/, '')
       .replace(/\s+/g, ' ')
       .trim();
-  const boxes = body.match(/^[ \t>]*(?:[-*+]|\d+[.)])\s+\[([ xX])\].*$/gm) ?? [];
-  if (boxes.length) return boxes.filter(line => /^[ \t>]*(?:[-*+]|\d+[.)])\s+\[ \]/.test(line)).map(lineText);
+  const boxes = body.match(/^[ \t>]*(?:(?:[-*+]|\d+[.)])\s+)?\[([ xX])\].*$/gm) ?? [];
+  if (boxes.length)
+    return boxes.filter(line => /^[ \t>]*(?:(?:[-*+]|\d+[.)])\s+)?\[ \]/.test(line)).map(lineText);
   const heading = /^[ \t>#*_]*done[- ]when\b/im.exec(body);
   if (!heading) return [];
   const lines = body

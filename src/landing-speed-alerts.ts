@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { HostedLandingState } from './hosted-landing.js';
 import { digest } from './state/hash.js';
 import { percentile } from './self-metrics-joins.js';
-import { costGuardSchema, costBudgetSchema } from './cost-budgets.js';
+import { costGuardSchema, costBudgetSchema, discardedRunnerSeconds } from './cost-budgets.js';
 
 /** Speed budgets (b7851c44). The numbers, their sources and reasons live in
  * src/speed-budgets.json; this module only judges landings against them. A budget is
@@ -159,6 +159,8 @@ export type SpeedBudgetEvent = {
   since: string;
   /** The longest stage of the landing that crossed (broken only). */
   stage?: string;
+  /** Missing stamps in the newest landing window, excluded rather than charged as zero. */
+  unknown?: number;
 };
 
 const span = (from?: string, to?: string, unit = minute) => {
@@ -192,7 +194,7 @@ export function landingSpeedSample(
       state.counts?.r2?.[1] ?? null,
       state.counts?.r2?.[2] ?? null,
       state.counts?.runnerSeconds ?? null,
-      state.counts?.runnerSeconds === undefined ? null : (state.counts.discardedRunnerSeconds ?? 0),
+      discardedRunnerSeconds(state),
       0,
     ],
     stages: {
@@ -278,15 +280,33 @@ export function observeLandingSpeed(
   for (const budget of landingBudgets(budgets)) {
     const value = windowValue(samples, budget.metric, budget.stat, budgets.window.landings);
     if (value === null) continue;
+    const unknown = samples
+      .slice(-budgets.window.landings)
+      .filter(row => windowValue([row], budget.metric, budget.stat, 1) === null).length;
     const open = broken[budget.id];
     if (value > budget.max && !open) {
       const stage = longestStage(sample.stages);
       const since = new Date(sample.at).toISOString();
       broken[budget.id] = { since, landing: sample.id, value, ...(stage ? { stage } : {}) };
-      events.push({ kind: 'broken', budget, value, landing: sample.id, since, ...(stage ? { stage } : {}) });
+      events.push({
+        kind: 'broken',
+        budget,
+        value,
+        landing: sample.id,
+        since,
+        ...(stage ? { stage } : {}),
+        ...(unknown ? { unknown } : {}),
+      });
     } else if (value <= budget.max && open) {
       delete broken[budget.id];
-      events.push({ kind: 'recovered', budget, value, landing: open.landing, since: open.since });
+      events.push({
+        kind: 'recovered',
+        budget,
+        value,
+        landing: open.landing,
+        since: open.since,
+        ...(unknown ? { unknown } : {}),
+      });
     }
   }
   return { state: { schema: 2, samples, broken }, events };
@@ -364,7 +384,11 @@ const lastLandings = (budgets: SpeedBudgets) => `the last ${budgets.window.landi
 /** The owner-facing message: which budget, which landing crossed it, where to look, the next step. */
 export function speedBudgetMessage(event: SpeedBudgetEvent, project: string, budgets: SpeedBudgets) {
   const b = event.budget;
-  const head = `${describe(b)} over ${lastLandings(budgets)} is ${event.value} ${b.unit}; budget ${b.max} ${b.unit}.`;
+  const head =
+    `${describe(b)} over ${lastLandings(budgets)} is ${event.value} ${b.unit}; budget ${b.max} ${b.unit}.` +
+    (event.unknown
+      ? ` ${event.unknown} of the newest ${budgets.window.landings} landings have an unknown ${b.metric} stamp; excluded, never counted as zero.`
+      : '');
   return event.kind === 'broken'
     ? {
         subject: `[Forge] Speed budget broken: ${describe(b)}: ${project}`,

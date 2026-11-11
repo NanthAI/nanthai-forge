@@ -175,6 +175,24 @@
       "what": "Core claim: docs-only main advanced the green head without its full run, discarding a passed check with audit-baseline",
       "file": "tests/hosted-first-check-landing.test.mjs",
       "test": "Issue 1018d0f8 / 5d690345: a docs-covered main keeps zero discarded passed runner minutes"
+    },
+    {
+      "incident": "1018d0f8",
+      "what": "An alert body rewrite dropped an unmet measurement line and reconciliation closed its Issue",
+      "file": "tests/hosted-agent-planning.test.mjs",
+      "test": "incident 1018d0f8: alert refresh preserves every outstanding Done-when line and reconciliation holds it open"
+    },
+    {
+      "incident": "f5c45985",
+      "what": "A discarded operation stamp was hidden by a missing accepted-run stamp, understating the alert window",
+      "file": "tests/landing-speed-alerts.test.mjs",
+      "test": "incident f5c45985: discarded operation stamp survives a missing accepted-run stamp and joins the alert window"
+    },
+    {
+      "incident": "f5c45985",
+      "what": "Existing null alert samples need bounded one-time operation-stamp repair and explicit unknown coverage",
+      "file": "tests/hosted-checks.test.mjs",
+      "test": "incident f5c45985: existing maintenance backfills null discard samples once from operation stamps and preserves unknowns"
     }
   ]
 }

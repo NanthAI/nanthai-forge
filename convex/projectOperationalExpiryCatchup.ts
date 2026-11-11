@@ -9,6 +9,7 @@ import { loadSourceJob, sourceJobTerminal } from './projectSourceJobs';
 import { checkDetailRetentionMs, exhaustRetentionMs } from './projectOperationalExpirySchedule';
 import { ForgeError, invariant } from '../src/errors';
 import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
+import { repairLandingSpeedPage } from './projectLandingSpeedRepair';
 import { projectExecution } from './projectExecution';
 
 type Total = { table: string; rows: number; bytes: number };
@@ -24,6 +25,9 @@ type Progress = {
   queue: number;
   serviceMs: number;
   paused: boolean;
+  /** Undefined on older receipts; null once the one-time stamp repair is complete. */
+  speedAfter?: string | null;
+  speedCutoff?: number;
 };
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length;
 const ref = makeFunctionReference<'mutation'>('projectOperationalExpiry:catchup');
@@ -40,7 +44,7 @@ export async function armExpiryCatchup(ctx: MutationCtx, projectId: Id<'hostedPr
   const old = await receipt(ctx, operationId);
   if (old) {
     const p: Progress = JSON.parse(old.result);
-    if (schedule && p.paused && p.phase !== 'done')
+    if (schedule && (p.speedAfter !== null || (p.paused && p.phase !== 'done')))
       await ctx.scheduler.runAfter(1_000, ref, { projectId, operationId, step: p.step });
     return;
   }
@@ -78,6 +82,16 @@ async function deferCheck(
   );
 }
 async function next(ctx: MutationCtx, projectId: Id<'hostedProjects'>, operationId: string, p: Progress) {
+  if (p.speedAfter !== null) {
+    const page = await repairLandingSpeedPage(
+      ctx,
+      projectId,
+      p.speedAfter ?? '',
+      (p.speedCutoff ??= Date.now()),
+    );
+    p.speedAfter = page.done ? null : page.after;
+    return page.readBytes + 4096;
+  }
   if (p.check) {
     const c = p.check;
     const out = await expireCheck(ctx, {
@@ -247,7 +261,7 @@ export const catchup = internalMutation({
     }
     const p: Progress = JSON.parse(row!.result);
     invariant(input.step <= p.step, 'BAD_ARGUMENT', 'Resume the current catch-up step.');
-    if (input.step < p.step || p.phase === 'done') return row!.result;
+    if (input.step < p.step || (p.phase === 'done' && p.speedAfter === null)) return row!.result;
     const queue = await ctx.db
       .query('projectHostedLandingQueues')
       .withIndex('by_project_and_channel', q => q.eq('projectId', input.projectId).eq('channel', 'main'))
@@ -261,10 +275,16 @@ export const catchup = internalMutation({
     p.paused = depth > p.queue || (p.serviceMs > 0 && serviceMs > p.serviceMs * 1.25);
     if (!p.paused) {
       let readCharge = 0;
-      for (let page = 0; page < pages && readCharge < 256 * 1024 && (p as Progress).phase !== 'done'; page++)
+      for (
+        let page = 0;
+        page < pages &&
+        readCharge < 256 * 1024 &&
+        ((p as Progress).phase !== 'done' || p.speedAfter !== null);
+        page++
+      )
         readCharge += await next(ctx, input.projectId, input.operationId, p);
       p.step++;
-      if (input.continue !== false && (p as Progress).phase !== 'done')
+      if (input.continue !== false && ((p as Progress).phase !== 'done' || p.speedAfter !== null))
         await ctx.scheduler.runAfter(1_000, ref, { ...input, step: p.step });
     }
     const result = JSON.stringify(p);

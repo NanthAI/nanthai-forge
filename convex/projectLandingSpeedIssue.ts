@@ -76,7 +76,9 @@ export const write = internalAction({
           expectedVersion: version,
           kind: 'issue',
           title: issue.title,
-          body: issue.body,
+          // The alert owns the initial description; later transitions comment below.
+          // Omission preserves the owner's complete body and acceptance checklist.
+          ...(version === 0 ? { body: issue.body } : {}),
           status: 'open',
           reason: 'Speed budget broken',
         }),

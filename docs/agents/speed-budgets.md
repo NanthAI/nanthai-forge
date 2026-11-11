@@ -83,6 +83,17 @@ numbers per retained sample. Source bytes remain in R2. The report and status us
 landing pages. Nothing can be removed from the source paths; this replaces the two unrecorded budgets
 and shares the existing timing receipts and alert path.
 
+Alert refreshes preserve an existing Issue body, including owner edits and every Done-when line.
+A repeat break reopens that Issue and records the new crossing in a comment. Reconciliation
+leaves it open while any unticked checklist line remains, including a bare `[ ]` line.
+
+Discarded runner seconds are independent of the accepted check's execution stamp: a known
+discard remains counted when the accepted run is unknown. Missing stamps stay null, are
+excluded from statistics and are reported as unknown coverage in budget reports and
+transition messages. The existing expiry catch-up repairs retained null samples from their
+operation stamps once, one sample per page (at most 40 retained samples per project), without
+new landing calls or idle timers. Missing operations or missing stamps remain unknown.
+
 ## Drill
 
 On the dev deployment only, from the project folder (never `--prod`; the drill is an internal function, so only
