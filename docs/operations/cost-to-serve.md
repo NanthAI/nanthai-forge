@@ -61,7 +61,7 @@ whole-deployment window below.
 | `projectConvexSourceNode:step` | 42% | 70 calls; about 146 MB egress (14.6 MB/landing), 0.062 GB-hours |
 | `projectHostedActionsSource:resolve` | 22% | 549 calls; about 90 MB DB I/O (9 MB/landing) |
 | `projectConvexSourceObjects:resolve` | 4% | 414 calls; 14.5 MB DB I/O |
-| HTTP POST callbacks | 4% | 626 calls |
+| HTTP POST (endpoint unspecified in the public evidence) | 4% | 626 calls |
 | `projectHostedReuse:prove` | 4% | No finer resource split retained in the source summary |
 | Other functions | 24% | Remainder of the rounded shares; no invented per-function allocation |
 
