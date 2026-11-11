@@ -1,20 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import {
   lstatSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   renameSync,
-  rmSync,
   statSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { checkoutHostedLane } from '../dist/hosted-lane-checkout.js';
@@ -36,8 +34,7 @@ import { digest } from '../dist/hash.js';
 
 /** A thousand-file Lane opened through the real checkout path. */
 async function openedLane(t, count = 1000) {
-  const directory = mkdtempSync(join(tmpdir(), 'forge-land-speed-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const directory = temporaryDirectory(t, 'forge-land-speed-');
   const objects = new Map(),
     put = value => {
       const bytes = Buffer.from(value),
@@ -259,8 +256,7 @@ test('land --save receipt splits the time before submission and prints one line'
   );
 
   // The submitter attaches it to the receipt, timed from the user's command (passed by env).
-  const root = mkdtempSync(join(tmpdir(), 'forge-land-timing-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const root = temporaryDirectory(t, 'forge-land-timing-');
   const saved = process.env[LAND_INVOKED_ENV];
   process.env[LAND_INVOKED_ENV] = String(Date.now() - 2_000);
   t.after(() => {

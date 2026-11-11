@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
-import { tmpdir } from 'node:os';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { ConvexError } from 'convex/values';
 import { getFunctionName, makeFunctionReference } from 'convex/server';
 import { recordsFixture } from './hosted-records-fixture.mjs';
@@ -30,13 +30,7 @@ const actionUrls = Object.fromEntries(
   ]),
 );
 export const at = '2026-10-28T00:00:00.000Z';
-const compileCache = join(
-  tmpdir(),
-  `forge-test-compile-cache-${createHash('sha256')
-    .update(fileURLToPath(import.meta.url))
-    .digest('hex')
-    .slice(0, 16)}`,
-);
+const compileCache = temporaryDirectory(null, 'forge-test-compile-cache-');
 export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = false, afterAction } = {}) {
   const f = recordsFixture(),
     { projectId } = await f.setup(),

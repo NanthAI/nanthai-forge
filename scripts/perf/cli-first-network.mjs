@@ -69,6 +69,7 @@ export function firstNetworkSamples(
       };
     });
   } finally {
-    rmSync(state, { recursive: true, force: true });
+    for (const path of [state, `${state}.forge-client`, `${state}.forge-metrics.jsonl`])
+      rmSync(path, { recursive: true, force: true });
   }
 }

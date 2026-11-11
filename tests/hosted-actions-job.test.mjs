@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
@@ -58,8 +59,7 @@ function fixture(
     submodule = null,
   } = {},
 ) {
-  const directory = mkdtempSync(join(tmpdir(), 'forge-direct-job-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const directory = temporaryDirectory(t, 'forge-direct-job-');
   const objects = new Map(),
     recipes = new Map(),
     closures = new Map();

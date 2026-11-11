@@ -314,3 +314,8 @@ the shared per-volume worker ceiling, digest checks, independent inodes and
 publication barriers. Cancelled or missing materialization tickets fail explicitly
 instead of waiting indefinitely. Synthetic open qualification is local-only; it
 does not establish a universal latency gain on other filesystems or under load.
+
+Local prune batches lifecycle reads across projects on each deployment (250 identities per page),
+retains inaccessible or missing records with a recovery reason, and preserves live/unknown-process
+copies. Test files use private temporary roots; the supervisor reclaims them after timeouts, and
+normal file exit fails on leaked Forge temporary entries.

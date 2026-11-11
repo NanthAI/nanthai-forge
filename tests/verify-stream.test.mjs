@@ -26,6 +26,7 @@ for (const flaky of [false, true])
       'selection-guard.mjs',
       'check-contract.mjs',
       'test-files.mjs',
+      'test-temp.mjs',
       'test-coverage.mjs',
       'prepare-convex-api.mjs',
     ])

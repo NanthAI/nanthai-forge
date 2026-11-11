@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
@@ -14,11 +15,10 @@ import { referenceExport } from './helpers/native-git-reference.mjs';
 
 const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 function fixture(t) {
-  const dir = mkdtempSync(join(tmpdir(), 'forge-batch-')),
+  const dir = temporaryDirectory(t, 'forge-batch-'),
     root = join(dir, 'owner');
   mkdirSync(root);
   nativeMarker(root);
-  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   return { dir, root, source: new NativeSource(root) };
 }
 function trackedGit(f, behavior = '') {

@@ -2,10 +2,10 @@
 // Incident a930de4c (2026-11-07): `land --save` with a Lane id from a folder that was not the Lane's
 // checkout landed the server-recorded head (== base), reported LANDED and left five edits unsaved.
 import test from 'node:test';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { recordLane } from '../dist/lane-registry.js';
@@ -31,8 +31,7 @@ const landingWrites = s =>
  * folder (the clone root) with no checkout marker for it. */
 async function incident(t, { edits = 5 } = {}) {
   const s = agentFixture(t);
-  const state = mkdtempSync(join(tmpdir(), 'forge-empty-land-'));
-  t.after(() => rmSync(state, { recursive: true, force: true }));
+  const state = temporaryDirectory(t, 'forge-empty-land-');
   process.env.XDG_STATE_HOME = state;
   s.lane.head = s.lane.base.head;
   await s.transport().dispatch('open', { laneId: s.lane.laneId });
@@ -89,8 +88,7 @@ test('land of an empty Lane is refused as nothing to land, unless allowEmpty ask
 for (const accept of [false, undefined])
   test(`incident replay: ${accept === false ? 'check-only' : 'land'} after a no-change finish, an edit and a re-run is a clear result, never NOT_FOUND`, async t => {
     const s = agentFixture(t);
-    const state = mkdtempSync(join(tmpdir(), 'forge-empty-rerun-'));
-    t.after(() => rmSync(state, { recursive: true, force: true }));
+    const state = temporaryDirectory(t, 'forge-empty-rerun-');
     process.env.XDG_STATE_HOME = state;
     const edited = s.lane.head;
     s.lane.head = s.lane.base.head;

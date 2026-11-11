@@ -2,11 +2,12 @@
 // Development-only: no provider calls or project code execution; the JAR is never
 // committed (a checksum-verified copy is cached in the OS temp folder).
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, writeFile, rm, statfs } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rm, statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFileSync } from 'node:child_process';
+import { temporaryDirectory } from '../../scripts/test-temp.mjs';
 import { childEnv } from '../../scripts/child-env.mjs';
 
 export const tlaTools = {
@@ -117,7 +118,7 @@ async function officialJar() {
 const cfg = await readFile(join(directory, `${config}.cfg`), 'utf8');
 const disk = await statfs(tmpdir());
 if (disk.bavail * disk.bsize < 40 * 1000 ** 3) throw new Error('TLC requires 40 GB free disk reserve.');
-const scratch = await mkdtemp(join(tmpdir(), 'forge-landing-tlc-'));
+const scratch = temporaryDirectory(null, 'forge-landing-tlc-');
 try {
   const home = join(scratch, 'home'),
     temp = join(scratch, 'tmp');

@@ -1,26 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, writeFileSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 
 export function fixture(t, files = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'forge-test-'));
-  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const root = temporaryDirectory(t);
   git(root, ['init', '-q']);
   for (const [name, text] of Object.entries(files)) write(root, name, text);
   return root;
 }
-const scratch = new Set();
-/** A temp directory for helpers that have no test context; removed when this test file's process exits. */
+/** A scratch fixture with shared exit cleanup when no test context exists. */
 export function scratchDir(prefix) {
-  if (!scratch.size)
-    process.once('exit', () => {
-      for (const path of scratch) rmSync(path, { recursive: true, force: true });
-    });
-  const path = mkdtempSync(join(tmpdir(), prefix));
-  scratch.add(path);
-  return path;
+  return temporaryDirectory(null, prefix);
 }
 export function write(root, name, content) {
   const path = join(root, name);

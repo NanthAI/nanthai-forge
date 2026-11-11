@@ -7,6 +7,7 @@ import { resolve, join } from 'node:path';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { coverageMarker, v8Touched } from './test-coverage.mjs';
+import { fileTemp } from './test-temp.mjs';
 import { workerBudget } from '../tests/worker-budget.mjs';
 
 const errorExcerpt = text =>
@@ -73,7 +74,8 @@ export async function runFiles(
   async function runFile(file) {
     return new Promise(resolve => {
       const started = performance.now();
-      const childEnv = { ...process.env };
+      const temp = fileTemp();
+      const childEnv = { ...process.env, ...temp.env };
       delete childEnv.NODE_TEST_CONTEXT;
       let coverageDirectory = null;
       if (coverageFiles) {
@@ -180,6 +182,12 @@ export async function runFiles(
               process.stdout.write(`# Coverage temporary files retained for ${file}.\n`);
             }
           }
+        }
+        const leaks = temp.cleanup();
+        if (leaks.length && !timedOut) {
+          code = 1;
+          firstError ||= `FORGE_TEMP_LEAK: ${leaks.length} temporary entries left by this test file`;
+          process.stdout.write(`not ok - ${file}: ${firstError}\n`);
         }
         clearTimeout(timer);
         children.delete(child);

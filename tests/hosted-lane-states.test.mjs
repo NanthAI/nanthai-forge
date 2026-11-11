@@ -62,3 +62,98 @@ test('Lane states: one call reads 100 Lane heads without bodies, bounded per Lan
     error => (error.data?.code ?? error.code) === 'BAD_ARGUMENT',
   );
 });
+
+test('92f4bf04: one bounded prune read classifies retained terminal/open headers across projects and isolates unavailable access', async t => {
+  const s = lanesFixture();
+  const projectId = s.insert('hostedProjects', {
+    key: 'prune-fixture',
+    name: 'Prune',
+    currentBackup: null,
+    revision: 0,
+    owner: 'owner',
+    visibility: 'private',
+  });
+  const inaccessible = s.insert('hostedProjects', {
+    key: 'private-fixture',
+    name: 'Private',
+    currentBackup: null,
+    revision: 0,
+    owner: 'other',
+    visibility: 'private',
+  });
+  const laneIds = Array.from({ length: 165 }, () => randomUUID());
+  // These are the existing small canonical headers. No source/record bodies need hydration.
+  for (const [index, laneId] of laneIds.entries()) {
+    const status = index < 72 ? 'completed' : index < 144 ? 'abandoned' : 'active';
+    const recordId = s.insert('projectHostedRecords', {
+      projectId,
+      kind: 'lane',
+      key: laneId,
+      parent: 'intent',
+      status,
+      version: 1,
+      digest: head,
+      bytes: 0,
+      inline: '',
+      bodyId: s.insert('projectHostedRecordBodies', { projectId, value: '' }),
+    });
+    s.insert('projectHostedRecordHeads', {
+      projectId,
+      kind: 'lane',
+      key: laneId,
+      parent: 'intent',
+      status,
+      version: 1,
+      recordId,
+    });
+  }
+  const hidden = randomUUID(),
+    missing = randomUUID();
+  const started = performance.now();
+  const result = await s.call('pruneStates', reads.states, {
+    projectId,
+    laneIds: [...laneIds, missing],
+    additionalProjects: [{ projectId: inaccessible, laneIds: [hidden] }],
+  });
+  assert.deepEqual(
+    result.slice(0, 165).map(row => row.state),
+    laneIds.map((_, index) => (index < 72 ? 'completed' : index < 144 ? 'abandoned' : 'active')),
+  );
+  assert.match(
+    result.find(row => row.laneId === hidden).reason,
+    /PROJECT_UNAVAILABLE.*restore project access/,
+  );
+  assert.match(result.find(row => row.laneId === missing).reason, /Lane record missing/);
+  const count = s.counts.at(-1);
+  t.diagnostic(
+    `165 retained headers: one query, ${count.documents} DB reads, ${count.readBytes} serialized DB bytes, ${Buffer.byteLength(JSON.stringify(result))} response bytes; fake wall ${(performance.now() - started).toFixed(1)}ms; provider billing unmeasured`,
+  );
+  assert.equal(count.writes, 0);
+  assert.equal(count.readDocumentsByTable.projectHostedRecordBodies ?? 0, 0);
+  assert(count.documents < 4 * 167 + 10, `bounded header reads: ${count.documents}`);
+  await assert.rejects(
+    s.call('unauthorized', reads.states, { projectId: inaccessible, laneIds: [hidden] }),
+    error => (error.data?.code ?? error.code) === 'PROJECT_UNAVAILABLE',
+  );
+  await assert.rejects(
+    s.call('tooMany', reads.states, {
+      projectId,
+      laneIds: Array.from({ length: 251 }, () => randomUUID()),
+      additionalProjects: [],
+    }),
+    error => (error.data?.code ?? error.code) === 'BAD_ARGUMENT',
+  );
+});
+
+test('92f4bf04: empty project selections cannot bypass the bounded prune read page', async () => {
+  const s = lanesFixture();
+  await assert.rejects(
+    s.call('emptyGroups', reads.states, {
+      projectId: 'missing',
+      laneIds: [],
+      additionalProjects: Array.from({ length: 250 }, () => ({ projectId: 'missing', laneIds: [] })),
+    }),
+    error => (error.data?.code ?? error.code) === 'BAD_ARGUMENT',
+  );
+  assert.equal(s.counts.at(-1).documents, 0, 'reject before any DB access');
+});

@@ -2,8 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -142,9 +142,9 @@ test('the standard check scans only changed test files, or all when the baseline
   ]);
 });
 
-test('the CLI exits 1 on a raise and --init refuses to overwrite a committed baseline', () => {
+test('the CLI exits 1 on a raise and --init refuses to overwrite a committed baseline', t => {
   const script = fileURLToPath(new URL('../scripts/check-test-signal.mjs', import.meta.url));
-  const repo = mkdtempSync(join(tmpdir(), 'forge-test-signal-'));
+  const repo = temporaryDirectory(t, 'forge-test-signal-');
   mkdirSync(join(repo, 'scripts'));
   mkdirSync(join(repo, 'tests'));
   writeFileSync(join(repo, 'scripts/check-test-signal.mjs'), readFileSync(script));

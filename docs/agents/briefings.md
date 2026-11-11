@@ -54,7 +54,11 @@ merges (or why nothing can go).
 4. Fix root causes for every project, never tune to a benchmark. Search for every
    instance; fix or list them. [Repeated classes and reverted fixes need a build-failing guard](improvement-loop.md#fix-the-class).
 5. Use the approved installed CLI and patched Node. Check disk before start,
-   builds and tests against the reserve in the brief. Run builds and test batches
+   builds and tests against the reserve in the brief. Inspect reclaimable copies with
+   `nforge prune` (or `nforge prune --scan DIRECTORY`); `--apply` removes eligible
+   regenerable roots. Live processes, unknown coverage, pins and unresolved state
+   retain their copies; the result explains unresolved state and recovery. Never
+   remove another builder's files to meet the floor. Run builds and test batches
    through `nforge heavy`; start servers or browsers only when needed and stop them
    afterwards. Slot count, disk reserve and builder count come from local machine
    setup and the brief, not from the repo. Format only with `npm run format` (oxfmt);

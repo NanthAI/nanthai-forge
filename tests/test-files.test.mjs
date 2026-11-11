@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileTimeout } from '../scripts/test-files.mjs';
@@ -20,9 +20,16 @@ test('file supervisor kills module hangs and leaked children, names failures and
   const blocked = join(root, 'blocked.mjs'),
     leaked = join(root, 'leaked.mjs'),
     passed = join(root, 'passed.mjs');
+  const tempPaths = join(root, 'temp-paths.json');
   const pid = join(root, 'child.pid'),
     marker = join(root, 'passed');
-  writeFileSync(blocked, 'while (true) {}');
+  writeFileSync(
+    blocked,
+    `import {mkdtempSync,writeFileSync} from 'node:fs';
+    import {tmpdir} from 'node:os'; import {join} from 'node:path';
+    writeFileSync(${JSON.stringify(tempPaths)}, JSON.stringify(['forge-batch-','forge-machine-check-','forge-landing-tlc-','forge-direct-job-','scale-'].map(prefix => mkdtempSync(join(tmpdir(), prefix)))));
+    while (true) {}`,
+  );
   writeFileSync(
     leaked,
     `import { spawn } from 'node:child_process';
@@ -45,6 +52,10 @@ test('file supervisor kills module hangs and leaked children, names failures and
     assert.ok(result.output.includes(`${file}: exceeded per-file timeout (10000ms)`), result.output);
     assert.ok(result.output.includes(`Failed test file: ${file}`));
   }
+  assert(
+    JSON.parse(readFileSync(tempPaths, 'utf8')).every(path => !existsSync(path)),
+    'SIGKILL timeout reclaims all five fixture prefixes',
+  );
   assert.ok(existsSync(pid), 'leaked child fixture must have started');
   assert.ok(existsSync(marker), result.output);
   assert.match(result.output, /# pass 1/);

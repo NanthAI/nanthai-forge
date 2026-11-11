@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync, rmSync } from 'node:fs';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-// Compiled test modules are cached on disk, shared by every test process of a
-// checkout. The file name is a hash of everything the output depends on: this
+// Compiled test modules use the supervisor-provided shared cache when selected;
+// direct test files own a private cache that is reclaimed on exit. The file name is a hash of everything the output depends on: this
 // file (rewrite rules), the TypeScript version, the compiler options, the
 // source bytes and import resolutions of every module its source can reach. Any source edit therefore yields a new file; an old
 // one is never read. Files are written to a temp name and renamed, so readers
@@ -31,14 +31,14 @@ const options = { target: 'ES2022', module: 'ESNext', jsx: 'ReactJSX' };
 const fromPattern = /from (['"])([^'"]+)\1/g;
 let ts;
 
+let privateCache;
 function cacheDirectory() {
-  return (
-    process.env.FORGE_TEST_MODULE_DIRECTORY ||
-    join(
-      tmpdir(),
-      `forge-test-modules-${createHash('sha256').update(fileURLToPath(root)).digest('hex').slice(0, 16)}`,
-    )
-  );
+  if (process.env.FORGE_TEST_MODULE_DIRECTORY) return process.env.FORGE_TEST_MODULE_DIRECTORY;
+  privateCache ??= temporaryDirectory(null, 'forge-test-modules-');
+  // Measured child processes reuse their parent's prepared modules, and do not own
+  // or remove this cache. The preparing test process reclaims it after they finish.
+  process.env.FORGE_TEST_MODULE_DIRECTORY = privateCache;
+  return privateCache;
 }
 
 // Same decisions the rewrite makes, without compiling. `nested` is a TypeScript

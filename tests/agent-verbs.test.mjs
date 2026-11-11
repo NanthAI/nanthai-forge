@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
@@ -251,7 +250,7 @@ test('old and new spellings send the same hosted request; only the old one print
     else process.env.FORGE_AUTH_TOKEN = previous;
   });
   t.mock.method(globalThis, 'fetch', () => assert.fail('No network: dispatch is replaced'));
-  const root = join(mkdtempSync(join(tmpdir(), 'forge-verbs-')), 'checkout');
+  const root = join(temporaryDirectory(t, 'forge-verbs-'), 'checkout');
   const address = { url: 'https://synthetic.convex.cloud', projectId: 'project-synthetic' };
   const sent = [];
   t.mock.method(HostedAgentTransport.prototype, 'dispatch', async (action, command) => {

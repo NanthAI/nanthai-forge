@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
@@ -100,15 +101,11 @@ function importClient({ startError, final = 'ready', updates = ['importing', 're
   };
   return { client, calls };
 }
-const tempDirectory = async () =>
-  (await import('node:fs')).mkdtempSync(
-    (await import('node:path')).join((await import('node:os')).tmpdir(), 'forge-import-'),
-  );
 test('nforge import starts once, waits on one progress subscription (no polling) and reports project and readiness', async t => {
   t.after(() => {
     process.exitCode = undefined;
   });
-  const directory = await tempDirectory(),
+  const directory = temporaryDirectory(t, 'forge-import-'),
     { client, calls } = importClient();
   const report = await githubImportCli(
     [
@@ -162,7 +159,7 @@ test('nforge import keeps the operation for resume and names the reset when GitH
   t.after(() => {
     process.exitCode = undefined;
   });
-  const directory = await tempDirectory(),
+  const directory = temporaryDirectory(t, 'forge-import-'),
     retryAt = 1_900_000_000_000;
   const limited = importClient({
     startError: new ConvexError({ code: 'GITHUB_RATE_LIMIT', message: 'GitHub limit.', retryAt }),

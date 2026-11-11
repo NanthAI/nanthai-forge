@@ -9,7 +9,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 
 const bootstrap = fileURLToPath(new URL('./check-runtime.mjs', import.meta.url));
-const env = temp => ({ ...process.env, TMPDIR: temp, NODE_TEST_CONTEXT: '' });
+const env = temp => ({ ...process.env, TMPDIR: temp, TMP: temp, TEMP: temp, NODE_TEST_CONTEXT: '' });
 const scratch = t => {
   const temp = mkdtempSync(join(tmpdir(), 'forge-bootstrap-check-'));
   t.after(() => rmSync(temp, { recursive: true, force: true }));
@@ -32,14 +32,14 @@ test('the test bootstrap removes its private directories when the runner stops i
     { env: env(temp), stdio: ['ignore', 'pipe', 'inherit'] },
   );
   await once(child.stdout, 'data');
-  assert.equal(leftovers(temp).length, 3, 'check queue, config and home directories exist while it runs');
+  assert.equal(leftovers(temp).length, 1, 'one private runtime root owns queue, config, home and state');
   child.kill('SIGTERM');
   const [, signal] = await once(child, 'exit');
   assert.equal(signal, 'SIGTERM');
   assert.deepEqual(leftovers(temp), []);
 });
 
-test('the test bootstrap sweeps its own stale directories, leaving young ones and other names alone', t => {
+test('the test bootstrap leaves stale and recent peer directories untouched', t => {
   const temp = scratch(t);
   const make = (name, hours) => {
     const path = join(temp, name);
@@ -53,6 +53,6 @@ test('the test bootstrap sweeps its own stale directories, leaving young ones an
     foreign = make('forge-exchange-stale', 5);
   const run = spawnSync(process.execPath, ['--import', bootstrap, '-e', ''], { env: env(temp) });
   assert.equal(run.status, 0, String(run.stderr));
-  assert.deepEqual(readdirSync(temp).sort(), [foreign, young].sort());
-  assert(!readdirSync(temp).includes(stale));
+  assert.deepEqual(readdirSync(temp).sort(), [foreign, young, stale].sort());
+  assert(readdirSync(temp).includes(stale), 'age alone does not authorize deleting another process fixture');
 });

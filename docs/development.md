@@ -28,6 +28,20 @@ npm run format               # oxfmt --write; run before committing
 
 Tests use synthetic repositories and real Git, Node and MCP subprocesses. Pass-or-fail is the only result that counts: a skipped test is not a pass. Automatic cleanup tests control the working-directory probes through `tests/cleanup-process-fixture.mjs`, including the concurrent finish child, so unrelated host processes and unavailable `/proc` or `lsof` coverage cannot change lifecycle assertions. `tests/clean-processes.test.mjs` separately exercises both OS scanner branches, missing probes, unreadable processes and process-exit races with synthetic inputs; unknown coverage continues to retain local copies.
 
+Each test file gets a private OS temporary root through `tests/check-runtime.mjs`.
+Use `temporaryDirectory(t, prefix)` from `scripts/test-temp.mjs` before fixture setup;
+it registers after-hook cleanup and a process-exit fallback. Helpers without a test
+context can pass `null`. The shared `scratchDir` helper uses the same ownership.
+On normal exit, any unowned `forge-*` or `scale-*` entry fails the file, and its
+private root is reclaimed. `scripts/test-files.mjs` owns the outer root and reclaims
+it after assertion failures, load failures, cancellation or a SIGKILL timeout.
+Cleanup never scans another process's OS temp directories by age. Tests that intentionally
+retain a spool or cache keep it inside their owned fixture and remove that fixture
+in teardown. Cache and metrics companions share fixture ownership through file exit,
+including deferred writes. Child processes reuse their parent's prepared module cache;
+the enclosing file owner reclaims a terminated worker's runtime root. Explicit shared
+precompiled-module caches retain their supervisor's ownership.
+
 Two guards keep hosted code on the intended path. `tests/hot-storage-invariant.test.mjs` fails any new use of Convex file storage in `convex/` (write, read, handle or `v.id('_storage')` field): bytes go to R2 ([data placement](data-placement.md)), and the few remaining uses are legacy-read allowlist entries with a count and an expiry date. `node scripts/check-convex-runtime.mjs` (a verify step) fails when a Convex module without `"use node"` reaches a `node:` builtin through `src/`.
 
 The compact Work/detail and native companion fixtures close their MCP clients and HTTP servers before removing owner directories. CLI presence workers are detached; directory removal retries transient `ENOTEMPTY` errors while those workers release their queue files. A presence worker that stops on an error writes one line (code and message) to stderr and the stack to the diagnostics log, and exits 1; a normal stop exits 0. Test fixtures that listen on a Unix socket take their path from `tests/helpers/short-socket.mjs`, so a deep `TMPDIR` (local preflight) never exceeds the macOS 104-byte limit.

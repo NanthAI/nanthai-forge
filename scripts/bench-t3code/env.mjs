@@ -11,6 +11,7 @@ import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -298,24 +299,28 @@ export function buildSteps(ctx) {
   const gh = (...args) => ctx.sh('gh', args);
   const ghOk = (...args) => ctx.tryRun('gh', args);
   const forgeCap = () => {
-    const probe = join(tmpdir(), 'forge-bench-setup-probe');
-    mkdirSync(probe, { recursive: true });
-    const out = (ctx.tryOut ?? ctx.tryRun)('/usr/local/bin/node', [
-      cfgSafe().forge?.cli ?? join(donor(), 'dist/cli-entry.js'),
-      'agent',
-      probe,
-      'capabilities',
-      JSON.stringify({ url: cfgSafe().forge?.url, projectId: cfgSafe().forge?.projectId }),
-      '--detail',
-    ]);
-    const line = out
-      ?.split('\n')
-      .filter(l => l.startsWith('{'))
-      .at(-1);
+    const probe = mkdtempSync(join(tmpdir(), 'forge-bench-setup-probe-'));
     try {
-      return line ? JSON.parse(line) : null;
-    } catch {
-      return null;
+      const out = (ctx.tryOut ?? ctx.tryRun)('/usr/local/bin/node', [
+        cfgSafe().forge?.cli ?? join(donor(), 'dist/cli-entry.js'),
+        'agent',
+        probe,
+        'capabilities',
+        JSON.stringify({ url: cfgSafe().forge?.url, projectId: cfgSafe().forge?.projectId }),
+        '--detail',
+      ]);
+      const line = out
+        ?.split('\n')
+        .filter(l => l.startsWith('{'))
+        .at(-1);
+      try {
+        return line ? JSON.parse(line) : null;
+      } catch {
+        return null;
+      }
+    } finally {
+      for (const path of [probe, `${probe}.forge-client`, `${probe}.forge-metrics.jsonl`])
+        rmSync(path, { recursive: true, force: true });
     }
   };
   const repoInfo = () => {

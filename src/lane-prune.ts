@@ -25,11 +25,16 @@ const DIRTY_CHECKS = 8;
 const terminal = new Set(['completed', 'abandoned']);
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export type LaneAddress = { url: string; projectId: string };
-/** One batched server read per 100 Lanes; null when the deployment predates it (nothing is pruned). */
-export type LaneStateReader = (
+type LaneState = string | { state: string; pinned?: boolean; reason?: string };
+type LaneStateGroup = { address: LaneAddress; laneIds: string[] };
+/** Legacy single-project readers use 100-Lane pages; hosted prune uses 250 identities
+ * across projects per deployment. Unavailable data never authorizes removal. */
+export type LaneStateReader = ((
   address: LaneAddress,
   laneIds: string[],
-) => Promise<Map<string, string | { state: string; pinned?: boolean }> | null>;
+) => Promise<Map<string, LaneState> | null>) & {
+  batch?: (groups: LaneStateGroup[]) => Promise<Map<string, LaneState> | null>;
+};
 export type IdleLane = { laneId: string; outcome?: string; idleHours: number; root: string };
 /** An idle Lane on this machine that another agent run (or an unknown, older run) of the account
  * started (d730121f): listed so nobody is surprised, never offered for abandon. */
@@ -200,26 +205,67 @@ export async function laneHousekeeping(input: {
     const key = JSON.stringify([entry.url, entry.projectId]);
     groups.set(key, [...(groups.get(key) ?? []), entry]);
   }
+  const reasons = new Map<string, string>();
+  const pages: LaneStateGroup[][] = [];
+  // One page can contain many projects, but credentials never cross deployment origins.
+  const deployments = new Map<string, LaneStateGroup[]>();
   for (const [key, group] of groups) {
     const [url, projectId] = JSON.parse(key) as [string, string];
-    for (let index = 0; index < group.length; index += 100) {
-      const page = group.slice(index, index + 100);
-      let read: Map<string, string | { state: string; pinned?: boolean }> | null = null;
-      try {
-        read = await input.readStates(
-          { url, projectId },
-          page.map(entry => entry.laneId),
-        );
-      } catch {
-        read = null;
-      }
-      for (const entry of page) {
-        const row = read?.get(entry.laneId);
-        states.set(entry.laneId, row === undefined ? null : typeof row === 'string' ? row : row.state);
-        if (read && row !== undefined)
-          pins.set(entry.laneId, typeof row === 'string' ? false : Boolean(row.pinned));
+    const pending = deployments.get(url) ?? [];
+    pending.push({ address: { url, projectId }, laneIds: group.map(entry => entry.laneId) });
+    deployments.set(url, pending);
+  }
+  for (const deployment of deployments.values()) {
+    let page: LaneStateGroup[] = [],
+      size = 0;
+    for (const group of deployment) {
+      for (const laneId of group.laneIds) {
+        const limit = input.readStates.batch ? 250 : 100;
+        if (
+          size === limit ||
+          (!input.readStates.batch && page.length > 0 && page[0]?.address !== group.address)
+        ) {
+          pages.push(page);
+          page = [];
+          size = 0;
+        }
+        let selected = page.at(-1);
+        if (selected?.address !== group.address) {
+          selected = { address: group.address, laneIds: [] };
+          page.push(selected);
+        }
+        selected.laneIds.push(laneId);
+        size++;
       }
     }
+    if (page.length) pages.push(page);
+  }
+  for (const page of pages) {
+    let read: Map<string, LaneState> | null = null;
+    let failure =
+      'State read unavailable: check sign-in and deployment/CLI compatibility, then rerun nforge prune; copy retained.';
+    try {
+      read = input.readStates.batch
+        ? await input.readStates.batch(page)
+        : await input.readStates(page[0]!.address, page[0]!.laneIds);
+    } catch (error) {
+      const code =
+        (error as { code?: string; data?: { code?: string } } | null)?.data?.code ??
+        (error as { code?: string } | null)?.code;
+      if (code === 'PROJECT_UNAVAILABLE' || code === 'AUTH_REQUIRED')
+        failure = `${code}: restore project access/sign-in, then rerun nforge prune; copy retained.`;
+    }
+    for (const { laneIds } of page)
+      for (const laneId of laneIds) {
+        const row = read?.get(laneId);
+        const state = row === undefined ? null : typeof row === 'string' ? row : row.state;
+        states.set(laneId, state);
+        // An inaccessible/missing record contains no current pin evidence. Keep the local
+        // mirror so offline cache GC cannot evict a previously pinned copy.
+        if (read && row !== undefined && state && (state === 'active' || terminal.has(state)))
+          pins.set(laneId, typeof row === 'string' ? false : Boolean(row.pinned));
+        reasons.set(laneId, typeof row === 'object' && row.reason ? row.reason : failure);
+      }
   }
   const isDirty = input.isDirty ?? hostedLaneDirty;
   let dirtyChecks = 0;
@@ -260,7 +306,8 @@ export async function laneHousekeeping(input: {
       continue;
     }
     if (!state || (!activeIdle && !terminal.has(state)) || limit === 0 || idleFor < limit) {
-      if (!state) result.kept.push({ laneId: entry.laneId, reason: 'state unknown' });
+      if (!state || (!terminal.has(state) && state !== 'active'))
+        result.kept.push({ laneId: entry.laneId, reason: reasons.get(entry.laneId)! });
       continue;
     }
     const root = canonicalRoot(entry.root);
@@ -320,12 +367,22 @@ export function convexLaneStates(
     query: (name: unknown, args: Record<string, unknown>) => Promise<unknown>;
   },
 ): LaneStateReader {
-  return async (address, laneIds) => {
+  const read = async (groups: LaneStateGroup[], batched: boolean) => {
+    const { address, laneIds } = groups[0]!;
+    const rest = groups.slice(1);
     let value: unknown;
     try {
       value = await client(address).query(makeFunctionReference<'query'>('projectHostedLanes:states'), {
         projectId: address.projectId,
         laneIds,
+        ...(batched
+          ? {
+              additionalProjects: rest.map(group => ({
+                projectId: group.address.projectId,
+                laneIds: group.laneIds,
+              })),
+            }
+          : {}),
       });
     } catch (error) {
       if (
@@ -339,9 +396,22 @@ export function convexLaneStates(
       laneId: string;
       state: string;
       pinned?: boolean;
+      reason?: string;
     }[];
-    return new Map(rows.map(row => [row.laneId, { state: row.state, pinned: row.pinned === true }]));
+    return new Map(
+      rows.map(row => [
+        row.laneId,
+        {
+          state: row.state,
+          pinned: row.pinned === true,
+          ...(row.reason ? { reason: row.reason } : {}),
+        },
+      ]),
+    );
   };
+  return Object.assign((address: LaneAddress, laneIds: string[]) => read([{ address, laneIds }], false), {
+    batch: (groups: LaneStateGroup[]) => read(groups, true),
+  });
 }
 
 /** Terse agent-facing lines; nothing when there is nothing to say. */

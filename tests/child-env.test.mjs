@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
@@ -323,8 +324,18 @@ function runner(fail = () => false) {
     },
   };
 }
-const linux = (fake, env = { HOME: '/srv/ci-home' }) =>
-  candidateIsolation({ env, platform: 'linux', run: fake.run });
+const linux = (fake, env = { HOME: '/srv/ci-home' }) => {
+  const temp = temporaryDirectory(null, 'forge-candidate-fixture-');
+  const previous = Object.fromEntries(['TMPDIR', 'TMP', 'TEMP'].map(name => [name, process.env[name]]));
+  for (const name of Object.keys(previous)) process.env[name] = temp;
+  try {
+    return candidateIsolation({ env, platform: 'linux', run: fake.run });
+  } finally {
+    for (const [name, value] of Object.entries(previous))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  }
+};
 
 test('the Candidate user falls back to the runner user, with a reason, wherever it cannot isolate', () => {
   assert.deepEqual(

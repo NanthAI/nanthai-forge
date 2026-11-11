@@ -9,6 +9,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   rmSync,
   symlinkSync,
@@ -376,4 +377,70 @@ test('a closed stdout reader never crashes the CLI, and messages arrive verbatim
     { encoding: 'utf8' },
   );
   assert.match(unreadable.stderr, /Message file could not be read/);
+});
+
+test('92f4bf04: 99 roots use one cross-project read; dry/apply reclaim terminal copies while live and unresolved copies survive', async t => {
+  const directory = isolated(t),
+    now = Date.now();
+  const lanes = Array.from({ length: 99 }, () => randomUUID());
+  const roots = lanes.map((laneId, i) => checkout(directory, `fixture-${i}`, laneId));
+  for (const [i, laneId] of lanes.entries())
+    recordLane(
+      {
+        laneId,
+        root: roots[i],
+        ...address,
+        projectId: i < 50 ? 'project' : 'other-project',
+        lastActionAt: now - 5 * hour,
+      },
+      now,
+    );
+  const before = await laneHousekeeping({ readStates: async () => null, apply: false, now });
+  assert.equal(before.kept.length, 99);
+  assert.equal(before.wouldPrune.length, 0);
+  recordLane({ laneId: lanes[96], pinned: true, lastActionAt: now - 5 * hour }, now);
+  let calls = 0;
+  const { convexLaneStates } = await import('../dist/lane-prune.js');
+  const readStates = convexLaneStates(() => ({
+    query: async (_fn, input) => {
+      calls++;
+      assert.equal(input.additionalProjects.length, 1);
+      return [...input.laneIds, ...input.additionalProjects.flatMap(group => group.laneIds)].map(laneId => {
+        const i = lanes.indexOf(laneId);
+        return {
+          laneId,
+          state: i < 36 ? 'completed' : i < 72 ? 'abandoned' : i < 96 ? 'active' : 'unknown',
+          ...(i >= 96
+            ? {
+                reason:
+                  'PROJECT_UNAVAILABLE: restore project access, then rerun nforge prune; copy retained.',
+              }
+            : {}),
+        };
+      });
+    },
+  }));
+  const input = { readStates, now, processes: () => ({ paths: [realpathSync(roots[0])], unknown: false }) };
+  const dry = await laneHousekeeping({ ...input, apply: false });
+  assert.equal(calls, 1);
+  assert.equal(dry.wouldPrune.length, 71);
+  assert.equal(dry.kept.length, 4);
+  assert(dry.kept.some(row => /PROJECT_UNAVAILABLE/.test(row.reason)));
+  assert(roots.every(existsSync), 'dry run changes no fixture bytes');
+  const applied = await laneHousekeeping({ ...input, apply: true });
+  assert.equal(calls, 2, 'one read per run, never per project/Lane');
+  assert.equal(applied.pruned.length, 71);
+  assert.equal(readLaneEntry(lanes[96]).pinned, true, 'unavailable state never clears the last known pin');
+  assert(existsSync(roots[0]), 'live process survives');
+  assert(roots.slice(72).every(existsSync), 'open and unresolved copies survive');
+  const unknown = await laneHousekeeping({
+    ...input,
+    apply: true,
+    processes: () => ({ paths: [], unknown: true }),
+  });
+  assert.equal(unknown.pruned.length, 0);
+  assert(unknown.kept.some(row => row.reason === 'Local process coverage is unavailable.'));
+  t.diagnostic(
+    '99-root fixture: unresolved 99 -> 3; prunable 0 -> 71; applied 71; live 1, open 24, unresolved 3 retained.',
+  );
 });

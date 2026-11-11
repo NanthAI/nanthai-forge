@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import assert from 'node:assert/strict';
 import { setImmediate as immediate } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { windowsPowerShell } from '../dist/local-process.js';
@@ -27,7 +28,16 @@ const outputApi = await import(moduleUrl('../convex/projectHostedOutputApi.ts'))
 const secret = 'synthetic-mac-fixed-collector';
 
 async function fixture(t, actualEnvironment = false, provider = 'mac', source = {}) {
-  const localLogs = mkdtempSync(join(tmpdir(), 'forge-mac-log-test-'));
+  const localLogs = temporaryDirectory(t, 'forge-mac-log-test-');
+  const temp = join(localLogs, 'tmp');
+  mkdirSync(temp);
+  const previousTemp = Object.fromEntries(['TMPDIR', 'TMP', 'TEMP'].map(name => [name, process.env[name]]));
+  for (const name of Object.keys(previousTemp)) process.env[name] = temp;
+  t.after(() => {
+    for (const [name, value] of Object.entries(previousTemp))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  });
   const oldLogs = process.env.FORGE_LOCAL_CHECK_LOG_DIR;
   process.env.FORGE_LOCAL_CHECK_LOG_DIR = localLogs;
   t.after(() => {
@@ -697,8 +707,7 @@ test(
   'Windows check root inherits an ACL with no Everyone, Users or Authenticated Users entry (1444471f)',
   { skip: process.platform !== 'win32' },
   t => {
-    const root = mkdtempSync(join(tmpdir(), 'forge-machine-check-'));
-    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const root = temporaryDirectory(t, 'forge-machine-check-');
     const script =
       `[System.IO.Directory]::GetAccessControl('${root.replaceAll("'", "''")}')` +
       '.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])' +

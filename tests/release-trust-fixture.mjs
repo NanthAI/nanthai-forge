@@ -5,17 +5,8 @@
 // run a copy of dist whose cli-release-keys.js lists that key. There is no production override:
 // a process only trusts the keys compiled into the build it runs.
 import { generateKeyPairSync } from 'node:crypto';
-import {
-  copyFileSync,
-  linkSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { copyFileSync, linkSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { cliReleaseKeyId, cliReleasePublicKey, signCliRelease } from '../dist/cli-release-trust.js';
@@ -42,8 +33,7 @@ let trusted = null;
  * links to the rest of the repository. Made once per test process. */
 export function trustedDist() {
   if (trusted) return trusted;
-  const directory = mkdtempSync(join(tmpdir(), 'forge-test-release-dist-'));
-  process.once('exit', () => rmSync(directory, { recursive: true, force: true }));
+  const directory = temporaryDirectory(null, 'forge-test-release-dist-');
   // Everything else (package.json, node_modules, scripts dist imports) is the repository's own.
   for (const entry of readdirSync(root))
     if (entry !== 'dist') symlinkSync(join(root, entry), join(directory, entry));

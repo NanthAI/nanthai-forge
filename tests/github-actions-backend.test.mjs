@@ -1407,8 +1407,10 @@ for (const replacement of ['same-family', 'same-family-legacy', 'other-family', 
 test('explicit interrupt observation retains SIGINT and leaves sender unknown', async t => {
   const { CheckQueue } = await import('../dist/check-queue.js');
   const { work, run, path } = fixture(t);
+  const priorSignals = new Set(process.listeners('SIGINT'));
   t.mock.method(CheckQueue.prototype, 'cancelled', () => {
-    process.emit('SIGINT', 'SIGINT');
+    // Deliver to this controller, not the test runtime's real process teardown.
+    for (const listener of process.listeners('SIGINT')) if (!priorSignals.has(listener)) listener('SIGINT');
     return false;
   });
   await launchGithubActionsRun(work.store, run, {}, async () => assert.fail('must not export'));
@@ -2189,6 +2191,7 @@ for (const signal of ['SIGTERM', 'SIGHUP'])
   test(`service ${signal} preserves an in-flight remote check without provider cancellation`, async t => {
     const { work, run, path } = fixture(t);
     const api = {};
+    const priorSignals = new Set(process.listeners(signal));
     let calls;
     await launchGithubActionsRun(
       work.store,
@@ -2204,7 +2207,8 @@ for (const signal of ['SIGTERM', 'SIGHUP'])
         const request = fake.api.request;
         Object.assign(api, fake.api, {
           request: async (...args) => {
-            process.emit(signal, signal);
+            for (const listener of process.listeners(signal))
+              if (!priorSignals.has(listener)) listener(signal);
             return request(...args);
           },
         });

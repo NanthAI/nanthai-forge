@@ -92,32 +92,84 @@ export const head = query({
     }
   },
 });
-/** Lifecycle state of up to 100 Lanes in one call (client idle listing and prune).
- * Reads heads and lifecycle overlays only, never record bodies; `pinned` rides on the same row. Unknown ids are "missing". */
+/** Bounded lifecycle headers only, across projects on the same deployment. Legacy callers
+ * retain their 100-Lane shape; prune batches up to 250 identities in one authorized read. */
 export const states = query({
-  args: { projectId: v.id('hostedProjects'), laneIds: v.array(v.string()) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    laneIds: v.array(v.string()),
+    additionalProjects: v.optional(
+      v.array(
+        v.object({
+          projectId: v.id('hostedProjects'),
+          laneIds: v.array(v.string()),
+        }),
+      ),
+    ),
+  },
   returns: v.array(
-    v.object({ laneId: v.string(), state: v.string(), version: v.number(), pinned: v.optional(v.boolean()) }),
+    v.object({
+      laneId: v.string(),
+      state: v.string(),
+      version: v.number(),
+      pinned: v.optional(v.boolean()),
+      reason: v.optional(v.string()),
+    }),
   ),
   handler: async (ctx, input) => {
     try {
-      invariant(input.laneIds.length <= 100, 'BAD_ARGUMENT', 'Read at most 100 Lanes per call.');
-      await caller(ctx, input.projectId);
+      const groups = [input, ...(input.additionalProjects ?? [])];
+      invariant(
+        groups.length <= 250 &&
+          groups.reduce((n, group) => n + group.laneIds.length, 0) <= (input.additionalProjects ? 250 : 100),
+        'BAD_ARGUMENT',
+        'Read one bounded Lane state page.',
+      );
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted work.');
       const result = [];
-      for (const laneId of new Set(input.laneIds)) {
-        const head = await recordHead(ctx, input.projectId, 'lane', laneId);
-        const row = head ? await ctx.db.get(head.recordId) : null;
-        const effective = row ? await effectiveLifecycleRecord(ctx, row) : null;
-        result.push(
-          effective
-            ? {
-                laneId,
-                state: String(effective.status),
-                version: effective.version,
-                ...(effective.pinned ? { pinned: true } : {}),
-              }
-            : { laneId, state: 'missing', version: 0 },
-        );
+      for (const group of groups) {
+        try {
+          await accessibleProject(ctx, group.projectId, user.subject);
+        } catch (error) {
+          // No record or lifecycle data is read for an unavailable project. A batched prune
+          // can still classify the other projects; a legacy caller keeps its typed failure.
+          if (!input.additionalProjects) throw error;
+          if ((error as { code?: string }).code !== 'PROJECT_UNAVAILABLE') throw error;
+          for (const laneId of new Set(group.laneIds))
+            result.push({
+              laneId,
+              state: 'unknown',
+              version: 0,
+              reason: 'PROJECT_UNAVAILABLE: restore project access, then rerun nforge prune; copy retained.',
+            });
+          continue;
+        }
+        for (const laneId of new Set(group.laneIds)) {
+          const head = await recordHead(ctx, group.projectId, 'lane', laneId);
+          const row = head ? await ctx.db.get(head.recordId) : null;
+          const effective = row ? await effectiveLifecycleRecord(ctx, row) : null;
+          result.push(
+            effective
+              ? {
+                  laneId,
+                  state: String(effective.status),
+                  version: effective.version,
+                  ...(effective.pinned ? { pinned: true } : {}),
+                }
+              : {
+                  laneId,
+                  state: 'missing',
+                  version: 0,
+                  ...(input.additionalProjects
+                    ? {
+                        reason:
+                          'Lane record missing: restore its retained hosted record, then rerun nforge prune; copy retained.',
+                      }
+                    : {}),
+                },
+          );
+        }
       }
       return result;
     } catch (error) {

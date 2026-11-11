@@ -26,8 +26,8 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 - The client keeps a small local index of the Lane checkouts it opened, at
   `$XDG_STATE_HOME/forge/lanes` (default `~/.local/state/forge/lanes`). It writes one small file
   when it opens a Lane and when an agent action touches one. Nothing runs in the background.
-- `start` reads the state of the Lanes that are due in one server call, which covers up to 100
-  Lanes. When nothing is due, `start` reads nothing. An idle machine costs nothing.
+- `start` reads the state of the Lanes that are due in bounded server pages of up to 250 Lane identities per deployment, combining projects
+  in the same read (one call for 99 or 165 roots). When nothing is due, `start` reads nothing. An idle machine costs nothing.
 - A root is removed only when all of these hold:
   - the server says the Lane is `completed` or `abandoned`;
   - there has been no Forge action and no file change for `autoPruneHours`;
@@ -44,7 +44,10 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   root is deleted; the file rotates to `lane-prune.jsonl.1` past 1 MB.
 - Pruning removes the root, its `ROOT.forge-client` cache and its `ROOT.forge-metrics.jsonl`.
   A `node_modules` link is removed as a link; the shared install stays.
-- A deployment without the batched read prunes nothing.
+- Unavailable project access, missing Lane records and incompatible/unreachable deployments
+  retain the root and report the reason and recovery. Local checkout/registry state may be stale
+  after a reopen and never substitutes for current hosted lifecycle state. Live processes and
+  unknown process coverage also retain copies. A deployment without the batched read prunes nothing.
 - The idle list on `start` is per agent run (Issue d730121f). Each index entry records the agent
   session slug of the run that started or resolved the Lane (`null` for a person). Only Lanes of the
   calling run are listed with the `abandon` command. Idle Lanes that other runs of the same account

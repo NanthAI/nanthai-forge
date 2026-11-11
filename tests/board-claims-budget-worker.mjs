@@ -3,6 +3,7 @@
 // query and the claim goes up from the detached sender, batched. Call counts only: the CPU p95 budget was
 // a wall-clock measurement that varied with machine load, so it is not asserted here.
 import assert from 'node:assert/strict';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import { Worker } from 'node:worker_threads';
 import { once } from 'node:events';
 import { spawnSync } from 'node:child_process';
@@ -52,7 +53,7 @@ async function claimServer() {
 }
 
 export default async function claimBudget() {
-  const root = mkdtempSync(join(tmpdir(), 'forge-claim-budget-'));
+  const root = temporaryDirectory(null, 'forge-claim-budget-');
   const state = mkdtempSync(join(tmpdir(), 'forge-claim-state-'));
   const server = await claimServer();
   try {
