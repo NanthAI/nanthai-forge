@@ -85,8 +85,10 @@ configured check (no `configure-check`) skips it and queues as before.
      JSON, HTML or YAML file mentions); a missing list means every Markdown is tested.
      Paths whose blob and mode (or deletion) are identical in the checked, current
      main and recomposed trees are recorded as `identicalPaths`: both checks already
-     saw that change, so it contributes no overlap or global risk. The complete
-     changed-path lists stay in the proof. Differing entries keep the usual rules.
+     saw that change, so it contributes no overlap. The complete changed-path
+     lists still decide global risk, declared check inputs, package placement and
+     shared sequence/fixture folders: identical configuration does not prove the
+     new combination passes under it. Differing entries keep the usual rules.
      If the entire recomposed file tree equals the checked tree, the existing
      `exact-tree-v1` proof carries the full pass, including for ancestry-only main
      moves outside the pipeline path. All current policy, check and audit gates remain.

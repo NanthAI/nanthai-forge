@@ -111,7 +111,8 @@ export async function analyzeCrossHeadReuse(
   }
   if (!candidatePaths.length || !mainPaths.length) return { reason: 'composition-not-exact' };
   // Both checks already saw an identical shared change. Verify the composed entry too, including
-  // absence and mode, before excluding it from overlap/risk; keep the complete deltas in the proof.
+  // absence and mode, before excluding it from overlap. Risk still uses the complete deltas:
+  // identical configuration does not prove that the new combination passes under it.
   const checkedEntries = entries(checked!),
     mainEntries = entries(main!),
     mergedEntries = entries(merged!);
@@ -135,12 +136,12 @@ export async function analyzeCrossHeadReuse(
   if (!docsOverlap.every(markdownPath)) return { reason: 'path-overlap' };
   // A manifest or lockfile inside a package may still be placed by the checked run's package graph
   // (rule v3, Issue 5cfcca4b); every other risk path decides here, on paths alone.
-  const risky = globalRiskBetween(candidateDelta, mainDelta, checkEntries);
-  const sensitive = risky && orderSensitiveRisk(candidateDelta, mainDelta, checkEntries).length > 0;
+  const risky = globalRiskBetween(candidatePaths, mainPaths, checkEntries);
+  const sensitive = risky && orderSensitiveRisk(candidatePaths, mainPaths, checkEntries).length > 0;
   const riskRefusal = sensitive ? ('order-sensitive' as const) : ('global-risk' as const);
   const relaxRisk = fast && risky && !sensitive;
   const relaxed: FastRelaxed[] = [];
-  if (risky && !relaxRisk && !placeableRisk(candidateDelta, mainDelta, checkEntries))
+  if (risky && !relaxRisk && !placeableRisk(candidatePaths, mainPaths, checkEntries))
     return { reason: riskRefusal };
   // The recomposition must be precisely the union of both deltas, including modes/deletions.
   // An overlapping Markdown file is the server's clean text merge: it exists on all four
@@ -192,7 +193,7 @@ export async function analyzeCrossHeadReuse(
   if (audit.scope !== 'full') return { reason: 'audit-not-full' };
   // A placed manifest is the stronger evidence, so it is tried first even in fast mode.
   const placement = risky
-    ? placedRiskBetween(candidateDelta, mainDelta, checkEntries, pinnedPackagePlacement(selection))
+    ? placedRiskBetween(candidatePaths, mainPaths, checkEntries, pinnedPackagePlacement(selection))
     : [];
   if (!placement && !relaxRisk) return { reason: riskRefusal };
   if (!placement) relaxed.push('global-risk');
@@ -213,7 +214,7 @@ export async function analyzeCrossHeadReuse(
           algorithm: 'fast-first-check-v1',
           relaxed,
           riskPaths: relaxed.includes('global-risk')
-            ? firstCheckRiskPaths([...candidateDelta, ...mainDelta], checkEntries).slice(0, 32)
+            ? firstCheckRiskPaths([...candidatePaths, ...mainPaths], checkEntries).slice(0, 32)
             : [],
         }
       : { algorithm: 'clean-disjoint-v2', ...(placed.length ? { placedRisk: placed } : {}) }),

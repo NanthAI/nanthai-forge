@@ -170,8 +170,9 @@ export function validCrossHeadProof(proof: CrossHeadProof) {
       // A relaxed class is named for what it relaxed, and nothing order-sensitive is ever relaxed.
       (!proof.relaxed.includes('tested-doc') || docs.length > 0) &&
       proof.relaxed.includes('global-risk') ===
-        globalRiskBetween(candidatePaths, mainPaths, proof.checkEntries, proof.riskRule) &&
-      orderSensitiveRisk(candidatePaths, mainPaths, proof.checkEntries, proof.riskRule).length === 0
+        globalRiskBetween(proof.candidatePaths, proof.mainPaths, proof.checkEntries, proof.riskRule) &&
+      orderSensitiveRisk(proof.candidatePaths, proof.mainPaths, proof.checkEntries, proof.riskRule).length ===
+        0
     );
   if (proof.algorithm !== 'conservative-impact-v1')
     return (
@@ -179,9 +180,8 @@ export function validCrossHeadProof(proof: CrossHeadProof) {
       proof.mainPaths.length > 0 &&
       docs.every(path => markdownPath(path) && candidateSet.has(path) && mainSet.has(path)) &&
       (proof.algorithm === 'clean-disjoint-v2' && proof.placedRisk
-        ? riskRuleSince(proof.riskRule, 'first-check-risk-v3') &&
-          validPlacedRisk({ ...proof, candidatePaths, mainPaths })
-        : !globalRiskBetween(candidatePaths, mainPaths, proof.checkEntries, proof.riskRule))
+        ? riskRuleSince(proof.riskRule, 'first-check-risk-v3') && validPlacedRisk(proof)
+        : !globalRiskBetween(proof.candidatePaths, proof.mainPaths, proof.checkEntries, proof.riskRule))
     );
   const heads = [proof.checkedBase.head, proof.checked.head, proof.main.head, proof.head];
   const union = (selections: typeof proof.candidateSelections) =>

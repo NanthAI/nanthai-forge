@@ -139,8 +139,10 @@ a State identity change was approved by this slice. Source: Issue [298f9675](htt
 ### 2026-11-10: reuse checks for identical and ancestry-only main changes
 
 Reuse a full passed check when checked/main/composed shared entries have the
-same blobs, modes and deletions, or the existing exact-tree proof establishes an
-ancestry-only change. Why: equivalent source was paying for another full check;
+same blobs, modes and deletions and the complete deltas pass the existing risk
+rules, or the existing exact-tree proof establishes an ancestry-only change.
+Identical entries clear overlap only; they retain global/declared input and
+shared-folder risk. Why: equivalent source was paying for another full check;
 the identical-overlap fixture falls from 25 discarded passed runner-minutes per
 landing to zero. Retain refusal/recheck for genuinely different overlap, changed
 tested docs, global risk, missing/corrupt proof, policy or actor ineligibility.

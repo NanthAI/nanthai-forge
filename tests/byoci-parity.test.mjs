@@ -127,8 +127,12 @@ const scenarios = [
     'identical shared entries keep the passed check (Issue 1018d0f8)',
     ['proof'],
     () => ({
-      memberPaths: ['packages/a/src/a.ts', 'packages/b/src/b.ts'],
-      fileCount: 3,
+      memberPaths: [
+        ['packages/a/src/a.ts', 'packages/shared/src/shared.ts'],
+        ['packages/b/src/b.ts', 'packages/shared/src/shared.ts'],
+      ],
+      memberContents: ['same', 'same'],
+      fileCount: 2,
     }),
   ],
   [

@@ -243,7 +243,6 @@ test('clean path-disjoint composition lands on its first check from six small re
 for (const [path, mode, deleted] of [
   ['src/shared.ts', 'file', false],
   ['docs/contract.md', 'file', false],
-  ['package.json', 'file', false],
   ['bin/shared', 'executable', false],
   ['src/removed.ts', 'file', true],
 ])
@@ -291,6 +290,117 @@ test('an ancestry-only main race reuses the existing exact-tree proof without a 
   assert.equal(proof.algorithm, 'exact-tree-v1');
   assert(validCrossHeadProof(proof));
   assert.deepEqual(f.metrics(), { calls: 2, maxWindow: 4 });
+});
+
+// Issue 1018d0f8 review: identical entries remove overlap, never the risk of combining
+// two changes under shared configuration. The approved first-check risk rule still applies.
+for (const [path, checkEntries, reason] of [
+  ['package.json', [], 'global-risk'],
+  ['package-lock.json', [], 'global-risk'],
+  ['.gitattributes', [], 'global-risk'],
+  ['.gitignore', [], 'global-risk'],
+  ['pkg/.env.test', [], 'global-risk'],
+  ['pkg/tsconfig.json', [], 'order-sensitive'],
+  ['.github/workflows/check.yml', [], 'order-sensitive'],
+  ['ci/check.sh', ['ci/check.sh'], 'order-sensitive'],
+  ['config/budget.json', ['config/**'], 'order-sensitive'],
+  ['db/migrations/001.sql', [], 'order-sensitive'],
+  ['tests/fixtures/a.json', [], 'order-sensitive'],
+  ['src/__snapshots__/a.snap', [], 'order-sensitive'],
+])
+  test(`identical shared risk at ${path} keeps the approved recheck: ${reason}`, async () => {
+    const f = fixture();
+    const heads = [f.basis.checkedBase.head, f.basis.checked.head, f.basis.main.head, f.basis.head];
+    const states = heads.map(head => JSON.parse(f.blobs.get(head)));
+    for (const [i, state] of states.entries()) {
+      state.files = state.files.filter(file => file.path !== path);
+      state.files.push({ path, blob: f.pin(i === 0 ? 'old' : 'shared'), mode: 'file' });
+    }
+    const pins = states.map(state => f.pin(state));
+    const basis = {
+      ...f.basis,
+      checkedBase: { ...f.basis.checkedBase, head: pins[0] },
+      checked: { ...f.basis.checked, head: pins[1] },
+      main: { ...f.basis.main, head: pins[2] },
+      head: pins[3],
+    };
+    assert.deepEqual(await analyzeCrossHeadReuse(basis, f.selection, f.read, checkEntries), { reason });
+    // Publication must also reject a certificate produced by the earlier unsafe classifier.
+    const { proof } = await analyzeCrossHeadReuse(f.basis, f.selection, f.read);
+    assert.equal(
+      validCrossHeadProof({
+        ...proof,
+        candidatePaths: [...proof.candidatePaths, path],
+        mainPaths: [...proof.mainPaths, path],
+        identicalPaths: [path],
+        checkEntries,
+      }),
+      false,
+    );
+    const fast = await analyzeCrossHeadReuse(basis, f.selection, f.read, checkEntries, true);
+    if (reason === 'order-sensitive') assert.deepEqual(fast, { reason });
+    else {
+      assert.equal(fast.proof.algorithm, 'fast-first-check-v1');
+      assert.deepEqual(fast.proof.relaxed, ['global-risk']);
+      assert(fast.proof.riskPaths.includes(path));
+      assert(validCrossHeadProof(fast.proof));
+    }
+    // When no untested combination remains, the full checked tree still carries its pass.
+    const exact = { ...basis, head: f.pin({ ...states[1], parents: [pins[2]] }) };
+    assert.equal(
+      (await analyzeCrossHeadReuse(exact, f.selection, f.read, checkEntries)).proof.algorithm,
+      'exact-tree-v1',
+    );
+  });
+
+test('data-reader combinations retain shared declared configuration risk, while ordinary disjoint semantic risk stays auditable', async () => {
+  const f = fixture();
+  const heads = [f.basis.checkedBase.head, f.basis.checked.head, f.basis.main.head, f.basis.head];
+  const states = heads.map(head => JSON.parse(f.blobs.get(head)));
+  for (const [i, state] of states.entries()) {
+    for (const [path, value] of [
+      ['data/a.json', i === 1 || i === 3 ? 2 : 0],
+      ['data/b.json', i === 2 || i === 3 ? 2 : 0],
+      ['config/budget.json', i === 0 ? 1 : 2],
+    ])
+      state.files.push({ path, blob: f.pin(value), mode: 'file' });
+  }
+  const check = state => {
+    const value = path => JSON.parse(f.blobs.get(state.files.find(file => file.path === path).blob));
+    return value('data/a.json') + value('data/b.json') <= value('config/budget.json');
+  };
+  assert.deepEqual(states.map(check), [true, true, true, false]);
+  const pins = states.map(state => f.pin(state));
+  const basis = {
+    ...f.basis,
+    checkedBase: { ...f.basis.checkedBase, head: pins[0] },
+    checked: { ...f.basis.checked, head: pins[1] },
+    main: { ...f.basis.main, head: pins[2] },
+    head: pins[3],
+  };
+  assert.deepEqual(await analyzeCrossHeadReuse(basis, f.selection, f.read, ['config/**']), {
+    reason: 'order-sensitive',
+  });
+  // With the same unchanged config on all four sides, the ordinary disjoint rule
+  // already permits this semantic risk; the immediate main audit owns detection.
+  for (const state of states) state.files.find(file => file.path === 'config/budget.json').blob = f.pin(2);
+  const unchanged = states.map(state => f.pin(state));
+  assert(
+    (
+      await analyzeCrossHeadReuse(
+        {
+          ...basis,
+          checkedBase: { ...basis.checkedBase, head: unchanged[0] },
+          checked: { ...basis.checked, head: unchanged[1] },
+          main: { ...basis.main, head: unchanged[2] },
+          head: unchanged[3],
+        },
+        f.selection,
+        f.read,
+        ['config/**'],
+      )
+    ).proof,
+  );
 });
 test('untouched symlinks and submodules anywhere in the tree do not block a first-check landing', async () => {
   const f = fixture({ links: true }),

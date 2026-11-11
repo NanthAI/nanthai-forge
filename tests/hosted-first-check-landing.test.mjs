@@ -170,8 +170,16 @@ test('first-check landing costs no more Convex calls or DB IO than the recheck i
 });
 
 test('Issue 1018d0f8: identical shared changes reuse the passed run instead of discarding runner minutes', async t => {
-  // fixture/0 is in both changes with identical bytes; each side already checked that version.
-  const options = { memberPaths: ['src/a.ts', 'src/b.ts'], fileCount: 3, runnerSeconds: 3000 };
+  // Ordinary source overlap is reusable; shared fixture/configuration paths keep their risk rule.
+  const options = {
+    memberPaths: [
+      ['src/a.ts', 'src/shared.ts'],
+      ['src/b.ts', 'src/shared.ts'],
+    ],
+    memberContents: ['same', 'same'],
+    fileCount: 2,
+    runnerSeconds: 3000,
+  };
   const f = await wave(t, options);
   assert.deepEqual(
     states(f).map(s => s.phase),
@@ -179,7 +187,7 @@ test('Issue 1018d0f8: identical shared changes reuse the passed run instead of d
   );
   assert.deepEqual(f.reuseDecisions, ['proof']);
   assert.equal(receipts(f)[1].firstCheck.landedOn, 'admission-run');
-  assert.deepEqual(receipts(f)[1].crossHeadProof.identicalPaths, ['fixture/0']);
+  assert.deepEqual(receipts(f)[1].crossHeadProof.identicalPaths, ['src/shared.ts']);
   assert(validCrossHeadProof(receipts(f)[1].crossHeadProof));
   assert.equal(runCount(f), 2);
   const discardedMinutes = fixture =>
@@ -218,6 +226,34 @@ test('an identical complete tree carries the full admission pass outside pipelin
   assert.equal(second.check.runId, second.crossHeadProof.runId);
   assert.equal(runCount(f), 2);
 });
+
+for (const [path, reason] of [
+  ['package.json', 'global-risk'],
+  ['fixture/0', 'order-sensitive'],
+  ['.github/workflows/check.yml', 'order-sensitive'],
+])
+  test(`identical shared ${path} falls back to a real composed check before acceptance`, async t => {
+    const f = await wave(t, {
+      memberPaths: [
+        ['src/a.ts', path],
+        ['src/b.ts', path],
+      ],
+      memberContents: ['same', 'same'],
+      fileCount: 2,
+      noOwnerApproval: true,
+    });
+    assert.deepEqual(
+      states(f).map(s => s.phase),
+      ['landed', 'landed'],
+    );
+    assert.deepEqual(f.reuseDecisions, [reason]);
+    const second = receipts(f)[1];
+    assert.deepEqual(second.firstCheck, { landedOn: 'recheck', reason });
+    assert.equal(second.crossHeadProof, undefined);
+    assert.equal(runCount(f), 3, 'two admission runs and a real composed recheck');
+    const run = f.runs().find(run => run.id === second.check.runId);
+    assert.equal(run.request.expectedHead, second.candidate.head);
+  });
 
 // The reason class says which kind of risk it was (81d12a32): `order-sensitive` is never relaxed,
 // `global-risk` is what an earned fast landing mode carries.

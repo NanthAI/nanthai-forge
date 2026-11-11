@@ -38,6 +38,7 @@ This page lists the guards and says where the next one goes.
 | Token permissions | test | a GitHub App token permission change broke one path class the mirror pushes (708b6943: contents-only token got 403 on a `.github/workflows/` tree). A permission change must be tested against every path class | `tests/hosted-github-mirror-retry.test.mjs`, `tests/github-token-permissions.test.mjs` |
 | Forge-only rules | test | product code keys a fast path on Forge's own check, layout or npm lockfile (audit 1bb0d8e6: first-check reuse only for `scripts/forge-check.mjs`, 05df5aed). An ecosystem lockfile, folder or extension list outside the [ecosystem registry](ecosystems.md) fails too (9c0ece48). Hits are listed in [Forge-only rules](../forge-only-rules.md) | `tests/forge-only-rules.test.mjs` |
 | BYOCI parity | test | a landing fast path that works for Forge's check but not for a project's own command on a pnpm tree with a link and a submodule (05df5aed) | `tests/byoci-parity.test.mjs` |
+| Cross-head shared risk | test | identical-entry overlap removal also removed global/declared inputs and shared-folder risk (1018d0f8 review). Analysis and publication must judge the complete deltas; only an unchanged complete tree bypasses path risk | `tests/hosted-cross-head-reuse.test.mjs`, `tests/hosted-first-check-landing.test.mjs` |
 | Message mirror | test | the finish message dropped from the mirror commit (eacfdb6e, b30284de) | `tests/landing-message-mirror.test.mjs` |
 
 ## Test signal
