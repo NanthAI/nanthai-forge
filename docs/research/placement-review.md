@@ -380,9 +380,11 @@ and billed savings remain unverified while the old writer or flag remains.
 
 ### S5. State-bound physical manifest
 
-The source step that writes a State also writes its physical manifest: digest to binding (raw key, pack range or recipe), stored as a recipe that shares unchanged chunks with the parent's manifest. CI, clones and the source worker read it with one signed grant instead of descriptor windows.
+The source step that writes a State also writes its physical manifest: digest to binding (raw key, pack range or recipe), stored as a recipe that shares unchanged chunks with the parent's manifest. The source worker reads it directly instead of descriptor windows. CI and clones read the source pack, and every grant outside it is signed from the manifest ([bulk read grants](#s5-bulk-read-grants)).
 
-Done when: a cold 29k-file CI job reads under 100 KB from Convex in at most 3 calls (2,105,060 B and 11 today); source-worker descriptor calls per landing fall from about 41 to at most 5; no State write scans descriptors (reads are O(changed files), asserted); every object is still verified by hash and size; a missing or invalid manifest falls back to the catalog and says so; a point lookup of one digest, stored or not, reads at most about 1 KB on the guard's 402- and 1,387-descriptor fixtures once bulk readers use the manifest. Removes: descriptor rows for new blobs; the dense catalog pages for manifest-bound projects later. Risk: medium; this is the trusted incremental writer Issue 298f9675 left open.
+Done when: a 29k-file CI job on a fresh runner reads under 100 KB from Convex and receives under 100 KB of grants in at most 3 resolver calls, both with a source pack and up to 300 changed paths, and with no source pack on a State stored in packs (2,105,060 B read, 15,951,085 B of reply and 11 calls today without a pack); a State with neither takes the windowed path, says so, and its check run publishes the pack; no grant covers a byte outside the selected State (asserted, with a refusal test); source-worker descriptor calls per landing fall from about 41 to at most 5; no State write scans descriptors (reads are O(changed files), asserted); every object is still verified by hash and size; a missing or invalid manifest falls back to the catalog and says so; a point lookup of one digest, stored or not, reads at most about 1 KB on the guard's 402- and 1,387-descriptor fixtures once bulk readers use the manifest. Removes: descriptor rows for new blobs; the dense catalog pages for manifest-bound projects later. Risk: medium; this is the trusted incremental writer Issue 298f9675 left open.
+
+The design review amended the first line and added the authority line. The original first line asked for under 100 KB on any cold job. 29,002 separately signed objects need at least 928 KB of signatures, so the line now names the two shapes a bulk reader meets after this slice and bounds the reply as well as the database read.
 
 #### S5 delivery boundary: bindings and download authority
 
@@ -436,34 +438,139 @@ sparse packed-descriptor guards still read 48,542/48,919 B for a stored full-pag
 lookup at 402/1,387 descriptors, against raw rows of 470/471 B. The S5 sparse target
 is therefore still unmet; dense pages must remain until bulk-reader cutover.
 
-**Implementation stops at this delivery-design evidence under the builder decision
-rules.** No reader format, default-off writer, capability gate, data migration or
-source access change is introduced. All six S5 acceptance lines remain open.
-The trusted source action already has server-side signing authority and can use
-R2 bindings without descriptor windows; external CI/clone readers cannot inherit
-that credential. The lead design review needs to select their delivery mechanism
-before the shared stored format is implemented. The cheapest alternative to
-investigate within the existing stack is an authorized per-job signed binding
-bundle in R2, generated after current access checks. It must account for O(files)
-signing, an additional job object and roughly the measured URL/reply bytes per
-cold job. Its creation, refresh and lifecycle are additional design work beyond
-the specified State manifest; their budget and retention treatment need lead
-review, rather than an assumption that the extra object is allowed or forbidden.
-The first parent without a physical manifest also needs a seeding decision:
-its flat State contains logical hashes, not the catalog's pack ranges or recipe
-bindings. Scanning those descriptors inside an ordinary one-file State write
-would fail the O(changed-files) requirement; skipping the manifest would leave
-that writer path incomplete. This diagnostic adds neither a scan nor a seed job.
-A scoped multi-key credential needs a separate authority design; a byte proxy
-adds a request path per body; requiring an existing source pack only covers warm
-jobs. None of these alternatives is enabled or accepted by this evidence.
+The diagnostic landing merged grant and reply accounting into the existing CI cost
+guard and changed no runtime path. The trusted source action already has signing
+authority and needs only the bindings; external readers need the decision below.
 
-This diagnostic change merges grant/reply accounting into the existing CI cost
-guard; it adds no runtime module, table, setting, service or idle work and removes
-no catalog fallback. Further runtime work still needs reader-first expansion,
-a separately landed default-off writer, capability fencing, O(changed-file)
-descriptor-read guards, exact hash/size verification, explicit fallback evidence,
-unchanged peak memory and real billed/byte-placement measurements.
+#### S5 bulk read grants
+
+**Decision.** Bulk reads are pack reads, and the five-minute exact-key GET stays the
+only read authority. Forge adds no credential type, proxy, service or job object. A
+runner or clone reads the project's [source pack](../operations/github-actions-checks.md#forge-source-packs)
+and then only the files the pack lacks. Every grant outside the pack is signed from the
+State's physical manifest as a **run**: one signed byte range over objects of that State
+that sit back to back in one stored pack, or one whole raw object. Imports and client
+uploads already store small files in packs of at most 1,000 files or 8 MiB, so a
+29,000-file State with no source pack needs about 30 to 60 runs where it gets 29,002
+grants today (modelled from those window sizes).
+
+**Why the other candidates fail.**
+
+- _Compact grants (one signature over a key list)._ R2 checks one signature per request,
+  and a signature is 32 bytes. 29,002 separately signed objects need at least 928 KB in
+  any encoding, so under 100 KB needs fewer physical reads, a wider credential or a
+  verifier in front of R2.
+- _Anything that keeps one read per file._ 29,002 Class B reads cost $0.0104 a job, five
+  times the $0.002 landing target, at zero Convex bytes. This rules out the next three
+  on cost before authority is considered.
+- _R2 temporary credentials._ Cloudflare documents them as bearer credentials for one
+  bucket, limited to key prefixes or exact keys and optionally to named actions, issued
+  by API or by a locally signed token, and revoked only with their parent key (read on
+  11 November 2026, not tested). Objects are content-addressed under one
+  `v1/p/<project>/o/` prefix shared by every State, Lane and history pack. A prefix is
+  the whole project store, and a State is a set of keys, never a prefix. Rejected: wider
+  than one State, R2-only, and a bearer key on a machine that runs project code.
+- _The Git byte Worker with a manifest-bound token._ The Worker is optional, holds no
+  secret and is built to fit Workers Free. It would need a verification key or a backend call
+  for each plan of at most 900 objects (33 calls at 29k, more than the 11 today).
+  Rejected; it stays a Git transport.
+- _A per-job signed bundle in R2._ It moves the 12 MB of URLs and the O(files) signing
+  into an action without removing either. Rejected.
+
+**Authority.** Today `projectHostedActionsSource:resolve` signs any stored digest of the
+project once the session passes; it does not check that the digest belongs to the run's
+States. The manifest signer is narrower. It takes one State the caller may read (for a
+runner: the run's Candidate, base, recheck and pack States; for a client: a State that
+current access allows) with a digest list or `all`, signs only members of that State's
+manifest, and refuses any other digest with `SOURCE_UNAVAILABLE`. A run holds exactly
+its members' bytes and never a neighbour's (the rule `packRuns` already applies for
+clients). The source pack grant covers one object whose inventory readers check against
+the hash-verified State. The source worker signs for itself and reads the manifest
+directly, so it needs no grant. Grants stay five-minute exact-key SigV4 GETs with the
+range signed; the presigner guard is unchanged.
+
+**What Convex returns.** The session reply carries the pack pin and one URL, as now. One
+resolver call returns the State bodies and, for a reader with no pack, the manifest's
+chunk grants. One more returns run grants: per-digest descriptors for a delta, runs only
+for `all`, because the reader maps files to runs from the manifest it fetched and checked
+against its pin. Convex reads the State rows and manifest pins, never one descriptor per
+file. The HTTP action fetches the manifest chunks it needs from R2 before signing.
+
+| 29k-file job, fresh runner                                | Resolver calls | DB read | Grants | Reply and Convex egress        | R2 reads                     |
+| --------------------------------------------------------- | -------------: | ------: | -----: | ------------------------------ | ---------------------------- |
+| Today, no pack (measured, fixture)                        |             11 | 2.11 MB | 29,002 | 15.95 MB, $0.0019              | 29,002, $0.0104              |
+| After, pack and 20 changed blobs (modelled)               |              2 | < 10 KB |   ~ 30 | ~ 17 KB, $0.000002             | ~ 30                         |
+| After, no pack, State stored in packs (modelled)          |              2 | < 10 KB |  ≤ 130 | ~ 50 to 60 KB, $0.000007       | ≤ 130                        |
+| After, no pack and every object raw: windowed, one time   |             11 | 2.11 MB | 29,002 | 15.95 MB, $0.0019              | 29,002, $0.0104              |
+
+Today's job costs about $0.0128 at list prices ($0.12 per GB of egress, $0.20 per GB
+read, $0.36 per million Class B), 6.4 times the landing target; the reply is 15% of it
+and the R2 reads 82%. The last row is today's path kept as the named fallback: that check
+run publishes the pack, so the next job takes the second row. The modelled DB reads
+assume a State row and its manifest pin read at about 1 KB; on dense pages one State
+lookup reads up to 48.9 KB, so the pins must sit in a slim row. Reply bytes exclude the
+HTTP envelope. No row is a billed reading.
+
+**Fetch and verify.** Unchanged in substance. Each State is hashed against its pin; the
+manifest is hashed against the pin stored beside the State before the signer or a reader
+uses it; every object is hashed and sized against the State, whichever pack, run or raw
+key supplied it; a ranged reply must carry the exact `content-range`
+(`verifyPackRange`); the final tree is hashed file by file. A wrong binding can therefore
+never supply different source. It could widen a run, which is why only the trusted
+source step writes manifests and the signer checks the chunk hashes first.
+
+**Legacy seeding.** A State write extends the manifest of an input that has one: the
+parent for a save, main's side for a sync or compose. With no such input it writes no
+manifest and never scans (asserted O(changed files)); readers of that State use the
+catalog and say so. The first manifest of a project is a separate **seed step** inside
+the first compose that meets a main without one. It reads the catalog once in digest
+order, the bulk pass dense pages are good at (2.1 MB in 11 windows at 29k, measured on
+the fixture), writes the manifest and pins it on that main State. The output is
+deterministic and keyed by the State pin, so racing composes agree and a retry
+reconciles. Every later accepted State descends from a compose that extended it, so the
+step runs once per project and not on ordinary State writes: this is the slice's one
+budgeted one-shot. It needs no user step, covers imports, client seeds and existing
+projects alike, and costs nothing while a project is idle. An open Lane picks the
+manifest up at its next sync.
+
+**Size bounds.** The encoding must meet three budgets at 29k files, each a ratchet in the
+guard: a reader fetches a whole manifest with at most 64 grants; a State write that
+changes up to 8 files uploads at most 150 KB of manifest in at most 4 PUTs; a lookup of
+k digests reads at most k + 1 chunks. The PUTs count against the S7 Class A ratchet of
+80 a landing. The signer holds one entry per file for `all`; its peak memory at 29k and
+100k files is **unmeasured** and must be stated before the setting is enabled. Run
+count grows with the files changed since they were packed, at worst one per file, and
+the source pack is the compaction that resets it. Trees over the pack bounds (300 MiB
+packed, 1 GiB, 32 MiB a file) have no pack and read by runs alone; a segmented pack for
+them is outside S5.
+
+**Rollout order.** Expand, then contract, one landing each.
+
+1. Guards only: add a pack-shaped 29k fixture and a pack-present 29k fixture to the cold
+   job guard, and record today's calls, DB bytes, grants and reply bytes for both.
+2. Readers: runners use the run reader clones already have; the CI resolver signs runs
+   for runners that advertise the capability (the existing Actions capability list).
+   This alone cuts grants on packed States, with no stored format change.
+3. Readers accept a pinned manifest or the catalog, and log which one served them.
+4. Writer behind a default-off project setting: the seed step, then extend-only writes.
+5. Signer reads the manifest for pinned States; a missing or invalid one falls back to
+   the catalog and says so. The lead enables it on dev and reads billed usage and byte
+   placement.
+6. Contract: manifest-bound projects stop writing descriptor rows for new blobs, point
+   rows are reshaped for the 1 KB lookup, and runners and clients without the capability
+   get `CLI_UPGRADE_REQUIRED`.
+
+**Guards that change.** The cold job guard in `tests/hosted-actions-direct.test.mjs`
+keeps today's raw fixture as the named one-time fallback ratchet and gains the two
+shapes with the 100 KB and 3-call bounds. New: a refusal test for a digest outside the
+selected State; an O(changed files) descriptor-read assertion on save, sync and compose
+with the seed step counted apart and at most once per State; the three manifest budgets.
+Unchanged: the presigner key and header binding, the source pack reservation bounds,
+hash and size checks, idle zero. No table, public error code, agent action or CLI
+command is added: the pin lives in a slim row beside the State's generation and parents,
+and the setting and capability reuse the existing mechanisms. **Merges:** the CI resolver's
+per-member signing into the run signer clients already use. **Removes,** at step 6: the
+O(files) grant reply for packed States and descriptor rows for new blobs.
 
 ### S6. One source job per landing attempt
 
