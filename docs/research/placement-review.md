@@ -428,9 +428,9 @@ It removes per-file rows from onboarding, two build phases and the uncalled `pro
 
 The source step that writes a State also writes its physical manifest: digest to binding (raw key, pack range or recipe), stored as a recipe that shares unchanged chunks with the parent's manifest. The source worker reads it directly instead of descriptor windows. CI and clones read the source pack, and every grant outside it is signed from the manifest ([bulk read grants](#s5-bulk-read-grants)).
 
-Done when: a 29k-file CI job on a fresh runner reads under 100 KB from Convex and receives under 100 KB of grants in at most 3 resolver calls, both with a source pack and up to 300 changed paths, and with no source pack on a State stored in compact packs of at most about 130 runs (2,105,060 B read, 15,951,085 B of reply and 11 calls today without a pack); an all-raw or fragmented packed State takes the one-time windowed path, says so, its check run publishes the pack and the following job takes the source-pack path; no grant covers a byte outside the selected State (asserted, with a refusal test); source-worker descriptor calls per landing fall from about 41 to at most 5; no State write scans descriptors (reads are O(changed files), asserted); every object is still verified by hash and size; a missing or invalid manifest falls back to the catalog and says so; a point lookup of one digest, stored or not, reads at most about 1 KB on the guard's 402- and 1,387-descriptor fixtures once bulk readers use the manifest. Removes: descriptor rows for new blobs; the dense catalog pages for manifest-bound projects later. Risk: medium; this is the trusted incremental writer Issue 298f9675 left open.
+Done when: a 29k-file CI job on a fresh runner reads under 100 KB from Convex and receives under 100 KB of grants in at most 3 resolver calls, both with a source pack and up to 300 changed paths, and with no source pack on a State stored in compact packs of at most about 130 runs (2,105,060 B read, 15,951,085 B of reply and 11 calls today without a pack); an all-raw or fragmented packed State takes the one-time windowed path, says so, its check run publishes the pack and the following job takes the source-pack path; no content grant covers a byte outside the selected State, and a metadata grant stays inside the selected State's own manifest lineage (asserted, with refusal tests); source-worker descriptor calls per landing fall from about 41 to at most 5; no State write scans descriptors (reads are O(changed files), asserted); every object is still verified by hash and size; a missing or invalid manifest falls back to the catalog and says so; a point lookup of one digest, stored or not, reads at most about 1 KB on the guard's 402- and 1,387-descriptor fixtures once bulk readers use the manifest. Removes: descriptor rows for new blobs; the dense catalog pages for manifest-bound projects later. Risk: medium; this is the trusted incremental writer Issue 298f9675 left open.
 
-The design review amended the first line and added the authority line. The original first line asked for under 100 KB on any cold job. 29,002 separately signed objects need at least 928 KB of signatures, so the line now names the two shapes a bulk reader meets after this slice and bounds the reply as well as the database read.
+The design review amended the first line and added the authority line. The original first line asked for under 100 KB on any cold job. 29,002 separately signed objects need at least 928 KB of signatures, so the line now names the two shapes a bulk reader meets after this slice and bounds the reply as well as the database read. The layout review then split the authority line into file contents (exact, unchanged) and manifest metadata ([S5 metadata layout](#s5-metadata-layout)).
 
 #### S5 delivery boundary: bindings and download authority
 
@@ -533,7 +533,8 @@ its members' bytes and never a neighbour's (the rule `packRuns` already applies 
 clients). The source pack grant covers one object whose inventory readers check against
 the hash-verified State. The source worker signs for itself and reads the manifest
 directly, so it needs no grant. Grants stay five-minute exact-key SigV4 GETs with the
-range signed; the presigner guard is unchanged.
+range signed; the presigner guard is unchanged. This exactness is about file contents. Grants on
+the manifest's own packs follow the [metadata layout](#s5-metadata-layout).
 
 **What Convex returns.** The session reply carries the pack pin and one URL, as now. One
 resolver call returns the State bodies and, for a reader with no pack, the manifest's
@@ -656,8 +657,9 @@ manifest up at its next sync.
 **Size bounds.** The encoding must meet three budgets at 29k files, each a ratchet in the
 guard: a reader fetches a whole manifest with at most 64 grants; a State write that
 changes up to 8 files uploads at most 150 KB of manifest in at most 4 PUTs; a lookup of
-k digests reads at most k + 1 chunks. The PUTs count against the S7 Class A ratchet of
-80 a landing. The signer streams verified buckets into physical interval groups for `all`.
+k digests reads at most k + 1 chunks. The [metadata layout](#s5-metadata-layout) makes all
+three hold after any history and restates the upload budget above 29k files. The PUTs count
+against the S7 Class A ratchet of 80 a landing. The signer streams verified buckets into physical interval groups for `all`.
 A paired fresh-process fixture including identical fixture construction, current
 run authorization, R2 manifest fetch and signing observes peak RSS of 386,236,416 B
 versus 600,375,296 B for the catalog path at 29k files, and 534,364,160 B versus
@@ -698,10 +700,10 @@ before the 47,305 B changed pack or root. This is evidence against root-only and
 one-write repack fixes, not an impossibility proof for a redesigned layout.
 `physical-manifest-v2.test.mjs` guards all 1,024 chunks, k+1 point reads and the
 unchanged refusal to produce an oversized grant plan. It does **not** count that
-refusal as satisfying the whole-plan or writer bounds. The selected continuation
-is FPR2, a one-time fragmented-metadata rebuild at compose, and size-tiered packs
-with merges only at compose. That strategy remains unqualified for the reason
-below; no wider credential, extra job, skipped root, raised bound or catalog deletion is applied.
+refusal as satisfying the whole-plan or writer bounds. The continuation chosen at
+this point (FPR2, a one-time fragmented-metadata rebuild at compose, and size-tiered
+packs merged only at compose) failed for the reason below. FPR2 stays; the rebuild and
+the merges are replaced by the [metadata layout](#s5-metadata-layout).
 These are synthetic body/signing measurements, not billed usage or live latency.
 The full runtime still keeps complete descriptor fallback and the writer off.
 
@@ -736,10 +738,10 @@ no compose occurs. This is a local prototype, not the runtime writer or billed
 qualification. Peak process RSS is 459,259,904 B for that single exploratory run.
 
 Compose-only tier merges cannot repair an allowed save-only chain, even when
-the fourth new pack fills a tier. Before writer switching or retirement, the
-lead must resolve this boundary while preserving ordinary save/sync capability,
-the 64-grant bound and exact ranges. No restriction on saves, merge during saves,
-grant across holes, skipped manifest or alternate layout is selected here.
+the fourth new pack fills a tier. No layout can: a save replaces buckets chosen by
+content hash, so every eight-file save leaves 16 new holes wherever the old buckets
+sit. The [metadata layout](#s5-metadata-layout) settles which of the three demands
+gives way (exact metadata ranges) and why.
 
 **Rollout order.** Expand, then contract, one landing each.
 
@@ -749,13 +751,18 @@ grant across holes, skipped manifest or alternate layout is selected here.
    for runners that advertise the capability (the existing Actions capability list).
    This alone cuts grants on packed States, with no stored format change.
 3. Readers accept a pinned manifest or the catalog, and log which one served them.
-4. Writer behind a default-off project setting: the seed step, then extend-only writes.
+4. Metadata plan: the signer grants one covering range per metadata key
+   ([metadata layout](#s5-metadata-layout), builder lines 1 to 3). Readers already on main
+   accept it unchanged. Then the writer behind its default-off project setting: the seed
+   step, then capped-pack writes (builder lines 4 to 9). Two landings, plan first.
 5. Signer reads the manifest for pinned States; a missing or invalid one falls back to
    the catalog and says so. The lead enables it on dev and reads billed usage and byte
    placement.
 6. Contract: manifest-bound projects stop writing descriptor rows for new blobs, point
    rows are reshaped for the 1 KB lookup, and runners and clients without the capability
-   get `CLI_UPGRADE_REQUIRED`.
+   get `CLI_UPGRADE_REQUIRED`. The same contract closes the runner's any-digest resolver
+   (a security condition of the metadata layout) and keeps every metadata pack that a
+   retained State root names.
 
 **Guards that change.** The cold job guard in `tests/hosted-actions-direct.test.mjs`
 keeps today's raw fixture as the named one-time fallback ratchet and gains the two
@@ -768,6 +775,129 @@ command is added: the pin lives in a slim row beside the State's generation and 
 and the setting and capability reuse the existing mechanisms. **Merges:** the CI resolver's
 per-member signing into the run signer clients already use. **Removes,** at step 6: the
 O(files) grant reply for packed States and descriptor rows for new blobs.
+The metadata layout changes two guards and adds one: `physical-manifest-history.test.mjs`
+stops refusing the fourth save's plan and expects 6 grants; `physical-manifest-v2.test.mjs`
+keeps refusing the 1,024-key root; a new 2,000-save chain guard asserts builder line 10.
+
+#### S5 metadata layout
+
+**Decision.** Two rules, and no stored-format change: FPR2 roots and FPM1/FPM2 buckets stay as the readers on main parse them.
+
+1. **Writer: capped packs.** A State's manifest names at most 63 metadata packs. A write puts its changed buckets into one new pack, as today. When the parent's surviving packs plus the new one would exceed 63, the pack that holds the fewest live bytes moves its live buckets, byte for byte, into the new pack and leaves the root. Among 63 packs the emptiest holds at most one 63rd of the manifest, so the carry is bounded on every write. There is no rebuild, no merge step and no dependence on compose: a save-only chain of any length stays inside the bounds.
+2. **Grants: one range per pack.** A whole read gets the root plus one signed range per metadata pack, from its first live bucket to its last: at most 64 grants after any history. Such a range can include superseded buckets that lie between live ones. File contents keep exact ranges.
+
+**Why one demand had to give.** Buckets are chosen by content hash, so an eight-file save replaces 16 buckets spread evenly over the manifest and leaves 16 holes wherever the old ones sit. Exact ranges, at most 64 grants and writes in proportion to the change cannot all hold on immutable objects:
+
+- Exact ranges and 64 grants: the manifest must be rewritten every fourth save (measured: 18, 35, 50, 66 grants). That is about 590 KB a save at 29k files with a 2.1 MB write every fourth save (modelled from the measured 2,125,616 B rebuild and 75 KB ordinary write).
+- Exact ranges and small writes: 476 exact grants on the ordinary chain below and 535 on the stress mix (measured), 1,025 at worst. At 273 B a grant that is 130 to 280 KB of reply, over the 100 KB reply bound, and one R2 read each.
+- Small writes and 64 grants: this decision. The price is that a reader of a State also receives superseded bucket lists of that State's own ancestors.
+
+**The bounds after this decision.**
+
+| Bound | Verdict | Basis |
+| --- | --- | --- |
+| No content grant covers a byte outside the selected State | Kept, unchanged | It is the security line. File bodies are what must not leak. |
+| Exact ranges for manifest metadata | Replaced: a metadata grant stays inside the packs named by the selected root, between the first and last live bucket of each | See the security verdict. A bucket holds digests, sizes and storage positions, never a path or a content byte. |
+| At most 64 grants for a whole read | Kept, now by construction (63 packs and the root) | A grant is about 273 B of reply and one Class B read: 64 are about 17.5 KB and $0.000023. |
+| At most 150 KB uploaded for an 8-file save | Kept at 29k files for every write. Above that it becomes a formula: root, plus the changed buckets, plus one 63rd of the manifest | The cost is Convex egress on the PUT ($0.12 per GB; R2 ingress is free): 150 KB is $0.000018. With 1,024 buckets no layout meets 150 KB at 100k files: 16 buckets and the root alone are 155,086 B (measured mean with no carry). |
+| At most 4 PUTs a State write | Kept | 2 measured; one more only per 16 MiB of new pack. |
+| k + 1 chunk reads for k digests | Kept | The format is unchanged. |
+| Writes read O(changed files), no descriptor scan | Kept | Carried buckets are copied from hash-checked parent chunks: 8 descriptor reads for 8 new files (measured). |
+| At most 5 descriptor calls a landing; cold job under 100 KB in at most 3 calls; Convex grows only with open work | Kept, untouched | No Convex call, row or read is added; idle stays zero. |
+
+**Measured.** A private prototype of the writer runs on the accepted codecs, and every 100th State is read back whole through the accepted client reader (`downloadPhysicalManifest`) with one covering grant per pack: every member present, removed members absent. Fixtures are synthetic and the object store is in memory. These are body and count measurements, not billed usage or latency.
+
+| Chain | Writes | Grants, every write | Upload per 8-file save | Carry | Whole read | Exact ranges would need |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 29k files from a seed, 8-file saves, no compose | 2,000 | at most 64 | max 100,592 B, mean 93,482 B, 2 PUTs | mean 17,059 B, max 20,916 B | at most 64 reads; 3.1 MB steady, 5.0 MB at peak | up to 476 |
+| 29k files from the 1,024-pack shape | 2,000 | at most 64 from write 43 | max 138,918 B | max 33,041 B | 3.4 MB at peak | 984 at the start |
+| 29k files, stress mix (1 to 29,000 files a write; adds, deletes, renames) | 2,000 | at most 63 | max 79,391 B (8-file saves) | none needed | 9.5 MB at peak | up to 535 |
+| 29k files, nonce bindings in every bucket | 400 | at most 64 | max 94,401 B | max 18,430 B | 4.5 MB at peak | up to 476 |
+| 100k files from a seed, 8-file saves | 2,000 | at most 64 | max 234,473 B, mean 214,964 B, 2 PUTs | mean 59,303 B, max 73,762 B | 11.1 MB mean, 17.0 MB at peak | up to 475 |
+| 100k files, stress mix | 1,000 | at most 58 | mean 155,086 B, max 163,853 B | none needed | 33.0 MB at peak | up to 492 |
+
+- Seed (the existing one-shot): 2,125,616 B at 29k and 7,215,275 B at 100k, 2 PUTs.
+- No write exceeded root plus changed buckets plus one 63rd of the parent manifest, in any chain.
+- Per save the writer reads the root, 16 changed buckets and at most 11 carried ones: at most 18 R2 reads. With today's whole-key reads that is 0.97 MB a save on average at 29k (2.9 MB at most) and 3.2 MB at 100k (10.0 MB at most); with ranged reads it would be 0.24 MB and 0.72 MB. R2 does not charge for these bytes.
+- The whole-read peak is the seed pack draining: it is 2.4 times the live manifest until the seed pack empties (about save 300 at 29k), then about 1.5 times. The stress mix reached 4.5 times. This multiple has no hard cap; see unverified.
+- The 1,024-pack shape exists only as output of the earlier default-off writer. It converges with the same rule and budget, with no rebuild. Until write 43 its plans are refused and take the named fallback, as today. Its worst single write, the earlier probe's 16 largest buckets, uploads 155,243 B once (a 76,585 B parent root); every other write in that chain is under 150,000 B.
+
+**Cost (modelled at list prices, three State writes a landing: save, sync, compose).**
+
+| | 29k files | 100k files |
+| --- | ---: | ---: |
+| Upload per State write (measured mean) | 93,482 B | 214,964 B |
+| Convex egress per landing | $0.000034, 1.7% of the $0.002 target | $0.000077, 3.9% |
+| Of which the carry | $0.000006 | $0.000021 |
+| R2 per State write | 2 Class A ($0.000009), at most 18 Class B ($0.0000065) | the same |
+| R2 storage added per 1,000 landings | 0.28 GB, $0.0042 a month | 0.64 GB, $0.0097 a month |
+| Cold whole read (no source pack) | at most 64 Class B ($0.000023), about 17.5 KB of grants, 3.1 to 5.0 MB from R2 | the same counts, 11 to 17 MB from R2 |
+
+Convex calls, rows and DB reads added on the healthy landing path: zero. Idle: zero.
+
+**Security verdict: acceptable, with five conditions.**
+
+What a superseded bucket holds: for about 28 files at 29k, the SHA-256 of each file's content, its size and where its bytes are stored (pack digest and offset, recipe hash, maintenance nonce). No path and no content.
+
+Whose buckets: only those of States in the selected State's own manifest lineage, the chain of manifests it was extended from. The writer reuses or copies only chunks of the one parent root it extends, after checking their hashes. Sync and compose extend main's side, so a Lane's intermediate saves never enter the lineage of an accepted State.
+
+Who receives them: readers who are already granted the whole selected State. A client with project access can already read every registered State and sign any committed digest of the project (`signDownloads`), so it learns nothing new. A runner is limited to its run's States, so it does learn something new: digests, sizes and positions of files that main held earlier and the run's States no longer hold. The State-bound signer still refuses to sign those digests. This is narrower than Git hosting practice, where any reader can fetch any reachable object and a pack carries unrelated history.
+
+Per-path trust (Issue 7f085ec9) is a landing-gate score per path and actor, not a read permission, so it adds no reader who sees part of a State. If path-scoped reading ever exists, that reader cannot be given the manifest at all, with or without superseded buckets: the live buckets already list every file's digest and size.
+
+Conditions, each asserted by a test:
+
+1. Content grants stay exact (the existing refusal test, unchanged).
+2. A metadata plan names only keys in the selected root, one range per key, never starting before the first live bucket or ending after the last, and is refused above 64 grants.
+3. Lineage: a file saved in a Lane and removed before landing appears in no pack reachable from an accepted State.
+4. Readers parse only root-listed chunks, each checked against its hash; bytes between them are never decoded (existing behaviour).
+5. A reader not entitled to the whole selected State receives no metadata plan; it is served per digest by the server.
+
+The security assessment (Issue a31ea521) must check:
+
+- The runner's any-digest resolver (`projectHostedActionsSource:resolve`). While it exists, a runner that learns an old digest can fetch that file. Stage 6 closes it; until then the exposure is the resolver's, not the layout's, but the layout supplies digests.
+- Purge, redaction or expiry. Whenever an ancestor State or a file becomes unreadable to readers of its descendants, the metadata packs written for it must be rewritten or retired too, superseded buckets included.
+- A content digest as a guessing oracle for low-entropy files that were removed.
+- Lineage isolation across Lanes, Candidates and imports; and on public projects, that nothing member-only sits in a public State's lineage.
+- That a storage position or nonce in a bucket grants nothing without a signature.
+- Bucket stuffing: a writer can choose file contents whose digests fall in chosen buckets and make those buckets, and so that project's own writes, large (measured: up to 936,695 B a save after 2,000 aimed saves). It cannot raise the grant count.
+
+If the assessment wants no readable superseded byte at all, the upgrade is to encrypt each bucket under a key derived from its content and carried in the root. The layout and the grant count stay as decided; it needs a new format version and readers first.
+
+**Rejected.**
+
+- Exact metadata ranges with a rewrite when ranges pass 64: about 590 KB a save at 29k, six times this design, with a 2.1 MB write every fourth save (modelled).
+- Exact metadata ranges with a higher grant bound: 476 to 1,025 grants, 130 to 280 KB of reply and as many R2 reads.
+- Size-tiered packs merged only at compose (the earlier continuation): fails on the fourth save of a save-only chain (measured).
+- Fold everything every 62 writes, as Delta Lake checkpoints do: about 34 KB a save on average against 17 KB here, and a 2.1 MB write at 29k or 7.2 MB at 100k on every 62nd save (modelled).
+- Size-tiered merges on every write, factor 4: about 13 keys, but about 88 KB of merge bytes a save against 17 KB here (modelled).
+- A rolling sweep by pack age: needs the age in the root, so a new format and a reader stage, and carries the full 33 KB on every write.
+- A cap of 32 packs: 121,990 B a save on average against 93,482 B (measured); it buys fewer reads on a rare path with more bytes on every write.
+- A second writer rule that also evacuates packs by dead bytes: 2.25 against 2.40 times at peak for a 112,044 B worst write (measured). Not worth a second rule.
+- Prolly trees, Merkle search trees, HAMTs: O(log n) node writes, but a whole read is one grant per node and a lookup is one read per level; new format.
+- One exact per-State snapshot object written on a cold read: a write on a read path, 2.1 MB (29k) or 7.2 MB (100k) of Convex egress per cold State, and a new object class to clean up.
+- The whole manifest rewritten on every save: one exact object and one grant, at 2.1 MB a save at 29k, 22 times the bytes.
+- Server-side compaction by multipart copy: parts must be megabytes; buckets are 2 to 7 KB (documented S3 limit, not tested on R2).
+- Scoped credentials, a Worker in front of R2 or signed cookies: rejected in [bulk read grants](#s5-bulk-read-grants); nothing here changes that.
+
+**Builder lines.** No design choice is left open.
+
+1. Constants: at most 63 metadata keys in a root; a metadata pack is at most 16 MiB (`packRunMaxBytes`).
+2. Plan, first landing. In `stateSourceReader.plan`, replace `physicalRuns(reader.root.chunks)` with covering runs: group the root's chunks by exact key (`physicalKey` of the pack digest and nonce, or of the chunk itself when it is its own object); emit one run per key from the lowest chunk offset to the highest chunk end, with the key's total size; a chunk that is its own object stays a raw run. Keep the refusal when runs plus the root exceed 64. Body runs still come from `physicalRuns` and stay exact. No client, runner, format or capability change: `downloadPhysicalManifest` already accepts these runs.
+3. Plan tests. `physical-manifest-history.test.mjs` expects 3, 4, 5 and 6 grants for its four saves and reads all members through `downloadPhysicalManifest`. `physical-manifest-v2.test.mjs` keeps refusing the 1,024-key root. Add security conditions 2 and 5 as refusal tests.
+4. Writer, second landing, behind the existing default-off setting. Inputs are the verified parent-State membership and the new membership. A bucket is changed when its sorted member digests differ; every other bucket reuses the parent's chunk pin as it is. Roots carry no membership fingerprints (FPR2). An FPR1 parent is extended the same way.
+5. Changed buckets are built as today: parent bindings for surviving members, descriptors only for digests the parent lacks, and a missing descriptor skips the writer as today.
+6. Carry. Group the unchanged parent chunks by exact key; a key's live bytes are the sum of its chunk sizes. The budget is the sum of all parent chunk sizes divided by 63, rounded up. While the remaining parent keys plus one exceed 63 (the one is the new pack; it counts when the write has a changed bucket or the parent already has more than 63 keys): take the key with the fewest live bytes, ties by smaller key string; stop if the carried bytes plus its live bytes exceed the budget; otherwise read its live chunks, check each hash, add them unchanged to the new pack and drop the key from the root.
+7. New pack: changed and carried chunks concatenated in bucket order, split only at 16 MiB. A write with no changed bucket and a parent within the cap writes the root alone.
+8. Seed: no parent, every bucket, the same pack rule. A parent with more than 63 keys uses the same loop and budget; it needs no rebuild step and no compose.
+9. Determinism: the output depends only on the parent root, the two memberships and the bindings, so a retry or a racing compose writes identical bytes.
+10. Guard, build-failing, one file. 2,000 eight-file saves at 29k from a seed with no compose: every write at most 64 grants under line 2, at most 150,000 B, 2 PUTs and 8 descriptor reads; every 100th State read whole through the client reader, every member present, removed members absent. The 1,024-key parent: at most 64 grants from write 43, and every write within root plus changed buckets plus the budget. 300 saves at 100k: at most 64 grants, every write within the same formula. Security condition 3 as its own case.
+11. Stage 5 is unchanged: the setting stays off until the lead enables it on dev and reads billed egress, R2 operations by class and byte placement.
+12. Stage 6 keeps its inventory and adds three lines: close or State-bind the runner's any-digest resolver; treat a metadata pack as live while any retained State root names it, in cleanup, export and restore, and copy it whole; drop the rebuild, the merge cap and the amortized merge budget from the qualification list.
+
+**Removes.** The compose rebuild, the size-tiered merges and their cap (decided earlier, never built); exact-range planning for metadata and its refusal on ordinary chains.
+
+**Unverified.** Billed egress, R2 operations and latency; action memory in a deployed isolate; a hard cap on whole-read bytes (measured 2.4 times live on ordinary chains and 4.5 on the stress mix; if one is wanted it is a writer-only rule with no format or reader change); metadata packs stored under nonce keys (the prototype covers nonce bindings inside buckets, not nonce-keyed metadata packs); real imported projects; the multipart-copy limit on R2.
 
 ### S6. One source job per landing attempt
 
