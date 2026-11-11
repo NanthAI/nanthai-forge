@@ -653,6 +653,18 @@
       "reason": "The queue throughput decision: runs per accepted landing at most 1.2 in the synthetic queue harness; check minutes follow runs. Live: 1.48 distinct runs per landing over 285 landings, 2026-11-08 to 11-10."
     },
     {
+      "id": "landing-runner-minutes",
+      "area": "Signed shard runner minutes of all checks in the six-landing fixture",
+      "measuredBy": "landing-fixture",
+      "metric": "runnerMinutes",
+      "unit": "min",
+      "value": 3.3333333333333335,
+      "floor": 0.01,
+      "source": "tests/landing-cost-guard.test.mjs, unchanged six-landing mix: five distinct check runs, two shards each, 120 synthetic signed seconds per shard (30 setup + 90 command). Total 20 runner minutes / 6 landings. Deterministic execution model, not provider billing or an elapsed-time benchmark.",
+      "issue": "685774ea",
+      "reason": "Check-run count alone misses wider shard fanout and repeated setup. The same orchestration now sums signed shard intervals; seeded third-shard and extra-setup regressions must fail without adding check runs. Provider bootstrap, optional pack refresh, audits outside this fixture and per-job minute rounding remain separate live evidence."
+    },
+    {
       "id": "landing-main-history-reads",
       "area": "whole-row reads of main's path history (projectHostedOverlapMain), per landing",
       "measuredBy": "landing-fixture",

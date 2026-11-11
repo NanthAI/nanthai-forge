@@ -43,7 +43,23 @@ const SOURCE = /^(projectConvexSource|projectHostedResolveChain:run)/;
 
 /** Counts every Convex execution and R2 request from now on: metered transactions (queries and
  * mutations), action executions (scheduled and nested), R2 requests by class and bytes put. */
-function meter(f) {
+function meter(f, { extraShard = false, extraSetupSeconds = 0 } = {}) {
+  // Signed synthetic runner usage, including job-side setup, makes shard fanout visible even
+  // when the number of check runs is unchanged. No wall-clock measurement or real sleep.
+  if (extraShard) f.rawChecks.setPlanOverrides({ shardCount: 3 });
+  f.rawChecks.pass = async run => {
+    for (let index = 0; index < run.plan.shardCount; index++)
+      await f.rawChecks.callback(
+        f.rawChecks.shard(run, index, 'passed', {
+          execution: {
+            startedAt: '2026-01-01T00:00:00.000Z',
+            endedAt: new Date(Date.UTC(2026, 0, 1) + (120 + extraSetupSeconds) * 1000).toISOString(),
+            seconds: 120 + extraSetupSeconds,
+          },
+        }),
+      );
+    return f.rawChecks.callback(f.rawChecks.complete(run));
+  };
   const from = f.counts.length,
     sourceFrom = f.metrics.convexSourceCalls.length,
     reuseFrom = f.reuseDecisions?.length ?? 0,
@@ -128,6 +144,12 @@ async function drain(f, m) {
 const stamped = f =>
   [...f.tables.projectHostedLandingRequests.values()].map(r => JSON.parse(r.value).counts ?? null);
 const runs = f => [...f.tables.projectHostedCheckRuns.values()].map(r => JSON.parse(r.value));
+const runnerMinutes = f =>
+  [...f.tables.projectHostedCheckShards.values()].reduce((sum, row) => {
+    const shard = JSON.parse(row.value);
+    assert(shard.execution, 'every completed fixture shard retains signed runner seconds');
+    return sum + shard.execution.seconds / 60;
+  }, 0);
 function assertRunMetrics(f) {
   for (const row of f.tables.projectHostedCheckRuns.values()) {
     const projection = [...f.tables.projectFinishReadRows.values()].find(
@@ -145,9 +167,9 @@ const landed = f =>
 
 /** One accepted-Candidate submission through check and acceptance; `moveMain` moves main during
  * the check, so it recomposes on a source job and checks again (the common dogfood case). */
-async function solo(t, { moveMain = false, extraQuery = false, durations = false } = {}) {
+async function solo(t, { moveMain = false, extraQuery = false, durations = false, ...runner } = {}) {
   const f = await finishFixture(t);
-  const m = meter(f);
+  const m = meter(f, runner);
   const state = await f.enqueue(
     f.request(),
     durations
@@ -181,15 +203,21 @@ async function solo(t, { moveMain = false, extraQuery = false, durations = false
   }
   assert.equal(landed(f), 1);
   assertRunMetrics(f);
-  return { landings: 1, checkRuns: runs(f).length, stamped: stamped(f), ...(await m.stop()) };
+  return {
+    landings: 1,
+    checkRuns: runs(f).length,
+    runnerMinutes: runnerMinutes(f),
+    stamped: stamped(f),
+    ...(await m.stop()),
+  };
 }
 /** Four queued landings composed and checked together under the default batching policy. */
-async function batch(t, { extraQuery = false } = {}) {
+async function batch(t, { extraQuery = false, ...runner } = {}) {
   const f = await batchesFixture(t, { count: 0, batching: 'default', batchMaxSize: null });
   const entries = [];
   for (let i = 0; i < 4; i++) entries.push(await f.add(i));
   // Measured after enqueue: Candidate composition and the four enqueue mutations are outside it.
-  const m = meter(f);
+  const m = meter(f, runner);
   const observers = [];
   for (const state of entries) {
     const observer = {};
@@ -217,7 +245,13 @@ async function batch(t, { extraQuery = false } = {}) {
   }
   assert.equal(landed(f), 4);
   assertRunMetrics(f);
-  return { landings: 4, checkRuns: f.runs().length, stamped: stamped(f), ...(await m.stop()) };
+  return {
+    landings: 4,
+    checkRuns: f.runs().length,
+    runnerMinutes: runnerMinutes(f),
+    stamped: stamped(f),
+    ...(await m.stop()),
+  };
 }
 
 /** The scripted mix in `costGuard.scenario`, per accepted landing. */
@@ -246,6 +280,7 @@ async function measureLandingCosts(t, options = {}) {
     r2ClassB: per('r2ClassB'),
     r2BytesPut: per('r2BytesPut'),
     checkRuns: per('checkRuns'),
+    runnerMinutes: per('runnerMinutes'),
     mainHistoryReads: per('mainHistoryReads'),
   };
   return { measured, scenarios, landings };
@@ -273,6 +308,20 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
     [],
     'a per-landing cost rose past its ledger threshold',
   );
+});
+
+test('runner-minute ledger rejects extra shard setup without an increase in check runs', async t => {
+  for (const options of [{ extraShard: true }, { extraSetupSeconds: 60 }]) {
+    const seeded = await measureLandingCosts(t, options);
+    assert.equal(seeded.measured.checkRuns, baseline.measured.checkRuns);
+    assert(seeded.measured.runnerMinutes > baseline.measured.runnerMinutes);
+    const verdict = judgeCosts(costs, costGuard, 'landing-fixture', seeded.measured).find(
+      v => v.metric === 'runnerMinutes',
+    );
+    assert(verdict, 'runner minutes must be judged by the existing fixture ledger');
+    assert.equal(verdict.status, 'fail', 'repeated setup or wider fanout must fail the landing check');
+    assert.match(verdict.message, /Decision it protects: Issue 685774ea/);
+  }
 });
 
 test('seeded regression: one extra query per landing fails the guard, naming the quantity, both values, the decision and the two ways out', async t => {

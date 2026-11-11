@@ -93,8 +93,11 @@ priced captured Convex usage at **$8.94 per 1,000 landings** in the driver,
 or **$8.69** in the lead journal, against the roughly **$2** target. The
 driver result is **4.47×** target, with maintenance, storage and R2 allocation
 still needed. [Main-race Issue 1018d0f8][race] records **5.02452 discarded
-runner-minutes** across ten smoke landings. Its fix landed, but the same smoke
-has not been re-measured after it.
+runner-minutes** across ten smoke landings. The retained post-fix dry smoke reports 56 / 81 billed CI minutes (ratio 0.691)
+and 0.57458 discarded command runner min/landing, versus 0.50245 before.
+The [N=3 attribution](ci-minute-attribution.md) separates setup, selection,
+rechecks, workload and missing historical evidence; these dry observations
+do not prove a causal saving.
 
 The **2026-11-09 N=10 real-agent attempt was void**: a deploy changed the
 landing path mid-cell ([8c9b84fc][exit], comments `cf376b87` and `acdbee8b`).

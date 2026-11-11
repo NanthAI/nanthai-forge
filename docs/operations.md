@@ -1180,7 +1180,11 @@ latest live dollars per 1,000 landings by family (`reference`, for reading only)
 **Reading the numbers.** Values are per accepted landing of a fixed fixture mix: one solo
 accepted-Candidate submission (initial save/compose excluded), one whose main moves during its check (recompose on a source job, second check) and a
 batch of four. They count queries, mutations, V8 and Node action executions, database bytes read and
-written, R2 class A (PUT) and class B (GET, HEAD) requests, R2 bytes put and check runs. Action
+written, R2 class A (PUT) and class B (GET, HEAD) requests, R2 bytes put, check runs and
+signed synthetic shard runner minutes. The runner-minute guard detects extra shard fanout
+or repeated setup even at unchanged run count; it models 120 seconds per shard, not live
+provider billing. See [N=3 CI attribution](research/ci-minute-attribution.md) for the
+separate setup, command, audit and rounding measurements. Action
 GB-seconds are modeled: executions by runtime times memory times the nominal durations in
 `costGuard.actionModel`. Two snapshot entries count Convex calls and R2 uploads per changed
 snapshot. Three planning entries count agent Convex calls per Issue put and per comment, and the Work
