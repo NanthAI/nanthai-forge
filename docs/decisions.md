@@ -112,8 +112,10 @@ the callback window. The **$2 per 1,000 landings** target covers Convex operatio
 R2 operations and amortized recurring maintenance; retained storage is reported
 beside it. On 11 November the owner approved **$5/month Workers Paid only if
 S8a passes its kill rule locally**. S8a stopped Option B at 102.74 MB against
-the 100 MB gate; the Fable verdict on whether that stands is pending on
-S8a (9e4ba8c6). [Advisory windows](#advisory-windows) are decided. The R2
+the 100 MB gate, and Fable's verdict (9e4ba8c6) confirms it: Option B is closed,
+Workers Paid is not bought, and the owner closed S8b (80f9bfe4) as won't-do. The
+reopen triggers are in the [placement review](research/placement-review.md).
+[Advisory windows](#advisory-windows) are decided. The R2
 metrics read was approved through a read-only analytics credential and
 performed (S0 comment 1eb0c8dc).
 
