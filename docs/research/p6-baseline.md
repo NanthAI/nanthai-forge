@@ -152,6 +152,13 @@ attribution still open on [8c4f126b][storage]. Many import walls included
 **500–6,000 s** of GitHub rate-reset waits ([ed088358][imports]); functional
 passes do not erase those waits.
 
+The [retained prep decomposition](workspace-prep.md) locates most of the
+increase in Lane open: smoke a1/a2 midpoint medians are 19.803/19.372 s,
+with higher load and lower free RAM than B1.5d. Historical CLI startup,
+prep-attributed calls and swap are not retained; a causal regression and a
+return to the 16.83 s acceptance bar remain unproven. The a2 GitHub prep
+median is 10.066 s, leaving 9.306 s owned by [a245bcf0][prep-gap].
+
 The prep regression ([c83c4451][prep]) and reduced CI-minute saving
 ([685774ea][ci]) remain open explanations for the next smoke/bench. Scripted
 agents omit failing model iterations that inflated GitHub's B1.5d minutes;
