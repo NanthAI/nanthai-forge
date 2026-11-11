@@ -7,6 +7,7 @@ import type { FunctionReference } from 'convex/server';
 import { ForgeError, invariant } from './errors.js';
 
 export interface CoordinationTransport {
+  action?(reference: FunctionReference<'action'>, args: Record<string, unknown>): Promise<unknown>;
   query(reference: FunctionReference<'query'>, args: Record<string, unknown>): Promise<unknown>;
   mutation(reference: FunctionReference<'mutation'>, args: Record<string, unknown>): Promise<unknown>;
 }

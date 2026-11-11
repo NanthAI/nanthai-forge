@@ -2161,3 +2161,16 @@ When GitHub advances, sync checks that its net changes are contained in accepted
 An exact historical version (including mode or absence) can supply a per-path base. Sync reads the pinned acceptance interval after the mapped base in pages, plus saved checkpoints ancestral to accepted Lane inputs; it excludes unaccepted saves, older versions and older branches. Dry-run records State/acceptance/Candidate pins in `reconciliation.historyProofs`, plus Lane/checkpoint pins for saves. Squash merges, merge commits and empty changes use this same check.
 
 Containment proposes one new adoption commit with current GitHub as parent and the exact exported main tree. Earlier mappings and history remain intact; subsequent syncs continue from this adoption. Dry-run reports `reconciliation.status: "contained"`, external commit IDs/paths and the proposal. Only `--push` changes Work metadata.
+
+
+Work journal history readers accept verified private R2 segments alongside live
+rows. A dedicated `projectJournalSegments` index retains revision ranges, scoped
+coordination positions, immutable record hashes, Lane source pins and metric
+facts. Exact versions, planning history, provenance, Lane history, event replay
+and recovery use the same logical readers through a server action; current access
+is checked again after IO and public identity mapping remains at the boundary.
+Reactive page clients keep live subscriptions and hydrate only selected cold
+pages. Legacy provider cursors require the existing format upgrade when archived
+rows exist, rather than silently omitting history. No journal writer is installed
+by this reader expansion. Larger existing documents can use verified transport
+fragments without changing their original row bytes or record limits.

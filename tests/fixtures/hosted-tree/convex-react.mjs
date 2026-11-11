@@ -11,10 +11,14 @@ export class ConvexReactClient {
   }
 }
 const empty = args => (args?.paginationOpts ? { page: [], isDone: true, continueCursor: '' } : null);
+function read(reference,args){
+ const page=args?.paginationOpts && tree().pages[name(reference)];
+ if(page){const value=page(args);return Array.isArray(value)?{page:value,isDone:true,continueCursor:''}:value;}
+ const answer=tree().queries[name(reference)];return answer?answer(args??{}):empty(args);
+}
 const client = {
   query: async (reference, args) => {
-    const answer = tree().queries[name(reference)];
-    return answer ? answer(args) : empty(args);
+    return read(reference,args);
   },
   action: async (reference, args) => tree().actions?.[name(reference)]?.(args) ?? null,
   mutation: async (reference, args) => tree().mutations?.[name(reference)]?.(args) ?? null,
@@ -24,7 +28,7 @@ export const useConvex = () => client;
 export const useConvexAuth = () => ({ isAuthenticated: true, isLoading: false });
 export const useConvexConnectionState = () => ({ isWebSocketConnected: true, hasEverConnected: true });
 export const useQuery = (reference, args) =>
-  args === 'skip' ? undefined : tree().queries[name(reference)]?.(args ?? {});
+  args === 'skip' ? undefined : read(reference,args);
 export const usePaginatedQuery = (reference, args) => ({
   results: args === 'skip' ? [] : (tree().pages[name(reference)]?.(args ?? {}) ?? []),
   status: 'Exhausted',

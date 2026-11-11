@@ -143,7 +143,11 @@ export function recordsFixture() {
           direction = 1;
         const q = {
           withIndex: (index, build) => {
-            const definition = schema.tables[table].export().indexes.find(x => x.indexDescriptor === index);
+            const declared = schema.tables[table].export().indexes.find(x => x.indexDescriptor === index);
+            const definition = declared && {
+              ...declared,
+              fields: [...declared.fields, '_creationTime', '_id'],
+            };
             assert(definition, `${table}.${index} exists`);
             const equalities = [];
             let lower = null,
@@ -170,15 +174,9 @@ export function recordsFixture() {
                 upper = { field, value };
                 return bounds;
               },
-              // Creation time is the implicit last key of every index, after all declared fields.
               lt: (field, value) => {
-                assert.equal(field, '_creationTime', 'only creation time takes a strict upper bound');
-                assert.equal(
-                  equalities.length,
-                  definition.fields.length,
-                  'creation time follows every field',
-                );
-                before = value;
+                assert.equal(field, definition.fields[equalities.length], 'index range follows equalities');
+                upper = { field, value, exclusive: true };
                 return bounds;
               },
             };
@@ -194,7 +192,7 @@ export function recordsFixture() {
                 groups.get(key).push(row);
               }
               const compare = (a, b) => {
-                for (const k of [...definition.fields, '_creationTime']) {
+                for (const k of definition.fields) {
                   if (at(a, k) !== at(b, k)) return at(a, k) < at(b, k) ? -1 : 1;
                 }
                 return 0;
@@ -211,7 +209,10 @@ export function recordsFixture() {
               selected = selected.filter(row =>
                 lower.inclusive ? row[lower.field] >= lower.value : row[lower.field] > lower.value,
               );
-            if (upper) selected = selected.filter(row => row[upper.field] <= upper.value);
+            if (upper)
+              selected = selected.filter(row =>
+                upper.exclusive ? row[upper.field] < upper.value : row[upper.field] <= upper.value,
+              );
             if (before !== null) selected = selected.filter(row => row._creationTime < before);
             return q;
           },

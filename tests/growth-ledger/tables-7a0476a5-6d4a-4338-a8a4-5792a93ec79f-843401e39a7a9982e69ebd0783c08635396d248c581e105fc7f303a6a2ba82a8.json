@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "Issue 27d4c1fd: isolate bounded archive indexes and compact coordination deduplication receipts from hot rows; old tables remain until verified relocation. Reuses S1 codec and removes repeated operation envelope fields.",
+  "date": "2026-11-11"
+}

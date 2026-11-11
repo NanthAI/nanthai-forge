@@ -17,40 +17,61 @@ const internalReads = await import(moduleUrl('../convex/projectJournalRead.ts'))
 const actions = await import(moduleUrl('../convex/projectJournalActions.ts'));
 const people = await import(moduleUrl('../convex/publicPeople.ts'));
 const code = expected => error => (error.code ?? error.data?.code) === expected;
-async function fixture(t) {
+async function fixture(t, { inline = false, lane = false } = {}) {
   const f = recordsFixture(),
     auth = await f.setup();
   let actor = 'owner';
   f.ctx.auth = { getUserIdentity: async () => ({ subject: actor }) };
-  const old = {
-    kind: 'job',
-    id: randomUUID(),
-    version: 0,
-    at: '2026-01-01T00:00:00.000Z',
-    operationId: randomUUID(),
-    jobKind: 'save',
-    input: { sha256: 'a'.repeat(64), size: 1 },
-    inputDigest: 'a'.repeat(64),
-    authorityEpoch: 1,
-    attempt: 0,
-    fence: 0,
-    status: 'pending',
-    executionId: null,
-    output: null,
-  };
+  const old = lane
+    ? {
+        kind: 'lane',
+        id: randomUUID(),
+        version: 0,
+        at: '2026-01-01T00:00:00.000Z',
+        intentId: randomUUID(),
+        actor: 'owner',
+        base: { head: 'a'.repeat(64), receiptId: 'receipt' },
+        head: 'a'.repeat(64),
+        sourceVersion: 0,
+        lifecycleVersion: 0,
+        state: 'active',
+        authorityEpoch: 1,
+      }
+    : {
+        kind: 'job',
+        id: randomUUID(),
+        version: 0,
+        at: '2026-01-01T00:00:00.000Z',
+        operationId: randomUUID(),
+        jobKind: 'save',
+        input: { sha256: 'a'.repeat(64), size: 1 },
+        inputDigest: 'a'.repeat(64),
+        authorityEpoch: 1,
+        attempt: 0,
+        fence: 0,
+        status: 'pending',
+        executionId: null,
+        output: null,
+      };
   const first = await f.run('old version', () =>
     records.writeHostedRecord(f.ctx, { ...auth, record: old, expectedVersion: null }),
   );
   await f.run('current version', () =>
     records.writeHostedRecord(f.ctx, {
       ...auth,
-      record: { ...old, version: 1, status: 'failed' },
+      record: lane
+        ? { ...old, version: 1, lifecycleVersion: 1, state: 'completed' }
+        : { ...old, version: 1, status: 'failed' },
       expectedVersion: 0,
     }),
   );
+  if (inline) {
+    await f.ctx.db.patch(first._id, { inline: first.value });
+    await f.ctx.db.patch(first.bodyId, { value: '' });
+  }
   const request = {
     projectId: auth.projectId,
-    request: canonicalPayload({ collection: 'jobs', id: old.id, version: 0 }),
+    request: canonicalPayload({ collection: lane ? 'lanes' : 'jobs', id: old.id, version: 0 }),
   };
   const before = await reads.read._handler(f.ctx, request);
   const header = f.tables.projectHostedRecords.get(first._id),
@@ -59,7 +80,7 @@ async function fixture(t) {
     protocol: 1,
     kind: 'forge-journal-segment',
     projectId: auth.projectId,
-    scope: store.journalScope('job', old.id),
+    scope: store.journalScope(old.kind, old.id),
     from: 0,
     through: 0,
     tables: {
@@ -84,20 +105,27 @@ async function fixture(t) {
         header.digest,
         header.bytes,
         null,
+        ...(lane ? [[old.head, old.sourceVersion, old.lifecycleVersion]] : []),
       ],
     ],
   };
   const relocate = async () => {
-    await f.ctx.db.insert('projectFinishReadRows', {
-      kind: store.journalIndexKind,
-      sourceId: store.journalIndexKey(auth.projectId, index.scope, 0),
+    await f.ctx.db.insert('projectJournalSegments', {
+      scope: index.scope,
+      from: index.from,
+      through: index.through,
+      category: 'record',
+      recordKind: old.kind,
+      firstPosition: `${auth.projectId}:${header._creationTime.toFixed(6).padStart(23, '0')}:${header._id}`,
+      lastPosition: `${auth.projectId}:${header._creationTime.toFixed(6).padStart(23, '0')}:${header._id}`,
+      key: store.journalIndexKey(auth.projectId, index.scope, 0),
       projectId: auth.projectId,
-      submissionId: 'segment',
       value: canonicalPayload(index),
     });
     await f.ctx.db.patch(auth.projectId, { journalRevision: 1 });
+    store.journalProject(f.ctx, await f.ctx.db.get(auth.projectId));
     await f.ctx.db.delete(first._id);
-    await f.ctx.db.delete(first.bodyId);
+    if (!inline) await f.ctx.db.delete(first.bodyId);
   };
   const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
   Object.assign(process.env, synthetic);
@@ -180,7 +208,8 @@ test('journal uses the S1 complete-object codec and rejects corrupt bytes, table
 test('exact archived versions match live replies through one server action and GET; current versions and immutable retry stay transactional', async t => {
   const h = await fixture(t);
   await h.relocate();
-  assert.deepEqual(JSON.parse(await h.query()), { journalHistory: true });
+  assert.equal(JSON.parse(await h.query()).journalHistory, true);
+  assert.match(JSON.parse(await h.query()).viewVersion, /^[a-f0-9]{64}$/);
   assert.equal(await h.read(), h.before);
   assert.equal(h.gets.length, 1);
   assert.equal(h.calls.filter(name => name === 'projectJournalRead:read').length, 2);
@@ -261,11 +290,13 @@ test('archived Work events fill contiguous revision pages and retain exact repla
   };
   const encoded = encodeArchiveBytes(journalSegmentText(segment), 1, journalTablePins(segment.tables));
   const index = { scope: 'events', from: 1, through: 1, pointer: encoded.pointer };
-  await h.ctx.db.insert('projectFinishReadRows', {
-    kind: store.journalIndexKind,
-    sourceId: store.journalIndexKey(h.auth.projectId, 'events', 1),
+  await h.ctx.db.insert('projectJournalSegments', {
+    scope: 'events',
+    from: 1,
+    through: 1,
+    category: 'events',
+    key: store.journalIndexKey(h.auth.projectId, 'events', 1),
     projectId: h.auth.projectId,
-    submissionId: 'events-1',
     value: canonicalPayload(index),
   });
   await h.ctx.db.delete(id);
@@ -311,4 +342,202 @@ test('journal recovery continues the S1 merge without duplicate physical rows or
   const end = JSON.parse(await recovery.journalRecoveryPage(ctx, project, 'projectHostedRecords', cursor));
   assert.equal(end.done, true);
   assert.deepEqual(end.rows, []);
+});
+
+test('archived inline record values hydrate while the empty provenance body remains live', async t => {
+  const h = await fixture(t, { inline: true });
+  await h.relocate();
+  assert(h.tables.projectHostedRecordBodies.has(h.first.bodyId));
+  assert.equal(JSON.parse(await h.query()).journalHistory, true);
+  assert.equal(await h.read(), h.before);
+});
+
+test('a narrow finish projection cannot hide an existing journal; cold markers change when a public writer loses their role', async t => {
+  const h = await fixture(t);
+  await h.relocate();
+  store.journalProject(h.ctx, { _id: h.auth.projectId, owner: 'owner', visibility: 'private' });
+  assert(await store.journalRecord(h.ctx, h.auth.projectId, 'job', h.old.id, 0));
+  await h.ctx.db.patch(h.auth.projectId, { visibility: 'public' });
+  h.actor('reader');
+  const grant = await h.ctx.db.insert('projectContributors', {
+    projectId: h.auth.projectId,
+    contributor: 'reader',
+  });
+  const writer = JSON.parse(await h.query());
+  await h.ctx.db.delete(grant);
+  const reader = JSON.parse(await h.query());
+  assert.notEqual(writer.viewVersion, reader.viewVersion);
+  assert.equal(writer.journalHistory, true);
+  assert.equal(reader.journalHistory, true);
+  assert.equal(h.gets.length, 0, 'reactive markers never open R2 on the query path');
+});
+
+test('version pages include a single archived version zero and continue in both directions', async t => {
+  const h = await fixture(t);
+  await h.relocate();
+  const { journalRecordPage } = await import(moduleUrl('../convex/projectJournalRecordPage.ts'));
+  const ctx = { ...h.ctx, journalLoaded: [h.segment] },
+    input = { projectId: h.auth.projectId, kind: 'job', key: h.old.id, through: 1, cursor: null, limit: 1 };
+  const first = await journalRecordPage(ctx, input);
+  assert.deepEqual(
+    first.page.map(row => row.version),
+    [0],
+  );
+  assert.equal(first.isDone, false);
+  const second = await journalRecordPage(ctx, { ...input, cursor: first.continueCursor });
+  assert.deepEqual(
+    second.page.map(row => row.version),
+    [1],
+  );
+  assert.equal(second.isDone, true);
+  const latest = await journalRecordPage(ctx, { ...input, newestFirst: true });
+  assert.deepEqual(
+    latest.page.map(row => row.version),
+    [1],
+  );
+  assert.equal(latest.isDone, false);
+  const older = await journalRecordPage(ctx, { ...input, newestFirst: true, cursor: latest.continueCursor });
+  assert.deepEqual(
+    older.page.map(row => row.version),
+    [0],
+  );
+  assert.equal(older.isDone, true);
+});
+
+test('an included Lane retains its exact transaction source pins after its full old body moves', async t => {
+  const h = await fixture(t, { lane: true });
+  await h.relocate();
+  await h.query();
+  const descriptor = await records.recordVersion(h.ctx, h.auth.projectId, 'lane', h.old.id, 0);
+  assert(descriptor);
+  assert.equal(await h.ctx.db.get(h.first.bodyId), null);
+  const pins = store.journalLaneSourcePins(descriptor);
+  assert.deepEqual(pins, { head: h.old.head, version: 0, sourceVersion: 0, lifecycleVersion: 0 });
+  const { sameSaveLane } = await import(moduleUrl('../convex/projectHostedSaveStore.ts'));
+  assert(sameSaveLane(pins, { head: h.old.head, version: 0, sourceVersion: 0, lifecycleVersion: 0 }));
+  assert(!sameSaveLane(pins, { head: h.old.head, version: 0, sourceVersion: 1, lifecycleVersion: 0 }));
+  assert.equal(h.gets.length, 0, 'transactional validation never opens an R2 segment');
+});
+
+test('Lane metrics retain superseded version facts without R2 or full old bodies', async t => {
+  const h = await fixture(t, { lane: true });
+  await h.relocate();
+  await h.query();
+  const { journalLaneMetricsPage } = await import(moduleUrl('../convex/projectJournalLaneMetrics.ts'));
+  const page = await journalLaneMetricsPage(h.ctx, h.auth.projectId, 0, Date.now() + 1000, null);
+  assert.deepEqual(
+    page.page.map(row => row.version),
+    [1, 0],
+  );
+  assert(
+    page.page.every(row => row.id === h.old.id && row.intentId === h.old.intentId && row.revert === false),
+  );
+  assert.equal(h.gets.length, 0);
+  assert.equal(page.isDone, true);
+});
+
+test('archived Work receipts reconcile the original command in a mutation without R2 and reject changed content', async t => {
+  const h = await fixture(t);
+  const { metadataRequest } = await import('../dist/work-metadata.js');
+  const events = await import(moduleUrl('../convex/projectWorkEventStore.ts'));
+  const command = { action: 'intent', outcome: 'Original outcome', constraints: '', base: 'a'.repeat(64) };
+  const text = JSON.stringify(command),
+    request = metadataRequest(command),
+    operationId = randomUUID();
+  const id = await h.ctx.db.insert('projectHostedRecordBodies', {
+    projectId: h.auth.projectId,
+    value: '',
+    operationId,
+    revision: 1,
+    request,
+    actor: 'owner',
+    at: '2026-01-01T00:00:00.000Z',
+    journalSegment: 'verified',
+    journalCommand: JSON.stringify({ action: 'intent', base: command.base }),
+  });
+  const replay = await events.findWorkEvent(h.ctx, h.auth.projectId, operationId, { command: text });
+  assert.equal(replay.command, text);
+  assert.equal(replay._id, id);
+  assert.equal(replay.previousRevision, 0);
+  assert.equal(h.gets.length, 0);
+  await assert.rejects(
+    events.findWorkEvent(h.ctx, h.auth.projectId, operationId, {
+      command: JSON.stringify({ ...command, outcome: 'Different' }),
+    }),
+    code('WORK_OPERATION_CHANGED'),
+  );
+  const authority = await events.findWorkEvent(h.ctx, h.auth.projectId, operationId, { authority: true });
+  assert.deepEqual(JSON.parse(authority.command), { action: 'intent', base: command.base });
+});
+
+test('a snapshot display rebuild resolves exact archived versions before writing and rechecks access after GET', async t => {
+  const h = await fixture(t),
+    snapshots = await import(moduleUrl('../convex/projectHostedSnapshots.ts'));
+  const projection = await import(moduleUrl('../convex/projectHostedProjection.ts')),
+    cold = await import(moduleUrl('../convex/projectJournalProjection.ts'));
+  const { HOSTED_SNAPSHOT_EMPTY_ROOT, hostedSnapshotPageRoot } = await import('../dist/hosted-snapshot.js');
+  const refs = [{ kind: 'job', key: h.old.id, version: 0, digest: h.first.digest, bytes: h.first.bytes }],
+    root = hostedSnapshotPageRoot(HOSTED_SNAPSHOT_EMPTY_ROOT, 0, refs);
+  const input = {
+    ...h.auth,
+    operationId: randomUUID(),
+    snapshotId: randomUUID(),
+    expectedSnapshotId: null,
+    journalSequence: 1,
+    seedCheckpoint: { sha256: 'a'.repeat(64), size: 1 },
+    source: { head: 'a'.repeat(64), receiptId: 'main' },
+    pageCount: 1,
+    recordCount: 1,
+    root,
+  };
+  const selection = { projectId: h.auth.projectId, actor: h.auth.actor, snapshotId: input.snapshotId };
+  await snapshots.begin._handler(h.ctx, input);
+  await snapshots.stage._handler(h.ctx, {
+    ...selection,
+    page: 0,
+    previousRoot: HOSTED_SNAPSHOT_EMPTY_ROOT,
+    refs,
+  });
+  await snapshots.publish._handler(h.ctx, selection);
+  const request = { ...selection, page: 0, operationId: randomUUID() };
+  assert.equal(await projection.rebuildPage._handler(h.ctx, request), 1);
+  const before = [...h.tables.projectHostedDisplayRecords.values()].map(row => row.value);
+  await h.relocate();
+  for (const id of [...h.tables.projectHostedDisplayRecords.keys()]) await h.ctx.db.delete(id);
+  const ctx = {
+    runMutation: async (ref, args) => {
+      assert.equal(getFunctionName(ref), 'projectHostedProjection:rebuildPage');
+      return h.run('rebuild', () => projection.rebuildPage._handler(h.ctx, args));
+    },
+  };
+  assert.equal(await cold.rebuildPage._handler(ctx, request), 1);
+  assert.deepEqual(
+    [...h.tables.projectHostedDisplayRecords.values()].map(row => row.value),
+    before,
+  );
+  assert.equal(h.gets.length, 1);
+  for (const id of [...h.tables.projectHostedDisplayRecords.keys()]) await h.ctx.db.delete(id);
+  h.onGet(() => {
+    h.tables.hostedProjects.get(h.auth.projectId).owner = 'different-owner';
+  });
+  await assert.rejects(cold.rebuildPage._handler(ctx, request), code('PROJECT_UNAVAILABLE'));
+  assert.equal(h.tables.projectHostedDisplayRecords.size, 0);
+});
+
+test('a mounted cold Lane history marker changes with a new current version while the archived first version stays identical', async t => {
+  const h = await fixture(t, { lane: true });
+  await h.relocate();
+  const history = await import(moduleUrl('../convex/projectHostedLaneHistory.ts'));
+  const args = { projectId: h.auth.projectId, laneId: h.old.id };
+  const before = JSON.parse(await history.read._handler(h.ctx, args));
+  assert(before.journalHistory);
+  await records.writeHostedRecord(h.ctx, {
+    ...h.auth,
+    expectedVersion: 1,
+    record: { ...h.old, version: 2, lifecycleVersion: 2, state: 'completed' },
+  });
+  const after = JSON.parse(await history.read._handler(h.ctx, args));
+  assert(after.journalHistory);
+  assert.notEqual(after.viewVersion, before.viewVersion);
+  assert.equal(h.gets.length, 0);
 });

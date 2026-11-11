@@ -14,7 +14,7 @@ export const JOURNAL_TABLES = [
 ] as const;
 export const JOURNAL_PAGE_ROWS = 100;
 export const JOURNAL_PAGE_BYTES = 500 * 1024;
-const position = z.number().int().nonnegative().safe();
+const position = z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER);
 export const journalSegmentSchema = z
   .object({
     protocol: z.literal(1),
@@ -23,6 +23,8 @@ export const journalSegmentSchema = z
     scope: z.string(),
     from: position,
     through: position,
+    startKey: z.string().optional(),
+    endKey: z.string().optional(),
     tables: z.partialRecord(z.enum(JOURNAL_TABLES), z.array(z.string())),
   })
   .strict();
@@ -37,10 +39,15 @@ export type JournalRecordPin = [
   string,
   number,
   string | null,
+  [string, number, number]?,
+  boolean?,
 ];
-export type JournalIndex = Pick<JournalSegment, 'scope' | 'from' | 'through'> & {
+export type JournalIndex = Pick<JournalSegment, 'scope' | 'from' | 'through' | 'startKey' | 'endKey'> & {
+  keys?: string[];
   pointer: LandingCapsulePointer;
   records?: JournalRecordPin[];
+  savePages?: [number, string][];
+  parts?: LandingCapsulePointer[];
 };
 export function journalTablePins(tables: JournalSegment['tables']) {
   return JOURNAL_TABLES.flatMap((table, ordinal) => {
@@ -87,11 +94,13 @@ export function readJournalSegment(
   text: string,
   pin: LandingCapsulePointer,
   projectId: string,
-  index: Pick<JournalIndex, 'scope' | 'from' | 'through'>,
+  index: Pick<JournalIndex, 'scope' | 'from' | 'through' | 'startKey' | 'endKey'>,
 ) {
   const value = journalSegmentSchema.parse(JSON.parse(text));
   invariant(
     value.projectId === projectId &&
+      value.startKey === index.startKey &&
+      value.endKey === index.endKey &&
       value.scope === index.scope &&
       value.from === index.from &&
       value.through === index.through &&

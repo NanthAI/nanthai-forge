@@ -515,3 +515,25 @@ index readers receive the same logical row. The finite observer hydrates only th
 so it never reads a batch selection merely to display status. Phase changes reuse both
 bodies; ordinary parent deletion and permanent project purge remove them atomically.
 Legacy inline tickets remain readable and separate their cold fields on their next state write.
+
+
+## Work journal segment readers
+
+Journal history uses S1's private complete-object gzip codec, digest/size/table
+verification and server transport. `projectJournalSegments` holds one compact
+range index per segment, separate from hot finish projections so its range indexes
+do not multiply every landing row's storage. Current heads and versions remain
+transaction-readable. `projectJournalReceipts` keeps compact deduplication facts
+for archived coordination detail; full commands stay in R2. Immutable version
+hashes, Lane source pins and metric facts
+let transactional retries and metrics reconcile without an R2 read. Full history
+bytes remain server-only and use current access checks after each GET.
+
+Version pages use stable revision positions; coordination uses creation-time/id
+positions with scoped indexes. Browser and CLI clients hydrate cold pages and
+retain live subscriptions; changing viewer permissions hides old hydrated data
+before reauthorization. Recovery merges original rows with live rows and capsules
+under a relocation fence. Existing rows larger than a page use ordered, hash-verified transport fragments;
+every physical segment still uses S1’s codec. Original row bytes reassemble before
+projection or export, preserving the record capability and bounded page transport.
+This reader expansion installs no writer or relocation.

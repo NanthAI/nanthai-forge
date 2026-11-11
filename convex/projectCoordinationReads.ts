@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { JournalNeeded, journalReadReply } from './projectJournalStore';
+import type { PaginationOptions } from 'convex/server';
 import { withActorName } from './projectActorNames';
 import { v } from 'convex/values';
 import { paginationOptsValidator } from 'convex/server';
@@ -62,35 +64,53 @@ export const inbox = query({
     sessionId: v.optional(v.string()),
   },
   returns: v.object({
+    journalHistory: v.optional(v.literal(true)),
+    viewVersion: v.optional(v.string()),
     page: v.array(ackedEvent),
     isDone: v.boolean(),
     continueCursor: v.string(),
     cursorReset: v.boolean(),
   }),
-  handler: async (ctx, { projectId, paginationOpts, sessionId }) => {
-    try {
-      const { actor } = await reader(ctx, projectId, sessionId);
-      const size = feedPageSize(paginationOpts.numItems);
-      const { position, cursorReset } = feedPosition(ctx, projectId, paginationOpts.cursor);
-      const result = await feedRows(ctx, projectId, position, size, {
-        field: 'recipientActor',
-        value: actor,
-      });
-      const page = [];
-      for (const row of result.rows)
-        if (forSession(row, sessionId))
-          page.push({ ...row, acked: !!(await receipt(ctx, projectId, row.operationId, actor)) });
-      return {
-        page,
-        isDone: !result.hasMore,
-        continueCursor: feedCursor(projectId, result.positions.at(-1) ?? position),
-        cursorReset,
-      };
-    } catch (error) {
-      return report(error);
-    }
-  },
+  handler: journalCoordinationInbox,
 });
+
+export async function journalCoordinationInbox(
+  ctx: QueryCtx,
+  input: { projectId: Id<'hostedProjects'>; paginationOpts: PaginationOptions; sessionId?: string },
+) {
+  const { projectId, paginationOpts, sessionId } = input;
+  try {
+    const { actor } = await reader(ctx, projectId, sessionId);
+    const size = feedPageSize(paginationOpts.numItems);
+    const { position, cursorReset } = feedPosition(ctx, projectId, paginationOpts.cursor);
+    const result = await feedRows(ctx, projectId, position, size, {
+      field: 'recipientActor',
+      value: actor,
+    });
+    const page = [];
+    for (const row of result.rows)
+      if (forSession(row, sessionId))
+        page.push({ ...row, acked: !!(await receipt(ctx, projectId, row.operationId, actor)) });
+    return {
+      page,
+      isDone: !result.hasMore,
+      continueCursor: feedCursor(projectId, result.positions.at(-1) ?? position),
+      cursorReset,
+    };
+  } catch (error) {
+    if (error instanceof JournalNeeded) {
+      const marker = JSON.parse(await journalReadReply(ctx, error, projectId));
+      return {
+        ...marker,
+        page: [],
+        isDone: false,
+        continueCursor: paginationOpts.cursor ?? '',
+        cursorReset: false,
+      };
+    }
+    return report(error);
+  }
+}
 
 /** Recent directed messages/handoffs and broadcasts by others that the caller has not acknowledged. */
 export const unacked = query({
@@ -197,6 +217,8 @@ export const related = query({
     includeMine: v.optional(v.boolean()),
   },
   returns: v.object({
+    journalHistory: v.optional(v.literal(true)),
+    viewVersion: v.optional(v.string()),
     page: v.array(eventDocument),
     isDone: v.boolean(),
     continueCursor: v.string(),
@@ -207,55 +229,77 @@ export const related = query({
       paths: v.array(v.string()),
     }),
   }),
-  handler: async (ctx, input) => {
-    try {
-      const { actor, own } = await reader(ctx, input.projectId, input.sessionId);
-      const size = feedPageSize(input.paginationOpts.numItems);
-      invariant(
-        (input.intentIds?.length ?? 0) <= 20 &&
-          (input.laneIds?.length ?? 0) <= 20 &&
-          (input.paths?.length ?? 0) <= COORDINATION_LIMITS.paths,
-        'BAD_ARGUMENT',
-        'Use at most 20 Intents, 20 Lanes and 100 paths.',
-      );
-      const mine = (await activeClaims(ctx, input.projectId, actor)).claims;
-      const ids = (values: (string | undefined)[]) => values.filter((x): x is string => !!x);
-      const scope = {
-        intentIds: new Set(
-          ids([...(input.intentIds ?? []), own?.context.intentId, ...mine.map(c => c.intentId)]),
-        ),
-        laneIds: new Set(ids([...(input.laneIds ?? []), own?.context.laneId, ...mine.map(c => c.laneId)])),
-        paths: [
-          ...new Set([...(input.paths ?? []), ...(own?.context.paths ?? []), ...mine.flatMap(c => c.paths)]),
-        ],
-      };
-      const { position, cursorReset } = feedPosition(ctx, input.projectId, input.paginationOpts.cursor);
-      const scanned = await feedRows(ctx, input.projectId, position, RELATED_SCAN);
-      const page: Doc<'projectCoordinationEvents'>[] = [];
-      let last = position,
-        stoppedEarly = false;
-      for (let i = 0; i < scanned.rows.length; i++) {
-        const row = scanned.rows[i]!;
-        last = scanned.positions[i]!;
-        if (
-          (input.includeMine || row.actor !== actor) &&
-          (row.recipientActor === actor || inCoordinationScope(row.command, scope))
-        )
-          page.push(row);
-        if (page.length >= size) {
-          stoppedEarly = i < scanned.rows.length - 1;
-          break;
-        }
-      }
-      return {
-        page,
-        isDone: !scanned.hasMore && !stoppedEarly,
-        continueCursor: feedCursor(input.projectId, last),
-        cursorReset,
-        scope: { intentIds: [...scope.intentIds], laneIds: [...scope.laneIds], paths: scope.paths },
-      };
-    } catch (error) {
-      return report(error);
-    }
-  },
+  handler: journalCoordinationRelated,
 });
+
+export async function journalCoordinationRelated(
+  ctx: QueryCtx,
+  input: {
+    projectId: Id<'hostedProjects'>;
+    paginationOpts: PaginationOptions;
+    sessionId?: string;
+    intentIds?: string[];
+    laneIds?: string[];
+    paths?: string[];
+    includeMine?: boolean;
+  },
+) {
+  try {
+    const { actor, own } = await reader(ctx, input.projectId, input.sessionId);
+    const size = feedPageSize(input.paginationOpts.numItems);
+    invariant(
+      (input.intentIds?.length ?? 0) <= 20 &&
+        (input.laneIds?.length ?? 0) <= 20 &&
+        (input.paths?.length ?? 0) <= COORDINATION_LIMITS.paths,
+      'BAD_ARGUMENT',
+      'Use at most 20 Intents, 20 Lanes and 100 paths.',
+    );
+    const mine = (await activeClaims(ctx, input.projectId, actor)).claims;
+    const ids = (values: (string | undefined)[]) => values.filter((x): x is string => !!x);
+    const scope = {
+      intentIds: new Set(
+        ids([...(input.intentIds ?? []), own?.context.intentId, ...mine.map(c => c.intentId)]),
+      ),
+      laneIds: new Set(ids([...(input.laneIds ?? []), own?.context.laneId, ...mine.map(c => c.laneId)])),
+      paths: [
+        ...new Set([...(input.paths ?? []), ...(own?.context.paths ?? []), ...mine.flatMap(c => c.paths)]),
+      ],
+    };
+    const { position, cursorReset } = feedPosition(ctx, input.projectId, input.paginationOpts.cursor);
+    const scanned = await feedRows(ctx, input.projectId, position, RELATED_SCAN);
+    const page: Doc<'projectCoordinationEvents'>[] = [];
+    let last = position,
+      stoppedEarly = false;
+    for (let i = 0; i < scanned.rows.length; i++) {
+      const row = scanned.rows[i]!;
+      last = scanned.positions[i]!;
+      if (
+        (input.includeMine || row.actor !== actor) &&
+        (row.recipientActor === actor || inCoordinationScope(row.command, scope))
+      )
+        page.push(row);
+      if (page.length >= size) {
+        stoppedEarly = i < scanned.rows.length - 1;
+        break;
+      }
+    }
+    return {
+      page,
+      isDone: !scanned.hasMore && !stoppedEarly,
+      continueCursor: feedCursor(input.projectId, last),
+      cursorReset,
+      scope: { intentIds: [...scope.intentIds], laneIds: [...scope.laneIds], paths: scope.paths },
+    };
+  } catch (error) {
+    if (error instanceof JournalNeeded)
+      return {
+        ...JSON.parse(await journalReadReply(ctx, error, input.projectId)),
+        page: [],
+        isDone: false,
+        continueCursor: input.paginationOpts.cursor ?? '',
+        cursorReset: false,
+        scope: { intentIds: [], laneIds: [], paths: [] },
+      };
+    return report(error);
+  }
+}

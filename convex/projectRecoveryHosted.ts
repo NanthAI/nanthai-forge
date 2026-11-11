@@ -260,7 +260,10 @@ export async function journalRecoveryRead(
     const rows = [];
     for (const row of result.page)
       if (
-        !(table === 'projectHostedOperations' && 'journalSegment' in row) &&
+        !(
+          (table === 'projectHostedOperations' || table === 'projectHostedRecordBodies') &&
+          'journalSegment' in row
+        ) &&
         ((!expected.capsuleRevision && !expected.journalRevision) ||
           !(await capsuleOwnsRecoveryRow(ctx, input.projectId, table, row)))
       )
@@ -276,7 +279,7 @@ export async function journalRecoveryRead(
       done: result.isDone && !expected.capsuleRevision && !expected.journalRevision,
     });
   } catch (error) {
-    if (error instanceof JournalNeeded) return journalReadReply(ctx, error);
+    if (error instanceof JournalNeeded) return journalReadReply(ctx, error, input.projectId);
     return report(error);
   }
 }

@@ -994,8 +994,13 @@ pins before returning its supplied exact bytes; it cannot rewrite history.
 Recovery extends S1's live/capsule merge into journal segments and includes
 coordination and snapshot/display tables. A physical journal-revision fence
 invalidates an export that crosses relocation. No writer or automatic relocation
-is installed by this reader expansion; planning-history and coordination-feed
-reader expansion, compact operation receipts and the writer follow separately.
+is installed by this reader expansion. Planning-version and Lane history pages,
+coordination feed/recent/related reads and Lane metric facts accept both forms.
+A dedicated segment table isolates archive range-index cost from hot finish rows.
+Readers also accept self-contained compact source-operation receipts (including
+the complete terminal result), compact Work command retry facts and closed-save
+digest ledgers. The writer follows separately. Receipt result bytes, index rows
+and coordination deduplication receipts are charged as retained overhead.
 
 The reader fixture proves exact old-version parity, current-version access,
 immutable retry, access revocation during GET, corruption rejection, contiguous

@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { withActorName } from './projectActorNames';
+import { JournalNeeded, journalReadReply } from './projectJournalStore';
+import type { QueryCtx } from './_generated/server';
+import type { Id } from './_generated/dataModel';
+import type { PaginationOptions } from 'convex/server';
 import { v } from 'convex/values';
-import { coordinationFeed, feedPageSize } from './coordinationFeed';
+import { coordinationFeed, coordinationRecent, feedPageSize } from './coordinationFeed';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { coordinationMutation as mutation, coordinationQuery as query } from './cliServer';
 import { activeProject, accessibleProject } from './projectAuthority';
@@ -14,6 +17,8 @@ import { sessionStructure, sessionView, sessionTree } from './coordinationSessio
 export { counts, publicCounts } from './coordinationCounts';
 
 const feedResult = v.object({
+  journalHistory: v.optional(v.literal(true)),
+  viewVersion: v.optional(v.string()),
   page: v.array(eventDocument),
   isDone: v.boolean(),
   continueCursor: v.string(),
@@ -36,7 +41,7 @@ export const publish = mutation({
     try {
       const actor = await signedIn(ctx, 'coordinate this project');
       const project = await activeProject(ctx, input.projectId, actor);
-      const old = await eventByOperation(ctx, input.projectId, input.operationId);
+      const old = await eventByOperation(ctx, input.projectId, input.operationId, input.command);
       if (old) {
         // Replays compare stored payloads without re-applying newer input limits to existing rows.
         invariant(
@@ -184,47 +189,77 @@ export const feed = query({
     laneId: v.optional(v.string()),
   },
   returns: feedResult,
-  handler: async (ctx, { projectId, paginationOpts, intentId, laneId }) => {
-    try {
-      const actor = await signedIn(ctx, 'read project coordination');
-      await accessibleProject(ctx, projectId, actor);
-      invariant(!(intentId && laneId), 'BAD_ARGUMENT', 'Scope the feed by an Intent or a Lane, not both.');
-      return await coordinationFeed(
-        ctx,
-        projectId,
-        paginationOpts.cursor,
-        paginationOpts.numItems,
-        laneId
-          ? { field: 'laneId', value: laneId }
-          : intentId
-            ? { field: 'intentId', value: intentId }
-            : undefined,
-      );
-    } catch (error) {
-      return report(error);
-    }
-  },
+  handler: journalCoordinationFeed,
 });
 
 export const recent = query({
   args: { projectId: v.id('hostedProjects'), paginationOpts: paginationOptsValidator },
-  returns: paginationResultValidator(eventDocument),
-  handler: async (ctx, { projectId, paginationOpts }) => {
-    try {
-      const actor = await signedIn(ctx, 'read project coordination');
-      await accessibleProject(ctx, projectId, actor);
-      feedPageSize(paginationOpts.numItems);
-      const result = await ctx.db
-        .query('projectCoordinationEvents')
-        .withIndex('by_project', q => q.eq('projectId', projectId))
-        .order('desc')
-        .paginate(paginationOpts);
-      return {
-        ...result,
-        page: await Promise.all(result.page.map(row => withActorName(ctx, projectId, row))),
-      };
-    } catch (error) {
-      return report(error);
-    }
-  },
+  returns: v.object({
+    ...paginationResultValidator(eventDocument).fields,
+    journalHistory: v.optional(v.literal(true)),
+    viewVersion: v.optional(v.string()),
+  }),
+  handler: journalCoordinationRecent,
 });
+
+export async function journalCoordinationFeed(
+  ctx: QueryCtx,
+  {
+    projectId,
+    paginationOpts,
+    intentId,
+    laneId,
+  }: {
+    projectId: Id<'hostedProjects'>;
+    paginationOpts: PaginationOptions;
+    intentId?: string;
+    laneId?: string;
+  },
+) {
+  try {
+    const actor = await signedIn(ctx, 'read project coordination');
+    await accessibleProject(ctx, projectId, actor);
+    invariant(!(intentId && laneId), 'BAD_ARGUMENT', 'Scope the feed by an Intent or a Lane, not both.');
+    return await coordinationFeed(
+      ctx,
+      projectId,
+      paginationOpts.cursor,
+      paginationOpts.numItems,
+      laneId
+        ? { field: 'laneId', value: laneId }
+        : intentId
+          ? { field: 'intentId', value: intentId }
+          : undefined,
+    );
+  } catch (error) {
+    if (error instanceof JournalNeeded)
+      return {
+        ...JSON.parse(await journalReadReply(ctx, error, projectId)),
+        page: [],
+        isDone: false,
+        continueCursor: paginationOpts.cursor ?? '',
+        cursorReset: false,
+      };
+    return report(error);
+  }
+}
+
+export async function journalCoordinationRecent(
+  ctx: QueryCtx,
+  { projectId, paginationOpts }: { projectId: Id<'hostedProjects'>; paginationOpts: PaginationOptions },
+) {
+  try {
+    const actor = await signedIn(ctx, 'read project coordination');
+    await accessibleProject(ctx, projectId, actor);
+    return await coordinationRecent(ctx, projectId, paginationOpts.cursor, paginationOpts.numItems);
+  } catch (error) {
+    if (error instanceof JournalNeeded)
+      return {
+        ...JSON.parse(await journalReadReply(ctx, error, projectId)),
+        page: [],
+        isDone: false,
+        continueCursor: paginationOpts.cursor ?? '',
+      };
+    return report(error);
+  }
+}

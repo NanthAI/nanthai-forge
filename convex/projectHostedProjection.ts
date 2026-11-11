@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { JournalNeeded, journalReadReply } from './projectJournalStore';
+import { journalSegmentSchema } from '../src/journal-segment';
 import { v } from 'convex/values';
 import { internalMutation } from './server';
 import { activeProject } from './projectAuthority';
@@ -16,45 +18,63 @@ export const rebuildPage = internalMutation({
     snapshotId: v.string(),
     page: v.number(),
     operationId: v.string(),
+    segments: v.optional(v.array(v.string())),
   },
-  returns: v.number(),
-  handler: async (ctx, input) => {
-    await activeProject(ctx, input.projectId, input.actor);
-    const snapshot = await snapshotByKey(ctx, input.projectId, input.snapshotId);
-    invariant(
-      snapshot?.status === 'published',
-      'SOURCE_UNAVAILABLE',
-      'Rebuild from an exact published snapshot.',
-    );
-    const page = await snapshotPage(ctx, snapshot._id, input.page);
-    invariant(page, 'NOT_FOUND', 'Snapshot page is unavailable.');
-    for (const ref of page.refs) {
-      const row = await recordVersion(ctx, input.projectId, ref.kind, ref.key, ref.version);
+  returns: v.union(v.number(), v.string()),
+  handler: async (original, input) => {
+    const ctx = {
+      ...original,
+      journalPrivate: true,
+      journalLoaded: (input.segments ?? []).map(text => journalSegmentSchema.parse(JSON.parse(text))),
+    };
+    try {
+      await activeProject(ctx, input.projectId, input.actor);
+      const snapshot = await snapshotByKey(ctx, input.projectId, input.snapshotId);
       invariant(
-        row && row.digest === ref.digest,
+        snapshot?.status === 'published',
         'SOURCE_UNAVAILABLE',
-        'The canonical record is unavailable.',
+        'Rebuild from an exact published snapshot.',
       );
-      const body = await hostedRecordBody(ctx, row);
-      const old = await ctx.db
-        .query('projectHostedDisplayRecords')
-        .withIndex('by_snapshot_and_kind_and_key_and_version', q =>
-          q.eq('snapshotId', snapshot._id).eq('kind', ref.kind).eq('key', ref.key).eq('version', ref.version),
-        )
-        .unique();
-      const value = {
-        projectId: row.projectId,
-        snapshotId: snapshot._id,
-        kind: row.kind,
-        key: row.key,
-        version: row.version,
-        parent: row.parent,
-        status: row.status,
-        value: body,
-      };
-      if (old) await ctx.db.replace(old._id, value);
-      else await ctx.db.insert('projectHostedDisplayRecords', value);
+      const page = await snapshotPage(ctx, snapshot._id, input.page);
+      invariant(page, 'NOT_FOUND', 'Snapshot page is unavailable.');
+      const selected = [];
+      for (const ref of page.refs) {
+        const row = await recordVersion(ctx, input.projectId, ref.kind, ref.key, ref.version);
+        invariant(
+          row && row.digest === ref.digest,
+          'SOURCE_UNAVAILABLE',
+          'The canonical record is unavailable.',
+        );
+        selected.push({ row, body: await hostedRecordBody(ctx, row) });
+      }
+      for (const { row, body } of selected) {
+        const old = await ctx.db
+          .query('projectHostedDisplayRecords')
+          .withIndex('by_snapshot_and_kind_and_key_and_version', q =>
+            q
+              .eq('snapshotId', snapshot._id)
+              .eq('kind', row.kind)
+              .eq('key', row.key)
+              .eq('version', row.version),
+          )
+          .unique();
+        const value = {
+          projectId: row.projectId,
+          snapshotId: snapshot._id,
+          kind: row.kind,
+          key: row.key,
+          version: row.version,
+          parent: row.parent,
+          status: row.status,
+          value: body,
+        };
+        if (old) await ctx.db.replace(old._id, value);
+        else await ctx.db.insert('projectHostedDisplayRecords', value);
+      }
+      return page.refs.length;
+    } catch (error) {
+      if (error instanceof JournalNeeded) return journalReadReply(ctx, error, input.projectId);
+      throw error;
     }
-    return page.refs.length;
   },
 });

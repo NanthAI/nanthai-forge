@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { journalTables, journalReceiptTables } from './projectJournalFields';
 import { finishReadTables } from './projectFinishReadFields';
 import { hostedOverlapTables } from './projectHostedOverlapFields';
 import { boardTables } from './projectBoardFields';
@@ -479,6 +480,8 @@ export const projectProposalDocument = v.object({
   ...projectProposalFields,
 });
 export default defineSchema({
+  ...journalTables,
+  ...journalReceiptTables,
   ...finishReadTables,
   legacyStorageCleanupWindows: defineTable({
     operationId: v.string(),

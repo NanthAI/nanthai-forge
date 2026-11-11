@@ -428,3 +428,52 @@ test('hosted Work writer transport keeps one call per metadata write and retains
   assert.equal(calls - before, 2, 'anchored note keeps the existing revision read plus validated action');
   assert.equal((await s.read()).data.intents.find(i => i.id === intentId).notes.length, 1);
 });
+
+test('CLI and MCP planning-version pages hydrate the cold marker once and retain the same page contract', async () => {
+  const calls = [],
+    projectId = 'project',
+    generationId = 'generation';
+  const client = {
+    query: async (ref, args) => {
+      const name = getFunctionName(ref);
+      calls.push(name);
+      if (name === 'projectWorkIndex:workspace')
+        return JSON.stringify({ generationId, backupId: 'backup', revision: 1 });
+      assert.equal(name, 'projectWorkIndex:records');
+      return {
+        generationId,
+        revision: 1,
+        page: [],
+        isDone: false,
+        continueCursor: '',
+        journalHistory: true,
+        viewVersion: 'owner',
+      };
+    },
+    action: async (ref, args) => {
+      calls.push(getFunctionName(ref));
+      assert.equal(args.projectId, projectId);
+      assert.equal(args.query, 'projectWorkIndex:records');
+      assert.equal(JSON.parse(args.request).collection, 'planningVersions');
+      return JSON.stringify({
+        generationId,
+        revision: 1,
+        page: [{ id: 'operation', position: 0, value: JSON.stringify({ version: 0, body: 'Original' }) }],
+        isDone: true,
+        continueCursor: 'done',
+      });
+    },
+  };
+  const page = await dispatchHostedWork(client, projectId, {
+    action: 'records',
+    collection: 'planningVersions',
+    parentId: randomUUID(),
+  });
+  assert.equal(page.page[0].value.body, 'Original');
+  assert.equal(page.isDone, true);
+  assert.deepEqual(calls, [
+    'projectWorkIndex:workspace',
+    'projectWorkIndex:records',
+    'projectJournalActions:history',
+  ]);
+});

@@ -56,7 +56,7 @@ export async function retainedEventPage(
     const batch: StoredWorkEvent[] = [];
     if (epoch?.storeFirst) {
       for await (const body of stored()) {
-        batch.push(eventDocument(body));
+        if (!body.journalSegment) batch.push(eventDocument(body));
         firstBytes += new TextEncoder().encode(JSON.stringify(body)).length;
         if (firstBytes >= budget || batch.length === remaining) {
           end = body.revision!;
@@ -73,7 +73,7 @@ export async function retainedEventPage(
           break;
         }
       }
-      batch.push(...(await stored().take(remaining)).map(eventDocument));
+      batch.push(...(await stored().take(remaining)).filter(row => !row.journalSegment).map(eventDocument));
     }
     if (project.journalRevision) {
       let selected = after;

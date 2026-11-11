@@ -20,25 +20,7 @@ export async function capsuleHistoryContext(
     'CLI_UPGRADE_REQUIRED',
     'This landing history requires server-side capsule support. Run nforge update and retry.',
   );
-  const viewer = await ctx.auth.getUserIdentity();
-  invariant(viewer, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted landing history.');
-  // A public project's role can change without changing its source or current snapshot.
-  // Retain that dependency even when only the viewer is named in the live context.
-  const contributor =
-    viewer.subject === project.owner
-      ? null
-      : await ctx.db
-          .query('projectContributors')
-          .withIndex('by_project_and_contributor', q =>
-            q.eq('projectId', project._id).eq('contributor', viewer.subject),
-          )
-          .unique();
-  const viewVersion = digest(
-    canonicalPayload({
-      viewer: viewer.subject,
-      role: viewer.subject === project.owner ? 'owner' : contributor ? 'writer' : 'reader',
-    }),
-  );
+  const viewVersion = await historyViewVersion(ctx, project);
   const { sha256, size, rawSize, version } = pointer;
   return canonicalPayload({
     ...context,
@@ -82,4 +64,27 @@ export function readCapsuleAttemptCursor(text: string | null, submissionId: stri
     'Continue the original capsule-aware attempt page.',
   );
   return value.after;
+}
+
+/** Shared reactive viewer dependency for every server-only archive marker. */
+export async function historyViewVersion(ctx: QueryCtx, project: Doc<'hostedProjects'>) {
+  const viewer = await ctx.auth.getUserIdentity();
+  invariant(viewer, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted landing history.');
+  // A public project's role can change without changing its source or current snapshot.
+  // Retain that dependency even when only the viewer is named in the live context.
+  const contributor =
+    viewer.subject === project.owner
+      ? null
+      : await ctx.db
+          .query('projectContributors')
+          .withIndex('by_project_and_contributor', q =>
+            q.eq('projectId', project._id).eq('contributor', viewer.subject),
+          )
+          .unique();
+  return digest(
+    canonicalPayload({
+      viewer: viewer.subject,
+      role: viewer.subject === project.owner ? 'owner' : contributor ? 'writer' : 'reader',
+    }),
+  );
 }

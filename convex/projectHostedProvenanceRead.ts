@@ -67,6 +67,7 @@ export async function journalProvenanceRead(
       'Select a clean Candidate for file provenance.',
     );
     const histories = [];
+    let historyBytes = 0;
     let remaining = PAGE,
       index = command.cursor?.index ?? 0;
     let nextCursor: { index: number; cursor: string | null } | null = null;
@@ -146,16 +147,22 @@ export async function journalProvenanceRead(
         });
       }
       histories.push({ selected: lane, previous, versions, complete: cursor === null && page.isDone });
+      historyBytes += new TextEncoder().encode(JSON.stringify(histories.at(-1))).length;
       remaining -= page.page.length;
       if (!page.isDone) {
         nextCursor = { index, cursor: page.continueCursor };
+        break;
+      }
+      if (historyBytes >= 128 * 1024) {
+        index++;
+        if (index < command.lanes.length) nextCursor = { index, cursor: null };
         break;
       }
     }
     if (!nextCursor && index < command.lanes.length) nextCursor = { index, cursor: null };
     return JSON.stringify({ candidate, histories, why: [...intents.values()], nextCursor });
   } catch (error) {
-    if (error instanceof JournalNeeded) return journalReadReply(ctx, error);
+    if (error instanceof JournalNeeded) return journalReadReply(ctx, error, input.projectId);
     return report(error);
   }
 }

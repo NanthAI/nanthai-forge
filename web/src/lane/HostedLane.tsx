@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { useArchivePaginatedQuery } from '../archive-pagination';
 import { AutoTag } from '../ui/signals';
 import { StatusPill } from '../ui/primitives';
 import { queueHref } from '../cockpit/queue-model';
@@ -19,7 +20,7 @@ import { useAttention } from '../shell/attention-context';
 import type { LifecycleParts } from './LifecycleParts';
 import { hostedViewHref } from '../views/links';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
-import { useConvex, useMutation, useQuery } from 'convex/react';
+import { useConvex, useMutation } from 'convex/react';
 import { BriefSourceContext, hostedBriefs, laneBrief } from '../cockpit/brief';
 import { CopyPrompt } from '../cockpit/CopyPrompt';
 import { api } from '../../../convex/_generated/api';
@@ -473,11 +474,11 @@ export function HostedLane({
   );
   const moves = useWorkRecords<WorkData['channelMoves'][number]>(projectId, workspace, 'channelMoves');
   const sessions = usePresenceSessions(projectId);
-  const feed = useQuery(api.projectCoordination.feed, {
-    projectId,
-    laneId,
-    paginationOpts: { numItems: 100, cursor: null },
-  });
+  const feed = useArchivePaginatedQuery(
+    api.projectCoordination.feed,
+    { projectId, laneId },
+    { initialNumItems: 100, throwOnError: true },
+  );
   usePageCritical('Lane', {
     intents: !intents.initialLoading,
     lanes: !lanes.initialLoading,
@@ -488,7 +489,7 @@ export function HostedLane({
     selectedIntent: !selectedIntent.initialLoading,
     scopedViews: !scopedViews.initialLoading,
     scopedRuns: !scopedViews.initialLoading && (!latestView || !scopedRuns.initialLoading),
-    conversation: feed !== undefined,
+    conversation: feed.status !== 'LoadingFirstPage',
   });
   const publish = useMutation(api.projectCoordination.publish);
   const [error, setError] = useState('');
@@ -568,7 +569,7 @@ export function HostedLane({
           })()}
           records={records}
           sessions={sessions.results as Session[]}
-          events={(feed?.page ?? []) as ActivityEvent[]}
+          events={feed.results as ActivityEvent[]}
           now={now}
           changes={changes}
           send={send}

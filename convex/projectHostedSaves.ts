@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { journalIndexAt } from './projectJournalStore';
 import { sourceProgress } from './projectSourceProgress';
 import { hostedSaveState } from '../src/hosted-save-state';
 import { boundOverlapChanges, type OverlapChange } from '../src/hosted-overlap';
@@ -234,8 +235,17 @@ export async function stageSavePage(
         .eq('index', input.index),
     )
     .unique();
-  if (old) {
-    invariant(old.digest === pin.sha256, 'WORK_OPERATION_CHANGED', 'Retry the original save page.');
+  const archived =
+    old || !operation.terminal
+      ? null
+      : await journalIndexAt(ctx, auth.projectId, `save:${auth.actor}:${auth.operationId}`, input.index);
+  const original = old ?? archived?.savePages?.find(row => row[0] === input.index);
+  if (original) {
+    invariant(
+      ('digest' in original ? original.digest : original[1]) === pin.sha256,
+      'WORK_OPERATION_CHANGED',
+      'Retry the original save page.',
+    );
     return state;
   }
   invariant(

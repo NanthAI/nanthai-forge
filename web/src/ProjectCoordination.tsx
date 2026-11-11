@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { useArchivePaginatedQuery } from './archive-pagination';
 import { ErrorToast } from './ui/Toast';
 import { WorkStatus } from './WorkStatus';
 import { WorkTimeline } from './WorkTimeline';
@@ -59,7 +60,11 @@ export default function ProjectCoordination({
   openIntent?: (id: string) => void;
 }) {
   const sessions = usePaginatedQuery(sessionsRef, { projectId }, { initialNumItems: 20 });
-  const events = usePaginatedQuery(eventsRef, { projectId }, { initialNumItems: 30 });
+  const events = useArchivePaginatedQuery(
+    eventsRef,
+    { projectId },
+    { initialNumItems: 30, throwOnError: true },
+  );
   const publish = useMutation(publishRef);
   const [tab, setTab] = useSection('activityTab', ['sessions', 'events'] as const, 'sessions'),
     [search, setSearch] = useState(''),

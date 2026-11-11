@@ -66,6 +66,7 @@ export async function runWorkCommand(
     projectId: input.projectId,
     owner,
     operationId: input.operationId,
+    command: JSON.stringify(command),
   });
   if (original) {
     invariant(

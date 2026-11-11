@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { hydrateLandingHistory } from './landing-capsule-client.js';
 import { randomUUID } from 'node:crypto';
 import { ConvexError } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
@@ -96,8 +97,19 @@ export async function dispatchCoordination(
     'Use publish with operationId/command, feed/sessions/recent/inbox/related with cursor and pageSize, watch with cursor, pageSize and waitMs, or a concise action (touch, message, handoff, ack, claim, release, unacked, claims, overlaps, counts). Text and path lists have size limits.',
   );
   const request = parsed.data;
-  const query = (name: string, args: Record<string, unknown>) =>
-    call<Record<string, unknown>>(() => client.query(ref.query(name), { projectId, ...defined(args) }));
+  const query = async (name: string, args: Record<string, unknown>) => {
+    const request = { projectId, ...defined(args) };
+    const value = await call<Record<string, unknown>>(() => client.query(ref.query(name), request));
+    const result = await hydrateLandingHistory(name, request, value, (action, input) => {
+      invariant(
+        client.action,
+        'HOSTED_ACTION_UNSUPPORTED',
+        'Update this coordination client to read archived history.',
+      );
+      return client.action(makeFunctionReference<'action'>(action), { ...input, projectId });
+    });
+    return (typeof result === 'string' ? JSON.parse(result) : result) as Record<string, unknown>;
+  };
   const publish = (operationId: string, command: CoordinationCommand) =>
     call<StoredEvent>(() =>
       client.mutation(ref.mutation('projectCoordination:publish'), { projectId, operationId, command }),

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { projectJournalHint } from './projectJournalStore';
+import { digest } from '../src/state/hash';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
@@ -17,11 +19,29 @@ export const session = (ctx: Ctx, projectId: Id<'hostedProjects'>, sessionId: st
     .query('projectCoordinationSessions')
     .withIndex('by_project_and_session', q => q.eq('projectId', projectId).eq('sessionId', sessionId))
     .unique();
-export const eventByOperation = (ctx: Ctx, projectId: Id<'hostedProjects'>, operationId: string) =>
-  ctx.db
+export async function eventByOperation(
+  ctx: Ctx,
+  projectId: Id<'hostedProjects'>,
+  operationId: string,
+  replay?: unknown,
+) {
+  const row = await ctx.db
     .query('projectCoordinationEvents')
     .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
     .unique();
+  if (row || projectJournalHint(ctx, projectId) === false) return row;
+  const receipt = await ctx.db
+    .query('projectJournalReceipts')
+    .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
+    .unique();
+  if (!receipt) return null;
+  invariant(
+    replay && digest(canonical(replay)) === receipt.hash,
+    'WORK_OPERATION_CHANGED',
+    'Use the original coordination operation and payload.',
+  );
+  return { ...JSON.parse(receipt.envelope), command: replay } as Doc<'projectCoordinationEvents'>;
+}
 export const receipt = (ctx: Ctx, projectId: Id<'hostedProjects'>, messageId: string, actor: string) =>
   ctx.db
     .query('projectCoordinationReceipts')

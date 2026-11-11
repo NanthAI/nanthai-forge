@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { journalRecord, loadedJournalRows, journalBody } from './projectJournalStore';
+import { journalDependency, journalRecord, loadedJournalRows, journalBody } from './projectJournalStore';
 import { fingerprintHostedIntent } from './projectWorkStoreFingerprintWrites';
 import { trackHostedOverlapLane } from './projectHostedOverlapStore';
 import type { OverlapChange } from '../src/hosted-overlap';
@@ -33,18 +33,21 @@ export async function hostedWriteProject(
   );
   return project;
 }
-export const recordHead = (
+export async function recordHead(
   ctx: QueryCtx | MutationCtx,
   projectId: Id<'hostedProjects'>,
   kind: HostedRecordKind,
   key: string,
-) =>
-  ctx.db
+) {
+  const row = await ctx.db
     .query('projectHostedRecordHeads')
     .withIndex('by_project_and_kind_and_key', q =>
       q.eq('projectId', projectId).eq('kind', kind).eq('key', key),
     )
     .unique();
+  journalDependency(ctx, `head:${kind}:${key}`, row ? [row.recordId, row.version, row.status] : null);
+  return row;
+}
 export async function recordVersion(
   ctx: QueryCtx | MutationCtx,
   projectId: Id<'hostedProjects'>,
@@ -63,7 +66,10 @@ export async function recordVersion(
         .eq('lifecyclePlanId', undefined),
     )
     .unique();
-  if (row) return row;
+  if (row) {
+    journalDependency(ctx, `version:${kind}:${key}:${version}`, [row._id, row.digest, row.status]);
+    return row;
+  }
   const archived = await journalRecord(ctx, projectId, kind, key, version);
   if (archived || kind !== 'lane') return archived;
   const overlay = await visibleLifecycleRecord(ctx, projectId, key);
@@ -83,7 +89,8 @@ export async function hostedRecordBody(ctx: QueryCtx | MutationCtx, row: Doc<'pr
   const body =
     (await ctx.db.get(row.bodyId)) ??
     loadedJournalRows(ctx, 'projectHostedRecordBodies').find(body => body._id === row.bodyId);
-  const value = body?.value ?? (await journalBody(ctx, row));
+  const value =
+    body?.value !== undefined && digest(body.value) === row.digest ? body.value : await journalBody(ctx, row);
   invariant(
     (!body || body.projectId === row.projectId) &&
       value !== undefined &&
@@ -229,6 +236,12 @@ export async function readHostedRecord(
       : await recordVersion(ctx, input.projectId, input.kind, input.key, input.version);
   if (!row) return null;
   if (input.version === undefined) row = await effectiveLifecycleRecord(ctx, row);
+  journalDependency(ctx, `selected:${input.kind}:${input.key}`, [
+    row._id,
+    row.version,
+    row.digest,
+    row.status,
+  ]);
   return { ...row, value: await hostedRecordBody(ctx, row) };
 }
 

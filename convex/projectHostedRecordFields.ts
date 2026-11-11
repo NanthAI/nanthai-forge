@@ -55,6 +55,8 @@ export const hostedRecordTables = {
     actor: v.optional(v.string()),
     at: v.optional(v.string()),
     command: v.optional(v.string()),
+    journalSegment: v.optional(v.string()),
+    journalCommand: v.optional(v.string()),
     baseBackupId: v.optional(v.id('projectBackups')),
   })
     .index('by_project', ['projectId'])
@@ -91,6 +93,7 @@ export const hostedRecordTables = {
     .index('by_project', ['projectId']),
   projectHostedOperations: defineTable({
     recovery: v.optional(v.string()),
+    journalSegment: v.optional(v.string()),
     projectId: v.id('hostedProjects'),
     actor: v.string(),
     operationId: v.string(),

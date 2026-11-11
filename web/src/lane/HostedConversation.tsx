@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { useArchivePaginatedQuery } from '../archive-pagination';
 import { useRef, useState } from 'react';
 import { useMutation, usePaginatedQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
@@ -20,10 +21,10 @@ export function HostedConversation({
   intentId?: string;
   viewId?: string;
 }) {
-  const feed = usePaginatedQuery(
+  const feed = useArchivePaginatedQuery(
     api.projectCoordination.feed,
     { projectId, ...(laneId ? { laneId } : intentId ? { intentId } : {}) },
-    { initialNumItems: 40 },
+    { initialNumItems: 40, throwOnError: true },
   );
   const people = usePaginatedQuery(api.projectCoordination.sessions, { projectId }, { initialNumItems: 30 });
   const publish = useMutation(api.projectCoordination.publish);

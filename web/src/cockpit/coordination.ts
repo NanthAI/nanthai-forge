@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { useArchivePaginatedQuery } from '../archive-pagination';
 import { useToast } from '../ui/Toast';
 import { createContext, useContext, useRef } from 'react';
 import { PendingWrite } from '../pending-write';
@@ -53,7 +54,7 @@ export function useCoordination(projectId: Id<'hostedProjects'>) {
 }
 export function useLiveCoordination(projectId: Id<'hostedProjects'>, enabled: boolean) {
   const sessions = usePresenceSessions(projectId, enabled);
-  const recent = useSafePaginatedQuery(api.projectCoordination.recent, enabled ? { projectId } : 'skip', {
+  const recent = useArchivePaginatedQuery(api.projectCoordination.recent, enabled ? { projectId } : 'skip', {
     initialNumItems: 40,
   });
   // A refused or failed read degrades its own panel to empty and "incomplete"; it never throws the page.

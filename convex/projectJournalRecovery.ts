@@ -4,7 +4,7 @@ import type { Doc } from './_generated/dataModel';
 import type { RecoveryTable } from '../src/recovery-hosted-protocol';
 import { RECOVERY_PAGE_BYTES, RECOVERY_PAGE_ROWS } from '../src/recovery-hosted-protocol';
 import { JOURNAL_TABLES, type JournalIndex } from '../src/journal-segment';
-import { journalIndexKind, requireJournal, loadedJournalRows } from './projectJournalStore';
+import { requireJournal } from './projectJournalStore';
 import { recoveryCapsuleCursor } from './projectLandingCapsuleRecovery';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
@@ -19,23 +19,29 @@ export async function journalRecoveryPage(
   if (!JOURNAL_TABLES.includes(table as never))
     return canonicalPayload({ table, rows: [], cursor: null, done: true });
   const row = await ctx.db
-    .query('projectFinishReadRows')
-    .withIndex('by_kind_and_project_and_submission', q => {
-      const range = q.eq('kind', journalIndexKind).eq('projectId', project._id);
+    .query('projectJournalSegments')
+    .withIndex('by_project_and_key', q => {
+      const range = q.eq('projectId', project._id);
       return cursor.cursor === null
         ? range
         : cursor.offset === undefined
-          ? range.gt('submissionId', cursor.cursor)
-          : range.gte('submissionId', cursor.cursor);
+          ? range.gt('key', cursor.cursor)
+          : range.gte('key', cursor.cursor);
     })
     .order('asc')
     .first();
   if (!row) return canonicalPayload({ table, rows: [], cursor: null, done: true });
+  if (row.category === 'fragment')
+    return canonicalPayload({
+      table,
+      rows: [],
+      done: false,
+      cursor: recoveryCapsuleCursor({ table, phase: 'journal', cursor: row.key }),
+    });
   const index = JSON.parse(row.value) as JournalIndex,
     offset = cursor.offset ?? 0;
-  requireJournal(ctx, index);
-  const all = loadedJournalRows(ctx, table as (typeof JOURNAL_TABLES)[number]);
-  const selected = all.filter(row => row.projectId === project._id).map(row => canonicalPayload(row));
+  const segment = requireJournal(ctx, index);
+  const selected = segment.tables[table as (typeof JOURNAL_TABLES)[number]] ?? [];
   invariant(offset <= selected.length, 'EVIDENCE_CHANGED', 'Journal recovery offset differs.');
   const rows: string[] = [];
   let bytes = 0;
@@ -53,7 +59,7 @@ export async function journalRecoveryPage(
     cursor: recoveryCapsuleCursor({
       table,
       phase: 'journal',
-      cursor: row.submissionId!,
+      cursor: row.key,
       ...(next < selected.length ? { offset: next } : {}),
     }),
   });

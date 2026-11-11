@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { journalLaneMetricsPage } from './projectJournalLaneMetrics';
 import { capsuleMetricsPage } from './projectLandingCapsuleMetrics';
 import { capsuleAttempt } from './projectLandingCapsuleStore';
 import { v } from 'convex/values';
@@ -125,6 +126,17 @@ export const page = query({
         });
       if (input.stream === 'attempts') {
         const page = await capsuleMetricsPage(ctx, input.projectId, context, to, input.cursor);
+        if (page)
+          return canonicalPayload({
+            ...page,
+            runProjectionVersion: 1,
+            contextFrom: new Date(context).toISOString(),
+            cutover: project.sourceCutover?.at ?? null,
+            authority: project.sourceAuthority ?? { mode: 'native-owner', epoch: 0 },
+          });
+      }
+      if (input.stream === 'lanes') {
+        const page = await journalLaneMetricsPage(ctx, input.projectId, context, to, input.cursor);
         if (page)
           return canonicalPayload({
             ...page,

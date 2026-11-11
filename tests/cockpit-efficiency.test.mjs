@@ -57,6 +57,10 @@ test('cockpit history batches preserve all dogfood rows and issue no disabled re
         /import \{ useConvex, useQuery \} from [^;]+;/,
         'const { useConvex, usePaginatedQuery, useQuery } = globalThis.__e67Convex;',
       )
+      .replace(
+        /import \{ useArchivePaginatedQuery \} from [^;]+;/,
+        'const useArchivePaginatedQuery = (...args) => ({ error: undefined, ...globalThis.__e67Convex.usePaginatedQuery(...args) });',
+      )
       // Pages come through the safe wrapper, which adds only an `error` field to the same hook result.
       .replace(
         /import \{ useSafePaginatedQuery \} from [^;]+;/,

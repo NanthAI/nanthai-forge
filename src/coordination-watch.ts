@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { hydrateLandingHistory, hasJournalHistory } from './landing-capsule-client.js';
+import { invariant } from './errors.js';
+import { getFunctionName } from 'convex/server';
 import { deadlineConvexSubscription } from './network-convex-client.js';
 import { makeFunctionReference } from 'convex/server';
 import type { FunctionReference } from 'convex/server';
@@ -8,6 +11,7 @@ import { COORDINATION_TOUCH_INTERVAL_MS } from './coordination-types.js';
 
 type FeedPage = { page: unknown[]; isDone: boolean; continueCursor: string };
 export interface CoordinationSubscription {
+  action?(reference: FunctionReference<'action'>, args: Record<string, unknown>): Promise<unknown>;
   onUpdate(
     reference: FunctionReference<'query'>,
     args: Record<string, unknown>,
@@ -36,6 +40,8 @@ export async function watchCoordinationFeed(
   input: WatchInput,
   touch?: (sessionId: string) => Promise<unknown>,
 ) {
+  let active = true,
+    generation = 0;
   let unsubscribe: (() => void) | undefined,
     timer: ReturnType<typeof setTimeout> | undefined,
     beat: ReturnType<typeof setInterval> | undefined;
@@ -83,8 +89,26 @@ export async function watchCoordinationFeed(
         reference,
         args,
         page => {
-          latest = page;
-          if (page.page.length) resolve({ ...page, timedOut: false });
+          const selected = ++generation;
+          const apply = (value: unknown) => {
+            if (!active || selected !== generation) return;
+            const parsed = (typeof value === 'string' ? JSON.parse(value) : value) as FeedPage;
+            latest = parsed;
+            if (parsed.page.length) resolve({ ...parsed, timedOut: false });
+          };
+          if (!hasJournalHistory(page)) {
+            apply(page);
+            return;
+          }
+          const hydrated = hydrateLandingHistory(getFunctionName(reference), args, page, (name, input) => {
+            invariant(
+              client.action,
+              'HOSTED_ACTION_UNSUPPORTED',
+              'Update this coordination client to read archived history.',
+            );
+            return client.action(makeFunctionReference<'action'>(name), { ...input, projectId });
+          });
+          void hydrated.then(apply, reject);
         },
         () =>
           reject(
@@ -96,6 +120,8 @@ export async function watchCoordinationFeed(
       );
     });
   } finally {
+    active = false;
+    generation++;
     if (timer) clearTimeout(timer);
     if (beat) clearInterval(beat);
     unsubscribe?.();

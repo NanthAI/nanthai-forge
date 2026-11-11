@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { JournalNeeded } from './projectJournalStore';
 import { workRecordTable } from './projectWorkRecordTables';
 // Compact, independently maintained journal fingerprints. These are disposable index metadata, not Work.
 import { writeFingerprint as put } from './projectWorkStoreFingerprintWrites';
@@ -257,14 +258,16 @@ export async function compareFingerprints(
           matched++;
           continue;
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof JournalNeeded) throw error;
         add(invalid, expected.key);
       }
     } else {
       try {
         const row = await recordVersion(ctx, projectId, ref.kind, ref.key, actual.version);
         if (row) await hostedRecordBody(ctx, row);
-      } catch {
+      } catch (error) {
+        if (error instanceof JournalNeeded) throw error;
         add(invalid, expected.key);
       }
     }

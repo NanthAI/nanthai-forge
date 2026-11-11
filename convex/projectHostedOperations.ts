@@ -21,18 +21,22 @@ import {
   type HostedTerminalReceipt,
 } from '../src/hosted-source-operation';
 
-export const hostedOperationRow = (
+export async function hostedOperationRow(
   ctx: QueryCtx | MutationCtx,
   projectId: Id<'hostedProjects'>,
   actor: string,
   operationId: string,
-) =>
-  ctx.db
+) {
+  const row = await ctx.db
     .query('projectHostedOperations')
     .withIndex('by_project_and_actor_and_operation', q =>
       q.eq('projectId', projectId).eq('actor', actor).eq('operationId', operationId),
     )
     .unique();
+  if (!row?.journalSegment) return row;
+  const { expandOperationReceipt } = await import('../src/compact-operation-receipt');
+  return { ...row, value: canonicalPayload(expandOperationReceipt(row)) };
+}
 
 /** Remove this project's receipts past the retention value, oldest first, at most one batch per call.
  * Runs only inside the write that adds a new receipt, so an idle project does nothing and no timer

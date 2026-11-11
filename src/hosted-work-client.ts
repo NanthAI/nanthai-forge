@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { hydrateLandingHistory } from './landing-capsule-client.js';
 import { metadataCommandSchema } from './work-intent-types.js';
 import { rebuildWorkIndex } from './work-index-client.js';
 import { hostedActionError } from './hosted-action-error.js';
@@ -7,7 +8,7 @@ import { assembleIndexValue } from './work-index-value.js';
 import { workStoreSources } from './work-store-records.js';
 import { policyWriteSchema } from './autonomy-policy.js';
 import { ConvexError } from 'convex/values';
-import { makeFunctionReference, type FunctionReference } from 'convex/server';
+import { getFunctionName, makeFunctionReference, type FunctionReference } from 'convex/server';
 import { z } from 'zod';
 import { ForgeError, invariant } from './errors.js';
 export const hostedWorkRequestSchema = z.discriminatedUnion('action', [
@@ -61,6 +62,17 @@ export interface HostedWorkTransport {
   query(reference: FunctionReference<'query'>, args: Record<string, unknown>): Promise<unknown>;
   mutation?(reference: FunctionReference<'mutation'>, args: Record<string, unknown>): Promise<unknown>;
   action(reference: FunctionReference<'action'>, args: Record<string, unknown>): Promise<unknown>;
+}
+async function queryWorkHistory(
+  client: HostedWorkTransport,
+  ref: FunctionReference<'query'>,
+  args: Record<string, unknown>,
+) {
+  const value = await client.query(ref, args);
+  const hydrated = await hydrateLandingHistory(getFunctionName(ref), args, value, (name, request) =>
+    client.action(makeFunctionReference<'action'>(name), { projectId: args.projectId, ...request }),
+  );
+  return typeof value !== 'string' && typeof hydrated === 'string' ? JSON.parse(hydrated) : hydrated;
 }
 type Workspace = {
   generationId: string;
@@ -205,7 +217,11 @@ async function workStorePass(
       const page = JSON.parse(
         (copy
           ? await client.mutation!(makeFunctionReference<'mutation'>('projectWorkStore:copy'), args)
-          : await client.query(makeFunctionReference<'query'>('projectWorkStore:compare'), args)) as string,
+          : await queryWorkHistory(
+              client,
+              makeFunctionReference<'query'>('projectWorkStore:compare'),
+              args,
+            )) as string,
       ) as StorePage;
       for (const [name, value] of Object.entries(page)) {
         if (name === 'cursor') continue;
@@ -374,7 +390,7 @@ export async function dispatchHostedWork(
         'BAD_ARGUMENT',
         'Use the returned page cursor, or provide the original generationId with a raw server cursor.',
       );
-    const page = (await client.query(reference('records'), {
+    const page = (await queryWorkHistory(client, reference('records'), {
       projectId,
       generationId: current.generationId,
       collection: request.collection,

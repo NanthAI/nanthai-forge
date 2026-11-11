@@ -4,6 +4,7 @@ import { makeFunctionReference } from 'convex/server';
 import {
   capsuleHistoryQueries,
   hasLandingCapsule,
+  hasJournalHistory,
   hydrateLandingHistory,
 } from '../../../src/landing-capsule-client';
 
@@ -53,7 +54,7 @@ export function watchLandingHistory(
           changed(undefined);
           return;
         }
-        if (!hasLandingCapsule(value)) {
+        if (!hasLandingCapsule(value) && !hasJournalHistory(value)) {
           changed(decode(value));
           return;
         }

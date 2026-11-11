@@ -18,13 +18,19 @@ export async function hydrateLandingHistory(
   value: unknown,
   action: (name: string, args: Record<string, unknown>) => Promise<unknown>,
 ) {
-  const parsed = typeof value === 'string' ? JSON.parse(value) : value;
-  if (parsed && typeof parsed === 'object' && 'journalHistory' in parsed)
-    return action('projectJournalActions:history', {
-      query: name,
-      request: name === 'projectRecoveryHosted:page' ? JSON.stringify(request) : String(request.request),
-    });
+  if (hasJournalHistory(value))
+    return action(
+      name.startsWith('projectCoordination')
+        ? 'projectJournalCoordination:history'
+        : 'projectJournalActions:history',
+      { query: name, request: JSON.stringify(request) },
+    );
   return capsuleHistoryQueries.has(name) && hasLandingCapsule(value)
     ? action('projectLandingCapsuleRead:history', { query: name, request: JSON.stringify(request) })
     : value;
 }
+
+export const hasJournalHistory = (value: unknown): boolean => {
+  const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+  return !!parsed && typeof parsed === 'object' && 'journalHistory' in parsed;
+};

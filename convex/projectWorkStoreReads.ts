@@ -4,6 +4,7 @@
 // (both read `projectWorkIndex:records` and `:detail`). One head per item and no project-wide row, so a
 // write re-runs only the page that holds it. Rows keep the journal's shape: the whole item or comment
 // (never a payload header), in the journal's append order (the order the heads were created).
+import { journalRecordPage } from './projectJournalRecordPage';
 import type { QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { PaginationOptions } from 'convex/server';
@@ -64,13 +65,16 @@ export async function storePage(
 ): Promise<Page> {
   const order = input.newestFirst ? 'desc' : 'asc';
   if (input.collection === 'planningVersions') {
-    const page = await ctx.db
-      .query('projectHostedRecords')
-      .withIndex('by_project_and_kind_and_key_and_version', q =>
-        q.eq('projectId', projectId).eq('kind', 'issue').eq('key', input.parentId!),
-      )
-      .order(order)
-      .paginate(input.paginationOpts);
+    const head = await recordHead(ctx, projectId, 'issue', input.parentId!);
+    const page = await journalRecordPage(ctx, {
+      projectId,
+      kind: 'issue',
+      key: input.parentId!,
+      through: head?.version ?? -1,
+      cursor: input.paginationOpts.cursor,
+      limit: input.paginationOpts.numItems,
+      ...(input.newestFirst === undefined ? {} : { newestFirst: input.newestFirst }),
+    });
     const rows: Row[] = [];
     for (const row of page.page) {
       const item = (await body(ctx, row)).item;

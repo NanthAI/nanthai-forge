@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { JournalNeeded, journalReadReply } from './projectJournalStore';
 import { workRecordTable } from './projectWorkRecordTables';
 import { eventDocument, type WorkProvenance, type StoredWorkEvent } from './projectWorkEventStore';
 // Flip 5 S1 and S2 (Issue 0695ab24): copy the journal index's Issues, comments and notes into the hosted
@@ -514,152 +515,164 @@ export const compare = query({
     digestOnly: v.optional(v.boolean()),
   },
   returns: v.string(),
-  handler: async (ctx, input) => {
-    try {
-      const { project, partition } = await ownerStore(ctx, input.projectId);
-      const digestPrefix = 'work-digest:';
-      const fullPrefix = 'work-full:';
-      const mode = input.cursor?.startsWith(digestPrefix)
-        ? 'digest'
-        : input.cursor?.startsWith(fullPrefix)
-          ? 'full'
-          : undefined;
-      if (mode)
-        input = {
-          ...input,
-          cursor: input.cursor!.slice(mode === 'digest' ? digestPrefix.length : fullPrefix.length),
-        };
-      if (
-        mode === 'digest' ||
-        (mode !== 'full' &&
-          workStoreMigrationActive(project) &&
-          (input.digestOnly ?? input.newest !== undefined))
-      ) {
-        const compared = workStoreMigrationActive(project)
-          ? await compareFingerprints(
-              ctx,
-              input.projectId,
-              partition,
-              input.collection,
-              input.cursor,
-              input.newest ?? 100,
-            )
-          : null;
-        invariant(
-          compared || mode !== 'digest',
-          'WORK_STALE',
-          'The Work store comparison coverage changed. Restart this bounded compare.',
-        );
-        if (compared)
-          return JSON.stringify({
-            ...compared,
-            method: 'digest',
-            cursor: compared.cursor ? digestPrefix + compared.cursor : null,
-          });
-      }
-      const full = (value: { cursor: string | null } & Record<string, unknown>) =>
-        JSON.stringify({ ...value, method: 'full', cursor: value.cursor ? fullPrefix + value.cursor : null });
-      const collection = input.collection as CompareSource;
-      let checked = 0,
-        matched = 0,
-        hosted = 0;
-      const missing = tally(),
-        different = tally(),
-        invalid = tally();
-      if (collection === 'issueHeads') {
-        const page = await ctx.db
-          .query('projectHostedRecordHeads')
-          .withIndex('by_project_and_kind', q => q.eq('projectId', input.projectId).eq('kind', 'issue'))
-          .order(input.newest ? 'desc' : 'asc')
-          .paginate({
-            cursor: input.cursor,
-            numItems: Math.min(input.newest ?? WORK_STORE_PAGE, WORK_STORE_PAGE),
-          });
-        for (const head of page.page) {
-          checked++;
-          const row = await indexRecord(ctx, partition, 'planningItems', head.key);
-          const version = row ? (JSON.parse(row.value) as { version?: number }).version : undefined;
-          if (!row) note(missing, head.key);
-          else if (version !== head.version) note(different, `${head.key}:${head.version}:${version}`);
-          else matched++;
-        }
-        return full({
-          checked,
-          matched,
-          missing,
-          different,
-          invalid,
-          cursor: page.isDone ? null : page.continueCursor,
+  handler: journalWorkStoreCompare,
+});
+export async function journalWorkStoreCompare(
+  ctx: QueryCtx,
+  input: {
+    projectId: Id<'hostedProjects'>;
+    collection: CompareSource;
+    cursor: string | null;
+    newest?: number;
+    digestOnly?: boolean;
+  },
+) {
+  try {
+    const { project, partition } = await ownerStore(ctx, input.projectId);
+    const digestPrefix = 'work-digest:';
+    const fullPrefix = 'work-full:';
+    const mode = input.cursor?.startsWith(digestPrefix)
+      ? 'digest'
+      : input.cursor?.startsWith(fullPrefix)
+        ? 'full'
+        : undefined;
+    if (mode)
+      input = {
+        ...input,
+        cursor: input.cursor!.slice(mode === 'digest' ? digestPrefix.length : fullPrefix.length),
+      };
+    if (
+      mode === 'digest' ||
+      (mode !== 'full' &&
+        workStoreMigrationActive(project) &&
+        (input.digestOnly ?? input.newest !== undefined))
+    ) {
+      const compared = workStoreMigrationActive(project)
+        ? await compareFingerprints(
+            ctx,
+            input.projectId,
+            partition,
+            input.collection,
+            input.cursor,
+            input.newest ?? 100,
+          )
+        : null;
+      invariant(
+        compared || mode !== 'digest',
+        'WORK_STALE',
+        'The Work store comparison coverage changed. Restart this bounded compare.',
+      );
+      if (compared)
+        return JSON.stringify({
+          ...compared,
+          method: 'digest',
+          cursor: compared.cursor ? digestPrefix + compared.cursor : null,
         });
+    }
+    const full = (value: { cursor: string | null } & Record<string, unknown>) =>
+      JSON.stringify({ ...value, method: 'full', cursor: value.cursor ? fullPrefix + value.cursor : null });
+    const collection = input.collection as CompareSource;
+    let checked = 0,
+      matched = 0,
+      hosted = 0;
+    const missing = tally(),
+      different = tally(),
+      invalid = tally();
+    if (collection === 'issueHeads') {
+      const page = await ctx.db
+        .query('projectHostedRecordHeads')
+        .withIndex('by_project_and_kind', q => q.eq('projectId', input.projectId).eq('kind', 'issue'))
+        .order(input.newest ? 'desc' : 'asc')
+        .paginate({
+          cursor: input.cursor,
+          numItems: Math.min(input.newest ?? WORK_STORE_PAGE, WORK_STORE_PAGE),
+        });
+      for (const head of page.page) {
+        checked++;
+        const row = await indexRecord(ctx, partition, 'planningItems', head.key);
+        const version = row ? (JSON.parse(row.value) as { version?: number }).version : undefined;
+        if (!row) note(missing, head.key);
+        else if (version !== head.version) note(different, `${head.key}:${head.version}:${version}`);
+        else matched++;
       }
-      if (
-        collection === 'readItems' ||
-        collection === 'readVersions' ||
-        collection === 'readComments' ||
-        collection === 'readNotes' ||
-        collection === 'readLifecycle'
-      ) {
-        const source = readCompares[collection];
-        const page = await indexPage(ctx, partition, source, input.cursor, input.newest);
-        for (const row of page.rows) {
-          checked++;
-          let read;
-          try {
-            read = await storeReadOf(ctx, input.projectId, source, row.value as { id?: string });
-          } catch {
-            // A stored body that fails its digest: the reader refuses it, so the compare names it.
-            note(invalid, row.key);
-            continue;
-          }
-          if (read == null) note(missing, row.key);
-          else if (!sameValue(read, row.value)) note(different, row.key);
-          else matched++;
-        }
-        return full({ checked, matched, missing, different, invalid, cursor: page.cursor });
-      }
-      const page = await indexPage(ctx, partition, collection, input.cursor, input.newest);
+      return full({
+        checked,
+        matched,
+        missing,
+        different,
+        invalid,
+        cursor: page.isDone ? null : page.continueCursor,
+      });
+    }
+    if (
+      collection === 'readItems' ||
+      collection === 'readVersions' ||
+      collection === 'readComments' ||
+      collection === 'readNotes' ||
+      collection === 'readLifecycle'
+    ) {
+      const source = readCompares[collection];
+      const page = await indexPage(ctx, partition, source, input.cursor, input.newest);
       for (const row of page.rows) {
         checked++;
-        if (collection === 'intents') {
-          let stored;
-          try {
-            stored = await storeIntent(ctx, input.projectId, project.owner, row.value, false);
-          } catch {
-            note(invalid, row.key);
-            continue;
-          }
-          if (stored === 'same') matched++;
-          else if (stored === 'hosted') hosted++;
-          else note(stored === 'missing' ? missing : different, row.key);
+        let read;
+        try {
+          read = await storeReadOf(ctx, input.projectId, source, row.value as { id?: string });
+        } catch (error) {
+          if (error instanceof JournalNeeded) throw error;
+          // A stored body that fails its digest: the reader refuses it, so the compare names it.
+          note(invalid, row.key);
           continue;
         }
-        let encoded;
+        if (read == null) note(missing, row.key);
+        else if (!sameValue(read, row.value)) note(different, row.key);
+        else matched++;
+      }
+      return full({ checked, matched, missing, different, invalid, cursor: page.cursor });
+    }
+    const page = await indexPage(ctx, partition, collection, input.cursor, input.newest);
+    for (const row of page.rows) {
+      checked++;
+      if (collection === 'intents') {
+        let stored;
         try {
-          encoded = hostedRecordValue(
-            workStoreRecord(collection === 'planningItems' ? 'planningVersions' : collection, row.value),
-          );
+          stored = await storeIntent(ctx, input.projectId, project.owner, row.value, false);
         } catch {
           note(invalid, row.key);
           continue;
         }
-        const { record, ref } = encoded;
-        if (collection === 'planningItems') {
-          const head = await recordHead(ctx, input.projectId, 'issue', record.id);
-          if (!head) note(missing, record.id);
-          else if (head.version !== record.version)
-            note(different, `${record.id}:${head.version}:${record.version}`);
-          else matched++;
-          continue;
-        }
-        const stored = await recordVersion(ctx, input.projectId, record.kind, record.id, record.version);
-        if (!stored) note(missing, `${record.kind}:${record.id}:${record.version}`);
-        else if (stored.digest !== ref.digest || stored.bytes !== ref.bytes)
-          note(different, `${record.kind}:${record.id}:${record.version}`);
-        else matched++;
+        if (stored === 'same') matched++;
+        else if (stored === 'hosted') hosted++;
+        else note(stored === 'missing' ? missing : different, row.key);
+        continue;
       }
-      return full({ checked, matched, hosted, missing, different, invalid, cursor: page.cursor });
-    } catch (error) {
-      return report(error);
+      let encoded;
+      try {
+        encoded = hostedRecordValue(
+          workStoreRecord(collection === 'planningItems' ? 'planningVersions' : collection, row.value),
+        );
+      } catch {
+        note(invalid, row.key);
+        continue;
+      }
+      const { record, ref } = encoded;
+      if (collection === 'planningItems') {
+        const head = await recordHead(ctx, input.projectId, 'issue', record.id);
+        if (!head) note(missing, record.id);
+        else if (head.version !== record.version)
+          note(different, `${record.id}:${head.version}:${record.version}`);
+        else matched++;
+        continue;
+      }
+      const stored = await recordVersion(ctx, input.projectId, record.kind, record.id, record.version);
+      if (!stored) note(missing, `${record.kind}:${record.id}:${record.version}`);
+      else if (stored.digest !== ref.digest || stored.bytes !== ref.bytes)
+        note(different, `${record.kind}:${record.id}:${record.version}`);
+      else matched++;
     }
-  },
-});
+    return full({ checked, matched, hosted, missing, different, invalid, cursor: page.cursor });
+  } catch (error) {
+    if (error instanceof JournalNeeded) return journalReadReply(ctx, error, input.projectId);
+    return report(error);
+  }
+}

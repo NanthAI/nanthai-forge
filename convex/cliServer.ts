@@ -157,20 +157,23 @@ export const mutation = people(
     customCtx((ctx: MutationCtx) => guard(ctx, 'cli')),
   ),
 );
-const guardedAction = customAction(baseAction, {
-  args: {},
-  input: async (ctx: ActionCtx) => {
-    await guard(ctx, 'cli');
-    return {
-      ctx: {},
-      args: {},
-      onSuccess: async () => {
-        await guard(ctx, 'cli');
-      },
-    };
-  },
-});
+const guardedActionFor = (scope: 'cli' | 'coordination') =>
+  customAction(baseAction, {
+    args: {},
+    input: async (ctx: ActionCtx) => {
+      await guard(ctx, scope);
+      return {
+        ctx: {},
+        args: {},
+        onSuccess: async () => {
+          await guard(ctx, scope);
+        },
+      };
+    },
+  });
+const guardedAction = guardedActionFor('cli');
 export const action = actionPeople(guardedAction);
+export const coordinationAction = actionPeople(guardedActionFor('coordination'));
 /** A bounded result must paginate after the one public identity mapping. */
 export function actionWithMappedResult(transform: (value: unknown, args: unknown) => unknown) {
   return withPeople(guardedAction, actionSubjectArgs, async (ctx: ActionCtx, args, value, shape) => {

@@ -180,7 +180,9 @@
       "importReaders": 0,
       "githubDeliveries": 0,
       "projectObjectReceipts": 0,
-      "projectHostedLandingBodies": 1013
+      "projectHostedLandingBodies": 1013,
+      "projectJournalSegments": 0,
+      "projectJournalReceipts": 0
     },
     "retained": {
       "projectFinishReadRows": 12688,
@@ -362,7 +364,9 @@
       "importReaders": 0,
       "githubDeliveries": 0,
       "projectObjectReceipts": 0,
-      "projectHostedLandingBodies": 1013
+      "projectHostedLandingBodies": 1013,
+      "projectJournalSegments": 0,
+      "projectJournalReceipts": 0
     },
     "perProject": {
       "immediate": {
@@ -584,7 +588,9 @@
       "importReaders": 0,
       "githubDeliveries": 0,
       "projectObjectReceipts": 0,
-      "projectHostedLandingBodies": 1015
+      "projectHostedLandingBodies": 1015,
+      "projectJournalSegments": 0,
+      "projectJournalReceipts": 0
     },
     "retained": {
       "projectFinishReadRows": 21168,
@@ -766,7 +772,9 @@
       "importReaders": 0,
       "githubDeliveries": 0,
       "projectObjectReceipts": 0,
-      "projectHostedLandingBodies": 1015
+      "projectHostedLandingBodies": 1015,
+      "projectJournalSegments": 0,
+      "projectJournalReceipts": 0
     },
     "perProject": {
       "immediate": {

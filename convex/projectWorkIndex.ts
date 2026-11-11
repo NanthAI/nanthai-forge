@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+import { JournalNeeded, journalReadReply } from './projectJournalStore';
+import type { QueryCtx } from './_generated/server';
+import type { Id } from './_generated/dataModel';
+import type { PaginationOptions } from 'convex/server';
+import type { Infer } from 'convex/values';
 import { workRecordTable } from './projectWorkRecordTables';
 import { findWorkEvent } from './projectWorkEventStore';
 import { likelyPlanningDuplicates } from './projectHostedPlanningSearch';
@@ -115,99 +120,15 @@ export const records = query({
   },
   returns: v.object({
     ...identity,
+    journalHistory: v.optional(v.literal(true)),
+    viewVersion: v.optional(v.string()),
     coverage: v.optional(v.string()),
     // State names are dynamic record keys: a literal object validator cannot name `in-progress`.
     counts: v.optional(v.record(v.string(), v.number())),
     ...paginationResultValidator(v.object({ id: v.string(), position: v.number(), value: v.string() }))
       .fields,
   }),
-  handler: async (ctx, input) => {
-    try {
-      const user = await ctx.auth.getUserIdentity();
-      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read your Forge project.');
-      const project = await accessibleProject(ctx, input.projectId, user.subject),
-        generation = await selectedGeneration(ctx, project);
-      invariant(
-        !input.paginationOpts.cursor ||
-          !input.generationId ||
-          generation?.recordsGenerationId !== input.generationId ||
-          generation._id === input.generationId,
-        'WORK_STALE',
-        'Work generation changed. Restart this list.',
-      );
-      if (!generation || (input.generationId && input.generationId !== generation._id))
-        return { generationId: null, revision: null, page: [], isDone: true, continueCursor: '' };
-      const numItems = Math.min(input.paginationOpts.numItems, 100);
-      if (
-        (input.collection === 'planningItems' && input.planningFilter) ||
-        readsStore(project, input.collection, input.parentId)
-      ) {
-        const actors = new Map<string, Promise<boolean>>();
-        const page =
-          input.planningFilter && input.collection === 'planningItems'
-            ? await planningPage(ctx, project, generation, { ...input, planningFilter: input.planningFilter })
-            : await storePage(ctx, project._id, {
-                ...input,
-                paginationOpts: { ...input.paginationOpts, numItems },
-              });
-        return {
-          ...page,
-          generationId: generation._id,
-          revision: generation.initialRevision,
-          page: await Promise.all(
-            page.page.map(async row => ({
-              id: row.id,
-              position: row.position,
-              value: await actorSummary(ctx, project._id, JSON.stringify(row.value), actors),
-            })),
-          ),
-        };
-      }
-      const rows =
-        input.parentId === undefined
-          ? ctx.db
-              .query(await workRecordTable(ctx, recordPartition(generation), input.collection))
-              .withIndex('by_generation_and_collection_and_position', q =>
-                q.eq('generationId', recordPartition(generation)).eq('collection', input.collection),
-              )
-          : ctx.db
-              .query(await workRecordTable(ctx, recordPartition(generation), input.collection))
-              .withIndex('by_generation_and_collection_and_parent_and_position', q =>
-                q
-                  .eq('generationId', recordPartition(generation))
-                  .eq('collection', input.collection)
-                  .eq('parent', input.parentId!),
-              );
-      const main = await hostedMain(ctx, generation);
-      const actors = new Map<string, Promise<boolean>>();
-      const payloads = new Map<string, Promise<Map<string, string>>>();
-      const page = await rows
-        .order(input.newestFirst ? 'desc' : 'asc')
-        .paginate({ ...input.paginationOpts, numItems });
-      return {
-        ...page,
-        generationId: generation._id,
-        revision: generation.initialRevision,
-        page: await Promise.all(
-          page.page.map(async row => ({
-            id: row.key,
-            position: row.position,
-            value: await cockpitSummary(
-              ctx,
-              project,
-              generation,
-              row.collection,
-              await hostedRecordValue(ctx, recordPartition(generation), row, payloads),
-              main,
-              actors,
-            ),
-          })),
-        ),
-      };
-    } catch (error) {
-      return report(error);
-    }
-  },
+  handler: journalWorkRecordsRead,
 });
 export const detail = query({
   args: { ...selection, collection: v.string(), id: v.string() },
@@ -240,7 +161,7 @@ export const detail = query({
       let editable = project.owner === user.subject,
         intentPin: string | null = null;
       if (input.collection === 'intents') {
-        const event = await findWorkEvent(ctx, project._id, input.id);
+        const event = await findWorkEvent(ctx, project._id, input.id, { authority: true });
         const membership = await ctx.db
           .query('projectContributors')
           .withIndex('by_project_and_contributor', q =>
@@ -310,3 +231,112 @@ export const revision = query({
     }
   },
 });
+
+export async function journalWorkRecordsRead(
+  ctx: QueryCtx,
+  input: {
+    projectId: Id<'hostedProjects'>;
+    generationId?: Id<'projectWorkGenerations'>;
+    collection: string;
+    planningFilter?: Infer<typeof planningFilter>;
+    counts?: boolean;
+    newestFirst?: boolean;
+    parentId?: string;
+    paginationOpts: PaginationOptions;
+  },
+) {
+  try {
+    const user = await ctx.auth.getUserIdentity();
+    invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read your Forge project.');
+    const project = await accessibleProject(ctx, input.projectId, user.subject),
+      generation = await selectedGeneration(ctx, project);
+    invariant(
+      !input.paginationOpts.cursor ||
+        !input.generationId ||
+        generation?.recordsGenerationId !== input.generationId ||
+        generation._id === input.generationId,
+      'WORK_STALE',
+      'Work generation changed. Restart this list.',
+    );
+    if (!generation || (input.generationId && input.generationId !== generation._id))
+      return { generationId: null, revision: null, page: [], isDone: true, continueCursor: '' };
+    const numItems = Math.min(input.paginationOpts.numItems, 100);
+    if (
+      (input.collection === 'planningItems' && input.planningFilter) ||
+      readsStore(project, input.collection, input.parentId)
+    ) {
+      const actors = new Map<string, Promise<boolean>>();
+      const page =
+        input.planningFilter && input.collection === 'planningItems'
+          ? await planningPage(ctx, project, generation, { ...input, planningFilter: input.planningFilter })
+          : await storePage(ctx, project._id, {
+              ...input,
+              paginationOpts: { ...input.paginationOpts, numItems },
+            });
+      return {
+        ...page,
+        generationId: generation._id,
+        revision: generation.initialRevision,
+        page: await Promise.all(
+          page.page.map(async row => ({
+            id: row.id,
+            position: row.position,
+            value: await actorSummary(ctx, project._id, JSON.stringify(row.value), actors),
+          })),
+        ),
+      };
+    }
+    const rows =
+      input.parentId === undefined
+        ? ctx.db
+            .query(await workRecordTable(ctx, recordPartition(generation), input.collection))
+            .withIndex('by_generation_and_collection_and_position', q =>
+              q.eq('generationId', recordPartition(generation)).eq('collection', input.collection),
+            )
+        : ctx.db
+            .query(await workRecordTable(ctx, recordPartition(generation), input.collection))
+            .withIndex('by_generation_and_collection_and_parent_and_position', q =>
+              q
+                .eq('generationId', recordPartition(generation))
+                .eq('collection', input.collection)
+                .eq('parent', input.parentId!),
+            );
+    const main = await hostedMain(ctx, generation);
+    const actors = new Map<string, Promise<boolean>>();
+    const payloads = new Map<string, Promise<Map<string, string>>>();
+    const page = await rows
+      .order(input.newestFirst ? 'desc' : 'asc')
+      .paginate({ ...input.paginationOpts, numItems });
+    return {
+      ...page,
+      generationId: generation._id,
+      revision: generation.initialRevision,
+      page: await Promise.all(
+        page.page.map(async row => ({
+          id: row.key,
+          position: row.position,
+          value: await cockpitSummary(
+            ctx,
+            project,
+            generation,
+            row.collection,
+            await hostedRecordValue(ctx, recordPartition(generation), row, payloads),
+            main,
+            actors,
+          ),
+        })),
+      ),
+    };
+  } catch (error) {
+    if (error instanceof JournalNeeded)
+      return {
+        ...JSON.parse(await journalReadReply(ctx, error, input.projectId)),
+        generationId: input.generationId ?? null,
+        revision: null,
+        page: [],
+        isDone: false,
+        continueCursor: input.paginationOpts.cursor ?? '',
+      };
+    return report(error);
+  }
+}

@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
+import { journalLaneSourcePins } from './projectJournalStore';
 import { capsuleAcceptancePage } from './projectLandingCapsuleLedger';
 import { capsulePlan } from './projectLandingCapsuleStore';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
 import { loadLanding, loadLandingAttempt } from './projectHostedLandingStore';
-import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
+import {
+  hostedWriteProject,
+  readHostedRecord,
+  recordVersion,
+  hostedRecordBody,
+} from './projectHostedRecords';
 import { saveObject, sameSaveLane } from './projectHostedSaveStore';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { validateComposePage, composeLaneSchema, composeDependencySchema } from '../src/hosted-compose';
@@ -137,15 +143,10 @@ export async function stageAcceptance(
       }
       // Read the immutable selected version, not a newer save. H08 has already
       // validated the composition; this verifies the completion ledger binding.
-      const row = await readHostedRecord(ctx, {
-        projectId: input.projectId,
-        actor: plan.actor,
-        kind: 'lane',
-        key: entry.laneId,
-        version: entry.version,
-      });
+      const row = await recordVersion(ctx, input.projectId, 'lane', entry.laneId, entry.version);
       invariant(row, 'SOURCE_UNAVAILABLE', 'The exact included Lane version is unavailable.');
-      const lane = hostedLaneSchema.parse(JSON.parse(row.value));
+      const lane =
+        journalLaneSourcePins(row) ?? hostedLaneSchema.parse(JSON.parse(await hostedRecordBody(ctx, row)));
       invariant(
         sameSaveLane(lane, entry),
         'EVIDENCE_CHANGED',

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { useArchivePaginatedQuery } from '../archive-pagination';
 import { readTestContract } from '../lane/test-contract-api';
 import type { IntentTestContract } from '../../../src/intent-test-contract';
 import { planningVersionLabel } from '../../../src/work-planning-lifecycle';
@@ -21,7 +22,7 @@ import { hostedFeed } from '../cockpit/coordination';
 import { intentTimeline, intentEvents } from './intent-timeline';
 import { activityAuthor, eventContext, type ActivityEvent } from '../coordination-view';
 import { go, useCreatedIntent } from './useCreatedIntent';
-import { useConvex, useMutation, usePaginatedQuery, useQuery } from 'convex/react';
+import { useConvex, useMutation, useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type { WorkData } from '../../../src/work-types';
@@ -147,9 +148,13 @@ export default function HostedIntents({
     moves: !moves.initialLoading,
   });
   const sessions = usePresenceSessions(projectId);
-  const feed = usePaginatedQuery(api.projectCoordination.feed, intentId ? { projectId, intentId } : 'skip', {
-    initialNumItems: 100,
-  });
+  const feed = useArchivePaginatedQuery(
+    api.projectCoordination.feed,
+    intentId ? { projectId, intentId } : 'skip',
+    {
+      initialNumItems: 100,
+    },
+  );
   const publish = useMutation(api.projectCoordination.publish);
   const writer = useRef<PendingWrite<
     import('../../../src/coordination-types').CoordinationCommand,

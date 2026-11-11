@@ -61,7 +61,9 @@ export async function executeCommand(
     await intentAuthority(ctx, input.projectId, user.subject, command.intentId);
   }
   const request = metadataRequest(command);
-  const original = await findWorkEvent(ctx, input.projectId, input.operationId);
+  const original = await findWorkEvent(ctx, input.projectId, input.operationId, {
+    command: JSON.stringify(command),
+  });
   if (original) {
     invariant(
       original.actor === user.subject && original.request === request,

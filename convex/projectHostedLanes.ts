@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { JournalNeeded, journalReadReply } from './projectJournalStore';
 import { v } from 'convex/values';
 import { query, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -188,13 +189,7 @@ export const states = query({
 export const detail = query({
   args: { ...identity, version: v.optional(v.number()) },
   returns: v.string(),
-  handler: async (ctx, input) => {
-    try {
-      return JSON.stringify((await laneRecord(ctx, input)).lane);
-    } catch (error) {
-      return report(error);
-    }
-  },
+  handler: journalLaneRead,
 });
 /** Select is a read: exact expected pins fail explicitly instead of choosing newer source. */
 export const select = query({
@@ -301,3 +296,15 @@ export const source = query({
     }
   },
 });
+
+export async function journalLaneRead(
+  ctx: QueryCtx,
+  input: { projectId: Id<'hostedProjects'>; laneId: string; version?: number },
+) {
+  try {
+    return JSON.stringify((await laneRecord(ctx, input)).lane);
+  } catch (error) {
+    if (error instanceof JournalNeeded) return journalReadReply(ctx, error, input.projectId);
+    return report(error);
+  }
+}

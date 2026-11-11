@@ -108,12 +108,17 @@ export const owner = internalQuery({
   },
 });
 export const find = internalQuery({
-  args: { projectId: v.id('hostedProjects'), owner: v.string(), operationId: v.string() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    owner: v.string(),
+    operationId: v.string(),
+    command: v.optional(v.string()),
+  },
   returns: v.union(hostedWorkEventDocument, v.null()),
-  handler: async (ctx, { projectId, owner, operationId }) => {
+  handler: async (ctx, { projectId, owner, operationId, command }) => {
     try {
       await accessibleProject(ctx, projectId, owner);
-      const event = await findWorkEvent(ctx, projectId, operationId);
+      const event = await findWorkEvent(ctx, projectId, operationId, command ? { command } : undefined);
       invariant(
         !event || event.actor === owner,
         'WORK_OPERATION_CHANGED',
@@ -251,7 +256,7 @@ export async function appendWork(
       if (command.action !== 'intent')
         await intentAuthority(ctx, input.projectId, input.owner, command.intentId);
     }
-    const original = await findWorkEvent(ctx, input.projectId, input.operationId);
+    const original = await findWorkEvent(ctx, input.projectId, input.operationId, { command: input.command });
     if (original) {
       invariant(
         original.actor === input.owner &&

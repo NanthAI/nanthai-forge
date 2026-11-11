@@ -1,4 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
+import { journalWorkStoreCompare } from './projectWorkStore';
+import { journalCoordinationFeed, journalCoordinationRecent } from './projectCoordination';
+import { journalCoordinationRelated, journalCoordinationInbox } from './projectCoordinationReads';
+import { journalWorkRecordsRead } from './projectWorkIndex';
+import { journalLaneRead } from './projectHostedLanes';
+import { journalLaneHistoryRead } from './projectHostedLaneHistory';
+import { invariant } from '../src/errors';
 import { journalRecoveryRead } from './projectRecoveryHosted';
 import { journalWorkEvents } from './projectWork';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -18,16 +25,38 @@ export const read = internalQuery({
   },
   returns: v.string(),
   handler: async (ctx, input) => {
-    await guard(ctx, 'cli');
+    await guard(ctx, input.query.startsWith('projectCoordination') ? 'coordination' : 'cli');
     const journalLoaded = input.segments.map(text => journalSegmentSchema.parse(JSON.parse(text)));
     const selected = { ...ctx, journalLoaded, journalPrivate: true };
+    const command = JSON.parse(input.request);
+    const original = { ...command, projectId: input.projectId };
+    if (input.query === 'projectCoordination:recent')
+      return canonicalPayload(await journalCoordinationRecent(selected, original));
+    if (input.query === 'projectCoordination:feed')
+      return canonicalPayload(await journalCoordinationFeed(selected, original));
+    if (input.query === 'projectCoordinationReads:inbox')
+      return canonicalPayload(await journalCoordinationInbox(selected, original));
+    if (input.query === 'projectCoordinationReads:related')
+      return canonicalPayload(await journalCoordinationRelated(selected, original));
+    if (input.query === 'projectWorkStore:compare') return journalWorkStoreCompare(selected, original);
+    if (input.query === 'projectWorkIndex:records')
+      return canonicalPayload(await journalWorkRecordsRead(selected, original));
+    if (input.query === 'projectHostedLaneHistory:read') return journalLaneHistoryRead(selected, original);
+    if (input.query === 'projectHostedLanes:detail') return journalLaneRead(selected, original);
     if (input.query === 'projectRecoveryHosted:page')
       return journalRecoveryRead(selected, { ...JSON.parse(input.request), projectId: input.projectId });
     if (input.query === 'projectWork:events')
       return canonicalPayload(
         await journalWorkEvents(selected, { ...JSON.parse(input.request), projectId: input.projectId }),
       );
-    if (input.query === 'projectHostedRecordReads:read') return journalRecordRead(selected, input);
-    return journalProvenanceRead(selected, input);
+    const request = typeof command.request === 'string' ? command.request : input.request;
+    if (input.query === 'projectHostedRecordReads:read')
+      return journalRecordRead(selected, { ...input, request });
+    invariant(
+      input.query === 'projectHostedProvenanceRead:read',
+      'BAD_ARGUMENT',
+      'Select a supported journal reader.',
+    );
+    return journalProvenanceRead(selected, { ...input, request });
   },
 });

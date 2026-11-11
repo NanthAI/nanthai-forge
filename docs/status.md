@@ -32,9 +32,13 @@ Journal reader expansion uses the same private capsule codec and transport for
 exact old versions, Lane provenance and contiguous Work event pages. Recovery
 merges verified segments after live rows and landing capsules, with a separate
 physical relocation fence, and includes coordination and snapshot tables.
-No journal writer or automatic relocation is installed yet; planning-history and
-coordination-feed reader expansion and compact source-operation receipts remain
-open.
+Planning-version and Lane history pages, coordination feed/recent/related reads and
+Lane metric facts also accept archived rows. Reactive clients hydrate cold pages
+through currently authorized server actions; live pages and idle tabs add no calls.
+Compact transaction pins and metrics live in a dedicated segment index. No journal
+writer or automatic relocation is installed yet. Retry readers accept compact
+source-operation receipts, Work command facts and closed-save digest ledgers; the
+default-off writer remains open.
 
 Web typechecking uses the existing native TypeScript compiler in both npm and
 the landing verifier. The JavaScript compiler remains an explicit all-scope

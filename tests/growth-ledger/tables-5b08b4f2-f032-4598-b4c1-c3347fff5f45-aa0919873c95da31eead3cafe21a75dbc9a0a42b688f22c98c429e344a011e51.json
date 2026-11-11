@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "Issue 27d4c1fd: add one bounded journal-segment index table to replace full superseded versions and bodies. Archive range indexes stay separate from hot finish projections; legacy tables cannot go until verified relocation and reader rollout.",
+  "date": "2026-11-11"
+}

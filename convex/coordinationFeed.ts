@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { projectJournalHint } from './projectJournalStore';
+import { journalCoordinationRows } from './projectJournalCoordinationRows';
 import { withActorName } from './projectActorNames';
 import { getPage } from 'convex-helpers/server/pagination';
 import type { QueryCtx } from './_generated/server';
@@ -74,6 +76,22 @@ export async function feedRows(
     targetMaxRows: maxRows,
     absoluteMaxRows: maxRows,
   });
+  const enabled = projectJournalHint(ctx, projectId);
+  if (enabled ?? !!(await ctx.db.get(projectId))?.journalRevision) {
+    const archived = await journalCoordinationRows(
+      ctx,
+      projectId,
+      position,
+      maxRows,
+      result.page as Doc<'projectCoordinationEvents'>[],
+      scope,
+    );
+    return {
+      ...archived,
+      rows: await Promise.all(archived.rows.map(row => withActorName(ctx, projectId, row))),
+      hasMore: archived.hasMore || result.hasMore,
+    };
+  }
   return {
     rows: await Promise.all(
       (result.page as Doc<'projectCoordinationEvents'>[]).map(row => withActorName(ctx, projectId, row)),
@@ -98,5 +116,60 @@ export async function coordinationFeed(
     isDone: !result.hasMore,
     continueCursor: feedCursor(projectId, result.positions.at(-1) ?? position),
     cursorReset,
+  };
+}
+
+const recentPrefix = 'forge-coordination-recent-v1:';
+export async function coordinationRecent(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  cursor: string | null,
+  numItems: number,
+) {
+  feedPageSize(numItems);
+  // Retain provider cursor support for pages opened before this reader expansion.
+  if (cursor && !cursor.startsWith(recentPrefix)) {
+    const archived = projectJournalHint(ctx, projectId) ?? !!(await ctx.db.get(projectId))?.journalRevision;
+    invariant(
+      !archived,
+      'CLI_UPGRADE_REQUIRED',
+      'This history cursor predates journal support. Run nforge update and retry.',
+    );
+    const result = await ctx.db
+      .query('projectCoordinationEvents')
+      .withIndex('by_project', q => q.eq('projectId', projectId))
+      .order('desc')
+      .paginate({ cursor, numItems });
+    return { ...result, page: await Promise.all(result.page.map(row => withActorName(ctx, projectId, row))) };
+  }
+  const position = cursor
+    ? feedPosition(ctx, projectId, prefix + cursor.slice(recentPrefix.length)).position
+    : [];
+  const live = await getPage(ctx, {
+    table: 'projectCoordinationEvents',
+    index: 'by_project',
+    schema,
+    startIndexKey: [projectId, ...position],
+    startInclusive: !position.length,
+    endIndexKey: [projectId],
+    endInclusive: true,
+    order: 'desc',
+    targetMaxRows: numItems,
+    absoluteMaxRows: numItems,
+  });
+  const enabled = projectJournalHint(ctx, projectId);
+  const result =
+    (enabled ?? !!(await ctx.db.get(projectId))?.journalRevision)
+      ? await journalCoordinationRows(ctx, projectId, position, numItems, live.page, undefined, true)
+      : {
+          rows: live.page,
+          positions: live.indexKeys.map(key => (key as (string | number)[]).slice(1)),
+          hasMore: live.hasMore,
+        };
+  const last = result.positions.at(-1) ?? position;
+  return {
+    page: await Promise.all(result.rows.map(row => withActorName(ctx, projectId, row))),
+    isDone: !result.hasMore && !live.hasMore,
+    continueCursor: recentPrefix + JSON.stringify({ projectId, key: [projectId, ...last] }),
   };
 }

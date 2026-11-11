@@ -85,7 +85,7 @@ export async function journalRecordRead(
       coverage: 'Each row pins its immutable version; this page is not a project-wide snapshot.',
     });
   } catch (error) {
-    if (error instanceof JournalNeeded) return journalReadReply(ctx, error);
+    if (error instanceof JournalNeeded) return journalReadReply(ctx, error, input.projectId);
     return report(error);
   }
 }

@@ -2,6 +2,7 @@
 import { useReadRetry } from './ui/read-retry';
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { type ConvexReactClient, useConvex, useQuery } from 'convex/react';
+import { useArchivePaginatedQuery } from './archive-pagination';
 import { useSafePaginatedQuery } from './safe-query';
 import { makeFunctionReference, type PaginationOptions, type PaginationResult } from 'convex/server';
 import type { Id } from '../../convex/_generated/dataModel';
@@ -124,9 +125,17 @@ function useWorkRows(
   // complete histories but multiplied queries and ancestry/authority reads.
   const initialNumItems = 100;
   // A refused or failed page is `status: 'Error'`, reported as `failed`, not thrown into the root boundary.
-  const { results, status, loadMore } = useSafePaginatedQuery(workIndex.records, selection, {
-    initialNumItems,
-  });
+  const ordinary = useSafePaginatedQuery(
+    workIndex.records,
+    collection === 'planningVersions' ? 'skip' : selection,
+    { initialNumItems },
+  );
+  const archived = useArchivePaginatedQuery(
+    workIndex.records,
+    collection === 'planningVersions' ? selection : 'skip',
+    { initialNumItems },
+  );
+  const { results, status, loadMore } = collection === 'planningVersions' ? archived : ordinary;
   // Convex splits any page longer than twice `initialNumItems` into two new subscriptions; larger
   // continuation pages would each be re-read and split twice before the page settles.
   const pageSize = Math.min(100, initialNumItems * 2);

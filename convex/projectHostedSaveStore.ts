@@ -67,7 +67,7 @@ export async function saveLane(...args: Parameters<typeof saveLaneRecord>) {
   return (await saveLaneRecord(...args)).lane;
 }
 export const sameSaveLane = (
-  lane: z.infer<typeof hostedLaneSchema>,
+  lane: Pick<z.infer<typeof hostedLaneSchema>, 'head' | 'version' | 'sourceVersion' | 'lifecycleVersion'>,
   expected: z.infer<typeof saveRequestSchema>['expected'],
 ) =>
   lane.head === expected.head &&
