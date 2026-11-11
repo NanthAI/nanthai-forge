@@ -25,6 +25,7 @@ export async function downloadPhysicalManifest(
     const run = plan.chunks.find(
       run =>
         run.digest === (pin.pack?.digest ?? pin.sha256) &&
+        run.nonce === (pin.pack?.nonce ?? pin.nonce) &&
         (pin.pack
           ? !run.raw && run.offset <= pin.pack.offset && run.offset + run.length >= pin.pack.offset + pin.size
           : run.raw && run.length === pin.size),

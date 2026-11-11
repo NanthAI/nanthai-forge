@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { physicalKey } from '../src/physical-manifest-binary';
 import { assertSourceStateSize, type SourceSizePhase } from '../src/source-state-size';
 import type { StateSize } from '../src/state/size';
 import { sourcePutMetrics } from './projectSourceBytes';
@@ -232,7 +233,7 @@ export function convexSourceTransport(
       ? null
       : await presignGet(
           r2Config(),
-          r2Key(projectId, entry.pack?.digest ?? entry.sha256),
+          r2Key(projectId, physicalKey(entry.pack?.digest ?? entry.sha256, entry.pack?.nonce ?? entry.nonce)),
           packHeaders(
             entry.pack ? { offset: entry.pack.offset, total: entry.pack.size } : undefined,
             entry.size,

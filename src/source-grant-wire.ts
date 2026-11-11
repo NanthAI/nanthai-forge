@@ -11,7 +11,7 @@ export function compactSourceGrants(value: unknown): SourceGrantWire {
       Object.entries(value).map(([key, item]) => {
         if (key !== 'url' || typeof item !== 'string') return [key, visit(item)];
         const match =
-          /^(https:\/\/[^?#]+\/)([^/?#]+(?:\/u\/[^/?#]+)?)(\?[^#]*[?&]X-Amz-Signature=)([a-f0-9]{64})(.*)$/.exec(
+          /^(https:\/\/[^?#]+?\/)([^/?#]+(?:\/u\/[^/?#]+)?)(\?[^#]*[?&]X-Amz-Signature=)([a-f0-9]{64})(.*)$/.exec(
             item,
           );
         if (!match) return [key, item];

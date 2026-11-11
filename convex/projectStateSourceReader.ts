@@ -3,6 +3,7 @@ import type { Id } from './_generated/dataModel';
 import { r2Config, r2Key, presignGet } from './r2';
 import { convexFetch, networkTimeout } from './networkFetch';
 import { digest } from '../src/state/hash';
+import { physicalKey } from '../src/physical-manifest-binary';
 import { invariant } from '../src/errors';
 import { packHeaders, verifyPackRange } from '../src/object-pack-range';
 import { PhysicalManifestReader, readPhysicalPin } from '../src/physical-manifest';
@@ -18,11 +19,12 @@ export type PhysicalGrantPlan = {
 /** Access is checked by the enclosing selector on every request. No repository URL or key enters this reader. */
 export function stateSourceReader(projectId: Id<'hostedProjects'>) {
   const bodies = new Map<string, Promise<Uint8Array>>();
-  const raw = (pin: { sha256: string; size: number }) => {
-    let promise = bodies.get(pin.sha256);
+  const raw = (pin: { sha256: string; size: number; nonce?: string }) => {
+    const key = physicalKey(pin.sha256, pin.nonce);
+    let promise = bodies.get(key);
     if (!promise) {
       promise = (async () => {
-        const response = await convexFetch(await presignGet(r2Config(), r2Key(projectId, pin.sha256)), {
+        const response = await convexFetch(await presignGet(r2Config(), r2Key(projectId, key)), {
           redirect: 'error',
           signal: networkTimeout(20_000),
           headers: { 'accept-encoding': 'identity' },
@@ -36,7 +38,7 @@ export function stateSourceReader(projectId: Id<'hostedProjects'>) {
         );
         return bytes;
       })();
-      bodies.set(pin.sha256, promise);
+      bodies.set(key, promise);
     }
     return promise.then(bytes => {
       invariant(bytes.length === pin.size, 'SOURCE_HASH_MISMATCH', 'Physical source size changed.');
@@ -45,7 +47,11 @@ export function stateSourceReader(projectId: Id<'hostedProjects'>) {
   };
   const read = async (pin: PhysicalPin) => {
     if (!pin.pack) return raw(pin);
-    const bytes = await raw({ sha256: pin.pack.digest, size: pin.pack.size });
+    const bytes = await raw({
+      sha256: pin.pack.digest,
+      size: pin.pack.size,
+      ...(pin.pack.nonce === undefined ? {} : { nonce: pin.pack.nonce }),
+    });
     packHeaders({ offset: pin.pack.offset, total: pin.pack.size }, pin.size);
     return bytes.subarray(pin.pack.offset, pin.pack.offset + pin.size);
   };
@@ -55,7 +61,7 @@ export function stateSourceReader(projectId: Id<'hostedProjects'>) {
         ...run,
         url: await presignGet(
           r2Config(),
-          r2Key(projectId, run.digest),
+          r2Key(projectId, physicalKey(run.digest, run.nonce)),
           run.raw ? {} : packHeaders({ offset: run.offset, total: run.total }, run.length),
         ),
       })),

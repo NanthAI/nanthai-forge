@@ -671,6 +671,39 @@ the source pack is the compaction that resets it. Trees over the pack bounds (30
 packed, 1 GiB, 32 MiB a file) have no pack and read by runs alone; a segmented pack for
 them is outside S5.
 
+**Long-history qualification.** The compact-parent writer fixture does not prove
+these bounds for an arbitrary metadata history. A 29k-file parent with 1,024
+independent metadata packs has a 107,305 B FPR1 root. Eight replacements across
+16 buckets read 16 chunks and eight new descriptors, but upload 154,126 B in two
+PUTs (106,821 B child root), exceeding 150,000 B. The same probe compares two
+reader-first candidates:
+
+| Root candidate | Parent root B | Child root B | Changed pack + root B | Child metadata grants, including root |
+| --- | ---: | ---: | ---: | ---: |
+| Optional fingerprints (FPR2) | 76,585 | 76,086 | 123,391 | 1,010 |
+| FPR1 gzip envelope (four-byte tag + gzip) | 100,976 | 100,400 | 147,705 | 1,010 |
+
+The optional-fingerprint reader is implemented; its greater byte headroom avoids
+a compression dependency. Readers verify every exact chunk hash/size without
+requiring a membership fingerprint. A future writer must use verified parent-State
+membership to decide which buckets can be shared, preserving O(changed) reads.
+Runtime writers still emit FPR1, so the 150 KB writer qualification is **unmet**.
+FPM2 readers also represent raw/pack maintenance nonces and retain the exact key
+through signing, downloads and cache selection; no arbitrary object key is accepted.
+
+Neither root candidate changes the 1,009 remaining metadata keys after the edit.
+With the current immutable-chunk copy primitive, packing enough old keys into one
+to reach 64 whole-plan grants requires moving at least 946 chunks / 1,870,911 B
+before the 47,305 B changed pack or root. This is evidence against root-only and
+one-write repack fixes, not an impossibility proof for a redesigned layout.
+`physical-manifest-v2.test.mjs` guards all 1,024 chunks, k+1 point reads and the
+unchanged refusal to produce an oversized grant plan. It does **not** count that
+refusal as satisfying the whole-plan or writer bounds. A metadata-layout decision
+is still needed before writer switching and descriptor retirement; no wider
+credential, extra job, skipped root, raised bound or catalog deletion is applied.
+These are synthetic body/signing measurements, not billed usage or live latency.
+The full runtime still keeps complete descriptor fallback and the writer off.
+
 **Rollout order.** Expand, then contract, one landing each.
 
 1. Guards only: add a pack-shaped 29k fixture and a pack-present 29k fixture to the cold

@@ -14,7 +14,17 @@ const size = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 export const physicalPinSchema = z.object({
   sha256: hash,
   size,
-  pack: z.object({ digest: hash, size, offset: size }).optional(),
+  pack: z
+    .object({
+      digest: hash,
+      size,
+      offset: size,
+      nonce: z
+        .string()
+        .regex(/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/)
+        .optional(),
+    })
+    .optional(),
 });
 export const physicalManifestSchema = z.object({
   schema: z.literal(1),

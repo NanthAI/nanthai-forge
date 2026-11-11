@@ -113,6 +113,7 @@ async function buildStateSourceGrants(options: {
         const at = signed.findIndex(
           run =>
             run.digest === (entry.pack?.digest ?? entry.sha256) &&
+            run.nonce === (entry.pack?.nonce ?? entry.nonce) &&
             (entry.pack
               ? !run.raw &&
                 run.offset <= entry.pack.offset &&
