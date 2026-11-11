@@ -193,7 +193,20 @@ test('cached signed URLs never appear in console output, files, or download erro
   const project = s.tables.hostedProjects.get('project');
   for (const line of logs) {
     assert.doesNotMatch(line, /https?:|X-Amz-|Signature|private payload/i);
-    assert.match(line, /^FORGE_PROJECT_EXECUTION /);
+    if (line.startsWith('FORGE_R2_COUNT ')) {
+      const count = JSON.parse(line.slice('FORGE_R2_COUNT '.length));
+      assert.deepEqual(
+        Object.keys(count).sort(),
+        ['projectId', 'sequence', 'a', 'b', 'put', 'deletes'].sort(),
+      );
+      assert.equal(count.projectId, 'project');
+      assert(
+        ['sequence', 'a', 'b', 'put', 'deletes'].every(
+          key => Number.isSafeInteger(count[key]) && count[key] >= 0,
+        ),
+      );
+      continue;
+    } else assert.match(line, /^FORGE_PROJECT_EXECUTION /);
     assert.deepEqual(JSON.parse(line.slice('FORGE_PROJECT_EXECUTION '.length)), {
       projectId: 'project',
       name: project.name,

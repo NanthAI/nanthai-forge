@@ -93,6 +93,7 @@ async function settle(
   input: SessionInput & { result: string },
   batch?: LoadedHostedCheck,
   reports?: ShardReportBatch,
+  envelope?: import('../src/hosted-check-output').OutputChunk['envelope'],
 ) {
   const selected = batch ?? (await actionsSession(ctx, input));
   const row = selected.row;
@@ -118,7 +119,7 @@ async function settle(
   if (result.log)
     await commitHostedOutputWindow(
       ctx,
-      directOutput(run, result.index, result.log, outputSigningKey(run.keyId)).map(entry => ({
+      directOutput(run, result.index, result.log, outputSigningKey(run.keyId), envelope).map(entry => ({
         ...entry,
         projectId: input.projectId,
       })),
@@ -190,7 +191,12 @@ async function settle(
 /** One mutation per bounded page, one run write after folding all new shard results. The legacy
  * result entry remains for already running or older supervisors. Only the collector calls this. */
 export const batch = internalMutation({
-  args: { ...batchArgs, results: v.string(), conclusion: v.optional(v.union(v.string(), v.null())) },
+  args: {
+    ...batchArgs,
+    results: v.string(),
+    envelopes: v.optional(v.string()),
+    conclusion: v.optional(v.union(v.string(), v.null())),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     invariant(
@@ -199,6 +205,20 @@ export const batch = internalMutation({
       'Page the result metadata.',
     );
     const selected = await batchSession(ctx, input);
+    const envelopes = z
+      .record(
+        z.string(),
+        z
+          .object({
+            object: z.object({
+              sha256: z.string().regex(/^[a-f0-9]{64}$/),
+              size: z.number().int().nonnegative(),
+            }),
+            fence: z.number().int().nonnegative(),
+          })
+          .strict(),
+      )
+      .parse(JSON.parse(input.envelopes ?? '{}'));
     const results = z.array(directResultSchema).parse(JSON.parse(input.results));
     invariant(
       new Set(results.map(r => r.index)).size === results.length,
@@ -214,6 +234,7 @@ export const batch = internalMutation({
         { ...input, claims: input.claims ?? '', result: JSON.stringify(result) },
         selected,
         reports,
+        envelopes[result.index],
       );
       selected.run = run;
     }

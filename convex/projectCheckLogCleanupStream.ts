@@ -4,12 +4,17 @@ import { convexFetch } from './networkFetch';
 import type { ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import { lookupRef, type Identity, type PlanState, type PlanWrite } from './projectCheckLogCleanupTypes';
-import { outputChunkSchema, outputKey, type OutputChunk } from '../src/hosted-check-output';
+import {
+  outputChunkSchema,
+  outputChunkKey,
+  outputChunkStorageId,
+  type OutputChunk,
+} from '../src/hosted-check-output';
 import { summarizeCheckLines } from '../src/check-report-summary';
 import { compactCheckText } from '../src/check-compact-output';
 import { presignGet, r2Config } from './r2';
 import { deleteR2Object } from './r2Operations';
-import { digest } from '../src/hash';
+import { verifyOutputBytes } from '../src/hosted-output-reader';
 import { invariant } from '../src/errors';
 export type StreamProgress = {
   phase: 'compact' | 'delete';
@@ -96,19 +101,14 @@ export async function cleanupStreamStep(ctx: ActionCtx, input: Identity, state: 
       p.sequence = chunk.sequence + 1;
       const config = r2Config(),
         response = await convexFetch(
-          await presignGet(config, outputKey(input.projectId, stream.runId, chunk.object)),
+          await presignGet(config, outputChunkKey(input.projectId, stream.runId, chunk)),
         );
       invariant(
         response.ok,
         'R2_OBJECT_UNAVAILABLE',
         'Original hosted log is unavailable; its metadata was preserved.',
       );
-      const bytes = Buffer.from(await response.arrayBuffer());
-      invariant(
-        bytes.length === chunk.object.size && digest(bytes) === chunk.object.sha256,
-        'R2_OBJECT_CHECKSUM_MISMATCH',
-        'Hosted log differs from its recorded chunk.',
-      );
+      const bytes = Buffer.from(verifyOutputBytes(chunk, new Uint8Array(await response.arrayBuffer())));
       carry.push(bytes);
     }
     const bytes = Buffer.concat(carry),
@@ -178,7 +178,9 @@ export async function cleanupStreamStep(ctx: ActionCtx, input: Identity, state: 
     p.retainedPins = [
       ...new Set([
         ...(p.retainedPins ?? []),
-        ...retained.pins.filter((pin: string) => p.targets!.some(chunk => chunk.object.sha256 === pin)),
+        ...retained.pins.filter((pin: string) =>
+          p.targets!.some(chunk => outputChunkStorageId(chunk) === pin),
+        ),
       ]),
     ];
     if (!retained.isDone) {
@@ -187,8 +189,8 @@ export async function cleanupStreamStep(ctx: ActionCtx, input: Identity, state: 
     }
     await pageAt(null); // original authority/stream bindings immediately before IO
     for (const chunk of p.targets)
-      if (!p.retainedPins.includes(chunk.object.sha256))
-        await deleteR2Object(r2Config(), outputKey(input.projectId, stream.runId, chunk.object));
+      if (!p.retainedPins.includes(outputChunkStorageId(chunk)))
+        await deleteR2Object(r2Config(), outputChunkKey(input.projectId, stream.runId, chunk));
     delete p.targets;
     delete p.retainedPins;
     delete p.retainedCursor;
@@ -214,7 +216,7 @@ export async function cleanupStreamStep(ctx: ActionCtx, input: Identity, state: 
     await ctx.runQuery(internal.projectHostedLogCleanupStore.retainedBatch, {
       ...address,
       expected,
-      digests: targets.map(chunk => chunk.object.sha256),
+      digests: targets.map(chunk => outputChunkStorageId(chunk)),
     }),
   );
   if (!retained.indexed) {
@@ -232,8 +234,8 @@ export async function cleanupStreamStep(ctx: ActionCtx, input: Identity, state: 
   // The reference window and exact stream bindings are freshly checked directly
   // before deletion IO, including retries after a lost response.
   for (const chunk of targets)
-    if (!retained.pins.includes(chunk.object.sha256))
-      await deleteR2Object(r2Config(), outputKey(input.projectId, stream.runId, chunk.object));
+    if (!retained.pins.includes(outputChunkStorageId(chunk)))
+      await deleteR2Object(r2Config(), outputChunkKey(input.projectId, stream.runId, chunk));
   if (page.isDone) finish();
   else p.cursor = page.continueCursor;
   return writes;

@@ -50,12 +50,15 @@ export async function batchSession(ctx: MutationCtx, input: BatchInput) {
     .unique();
   invariant(batch?.digest === run.planDigest, 'EVIDENCE_CHANGED', 'Collect only a prepared batch inbox.');
   if (!reportsDetached(run)) detachCheckReports(run);
-  return selected;
+  return { ...selected, packed: batch.state === '{"packed":true}' };
 }
 export const prepare = internalMutation({
   args: batchArgs,
   returns: v.string(),
-  handler: async (ctx, input) => JSON.stringify((await batchSession(ctx, input)).run),
+  handler: async (ctx, input) => {
+    const { run, packed } = await batchSession(ctx, input);
+    return JSON.stringify({ run, packed });
+  },
 });
 export const output = internalMutation({
   args: { ...batchArgs, root: v.string() },

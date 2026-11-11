@@ -4,6 +4,7 @@
 // (the runner's common path) over a realistic report set and meters every mutation.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { landingStorage } from './landing-storage-fixture.mjs';
 import { bootstrapInterval } from '../scripts/bootstrap-interval.mjs';
 import { speedBudgets } from '../dist/speed-budgets.js';
 import { judgeCosts, formatCostVerdicts } from '../dist/cost-budgets.js';
@@ -23,7 +24,8 @@ import { mergeShardReports, settlePoolPending } from '../dist/hosted-actions-poo
 const timingStore = await import(moduleUrl('../convex/projectHostedTestTimings.ts'));
 const batchStore = await import(moduleUrl('../convex/projectHostedActionsBatchStore.ts'));
 const batchCollector = await import(moduleUrl('../convex/projectHostedActionsBatch.ts'));
-const { resultSlotKey, resultEnvelopeBody } = await import('../dist/hosted-actions-result-batch.js');
+const { resultSlotKey, resultEnvelopeBody, notifyPackedResultBatch } =
+  await import('../dist/hosted-actions-result-batch.js');
 const direct = await import(moduleUrl('../convex/projectHostedActionsDirect.ts'));
 const sessions = await import(moduleUrl('../convex/projectHostedActionsSession.ts'));
 const plans = await import(moduleUrl('../convex/projectHostedActionsPlan.ts'));
@@ -97,7 +99,7 @@ const report = i =>
       }
     : { durationMs: 1000 + ((i * 37) % 9000) + 0.123, failed: false };
 
-async function landing(t, shards, batch = false) {
+async function landing(t, shards, batch = false, packed = false) {
   variables(t, {
     CONVEX_SITE_URL: audience,
     CONVEX_CLOUD_URL: 'https://forge.convex.cloud',
@@ -161,6 +163,7 @@ async function landing(t, shards, batch = false) {
     selectionStorage: 'selection',
     recipeStorage: 'recipe',
     ...(batch ? { resultsBatch: true } : {}),
+    ...(packed ? { resultsPacked: true } : {}),
   });
   const logs = new Map(),
     inbox = new Map(),
@@ -197,6 +200,8 @@ async function landing(t, shards, batch = false) {
       return new Response(inbox.get(key) ?? null, { status: inbox.has(key) ? 200 : 404 });
     }
 
+    if (init.method === 'HEAD' && key.includes('/check-results/'))
+      return new Response(null, { status: inbox.has(key) ? 200 : 404 });
     const known = [...logs.keys()].find(sha => url.includes(sha));
     const bytes = known
       ? logs.get(known)
@@ -965,13 +970,26 @@ test('batched reports: 20,000 files retain details in bounded records and keep p
   assert.deepEqual(metric.flaky.files[0].attempts, status.contractReports[many[0]].attempts);
 });
 
-async function resultPathBytes(t, batch) {
-  const l = await landing(t, 12, batch),
+async function resultPathBytes(t, batch, packed = batch) {
+  const l = await landing(t, 12, batch, packed),
     run = l.stored(),
     steps = [];
   const planReplyBytes = Buffer.byteLength(
-    JSON.stringify(batch ? { run, resultBatch: await batchCollector.resultBatchTargets(run) } : run),
+    JSON.stringify(batch ? { run, resultBatch: await batchCollector.resultBatchTargets(run, packed) } : run),
   );
+  const targets = batch ? await batchCollector.resultBatchTargets(run, packed) : null;
+  const collect = async () => {
+    replyBytes += Buffer.byteLength(
+      JSON.stringify(
+        await batchCollector.collectResultBatch(l.ctx, {
+          ...l.id,
+          fence: run.fence,
+          executionId: run.executionId,
+          claims: JSON.stringify(claims()),
+        }),
+      ),
+    );
+  };
   const per = Math.ceil(files.length / 12);
   const start = l.s.counts.length;
   const r2Before = { ...l.r2 };
@@ -1001,31 +1019,28 @@ async function resultPathBytes(t, batch) {
         {
           method: 'PUT',
           headers: { 'if-none-match': '*' },
-          body: resultEnvelopeBody({ result, logBytes: bytes.toString('base64') }),
+          body: resultEnvelopeBody({
+            result,
+            ...(packed ? { packed: true } : {}),
+            logBytes: bytes.toString('base64'),
+          }),
         },
       );
-      await fetch('https://synthetic-account.r2.cloudflarestorage.com/synthetic-bucket/?list-type=2');
+      if (packed) await notifyPackedResultBatch(targets, index, fetch, collect);
+      else await fetch('https://synthetic-account.r2.cloudflarestorage.com/synthetic-bucket/?list-type=2');
     }
   }
   if (batch) {
-    await fetch(
-      `https://synthetic-account.r2.cloudflarestorage.com/synthetic-bucket/${resultSlotKey(run, 'coordinator')}`,
-      {
-        method: 'PUT',
-        headers: { 'if-none-match': '*' },
-        body: 'collect',
-      },
-    );
-    replyBytes = Buffer.byteLength(
-      JSON.stringify(
-        await batchCollector.collectResultBatch(l.ctx, {
-          ...l.id,
-          fence: run.fence,
-          executionId: run.executionId,
-          claims: JSON.stringify(claims()),
-        }),
-      ),
-    );
+    if (!packed)
+      await fetch(
+        `https://synthetic-account.r2.cloudflarestorage.com/synthetic-bucket/${resultSlotKey(run, 'coordinator')}`,
+        {
+          method: 'PUT',
+          headers: { 'if-none-match': '*' },
+          body: 'collect',
+        },
+      );
+    if (!packed) await collect();
   }
   await l.conclude();
   for (const task of l.scheduled.filter(task => task.name === 'projectHostedTestTimings:record'))
@@ -1242,4 +1257,213 @@ test('exact-tree reuse across Candidates retains provenance and rejects unrecord
   });
   assert.notEqual(changed.id, original.id);
   assert.equal(changed.status, 'queued');
+});
+
+test('S7: twelve packed shard objects, election and final manifest use at most 14 Class A operations, preserving exact pins and replay', async t => {
+  const legacy = await resultPathBytes(t, true, false);
+  const packed = await resultPathBytes(t, true, true);
+  assert.equal(legacy.r2.classA, 38);
+  assert.equal(packed.r2.classA, 14);
+  assert(packed.calls <= legacy.calls, 'no extra Convex calls per landing');
+  t.diagnostic(JSON.stringify({ legacy, packed }));
+  const l = await landing(t, 2, true, true),
+    run = l.stored();
+  const log = Buffer.from('exact retained shard log');
+  const result = {
+    index: 0,
+    exitCode: 0,
+    log: { object: { sha256: digest(log), size: log.length }, failureSummary: '' },
+  };
+  const body = resultEnvelopeBody({ packed: true, result, logBytes: log.toString('base64') });
+  const key = `/synthetic-bucket/${resultSlotKey(run, 0)}`;
+  l.inbox.set(key, Buffer.from(body));
+  l.inbox.set(
+    `/synthetic-bucket/${resultSlotKey(run, 1)}`,
+    Buffer.from(
+      resultEnvelopeBody({ packed: true, result: { ...result, index: 1 }, logBytes: log.toString('base64') }),
+    ),
+  );
+  await l.conclude();
+  const task = l.scheduled.find(task => task.name === 'projectHostedActionsBatch:collect');
+  await batchCollector.collect._handler(l.ctx, task.input);
+  assert.equal(l.stored().status, 'passed');
+  const pin = [...l.s.tables.projectHostedActionsResults.values()].find(row => row.index === 0).digest;
+  assert.equal(pin, checkPin(result), 'the original shard result digest is unchanged');
+  const chunk = JSON.parse([...l.s.tables.projectHostedOutputChunks.values()][0].value);
+  assert.deepEqual(chunk.object, result.log.object);
+  const { verifyOutputBytes } = await import('../dist/hosted-output-reader.js');
+  assert.deepEqual(Buffer.from(verifyOutputBytes(chunk, Buffer.from(body))), log);
+  await batchCollector.collect._handler(l.ctx, task.input);
+  assert(l.inbox.has(key), 'terminal replay preserves the backing object');
+  assert.throws(() => verifyOutputBytes(chunk, Buffer.from(body + ' ')), code('R2_OBJECT_CHECKSUM_MISMATCH'));
+  const outputRead = await import(moduleUrl('../convex/projectHostedOutputRead.ts'));
+  const streamId = [...l.s.tables.projectHostedOutputStreams.values()][0].streamId;
+  const link = JSON.parse(
+    await l.s.transaction('packed-download', outputRead.download, { ...l.id, streamId, sequence: 0 }),
+  );
+  const { verifyDownloadedOutput } = await import('../dist/hosted-output-reader.js');
+  assert.deepEqual(
+    Buffer.from(verifyDownloadedOutput(link, new Uint8Array(await (await fetch(link.url)).arrayBuffer()))),
+    log,
+  );
+  const cleanupStore = await import(moduleUrl('../convex/projectHostedLogCleanupStore.ts'));
+  const cleanup = await import(moduleUrl('../convex/projectHostedLogCleanup.ts'));
+  const invoke = (ref, input) => {
+    const name = getFunctionName(ref),
+      method = name.split(':')[1];
+    return l.s.transaction(name, cleanupStore[method], input);
+  };
+  await cleanup.purgeHostedLogStream(
+    { runQuery: invoke, runMutation: invoke },
+    {
+      projectId: l.id.projectId,
+      runId: l.id.runId,
+      streamId,
+      actor: 'owner',
+    },
+  );
+  assert(!l.inbox.has(key), 'cleanup deletes the retired physical envelope');
+  assert(
+    l.inbox.has(`/synthetic-bucket/${resultSlotKey(run, 1)}`),
+    'identical logical bytes in another shard keep their own physical object',
+  );
+  await assert.rejects(
+    l.s.transaction('retired-download', outputRead.download, { ...l.id, streamId, sequence: 0 }),
+    code('LOG_PROVIDER_HELD'),
+  );
+});
+
+test('S7 smoke shape: source, two twelve-shard checks and exhaust maintenance stay below 80 Class A requests', async t => {
+  let storage;
+  await t.test('source/main race and exhaust maintenance', async child => {
+    storage = await landingStorage(child, true);
+  });
+  const first = await resultPathBytes(t, true),
+    recheck = await resultPathBytes(t, true);
+  const byCaller = {
+    ...storage.r2,
+    ciResults: {
+      classA: first.r2.classA + recheck.r2.classA,
+      classB: first.r2.classB + recheck.r2.classB,
+      deletes: first.r2.deletes + recheck.r2.deletes,
+    },
+  };
+  const measured = {
+    r2ClassA: Object.values(byCaller).reduce((n, c) => n + c.classA, 0),
+    r2ClassB: Object.values(byCaller).reduce((n, c) => n + c.classB, 0),
+  };
+  const verdicts = judgeCosts(speedBudgets.costs, speedBudgets.costGuard, 'smoke-r2-fixture', measured);
+  assert.equal(verdicts.length, 2);
+  assert(measured.r2ClassA <= 80, 'S7 absolute smoke ceiling');
+  assert(!verdicts.some(v => v.status === 'fail'));
+  const seeded = judgeCosts(speedBudgets.costs, speedBudgets.costGuard, 'smoke-r2-fixture', {
+    ...measured,
+    r2ClassA: 81,
+  });
+  assert.equal(
+    seeded.find(v => v.metric === 'r2ClassA').status,
+    'fail',
+    'one request beyond 80 fails regardless of percentage tolerance',
+  );
+  t.diagnostic(
+    `S7 smoke R2 ${JSON.stringify({ byCaller, measured, scope: '4,096-file source/main race, two twelve-shard CI batches and 31-day exhaust maintenance; Lane/check setup, client upload/materialization, reuse, mirror, external backup/sweep and retries excluded, not live billing' })}`,
+  );
+});
+
+test('packed transport keeps a full log beside the existing metadata window in one immutable object', async () => {
+  const { resultSlotBytes, readResultSlot, uploadResultSlot } =
+    await import('../dist/hosted-actions-result-batch.js');
+  const result = {
+    index: 0,
+    exitCode: 0,
+    contractReports: {
+      [`tests/${'synthetic-'.repeat(48000)}.test.mjs`]: { failed: false, durationMs: 1 },
+    },
+  };
+  const logBytes = Buffer.alloc(64 * 1024, 'L').toString('base64');
+  const body = resultEnvelopeBody({ packed: true, result, logBytes });
+  assert(Buffer.byteLength(JSON.stringify(result)) < resultSlotBytes);
+  assert(Buffer.byteLength(body) > resultSlotBytes);
+  assert.equal(await readResultSlot(new Response(body), true), body);
+  await assert.rejects(readResultSlot(new Response(body)), code('BAD_ARGUMENT'));
+  let original;
+  const request = async (_url, init) => {
+    if (init?.method !== 'PUT') return new Response(original);
+    if (original) return new Response(null, { status: 412 });
+    original = init.body;
+    return new Response(null, { status: 200 });
+  };
+  const target = {
+    put: { url: 'https://synthetic.invalid/slot', headers: { 'if-none-match': '*' } },
+    get: 'https://synthetic.invalid/slot',
+  };
+  assert.equal(await uploadResultSlot(target, body, request), true);
+  assert.equal(await uploadResultSlot(target, body, request), false);
+});
+
+test('S7 contract: completed packed shards reach Forge before optional pack/proof workflow completion', async t => {
+  const l = await landing(t, 2, true, true),
+    run = l.stored();
+  // Both fixed supervisors have returned from their successful immutable uploads. The optional
+  // pack/proof jobs are still running, so no workflow_run:completed event exists yet.
+  const targets = await batchCollector.resultBatchTargets(run, true);
+  let notifications = 0;
+  for (let index = 0; index < 2; index++) {
+    l.inbox.set(
+      `/synthetic-bucket/${resultSlotKey(run, index)}`,
+      Buffer.from(resultEnvelopeBody({ packed: true, result: { index, exitCode: 0 } })),
+    );
+    await notifyPackedResultBatch(targets, index, fetch, async () => {
+      notifications++;
+      const response = await handle._handler(
+        l.ctx,
+        new Request(`${audience}/checks/actions`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${oidc()}` },
+          body: JSON.stringify({ ...l.id, fence: run.fence, command: { kind: 'results' } }),
+        }),
+      );
+      assert.equal(response.status, 200);
+      await response.body?.cancel();
+    });
+  }
+  assert.equal(notifications, 1);
+  assert.equal(
+    l.scheduled.some(task => task.name === 'projectHostedActionsBatch:collect'),
+    false,
+  );
+  // Friction 0064c3b2 already requires this for the legacy coordinator path. A packed transport
+  // must retain that behavior rather than wait for the optional workflow jobs (20-minute timeout).
+  assert.equal(
+    l.stored().counts.completed,
+    2,
+    'required shard completion must reach the existing provider-jobs verdict path before optional jobs finish',
+  );
+});
+
+test('packed required-shard failure reaches Forge through the election before optional jobs complete', async t => {
+  const l = await landing(t, 2, true, true),
+    run = l.stored();
+  const targets = await batchCollector.resultBatchTargets(run, true);
+  let notifications = 0;
+  for (let index = 0; index < 2; index++) {
+    l.inbox.set(
+      `/synthetic-bucket/${resultSlotKey(run, index)}`,
+      Buffer.from(resultEnvelopeBody({ packed: true, result: { index, exitCode: index === 0 ? 7 : 0 } })),
+    );
+    await notifyPackedResultBatch(targets, index, fetch, async () => {
+      notifications++;
+      await batchCollector.collectResultBatch(l.ctx, {
+        ...l.id,
+        fence: run.fence,
+        executionId: run.executionId,
+        claims: JSON.stringify(claims()),
+      });
+    });
+  }
+  assert.equal(notifications, 1);
+  assert.equal(l.stored().counts.completed, 2);
+  assert.equal(l.stored().counts.failed, 1);
+  assert.notEqual(l.stored().status, 'passed');
+  assert.equal([...l.s.tables.projectHostedCheckRuns.values()][0].verdictKey, undefined);
 });

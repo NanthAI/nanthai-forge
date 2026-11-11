@@ -1383,12 +1383,18 @@ dispatch fence and provider execution. They remain in the supervisor bundle;
 Candidate processes receive neither that bundle nor the upload capabilities. The
 run bundle is written and restored with owner-only file permissions before
 Candidate execution.
-Each completed shard uploads its immutable result and redacted log, then reads
-one bounded inbox listing. A create-only coordinator slot elects one supervisor
-to call Forge after every planned result is present. The signed provider-completed
-webhook recovers an interrupted coordinator. This adds no workflow step or timer.
+With negotiated `results.packed`, each shard writes one immutable combined result/log
+object. After uploading, a required shard HEADs the other required slots once, stopping
+at the first missing slot. A shard that sees them all attempts a create-only election
+marker, then the winner sends one completion notification. The marker identifies its
+shard so a lost PUT reply can reconcile without a second shard notifying. Optional
+pack/proof jobs have no slots and never delay this notification. The signed
+provider-completed webhook recovers a lost elected supervisor; packed discovery uses
+no LIST. Older `results.batch` supervisors retain their
+LIST/election protocol. This adds no workflow step, timer or per-shard Convex call.
 
-Forge streams each slot within the existing 512 KiB metadata window and commits
+Forge streams each slot within the existing 512 KiB metadata window (plus the
+base64 encoding of its at-most-64-KiB log for packed objects) and commits
 results in pages below 768 KiB. Each page folds all its shards in memory and
 writes the run head once, preserving per-shard identities, retry budgets, pool
 settlement, failure excerpts and immutable result digests. An ordinary 10–12-shard
@@ -1401,8 +1407,12 @@ existing Actions results table. Run heads keep counts and failure/flaky summarie
 Readers that need per-file evidence hydrate the report pages; provider verdicts,
 webhook updates and metrics read the slim head. Timing aggregation is scheduled
 once after provider completion, rather than loading reports into the webhook.
-Logs retain their existing R2 placement and retention behavior. Ingested inbox
-objects are regenerable scratch bytes and are removed after successful ingestion.
+Logs remain in R2. Packed output chunks retain the original log hash/size and seal,
+plus the physical envelope hash/size and dispatch fence. Authorized downloads verify
+the physical envelope, extract the log and verify its original pin. Output cleanup
+reads and deletes that same physical key; backup/restore preserves its R2 reference.
+Packed backing objects survive collection and terminal replay. Only legacy inboxes
+are scratch removed after ingestion. No retention setting or output expiry changes.
 
 Only the provider's independent conclusion makes a passing verdict reusable.
 Reuse is indexed by exact source digest, check definition, runner configuration,
@@ -1417,39 +1427,38 @@ still reconcile retries. Supervisor results alone never enter this reuse index.
 from the small synthetic check in the six-landing `landing-fixture`. It runs eleven
 interleaved legacy/batch pairs with the same 886 test files, two recovered flakes,
 twelve shards and one check run per fixture landing. Provider conclusion, final
-output and the deferred timing mutation are included. The before path remains
-executable for older supervisors. Values below are one representative pair on merged metrics-projection code;
-KB means 1,000 bytes.
+output and the existing deferred timing aggregation are included. Collection runs before
+provider completion, so optional pack/proof work does not block required results.
+The before path remains executable for older supervisors. KB means 1,000 bytes.
 
-| Function / phase | Before calls | Before read / write KB per call | After calls | After read / write KB per call |
-| --- | ---: | ---: | ---: | ---: |
-| Output authorization / batch prepare | 12 | 4.7 / 0 | 1 | 4.2 / 0 |
-| Shard result / batch result | 12 | 26.0 / 41.8 | 1 | 16.1 / 135.8 |
-| Final output apply | 1 | 78.1 / 0.5 | 1 | 7.1 / 0.5 |
-| Provider completed webhook | 1 | 158.1 / 250.6 | 1 | 15.0 / 11.3 |
-| Timing aggregation | included in webhook | included above | 1 | 85.2 / 95.0 |
+The packed fixture counts six executions: batch prepare, batch result, final output
+apply, provider-completed webhook, deferred timing aggregation and one collector
+invocation. The provider HTTP envelope is excluded consistently. This is the same
+call count as the older batched inbox. A representative packed run reads 91.8 KB and
+writes 197.0 KB, including timing aggregation; its result reply is 113 B. The existing
+plan response carries about 20.0 KB including private upload/HEAD/election capabilities,
+with no additional planning call. The older per-result route and eleven interleaved
+comparisons remain in the guard; these are synthetic fixture observations, not bills.
 
-Across the full result path, mutations fall from 26 to 5; including its HTTP
-actions, calls fall from 38 to 6. Read/write totals are 604.7/752.7 KB before and
-127.6/242.6 KB after. CI response bytes fall from about 111.6 KB across twelve
-replies to 113 bytes in one reply. Preflight and planning calls are excluded from both
-sides; their function-call counts are unchanged. The plan reply grows from 2.9 KB
-to 36.3 KB for private upload capabilities; that added egress is separately guarded
-and included in the price model. The existing plan write adds
-only the batch marker and report-placement fields. A reused provider-attested
-pass dispatches no CI and writes no additional verdict or result; its operation
-receipt and any cross-Candidate alias still record provenance.
-
-R2 Class A/B requests rise from 13/13 to 38/25. PUT bytes rise from 17,231 to
-110,768, with the difference going to regenerable inbox objects removed after
-ingestion; retained logs keep their existing placement. The 25 scratch deletes
-are [free R2 operations](https://developers.cloudflare.com/r2/pricing/).
-Using $0.20/GB DB I/O, $0.12/GB CI egress and R2's $4.50/$0.36 per million
-Class A/B operations, with no call charge, the modeled marginal slice falls
-from about $0.3484 to $0.2584 per 1,000 fixture landings. The median paired difference
-is about -$0.0900, with a 95% bootstrap interval near [-$0.0901, -$0.0899]
-(seed 1, 10,000 resamples, eleven pairs). This excludes action compute, retained
-storage, provider allowances and other landing work; it is not an invoice saving.
+The packed fixture uses 14 Class A requests (twelve combined objects, one election
+marker and one final manifest) and 90 Class B requests, compared with 38/25 for the
+older batched inbox. Sequential upload order executes 77 discovery HEADs, twelve
+collector GETs and one final-verification HEAD; another completion order can execute
+up to 132 discovery HEADs. Discovery skips the uploader's own slot and stops at the
+first missing required object. It removes twelve LISTs and twelve duplicate log-copy
+PUTs, including their verification HEADs and legacy scratch deletes. The marker stays
+in its run/fence/execution namespace so concurrent losers and lost replies can reconcile.
+The absolute nominal Class A ceiling is 14, independent of the ledger's percentage
+tolerance. Race fixtures count attempted conditional writes and marker reads too;
+retries and losing election PUTs are additional executed requests, never inferred
+from signatures or hidden as zero.
+The original per-result route remains executable for older supervisors. These are
+synthetic operation counts; live billed usage and byte placement still need a
+post-deploy observation. The cost ledger also combines the actual 4,096-file
+source/main-race fixture, two twelve-shard check collections and exhaust maintenance
+under a separate 80-Class-A fixture ceiling (31 A / 193 B observed). Lane/check
+setup, client uploads/materialization, reuse, mirror, external backup/sweep and
+unobserved retries remain coverage gaps. The earlier live bucket window is reported separately in [cost to serve](cost-to-serve.md#s7-request-ledger-and-smoke-coverage).
 
 Live verification still needs the lead's log-only meter on the deployed version.
 The reported baseline was 23.7 MB / 231 result calls, 14.8 MB / 215 webhook calls

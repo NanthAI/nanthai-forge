@@ -12,7 +12,7 @@ import {
   rootForOutput,
   type OutputIdentity,
 } from './projectHostedOutputStore';
-import { outputKey, outputChunkSchema, outputRootObject } from '../src/hosted-check-output';
+import { outputKey, outputChunkKey, outputChunkSchema, outputRootObject } from '../src/hosted-check-output';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { presignGet, r2Config } from './r2';
 import { invariant } from '../src/errors';
@@ -139,10 +139,10 @@ export const download = mutation({
       await outputReader(ctx, input.projectId);
       await chargeAnonymousRead(ctx, input.projectId);
       await loadHostedCheck(ctx, input);
-      const object = await downloadableOutput(ctx, input);
+      const { key, ...object } = await downloadableOutput(ctx, input);
       return canonicalPayload({
-        object,
-        url: await presignGet(r2Config(), outputKey(input.projectId, input.runId, object)),
+        ...object,
+        url: await presignGet(r2Config(), key),
       });
     } catch (error) {
       return report(error);
@@ -156,7 +156,8 @@ export async function downloadableOutput(
   if (input.streamId === null) {
     const head = await outputHead(ctx, input);
     invariant(head?.final, 'NOT_FOUND', 'Final output manifest is not complete.');
-    return outputRootObject(JSON.parse(head.final));
+    const object = outputRootObject(JSON.parse(head.final));
+    return { object, key: outputKey(input.projectId, input.runId, object) };
   }
   invariant(
     Number.isSafeInteger(input.sequence) && input.sequence >= 0,
@@ -171,7 +172,12 @@ export async function downloadableOutput(
   );
   const row = await outputChunk(ctx, input, input.streamId, input.sequence);
   invariant(row, 'NOT_FOUND', 'Output chunk is missing; recover it from the original collector.');
-  return outputChunkSchema.parse(JSON.parse(row.value)).object;
+  const chunk = outputChunkSchema.parse(JSON.parse(row.value));
+  return {
+    object: chunk.object,
+    key: outputChunkKey(input.projectId, input.runId, chunk),
+    ...(chunk.envelope ? { envelope: chunk.envelope.object } : {}),
+  };
 }
 /** H14 may inspect completeness separately from H10's passing-run evidence.
  * This helper neither changes landing policy nor makes log reads a new step. */
@@ -229,10 +235,10 @@ export const downloads = mutation({
       );
       const result = [];
       for (const entry of input.entries) {
-        const object = await downloadableOutput(ctx, { ...input, ...entry });
+        const { key, ...object } = await downloadableOutput(ctx, { ...input, ...entry });
         result.push({
-          object,
-          url: await presignGet(r2Config(), outputKey(input.projectId, input.runId, object)),
+          ...object,
+          url: await presignGet(r2Config(), key),
         });
       }
       return canonicalPayload(result);

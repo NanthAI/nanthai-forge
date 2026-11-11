@@ -18,6 +18,7 @@ import {
   resultBatchPrefix,
   readResultSlot,
   resultPageBytes,
+  resultSlotBytes,
   type ResultEnvelope,
 } from '../src/hosted-actions-result-batch';
 import { invariant } from '../src/errors';
@@ -26,8 +27,19 @@ import { deleteR2Object } from './r2Operations';
 
 /** CPU-only targets added to the existing plan response; never stored in the run or given to
  * Candidate code. The exact run/fence/execution namespace cannot accept an earlier run's upload. */
-export async function resultBatchTargets(run: HostedCheckRun) {
+export async function resultBatchTargets(run: HostedCheckRun, packed = false) {
   const config = r2Config();
+  if (packed)
+    return {
+      packed: true as const,
+      slots: await Promise.all(
+        Array.from({ length: run.plan!.shardCount }, async (_, i) => {
+          const { put, get, head } = await presignResultSlot(config, resultSlotKey(run, i));
+          return { put, get, head };
+        }),
+      ),
+      coordinator: await presignResultSlot(config, resultSlotKey(run, 'coordinator')),
+    };
   return {
     slots: await Promise.all(
       Array.from({ length: run.plan!.shardCount }, (_, i) =>
@@ -41,7 +53,11 @@ export async function resultBatchTargets(run: HostedCheckRun) {
     list: await presignResultList(config, resultBatchPrefix(run)),
   };
 }
-async function cleanupInbox(run: HostedCheckRun) {
+async function cleanupInbox(run: HostedCheckRun, packed = false) {
+  if (packed) {
+    if (run.poolClaimed) await cleanPoolClaims(run.projectId, run.id);
+    return;
+  }
   const keys = Array.from({ length: run.plan!.shardCount }, (_, i) => resultSlotKey(run, i));
   keys.push(
     ...Array.from({ length: run.plan!.shardCount }, (_, i) => resultSlotKey(run, `log-${i}`)),
@@ -53,7 +69,7 @@ async function cleanupInbox(run: HostedCheckRun) {
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
 /** One event-driven collector; no polling or hosted worker. The last uploader invokes it using
  * OIDC. A signed completed webhook invokes the same path if that uploader lost its process/reply.
- * Peak buffers are one 512 KiB slot plus a <768 KiB page, independent of total reports. */
+ * Peak buffers are one 512 KiB metadata slot plus its encoded 64 KiB log and a <768 KiB page. */
 export async function collectResultBatch(
   ctx: ActionCtx,
   identity: BatchInput | SessionInput,
@@ -67,14 +83,15 @@ export async function collectResultBatch(
           fence: identity.fence!,
           executionId: String(JSON.parse(identity.claims).run_id),
         };
-  const run: HostedCheckRun = JSON.parse(
+  const { run, packed }: { run: HostedCheckRun; packed: boolean } = JSON.parse(
     await ctx.runMutation(reference('projectHostedActionsBatchStore:prepare'), input),
   );
   const config = r2Config();
   if (hostedCheckTerminal(run) && !['passed', 'failed'].includes(run.status)) {
-    await cleanupInbox(run);
+    await cleanupInbox(run, packed);
     return { id: run.id, status: run.status, counts: run.counts };
   }
+  let envelopes: Record<number, { object: { sha256: string; size: number }; fence: number }> = {};
   let page: ResultEnvelope['result'][] = [],
     pageSize = 2;
   let settled = run;
@@ -84,11 +101,13 @@ export async function collectResultBatch(
       await ctx.runMutation(reference('projectHostedActionsResults:batch'), {
         ...input,
         results: canonicalPayload(page),
+        envelopes: canonicalPayload(envelopes),
         ...(last && conclusion !== undefined ? { conclusion } : {}),
       }),
     );
     settled = updated;
     page = [];
+    envelopes = {};
     pageSize = 2;
     invariant(final !== 'prepare', 'EVIDENCE_CHANGED', 'Finalize only settled output with complete seals.');
     if (final) {
@@ -108,7 +127,14 @@ export async function collectResultBatch(
         continue;
       }
       invariant(response.ok, 'R2_VERIFY_FAILED', 'Read the original result inbox.');
-      const envelope = resultEnvelopeSchema.parse(JSON.parse(await readResultSlot(response)));
+      const body = await readResultSlot(response, packed);
+      const envelope = resultEnvelopeSchema.parse(JSON.parse(body));
+      invariant(
+        new TextEncoder().encode(canonicalPayload(envelope.result)).length <= resultSlotBytes,
+        'BAD_ARGUMENT',
+        'Result exceeds the existing metadata window.',
+      );
+      invariant(!envelope.packed || packed, 'EVIDENCE_CHANGED', 'Use the negotiated result format.');
       invariant(envelope.result.index === index, 'EVIDENCE_CHANGED', 'Shard result differs from its slot.');
       const { result } = envelope;
       let logBytes = envelope.logBytes;
@@ -118,6 +144,8 @@ export async function collectResultBatch(
         logBytes = await readResultSlot(logResponse);
       }
       if (result.log) {
+        if (envelope.packed)
+          invariant(logBytes !== undefined, 'EVIDENCE_CHANGED', 'Packed log bytes are missing.');
         if (logBytes !== undefined) {
           const bytes = Uint8Array.from(atob(logBytes), c => c.charCodeAt(0));
           invariant(
@@ -125,30 +153,36 @@ export async function collectResultBatch(
             'EVIDENCE_CHANGED',
             'Log bytes differ from the result pin.',
           );
-          await storeOutputObject(
-            await presignPut(config, outputKey(input.projectId, run.id, result.log.object), {
-              digest: result.log.object.sha256,
-              size: result.log.object.size,
-            }),
-            bytes,
-          );
+          if (!envelope.packed)
+            await storeOutputObject(
+              await presignPut(config, outputKey(input.projectId, run.id, result.log.object), {
+                digest: result.log.object.sha256,
+                size: result.log.object.size,
+              }),
+              bytes,
+            );
         }
-        await verifyOutputObject(
-          input.projectId,
-          directOutput(run, index, result.log, outputSigningKey(run.keyId))[0]!.message,
-        );
+        if (!envelope.packed)
+          await verifyOutputObject(
+            input.projectId,
+            directOutput(run, index, result.log, outputSigningKey(run.keyId))[0]!.message,
+          );
       }
       const size = new TextEncoder().encode(canonicalPayload(result)).length + 1;
       if (pageSize + size > resultPageBytes) await flush(false);
+      if (envelope.packed && result.log) {
+        const bytes = new TextEncoder().encode(body);
+        envelopes[index] = { object: { sha256: digest(bytes), size: bytes.length }, fence: run.fence };
+      }
       page.push(result);
       pageSize += size;
     }
   }
   await flush(true);
-  // Ingested scratch bytes can be reconstructed by a retry; retained reports/logs use their
-  // existing stores and policies. Failure leaves the exact inbox recoverable, never loses evidence.
+  // Legacy inboxes are scratch. Packed objects back the retained output pins and remain under
+  // the existing output cleanup path; terminal replay must never delete that backing object.
   if (hostedCheckTerminal(settled) || settled.actions?.verdictPending) {
-    await cleanupInbox(settled);
+    await cleanupInbox(settled, packed);
   }
   return { id: settled.id, status: settled.status, counts: settled.counts };
 }

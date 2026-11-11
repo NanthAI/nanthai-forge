@@ -49,6 +49,7 @@ export const costBudgetSchema = z
       'ci-result-fixture',
       'metrics-fixture',
       'ci-batch-fixture',
+      'smoke-r2-fixture',
       'capture',
     ]),
     metric: z.string().min(1),
@@ -57,6 +58,7 @@ export const costBudgetSchema = z
     value: z.number().min(0),
     /** Absolute change a measurement may move before any rule applies, so tiny counts never flap. */
     floor: z.number().min(0),
+    ceiling: z.number().min(0).optional(),
     source: z.string().min(20),
     issue: z.string().regex(/^[0-9a-f]{8}$/),
     reason: z.string().min(20),
@@ -107,6 +109,8 @@ export function judgeCost(budget: CostBudget, after: number | null, guard: CostG
     status,
     message,
   });
+  if (budget.ceiling !== undefined && after > budget.ceiling)
+    return verdict('fail', `${head('exceeds its ceiling', `${budget.ceiling} maximum`)} ${OUT}`);
   if (Math.abs(delta) <= budget.floor) return verdict('pass', null);
   if (change * 100 > guard.failPct)
     return verdict('fail', `${head('rose', `${pct(change)}, fails above +${guard.failPct}%`)} ${OUT}`);

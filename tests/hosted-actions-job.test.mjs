@@ -3218,6 +3218,67 @@ test('batched supervisor uploads one immutable slot and elects one result call w
   assert.equal(digest(Buffer.from(envelope.logBytes, 'base64')), envelope.result.log.object.sha256);
 });
 
+test('packed supervisor writes one result/log object and elects early collection with a failing required shard', async t => {
+  const s = fixture(t),
+    candidate = join(s.directory, 'candidate');
+  const prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+  const path = join(s.directory, 'batch-plan.json');
+  writeFileSync(path, JSON.stringify(prepared.recipe));
+  const count = s.client.run.plan.shardCount;
+  assert.equal(count, 1, 'the configured fixture runs in its static job');
+  const target = key => ({
+    put: { url: `https://batch.invalid/${key}`, headers: { 'if-none-match': '*' } },
+    get: `https://batch.invalid/${key}`,
+    head: `https://batch.invalid/${key}`,
+  });
+  s.client.resultBatch = {
+    packed: true,
+    slots: [target('0')],
+    coordinator: target('coordinator'),
+  };
+  const objects = new Map(),
+    posted = [],
+    realRequest = s.client.request;
+  s.client.request = async (url, init) => {
+    if (!url.startsWith('https://batch.invalid/')) return realRequest(url, init);
+    const key = new URL(url).pathname.slice(1);
+    if (init?.method === 'PUT') {
+      assert.equal(init.headers['if-none-match'], '*');
+      if (objects.has(key)) return new Response(null, { status: 412 });
+      objects.set(key, String(init.body));
+      return new Response(null, { status: 200 });
+    }
+    if (key === 'list')
+      return new Response('<ListBucketResult><Contents><Key>inbox/0</Key></Contents></ListBucketResult>');
+    return new Response(objects.get(key) ?? null, { status: objects.has(key) ? 200 : 404 });
+  };
+  const realCall = s.client.call.bind(s.client);
+  s.client.call = async command => {
+    if (['result', 'results', 'output'].includes(command.kind)) {
+      posted.push(command);
+      return {};
+    }
+    return realCall(command);
+  };
+  t.mock.method(process.stdout, 'write', () => true);
+  const exit = await executeActionsJob(s.client, candidate, path, 'static', [
+    process.execPath,
+    '--eval',
+    "console.log('__FORGE_TESTS__'+JSON.stringify({file:'tests/batch-supervisor.test.mjs',complete:true,durationMs:5,results:[{name:'fails',passed:false}]}));process.exitCode=7;",
+  ]);
+  assert.equal(exit, 7);
+  assert.deepEqual(
+    posted.map(c => c.kind),
+    ['results'],
+  );
+  assert.equal(objects.size, 2);
+  const envelope = JSON.parse(objects.get('0'));
+  assert.equal(envelope.packed, true);
+  assert.equal(envelope.result.exitCode, 7);
+  assert.equal(envelope.result.contractReports['tests/batch-supervisor.test.mjs'].failed, true);
+  assert.equal(digest(Buffer.from(envelope.logBytes, 'base64')), envelope.result.log.object.sha256);
+});
+
 test('result-write capabilities remain private when a run bundle is written, replaced or restored from an artifact', async t => {
   const { writeActionsRunBundle, readActionsRunBundle } =
     await import('../dist/hosted-actions-job-bundle.js');

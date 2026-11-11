@@ -40,6 +40,7 @@ export const hostedActionsCapabilities = [
   actionsPackVerdictCapability,
   actionsIsolationCapability,
   actionsBatchCapability,
+  'results.packed',
 ] as const;
 /** Batched jobs use only their existing preflight; result collection is fixed work per run.
  * Legacy Convex function calls per Actions job: preflight query, then either output
@@ -63,6 +64,7 @@ export const actionsCapabilityFields: Readonly<Record<string, string>> = {
   'result.result.pool': actionsPoolCapability,
   'plan.plan.recipe.actions': actionsToolchainsCapability,
   'plan.resultsBatch': actionsBatchCapability,
+  'plan.resultsPacked': 'results.packed',
   'plan.packRefresh': actionsPackVerdictCapability,
   'result.result.isolation': actionsIsolationCapability,
 };

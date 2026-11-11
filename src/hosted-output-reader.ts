@@ -11,15 +11,40 @@ import {
 } from './hosted-check-output.js';
 import { invariant } from './errors.js';
 
-/** Portable reader: one bounded direct download, no refresh/tail/poll timer. */
-export function verifyOutputBytes(input: OutputChunk, bytes: Uint8Array) {
-  const chunk = outputChunkSchema.parse(input);
+/** Verify physical bytes first, then extract and verify the unchanged logical log pin. */
+export function verifyDownloadedOutput(
+  link: { object: { sha256: string; size: number }; envelope?: { sha256: string; size: number } | undefined },
+  bytes: Uint8Array,
+) {
+  const physical = link.envelope ?? link.object;
   invariant(
-    bytes.length === chunk.object.size && bytesToHex(sha256(bytes)) === chunk.object.sha256,
+    bytes.length === physical.size && bytesToHex(sha256(bytes)) === physical.sha256,
+    'R2_OBJECT_CHECKSUM_MISMATCH',
+    'Downloaded output differs from its committed object.',
+  );
+  if (link.envelope) {
+    const body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    invariant(
+      body.packed === true && typeof body.logBytes === 'string',
+      'EVIDENCE_CHANGED',
+      'Packed output has no log.',
+    );
+    bytes = Uint8Array.from(atob(body.logBytes), c => c.charCodeAt(0));
+  }
+  invariant(
+    bytes.length === link.object.size && bytesToHex(sha256(bytes)) === link.object.sha256,
     'R2_OBJECT_CHECKSUM_MISMATCH',
     'Downloaded output differs from its committed chunk.',
   );
   return bytes;
+}
+/** Portable reader: one bounded direct download, no refresh/tail/poll timer. */
+export function verifyOutputBytes(input: OutputChunk, bytes: Uint8Array) {
+  const chunk = outputChunkSchema.parse(input);
+  return verifyDownloadedOutput(
+    { object: chunk.object, ...(chunk.envelope ? { envelope: chunk.envelope.object } : {}) },
+    bytes,
+  );
 }
 /** Full-stream verifier, independent of UTF-8 boundaries or artifact encoding.
  * For reconnect, keep this instance and request only its next sequence/offset.
@@ -40,7 +65,7 @@ export class HostedOutputReader {
       'EVIDENCE_CHANGED',
       'Output has a missing sequence, changed stream or different offset. Recover the exact chunk.',
     );
-    verifyOutputBytes(chunk, bytes);
+    bytes = verifyOutputBytes(chunk, bytes);
     this.hash.update(bytes);
     this.sequence++;
     this.offset += bytes.length;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createHash } from 'node:crypto';
+import { verifyDownloadedOutput } from './hosted-output-reader.js';
 import { z } from 'zod';
 import { ForgeError, invariant } from './errors.js';
 import { networkFetch } from './network-fetch.js';
@@ -49,6 +49,7 @@ const manifestSchema = z.object({
 });
 const downloadSchema = z.object({
   object: z.object({ sha256: z.string(), size: z.number() }),
+  envelope: z.object({ sha256: z.string(), size: z.number() }).optional(),
   url: z.string(),
 });
 
@@ -146,13 +147,7 @@ export async function hostedCheckLog(input: unknown, transport: CheckLogTranspor
           `Check output download answered ${response.status}; retry.`,
         );
       }
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      invariant(
-        bytes.length === link.object.size &&
-          createHash('sha256').update(bytes).digest('hex') === link.object.sha256,
-        'R2_OBJECT_CHECKSUM_MISMATCH',
-        'Check output chunk differs from its retained bytes.',
-      );
+      const bytes = verifyDownloadedOutput(link, new Uint8Array(await response.arrayBuffer()));
       parts.unshift(bytes);
       have += bytes.length;
     }

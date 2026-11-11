@@ -151,6 +151,7 @@ test('replay: a module reached through a type-only cycle is rekeyed when its val
 test('server marker diagnostics stay on stderr while child result stdout remains JSON', async () => {
   const script = `await import(${JSON.stringify(loader)});
 console.log('FORGE_PROJECT_EXECUTION {"synthetic":true}');
+console.log('FORGE_R2_COUNT {"projectId":"synthetic","sequence":1,"a":1,"b":0,"put":0,"deletes":0}');
 console.log('FORGE_ACCEPTED_LANDINGS 4');
 console.log('FORGE_FUTURE_DIAGNOSTIC 2');
 console.log(JSON.stringify({ result: 'synthetic' }));`;
@@ -158,6 +159,7 @@ console.log(JSON.stringify({ result: 'synthetic' }));`;
   assert.deepEqual(JSON.parse(stdout), { result: 'synthetic' });
   assert.deepEqual(stderr.trim().split('\n'), [
     'FORGE_PROJECT_EXECUTION {"synthetic":true}',
+    'FORGE_R2_COUNT {"projectId":"synthetic","sequence":1,"a":1,"b":0,"put":0,"deletes":0}',
     'FORGE_ACCEPTED_LANDINGS 4',
     'FORGE_FUTURE_DIAGNOSTIC 2',
   ]);

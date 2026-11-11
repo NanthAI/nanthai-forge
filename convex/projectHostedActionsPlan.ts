@@ -30,11 +30,13 @@ export const prepare = internalMutation({
     /** The plan starts the optional source-pack job (friction 0064c3b2). */
     packRefresh: v.optional(v.literal(true)),
     resultsBatch: v.optional(v.literal(true)),
+    resultsPacked: v.optional(v.literal(true)),
   },
   // JSON text (Issue 0c457ae4): a replayed plan can return a finished run with per-file reports.
   returns: v.string(),
   handler: async (ctx, input) => {
     const { row, run } = await actionsSession(ctx, input);
+    const replay = !!run.plan;
     const recipe = hostedActionsRecipeSchema.parse(JSON.parse(input.recipe)),
       { pin, ...pins } = recipe;
     const standard = isStandardForgeCheck(run.check);
@@ -193,12 +195,26 @@ export const prepare = internalMutation({
             runId: run.id,
             index: -2,
             digest: run.planDigest!,
+            ...(input.resultsPacked ? { state: '{"packed":true}' } : {}),
           });
       }
       if (input.packRefresh && run.actions) run.actions.packRefresh = true;
       run.status = 'running';
       if (run.gate) await ctx.db.patch(row._id, { gate: run.gate });
       await writeHostedCheck(ctx, row._id, run);
+    }
+    if (input.resultsPacked && replay) {
+      const batch = await ctx.db
+        .query('projectHostedActionsResults')
+        .withIndex('by_project_and_run_and_index', q =>
+          q.eq('projectId', input.projectId).eq('runId', run.id).eq('index', -2),
+        )
+        .unique();
+      invariant(
+        batch?.state === '{"packed":true}',
+        'WORK_OPERATION_CHANGED',
+        'Retry the original result transport.',
+      );
     }
     return JSON.stringify(run);
   },

@@ -763,6 +763,26 @@ console.log(
   JSON.stringify({
     cellId,
     landed: summary.landed,
+    r2Signatures: convex?.r2Signatures
+      ? {
+          ...convex.r2Signatures,
+          perLanding:
+            convex.r2Signatures.totals && summary.landed > 0
+              ? Object.fromEntries(
+                  Object.entries(convex.r2Signatures.totals).map(([k, v]) => [k, v / summary.landed]),
+                )
+              : null,
+          byCallerPerLanding:
+            summary.landed > 0
+              ? Object.fromEntries(
+                  Object.entries(convex.r2Signatures.byCaller).map(([caller, counts]) => [
+                    caller,
+                    Object.fromEntries(Object.entries(counts).map(([k, v]) => [k, v / summary.landed])),
+                  ]),
+                )
+              : null,
+        }
+      : null,
     wallSeconds: summary.wallSecondsToAllLanded,
     strict: oracle?.grade?.strictSuccess ?? null,
     voided,

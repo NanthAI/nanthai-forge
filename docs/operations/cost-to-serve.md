@@ -1025,7 +1025,7 @@ window; neither its scope nor the fixture ledger's A/B ratio supplies this cell.
 
 The owner approved the read-only analytics credential on 11 November, and the
 lead performed the aggregate read through `r2OperationsAdaptiveGroups` (S0
-comment 1eb0c8dc). For the ten-landing window, **07:29:13–07:50:50Z**, the
+comment `1eb0c8dc`). For the ten-landing window, **07:29:13–07:50:50Z**, the
 bucket-wide executed counts are:
 
 | Action | Success | userError |
@@ -1049,6 +1049,50 @@ that table under-counts executed operations. The analytics dataset exposes no
 caller split. Setup/reset or other non-landing traffic in this bucket-wide
 window is included; no caller attribution or retry split is inferred. The
 approved read is complete; no objects, settings or retention changed.
+
+The window-specific executed/signature coverage factors are 2.75× A and
+30.27× B; they are not multipliers for other workloads. Net retained R2 bytes
+and full caller/maintenance attribution remain unmeasured.
+
+The 60 userError requests cannot be assigned from bucket aggregates. S7 removes
+legacy per-log verification HEADs and scratch DELETEs along with duplicate log
+copies; packed discovery skips its own slot and stops at the first missing required
+slot. Missing-slot HEADs and conditional PUT races are expected discovery/retry
+outcomes, so they are still reported. An exact mapping of the historical 38 HEAD,
+18 DELETE and 4 PUT errors remains with S0's executed-request attribution follow-up
+(Issue 886a4694); source upload verification/reuse and project maintenance callers
+are outside S7. No historical error is claimed fixed without its caller/status.
+
+### S7 request ledger and smoke coverage
+
+The CI inbox guard counts actual fixture HTTP requests. For twelve shards with the
+same 886-file report set, the older batched path uses 38 Class A / 25 Class B requests;
+packed results use 14 / 90. Logical log hashes, original shard result digests and
+provider attestation are unchanged. This is a deterministic fixture observation,
+not a live or invoice saving. The ledger has an absolute 14-Class-A CI ceiling and
+an 80-Class-A smoke-shaped landing ceiling; exceeding either fails independently
+of the normal percentage tolerance. The fixture shape includes a 4,096-file source
+main race, both twelve-shard check runs and 31-day exhaust maintenance. It starts
+after fixture Lane/check setup: client upload/materialization, reuse, mirror and
+external recurring backup/sweep are unmeasured. Its caller
+counts are printed as `S7 smoke R2` in the landing check (31 Class A / 193 Class B:
+source 3/13, CI results 28/180, exhaust maintenance 0/0). Those zeros describe the
+executed expiry fixture, not all recurring maintenance.
+
+New smoke captures retain `r2Signatures` in `result.json`: totals and per-landing
+Class A/B signatures, PUT lengths and free deletes, grouped by the actual provider
+function identifier. The signer emits only project identity, sequence and counters;
+no key, signed URL, source body or secret. Streamed Progress/Completion replays are
+deduplicated. Maintenance functions in the captured window are included in the same
+table. Old captures with no such lines return unknown, never zero. These counters
+are capabilities signed by Convex, not executed bucket requests: unused grants,
+client reuse/retries, missing lines and external backup/maintenance remain separate
+coverage gaps. Source-step copies of the counters must not be added again.
+
+The retained `n3-r1-dry-a2` report above predates these lines. It is not backfilled
+with fixture counts. The lead's executed bucket reconciliation above supplies that
+historical window only; complete caller and recurring-maintenance allocation stays
+open on S0. The S7 builder made no account-dashboard read.
 
 ### Indexed patch calibration
 

@@ -24,6 +24,12 @@ globalThis.fetch = async (url, init) => {
   stored.set(key, { digest: createHash('sha256').update(bytes).digest('hex'), size: bytes.length });
   return new Response(null, { status: 200 });
 };
+// This child returns one JSON result on stdout; server diagnostics belong on stderr.
+const resultLog = console.log.bind(console);
+console.log = (...args) => {
+  if (typeof args[0] === 'string' && args[0].startsWith('FORGE_R2_COUNT ')) console.error(...args);
+  else resultLog(...args);
+};
 const { ImportUpload } = await import(process.argv[2]);
 const objects = new Map(),
   stored = new Map();

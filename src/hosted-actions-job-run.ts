@@ -9,7 +9,12 @@ import { semanticCheckCommand } from './semantic-check-command.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { workspaceTestRunner } from './workspace-test-runner.js';
 import { digest } from './hash.js';
-import { resultEnvelopeBody, readResultSlot, uploadResultSlot } from './hosted-actions-result-batch.js';
+import {
+  resultEnvelopeBody,
+  readResultSlot,
+  uploadResultSlot,
+  notifyPackedResultBatch,
+} from './hosted-actions-result-batch.js';
 import { directLogBytes, directResultSchema } from './hosted-actions-direct.js';
 import { ActionsJobClient } from './hosted-actions-job-client.js';
 import { checkFileSummary } from './check-file-summary.js';
@@ -379,6 +384,28 @@ async function executeActiveActionsJob(
     const encodedLog = log ? tail.toString('base64') : undefined;
     const request = async (url: string, init?: RequestInit) =>
       actionsInfrastructureResponse(await client.request(url, init));
+    if ('packed' in targets) {
+      body = resultEnvelopeBody({
+        result: selected,
+        packed: true,
+        ...(encodedLog ? { logBytes: encodedLog } : {}),
+      });
+      await retryActionsInfrastructure(
+        signal => uploadResultSlot(targets.slots[index]!, body, request, signal),
+        60_000,
+        actionsDeliveryDeadlineMs,
+        actionsDeliveryPolicy,
+      );
+      await notifyPackedResultBatch(
+        targets,
+        index,
+        (url, init) => retryActionsInfrastructure(signal => request(url, { ...init, signal })),
+        () => client.call({ kind: 'results' }),
+      );
+      lap('reportMs');
+      console.log(`run: phases ${JSON.stringify(phases)}`);
+      return exitCode;
+    }
     try {
       body = resultEnvelopeBody({ result: selected, ...(encodedLog ? { logBytes: encodedLog } : {}) });
     } catch (error) {

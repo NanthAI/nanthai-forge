@@ -2,11 +2,11 @@
 'use node';
 import { convexFetch } from './networkFetch';
 import type { ActionCtx } from './_generated/server';
-import { outputChunkSchema, outputKey } from '../src/hosted-check-output';
+import { outputChunkSchema, outputChunkKey, outputChunkStorageId } from '../src/hosted-check-output';
 import { compactProviderOutput, compactCheckText } from '../src/check-compact-output';
 import { presignGet, r2Config } from './r2';
 import { deleteR2Object } from './r2Operations';
-import { digest } from '../src/hash';
+import { verifyOutputBytes } from '../src/hosted-output-reader';
 import { invariant } from '../src/errors';
 import { internal } from './_generated/api';
 /** Keep original hashes, seals and verdicts as commitments. Compact evidence is
@@ -40,19 +40,14 @@ export async function purgeHostedLogStream(
         if (chunk.sequence !== next) yield Buffer.from('\n');
         next = chunk.sequence + 1;
         const response = await convexFetch(
-          await presignGet(config, outputKey(input.projectId, input.runId, chunk.object)),
+          await presignGet(config, outputChunkKey(input.projectId, input.runId, chunk)),
         );
         invariant(
           response.ok,
           'R2_OBJECT_UNAVAILABLE',
           'Original hosted log is unavailable; its metadata was preserved.',
         );
-        const bytes = Buffer.from(await response.arrayBuffer());
-        invariant(
-          bytes.length === chunk.object.size && digest(bytes) === chunk.object.sha256,
-          'R2_OBJECT_CHECKSUM_MISMATCH',
-          'Hosted log differs from its recorded chunk.',
-        );
+        const bytes = Buffer.from(verifyOutputBytes(chunk, new Uint8Array(await response.arrayBuffer())));
         yield bytes;
       }
     }
@@ -83,9 +78,9 @@ export async function purgeHostedLogStream(
     cursor = page.isDone ? null : page.continueCursor;
   } while (cursor);
   for (const chunk of chunks) {
-    if (protectedPins.has(chunk.object.sha256)) continue;
+    if (protectedPins.has(outputChunkStorageId(chunk))) continue;
     await ctx.runQuery(internal.projectHostedLogCleanupStore.page, { ...input, cursor: null });
-    await deleteR2Object(config, outputKey(input.projectId, input.runId, chunk.object));
+    await deleteR2Object(config, outputChunkKey(input.projectId, input.runId, chunk));
   }
   return chunks.reduce((sum, chunk) => sum + chunk.object.size, 0);
 }

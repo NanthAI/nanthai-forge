@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { outputChunkSchema, outputChunkStorageId } from '../src/hosted-check-output';
 import { v } from 'convex/values';
 import { internalMutation, internalQuery } from './server';
 import { activeOwnedProject } from './projectAuthority';
@@ -53,7 +54,7 @@ export const retained = internalQuery({
         'Retained output chunk has no stream; its bytes were preserved.',
       );
       if (!stream.retired || JSON.parse(stream.descriptor).stream === 'artifact')
-        pins.push(JSON.parse(row.value).object.sha256);
+        pins.push(outputChunkStorageId(outputChunkSchema.parse(JSON.parse(row.value))));
     }
     return JSON.stringify({ pins, isDone: page.isDone, continueCursor: page.continueCursor });
   },
@@ -71,7 +72,10 @@ export const indexDigests = internalMutation({
         q.eq('projectId', input.projectId).eq('runId', input.runId).eq('digest', undefined),
       )
       .take(50);
-    for (const row of rows) await ctx.db.patch(row._id, { digest: JSON.parse(row.value).object.sha256 });
+    for (const row of rows)
+      await ctx.db.patch(row._id, {
+        digest: outputChunkStorageId(outputChunkSchema.parse(JSON.parse(row.value))),
+      });
     return rows.length < 50;
   },
 });

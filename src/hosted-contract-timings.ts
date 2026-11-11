@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
+import { verifyDownloadedOutput } from './hosted-output-reader.js';
 import { ContractTimingReader } from './contract-test-timings.js';
 import { hostedCheckRunSchema } from './hosted-check.js';
 import { outputStreamSchema, outputSealSchema } from './hosted-check-output.js';
@@ -64,7 +65,11 @@ export async function hostedContractTimings(input: {
     let size = 0;
     for (let sequence = 0; sequence < row.seal.chunks; sequence++) {
       const result = z
-        .object({ object: z.object({ sha256: z.string(), size: z.number() }), url: z.string() })
+        .object({
+          object: z.object({ sha256: z.string(), size: z.number() }),
+          envelope: z.object({ sha256: z.string(), size: z.number() }).optional(),
+          url: z.string(),
+        })
         .parse(
           await input.mutation('projectHostedOutputRead:download', {
             ...identity,
@@ -72,13 +77,7 @@ export async function hostedContractTimings(input: {
             sequence,
           }),
         );
-      const bytes = await input.download(result.url);
-      invariant(
-        bytes.length === result.object.size &&
-          createHash('sha256').update(bytes).digest('hex') === result.object.sha256,
-        'R2_OBJECT_CHECKSUM_MISMATCH',
-        'Timing output chunk differs from its retained bytes.',
-      );
+      const bytes = verifyDownloadedOutput(result, await input.download(result.url));
       hash.update(bytes);
       size += bytes.length;
       parser.accept(decoder.decode(bytes, { stream: true }));

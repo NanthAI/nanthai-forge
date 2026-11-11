@@ -268,6 +268,7 @@ export async function prepareActionsJob(
   const planned = (await client.call({
     kind: 'plan',
     ...(client.capabilities.includes('results.batch') ? { resultsBatch: true as const } : {}),
+    ...(client.capabilities.includes('results.packed') ? { resultsPacked: true as const } : {}),
     plan: { recipe, lockfile: lockfileDigest(state.files) },
     ...(packRefresh ? { packRefresh: true as const } : {}),
   })) as typeof run | { run: typeof run; claims: unknown };

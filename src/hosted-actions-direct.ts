@@ -126,6 +126,7 @@ export const directCommandSchema = z.discriminatedUnion('kind', [
       /** The plan starts the optional source-pack job: settle a pass from the required jobs. */
       packRefresh: z.literal(true).optional(),
       resultsBatch: z.literal(true).optional(),
+      resultsPacked: z.literal(true).optional(),
     })
     .strip(),
   z.object({ kind: z.literal('results') }).strip(),
@@ -184,6 +185,7 @@ export function directOutput(
   index: number,
   log: z.infer<typeof directLogSchema>,
   secret: string,
+  envelope?: import('./hosted-check-output.js').OutputChunk['envelope'],
 ) {
   invariant(run.plan && index < run.plan.shardCount, 'EVIDENCE_CHANGED', 'Select a planned Actions job.');
   const stream = {
@@ -195,7 +197,10 @@ export function directOutput(
     name: '',
   };
   const bodies: OutputMessage['body'][] = [
-    { kind: 'chunk', chunk: { stream, sequence: 0, offset: 0, object: log.object } },
+    {
+      kind: 'chunk',
+      chunk: { stream, sequence: 0, offset: 0, object: log.object, ...(envelope ? { envelope } : {}) },
+    },
     {
       kind: 'seal',
       seal: {

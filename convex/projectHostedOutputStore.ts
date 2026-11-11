@@ -11,6 +11,7 @@ import {
   outputMessageSchema,
   outputStreamId,
   outputChunkSchema,
+  outputChunkStorageId,
   outputInitialChain,
   verifyOutput,
   outputRootSchema,
@@ -113,6 +114,18 @@ async function validateOutput(
       'WORK_STALE',
       'Output requires the live machine execution owner.',
     );
+  if (message.body.kind === 'chunk' && message.body.chunk.envelope) {
+    const chunk = message.body.chunk;
+    invariant(
+      run.configuration.provider === 'github-actions' &&
+        chunk.envelope!.fence === run.fence &&
+        chunk.stream.executionId === `${run.executionId}/${chunk.stream.shard}` &&
+        chunk.sequence === 0 &&
+        chunk.stream.kind === 'summary',
+      'EVIDENCE_CHANGED',
+      'Packed output differs from its Actions shard.',
+    );
+  }
   const stream =
     message.body.kind === 'chunk'
       ? message.body.chunk.stream
@@ -337,7 +350,7 @@ async function commitOutputMessage(
       await ctx.db.insert('projectHostedOutputChunks', {
         ...id,
         streamId,
-        digest: chunk.object.sha256,
+        digest: outputChunkStorageId(chunk),
         sequence: chunk.sequence,
         revision: head.revision,
         value: canonicalPayload(chunk),

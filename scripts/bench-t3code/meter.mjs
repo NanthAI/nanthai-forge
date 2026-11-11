@@ -6,6 +6,7 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { setTimeout as wait } from 'node:timers/promises';
+import { r2SignatureMeter } from './r2-meter.mjs';
 import { ImportBenchmarkMonitor, completionUsage } from '../benchmark-import-monitor.mjs';
 
 // Convex list rates: calls $2.2/M, DB I/O $0.22/GB, egress $0.132/GB, action compute $0.30/GB-h.
@@ -30,6 +31,7 @@ export function costUsd(input) {
 /** Live meter. `spawnLogs` is injectable for tests. */
 export function convexMeter({ deployment, projectId, name, cwd, spawnLogs = defaultSpawn }) {
   const startedAt = Date.now();
+  const r2 = r2SignatureMeter(projectId);
   const monitor = new ImportBenchmarkMonitor({ projectId, name, since: startedAt, capacity: 200_000 });
   monitor.usage = {
     databaseReadDocuments: 0,
@@ -82,6 +84,7 @@ export function convexMeter({ deployment, projectId, name, cwd, spawnLogs = defa
             ? null
             : deploymentWide.egressBytes + usage.networkEgressBytes;
       }
+      if (event.timestamp * 1000 >= startedAt) r2.observe(event);
       monitor.observe(event);
     } catch {
       monitor.fail('BENCHMARK_LOG_SCHEMA');
@@ -168,7 +171,11 @@ export function convexMeter({ deployment, projectId, name, cwd, spawnLogs = defa
         perFunction,
         deploymentWide,
         costUsd: costUsd(costInput),
-        notMetered: ['R2 operations and bytes', 'Convex storage'],
+        r2Signatures: r2.report(),
+        notMetered: [
+          'Executed R2 operations, retries and stored bytes (signatures reported separately)',
+          'Convex storage',
+        ],
       };
     },
   };

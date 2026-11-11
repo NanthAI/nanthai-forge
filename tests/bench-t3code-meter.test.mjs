@@ -898,3 +898,22 @@ test('stdin meter delivers one P0 upsert payload through the existing notifier a
   assert.equal(alerts[0].landings, 20);
   assert.match(alerts[0].body, /partial/);
 });
+
+test('R2 signature report attributes both classes and maintenance by caller, deduplicating streamed completions', () => {
+  const stamp = (sequence, a, b) => ({
+    messages: [`FORGE_R2_COUNT ${JSON.stringify({ projectId: 'p', sequence, a, b, put: 0, deletes: 0 })}`],
+  });
+  const work = { ...action(), logLines: [...action().logLines, stamp(1, 1, 2)] };
+  const maintenance = {
+    ...action(),
+    requestId: 'maintenance',
+    executionId: 'maintenance',
+    identifier: 'projectR2Sweep:step',
+    logLines: [stamp(2, 1, 3)],
+  };
+  const r = metered([work, work, maintenance]).r2Signatures;
+  assert.deepEqual(r.totals, { classA: 2, classB: 5, putBytes: 0, deletes: 0 });
+  assert.equal(r.byCaller['projectR2Sweep:step'].classA, 1);
+  assert.equal(r.observed, true);
+  assert.equal(metered([action()]).r2Signatures.totals, null, 'missing old logs remain unknown');
+});

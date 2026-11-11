@@ -190,6 +190,7 @@ export const handle = httpAction(async (ctx, request) => {
           lockfile: plan.lockfile,
           ...(command.packRefresh ? { packRefresh: true } : {}),
           ...(command.resultsBatch ? { resultsBatch: true } : {}),
+          ...(command.resultsPacked ? { resultsPacked: true } : {}),
           ...('storageId' in selection
             ? { selectionStorage: selection.storageId }
             : { selectionR2Key: selection.r2Key }),
@@ -199,7 +200,7 @@ export const handle = httpAction(async (ctx, request) => {
       if (command.resultsBatch)
         value = {
           run: value,
-          resultBatch: await resultBatchTargets(value as HostedCheckRun),
+          resultBatch: await resultBatchTargets(value as HostedCheckRun, command.resultsPacked),
         };
       // Shard pool: sign one claim per unit here (CPU only), so shards claim with no Convex call.
       if (plan.recipe.pool) {

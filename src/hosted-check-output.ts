@@ -27,6 +27,8 @@ export const outputChunkSchema = z
     sequence: checkNumber,
     offset: checkNumber,
     object: checkObject.refine(o => o.size > 0),
+    // Physical envelope keeps the original logical log pin and seal unchanged.
+    envelope: z.object({ object: checkObject, fence: checkNumber }).strict().optional(),
   })
   .strict();
 export type OutputChunk = z.infer<typeof outputChunkSchema>;
@@ -124,3 +126,14 @@ export const outputMessageObject = (message: OutputMessage) =>
     : message.body.kind === 'final'
       ? outputRootObject(message.body.root)
       : null;
+
+/** Physical storage location of a packed Actions log; no arbitrary object key can be supplied. */
+export function outputChunkKey(projectId: string, runId: string, chunk: OutputChunk) {
+  if (!chunk.envelope) return outputKey(projectId, runId, chunk.object);
+  const executionId = chunk.stream.executionId.slice(0, chunk.stream.executionId.lastIndexOf('/'));
+  return `v1/p/${projectId}/check-results/${runId}/${chunk.envelope.fence}/${executionId}/${chunk.stream.shard}`;
+}
+
+/** Cleanup protects physical references, which can differ for identical logical log bytes. */
+export const outputChunkStorageId = (chunk: OutputChunk) =>
+  chunk.envelope ? `envelope:${chunk.envelope.fence}:${chunk.stream.executionId}` : chunk.object.sha256;

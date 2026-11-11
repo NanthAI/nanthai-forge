@@ -281,7 +281,7 @@ Done when: Node actions per landing fall to at most 3 on the smoke shape; the th
 
 Add Class A and Class B requests per landing to the cost ledger and the smoke report, with a ratchet. Batch the CI result inbox to one object per shard.
 
-Done when: the ledger's Class A per landing is at most 80 on the smoke shape and a check fails if it rises; a twelve-shard batch makes at most 13 Class A requests (38 today). Removes: about two thirds of the CI inbox writes.
+Done when: the ledger's Class A per landing is at most 80 on the smoke shape and a check fails if it rises; a twelve-shard batch makes at most 14 Class A requests (38 today). The lead amended the original 13-request assumption to retain one election marker and early required-job completion (Issue comment f0582383); discovery uses HEAD rather than LIST. Removes: about two thirds of the CI inbox writes.
 
 ### S8. Byte plane beside R2 (owner decision; adds $5 a month)
 

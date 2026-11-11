@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { LandingIO, Pin } from './hosted-landing-client';
-import { digest } from '../../../src/state/hash';
+import { verifyDownloadedOutput } from '../../../src/hosted-output-reader';
 import { invariant } from '../../../src/errors';
 import { failingTests } from './CheckPanel';
 /** A decision excerpt reads one tail chunk per text stream, without a tail loop.
@@ -26,10 +26,13 @@ export async function landingFailureExcerpt(io: LandingIO, runId: string) {
       row => row.stream.stream !== 'artifact' && !row.seal?.failureSummary && row.chunks && !row.retired,
     );
     const targets = tails.length
-      ? await io.mutation<{ object: Pin; url: string }[]>('projectHostedOutputRead:downloads', {
-          runId,
-          entries: tails.map(row => ({ streamId: row.streamId, sequence: row.maxSequence })),
-        })
+      ? await io.mutation<{ object: Pin; envelope?: Pin; url: string }[]>(
+          'projectHostedOutputRead:downloads',
+          {
+            runId,
+            entries: tails.map(row => ({ streamId: row.streamId, sequence: row.maxSequence })),
+          },
+        )
       : [];
     invariant(targets.length === tails.length, 'EVIDENCE_CHANGED', 'Output download window is incomplete.');
     const byStream = new Map(tails.map((row, i) => [row.streamId, targets[i]!]));
@@ -59,12 +62,7 @@ export async function landingFailureExcerpt(io: LandingIO, runId: string) {
       const selected = byStream.get(row.streamId)!;
       const response = await fetch(selected.url);
       invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Check output download failed.');
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      invariant(
-        bytes.length === selected.object.size && digest(bytes) === selected.object.sha256,
-        'R2_OBJECT_CHECKSUM_MISMATCH',
-        'Check output differs from its recorded chunk.',
-      );
+      const bytes = verifyDownloadedOutput(selected, new Uint8Array(await response.arrayBuffer()));
       text.push(new TextDecoder().decode(bytes));
     }
     cursor = page.isDone ? null : page.continueCursor;

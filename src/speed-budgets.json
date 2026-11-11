@@ -454,9 +454,9 @@
       "measuredBy": "ci-result-fixture",
       "metric": "readBytes",
       "unit": "bytes",
-      "value": 625682,
+      "value": 553311,
       "floor": 1024,
-      "source": "tests/hosted-actions-result-growth.test.mjs on merged Lane head 1de517df: twelve shards, 886 reports, inline logs, two replays and provider conclusion; per completed run. Setup is excluded. Byte floor allows random IDs and timestamps.",
+      "source": "tests/hosted-actions-result-growth.test.mjs, S7 observation: unchanged older per-result transport with twelve shards, 886 reports, two replays and provider conclusion; execution counts unchanged, exact measured byte reduction ratcheted after result/report placement.",
       "issue": "65534f20",
       "reason": "Makes the previous diagnostic-only real CI path fail on a cost increase; all reports, replay idempotence and independent provider verdict remain covered."
     },
@@ -466,9 +466,9 @@
       "measuredBy": "ci-result-fixture",
       "metric": "writeBytes",
       "unit": "bytes",
-      "value": 743807,
+      "value": 663340,
       "floor": 1024,
-      "source": "tests/hosted-actions-result-growth.test.mjs on merged Lane head 1de517df: twelve shards, 886 reports, inline logs, two replays and provider conclusion; per completed run. Setup is excluded. Byte floor allows random IDs and timestamps.",
+      "source": "tests/hosted-actions-result-growth.test.mjs, S7 observation: unchanged older per-result transport with twelve shards, 886 reports, two replays and provider conclusion; execution counts unchanged, exact measured byte reduction ratcheted after result/report placement.",
       "issue": "65534f20",
       "reason": "Makes the previous diagnostic-only real CI path fail on a cost increase; all reports, replay idempotence and independent provider verdict remain covered."
     },
@@ -1104,9 +1104,9 @@
       "unit": "calls",
       "value": 6,
       "floor": 0.5,
-      "source": "tests/hosted-actions-result-growth.test.mjs: interleaved 12-shard, 886-file CI result fixture, including provider conclusion and deferred timing aggregation; one check run per fixture landing.",
-      "issue": "65534f20",
-      "reason": "One batch replaces per-shard run/progress rewrites; terminal reports are paged outside the head, and CI replies are minimal. R2 inbox PUT/LIST/GET operations replace larger repeated Convex I/O; scratch is removed after ingest. Calls are not priced in the Professional model."
+      "source": "S7 required-shard HEAD election, Issue decision f0582383: executed fixture requests over twelve shards and 886 reports; collection precedes provider completion, with the existing deferred timing aggregation. The smoke shape adds source/main race, two check batches and exhaust maintenance; client setup, reuse, mirror, external backup/sweep and unobserved retries are excluded.",
+      "issue": "b99d1ea1",
+      "reason": "Restores the established early result notification before provider completion: same six counted executions as the legacy batch, including existing deferred timing aggregation and independent provider verdict. The previous five-call saved observation waited for optional workflow completion and could not land."
     },
     {
       "id": "ci-batch-read-bytes",
@@ -1114,11 +1114,11 @@
       "measuredBy": "ci-batch-fixture",
       "metric": "readBytes",
       "unit": "bytes",
-      "value": 127580,
+      "value": 91823,
       "floor": 1024,
-      "source": "tests/hosted-actions-result-growth.test.mjs: interleaved 12-shard, 886-file CI result fixture, including provider conclusion and deferred timing aggregation; one check run per fixture landing. Merged metrics projection 1441a9bf plus CI batch 65534f20 qualification; includes compact metric-row metadata I/O.",
-      "issue": "65534f20",
-      "reason": "One batch replaces per-shard run/progress rewrites; terminal reports are paged outside the head, and CI replies are minimal. R2 inbox PUT/LIST/GET operations replace larger repeated Convex I/O; scratch is removed after ingest. Calls are not priced in the Professional model."
+      "source": "S7 required-shard HEAD election, Issue decision f0582383: executed fixture requests over twelve shards and 886 reports; collection precedes provider completion, with the existing deferred timing aggregation. The smoke shape adds source/main race, two check batches and exhaust maintenance; client setup, reuse, mirror, external backup/sweep and unobserved retries are excluded.",
+      "issue": "b99d1ea1",
+      "reason": "Restores the established early result notification before provider completion: same six counted executions as the legacy batch, including existing deferred timing aggregation and independent provider verdict. The previous five-call saved observation waited for optional workflow completion and could not land."
     },
     {
       "id": "ci-batch-write-bytes",
@@ -1126,10 +1126,10 @@
       "measuredBy": "ci-batch-fixture",
       "metric": "writeBytes",
       "unit": "bytes",
-      "value": 242565,
+      "value": 197003,
       "floor": 1024,
-      "source": "tests/hosted-actions-result-growth.test.mjs: interleaved 12-shard, 886-file CI result fixture, including provider conclusion and deferred timing aggregation; one check run per fixture landing. Merged metrics projection 1441a9bf plus CI batch 65534f20 qualification; includes compact metric-row metadata I/O.",
-      "issue": "65534f20",
+      "source": "S7 required-shard HEAD election, Issue decision f0582383: executed fixture requests over twelve shards and 886 reports; collection precedes provider completion, with the existing deferred timing aggregation. The smoke shape adds source/main race, two check batches and exhaust maintenance; client setup, reuse, mirror, external backup/sweep and unobserved retries are excluded.",
+      "issue": "b99d1ea1",
       "reason": "One batch replaces per-shard run/progress rewrites; terminal reports are paged outside the head, and CI replies are minimal. R2 inbox PUT/LIST/GET operations replace larger repeated Convex I/O; scratch is removed after ingest. Calls are not priced in the Professional model."
     },
     {
@@ -1139,10 +1139,10 @@
       "metric": "replyBytes",
       "unit": "bytes",
       "value": 113,
-      "floor": 32,
-      "source": "tests/hosted-actions-result-growth.test.mjs: interleaved 12-shard, 886-file CI result fixture, including provider conclusion and deferred timing aggregation; one check run per fixture landing.",
-      "issue": "65534f20",
-      "reason": "One batch replaces per-shard run/progress rewrites; terminal reports are paged outside the head, and CI replies are minimal. R2 inbox PUT/LIST/GET operations replace larger repeated Convex I/O; scratch is removed after ingest. Calls are not priced in the Professional model."
+      "floor": 0,
+      "source": "S7 required-shard HEAD election, Issue decision f0582383: executed fixture requests over twelve shards and 886 reports; collection precedes provider completion, with the existing deferred timing aggregation. The smoke shape adds source/main race, two check batches and exhaust maintenance; client setup, reuse, mirror, external backup/sweep and unobserved retries are excluded.",
+      "issue": "b99d1ea1",
+      "reason": "Restores the established early result notification before provider completion: same six counted executions as the legacy batch, including existing deferred timing aggregation and independent provider verdict. The previous five-call saved observation waited for optional workflow completion and could not land."
     },
     {
       "id": "ci-batch-r2-class-a",
@@ -1150,11 +1150,12 @@
       "measuredBy": "ci-batch-fixture",
       "metric": "r2ClassA",
       "unit": "ops",
-      "value": 38,
-      "floor": 0.5,
-      "source": "tests/hosted-actions-result-growth.test.mjs: interleaved 12-shard, 886-file CI result fixture, including provider conclusion and deferred timing aggregation; one check run per fixture landing.",
-      "issue": "65534f20",
-      "reason": "One batch replaces per-shard run/progress rewrites; terminal reports are paged outside the head, and CI replies are minimal. R2 inbox PUT/LIST/GET operations replace larger repeated Convex I/O; scratch is removed after ingest. Calls are not priced in the Professional model."
+      "value": 14,
+      "floor": 0,
+      "source": "S7 required-shard HEAD election, Issue decision f0582383: executed fixture requests over twelve shards and 886 reports; collection precedes provider completion, with the existing deferred timing aggregation. The smoke shape adds source/main race, two check batches and exhaust maintenance; client setup, reuse, mirror, external backup/sweep and unobserved retries are excluded.",
+      "issue": "b99d1ea1",
+      "reason": "Twelve immutable combined result/log PUTs, one conditional election marker and one final manifest replace legacy LIST and duplicate log writes. Required jobs notify early without an optional-job wait. Races and infrastructure retries count separately in their fixtures.",
+      "ceiling": 14
     },
     {
       "id": "ci-batch-r2-class-b",
@@ -1162,11 +1163,11 @@
       "measuredBy": "ci-batch-fixture",
       "metric": "r2ClassB",
       "unit": "ops",
-      "value": 25,
+      "value": 90,
       "floor": 0.5,
-      "source": "tests/hosted-actions-result-growth.test.mjs: interleaved 12-shard, 886-file CI result fixture, including provider conclusion and deferred timing aggregation; one check run per fixture landing.",
-      "issue": "65534f20",
-      "reason": "One batch replaces per-shard run/progress rewrites; terminal reports are paged outside the head, and CI replies are minimal. R2 inbox PUT/LIST/GET operations replace larger repeated Convex I/O; scratch is removed after ingest. Calls are not priced in the Professional model."
+      "source": "S7 required-shard HEAD election, Issue decision f0582383: executed fixture requests over twelve shards and 886 reports; collection precedes provider completion, with the existing deferred timing aggregation. The smoke shape adds source/main race, two check batches and exhaust maintenance; client setup, reuse, mirror, external backup/sweep and unobserved retries are excluded.",
+      "issue": "b99d1ea1",
+      "reason": "Reports actual required-shard discovery HEADs (77 in sequential upload order), twelve collector GETs and final verification HEAD. No per-shard Convex call, optional job discovery or polling. This is separate from the compose-only live Class B budget."
     },
     {
       "id": "ci-batch-r2-bytes-put",
@@ -1174,10 +1175,10 @@
       "measuredBy": "ci-batch-fixture",
       "metric": "r2BytesPut",
       "unit": "bytes",
-      "value": 110768,
+      "value": 93915,
       "floor": 1024,
-      "source": "tests/hosted-actions-result-growth.test.mjs: interleaved 12-shard, 886-file CI result fixture, including provider conclusion and deferred timing aggregation; one check run per fixture landing.",
-      "issue": "65534f20",
+      "source": "S7 required-shard HEAD election, Issue decision f0582383: executed fixture requests over twelve shards and 886 reports; collection precedes provider completion, with the existing deferred timing aggregation. The smoke shape adds source/main race, two check batches and exhaust maintenance; client setup, reuse, mirror, external backup/sweep and unobserved retries are excluded.",
+      "issue": "b99d1ea1",
       "reason": "One batch replaces per-shard run/progress rewrites; terminal reports are paged outside the head, and CI replies are minimal. R2 inbox PUT/LIST/GET operations replace larger repeated Convex I/O; scratch is removed after ingest. Calls are not priced in the Professional model."
     },
     {
@@ -1186,10 +1187,10 @@
       "measuredBy": "ci-batch-fixture",
       "metric": "planReplyBytes",
       "unit": "bytes",
-      "value": 36327,
+      "value": 19971,
       "floor": 1024,
-      "source": "tests/hosted-actions-result-growth.test.mjs: interleaved 12-shard, 886-file CI result fixture, including provider conclusion and deferred timing aggregation; one check run per fixture landing.",
-      "issue": "65534f20",
+      "source": "S7 required-shard HEAD election, Issue decision f0582383: executed fixture requests over twelve shards and 886 reports; collection precedes provider completion, with the existing deferred timing aggregation. The smoke shape adds source/main race, two check batches and exhaust maintenance; client setup, reuse, mirror, external backup/sweep and unobserved retries are excluded.",
+      "issue": "b99d1ea1",
       "reason": "The existing plan reply carries private run-scoped inbox URLs. Guard and price this added handshake egress as well as the much smaller CI result reply; no additional planning function call is introduced."
     },
     {
@@ -1251,6 +1252,31 @@
       "source": "One contributor path/detail query on merged main7ef80300: two changed Lanes, 50 saved paths each, 19 KB project, peer identity, presence and a board note. 164,538 -> 88,502 B/query; one query unchanged. The project row was read five times and is now read once.",
       "issue": "3e3f9fe6",
       "reason": "Removes four duplicate full-project reads inside one query snapshot. Keeps full policy, current grant checks and public masking; returns independent object copies. No cross-query cache, writes, tables or extra calls."
+    },
+    {
+      "id": "smoke-r2-class-a",
+      "area": "Synthetic smoke-shaped landing including source/main race, two twelve-shard CI checks and exhaust maintenance",
+      "measuredBy": "smoke-r2-fixture",
+      "metric": "r2ClassA",
+      "unit": "ops",
+      "value": 31,
+      "floor": 0,
+      "ceiling": 80,
+      "source": "S7 required-shard HEAD election, Issue decision f0582383: executed fixture requests over twelve shards and 886 reports; collection precedes provider completion, with the existing deferred timing aggregation. The smoke shape adds source/main race, two check batches and exhaust maintenance; client setup, reuse, mirror, external backup/sweep and unobserved retries are excluded.",
+      "issue": "b99d1ea1",
+      "reason": "Keeps source and maintenance requests beside CI results so inbox savings cannot hide another caller. External backups/sweeps and unobserved retries remain uncovered. Class B is reported separately from the existing compose-only live budget."
+    },
+    {
+      "id": "smoke-r2-class-b",
+      "area": "Synthetic smoke-shaped landing including source/main race, two twelve-shard CI checks and exhaust maintenance",
+      "measuredBy": "smoke-r2-fixture",
+      "metric": "r2ClassB",
+      "unit": "ops",
+      "value": 193,
+      "floor": 0,
+      "source": "S7 required-shard HEAD election, Issue decision f0582383: executed fixture requests over twelve shards and 886 reports; collection precedes provider completion, with the existing deferred timing aggregation. The smoke shape adds source/main race, two check batches and exhaust maintenance; client setup, reuse, mirror, external backup/sweep and unobserved retries are excluded.",
+      "issue": "b99d1ea1",
+      "reason": "Keeps source and maintenance requests beside CI results so inbox savings cannot hide another caller. External backups/sweeps and unobserved retries remain uncovered. Class B is reported separately from the existing compose-only live budget."
     }
   ]
 }

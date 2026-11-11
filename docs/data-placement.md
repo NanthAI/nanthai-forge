@@ -387,3 +387,14 @@ Owner-selected coordination detail retention is 14 days hot then R2 archival by
 S2 (27d4c1fd), with nothing deleted. Messages, handoffs, acknowledgements and agent
 lifecycle audit stay indefinitely; agent access diagnostics have no window until
 volume warrants one. See [decisions](decisions.md#advisory-windows).
+
+
+CI supervisors negotiating `results.packed` retain one combined result/log object
+per shard in R2's run/fence/execution inbox namespace. Output chunk metadata keeps
+the original logical log pin and a verified physical envelope pin; the same
+current-access download and output cleanup paths resolve that physical key.
+Required supervisors discover other required slots with one finite HEAD pass and
+elect a collector through a create-only marker. One completion notification collects
+bounded metadata pages before optional pack/proof jobs finish; signed workflow
+completion remains recovery. Packed mode removes LISTs and duplicate log PUTs. The legacy batch path remains for
+older supervisors. See [the CI request guard](operations/github-actions-checks.md#ci-byte-guard-and-serving-estimate).
