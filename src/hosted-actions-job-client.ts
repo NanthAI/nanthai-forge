@@ -568,10 +568,7 @@ export class ActionsJobClient {
       const recipes = digests.flatMap(id => {
         const recipe = rows.get(id)!.descriptor.recipe;
         if (!recipe || (cache && rows.get(id)!.closure)) return [];
-        if (
-          this.capabilities.includes(actionsSourceStateCapability) &&
-          (selectedState || authorizedStates.has(id))
-        )
+        if (this.capabilities.includes(actionsSourceStateCapability) && (selectedState || bound.has(id)))
           recipeOwners.set(recipe.sha256, id);
         return [recipe];
       });

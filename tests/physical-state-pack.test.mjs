@@ -14,7 +14,7 @@ import {
 import { materializeActionsSource } from '../dist/hosted-actions-job-source.js';
 import { refreshActionsSourcePack } from '../dist/hosted-actions-job-pack.js';
 import { temporaryDirectory } from '../scripts/test-temp.mjs';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 const { sourcePackCommand } = await import(moduleUrl('../convex/projectSourcePacks.ts'));
 const { writableHostedCheck, writeHostedCheck } = await import(
@@ -99,4 +99,93 @@ test('pack refresh selects the accepted base for a file the Candidate changed in
   );
   const published = [...f.s.tables.projectSourcePacks.values()][0].latest;
   assert.equal(published.stateRef, base.sha256);
+});
+
+test('a cold29k job with a historical source pack and300 raw changes stays under100KB and three resolver mutations', async t => {
+  const { createSourcePack } = await import('../dist/source-pack-archive.js'),
+    { latestSourcePack } = await import(moduleUrl('../convex/projectSourcePackStore.ts'));
+  const f = await physicalStateSourceFixture(t, 29000, { rawTail: 300 }),
+    directory = temporaryDirectory(t, 'forge-state-delta-pack-'),
+    seedCache = join(directory, 'seed-objects');
+  mkdirSync(seedCache);
+  const state = JSON.parse(f.s.objectBytes.get(f.s.state.sha256)),
+    historical = { ...state, files: f.files.slice(0, -300), message: 'historical packed source' },
+    stateBytes = Buffer.from(JSON.stringify(historical)),
+    packState = f.s.put(stateBytes);
+  f.r2.objects.set(`/synthetic/v1/p/${f.s.projectId}/o/${packState.sha256}`, stateBytes);
+  f.r2.objects.set(`/synthetic/synthetic/${packState.sha256}`, stateBytes);
+  for (const [index, file] of historical.files.entries())
+    writeFileSync(join(seedCache, file.blob), `source ${index}`);
+  const setBase = async head => {
+    f.run.candidate.base.head = head;
+    await f.s.transaction(
+      'physical-historical-pack-base',
+      {
+        _handler: async ctx => {
+          const selected = await writableHostedCheck(ctx, f.input);
+          selected.run.candidate.base.head = head;
+          await writeHostedCheck(ctx, selected.row._id, selected.run);
+        },
+      },
+      {},
+    );
+  };
+  await setBase(packState.sha256);
+  const archive = join(directory, 'historical.gz'),
+    upload = await createSourcePack(packState.sha256, historical, seedCache, archive);
+  assert(upload);
+  const target = await sourcePackCommand(f.ctx, f.input, 'prepare', upload);
+  assert(target);
+  await fetch(target.url, { method: 'PUT', headers: target.headers, body: readFileSync(archive) });
+  await sourcePackCommand(f.ctx, f.input, 'commit', upload);
+  // A later run's base has advanced: the latest source pack is neither initial head.
+  await setBase(f.s.state.sha256);
+  const pack = await f.s.transaction(
+    'physical-historical-latest-pack',
+    {
+      _handler: ctx => latestSourcePack(ctx, f.s.projectId),
+    },
+    {},
+  );
+  assert.equal(pack.stateRef, packState.sha256);
+  const cache = join(directory, 'cold-objects');
+  mkdirSync(cache);
+  const client = new ActionsJobClient('https://forge.example', f.s.projectId, f.run.id, (url, init) =>
+    fetch(url, init),
+  );
+  client.run = f.run;
+  client.sourcePack = pack;
+  client.capabilities = [...hostedActionsCapabilities];
+  let requests = 0,
+    replyBytes = Buffer.byteLength(JSON.stringify(pack));
+  const start = f.s.counts.length;
+  f.calls.length = 0;
+  t.mock.method(client, 'call', async command => {
+    assert.equal(command.kind, 'source');
+    requests++;
+    const wire = command.state ? await f.source(command) : await f.heads();
+    replyBytes += Buffer.byteLength(JSON.stringify(wire));
+    return expandSourceGrants(wire);
+  });
+  const source = await materializeActionsSource(client, join(directory, 'candidate'), cache);
+  assert(source.packed, 'historical pack supplies the unchanged28700 files');
+  assert.equal(source.deltaFiles, 300);
+  assert.equal(requests, 2, 'historical State descriptor rides the first head reply');
+  assert.equal(f.calls.length, 3, 'head resolver and two fresh State authority selections');
+  const dbBytes = f.s.counts.slice(start).reduce((sum, row) => sum + row.readBytes, 0);
+  assert(dbBytes < 100000, `${dbBytes} serialized DB bytes`);
+  assert(replyBytes < 100000, `${replyBytes} grant reply bytes including signed source pack`);
+  for (const [index, file] of f.files.entries())
+    assert.equal(readFileSync(join(directory, 'candidate', file.path), 'utf8'), `source ${index}`);
+  t.diagnostic(
+    JSON.stringify({
+      files: 29000,
+      packedFiles: 28700,
+      rawChanges: 300,
+      resolverCalls: f.calls.length,
+      sourceRequests: requests,
+      dbBytes,
+      replyBytes,
+    }),
+  );
 });

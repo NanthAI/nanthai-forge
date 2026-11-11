@@ -37,6 +37,7 @@ export const hostedActionsCapabilities = [
   actionsSourceBatchCapability,
   actionsSourceClosureCapability,
   actionsSourceRunsCapability,
+  actionsSourceStateCapability,
   actionsPreflightCapability,
   actionsInlineLogCapability,
   actionsPoolCapability,

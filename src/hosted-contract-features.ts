@@ -14,6 +14,8 @@
  */
 export const sourceStateFeature = 'source-state';
 export const hostedContractFeatures = [
+  /** State-bound physical run and recipe grants; bootstrap replies carry the trusted root pin. */
+  sourceStateFeature,
   /** Candidate files read from exact R2 States without a legacy Work generation. */
   'candidate-source-files',
   /** put-planning-item keeps every stored field the put omits (c0255160). Without it the CLI sends

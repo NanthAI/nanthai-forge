@@ -111,9 +111,27 @@ test('clone reader checks current State authority and uses the same complete-run
     { temporaryDirectory } = await import('../scripts/test-temp.mjs'),
     { join } = await import('node:path'),
     { readFileSync } = await import('node:fs');
-  const api = await import(moduleUrl('../convex/projectStateSourceApi.ts'));
+  const api = await import(moduleUrl('../convex/projectStateSourceApi.ts')),
+    objectDownloads = await import(moduleUrl('../convex/projectObjectDownloads.ts'));
   const f = await physicalStateSourceFixture(t, 1001),
     root = temporaryDirectory(t, 'forge-state-clone-');
+  const stateRow = [...f.s.tables.projectObjects.values()].find(row => row.digest === f.s.state.sha256);
+  f.s.patch('projectObjects', stateRow._id, { r2Key: `v1/p/${f.s.projectId}/o/${f.s.state.sha256}` });
+  for (const method of ['describe', 'lanePage']) {
+    const legacy = await f.s.transaction('legacy-bootstrap-' + method, objectDownloads[method], {
+      projectId: f.s.projectId,
+      digests: [f.s.state.sha256],
+      signed: true,
+    });
+    assert.equal(legacy[0].statePhysical, undefined, 'old clients receive the original descriptor shape');
+    const negotiated = await f.s.transaction('state-bootstrap-' + method, objectDownloads[method], {
+      projectId: f.s.projectId,
+      digests: [f.s.state.sha256],
+      signed: true,
+      stateSource: true,
+    });
+    assert.deepEqual(negotiated[0].statePhysical, f.root.pin);
+  }
   const downloads = new HostedCheckoutDownloads({
     projectId: f.s.projectId,
     sourceStateReads: true,
@@ -121,16 +139,7 @@ test('clone reader checks current State authority and uses the same complete-run
       action: async (_ref, args) => api.read._handler(f.ctx, args),
       mutation: async (_ref, args) => {
         assert.deepEqual(args.digests, [f.s.state.sha256], 'only the State bootstrap uses legacy metadata');
-        const head = (await f.heads()).rows[0];
-        return [
-          {
-            digest: f.s.state.sha256,
-            size: f.s.state.size,
-            location: 'r2',
-            url: head.url,
-            statePhysical: f.root.pin,
-          },
-        ];
+        return f.s.transaction('clone-real-bootstrap', objectDownloads.describe, args);
       },
     },
   });

@@ -155,6 +155,7 @@ export async function describeObjects(
     projectId,
     digests,
     signed,
+    stateSource,
     runs,
   }: {
     projectId: Id<'hostedProjects'>;
@@ -184,7 +185,11 @@ export async function describeObjects(
         'INVALID_WORK_BACKUP',
         'Stored content is unavailable.',
       );
-      const pin = { digest, size: row.size };
+      const pin = {
+        digest,
+        size: row.size,
+        ...(stateSource && row.statePhysical ? { statePhysical: row.statePhysical } : {}),
+      };
       if (isR2Object(row)) {
         invariant(
           row.r2Key === r2Key(projectId, row.pack?.digest ?? digest),
@@ -322,7 +327,7 @@ export const lanePage = mutation({
       run: runValue,
     }),
   ),
-  handler: async (ctx, { projectId, digests, signed, runs }) => {
+  handler: async (ctx, { projectId, digests, signed, stateSource, runs }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted source.');
@@ -357,6 +362,7 @@ export const lanePage = mutation({
         result.push({
           digest,
           size: row.size,
+          ...(stateSource && row.statePhysical ? { statePhysical: row.statePhysical } : {}),
           ...(signed && row.recipeClosure ? { closure: (await signRecipeClosure(row))! } : {}),
           ...(row.pack ? { range: packRange(row)! } : {}),
           ...(signed && isR2Object(row) && !deferred

@@ -191,9 +191,10 @@ unchanged manifest buckets and resolve only new bindings. Ordinary save and sync
 never seed. Roots and packed changed chunks use the existing R2 output commit;
 Convex holds one root pin per State. Legacy noncanonical bindings retain explicit
 catalog fallback. State-bound external endpoints and Actions/clone readers accept
-compact grant replies and full physical-run plans, but their `source.state` and
-`source-state` capabilities remain unadvertised until the separate emission
-landing. They check current access before and after R2 I/O, refuse nonmembers,
+compact grant replies and full physical-run plans through the negotiated `source.state`
+(Actions) and `source-state` (CLI) capabilities. State bootstrap replies carry the
+trusted root pin only when requested by a negotiated reader. They check current
+access before and after R2 I/O, refuse nonmembers,
 and prove recipe descendants from a selected logical member. Full metadata is
 hash/size checked before member rows enter the client cache. Raw or fragmented
 States use the named one-time window and existing check-published source pack.

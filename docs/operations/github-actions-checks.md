@@ -573,12 +573,16 @@ format or State writer; catalog reads and the all-raw path remain.
 The subsequent State-bound reader protocol (`source.state`) accepts a compact
 exact-key URL representation and whole-State physical-run plans, verifies every
 manifest chunk before using its member rows, and keeps complete runs together
-across descriptor windows. Its capability is not advertised yet. The signer
+across descriptor windows. The capability is advertised after the reader landing. The signer
 checks live run authority before and after R2 I/O and refuses digests outside the
 selected State; recipe metadata must be a proved descendant of a selected file.
 Raw or fragmented bindings retain the named one-time window. That check publishes
 the existing source pack and a following fresh job uses it. No retained manifest
-contains expiring URLs.
+contains expiring URLs. A real-handler synthetic 29k job with a historical pack
+covering 28,700 files and 300 raw additions uses two source requests and three
+resolver mutations, with 14,404 serialized DB bytes and 83,268 grant reply bytes
+including signed pack metadata. These are fixture serialization counts, not billed
+usage. The default-off writer setting remains disabled.
 Failures drain in-flight pages before returning without publishing a plan.
 Each completed page logs files, downloaded bytes and elapsed time. Source bytes
 go directly from object storage to the runner. The Candidate is transferred once as an artifact, preserving modes and

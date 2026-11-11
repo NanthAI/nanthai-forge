@@ -663,7 +663,9 @@ run authorization, R2 manifest fetch and signing observes peak RSS of 386,236,41
 versus 600,375,296 B for the catalog path at 29k files, and 534,364,160 B versus
 796,999,680 B at 100k (one sample per path). This is a full handler/process guard,
 not isolated deployed action memory or billed usage; those remain unmeasured.
-The reader capability remains unadvertised until its separate emission landing. Run
+The `source.state` and `source-state` capabilities advertise these readers; negotiated
+State bootstrap descriptors carry the trusted physical root pin. The writer remains
+default-off, and catalog retirement and old-client enforcement remain open. Run
 count grows with the files changed since they were packed, at worst one per file, and
 the source pack is the compaction that resets it. Trees over the pack bounds (300 MiB
 packed, 1 GiB, 32 MiB a file) have no pack and read by runs alone; a segmented pack for

@@ -1646,7 +1646,7 @@ test('recipe-backed source batches metadata and leaf descriptors instead of call
   assert.equal(readFileSync(join(cache, logical[99].sha256), 'utf8'), 'left-99right-99');
 });
 
-test('Actions State recipe closures remove tree lookups while preserving the verified Candidate and storage GETs', async t => {
+test('Actions State recipe closures retain the legacy five-call traversal after State capability advertisement', async t => {
   const measurements = [];
   for (const closure of [false, true]) {
     const s = fixture(t);
