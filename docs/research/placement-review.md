@@ -285,10 +285,14 @@ Done when: the ledger's Class A per landing is at most 80 on the smoke shape and
 
 ### S8. Byte plane beside R2 (owner decision; adds $5 a month)
 
-S8a [local spike result](workers-source-step-spike.md): the unchanged 29k compose
-reached an observed 102.74 MB of used isolate memory under the diagnostic method,
-exceeding the 100 MB kill gate. Option B stops; no provider or service is enabled.
-Full fixture timing and billed-cost adoption gates remain unmeasured.
+**S8a result: the kill stands; Option B is closed with no retry.** The [local spike](workers-source-step-spike.md) ran the unchanged source step in workerd on one 29k sibling compose and read 102.74 MB of used isolate memory at a checkpoint (measured; gate 100 MB; output pin equal). No provider or service is enabled; timing and billed cost stay unmeasured.
+
+- **Why a cleaner measurement would not change it.** The reading was taken under the inspector with no forced collection, so it may overstate live memory; it is also a lower bound on the peak, on a short-path fixture. The job added about 69 MB to the 34 MB held at the first checkpoint, seven times the bytes it read, because every State is parsed and rebuilt whole. Scaled by bytes read, a 29k State with deep paths (4.70 MB against this fixture's 3.31 MB) needs about 132 MB and a 29k conflict sync about 230 MB (modelled), and the 128 MB limit is per isolate, shared by concurrent requests. Only a streaming State reader and writer closes that gap. That is a rewrite of the trusted merge core, and done for the Worker alone it forks the one module both providers must run identically.
+- **The upload bytes are not the reason.** The spike adapter wrote raw States (3.31 MB) where the provider writes the bounded recipe encoding (0.74 MB). A Worker pays no egress, but kept forever the raw form costs more than all of A's retained storage (modelled), so any future provider must match the provider's physical encoding.
+- **Reopen when both are true.** (1) The shared source step handles a 29k State in memory proportional to the change, shown on the Convex provider's own scale harness for save, sync, conflict sync and compose. (2) Measured source-step action compute passes 150 GB-hours in a month (60% of the plan's included 250), or S0 attributes most of the step's wall time to R2 round trips that S6 cannot remove. Then S8a reruns with the same kill rule plus the deep-path, conflict and two-concurrent-job 29k shapes. Option C's Worker compute depends on the same first condition.
+- **What carries over to A.** S0's wall-time split of the source step now decides the action-compute line B was modelled to cut (about 6 s billed against a 0.35 to 0.66 s handler). S6 must not raise peak memory when it fuses jobs.
+
+The slice as proposed:
 
 - **S8a, spike, no production path.** Run the existing source step in the Workers runtime with an R2 binding on the 4k, 12k and 29k fixtures and one larger synthetic tree. Report peak memory against 128 MB, CPU milliseconds, wall time and R2 requests, and prove output pins equal the Convex provider's. Kill rule: any 29k fixture over 100 MB, or any differing pin, ends the option.
 - **S8b, provider.** An optional source provider beside the Convex one. A Convex action sends a signed grant naming exact input pins; the Worker reads and writes content-addressed objects and returns pins; the same commit reducer publishes. The job records its provider; an over-limit job runs on the Convex provider under a recorded reason, never silently. One contract suite runs both providers.
