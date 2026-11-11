@@ -32,5 +32,8 @@ export async function hydrateLandingHistory(
 
 export const hasJournalHistory = (value: unknown): boolean => {
   const parsed = typeof value === 'string' ? JSON.parse(value) : value;
-  return !!parsed && typeof parsed === 'object' && 'journalHistory' in parsed;
+  const marker = parsed && typeof parsed === 'object' && 'data' in parsed ? parsed.data : parsed;
+  return (
+    !!marker && typeof marker === 'object' && 'journalHistory' in marker && marker.journalHistory === true
+  );
 };

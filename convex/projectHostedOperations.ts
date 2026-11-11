@@ -27,13 +27,14 @@ export async function hostedOperationRow(
   actor: string,
   operationId: string,
 ) {
-  const row = await ctx.db
+  const [row] = await ctx.db
     .query('projectHostedOperations')
     .withIndex('by_project_and_actor_and_operation', q =>
       q.eq('projectId', projectId).eq('actor', actor).eq('operationId', operationId),
     )
-    .unique();
-  if (!row?.journalSegment) return row;
+    .order('desc')
+    .take(1);
+  if (!row?.journalSegment) return row ?? null;
   const { expandOperationReceipt } = await import('../src/compact-operation-receipt');
   return { ...row, value: canonicalPayload(expandOperationReceipt(row)) };
 }

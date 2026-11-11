@@ -38,7 +38,9 @@ through currently authorized server actions; live pages and idle tabs add no cal
 Compact transaction pins and metrics live in a dedicated segment index. No journal
 writer or automatic relocation is installed yet. Retry readers accept compact
 source-operation receipts, Work command facts and closed-save digest ledgers; the
-default-off writer remains open.
+default-off writer remains open. Recovery also preserves a terminal operation’s
+mutable recovery ledger and selects its latest archived physical row; restored
+expired operation UUIDs reconcile against their newest retained receipt.
 
 Web typechecking uses the existing native TypeScript compiler in both npm and
 the landing verifier. The JavaScript compiler remains an explicit all-scope

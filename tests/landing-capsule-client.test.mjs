@@ -136,3 +136,65 @@ test('a browser wait satisfied by the cached live value releases its subscriptio
   assert.deepEqual(await io.wait(name, {}, value => value.done), { done: true });
   assert.equal(closed, 1);
 });
+
+test('an archive-aware agent hydrates a structured journal upgrade in its original query without another capability read', async t => {
+  const { ConvexError } = await import('convex/values'),
+    f = agentFixture(t);
+  f.caps.features = ['journal-segments-v1'];
+  const transport = f.transport();
+  await transport.dispatch('capabilities', {});
+  const calls = [];
+  f.exchange.client.query = async (_ref, request) => {
+    calls.push('query');
+    assert(request.request);
+    throw new ConvexError({
+      code: 'CLI_UPGRADE_REQUIRED',
+      message: 'Update the client.',
+      journalHistory: true,
+      viewVersion: 'owner',
+    });
+  };
+  f.exchange.client.action = async (ref, request) => {
+    calls.push('action');
+    assert.equal(getFunctionName(ref), 'projectJournalActions:history');
+    assert.equal(request.query, 'projectHostedRecordReads:read');
+    return JSON.stringify({ record: { id: 'original' } });
+  };
+  assert.deepEqual(
+    await transport.query('projectHostedRecordReads:read', {
+      request: JSON.stringify({ collection: 'jobs', id: 'original', version: 0 }),
+    }),
+    { record: { id: 'original' } },
+  );
+  assert.deepEqual(calls, ['query', 'action']);
+});
+test('browser exact-history reads hydrate structured journal upgrades without a redundant protocol retry', async () => {
+  const { ConvexError } = await import('convex/values');
+  let queries = 0,
+    actions = 0;
+  const client = {
+    query: async () => {
+      queries++;
+      throw new ConvexError({
+        code: 'CLI_UPGRADE_REQUIRED',
+        message: 'Update the client.',
+        journalHistory: true,
+        viewVersion: 'owner',
+      });
+    },
+    action: async ref => {
+      actions++;
+      assert.equal(getFunctionName(ref), 'projectJournalActions:history');
+      return '{"record":{"id":"original"}}';
+    },
+  };
+  assert.deepEqual(
+    await landingHistoryQuery(client, 'projectHostedLaneHistory:read', {
+      projectId: 'project',
+      laneId: 'original',
+    }),
+    { record: { id: 'original' } },
+  );
+  assert.equal(queries, 1);
+  assert.equal(actions, 1);
+});

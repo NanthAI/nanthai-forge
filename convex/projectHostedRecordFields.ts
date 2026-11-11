@@ -43,6 +43,17 @@ export const hostedRecordFields = {
   bytes: v.number(),
   /** Canonical journal-row hash for digest-only Work migration comparisons. */
   workReadDigest: v.optional(v.string()),
+  journalReady: v.optional(v.boolean()),
+  journalReadyAt: v.optional(v.number()),
+  journalSegment: v.optional(v.string()),
+  journalLane: v.optional(
+    v.object({
+      head: v.string(),
+      sourceVersion: v.number(),
+      lifecycleVersion: v.number(),
+      revert: v.boolean(),
+    }),
+  ),
   lifecyclePlanId: v.optional(v.id('projectHostedLifecyclePlans')),
 };
 export const hostedRecordTables = {
@@ -93,6 +104,9 @@ export const hostedRecordTables = {
     .index('by_project', ['projectId']),
   projectHostedOperations: defineTable({
     recovery: v.optional(v.string()),
+    journalDigest: v.optional(v.string()),
+    journalReady: v.optional(v.boolean()),
+    journalReadyAt: v.optional(v.number()),
     journalSegment: v.optional(v.string()),
     projectId: v.id('hostedProjects'),
     actor: v.string(),

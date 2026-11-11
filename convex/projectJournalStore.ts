@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { ConvexError } from 'convex/values';
 import { historyViewVersion } from './projectLandingCapsuleContext';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id, Doc } from './_generated/dataModel';
@@ -14,7 +15,15 @@ const laneSourcePins = new WeakMap<
   object,
   { head: string; version: number; sourceVersion: number; lifecycleVersion: number }
 >();
-export const journalLaneSourcePins = (row: Doc<'projectHostedRecords'>) => laneSourcePins.get(row);
+export const journalLaneSourcePins = (row: Doc<'projectHostedRecords'>) =>
+  row.journalLane
+    ? {
+        head: row.journalLane.head,
+        version: row.version,
+        sourceVersion: row.journalLane.sourceVersion,
+        lifecycleVersion: row.journalLane.lifecycleVersion,
+      }
+    : laneSourcePins.get(row);
 const configured = new WeakMap<Context, Map<string, boolean>>();
 export function journalProject(ctx: Context, project: Doc<'hostedProjects'>) {
   let entries = configured.get(ctx);
@@ -46,17 +55,16 @@ export async function journalReadReply(ctx: Context, error: unknown, projectId: 
     'PROJECT_UNAVAILABLE',
     'Selected history is unavailable.',
   );
-  return canonicalPayload({
-    journalHistory: true,
-    ...(project
-      ? {
-          viewVersion: digest(
-            canonicalPayload([await historyViewVersion(ctx, project), [...(dependencies.get(ctx) ?? [])]]),
-          ),
-        }
-      : {}),
-    ...((ctx as LoadedContext).journalPrivate ? { index: error.index } : {}),
-  });
+  if (project)
+    throw new ConvexError({
+      code: 'CLI_UPGRADE_REQUIRED',
+      message: 'Run nforge update to read archived Work history.',
+      journalHistory: true,
+      viewVersion: digest(
+        canonicalPayload([await historyViewVersion(ctx, project), [...(dependencies.get(ctx) ?? [])]]),
+      ),
+    });
+  return canonicalPayload({ journalHistory: true, index: error.index });
 }
 export function loadedJournalRows<T extends keyof JournalSegment['tables']>(
   ctx: Context,

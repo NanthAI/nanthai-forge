@@ -3,7 +3,7 @@ import { makeFunctionReference } from 'convex/server';
 import { ConvexExchange } from './exchange-client.js';
 import { downloadArchiveFile } from './archive-download-file.js';
 import { hostedRecoveryPageSchema, type RecoveryTable } from './recovery-hosted-protocol.js';
-import { hydrateLandingHistory } from './landing-capsule-client.js';
+import { hydrateLandingHistory, hasJournalHistory } from './landing-capsule-client.js';
 import { invariant } from './errors.js';
 import type { RecoveryRequest, RecoverySelection } from './recovery-protocol.js';
 import type { RecoveryTransport } from './recovery-source.js';
@@ -26,6 +26,7 @@ export function recoveryTransport(request: RecoveryRequest): RecoveryTransport {
         ...(capsuleProtocol ? { capsuleProtocol: 1 } : {}),
       });
     } catch (error) {
+      if (hasJournalHistory(error)) return error;
       if (
         !capsuleProtocol ||
         !(error instanceof Error) ||

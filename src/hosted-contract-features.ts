@@ -59,6 +59,7 @@ export const hostedContractFeatures = [
   'landing-withdraw',
   /** Terminal history is read through an authorized, redacting server action; capsuleProtocol:1. */
   'landing-capsules-v1',
+  'journal-segments-v1',
   /** Revert provenance on CLI landings (Issue 8dbccdfb): projectHostedComposeSelection:page names a
    * revert Lane's `revertOf`, and projectHostedLandingDesired:submit takes `revertOf`, so a landed
    * revert is recorded as compensating and tells the reverted Lane. Without it the CLI sends none. */

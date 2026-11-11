@@ -54,7 +54,7 @@ export function useArchivePaginatedQuery<Q extends PaginatedQueryReference>(
     mounted = useRef(false);
   const candidates = Object.entries(requests).map(([id, request]) => {
     const raw = observed[id],
-      token = `${selection}:${id}:${raw instanceof Error ? raw.message : JSON.stringify(raw)}`;
+      token = `${selection}:${id}:${raw instanceof Error && !hasJournalHistory(raw) ? raw.message : JSON.stringify(raw instanceof Error ? (raw as Error & { data?: unknown }).data : raw)}`;
     return { id, request, raw, token };
   });
   current.current = new Map(candidates.map(item => [item.id, item.token]));
@@ -69,7 +69,7 @@ export function useArchivePaginatedQuery<Q extends PaginatedQueryReference>(
     for (const item of candidates) {
       if (
         item.raw === undefined ||
-        item.raw instanceof Error ||
+        (item.raw instanceof Error && !hasJournalHistory(item.raw)) ||
         !hasJournalHistory(item.raw) ||
         cached[item.id]?.token === item.token ||
         pending.current.has(item.token)
@@ -106,7 +106,7 @@ export function useArchivePaginatedQuery<Q extends PaginatedQueryReference>(
     loading = false;
   const resolved: Page[] = [];
   for (const item of candidates) {
-    if (item.raw instanceof Error) {
+    if (item.raw instanceof Error && !hasJournalHistory(item.raw)) {
       error = item.raw;
       break;
     }

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { journalOperationRecoveryRow } from './projectJournalOperationRecovery';
 import type { QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import type { RecoveryTable } from '../src/recovery-hosted-protocol';
@@ -44,14 +45,24 @@ export async function journalRecoveryPage(
   const selected = segment.tables[table as (typeof JOURNAL_TABLES)[number]] ?? [];
   invariant(offset <= selected.length, 'EVIDENCE_CHANGED', 'Journal recovery offset differs.');
   const rows: string[] = [];
-  let bytes = 0;
-  for (const text of selected.slice(offset, offset + RECOVERY_PAGE_ROWS)) {
+  let bytes = 0,
+    consumed = 0;
+  for (const original of selected.slice(offset, offset + RECOVERY_PAGE_ROWS)) {
+    const text =
+      table === 'projectHostedOperations'
+        ? await journalOperationRecoveryRow(ctx, project._id, original)
+        : original;
+    if (text === null) {
+      consumed++;
+      continue;
+    }
     const size = new TextEncoder().encode(text).length;
     if (rows.length && bytes + size > RECOVERY_PAGE_BYTES) break;
+    consumed++;
     rows.push(text);
     bytes += size;
   }
-  const next = offset + rows.length;
+  const next = offset + consumed;
   return canonicalPayload({
     table,
     rows,

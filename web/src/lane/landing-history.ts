@@ -20,8 +20,11 @@ export async function landingHistoryQuery(
   try {
     value = await client.query(ref, args);
   } catch (error) {
-    if (!capsuleHistoryQueries.has(name) || !needsProtocol(error)) throw error;
-    value = await client.query(ref, { ...args, capsuleProtocol: 1 });
+    if (hasJournalHistory(error)) value = error;
+    else {
+      if (!capsuleHistoryQueries.has(name) || !needsProtocol(error)) throw error;
+      value = await client.query(ref, { ...args, capsuleProtocol: 1 });
+    }
   }
   return decode(
     await hydrateLandingHistory(name, args, value, (name, request) =>
@@ -48,8 +51,7 @@ export function watchLandingHistory(
     });
     const update = () => {
       const selected = ++generation;
-      try {
-        const value = watch.localQueryResult();
+      const consume = (value: unknown) => {
         if (value === undefined) {
           changed(undefined);
           return;
@@ -71,9 +73,13 @@ export function watchLandingHistory(
             if (active && selected === generation) failed(error);
           },
         );
+      };
+      try {
+        consume(watch.localQueryResult());
       } catch (error) {
         changed(undefined);
-        if (!protocol && capsuleHistoryQueries.has(name) && needsProtocol(error)) {
+        if (hasJournalHistory(error)) consume(error);
+        else if (!protocol && capsuleHistoryQueries.has(name) && needsProtocol(error)) {
           stop();
           subscribe(true);
         } else failed(error);

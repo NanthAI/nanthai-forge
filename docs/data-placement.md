@@ -537,3 +537,26 @@ under a relocation fence. Existing rows larger than a page use ordered, hash-ver
 every physical segment still uses S1’s codec. Original row bytes reassemble before
 projection or export, preserving the record capability and bounded page transport.
 This reader expansion installs no writer or relocation.
+
+Terminal operation transport and its mutable recovery ledger have separate
+ownership during export. A live compact receipt supplies the current recovery
+ledger; after receipt expiry a compact ownership digest selects the last archived
+physical row. Older immutable objects remain retained, while export emits each
+physical operation once. Restored operation histories can contain an operation
+UUID reused after its original receipt expired; the transactional loader selects
+the newest physical receipt for that project/actor/UUID.
+
+Cold journal queries use the existing structured `CLI_UPGRADE_REQUIRED` envelope
+with an opaque viewer/source commitment. Updated clients recognize that
+continuation and hydrate through the private history action automatically; older
+clients get an explicit upgrade instead of an incomplete successful page. The
+existing contract-feature negotiation advertises `journal-segments-v1`. Live
+reads retain their original query count and no extra capability call is added.
+
+Record journals also accept compact original version receipts: immutable identity,
+content hash and transaction pins remain query-readable, while the full original
+header and body live in a range segment. Lane receipts carry only source and
+metric facts. This keeps metric paging exact even when an old Lane version becomes
+superseded long after other projects' history was archived; metrics do not depend
+on a bounded guess about overlapping segment time ranges. These are receipt
+bytes in the storage ledger, separate from the one index per physical segment.

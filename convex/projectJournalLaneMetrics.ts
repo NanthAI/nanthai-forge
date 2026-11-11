@@ -16,6 +16,7 @@ export async function journalLaneMetricsPage(
   from: number,
   to: number,
   cursor: string | null,
+  recordReceipts = false,
 ) {
   if (projectJournalHint(ctx, projectId) === false) return null;
   if (projectJournalHint(ctx, projectId) === undefined && !(await ctx.db.get(projectId))?.journalRevision)
@@ -47,13 +48,15 @@ export async function journalLaneMetricsPage(
     absoluteMaxRows: 101,
   });
   const rows = live.page;
-  const indexes = await ctx.db
-    .query('projectJournalSegments')
-    .withIndex('by_project_and_record_kind_and_first', q =>
-      q.eq('projectId', projectId).eq('recordKind', 'lane').lt('firstPosition', before),
-    )
-    .order('desc')
-    .take(201);
+  const indexes = recordReceipts
+    ? []
+    : await ctx.db
+        .query('projectJournalSegments')
+        .withIndex('by_project_and_record_kind_and_first', q =>
+          q.eq('projectId', projectId).eq('recordKind', 'lane').lt('firstPosition', before),
+        )
+        .order('desc')
+        .take(201);
   const facts = new Map<
     string,
     {
@@ -65,6 +68,14 @@ export async function journalLaneMetricsPage(
   for (const row of rows) {
     const key = coordinationJournalKey(projectId, [row._creationTime, row._id]);
     if (key < start || key >= before) continue;
+    if (row.journalLane) {
+      facts.set(row._id, {
+        key,
+        position: [row._creationTime, row._id],
+        value: { id: row.key, version: row.version, intentId: row.parent, revert: row.journalLane.revert },
+      });
+      continue;
+    }
     const body = await ctx.db.get(row.bodyId);
     invariant(body && body.projectId === projectId, 'EVIDENCE_CHANGED', 'Metric record body is missing.');
     const lane = JSON.parse(body.value);

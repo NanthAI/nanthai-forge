@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { hydrateLandingHistory } from './landing-capsule-client.js';
+import { hydrateLandingHistory, hasJournalHistory } from './landing-capsule-client.js';
 import { metadataCommandSchema } from './work-intent-types.js';
 import { rebuildWorkIndex } from './work-index-client.js';
 import { hostedActionError } from './hosted-action-error.js';
@@ -68,11 +68,19 @@ async function queryWorkHistory(
   ref: FunctionReference<'query'>,
   args: Record<string, unknown>,
 ) {
-  const value = await client.query(ref, args);
+  let value;
+  try {
+    value = await client.query(ref, args);
+  } catch (error) {
+    if (!hasJournalHistory(error)) throw error;
+    value = error;
+  }
   const hydrated = await hydrateLandingHistory(getFunctionName(ref), args, value, (name, request) =>
     client.action(makeFunctionReference<'action'>(name), { projectId: args.projectId, ...request }),
   );
-  return typeof value !== 'string' && typeof hydrated === 'string' ? JSON.parse(hydrated) : hydrated;
+  return getFunctionName(ref) !== 'projectWorkStore:compare' && typeof hydrated === 'string'
+    ? JSON.parse(hydrated)
+    : hydrated;
 }
 type Workspace = {
   generationId: string;

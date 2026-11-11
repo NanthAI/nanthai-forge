@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { journalSourceRow } from './projectJournalCanonical';
 import { journalRecoveryPage } from './projectJournalRecovery';
 import { JournalNeeded, journalReadReply } from './projectJournalStore';
 import { v } from 'convex/values';
@@ -261,13 +262,15 @@ export async function journalRecoveryRead(
     for (const row of result.page)
       if (
         !(
-          (table === 'projectHostedOperations' || table === 'projectHostedRecordBodies') &&
+          (table === 'projectHostedOperations' ||
+            table === 'projectHostedRecordBodies' ||
+            table === 'projectHostedRecords') &&
           'journalSegment' in row
         ) &&
         ((!expected.capsuleRevision && !expected.journalRevision) ||
           !(await capsuleOwnsRecoveryRow(ctx, input.projectId, table, row)))
       )
-        rows.push(canonicalPayload(row));
+        rows.push(canonicalPayload(journalSourceRow(row)));
     return canonicalPayload({
       table,
       rows,

@@ -67,6 +67,10 @@ export async function recordVersion(
     )
     .unique();
   if (row) {
+    if (row.journalSegment) {
+      const original = loadedJournalRows(ctx, 'projectHostedRecords').find(item => item._id === row._id);
+      if (original) return original;
+    }
     journalDependency(ctx, `version:${kind}:${key}:${version}`, [row._id, row.digest, row.status]);
     return row;
   }

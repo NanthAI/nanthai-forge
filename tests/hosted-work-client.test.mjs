@@ -13,6 +13,7 @@ import { WorkStore } from '../dist/work-store.js';
 import { setup } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { dispatchHostedWork } from '../dist/hosted-work-client.js';
+import { ConvexError } from 'convex/values';
 import { coordinationClient } from '../dist/coordination-client.js';
 const queries = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const actions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
@@ -440,7 +441,9 @@ test('CLI and MCP planning-version pages hydrate the cold marker once and retain
       if (name === 'projectWorkIndex:workspace')
         return JSON.stringify({ generationId, backupId: 'backup', revision: 1 });
       assert.equal(name, 'projectWorkIndex:records');
-      return {
+      throw new ConvexError({
+        code: 'CLI_UPGRADE_REQUIRED',
+        message: 'Update the client.',
         generationId,
         revision: 1,
         page: [],
@@ -448,7 +451,7 @@ test('CLI and MCP planning-version pages hydrate the cold marker once and retain
         continueCursor: '',
         journalHistory: true,
         viewVersion: 'owner',
-      };
+      });
     },
     action: async (ref, args) => {
       calls.push(getFunctionName(ref));

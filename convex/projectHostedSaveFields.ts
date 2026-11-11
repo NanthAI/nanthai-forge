@@ -12,6 +12,7 @@ export const hostedSaveTables = {
     .index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId'])
     .index('by_project_and_job', ['projectId', 'jobId']),
   projectHostedSavePages: defineTable({
+    journalLaneId: v.optional(v.string()),
     projectId: v.id('hostedProjects'),
     actor: v.string(),
     operationId: v.string(),

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { hydrateLandingHistory } from './landing-capsule-client.js';
+import { hydrateLandingHistory, hasJournalHistory } from './landing-capsule-client.js';
 import { randomUUID } from 'node:crypto';
 import { ConvexError } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
@@ -99,7 +99,14 @@ export async function dispatchCoordination(
   const request = parsed.data;
   const query = async (name: string, args: Record<string, unknown>) => {
     const request = { projectId, ...defined(args) };
-    const value = await call<Record<string, unknown>>(() => client.query(ref.query(name), request));
+    const value = await call<Record<string, unknown>>(async () => {
+      try {
+        return (await client.query(ref.query(name), request)) as Record<string, unknown>;
+      } catch (error) {
+        if (hasJournalHistory(error)) return error as Record<string, unknown>;
+        throw error;
+      }
+    });
     const result = await hydrateLandingHistory(name, request, value, (action, input) => {
       invariant(
         client.action,

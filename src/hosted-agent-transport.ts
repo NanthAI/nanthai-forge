@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { capsuleHistoryQueries, hydrateLandingHistory } from './landing-capsule-client.js';
+import { capsuleHistoryQueries, hydrateLandingHistory, hasJournalHistory } from './landing-capsule-client.js';
 import { agentClient } from './agent-turn-work.js';
 import { landingMessage } from './landing-message.js';
 import { keptApplyEnvelope } from './hosted-apply-kept.js';
@@ -1744,11 +1744,19 @@ export class HostedAgentTransport {
         ? { capsuleProtocol: 1 }
         : {}),
     };
+    const read = async (input: Record<string, unknown>) => {
+      try {
+        return await this.exchange.client.query(makeFunctionReference<'query'>(name), input);
+      } catch (error) {
+        if (hasJournalHistory(error)) return error;
+        throw error;
+      }
+    };
     let value: unknown;
     let selectedRequest: Record<string, unknown> = request;
     if (priorityRead && this.priorityReads !== false) {
       try {
-        value = await this.exchange.client.query(makeFunctionReference<'query'>(name), {
+        value = await read({
           ...request,
           priorityInfo: 1,
         });
@@ -1765,9 +1773,9 @@ export class HostedAgentTransport {
         )
           throw error;
         this.priorityReads = false;
-        value = await this.exchange.client.query(makeFunctionReference<'query'>(name), request);
+        value = await read(request);
       }
-    } else value = await this.exchange.client.query(makeFunctionReference<'query'>(name), request);
+    } else value = await read(request);
     value = await hydrateLandingHistory(name, selectedRequest, value, (name, args) =>
       this.action(name, args),
     );

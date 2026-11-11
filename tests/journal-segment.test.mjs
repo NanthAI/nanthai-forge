@@ -8,7 +8,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { encodeArchiveBytes, decodeArchiveBytes } from '../dist/landing-capsule-bytes.js';
 import { journalSegmentText, journalTablePins, readJournalSegment } from '../dist/journal-segment.js';
-import { hydrateLandingHistory } from '../dist/landing-capsule-client.js';
+import { hydrateLandingHistory, hasJournalHistory } from '../dist/landing-capsule-client.js';
 import { synthetic } from './hosted-landing-batches-fixture.mjs';
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const reads = await import(moduleUrl('../convex/projectHostedRecordReads.ts'));
@@ -109,7 +109,7 @@ async function fixture(t, { inline = false, lane = false } = {}) {
       ],
     ],
   };
-  const relocate = async () => {
+  const relocate = async ({ receipts = false } = {}) => {
     await f.ctx.db.insert('projectJournalSegments', {
       scope: index.scope,
       from: index.from,
@@ -120,11 +120,31 @@ async function fixture(t, { inline = false, lane = false } = {}) {
       lastPosition: `${auth.projectId}:${header._creationTime.toFixed(6).padStart(23, '0')}:${header._id}`,
       key: store.journalIndexKey(auth.projectId, index.scope, 0),
       projectId: auth.projectId,
-      value: canonicalPayload(index),
+      value: canonicalPayload(
+        receipts ? Object.fromEntries(Object.entries(index).filter(([key]) => key !== 'records')) : index,
+      ),
     });
-    await f.ctx.db.patch(auth.projectId, { journalRevision: 1 });
+    await f.ctx.db.patch(auth.projectId, {
+      journalRevision: 1,
+      ...(receipts ? { journalRecordReceipts: true } : {}),
+    });
     store.journalProject(f.ctx, await f.ctx.db.get(auth.projectId));
-    await f.ctx.db.delete(first._id);
+    if (receipts)
+      await f.ctx.db.patch(first._id, {
+        inline: undefined,
+        journalSegment: encoded.pointer.sha256,
+        ...(lane
+          ? {
+              journalLane: {
+                head: old.head,
+                sourceVersion: old.sourceVersion,
+                lifecycleVersion: old.lifecycleVersion,
+                revert: false,
+              },
+            }
+          : {}),
+      });
+    else await f.ctx.db.delete(first._id);
     if (!inline) await f.ctx.db.delete(first.bodyId);
   };
   const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
@@ -168,7 +188,14 @@ async function fixture(t, { inline = false, lane = false } = {}) {
     relocate,
     calls,
     gets,
-    query: () => reads.read._handler(f.ctx, request),
+    query: async () => {
+      try {
+        return await reads.read._handler(f.ctx, request);
+      } catch (error) {
+        if (hasJournalHistory(error)) return canonicalPayload(error.data);
+        throw error;
+      }
+    },
     read: () => actions.history._handler(actionCtx, { ...request, query: 'projectHostedRecordReads:read' }),
     actor: value => {
       actor = value;
@@ -529,15 +556,56 @@ test('a mounted cold Lane history marker changes with a new current version whil
   await h.relocate();
   const history = await import(moduleUrl('../convex/projectHostedLaneHistory.ts'));
   const args = { projectId: h.auth.projectId, laneId: h.old.id };
-  const before = JSON.parse(await history.read._handler(h.ctx, args));
+  const observe = async () => {
+    try {
+      return JSON.parse(await history.read._handler(h.ctx, args));
+    } catch (error) {
+      if (hasJournalHistory(error)) return error.data;
+      throw error;
+    }
+  };
+  const before = await observe();
   assert(before.journalHistory);
   await records.writeHostedRecord(h.ctx, {
     ...h.auth,
     expectedVersion: 1,
     record: { ...h.old, version: 2, lifecycleVersion: 2, state: 'completed' },
   });
-  const after = JSON.parse(await history.read._handler(h.ctx, args));
+  const after = await observe();
   assert(after.journalHistory);
   assert.notEqual(after.viewVersion, before.viewVersion);
   assert.equal(h.gets.length, 0);
+});
+
+test('unsupported clients get a structured upgrade before archived history can look like an empty successful reply', async t => {
+  const h = await fixture(t);
+  await h.relocate();
+  await assert.rejects(
+    reads.read._handler(h.ctx, h.request),
+    error =>
+      error.data?.code === 'CLI_UPGRADE_REQUIRED' &&
+      error.data.journalHistory === true &&
+      !('index' in error.data),
+  );
+  assert.equal(h.gets.length, 0);
+});
+
+test('compact version receipts preserve exact reads, source pins and complete metrics without one archive index per version', async t => {
+  const h = await fixture(t, { lane: true });
+  await h.relocate({ receipts: true });
+  assert(h.tables.projectHostedRecords.has(h.first._id));
+  assert.equal(await h.ctx.db.get(h.first.bodyId), null);
+  assert.deepEqual(JSON.parse(await h.read()), JSON.parse(h.before));
+  const row = await records.recordVersion(h.ctx, h.auth.projectId, 'lane', h.old.id, 0);
+  assert.equal(store.journalLaneSourcePins(row).head, h.old.head);
+  const { journalLaneMetricsPage } = await import(moduleUrl('../convex/projectJournalLaneMetrics.ts'));
+  const gets = h.gets.length,
+    page = await journalLaneMetricsPage(h.ctx, h.auth.projectId, 0, Date.now() + 1000, null, true);
+  assert.deepEqual(
+    page.page.map(row => row.version),
+    [1, 0],
+  );
+  assert.equal(h.gets.length, gets);
+  const { journalSourceRow } = await import(moduleUrl('../convex/projectJournalCanonical.ts'));
+  assert(!('journalLane' in journalSourceRow(row)));
 });

@@ -61,3 +61,35 @@ test('authority loss and subscription failure close the socket and preserve call
   );
   assert.deepEqual(f.counts(), { closed: 1, unsubscribed: 1 });
 });
+
+test('an archive-aware watch hydrates a structured upgrade observation and closes normally without an empty-success result', async () => {
+  const { ConvexError } = await import('convex/values');
+  const f = subscription((_args, _next, error) =>
+    error(
+      new ConvexError({
+        code: 'CLI_UPGRADE_REQUIRED',
+        message: 'Update the client.',
+        journalHistory: true,
+        viewVersion: 'owner',
+      }),
+    ),
+  );
+  let actions = 0;
+  f.client.action = async () => {
+    actions++;
+    return JSON.stringify({
+      page: [{ operationId: 'archived' }],
+      continueCursor: 'original-next',
+      isDone: true,
+    });
+  };
+  const result = await watchCoordinationFeed(f.client, 'project', {
+    cursor: 'original',
+    pageSize: 50,
+    waitMs: 1000,
+  });
+  assert.equal(actions, 1);
+  assert.equal(result.page[0].operationId, 'archived');
+  assert.equal(result.continueCursor, 'original-next');
+  assert.deepEqual(f.counts(), { closed: 1, unsubscribed: 1 });
+});

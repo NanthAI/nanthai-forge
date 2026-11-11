@@ -85,38 +85,37 @@ export async function watchCoordinationFeed(
               ),
         input.waitMs,
       );
-      unsubscribe = client.onUpdate(
-        reference,
-        args,
-        page => {
-          const selected = ++generation;
-          const apply = (value: unknown) => {
-            if (!active || selected !== generation) return;
-            const parsed = (typeof value === 'string' ? JSON.parse(value) : value) as FeedPage;
-            latest = parsed;
-            if (parsed.page.length) resolve({ ...parsed, timedOut: false });
-          };
-          if (!hasJournalHistory(page)) {
-            apply(page);
-            return;
-          }
-          const hydrated = hydrateLandingHistory(getFunctionName(reference), args, page, (name, input) => {
-            invariant(
-              client.action,
-              'HOSTED_ACTION_UNSUPPORTED',
-              'Update this coordination client to read archived history.',
-            );
-            return client.action(makeFunctionReference<'action'>(name), { ...input, projectId });
-          });
-          void hydrated.then(apply, reject);
-        },
-        () =>
-          reject(
-            new ForgeError(
-              'COORDINATION_UNAVAILABLE',
-              'The live feed failed or current authority expired. Retain the original cursor and obtain current authentication through the existing integration.',
+      const observe = (page: unknown) => {
+        const selected = ++generation;
+        const apply = (value: unknown) => {
+          if (!active || selected !== generation) return;
+          const parsed = (typeof value === 'string' ? JSON.parse(value) : value) as FeedPage;
+          latest = parsed;
+          if (parsed.page.length) resolve({ ...parsed, timedOut: false });
+        };
+        if (!hasJournalHistory(page)) {
+          apply(page);
+          return;
+        }
+        const hydrated = hydrateLandingHistory(getFunctionName(reference), args, page, (name, input) => {
+          invariant(
+            client.action,
+            'HOSTED_ACTION_UNSUPPORTED',
+            'Update this coordination client to read archived history.',
+          );
+          return client.action(makeFunctionReference<'action'>(name), { ...input, projectId });
+        });
+        void hydrated.then(apply, reject);
+      };
+      unsubscribe = client.onUpdate(reference, args, observe, error =>
+        hasJournalHistory(error)
+          ? observe(error)
+          : reject(
+              new ForgeError(
+                'COORDINATION_UNAVAILABLE',
+                'The live feed failed or current authority expired. Retain the original cursor and obtain current authentication through the existing integration.',
+              ),
             ),
-          ),
       );
     });
   } finally {
