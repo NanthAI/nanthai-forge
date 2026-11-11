@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { CheckReportDetail } from './CheckReportDetail';
+import type { Id } from '../../../convex/_generated/dataModel';
 import { proofLine } from '../../../src/landing-proof';
 import { useState, type ReactNode } from 'react';
 import { Button, Panel } from '../ui/primitives';
@@ -269,6 +271,9 @@ export function LandingDecision(props: LandingDecisionProps) {
           </div>
           {feedback}
         </>
+      )}
+      {run && current && (
+        <CheckReportDetail projectId={current.request.projectId as Id<'hostedProjects'>} runId={run.id} />
       )}
       {props.children}
       <ErrorToast error={props.error ?? ''} />

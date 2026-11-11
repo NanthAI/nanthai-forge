@@ -1730,6 +1730,8 @@ export class HostedAgentTransport {
     });
   }
   async query<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
+    if (name === 'projectHostedCheckRead:status')
+      args = { ...args, features: ['ci-status-check', 'check-report-detail'] };
     const priorityRead = [
       'projectHostedLanding:status',
       'projectHostedFinish:status',
@@ -1835,7 +1837,7 @@ export class HostedAgentTransport {
     return (typeof value === 'string' ? JSON.parse(value) : value) as T;
   }
   private async observe(command: z.infer<typeof hostedAgentCommandSchemas.status>) {
-    const { laneId, operationId, submissionId, runId, kind, version, summary } = command;
+    const { laneId, operationId, submissionId, runId, kind, version, summary, reports, cursor } = command;
     invariant(!summary || runId, 'BAD_ARGUMENT', 'summary:true reads one check run: pass runId.');
     invariant(
       [laneId, operationId, submissionId, runId].filter(Boolean).length === 1,
@@ -1847,7 +1849,17 @@ export class HostedAgentTransport {
         submissionId,
         ...(version === undefined ? {} : { version }),
       });
-    if (runId) return this.query(`projectHostedCheckRead:${summary ? 'summary' : 'status'}`, { runId });
+    if (runId && reports)
+      return this.action('projectHostedCheckDetail:reports', {
+        runId,
+        ...(reports === 'failed' ? { failed: true } : typeof reports === 'object' ? reports : {}),
+        ...(cursor === undefined ? {} : { cursor }),
+      });
+    if (runId)
+      return this.query(`projectHostedCheckRead:${summary ? 'summary' : 'status'}`, {
+        runId,
+        ...(!summary ? { features: ['ci-status-check', 'check-report-detail'] } : {}),
+      });
     if (laneId) return this.query('projectHostedLanes:head', { laneId });
     if (!kind)
       return this.query('projectHostedFinishObserve:page', {

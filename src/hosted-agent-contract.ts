@@ -335,6 +335,14 @@ export const hostedAgentCommandSchemas = {
       version: z.number().int().nonnegative().optional(),
       /** With runId: counts, failed/flaky file names, timings and selection scope, under 8 KB, not the 80 KB run. */
       summary: z.boolean().optional(),
+      reports: z
+        .union([
+          z.literal('failed'),
+          z.object({ files: z.array(z.string()).max(256) }).strict(),
+          z.literal(true),
+        ])
+        .optional(),
+      cursor: z.string().nullable().optional(),
     })
     .strict(),
   observe: z

@@ -26,12 +26,14 @@ export function summarizeCheckRun(run: HostedCheckRun) {
   const flakyAll = summary
     ? summary.flaky.map(item => item.file)
     : reported.filter(([, r]) => r.flaky && !r.failed).map(([file]) => file);
-  const slowest = reported
-    .flatMap(([file, r]) =>
-      r.durationMs === undefined ? [] : [{ file, durationMs: Math.round(r.durationMs) }],
-    )
-    .sort((a, b) => b.durationMs - a.durationMs)
-    .slice(0, SLOWEST);
+  const slowest =
+    run.reportSummary?.slowest ??
+    reported
+      .flatMap(([file, r]) =>
+        r.durationMs === undefined ? [] : [{ file, durationMs: Math.round(r.durationMs) }],
+      )
+      .sort((a, b) => b.durationMs - a.durationMs)
+      .slice(0, SLOWEST);
   const planned = run.semanticPlan?.members.reduce((sum, member) => sum + member.tests.length, 0);
   const build = (names: number) => ({
     runId: run.id,
@@ -50,11 +52,15 @@ export function summarizeCheckRun(run: HostedCheckRun) {
       ...(item.error ? { firstError: clip(item.error.replace(/\s+/g, ' '), ERROR_CHARS) } : {}),
     })),
     flaky: flakyAll.slice(0, names),
-    ...(failedAll.length > names || flakyAll.length > names
+    ...((summary?.counts.failed ?? failedAll.length) > names ||
+    (summary?.counts.flaky ?? flakyAll.length) > names
       ? {
           more: {
-            failed: Math.max(0, failedAll.length - names),
-            flaky: Math.max(0, flakyAll.length - names),
+            failed: Math.max(
+              0,
+              (summary?.counts.failed ?? failedAll.length) - Math.min(names, failedAll.length),
+            ),
+            flaky: Math.max(0, (summary?.counts.flaky ?? flakyAll.length) - Math.min(names, flakyAll.length)),
           },
         }
       : {}),
@@ -72,7 +78,7 @@ export function summarizeCheckRun(run: HostedCheckRun) {
       ...(run.gate?.reason ? { reason: clip(run.gate.reason, 200) } : {}),
       ...(run.fallback ? { ranInFull: { code: run.fallback, reason: run.fallbackReason ?? null } } : {}),
       requestedTests: run.gate?.tests?.length ?? null,
-      reportedFiles: reported.length,
+      reportedFiles: summary?.counts.total ?? reported.length,
       plannedTests: planned ?? null,
       shardCount: run.plan?.shardCount ?? null,
     },

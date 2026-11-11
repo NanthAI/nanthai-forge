@@ -249,6 +249,23 @@ export const hostedCheckRunSchema = z
     proofOnLanding: z.literal(true).optional(),
     semanticPlan: semanticPlanSchema.optional(),
     contractReports: semanticReportsSchema.optional(),
+    reportPointer: z
+      .object({
+        digest: checkHash,
+        size: z.number().int().nonnegative(),
+        files: z.number().int().nonnegative(),
+      })
+      .strict()
+      .optional(),
+    reportSummary: z
+      .object({
+        slowest: z
+          .array(z.object({ file: z.string(), durationMs: z.number().finite().nonnegative() }).strict())
+          .max(5),
+        semantic: semanticReportsSchema,
+      })
+      .strict()
+      .optional(),
     // Shard pool files yielded by a home shard and not yet reported by any shard (usually empty).
     poolPending: z.array(contractTestPath).max(4096).optional(),
     // Some shard ran the shard pool, so claim objects may exist for this run; the final result deletes them.

@@ -155,7 +155,11 @@ async function observeHostedRunOnce(
       }
       unsubscribe = client.onUpdate(
         makeFunctionReference<'query'>('projectHostedCheckRead:status'),
-        { projectId: transport.address.projectId, runId: command.runId },
+        {
+          projectId: transport.address.projectId,
+          runId: command.runId,
+          features: ['ci-status-check', 'check-report-detail'],
+        },
         value => {
           try {
             const next = run(value);

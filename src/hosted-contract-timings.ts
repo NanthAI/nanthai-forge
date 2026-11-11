@@ -20,7 +20,10 @@ export async function hostedContractTimings(input: {
   const identity = { runId: input.runId };
   const run = parseHostedResponse(
     hostedCheckRunSchema,
-    await input.query('projectHostedCheckRead:status', identity),
+    await input.query('projectHostedCheckRead:status', {
+      ...identity,
+      features: ['ci-status-check', 'check-report-detail'],
+    }),
   );
   invariant(
     run.request.candidateId === input.candidateId &&

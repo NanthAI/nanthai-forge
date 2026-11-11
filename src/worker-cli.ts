@@ -195,7 +195,7 @@ export async function workerCli(args: string[]) {
         watch: (runId, update, error) =>
           subscriptions.onUpdate(
             makeFunctionReference<'query'>('projectHostedCheckRead:status'),
-            { projectId, runId },
+            { projectId, runId, features: ['ci-status-check', 'check-report-detail'] },
             value => {
               try {
                 update(hostedCheckRunSchema.parse(JSON.parse(String(value))));

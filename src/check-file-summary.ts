@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import type { HostedCheckRun } from './hosted-check.js';
+import { canonicalPayload } from './hosted-source-operation.js';
+import { digest } from './state/hash.js';
 import { capCheckReports, encodedBytes } from './check-report-cap.js';
 import { semanticReportsSchema } from './intent-semantic-conflict.js';
 const file = z.object({ file: z.string(), report: semanticReportsSchema.valueType }).strict();
@@ -12,6 +15,10 @@ export const checkFileSummarySchema = z
         flaky: z.number().int().nonnegative(),
       })
       .strict(),
+    omitted: z
+      .object({ failed: z.number().int().nonnegative(), flaky: z.number().int().nonnegative() })
+      .strict()
+      .optional(),
     truncated: z.number().int().nonnegative().optional(),
     failed: z.array(file),
     flaky: z.array(file),
@@ -54,10 +61,68 @@ export function checkFileSummary(reports: z.infer<typeof semanticReportsSchema>)
   const { truncated } = capCheckReports(reports);
   const failed = files.filter(item => item.report.failed);
   const flaky = files.filter(item => item.report.flaky && !item.report.failed);
-  return {
+  const summary = {
     counts: { total: files.length, failed: failed.length, flaky: flaky.length },
     ...(truncated ? { truncated } : {}),
     failed,
     flaky,
+  };
+  // Count the stored string's escaping as well. Names and excerpts cannot grow the hot row
+  // with repository size; counts retain every report even when the lists are shortened.
+  const build = (length: number) => ({
+    ...summary,
+    failed: failed.slice(0, length),
+    flaky: flaky.slice(0, Math.max(0, length - failed.length)),
+    omitted: {
+      failed: Math.max(0, failed.length - length),
+      flaky: Math.min(flaky.length, Math.max(0, failed.length + flaky.length - length)),
+    },
+  });
+  const size = (value: unknown) => new TextEncoder().encode(JSON.stringify(JSON.stringify(value))).length;
+  if (size(summary) <= 8 * 1024) return summary;
+  let low = 0,
+    high = files.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (size(build(mid)) <= 8 * 1024) low = mid;
+    else high = mid - 1;
+  }
+  return build(low);
+}
+
+/** Transaction readers need only the reports named by the pinned semantic plan. */
+export function checkReportHeader(run: HostedCheckRun) {
+  const reports = run.contractReports;
+  if (!reports) return;
+  run.testFiles = checkFileSummary(reports);
+  const named = new Set(
+    run.semanticPlan?.members.flatMap(member => member.tests.map(test => test.path)) ?? [],
+  );
+  run.reportSummary = {
+    slowest: Object.entries(reports)
+      .flatMap(([file, report]) =>
+        report.durationMs === undefined ? [] : [{ file, durationMs: report.durationMs }],
+      )
+      .sort((a, b) => b.durationMs - a.durationMs || a.file.localeCompare(b.file))
+      .slice(0, 5),
+    semantic: Object.fromEntries(
+      [...named]
+        .filter(file => reports[file])
+        .map(file => {
+          const { failed, durationMs, flaky } = reports[file]!;
+          return [
+            file,
+            { failed, ...(durationMs === undefined ? {} : { durationMs }), ...(flaky ? { flaky } : {}) },
+          ];
+        }),
+    ),
+  };
+}
+export function checkReportPointer(reports: NonNullable<HostedCheckRun['contractReports']>) {
+  const body = canonicalPayload(reports);
+  return {
+    digest: digest(canonicalPayload(reports)),
+    size: new TextEncoder().encode(body).length,
+    files: Object.keys(reports).length,
   };
 }

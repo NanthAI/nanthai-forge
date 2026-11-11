@@ -41,7 +41,11 @@ function fixture(t) {
       return {
         onUpdate(ref, args, next, error) {
           assert.equal(getFunctionName(ref), 'projectHostedCheckRead:status');
-          assert.deepEqual(args, { projectId: s.address.projectId, runId });
+          assert.deepEqual(args, {
+            projectId: s.address.projectId,
+            runId,
+            features: ['ci-status-check', 'check-report-detail'],
+          });
           update = next;
           fail = error;
           return () => {

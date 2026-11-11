@@ -99,7 +99,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `x complete-merged` | `operationId?` |
 | `x abandon-dormant` | `apply?, limit?, operationId?` |
 | `start --reopen` | `laneId?, target?, operationId?` |
-| `status` | `laneId?, kind?, operationId?, submissionId?, runId?, version?, summary?` |
+| `status` | `laneId?, kind?, operationId?, submissionId?, runId?, version?, summary?, reports?, cursor?` |
 | `observe` | `kind?, operationId?, submissionId?, runId?, version?` |
 | `metrics` | `from?, to?, limit?, cursor?, contextDays?, operationId?` |
 | `capabilities` | `operationId?` |
@@ -2086,3 +2086,13 @@ board page may still contain old project notes on the wire; filtering advances t
 Lane cursor without another query and never filters relevant Lane/Issue notes.
 
 MCP tools/list grows by 56 UTF-8 bytes (5,685 → 5,741, including the accepted Issue aliases) for the four reply-detail selectors; advertised description bytes stay at 675. No action or CLI command is added.
+
+### Check report detail
+
+Capable check status readers send `check-report-detail`: the status response carries a bounded
+file summary and no `contractReports`. `status {runId,reports:"failed"}` reads failed and flaky
+files with retained excerpts through a server action. `reports:true` pages every report;
+`reports:{files:[...]}` selects up to 256 named files. Pass the returned `cursor` to continue.
+Each reply is at most 256 KiB; storage keys and URLs never leave the server. The action uses the
+same project access and public identity mapping as status and reads legacy inline and paged runs.
+The landing detail's Test reports disclosure uses this same server action only while open.

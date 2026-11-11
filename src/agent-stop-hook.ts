@@ -114,6 +114,7 @@ export async function hostedTurnWorkProbe(work: TurnWork): Promise<TurnWorkState
       await exchange.client.query(makeFunctionReference<'query'>('projectHostedCheckRead:status'), {
         projectId: address.projectId,
         runId: work.id,
+        features: ['ci-status-check', 'check-report-detail'],
       }),
     );
     if (!run?.status) return 'unknown';

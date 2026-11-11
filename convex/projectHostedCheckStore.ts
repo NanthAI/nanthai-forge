@@ -9,6 +9,7 @@ import { hostedVerdictKey } from '../src/hosted-check-evidence';
 import { onGateRunTerminal } from './projectHostedMainAuditState';
 import { semanticPayload } from '../src/semantic-payload';
 import { wakeExpiredLogs } from './projectCheckLogRetention';
+import { checkReportHeader } from '../src/check-file-summary';
 import { restoreShardReports } from './projectHostedActionsReports';
 import { makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
@@ -156,6 +157,7 @@ export async function writeHostedCheck(
     await ctx.scheduler.cancel(run.actions.watchdog as Id<'_scheduled_functions'>);
     run.actions.watchdog = null;
   }
+  checkReportHeader(run);
   const reports = await storeCheckReports(ctx, run);
   const stored = { ...run };
   if ('reportParts' in reports) delete stored.contractReports;

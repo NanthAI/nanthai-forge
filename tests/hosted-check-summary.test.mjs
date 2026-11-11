@@ -97,3 +97,20 @@ test('check summary: a landed run without reports uses the compact testFiles sum
   assert.equal(empty.selection.mode, null);
   assert.deepEqual(empty.failed, []);
 });
+
+test('header-only summaries retain slowest files and exact omitted failure counts', () => {
+  const value = run({
+    testFiles: {
+      counts: { total: 20000, failed: 20000, flaky: 0 },
+      failed: [{ file: 'tests/a.test.mjs', report: { failed: true } }],
+      flaky: [],
+      omitted: { failed: 19999, flaky: 0 },
+    },
+    reportSummary: { slowest: [{ file: 'tests/slow.test.mjs', durationMs: 900 }], semantic: {} },
+  });
+  const summary = summarizeCheckRun(value);
+  assert.equal(summary.files.failed, 20000);
+  assert.equal(summary.more.failed, 19999);
+  assert.equal(summary.selection.reportedFiles, 20000);
+  assert.deepEqual(summary.timings.slowest, value.reportSummary.slowest);
+});

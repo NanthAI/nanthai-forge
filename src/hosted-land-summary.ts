@@ -28,6 +28,7 @@ type Result = {
     };
     testFiles?: {
       counts?: { failed: number };
+      omitted?: { failed: number };
       failed?: { file: string; report?: { firstError?: string } }[];
     };
   };
@@ -183,10 +184,12 @@ function classifyLand(response: HostedAgentResponse): { kind: LandOutcomeKind; l
     );
   const more =
     Math.max(failedFiles.length, submission?.testFiles?.counts?.failed ?? 0) - named - shown.length;
-  if (more > 0)
+  if (more > 0) {
+    const label = submission?.testFiles?.omitted?.failed ? 'run details' : 'all names';
     lines.push(
-      `  ... ${more} more failing file${more === 1 ? '' : 's'}${response.operationId ? `; all names: nforge agent ROOT status '{"operationId":"${response.operationId}"}' --detail` : '; all names: status --detail'}`,
+      `  ... ${more} more failing file${more === 1 ? '' : 's'}${response.operationId ? `; ${label}: nforge agent ROOT status '{"operationId":"${response.operationId}"}' --detail` : `; ${label}: status --detail`}`,
     );
+  }
   return out(failed ? 'failed' : 'other', lines);
 }
 

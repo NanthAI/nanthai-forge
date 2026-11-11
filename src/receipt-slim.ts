@@ -220,6 +220,7 @@ function briefTestFiles(value: unknown): Json | undefined {
     flaky = Array.isArray(files?.flaky) ? files.flaky : [];
   return {
     counts,
+    ...(files?.omitted ? { omitted: files.omitted } : {}),
     ...(failed.length ? { failed } : {}),
     ...(flaky.length ? { flaky: flaky.map(briefFlaky) } : {}),
   };

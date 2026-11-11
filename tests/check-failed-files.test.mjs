@@ -71,7 +71,7 @@ test('many failed files: capped list, an N more line with the full-list command,
   const more = lines.at(-1);
   assert.match(
     more,
-    /^ {2}\.\.\. 100 more failing files; all names: nforge agent ROOT status '\{"operationId":"op-1"\}' --detail$/,
+    /^ {2}\.\.\. 100 more failing files; run details: nforge agent ROOT status '\{"operationId":"op-1"\}' --detail$/,
   );
   assert.ok(Buffer.byteLength(lines.join('\n')) < 8 * 1024, 'the printed failure stays under 8 KiB');
   // The compact summary adds at most failedErrors x failedErrorChars of error text per run.
@@ -95,4 +95,24 @@ test('the default failed-land receipt stays unchanged by slimming (full receipt 
     action: 'finish',
   });
   assert.equal(slim.result.submission.testFiles.failed.length, 3);
+});
+
+test('header-only failures retain the first file excerpt and exact overflow count in the landing message', () => {
+  const reports = fixture(1000);
+  const testFiles = checkFileSummary(reports);
+  assert.equal(
+    checkFailureDetail({ testFiles }),
+    checkFailureDetail({ contractReports: reports, testFiles }),
+  );
+  assert(testFiles.failed.length < testFiles.counts.failed);
+  assert.match(checkFailureDetail({ testFiles }), /case 0: expected 0/);
+  assert.match(checkFailureDetail({ testFiles }), /999 more failed files/);
+});
+
+test('a bounded summary keeps its omitted count in compact receipts and names the details read honestly', () => {
+  const { response, testFiles } = landing(1000);
+  assert(testFiles.omitted.failed > 0);
+  const slim = slimReceipt({ ...response, transport: 'hosted', action: 'finish' });
+  assert.deepEqual(slim.result.submission.testFiles.omitted, testFiles.omitted);
+  assert.match(landSummary(slim).at(-1), /; run details:/);
 });

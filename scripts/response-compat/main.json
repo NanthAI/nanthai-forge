@@ -2659,6 +2659,112 @@
             "additionalProperties": false
           }
         },
+        "reportPointer": {
+          "type": "object",
+          "properties": {
+            "digest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "files": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "digest",
+            "size",
+            "files"
+          ],
+          "additionalProperties": false
+        },
+        "reportSummary": {
+          "type": "object",
+          "properties": {
+            "slowest": {
+              "maxItems": 5,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string"
+                  },
+                  "durationMs": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "file",
+                  "durationMs"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "semantic": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "durationMs": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "failed": {
+                    "type": "boolean"
+                  },
+                  "firstError": {
+                    "type": "string",
+                    "maxLength": 2048
+                  },
+                  "flaky": {
+                    "type": "boolean"
+                  },
+                  "attempts": {
+                    "maxItems": 2,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "durationMs": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        },
+                        "failed": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "durationMs",
+                        "failed"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "failed"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "slowest",
+            "semantic"
+          ],
+          "additionalProperties": false
+        },
         "poolPending": {
           "maxItems": 4096,
           "type": "array",
@@ -2694,6 +2800,26 @@
               },
               "required": [
                 "total",
+                "failed",
+                "flaky"
+              ],
+              "additionalProperties": false
+            },
+            "omitted": {
+              "type": "object",
+              "properties": {
+                "failed": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "flaky": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
                 "failed",
                 "flaky"
               ],
@@ -4255,6 +4381,26 @@
               },
               "required": [
                 "total",
+                "failed",
+                "flaky"
+              ],
+              "additionalProperties": false
+            },
+            "omitted": {
+              "type": "object",
+              "properties": {
+                "failed": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "flaky": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
                 "failed",
                 "flaky"
               ],

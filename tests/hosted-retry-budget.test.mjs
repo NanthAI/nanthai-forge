@@ -205,7 +205,9 @@ test('1,000 failures across 27 old-runner shards retain every name within the ru
     });
   assert.equal(run.status, 'failed');
   assert.deepEqual(Object.keys(run.contractReports).sort(), Object.keys(reports).sort());
-  assert.equal(run.testFiles.failed.length, 1000);
+  assert.equal(run.testFiles.counts.failed, 1000);
+  assert.equal(run.testFiles.failed.length + run.testFiles.omitted.failed, 1000);
+  assert(Buffer.byteLength(JSON.stringify(JSON.stringify(run.testFiles))) <= 8192);
   assert.equal(run.testFiles.truncated, 968);
   const row = [...s.tables.projectHostedCheckRuns.values()].find(row => row.runId === run.id);
   const documentBytes = Buffer.byteLength(JSON.stringify(row));

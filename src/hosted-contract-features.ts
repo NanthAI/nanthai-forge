@@ -124,6 +124,7 @@ export const hostedContractFeatures = [
    * `features` and sends such a run only to a caller naming this feature. Without it the read
    * refuses that one run by name, so an older CLI never receives a configuration it cannot parse. */
   'ci-status-check',
+  'check-report-detail',
   /** put-planning-item runs in the revision-free mutation projectWorkCommand:command (flip 5 S5): one
    * call, the item version is its only check (ITEM_CHANGED). Without it the CLI reads the Work
    * revision and calls the revision-checked action, retrying when an unrelated write moved it. */

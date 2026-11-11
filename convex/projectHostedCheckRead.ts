@@ -16,7 +16,7 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 
 const identity = { projectId: v.id('hostedProjects'), runId: v.string() };
-async function reader(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
+export async function checkReader(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
   const user = await ctx.auth.getUserIdentity();
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted checks.');
   await accessibleProject(ctx, projectId, user.subject);
@@ -26,8 +26,14 @@ export const status = query({
   returns: v.string(),
   handler: async (ctx, { features, ...input }) => {
     try {
-      await reader(ctx, input.projectId);
-      const { run } = await loadHostedCheck(ctx, input);
+      await checkReader(ctx, input.projectId);
+      const { run } = await loadHostedCheck(ctx, input, !features?.includes('check-report-detail'));
+      invariant(
+        !run.reportPointer || features?.includes('check-report-detail'),
+        'CLI_UPGRADE_REQUIRED',
+        'Update the Forge CLI to read check report detail.',
+      );
+      if (features?.includes('check-report-detail')) delete run.contractReports;
       // Older CLIs parse runs strictly: a ci-status run goes only to callers that know its shape.
       invariant(
         run.configuration.provider !== 'ci-status' || Boolean(features?.includes('ci-status-check')),
@@ -47,7 +53,7 @@ export const summary = query({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      await reader(ctx, input.projectId);
+      await checkReader(ctx, input.projectId);
       return canonicalPayload(summarizeCheckRun((await loadHostedCheck(ctx, input)).run));
     } catch (error) {
       return report(error);
@@ -59,7 +65,7 @@ export const shards = query({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      await reader(ctx, input.projectId);
+      await checkReader(ctx, input.projectId);
       await loadHostedCheck(ctx, input);
       const page = await ctx.db
         .query('projectHostedCheckShards')
@@ -81,7 +87,7 @@ export const list = query({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      await reader(ctx, input.projectId);
+      await checkReader(ctx, input.projectId);
       const page = await ctx.db
         .query('projectHostedCheckRuns')
         .withIndex('by_project_and_candidate', q =>

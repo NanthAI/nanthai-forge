@@ -3,7 +3,13 @@ import { scrubText } from './client-error-text.js';
 import { stepExcerptChars } from './hosted-landing-suspect.js';
 
 type FailedRun = {
-  testFiles?: { counts?: { failed: number }; failed: { file: string }[] } | undefined;
+  testFiles?:
+    | {
+        counts?: { failed: number };
+        failed: { file: string; report?: { failed?: boolean; flaky?: boolean; firstError?: string } }[];
+        flaky?: { file: string; report?: { failed?: boolean; flaky?: boolean; firstError?: string } }[];
+      }
+    | undefined;
   contractReports?:
     | Record<
         string,
@@ -19,14 +25,21 @@ const line = (text: string, max: number) => scrubText(text.replace(/\s+/g, ' ').
 
 /** What a settled failed check names, in one bounded, secret-safe sentence: the
  * first failing file with its first error and a count of the rest (the land output and
- * `status --detail` list each file with its first error), else the failing job and its most
+ * `status {runId,reports:"failed"}` returns retained per-file detail), else the failing job and its most
  * specific line. Reads only what the run already retained; never a log fetch. */
 export function checkFailureDetail(
   run: FailedRun,
   step?: { job: string; excerpt: string } | null,
   files = 1,
 ): string {
-  const reports = run.contractReports ?? {};
+  const reports =
+    run.contractReports ??
+    Object.fromEntries(
+      [...(run.testFiles?.failed ?? []), ...(run.testFiles?.flaky ?? [])].map(item => [
+        item.file,
+        item.report ?? { failed: true },
+      ]),
+    );
   const failed = [
     ...new Set([
       ...(run.testFiles?.failed.map(item => item.file) ?? []),

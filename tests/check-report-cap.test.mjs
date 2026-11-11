@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { pageCheckReports } from '../dist/check-report-detail.js';
 import { observerProjectionBudget } from './observer-projection-budget.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -40,7 +41,9 @@ test('1,000 failed file identities survive a deterministic, idempotent UTF-8 exc
     assert.match(text, /\[excerpt truncated\]$/);
   }
   const summary = checkFileSummary(capped.reports);
-  assert.equal(summary.failed.length, 1000);
+  assert.equal(summary.counts.failed, 1000);
+  assert.equal(summary.failed.length + summary.omitted.failed, 1000);
+  assert(Buffer.byteLength(JSON.stringify(JSON.stringify(summary))) <= 8192);
   assert.equal(summary.truncated, 1000);
   // Issue 58236de6: the first failedErrors failed files keep a bounded first error; the rest are names only.
   // Emoji errors are 7+ JSON-escaped bytes per character, so the 6 KiB byte budget ends the list before 20.
@@ -65,6 +68,13 @@ test('1,000 failed file identities survive a deterministic, idempotent UTF-8 exc
       additionalDocumentsRead: 0,
       additionalDocumentsWritten: 0,
     }),
+  );
+  // Detail paging has its own scale guard; keep this existing 32 MiB guard scoped to
+  // the report cap and compact summary it has always measured.
+  assert.deepEqual(
+    pageCheckReports(capped.reports).contractReports,
+    capped.reports,
+    'all failure identities remain in exact detail',
   );
 });
 test('small reports keep original excerpts and verdicts, including flaky passes', () => {
@@ -182,7 +192,10 @@ test('signed callback completion caps excerpts and retains every failure name', 
     {},
   );
   assert.equal(result.status, 'failed');
-  assert.equal(result.testFiles.failed.length, 100);
+  assert.equal(result.testFiles.counts.failed, 100);
+  assert.equal(result.testFiles.failed.length + (result.testFiles.omitted?.failed ?? 0), 100);
+  assert.equal(Object.keys(result.contractReports).length, 100);
+  assert.deepEqual(pageCheckReports(result.contractReports).contractReports, result.contractReports);
   assert.equal(result.testFiles.truncated, 68);
   assert.equal(Object.values(result.contractReports).filter(r => r.firstError).length, 32);
 });
