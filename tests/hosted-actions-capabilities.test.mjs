@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { directCommandSchema, directRequestSchema } from '../dist/hosted-actions-direct.js';
 import {
   hostedActionsCapabilities,
+  actionsSourceStateCapability,
   actionsCapabilityFields,
   actionsCapabilityCommands,
   actionsCommandForCapabilities,
@@ -95,7 +96,9 @@ test('every runner request extension has a registered capability gate', () => {
   });
   for (const [path, capability] of Object.entries(actionsCapabilityFields)) {
     assert(paths.includes(path), `stale capability path ${path}`);
-    assert(hostedActionsCapabilities.includes(capability));
+    // Reader-first rollout registers source.state before advertising it. The
+    // same behavioral gate assertions below cover both offered and staged fields.
+    assert(hostedActionsCapabilities.includes(capability) || capability === actionsSourceStateCapability);
     const [kind, ...parts] = path.split('.');
     const command = { kind };
     let node = command;

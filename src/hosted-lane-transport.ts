@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
+import type { NativeFile } from './state/format.js';
 import { checkoutIo } from './checkout-io.js';
 import { writeFileSync } from 'node:fs';
 import { makeFunctionReference } from 'convex/server';
@@ -20,6 +22,7 @@ export class ConvexLaneTransport implements LaneTransport {
   private readonly descriptors = new Map<string, Descriptor>();
   private runs = true;
   private pages = 0;
+  private stateDownloads: HostedCheckoutDownloads | undefined;
   constructor(
     private readonly exchange: Pick<
       ConvexExchange,
@@ -30,8 +33,20 @@ export class ConvexLaneTransport implements LaneTransport {
       | 'prepareDownloads'
       | 'onCall'
       | 'onDownloadProgress'
-    >,
+    > & { sourceStateReads?: boolean },
   ) {}
+  selectState(state: string, files: readonly NativeFile[]) {
+    const physical = this.descriptors.get(state)?.statePhysical;
+    if (!this.exchange.sourceStateReads || !physical) {
+      this.stateDownloads = undefined;
+      return;
+    }
+    this.stateDownloads ??= new HostedCheckoutDownloads(this.exchange);
+    this.stateDownloads.selectState(state, files, physical);
+  }
+  prepareObjects(ids: string[]) {
+    return this.stateDownloads?.prepareObjects(ids) ?? Promise.resolve(null);
+  }
   sourcePack() {
     return latestClientSourcePack(this.exchange.client as never, this.exchange.projectId);
   }
@@ -54,6 +69,7 @@ export class ConvexLaneTransport implements LaneTransport {
           projectId: this.exchange.projectId,
           digests,
           signed,
+          ...(this.exchange.sourceStateReads ? { stateSource: true } : {}),
           ...(withRuns ? { runs: true } : {}),
         },
         { skipQueue: true },
@@ -77,6 +93,7 @@ export class ConvexLaneTransport implements LaneTransport {
     return rows.map(({ run, ...row }) => (run ? { ...row, run: { ...run, key: `${page}:${run.id}` } } : row));
   }
   async objects(digests: string[]) {
+    if (this.stateDownloads) return this.stateDownloads.objects(digests);
     const rows = await this.page(digests, true, true);
     // Merge: the checkout cache describes later pages while an earlier one downloads.
     for (const row of rows) this.descriptors.set(row.digest, row);
@@ -84,12 +101,15 @@ export class ConvexLaneTransport implements LaneTransport {
   }
   /** Keep each pack run inside one download window. */
   downloadGroups(pins: ContentPin[]) {
+    if (this.stateDownloads) return this.stateDownloads.downloadGroups(pins);
     return runGroups(pins, digest => this.descriptors.get(digest));
   }
   downloadToFile(pin: ContentPin, path: string) {
+    if (this.stateDownloads) return this.stateDownloads.downloadToFile(pin, path);
     return this.exchange.downloadToFile(pin, path);
   }
   async downloadFiles(files: { pin: ContentPin; path: string }[]) {
+    if (this.stateDownloads) return this.stateDownloads.downloadFiles(files);
     if (files.length > this.objectPageSize) {
       for (let at = 0; at < files.length; at += this.objectPageSize)
         await this.downloadFiles(files.slice(at, at + this.objectPageSize));

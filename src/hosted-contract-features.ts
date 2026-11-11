@@ -12,6 +12,7 @@
  * Rules: add a name in the same change that implements the behaviour on the server; never rename,
  * reuse or remove a name; the CLI keeps the old safe behaviour whenever a name is not advertised.
  */
+export const sourceStateFeature = 'source-state';
 export const hostedContractFeatures = [
   /** Candidate files read from exact R2 States without a legacy Work generation. */
   'candidate-source-files',

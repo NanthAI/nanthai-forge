@@ -15,6 +15,9 @@ import { neverIndex } from './forge-disk.js';
 import { ownerOnly } from './file-mode.js';
 import { aheadOf, runDownloadWindows } from './checkout-download-schedule.js';
 export interface CheckoutObjectTransport {
+  selectState?(state: string, files: readonly import('./state/format.js').NativeFile[]): void;
+  /** A cold manifest can supply one complete signed run inventory before paging. */
+  prepareObjects?(ids: string[]): Promise<ContentPin[] | null>;
   readonly objectPageSize?: number;
   objects(digests: string[]): Promise<ContentPin[]>;
   downloadToFile(pin: ContentPin, path: string): Promise<void>;
@@ -108,6 +111,24 @@ export class HostedCheckoutCache {
   /** Describe pages of `missing` and download them in windows. */
   private async fetchMissing(missing: string[]) {
     if (!missing.length) return;
+    const bulk = await this.transport.prepareObjects?.(missing);
+    if (bulk) {
+      invariant(
+        bulk.length === missing.length && bulk.every((pin, index) => pin.sha256 === missing[index]),
+        'SOURCE_HASH_MISMATCH',
+        'State inventory changed.',
+      );
+      const groups = this.transport.downloadGroups?.(bulk) ?? sizeGroups(bulk);
+      async function* described() {
+        yield groups;
+      }
+      await runDownloadWindows(
+        described(),
+        Math.max(1, Math.min(4, this.transport.downloadWindows ?? 1)),
+        group => this.download(group),
+      );
+      return;
+    }
     const pageSize = this.transport.objectPageSize ?? 100,
       pages: string[][] = [];
     for (let at = 0; at < missing.length; at += pageSize) pages.push(missing.slice(at, at + pageSize));

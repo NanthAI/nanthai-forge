@@ -60,8 +60,7 @@ export function decodePhysicalEntries(bytes: Uint8Array, bucket: number): Physic
   };
   const hash = () => {
     valid(at + 32 <= bytes.length);
-    let id = '';
-    for (const byte of bytes.subarray(at, at + 32)) id += byte.toString(16).padStart(2, '0');
+    const id = Array.from(bytes.subarray(at, at + 32), byte => byte.toString(16).padStart(2, '0')).join('');
     at += 32;
     return id;
   };

@@ -72,6 +72,18 @@ export function fakeSourceR2(t) {
             : Buffer.from(digest(bytes), 'hex').toString('base64'),
         },
       });
+    const range = new Headers(init.headers).get('range');
+    if (range) {
+      const match = /^bytes=(\d+)-(\d+)$/.exec(range);
+      assert(match, 'one exact range');
+      const start = Number(match[1]),
+        end = Number(match[2]);
+      assert(start <= end && end < bytes.length, 'range stays inside physical object');
+      return new Response(bytes.subarray(start, end + 1), {
+        status: 206,
+        headers: { 'content-range': `bytes ${start}-${end}/${bytes.length}` },
+      });
+    }
     return new Response(bytes);
   };
   t.after(() => (globalThis.fetch = original));

@@ -1,32 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { bytePinSchema as pinSchema } from './byte-tree-format.js';
+import { objectRecipeSchema, objectChunkPageSchema, type ObjectRecipe } from './byte-tree-format.js';
+export { objectRecipeSchema, objectChunkPageSchema, type ObjectRecipe } from './byte-tree-format.js';
 import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
-import { treeRefSchema, type TreeRef } from './byte-tree-format.js';
-const pinSchema = z
-  .object({
-    sha256: z.string().regex(/^[0-9a-f]{64}$/),
-    size: z.number().safe().nonnegative(),
-  })
-  .strict();
+import type { TreeRef } from './byte-tree-format.js';
 export type ChunkPin = z.infer<typeof pinSchema>;
-export const objectChunkPageSchema = z
-  .object({
-    kind: z.literal('forge-byte-tree'),
-    schema: z.literal(1),
-    children: z.array(treeRefSchema).min(2),
-  })
-  .strict();
-export const objectRecipeSchema = z
-  .object({
-    kind: z.literal('forge-object-recipe'),
-    schema: z.literal(1),
-    object: pinSchema,
-    tree: treeRefSchema,
-  })
-  .strict();
-export type ObjectRecipe = z.infer<typeof objectRecipeSchema>;
 // Internal content boundaries, not accepted-file limits. Rolling anchors recover
 // after an insertion/deletion; raw logical IDs never depend on these parameters.
 export const objectChunkBytes = 1024 * 1024,

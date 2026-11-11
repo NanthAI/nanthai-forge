@@ -1,4 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
+import { expandSourceGrants } from './source-grant-wire.js';
+import {
+  rowsFromPhysicalRuns,
+  type StateSourceRow,
+  type StateSourceReply,
+} from './hosted-actions-state-source.js';
+import type { PhysicalGrantPlan, SignedPhysicalRun } from './physical-manifest-download.js';
+import { actionsSourceStateCapability } from './hosted-actions-capabilities.js';
 import { mapSourceOrdered } from './hosted-source-parallel.js';
 import type { ResultBatchTargets } from './hosted-actions-result-batch.js';
 import { networkFetch } from './network-fetch.js';
@@ -9,7 +17,7 @@ import { sourcePackDownloadSchema, type SourcePackDownload } from './source-pack
 import { digest } from './hash.js';
 import { objectRecipeSchema, objectChunkPageSchema } from './object-chunks.js';
 import { ForgeError, invariant } from './errors.js';
-import { packHeaders, verifyPackRange, type PackRange } from './object-pack-range.js';
+import { packHeaders, verifyPackRange } from './object-pack-range.js';
 import type { z } from 'zod';
 import { directSourceWindow, directSourceBatch, type directCommandSchema } from './hosted-actions-direct.js';
 import {
@@ -29,7 +37,7 @@ import { createReadStream } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { readCompleteRuns, type PackRunBinding } from './hosted-checkout-runs.js';
+import { readCompleteRuns } from './hosted-checkout-runs.js';
 import type { exchangeRequest } from './exchange-request.js';
 import { SourceWorkerReader } from './hosted-source-worker-reader.js';
 import type { SignedDownload } from './blob-download-format.js';
@@ -90,15 +98,20 @@ export class ActionsJobClient {
         );
         if (!response.ok) {
           // Only a fixed reason vocabulary may reach logs; never echo a response body.
-          const body = (await response.json().catch(() => null)) as { reason?: unknown } | null;
+          const body = (await response.json().catch(() => null)) as {
+            reason?: unknown;
+            code?: unknown;
+          } | null;
           const reason = actionsRefusalReasons.find(value => value === body?.reason);
           throw Object.assign(
             new ForgeError(
-              reason === 'cancelled'
-                ? 'CHECK_CANCELLED'
-                : reason === 'limit'
-                  ? 'CONVEX_VALUE_LIMIT'
-                  : 'RUNNER_UNAVAILABLE',
+              body?.code === 'SOURCE_UNAVAILABLE' || body?.code === 'CLI_UPGRADE_REQUIRED'
+                ? body.code
+                : reason === 'cancelled'
+                  ? 'CHECK_CANCELLED'
+                  : reason === 'limit'
+                    ? 'CONVEX_VALUE_LIMIT'
+                    : 'RUNNER_UNAVAILABLE',
               `Convex Actions request failed (${response.status}${reason ? `; reason: ${reason}` : ''}).`,
             ),
             // Callers tell a request Forge refused as invalid (deterministic) from an unavailable runner.
@@ -137,7 +150,7 @@ export class ActionsJobClient {
         // Optional evidence must never fail the required planning job.
       }
     }
-    return value;
+    return command.kind === 'source' ? expandSourceGrants(value) : value;
   }
   /**
    * Keeps the runner's OIDC request credentials in this client and removes the job's tokens from
@@ -259,34 +272,44 @@ export class ActionsJobClient {
     return this.capabilities.includes(actionsSourceBatchCapability) ? directSourceBatch : directSourceWindow;
   }
   transport(cache?: string) {
-    const rows = new Map<
-      string,
-      {
-        descriptor: {
-          object: { sha256: string; size: number };
-          recipe: { sha256: string; size: number } | null;
-        };
-        url: string | null;
-        range?: PackRange;
-        run?: PackRunBinding & { id: number };
-        closure?: SignedDownload[];
-      }
-    >();
+    const rows = new Map<string, StateSourceRow>();
+    const bound = new Map<string, { sha256: string; size: number }>();
+    let selectedState: string | null = null;
+    const recipeOwners = new Map<string, string>(),
+      authorizedStates = new Set<string>();
     let sourcePage = 0;
     const runFiles = new Map<string, string>();
     const signedLeaves = new Map<string, NonNullable<ReturnType<typeof rows.get>>>();
     const pending = new Map<string, Promise<void>>();
-    const resolve = async (digests: string[], oneWindow = false, runs = false): Promise<number> => {
+    const resolve = async (
+      digests: string[],
+      oneWindow = false,
+      runs = false,
+      states = false,
+    ): Promise<number> => {
       const unique = [...new Set(digests)],
         waiting = unique.flatMap(id => (pending.has(id) ? [pending.get(id)!] : [])),
         missing = unique.filter(id => !rows.has(id) && !pending.has(id));
       const request = (async () => {
         for (let start = 0; start < missing.length;) {
-          const page = missing.slice(start, start + this.sourceWindow);
+          const owner = recipeOwners.get(missing[start]!);
+          let page = missing.slice(start, start + this.sourceWindow);
+          if (owner) {
+            const other = page.findIndex(id => recipeOwners.get(id) !== owner);
+            if (other >= 0) page = page.slice(0, other);
+          }
+          const stateRead = states;
           const batch = this.capabilities.includes(actionsSourceBatchCapability);
           const found = (await this.call({
             kind: 'source',
             digests: page,
+            ...(owner
+              ? { state: selectedState ?? owner, object: owner }
+              : selectedState && !stateRead
+                ? { state: selectedState }
+                : this.capabilities.includes(actionsSourceStateCapability) && stateRead
+                  ? { bound: true }
+                  : {}),
             ...(batch ? { batch: true } : {}),
             ...(runs && batch && cache && this.capabilities.includes(actionsSourceRunsCapability)
               ? { runs: true }
@@ -294,21 +317,35 @@ export class ActionsJobClient {
             ...(batch && cache && this.capabilities.includes(actionsSourceClosureCapability)
               ? { closures: true }
               : {}),
-          })) as (typeof rows extends Map<string, infer T> ? T : never)[];
+          })) as
+            | StateSourceRow[]
+            | {
+                rows: StateSourceRow[];
+                physical?: { state: string; pin: { sha256: string; size: number } };
+                plan?: PhysicalGrantPlan;
+                extraStates?: StateSourceRow[];
+              };
+          const envelope = Array.isArray(found) ? null : found;
+          if (envelope?.physical) bound.set(envelope.physical.state, envelope.physical.pin);
+          const values = Array.isArray(found) ? found : found.rows;
           invariant(
-            found.length > 0 && (batch ? found.length <= page.length : found.length === page.length),
+            values.length > 0 && (batch ? values.length <= page.length : values.length === page.length),
             'SOURCE_HASH_MISMATCH',
             'Source descriptor window is incomplete.',
           );
           const pageKey = sourcePage++;
-          found.forEach((row, index) => {
+          [...values, ...(envelope?.extraStates ?? [])].forEach((row, index) => {
             invariant(
-              row.descriptor.object.sha256 === page[index],
+              index >= values.length || row.descriptor.object.sha256 === page[index],
               'SOURCE_HASH_MISMATCH',
               'Source descriptor changed.',
             );
             if (row.run) row.run = { ...row.run, key: `${pageKey}:${row.run.id}` };
-            rows.set(page[index]!, row);
+            rows.set(row.descriptor.object.sha256, row);
+            if (states) {
+              authorizedStates.add(row.descriptor.object.sha256);
+              if (row.statePhysical) bound.set(row.descriptor.object.sha256, row.statePhysical);
+            }
             if (row.closure && cache) {
               invariant(
                 row.descriptor.recipe &&
@@ -342,7 +379,7 @@ export class ActionsJobClient {
               }
             }
           });
-          start += found.length;
+          start += values.length;
           if (oneWindow) break;
         }
       })();
@@ -356,7 +393,7 @@ export class ActionsJobClient {
       const missingAt = unique.findIndex(id => !rows.has(id));
       // A concurrent single-window request may have returned only a prefix.
       // Full readers reconcile the remainder after that shared request settles.
-      if (!oneWindow && missingAt >= 0) return resolve(unique, false, runs);
+      if (!oneWindow && missingAt >= 0) return resolve(unique, false, runs, states);
       return missingAt < 0 ? unique.length : missingAt;
     };
     const readRaw = async (
@@ -366,7 +403,12 @@ export class ActionsJobClient {
       if (!row.url && row.run) {
         // A partial or expired run retains the existing exact-object path. A run
         // URL cannot sign a member range, so request one fresh singleton grant.
-        const [single] = await this.call({ kind: 'source', digests: [pin.sha256] });
+        const reply = await this.call({
+          kind: 'source',
+          digests: [pin.sha256],
+          ...(selectedState ? { state: selectedState } : {}),
+        });
+        const [single] = Array.isArray(reply) ? reply : reply.rows;
         invariant(
           single?.descriptor.object.sha256 === pin.sha256,
           'SOURCE_HASH_MISMATCH',
@@ -523,21 +565,36 @@ export class ActionsJobClient {
           return JSON.parse(new TextDecoder().decode(bytes));
         });
       };
-      const recipes = digests.flatMap(id =>
-        rows.get(id)!.descriptor.recipe && !(cache && rows.get(id)!.closure)
-          ? [rows.get(id)!.descriptor.recipe!]
-          : [],
-      );
+      const recipes = digests.flatMap(id => {
+        const recipe = rows.get(id)!.descriptor.recipe;
+        if (!recipe || (cache && rows.get(id)!.closure)) return [];
+        if (
+          this.capabilities.includes(actionsSourceStateCapability) &&
+          (selectedState || authorizedStates.has(id))
+        )
+          recipeOwners.set(recipe.sha256, id);
+        return [recipe];
+      });
       await resolve(recipes.map(pin => pin.sha256));
       const frontier = [] as { sha256: string; size: number; height: number }[];
-      for (const pin of recipes) frontier.push(objectRecipeSchema.parse(await metadata(pin)).tree);
+      for (const pin of recipes) {
+        const tree = objectRecipeSchema.parse(await metadata(pin)).tree;
+        const owner = recipeOwners.get(pin.sha256);
+        if (owner) recipeOwners.set(tree.sha256, owner);
+        frontier.push(tree);
+      }
       const seen = new Set<string>();
       while (frontier.length) {
         const page = frontier.splice(0, 400).filter(pin => !seen.has(pin.sha256));
         await resolve(page.map(pin => pin.sha256));
         for (const pin of page) {
           seen.add(pin.sha256);
-          if (pin.height) frontier.push(...objectChunkPageSchema.parse(await metadata(pin)).children);
+          if (pin.height) {
+            const children = objectChunkPageSchema.parse(await metadata(pin)).children;
+            const owner = recipeOwners.get(pin.sha256);
+            if (owner) for (const child of children) recipeOwners.set(child.sha256, owner);
+            frontier.push(...children);
+          }
         }
       }
     };
@@ -567,8 +624,81 @@ export class ActionsJobClient {
         throw error;
       }
     };
+    const clientCall = (command: z.infer<typeof directCommandSchema>) =>
+      this.call(command) as Promise<StateSourceReply>;
+    const clientRequest = this.request;
     return {
       transport,
+      resolveHeads: (ids: string[]) => resolve(ids, false, false, true),
+      async selectState(state: string, all: boolean) {
+        if (selectedState !== state) {
+          for (const id of rows.keys()) if (!authorizedStates.has(id)) rows.delete(id);
+          for (const [id, owner] of recipeOwners) if (!authorizedStates.has(owner)) recipeOwners.delete(id);
+          for (const id of signedLeaves.keys()) if (!rows.has(id)) signedLeaves.delete(id);
+          // Re-register State closure leaves after dropping the previous State's file bindings.
+          for (const row of rows.values())
+            for (const leaf of row.closure ?? []) {
+              const signed = {
+                descriptor: { object: { sha256: leaf.digest, size: leaf.size }, recipe: null },
+                url: leaf.url,
+                ...(leaf.range ? { range: leaf.range } : {}),
+              };
+              signedLeaves.set(leaf.digest, signed);
+              rows.set(leaf.digest, signed);
+            }
+        }
+        if (!bound.has(state)) {
+          selectedState = null;
+          return false;
+        }
+        selectedState = state;
+        if (!all) return false;
+        let reply = await clientCall({ kind: 'source', digests: [state], state, all: true, batch: true });
+        if (reply.mode === 'runs') {
+          try {
+            const plan = reply.plan as PhysicalGrantPlan,
+              pin = bound.get(state)!;
+            invariant(
+              plan && plan.state === state && plan.pin.sha256 === pin.sha256 && plan.pin.size === pin.size,
+              'SOURCE_HASH_MISMATCH',
+              'State manifest plan is unavailable.',
+            );
+            await rowsFromPhysicalRuns(
+              plan,
+              reply.runs as SignedPhysicalRun[],
+              clientRequest,
+              (id, row) => rows.set(id, row),
+              `manifest-${sourcePage++}`,
+            );
+            console.log('source: State-bound physical manifest runs');
+            return true;
+          } catch {
+            console.log('source: catalog fallback (physical manifest transfer invalid or unavailable)');
+            reply = await clientCall({
+              kind: 'source',
+              digests: [state],
+              state,
+              all: true,
+              batch: true,
+              fallback: true,
+            });
+          }
+        }
+        invariant(reply.mode !== 'runs', 'SOURCE_HASH_MISMATCH', 'Catalog fallback reply changed.');
+        const prefix = reply.digests;
+        console.log('source: one-time windowed fallback; check publishes source pack');
+        (reply.rows as StateSourceRow[]).forEach((row, index) => {
+          invariant(
+            row.descriptor.object.sha256 === prefix[index],
+            'SOURCE_HASH_MISMATCH',
+            'State source prefix changed.',
+          );
+          if (row.run) row.run = { ...row.run, key: `fallback-${sourcePage}:${row.run.id}` };
+          rows.set(row.descriptor.object.sha256, row);
+        });
+        sourcePage++;
+        return false;
+      },
       resolve,
       prepareRuns,
       resolveWindow: (digests: string[]) => resolve(digests, true, true),

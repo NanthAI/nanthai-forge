@@ -9,6 +9,8 @@ export const actionsSourceBatchCapability = 'source.batch';
 export const actionsSourceClosureCapability = 'source.closures';
 /** Neighbouring packed objects share one exact-range grant and verified download. */
 export const actionsSourceRunsCapability = 'source.runs';
+/** State-bound physical manifest plans and compact exact-key grant replies. */
+export const actionsSourceStateCapability = 'source.state';
 /** The result call carries the log bytes; the server stores them, so a job skips
  * its separate output call and the result's session read. */
 export const actionsInlineLogCapability = 'results.inlineLog';
@@ -59,6 +61,11 @@ export const actionsCapabilityFields: Readonly<Record<string, string>> = {
   'source.batch': actionsSourceBatchCapability,
   'source.closures': actionsSourceClosureCapability,
   'source.runs': actionsSourceRunsCapability,
+  'source.bound': actionsSourceStateCapability,
+  'source.state': actionsSourceStateCapability,
+  'source.object': actionsSourceStateCapability,
+  'source.all': actionsSourceStateCapability,
+  'source.fallback': actionsSourceStateCapability,
   'session.timings': 'session.timingHistory',
   'result.result.testFiles': 'results.testFiles',
   'result.result.testFiles.truncated': 'results.testFiles.truncated',

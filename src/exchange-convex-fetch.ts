@@ -33,6 +33,7 @@ const replaySafe = new Set([
   'projectObjects:available',
   'projectWork:state',
   'projectObjectDownloads:describe',
+  'projectStateSourceApi:read',
   'projectObjectDownloads:lanePage',
   'projectObjects:prepareBatch',
   'projectObjectDownloads:signDownloads',

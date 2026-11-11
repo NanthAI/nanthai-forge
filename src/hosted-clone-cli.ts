@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { hostedContractFeatures, sourceStateFeature } from './hosted-contract-features.js';
+import { hostedMainV2Schema } from './hosted-main.js';
+import { CUTOVER_CLI_VERSION } from './cutover-version.js';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { lstatSync, readdirSync } from 'node:fs';
@@ -121,7 +124,7 @@ export async function hostedCloneCli(
   // the read is used only when the lookup names that same project.
   const named =
     dependencies || !route.projectId ? null : new ConvexExchange(url, undefined, route.projectId, '', null);
-  let early = named?.current();
+  let early = named ? sourceCurrent(named) : undefined;
   early?.catch(() => undefined);
   const project = z
     .object({ id: z.string(), handle: z.string().optional(), slug: z.string().optional() })
@@ -135,16 +138,25 @@ export async function hostedCloneCli(
       : new ConvexExchange(url, undefined, project.id, '', null);
   if (exchange !== named) early = undefined;
   const downloads = exchange ? new HostedCheckoutDownloads(exchange) : null;
+  let sourceFeaturesRead = false;
   // The slug is what `nforge host ROOT --delete-project ID --confirm SLUG` needs; a re-import of the
   // same name gets a suffixed one, so it is printed rather than guessed.
   const cloned = await cloneHostedProject(
     root,
     { url, projectId: project.id },
     dependencies?.transport(project.id) ?? {
-      current: expected => {
+      current: async expected => {
         const read = expected === undefined ? early : undefined;
         early = undefined;
-        return read ?? exchange!.current(expected);
+        if (read) {
+          sourceFeaturesRead = true;
+          return read;
+        }
+        if (!sourceFeaturesRead) {
+          sourceFeaturesRead = true;
+          return sourceCurrent(exchange!, expected);
+        }
+        return exchange!.current(expected);
       },
       ...downloads!.transport(),
     },
@@ -155,4 +167,34 @@ export async function hostedCloneCli(
     ...(project.slug ? { slug: project.slug } : {}),
     ...(project.handle ? { handle: project.handle } : {}),
   };
+}
+
+/** Existing discovery carries main, keeping one first selection call per current-server clone. */
+async function sourceCurrent(
+  exchange: ConvexExchange,
+  expected?: import('./hosted-main.js').MainExpectation,
+) {
+  const value = await exchange.client.query(
+    makeFunctionReference<'query'>('projectHostedAgent:capabilities'),
+    {
+      projectId: exchange.projectId,
+      clientVersion: CUTOVER_CLI_VERSION,
+      features: [...new Set([...hostedContractFeatures, sourceStateFeature, 'capabilities-main'])],
+    },
+  );
+  const capabilities = typeof value === 'string' ? JSON.parse(value) : value;
+  exchange.sourceStateReads = capabilities.features?.includes(sourceStateFeature) === true;
+  const parsed = hostedMainV2Schema.safeParse(capabilities.main);
+  if (!parsed.success) return exchange.current(expected);
+  invariant(
+    parsed.data.projectId === exchange.projectId,
+    'PROJECT_UNAVAILABLE',
+    'Select this hosted project.',
+  );
+  invariant(
+    !expected || (expected.head === parsed.data.head && expected.receiptId === parsed.data.receipt.id),
+    'CHANNEL_CHANGED',
+    'Hosted main changed from the expected head and receipt.',
+  );
+  return parsed.data;
 }

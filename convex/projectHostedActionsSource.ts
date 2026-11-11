@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { internalMutation } from './server';
+import { sourceObjectLocation } from './projectSourceBeginReads';
+import { actionsSourceStates } from './projectStateSourceSelection';
 import { actionsSession, sessionArgs } from './projectHostedActionsSession';
 import { isStored } from './projectObjectFields';
 import { presignGet, r2Config } from './r2';
@@ -20,10 +22,23 @@ export const resolve = internalMutation({
     batch: v.optional(v.literal(true)),
     closures: v.optional(v.literal(true)),
     runs: v.optional(v.literal(true)),
+    bound: v.optional(v.literal(true)),
   },
   returns: v.any(),
   handler: async (ctx, input) => {
-    await actionsSession(ctx, input, false);
+    const { run } = await actionsSession(ctx, input, false);
+    let packState: string | undefined;
+    if (input.bound) {
+      const scope = await actionsSourceStates(ctx, input.projectId, run);
+      const allowed = scope.allowed;
+      packState = scope.packState;
+      invariant(
+        input.digests.every(id => allowed.has(id)),
+        'SOURCE_UNAVAILABLE',
+        'State is outside this run.',
+      );
+    }
+    let physical: { state: string; pin: { sha256: string; size: number } } | undefined;
     invariant(
       input.digests.length > 0 &&
         input.digests.length <= (input.batch ? directSourceBatch : directSourceWindow),
@@ -39,15 +54,43 @@ export const resolve = internalMutation({
       range?: { offset: number; total: number };
       closure?: Awaited<ReturnType<typeof signRecipeClosure>>;
       run?: RunBinding;
+      statePhysical?: { sha256: string; size: number };
     }[] = [];
     const packed: { index: number; size: number; pack: ObjectPack; key: string }[] = [];
     const reply = async () => {
+      const extraStates = [];
+      if (input.bound && packState && !input.digests.includes(packState)) {
+        const row = await findObjects(ctx, input.projectId, [packState]);
+        if (row[0] && !row[0].removed && isStored(row[0])) {
+          const location = await sourceObjectLocation(ctx, input.projectId, {
+            sha256: packState,
+            size: row[0].size,
+          });
+          const url =
+            location.url ?? (location.storageId ? await blobStore(ctx).getUrl(location.storageId) : null);
+          extraStates.push({
+            descriptor: location.descriptor,
+            ...(location.statePhysical ? { statePhysical: location.statePhysical } : {}),
+            url,
+            ...(location.range ? { range: location.range } : {}),
+            ...(location.closure ? { closure: location.closure } : {}),
+          });
+        }
+      }
       for (;;) {
         if (input.runs) await signRuns(result, packed);
         const text = JSON.stringify(result);
         const bytes = new TextEncoder().encode(text).length;
         if (!input.batch || result.length === 1 || bytes <= 4 * 1024 * 1024)
-          return input.batch ? text : result;
+          return input.bound
+            ? JSON.stringify({
+                rows: result,
+                ...(physical ? { physical } : {}),
+                ...(extraStates.length ? { extraStates } : {}),
+              })
+            : input.batch
+              ? text
+              : result;
         // Keep the existing bounded-prefix protocol even with unusually long
         // storage URLs. Re-sign only retained members, so no run gets split.
         result.length = Math.max(1, Math.floor((result.length * (4 * 1024 * 1024 - 1024)) / bytes));
@@ -83,6 +126,8 @@ export const resolve = internalMutation({
           'SOURCE_UNAVAILABLE',
           'Exact project object is unavailable.',
         );
+        if (input.bound && row.digest === run.request.expectedHead && row.statePhysical)
+          physical = { state: row.digest, pin: row.statePhysical };
         sourceBytes += row.size;
         const url =
           input.runs && row.pack && row.location === 'r2' && row.r2Key
@@ -98,6 +143,7 @@ export const resolve = internalMutation({
           'Source storage binding is unavailable.',
         );
         const value = {
+          ...(input.bound && row.statePhysical ? { statePhysical: row.statePhysical } : {}),
           descriptor: {
             object: { sha256: row.digest, size: row.size },
             recipe: row.recipe ? { sha256: row.recipe.digest, size: row.recipe.size } : null,

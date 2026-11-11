@@ -39,12 +39,14 @@ export async function refreshActionsSourcePack(
         missing.push(file.blob);
       }
     }
+    await source.connection.selectState(client.run!.candidate.base.head, false);
     const objects = sourceWindowOrder(missing);
     for (let start = 0; start < objects.length;) {
       const hashes = objects.slice(start, start + client.sourceWindow);
       const count = await source.connection.resolveWindow(hashes);
       const selected = hashes.slice(0, count);
       await source.connection.prepareRecipes(selected);
+      await source.connection.prepareRuns(selected);
       await source.reader.resolveMany(selected);
       start += count;
     }

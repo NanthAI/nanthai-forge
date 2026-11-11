@@ -327,6 +327,7 @@ async function checkout(
         'Selected State bytes changed.',
       );
       const state = parseNativeState(stateBytes);
+      transport.selectState?.(selection.head, state.files);
       const { before, beforeDigest } = await checkoutIo(async () =>
         workLocked(lock, () => {
           recover();

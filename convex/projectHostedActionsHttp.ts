@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { runnerStateSource } from './projectStateSourceApi';
+import { compactSourceGrants } from '../src/source-grant-wire';
 import { cleanPoolClaims } from './projectHostedActionsPool';
 export { cleanPoolClaims } from './projectHostedActionsPool';
 import { collectResultBatch, resultBatchTargets } from './projectHostedActionsBatch';
@@ -101,7 +103,9 @@ export const handle = httpAction(async (ctx, request) => {
     verified = input;
     reason = 'authorization';
     let value: unknown;
-    if (command.kind === 'source') {
+    if (command.kind === 'source' && command.state) {
+      value = await runnerStateSource(ctx, input, { ...command, state: command.state });
+    } else if (command.kind === 'source') {
       const reply = await ctx.runMutation(
         makeFunctionReference<'mutation'>('projectHostedActionsSource:resolve'),
         {
@@ -110,9 +114,17 @@ export const handle = httpAction(async (ctx, request) => {
           ...(command.batch ? { batch: true } : {}),
           ...(command.closures ? { closures: true } : {}),
           ...(command.runs ? { runs: true } : {}),
+          ...(command.bound ? { bound: true } : {}),
         },
       );
-      value = command.batch ? JSON.parse(reply as string) : reply;
+      value = command.batch || command.bound ? JSON.parse(reply as string) : reply;
+      if (command.bound) {
+        const bound = value as {
+          rows: unknown[];
+          physical?: { state: string; pin: { sha256: string; size: number } };
+        };
+        value = compactSourceGrants(bound);
+      }
     } else if (command.kind === 'results') value = await collectResultBatch(ctx, input);
     else if (command.kind === 'output')
       value = JSON.parse(
@@ -321,7 +333,7 @@ export const handle = httpAction(async (ctx, request) => {
     return Response.json(
       {
         reason,
-        ...(code === 'CLI_UPGRADE_REQUIRED' ? { code } : {}),
+        ...(code === 'CLI_UPGRADE_REQUIRED' || code === 'SOURCE_UNAVAILABLE' ? { code } : {}),
         error: 'Actions request failed authorization, validation or storage verification.',
       },
       {

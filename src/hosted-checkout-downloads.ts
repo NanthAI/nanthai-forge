@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+import { expandSourceGrants } from './source-grant-wire.js';
+import { rowsFromPhysicalRuns, type StateSourceRow } from './hosted-actions-state-source.js';
+import type { PhysicalGrantPlan, SignedPhysicalRun } from './physical-manifest-download.js';
+import type { NativeFile } from './state/format.js';
 import { copyRecipeClosure } from './object-pack-range.js';
-import { downloadClosureSchema } from './blob-download-format.js';
+import { downloadClosureSchema, downloadPinSchema } from './blob-download-format.js';
 import { checkoutIo } from './checkout-io.js';
 import { closeSync, openSync, unlinkSync } from 'node:fs';
 import { makeFunctionReference } from 'convex/server';
@@ -10,7 +14,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { readNestedCheckoutNode } from './hosted-checkout-recipe-read.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
-import { exchangeRequest } from './exchange-request.js';
+import { exchangeFetch, exchangeRequest } from './exchange-request.js';
 import { mapExchange } from './exchange-parallel.js';
 import {
   objectRecipeSchema,
@@ -38,6 +42,7 @@ const rowSchema = z.discriminatedUnion('location', [
     digest: z.string(),
     size: z.number().safe().nonnegative(),
     location: z.literal('r2'),
+    statePhysical: downloadPinSchema.optional(),
     url: z.url().optional(),
     range: z
       .object({ offset: z.number().safe().nonnegative(), total: z.number().safe().positive() })
@@ -56,12 +61,14 @@ const rowSchema = z.discriminatedUnion('location', [
     digest: z.string(),
     size: z.number().safe().nonnegative(),
     location: z.literal('convex'),
+    statePhysical: downloadPinSchema.optional(),
     url: z.url(),
   }),
   z.object({
     digest: z.string(),
     size: z.number().safe().nonnegative(),
     location: z.literal('recipe'),
+    statePhysical: downloadPinSchema.optional(),
     closure: downloadClosureSchema.optional(),
     recipe: z.object({
       digest: z.string(),
@@ -86,12 +93,102 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
    * so overlapping windows never remove or replace one another's. */
   private readonly window = new AsyncLocalStorage<Window>();
   private runs = true;
+  private readonly physicalStates = new Set<string>();
+  private selectedState: { id: string; count: number } | undefined;
   private pages = 0;
   /** Every written file's size and digest is checked here (stream hash, run hash, recipe identity). */
   readonly verifiesDownloads = true;
   /** Two windows at once; each keeps its own state in `window`. */
   readonly downloadWindows = 2;
-  constructor(private readonly exchange: Pick<ConvexExchange, 'client' | 'projectId'>) {}
+  constructor(
+    private readonly exchange: Pick<ConvexExchange, 'client' | 'projectId'> & { sourceStateReads?: boolean },
+  ) {}
+  selectState(state: string, files: readonly NativeFile[], pin?: { sha256: string; size: number }) {
+    if (pin) this.physicalStates.add(state);
+    if (this.exchange.sourceStateReads && this.physicalStates.has(state))
+      this.selectedState = { id: state, count: new Set(files.map(file => file.blob)).size };
+    else this.selectedState = undefined;
+  }
+  private async sourceRows(ids: string[], all = false, runs = false, fallback = false) {
+    const state = this.selectedState!;
+    return expandSourceGrants(
+      JSON.parse(
+        await this.exchange.client.action(makeFunctionReference<'action'>('projectStateSourceApi:read'), {
+          projectId: this.exchange.projectId,
+          state: state.id,
+          digests: ids,
+          ...(all ? { all: true } : {}),
+          ...(runs ? { runs: true } : {}),
+          ...(fallback ? { fallback: true } : {}),
+          ...(this.window.getStore()?.owners.get(ids[0]!)
+            ? { object: this.window.getStore()!.owners.get(ids[0]!) }
+            : {}),
+        }),
+      ),
+    ) as {
+      mode: string;
+      rows: (Row | StateSourceRow)[];
+      runs?: SignedPhysicalRun[];
+      plan?: PhysicalGrantPlan;
+    };
+  }
+  private sourceRow(value: Row | StateSourceRow): Row {
+    if (!('descriptor' in value)) return value;
+    invariant(!value.descriptor.recipe, 'SOURCE_HASH_MISMATCH', 'Physical member changed encoding.');
+    const { run, range } = value;
+    return {
+      digest: value.descriptor.object.sha256,
+      size: value.descriptor.object.size,
+      location: 'r2',
+      ...(value.url ? { url: value.url } : {}),
+      ...(range ? { range } : {}),
+      ...(run ? { run } : {}),
+    };
+  }
+  async prepareObjects(ids: string[]): Promise<ContentPin[] | null> {
+    if (!this.selectedState || ids.length < 500 || ids.length !== this.selectedState.count) return null;
+    const reply = await this.sourceRows([this.selectedState.id], true);
+    if (reply.mode !== 'runs') {
+      for (const value of reply.rows) {
+        const row = this.sourceRow(value);
+        if (row.run)
+          row.run = {
+            ...row.run,
+            key: `fallback-${this.pages}:${(row.run as typeof row.run & { id: number }).id}`,
+          };
+        this.rows.set(row.digest, row);
+      }
+      this.pages++;
+      return null;
+    }
+    try {
+      invariant(
+        reply.plan?.state === this.selectedState.id && reply.runs,
+        'SOURCE_HASH_MISMATCH',
+        'State physical plan changed.',
+      );
+      await rowsFromPhysicalRuns(
+        reply.plan,
+        reply.runs,
+        (url, init) => exchangeFetch('Manifest download', url, init),
+        (id, value) => this.rows.set(id, this.sourceRow(value)),
+        `manifest-${this.pages++}`,
+      );
+      return ids.map(id => {
+        const row = this.rows.get(id);
+        invariant(row, 'SOURCE_HASH_MISMATCH', 'Manifest omitted a selected member.');
+        return { sha256: id, size: row.size };
+      });
+    } catch {
+      console.log('source bindings: catalog (physical manifest transfer invalid or unavailable)');
+      const fallback = await this.sourceRows([this.selectedState.id], true, false, true);
+      for (const value of fallback.rows) {
+        const row = this.sourceRow(value);
+        this.rows.set(row.digest, row);
+      }
+      return null;
+    }
+  }
   /** One signed page holds up to 500 pins when the server groups pack runs. */
   get objectPageSize() {
     return this.runs ? hostedDownloadPageSize : 100;
@@ -108,6 +205,8 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
       verifiesDownloads: this.verifiesDownloads,
       downloadWindows: this.downloadWindows,
       objects: ids => this.objects(ids),
+      selectState: (id, files) => this.selectState(id, files),
+      prepareObjects: ids => this.prepareObjects(ids),
       downloadToFile: (pin, path) => this.downloadToFile(pin, path),
       downloadFiles: files => this.downloadFiles(files),
       downloadGroups: pins => this.downloadGroups(pins),
@@ -115,18 +214,34 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
     };
   }
   private async describe(digests: string[], runs: boolean) {
+    if (this.selectedState && new Set(digests.map(id => this.window.getStore()?.owners.get(id))).size > 1) {
+      const groups = new Map<string | undefined, string[]>();
+      for (const id of digests) {
+        const owner = this.window.getStore()?.owners.get(id);
+        const group = groups.get(owner) ?? [];
+        group.push(id);
+        groups.set(owner, group);
+      }
+      const pins = new Map<string, ContentPin>();
+      for (const group of groups.values())
+        for (const pin of await this.describe(group, runs)) pins.set(pin.sha256, pin);
+      return digests.map(id => pins.get(id)!);
+    }
     const rows = z.array(rowSchema).parse(
-      await this.exchange.client.mutation(
-        makeFunctionReference<'mutation'>('projectObjectDownloads:describe'),
-        {
-          projectId: this.exchange.projectId,
-          digests,
-          signed: true,
-          ...(runs ? { runs: true } : {}),
-        },
-        // Signing writes nothing: pages described ahead need not wait in the SDK's mutation queue.
-        { skipQueue: true },
-      ),
+      this.selectedState
+        ? (await this.sourceRows(digests, false, runs)).rows.map(row => this.sourceRow(row))
+        : await this.exchange.client.mutation(
+            makeFunctionReference<'mutation'>('projectObjectDownloads:describe'),
+            {
+              projectId: this.exchange.projectId,
+              digests,
+              signed: true,
+              ...(this.exchange.sourceStateReads ? { stateSource: true } : {}),
+              ...(runs ? { runs: true } : {}),
+            },
+            // Signing writes nothing: pages described ahead need not wait in the SDK's mutation queue.
+            { skipQueue: true },
+          ),
     );
     invariant(
       rows.length === digests.length && rows.every((row, i) => row.digest === digests[i]),
@@ -135,6 +250,7 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
     );
     const page = this.pages++;
     for (const row of rows) {
+      if (row.statePhysical) this.physicalStates.add(row.digest);
       const { run, ...rest } = row as typeof row & { run?: SignedRun & { id: number } };
       invariant(
         row.location !== 'r2' || row.url || run,
@@ -160,6 +276,8 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
     return this.window.getStore()?.rows.get(digest) ?? this.rows.get(digest);
   }
   private async describePages(digests: string[]): Promise<ContentPin[]> {
+    if (digests.every(id => this.row(id)))
+      return digests.map(id => ({ sha256: id, size: this.row(id)!.size }));
     if (this.runs && digests.length > 1)
       try {
         const pins: ContentPin[] = [];
@@ -417,6 +535,7 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
       invariant(row.location === 'recipe', 'INVALID_NATIVE_SOURCE', 'Select recipe content.');
       return { sha256: row.recipe.digest, size: row.recipe.size };
     };
+    for (const pin of logical) this.state().owners.set(recipePin(pin).sha256, pin.sha256);
     await this.prepare(logical.map(recipePin), true);
     const recipes = await mapExchange(logical, 4, async pin => {
       const recipe = objectRecipeSchema.parse(
@@ -430,6 +549,7 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
         'Recipe differs from selected logical source.',
       );
       this.state().recipes.set(pin.sha256, recipe);
+      this.state().owners.set(recipe.tree.sha256, pin.sha256);
       return recipe;
     });
     // Batch every tree level across all logical objects in this <=100-file window.
@@ -457,6 +577,8 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
             'INVALID_NATIVE_SOURCE',
             'Recipe ancestry or length is invalid.',
           );
+          const owner = this.state().owners.get(ref.sha256);
+          if (owner) for (const child of page.children) this.state().owners.set(child.sha256, owner);
           return page.children;
         },
         { bytes: 16 * 1024 * 1024, size: ref => ref.size },
@@ -524,6 +646,7 @@ type Window = {
   indexPages: Map<string, Buffer>;
   closureRoots: Map<string, ContentPin>;
   renewals: Map<string, Promise<void>>;
+  owners: Map<string, string>;
 };
 const newWindow = (): Window => ({
   rows: new Map(),
@@ -531,4 +654,5 @@ const newWindow = (): Window => ({
   indexPages: new Map(),
   closureRoots: new Map(),
   renewals: new Map(),
+  owners: new Map(),
 });

@@ -4,6 +4,7 @@ export const hostedDownloadPageSize = 500;
 export type HostedDownloadDescriptor = {
   digest: string;
   size: number;
+  statePhysical?: { sha256: string; size: number };
   url?: string;
   closure?: import('./blob-download-format.js').SignedDownload[];
   range?: import('./object-pack-range.js').PackRange;

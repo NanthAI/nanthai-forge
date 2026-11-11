@@ -219,6 +219,7 @@ async function checkoutMain(root: string, request: z.infer<typeof requestSchema>
   );
   await objects.ensure([selection.head]);
   const state = parseNativeState(readFileSync(join(objects.objects, selection.head)));
+  transport.selectState?.(selection.head, state.files);
   // A pull changes the clone root in place (it never swaps the directory a shell may be in): only
   // changed paths are fetched, verified, staged, flushed and journaled, and the checkout is validated
   // through the stat index. Case/normalization-only renames apply in place too. An untracked

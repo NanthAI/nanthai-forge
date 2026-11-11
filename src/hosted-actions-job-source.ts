@@ -53,12 +53,12 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
   const extra = recheckBase ? [recheckBase] : [...new Set(pairs?.flatMap(p => [p.base, p.checked]) ?? [])];
   let heads = [run.request.expectedHead, run.candidate.base.head, ...extra];
   try {
-    await resolve(heads);
+    await connection.resolveHeads(heads);
     await prepareRecipes(heads);
   } catch (error) {
     if (heads.length < 3) throw error;
     heads = heads.slice(0, 2);
-    await resolve(heads);
+    await connection.resolveHeads(heads);
     await prepareRecipes(heads);
   }
   const [candidateRef, baseRef, ...extraRefs] = await transport.describeBatch!(heads);
@@ -105,7 +105,7 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
           : pack.stateRef === heads[1]
             ? base
             : await (async () => {
-                await resolve([pack.stateRef]);
+                await connection.resolveHeads([pack.stateRef]);
                 await prepareRecipes([pack.stateRef]);
                 return parseNativeState(
                   await reader.bytes((await transport.describeBatch!([pack.stateRef]))[0]!),
@@ -142,13 +142,24 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
       await rm(archive, { force: true });
     }
   }
-  if (!packed && selected.length > 1000)
+  const manifestRuns = await connection.selectState(heads[0]!, !packed && selected.length > 0);
+  if (!packed && selected.length > 1000 && !manifestRuns)
     console.log(
       `source: no usable source pack (${reason}); reading ${selected.length} objects ` +
         (runReads ? 'from the catalog in runs where available. ' : 'individually. ') +
         'The pack job publishes one after this plan; repair now with: nforge x ROOT source-pack',
     );
   const download = async () => {
+    if (manifestRuns) {
+      const objects = sourceWindowOrder(selected.map(file => file.blob));
+      await prepareRecipes(objects);
+      await connection.prepareRuns(objects);
+      const pages = Array.from({ length: Math.ceil(objects.length / directSourceWindow) }, (_, index) =>
+        objects.slice(index * directSourceWindow, (index + 1) * directSourceWindow),
+      );
+      await mapExchange(pages, 3, page => reader.resolveMany(page));
+      return;
+    }
     if (runReads) {
       // Keep a complete signed window together: slicing it into the old 400-object
       // workers would split runs and force every member back to a singleton GET.

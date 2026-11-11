@@ -23,7 +23,7 @@ const rangeValue = v.optional(v.object({ offset: v.number(), total: v.number() }
 const signedClosureValue = v.array(
   v.object({ digest: v.string(), size: v.number(), url: v.string(), range: rangeValue }),
 );
-export async function readableProject(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
+export async function readableProject(ctx: MutationCtx, projectId: Id<'hostedProjects'>, charge = true) {
   const user = await ctx.auth.getUserIdentity();
   if (user) return accessibleProject(ctx, projectId, user.subject);
   const project = await ctx.db.get(projectId);
@@ -32,7 +32,7 @@ export async function readableProject(ctx: MutationCtx, projectId: Id<'hostedPro
     'PROJECT_UNAVAILABLE',
     'This Forge project is unavailable with the current account.',
   );
-  await chargeAnonymousRead(ctx, projectId);
+  if (charge) await chargeAnonymousRead(ctx, projectId);
   return project;
 }
 
@@ -108,6 +108,7 @@ export const describe = mutation({
     projectId: v.id('hostedProjects'),
     digests: v.array(v.string()),
     signed: v.optional(v.boolean()),
+    stateSource: v.optional(v.boolean()),
     /** Signed pages of up to hostedDownloadPageSize; neighbours in one stored pack share a run. */
     runs: v.optional(v.boolean()),
   },
@@ -117,15 +118,23 @@ export const describe = mutation({
         digest: v.string(),
         size: v.number(),
         location: v.literal('r2'),
+        statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
         url: v.optional(v.string()),
         range: rangeValue,
         run: runValue,
       }),
-      v.object({ digest: v.string(), size: v.number(), location: v.literal('convex'), url: v.string() }),
+      v.object({
+        digest: v.string(),
+        size: v.number(),
+        location: v.literal('convex'),
+        url: v.string(),
+        statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
+      }),
       v.object({
         digest: v.string(),
         size: v.number(),
         location: v.literal('recipe'),
+        statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
         closure: v.optional(signedClosureValue),
         /** Signed calls also sign the recipe object itself, so reading it needs no second call. */
         recipe: v.object({
@@ -137,86 +146,101 @@ export const describe = mutation({
       }),
     ),
   ),
-  handler: async (ctx, { projectId, digests, signed, runs }) => {
-    try {
-      await readableProject(ctx, projectId);
-      invariant(
-        digests.length <= (runs ? hostedDownloadPageSize : 100) &&
-          digests.every(id => /^[a-f0-9]{64}$/.test(id)) &&
-          (!runs || signed),
-        'BAD_ARGUMENT',
-        'Read exact content identities in pages of at most 100 (signed runs: 500).',
-      );
-      const result: (DownloadRow & { url?: string; run?: RunBinding })[] = [];
-      const packed: { index: number; size: number; pack: ObjectPack; key: string }[] = [],
-        seen = new Set<string>();
-      const rows = await findObjects(ctx, projectId, digests);
-      for (const [i, digest] of digests.entries()) {
-        const row = rows[i];
-        invariant(
-          row && isStored(row) && !row.removed,
-          'INVALID_WORK_BACKUP',
-          'Stored content is unavailable.',
-        );
-        const pin = { digest, size: row.size };
-        if (isR2Object(row)) {
-          invariant(
-            row.r2Key === r2Key(projectId, row.pack?.digest ?? digest),
-            'INVALID_WORK_BACKUP',
-            'Stored content has a different project binding.',
-          );
-          // Packed rows are signed after the page is read (runs); every other row as before.
-          const deferred = runs === true && !!row.pack && row.size > 0 && !seen.has(digest);
-          seen.add(digest);
-          if (deferred)
-            packed.push({ index: result.length, size: row.size, pack: row.pack!, key: row.r2Key });
-          result.push({
-            ...pin,
-            location: 'r2',
-            ...(row.pack ? { range: packRange(row)! } : {}),
-            ...(signed && !deferred
-              ? { url: await presignGet(r2Config(), row.r2Key, packHeaders(packRange(row), row.size)) }
-              : {}),
-          });
-        } else if (row.storageId) {
-          const metadata = await blobStore(ctx).getMetadata(row.storageId),
-            url = await blobStore(ctx).getUrl(row.storageId);
-          invariant(
-            metadata && metadata.size === row.size && storageDigest(metadata.sha256) === digest && url,
-            'INVALID_WORK_BACKUP',
-            'Stored content differs from its original binding.',
-          );
-          result.push({ ...pin, location: 'convex', url });
-        } else {
-          invariant(row.recipe, 'INVALID_WORK_BACKUP', 'Stored content representation is unavailable.');
-          const node = signed ? await findObject(ctx, projectId, row.recipe.digest) : null;
-          const signable =
-            node &&
-            !node.removed &&
-            isR2Object(node) &&
-            node.size === row.recipe.size &&
-            node.r2Key === r2Key(projectId, node.pack?.digest ?? row.recipe.digest);
-          result.push({
-            ...pin,
-            location: 'recipe',
-            ...(signed && row.recipeClosure ? { closure: await signRecipeClosure(row) } : {}),
-            recipe: signable
-              ? {
-                  ...row.recipe,
-                  url: await presignGet(r2Config(), node.r2Key!, packHeaders(packRange(node), node.size)),
-                  ...(node.pack ? { range: packRange(node)! } : {}),
-                }
-              : { digest: row.recipe.digest, size: row.recipe.size },
-          });
-        }
-      }
-      if (runs) await signRuns(result, packed);
-      return result;
-    } catch (error) {
-      return report(error);
-    }
-  },
+  handler: describeObjects,
 });
+
+export async function describeObjects(
+  ctx: MutationCtx,
+  {
+    projectId,
+    digests,
+    signed,
+    runs,
+  }: {
+    projectId: Id<'hostedProjects'>;
+    digests: string[];
+    signed?: boolean;
+    stateSource?: boolean;
+    runs?: boolean;
+  },
+  maximum = runs ? hostedDownloadPageSize : 100,
+  charge = true,
+) {
+  try {
+    await readableProject(ctx, projectId, charge);
+    invariant(
+      digests.length <= maximum && digests.every(id => /^[a-f0-9]{64}$/.test(id)) && (!runs || signed),
+      'BAD_ARGUMENT',
+      'Read exact content identities in pages of at most 100 (signed runs: 500).',
+    );
+    const result: (DownloadRow & { url?: string; run?: RunBinding })[] = [];
+    const packed: { index: number; size: number; pack: ObjectPack; key: string }[] = [],
+      seen = new Set<string>();
+    const rows = await findObjects(ctx, projectId, digests);
+    for (const [i, digest] of digests.entries()) {
+      const row = rows[i];
+      invariant(
+        row && isStored(row) && !row.removed,
+        'INVALID_WORK_BACKUP',
+        'Stored content is unavailable.',
+      );
+      const pin = { digest, size: row.size };
+      if (isR2Object(row)) {
+        invariant(
+          row.r2Key === r2Key(projectId, row.pack?.digest ?? digest),
+          'INVALID_WORK_BACKUP',
+          'Stored content has a different project binding.',
+        );
+        // Packed rows are signed after the page is read (runs); every other row as before.
+        const deferred = runs === true && !!row.pack && row.size > 0 && !seen.has(digest);
+        seen.add(digest);
+        if (deferred) packed.push({ index: result.length, size: row.size, pack: row.pack!, key: row.r2Key });
+        result.push({
+          ...pin,
+          location: 'r2',
+          ...(row.pack ? { range: packRange(row)! } : {}),
+          ...(signed && !deferred
+            ? { url: await presignGet(r2Config(), row.r2Key, packHeaders(packRange(row), row.size)) }
+            : {}),
+        });
+      } else if (row.storageId) {
+        const metadata = await blobStore(ctx).getMetadata(row.storageId),
+          url = await blobStore(ctx).getUrl(row.storageId);
+        invariant(
+          metadata && metadata.size === row.size && storageDigest(metadata.sha256) === digest && url,
+          'INVALID_WORK_BACKUP',
+          'Stored content differs from its original binding.',
+        );
+        result.push({ ...pin, location: 'convex', url });
+      } else {
+        invariant(row.recipe, 'INVALID_WORK_BACKUP', 'Stored content representation is unavailable.');
+        const node = signed ? await findObject(ctx, projectId, row.recipe.digest) : null;
+        const signable =
+          node &&
+          !node.removed &&
+          isR2Object(node) &&
+          node.size === row.recipe.size &&
+          node.r2Key === r2Key(projectId, node.pack?.digest ?? row.recipe.digest);
+        result.push({
+          ...pin,
+          location: 'recipe',
+          ...(signed && row.recipeClosure ? { closure: await signRecipeClosure(row) } : {}),
+          recipe: signable
+            ? {
+                ...row.recipe,
+                url: await presignGet(r2Config(), node.r2Key!, packHeaders(packRange(node), node.size)),
+                ...(node.pack ? { range: packRange(node)! } : {}),
+              }
+            : { digest: row.recipe.digest, size: row.recipe.size },
+        });
+      }
+    }
+    if (runs) await signRuns(result, packed);
+    return result;
+  } catch (error) {
+    return report(error);
+  }
+}
 
 /** Exact checkpoint and optional disposable source pins; never reads source/file bytes. */
 export const source = mutation({
@@ -283,6 +307,7 @@ export const lanePage = mutation({
     projectId: v.id('hostedProjects'),
     digests: v.array(v.string()),
     signed: v.boolean(),
+    stateSource: v.optional(v.boolean()),
     /** Neighbours in one stored pack share one signed run (see describe). */
     runs: v.optional(v.boolean()),
   },
@@ -290,6 +315,7 @@ export const lanePage = mutation({
     v.object({
       digest: v.string(),
       size: v.number(),
+      statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
       url: v.optional(v.string()),
       range: rangeValue,
       closure: v.optional(signedClosureValue),

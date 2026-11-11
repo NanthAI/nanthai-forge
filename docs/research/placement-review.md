@@ -657,8 +657,13 @@ manifest up at its next sync.
 guard: a reader fetches a whole manifest with at most 64 grants; a State write that
 changes up to 8 files uploads at most 150 KB of manifest in at most 4 PUTs; a lookup of
 k digests reads at most k + 1 chunks. The PUTs count against the S7 Class A ratchet of
-80 a landing. The signer holds one entry per file for `all`; its peak memory at 29k and
-100k files is **unmeasured** and must be stated before the setting is enabled. Run
+80 a landing. The signer streams verified buckets into physical interval groups for `all`.
+A paired fresh-process fixture including identical fixture construction, current
+run authorization, R2 manifest fetch and signing observes peak RSS of 386,236,416 B
+versus 600,375,296 B for the catalog path at 29k files, and 534,364,160 B versus
+796,999,680 B at 100k (one sample per path). This is a full handler/process guard,
+not isolated deployed action memory or billed usage; those remain unmeasured.
+The reader capability remains unadvertised until its separate emission landing. Run
 count grows with the files changed since they were packed, at worst one per file, and
 the source pack is the compaction that resets it. Trees over the pack bounds (300 MiB
 packed, 1 GiB, 32 MiB a file) have no pack and read by runs alone; a segmented pack for

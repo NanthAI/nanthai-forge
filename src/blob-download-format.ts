@@ -22,7 +22,7 @@ export const downloadRecipeSchema = z.object({
   object: downloadPinSchema,
   tree: downloadTreeSchema,
 });
-export type DownloadRow = { digest: string; size: number } & (
+export type DownloadRow = { digest: string; size: number; statePhysical?: DownloadPin | undefined } & (
   | { location: 'r2'; url?: string | undefined; range?: PackRange | undefined }
   | { location: 'convex'; url: string }
   // A signed describe may also sign the recipe object itself (url/range); readers may ignore it.

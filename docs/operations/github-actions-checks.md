@@ -569,6 +569,16 @@ A gap never becomes part of a grant. Partial or expired runs use fresh individua
 grants; a run URL is never reused for a member's narrower range. Old runners
 receive their existing per-object reply. This reader rollout changes no stored
 format or State writer; catalog reads and the all-raw path remain.
+
+The subsequent State-bound reader protocol (`source.state`) accepts a compact
+exact-key URL representation and whole-State physical-run plans, verifies every
+manifest chunk before using its member rows, and keeps complete runs together
+across descriptor windows. Its capability is not advertised yet. The signer
+checks live run authority before and after R2 I/O and refuses digests outside the
+selected State; recipe metadata must be a proved descendant of a selected file.
+Raw or fragmented bindings retain the named one-time window. That check publishes
+the existing source pack and a following fresh job uses it. No retained manifest
+contains expiring URLs.
 Failures drain in-flight pages before returning without publishing a plan.
 Each completed page logs files, downloaded bytes and elapsed time. Source bytes
 go directly from object storage to the runner. The Candidate is transferred once as an artifact, preserving modes and

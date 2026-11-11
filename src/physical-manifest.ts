@@ -96,8 +96,11 @@ export class PhysicalManifestReader {
       buckets.set(bucket, new Map((await this.chunk(bucket)).map(entry => [entry.sha256, entry])));
     return ids.map(id => buckets.get(physicalBucket(id))!.get(id) ?? null);
   }
-  async *all(): AsyncGenerator<PhysicalEntry> {
-    for (const pin of this.root.chunks) yield* await this.chunk(pin.bucket);
+  async *all(retain = true): AsyncGenerator<PhysicalEntry> {
+    for (const pin of this.root.chunks) {
+      yield* await this.chunk(pin.bucket);
+      if (!retain) this.chunks.delete(pin.bucket);
+    }
   }
 }
 /** Missing/corrupt derived bindings never select different source. Fall back to
