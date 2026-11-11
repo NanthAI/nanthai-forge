@@ -45,7 +45,7 @@ only verified frozen-manifest files; the repair records a backfill time and move
 | `legacyStorageCleanupWindows` | One metadata fence per approved dev cleanup window; closing it invalidates older deletion transactions. No source or file bytes. | Approved maintenance windows |
 | `projectObjects` | One row per physical object: digest, size, placement (`r2Key`, `location`, legacy `storageId`), recipe pin. No bytes. | Repo size |
 | `projectObjectReceipts` | Original upload-id, nonce, size and digest pins after immutable descriptors move into catalog pages; current project access still gates replay. Bounded migration cursor receipts use the same table. See [storage compaction](operations/storage-compaction.md). | Compacted descriptor count |
-| `projectObjectCatalog` | Sorted pins of a GitHub archive import, 256 per row (digest, size, recipe or packed byte range; physical packs retain protected source pins), instead of one `projectObjects` row per object; `findObject` reads it. | Repo size / 256 |
+| `projectObjectCatalog` | Sorted immutable object descriptors from imports or explicit compaction, 256 per row (digest, size, recipe or packed byte range; physical packs retain protected source pins), instead of one `projectObjects` row per object; `findObject` reads it. | Repo size / 256 |
 | `projectGithubImports`, `projectGithubImportInventory` | GitHub import jobs and their paged inventory (keys and positions per page). Inventory rows are deleted once the import is published. | Repo size, during an import |
 | `projectSourcePacks` | Latest source pack per project (R2 key and pins). | Fixed |
 | `projectHistory`, `projectHistoryPacks` | Imported Git history: one status row per project (repository, import commit and State, stored bytes, owner limit, cached trailer of one joined pack set) and one row per Git pack (tip commit, R2 chunk pins, pack checksum, object set; Forge packs also their tip State, tree, tree listing and last landing), never one per commit. | Imports, history reads and Git ref listings after main's mirror moved |
@@ -69,7 +69,10 @@ only verified frozen-manifest files; the repair records a backfill time and move
 | `projectBoardClaims` | Automatic file claims: one row per Lane and unsaved path written ("touching PATH"), at most 30 live per Lane, 14 days; hidden once the Lane saves the path or closes. | Activity, bounded by retention |
 | `projectBoardMessages`, `projectBoardInboxes`, `projectBoardSenders`, `projectBoardProjects`, `boardAccounts`, `boardSwitches`, `boardAudit`, `boardEvidence` | Agent board notes (at most 240 characters, 14 days, 5,000 per project), per-target inbox and rate-window counters, account day totals, operator switches and audit, and body-free evidence rows. | Activity, bounded by retention |
 | `projectReadBudgets`, `projectStorageUsage`, `accountStorageUsage` | Abuse-limit counters (`convex/abuseLimits.ts`): signed-out read calls per public project in the current window, and reserved stored objects and bytes per project (sharded) and per owning account (added in roll-ups); fixed rows per scope, reset or updated in place. | Activity, bounded by shard count |
-| `projectWorkGenerations`, `projectWorkRecords`, `projectPlanningRecords`, `projectWorkDataRecords`, `projectWorkHeads`, `projectWorkEvents`, `projectWorkDetailMigrations`, `projectReturnPages`, `projectReturnSupersessions` | Work index generations and entries, Work events, return pages. | Activity |
+| `projectWorkGenerations`, `projectWorkHeads`, `projectWorkEvents`, `projectWorkDetailMigrations`, `projectReturnPages`, `projectReturnSupersessions` | Work projection generations, heads/events, migration and return pages; canonical history remains separately retained. | Activity |
+| `projectWorkRecords` | General Work projections, including activity/status readers; eight custom B-tree indexes. | Activity |
+| `projectPlanningRecords` | Planning roots, versions, comments and search fragments; thirteen custom B-tree indexes plus search, confined to planning rows. | Planning activity |
+| `projectWorkDataRecords` | Source projections, `viewFiles`, non-planning `:payload` parts and `_workStore*` comparison rows; six custom B-tree indexes. | Source/Work projection size |
 | `projectCoordinationClaims`, `projectCoordinationEvents`, `projectCoordinationReceipts`, `projectCoordinationSessions` | Live coordination (advisory). | Activity |
 | `projectBackups`, `projectProposals`, `projectUploadCleanup`, `projectRecoveryConnections` | Backup and proposal archive rows (R2 key, legacy `storageId`) and upload cleanup. | Activity |
 | `projectPublications`, `projectPublicationAttempts`, `projectPublicationPages`, `projectGithubBindings`, `projectGithubMirrors`, `projectGithubMirrorJobs` | Publication and GitHub mirror state. | Activity |
@@ -263,3 +266,105 @@ budget, including measured fixed page overhead. The completed dev migration bill
 0.840 GB read and 0.530 GB write (1.369 GB total); the aggregate domain verification added
 0.056 GB reads, for 1.425 GB together. It found no moved collection left in the core table.
 Ordinary write I/O per landing and the post-cleanup dashboard are measured separately.
+
+## Where the bytes and I/O go (2026-11-10)
+
+The owner's placement yardstick is that Convex serves three jobs: CI and landing
+orchestration, the realtime agent message board, and the web app (with a future
+iOS app). Immutable, content-addressed, large, or historical data read only on
+demand belongs in R2 behind a pointer. This is the rule for future placement;
+the candidates below remain review work, not approved migrations or deletions.
+Convex queries/mutations cannot fetch R2 bodies themselves; moving a body must
+preserve transactional readers or use an action without adding per-item calls.
+
+### Dashboard storage and the sample model
+
+Convex database storage includes documents **and indexes**. For design sensitivity,
+count each index as approximately one extra copy of its rows. This is a model of
+amplification, not a vendor formula asserting that every index stores the whole
+payload. The inventory model counts one document, two built-ins, custom B-tree
+indexes and one extra copy-equivalent for a search index. Search bytes may behave
+differently. Provider document/index breakdown remains unmeasured.
+
+All dashboard numbers below are **measured, owner dashboard, 10 November, before
+cleanup**: 21.47 GB total, versus about 8.7 GB on the previous day. The roughly
+2.4-fold rise across many tables coincided with a plan change; a measurement
+change is a hypothesis, not established growth attribution. The dashboard exposes
+five named tables and a 6.12 GB remainder, not individual sizes for that remainder.
+Those reported components sum to 21.52 GB, 0.05 GB above the reported total;
+the source does not reconcile that discrepancy, so it is not allocated to a table.
+The other columns are **modelled** from bounded chronological JSON samples and
+full table counts, not full-table byte sums or random samples. GB is decimal.
+
+| Table | Dashboard GB (measured) | Rows counted | Sample mean / p95 JSON B | Logical / indexed GB (modelled) | Contents and preservation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `projectWorkRecords` (before split) | 10.84 | 200,262 | 2,210 / 4,186 | 0.443 / 8.409 | Work/source/planning projections: rebuildable; canonical source, planning history and audit kept forever. |
+| `projectHostedCheckRuns` | 2.01 | 2,200 | 27,081 / 86,119 | 0.060 / 0.655 | Verdict, proof and source/configuration pins kept; execution detail is operational exhaust under the approved window. |
+| `projectHostedCheckCallbacks` | 0.89 | 24,186 | 2,471 / 1,703 | 0.060 / 0.299 | Callback inbox payload is exhaust; digest retry receipts and reuse aliases remain. |
+| `projectObjects` | 0.84 | 119,617 | 526 / 613 | 0.063 / 0.629 | R2 descriptors, not source bytes. Reachable Git/State bindings remain; immutable descriptor copies can use catalog pages. |
+| `projectSourceTasks` | 0.82 | 30,402 | 5,696 / 12,934 | 0.173 / 0.866 | Fan-out inputs/progress/results: operational after whole-job completion; retained job outcome/source live elsewhere. |
+| All other tables | 6.12 | — | — | Not individually dashboard-reconciled | Includes the candidate classes below; not an unexplained second byte store. |
+| **Total** | **21.47** | — | — | No exact physical total model | Dashboard after cleanup remains a lead measurement. |
+
+The Work sample contains 645 rows. Its current deployment-wide count differs
+from the frozen dogfood generation's 154,496 rows, of which 103,355 are `viewFiles`.
+Their sampled sizes are 1.94–2.97 KB, with contributors the largest nested field;
+legacy payload pages reach roughly 10–36 KB. Dividing indexed dashboard storage
+by a frozen generation count does not establish 70 KB logical Work rows. Work,
+check-run and callback models do not fully explain their dashboard figures.
+
+### Split indexes and catalog placement
+
+The [Work projection index domains](#work-projection-index-domains) give the
+reader map and completed migration. **Modelled copy-equivalents per write** fell
+from 19 to core 11 / planning 17 / data 9; these are not measured billed write
+bytes. The frozen dogfood model is 5.88 → 2.83 GB. Reconstruction from measured
+native document bytes is 7.94 → 3.97 GB under the same copy assumption; physical
+reclamation still needs the dashboard. Routing now reads one physical domain,
+without layout lookups, fallback mirrors, extra RPCs or idle scans.
+
+Immutable descriptors now share existing 256-entry `projectObjectCatalog` pages.
+Mutable State parents/generation/protection, pending uploads and small new outputs
+stay rows; random insertion into dense pages would increase read/write I/O.
+`projectObjectReceipts` keeps original upload-id, nonce and size retry/cleanup
+pins with three indexes instead of the descriptor table's seven. **Measured dev
+migration:** 38,003 descriptors across nine projects, every digest/size verified;
+18,427,473 serialized bytes removed versus 11,604,506 receipt bytes plus
+3,367,626 catalog bytes (including pre-existing pages). The conservative net
+logical reduction is at least 3,455,341 B, not a dashboard saving. See
+[compaction](operations/storage-compaction.md) and
+[maintenance costs](operations/cost-to-serve.md#maintenance-cost-and-unmeasured-work).
+
+### Open placement candidates
+
+This inventory of the remaining large classes is **modelled**, from the same
+pre-cleanup samples. Indexed sizes assume approximate full copies; potential
+savings are ceilings/ranges before pointer/R2 costs and overlap with expiry.
+They must not be summed as a measured saving. Keeping history forever permits
+moving exact bytes behind verified pointers, not deleting them.
+
+| Table | Rows / sample mean B | Logical / indexed GB model | What remains to assess |
+| --- | ---: | ---: | --- |
+| `projectHostedRecordBodies` | 109,335 / 1,279 | 0.140 / 0.839 | Immutable journal/Work bodies, including planning/audit, must stay forever; exact R2 body plus compact hot pointer is a candidate (~0.70 GB ceiling). |
+| `projectHostedActionsResults` | 20,490 / 2,151 | 0.044 / 0.176 | Report detail is operational; lossless row compaction landed. Further R2 detail placement (~0.15 GB original ceiling) is undecided. |
+| `projectHostedLandingObservations` | 44,941 / 2,293 | 0.103 / 0.412 | Versioned observation copies include committed recovery/audit history; assess deltas/references (~0.35 GB ceiling), not blanket expiry. |
+| `projectHostedRecords` | 109,335 / 487 | 0.053 / 0.426 | Immutable versions/audit stay; deduplicate inline body copies only with equal read-call cost (~0.06 GB ceiling). |
+| `projectHostedOperations` | 18,368 / 1,860 | 0.034 / 0.171 | Retry outcomes/receipts stay; bulk transport body pointers are an option (~0.14 GB ceiling), with no proven extra-R2-read win. |
+| `projectHostedSaves` | 3,054 / 3,066 | 0.009 / 0.047 | Save/State receipts stay; completed protocol copies are a candidate (0.03–0.16 GB range), not an agreed cut. |
+| `projectHostedOverlapLanes` | 1,338 / 9,371 | 0.013 / 0.075 | Current saved-path projection is rebuildable; intern/compress paths (0.03–0.12 GB range), preserving current pins. |
+| `projectHostedLandingAttempts` | 4,081 / 4,176 | 0.017 / 0.102 | Causal attempt evidence stays; intern repeated Candidate/policy snapshots (~0.07 GB ceiling). |
+| `projectHostedRecordHeads` | 20,071 / 750 | 0.015 / 0.136 | Rebuildable but transaction-critical CAS/current heads; keep pending read-cost parity, zero committed saving. |
+| `projectFinishReadRows` | 10,180 / 1,227 | 0.012 / 0.150 | Transactional metric/public projections are rebuildable; narrow nested copies without changing readers (~0.08 GB ceiling). |
+| `projectHostedLandingRequests` | 1,479 / 7,713 | 0.011 / 0.308 | Admission/selection/receipt/audit preserved; assess compact hot envelope plus immutable R2 body (~0.20 GB ceiling). |
+
+Other review options are a State-bound R2 descriptor manifest (trusted incremental
+baseline plus changed pins, never a fresh full descriptor scan per State), Work
+payload/actor interning, and a different overall stack. None is built or selected
+by this inventory. All audited indexes have readers, including generic pages and
+snapshots; no unread collection was established. Further core/planning-history
+splits model only about 0.08 / 0.11 GB and were not pursued in this slice.
+
+Evidence: storage Issue [8c4f126b](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981) (inventory comment `b69f2f14`, catalog
+completion `a67d6495`, catch-up `257c5a66`, final split evidence), and cost Issue
+[298f9675](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd). The [placement review](phase6-plan.md#p6-close-order-owner-2026-11-10)
+decides the next implementation slices.

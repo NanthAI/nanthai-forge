@@ -10,7 +10,7 @@ These rules hold the design together. Break one only with an explicit owner deci
 6. **Parsing never executes code.** Checks and agents run locally under the OS account. Managed execution and secret use by arbitrary code do not exist.
 7. **Forge identities are the daily format; Git holds the bytes.** A State, Lane, Candidate, run or record is identified by its Forge SHA-256 identity, never by a storage identity. Source file bytes and trees are stored as Git objects and packfiles, which is also the export, publication and GitHub boundary; no separate projection exists. Everything Git cannot model (Work, evidence, edit streams, decisions, analysis) lives in Forge's own packed, collectable store beside it. Existing native States and Git-backed owners stay readable through explicit, reversible migration.
 8. **Unknown stays unknown.** Missing analysis edges, unmodelled languages and unreported coverage are never proof of independence. Do not guess a binding or fall back to an outer scope.
-9. **History is kept.** No automatic age or count deletion, no quotas and no retention deadlines unless the owner asks. Collection removes only verified unreferenced objects.
+9. **History is kept.** No automatic age or count deletion, no quotas and no retention deadlines unless the owner asks. Collection removes only verified unreferenced objects. The owner-approved operational windows below exclude Git/source history, receipts, audit and planning.
 10. **Live signals are advisory.** Sessions and messages are never locks, never authorization and never acceptance. Declared readiness is not checked or accepted source.
 11. **No sandbox claims.** Do not describe Lanes, worktrees, MCP permissions or scoped grants as confinement.
 12. **Hosted stack is fixed for development.** Convex for records, Cloudflare R2 for every byte, Clerk identity, the Forge GitHub App and Netlify hosting. R2 is required on every deployment, self-host included (any S3-compatible bucket through `R2_ENDPOINT`). Convex file storage holds only legacy copies awaiting cleanup ([data placement](data-placement.md)). PostHog is deferred.
@@ -64,3 +64,96 @@ increase uploaded bytes keeps the flat writer. Physical metadata is published in
 the existing output commit; legacy recipes retain their reader. This addresses
 sequential descriptor calls at this scale. It does not solve the 190k-file flat
 manifest memory failure or authorize a State identity change.
+
+## Decisions from 10 November
+
+These decisions record owner-approved scope and the landed implementation. They
+add no new retention window, approval step or stack change. Issue links retain
+the evidence; read the full item and comments with `nforge agent ROOT planning`
+using its id and `reconcile:false`.
+
+### 2026-11-10: operational retention windows
+
+Raw check callback values compact seven days after terminal run completion;
+finished source tasks/batches expire seven days after the whole job ends; check
+report detail/shards expire after thirty days. Active physical tasks delay input
+cleanup. These diagnostic/retry grace periods bound operational exhaust while
+keeping callback digest/ID/time receipts, reuse aliases, verdict/proof/source
+pins, accepted source/Git ancestry, planning and audit. Superseded/failed derived
+generations retire only through existing ownership/pin proofs. One-shot terminal
+wakes and bounded idempotent pages stop when complete; legacy catch-up reuses
+them. Why: payload copies outlived their execution readers and grew storage.
+Source: Issue [8c4f126b](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981); [windows and readers](operations/cost-to-serve.md#operational-expiry-and-storage-per-landing).
+
+### 2026-11-10: weekly backups and manual export approval
+
+Keep the existing weekly backup, Monday 03:00 UTC; manual dispatch requires the
+lead's OK. Why: each export reads the whole database; three manual exports on
+10 November consumed 3.94 GB DB I/O, about 1.31 GB each (measured total, derived
+mean). Inventory/cleanup must not launch an export as a shortcut. No workflow or
+backup contents changed. Source: Issue [8c4f126b](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981);
+[backup cadence](operations/cost-to-serve.md#backup-export-cadence).
+
+### 2026-11-10: separate planning and data projection indexes
+
+Route planning roots/history/comments/search fragments to `projectPlanningRecords`,
+source/view-file/non-planning payload/comparison rows to `projectWorkDataRecords`,
+and general Work to `projectWorkRecords`. Why: planning indexes covered unrelated
+rows. Modelled document/index copies per write fall from 19 to core 11 / planning
+17 / data 9. The bounded dev copy/cleanup is complete and temporary layout reads,
+mirrors/fallbacks and old core planning indexes are removed. No logical collection
+or canonical history was dropped. The owner approved a one-time fresh public
+generation at cutover: old list/search cursors get `WORK_STALE` and restart;
+record partition, Work revision, source and Issue identities stay the same.
+Source: Issue [8c4f126b](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981); [reader map, model and measured I/O](data-placement.md#work-projection-index-domains).
+
+### 2026-11-10: immutable object descriptors in catalog pages
+
+Move eligible immutable `projectObjects` descriptors into existing sorted
+256-entry `projectObjectCatalog` pages. Keep mutable State ancestry/protection,
+pending/rotated bindings and small new worker outputs in rows. Compact
+`projectObjectReceipts` pins preserve original upload-id, nonce and exact-size
+cleanup/retry semantics. Why: seven descriptor indexes and per-file cold lookup
+bytes dominate; randomly rewriting dense pages for a few new objects would cost
+more. Measured dev migration verified all 38,003 moved digest/size pairs. Fixture
+cold 29k-job DB bytes fell 10,226,466 → 2,105,060 at eleven calls; no live billed
+saving is claimed. Source: Issue [8c4f126b](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981) and Issue [298f9675](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd);
+[compaction](operations/storage-compaction.md).
+
+### 2026-11-10: bounded State recipes
+
+The landed follow-up to rejected experiment `2f4e04ad` provides trusted ordered
+recipe leaves/ranges in **one existing bounded authorized metadata read**, for
+server, CLI/browser and Actions readers. It removes per-level descriptor/signing
+rounds, verifies leaves and logical identity, deduplicates bounded parallel reads,
+and reuses verified destination ranges. Physical metadata publishes in the
+existing commit. Fixed writers use it only in the existing 1–4 MiB State window
+when fewer bytes are uploaded; legacy/flat reads remain. Why: sequential healthy
+29k saves upload 3.31 → 0.74 MB in fixtures without extra Convex rounds. This
+meets the one-bounded-read concern at that scale. The rejected experiment's
+190k-file flat-manifest memory failure remains unresolved; neither that scale nor
+a State identity change was approved by this slice. Source: Issue [298f9675](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd);
+[original experiment](#chunked-flat-states-issue-2f4e04ad) and
+[fixture tradeoffs](operations/cost-to-serve.md#landed-fixes-and-fixture-evidence).
+
+### 2026-11-10: reuse checks for identical and ancestry-only main changes
+
+Reuse a full passed check when checked/main/composed shared entries have the
+same blobs, modes and deletions, or the existing exact-tree proof establishes an
+ancestry-only change. Why: equivalent source was paying for another full check;
+the identical-overlap fixture falls from 25 discarded passed runner-minutes per
+landing to zero. Retain refusal/recheck for genuinely different overlap, changed
+tested docs, global risk, missing/corrupt proof, policy or actor ineligibility.
+Graph absence is never independence. Six existing pins suffice; no extra calls
+or idle work. Source: Issue [1018d0f8](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=1018d0f8-7745-447b-8e83-b2b502bc25fc); live post-deploy smoke/dogfood measurement
+remains open.
+
+### 2026-11-10: live GitLab publishing moves to P8
+
+GitLab stays contract-only in P6; live publishing is owned by P8 Issue
+[a697aba8](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=a697aba8-5ca4-4e95-af2c-6ce3139700db). Why: it needs owner GitLab access and matters for outside users in
+P8. GitHub ci-status shipped LFS publication, mirror-lag retry, Candidate branch
+cleanup and superseded-run cancellation; its live/timing evidence is complete
+with sample limitations retained. Source: closed Flip 3 Issue [4e4204b6](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4e4204b6-9373-49b3-a8fd-3eb06208a310).
+Closed one-client/parity Issue [657d63ee](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=657d63ee-249a-44ae-94e2-55549f84eea9) also includes the accepted State/hash
+codemod; it is not an open P6 dependency. P7 is UX and UI only.

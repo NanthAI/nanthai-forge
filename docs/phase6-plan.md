@@ -1,6 +1,78 @@
 # Phase 6 lead plan
 
-Read this plan, the [lead rules](agents/lead.md), [Phase 5 close](phase5-close.md), [roadmap](roadmap.md) and the full linked Forge planning Issues. The roadmap is the authority for current stage names; historical drafts and old Issue stage labels are superseded. Phase 5 is closed. Phase 6 makes it solid; Phase 7 is product and design; Phase 8 is the public beta; Phase 9 is growth (owner re-bucket, 2026-11-07). No outside-user count is a Phase 6 exit.
+Read this plan, the [lead rules](agents/lead.md), [Phase 5 close](phase5-close.md), [roadmap](roadmap.md) and the full linked Forge planning Issues. The roadmap is the authority for current stage names; historical drafts and old Issue stage labels are superseded. Phase 5 is closed. Phase 6 makes it solid; Phase 7 is UX and UI only; Phase 8 is the public beta; Phase 9 is growth (owner re-bucket, 2026-11-07). No outside-user count is a Phase 6 exit.
+
+## P6 close order (owner, 2026-11-10)
+
+This order supersedes earlier close/start sequencing below. P6.8 starts from the
+repo evidence in [data placement](data-placement.md#where-the-bytes-and-io-go-2026-11-10),
+[cost to serve](operations/cost-to-serve.md#pre-bench-smoke-and-subsequent-fixes-2026-11-10)
+and [decisions](decisions.md#decisions-from-10-november), plus the linked Issues
+and all their comments. One-off private handoffs are not the knowledge store.
+P7 is **UX and UI only**; it does not silently absorb unfinished P6 work. Live
+GitLab is explicitly moved to P8 [a697aba8](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=a697aba8-5ca4-4e95-af2c-6ce3139700db). Flip 3 [4e4204b6](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4e4204b6-9373-49b3-a8fd-3eb06208a310) and one-client/
+parity [657d63ee](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=657d63ee-249a-44ae-94e2-55549f84eea9) are closed with evidence, including the State/hash codemod.
+
+1. Builders finish their current slices and verify their accepted source.
+2. Fable 5.2 reviews what lives in Convex versus R2 or a third stack, under
+   Issue [4c8dfe6a](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4c8dfe6a-3511-4d01-a36b-1158c4e42c69). Convex is preferred for realtime across web and future
+   iOS, its SDK and agent notifications. Alternatives are welcome if cheaper
+   within the margin of error and simpler, including consolidation on one
+   platform. Near-realtime is acceptable only if savings and simplification of
+   infrastructure/interdependencies are large. Time to main, check wall and
+   notification latency must not regress much. Cost is major, not the only
+   factor: the product must sustain itself, with a paid tier planned. These
+   constraints authorize the review, not a new paid service or product limit.
+3. GPT builders implement the agreed recommendations in finite slices with
+   calls, bytes, memory, timing and preservation guards.
+4. Run the smoke and report cost per 1,000 landings **including maintenance**;
+   show measured usage separately from fixture/model estimates, R2 operations,
+   storage and amortized backup/expiry cost, with one-off migration/index builds
+   separate. Report coverage gaps, end-to-end timing and discarded runner minutes.
+5. Run the exit bench only on the owner's **explicit go**, on the final frozen
+   pins and under its registered plan. A passing smoke is not that go.
+6. Close out with accepted receipts, every acceptance line evidenced or explicitly
+   moved by the owner, remaining caveats, and the owner decision to begin P7.
+
+### Open P6 acceptance lines
+
+The 11 November handover planning read for Initiative `f1ce7574-337a-485f-8a81-0938845523e8`
+contains **11 live Issues: eight open, three in progress, zero proposed**. This
+is the handover inventory, not a claim that old checklist text has been reconciled;
+read fresh planning before close. No checkbox or Issue status changes here.
+
+| Issue | Remaining line(s) / evidence needed |
+| --- | --- |
+| [8c4f126b](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981) | Aggregate exhaust/rebuildable compaction disposition and the lead's post-cleanup dashboard figure. B expiry/catch-up, C split/migration and D compaction evidence are posted; retained journal/observation bodies and other candidates need the placement review, not blanket expiry. Matched billed per-landing I/O remains unverified. |
+| [298f9675](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd) | Both paths' final no-regression bar (time to main/check wall), zero idle/always-on work and unchanged MCP surface; lead's identical billed re-smoke and per-function split. Source/CI fixture lines are met; catalog-backed bytes do not prove every raw binding is cheaper. |
+| [1018d0f8](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=1018d0f8-7745-447b-8e83-b2b502bc25fc) | Next smoke and post-deploy dogfood before/after discarded passed runner-minutes per landing. Root cause and reuse fix are evidenced; independent proof/negative-fixture review precedes the smoke. |
+| [4c8dfe6a](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4c8dfe6a-3511-4d01-a36b-1158c4e42c69) | Public-safe role/size/I/O/realtime/transaction classification for every Convex table and R2 use; two or three whole-system options with cost per 1,000, idle/10x/100x monthly and maintenance costs, timing, migration and risk; owner summary; implementation Issues only after agreement. |
+| [70a9bd2f](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=70a9bd2f-f741-4d26-8ae5-7bb11148a17c) | Complete 26-repository/path report and timings next to Git; every failure filed and generically fixed; on-demand low-cost regression rerun and claim citations. Preserve failed/lost samples and report setup/teardown evidence; remaining teardown-suffix/fidelity cleanup is owned here. |
+| [ea0bc2e6](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=ea0bc2e6-ed28-4fd5-adf2-0e4ac9dfdda8) | Preserve `retryAt`; wait locally with zero Convex calls after the provider's named rate refusal and resume the original import/payload. Synthetic thrown/returned-refusal, identity and healthy-call guards; replacement row with failed setup time retained. |
+| [7bce7c1a](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=7bce7c1a-4884-4a25-b264-9d33e668258b) | Hazard rows pass only the established source-representation refusal for that phase. Auth/rate/unknown refusals fail. Guard in the existing test file and apply to the final 26-row report. |
+| [95e39ecf](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=95e39ecf-3bcc-40ea-9549-e884fceff232) | Every pending/timeout source action reconciles the original operation/payload before the next action; unfinished journals survive. Synthetic timeout/terminal-failure guard; publish original and replacement samples. |
+| [d9eded54](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=d9eded54-2727-4e0e-87dc-8851a8909fc5) | Automatic cache eviction retains live-process or unknown-coverage copies; delete only truly unused copies. Reuse batched process observation, retain deletion provenance, add no Convex/idle calls; verify tests/landing and disclose the lost evidence in the zoo report. |
+| [6ab11d19](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=6ab11d19-472f-44e4-bc84-daaa27c1fdd8) | Summary/default report/baseline preserve actual A/C `mainMoved`, first-check class/reason and recompose count; `landReuse` is C, not necessarily the overtaken Lane. Keep baseline values/strict checks unchanged; exact historical matching, reversed-order guard and full report; only matched C overtakes count toward the requested five. |
+| [8c9b84fc](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c9b84fc-737e-4d1e-8bca-0d0f847566e6) | Finish offline qualified-base/ten-task reconstruction and setup/harness portability proofs with receipts, then final frozen plan, estimate and owner go. Publish every N against GitHub and B1.5d: seconds to main/wall/prep/CLI/queue, correctness, rework tokens/turns, CI and Convex cost; preserve preregistered outlier/contamination rules and every void. Prove multi-agent coordination, N16 convoy bar and zero independent-order waits; report stacking A/B and weaker-model error/turn evidence. Later owner amendments soften N1 parity and CI-minute reduction; they do not waive reporting or generic regression fixes. |
+
+The bench Issue retains its exact bars and amendments; this table is not a new
+bench plan. Older stage-map items below are context, not additional live Issues
+or authority to move an unresolved acceptance line.
+
+### Friction carried from the run
+
+These observations remain visible even where a workaround or fixture fix exists;
+this docs slice does not declare them resolved or open a duplicate Issue.
+
+| Friction / observation | Handover consequence |
+| --- | --- |
+| Owner clicks needed to connect/authorize each scratch project | Include setup time and exact connection preconditions in the next run; Flip 3 evidence [4e4204b6](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4e4204b6-9373-49b3-a8fd-3eb06208a310) records the blocks. No additional product confirmation is proposed. |
+| Stop hook attributed bench landings to the lead | Keep actor/operation/receipt attribution explicit; verify the hook against the actual builder before interpreting its blocker. Carried under exit-bench [8c9b84fc](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c9b84fc-737e-4d1e-8bca-0d0f847566e6). |
+| Flakes passed on retry (archive memory, source CPU, recipe GET count and others) | Retain first failures/retries; a later green run alone does not diagnose a flake. Storage/cost/main-race Issues retain the relevant check receipts. |
+| Spend parser missed quoted provider project/landing markers | Storage comment `090de0e9` records the fault; split builder added balanced-quote parsing. New paired attribution/coverage proof is still needed; never divide by zero or infer a saving. |
+| Dry runs left fork commits | Preserve the original inputs, failed/void samples and cleanup proof under [8c9b84fc](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c9b84fc-737e-4d1e-8bca-0d0f847566e6); distinguish generated fork history from accepted product source. |
+| Shared dependency cache never evicted | Reconcile retention/reclaim before the full bench; this is distinct from automatic Lane eviction deleting a live copy ([d9eded54](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=d9eded54-2727-4e0e-87dc-8851a8909fc5)). No deletion scope is authorized here. |
+| About 34 GiB free versus about 43 GiB for the full bench | Observed run-log capacity versus modelled bench requirement: about 9 GiB short, before reserve. Resolve capacity before owner go; no cleanup or paid infrastructure is authorized by this arithmetic. |
 
 ## Stage map
 

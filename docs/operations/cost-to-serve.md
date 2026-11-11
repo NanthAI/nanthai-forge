@@ -44,6 +44,130 @@ Multiply the first four terms by 1.1 for published Starter; search already uses
 Starter's published rate. Storage is added separately. R2 uploads from a Convex
 action incur Convex egress even though subsequent R2 downloads have free egress.
 
+## Pre-bench smoke and subsequent fixes (2026-11-10)
+
+**Measured live meter, priced at capture list rates:** the pre-bench smoke
+(20:13–20:54 UTC, dry `n3-r1`, harness GitHub `4b092a6c`, ten Forge landings on
+the bench deployment) cost $0.0894 in the driver meter: **$8.94 per 1,000**
+(reported rounded as $8.9), against B1.5d $9.40. The lead journal measured
+$0.0869 with zero detected gaps. These are captured Convex usage priced at list,
+not an invoice or a post-fix result. The target is about $2 per 1,000; the driver
+reading is 4.47 times that target. R2, stored bytes and maintenance need separate
+allocation in the next report. This smoke is distinct from the earlier dev
+whole-deployment window below.
+
+| Function / family | Smoke Convex cost share (measured, rounded) | Measured usage over ten landings |
+| --- | ---: | --- |
+| `projectConvexSourceNode:step` | 42% | 70 calls; about 146 MB egress (14.6 MB/landing), 0.062 GB-hours |
+| `projectHostedActionsSource:resolve` | 22% | 549 calls; about 90 MB DB I/O (9 MB/landing) |
+| `projectConvexSourceObjects:resolve` | 4% | 414 calls; 14.5 MB DB I/O |
+| HTTP POST callbacks | 4% | 626 calls |
+| `projectHostedReuse:prove` | 4% | No finer resource split retained in the source summary |
+| Other functions | 24% | Remainder of the rounded shares; no invented per-function allocation |
+
+Source-worker uploads are generated States/recipes, results and durable progress
+sent from Convex to project R2; they are not source downloads sent to GitHub.
+The 146 MB live total was not split exactly between State, progress and replay.
+The new `forge-source-step.putBytes` counters separate attempted state/progress/
+result/other/refused/avoided body bytes, including failed attempts, but are not
+billed egress. HEAD-only reuse saved zero bytes in healthy sequential-save
+fixtures and was withheld; replay-only savings were not admitted as landing gains.
+
+### Landed fixes and fixture evidence
+
+All before/after figures in this table are **synthetic fixtures**, not a new
+smoke or measured invoice saving. They overlap and must not be added into a
+cost forecast. Storage/expiry figures use net serialized JSON documents; DB-I/O
+figures count reads/writes in their own guards; upload figures count PUT bodies.
+
+| Landed change | Before → after fixture | Calls / scope and limitation |
+| --- | --- | --- |
+| Bounded trusted State recipes and both reader families (Cost A2) | Ten sequential one-file saves at 29k files: 3,306,429 → 737,549 PUT B/save (3.31 → 0.74 MB, −77.7%); 12k: 1,368,429 → 737,192 B | Six Convex calls/save unchanged. Trusted closure/ranges arrive in the existing bounded authorized read; legacy first save can remain flat. |
+| State compose / sync reuse | Three paired 29k runs: 3,306,586 → 737,706 PUT B/compose; 3,306,554 → 737,622 B/sync | Eight / six Convex calls unchanged. 29k save mean handler CPU 0.341 → 0.266 s, wall 452 → 349 ms, peak RSS 233 → 203 MB; fixture worker time, not time to accepted main. |
+| Larger bounded CI descriptor windows (Cost B) | Complete 6k-file job: 16 → 3 source-resolver calls; 2,162,042 → 2,110,510 DB B | Same 6,002 storage GETs, 48-stream ceiling. One paired plan/job timing 12.747 → 11.020 s is a sample, not a distribution. |
+| Trusted recipe leaves in Actions (Cost B2/A2) | Two-State fixture: 5 → 2 source calls, 16 → 8 storage GETs; bounded parallel deduplicated leaf prefetch later makes 8 → 7 GETs in the A2 integration fixture | Eliminates recipe-tree rounds. Raw 29k object metadata stays 10,226,466 B; closure alone does not fix the per-file DB floor. |
+| Catalog-backed cold CI lookup (StoreD) | 29k full job: 10,226,466 → 2,105,060 DB B (10.23 → 2.11 MB, −79.4%); 6k: 2,110,450 → 437,952 B | Eleven / three calls unchanged. Applies to imported/migrated catalog bindings; new/unmigrated raw descriptors retain their old cost. |
+| Compact callback receipts at write time (StoreD) | Fresh landing 4,332 → 1,038 B; dogfood-shaped landing 8,676 → 2,088 B | Full-input digest and retry/reuse identity preserved. No extra normal call or R2 request. |
+| Compact successful source tasks at terminal write (StoreD) | Two successful rows, 4,096 files/128 changed: 16,880 → 560 B (8,440 → 280 B/row) | Eighteen source-function calls/190 document writes unchanged; failed/fenced inputs and completed output retained. |
+| Lossless final report encoding (StoreD) | 20k-file report, six pages: 1,470,479 → 790,776 B | Exact report digest, hydration, failures/flakes/attempts retained; no added R2 call. |
+| Approved expiry (StoreB) | Dogfood-shaped main race/two large checks: 931,822 → 360,486 retained B (932 → 360 KB); fresh 53,279 → 50,417 B | Original StoreB measurement, immediate versus after expiry, including maintenance receipts; before the later write-time cuts. Not a live deployment or physical/index byte figure. |
+| Work index split (StoreC) | Copy sensitivity 19 → core 11 / planning 17 / data 9; frozen shape 5.88 → 2.83 GB | Modelled indexed storage, not fixture/provider billing; ordinary calls unchanged. See [placement](../data-placement.md#work-projection-index-domains). |
+| Main-race check reuse | Identical shared changes: 25 → 0 discarded passed runner-minutes/landing in two-landings/50-minute-check fixture | Same six proof pins, no added calls. Exact matching blobs/modes/deletions and ancestry-only changes reuse; unsafe changes still recheck. |
+
+State saves trade fewer uploaded bytes for more bounded physical metadata:
+R2 reads 4 → 8 / 10 at 12k / 29k; synthetic DB documents 95 → 112–113 / 118–122,
+writes 31–32 → 35–37 / 35–40. There is no added Convex round or idle work.
+The remaining 190k-file flat-manifest memory failure is unresolved. The
+[bounded encoding decision](../decisions.md#2026-11-10-bounded-state-recipes)
+records how this differs from the rejected large-State experiment.
+
+**Measured historical runner waste:** early dogfood, 36 landings, 4.653 discarded
+passed runner-minutes/landing; smoke, ten landings/twelve main races, 0.502.
+Smoke races were seven reused passes, three discarded passes (two text conflicts,
+one tested-document change) and two zero-runner transitions. The 52.5-minute
+alert landing waited on protected-workflow owner review. The later rolling
+20-landing mean of 5.107 minutes largely predates the patch and is not causal
+proof. Cost A2 subsequently reported another 3,299 discarded runner-seconds;
+the matched post-deploy smoke/dogfood comparison remains open.
+
+Evidence: cost Issue [298f9675](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd) (A2 completion `99be677c`, B/B2 and catalog
+comments), storage Issue [8c4f126b](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981) (inventory and B/C/D receipts), and
+main-race Issue [1018d0f8](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=1018d0f8-7745-447b-8e83-b2b502bc25fc). Accepted runtime commits include
+[State writer `acdd3980`](https://github.com/NanthAI/nanthai-forge/commit/acdd3980b25007a3de4accd98a4b5d4ce53075b4),
+[CI windows `5afc36a6`](https://github.com/NanthAI/nanthai-forge/commit/5afc36a6f41093e072c425238ec585a986c83b17),
+[Actions closure `840097f2`](https://github.com/NanthAI/nanthai-forge/commit/840097f27b0f77647297f69b8061b0198aa99e4e),
+[catalog guard `0987b76c`](https://github.com/NanthAI/nanthai-forge/commit/0987b76c631e590cd953f990d8eca9e034b121ec),
+[split `fa45aaa1`](https://github.com/NanthAI/nanthai-forge/commit/fa45aaa1acb342ec80171717714e2c97b77abaca),
+and [main-race reuse `6fbb7511`](https://github.com/NanthAI/nanthai-forge/commit/6fbb751155058b10775f04d69a09f9c0bd3d0adf).
+
+### Maintenance cost and unmeasured work
+
+Maintenance is part of the eventual cost per 1,000 landings. Amortize recurring
+weekly backup/expiry work over the same period's accepted receipts; report
+one-off purges, migrations and index builds separately. Do not divide unrelated
+team investigation traffic by a small landing count and call it serving cost.
+The following are **measured provider/dashboard usage**, except explicit models:
+
+| Maintenance | Measured bytes / work | Accounting consequence |
+| --- | --- | --- |
+| Weekly full database export | Three manual exports on 10 Nov read 3.94 GB total; approximately 1.31 GB/run (derived mean) | At capture I/O rate, model about $0.263/run, before other export costs; not 21.47 GB indexed storage read per run. Manual dispatch needs lead OK. |
+| Initial bounded expiry | Two calls: 59,932 read + 6,355 written B; 17,888 logical B reclaimed before receipts | A pilot, not the complete backlog. |
+| Legacy expiry catch-up | Ten walks; 611,581,842 read + 13,500,509 written B, plus 6,912,037 audit read B: 0.632 GB | 2,878 requests / 2,894 executions (16 OCC retries), zero failed requests. 22.18-minute active drain; provider time 605.321 s including audit; no function egress. |
+| Catch-up retained overhead | 187,619,745 gross logical B reclaimed minus 6,326,334 B in 8,106 receipts = 181,293,411 net B | 7,106 callbacks compacted, 29,369 tasks and 6,287 batches removed; zero eligible 30-day check details or unprotected generations. Physical/index saving unmeasured. |
+| Work split migration | 0.839689 GB read + 0.529574 GB write; verification 0.055927 GB read; total 1.425189 GB | One-off 3,538 transactional pages across ten partitions; modelled envelope about 1.4 GB. Ordinary landing I/O is separate. |
+| Object catalog migration | 113,975,442 read + 49,290,133 written B; verification 21,133,458 read B; total 184,399,033 B | One-off 1,421 steps / 38,003 descriptors; wider inspection envelope 258,220,078 B includes peers. |
+| New planning index backfill | 1.01 GB DB I/O in the owner's 10 Nov dashboard | One-off index build, not a per-landing fee. |
+| Approved scratch purge/inventory | Five projects, 81,486 rows / 57.327738 recorded MB and 31,354 R2 objects / 2.216819257 GB removed; captured-function I/O envelope 236.633655 MB | Envelope includes peers; row counters exclude physical/index reclamation. R2 deleted sizes are not downloaded bytes. |
+
+Catch-up receipt audits and normal control/source/CI work have separate attribution
+gaps; the captured totals above are not a complete invoice. Expiry saves retained
+storage, not the initial write already paid. Recurring expiry uses the existing
+terminal wakes and bounded pages, with zero calls when no work is due. Its
+[reader/windows and fixture guard](#operational-expiry-and-storage-per-landing)
+remain the operational contract.
+
+R2 charges per operation, not just per byte. At the linked Standard rate, one
+million one-object PUTs cost $4.50 before allowances even if the bodies are tiny;
+GET/HEAD cost $0.36/million and egress is free. Batch immutable writes when that
+reduces operations without rewriting dense pages for small changes. Convex-to-R2
+PUT bodies still incur Convex egress. Queries/mutations cannot fetch R2 directly,
+so an immutable-body move must include action/call/transaction effects in its
+cost model. A proposed State-bound descriptor manifest could replace about
+2.069 MB of cold 29k-job catalog reads, but its trusted incremental writer is
+unbuilt; no extra whole-descriptor scan per State is an acceptable saving claim.
+
+Still **unmeasured/unverified**: the identical post-fix billed re-smoke and its
+per-function split; post-cleanup dashboard documents/indexes/storage; matched
+billed write-I/O per landing; 190k-file memory within the action limit; final
+check wall/time-to-main comparison; and the ci-status submit-to-GitHub-created
+overhead. The latter is **measured but unexplained** at 7.601 s versus 2.384 s
+normal (about +5.217 s), in three samples per path. Overall client means were
+246.567 versus 249.066 s, but blocked cohorts, moving CLI pins and different
+provider matrices prevent a causal speedup claim (Flip 3 Issue [4e4204b6](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4e4204b6-9373-49b3-a8fd-3eb06208a310)).
+The quoted-provider-log marker bug caused missing project/landing attribution;
+the split builder added balanced-quote parsing, but a new paired coverage-checked
+window is still required. No missing metric is treated as zero.
+
 ## Evidence and the allocation we cannot yet measure
 
 The [`costs` ledger](../../src/speed-budgets.json) and
@@ -65,8 +189,9 @@ cannot measure those sizes. CI batch replaces callbacks already represented in
 the core and adds R2 inbox traffic. Work writes are outside the landing denominator. Core/inbound Convex egress includes
 their R2 PUT payload bytes; other unmetered response egress is excluded. CI includes
 its measured result and plan replies; its runner-originated inbox uploads are R2 traffic.
-The historical $5.96 corrected live proxy below remains the forecast calibration:
-there is no comparable post-cut capture from which to replace it with a new live total.
+The historical $5.96 corrected live proxy below remains the forecast calibration for
+this older model. The later pre-bench smoke above is a distinct measured workload;
+neither has a comparable post-fix capture establishing a new serving total.
 
 | Guarded slice | Current quantities per landing or operation | Brief-rate $/1,000 | Starter $/1,000 |
 | --- | --- | ---: | ---: |
@@ -487,7 +612,7 @@ the readers below need the data while execution is active, not forever afterward
 | `projectHostedCheckCallbacks` raw `value` | Seven days after the run ends. `receiveHostedCheckCallback` in `convex/projectHostedCheckCallbacks.ts` reads retained event IDs/digests for deduplication; the raw payload has no later execution reader, and terminal results are immutable. | Event IDs/digests/timestamps for original retries; full same-tree reuse aliases/provenance; the check run’s verdict and exact source/provider pins. `projectHostedCheckRead` and `projectHostedCheckVerdictReuse` require aliases indefinitely. |
 | `projectSourceTasks`, `projectSourceBatches` | Seven days after the **whole job** ends. `projectConvexSourceFanout.results` joins completed siblings while the parent is active; `sourceStep` refuses terminal jobs. Physical scheduled executions are checked before deletion. | Original job/operation records, output references, source objects and step timing. |
 | `projectHostedCheckRuns` detailed `contractReports`; `projectHostedCheckShards`; `projectHostedActionsResults` | Thirty days after the run ends. `hydrateCheckReports`, `restoreShardReports` and `projectHostedCheckRead` read execution/detail copies. This keeps a longer diagnostic window than the raw callback inbox. | The run row, verdict and digest, summary counts/test files, flakes, proof, source/check/configuration pins, provider/receipt links, output/cost references and all immutable acceptance evidence. Full report detail is no longer available after the window. |
-| Superseded/failed `projectWorkGenerations`, `projectWorkRecords`, `projectReturnPages` and replaced payload parts | No age window: retire only when the existing publication/sweep proves the binding is superseded, or the build failed. `selectedGeneration` and `recordPartition` select the current projection. | Current generation, its shared record partition, migration-pinned generations, original backups, Git/source history, Work events, audit trail and planning. |
+| Superseded/failed `projectWorkGenerations`, `projectWorkRecords`, `projectPlanningRecords`, `projectWorkDataRecords`, `projectReturnPages` and replaced payload parts | No age window: retire only when the existing publication/sweep proves the binding is superseded, or the build failed. `selectedGeneration` and `recordPartition` select the current projection. | Current generation, its shared record partition, migration-pinned generations, original backups, Git/source history, Work events, audit trail and planning. |
 
 `projectOperationalExpirySchedule.ts` schedules two one-shot Forge-runner check wakes and one
 Convex-source-job wake in their existing terminal mutations; replay of a terminal source
@@ -578,8 +703,8 @@ not source files. At most eight maximum-size task rows plus a job/batch/pool and
 physical execution records are live in one transaction (roughly 12 MiB of row
 payload, before runtime/JSON overhead). A check page holds a run plus eight rows
 (roughly 9 MiB before overhead). These are conservative payload bounds, not
-measured heap ceilings. Mutation CPU/wall time and billed index/delete bytes still
-need the dev run's provider usage; JSON bytes do not establish billed savings.
+measured heap ceilings. The completed catch-up's provider usage is recorded [above](#maintenance-cost-and-unmeasured-work);
+JSON bytes and reserved-memory figures still do not establish heap or physical-storage savings.
 No new vendor, worker or paid service is introduced.
 
 ## Backup export cadence
