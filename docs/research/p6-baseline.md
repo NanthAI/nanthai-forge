@@ -157,6 +157,33 @@ The prep regression ([c83c4451][prep]) and reduced CI-minute saving
 agents omit failing model iterations that inflated GitHub's B1.5d minutes;
 that is a workload difference to quantify, not proof that the saving survived.
 
+## Single operations: where we stopped (2026-11-09 design review)
+
+The following figures are **from the 2026-11-09 design review, evidence not
+in a public source**. The review judged these single-operation gaps small
+enough to stop further work there.
+
+| Step | Forge | git / GitHub |
+| --- | --- | --- |
+| save | 1.7 s | 1.4–1.6 s (commit + push) |
+| `nforge clone` | 4.8 s (was 6.7 s) | 3.4–4.5 s |
+| Git clone served by Forge | 4.94 s | 4.95 s from GitHub |
+| no-op fetch | 0.62 s | 0.47 s |
+
+Also judged not worth more work there: agent context (about 1,450 tool
+tokens; receipts about 290 characters), test pruning (about 8 s of CI),
+scoped re-checks (0.2–1 min per landing), and Git serving (at parity).
+The Convex cost slices were left to the flips.
+
+This stop list covers **single operations only**, not CI and not bench
+workspace prep (Lane start/open plus dependencies). The prep regression is
+owned by [c83c4451][prep]; the remaining gap is owned by [a245bcf0][prep-gap].
+It also **does not cover sync and resolve**: those were 5–9 s against about
+1 s for `git pull` in the design review (fea47345). The
+[2026-11-11 zoo](zoo-mini-report.md) records sync at 4.9 s against 0.6 s;
+that remaining work is now owned by [6fbba986][sync-gap] since the
+trees-in-packs flip was dropped.
+
 ## Not re-measured since B1.5d (no current P6 number)
 
 The [exit-bench Issue][exit] and [registered plan](p6-exit-bench-plan.md)
@@ -184,3 +211,6 @@ missing real-agent result.
 [zoo]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=70a9bd2f-f741-4d26-8ae5-7bb11148a17c
 [storage]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981
 [imports]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=ed088358-d32e-4821-b951-1ecf21e1ff76
+
+[prep-gap]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=a245bcf0-b1ff-4ea5-ba8d-a2c9c9e14dff
+[sync-gap]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=6fbba986-3b78-439d-878d-afbd66510414
