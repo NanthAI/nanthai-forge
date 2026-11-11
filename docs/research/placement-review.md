@@ -18,7 +18,7 @@ This page proposes; it decides nothing. No slice below is filed, approved or bui
 | 6. Derived per-file projections (`viewFiles`, source rows, payload pages) | No | Derive on demand or store one R2 object per Candidate. |
 | 7. Byte compute: building and merging States inside 512 MiB actions that mostly wait on R2 | No; costly at scale | Keep in Convex now; run it beside R2 when a spike proves it. |
 
-**Recommendation: Option A now, Option B behind a spike, Option C not now.**
+**Recommendation: Option A now, Option B stopped by the [S8a memory result](workers-source-step-spike.md), Option C not now.**
 
 - **A, Convex plus R2 tidied.** One rule: *Convex grows with open work, never with repository size or history length.* Modelled about $4.5 per 1,000 landings for Convex and R2 requests together (227% of the $2 target) against about $7.6 today, and retained Convex storage per landing falls about 13 times.
 - **B, A plus a byte plane beside R2.** The source worker runs in a Cloudflare Worker with an R2 binding, the same pattern as the existing Git large-pack Worker. Modelled about $2.8 per 1,000 (140%). It adds $5 a month and saves almost nothing below roughly 35,000 to 50,000 landings a month, because the Professional plan already includes that much action compute. Its near-term value is speed, which a spike must measure.
@@ -284,6 +284,11 @@ Add Class A and Class B requests per landing to the cost ledger and the smoke re
 Done when: the ledger's Class A per landing is at most 80 on the smoke shape and a check fails if it rises; a twelve-shard batch makes at most 13 Class A requests (38 today). Removes: about two thirds of the CI inbox writes.
 
 ### S8. Byte plane beside R2 (owner decision; adds $5 a month)
+
+S8a [local spike result](workers-source-step-spike.md): the unchanged 29k compose
+reached an observed 102.74 MB of used isolate memory under the diagnostic method,
+exceeding the 100 MB kill gate. Option B stops; no provider or service is enabled.
+Full fixture timing and billed-cost adoption gates remain unmeasured.
 
 - **S8a, spike, no production path.** Run the existing source step in the Workers runtime with an R2 binding on the 4k, 12k and 29k fixtures and one larger synthetic tree. Report peak memory against 128 MB, CPU milliseconds, wall time and R2 requests, and prove output pins equal the Convex provider's. Kill rule: any 29k fixture over 100 MB, or any differing pin, ends the option.
 - **S8b, provider.** An optional source provider beside the Convex one. A Convex action sends a signed grant naming exact input pins; the Worker reads and writes content-addressed objects and returns pins; the same commit reducer publishes. The job records its provider; an over-limit job runs on the Convex provider under a recorded reason, never silently. One contract suite runs both providers.

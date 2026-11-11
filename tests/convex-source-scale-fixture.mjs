@@ -276,6 +276,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
               events.push({ put: a.bytes.length, existed: value });
               if (!value) objects.set(id, a.bytes);
             } else if (message.kind === 'r2-head') {
+              events.push({ head: true });
               const id = new URL(a.url).pathname.split('/o/')[1]?.split('/')[0],
                 spec = objects.get(id);
               value = spec

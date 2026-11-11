@@ -1,0 +1,6 @@
+{
+  "name": "forge-workers-source-step-spike",
+  "private": true,
+  "type": "module",
+  "dependencies": { "miniflare": "4.20260730.0" }
+}
