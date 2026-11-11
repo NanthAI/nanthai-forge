@@ -11,16 +11,11 @@ import { readObjectRecipe } from '../dist/object-chunks.js';
 import { readFileSync } from 'node:fs';
 import { listGithubTree } from '../dist/github-archive-source.js';
 import { wantedBlobResponse } from './github-blob-pack-fixture.mjs';
-import { ListingBuilder, ListingTable } from '../dist/github-listing-codec.js';
+import { ImportedPins, ListingBuilder, ListingTable } from '../dist/github-listing-codec.js';
 import { TreeRows, readTreeReply } from '../dist/github-tree-split.js';
 import { CatalogTable } from '../dist/import-catalog-table.js';
 import { importStateFiles } from '../dist/import-state-scan.js';
-import { setFlagsFromString } from 'node:v8';
-import { runInNewContext } from 'node:vm';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
-import { childEnv } from '../scripts/child-env.mjs';
+import { assertColumnRetention, tableRetention } from './archive-table-retention.mjs';
 import { getFunctionName } from 'convex/server';
 import { startFakeR2, fakeR2Config } from './fake-r2.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
@@ -1064,74 +1059,60 @@ test('Issue 96f164ce: a publication retry reads the stored State one file at a t
     assert.throws(() => [...importStateFiles(Buffer.from(damaged))], { code: 'INVALID_WORK_BACKUP' });
 });
 
-test('Issue 96f164ce: an archive step keeps file pins in columns, under 300 bytes of heap per file from listing to archive-complete (150,612 files peaked at 494 of 512 MB)', async t => {
-  if (process.env.FORGE_ARCHIVE_HEAP_WORKER !== '1') {
-    // Earlier archive cases change V8's retained caches and heap baseline. Measure this
-    // per-file contract in a fresh process, with the same finite heap as the Node action.
-    let stdout;
-    try {
-      ({ stdout } = await promisify(execFile)(
-        process.execPath,
-        [
-          '--max-old-space-size=512',
-          '--import',
-          './tests/check-runtime.mjs',
-          '--test',
-          '--test-reporter=tap',
-          '--test-name-pattern=^Issue 96f164ce: an archive step keeps file pins',
-          fileURLToPath(import.meta.url),
-        ],
-        {
-          env: childEnv({
-            allow: ['FORGE_TEST_PRECOMPILED', 'FORGE_TEST_MODULE_DIRECTORY'],
-            extra: { FORGE_ARCHIVE_HEAP_WORKER: '1' },
-          }),
-          maxBuffer: 1024 * 1024,
-        },
-      ));
-    } catch (error) {
-      const output = `${error.stdout ?? ''}\n${error.stderr ?? ''}`;
-      const measured = output.match(/\d+ heap bytes per file between listing and archive-complete/);
-      if (output.trim()) t.diagnostic(output.slice(-8000));
-      throw new Error(`Archive heap worker failed: ${measured?.[0] ?? error.message}`, { cause: error });
-    }
-    // A successful process that selected no test is not memory evidence.
-    const measured = stdout.match(/\d+ heap bytes per file between listing and archive-complete/);
-    assert(measured, 'the isolated archive import reported its per-file heap measurement');
-    t.diagnostic(measured[0]);
-    return;
-  }
-  setFlagsFromString('--expose-gc');
-  const gc = runInNewContext('gc');
-  // Warm several receipt windows and table growth, not only the first page. Fixed
-  // initialization belongs in the baseline; the measured 30,000-file import stays the same.
-  const repo = repository({ files: 2000, directories: 200, submodules: 0 }),
-    counts = {};
-  await serve(t, repo, counts);
-  await importArchive(pagedFixture());
-  Object.assign(repo, repository({ files: 30_000, directories: 2_000, submodules: 0 }));
-  const s = pagedFixture(),
-    heap = {},
-    log = console.log;
+test('Issue c448ff99 / 96f164ce: a 30,000-file archive retains column storage; the old per-file Maps fail the same guard', async t => {
+  const repo = repository({ files: 30_000, directories: 2_000, submodules: 0 }),
+    s = pagedFixture();
+  await serve(t, repo, {});
+  let pins, catalog, retained, legacy, completed, catalogSize;
+  const pinSet = ImportedPins.prototype.set,
+    catalogSet = CatalogTable.prototype.set;
+  // Observe the actual action's tables rather than constructing an unrelated compact fixture.
+  // Restore automatically even when the worker or assertion fails.
+  t.mock.method(ImportedPins.prototype, 'set', function (...args) {
+    pins = this;
+    return pinSet.apply(this, args);
+  });
+  t.mock.method(CatalogTable.prototype, 'set', function (...args) {
+    catalog = this;
+    return catalogSet.apply(this, args);
+  });
+  const log = console.log;
   t.after(() => {
     console.log = log;
   });
   console.log = (...args) => {
-    const phase =
-      typeof args[0] === 'string' && args[0].match(/^FORGE_IMPORT_METRIC .*"phase":"([a-z-]+)"/)?.[1];
-    if (phase === 'listing' || phase === 'archive-complete' || phase === 'ready') {
-      gc();
-      heap[phase] = process.memoryUsage().heapUsed;
-    }
-    if (!phase) log(...args);
+    if (typeof args[0] === 'string' && args[0].startsWith('FORGE_IMPORT_METRIC ')) {
+      const metric = JSON.parse(args[0].slice('FORGE_IMPORT_METRIC '.length));
+      if (metric.phase === 'archive-complete') {
+        completed = pins?.count;
+        catalogSize = catalog?.size;
+        retained = tableRetention(pins, catalog);
+        if (!pins || !catalog) return;
+        // The previous layout retained a path Map of {blob,size} and a digest Map
+        // of {digest,size,pack}. Reconstruct those exact data records from this import.
+        const paths = repo.tree
+          .filter(entry => entry.type !== 'tree')
+          .map(entry => entry.path)
+          .sort();
+        const oldPins = new Map();
+        for (let i = 0; i < pins.length; i++)
+          oldPins.set(paths[i], { blob: pins.blob(i), size: pins.size(i) });
+        const oldCatalog = new Map([...catalog.values()].map(entry => [entry.digest, entry]));
+        legacy = tableRetention(oldPins, oldCatalog);
+      }
+    } else log(...args);
   };
   const job = await importArchive(s);
   console.log = log;
   assert.equal(job.completed, repo.files);
-  const perFile = Math.round((heap['archive-complete'] - heap.listing) / repo.files);
-  t.diagnostic(`${perFile} heap bytes per file between listing and archive-complete`);
-  // Before (a path Map of pin objects plus a Map of catalog entry objects): 500 bytes here.
-  assert.ok(perFile < 300, `${perFile} heap bytes per file between listing and archive-complete`);
+  assert.ok(retained, 'the action reached the archive-complete measurement boundary');
+  assert.equal(completed, repo.files, 'every file was recorded in the observed pins');
+  assert.ok(catalogSize >= repo.files, 'the observed catalog contains every stored object');
+  // Assert outside the action: its error boundary would otherwise recode this test failure.
+  assertColumnRetention(retained, repo.files);
+  assert.ok(legacy, 'the old-layout control was measured');
+  assert.throws(() => assertColumnRetention(legacy, repo.files), /per-file objects returned/);
+  t.diagnostic(JSON.stringify({ files: repo.files, retained, legacy }));
 });
 
 test('import REST calls stay bounded by tree pages when every small archive member is omitted', async t => {

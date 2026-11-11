@@ -259,8 +259,12 @@ The fixture guard in `tests/github-import-archive.test.mjs` bounds PUT count on 
 commit, tree; run: repository, tarball, two fallback blobs; publication:
 repository); `tests/github-import-archive.test.mjs` also asserts that a two-step
 import with a split listing makes one listing's tree reads in total, and that an archive
-step keeps under 300 bytes of heap per file between listing and archive-complete (about
-500 with the earlier per-file Maps). The protocol-2 fixture in `tests/github-import-pages.test.mjs`
+step retains column storage at archive-complete: fewer than 300 backing-buffer bytes
+per file and at most a few data objects per upload window, with no per-file pin or catalog
+objects. The same structural assertion rejects the earlier per-file Maps (which measured
+about 500 heap bytes per file). The guard counts the actual action tables and their owned
+data, independent of garbage collection, process caches, elapsed time and machine load;
+it does not estimate total action heap or RSS. The protocol-2 fixture in `tests/github-import-pages.test.mjs`
 (28,905 files, 4,089 directories) records 33,061 REST requests, one per directory
 and blob, so that path relies on the App installation token; without one, a
 private repository on that path proceeds at about 10 percent of the importer's
