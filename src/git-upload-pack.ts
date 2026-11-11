@@ -10,6 +10,8 @@ export type PackFetch = {
   /** Repository HTTPS URL without `.git`, e.g. https://github.com/OWNER/NAME. */
   url: string;
   want: string;
+  /** Additional objects in the same fetch (for a bounded page of source blobs). */
+  wants?: string[];
   haves?: string[];
   /** Read token, sent only as HTTP Basic credentials. */
   token?: string | null;
@@ -29,9 +31,9 @@ export function pktLine(text: string): Uint8Array {
   invariant(body.length + 4 <= 65520, 'BAD_ARGUMENT', 'A Git protocol line is too long.');
   return encoder.encode((body.length + 4).toString(16).padStart(4, '0') + text);
 }
-export function fetchRequest(want: string, haves: string[]): Uint8Array {
+export function fetchRequest(want: string, haves: string[], wants: string[] = []): Uint8Array {
   invariant(
-    [want, ...haves].every(id => oid.test(id)),
+    [want, ...wants, ...haves].every(id => oid.test(id)),
     'BAD_ARGUMENT',
     'Select full Git commit ids.',
   );
@@ -41,8 +43,8 @@ export function fetchRequest(want: string, haves: string[]): Uint8Array {
     encoder.encode('0001'),
     pktLine('ofs-delta\n'),
     pktLine('no-progress\n'),
-    pktLine(`want ${want}\n`),
-    ...[...new Set(haves)].filter(id => id !== want).map(id => pktLine(`have ${id}\n`)),
+    ...[...new Set([want, ...wants])].map(id => pktLine(`want ${id}\n`)),
+    ...[...new Set(haves)].filter(id => ![want, ...wants].includes(id)).map(id => pktLine(`have ${id}\n`)),
     pktLine('done\n'),
     encoder.encode('0000'),
   ];
@@ -176,7 +178,7 @@ export async function fetchGitPack(
     {
       method: 'POST',
       headers,
-      body: Buffer.from(fetchRequest(input.want, input.haves ?? [])),
+      body: Buffer.from(fetchRequest(input.want, input.haves ?? [], input.wants)),
       redirect: 'error',
       ...(input.signal ? { signal: input.signal } : {}),
     },
@@ -188,7 +190,7 @@ export async function fetchGitPack(
       response.status === 401 || response.status === 403 || response.status === 404
         ? 'GIT_FETCH_UNAUTHORIZED'
         : 'GIT_FETCH_FAILED',
-      `The Git host answered ${response.status} to the history fetch.`,
+      `The Git host answered ${response.status} to the Git fetch.`,
     );
   }
   const reader = response.body.getReader();

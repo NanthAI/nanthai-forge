@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from './errors.js';
 /** Git pack delta instructions: https://git-scm.com/docs/gitformat-pack */
-export function applyGitDelta(base: Buffer, delta: Buffer): Buffer {
+export function applyGitDelta(base: Buffer, delta: Buffer, maximum = Number.MAX_SAFE_INTEGER): Buffer {
   let position = 0;
   const byte = () => {
     invariant(position < delta.length, 'INVALID_GIT_BUNDLE', 'Git delta is incomplete.');
@@ -24,7 +24,9 @@ export function applyGitDelta(base: Buffer, delta: Buffer): Buffer {
     return value;
   };
   invariant(size() === base.length, 'INVALID_GIT_BUNDLE', 'Git delta base size differs.');
-  const output = Buffer.alloc(size());
+  const resultSize = size();
+  invariant(resultSize <= maximum, 'INVALID_GIT_BUNDLE', 'Git delta exceeds its pinned result size.');
+  const output = Buffer.alloc(resultSize);
   let written = 0;
   while (position < delta.length) {
     const op = byte();

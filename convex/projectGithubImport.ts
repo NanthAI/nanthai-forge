@@ -12,8 +12,7 @@ import { importReadToken } from './githubAppToken';
 import { convexFetch } from './networkFetch';
 import { networkFetch } from '../src/network-fetch';
 import { ImportRequestMeter } from '../src/github-import-meter';
-import { authorizeGithub } from '../src/github-access';
-import { githubConfig } from './access';
+import { authorizeImportGithub } from './githubImportAccess';
 import { invariant } from '../src/errors';
 import { storeListing } from './projectGithubImportListing';
 import { report } from './errors';
@@ -69,12 +68,7 @@ export const start = action({
         return existing._id;
       }
       const meter = new ImportRequestMeter(undefined);
-      const access = await authorizeGithub(
-        parsed.repository,
-        user.subject,
-        githubConfig(),
-        meter.wrap(networkFetch),
-      );
+      const access = await authorizeImportGithub(parsed.repository, user.subject, meter.wrap(networkFetch));
       // Reads go on the Forge App's own quota when it is installed on the
       // repository; the importer's credential then only proves their access.
       const token =

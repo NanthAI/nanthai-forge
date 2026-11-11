@@ -10,6 +10,7 @@ import { tarEntries } from '../dist/github-tar.js';
 import { readObjectRecipe } from '../dist/object-chunks.js';
 import { readFileSync } from 'node:fs';
 import { listGithubTree } from '../dist/github-archive-source.js';
+import { wantedBlobResponse } from './github-blob-pack-fixture.mjs';
 import { ListingBuilder, ListingTable } from '../dist/github-listing-codec.js';
 import { TreeRows, readTreeReply } from '../dist/github-tree-split.js';
 import { CatalogTable } from '../dist/import-catalog-table.js';
@@ -190,6 +191,10 @@ async function serve(t, repo, counts, hooks = {}) {
         headers: { location: 'https://codeload.github.com/fixture/arch/legacy.tar.gz/' + 'a'.repeat(40) },
       });
     }
+    if (u.hostname === 'github.com' && path === '/fixture/arch.git/git-upload-pack') {
+      count('blobPacks');
+      return wantedBlobResponse(options, repo.bodies);
+    }
     if (path.includes('/git/blobs/')) {
       count('blobs');
       return new Response(repo.bodies.get(path.split('/').at(-1)));
@@ -310,13 +315,13 @@ test('a 28,905-file tree imports through one archive stream within an O(pages) b
     stats = s.stats();
   assert.equal(job.protocol, 3);
   assert.equal(job.completed, repo.files);
-  // Only the archive-omitted and archive-rewritten files cost a blob request.
-  assert.deepEqual(counts, { trees: 1, tarball: 1, archive: 1, blobs: 2 });
-  // Issue 2ccd3bae: the whole archive import is 8 REST requests (start: repository, commit,
-  // tree; run: repository, tarball, 2 blobs; publication: repository). The run reads the tree
+  // Both omitted/rewritten files share one bounded Git pack fetch.
+  assert.deepEqual(counts, { trees: 1, tarball: 1, archive: 1, blobPacks: 1 });
+  // Issue ed088358: the whole archive import is 6 REST requests (start: repository, commit,
+  // tree; run: repository, tarball; publication: repository). Git fetch consumes no REST quota. The run reads the tree
   // listing start stored (Issue e5be6ef3). With no App or deployment token configured here,
   // none of them uses an importer credential.
-  assert.deepEqual(job.githubRequests, { user: 0, app: 0, server: 0, anonymous: 8 });
+  assert.deepEqual(job.githubRequests, { user: 0, app: 0, server: 0, anonymous: 6 });
   // Issue 7cbb881c line 3: no per-file row survives ready; documents are O(pages).
   const catalogRows = [...s.tables.projectObjectCatalog.values()].filter(r => r.projectId === job.projectId);
   const catalogued = catalogRows.reduce((sum, row) => sum + row.sizes.length, 0);
@@ -454,11 +459,11 @@ test('Issue c6426ee9: a root truncated by count imports through the archive stre
   assert.equal(job.completed, repo.files);
   // One listing: the truncated root, 3 directories recursive, the root and the still-truncated directory
   // flat. Start lists it; the archive run reads the stored table (Issue e5be6ef3).
-  assert.deepEqual(counts, { treesRecursive: 4, treesFlat: 2, tarball: 1, archive: 1, blobs: 2 });
+  assert.deepEqual(counts, { treesRecursive: 4, treesFlat: 2, tarball: 1, archive: 1, blobPacks: 1 });
   assert.equal(
     job.githubRequests.anonymous,
-    2 + 6 + 4 + 1,
-    'start: repository and commit; 1 listing of 6; run: repository, tarball, 2 blobs; publication: repository',
+    2 + 6 + 2 + 1,
+    'start: repository and commit; 1 listing of 6; run: repository, tarball; publication: repository',
   );
 });
 
@@ -797,11 +802,11 @@ test('Issue e5be6ef3: a multi-step archive import lists the tree once; every ste
   assert.equal(job.step, 1, 'two archive runs');
   assert.equal(job.completed, repo.files);
   // 4 recursive + 2 flat reads are the one listing (start); both runs streamed the archive.
-  assert.deepEqual(counts, { treesRecursive: 4, treesFlat: 2, tarball: 2, archive: 2, blobs: 2 });
+  assert.deepEqual(counts, { treesRecursive: 4, treesFlat: 2, tarball: 2, archive: 2, blobPacks: 1 });
   assert.equal(
     job.githubRequests.anonymous,
-    2 + 6 + 2 + 4 + 1,
-    'start: repository, commit, 1 listing of 6; run 1: repository, tarball; run 2: repository, tarball, 2 blobs; publication: repository',
+    2 + 6 + 2 + 2 + 1,
+    'start: repository, commit, 1 listing of 6; run 1: repository, tarball; run 2: repository, tarball; publication: repository',
   );
   assert.equal(listingGets(bucket), 2, 'each run read the stored table from R2');
   assert.deepEqual(listingKeys(bucket), [], 'the scratch table is deleted once main is published');
@@ -813,11 +818,11 @@ test('Issue e5be6ef3: a run that stored the last file at its time budget publish
     s = pagedFixture(),
     clock = skewClock(t);
   // The omitted and rewritten files are fetched after the stream ends; the budget passes during them.
-  clock.bucket = await serve(t, repo, counts, { blobs: n => n === 1 && clock.jump(7) });
+  clock.bucket = await serve(t, repo, counts, { blobPacks: n => n === 1 && clock.jump(7) });
   const job = await importArchive(s);
   assert.equal(job.step, 0, 'no continuation step');
   assert.equal(job.completed, repo.files);
-  assert.deepEqual(counts, { trees: 1, tarball: 1, archive: 1, blobs: 2 });
+  assert.deepEqual(counts, { trees: 1, tarball: 1, archive: 1, blobPacks: 1 });
 });
 
 for (const damage of ['gone', 'altered'])
@@ -1127,4 +1132,23 @@ test('Issue 96f164ce: an archive step keeps file pins in columns, under 300 byte
   t.diagnostic(`${perFile} heap bytes per file between listing and archive-complete`);
   // Before (a path Map of pin objects plus a Map of catalog entry objects): 500 bytes here.
   assert.ok(perFile < 300, `${perFile} heap bytes per file between listing and archive-complete`);
+});
+
+test('import REST calls stay bounded by tree pages when every small archive member is omitted', async t => {
+  for (const files of [10, 210]) {
+    await t.test(`${files} omitted files`, async t => {
+      const repo = repository({ files, directories: 1, submodules: 0 }),
+        counts = {},
+        s = pagedFixture();
+      repo.tree = repo.tree.filter(e => e.path !== 'large.bin');
+      repo.files--;
+      repo.archive = tarball([]);
+      await serve(t, repo, counts);
+      const job = await importArchive(s);
+      assert.equal(job.completed, repo.files);
+      assert.equal(counts.blobs ?? 0, 0, 'no per-member REST blob requests');
+      assert.equal(counts.blobPacks, Math.ceil(repo.files / 100), 'one Git fetch per bounded blob page');
+      assert.equal(job.githubRequests.anonymous, 6, 'REST calls do not grow with omitted files');
+    });
+  }
 });

@@ -5,7 +5,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
-import { streamGithubSourceBlob, githubBlobEndpointBytes } from '../dist/github-project-source.js';
+import { githubBlobEndpointBytes } from '../dist/github-project-source.js';
+import { streamGithubBlobPack } from '../dist/github-blob-pack-stream.js';
+import { streamedBlobResponse } from './github-blob-pack-fixture.mjs';
 import { ObjectRecipeBuilder } from '../dist/object-chunks.js';
 import { defaultR2Config } from './default-r2.mjs';
 // Import bytes go to R2. This process keeps only each PUT's digest and size, not the bytes.
@@ -74,7 +76,7 @@ const expected = logical.digest('hex'),
 const builder = new ObjectRecipeBuilder(upload.put);
 let index = 0,
   peakRss = process.memoryUsage().rss;
-const pin = await streamGithubSourceBlob(
+const pin = await streamGithubBlobPack(
   'fixture/stream',
   { path: 'large.bin', sha: git.digest('hex'), size, mode: '100644' },
   async bytes => {
@@ -84,7 +86,8 @@ const pin = await streamGithubSourceBlob(
   },
   undefined,
   async () =>
-    new Response(
+    streamedBlobResponse(
+      size,
       new ReadableStream({
         pull(controller) {
           if (index * blockSize >= size) controller.close();

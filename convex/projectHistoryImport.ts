@@ -4,8 +4,7 @@ import { v } from 'convex/values';
 import { internalAction, type ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
-import { authorizeGithub } from '../src/github-access';
-import { githubConfig } from './access';
+import { authorizeImportGithub } from './githubImportAccess';
 import { importReadToken } from './githubAppToken';
 import { storeSourceBytes } from './projectSourceBytes';
 import { r2Config, r2Key } from './r2';
@@ -21,7 +20,7 @@ import { githubSyncCommitSchema } from '../src/github-sync-types';
 /** Read credential for one github.com repository: the App's own read token when
  * installed, else the importer's authorized one (public: the server read token). */
 export async function historyReadToken(repository: string, owner: string, visibility: 'public' | 'private') {
-  const access = await authorizeGithub(repository, owner, githubConfig());
+  const access = await authorizeImportGithub(repository, owner);
   invariant(
     visibility === 'private' || !access.repository.private,
     'GITHUB_VISIBILITY_CHANGED',

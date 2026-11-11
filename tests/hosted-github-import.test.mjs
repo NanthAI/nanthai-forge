@@ -10,6 +10,7 @@ import { state } from './hosted-fixture.mjs';
 import { githubHostedProject } from '../dist/hosted-github-bootstrap.js';
 import { setup as r2Setup } from './r2-harness.mjs';
 import { digest } from '../dist/hash.js';
+import { wantedBlobResponse } from './github-blob-pack-fixture.mjs';
 const modules = {};
 for (const name of [
   'projectGithubImportInventory',
@@ -111,6 +112,11 @@ function fixture(
     if (app && p === '/repos/example/repo/installation') return Response.json({ id: 7 });
     if (app && p === '/app/installations/7/access_tokens') return Response.json({ token: 'ghs_synthetic' });
     if (denied) return new Response('', { status: 404 });
+    if (p === '/repos/example/repo' && limited)
+      return reply('{}', options, {
+        status: 403,
+        headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(limited) },
+      });
     if (p === '/repos/example/repo')
       return reply(
         {
@@ -185,21 +191,26 @@ function fixture(
       lfs.counts.download++;
       return new Response(lfs.objects.get(p.slice(1)));
     }
-    if (p.includes('/git/blobs/')) {
-      if (limited)
-        return reply('{}', options, {
-          status: 403,
-          headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(limited) },
-        });
-      blobs++;
-      assert.equal(options.headers.Accept, 'application/vnd.github.raw+json');
-      if (app) assert.equal(options.headers.Authorization, 'Bearer ghs_synthetic');
-      else if (privateRepository) assert.equal(options.headers.Authorization, 'Bearer ghu_synthetic');
-      if (submodules && p.endsWith(gitSha(modulesBytes))) return reply(modulesBytes, options);
-      const listed = lfs?.files.find(([, content]) => p.endsWith(gitSha(content)));
-      if (listed) return reply(listed[1], options);
-      assert(p.endsWith(gitSha(bytes)), 'never fetch a submodule commit as blob');
-      return reply(bytes, options);
+    if (p === '/example/repo.git/git-upload-pack') {
+      const wants = [
+        ...Buffer.from(options.body)
+          .toString()
+          .matchAll(/want ([0-9a-f]{40})/g),
+      ].map(m => m[1]);
+      blobs += wants.length;
+      const expectedToken = app ? 'ghs_synthetic' : privateRepository ? 'ghu_synthetic' : null;
+      if (expectedToken)
+        assert.equal(
+          options.headers.authorization,
+          'Basic ' + Buffer.from(`x-access-token:${expectedToken}`).toString('base64'),
+        );
+      const bodies = new Map([
+        [gitSha(bytes), bytes],
+        [gitSha(modulesBytes), modulesBytes],
+        ...(lfs?.files ?? []).map(([, value]) => [gitSha(value), value]),
+      ]);
+      for (const want of wants) assert.ok(bodies.has(want), 'never fetch a submodule commit as blob');
+      return wantedBlobResponse(options, bodies);
     }
     throw Error(url);
   };

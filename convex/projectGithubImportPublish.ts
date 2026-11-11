@@ -11,10 +11,9 @@ import { materializeWork, type IndexEntry } from '../src/work-hosted-index';
 import { sourceTreeEntries } from '../src/source-tree-index';
 import { nativeManifestSchema } from '../src/work-archive-metadata';
 import { digest } from '../src/hash';
-import { authorizeGithub } from '../src/github-access';
+import { authorizeImportGithub } from './githubImportAccess';
 import { networkFetch } from '../src/network-fetch';
 import { ImportRequestMeter } from '../src/github-import-meter';
-import { githubConfig } from './access';
 import { ForgeError, invariant } from '../src/errors';
 import { importPageFiles } from '../src/github-import-pages';
 
@@ -259,7 +258,7 @@ async function publishRows(
     }
   await flush();
   metric('projection');
-  const access = await authorizeGithub(job.repository, job.owner, githubConfig(), meter.wrap(networkFetch));
+  const access = await authorizeImportGithub(job.repository, job.owner, meter.wrap(networkFetch));
   invariant(
     job.visibility === 'private' || !access.repository.private,
     'GITHUB_VISIBILITY_CHANGED',

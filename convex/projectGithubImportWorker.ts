@@ -3,17 +3,13 @@
 import { v } from 'convex/values';
 import { internalAction } from './_generated/server';
 import { internal } from './_generated/api';
-import { authorizeGithub } from '../src/github-access';
-import { githubConfig } from './access';
-import {
-  discoverGithubSource,
-  githubSourceMode,
-  streamGithubSourceBlob,
-  type GithubSourceEntry,
-} from '../src/github-project-source';
+import { authorizeImportGithub } from './githubImportAccess';
+import { discoverGithubSource, githubSourceMode, type GithubSourceEntry } from '../src/github-project-source';
 import { ObjectRecipeBuilder, objectChunkBytes } from '../src/object-chunks';
 import { ForgeError, invariant } from '../src/errors';
-import { mapExchange } from '../src/exchange-parallel';
+import { githubBlobPack } from '../src/github-blob-pack';
+import { streamGithubBlobPack } from '../src/github-blob-pack-stream';
+import { digest } from '../src/hash';
 import {
   importPageFiles,
   importPageBytes,
@@ -53,7 +49,7 @@ export const run = internalAction({
       );
       const progress: ImportProgress = JSON.parse(job.cursor);
       invariant(progress.schema === 2, 'IMPORT_CURSOR_CHANGED', 'Import progress format differs.');
-      const access = await authorizeGithub(job.repository, job.owner, githubConfig(), github);
+      const access = await authorizeImportGithub(job.repository, job.owner, github);
       invariant(
         job.visibility === 'private' || !access.repository.private,
         'GITHUB_VISIBILITY_CHANGED',
@@ -184,48 +180,26 @@ export const run = internalAction({
         let bytes = job.bytes,
           completed = job.completed;
         const smallPage = entries.every(row => JSON.parse(row.value).size <= objectChunkBytes);
-        const fetched = smallPage
-          ? await mapExchange(entries, 8, async row => {
-              if (Date.now() - started >= importPageMillis) return null;
-              const file: GithubSourceEntry = JSON.parse(row.value),
-                parts: Buffer[] = [];
-              const pin = await streamGithubSourceBlob(
-                job.repository,
-                file,
-                async part => {
-                  parts.push(part);
-                },
-                token,
-                github,
-              );
-              return { pin, bytes: Buffer.concat(parts) };
-            })
-          : null;
+        const blobs = await githubBlobPack(
+          job.repository,
+          entries
+            .map(row => JSON.parse(row.value))
+            .filter(file => file.mode !== '160000' && file.size <= objectChunkBytes),
+          token,
+          github,
+        );
         const lfs = progress.lfsLimitBytes === 0 ? null : pagedLfs(progress);
         const held = new Map<string, { at: number; file: GithubSourceEntry }>();
         const sizes: number[] = [];
-        for (const [index, row] of entries.entries()) {
+        for (const row of entries) {
           const file: GithubSourceEntry = JSON.parse(row.value);
-          if (fetched && !fetched[index]) break;
           let pin, content: Buffer | undefined;
-          if (fetched) {
-            pin = fetched[index]!.pin;
-            content = fetched[index]!.bytes;
-          } else if (file.size <= objectChunkBytes) {
-            const parts: Buffer[] = [];
-            pin = await streamGithubSourceBlob(
-              job.repository,
-              file,
-              async part => {
-                parts.push(part);
-              },
-              token,
-              github,
-            );
-            content = Buffer.concat(parts);
+          if (file.size <= objectChunkBytes) {
+            content = file.mode === '160000' ? Buffer.from(file.sha) : blobs.get(file.sha)!;
+            pin = { blob: digest(content), size: content.length };
           } else {
             const builder = new ObjectRecipeBuilder(upload.put);
-            pin = await streamGithubSourceBlob(
+            pin = await streamGithubBlobPack(
               job.repository,
               file,
               async part => {
@@ -256,7 +230,10 @@ export const run = internalAction({
           progress.after = row.key;
           // A full byte window stops this page; a large single file streams
           // through multiple bounded physical windows before its logical receipt.
-          if (bytes - job.bytes >= importPageBytes || (!fetched && Date.now() - started >= importPageMillis))
+          if (
+            bytes - job.bytes >= importPageBytes ||
+            (!smallPage && Date.now() - started >= importPageMillis)
+          )
             break;
         }
         if (lfs && held.size) {
@@ -270,8 +247,7 @@ export const run = internalAction({
             sizes,
             token: access.repository.private ? token : undefined,
             github,
-            fetchAttribute: (entry, consume) =>
-              streamGithubSourceBlob(job.repository, entry, consume, token, github),
+            fetchAttributes: entries => githubBlobPack(job.repository, entries, token, github),
             started,
             actor: input.actor,
           });

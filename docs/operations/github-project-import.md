@@ -40,9 +40,9 @@ and retry.
 
 | Request | Token |
 | --- | --- |
-| Access check (`GET /repos/OWNER/NAME`), once at start and once per worker run and publication | Public repository: the deployment's `GITHUB_PUBLIC_TOKEN` (or none); a rejected credential falls back to an anonymous visibility check. Private: the importer's GitHub App user token, which shares their personal hourly limit with `gh` and their other tools |
-| Ref resolution, tree listing, tarball, blob fallback, paged discovery | The Forge GitHub App installation token (`contents`/`metadata` read on that one repository; the App's own quota) when the App is installed there; otherwise the credential from the access check |
-| Installation lookup and token mint | The App JWT (App quota) |
+| Access check (`GET /repos/OWNER/NAME`), once at start and once per worker run and publication | Public repository: the deployment's `GITHUB_PUBLIC_TOKEN` (or none); a rejected credential falls back to an anonymous visibility check. If that quota is exhausted, a configured App tries a metadata-only token scoped to the named repository. Private repositories still require the importer's current GitHub App user token, which shares their personal hourly limit with `gh` and their other tools |
+| Ref resolution, tree listing, tarball, Git pack fallback, paged discovery | The Forge GitHub App installation token (`contents`/`metadata` read on that one repository; the App's own quota) when the App is installed there; otherwise the credential from the access check |
+| Installation lookup and token mint | The App JWT (App quota); metadata recovery mints only `metadata:read` for the named repository, then contents reads use the numeric repository ID returned by authorization |
 
 Owner decision (Issue 2ccd3bae): one import may use about 10 percent of the
 importer's hourly GitHub limit. The worker reads the limit and reset from GitHub's
@@ -78,13 +78,13 @@ repository or claim ownership of it.
 A complete recursive Git tree selects archive transfer (protocol 3). The worker
 streams the selected commit's tarball, follows only the validated GitHub codeload
 redirect without forwarding credentials, and verifies every retained file against
-its Git object ID. Archive-omitted or rewritten members are fetched by Git blob;
+its Git object ID. Archive-omitted or rewritten members are fetched in Git protocol v2 blob packs;
 submodules remain commit pointers. GitHub truncates a recursive tree reply at 100,000
 entries or about 7 MB, whichever comes first. A truncated reply does not change the
 path: the listing is rebuilt from smaller tree reads (the root without recursion, each
 child recursively, and again non-recursively only for a child still truncated; equal
 trees are read once, 8 reads at a time), about one request per split directory rather
-than per directory or blob. Paged tree/blob acquisition (protocol 2) is used only when
+than per directory or blob. Paged tree/Git-pack acquisition (protocol 2) is used only when
 a single directory is itself above the reply limit or the split would need more than
 1,500 tree reads; the reason is logged as `listing-split-unavailable`. No partial tree
 is published.
@@ -104,16 +104,22 @@ Committed regular files, executable modes, symlink targets, binaries, empty file
 and committed ignored paths are retained. Source names cannot overlap the
 existing `.git`/`.forge` metadata namespaces. Git history and derived code
 analysis are separate. [Git LFS files](#git-lfs-files) hold their object bytes.
-The Git blob endpoint acquisition boundary remains 100 MB per blob; large
-supported files stream through the existing bounded chunk recipes. This is a
-provider boundary, not a new repository quota.
+The existing 100 MB acquisition boundary remains unchanged; large supported
+files stream through the existing bounded chunk recipes.
 
 Ordinary archive members drain the source buffer at the 8 MiB/1,000-object
-thresholds; a final member can cross the byte threshold. Git-blob fallback
-fetches windows of up to 100 small blobs, each sized by listed bytes to the room
-left before the 8 MiB threshold (an empty window still takes one blob), stages each
-verified blob as it arrives and drains after every window, so staging stays within
-about 8 MiB plus one blob. Large members stream through chunk recipes. Upload holds the staged
+thresholds; a final member can cross the byte threshold. Fallback fetches one Git
+pack per page of up to 100 small blobs, sized by listed bytes to the room before
+the 8 MiB drain threshold (an empty window still takes one blob). Whole objects
+and offset/id deltas are verified against the pinned Git identities and sizes;
+duplicate identities share the same fetch. Large missing blobs stream as singleton
+Git packs into chunk recipes. Protocol 2 similarly fetches its small source blobs
+and LFS attribute rules by byte-bounded pages. None of these transfers calls the
+REST blob endpoint. Git fetches use the selected read credential on `github.com`
+and consume no `api.github.com` primary REST quota. LFS batch requests and object
+downloads remain separate; object downloads are inherently per distinct LFS oid.
+The small pack decoder holds one compressed/decoded page alongside the existing
+source window; large blobs hold bounded compressed/decompressed chunks. Upload holds the staged
 source and one pack copy. Each window becomes one immutable, SHA-256-verified R2
 object; singleton and empty objects can stay raw. The sorted
 catalog retains logical digests, sizes, byte offsets and pack identities, with up

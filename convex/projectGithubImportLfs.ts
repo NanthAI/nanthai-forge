@@ -5,7 +5,7 @@ import type { Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import type { GithubFetch } from '../src/github';
 import { githubSourceMode, type GithubSourceEntry } from '../src/github-project-source';
-import { lfsImportDefaultBytes, type ImportProgress } from '../src/github-import-pages';
+import { lfsImportDefaultBytes, filePage, type ImportProgress } from '../src/github-import-pages';
 import { LfsImport } from '../src/github-lfs-import';
 import { ObjectRecipeBuilder } from '../src/object-chunks';
 import { ForgeError } from '../src/errors';
@@ -38,24 +38,18 @@ export async function resolvePageLfs(
     sizes: number[];
     token?: string;
     github: GithubFetch;
-    fetchAttribute: (
-      entry: GithubSourceEntry,
-      consume: (part: Buffer) => Promise<void>,
-    ) => Promise<{ blob: string; size: number }>;
+    fetchAttributes: (entries: GithubSourceEntry[]) => Promise<Map<string, Buffer>>;
     started: number;
     actor: string;
   },
 ) {
   const { job, progress, lfs, upload, held, imported, sizes } = input;
-  for (const attribute of progress.attributes ?? []) {
-    const parts: Buffer[] = [];
-    await input.fetchAttribute(
-      { path: attribute.path, sha: attribute.sha, size: attribute.size, mode: '100644' },
-      async part => {
-        parts.push(part);
-      },
-    );
-    lfs.addAttributes(attribute.path, Buffer.concat(parts).toString('utf8'));
+  const attributes = progress.attributes ?? [];
+  for (let at = 0; at < attributes.length;) {
+    const page = filePage(attributes.slice(at).map(entry => ({ ...entry, mode: '100644' as const })));
+    const blobs = await input.fetchAttributes(page);
+    for (const entry of page) lfs.addAttributes(entry.path, blobs.get(entry.sha)!.toString('utf8'));
+    at += page.length;
   }
   let known = new Set<string>();
   const resolved = new Set<string>();

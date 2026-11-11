@@ -161,6 +161,77 @@ Import seconds above include provider waits and failed setup attempts; successfu
 | shapes-posix | GITHUB_RATE_LIMIT | 5.6 | 1743.4 | 6047.1 |
 | shapes-posix | GITHUB_RATE_LIMIT | 6.4 | 1244.6 | 6047.1 |
 
+## Import request attribution and qualification
+
+Issue `ed088358` separates the retained observations from counts derived from the
+import code. The raw preparation rows retain three `GITHUB_RATE_LIMIT` refusals
+for each worst row: C++ active attempt 7.203 s, full wall 2,580.215 s, provider
+waits 1,734.021 + 577.242 + 223.375 s; POSIX shapes active attempt 17.061 s,
+full wall 6,047.133 s, waits 3,029.098 + 1,743.358 + 1,244.642 s. These are
+observations with failed attempts included, not a matched before/after result.
+Their CLI import-call totals are 11 and 7, respectively; those are client calls,
+not all internal Convex executions. Retained Rust recovery also recorded
+`anonymous:2, app:4, server:2, user:0` before source progress. This supports shared
+metadata quota exhaustion before installation-token selection, rather than an
+importer-share refusal. The precise failing endpoint and credential for each
+C++/POSIX attempt were not retained; no HTTP trace is reconstructed from a reset.
+
+Structural counts for an import (not measured endpoint traces): `R` is the number
+of source worker runs, `T` the required tree replies, `M` archive-missing or
+rewritten source blobs, `F` the files in protocol 2, and `A` attribute rules read
+for LFS pages. Healthy archive imports usually have `R=1`, `T=1`.
+
+| Endpoint / transfer | Before this fix | Current path | Credential / bucket |
+| --- | --- | --- | --- |
+| `GET /repos/OWNER/NAME` | Start + each worker + publication; separate history authorization after ready | Same healthy count; exhausted public metadata can use a metadata-only App probe | Deployment token when configured, else anonymous; private reads additionally prove current importer access |
+| Clerk OAuth token + `POST /applications/CLIENT/token` | One each per private authorization | Unchanged | Clerk is not GitHub; client Basic auth is App traffic, not the importer token |
+| `GET /repos/OWNER/NAME/installation` + `POST /app/installations/ID/access_tokens` | One pair per transfer authorization when configured/installed | Same, plus one metadata-only pair only on quota recovery | App JWT; contents tokens remain scoped to a proven numeric repository ID |
+| `GET /repos/OWNER/NAME/commits/REF` | One at start | One | Installation token when available; authorized fallback otherwise |
+| `GET /repos/OWNER/NAME/git/trees/TREE` | One complete recursive tree, or bounded split/directory replies (`T`) | Unchanged | Same selected source credential |
+| `GET /repos/OWNER/NAME/tarball/COMMIT`, then codeload | One per archive run (`R`), codeload follows without credentials | Unchanged | Source credential on API request; codeload is outside REST quota |
+| `GET /repos/OWNER/NAME/git/blobs/OID` | `M` for archives; up to `F+A` for protocol 2 | Zero in source import | Previously the selected source credential's REST quota |
+| `POST github.com/OWNER/NAME.git/git-upload-pack` | Separate history fetch after publication | Also one per count/byte-bounded missing-source page; a large blob streams as a singleton byte page | Selected source credential via Basic; Git transport, outside primary REST quota |
+| LFS batch / object download | One batch per at most 100 unique oids, then each distinct object | Unchanged | Separate LFS bucket; public anonymous, private selected read token; downloads remain per distinct object |
+
+The public metadata path tries `GITHUB_PUBLIC_TOKEN` first; a rejected token can
+fall back to anonymous metadata. Source selection previously happened only after
+that succeeded. The recovery now reaches the App's own quota without using App
+metadata as proof of a person's private access. Publication and the separate
+history fetch share the same recovery, with no new Convex call or idle work.
+A missing App preserves the original provider reset and existing retry behavior.
+
+[GitHub's rate-limit documentation](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
+assigns anonymous REST traffic 60 requests/hour per originating IP, user traffic
+a shared personal budget normally 5,000/hour, and installation tokens a separate
+budget of at least 5,000/hour (which can scale with the installation). The
+configured deployment token's exact bucket depends on its token kind; retained
+counters do not prove its configuration. Secondary limits can also apply; Git
+and LFS transfers are not evidence that all provider limits disappeared.
+
+The synthetic omitted-archive guard fails on the old path at 12 and 212 REST
+blob requests. The same imports now use six REST requests at either size and
+one/three Git blob-page fetches. It also verifies exact completion. The older
+paged path, large streamed fallback, byte-window storage, private access,
+revocation, unavailable App, corrupt packs/deltas, failed sinks and provider
+errors have affected regression coverage. Source and listing bytes remain in R2;
+existing metadata windows, upload receipts and publication writes are reused.
+There are no new tables, scheduling steps, quotas, waiting rules or user steps.
+
+Live qualification remains open: no development deployment or fresh import is
+claimed by this change. Both original public fixture repositories now return
+HTTP 404; the zoo teardown removed them. Recreating/publishing repositories and
+deploying backend code are outside this builder's authorization, so neither of
+the two permitted reruns was launched. The authorized follow-up is at most two imports, the
+retained C++ and POSIX source pins, after the accepted backend is deployed.
+Capture reset waits, whole wall and active time, all internal Convex calls and
+DB read/write bytes, plus host load/swap. The retained selected-function baseline
+is C++ `stored`: 3 calls/36,029 read B, `publish`: 2 calls/33,461 read B/30,062
+write B; POSIX `stored`: 1 call/1,610 read B, `publish`: 1 call/1,711 read B/3,887
+write B. These are incomplete function cohorts, not total import billing. Missing
+before totals and provider-header traces must stay unknown. Two observations do
+not meet the interleaved-pair performance-claim method or establish a causal
+wall-time gain; the healthy-wall/billed-I/O acceptance stays unticked.
+
 ## Per-repository timings
 
 Seconds, Forge / plain Git. Forge landing times include hosted checks; Git push times exclude CI. Import uses total elapsed wall time including provider waits. `landReuse` is the legacy Lane C column; it does not establish which Lane was overtaken.

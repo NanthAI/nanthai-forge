@@ -4,17 +4,12 @@ import { createHash } from 'node:crypto';
 import type { ActionCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
-import { authorizeGithub } from '../src/github-access';
-import { githubConfig } from './access';
+import { authorizeImportGithub } from './githubImportAccess';
 import { importReadToken } from './githubAppToken';
 import { convexFetch } from './networkFetch';
 import { networkFetch } from '../src/network-fetch';
 import type { ImportRequestMeter } from '../src/github-import-meter';
-import {
-  githubSourceMode,
-  streamGithubSourceBlob,
-  type GithubSourceEntry,
-} from '../src/github-project-source';
+import { githubSourceMode, type GithubSourceEntry } from '../src/github-project-source';
 import {
   listGithubTree,
   openGithubArchive,
@@ -24,7 +19,8 @@ import {
 import { archiveCursorSchema, importPageBytes, lfsImportDefaultBytes } from '../src/github-import-pages';
 import { ImportedPins } from '../src/github-listing-codec';
 import { ObjectRecipeBuilder, objectChunkBytes } from '../src/object-chunks';
-import { mapExchange } from '../src/exchange-parallel';
+import { githubBlobPack } from '../src/github-blob-pack';
+import { streamGithubBlobPack } from '../src/github-blob-pack-stream';
 import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
 import { LfsImport } from '../src/github-lfs-import';
@@ -56,7 +52,7 @@ export async function runArchiveImport(
   const started = Date.now(),
     cursor = archiveCursorSchema.parse(JSON.parse(job.cursor));
   const github = meter.wrap(networkFetch);
-  const access = await authorizeGithub(job.repository, job.owner, githubConfig(), github);
+  const access = await authorizeImportGithub(job.repository, job.owner, github);
   invariant(
     job.visibility === 'private' || !access.repository.private,
     'GITHUB_VISIBILITY_CHANGED',
@@ -178,7 +174,7 @@ export async function runArchiveImport(
     missing.filter(file => file.mode !== '160000' && file.size <= objectChunkBytes),
     {
       upload,
-      fetchBlob: (entry, consume) => streamGithubSourceBlob(job.repository, entry, consume, token, github),
+      fetchBlobs: entries => githubBlobPack(job.repository, entries, token, github),
       record,
       drain,
       over,
@@ -188,7 +184,7 @@ export async function runArchiveImport(
   for (const entry of missing.filter(file => file.mode !== '160000' && file.size > objectChunkBytes)) {
     if (over()) break;
     const matched = await streamLarge(entry, async consume => {
-      await streamGithubSourceBlob(job.repository, entry, consume, token, github);
+      await streamGithubBlobPack(job.repository, entry, consume, token, github);
     });
     invariant(matched, 'ARTIFACT_INTEGRITY', 'GitHub blob differs from the selected commit.');
   }
@@ -264,23 +260,19 @@ export async function runArchiveImport(
 /** Fallback blobs (omitted or rewritten archive members) are fetched in windows
  * sized by listed bytes as well as count: a window only fills the room left
  * before the normal 8 MiB drain threshold, plus at most one blob when it is
- * empty. Each blob is verified against its Git object, staged as soon as it
- * arrives, then drained, so staging never holds a whole 100-blob page. */
+ * empty. One Git fetch returns the verified page; staging drains after each
+ * byte-bounded page, so neither transfer nor staging grows with the repository. */
 export async function stageFallbackBlobs(
   entries: GithubSourceEntry[],
   io: {
     upload: Pick<ImportUpload, 'put' | 'stagedBytes'>;
-    fetchBlob: (
-      entry: GithubSourceEntry,
-      consume: (part: Buffer) => Promise<void>,
-    ) => Promise<{ blob: string; size: number }>;
+    fetchBlobs: (entries: GithubSourceEntry[]) => Promise<Map<string, Buffer>>;
     record: (entry: GithubSourceEntry, pin: { blob: string; size: number }) => void;
     drain: () => Promise<void>;
     over: () => boolean;
     /** True when these verified bytes wait for LFS resolution instead. */
     hold?: (entry: GithubSourceEntry, bytes: Buffer) => boolean;
   },
-  concurrency = 8,
   pageFiles = 100,
 ) {
   for (let at = 0; at < entries.length && !io.over();) {
@@ -293,16 +285,19 @@ export async function stageFallbackBlobs(
       (end === at || listed + entries[end]!.size <= room)
     )
       listed += entries[end++]!.size;
-    await mapExchange(entries.slice(at, end), concurrency, async entry => {
-      const parts: Buffer[] = [];
-      const pin = await io.fetchBlob(entry, async part => {
-        parts.push(part);
-      });
-      const bytes = Buffer.concat(parts);
-      if (io.hold?.(entry, bytes)) return;
+    const page = entries.slice(at, end),
+      blobs = await io.fetchBlobs(page);
+    for (const entry of page) {
+      const bytes = blobs.get(entry.sha);
+      invariant(
+        bytes && bytes.length === entry.size && gitBlobId(entry.sha, bytes) === entry.sha,
+        'ARTIFACT_INTEGRITY',
+        'GitHub blob differs from the selected commit.',
+      );
+      if (io.hold?.(entry, bytes)) continue;
       io.upload.put(bytes);
-      io.record(entry, pin);
-    });
+      io.record(entry, { blob: digest(bytes), size: bytes.length });
+    }
     at = end;
     await io.drain();
   }

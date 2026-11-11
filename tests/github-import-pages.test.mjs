@@ -9,6 +9,7 @@ import { readObjectRecipe } from '../dist/object-chunks.js';
 import { filePage, importPageBytes, importPathKey } from '../dist/github-import-pages.js';
 import { digest } from '../dist/hash.js';
 import { storedBytes } from './default-r2.mjs';
+import { wantedBlobResponse } from './github-blob-pack-fixture.mjs';
 const sha = bytes => createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 const hex = n => n.toString(16).padStart(40, '0');
 
@@ -56,6 +57,7 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
     globalThis.fetch = old;
   });
   let blobRequests = 0,
+    blobPacks = 0,
     splitProbe = false,
     apiRequests = 0;
   globalThis.fetch = async (url, init) => {
@@ -84,6 +86,10 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
     if (path.includes('/git/trees/')) {
       const id = path.split('/').at(-1);
       return Response.json({ sha: id, truncated: false, tree: trees.get(id) });
+    }
+    if (path === '/fixture/scale.git/git-upload-pack') {
+      blobPacks++;
+      return wantedBlobResponse(init, bodies);
     }
     if (path.includes('/git/blobs/')) {
       blobRequests++;
@@ -126,7 +132,8 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
   assert.equal(job.phase, 'ready');
   assert.equal(job.completed, files + submodules);
   assert.equal(job.submodules, submodules);
-  assert.equal(blobRequests, files);
+  assert.equal(blobRequests, 0, 'no per-file REST calls');
+  assert.equal(blobPacks, Math.ceil((files + submodules) / 1000));
   // Issue 2ccd3bae: every REST request of the fallback path is counted by who paid it.
   assert.deepEqual(job.githubRequests, { user: 0, app: 0, server: 0, anonymous: apiRequests });
   assert.ok(

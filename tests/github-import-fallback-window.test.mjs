@@ -5,7 +5,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
 import { startFakeR2, fakeR2Config } from './fake-r2.mjs';
-import { streamGithubSourceBlob } from '../dist/github-project-source.js';
+import { githubBlobPack } from '../dist/github-blob-pack.js';
+import { wantedBlobResponse } from './github-blob-pack-fixture.mjs';
 import { importPageBytes } from '../dist/github-import-pages.js';
 const { ImportUpload } = await import(moduleUrl('../convex/projectGithubImportUpload.ts'));
 const { stageFallbackBlobs } = await import(moduleUrl('../convex/projectGithubImportArchive.ts'));
@@ -70,13 +71,9 @@ async function fixture(t, count, size) {
         return upload.stagedBytes;
       },
     },
-    fetchBlob: (entry, consume, tamper) =>
-      streamGithubSourceBlob(
-        'fixture/repo',
-        entry,
-        consume,
-        undefined,
-        async () => new Response(tamper ?? bodies.get(entry.sha)),
+    fetchBlobs: (entries, tamper) =>
+      githubBlobPack('fixture/repo', entries, undefined, async (_url, init) =>
+        wantedBlobResponse(init, tamper ?? bodies),
       ),
     drain: async () => {
       if (await upload.drain()) {
@@ -142,7 +139,7 @@ test('a changed fallback blob is rejected before it can be staged', async t => {
   await assert.rejects(
     stageFallbackBlobs(f.entries, {
       ...f.io,
-      fetchBlob: entry => f.io.fetchBlob(entry, async () => {}, bad),
+      fetchBlobs: entries => f.io.fetchBlobs(entries, new Map(f.entries.map(e => [e.sha, bad]))),
       record: () => assert.fail('nothing recorded'),
     }),
     /differs|ARTIFACT_INTEGRITY|exceeds|pinned/i,
