@@ -342,6 +342,8 @@ pre-cleanup samples. Indexed sizes assume approximate full copies; potential
 savings are ceilings/ranges before pointer/R2 costs and overlap with expiry.
 They must not be summed as a measured saving. Keeping history forever permits
 moving exact bytes behind verified pointers, not deleting them.
+The [placement review](research/placement-review.md) gives a verdict for every table and R2
+use and proposes the slices; none is approved yet.
 
 | Table | Rows / sample mean B | Logical / indexed GB model | What remains to assess |
 | --- | ---: | ---: | --- |
