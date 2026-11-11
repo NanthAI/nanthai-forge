@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { StateSize } from '../src/state/size';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { r2Key } from './r2';
@@ -32,6 +33,13 @@ function entry(page: Page, digest: string): CatalogObject | null {
         size: page.sizes[middle]!,
         ...(page.stateGenerations?.some(row => row.index === middle)
           ? { stateGeneration: page.stateGenerations.find(row => row.index === middle)!.generation }
+          : {}),
+        ...(page.stateSizes?.find(row => row.index === middle)
+          ? {
+              stateSize: (({ fileCount, manifestBytes }) => ({ fileCount, manifestBytes }))(
+                page.stateSizes.find(row => row.index === middle)!,
+              ),
+            }
           : {}),
         nonce: '',
         removed: false,
@@ -120,6 +128,7 @@ export async function objectRow(ctx: MutationCtx, object: ObjectView): Promise<D
     size: object.size,
     nonce: crypto.randomUUID(),
     ...(object.stateGeneration === undefined ? {} : { stateGeneration: object.stateGeneration }),
+    ...(object.stateSize === undefined ? {} : { stateSize: object.stateSize }),
     removed: false,
     sourceReferenced: true,
     ...(object.recipe
@@ -137,6 +146,7 @@ type CatalogPageEntry = {
   digest: string;
   size: number;
   stateGeneration?: number;
+  stateSize?: StateSize;
   recipe?: { digest: string; size: number };
   pack?: ObjectPack;
 };
@@ -163,6 +173,9 @@ export function* sortedCatalogPages(sorted: Iterable<CatalogPageEntry>) {
             row.stateGeneration === undefined ? [] : [{ index, generation: row.stateGeneration }],
           ),
         }
+      : {}),
+    ...(rows.some(row => row.stateSize !== undefined)
+      ? { stateSizes: rows.flatMap((row, index) => (row.stateSize ? [{ index, ...row.stateSize }] : [])) }
       : {}),
     recipes: rows.flatMap((row, index) => (row.recipe ? [{ index, ...row.recipe }] : [])),
     ...(rows.some(row => row.pack)

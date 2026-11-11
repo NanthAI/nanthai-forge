@@ -594,3 +594,32 @@ test('catalog compaction preserves every reachable binding, original upload retr
     }),
   );
 });
+
+test('State logical dimensions survive catalog windows, page rewrites and row promotion; legacy entries remain readable', async () => {
+  const dimensions = { fileCount: 29000, manifestBytes: 4698112 };
+  const entries = [
+    { digest: hex('sized-state'), size: dimensions.manifestBytes, stateSize: dimensions },
+    { digest: hex('legacy-state'), size: 123 },
+  ];
+  const { s } = fixture(entries);
+  const sized = await find.findObject(s.ctx, 'project', entries[0].digest);
+  assert.deepEqual(sized.stateSize, dimensions);
+  assert.equal((await find.findObject(s.ctx, 'project', entries[1].digest)).stateSize, undefined);
+  const page = find.catalogPages(entries)[0];
+  const restored = catalog.windowEntries(JSON.stringify(page));
+  assert.deepEqual(restored.find(row => row.digest === entries[0].digest).stateSize, dimensions);
+  assert.deepEqual((await find.objectRow(s.ctx, sized)).stateSize, dimensions);
+  const { CatalogTable } = await import('../dist/import-catalog-table.js');
+  const compact = new CatalogTable();
+  for (const entry of entries) compact.set(entry.digest, entry);
+  assert.deepEqual(
+    [...compact.sorted()],
+    [...entries].sort((a, b) => a.digest.localeCompare(b.digest)),
+  );
+  compact.get(entries[0].digest).stateSize.fileCount = 0;
+  assert.deepEqual(
+    compact.get(entries[0].digest).stateSize,
+    dimensions,
+    'callers cannot mutate stored dimensions',
+  );
+});

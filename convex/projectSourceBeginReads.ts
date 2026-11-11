@@ -27,6 +27,7 @@ export async function sourceObjectLocation(
   return {
     descriptor: descriptor!,
     ...(object.stateGeneration === undefined ? {} : { stateGeneration: object.stateGeneration }),
+    ...(object.stateSize === undefined ? {} : { stateSize: object.stateSize }),
     ...(object.stateParents === undefined ? {} : { stateParents: object.stateParents }),
     ...(object.statePhysical === undefined ? {} : { statePhysical: object.statePhysical }),
     storageId: url ? null : (object.storageId ?? null),

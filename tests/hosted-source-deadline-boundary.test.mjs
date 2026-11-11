@@ -194,7 +194,17 @@ for (const shape of ['serial', 'fork', 'child-continue', 'child-join'])
       f.advanceClock(2);
       commits++;
     });
+    // Exercise the nonterminal reducer deterministically: identical cached bodies
+    // can finish even a 12k-file merge within the real quantum on a fast machine.
+    // Advance only the monotonic work clock; the retained deadline uses the
+    // fixture's independent Date clock above. No sleep or wall-time assertion.
+    let workClock;
+    if (shape === 'serial') {
+      let tick = 0;
+      workClock = t.mock.method(performance, 'now', () => (tick += 10001));
+    }
     await f.execute(action);
+    workClock?.mock.restore();
     assert.equal(commits, 1, 'the expected real success reducer was reached');
     const failed = await load();
     assert.equal(failed.control.failureCode, 'SOURCE_RETRY_EXHAUSTED');

@@ -85,6 +85,7 @@ export const resolve = sourceMutation({
       selected.map(async ({ row, url }, i) => ({
         descriptor: descriptors[i]!,
         ...(row.stateGeneration === undefined ? {} : { stateGeneration: row.stateGeneration }),
+        ...(row.stateSize === undefined ? {} : { stateSize: row.stateSize }),
         ...(row.stateParents === undefined ? {} : { stateParents: row.stateParents }),
         ...(row.statePhysical === undefined ? {} : { statePhysical: row.statePhysical }),
         storageId: url ? null : (row.storageId ?? null),

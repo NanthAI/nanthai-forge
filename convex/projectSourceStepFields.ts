@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
-import { objectPack, recipeClosure } from './projectObjectFields';
+import { objectPack, recipeClosure, stateSize } from './projectObjectFields';
 import { sourceExecutionTiming } from './projectSourceStepTiming';
 import {
   sourceFailureStages,
@@ -11,6 +11,7 @@ import {
 } from '../src/hosted-source-retry';
 export const sourceOutput = v.object({
   stateGeneration: v.optional(v.number()),
+  stateSize: v.optional(stateSize),
   stateParents: v.optional(v.array(v.string())),
   statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
   sha256: v.string(),

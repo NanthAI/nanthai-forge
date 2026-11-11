@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { StateSize } from '../src/state/size';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
@@ -12,6 +13,7 @@ export type SourceOutput = {
   sha256: string;
   size: number;
   stateGeneration?: number;
+  stateSize?: StateSize;
   stateParents?: string[];
   storageId?: Id<'_storage'>;
   r2Key?: string;

@@ -17,6 +17,8 @@ export function catalogEligible(row: Doc<'projectObjects'>) {
     !row.packMembers &&
     row.stateGeneration === undefined &&
     row.stateParents === undefined &&
+    row.stateSize === undefined &&
+    row.statePhysical === undefined &&
     row.stateTree === undefined &&
     row.recipeClosure === undefined &&
     !row.r2SweepKey &&

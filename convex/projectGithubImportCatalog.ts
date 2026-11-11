@@ -11,13 +11,15 @@ import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { purgePageBudget, documentBytes } from './projectPurgeBudget';
-import { objectPack } from './projectObjectFields';
+import { stateSize, stateSizes, objectPack } from './projectObjectFields';
+import { validStateSize, type StateSize } from '../src/state/size';
 import type { ObjectPack } from '../src/object-pack-range';
 
 export const catalogEntry = v.object({
   digest: v.string(),
   size: v.number(),
   stateGeneration: v.optional(v.number()),
+  stateSize: v.optional(stateSize),
   recipe: v.optional(v.object({ digest: v.string(), size: v.number() })),
   pack: v.optional(objectPack),
 });
@@ -25,6 +27,7 @@ type Entry = {
   digest: string;
   size: number;
   stateGeneration?: number;
+  stateSize?: StateSize;
   recipe?: { digest: string; size: number };
   pack?: ObjectPack;
 };
@@ -33,6 +36,7 @@ const catalogRow = v.object({
   last: v.string(),
   digests: v.string(),
   sizes: v.array(v.number()),
+  stateSizes,
   stateGenerations: v.optional(v.array(v.object({ index: v.number(), generation: v.number() }))),
   recipes: v.array(v.object({ index: v.number(), digest: v.string(), size: v.number() })),
   packs: v.optional(
@@ -48,6 +52,8 @@ const validEntry = (entry: Entry) =>
   entry.size >= 0 &&
   (entry.stateGeneration === undefined ||
     (Number.isSafeInteger(entry.stateGeneration) && entry.stateGeneration > 0)) &&
+  (entry.stateSize === undefined ||
+    (validStateSize(entry.stateSize) && entry.stateSize.manifestBytes === entry.size)) &&
   (!entry.recipe || (pin.test(entry.recipe.digest) && Number.isSafeInteger(entry.recipe.size))) &&
   (!entry.pack ||
     (!entry.recipe &&
@@ -78,6 +84,13 @@ export async function recordWindow(ctx: MutationCtx, job: Doc<'projectGithubImpo
           ),
         }
       : {}),
+    ...(objects.some(entry => entry.stateSize !== undefined)
+      ? {
+          stateSizes: objects.flatMap((entry, index) =>
+            entry.stateSize ? [{ index, ...entry.stateSize }] : [],
+          ),
+        }
+      : {}),
     recipes: objects.flatMap((entry, index) => (entry.recipe ? [{ index, ...entry.recipe }] : [])),
     packs: objects.flatMap((entry, index) => (entry.pack ? [{ index, ...entry.pack }] : [])),
   });
@@ -87,6 +100,7 @@ export function windowEntries(value: string): Entry[] {
   const row: {
     digests: string;
     sizes: number[];
+    stateSizes?: ({ index: number } & StateSize)[];
     stateGenerations?: { index: number; generation: number }[];
     recipes: { index: number; digest: string; size: number }[];
     packs?: ({ index: number } & ObjectPack)[];
@@ -97,6 +111,8 @@ export function windowEntries(value: string): Entry[] {
   }));
   for (const { index, generation } of row.stateGenerations ?? [])
     entries[index]!.stateGeneration = generation;
+  for (const { index, fileCount, manifestBytes } of row.stateSizes ?? [])
+    entries[index]!.stateSize = { fileCount, manifestBytes };
   for (const { index, digest, size } of row.recipes) entries[index]!.recipe = { digest, size };
   for (const { index, digest, size, offset } of row.packs ?? [])
     entries[index]!.pack = { digest, size, offset };
@@ -130,6 +146,15 @@ export const publish = internalMutation({
           page.digests.length === count * 64 &&
           page.first === page.digests.slice(0, 64) &&
           page.last === page.digests.slice(-64) &&
+          (page.stateSizes ?? []).every(
+            row =>
+              Number.isSafeInteger(row.index) &&
+              row.index >= 0 &&
+              row.index < count &&
+              validStateSize(row) &&
+              row.manifestBytes === page.sizes[row.index],
+          ) &&
+          new Set((page.stateSizes ?? []).map(row => row.index)).size === (page.stateSizes?.length ?? 0) &&
           page.recipes.every(row => row.index >= 0 && row.index < count) &&
           (page.packs ?? []).every(
             row => Number.isSafeInteger(row.index) && row.index >= 0 && row.index < count,
@@ -171,7 +196,8 @@ export const publish = internalMutation({
             same(previous.sizes, page.sizes) &&
             same(previous.recipes, page.recipes) &&
             same(previous.packs, page.packs) &&
-            same(previous.stateGenerations, page.stateGenerations),
+            same(previous.stateGenerations, page.stateGenerations) &&
+            same(previous.stateSizes, page.stateSizes),
           'IMPORT_PAGE_CHANGED',
           'Immutable catalog changed.',
         );

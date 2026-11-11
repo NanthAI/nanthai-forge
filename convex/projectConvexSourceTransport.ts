@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { StateSize } from '../src/state/size';
 import { sourcePutMetrics } from './projectSourceBytes';
 import { sourceStateChunks } from './projectConvexSourceChunks';
 import { copyRecipeClosure } from '../src/object-pack-range';
@@ -31,6 +32,7 @@ export const sourceResultInlineBytes = 64 * 1024;
 export type ObjectLocation = {
   descriptor: WorkerObject;
   stateGeneration?: number;
+  stateSize?: StateSize;
   stateParents?: string[];
   statePhysical?: WorkerPin;
   storageId: Id<'_storage'> | null;

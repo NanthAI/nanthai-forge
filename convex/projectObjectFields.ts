@@ -7,12 +7,18 @@ export const objectPack = v.object({ digest: v.string(), size: v.number(), offse
 export const recipeClosure = v.array(
   v.object({ sha256: v.string(), size: v.number(), pack: v.optional(objectPack) }),
 );
+export const stateSize = v.object({ fileCount: v.number(), manifestBytes: v.number() });
+export const stateSizes = v.optional(
+  v.array(v.object({ index: v.number(), fileCount: v.number(), manifestBytes: v.number() })),
+);
 export const objectFields = {
   projectId: v.id('hostedProjects'),
   digest: v.string(),
   size: v.number(),
   /** Authenticated State topological level; absent on old rows and non-States. */
   stateGeneration: v.optional(v.number()),
+  /** Logical dimensions of hash-verified State bytes; absent on legacy States. */
+  stateSize: v.optional(stateSize),
   /** Exact parents of a hash-verified State (Git commit-graph parity), written once beside its
    * generation so ancestry walks read this row instead of the manifest. Absent on old rows. */
   stateParents: v.optional(v.array(v.string())),
@@ -83,6 +89,7 @@ export const objectTables = {
     /** Concatenated 64-hex digests, ascending. */
     digests: v.string(),
     sizes: v.array(v.number()),
+    stateSizes,
     stateGenerations: v.optional(v.array(v.object({ index: v.number(), generation: v.number() }))),
     /** Logical objects stored as a recipe (no raw bytes of their own). */
     recipes: v.array(v.object({ index: v.number(), digest: v.string(), size: v.number() })),

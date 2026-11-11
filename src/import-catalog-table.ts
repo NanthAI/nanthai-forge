@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { StateSize } from './state/size.js';
 import type { ObjectPack } from './object-pack-range.js';
 
 export type CatalogEntry = {
   digest: string;
   size: number;
   stateGeneration?: number;
+  stateSize?: StateSize;
   recipe?: { digest: string; size: number };
   pack?: ObjectPack;
 };
@@ -24,7 +26,7 @@ export class CatalogTable {
   private slots = new Int32Array(0);
   private packNames: { digest: string; size: number }[] = [];
   private packIndex = new Map<string, number>();
-  private extra = new Map<number, Pick<CatalogEntry, 'recipe' | 'stateGeneration'>>();
+  private extra = new Map<number, Pick<CatalogEntry, 'recipe' | 'stateGeneration' | 'stateSize'>>();
   private probe = Buffer.alloc(32);
 
   has(digest: string) {
@@ -56,10 +58,11 @@ export class CatalogTable {
       this.packs[row] = name;
       this.offsets[row] = entry.pack.offset;
     } else this.packs[row] = -1;
-    if (entry.recipe || entry.stateGeneration !== undefined)
+    if (entry.recipe || entry.stateGeneration !== undefined || entry.stateSize !== undefined)
       this.extra.set(row, {
         ...(entry.recipe ? { recipe: { digest: entry.recipe.digest, size: entry.recipe.size } } : {}),
         ...(entry.stateGeneration === undefined ? {} : { stateGeneration: entry.stateGeneration }),
+        ...(entry.stateSize === undefined ? {} : { stateSize: { ...entry.stateSize } }),
       });
     else this.extra.delete(row);
     return this;
@@ -80,6 +83,7 @@ export class CatalogTable {
       extra = this.extra.get(row);
     const entry: CatalogEntry = { digest, size: this.sizes[row]! };
     if (extra?.stateGeneration !== undefined) entry.stateGeneration = extra.stateGeneration;
+    if (extra?.stateSize) entry.stateSize = { ...extra.stateSize };
     if (extra?.recipe) entry.recipe = { ...extra.recipe };
     if (pack >= 0) entry.pack = { ...this.packNames[pack]!, offset: this.offsets[row]! };
     return entry;
