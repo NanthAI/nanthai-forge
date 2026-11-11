@@ -44,26 +44,21 @@ Multiply the first four terms by 1.1 for published Starter; search already uses
 Starter's published rate. Storage is added separately. R2 uploads from a Convex
 action incur Convex egress even though subsequent R2 downloads have free egress.
 
-## Pre-bench smoke and subsequent fixes (2026-11-10)
+<a id="pre-bench-smoke-and-subsequent-fixes-2026-11-10"></a>
 
-**Measured live meter, priced at capture list rates:** the pre-bench smoke
+## Pre-bench smoke and subsequent fixes
+
+**Measured live usage, with explicit price bases:** the pre-bench smoke
 (20:13–20:54 UTC, dry `n3-r1`, harness GitHub `4b092a6c`, ten Forge landings on
 the bench deployment) cost $0.0894 in the driver meter: **$8.94 per 1,000**
-(reported rounded as $8.9), against B1.5d $9.40. The lead journal measured
-$0.0869 with zero detected gaps. These are captured Convex usage priced at list,
-not an invoice or a post-fix result. The target is about $2 per 1,000; the driver
-reading is 4.47 times that target. R2, stored bytes and maintenance need separate
-allocation in the next report. This smoke is distinct from the earlier dev
+(reported rounded as $8.9), against B1.5d $9.40. The driver uses $2.20/million
+calls, $0.22/GB I/O, $0.132/GB egress and $0.30/GB-hour actions; this is a mixed
+historical basis, not the complete Starter tariff. The independent journal's
+$0.0869 uses the Professional capture rates above; at the driver's rates its
+same window is $0.0928. The independent capture has zero detected gaps. These are
+captured Convex usage priced at list, not invoices. The target is about $2 per 1,000; the driver
+reading is 4.47 times that target. R2, stored bytes and maintenance have separate coverage and allocation below. This smoke is distinct from the earlier dev
 whole-deployment window below.
-
-| Function / family | Smoke Convex cost share (measured, rounded) | Measured usage over ten landings |
-| --- | ---: | --- |
-| `projectConvexSourceNode:step` | 42% | 70 calls; about 146 MB egress (14.6 MB/landing), 0.062 GB-hours |
-| `projectHostedActionsSource:resolve` | 22% | 549 calls; about 90 MB DB I/O (9 MB/landing) |
-| `projectConvexSourceObjects:resolve` | 4% | 414 calls; 14.5 MB DB I/O |
-| HTTP POST (endpoint unspecified in the public evidence) | 4% | 626 calls |
-| `projectHostedReuse:prove` | 4% | No finer resource split retained in the source summary |
-| Other functions | 24% | Remainder of the rounded shares; no invented per-function allocation |
 
 Source-worker uploads are generated States/recipes, results and durable progress
 sent from Convex to project R2; they are not source downloads sent to GitHub.
@@ -72,6 +67,142 @@ The new `forge-source-step.putBytes` counters separate attempted state/progress/
 result/other/refused/avoided body bytes, including failed attempts, but are not
 billed egress. HEAD-only reuse saved zero bytes in healthy sequential-save
 fixtures and was withheld; replay-only savings were not admitted as landing gains.
+
+### Post-fix smoke (`n3-r1-dry-a2`)
+
+The post-overnight-fixes smoke is `n3-r1-dry-a2` (2026-11-11 07:24:20–08:10:03 UTC),
+against `n3-r1-dry-a1` above. Harness and bench deployment are Git
+[`9a083d5e0a12`](https://github.com/NanthAI/nanthai-forge/commit/9a083d5e0a12d0589a0844dac9ff01bbf9e1762d);
+the bench CLI is accepted State `9acd7b983e3e`, mapped to that same Git commit.
+[Verify Forge](https://github.com/NanthAI/nanthai-forge/actions/runs/42977707945)
+and the authorized [bench deployment](https://github.com/NanthAI/nanthai-forge/actions/runs/42979013818)
+are green at that commit. Both arms use the same concurrent N=3 schedule, ten-task
+order and seed `b15d-rerun-2026-11-01/n3/r1` as the original dry. Both retain
+`agent: scripted-no-model`: configured Codex `gpt-6.1-sol` / high is a version pin,
+not twenty model executions. Tokens are not applicable in either arm. No scored
+cell runs; `qualifiedHarness`, `PLAN.md` and the registered plan stay unchanged.
+The batch version guard passes with no changed measurement pin; moving accepted
+Forge/GitHub main is recorded separately.
+
+**Convex serving falls 30.0%, from $8.936 to $6.253 per 1,000 landings, on the
+original driver's four rates.** The independent numeric capture has complete
+coverage and zero detected gaps/missing usage fields in both whole-batch windows.
+At those same rates it is $9.282 → $6.795 per 1,000; at Professional capture rates,
+$8.689 → $6.376. It includes reset/setup, collection and deployment-wide webhook
+traffic, while the driver attributes its task window to the bench project. The
+after capture sees eleven acceptance markers, including reset; serving uses the
+ten task receipts. The older journal has no acceptance markers, so its denominator
+also comes from the retained receipts, not an invented zero.
+
+| Cost per 1,000 task landings | Before `a1` | After `a2` | Basis / coverage |
+| --- | ---: | ---: | --- |
+| Convex serving | $8.936 | $6.253 | Measured driver usage, original driver rates |
+| R2 compose requests | $0.0251 | $0.0256 | Model from signed requests; incomplete provider coverage |
+| Weekly backup I/O allocation | $0.415 | $0.399 | Model below; recurring expiry is unmeasured |
+| Covered serving + R2 + maintenance subtotal | $9.376 | $6.677 | Partial model, not the complete invoice total |
+| Covered subtotal / ~$2 target | 468.8% | 333.9% | Unmeasured components are not zero |
+| Complete serving + R2 + maintenance total | Unknown | Unknown | Net retained bytes, full operation counts and recurring expiry missing |
+
+Repricing the driver's identical usage at Professional rates gives $8.366 →
+$5.868 per 1,000 before R2 and maintenance. The configured Professional plan's
+captured usage remains within its period inclusions, so the captured marginal
+usage overage is $0; that is not a $0 service cost or a complete invoice. The
+$25/month subscription is separate, its shared allocation is not inferred, and
+uncaptured usage and storage prevent invoice reconciliation. No plan changes.
+
+The R2 counters retain all ten task receipts in each arm: Class A / B requests
+signed by compose are 54 / 22 → 55 / 24, or 5.4 / 2.2 → 5.5 / 2.4 per landing.
+Signed PUT lengths are 58,969,878 → 54,068,880 B total, or 5,896,988 → 5,406,888
+B/landing. They count signatures, not every executed/retried R2 operation, and
+exclude other upload/download paths. They do **not** measure stored bytes added:
+create-only reuse, failed/duplicate bodies and retention are not a net inventory.
+Net R2 stored-byte growth per landing remains unknown; no storage charge is
+silently set to zero.
+
+Backup allocation uses one weekly export at the retained mean 3.94 / 3 =
+1.313333 GB read, or $0.262667 at Professional I/O rates. The complete preceding
+seven-day accepted-receipt windows have 633 landings before and 659 after (22
+bounded pages each), giving $0.414955 → $0.398584 per 1,000. This models a weekly
+export, not all three manual experiments as recurring work, and excludes other
+export resources. Recurring expiry lacks a representative measured period and
+stays unknown. Catch-up expiry, migrations, index builds and scratch purges in
+the maintenance table remain one-off costs; none is amortized into this smoke.
+
+**Per-function driver attribution over ten landings.** MB is decimal; every cell
+is before → after. Calls are the driver's project-attributed executions; the
+older 549-call / 90-MB CI summary uses the wider independent window. Both meters
+are valid; the different scopes are retained.
+
+| Function | Calls | DB read / write MB | Egress MB | Action GB-hours | $ / 1,000 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `projectConvexSourceNode:step` | 70 → 76 | 0.000 / 0.000 → 0.000 / 0.000 | 146.369 → 155.710 | 0.062290 → 0.050229 | 3.8162 → 3.5790 |
+| `projectHostedActionsSource:resolve` | 543 → 114 | 89.143 / 0.000 → 13.848 / 0.000 | 0.000 → 0.000 | 0.000000 → 0.000000 | 2.0806 → 0.3297 |
+| `projectConvexSourceObjects:resolve` | 414 → 290 | 14.464 / 0.000 → 4.086 / 0.000 | 0.000 → 0.000 | 0.000000 → 0.000000 | 0.4093 → 0.1537 |
+| `POST /checks/actions` | 616 → 189 | 0.000 / 0.000 → 0.000 / 0.000 | 1.114 → 1.186 | 0.007337 → 0.001840 | 0.3703 → 0.1125 |
+| `projectHostedReuse:prove` | 10 → 8 | 0.000 / 0.000 → 0.000 / 0.000 | 0.760 → 0.526 | 0.010783 → 0.007953 | 0.3357 → 0.2473 |
+| `projectConvexSourceStore:commit` | 71 → 82 | 6.404 / 0.992 → 7.421 / 1.058 | 0.000 → 0.000 | 0.000000 → 0.000000 | 0.1783 → 0.2046 |
+| `projectHostedFinishDriver:step` | 102 → 95 | 6.871 / 1.256 → 6.419 / 1.194 | 0.000 → 0.000 | 0.000000 → 0.000000 | 0.2012 → 0.1884 |
+| All functions | 3,629 → 2,682 | 151.338 / 8.118 → 62.869 / 8.250 | 148.260 → 157.439 | 0.089073 → 0.067342 | 8.9356 → 6.2531 |
+
+The live gain is concentrated in CI lookup: 543 → 114 calls and 89.143 → 13.848
+MB read (−84.5%). Source-worker egress **increases 6.4%**, 146.369 → 155.710 MB;
+its compute decreases, but this smoke does not prove the fixture's State-upload
+saving. It remains 57.2% of the new driver cost. Total captured DB writes also
+increase, 8.118 → 8.250 MB. Fixture savings and physical/index storage savings
+are not substituted for these live observations.
+
+**Timing observation, not a scored exit result.** Seconds unless labelled; ranges
+are over the ten tasks. Shared-machine load is recorded in both arms; a single
+dry pair does not establish a causal performance distribution.
+
+| Metric | Before Forge | Before GitHub | After Forge | After GitHub |
+| --- | ---: | ---: | ---: | ---: |
+| Time to main, median (range) | 312.1 (183.4–793.4) | 433.2 (250.3–791.8) | 223.0 (172.9–528.5) | 400.5 (304.9–784.5) |
+| Wall to all landed | 1451.1 | 1703.0 | 1279.0 | 1580.3 |
+| Workspace prep, median (range) | 19.8 (15.0–30.7) | 12.8 (7.6–24.0) | 19.4 (15.0–45.7) | 10.1 (8.1–17.4) |
+| All check wall / landing | 347.4 | 404.2 | 301.1 | 370.6 |
+| Landed check wall, median (range) | 169.4 (139.1–346.1) | Unmeasured | 158.0 (132.6–183.6) | Unmeasured |
+| Submit/queue to accept, median (range) | 202.6 (149.4–404.3) | Unmeasured | 178.7 (136.0–404.6) | Unmeasured |
+| CI billed-equivalent minutes | 67 | 83 | 56 | 81 |
+| CI runs / jobs | 18 / 21 | 34 / 34 | 19 / 19 | 31 / 31 |
+
+Forge all-check wall uses reservation through CI end; GitHub uses check-job
+start through end, including job setup. The mean divides all runs by ten task
+landings. Forge submit-to-accept includes its queue and check; GitHub's matching
+merge-queue stamp is not retained. Those missing intervals stay unmeasured.
+Public GitHub-hosted runners incur no paid CI spend in either arm.
+
+**Main-race and reuse figures are “pre-fix b5cf317 code”.** The batch pin predates
+[`b5cf317`](https://github.com/NanthAI/nanthai-forge/commit/b5cf317768ff7f0a59b827287160a0175cb61a0c),
+which preserves global risk for identical shared configuration/lock/workflow
+paths. Main races are 12 → 11 attempts and 17.590 → 12.149 elapsed minutes.
+Discarded passed runner-minutes are 5.02452 → 5.74582 total, or **0.50245 →
+0.57458 per landing**. Each has three discarded passed runs and zero unknown
+runner runs; both have seven accepted reuse proofs. Inspection covers all ten
+new acceptance receipts and all thirty retained attempts: seven proofs, all
+`clean-disjoint-v2`, none with `identicalPaths`, and no global-risk paths in their
+candidate/main path sets under the pinned risk rule and check entries. The unsafe
+identical-global-risk path is not exercised. These are pre-fix context only:
+they do **not** tick or satisfy the smoke half of Issue 1018d0f8's measured line;
+a post-safety-fix smoke and the dogfood half remain open.
+
+Both arms land 10/10, with zero voids, strict 0/10 and identical lenient score
+0.332868; existing suites are green. The zero strict score is the scripted dry's
+expected oracle result, not model correctness evidence. The after whole-batch
+capture is $0.067955 at driver rates / 78.042 MB DB I/O, below the $0.30 / 500-MB
+brief budget. Load mean/max is 13.29 / 25.12 for Forge and 13.37 / 25.12 for
+GitHub. Swap starts at 3,629.88 MB and ends at 4,617.25 MB; both arms keep N=3.
+Disk stays above the 22-GiB floor (lowest observed budget sample 26.16 GiB).
+
+The full five-minute post-batch capture has no gap and no source or landing-worker
+calls, but strict deployment-wide zero calls is **not demonstrated**: one
+landings read, five capability reads, five check-summary reads and four webhook
+handler executions remain. These are observations, not attributed to an invented
+background worker. Whole-deployment idle and the complete cost total remain
+open coverage bars. The driver's own workspaces and both oracle branches are
+cleaned. The manifest-verified temporary fork is reset to the qualified base,
+and this dry's agent branches are removed. Pinned harnesses, inputs, raw evidence,
+the shared fixture project/fork and shared caches are retained.
 
 ### Landed fixes and fixture evidence
 
@@ -108,7 +239,7 @@ one tested-document change) and two zero-runner transitions. The 52.5-minute
 alert landing waited on protected-workflow owner review. The later rolling
 20-landing mean of 5.107 minutes largely predates the patch and is not causal
 proof. Cost A2 subsequently reported another 3,299 discarded runner-seconds;
-the matched post-deploy smoke/dogfood comparison remains open.
+the post-safety-fix smoke/dogfood comparison remains open; the pre-fix smoke context is above.
 
 Evidence: cost Issue [298f9675](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd) (A2 completion `99be677c`, B/B2 and catalog
 comments), storage Issue [8c4f126b](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c4f126b-0c04-492e-a66a-aabc6acd4981) (inventory and B/C/D receipts), and
@@ -156,11 +287,12 @@ cost model. A proposed State-bound descriptor manifest could replace about
 2.069 MB of cold 29k-job catalog reads, but its trusted incremental writer is
 unbuilt; no extra whole-descriptor scan per State is an acceptable saving claim.
 
-Still **unmeasured/unverified**: the identical post-fix billed re-smoke and its
-per-function split; post-cleanup dashboard documents/indexes/storage; matched
-billed write-I/O per landing; 190k-file memory within the action limit; final
-check wall/time-to-main comparison; and the ci-status submit-to-GitHub-created
-overhead. The latter is **measured but unexplained** at 7.601 s versus 2.384 s
+Still **unmeasured/unverified**: complete invoices, R2 operation/net-storage
+coverage and recurring expiry; post-cleanup dashboard documents/indexes/storage;
+190k-file memory within the action limit; a post-b5cf317 smoke and post-deploy
+dogfood runner-waste comparison; and the ci-status submit-to-GitHub-created
+overhead. The post-overnight-fixes dry above measures captured write I/O and
+check-wall/time-to-main, without a causal or scored exit claim. The latter is **measured but unexplained** at 7.601 s versus 2.384 s
 normal (about +5.217 s), in three samples per path. Overall client means were
 246.567 versus 249.066 s, but blocked cohorts, moving CLI pins and different
 provider matrices prevent a causal speedup claim (Flip 3 Issue [4e4204b6](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4e4204b6-9373-49b3-a8fd-3eb06208a310)).
