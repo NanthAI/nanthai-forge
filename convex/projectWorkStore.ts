@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readyJournalRecord } from './projectJournalWake';
 import { JournalNeeded, journalReadReply } from './projectJournalStore';
 import { workRecordTable } from './projectWorkRecordTables';
 import {
@@ -210,7 +211,10 @@ async function insertVersion(
   const inline = inlineValue(encoded),
     pointer = { ...identity, ...indexed, recordId, ...(inline === undefined ? {} : { value: inline }) };
   if (!head) await ctx.db.insert('projectHostedRecordHeads', pointer);
-  else if (head.version < record.version) await ctx.db.replace(head._id, pointer);
+  else if (head.version < record.version) {
+    await readyJournalRecord(ctx, projectId, head.recordId);
+    await ctx.db.replace(head._id, pointer);
+  }
 }
 
 /** The journal Intent `value` against its stored head. `hosted`: a Lane pinned it, so hosted paths own it.

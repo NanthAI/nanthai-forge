@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { retainJournalRecovery } from './projectJournalWake';
 import { auditWindowFlake } from '../src/landing-mode';
 import { convexFetch, networkTimeout } from './networkFetch';
 import { noteTrustCulprit } from './projectHostedTrust';
@@ -92,7 +93,7 @@ async function recoveryRow(ctx: MutationCtx | QueryCtx, input: Identity, owner: 
   return hostedOperationRow(ctx, input.projectId, owner, recoveryOperation(input.runId));
 }
 async function retain(ctx: MutationCtx, row: Doc<'projectHostedOperations'>, state: Recovery) {
-  await ctx.db.patch(row._id, { recovery: canonicalPayload(state) });
+  await retainJournalRecovery(ctx, row, canonicalPayload(state));
   if (state.stage === 'done') {
     const operation = hostedOperationSchema.parse(JSON.parse(row.value));
     await finishHostedOperation(ctx, {

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { wakeJournal, journalGraceMs } from './projectJournalWake';
 import { JournalNeeded } from './projectJournalStore';
 import type { QueryCtx } from './_generated/server';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -422,6 +423,12 @@ export async function appendWork(
       'SOURCE_UNAVAILABLE',
       'Retain the primary Work version before acknowledging its command.',
     );
+    if (retained)
+      await wakeJournal(
+        ctx,
+        { projectId: input.projectId, operationId: `work:${input.operationId}` },
+        Date.now() + journalGraceMs,
+      );
     const saved = retained ?? (await ctx.db.get(await ctx.db.insert('projectWorkEvents', event)))!;
     await emitChange(ctx, {
       projectId: input.projectId,

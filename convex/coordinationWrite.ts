@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { wakeJournal } from './projectJournalWake';
 import { projectJournalHint } from './projectJournalStore';
 import { digest } from '../src/state/hash';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -228,7 +229,9 @@ export async function emitChange(
     command,
     ...denormalized(command),
   });
+  await wakeJournal(ctx, { projectId, operationId, phase: 4 }, Date.now() + 14 * 86_400_000 + 1);
 }
+
 /** Best-effort fields of a hosted Work command for its change event. */
 export function workChange(command: string) {
   let value: Record<string, unknown> = {};

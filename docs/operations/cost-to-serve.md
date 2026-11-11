@@ -999,14 +999,14 @@ coordination feed/recent/related reads and Lane metric facts accept both forms.
 A dedicated segment table isolates archive range-index cost from hot finish rows.
 Readers also accept self-contained compact source-operation receipts (including
 the complete terminal result), compact Work command retry facts and closed-save
-digest ledgers. The writer follows separately. Receipt result bytes, index rows
+digest ledgers. The separate default-off writer retains these receipts after verified relocation. Receipt result bytes, index rows
 and coordination deduplication receipts are charged as retained overhead.
 
 The reader fixture proves exact old-version parity, current-version access,
 immutable retry, access revocation during GET, corruption rejection, contiguous
 archived/live event pages and exact journal recovery rows. Existing S1 capsule
 round trips and recovery drills remain covered. Reader expansion changes no
-retained rows; storage ratchets are not lowered until the writer is measured.
+retained rows; writer-enabled storage has a separate measured ratchet.
 The measured-floor restatement is 25,290 / 128,244 B plus the actual segment-index
 and compact-receipt overhead, as settled on the Issue. A fixture result does not
 qualify live billing, provider memory or speed distributions. The weekly-export
@@ -1018,6 +1018,83 @@ segment read, zero added landing hot-path calls and zero idle calls. Live pages
 retain their original query path when no segment is needed. A cold action
 reauthorizes in its projection query after every GET. Fixture and live usage
 measurements accompany the implementation evidence on the Issue.
+
+### S2 default-off writer qualification
+
+The existing per-table landing-storage ratchet now runs the actual journal
+capture, Node codec/transport and publication handlers after S1. The server setting
+stays off in ordinary operation. Its immediate ceilings are unchanged; retained
+ceilings charge the writer's measured result. One shared physical segment can hold
+several resources because immutable version headers provide exact point/page pins.
+This removes duplicate per-resource archive indexes without changing source bytes.
+
+| Retained document class | Fresh B / landing | Dogfood B / landing |
+| --- | ---: | ---: |
+| Segment indexes, including page replay metadata | 1,394 | 3,514 |
+| Version-header table increment, including retained pins | 1,257 | 4,768 |
+| Version-body table net increment | 0 | 78,753 |
+| Operation table increment, including complete retry results | 1,600 | 85,070 |
+| Coordination/expired-operation receipts in this landing mix | 0 | 0 |
+| Total across all per-landing tables | **29,780** | **217,279** |
+| Bootstrap project controls, separately charged | **2,778 (5 rows)** | **2,787 (5 rows)** |
+| Steady project controls after operator and terminal-event paths | **4,771 (8 rows)** | **4,783 (8 rows)** |
+
+These fixed-clock synthetic JSON-byte observations compare with the reader-only
+30,479 / 227,216 B baseline. Current Candidate bodies stay whole: the dogfood
+Candidate is 80,667 B, while the table increment also credits previously retained
+bodies moved by the existing-row run. Whole compact version receipts occupy
+2,290 / 4,928 B, and whole operation receipts 6,417 / 168,609 B; their table
+increments above subtract rows already present in the fixture baseline. No
+receipt result is treated as free. Project controls replace their last cursor
+and outcome rather than retaining one row per landing; key lengths and page-number
+digits still affect their byte size. A pending known-eligibility scheduling fact
+is separately charged (469 B for one Lane in the future-window fixture), then
+removed on execution or in a bounded metadata-only resume page. It is not hidden
+in the fixed-control split. First-enablement project flags also remain charged in
+the per-landing ledger rather than stripping fields from a mixed table.
+
+The executable restatement of the withdrawn 15/60 KB line is **29,780 / 217,279 B**
+for these shaped incremental landings, plus the fixed project controls above.
+The original 25,290 / 128,244 B floor assumed zero receipts; it remains a capacity
+reference, not a final target without actual index and receipt costs. Existing-row
+backfill credits and peer changes also distinguish a net increment from a sum of
+whole receipt rows. Thirty represented Issue completions with one landing each
+model 893,400 / 6,518,370 B plus project controls once; planning, comments, extra
+saves and the live workload mix remain outside that scenario.
+
+Observed bootstrap drains use 5 / 8 Node pages and 10 / 16 mutations, with 2 / 5
+physical segments. Each new segment uses one PUT and two GETs (reconcile plus
+verify). Every page is at most 100 source rows and 500 KiB of capture transport;
+large existing provider rows use UTF-8-safe frames whose nested escaping fits that
+transport bound. One provider row can exceed a transport page and is re-read while
+framing. In these two fixtures the largest mutation reads 58 / 116 documents,
+50 / 100 ranges and 24,398 / 86,565 JSON B; the largest write is 9,486 / 84,473 B.
+These are local DB-fake counts, not billed index/storage bytes. The isolated actual
+Node handler with recorded V8 replies and local fake R2 peaks around 101 / 107 MB
+RSS, including loaded module overhead, and drains in roughly 23 / 32 ms in one
+observation per shape. This is not provider memory, network latency or a measured
+statistical performance improvement.
+
+Terminal events can initiate finite empty eligibility pages; no wake coalescing
+across unrelated terminal events is claimed. Known eligibility points schedule
+once per scope/date, so a creation-time boundary cannot strand data and an
+inventory page does not schedule one timer per row. Paused-job markers drain in
+bounded metadata-only pages. Initial disabled writers schedule nothing; a disabled
+handler makes no nested Convex or R2 calls. Landing-path RPC delta is zero and no
+periodic idle work is introduced.
+
+Fixture fault paths cover lost capture/PUT/publication replies, fragment replay,
+corruption, shared current bodies, exact original-row export, expired operation
+ownership and late recovery-ledger changes. Mutable archived ledgers advance the
+recovery fence; identical retries preserve it. Closed-save digest replay facts,
+messages, handoffs and acknowledgements remain available. All tables stay because
+current rows and compact retry facts still use them; full relocated Convex payload
+copies are removed only after verification, while logical history remains in R2.
+
+Live billing, physical index bytes, provider latency/memory and the actual hot-table
+frontier remain unqualified until the lead enables the setting and checks usage.
+Weekly export growth **needs two dev exports after the setting is on**. No live
+backfill, setting change or manual deployment is part of this fixture qualification.
 
 Controller-only test budgets report delayed retention allocations separately,
 keeping their original source/controller ceilings. The raw fixture counters and

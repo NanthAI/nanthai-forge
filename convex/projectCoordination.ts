@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { wakeJournal } from './projectJournalWake';
 import { JournalNeeded, journalReadReply } from './projectJournalStore';
 import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -115,6 +116,12 @@ export const publish = mutation({
         ...denormalized(parsed),
         ...fields,
       });
+      if (['activity', 'change', 'claim', 'release'].includes(parsed.kind))
+        await wakeJournal(
+          ctx,
+          { projectId: input.projectId, operationId: input.operationId, phase: 4 },
+          Date.now() + 14 * 86_400_000 + 1,
+        );
       return (await ctx.db.get(id))!;
     } catch (error) {
       return report(error);

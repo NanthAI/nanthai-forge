@@ -9,7 +9,7 @@ import {
   type JournalSegment,
 } from './journal-segment.js';
 /** Fragment the canonical logical segment, preserving the original JSON document bytes.
- * 200 KiB of UTF-8 leaves room for JSON escaping plus the fragment envelope within 500 KiB.
+ * Bound each frame by source bytes and its nested JSON escaping, leaving room for capture metadata within 500 KiB.
  * This is transport framing, not another archive codec: S1 still packs every physical segment. */
 export function journalFragmentTexts(segment: JournalSegment) {
   const text = canonicalPayload(journalSegmentSchema.parse(segment));
@@ -21,7 +21,16 @@ export function journalFragmentTexts(segment: JournalSegment) {
   const bytes = new TextEncoder().encode(text),
     pieces: string[] = [];
   for (let at = 0; at < bytes.length;) {
-    let end = Math.min(bytes.length, at + 200 * 1024);
+    let end = at,
+      escaped = 0;
+    // Canonical JSON has no raw control characters. Quotes and backslashes expand
+    // eightfold across the fragment row, segment string and capture reply.
+    while (end < bytes.length && end - at < 200 * 1024) {
+      const weight = bytes[end] === 34 || bytes[end] === 92 ? 8 : 1;
+      if (escaped + weight > 384 * 1024) break;
+      escaped += weight;
+      end++;
+    }
     while (end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end--;
     pieces.push(new TextDecoder('utf-8', { fatal: true }).decode(bytes.slice(at, end)));
     at = end;

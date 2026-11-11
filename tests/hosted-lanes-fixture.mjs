@@ -182,8 +182,8 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
                     : schema.tables[table].export().indexes.find(i => i.indexDescriptor === name);
                 assert(index, `${table}.${name}`);
                 indexFields = index.fields;
-                // Every provider index ends in the implicit _creationTime, which a range may bound.
-                const keyFields = [...index.fields, '_creationTime'];
+                // Provider indexes end in implicit creation time and id, including exact tie cursors.
+                const keyFields = [...index.fields, '_creationTime', '_id'];
                 const terms = [];
                 let lower = null,
                   upper = null;

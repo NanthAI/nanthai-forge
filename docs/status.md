@@ -35,10 +35,14 @@ physical relocation fence, and includes coordination and snapshot tables.
 Planning-version and Lane history pages, coordination feed/recent/related reads and
 Lane metric facts also accept archived rows. Reactive clients hydrate cold pages
 through currently authorized server actions; live pages and idle tabs add no calls.
-Compact transaction pins and metrics live in a dedicated segment index. No journal
-writer or automatic relocation is installed yet. Retry readers accept compact
-source-operation receipts, Work command facts and closed-save digest ledgers; the
-default-off writer remains open. Recovery also preserves a terminal operation’s
+Compact immutable version receipts retain transaction pins and Lane metrics.
+The separately landed writer is default-off (`FORGE_JOURNAL_SEGMENTS`): finite
+terminal-event continuations and one operator-started existing-history run move
+verified superseded payloads, terminal transports, closed-save pages and coordination
+detail older than fourteen days. Messages, handoffs and acknowledgements remain live.
+Retry readers accept complete terminal results, Work command facts and closed-save
+digest ledgers. Fixture relocation, fault recovery and exact original-row export
+are covered; live enablement, billed usage and two dev exports remain open. Recovery also preserves a terminal operation’s
 mutable recovery ledger and selects its latest archived physical row; restored
 expired operation UUIDs reconcile against their newest retained receipt.
 

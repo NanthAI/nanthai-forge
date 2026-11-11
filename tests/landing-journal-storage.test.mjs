@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { landingStorage } from './landing-storage-fixture.mjs';
 import { journalStorageInventory, journalStorageGrowth } from './landing-journal-storage.mjs';
 
 for (const dogfood of [false, true])
   test(`S2 ${dogfood ? 'dogfood' : 'fresh'} storage accounts for current versions separately from superseded history`, async t => {
+    storageClock(t);
     const samples = {};
     let finishProjections;
     const started = performance.now();

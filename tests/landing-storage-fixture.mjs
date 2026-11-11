@@ -28,6 +28,7 @@ export function inflateDogfoodChecks(f) {
 
 // Net retained JSON document bytes, rather than cumulative write traffic. Identities retain their
 // lengths; normalize only the synthetic creation clock. Index/system/R2 bytes are separate costs.
+const fixedJournalControl = row => /^journal-control:[0-4]:(existing|live)$/.test(row.operationId);
 function storedBytes(f) {
   return Object.fromEntries(
     Object.entries(f.tables)
@@ -37,7 +38,8 @@ function storedBytes(f) {
         [...rows.values()].reduce(
           (n, row) =>
             n +
-            (name === 'projectFinishReadRows' && row.kind === 'projectLandingCapsuleIndex'
+            ((name === 'projectFinishReadRows' && row.kind === 'projectLandingCapsuleIndex') ||
+            (name === 'projectJournalReceipts' && fixedJournalControl(row))
               ? 0
               : Buffer.byteLength(JSON.stringify({ ...row, _creationTime: 0 }))),
           0,
@@ -58,6 +60,15 @@ export const storageBudgets = JSON.parse(
 export function fixedProjectStorage(f) {
   const bytes = storedBytes(f);
   return Object.fromEntries([
+    [
+      'projectJournalControls',
+      {
+        rows: [...f.tables.projectJournalReceipts.values()].filter(fixedJournalControl).length,
+        bytes: [...f.tables.projectJournalReceipts.values()]
+          .filter(fixedJournalControl)
+          .reduce((n, row) => n + Buffer.byteLength(JSON.stringify({ ...row, _creationTime: 0 })), 0),
+      },
+    ],
     ...[...fixedProjectTables].map(table => [table, { rows: f.tables[table].size, bytes: bytes[table] }]),
     [
       'projectLandingCapsuleIndex',
@@ -84,7 +95,7 @@ export function assertFixedProjectStorage(actual, budget, label) {
 export async function landingStorage(
   t,
   dogfood,
-  { fileCount = 4096, capsules = false, capsuleSample, storageSample } = {},
+  { fileCount = 4096, capsules = false, journals = false, capsuleSample, journalSample, storageSample } = {},
 ) {
   const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
   Object.assign(process.env, synthetic);
@@ -213,6 +224,25 @@ export async function landingStorage(
   } finally {
     Date.now = realNow;
   }
+  let journal = null;
+  if (journals) {
+    const { journalMaintenanceFixture } = await import('./journal-maintenance-fixture.mjs');
+    const previous = process.env.FORGE_JOURNAL_SEGMENTS;
+    const maintenance = await journalMaintenanceFixture(t, { f });
+    const pages = await maintenance.drain().finally(() => {
+      if (previous === undefined) delete process.env.FORGE_JOURNAL_SEGMENTS;
+      else process.env.FORGE_JOURNAL_SEGMENTS = previous;
+    });
+    journal = {
+      pages: pages.length,
+      mutations: pages.reduce((n, page) => n + page.metrics.mutations, 0),
+      classA: maintenance.requests.filter(method => method === 'PUT').length,
+      classB: maintenance.requests.filter(method => method === 'GET').length,
+    };
+    r2.maintenance.classA += journal.classA;
+    r2.maintenance.classB += journal.classB;
+  }
+  await journalSample?.(f);
   const retained = delta();
   await storageSample?.('retained', f);
   requestMeter.mock.restore();
@@ -221,5 +251,6 @@ export async function landingStorage(
     perProject: { immediate: fixedImmediate, retained: fixedProjectStorage(f) },
     r2,
     ...(capsule ? { capsule } : {}),
+    ...(journal ? { journal } : {}),
   };
 }

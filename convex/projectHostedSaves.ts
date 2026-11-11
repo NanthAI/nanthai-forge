@@ -289,7 +289,12 @@ export async function stageSavePage(
     next: page.next,
     status: page.next ? ('staging' as const) : ('ready' as const),
   };
-  await ctx.db.insert('projectHostedSavePages', { ...auth, index: input.index, digest: pin.sha256 });
+  await ctx.db.insert('projectHostedSavePages', {
+    ...auth,
+    index: input.index,
+    digest: pin.sha256,
+    ...(process.env.FORGE_JOURNAL_SEGMENTS === '1' ? { journalLaneId: state.request.laneId } : {}),
+  });
   await writeSaveState(ctx, row._id, next);
   return next;
 }

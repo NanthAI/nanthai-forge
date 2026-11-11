@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readyJournalRecord, wakeJournal, journalGraceMs } from './projectJournalWake';
 import { journalDependency, journalRecord, loadedJournalRows, journalBody } from './projectJournalStore';
 import { fingerprintHostedIntent } from './projectWorkStoreFingerprintWrites';
 import { trackHostedOverlapLane } from './projectHostedOverlapStore';
@@ -208,11 +209,19 @@ export async function writeHostedRecord(
     bytes: ref.bytes,
   });
   const pointer = { ...identity, ...indexed, recordId: id };
-  if (head) await ctx.db.replace(head._id, pointer);
-  else await ctx.db.insert('projectHostedRecordHeads', pointer);
+  if (head) {
+    await readyJournalRecord(ctx, input.projectId, head.recordId);
+    await ctx.db.replace(head._id, pointer);
+  } else await ctx.db.insert('projectHostedRecordHeads', pointer);
   if (record.kind === 'intent')
     await fingerprintHostedIntent(ctx, project, ref, head?._creationTime ?? Date.now(), indexed.status);
   if (record.kind === 'lane') {
+    if (['completed', 'abandoned'].includes(record.state))
+      await wakeJournal(
+        ctx,
+        { projectId: input.projectId, operationId: id, phase: 2, laneId: record.id },
+        Date.now() + journalGraceMs,
+      );
     await touchLifecycleIntent(ctx, input.projectId, record.intentId);
     await trackHostedOverlapLane(ctx, input.projectId, record, input.overlap);
   }

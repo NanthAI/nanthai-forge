@@ -7,6 +7,7 @@ export const journalTables = {
   projectJournalSegments: defineTable({
     projectId: v.id('hostedProjects'),
     key: v.string(),
+    pageId: v.optional(v.string()),
     scope: v.string(),
     from: v.number(),
     through: v.number(),
@@ -26,6 +27,7 @@ export const journalTables = {
     recipientActor: v.optional(v.string()),
     value: v.string(),
   })
+    .index('by_project_and_page', ['projectId', 'pageId'])
     .index('by_project_and_key', ['projectId', 'key'])
     .index('by_project_and_scope_and_from', ['projectId', 'scope', 'from'])
     .index('by_project_and_record_kind_and_first', ['projectId', 'recordKind', 'firstPosition'])

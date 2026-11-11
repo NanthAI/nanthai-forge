@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { digest } from '../src/state/hash';
+import { wakeJournal, journalGraceMs } from './projectJournalWake';
 import { semanticPayload } from '../src/semantic-payload';
 import { requireSourceAuthority, type SourceAuthority } from '../src/hosted-source-authority';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -58,7 +60,37 @@ export async function pruneExpiredHostedOperations(
         .lt('_creationTime', now - HOSTED_OPERATION_RETENTION_MS),
     )
     .take(HOSTED_OPERATION_PRUNE_BATCH);
-  for (const row of expired) await ctx.db.delete(row._id);
+  for (const row of expired) {
+    if (row.journalSegment && row.journalReadyAt === undefined && row.journalDigest) {
+      const operationId = `journal-operation:${row._id}`;
+      const old = await ctx.db
+        .query('projectJournalReceipts')
+        .withIndex('by_project_and_operation', q =>
+          q.eq('projectId', projectId).eq('operationId', operationId),
+        )
+        .unique();
+      if (!old)
+        await ctx.db.insert('projectJournalReceipts', {
+          projectId,
+          operationId,
+          hash: row.journalDigest,
+          envelope: '',
+        });
+      await ctx.db.delete(row._id);
+    } else if (row.journalSegment || process.env.FORGE_JOURNAL_SEGMENTS === '1') {
+      if (row.journalReadyAt === undefined) await ctx.db.patch(row._id, { journalReadyAt: now });
+    } else await ctx.db.delete(row._id);
+  }
+  if (expired.length)
+    await wakeJournal(
+      ctx,
+      {
+        projectId,
+        operationId: `expiry:${digest(canonicalPayload(expired.map(row => [row._id, row.journalReadyAt ?? now, row.journalDigest ?? ''])))}`,
+        phase: 1,
+      },
+      now,
+    );
   return expired.length;
 }
 
@@ -138,7 +170,12 @@ export async function finishHostedOperation(
   );
   const value = semanticPayload(operation);
   if (value !== row.value) {
-    await ctx.db.patch(row._id, { value });
+    const dueAt = Date.now() + journalGraceMs;
+    await ctx.db.patch(row._id, {
+      value,
+      ...(process.env.FORGE_JOURNAL_SEGMENTS === '1' ? { journalReadyAt: dueAt } : {}),
+    });
+    await wakeJournal(ctx, { projectId: input.projectId, operationId: `source:${row._id}` }, dueAt);
     if (row.metricAction && operation.terminal?.outcome.status === 'completed')
       await recordMutationReceipt(ctx, {
         projectId: input.projectId,

@@ -4,6 +4,7 @@
 // src/speed-budgets.json (`costs`). Deterministic counts, not live billing: a change that adds work
 // per landing fails here, a saving asks the author to ratchet the ledger down.
 import test from 'node:test';
+import { storageClock as fixedClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { inboundCostFixture } from './hosted-github-inbound-cost-fixture.mjs';
@@ -526,24 +527,6 @@ test('a saving of 10% or more asks the author to lower the ledger value, so it r
   assert.equal(judgeCost({ ...entry, value: 2, floor: 0.5 }, null, costGuard).status, 'fail');
 });
 
-function fixedClock(t) {
-  // Keep ISO stamps and the scheduler on the same controlled clock.
-  const OriginalDate = Date;
-  class FixtureDate extends OriginalDate {
-    constructor(...args) {
-      if (args.length) super(...args);
-      else super(FixtureDate.now());
-    }
-    static now() {
-      return OriginalDate.UTC(2026, 10, 10, 12);
-    }
-  }
-  globalThis.Date = FixtureDate;
-  t.after(() => {
-    globalThis.Date = OriginalDate;
-  });
-}
-
 for (const mainRace of [false, true])
   test(`cost 298f9675: ${mainRace ? 'main-race' : 'solo'} landing preserves check wall, acceptance delay and zero idle calls`, async t => {
     fixedClock(t);
@@ -878,8 +861,8 @@ test('GitHub inbound cost: one changed blob imports, composes, checks, lands and
 test('storage per landing ratchets every table on fresh and dogfood-shaped checks before and after exhaust expiry', async t => {
   fixedClock(t);
   const scenarios = {
-    fresh: await landingStorage(t, false, { capsules: true }),
-    dogfood: await landingStorage(t, true, { capsules: true }),
+    fresh: await landingStorage(t, false, { capsules: true, journals: true }),
+    dogfood: await landingStorage(t, true, { capsules: true, journals: true }),
   };
   t.diagnostic(`storagePerLanding ${JSON.stringify(scenarios)}`);
   for (const [name, scenario] of Object.entries(scenarios)) {

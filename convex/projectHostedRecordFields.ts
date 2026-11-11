@@ -75,6 +75,8 @@ export const hostedRecordTables = {
     .index('by_project_and_operation', ['projectId', 'operationId']),
   // Canonical immutable versions; the head is only a per-resource CAS pointer.
   projectHostedRecords: defineTable(hostedRecordFields)
+    .index('by_project_and_journal_ready_at', ['projectId', 'journalReadyAt'])
+    .index('by_project_and_body', ['projectId', 'bodyId'])
     .index('by_project_and_kind', ['projectId', 'kind'])
     .index('by_project_and_kind_and_key_and_version', ['projectId', 'kind', 'key', 'version'])
     .index('by_project_and_kind_and_key_and_version_and_plan', [
@@ -130,6 +132,8 @@ export const hostedRecordTables = {
     ),
     value: v.string(),
   })
+    .index('by_project', ['projectId'])
+    .index('by_project_and_journal_ready_at', ['projectId', 'journalReadyAt'])
     .index('by_project_and_metric_action', ['projectId', 'metricMutation.action'])
     .index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId']),
 };

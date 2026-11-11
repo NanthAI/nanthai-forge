@@ -185,9 +185,11 @@
       "projectJournalReceipts": 0
     },
     "retained": {
-      "projectFinishReadRows": 12688,
+      "projectJournalSegments": 1394,
+      "projectJournalReceipts": 0,
+      "projectFinishReadRows": 12675,
       "legacyStorageCleanupWindows": 0,
-      "legacyStorageCleanupPages": 320,
+      "legacyStorageCleanupPages": 314,
       "projectGithubMirrors": 0,
       "projectGithubMirrorJobs": 0,
       "projectGithubBindings": 0,
@@ -234,13 +236,13 @@
       "projectCoordinationClaims": 0,
       "projectReturnPages": 0,
       "projectWorkGenerations": 0,
-      "projectWorkRecords": 0,
       "projectPlanningRecords": 0,
       "projectWorkDataRecords": 0,
-      "projectHostedRecordBodies": 1045,
-      "projectHostedRecords": 693,
+      "projectWorkRecords": 0,
+      "projectHostedRecordBodies": 0,
+      "projectHostedRecords": 1257,
       "projectHostedRecordHeads": 9,
-      "projectHostedOperations": 3261,
+      "projectHostedOperations": 1600,
       "projectHostedSaves": 0,
       "projectHostedSavePages": 0,
       "projectHostedStates": 0,
@@ -271,6 +273,7 @@
       "projectHostedLandingAliases": 0,
       "projectHostedLandingObservations": 0,
       "projectHostedLandingCheckWakes": 163,
+      "projectHostedLandingBodies": 1013,
       "projectHostedLandingRequests": 2289,
       "projectHostedLandingAttempts": 0,
       "projectLandingSpeed": 233,
@@ -289,6 +292,7 @@
       "projectHostedSnapshotPages": 0,
       "projectHostedSnapshotHeads": 0,
       "projectHostedDisplayRecords": 0,
+      "projectObjectReceipts": 0,
       "projectObjects": 738,
       "projectObjectCatalog": 0,
       "artifactBlobs": 0,
@@ -312,7 +316,7 @@
       "projectWorkHeads": 0,
       "projectWorkEvents": 0,
       "projectRecoveryConnections": 0,
-      "hostedProjects": 0,
+      "hostedProjects": 49,
       "projectPublicationAttempts": 0,
       "projectPublications": 0,
       "projectPublicationPages": 0,
@@ -362,11 +366,7 @@
       "imports": 0,
       "importArtifacts": 0,
       "importReaders": 0,
-      "githubDeliveries": 0,
-      "projectObjectReceipts": 0,
-      "projectHostedLandingBodies": 1013,
-      "projectJournalSegments": 0,
-      "projectJournalReceipts": 0
+      "githubDeliveries": 0
     },
     "perProject": {
       "immediate": {
@@ -383,6 +383,10 @@
           "bytes": 153
         },
         "projectLandingCapsuleIndex": {
+          "rows": 0,
+          "bytes": 0
+        },
+        "projectJournalControls": {
           "rows": 0,
           "bytes": 0
         }
@@ -403,6 +407,10 @@
         "projectLandingCapsuleIndex": {
           "rows": 1,
           "bytes": 240
+        },
+        "projectJournalControls": {
+          "rows": 8,
+          "bytes": 4771
         }
       }
     }
@@ -593,9 +601,11 @@
       "projectJournalReceipts": 0
     },
     "retained": {
-      "projectFinishReadRows": 21168,
+      "projectJournalSegments": 3514,
+      "projectJournalReceipts": 0,
+      "projectFinishReadRows": 21163,
       "legacyStorageCleanupWindows": 0,
-      "legacyStorageCleanupPages": 320,
+      "legacyStorageCleanupPages": 315,
       "projectGithubMirrors": 0,
       "projectGithubMirrorJobs": 0,
       "projectGithubBindings": 0,
@@ -612,7 +622,7 @@
       "projectWorkDetailMigrations": 0,
       "projectCheckLogCleanupPages": 0,
       "projectCheckLogRetentions": 0,
-      "projectCheckLogSourcePins": 990,
+      "projectCheckLogSourcePins": 825,
       "projectCheckLogCleanups": 0,
       "projectHostedSeeds": 0,
       "projectHostedSeedPages": 0,
@@ -642,17 +652,17 @@
       "projectCoordinationClaims": 0,
       "projectReturnPages": 0,
       "projectWorkGenerations": 0,
-      "projectWorkRecords": 0,
       "projectPlanningRecords": 0,
       "projectWorkDataRecords": 0,
-      "projectHostedRecordBodies": 90887,
-      "projectHostedRecords": 3700,
+      "projectWorkRecords": 0,
+      "projectHostedRecordBodies": 78753,
+      "projectHostedRecords": 4768,
       "projectHostedRecordHeads": 561,
-      "projectHostedOperations": 87504,
+      "projectHostedOperations": 85070,
       "projectHostedSaves": 0,
       "projectHostedSavePages": 0,
       "projectHostedStates": 735,
-      "projectHostedComposes": 1376,
+      "projectHostedComposes": 1370,
       "projectHostedComposePages": 0,
       "projectHostedComposeSelections": 0,
       "projectHostedSyncs": 0,
@@ -679,6 +689,7 @@
       "projectHostedLandingAliases": 0,
       "projectHostedLandingObservations": 0,
       "projectHostedLandingCheckWakes": 330,
+      "projectHostedLandingBodies": 1015,
       "projectHostedLandingRequests": 2406,
       "projectHostedLandingAttempts": 0,
       "projectLandingSpeed": 232,
@@ -697,6 +708,7 @@
       "projectHostedSnapshotPages": 0,
       "projectHostedSnapshotHeads": 0,
       "projectHostedDisplayRecords": 0,
+      "projectObjectReceipts": 0,
       "projectObjects": 3501,
       "projectObjectCatalog": 0,
       "artifactBlobs": 0,
@@ -720,7 +732,7 @@
       "projectWorkHeads": 0,
       "projectWorkEvents": 0,
       "projectRecoveryConnections": 0,
-      "hostedProjects": 0,
+      "hostedProjects": 49,
       "projectPublicationAttempts": 0,
       "projectPublications": 0,
       "projectPublicationPages": 0,
@@ -770,11 +782,7 @@
       "imports": 0,
       "importArtifacts": 0,
       "importReaders": 0,
-      "githubDeliveries": 0,
-      "projectObjectReceipts": 0,
-      "projectHostedLandingBodies": 1015,
-      "projectJournalSegments": 0,
-      "projectJournalReceipts": 0
+      "githubDeliveries": 0
     },
     "perProject": {
       "immediate": {
@@ -791,6 +799,10 @@
           "bytes": 96767
         },
         "projectLandingCapsuleIndex": {
+          "rows": 0,
+          "bytes": 0
+        },
+        "projectJournalControls": {
           "rows": 0,
           "bytes": 0
         }
@@ -811,8 +823,30 @@
         "projectLandingCapsuleIndex": {
           "rows": 1,
           "bytes": 240
+        },
+        "projectJournalControls": {
+          "rows": 8,
+          "bytes": 4783
         }
       }
+    }
+  },
+  "journal": {
+    "fresh": {
+      "bootstrapControls": {
+        "rows": 5,
+        "bytes": 2778
+      },
+      "beforeRetainedBytes": 30479,
+      "retainedBytes": 29780
+    },
+    "dogfood": {
+      "bootstrapControls": {
+        "rows": 5,
+        "bytes": 2787
+      },
+      "beforeRetainedBytes": 227216,
+      "retainedBytes": 217279
     }
   }
 }

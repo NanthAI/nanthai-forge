@@ -27,12 +27,19 @@ export function journalStorageInventory(f) {
   const records = rows('projectHostedRecords');
   const byBody = new Map();
   const recordClass = row =>
-    current.has(row._id) ? 'current' : row.lifecyclePlanId ? 'prepared' : 'superseded';
+    current.has(row._id)
+      ? 'current'
+      : row.journalSegment
+        ? 'receipt'
+        : row.lifecyclePlanId
+          ? 'prepared'
+          : 'superseded';
   for (const row of records) {
     const refs = byBody.get(row.bodyId) ?? [];
     refs.push(row);
     byBody.set(row.bodyId, refs);
-    if (row.inline === undefined) assert(f.tables.projectHostedRecordBodies.has(row.bodyId));
+    if (row.inline === undefined && !row.journalSegment)
+      assert(f.tables.projectHostedRecordBodies.has(row.bodyId));
   }
   const selectedSnapshots = new Set(rows('projectHostedSnapshotHeads').map(row => row.snapshotId));
   const snapshotClass = row =>
@@ -55,7 +62,7 @@ export function journalStorageInventory(f) {
       case 'projectHostedRecordHeads':
         return `current:${row.kind}`;
       case 'projectHostedOperations':
-        return JSON.parse(row.value).terminal ? 'terminal' : 'active';
+        return row.journalSegment ? 'receipt' : JSON.parse(row.value).terminal ? 'terminal' : 'active';
       case 'projectHostedSavePages': {
         const save = saves.find(s => s.actor === row.actor && s.operationId === row.operationId);
         const laneId = save && JSON.parse(save.value).request?.laneId;

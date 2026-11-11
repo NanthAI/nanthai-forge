@@ -536,7 +536,41 @@ before reauthorization. Recovery merges original rows with live rows and capsule
 under a relocation fence. Existing rows larger than a page use ordered, hash-verified transport fragments;
 every physical segment still uses S1’s codec. Original row bytes reassemble before
 projection or export, preserving the record capability and bounded page transport.
-This reader expansion installs no writer or relocation.
+The separate writer is installed behind the default-off server setting
+`FORGE_JOURNAL_SEGMENTS=1`; the setting is not enabled by a deployment. Existing
+readers continue to resolve retained objects when the setting is off.
+
+Terminal source operations and primary Work commands schedule finite archive
+continuations after seven days; closed Lanes schedule their save-page drain and
+coordination detail schedules its fourteen-day drain. No cron or periodic poll is
+added. One internal operator invocation of `projectJournalRun:pack` with
+`{projectId, operationId, existing:true}` also walks settled existing rows. Its
+per-project cursors and page receipts resume interrupted work; another invocation
+with the same operation id reconciles published pages. A failed in-flight capture
+can be resumed after its ten-minute internal claim lease. This is an operator
+maintenance entry point, not a new user action or confirmation.
+
+Each Node page uses one capture and one publication mutation, at most 100 original
+rows, and at most 500 KiB of capture transport. Capture budgets include related
+head/body reads; an individual existing provider row can exceed the transport
+page and is re-read and framed without truncation. Publication revalidates source
+hashes, head identity and body sharing after the verified PUT/GET. Original rows
+stay until the final verified fragment. One R2 PUT writes each physical segment;
+no separate packer or object store is introduced. Compact version/header facts,
+complete ninety-day terminal retry results and Work command replay facts remain
+in Convex. Shared current bodies, current heads, prepared lifecycle versions,
+messages, handoffs and acknowledgements stay live. The archive removes relocated
+Convex copies, not logical history; recovery export and restore provide the
+original rows. Turning the setting off stops new relocation.
+
+Eight fixed record/operation/existing-history cursor kinds are accounted as
+project metadata, separately from coordination and expired-operation ownership
+receipts. Lane-scoped save controls are removed after their finite drain. The
+fixture ratchets charge segment indexes and all remaining receipt result bytes;
+small-row metadata overhead is charged whole. Known eligibility points use one
+deduplicated scheduling fact per scope/date; expired facts left by a paused job
+clear in bounded metadata-only pages. Late archived operation-ledger updates
+advance the recovery fence, including while new relocation is disabled.
 
 Terminal operation transport and its mutable recovery ledger have separate
 ownership during export. A live compact receipt supplies the current recovery

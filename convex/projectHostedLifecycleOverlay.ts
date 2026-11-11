@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readyJournalRecord, wakeJournal, journalGraceMs } from './projectJournalWake';
 import { materializeHostedOverlapLifecycle } from './projectHostedOverlapStore';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -66,6 +67,13 @@ export async function materializeLifecycleLane(
     .unique();
   if (head?.recordId !== overlay.pointer.baseRecordId) return;
   const row = overlay.row;
+  await readyJournalRecord(ctx, projectId, head.recordId);
+  if (['completed', 'abandoned'].includes(row.status))
+    await wakeJournal(
+      ctx,
+      { projectId, operationId: row._id, phase: 2, laneId },
+      Date.now() + journalGraceMs,
+    );
   await ctx.db.patch(row._id, { lifecyclePlanId: undefined });
   await ctx.db.replace(head._id, {
     projectId,
