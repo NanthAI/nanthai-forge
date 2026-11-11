@@ -110,6 +110,19 @@
             "scripts/response-compat*",
             "convex/projectHostedAgent*.ts"
           ]
+        },
+        {
+          "name": "cleanup process coverage",
+          "tests": [
+            "tests/clean-processes.test.mjs"
+          ],
+          "inputs": [
+            "src/clean-processes.ts",
+            "src/lane-prune.ts",
+            "src/client-cache-gc.ts",
+            "tests/automatic-cleanup.mjs",
+            "tests/cleanup-process-fixture.mjs"
+          ]
         }
       ]
     }

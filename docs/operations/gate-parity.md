@@ -42,3 +42,30 @@ These are conditions the plan set for any gate-speed work. They stay requirement
 ## What was left out
 
 The original plan's account names, the retired native check paths and compute vendors, per-account spend details, and its ordering ("G9, then G10, then G11") are not carried over. The 10 and 5 minute targets and the free-tier job count are kept only as history above.
+
+## Cleanup process coverage across runners
+
+The hosted landing check and public `Verify Forge` both use `github-actions-check.mjs`
+and `test-files.mjs`, but run under different OS identities. Hosted checks use the
+isolated Candidate user; public verification runs as the runner user. Linux
+`/proc` may include a same-user process whose working directory cannot be read.
+`workingProcesses` correctly returns unknown coverage in that case; automatic
+cleanup retains the directory. A passing isolated-user check therefore did not
+prove cleanup tests would pass against the runner user's process table. This was
+an environment-dependent fixture gap, rather than missing test selection or a
+shard partition bug.
+
+Cleanup test files explicitly import `automatic-cleanup.mjs`, which installs a
+controlled process table in each test's own process. A standalone test file's
+hooks do not affect other files, even when Node runs them together. The shared
+fixture replaces only the cleanup OS probes, leaving actual filesystem cleanup
+and other process behavior intact. Tests of the process guard itself exercise
+both Linux and macOS probes on every host, including unavailable coverage and
+process exits. Integration cases use those probes through both automatic removal
+paths: live and unknown roots survive, and unused roots are removed.
+A subprocess regression replays representative cleanup consumers against a synthetic
+Linux host with an unreadable same-user process, in separate test files as in CI.
+Removing their explicit fixture imports reproduces the original failures on any host.
+The `cleanup process coverage` preflight guard selects these cases whenever either
+removal path or its process probe/fixture changes. Unknown coverage remains a
+reason to retain source; CI parity does not weaken that behavior.

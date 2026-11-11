@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import './automatic-cleanup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
