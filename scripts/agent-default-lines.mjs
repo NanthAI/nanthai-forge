@@ -14,10 +14,9 @@ export function agentDefaultLines(defaults, root = 'ROOT') {
   const lines = [];
   if (defaults.preflight !== 'off')
     lines.push(
-      `Before land, run your affected tests: nforge agent ${root} preflight '{"laneId":"…"}'` +
-        (defaults.preflight === 'require'
-          ? ` (land refuses without a pass for the saved head; sets over ${defaults.preflightMaxMinutes} min are advisory).`
-          : ' (advisory).'),
+      defaults.preflight === 'require'
+        ? `land --save runs required preflight within its local budget; on failure or budget exhaustion follow its command, then replay. Sets over ${defaults.preflightMaxMinutes} min are advisory.`
+        : `Affected tests: nforge agent ${root} preflight '{"laneId":"…"}' (advisory).`,
     );
   if (defaults.checkpointNudgeMinutes > 0)
     lines.push(

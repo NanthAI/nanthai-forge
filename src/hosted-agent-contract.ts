@@ -15,7 +15,7 @@ import { snapshotsCommandSchema } from './lane-snapshot-contract.js';
 import { safeRelative } from './safe-relative.js';
 import { planningCommentCommandSchema, planningPutSchema } from './work-planning-types.js';
 import { invariant } from './errors.js';
-import { isPlanningRef, planningIdHelp } from './planning-id.js';
+import { planningIssueFields } from './planning-issue-arguments.js';
 import { policyWriteObject } from './autonomy-policy.js';
 import { hostedCheckCommandSchema, hostedCheckRunnerSchema } from './hosted-check.js';
 import { submoduleAllowChangesSchema } from './submodule-allowlist.js';
@@ -130,9 +130,6 @@ export type HostedAgentCapabilities = z.infer<typeof hostedAgentCapabilitiesSche
 const planningStatuses = ['proposed', 'open', 'in-progress', 'closed', 'abandoned'] as const;
 const uuid = z.uuid(),
   hash = z.string().regex(/^[0-9a-f]{64}$/);
-/** A planning id: a complete UUID (used as given) or a unique hex prefix of 8+ characters, which the
- * transport resolves to the full id in the same call (ce863deb). */
-const planningRef = z.string().refine(isPlanningRef, `must be ${planningIdHelp}`);
 const lane = { laneId: uuid.optional() };
 const message = { message: z.string().default('Agent change') };
 const selection = {
@@ -167,7 +164,7 @@ export const hostedAgentCommandSchemas = {
       stackOn: uuid.optional(),
       stackEntry: uuid.optional(),
       /** Start from a planned Issue: its title and body become the Intent, and it moves to in-progress. */
-      planningItemId: planningRef.optional(),
+      ...planningIssueFields,
       /** Declared paths (a trailing / selects a directory): the start receipt names open Lanes that
        * already saved files there (D2). Client-side only; never part of the start request. */
       scope: z
@@ -423,7 +420,7 @@ export const hostedAgentCommandSchemas = {
   /** Finite page of the backlog (Initiatives and Issues). id reads one item with its comments. */
   planning: z
     .object({
-      id: planningRef.optional(),
+      ...planningIssueFields,
       search: z.string().trim().min(1).optional(),
       kind: z.enum(['issue', 'initiative']).optional(),
       status: z.enum([...planningStatuses, 'all']).optional(),
@@ -443,16 +440,20 @@ export const hostedAgentCommandSchemas = {
       input => !(input.counts && (input.id || input.search || input.schedule)),
       'Use counts with a list read.',
     )
-    .refine(input => !(input.id && input.search), 'Use id or search, not both.')
+    .refine(input => !(input.id && input.search), 'Use planningItemId or search, not both.')
     .refine(input => !(input.schedule && (input.id || input.search)), 'Use schedule with a list read.'),
   'put-planning-item': planningPutSchema
     .omit({ action: true, operationId: true, itemId: true })
-    .extend({ itemId: planningRef.optional() })
+    .extend(planningIssueFields)
     .strict(),
   'comment-planning-item': planningCommentCommandSchema
     .omit({ action: true, operationId: true })
-    .extend({ itemId: planningRef })
-    .strict(),
+    .extend(planningIssueFields)
+    .strict()
+    .refine(
+      value => Boolean(value.planningItemId || value.id || value.itemId),
+      'planningItemId: name the Issue.',
+    ),
 };
 export type HostedAgentAction = keyof typeof hostedAgentCommandSchemas;
 export function hostedAgentAction(action: string): HostedAgentAction {

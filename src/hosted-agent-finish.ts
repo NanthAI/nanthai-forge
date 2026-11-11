@@ -233,6 +233,19 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
       const code = (error as { code?: unknown }).code;
       if (typeof code === 'string' && FINISH_REFUSALS.has(code))
         await session.journal.retain(finishRefusedKey, () => code);
+      if (error instanceof ForgeError && code === 'PREFLIGHT_REQUIRED') {
+        const parameters = {
+          ...(input as Record<string, unknown>),
+          operationId: session.journal.operationId,
+        };
+        const replayCommand = `nforge agent ${shellQuote(session.root)} land --save ${shellQuote(JSON.stringify(parameters))}`;
+        throw new ForgeError(error.code, `${error.message} Replay: ${replayCommand}`, undefined, {
+          ...error.recovery,
+          operationId: session.journal.operationId,
+          replayCommand,
+          replay: { action: 'finish', parameters },
+        });
+      }
       throw error;
     }
   const context = session.journal.get<FinishContext>('finish-context');

@@ -10,7 +10,10 @@ import {
 export const hostedRecordCommands = {
   friction: frictionInputSchema.omit({ operationId: true }).strict(),
   'friction-list': frictionListSchema,
-  'friction-triage': hostedFrictionTriageSchema,
+  'friction-triage': hostedFrictionTriageSchema.extend({
+    id: z.uuid().describe('Alias for planningItemId (Issue).').optional(),
+    itemId: z.uuid().describe('Alias for planningItemId (Issue).').optional(),
+  }),
   decide: decideInputSchema.omit({ operationId: true }).strict(),
   decisions: decisionsInputSchema.extend({ cursor: z.string().nullable().default(null) }).strict(),
 };

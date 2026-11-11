@@ -132,7 +132,9 @@ test('urgent roles: owner in person or asOwner; agents only when allowed; never 
 
 test('agent text: one line per active rule, nothing for rules that are off', () => {
   const all = agentDefaultLines(AGENT_DEFAULTS);
-  assert(all.some(line => line.includes('preflight') && line.includes('refuses')));
+  assert(
+    all.some(line => line.includes('preflight') && line.includes('land --save') && line.includes('budget')),
+  );
   assert(!all.some(line => line.includes(' ack ')), 'overlap answers are retired (Issue 853fcde3)');
   assert(all.some(line => line.includes('30 minutes')));
   assert(all.some(line => /urgent/.test(line)));

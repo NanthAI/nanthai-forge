@@ -3,8 +3,17 @@ import { hostedActionError } from './hosted-action-error.js';
 import { z } from 'zod';
 import { ForgeError, invariant } from './errors.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
+import { planningIssueArguments } from './planning-issue-arguments.js';
 export const liveLanesInput = z
   .object({
+    planningItemId: z
+      .uuid()
+      .describe('Issue key (canonical); full UUID. Selects its current execution Intent.')
+      .optional(),
+    id: z.uuid().describe('Alias for planningItemId; full UUID.').optional(),
+    itemId: z.uuid().describe('Alias for planningItemId; full UUID.').optional(),
+    /** Exact execution Intent; planningItemId selects the Issue's current execution Intent. */
+    intentId: z.uuid().optional(),
     cursor: z.string().startsWith('forge-lanes-v1:').nullable().default(null),
     limit: z.number().int().min(1).max(100).default(50),
     /** `live` hides dormant Lanes; `dormant` lists only them, each with `abandonable`; default lists all. */
@@ -12,7 +21,7 @@ export const liveLanesInput = z
   })
   .strict();
 export async function liveLanes(transport: HostedAgentTransport, input: Record<string, unknown>) {
-  const parsed = liveLanesInput.safeParse(input);
+  const parsed = liveLanesInput.safeParse(planningIssueArguments('lanes', input));
   invariant(
     parsed.success,
     'BAD_ARGUMENT',

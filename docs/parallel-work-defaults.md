@@ -574,7 +574,7 @@ with nothing to answer ([exact conflicts at save](agents/workflow.md#exact-confl
 
 ### Server enforcement of preflight
 
-The CLI checks `preflight: require` before it composes. The server checks it again when it accepts
+The CLI checks `preflight: require` before it composes. From the Lane checkout, `land --save` runs an unsatisfied required preflight inline, reusing the existing local budget and operationId. Failure or budget exhaustion names the exact preflight continuation; run it and replay the same landing. The server checks it again when it accepts
 a new agent landing (`projectHostedLanding:enqueue` or `projectHostedLandingDesired:submit`). A
 landing from an older or hand-written client that skips the CLI check is refused with the same
 code (`PREFLIGHT_REQUIRED`) and next step.

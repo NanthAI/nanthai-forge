@@ -6,6 +6,7 @@ import { unknownActionError } from './hosted-agent-version.js';
 import { ForgeError, invariant } from './errors.js';
 import { describeIssues } from './argument-errors.js';
 import { actionRoot } from './agent-verbs.js';
+import { planningIssueArguments } from './planning-issue-arguments.js';
 
 /** The same enforced schemas, before installed-CLI release discovery. Only
  * argument validation happens here; dispatch retains authority and retry checks. */
@@ -14,8 +15,11 @@ export function validateHostedCliCommand(
   requestedAction: string,
   selected: Record<string, unknown>,
 ) {
-  const input = Object.fromEntries(
-    Object.entries(selected).filter(([key]) => !['url', 'projectId', 'action'].includes(key)),
+  const input = planningIssueArguments(
+    requestedAction,
+    Object.fromEntries(
+      Object.entries(selected).filter(([key]) => !['url', 'projectId', 'action'].includes(key)),
+    ),
   );
   const local: Record<string, z.ZodType> = hostedClientReadSchemas;
   let schema: z.ZodType;

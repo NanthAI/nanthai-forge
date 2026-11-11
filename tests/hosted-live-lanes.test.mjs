@@ -179,3 +179,132 @@ test('live Lane reads require current access and validate page size', async () =
     error => error.data?.code === 'PROJECT_UNAVAILABLE',
   );
 });
+
+test('Issue and Intent filters page only indexed matching Lanes at project scale, with no writes or source reads', async t => {
+  const s = await fixture(),
+    intentId = randomUUID(),
+    other = randomUUID();
+  const putIntent = id =>
+    s.put({
+      kind: 'intent',
+      id,
+      version: 0,
+      at,
+      outcome: 'Filtered task',
+      constraints: '',
+      creatorAccountId: 'owner',
+      assigneeAccountIds: [],
+      base: { head: hash, receiptId: randomUUID() },
+      status: 'active',
+    });
+  await putIntent(intentId);
+  await putIntent(other);
+  const matching = [];
+  for (let i = 0; i < 5; i++) {
+    const id = randomUUID();
+    matching.push(id);
+    await s.put({
+      kind: 'lane',
+      id,
+      version: 0,
+      at,
+      intentId,
+      actor: 'owner',
+      base: { head: hash, receiptId: randomUUID() },
+      head: hash,
+      sourceVersion: 0,
+      lifecycleVersion: 0,
+      state: 'active',
+      authorityEpoch: 1,
+    });
+  }
+  const read = params =>
+    s
+      .call('filtered', api.list, { projectId: s.auth.projectId, cursor: null, limit: 2, ...params })
+      .then(JSON.parse);
+  const first = await read({ intentId });
+  const before = s.counts.at(-1);
+  // These records deliberately have no body: touching one proves the filter scanned unrelated work.
+  for (let i = 0; i < 10000; i++)
+    await s.ctx.db.insert('projectHostedRecordHeads', {
+      projectId: s.auth.projectId,
+      kind: 'lane',
+      key: `unrelated-${i}`,
+      parent: other,
+      status: 'active',
+      version: 0,
+      recordId: 'missing-body',
+    });
+  const again = await read({ intentId });
+  assert.deepEqual(again, first);
+  assert.deepEqual(s.counts.at(-1), before, 'unrelated project growth adds zero DB I/O');
+  assert.equal(before.writes, 0);
+  assert(before.documents < 100 && before.readBytes < 32000, JSON.stringify(before));
+  const seen = [...first.page];
+  let cursor = first.continueCursor;
+  while (cursor) {
+    const page = await read({ intentId, cursor });
+    seen.push(...page.page);
+    cursor = page.continueCursor;
+  }
+  assert.deepEqual(seen.map(row => row.laneId).sort(), matching.sort());
+  const byIssue = await read({ planningItemId: intentId });
+  assert.deepEqual(byIssue.page, first.page);
+  assert.deepEqual((await read({ intentId: randomUUID() })).page, []);
+  for (const params of [
+    { planningItemId: intentId, intentId: other },
+    { intentId: other, cursor: first.continueCursor },
+    { cursor: first.continueCursor },
+    { planningItemId: 'short' },
+  ])
+    await assert.rejects(read(params), error => error.data?.code === 'BAD_ARGUMENT');
+  t.diagnostic(JSON.stringify({ unrelatedLanes: 10000, page: 2, callsPerPage: 1, ...before }));
+});
+
+test('Issue filtering follows the same bounded successor Intent chain as planned start', async () => {
+  const { successorIntentId } = await import('../dist/hosted-intent-chain.js');
+  const s = await fixture(),
+    issue = randomUUID(),
+    successor = successorIntentId(issue);
+  for (const id of [issue, successor])
+    await s.put({
+      kind: 'intent',
+      id,
+      version: 0,
+      at,
+      outcome: 'Reopened Issue',
+      constraints: '',
+      creatorAccountId: 'owner',
+      assigneeAccountIds: [],
+      base: { head: hash, receiptId: randomUUID() },
+      status: id === issue ? 'completed' : 'active',
+    });
+  const lane = randomUUID();
+  await s.put({
+    kind: 'lane',
+    id: lane,
+    version: 0,
+    at,
+    intentId: successor,
+    actor: 'owner',
+    base: { head: hash, receiptId: randomUUID() },
+    head: hash,
+    sourceVersion: 0,
+    lifecycleVersion: 0,
+    state: 'active',
+    authorityEpoch: 1,
+  });
+  const read = params =>
+    s
+      .call('reopened', api.list, { projectId: s.auth.projectId, cursor: null, limit: 10, ...params })
+      .then(JSON.parse);
+  assert.deepEqual(
+    (await read({ planningItemId: issue })).page.map(row => row.laneId),
+    [lane],
+  );
+  assert.deepEqual((await read({ intentId: issue })).page, []);
+  assert.deepEqual(
+    (await read({ planningItemId: issue, intentId: successor })).page.map(row => row.laneId),
+    [lane],
+  );
+});

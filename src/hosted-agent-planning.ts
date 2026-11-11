@@ -9,6 +9,7 @@ import { hostedActionError } from './hosted-action-error.js';
 import { readIndexedWorkDetail } from './hosted-work-client.js';
 import { ForgeError, invariant, itemChanged } from './errors.js';
 import { isPlanningPrefix, planningIdMaxCandidates } from './planning-id.js';
+import { planningIssueArguments } from './planning-issue-arguments.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 import type { PlanningItem, PlanningWrite } from './work-planning-types.js';
 import { issuePaths, SCHEDULE_RULE, suggestSchedule } from './work-schedule.js';
@@ -703,6 +704,7 @@ export async function executeHostedPlanning(
   input: Record<string, unknown>,
   operationId: string | undefined,
 ) {
+  input = planningIssueArguments(action, input);
   if (action === 'planning') {
     const read = hostedAgentCommandSchemas.planning.parse(input);
     return { operationId: null, result: marked(await readPlanning(port, read)) };
@@ -711,7 +713,7 @@ export async function executeHostedPlanning(
   port.retainOperation?.(journal.operationId);
   if (action === 'comment-planning-item') {
     const comment = hostedAgentCommandSchemas['comment-planning-item'].parse(input);
-    const itemId = await resolvePlanningId(port, comment.itemId, journal);
+    const itemId = await resolvePlanningId(port, comment.itemId!, journal);
     const revision = await writePlanning(
       port,
       {

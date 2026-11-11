@@ -11,12 +11,29 @@ import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { hostedAgentActions } from '../dist/hosted-agent-contract.js';
 const at = '2026-01-01T00:00:00.000Z';
-export function agentFixture(t) {
+export function agentFixture(t, source) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-hosted-agent-'));
   t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(directory, 'client'),
     address = { url: 'https://fixture.invalid', projectId: 'project' };
-  const state = { schema: 1, kind: 'forge-source-state', parents: [], files: [], message: 'Synthetic', at };
+  const objects = new Map();
+  const fileEntries = files =>
+    Object.entries(files)
+      .map(([path, text]) => {
+        const bytes = Buffer.from(text),
+          blob = digest(bytes);
+        objects.set(blob, bytes);
+        return { path, blob, mode: 'file' };
+      })
+      .sort((a, b) => a.path.localeCompare(b.path));
+  const state = {
+    schema: 1,
+    kind: 'forge-source-state',
+    parents: [],
+    files: fileEntries(source?.base ?? {}),
+    message: 'Synthetic',
+    at,
+  };
   const bytes = Buffer.from(JSON.stringify(state)),
     head = digest(bytes),
     // The Lane's saved head changes one file against its base (an edited Lane), so landing it is not empty.
@@ -24,16 +41,13 @@ export function agentFixture(t) {
     laneBytes = Buffer.from(
       JSON.stringify({
         ...state,
-        files: [{ path: 'lane-edit.txt', blob: digest(laneFile), mode: 'file' }],
+        files: fileEntries(source?.lane ?? { 'lane-edit.txt': laneFile.toString() }),
         message: 'Synthetic Lane edit',
       }),
     ),
-    laneHead = digest(laneBytes),
-    objects = new Map([
-      [head, bytes],
-      [laneHead, laneBytes],
-      [digest(laneFile), laneFile],
-    ]);
+    laneHead = digest(laneBytes);
+  objects.set(head, bytes);
+  objects.set(laneHead, laneBytes);
   const main = {
     schema: 2,
     projectId: 'project',
@@ -446,7 +460,7 @@ export function agentFixture(t) {
     requests,
     exchange,
     objects,
-    laneFiles: [{ path: 'lane-edit.txt', blob: digest(laneFile), mode: 'file' }],
+    laneFiles: JSON.parse(laneBytes).files,
     transport,
     queueView,
     lose(name) {

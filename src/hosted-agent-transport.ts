@@ -51,6 +51,7 @@ import {
 import { executeHostedPolicy } from './hosted-agent-policy.js';
 import { executeHostedPlanning, markPlanningStarted } from './hosted-agent-planning.js';
 import { isPlanningPrefix } from './planning-id.js';
+import { planningIssueArguments } from './planning-issue-arguments.js';
 import { executeHostedMetrics, METRICS_DEADLINE_MS, metricsDeadline } from './hosted-agent-metrics.js';
 import { laneLiveness, readLaneEntry, recordLane, withLaneCommand } from './lane-registry.js';
 import { convexLaneStates, laneHousekeeping, markerIdentity } from './lane-prune.js';
@@ -357,6 +358,7 @@ export class HostedAgentTransport {
     input: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<HostedAgentResponse> {
+    input = planningIssueArguments(requestedAction, input);
     if (requestedAction === 'provenance')
       return {
         schema: 1,
@@ -1082,6 +1084,14 @@ export class HostedAgentTransport {
               ...(tree ? { tree } : {}),
             },
             advice,
+            selected?.laneId === laneId && selected.head === head
+              ? () =>
+                  invariant(
+                    !hostedLaneDirty(root, { refresh: true }),
+                    'LANE_DIRTY',
+                    'Save first: inline preflight records a result for the saved head, and the files here differ from it. Replay land --save to save them.',
+                  )
+              : false,
           );
           // The server requires this preflight result again at enqueue (Issue 029138ef).
           gatedLane = { laneId, head, preflight: preflightResult(gates.preflight) };

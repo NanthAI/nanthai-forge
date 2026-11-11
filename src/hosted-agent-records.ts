@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { planningIssueArguments } from './planning-issue-arguments.js';
 import { describeIssues } from './argument-errors.js';
 import { actionRoot } from './agent-verbs.js';
 import { hostedRecordCommands } from './hosted-record-input.js';
@@ -16,7 +17,7 @@ export async function executeHostedRecords(
   action: keyof typeof hostedRecordCommands,
   input: Record<string, unknown>,
 ): Promise<HostedAgentResponse> {
-  const { operationId, ...parameters } = input;
+  const { operationId, ...parameters } = planningIssueArguments(action, input);
   if (
     (action === 'friction' || (action === 'friction-triage' && parameters.status === 'fixed')) &&
     parameters.laneId === undefined

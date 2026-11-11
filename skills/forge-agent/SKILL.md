@@ -51,7 +51,7 @@ For work on Forge itself, read [AGENTS.md](../../AGENTS.md), the [lead playbook]
 Defaults; a project can change them. `nforge agent ROOT capabilities` returns your project's `rules`, `policy` its settings ([parallel-work defaults](../../docs/parallel-work-defaults.md)).
 
 <!-- agent-defaults:start (generated from scripts/agent-default-lines.mjs) -->
-- Before land, run your affected tests: nforge agent ROOT preflight '{"laneId":"…"}' (land refuses without a pass for the saved head; sets over 10 min are advisory).
+- land --save runs required preflight within its local budget; on failure or budget exhaustion follow its command, then replay. Sets over 10 min are advisory.
 - Save after each meaningful step, at least every 30 minutes of edits: each save checks your saved files for exact conflicts with main and other open Lanes.
 - Never request urgent priority; it is owner-only.
 - After land is submitted, do not save, sync or edit that Lane until it lands or fails.

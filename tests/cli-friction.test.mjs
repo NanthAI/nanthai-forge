@@ -9,6 +9,7 @@ import { heavyStatus, tryHeavySlot } from '../dist/heavy-slots.js';
 import { agentCli } from '../dist/agent-cli.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { getFunctionName } from 'convex/server';
+import { randomUUID } from 'node:crypto';
 const cli = resolve('dist/cli-entry.js');
 function temporary(t) {
   const root = fs.mkdtempSync(join(tmpdir(), 'forge-cli-friction-'));
@@ -123,7 +124,7 @@ test('a folder without a hosted marker is refused with its absolute path and nfo
   assert.equal(fs.existsSync(join(root, '.git')), false);
   assert.equal(fs.existsSync(join(root, '.forge')), false);
 });
-test('live Lane client makes exactly one page query, no capabilities or per-Lane calls; errors are local', async t => {
+test('live Lane client makes exactly one filtered page query, no capabilities or per-Lane calls; errors are local', async t => {
   const root = temporary(t),
     calls = [];
   const transport = new HostedAgentTransport(
@@ -139,11 +140,13 @@ test('live Lane client makes exactly one page query, no capabilities or per-Lane
       },
     },
   );
-  const result = await transport.dispatch('lanes', { limit: 20 });
+  const planningItemId = randomUUID();
+  const result = await transport.dispatch('lanes', { limit: 20, planningItemId });
   assert.equal(result.result.page.length, 1);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].name, 'projectHostedLiveLanes:list');
   assert.equal(calls[0].args.limit, 20);
+  assert.equal(calls[0].args.planningItemId, planningItemId);
   for (const input of [{ limit: 0 }, { limit: 101 }, { cursor: 2 }, { extra: true }])
     await assert.rejects(
       transport.dispatch('lanes', input),

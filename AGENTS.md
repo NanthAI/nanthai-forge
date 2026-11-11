@@ -22,17 +22,18 @@ The backlog is Forge planning (Initiatives group Issues). Start work from its Is
 
 ```sh
 nforge agent ROOT planning '{"status":"open","limit":50}'          # what is planned and in flight
+nforge agent ROOT lanes '{"planningItemId":"ISSUE_ID"}'              # earlier open work for this Issue
 nforge agent ROOT start '{"planningItemId":"ISSUE_ID"}'            # or {"outcome":"…"} for unplanned work; returns a Lane path
 # edit files only in that Lane path with your normal tools
 nforge agent ROOT land --save '{"laneId":"…","message":"…"}'
-nforge agent ROOT comment-planning-item '{"itemId":"ISSUE_ID","text":"What landed, follow-ups"}'
+nforge agent ROOT comment-planning-item '{"planningItemId":"ISSUE_ID","text":"What landed, follow-ups"}'
 ```
 
 Agreed ideas, decisions and builder-found friction go into planning as Issues (`put-planning-item`), not only into a handoff. Discuss an owner question or idea before filing it; a question is not agreement to add work. For a new friction item with no existing planning match, run `nforge agent ROOT friction '{"title":"…","detail":"…","area":"…"}'`. Outside a Lane this records project/actor friction; inside a Lane it attaches that Lane automatically. Supply `laneId` to attach a different Lane.
 
 Before filing an Issue or friction, search planning and comment on an existing match instead of duplicating it. One `planning {"search":"relevant words","limit":10}` is enough; add `status:"all"` to include closed work. Do not page `nextCursor` for a duplicate check: every search is billed at the full search-index size, whatever the limit.
 
-`land --save` saves, updates from main, composes a Candidate, runs the check and accepts under the project policy. Details: [agent workflow](docs/agents/workflow.md). Hosted start/save/status receipts include `behindMain`, and a save that trial-merges into a real conflict with a peer's saved files carries `conflictNotice` (nothing to answer; coordinate or stack). Saved-path advice excludes unsaved peer edits and never establishes independence. Hosted `peers {laneId,path?,detail?}` reads the same saved overlap evidence in one query; `diff {laneId,paths?,byteBudget?}` compares pinned base to saved head. MCP uses `forge_review` for both.
+`land --save` saves, runs any required small preflight within its existing local budget, updates from main, composes a Candidate, runs the check and accepts under the project policy. A failed or budget-exhausted inline preflight names the exact continuation; replay the same landing operation after it. `planningItemId` is the Issue key across agent actions; `id` and `itemId` remain aliases. `lanes {planningItemId}` uses a full Issue UUID; `intentId` selects an exact execution Intent. Details: [agent workflow](docs/agents/workflow.md). Hosted start/save/status receipts include `behindMain`, and a save that trial-merges into a real conflict with a peer's saved files carries `conflictNotice` (nothing to answer; coordinate or stack). Saved-path advice excludes unsaved peer edits and never establishes independence. Hosted `peers {laneId,path?,detail?}` reads the same saved overlap evidence in one query; `diff {laneId,paths?,byteBudget?}` compares pinned base to saved head. MCP uses `forge_review` for both.
 
 **Working rules for every agent**
 

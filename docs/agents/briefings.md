@@ -34,13 +34,14 @@ budget, time box, acceptance bar, metrics that must not regress, and what it rem
 merges (or why nothing can go).
 
 1. Read Lane AGENTS.md, DESIGN.md, the Issue body and **every comment**
-   (`planning {"id":"ISSUE_ID","reconcile":false}`); comments can amend Done-when. Own one
+   (`planning {"planningItemId":"ISSUE_ID","reconcile":false}`); comments can amend Done-when. Own one
    finite task. Builders on one machine share a root and identity, so generate your own
    fresh `operationId` (`uuidgen`) and pass it:
    `start {planningItemId,operationId}`; a start without it can return another builder's
    open Lane. Reuse the same id only to retry your own lost start. Edit only the returned
    Lane path; never edit or commit in the project folder or mirror, or in another
-   builder's Lane. Check for an earlier Lane on the Issue (`lanes`); continue or abandon
+   builder's Lane. Check for earlier open work with `lanes {"planningItemId":"ISSUE_ID"}` (full UUID;
+   follow `continueCursor`; `intentId` selects one execution Intent). Continue or abandon
    it, never redo work already on main.
 2. Follow AGENTS.md secret handling and owner decision rights. Never print secrets
    or environment values, read credentials raw into output, use production or

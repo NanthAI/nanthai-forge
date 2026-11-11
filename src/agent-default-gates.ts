@@ -2,7 +2,12 @@
 import { ForgeError } from './errors.js';
 import { shellQuote } from './shell-quote.js';
 import { preflightOutcome } from './agent-preflight-incomplete.js';
-import { preflightPlan, readPreflightReceipt, PREFLIGHT_SECONDS_PER_FILE } from './agent-preflight.js';
+import {
+  preflightPlan,
+  readPreflightReceipt,
+  runPreflight,
+  PREFLIGHT_SECONDS_PER_FILE,
+} from './agent-preflight.js';
 import type { EffectiveAgentDefaults } from './agent-parallel-defaults.js';
 import type { readHostedOverlapAdvice } from './hosted-overlap-client.js';
 
@@ -18,6 +23,7 @@ export function finishGates(
   defaults: EffectiveAgentDefaults | undefined,
   lane: { laneId: string; head: string; tree?: string },
   advice: Advice | undefined,
+  runRequired: boolean | (() => void) = false,
 ) {
   const advisories: Record<string, unknown> = {};
   if (!defaults) return advisories;
@@ -110,11 +116,35 @@ export function finishGates(
               60,
           ),
         );
-        if (defaults.preflight === 'require' && gateMinutes <= defaults.preflightMaxMinutes && !plan.advisory)
+        if (
+          defaults.preflight === 'require' &&
+          gateMinutes <= defaults.preflightMaxMinutes &&
+          !plan.advisory
+        ) {
+          if (runRequired) {
+            if (typeof runRequired === 'function') runRequired();
+            // Reuse this plan and its existing local wall-time budget. No hosted read, new
+            // operation or recursive dispatch: the caller continues the original finish.
+            const result = runPreflight(root, lane.laneId, lane.head, plan, lane.tree);
+            const next = result.incomplete?.finish ?? result.stoppedRerun ?? run;
+            if (
+              preflightOutcome(result) === 'failed' ||
+              result.stoppedForTime ||
+              result.static?.some(check => check.outcome === 'timed-out')
+            )
+              throw new ForgeError(
+                'PREFLIGHT_REQUIRED',
+                `Inline preflight ${preflightOutcome(result) === 'failed' ? 'failed' : 'exceeded its budget'} for saved head ${lane.head.slice(0, 12)}.${result.failure ? ` ${result.failure.excerpt}` : ''} Continue with: ${next}. Then replay the same land operation.`,
+                undefined,
+                { command: next },
+              );
+            return finishGates(root, defaults, lane, advice);
+          }
           throw new ForgeError(
             'PREFLIGHT_REQUIRED',
             `Run the ${plan.tests.length} affected test file(s) for saved head ${lane.head.slice(0, 12)} first (about ${plan.estimateMinutes} min): ${run}.${failed} Then land again.`,
           );
+        }
         advisories.preflight = {
           status: 'advised',
           ...summary,
