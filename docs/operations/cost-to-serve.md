@@ -875,6 +875,137 @@ budget, including zero-growth tables, is recorded in the JSON guard. These are
 before/after **expiry** measurements of the same synthetic landing, not a claim
 about a measured dashboard reduction or a live pre-change deployment.
 
+### S2 journal capacity and reader inventory
+
+`tests/landing-journal-storage.test.mjs` partitions the same complete landing
+fixture after S1 packing and existing expiry. This is a measured capacity
+check before implementing S2, not an archive rollout or a saving. Whole-row
+serialized JSON includes escaped body strings and metadata; only `_creationTime`
+is normalized to zero, as in the existing storage guard. Membership in
+`projectHostedRecordHeads.recordId`, rather than the largest version number,
+identifies current records. Bodies shared with a current record stay current.
+Prepared lifecycle versions are separate, never credited as superseded history.
+Every table's category deltas must sum to its existing per-landing measurement.
+The committed landing-storage ceilings are unchanged.
+
+Each fixture represents one already-started Issue's Intent and Lane through one
+landing. The fresh fixture already has its Candidate; the dogfood main race adds
+a second immutable Candidate and a source job. These are incremental bytes per
+landing and per represented Issue completion, **excluding** starting the Issue,
+planning comments and earlier saves. The month columns explicitly model thirty
+such Issues with one landing each (one per day in a thirty-day month); they are
+30 times the measured increment, not a measured month or a whole Issue lifecycle.
+An Issue with several landings needs its actual workload mix rather than this
+normalization. Zero current-row *counts* can still have positive byte deltas when
+an existing head or current body is replaced with a longer terminal state.
+
+| Row kind and placement class | Fresh B / landing / Issue completion | Dogfood B / landing / Issue completion | Fresh B / model month | Dogfood B / model month |
+| --- | ---: | ---: | ---: | ---: |
+| Version headers: current:candidate | 0 | 422 | 0 | 12,660 |
+| Version headers: current:intent | 7 | 9 | 210 | 270 |
+| Version headers: current:job | 0 | 354 | 0 | 10,620 |
+| Version headers: current:lane | 5 | 3 | 150 | 90 |
+| Version headers: superseded:intent | 316 | 316 | 9,480 | 9,480 |
+| Version headers: superseded:job | 0 | 2,118 | 0 | 63,540 |
+| Version headers: superseded:lane | 365 | 369 | 10,950 | 11,070 |
+| Version bodies: current:candidate | 0 | 80,667 | 0 | 2,420,010 |
+| Version bodies: current:intent | 5 | 6 | 150 | 180 |
+| Version bodies: current:job | 0 | 1,507 | 0 | 45,210 |
+| Version bodies: current:lane | 4 | 3 | 120 | 90 |
+| Version bodies: superseded:intent | 470 | 470 | 14,100 | 14,100 |
+| Version bodies: superseded:job | 0 | 7,666 | 0 | 229,980 |
+| Version bodies: superseded:lane | 566 | 568 | 16,980 | 17,040 |
+| Heads: current:candidate | 0 | 286 | 0 | 8,580 |
+| Heads: current:intent | 5 | 6 | 150 | 180 |
+| Heads: current:job | 0 | 266 | 0 | 7,980 |
+| Heads: current:lane | 4 | 3 | 120 | 90 |
+| Operations: active | 0 | 1,013 | 0 | 30,390 |
+| Operations: terminal | 3,261 | 86,491 | 97,830 | 2,594,730 |
+| Closed-Lane save pages, display rows, snapshots/pages/heads, coordination events | 0 | 0 | 0 | 0 |
+
+The zero rows describe this fixture's coverage only. In particular it exercises
+no coordination history, snapshot chain, saved-page stream, planning history or
+ninety-day replay. They cannot supply savings against this fixture's target.
+The partition retains their categories for future populated workload probes;
+it is test instrumentation, not production archive eligibility logic.
+
+| Capacity quantity | Fresh B / landing | Dogfood B / landing |
+| --- | ---: | ---: |
+| Observed retained after S1 | 30,268 | 226,242 |
+| Superseded version headers and bodies | 1,717 | 11,507 |
+| Entire terminal operation rows (optimistic removable upper bound) | 3,261 | 86,491 |
+| Optimistic retained floor after both moves, zero index/receipt overhead | 25,290 | 128,244 |
+| Approved joint target | 15,000 | 60,000 |
+| Rows outside S2's journal table set, alone | 25,260 | 43,699 |
+
+These observations differ slightly from S1's earlier sample because timestamp
+and timing digits contribute serialized bytes; they fit the unchanged ceilings.
+Even treating all terminal operation receipts as free cannot meet either target.
+Real compact receipts and segment index rows would raise the floor. At the stated
+thirty-Issue mix, retained increments are 908,040 / 6,787,260 B per model month;
+the optimistic floors are 758,700 / 3,847,320 B. Existing project rows and source
+objects remain additional costs. These logical bytes exclude physical indexes,
+system jobs and R2; they establish no billed storage reduction.
+
+The new dogfood Candidate's **current** body alone is 80,667 B, including
+71,345 B of inner `governance` JSON with 4,222 exact paths. Its outer stored
+string includes additional escaping. It did not exist before this landing and
+is therefore not seeded overhead. S2 keeps current versions and heads, so that
+one body exceeds the entire 60,000 B target before any other rows or pointers.
+The six superseded source-job versions account for only 2,118 B of headers and
+7,666 B of bodies. Relocating those cannot solve current-Candidate growth.
+
+The fresh floor is independently blocked by non-journal rows. In the full
+post-fixture `projectFinishReadRows` inventory, S1's private capsule pointer,
+owner/replay controls and acceptance-page ledgers occupy 5,693 / 2,741 / 1,147 B
+fresh and 7,671 / 5,904 / 2,312 B dogfood. These are whole retained rows, not
+incremental deltas or a second charge to add to the table above. Their exact
+transaction pins belong to S1; S2 cannot silently remove them.
+
+The cheapest next investigation is a lead placement review of current Candidate
+path bytes and S1's private transaction/replay metadata. Current paths are read
+inside mutations by `projectHostedAcceptancePublish`, `projectHostedGate`,
+`projectHostedTrust`, `projectHostedLandingBatchPublish` and `projectHostedCulprit`;
+queries also use them in `projectHostedLandingOvertake`,
+`projectHostedLandingPrecompose` and `projectHostedLandingWouldConflict`.
+An R2 pointer alone cannot replace those transaction reads. Reuse S4's existing
+Candidate file-list work where applicable, while proving exact current-policy
+checks and old-Candidate replays first. This is an investigation proposal, not
+an approved format, scope expansion or weakened target.
+
+The inventory before any move is:
+
+| Stored family | Current readers and transaction constraints | Required expansion before a writer |
+| --- | --- | --- |
+| Record versions and bodies | Central `recordVersion`, `readHostedRecord`, `hostedRecordBody` serve queries and mutations. `writeHostedRecord` replays an exact old version before CAS; lifecycle overlays/materialization retain original row ids. Direct history ranges exist in `projectHostedProvenanceRead`, `projectHostedLiveLanes`, `projectWorkStoreReads` and `projectSelfMetrics`. | Authorized redacting server actions for explicit versions, Lane history, planning versions and provenance, preserving exact cursors. Retain transaction-needed digest/identity/replay summaries; do not turn a missing archived version into permission to rewrite it. |
+| Work event provenance on record bodies | `projectWorkEventStore.findWorkEvent` is also used by metadata mutations for operation deduplication; `projectWorkEventPage.retainedEventPage` requires contiguous revisions across both legacy events and record bodies. `projectWorkStore` and `projectWorkStoreDigests` compare exact historical versions. | Range-indexed segment reads plus compact mutation receipts; preserve canonical event request/command/revision and current identity mapping. |
+| Terminal source operations | `beginHostedOperation` and family-specific save/sync/compose/check/lifecycle loaders parse the full envelope; terminal results can themselves embed the whole Candidate. `projectHostedCulprit` stores recovery state separately on the same row. | Compact replay representation must reconstruct the original result and original first-attempt ids/pins inside existing mutations for ninety days. No new retry denial. Current implementation still retains full envelopes and prunes under its existing ninety-day rule. |
+| Closed-Lane save pages | `projectHostedSaves` checks original page digests on replay. Save/sync/state rows also provide provenance through `projectHostedProvenanceRead.sourceOperation`. | Preserve exact page digest replay and provenance; prove terminal ownership before relocation. |
+| Snapshot/display families | `projectHostedSnapshots` validates referenced versions in mutations and reconciles old page/publication retries. `projectHostedSnapshotRead` reads exact published pages; `projectHostedProjection` derives display rows from those pages. | Expand exact-version and snapshot readers before merging tables. Display rows have no authority reader; removing their table still requires updating its writer and purge inventory. |
+| Coordination detail | `coordinationFeed.feedRows` uses creation-time/id positions and scoped indexes; `projectCoordinationReads.related` scans the same feed. `coordinationWrite.eventByOperation` and emit paths use event identity for deduplication; `projectCoordination:publish` also replays it. Messages, handoffs and acknowledgements have inbox/receipt readers. | Archive only activity/change/claim/release older than fourteen days, through current-access server actions with the same feed boundaries. Keep messages/handoffs/acks in Convex. No existing recovery-hosted table branch exports coordination events, so complete archive export needs explicit coverage rather than assuming S1 already includes them. |
+| Export, restore and administration | `projectRecoveryHosted` exports records/bodies/operations/save pages; S1 merges its nine capsule families using `projectLandingCapsuleRecovery` and fences relocation with a revision. Generic purge inventory and legacy storage accounting read physical tables. | Reuse S1's verified codec and recovery merge, with a journal range identity and recovery fence. Extend the full export/drill for snapshots and coordination, which are absent from `recoveryTables` today. Keep physical accounting honest during partial removal. |
+
+Under the builder stop-at-evidence rule, S2's archive reader/writer work is paused
+for that lead review; no new stored format, flag, table, policy or automatic
+relocation is installed. No table or runtime row can be removed by this
+measurement-only change. The superseded-history classes remain identified for a
+reader-first implementation once placement is settled. The default-off writer,
+compact replay, fourteen-day hot-table bound, complete archive recovery and
+speed qualification all remain open. The weekly-export line explicitly **needs
+two dev exports after the setting is on**; a fixture normalization does not close it.
+
+Runtime cost delta for this instrumentation is zero Convex calls, zero DB I/O,
+zero R2 requests, zero idle work and no change to landing wall time. No S2 archive
+action exists to measure. The two in-process inventory samples took 175.9 / 283.9
+ms for the complete landing/storage fixture and process peak RSS was
+409,747,456 / 489,209,856 B, including module imports, DB fake and S1 action;
+these are not isolated action memory, latency distributions or provider billing.
+The future archive budget remains one action and at most two mutations per
+100-row/500-KiB page, one PUT per segment, one server action and one GET per
+segment read, zero added landing hot-path calls and zero idle calls. Live billed
+usage, actual byte placement, provider memory and a complete Issue-month workload
+remain unverified.
+
 Controller-only test budgets report delayed retention allocations separately,
 keeping their original source/controller ceilings. The raw fixture counters and
 cumulative landing cost guard still include **all** system-job writes and bytes.

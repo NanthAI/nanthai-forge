@@ -81,7 +81,11 @@ export function assertFixedProjectStorage(actual, budget, label) {
         `${label}/${table}: ${stored[metric]} > ${budget[table][metric]} ${metric} per project; fixed rows must not grow with landing history`,
       );
 }
-export async function landingStorage(t, dogfood, { fileCount = 4096, capsules = false, capsuleSample } = {}) {
+export async function landingStorage(
+  t,
+  dogfood,
+  { fileCount = 4096, capsules = false, capsuleSample, storageSample } = {},
+) {
   const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
   Object.assign(process.env, synthetic);
   t.after(() => {
@@ -127,6 +131,7 @@ export async function landingStorage(t, dogfood, { fileCount = 4096, capsules = 
     return original(url, init);
   });
   const before = storedBytes(f);
+  await storageSample?.('before', f);
   const state = await f.enqueue(f.request());
   await f.drain();
   await f.passChecks();
@@ -209,6 +214,7 @@ export async function landingStorage(t, dogfood, { fileCount = 4096, capsules = 
     Date.now = realNow;
   }
   const retained = delta();
+  await storageSample?.('retained', f);
   requestMeter.mock.restore();
   return {
     perLanding: { immediate, retained },
