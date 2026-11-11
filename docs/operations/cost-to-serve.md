@@ -330,7 +330,7 @@ neither has a comparable post-fix capture establishing a new serving total.
 | Six-Candidate core, after source continuations cut | 37.50 calls; 1.049 MB DB I/O; 2.85 modeled GB-s; R2 A/B 3.17/10.67 | 0.541 | 0.593 |
 | Dependency-aware wait observer, separate | 8.83 queries; 82,540 read B | 0.034 | 0.038 |
 | GitHub inbound fixture, one new 24 B blob | 52 calls; 0.836 MB DB I/O; 6.1375 modeled GB-s; R2 A/B 5/15 | 0.811 | 0.889 |
-| Real twelve-shard CI batch ingest, excluding compute | 6 calls; 370,145 DB B; 36,440 reply B; R2 A/B 38/25 | 0.270 | 0.279 |
+| Packed twelve-shard CI batch ingest, excluding compute | 6 calls; 288,826 DB B; 20,084 reply B; R2 A/B 14/90 | 0.168 | 0.175 |
 | Completed dogfood-sized driver tail, reads only | 2,070,233.5 read B; calls unchanged | 0.414 | 0.455 |
 | Flip 5 planning primary write, I/O only, per 1,000 planning writes | 14,934 read B + 12,225 written B; 0 migration writes | 0.005 | 0.006 |
 
