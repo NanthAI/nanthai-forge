@@ -847,3 +847,252 @@ exports on 10 November consumed **3.94 GB of database I/O**, according to the
 owner's Usage evidence on Issue `8c4f126b`. Cleanup/measurement must not dispatch
 another export as an inventory shortcut. This changes no workflow or backup
 contents; the existing weekly recovery path remains in place.
+
+## Measured placement inputs (S0)
+
+This is an observation of the settled `n3-r1-dry-a2` cell, not a new run or a
+causal before/after claim. Its ten landings ran from 07:29:13.891 to
+07:50:49.416 UTC on 11 November. Recorded load averages were
+12.931 / 6.781 / 5.232 before and 6.216 / 7.508 / 10.026 after.
+The retained `result.json` meter reports valid coverage, no missing usage fields,
+no execution failures and no voids. The separate smoke report owns its verdict,
+pricing and timing comparison. The measurements here supply the placement vector;
+R2 reconciliation and indexed-patch billing remain open.
+
+### Calls and database I/O by family
+
+All quantities below are the retained project meter divided by ten accepted
+landings, including preparation, retries/recompositions and observation in that
+meter's window. They are not isolated marginal transactions. Read/write bytes
+are provider `databaseIoReadBytes` / `databaseIoWriteBytes`; GB-s is billed action
+memory-time, not CPU. Executions include cached query completions; the parenthetic
+subset identifies those explicitly. The existing meter prices all its executions,
+so its call-cost line must not be mistaken for a separately reconciled invoice.
+
+| Family | Executions/landing (cached subset) | Read B/landing | Write B/landing | Egress B/landing | Action GB-s/landing |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `projectConvexSourceNode:step` | 7.6 (0) | 0.0 | 0.0 | 15,570,999.5 | 18.0823 |
+| Finish driver and observer | 53 (0.1) | 1,331,497.9 | 150,686.6 | 733.4 | 0.6902 |
+| Source control and V8 | 24.4 (0) | 1,079,630.4 | 193,606.3 | 0.0 | 1.2964 |
+| `projectHostedActionsSource:resolve` | 11.4 (0) | 1,384,810.8 | 0.0 | 0.0 | 0.0000 |
+| Landing and acceptance | 18.4 (0) | 634,579.8 | 268,181.3 | 0.0 | 0.1673 |
+| `projectHostedReuse:prove` | 0.8 (0) | 0.0 | 0.0 | 52,608.4 | 2.8630 |
+| CI orchestration and results | 28.1 (0.4) | 429,280.0 | 105,232.1 | 613.9 | 0.2571 |
+| `projectConvexSourceObjects:resolve` | 29 (0) | 408,578.7 | 0.0 | 0.0 | 0.0000 |
+| Object upload, download and packs | 28.8 (5.4) | 338,523.8 | 12,588.4 | 0.0 | 0.0368 |
+| Save, sync, compose and conflict resolution | 11.7 (0) | 360,023.1 | 31,456.4 | 256.5 | 0.0965 |
+| `POST /checks/actions` | 18.9 (0) | 0.0 | 0.0 | 118,643.0 | 0.6626 |
+| Agent, authorization and workspace | 24.5 (9) | 114,387.6 | 21,595.8 | 0.0 | 0.0000 |
+| Reuse store | 4 (0) | 138,335.6 | 29,517.8 | 0.0 | 0.0000 |
+| Metrics and placement | 1.3 (0) | 49,014.6 | 0.0 | 0.0 | 0.0271 |
+| GitHub webhook | 3.7 (0) | 0.0 | 0.0 | 0.0 | 0.0639 |
+| Work projection and commands | 2.6 (0.2) | 18,233.8 | 12,182.7 | 0.0 | 0.0000 |
+| **Total** | **268.2 (15.1)** | **6,286,896.1** | **825,047.4** | **15,743,854.7** | **24.2432** |
+
+The 80 named functions reconcile exactly to 2,682 completions, 62,868,961 read B,
+8,250,474 write B and 157,438,547 egress B. Excluding the 151 cached completions
+leaves 2,531 uncached executions. Family membership is by module name:
+
+- Source control/V8: `projectConvexSourceStore`, `projectConvexSource`,
+  `projectSourceRunStore`, `projectSourceRun`.
+- Finish: `projectHostedFinishDriver`, `projectHostedFinishObserve`.
+- Landing/acceptance: every `projectHostedLanding*` module and
+  `projectHostedAcceptance`.
+- CI: every other `projectHostedActions*` module, `projectHostedCheckDefinitions`
+  and `projectHostedMainAudit`.
+- Save/sync/compose: `projectHostedSaves`, `projectHostedSync`,
+  `projectHostedCompose*`, `projectHostedResolveChain*`.
+- Object transport: `projectObjects`, `projectObjectCommit`,
+  `projectObjectDownloads`, `projectSourcePacks`.
+- Reuse store: `projectHostedReuseStore`.
+- Metrics: `projectSelfMetrics`, `projectSelfMetricBills`, `projectBytePlacement`,
+  `projectLandingSpeedIssue`.
+- Agent/workspace: `projectHostedAgent`, `deviceStore`, `projectHostedConflicts`,
+  `projectHostedStart`, `projectHostedOverlaps`, `projectHostedLanes`,
+  `projectHostedChannels`, `projectHostedLifecycle`, `projectHostedBatchAbandon`.
+- Work: `projectWorkIndexStore`, `projectWorkCommand`. GitHub webhook is
+  `POST /github/webhook`. The five individually named functions are excluded from
+  all grouped rows.
+
+The old **24% unnamed** headline was a remainder of a rounded summary, not an
+unattributed billing bucket. Reading the original settled pre-fix cell identifies
+its other families below. In that retained meter the five headline functions sum
+to 78.47%, leaving **21.53%**, rather than exactly 24%. Its CI resolver/HTTP counts
+are 543/616, whereas the earlier summary reported 549/626; these scopes are not
+silently equated. Shares use the original meter's own price basis.
+
+| Previously unnamed family | Share of original retained meter |
+| --- | ---: |
+| Finish driver and observer | 6.04% |
+| Source control and V8 | 4.83% |
+| Landing and acceptance | 2.90% |
+| Object upload, download and packs | 2.28% |
+| CI orchestration and results | 2.27% |
+| Save, sync, compose and conflict resolution | 1.48% |
+| Agent, authorization and workspace | 0.88% |
+| Reuse store | 0.66% |
+| GitHub webhook | 0.16% |
+| Metrics and placement | 0.02% |
+
+### Source steps, bodies and wall time
+
+Three bounded creation-time reads (64 rows and a 262,144-byte target per page)
+found 43 source-job rows in the cell window, with 76 recorded step entries.
+These match all 76 Node-step completions in the meter. Two reset jobs before the
+cell were excluded. No `register-state` job, fan-out batch or child task was
+present in this window. The 11 additional `projectConvexSource:step` V8 action
+completions are delegation/control overhead, not eleven additional terminal
+source steps; a submitting action can also delegate inline.
+
+| Kind | Jobs | Recorded steps | Steps/landing | R2 read-busy s/landing | R2 write-busy s/landing | Nested-call-busy s/landing | Recorded run s/landing | Job wall s/landing |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Save | 13 | 13 | 1.3 | 1.1626 | 1.2728 | 0.5285 | 4.7674 | 5.6523 |
+| Sync | 6 | 12 | 1.2 | 1.2547 | 0.9853 | 0.9173 | 6.6992 | 7.1701 |
+| Compose | 24 | 51 | 5.1 | 5.8854 | 2.0701 | 4.3990 | 21.6343 | 24.2233 |
+| Registration | 0 | 0 | 0 | — | — | — | — | — |
+| Fan-out child | 0 | 0 | 0 | — | — | — | — | — |
+| **Total** | **43** | **76** | **7.6** | **8.3027** | **4.3282** | **5.8448** | **33.1009** | **37.0457** |
+
+Each busy clock measures the union within its own category. Reads, writes and
+nested calls can overlap each other, so subtracting their sum does not produce
+an exact compute split. Per-step union bounds put R2 busy wall at
+9.6570–12.6309 s/landing; wall with none of those three categories active is
+14.6252–22.6508 s/landing. That residual includes parse/hash/merge and uninstrumented
+work; it is not measured CPU. Job wall sums `doneAt - queuedAt`; overlapping jobs
+make it different from the cell's elapsed wall or time to accepted main. Queue
+wait totals 3.6911 s/landing; Node boot totals 0.4780 s/landing and can overlap
+that queue accounting. The recorded run begins after the initial `begin` read
+and its timing is captured before terminal commit, so neither belongs in a
+claimed exclusive CPU bucket.
+
+The later read-only provider-log snapshot retained only 13 of the 76 Node-step
+lines (07:44:03.341–07:47:39.742 UTC). Its attempted PUT bodies are:
+
+| Kind / observed steps | State B | Progress B | Result B | Other B | Refused B (already included) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Save / 1 | 4,908,769 | 0 | 246 | 0 | 0 |
+| Sync / 4 | 9,817,605 | 6,868 | 1,438 | 61 | 61 |
+| Compose / 8 | 14,726,526 | 10,798 | 1,562 | 600 | 0 |
+| **Observed subtotal** | **29,452,900** | **17,666** | **3,246** | **661** | **61** |
+
+These 29,474,473 attempted body bytes cover a tail, not ten complete landings.
+Avoided bytes are zero in that tail. The full timing rows retain 152,272,690
+signed PUT bytes (15,227,269 B/landing); the full Node-action meter records
+155,709,995 egress B (15,570,999.5 B/landing). Neither reconstructs the missing
+State/progress/result split, and their 3,437,305-byte difference is unallocated.
+Do not extrapolate the tail or subtract overlapping refused bytes again.
+The smoke meter reads usage and project markers but discards these structured
+step lines; `attribution.mjs` assigns oracle test cases, not source-byte costs.
+
+### R2 counters and the outstanding owner read
+
+These are signed requests counted by `presign`, not a reconciled count of
+executed bucket operations. Reusing a signed URL, retrying it, or signing in a
+nested mutation separates the signer count from actual requests. In particular,
+253 timed source reads coexist with only 37 Class B signatures in the action
+clocks: pre-signed descriptor reads are not counted again by that clock.
+
+| Caller / job kind | Class A signatures/landing | Class B signatures/landing | Signed PUT B/landing |
+| --- | ---: | ---: | ---: |
+| Source worker / save | 2.6 | 0 | 6,380,636.8 |
+| Source worker / sync | 2.1 | 0.8 | 2,947,185.6 |
+| Source worker / compose | 6.9 | 2.9 | 5,899,446.6 |
+| **Covered source subtotal** | **11.6** | **3.7** | **15,227,269.0** |
+| CLI uploads/downloads, CI source/results, reuse, mirror and maintenance | Unknown | Unknown | Unknown |
+
+There is no retained whole-cell counter split for those other callers. Their
+requests are not zero, and source/compose copies of the same counters must not
+be added twice. The old 1,060 requests/landing was a different, whole-dev-bucket
+window; neither its scope nor the fixture ledger's A/B ratio supplies this cell.
+
+**Lead's exact owner question:** approve one read of the bench bucket's aggregate
+operation metrics for 11 November 07:29:13.891–07:50:49.416 UTC (or the provider's
+smallest enclosing buckets, stated explicitly), separated into Class A and B,
+method and status, including failed/retried requests and deletes separately.
+This is a read only: no objects, settings, credentials or retention change.
+Reconcile its bucket-wide counts against the ten-landings window and identify
+other traffic; the dashboard cannot invent caller attribution it does not expose.
+The account-dashboard read remains unapproved and unperformed; S0 line 3 stays open.
+
+### Indexed patch experiment: billing evidence still missing
+
+Deployed index metadata confirms existing tables with the requested custom-index
+counts: `projectHostedLandingQueueStatus` (1), `projectHostedCheckRuns` (9), and
+`projectHostedLandingRequests` (24), excluding built-ins. No synthetic schema or
+production writer is needed to represent those shapes.
+
+A single dev admin-data-editor probe inserted a synthetic 1,024-character body
+under an isolated synthetic, non-active project and patched it to different
+same-length bytes. The patch succeeded at 08:20:03.554–08:20:03.689 UTC on
+11 November; its two synthetic rows were removed and absence verified. It did
+not start a landing, check, source job or other workload. It supplied **no billed
+read/write bytes**: the system mutation returns only success and is absent from
+the provider log snapshot/spend journal. Provider source confirms system UDFs
+are omitted from function logs even though their bandwidth is tracked
+([function logging](https://github.com/get-convex/convex-backend/blob/main/crates/application/src/function_log.rs),
+[usage tracking](https://github.com/get-convex/convex-backend/blob/main/crates/usage_tracking/src/lib.rs)).
+The 0.135 s observation has no recorded load sample and is not a latency claim.
+
+The ten-patch 1/8/27 KB × 1/9/24-index matrix was **not run**, so there is no
+billed-byte table and S0 line 1 remains open. Further unobservable writes would
+spend the experiment's <5 MB budget without supplying its acceptance evidence.
+A follow-up needs an observable dev-only mutation through the normal Lane/CI dev
+path, with no production writer, or provider per-operation usage for the existing
+admin editor. Capture read/write usage for every patch, audit/setup/cleanup
+separately, and stop within the approved total I/O envelope. No local deploy,
+production change or inferred index-copy multiplier was used here.
+
+### Advisory rows, growth and window proposals
+
+On dev, bounded creation-time pages (128 rows, 262,144-byte target) returned only
+aggregate sizes/day counts. A fixed upper creation time per table prevents new
+writes from extending its scan. Forty-four coordination pages plus one empty
+agent page and one client-error page read 5,564 retained rows, 1,877,912 serialized
+JSON bytes. These are logical retained bytes, not physical/index storage or billed
+I/O. Peak application memory is O(one page plus day aggregates), with no payload
+returned to the client and no per-row external call.
+
+| Table | Observation UTC, 11 Nov | Rows | Logical B | Oldest / newest UTC | Last complete day: rows / B | Last seven complete UTC days: rows/day / B/day |
+| --- | --- | ---: | ---: | --- | ---: | ---: |
+| `projectCoordinationEvents` | 08:17:12.974 | 5,562 | 1,870,569 | 30 Oct 05:06 / 11 Nov 08:16 | 610 / 204,710 | 636.3 / 213,258.7 |
+| `agentEvents` | 08:17:37.374 | 0 | 0 | None | 0 / 0 | 0 / 0 |
+| `clientErrors` | 08:17:37.705 | 2 | 7,343 | 30 Oct 20:22 / 4 Nov 21:14 | 0 / 0 | 0.143 / 617.9 |
+
+Seven complete days means 4–10 November. Coordination totalled 4,454 rows /
+1,492,811 B then; client errors one row / 4,325 B. The partial 11 November
+coordination day has 118 rows / 39,512 B and is not extrapolated to a daily rate.
+These are creation rates of **currently retained** rows, not measured net table
+growth or proof that no earlier deletion occurred. A later retained-byte snapshot
+and insert/delete counters would establish net growth.
+
+The following are proposals for the owner, not selected windows or implemented
+expiry. R2 archive/pointer costs and readers must be designed before any archive
+option is admitted. The rate projections assume the measured seven-day mix
+continues; they do not predict provider indexed storage.
+
+| Scope | Window choices / proposed behavior | Size basis and tradeoff |
+| --- | --- | --- |
+| Coordination activity/change/claim/release detail | Consider 7 or 14 days hot in Convex. Preserve message, handoff and acknowledgement history; any move of that history needs exact durable archive/read recovery first. | All-kind upper envelope at the observed rate: 7 days ~4,454 rows / 1.493 MB; 14 days ~8,908 / 2.986 MB. Eligible subset is not separately sized. Shorter detail history reduces debugging reach. |
+| Agent lifecycle audit (`create`, `revoke`, `expire`, `cascade-revoke`) | Preserve indefinitely; no deletion window proposed. | Zero retained rows today is not permission to drop future grant audit. |
+| Agent access diagnostics (`describe`, `read`) | Consider 30 days only if future volume warrants it; leave current behavior until the owner decides. | Zero rows/observed growth; no measured storage benefit today. |
+| Client errors | Consider 30 days of error/stack detail, or keep current behavior. | Both retained rows fit 30 days; no immediate measured saving. Recent creation rate projects ~4.3 rows / 18.5 KB per 30 days, based on one event and therefore weak. |
+
+### S0 follow-up evidence
+
+The remaining counters belong to S0, not to another smoke run: retain the bounded
+`forge-source-step.putBytes` category totals with execution/job/kind and failed
+attempts in the existing meter; record an all-I/O union and exclusive busy-state
+intervals (plus Node CPU if CPU is claimed), rather than subtracting overlapping
+clocks; and count executed R2 methods/status/retries by caller at the actual
+request seam, including uses of already signed URLs. Reconcile once with the
+owner-approved bucket read. The patch matrix still requires an observable dev
+write path. Advisory net growth needs a second retained snapshot or insertion /
+deletion counters. No missing field is zero and no new run is authorized by this
+follow-up list.
+
+Evidence and open lines are tracked on
+[S0](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=886a4694-b2eb-4e58-881f-787376038698)
+and the existing [cost Issue](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd).
+This documentation replaces unlabelled placement estimates with scoped
+observations and explicit gaps. It removes no runtime code: calls, memory, byte
+placement, idle work and retention are unchanged.
