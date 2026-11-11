@@ -110,6 +110,8 @@ export async function measureSync({ files, changed, distance, conflict, resolve 
   const s = await scaleFixture();
   try {
     const h = await syncHistory(s, { files, changed, distance, conflict });
+    const eventStart = s.events.length,
+      countStart = s.counts.length;
     const id = await s.enqueue(await syncInput(s, h)),
       sync = await s.drain({ memoryBound: false }).catch(error => {
         throw Object.assign(error, { phase: 'sync' });
@@ -119,9 +121,18 @@ export async function measureSync({ files, changed, distance, conflict, resolve 
     const outputBytes = await s.bytes(job.output),
       output = JSON.parse(outputBytes.toString());
     assert.equal(output.result.status, conflict ? 'conflict' : 'merged');
-    const report = { files, changed, distance, conflict, sync: summary(sync), output: digest(outputBytes) };
+    const report = {
+      files,
+      changed,
+      distance,
+      conflict,
+      sync: summary(s, id, sync, eventStart, countStart),
+      output: digest(outputBytes),
+    };
     if (resolve) {
       const input = await resolveInput(s, h, output);
+      const resolveEvents = s.events.length,
+        resolveCounts = s.counts.length;
       const resolveId = await s.enqueue(input),
         resolveRun = await s.drain({ memoryBound: false }),
         resolveJob = await s.job(resolveId);
@@ -130,25 +141,49 @@ export async function measureSync({ files, changed, distance, conflict, resolve 
         resolvedOutput = JSON.parse(resolvedBytes.toString());
       report.resolvedOutput = digest(resolvedBytes);
       assert.equal(resolvedOutput.result.status, 'resolved');
-      report.resolve = summary(resolveRun);
+      report.resolve = summary(s, resolveId, resolveRun, resolveEvents, resolveCounts);
     }
     report.manifestBytes = h.main.size;
+    const idle = await s.drain({ memoryBound: false });
+    assert.equal(idle.functionCalls, 0, 'a settled sync/resolve schedules no idle work');
+    assert.equal(idle.readObjects, 0);
+    report.idleCalls = idle.functionCalls;
     return report;
   } finally {
     s.restore();
   }
 }
-const summary = r => ({
-  wallMs: Math.round(r.wallMs),
-  actionMs: Math.round(r.actionMs),
-  steps: r.steps,
-  functionCalls: r.functionCalls,
-  documentsRead: r.documentsRead,
-  documentsWritten: r.documentsWritten,
-  readObjects: r.readObjects,
-  readBytes: r.readBytes,
-  maxRssMB: Math.round(r.maxRssBytes / 2 ** 20),
-});
+/** Source-job cost only: preparation, the CLI and final Lane publication are outside this fixture.
+ * R2 bytes count attempted bodies (including 412 reuse), not provider-billed traffic. Clock kinds
+ * overlap, so never subtract their sum from runMs and call that merge time. */
+function summary(s, jobId, r, eventStart, countStart) {
+  const events = s.events.slice(eventStart),
+    counts = s.counts.slice(countStart),
+    steps = [...s.tables.projectSourceSteps.values()]
+      .filter(row => row.jobId === jobId)
+      .flatMap(row => row.timing?.steps ?? []),
+    puts = events.filter(event => event.put !== undefined),
+    names = events.filter(event => event.call).map(event => event.call);
+  return {
+    wallMs: Math.round(r.wallMs),
+    actionMs: Math.round(r.actionMs),
+    workCpuMs: Math.round(r.workCpuMicros / 1000),
+    steps: r.steps,
+    functionCalls: r.functionCalls,
+    documentsRead: r.documentsRead,
+    documentsWritten: r.documentsWritten,
+    dbReadBytes: counts.reduce((n, row) => n + row.readBytes, 0),
+    dbWriteBytes: counts.reduce((n, row) => n + row.writeBytes, 0),
+    readObjects: r.readObjects,
+    readBytes: r.readBytes,
+    putObjects: puts.length,
+    putBytes: puts.reduce((n, event) => n + event.put, 0),
+    reusedPutBytes: puts.filter(event => event.existed).reduce((n, event) => n + event.put, 0),
+    descriptorCalls: names.filter(name => name === 'projectConvexSourceObjects:resolve').length,
+    timing: steps,
+    maxRssMB: Math.round(r.maxRssBytes / 2 ** 20),
+  };
+}
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [files = 29000, changed = 1, distance = 20] = process.argv.slice(2).map(Number);

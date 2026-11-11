@@ -49,6 +49,11 @@ The harness is [scripts/bench-zoo](../../scripts/bench-zoo/suite.mjs). Fixtures 
 | land | 82.1 | 1.8 | 44.4 | 23 |
 | landReuse | 117.6 | 2.2 | 54.4 | 23 |
 
+The [sync/resolve decomposition](sync-resolve-costs.md) separates local source jobs
+and client apply from the checked landing. The `resolve` row above includes that
+landing; it is not source-only resolution latency. The next zoo comparison is still
+unrun and the decomposition makes no hosted speedup claim.
+
 ## Concurrent landing order
 
 `land` times Lane A; the legacy `landReuse` key times Lane C. Either can land first. An overtaken Lane has `mainMoved: true`; the check outcome below distinguishes reuse from rechecking. Timing thresholds remain unchanged.

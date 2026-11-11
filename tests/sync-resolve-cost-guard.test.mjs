@@ -1,0 +1,58 @@
+// SPDX-License-Identifier: Apache-2.0
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { measureSync } from './measure-sync-ancestry.mjs';
+import { syncApplyFixture } from './measure-sync-apply.mjs';
+
+// Guard the selected source job, independently of deployment latency. Flat State bytes are
+// unavoidable under today's identity; unchanged file bodies and per-file descriptor RPCs are not.
+for (const files of [4000, 29000]) {
+  test(`sync and resolve at ${files} files pay only the flat-State floor plus changed paths, and idle stays zero`, async t => {
+    const clean = await measureSync({ files, changed: 1, distance: 1, conflict: false });
+    const wider = await measureSync({ files, changed: 8, distance: 1, conflict: false });
+    const conflict = await measureSync({ files, changed: 1, distance: 1, conflict: true });
+    for (const [run, stateReads] of [
+      [clean.sync, 3],
+      [wider.sync, 3],
+      [conflict.sync, 6],
+      [conflict.resolve, 4],
+    ]) {
+      assert(run.functionCalls <= 7 * run.steps, 'bounded control calls per source action');
+      assert(run.descriptorCalls <= 4 * run.steps, 'batch metadata, never one call per repository file');
+      assert(run.steps <= 2, 'small changes need at most two bounded source actions on these shapes');
+      assert(
+        run.readBytes <= stateReads * clean.manifestBytes + 32 * 1024,
+        'flat manifests plus small changed content',
+      );
+      assert(
+        run.putBytes <= 2 * clean.manifestBytes + 64 * 1024,
+        'State, bounded continuation and result, not unchanged file bodies',
+      );
+      assert(run.dbReadBytes < 160 * 1024, 'control metadata does not scan the repository inventory');
+      assert(run.dbWriteBytes < 96 * 1024, 'control writes stay independent of the file count');
+    }
+    assert.equal(
+      wider.sync.functionCalls,
+      clean.sync.functionCalls,
+      'eight changed paths share the same control-call window',
+    );
+    assert.equal(wider.sync.readObjects, clean.sync.readObjects, 'clean metadata merges read no file bodies');
+    assert.equal(clean.idleCalls + wider.idleCalls + conflict.idleCalls, 0);
+    t.diagnostic(
+      JSON.stringify({ files, clean: clean.sync, conflict: conflict.sync, resolve: conflict.resolve }),
+    );
+  });
+
+  test(`live sync apply at ${files} files transfers only the changed path; fallback keeps the exact State`, async t => {
+    const apply = await syncApplyFixture(t, files);
+    const ordinary = await apply('fallback', false);
+    const live = await apply('live', true);
+    assert.equal(ordinary.downloadedState, true, 'a result without a delta still verifies its pinned State');
+    assert.equal(live.downloadedState, false, 'the live delta reconstructs the exact State locally');
+    assert(live.downloads <= 1, 'a verified machine-cache hit needs no transfer');
+    assert(live.downloadedBytes <= live.changedBytes);
+    assert.equal(live.selects, live.downloads ? 1 : 0, 'a transfer keeps its final current-access fence');
+    assert(live.descriptors <= 1, 'at most one changed-object window for either repository size');
+    t.diagnostic(JSON.stringify({ files, ordinary, live }));
+  });
+}

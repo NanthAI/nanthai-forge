@@ -1,0 +1,1593 @@
+{
+  "source": [
+    {
+      "rep": 0,
+      "before": {
+        "at": "2026-11-11T08:22:51.748Z",
+        "loadAverage": [
+          13.89697265625,
+          9.19873046875,
+          9.29248046875
+        ],
+        "swapUsedMiB": 5924.44
+      },
+      "after": {
+        "at": "2026-11-11T08:22:53.087Z",
+        "loadAverage": [
+          13.89697265625,
+          9.19873046875,
+          9.29248046875
+        ],
+        "swapUsedMiB": 5924.44
+      },
+      "files": 4000,
+      "changed": 1,
+      "distance": 1,
+      "conflict": false,
+      "sync": {
+        "wallMs": 1026,
+        "actionMs": 826,
+        "workCpuMs": 225,
+        "steps": 1,
+        "functionCalls": 6,
+        "documentsRead": 95,
+        "documentsWritten": 31,
+        "dbReadBytes": 40944,
+        "dbWriteBytes": 20096,
+        "readObjects": 4,
+        "readBytes": 1944871,
+        "putObjects": 2,
+        "putBytes": 648552,
+        "reusedPutBytes": 0,
+        "descriptorCalls": 2,
+        "timing": [
+          {
+            "blobs": 0,
+            "callMs": 24,
+            "calls": 2,
+            "pages": 1,
+            "phase": "input>done",
+            "r2a": 2,
+            "r2b": 2,
+            "r2put": 648552,
+            "readMs": 49,
+            "reads": 4,
+            "runMs": 296,
+            "states": 3,
+            "stop": "done",
+            "waitMs": 673,
+            "writeMs": 57,
+            "writes": 2
+          }
+        ],
+        "maxRssMB": 143
+      },
+      "output": "abe0412034b4710a3ac0c6125ac3ee1c7dbcd3695b3e50b0c8ed0cb3cd415f7c",
+      "manifestBytes": 648180,
+      "idleCalls": 0
+    },
+    {
+      "rep": 0,
+      "before": {
+        "at": "2026-11-11T08:22:53.093Z",
+        "loadAverage": [
+          13.89697265625,
+          9.19873046875,
+          9.29248046875
+        ],
+        "swapUsedMiB": 5924.44
+      },
+      "after": {
+        "at": "2026-11-11T08:22:54.680Z",
+        "loadAverage": [
+          14.70556640625,
+          9.4443359375,
+          9.37841796875
+        ],
+        "swapUsedMiB": 5924.44
+      },
+      "files": 4000,
+      "changed": 1,
+      "distance": 1,
+      "conflict": true,
+      "sync": {
+        "wallMs": 837,
+        "actionMs": 720,
+        "workCpuMs": 387,
+        "steps": 1,
+        "functionCalls": 7,
+        "documentsRead": 108,
+        "documentsWritten": 37,
+        "dbReadBytes": 45222,
+        "dbWriteBytes": 22050,
+        "readObjects": 7,
+        "readBytes": 1945017,
+        "putObjects": 4,
+        "putBytes": 649737,
+        "reusedPutBytes": 0,
+        "descriptorCalls": 3,
+        "timing": [
+          {
+            "blobs": 3,
+            "callMs": 28,
+            "calls": 3,
+            "pages": 1,
+            "phase": "input>done",
+            "r2a": 4,
+            "r2b": 4,
+            "r2put": 649737,
+            "readMs": 46,
+            "reads": 7,
+            "runMs": 315,
+            "states": 3,
+            "stop": "done",
+            "waitMs": 506,
+            "writeMs": 38,
+            "writes": 4
+          }
+        ],
+        "maxRssMB": 180
+      },
+      "output": "b0e88ec9f1b08ffbeab8dd56368013af06f4c1f6cd4453b6d2187811df9d89ce",
+      "resolvedOutput": "ae92bc13c26ab5a905dcfebad537eac9d6fc4d877e97c2944366d489411c0b05",
+      "resolve": {
+        "wallMs": 647,
+        "actionMs": 562,
+        "workCpuMs": 267,
+        "steps": 1,
+        "functionCalls": 7,
+        "documentsRead": 103,
+        "documentsWritten": 30,
+        "dbReadBytes": 45213,
+        "dbWriteBytes": 19649,
+        "readObjects": 5,
+        "readBytes": 1297901,
+        "putObjects": 2,
+        "putBytes": 648940,
+        "reusedPutBytes": 0,
+        "descriptorCalls": 3,
+        "timing": [
+          {
+            "blobs": 1,
+            "callMs": 29,
+            "calls": 3,
+            "pages": 2,
+            "phase": "input>done",
+            "r2a": 2,
+            "r2b": 2,
+            "r2put": 648940,
+            "readMs": 55,
+            "reads": 5,
+            "runMs": 242,
+            "states": 2,
+            "stop": "done",
+            "waitMs": 397,
+            "writeMs": 44,
+            "writes": 2
+          }
+        ],
+        "maxRssMB": 140
+      },
+      "manifestBytes": 648180,
+      "idleCalls": 0
+    },
+    {
+      "rep": 0,
+      "before": {
+        "at": "2026-11-11T08:22:54.689Z",
+        "loadAverage": [
+          14.70556640625,
+          9.4443359375,
+          9.37841796875
+        ],
+        "swapUsedMiB": 5924.44
+      },
+      "after": {
+        "at": "2026-11-11T08:22:56.635Z",
+        "loadAverage": [
+          14.70556640625,
+          9.4443359375,
+          9.37841796875
+        ],
+        "swapUsedMiB": 5924.44
+      },
+      "files": 29000,
+      "changed": 1,
+      "distance": 1,
+      "conflict": false,
+      "sync": {
+        "wallMs": 1466,
+        "actionMs": 1306,
+        "workCpuMs": 788,
+        "steps": 1,
+        "functionCalls": 7,
+        "documentsRead": 102,
+        "documentsWritten": 32,
+        "dbReadBytes": 44714,
+        "dbWriteBytes": 20287,
+        "readObjects": 4,
+        "readBytes": 14094873,
+        "putObjects": 2,
+        "putBytes": 4698553,
+        "reusedPutBytes": 0,
+        "descriptorCalls": 3,
+        "timing": [
+          {
+            "blobs": 0,
+            "callMs": 74,
+            "calls": 3,
+            "pages": 1,
+            "phase": "input>done",
+            "r2a": 2,
+            "r2b": 2,
+            "r2put": 4698553,
+            "readMs": 208,
+            "reads": 4,
+            "runMs": 925,
+            "states": 3,
+            "stop": "done",
+            "waitMs": 530,
+            "writeMs": 218,
+            "writes": 2
+          }
+        ],
+        "maxRssMB": 292
+      },
+      "output": "6f90066be9fc0100203459e23817b8e06b06a6bc63329fd95b520a2c590825ab",
+      "manifestBytes": 4698180,
+      "idleCalls": 0
+    },
+    {
+      "rep": 0,
+      "before": {
+        "at": "2026-11-11T08:22:56.656Z",
+        "loadAverage": [
+          14.70556640625,
+          9.4443359375,
+          9.37841796875
+        ],
+        "swapUsedMiB": 5924.44
+      },
+      "after": {
+        "at": "2026-11-11T08:23:02.117Z",
+        "loadAverage": [
+          15.20947265625,
+          9.6357421875,
+          9.4462890625
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "files": 29000,
+      "changed": 1,
+      "distance": 1,
+      "conflict": true,
+      "sync": {
+        "wallMs": 3296,
+        "actionMs": 3090,
+        "workCpuMs": 1826,
+        "steps": 2,
+        "functionCalls": 14,
+        "documentsRead": 156,
+        "documentsWritten": 44,
+        "dbReadBytes": 71051,
+        "dbWriteBytes": 26975,
+        "readObjects": 11,
+        "readBytes": 28194434,
+        "putObjects": 5,
+        "putBytes": 4704683,
+        "reusedPutBytes": 0,
+        "descriptorCalls": 7,
+        "timing": [
+          {
+            "blobs": 3,
+            "callMs": 118,
+            "calls": 4,
+            "pages": 1,
+            "phase": "input>compute",
+            "r2a": 2,
+            "r2b": 2,
+            "r2put": 5140,
+            "readMs": 160,
+            "reads": 7,
+            "runMs": 1550,
+            "states": 3,
+            "stop": "recompute",
+            "waitMs": 405,
+            "writeMs": 9,
+            "writes": 1
+          },
+          {
+            "blobs": 0,
+            "callMs": 6,
+            "calls": 3,
+            "pages": 0,
+            "phase": "compute>done",
+            "r2a": 3,
+            "r2b": 4,
+            "r2put": 4699543,
+            "readMs": 49,
+            "reads": 3,
+            "runMs": 962,
+            "states": 3,
+            "stop": "done",
+            "waitMs": 366,
+            "writeMs": 172,
+            "writes": 3
+          }
+        ],
+        "maxRssMB": 343
+      },
+      "output": "f1d7a1c718954f4bf400165b77587a7f20ed1d4e5194ccef79f0326d565f73f7",
+      "resolvedOutput": "7d142a83b71eb1e2dcaf5b4481e02de00592856dbb6b756424272eace8a888c8",
+      "resolve": {
+        "wallMs": 1595,
+        "actionMs": 1411,
+        "workCpuMs": 1061,
+        "steps": 2,
+        "functionCalls": 14,
+        "documentsRead": 151,
+        "documentsWritten": 35,
+        "dbReadBytes": 70879,
+        "dbWriteBytes": 24249,
+        "readObjects": 9,
+        "readBytes": 18798150,
+        "putObjects": 3,
+        "putBytes": 4702024,
+        "reusedPutBytes": 0,
+        "descriptorCalls": 7,
+        "timing": [
+          {
+            "blobs": 1,
+            "callMs": 23,
+            "calls": 5,
+            "pages": 2,
+            "phase": "input>compute",
+            "r2a": 1,
+            "r2b": 1,
+            "r2put": 3083,
+            "readMs": 61,
+            "reads": 5,
+            "runMs": 340,
+            "states": 2,
+            "stop": "recompute",
+            "waitMs": 368,
+            "writeMs": 0,
+            "writes": 0
+          },
+          {
+            "blobs": 0,
+            "callMs": 5,
+            "calls": 2,
+            "pages": 1,
+            "phase": "compute>done",
+            "r2a": 2,
+            "r2b": 3,
+            "r2put": 4698941,
+            "readMs": 32,
+            "reads": 3,
+            "runMs": 516,
+            "states": 2,
+            "stop": "done",
+            "waitMs": 363,
+            "writeMs": 167,
+            "writes": 2
+          }
+        ],
+        "maxRssMB": 249
+      },
+      "manifestBytes": 4698180,
+      "idleCalls": 0
+    },
+    {
+      "rep": 1,
+      "before": {
+        "at": "2026-11-11T08:23:02.123Z",
+        "loadAverage": [
+          15.20947265625,
+          9.6357421875,
+          9.4462890625
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:03.419Z",
+        "loadAverage": [
+          14.7919921875,
+          9.6416015625,
+          9.44921875
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "files": 29000,
+      "changed": 1,
+      "distance": 1,
+      "conflict": false,
+      "sync": {
+        "wallMs": 976,
+        "actionMs": 891,
+        "workCpuMs": 695,
+        "steps": 1,
+        "functionCalls": 7,
+        "documentsRead": 102,
+        "documentsWritten": 32,
+        "dbReadBytes": 44756,
+        "dbWriteBytes": 20295,
+        "readObjects": 4,
+        "readBytes": 14094873,
+        "putObjects": 2,
+        "putBytes": 4698553,
+        "reusedPutBytes": 0,
+        "descriptorCalls": 3,
+        "timing": [
+          {
+            "blobs": 0,
+            "callMs": 33,
+            "calls": 3,
+            "pages": 1,
+            "phase": "input>done",
+            "r2a": 2,
+            "r2b": 2,
+            "r2put": 4698553,
+            "readMs": 68,
+            "reads": 4,
+            "runMs": 597,
+            "states": 3,
+            "stop": "done",
+            "waitMs": 373,
+            "writeMs": 166,
+            "writes": 2
+          }
+        ],
+        "maxRssMB": 305
+      },
+      "output": "6f90066be9fc0100203459e23817b8e06b06a6bc63329fd95b520a2c590825ab",
+      "manifestBytes": 4698180,
+      "idleCalls": 0
+    },
+    {
+      "rep": 1,
+      "before": {
+        "at": "2026-11-11T08:23:03.423Z",
+        "loadAverage": [
+          14.7919921875,
+          9.6416015625,
+          9.44921875
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:07.922Z",
+        "loadAverage": [
+          14.7919921875,
+          9.6416015625,
+          9.44921875
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "files": 29000,
+      "changed": 1,
+      "distance": 1,
+      "conflict": true,
+      "sync": {
+        "wallMs": 2179,
+        "actionMs": 2003,
+        "workCpuMs": 1663,
+        "steps": 2,
+        "functionCalls": 14,
+        "documentsRead": 156,
+        "documentsWritten": 44,
+        "dbReadBytes": 71063,
+        "dbWriteBytes": 26978,
+        "readObjects": 11,
+        "readBytes": 28194434,
+        "putObjects": 5,
+        "putBytes": 4704683,
+        "reusedPutBytes": 0,
+        "descriptorCalls": 7,
+        "timing": [
+          {
+            "blobs": 3,
+            "callMs": 57,
+            "calls": 4,
+            "pages": 1,
+            "phase": "input>compute",
+            "r2a": 2,
+            "r2b": 2,
+            "r2put": 5140,
+            "readMs": 83,
+            "reads": 7,
+            "runMs": 737,
+            "states": 3,
+            "stop": "recompute",
+            "waitMs": 339,
+            "writeMs": 8,
+            "writes": 1
+          },
+          {
+            "blobs": 0,
+            "callMs": 4,
+            "calls": 3,
+            "pages": 0,
+            "phase": "compute>done",
+            "r2a": 3,
+            "r2b": 4,
+            "r2put": 4699543,
+            "readMs": 41,
+            "reads": 3,
+            "runMs": 744,
+            "states": 3,
+            "stop": "done",
+            "waitMs": 351,
+            "writeMs": 176,
+            "writes": 3
+          }
+        ],
+        "maxRssMB": 344
+      },
+      "output": "f1d7a1c718954f4bf400165b77587a7f20ed1d4e5194ccef79f0326d565f73f7",
+      "resolvedOutput": "7d142a83b71eb1e2dcaf5b4481e02de00592856dbb6b756424272eace8a888c8",
+      "resolve": {
+        "wallMs": 1924,
+        "actionMs": 1716,
+        "workCpuMs": 1119,
+        "steps": 2,
+        "functionCalls": 14,
+        "documentsRead": 151,
+        "documentsWritten": 35,
+        "dbReadBytes": 70894,
+        "dbWriteBytes": 24249,
+        "readObjects": 9,
+        "readBytes": 18798150,
+        "putObjects": 3,
+        "putBytes": 4702024,
+        "reusedPutBytes": 0,
+        "descriptorCalls": 7,
+        "timing": [
+          {
+            "blobs": 1,
+            "callMs": 36,
+            "calls": 5,
+            "pages": 2,
+            "phase": "input>compute",
+            "r2a": 1,
+            "r2b": 1,
+            "r2put": 3083,
+            "readMs": 56,
+            "reads": 5,
+            "runMs": 421,
+            "states": 2,
+            "stop": "recompute",
+            "waitMs": 352,
+            "writeMs": 0,
+            "writes": 0
+          },
+          {
+            "blobs": 0,
+            "callMs": 8,
+            "calls": 2,
+            "pages": 1,
+            "phase": "compute>done",
+            "r2a": 2,
+            "r2b": 3,
+            "r2put": 4698941,
+            "readMs": 61,
+            "reads": 3,
+            "runMs": 644,
+            "states": 2,
+            "stop": "done",
+            "waitMs": 500,
+            "writeMs": 185,
+            "writes": 2
+          }
+        ],
+        "maxRssMB": 249
+      },
+      "manifestBytes": 4698180,
+      "idleCalls": 0
+    },
+    {
+      "rep": 1,
+      "before": {
+        "at": "2026-11-11T08:23:07.927Z",
+        "loadAverage": [
+          14.7919921875,
+          9.6416015625,
+          9.44921875
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:08.492Z",
+        "loadAverage": [
+          14.568359375,
+          9.6806640625,
+          9.4638671875
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "files": 4000,
+      "changed": 1,
+      "distance": 1,
+      "conflict": false,
+      "sync": {
+        "wallMs": 510,
+        "actionMs": 413,
+        "workCpuMs": 205,
+        "steps": 1,
+        "functionCalls": 6,
+        "documentsRead": 95,
+        "documentsWritten": 31,
+        "dbReadBytes": 41034,
+        "dbWriteBytes": 20132,
+        "readObjects": 4,
+        "readBytes": 1944871,
+        "putObjects": 2,
+        "putBytes": 648552,
+        "reusedPutBytes": 0,
+        "descriptorCalls": 2,
+        "timing": [
+          {
+            "blobs": 0,
+            "callMs": 11,
+            "calls": 2,
+            "pages": 1,
+            "phase": "input>done",
+            "r2a": 2,
+            "r2b": 2,
+            "r2put": 648552,
+            "readMs": 34,
+            "reads": 4,
+            "runMs": 144,
+            "states": 3,
+            "stop": "done",
+            "waitMs": 359,
+            "writeMs": 37,
+            "writes": 2
+          }
+        ],
+        "maxRssMB": 144
+      },
+      "output": "abe0412034b4710a3ac0c6125ac3ee1c7dbcd3695b3e50b0c8ed0cb3cd415f7c",
+      "manifestBytes": 648180,
+      "idleCalls": 0
+    },
+    {
+      "rep": 1,
+      "before": {
+        "at": "2026-11-11T08:23:08.508Z",
+        "loadAverage": [
+          14.568359375,
+          9.6806640625,
+          9.4638671875
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:10.087Z",
+        "loadAverage": [
+          14.568359375,
+          9.6806640625,
+          9.4638671875
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "files": 4000,
+      "changed": 1,
+      "distance": 1,
+      "conflict": true,
+      "sync": {
+        "wallMs": 754,
+        "actionMs": 651,
+        "workCpuMs": 377,
+        "steps": 1,
+        "functionCalls": 7,
+        "documentsRead": 108,
+        "documentsWritten": 37,
+        "dbReadBytes": 45273,
+        "dbWriteBytes": 22071,
+        "readObjects": 7,
+        "readBytes": 1945017,
+        "putObjects": 4,
+        "putBytes": 649737,
+        "reusedPutBytes": 0,
+        "descriptorCalls": 3,
+        "timing": [
+          {
+            "blobs": 3,
+            "callMs": 21,
+            "calls": 3,
+            "pages": 1,
+            "phase": "input>done",
+            "r2a": 4,
+            "r2b": 4,
+            "r2put": 649737,
+            "readMs": 45,
+            "reads": 7,
+            "runMs": 337,
+            "states": 3,
+            "stop": "done",
+            "waitMs": 405,
+            "writeMs": 41,
+            "writes": 4
+          }
+        ],
+        "maxRssMB": 160
+      },
+      "output": "b0e88ec9f1b08ffbeab8dd56368013af06f4c1f6cd4453b6d2187811df9d89ce",
+      "resolvedOutput": "ae92bc13c26ab5a905dcfebad537eac9d6fc4d877e97c2944366d489411c0b05",
+      "resolve": {
+        "wallMs": 755,
+        "actionMs": 661,
+        "workCpuMs": 270,
+        "steps": 1,
+        "functionCalls": 7,
+        "documentsRead": 103,
+        "documentsWritten": 30,
+        "dbReadBytes": 45222,
+        "dbWriteBytes": 19655,
+        "readObjects": 5,
+        "readBytes": 1297901,
+        "putObjects": 2,
+        "putBytes": 648940,
+        "reusedPutBytes": 0,
+        "descriptorCalls": 3,
+        "timing": [
+          {
+            "blobs": 1,
+            "callMs": 12,
+            "calls": 3,
+            "pages": 2,
+            "phase": "input>done",
+            "r2a": 2,
+            "r2b": 2,
+            "r2put": 648940,
+            "readMs": 98,
+            "reads": 5,
+            "runMs": 322,
+            "states": 2,
+            "stop": "done",
+            "waitMs": 427,
+            "writeMs": 72,
+            "writes": 2
+          }
+        ],
+        "maxRssMB": 139
+      },
+      "manifestBytes": 648180,
+      "idleCalls": 0
+    },
+    {
+      "rep": 2,
+      "before": {
+        "at": "2026-11-11T08:23:10.091Z",
+        "loadAverage": [
+          14.568359375,
+          9.6806640625,
+          9.4638671875
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:10.727Z",
+        "loadAverage": [
+          14.568359375,
+          9.6806640625,
+          9.4638671875
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "files": 4000,
+      "changed": 1,
+      "distance": 1,
+      "conflict": false,
+      "sync": {
+        "wallMs": 578,
+        "actionMs": 489,
+        "workCpuMs": 218,
+        "steps": 1,
+        "functionCalls": 6,
+        "documentsRead": 95,
+        "documentsWritten": 31,
+        "dbReadBytes": 41037,
+        "dbWriteBytes": 20138,
+        "readObjects": 4,
+        "readBytes": 1944871,
+        "putObjects": 2,
+        "putBytes": 648552,
+        "reusedPutBytes": 0,
+        "descriptorCalls": 2,
+        "timing": [
+          {
+            "blobs": 0,
+            "callMs": 13,
+            "calls": 2,
+            "pages": 1,
+            "phase": "input>done",
+            "r2a": 2,
+            "r2b": 2,
+            "r2put": 648552,
+            "readMs": 37,
+            "reads": 4,
+            "runMs": 154,
+            "states": 3,
+            "stop": "done",
+            "waitMs": 416,
+            "writeMs": 36,
+            "writes": 2
+          }
+        ],
+        "maxRssMB": 145
+      },
+      "output": "abe0412034b4710a3ac0c6125ac3ee1c7dbcd3695b3e50b0c8ed0cb3cd415f7c",
+      "manifestBytes": 648180,
+      "idleCalls": 0
+    },
+    {
+      "rep": 2,
+      "before": {
+        "at": "2026-11-11T08:23:10.732Z",
+        "loadAverage": [
+          14.568359375,
+          9.6806640625,
+          9.4638671875
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:12.557Z",
+        "loadAverage": [
+          14.568359375,
+          9.6806640625,
+          9.4638671875
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "files": 4000,
+      "changed": 1,
+      "distance": 1,
+      "conflict": true,
+      "sync": {
+        "wallMs": 897,
+        "actionMs": 798,
+        "workCpuMs": 397,
+        "steps": 1,
+        "functionCalls": 7,
+        "documentsRead": 108,
+        "documentsWritten": 37,
+        "dbReadBytes": 45270,
+        "dbWriteBytes": 22077,
+        "readObjects": 7,
+        "readBytes": 1945017,
+        "putObjects": 4,
+        "putBytes": 649737,
+        "reusedPutBytes": 0,
+        "descriptorCalls": 3,
+        "timing": [
+          {
+            "blobs": 3,
+            "callMs": 22,
+            "calls": 3,
+            "pages": 1,
+            "phase": "input>done",
+            "r2a": 4,
+            "r2b": 4,
+            "r2put": 649737,
+            "readMs": 50,
+            "reads": 7,
+            "runMs": 441,
+            "states": 3,
+            "stop": "done",
+            "waitMs": 450,
+            "writeMs": 69,
+            "writes": 4
+          }
+        ],
+        "maxRssMB": 177
+      },
+      "output": "b0e88ec9f1b08ffbeab8dd56368013af06f4c1f6cd4453b6d2187811df9d89ce",
+      "resolvedOutput": "ae92bc13c26ab5a905dcfebad537eac9d6fc4d877e97c2944366d489411c0b05",
+      "resolve": {
+        "wallMs": 860,
+        "actionMs": 760,
+        "workCpuMs": 257,
+        "steps": 1,
+        "functionCalls": 7,
+        "documentsRead": 103,
+        "documentsWritten": 30,
+        "dbReadBytes": 45219,
+        "dbWriteBytes": 19651,
+        "readObjects": 5,
+        "readBytes": 1297901,
+        "putObjects": 2,
+        "putBytes": 648940,
+        "reusedPutBytes": 0,
+        "descriptorCalls": 3,
+        "timing": [
+          {
+            "blobs": 1,
+            "callMs": 9,
+            "calls": 3,
+            "pages": 2,
+            "phase": "input>done",
+            "r2a": 2,
+            "r2b": 2,
+            "r2put": 648940,
+            "readMs": 38,
+            "reads": 5,
+            "runMs": 261,
+            "states": 2,
+            "stop": "done",
+            "waitMs": 594,
+            "writeMs": 41,
+            "writes": 2
+          }
+        ],
+        "maxRssMB": 138
+      },
+      "manifestBytes": 648180,
+      "idleCalls": 0
+    },
+    {
+      "rep": 2,
+      "before": {
+        "at": "2026-11-11T08:23:12.563Z",
+        "loadAverage": [
+          14.568359375,
+          9.6806640625,
+          9.4638671875
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:14.365Z",
+        "loadAverage": [
+          14.5224609375,
+          9.751953125,
+          9.490234375
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "files": 29000,
+      "changed": 1,
+      "distance": 1,
+      "conflict": false,
+      "sync": {
+        "wallMs": 1457,
+        "actionMs": 1354,
+        "workCpuMs": 805,
+        "steps": 1,
+        "functionCalls": 7,
+        "documentsRead": 102,
+        "documentsWritten": 32,
+        "dbReadBytes": 44750,
+        "dbWriteBytes": 20290,
+        "readObjects": 4,
+        "readBytes": 14094873,
+        "putObjects": 2,
+        "putBytes": 4698553,
+        "reusedPutBytes": 0,
+        "descriptorCalls": 3,
+        "timing": [
+          {
+            "blobs": 0,
+            "callMs": 35,
+            "calls": 3,
+            "pages": 1,
+            "phase": "input>done",
+            "r2a": 2,
+            "r2b": 2,
+            "r2put": 4698553,
+            "readMs": 86,
+            "reads": 4,
+            "runMs": 1054,
+            "states": 3,
+            "stop": "done",
+            "waitMs": 387,
+            "writeMs": 185,
+            "writes": 2
+          }
+        ],
+        "maxRssMB": 277
+      },
+      "output": "6f90066be9fc0100203459e23817b8e06b06a6bc63329fd95b520a2c590825ab",
+      "manifestBytes": 4698180,
+      "idleCalls": 0
+    },
+    {
+      "rep": 2,
+      "before": {
+        "at": "2026-11-11T08:23:14.371Z",
+        "loadAverage": [
+          14.5224609375,
+          9.751953125,
+          9.490234375
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:19.284Z",
+        "loadAverage": [
+          14.240234375,
+          9.7724609375,
+          9.4990234375
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "files": 29000,
+      "changed": 1,
+      "distance": 1,
+      "conflict": true,
+      "sync": {
+        "wallMs": 2490,
+        "actionMs": 2296,
+        "workCpuMs": 1828,
+        "steps": 2,
+        "functionCalls": 14,
+        "documentsRead": 156,
+        "documentsWritten": 44,
+        "dbReadBytes": 71033,
+        "dbWriteBytes": 26967,
+        "readObjects": 11,
+        "readBytes": 28194434,
+        "putObjects": 5,
+        "putBytes": 4704683,
+        "reusedPutBytes": 0,
+        "descriptorCalls": 7,
+        "timing": [
+          {
+            "blobs": 3,
+            "callMs": 35,
+            "calls": 4,
+            "pages": 1,
+            "phase": "input>compute",
+            "r2a": 2,
+            "r2b": 2,
+            "r2put": 5140,
+            "readMs": 75,
+            "reads": 7,
+            "runMs": 825,
+            "states": 3,
+            "stop": "recompute",
+            "waitMs": 361,
+            "writeMs": 9,
+            "writes": 1
+          },
+          {
+            "blobs": 0,
+            "callMs": 14,
+            "calls": 3,
+            "pages": 0,
+            "phase": "compute>done",
+            "r2a": 3,
+            "r2b": 4,
+            "r2put": 4699543,
+            "readMs": 40,
+            "reads": 3,
+            "runMs": 910,
+            "states": 3,
+            "stop": "done",
+            "waitMs": 385,
+            "writeMs": 197,
+            "writes": 3
+          }
+        ],
+        "maxRssMB": 331
+      },
+      "output": "f1d7a1c718954f4bf400165b77587a7f20ed1d4e5194ccef79f0326d565f73f7",
+      "resolvedOutput": "7d142a83b71eb1e2dcaf5b4481e02de00592856dbb6b756424272eace8a888c8",
+      "resolve": {
+        "wallMs": 1694,
+        "actionMs": 1508,
+        "workCpuMs": 1082,
+        "steps": 2,
+        "functionCalls": 14,
+        "documentsRead": 151,
+        "documentsWritten": 35,
+        "dbReadBytes": 70828,
+        "dbWriteBytes": 24232,
+        "readObjects": 9,
+        "readBytes": 18798150,
+        "putObjects": 3,
+        "putBytes": 4702024,
+        "reusedPutBytes": 0,
+        "descriptorCalls": 7,
+        "timing": [
+          {
+            "blobs": 1,
+            "callMs": 22,
+            "calls": 5,
+            "pages": 2,
+            "phase": "input>compute",
+            "r2a": 1,
+            "r2b": 1,
+            "r2put": 3083,
+            "readMs": 54,
+            "reads": 5,
+            "runMs": 351,
+            "states": 2,
+            "stop": "recompute",
+            "waitMs": 433,
+            "writeMs": 0,
+            "writes": 0
+          },
+          {
+            "blobs": 0,
+            "callMs": 13,
+            "calls": 2,
+            "pages": 1,
+            "phase": "compute>done",
+            "r2a": 2,
+            "r2b": 3,
+            "r2put": 4698941,
+            "readMs": 32,
+            "reads": 3,
+            "runMs": 507,
+            "states": 2,
+            "stop": "done",
+            "waitMs": 395,
+            "writeMs": 189,
+            "writes": 2
+          }
+        ],
+        "maxRssMB": 265
+      },
+      "manifestBytes": 4698180,
+      "idleCalls": 0
+    }
+  ],
+  "apply": [
+    {
+      "files": 4000,
+      "rep": 0,
+      "before": {
+        "at": "2026-11-11T08:23:20.380Z",
+        "loadAverage": [
+          14.240234375,
+          9.7724609375,
+          9.4990234375
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:20.859Z",
+        "loadAverage": [
+          14.240234375,
+          9.7724609375,
+          9.4990234375
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "live": false,
+      "wallMs": 465,
+      "selects": 2,
+      "descriptors": 2,
+      "downloads": 2,
+      "downloadedBytes": 648015,
+      "stateBytes": 648000,
+      "changedBytes": 15,
+      "downloadedState": true
+    },
+    {
+      "files": 4000,
+      "rep": 0,
+      "before": {
+        "at": "2026-11-11T08:23:20.864Z",
+        "loadAverage": [
+          14.240234375,
+          9.7724609375,
+          9.4990234375
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:21.261Z",
+        "loadAverage": [
+          14.240234375,
+          9.7724609375,
+          9.4990234375
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "live": true,
+      "wallMs": 384,
+      "selects": 1,
+      "descriptors": 1,
+      "downloads": 1,
+      "downloadedBytes": 15,
+      "stateBytes": 648000,
+      "changedBytes": 15,
+      "downloadedState": false
+    },
+    {
+      "files": 4000,
+      "rep": 1,
+      "before": {
+        "at": "2026-11-11T08:23:21.266Z",
+        "loadAverage": [
+          14.240234375,
+          9.7724609375,
+          9.4990234375
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:21.627Z",
+        "loadAverage": [
+          14.240234375,
+          9.7724609375,
+          9.4990234375
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "live": true,
+      "wallMs": 348,
+      "selects": 1,
+      "descriptors": 1,
+      "downloads": 1,
+      "downloadedBytes": 15,
+      "stateBytes": 648000,
+      "changedBytes": 15,
+      "downloadedState": false
+    },
+    {
+      "files": 4000,
+      "rep": 1,
+      "before": {
+        "at": "2026-11-11T08:23:21.632Z",
+        "loadAverage": [
+          14.240234375,
+          9.7724609375,
+          9.4990234375
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:22.003Z",
+        "loadAverage": [
+          14.240234375,
+          9.7724609375,
+          9.4990234375
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "live": false,
+      "wallMs": 359,
+      "selects": 2,
+      "descriptors": 2,
+      "downloads": 2,
+      "downloadedBytes": 648015,
+      "stateBytes": 648000,
+      "changedBytes": 15,
+      "downloadedState": true
+    },
+    {
+      "files": 4000,
+      "rep": 2,
+      "before": {
+        "at": "2026-11-11T08:23:22.007Z",
+        "loadAverage": [
+          14.240234375,
+          9.7724609375,
+          9.4990234375
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:22.371Z",
+        "loadAverage": [
+          14.240234375,
+          9.7724609375,
+          9.4990234375
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "live": false,
+      "wallMs": 352,
+      "selects": 2,
+      "descriptors": 2,
+      "downloads": 2,
+      "downloadedBytes": 648015,
+      "stateBytes": 648000,
+      "changedBytes": 15,
+      "downloadedState": true
+    },
+    {
+      "files": 4000,
+      "rep": 2,
+      "before": {
+        "at": "2026-11-11T08:23:22.374Z",
+        "loadAverage": [
+          14.240234375,
+          9.7724609375,
+          9.4990234375
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:22.708Z",
+        "loadAverage": [
+          14.240234375,
+          9.7724609375,
+          9.4990234375
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "live": true,
+      "wallMs": 323,
+      "selects": 1,
+      "descriptors": 1,
+      "downloads": 1,
+      "downloadedBytes": 15,
+      "stateBytes": 648000,
+      "changedBytes": 15,
+      "downloadedState": false
+    },
+    {
+      "files": 29000,
+      "rep": 0,
+      "before": {
+        "at": "2026-11-11T08:23:27.869Z",
+        "loadAverage": [
+          14.541015625,
+          9.90869140625,
+          9.548828125
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:29.397Z",
+        "loadAverage": [
+          13.85693359375,
+          9.84375,
+          9.52783203125
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "live": false,
+      "wallMs": 1471,
+      "selects": 2,
+      "descriptors": 1,
+      "downloads": 1,
+      "downloadedBytes": 4698000,
+      "stateBytes": 4698000,
+      "changedBytes": 15,
+      "downloadedState": true
+    },
+    {
+      "files": 29000,
+      "rep": 0,
+      "before": {
+        "at": "2026-11-11T08:23:29.401Z",
+        "loadAverage": [
+          13.85693359375,
+          9.84375,
+          9.52783203125
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:30.933Z",
+        "loadAverage": [
+          13.85693359375,
+          9.84375,
+          9.52783203125
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "live": true,
+      "wallMs": 1479,
+      "selects": 0,
+      "descriptors": 0,
+      "downloads": 0,
+      "downloadedBytes": 0,
+      "stateBytes": 4698000,
+      "changedBytes": 15,
+      "downloadedState": false
+    },
+    {
+      "files": 29000,
+      "rep": 1,
+      "before": {
+        "at": "2026-11-11T08:23:30.938Z",
+        "loadAverage": [
+          13.85693359375,
+          9.84375,
+          9.52783203125
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:32.434Z",
+        "loadAverage": [
+          13.85693359375,
+          9.84375,
+          9.52783203125
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "live": true,
+      "wallMs": 1443,
+      "selects": 0,
+      "descriptors": 0,
+      "downloads": 0,
+      "downloadedBytes": 0,
+      "stateBytes": 4698000,
+      "changedBytes": 15,
+      "downloadedState": false
+    },
+    {
+      "files": 29000,
+      "rep": 1,
+      "before": {
+        "at": "2026-11-11T08:23:32.438Z",
+        "loadAverage": [
+          13.85693359375,
+          9.84375,
+          9.52783203125
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:33.983Z",
+        "loadAverage": [
+          13.0673828125,
+          9.74658203125,
+          9.4951171875
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "live": false,
+      "wallMs": 1495,
+      "selects": 2,
+      "descriptors": 1,
+      "downloads": 1,
+      "downloadedBytes": 4698000,
+      "stateBytes": 4698000,
+      "changedBytes": 15,
+      "downloadedState": true
+    },
+    {
+      "files": 29000,
+      "rep": 2,
+      "before": {
+        "at": "2026-11-11T08:23:33.987Z",
+        "loadAverage": [
+          13.0673828125,
+          9.74658203125,
+          9.4951171875
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:35.587Z",
+        "loadAverage": [
+          13.0673828125,
+          9.74658203125,
+          9.4951171875
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "live": false,
+      "wallMs": 1541,
+      "selects": 2,
+      "descriptors": 1,
+      "downloads": 1,
+      "downloadedBytes": 4698000,
+      "stateBytes": 4698000,
+      "changedBytes": 15,
+      "downloadedState": true
+    },
+    {
+      "files": 29000,
+      "rep": 2,
+      "before": {
+        "at": "2026-11-11T08:23:35.592Z",
+        "loadAverage": [
+          13.0673828125,
+          9.74658203125,
+          9.4951171875
+        ],
+        "swapUsedMiB": 5973.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:37.283Z",
+        "loadAverage": [
+          13.0673828125,
+          9.74658203125,
+          9.4951171875
+        ],
+        "swapUsedMiB": 5949.19
+      },
+      "live": true,
+      "wallMs": 1640,
+      "selects": 0,
+      "descriptors": 0,
+      "downloads": 0,
+      "downloadedBytes": 0,
+      "stateBytes": 4698000,
+      "changedBytes": 15,
+      "downloadedState": false
+    }
+  ],
+  "startup": [
+    {
+      "action": "sync",
+      "before": {
+        "at": "2026-11-11T08:23:41.230Z",
+        "loadAverage": [
+          12.7412109375,
+          9.73388671875,
+          9.4921875
+        ],
+        "swapUsedMiB": 5949.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:42.883Z",
+        "loadAverage": [
+          12.7412109375,
+          9.73388671875,
+          9.4921875
+        ],
+        "swapUsedMiB": 5949.19
+      },
+      "samples": [
+        {
+          "durationMs": 407,
+          "reason": "fetch"
+        },
+        {
+          "durationMs": 452,
+          "reason": "fetch"
+        },
+        {
+          "durationMs": 459,
+          "reason": "fetch"
+        }
+      ]
+    },
+    {
+      "action": "resolve",
+      "before": {
+        "at": "2026-11-11T08:23:42.890Z",
+        "loadAverage": [
+          12.7412109375,
+          9.73388671875,
+          9.4921875
+        ],
+        "swapUsedMiB": 5949.19
+      },
+      "after": {
+        "at": "2026-11-11T08:23:44.730Z",
+        "loadAverage": [
+          12.44140625,
+          9.7216796875,
+          9.4892578125
+        ],
+        "swapUsedMiB": 5949.19
+      },
+      "samples": [
+        {
+          "durationMs": 473,
+          "reason": "fetch"
+        },
+        {
+          "durationMs": 445,
+          "reason": "fetch"
+        },
+        {
+          "durationMs": 467,
+          "reason": "fetch"
+        }
+      ]
+    }
+  ],
+  "pins": {
+    "runtimeSource": "f9128ed455e032702fa4cd8c2aee3b81795e6c04c15af9b9c060bda5851faa23",
+    "measurerSavedHead": "9f12cc66cd91d580732ee1d2d5af419a321de195287dc9db2b6f091fa4831ddd",
+    "cli": "f9128ed455e032702fa4cd8c2aee3b81795e6c04c15af9b9c060bda5851faa23"
+  },
+  "scope": "Local synthetic real Convex handlers, in-memory DB/R2 and full local checkout; no live latency or billing result.",
+  "node": "24.22.1",
+  "sourceOrder": "For each rep: clean sync, conflict sync then resolve; shape order 4000/29000, 29000/4000, 4000/29000.",
+  "applyOrder": "A=ordinary State transfer, B=existing live delta; AB, BA, AB. Setup excluded. Shared verified machine cache retained."
+}
