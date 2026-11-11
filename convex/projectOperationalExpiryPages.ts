@@ -59,6 +59,24 @@ async function expiryPage(ctx: MutationCtx, input: PageIdentity, kind: string, w
     return JSON.parse(old.result) as Outcome;
   }
   const outcome = await work();
+  // Reuse this scheduled transaction and its receipt; never schedule diagnostics alone.
+  if (!outcome.kept && kind !== 'source') {
+    const errors = await ctx.db
+      .query('clientErrors')
+      .withIndex('by_creation_time', q => q.lt('_creationTime', Date.now() - 30 * 86_400_000))
+      .take(pageSize);
+    let removedBytes = 0;
+    for (const error of errors) {
+      removedBytes += bytes(error);
+      await ctx.db.delete(error._id);
+    }
+    if (errors.length) {
+      outcome.rows += errors.length;
+      outcome.bytes += removedBytes;
+      outcome.readBytes = (outcome.readBytes ?? 0) + removedBytes;
+      (outcome.tables ??= []).push({ table: 'clientErrors', rows: errors.length, bytes: removedBytes });
+    }
+  }
   if (!outcome.kept)
     await ctx.db.insert('legacyStorageCleanupPages', {
       operationId: input.operationId,

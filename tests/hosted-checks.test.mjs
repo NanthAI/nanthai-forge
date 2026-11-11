@@ -812,3 +812,57 @@ test('legacy catch-up resumes exact steps, pauses for landings, and stops after 
   await s.run('armCompletedCatchup', ctx => armExpiryCatchup(ctx, s.projectId), {});
   assert.equal(s.scheduled.length, wakes, 'later terminal traffic does not restart the completed walk');
 });
+
+test('client error maintenance expires only older than 30 days in one retry-safe page and retains agent audit', async t => {
+  const s = await checksFixture();
+  const expiry = await import(moduleUrl('../convex/projectOperationalExpiry.ts'));
+  const run = await s.pass(await s.activate((await s.enqueue(s.selection())).id));
+  const now = Date.now() + 32 * 86_400_000;
+  t.mock.method(Date, 'now', () => now);
+  s.tables.clientErrors ??= new Map();
+  s.tables.agentEvents ??= new Map();
+  const seed = (id, days) =>
+    s.tables.clientErrors.set(`clientErrors-${id}`, {
+      _id: `clientErrors-${id}`,
+      _creationTime: now - days * 86_400_000,
+      user: 'synthetic',
+      operationId: id,
+      kind: 'error',
+      message: 'synthetic',
+      route: '/',
+      build: 'test',
+    });
+  seed('young', 29);
+  seed('boundary', 30);
+  for (let i = 0; i < 12; i++) seed(`old-${i}`, 31);
+  for (const kind of ['create', 'revoke', 'expire', 'cascade-revoke', 'describe', 'read'])
+    s.tables.agentEvents.set(kind, {
+      _id: kind,
+      _creationTime: 0,
+      kind,
+      at: 0,
+      actor: 'synthetic',
+      agentId: 'agent',
+    });
+  const audit = structuredClone([...s.tables.agentEvents]);
+  const input = {
+    projectId: s.projectId,
+    runId: run.id,
+    phase: 'callbacks',
+    dueAt: 0,
+    continue: false,
+    operationId: 'client-error-retention',
+  };
+  const expire = args => s.store.call('clientErrorExpiry', expiry.check, args);
+  const out = await expire(input);
+  assert.equal(out.tables.find(row => row.table === 'clientErrors').rows, 8);
+  assert.equal(s.tables.clientErrors.size, 6);
+  assert(s.tables.clientErrors.has('clientErrors-young'));
+  assert(s.tables.clientErrors.has('clientErrors-boundary'));
+  assert.deepEqual(await expire(input), out, 'lost replies do not spend another page');
+  assert.equal(s.tables.clientErrors.size, 6);
+  assert.deepEqual([...s.tables.agentEvents], audit);
+  await expire({ ...input, operationId: 'next-maintenance' });
+  assert.deepEqual([...s.tables.clientErrors.keys()].sort(), ['clientErrors-boundary', 'clientErrors-young']);
+  assert.deepEqual([...s.tables.agentEvents], audit);
+});

@@ -370,3 +370,20 @@ Evidence: storage Issue [8c4f126b](https://nanthai-forge-dev.netlify.app/?projec
 completion `a67d6495`, catch-up `257c5a66`, final split evidence), and cost Issue
 [298f9675](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd). The [placement review](phase6-plan.md#p6-close-order-owner-2026-11-10)
 decides the next implementation slices.
+
+## Advisory retention
+
+Client errors expire strictly after 30 days from creation, in pages of at most
+eight rows in existing scheduled check-expiry transactions. There is no new cron,
+idle call or diagnostics-only continuation; a backlog drains on later maintenance.
+The receipt includes deleted row and logical byte totals and reconciles retries.
+At two check-expiry phases per landing, the added budget per 1,000 landings is
+zero function calls, at most 2,000 indexed page reads and 16,000 deletes; at the
+observed one error/week it is approximately one delete/week. Billed I/O and wall
+time remain unmeasured; memory is bounded to eight documents (8 MiB schema ceiling).
+No R2 bytes are involved in diagnostic deletion.
+
+Owner-selected coordination detail retention is 14 days hot then R2 archival by
+S2 (27d4c1fd), with nothing deleted. Messages, handoffs, acknowledgements and agent
+lifecycle audit stay indefinitely; agent access diagnostics have no window until
+volume warrants one. See [decisions](decisions.md#advisory-windows).

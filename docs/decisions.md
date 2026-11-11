@@ -67,6 +67,15 @@ manifest memory failure or authorize a State identity change.
 
 ## Decisions from 11 November
 
+### Advisory windows
+
+The owner selects 14 days hot for coordination detail, then archival to R2 by
+S2 (27d4c1fd); nothing is deleted. Messages, handoffs, acknowledgements and
+agent lifecycle audit (`create`, `revoke`, `expire`, `cascade-revoke`) stay
+indefinitely. Agent access diagnostics (`describe`, `read`) have no window until
+volume warrants one. Client errors expire after 30 days (Issue 71db311e).
+
+
 ### 2026-11-11: placement slices and the Worker adoption bar
 
 The owner adopts the [placement review](research/placement-review.md)'s rule:

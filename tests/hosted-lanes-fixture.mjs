@@ -175,7 +175,10 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
               descending = false;
             const q = {
               withIndex: (name, build) => {
-                const index = schema.tables[table].export().indexes.find(i => i.indexDescriptor === name);
+                const index =
+                  name === 'by_creation_time'
+                    ? { fields: [] }
+                    : schema.tables[table].export().indexes.find(i => i.indexDescriptor === name);
                 assert(index, `${table}.${name}`);
                 indexFields = index.fields;
                 // Every provider index ends in the implicit _creationTime, which a range may bound.

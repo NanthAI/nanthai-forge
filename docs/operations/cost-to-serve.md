@@ -1083,8 +1083,11 @@ These are creation rates of **currently retained** rows, not measured net table
 growth or proof that no earlier deletion occurred. A later retained-byte snapshot
 and insert/delete counters would establish net growth.
 
-The following are proposals for the owner, not selected windows or implemented
-expiry. R2 archive/pointer costs and readers must be designed before any archive
+The following table records the measurement-time proposals. The owner has since
+[selected advisory windows](../decisions.md#advisory-windows): client errors expire
+after 30 days through existing scheduled check maintenance; coordination detail
+gets 14 days hot then R2 archival in S2, with no deletion. Lifecycle audit, messages,
+handoffs and acknowledgements stay indefinitely; access diagnostics have no window. R2 archive/pointer costs and readers must be designed before any archive
 option is admitted. The rate projections assume the measured seven-day mix
 continues; they do not predict provider indexed storage.
 
