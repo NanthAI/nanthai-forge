@@ -21,27 +21,45 @@ function fixture(objects) {
       origin: 'github-import:job',
       ...page,
     });
-  let catalogReads = 0,
-    catalogReadBytes = 0;
+  const meter = {
+    objectQueries: 0,
+    objectDocuments: 0,
+    objectBytes: 0,
+    catalogQueries: 0,
+    catalogDocuments: 0,
+    catalogBytes: 0,
+  };
   const query = s.ctx.db.query;
   s.ctx.db.query = table => {
     const result = query(table);
-    if (table !== 'projectObjectCatalog') return result;
-    const take = result.take;
+    const kind = table === 'projectObjectCatalog' ? 'catalog' : table === 'projectObjects' ? 'object' : null;
+    if (!kind) return result;
+    const method = kind === 'catalog' ? 'take' : 'unique';
+    const read = result[method];
     const counted = {
       ...result,
-      take: async n => {
-        catalogReads += n;
-        const rows = await take(n);
-        catalogReadBytes += rows.reduce((total, row) => total + Buffer.byteLength(JSON.stringify(row)), 0);
-        return rows;
+      [method]: async (...args) => {
+        meter[`${kind}Queries`]++;
+        const value = await read(...args);
+        const rows = Array.isArray(value) ? value : value ? [value] : [];
+        meter[`${kind}Documents`] += rows.length;
+        meter[`${kind}Bytes`] += rows.reduce(
+          (total, row) => total + Buffer.byteLength(JSON.stringify(row)),
+          0,
+        );
+        return value;
       },
     };
     counted.withIndex = (...args) => (result.withIndex(...args), counted);
     counted.order = value => (result.order(value), counted);
     return counted;
   };
-  return { s, reads: () => catalogReads, bytes: () => catalogReadBytes };
+  return {
+    s,
+    reads: () => meter.catalogQueries,
+    bytes: () => meter.catalogBytes,
+    meter: () => ({ ...meter }),
+  };
 }
 const objects = Array.from({ length: 1000 }, (_, i) => ({
   digest: hex(i),
@@ -168,6 +186,81 @@ test('Actions source lookup cost guard batches neighbouring catalog rows without
       },
     }),
   );
+});
+
+test('sparse catalog lookup cost distinguishes page width from documents read at zoo sizes (8c4f126b)', async t => {
+  for (const [count, fullBudget, tailBudget] of [
+    [35, 6833, 6833],
+    [402, 48542, 27797],
+    [1387, 48919, 20589],
+  ]) {
+    // Synthetic packed blobs, not retained zoo source or provider billing. Equal-width
+    // identities isolate full versus tail page placement from source/metadata drift.
+    const pins = Array.from({ length: count }, (_, i) => ({
+      digest: hex(`sparse-${i}`),
+      size: 1024,
+      pack: { digest: hex('pack'), size: count * 1024, offset: i * 1024 },
+    }));
+    const run = fixture(pins);
+    const sorted = [...pins].sort((a, b) => (a.digest < b.digest ? -1 : 1));
+    const selected = [sorted[0], sorted.at(-1)];
+    const raw = selected.map((pin, index) => ({
+      _id: `raw-${index}`,
+      _creationTime: 1,
+      projectId: 'project',
+      ...pin,
+      nonce: '00000000-0000-4000-8000-000000000000',
+      removed: false,
+      sourceReferenced: true,
+      location: 'r2',
+      r2Key: `v1/p/project/o/${pin.pack.digest}`,
+      r2Committed: true,
+    }));
+    for (const row of raw) run.s.tables.projectObjects.set(row._id, row);
+    const lookup = async pin => {
+      const before = run.meter();
+      const row = await find.findObject({ ...run.s.ctx }, 'project', pin.digest);
+      assert.equal(row.size, pin.size);
+      assert.deepEqual(row.pack, pin.pack);
+      return Object.fromEntries(
+        Object.entries(run.meter()).map(([key, value]) => [key, value - before[key]]),
+      );
+    };
+    for (const pin of selected) {
+      const measured = await lookup(pin);
+      assert.equal(measured.objectDocuments, 1);
+      assert.equal(measured.objectBytes, Buffer.byteLength(JSON.stringify(raw[selected.indexOf(pin)])));
+      assert.equal(measured.catalogQueries, 0, 'raw descriptors take precedence');
+    }
+    const rawBytes = raw.map(row => Buffer.byteLength(JSON.stringify(row)));
+    for (const row of raw) run.s.tables.projectObjects.delete(row._id);
+    const after = [];
+    for (const pin of selected) after.push(await lookup(pin));
+    for (const [index, measured] of after.entries()) {
+      assert.equal(measured.objectQueries, 1, 'raw precedence is checked once');
+      assert.equal(measured.objectDocuments, 0, 'a raw miss is not a document read');
+      assert.equal(measured.catalogQueries, 1);
+      assert.equal(measured.catalogDocuments, 1, 'both full and tail lookup read one document');
+      assert(
+        measured.catalogBytes <= [fullBudget, tailBudget][index],
+        `${count}: packed descriptor page byte ratchet`,
+      );
+    }
+    assert(after.every((measured, index) => measured.catalogBytes > rawBytes[index]));
+    if (count > 256)
+      assert(after[0].catalogBytes > after[1].catalogBytes, 'one document has different byte costs');
+    const request = { ...run.s.ctx };
+    const start = run.meter();
+    for (const pin of sorted.slice(0, Math.min(count, 100))) {
+      assert.equal((await find.findObject(request, 'project', pin.digest)).size, pin.size);
+    }
+    assert.equal(
+      run.meter().catalogQueries - start.catalogQueries,
+      1,
+      'neighbours reuse their covering page',
+    );
+    t.diagnostic(JSON.stringify({ sparseCatalog: { count, rawBytes, full: after[0], tail: after[1] } }));
+  }
 });
 
 test('catalog-backed generations resolve sourceBlobs from the catalog, others do not', async () => {
