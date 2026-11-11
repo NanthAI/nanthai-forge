@@ -179,10 +179,7 @@
       "importArtifacts": 0,
       "importReaders": 0,
       "githubDeliveries": 0,
-      "projectObjectReceipts": 0,
-      "placementPatchProbe1": 0,
-      "placementPatchProbe9": 0,
-      "placementPatchProbe24": 0
+      "projectObjectReceipts": 0
     },
     "retained": {
       "projectFinishReadRows": 7679,
@@ -363,10 +360,7 @@
       "importArtifacts": 0,
       "importReaders": 0,
       "githubDeliveries": 0,
-      "projectObjectReceipts": 0,
-      "placementPatchProbe1": 0,
-      "placementPatchProbe9": 0,
-      "placementPatchProbe24": 0
+      "projectObjectReceipts": 0
     },
     "perProject": {
       "immediate": {
@@ -579,10 +573,7 @@
       "importArtifacts": 0,
       "importReaders": 0,
       "githubDeliveries": 0,
-      "projectObjectReceipts": 0,
-      "placementPatchProbe1": 0,
-      "placementPatchProbe9": 0,
-      "placementPatchProbe24": 0
+      "projectObjectReceipts": 0
     },
     "retained": {
       "projectFinishReadRows": 9665,
@@ -763,10 +754,7 @@
       "importArtifacts": 0,
       "importReaders": 0,
       "githubDeliveries": 0,
-      "projectObjectReceipts": 0,
-      "placementPatchProbe1": 0,
-      "placementPatchProbe9": 0,
-      "placementPatchProbe24": 0
+      "projectObjectReceipts": 0
     },
     "perProject": {
       "immediate": {

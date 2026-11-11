@@ -1050,33 +1050,87 @@ caller split. Setup/reset or other non-landing traffic in this bucket-wide
 window is included; no caller attribution or retry split is inferred. The
 approved read is complete; no objects, settings or retention changed.
 
-### Indexed patch experiment: billing evidence still missing
+### Indexed patch calibration
 
-Deployed index metadata confirms existing tables with the requested custom-index
-counts: `projectHostedLandingQueueStatus` (1), `projectHostedCheckRuns` (9), and
-`projectHostedLandingRequests` (24), excluding built-ins. No synthetic schema or
-production writer is needed to represent those shapes.
+**Measured dev execution I/O**, 11 November 10:23:32.601–10:26:11.984 UTC.
+The [numeric calibration fixture](../../tests/fixtures/indexed-patch-usage.json)
+retains every execution's usage and timing conditions. The observable internal
+writer reached dev through the normal Lane and
+[CI deployment](https://github.com/NanthAI/nanthai-forge/actions/runs/43002233317),
+at source State `37b2f69c`, mirrored commit `0c27e652`. It ran only on dev.
+The three temporary table definitions and writer were removed from source after
+measurement; the schema-wide duplicate-index deployment guard remains.
 
-A single dev admin-data-editor probe inserted a synthetic 1,024-character body
-under an isolated synthetic, non-active project and patched it to different
-same-length bytes. The patch succeeded at 08:20:03.554–08:20:03.689 UTC on
-11 November; its two synthetic rows were removed and absence verified. It did
-not start a landing, check, source job or other workload. It supplied **no billed
-read/write bytes**: the system mutation returns only success and is absent from
-the provider log snapshot/spend journal. Provider source confirms system UDFs
-are omitted from function logs even though their bandwidth is tracked
-([function logging](https://github.com/get-convex/convex-backend/blob/main/crates/application/src/function_log.rs),
-[usage tracking](https://github.com/get-convex/convex-backend/blob/main/crates/usage_tracking/src/lib.rs)).
-The 0.135 s observation has no recorded load sample and is not a latency claim.
+Each table had identical document columns, nominal JSON document sizes of
+1,024 / 8,192 / 27,648 bytes, and 1 / 9 / 24 distinct custom indexes (built-ins
+excluded). Each index selected the operation key plus a different small numeric
+column. Ten rounds ran sizes 1 / 8 / 27 KiB, then indexes 1 / 9 / 24 for each
+size. Each patch advanced an **unindexed counter**; indexed values stayed fixed.
+Read/write bytes below come from each successful `Completion.usageStats` in the
+same `convex logs --jsonl --success` stream as the benchmark meter. No raw log
+text was retained. All ten executions in each cell had identical byte counts.
 
-The ten-patch 1/8/27 KB × 1/9/24-index matrix was **not run**, so there is no
-billed-byte table and S0 line 1 remains open. Further unobservable writes would
-spend the experiment's <5 MB budget without supplying its acceptance evidence.
-A follow-up needs an observable dev-only mutation through the normal Lane/CI dev
-path, with no production writer, or provider per-operation usage for the existing
-admin editor. Capture read/write usage for every patch, audit/setup/cleanup
-separately, and stop within the approved total I/O envelope. No local deploy,
-production change or inferred index-copy multiplier was used here.
+| Nominal JSON B | Custom indexes | Patches | Billed read B / patch | Billed write B / patch |
+| ---: | ---: | ---: | ---: | ---: |
+| 1,024 | 1 | 10 | 2,505 | 1,333 |
+| 1,024 | 9 | 10 | 2,505 | 2,357 |
+| 1,024 | 24 | 10 | 2,505 | 4,277 |
+| 8,192 | 1 | 10 | 16,841 | 8,501 |
+| 8,192 | 9 | 10 | 16,841 | 9,525 |
+| 8,192 | 24 | 10 | 16,841 | 11,445 |
+| 27,648 | 1 | 10 | 55,754 | 27,958 |
+| 27,648 | 9 | 10 | 55,754 | 28,990 |
+| 27,648 | 24 | 10 | 55,754 | 30,925 |
+
+| Phase | Executions | Billed read B | Billed write B |
+| --- | ---: | ---: | ---: |
+| Create nine synthetic rows | 1 | 0 | 125,311 |
+| Counter patches | 90 | 2,253,000 | 1,253,110 |
+| Delete nine synthetic rows | 1 | 225,300 | 0 |
+| Repeat cleanup, verify absence | 1 | 0 | 0 |
+| **Total** | **93** | **2,478,300** | **1,378,421** |
+
+Total observed fixture I/O is **3,856,721 B**, below the 5 MB envelope, including
+setup and cleanup. Counters report 198 document reads and 108 document writes
+(including nine deletions whose billed write bytes were zero). Each patch
+reports two document reads and one write. Reported execution network egress is
+zero; that is not a measurement of the caller's HTTP traffic. The second cleanup
+found no rows for the operation; separate bounded reads verified all three
+tables empty. No landing, source job, retention change or new smoke was triggered.
+
+**Observation, N = 10 pairs per size:** reducing custom indexes from 24 to 1
+changed billed writes by -2,944 B at 1 and 8 KiB, and -2,967 B at 27 KiB.
+The median-difference 95% bootstrap intervals are respectively
+[-2,944, -2,944], [-2,944, -2,944] and [-2,967, -2,967] B, with seed 1 and
+10,000 resamples. These are small samples below the 11-pair reference bar;
+the intervals cover resampling these observations, not other key shapes,
+provider changes or production landings.
+
+For these rows, write bytes fit `D + 181 + N * E`, where `D` is nominal JSON
+bytes, `N` is custom-index count, and `E` is 128 B for the shorter operation key
+or 129 B for the one-character-longer 27 KiB key. This is an empirical fit,
+**not a vendor formula**. Increasing the payload by 7,168 B changed billed writes
+by 7,168 B at every index count. Thus a full payload copy per index is not the
+observed patch-I/O multiplier. A smaller frequently rewritten payload supplies
+about a one-for-one write-byte reduction in this fixture; changing indexed keys,
+physical index storage, actual landing key widths and the ticket/body write
+partition still need their own evidence. The matrix does not prove an S3
+production saving or the $2 target.
+
+The 159.383 s window excludes the heavy queue and log-stream startup. Per-patch
+server execution was 0.0785–0.2950 s; caller wall time was 0.989–3.107 s including
+`npx`, authentication and local load. One-minute load was 12.19–27.31 and swap
+used was 6,218.5–6,450.5 MiB; all three load averages and swap are recorded per
+sample. Maximum driver RSS was about 53.5 MiB; child CLI and remote function
+memory were not measured. No latency or memory improvement is claimed.
+
+Node remained 24.22.1 and Convex CLI 1.46.0. During the window, dev also deployed
+commit `47e0cdb1` (State `1f4ad21d`); its only changed files were `src/host-cli.ts`
+and `tests/host-directory.test.mjs`, outside the fixture/server dependency
+closure. The fixture functions, schema and dependency versions were unchanged.
+Administrative metadata preflight/empty-table reads and CI deployment are
+separate from the 93 measured fixture executions. No account-dashboard read,
+local deployment or production operation was performed by this calibration.
 
 ### Advisory rows, growth and window proposals
 
@@ -1124,8 +1178,7 @@ attempts in the existing meter; record an all-I/O union and exclusive busy-state
 intervals (plus Node CPU if CPU is claimed), rather than subtracting overlapping
 clocks; and count executed R2 methods/status/retries by caller at the actual
 request seam, including uses of already signed URLs. Reconcile once with the
-owner-approved bucket read. The patch matrix still requires an observable dev
-write path. Advisory net growth needs a second retained snapshot or insertion /
+owner-approved bucket read. The indexed patch matrix above is complete. Advisory net growth needs a second retained snapshot or insertion /
 deletion counters. No missing field is zero and no new run is authorized by this
 follow-up list.
 
@@ -1133,5 +1186,7 @@ Evidence and open lines are tracked on
 [S0](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=886a4694-b2eb-4e58-881f-787376038698)
 and the existing [cost Issue](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=298f9675-b8ad-49d6-96c3-07d94e5f9ebd).
 This documentation replaces unlabelled placement estimates with scoped
-observations and explicit gaps. It removes no runtime code: calls, memory, byte
-placement, idle work and retention are unchanged.
+observations and explicit gaps. The temporary patch writer and three schema
+definitions are removed after row cleanup. The retained numeric evidence and
+deployment guard add no product runtime calls, memory, byte placement, idle work
+or retention changes.

@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": -3,
+  "reason": "Remove the three temporary S0 calibration table definitions and internal writer after all ninety measured patches and verified row cleanup, Issue 324f1d97. Keep only numeric evidence and the generic duplicate-index deployment guard.",
+  "date": "2026-11-11"
+}
