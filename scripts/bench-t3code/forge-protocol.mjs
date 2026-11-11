@@ -80,6 +80,34 @@ function sourceFailed(value) {
   return ['source', 'progress', 'terminal'].some(key => sourceFailed(value[key]));
 }
 
+// Waits can return several operations and single-target aliases. Select by the
+// requested identity before reading success or recovery, never by array order.
+function selectedResult(response, command) {
+  const result = response.result ?? {};
+  if (!Array.isArray(result.submissions)) return result;
+  const requested = command.body.operationIds;
+  if (!Array.isArray(requested) || !requested.length)
+    friction('Submission wait returned without a requested operation');
+  const byOperation = new Map(result.submissions.map(entry => [entry.submission?.operationId, entry]));
+  const entries = requested.map(id => byOperation.get(id));
+  if (entries.some(entry => !entry)) {
+    if (result.status === 'terminal') friction('Terminal wait omitted a requested operation');
+    return { ...result, submission: undefined, recovery: undefined, conflict: undefined };
+  }
+  const state = entry => entry.submission.observation?.state ?? entry.submission.phase;
+  const selected =
+    entries.find(entry => ['terminal-failed', 'cancelled', 'superseded'].includes(state(entry))) ??
+    entries.find(entry => state(entry) !== 'landed') ??
+    entries[0];
+  return {
+    ...result,
+    submission: selected.submission,
+    // Top-level recovery is the single-target alias, not advice for unrelated entries.
+    recovery: selected.recovery ?? (result.submissions.length === 1 ? result.recovery : undefined),
+    conflict: selected.conflict ?? (result.submissions.length === 1 ? result.conflict : undefined),
+  };
+}
+
 /** Keep pending operations outside the landing budget. A resolved server outcome alone
  * never means local apply completed: only resolve's advertised finish advances that phase. */
 export async function driveForge({
@@ -100,9 +128,9 @@ export async function driveForge({
     if (newLanding && ++landAttempts > maxLandAttempts) throw Error('BENCH_LAND_ATTEMPTS_EXHAUSTED');
     newLanding = false;
     const response = await call(command);
-    const result = response.result ?? {};
-    if (result.submission?.phase === 'landed' || result.phase === 'landed')
-      return { root: command.root, landAttempts };
+    const result = selectedResult(response, command);
+    const state = result.submission?.observation?.state ?? result.submission?.phase ?? result.phase;
+    if (state === 'landed') return { root: command.root, landAttempts };
     const code = response.error?.code;
     if (['OVERLAP_UNANSWERED', 'PREFLIGHT_REQUIRED'].includes(code)) {
       await call({
@@ -146,8 +174,8 @@ export async function driveForge({
       continue;
     }
     const terminalFailure =
-      result.submission?.phase === 'terminal-failed' ||
-      result.phase === 'terminal-failed' ||
+      ['terminal-failed', 'cancelled', 'superseded'].includes(state) ||
+      ['terminal', 'cancelled'].includes(result.status) ||
       (result.terminal === true && result.complete !== true);
     const next = continuation(conflict ?? recovery, command.root);
     if (terminalFailure && !next) throw Error(`BENCH_PRODUCT_FAILURE: ${JSON.stringify(result)}`);

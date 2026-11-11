@@ -54,6 +54,229 @@ async function fixture(replies, options = {}) {
   return { result, calls, edits, pauses };
 }
 
+const operationId = 'requested-landing';
+const waitNext = { action: 'wait', operationIds: [operationId], until: 'acceptance', timeoutSeconds: 7080 };
+const waitCommand = `nforge agent '${root}' wait '${JSON.stringify({
+  operationIds: waitNext.operationIds,
+  until: waitNext.until,
+  timeoutSeconds: waitNext.timeoutSeconds,
+})}'`;
+const submitted = {
+  action: 'finish',
+  operationId,
+  result: {
+    phase: 'finish',
+    next: waitNext,
+    command: waitCommand,
+    waitCommand,
+    wake: { delivery: 'background-exit', command: waitCommand, budgetSeconds: 7080 },
+  },
+};
+const entry = (operationId, state, extra = {}) => ({
+  submission: {
+    operationId,
+    phase: ['cancelled', 'superseded'].includes(state) ? 'terminal-failed' : state,
+    observation: { state: ['composing', 'queued', 'checking', 'ready'].includes(state) ? 'pending' : state },
+    ...(state === 'landed' ? { acceptance: { receiptId: operationId + '-receipt', head: 'accepted' } } : {}),
+  },
+  ...extra,
+});
+const observed = (entries, extra = {}) => ({
+  action: 'observe',
+  operationId: null,
+  result: {
+    status: 'terminal',
+    successful: entries.every(e => e.submission.observation.state === 'landed'),
+    submissions: entries,
+    ...extra,
+  },
+});
+
+test('async wake wait accepts its terminal observe envelope without replaying the landing', async () => {
+  const f = await fixture([submitted, observed([entry(operationId, 'landed')])], { maxLandAttempts: 1 });
+  assert.deepEqual(
+    f.calls.map(c => c.action),
+    ['land', 'wait'],
+  );
+  assert.deepEqual(f.calls[1].body, {
+    operationIds: [operationId],
+    until: 'acceptance',
+    timeoutSeconds: 7080,
+  });
+  assert.equal(f.result.landAttempts, 1);
+  assert.equal(f.pauses.length, 0);
+});
+
+test('blocking finish accepts the direct landed submission without a separate wait', async () => {
+  const f = await fixture([
+    {
+      action: 'finish',
+      operationId,
+      result: { phase: 'finish', ...entry(operationId, 'landed') },
+    },
+  ]);
+  assert.deepEqual(
+    f.calls.map(c => c.action),
+    ['land'],
+  );
+  assert.equal(f.result.landAttempts, 1);
+});
+
+for (const state of ['terminal-failed', 'cancelled', 'superseded'])
+  test(`async wait retains ${state} as an unsuccessful outcome with its original error`, async () => {
+    const failed = entry(operationId, state === 'cancelled' ? 'terminal-failed' : state);
+    const code = state === 'cancelled' ? 'LANDING_CANCELLED' : 'RETAINED_FAILURE';
+    failed.submission.error = { code, message: 'original failure evidence' };
+    await assert.rejects(fixture([submitted, observed([failed])]), error => {
+      assert.match(error.message, /BENCH_PRODUCT_FAILURE:/);
+      assert.ok(error.message.includes(code));
+      assert.match(error.message, /original failure evidence/);
+      assert.doesNotMatch(error.message, /no terminal result or continuation/);
+      return true;
+    });
+  });
+
+test('mixed operations select requested success even when an unrelated entry failed first', async () => {
+  const f = await fixture([
+    submitted,
+    observed([
+      entry('unrelated', 'terminal-failed', { recovery: { next: next('sync', 'unrelated-sync') } }),
+      entry(operationId, 'landed'),
+    ]),
+  ]);
+  assert.deepEqual(
+    f.calls.map(c => c.action),
+    ['land', 'wait'],
+  );
+});
+
+test('mixed operations cannot replace the requested failure with an unrelated landed receipt or alias', async () => {
+  const other = entry('unrelated', 'landed');
+  await assert.rejects(
+    fixture([
+      submitted,
+      observed([other, entry(operationId, 'terminal-failed')], { ...other, successful: true }),
+    ]),
+    /BENCH_PRODUCT_FAILURE:/,
+  );
+  await assert.rejects(
+    fixture([submitted, observed([other])]),
+    /Terminal wait omitted a requested operation/,
+  );
+});
+
+test('summary successful alone never invents a landed receipt for a pending operation', async () => {
+  const queued = entry(operationId, 'ready');
+  queued.submission.observation.state = 'pending';
+  await assert.rejects(
+    fixture([submitted, observed([queued], { successful: true })]),
+    /BENCH_PRODUCT_FAILURE:/,
+  );
+});
+
+for (const status of ['timeout', 'changed', 'message', 'cancelled', 'IN_PROGRESS'])
+  test(`async ${status} continues the original wait then lands without spending a landing attempt`, async () => {
+    const f = await fixture(
+      [
+        submitted,
+        observed([entry(operationId, 'checking')], {
+          status,
+          successful: false,
+          inProgress: true,
+          next: waitNext,
+          command: waitCommand,
+        }),
+        observed([entry(operationId, 'landed')]),
+      ],
+      { maxLandAttempts: 1 },
+    );
+    assert.deepEqual(
+      f.calls.map(c => c.action),
+      ['land', 'wait', 'wait'],
+    );
+    assert.deepEqual(f.calls[1], f.calls[2]);
+    assert.equal(f.result.landAttempts, 1);
+    assert.equal(f.pauses.length, 0);
+  });
+
+test('pending CLI wait without submission entries follows its exact printed continuation', async () => {
+  const f = await fixture(
+    [
+      submitted,
+      response({ status: 'IN_PROGRESS', reason: 'budget', next: waitNext, command: waitCommand }),
+      observed([entry(operationId, 'landed')]),
+    ],
+    { maxLandAttempts: 1 },
+  );
+  assert.deepEqual(f.calls[1], f.calls[2]);
+});
+
+test('async wait failure follows only its matching entry recovery through resolve and finish', async () => {
+  const failed = entry(operationId, 'terminal-failed', { recovery: conflict.result.recovery });
+  const f = await fixture([submitted, observed([entry('unrelated', 'landed'), failed]), resolved, landed]);
+  assert.deepEqual(
+    f.calls.map(c => c.action),
+    ['land', 'wait', 'resolve', 'finish'],
+  );
+  assert.equal(f.edits.length, 1);
+  assert.equal(f.calls[2].root, draft);
+  assert.equal(f.result.landAttempts, 2);
+});
+
+test('single-target wait aliases preserve recovery and advertised terminal retry parameters', async () => {
+  const retry = { inputs: [{ laneId: 'lane', expected: { head: 'pinned' } }], retry: true, message: 'dry' };
+  const failed = entry(operationId, 'terminal-failed');
+  const f = await fixture([
+    submitted,
+    observed([failed], { ...failed, next: { action: 'finish', ...retry } }),
+    landed,
+  ]);
+  assert.deepEqual(f.calls[2].body, retry);
+  assert.equal(f.result.landAttempts, 2);
+});
+
+test('multiple requested operations require every selected operation to land, independent of entry order', async () => {
+  const multiple = { action: 'wait', operationIds: [operationId, 'also-requested'], until: 'acceptance' };
+  const start = response({ next: multiple });
+  const f = await fixture([
+    start,
+    observed([
+      entry('also-requested', 'landed'),
+      entry('unrelated', 'terminal-failed'),
+      entry(operationId, 'landed'),
+    ]),
+  ]);
+  assert.equal(f.result.landAttempts, 1);
+  await assert.rejects(
+    fixture([start, observed([entry(operationId, 'landed'), entry('also-requested', 'terminal-failed')])]),
+    /BENCH_PRODUCT_FAILURE:/,
+  );
+});
+
+for (const count of [575, 1150])
+  test(`wait decoding ${count} requested operations stays local and requires every receipt`, async t => {
+    const operationIds = Array.from({ length: count }, (_, i) => `selected-${i}`);
+    const replies = [
+      response({ next: { action: 'wait', operationIds, until: 'acceptance' } }),
+      observed(operationIds.map(id => entry(id, 'landed')).reverse()),
+    ];
+    const started = performance.now();
+    const f = await fixture(replies, { maxLandAttempts: 1 });
+    assert.equal(f.calls.length, 2, 'only the advertised land and wait, with no per-entry calls');
+    assert.equal(f.result.landAttempts, 1);
+    t.diagnostic(
+      JSON.stringify({
+        targets: count,
+        elapsedMs: performance.now() - started,
+        addedConvexCalls: 0,
+        addedDbReads: 0,
+        addedDbWrites: 0,
+        addedR2Bytes: 0,
+        idleCalls: 0,
+      }),
+    );
+  });
+
 test('pending source continues the same sync beyond land budget; resolve applies then exact finish', async () => {
   const recovery = response({ recovery: { next: next('sync', 'sync-op', { laneId: 'lane' }) } });
   const f = await fixture(

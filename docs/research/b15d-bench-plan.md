@@ -258,6 +258,11 @@ source continuations (including save/compose within land) do not consume the eig
 attempts. Interrupted actions replay their original operation and parameters when Forge
 explicitly advises that; a repeated obstruction remains a failure. Every child response,
 error and operation identity stays in the agent transcript and broker call log.
+Async wake waits and blocking finishes share the same outcome rules: wait envelopes select
+`submissions[].submission` by the requested operation IDs, including single-target aliases.
+Only the selected operations landing is success; failed, cancelled and superseded outcomes
+keep their recovery or stop with the retained failure. Pending waits follow their advertised
+continuation without another landing attempt. An unrelated accepted receipt is never success.
 The collector records typed executed CLI receipts, observes only finish/land operations, and retains structured stderr errors on nonzero exits.
 
 There are no task-name, marker-path or Forge-repository exceptions in recovery. Missing or
@@ -286,7 +291,8 @@ the checkout marker's materialized scope. Missing files outside it are unknown, 
 deletions. Actual changes/deletions within scope remain visible; the archived marker and
 captured scope explain the comparison. Full checkouts retain the existing whole-tree rule.
 Local qualification fixtures live in `scripts/bench-t3code/protocol-fixtures.test.mjs`; run
-with `node --test --test-concurrency=1` (no cell or benchmark driver is invoked).
+with `node --test --test-concurrency=1` (no cell or benchmark driver is invoked). The landing
+suite includes them through `tests/bench-t3code-protocol.test.mjs`.
 
 ## Correctness (oracle)
 
