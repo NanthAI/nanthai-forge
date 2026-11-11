@@ -698,11 +698,48 @@ before the 47,305 B changed pack or root. This is evidence against root-only and
 one-write repack fixes, not an impossibility proof for a redesigned layout.
 `physical-manifest-v2.test.mjs` guards all 1,024 chunks, k+1 point reads and the
 unchanged refusal to produce an oversized grant plan. It does **not** count that
-refusal as satisfying the whole-plan or writer bounds. A metadata-layout decision
-is still needed before writer switching and descriptor retirement; no wider
-credential, extra job, skipped root, raised bound or catalog deletion is applied.
+refusal as satisfying the whole-plan or writer bounds. The selected continuation
+is FPR2, a one-time fragmented-metadata rebuild at compose, and size-tiered packs
+with merges only at compose. That strategy remains unqualified for the reason
+below; no wider credential, extra job, skipped root, raised bound or catalog deletion is applied.
 These are synthetic body/signing measurements, not billed usage or live latency.
 The full runtime still keeps complete descriptor fallback and the writer off.
+
+**Ranges versus keys between composes.** Limiting metadata keys does not limit
+exact grants. Replacing a bucket leaves a hole in its old immutable pack; runs on
+either side must remain separate to exclude obsolete buckets. A 29k-file fixture
+starts with all 1,024 buckets in one compact pack (two grants including the root).
+Four consecutive eight-file saves, without compose, produce:
+
+| Save | Metadata keys | Exact grants including root | FPR2 candidate upload B |
+| --- | ---: | ---: | ---: |
+| 1 | 2 | 18 | 72,894 |
+| 2 | 3 | 35 | 74,648 |
+| 3 | 4 | 50 | 75,898 |
+| 4 | 5 | 66 | 76,491 |
+
+`physical-manifest-history.test.mjs` reproduces the range counts through the
+existing writer, emits equivalent fingerprint-free FPR2 roots, and exercises the
+real signer. It verifies all 29k current members, absence of removed members,
+all 1,024 buckets and refusal of the fourth plan. That refusal is a correctness
+guard, **not** satisfaction of the 64-grant writer target.
+
+A separate 2,000-save exploratory FPR2 candidate compares supplied parent-State
+membership, reads only changed buckets and adds one metadata pack per write.
+It starts from the 29k / 1,024-pack shape, rebuilds verified metadata once into
+one pack (2,125,616 B including root, two PUTs, zero catalog reads), and then
+allows no compose merges during the ordinary-save chain. Maximum ordinary
+upload is 87,259 B / two PUTs, eight descriptor reads and 16 bucket reads;
+maximum grants are 587 from at most 236 keys. The first failure is the fourth
+save above. Rebuild bytes are counted separately; merge bytes are zero because
+no compose occurs. This is a local prototype, not the runtime writer or billed
+qualification. Peak process RSS is 459,259,904 B for that single exploratory run.
+
+Compose-only tier merges cannot repair an allowed save-only chain, even when
+the fourth new pack fills a tier. Before writer switching or retirement, the
+lead must resolve this boundary while preserving ordinary save/sync capability,
+the 64-grant bound and exact ranges. No restriction on saves, merge during saves,
+grant across holes, skipped manifest or alternate layout is selected here.
 
 **Rollout order.** Expand, then contract, one landing each.
 

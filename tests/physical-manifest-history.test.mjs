@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: Apache-2.0
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { digest } from '../dist/hash.js';
+import { PhysicalManifestReader } from '../dist/physical-manifest.js';
+import { encodePhysicalRoot } from '../dist/physical-manifest-root.js';
+import { writePhysicalManifest } from '../dist/physical-manifest-write.js';
+import { physicalRuns } from '../dist/physical-manifest-runs.js';
+import { fakeSourceR2 } from './convex-source-r2-fixture.mjs';
+import { moduleUrl } from './convex-module.mjs';
+const { stateSourceReader } = await import(moduleUrl('../convex/projectStateSourceReader.ts'));
+
+test('four saves after compact metadata seeding need66 exact grants from five keys; FPR2 must refuse rather than include obsolete buckets', async t => {
+  const r2 = fakeSourceR2(t),
+    bindings = new Map(
+      Array.from({ length: 29000 }, (_, index) => {
+        const sha256 = digest(`file-${index}`);
+        return [
+          sha256,
+          {
+            sha256,
+            size: 51,
+            pack: {
+              digest: digest(`pack-${Math.floor(index / 1000)}`),
+              size: 51000,
+              offset: (index % 1000) * 51,
+            },
+          },
+        ];
+      }),
+    ),
+    ids = [...bindings.keys()],
+    objects = new Map(),
+    put = async bytes => {
+      const pin = { sha256: digest(bytes), size: bytes.length };
+      objects.set(pin.sha256, bytes);
+      r2.objects.set(`/synthetic/v1/p/project/o/${pin.sha256}`, bytes);
+      return pin;
+    },
+    read = async pin =>
+      pin.pack
+        ? objects.get(pin.pack.digest).subarray(pin.pack.offset, pin.pack.offset + pin.size)
+        : objects.get(pin.sha256),
+    write = (state, parent) =>
+      writePhysicalManifest({
+        state,
+        members: ids,
+        parent,
+        put,
+        describe: async requested => requested.map(id => bindings.get(id)),
+      });
+  let state = digest('compact seed'),
+    current = await write(state, null);
+  assert.equal(1 + (await physicalRuns(current.root.chunks)).length, 2);
+  const observations = [],
+    removed = [];
+  for (let step = 1; step <= 4; step++) {
+    const parent = await PhysicalManifestReader.open(state, current.pin, read);
+    for (let index = 0; index < 8; index++) {
+      const at = (step - 1) * 8 + index,
+        sha256 = digest(`replacement-${step}-${index}`);
+      removed.push(ids[at]);
+      ids[at] = sha256;
+      bindings.set(sha256, {
+        sha256,
+        size: 51,
+        pack: { digest: digest(`replacement-pack-${step}`), size: 408, offset: index * 51 },
+      });
+    }
+    state = digest(`save-${step}`);
+    current = await write(state, parent);
+    // Fingerprint omission changes root bytes, never the chunks' immutable keys
+    // or the exact intervals the deployed signer is allowed to grant.
+    const root = {
+        ...current.root,
+        chunks: current.root.chunks.map(({ members: _members, ...chunk }) => chunk),
+      },
+      bytes = encodePhysicalRoot(root),
+      pin = await put(bytes),
+      keys = new Set(root.chunks.map(chunk => chunk.pack?.digest ?? chunk.sha256)).size,
+      grants = 1 + (await physicalRuns(root.chunks)).length,
+      plan = await stateSourceReader('project').plan(state, pin);
+    assert.equal(bytes[3], 2);
+    if (grants <= 64) assert.equal(plan.chunks.length + 1, grants);
+    else assert.equal(plan, null, 'count exact ranges, never only distinct metadata keys');
+    observations.push({ step, keys, grants });
+    if (step === 4) {
+      const reader = await PhysicalManifestReader.open(state, pin, read);
+      assert.equal(reader.root.chunks.length, 1024, 'no bucket may be skipped to fit the plan');
+      assert.deepEqual(
+        await reader.lookup(removed),
+        removed.map(() => null),
+      );
+      const members = [];
+      for await (const entry of reader.all()) members.push(entry.sha256);
+      assert.deepEqual(members.sort(), [...ids].sort(), 'all current members remain readable');
+    }
+  }
+  assert.deepEqual(observations, [
+    { step: 1, keys: 2, grants: 18 },
+    { step: 2, keys: 3, grants: 35 },
+    { step: 3, keys: 4, grants: 50 },
+    { step: 4, keys: 5, grants: 66 },
+  ]);
+  t.diagnostic(JSON.stringify({ files: ids.length, observations }));
+});
