@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { assertSourceStateSize, type SourceSizePhase } from '../src/source-state-size';
 import type { StateSize } from '../src/state/size';
 import { sourcePutMetrics } from './projectSourceBytes';
 import { sourceStateChunks } from './projectConvexSourceChunks';
@@ -52,6 +53,7 @@ export function convexSourceTransport(
     overlapWrites = false,
     hash = digest,
     preloaded = [],
+    observed = [],
     putMetrics = sourcePutMetrics(),
     physicalManifests = false,
     sourceKind,
@@ -67,6 +69,7 @@ export function convexSourceTransport(
     physicalManifests?: boolean;
     sourceKind?: string;
     bindings?: readonly { sha256: string; size: number; r2Key: string; pack?: ObjectPack }[] | undefined;
+    observed?: ({ sha256: string; size: number } & StateSize)[] | undefined;
   } = {},
 ) {
   // Fan-out tasks pass their wider identity; the object validator accepts only these fields.
@@ -78,6 +81,9 @@ export function convexSourceTransport(
     // The last few small outputs, by digest: a step's final result manifest is one of them, so
     // commit can carry it to publication without a separate action re-reading it from R2.
     small = new Map<string, string>(),
+    observedStates = new Map(observed.map(pin => [pin.sha256, pin])),
+    outputSizes = new Map<string, StateSize>(),
+    expectedStates = new Set<string>(),
     // Overlapped writes in upload order, at most sourceIoConcurrency in flight.
     writing: Promise<SourceOutput>[] = [];
   const settle = async () => {
@@ -107,6 +113,11 @@ export function convexSourceTransport(
     parents = new Map<string, string[]>(),
     outputParents = new Map<string, readonly string[]>(),
     outputFiles = new Map<string, readonly NativeFile[]>();
+  let sizePhase: SourceSizePhase | undefined;
+  const checkSize = (pin: WorkerPin) => {
+    if (sizePhase && expectedStates.has(pin.sha256) && !outputSizes.has(pin.sha256))
+      assertSourceStateSize(sizePhase, locations.get(pin.sha256)?.stateSize);
+  };
   const remember = (rows: ObjectLocation[]) => {
     for (const row of rows) {
       chunks.remember(row);
@@ -124,6 +135,7 @@ export function convexSourceTransport(
   for (const binding of bindings) {
     if (binding.r2Key !== r2Key(projectId, binding.pack?.digest ?? binding.sha256)) continue;
     locations.set(binding.sha256, {
+      ...locations.get(binding.sha256),
       descriptor: { object: { sha256: binding.sha256, size: binding.size }, recipe: null },
       storageId: null,
       url: null,
@@ -189,6 +201,7 @@ export function convexSourceTransport(
             ...input,
             digests: ids,
             ancestry,
+            ...(sizePhase ? { sizePhase, states: ids.filter(id => expectedStates.has(id)) } : {}),
             known,
             windows,
           }),
@@ -202,6 +215,7 @@ export function convexSourceTransport(
         }),
     );
     remember(rows);
+    for (const row of rows) checkSize(row.descriptor.object);
     // A byte-bounded response can be a prefix; ordinary descriptor requests
     // continue the remainder without creating per-file RPCs.
     if (!ancestry && rows.length < ids.length) {
@@ -309,7 +323,21 @@ export function convexSourceTransport(
     hasPhysicalState: id => !!locations.get(id)?.statePhysical,
     ...(physical.seedPhysicalState ? { seedPhysicalState: physical.seedPhysicalState } : {}),
     ...(physical.writePhysicalState ? { writePhysicalState: physical.writePhysicalState } : {}),
+    setSourceSizePhase: phase => {
+      sizePhase = phase;
+    },
+    expectState: id => {
+      expectedStates.add(id);
+      const row = locations.get(id);
+      if (row) checkSize(row.descriptor.object);
+    },
+    checkStateSize: checkSize,
+    rememberLoadedState: (pin, fileCount) => {
+      if (!locations.get(pin.sha256)?.stateSize && !outputSizes.has(pin.sha256))
+        observedStates.set(pin.sha256, { ...pin, fileCount, manifestBytes: pin.size });
+    },
     rememberOutputState: (pin, parents, files) => {
+      if (files) outputSizes.set(pin.sha256, { fileCount: files.length, manifestBytes: pin.size });
       if (validStateParents(parents)) outputParents.set(pin.sha256, [...parents]);
       if (physicalManifests && files) outputFiles.set(pin.sha256, files);
     },
@@ -324,6 +352,7 @@ export function convexSourceTransport(
       }
     },
     readInto: async (pin, destination) => {
+      checkSize(pin);
       const prior = held.get(pin.sha256);
       if (prior && prior.length === pin.size) {
         destination.set(prior);
@@ -353,6 +382,7 @@ export function convexSourceTransport(
               ...input,
               digests: pending,
               ancestry: !!hints,
+              ...(sizePhase ? { sizePhase, states: pending.filter(id => expectedStates.has(id)) } : {}),
               known: hints?.known ?? [],
               probe: true,
               ...(hints ? { windows: hints.windows } : {}),
@@ -365,6 +395,8 @@ export function convexSourceTransport(
           }),
       );
       remember(result.rows);
+      for (const row of result.rows) checkSize(row.descriptor.object);
+
       const remaining = pending.filter(id => !locations.has(id) && !result.unavailable.includes(id));
       invariant(remaining.length < pending.length, 'SOURCE_UNAVAILABLE', 'Object window made no progress.');
       // As with ordinary resolution, complete the byte-bounded descriptor pages
@@ -400,8 +432,10 @@ export function convexSourceTransport(
       ];
       for (let offset = 0; offset < missing.length; offset += 100)
         await resolve(missing.slice(offset, offset + 100).map(p => p.sha256));
+      for (const pin of pins) checkSize(pin);
     },
     read: async pin => {
+      checkSize(pin);
       const bytes = held.get(pin.sha256);
       if (bytes && bytes.length === pin.size)
         return (async function* () {
@@ -409,6 +443,7 @@ export function convexSourceTransport(
         })();
       if (!locations.has(pin.sha256)) await resolve([pin.sha256]);
       const row = locations.get(pin.sha256)!;
+      checkSize(pin);
       if (row.closure)
         return (async function* () {
           yield await readClosure(pin, row.closure!);
@@ -567,6 +602,7 @@ export function convexSourceTransport(
     let stateGeneration: number | undefined,
       stateParents: string[] | undefined,
       stateFiles = outputFiles.get(pin.sha256);
+    let stateSize = outputSizes.get(pin.sha256);
     const prefix = new TextDecoder().decode(bytes.subarray(0, 256));
     const ownParents = outputParents.get(pin.sha256);
     if (ownParents) {
@@ -577,6 +613,7 @@ export function convexSourceTransport(
       try {
         const state = parseNativeState(bytes);
         if (physicalManifests) stateFiles = state.files;
+        stateSize = { fileCount: state.files.length, manifestBytes: bytes.length };
         stateGeneration = nextStateGeneration(state.parents, id => generations.get(id));
         if (stateGeneration !== undefined) generations.set(pin.sha256, stateGeneration);
         if (validStateParents(state.parents)) stateParents = [...state.parents];
@@ -585,6 +622,8 @@ export function convexSourceTransport(
         if (!(error instanceof ForgeError) || error.code !== 'INVALID_NATIVE_SOURCE') throw error;
       }
     }
+    if (stateSize) outputSizes.set(pin.sha256, stateSize);
+    const dimensions = stateSize ? { stateSize } : {};
     if (bytes.length <= sourceResultInlineBytes) {
       small.delete(pin.sha256);
       small.set(pin.sha256, new TextDecoder().decode(bytes));
@@ -625,6 +664,7 @@ export function convexSourceTransport(
               ...(stateGeneration === undefined ? {} : { stateGeneration }),
               stateParents,
               ...(manifest ? { statePhysical: manifest.statePhysical } : {}),
+              ...dimensions,
             },
           ]);
           return {
@@ -637,6 +677,7 @@ export function convexSourceTransport(
                   physical: [...(projected.physical ?? []), ...manifest.physical],
                 }
               : {}),
+            ...dimensions,
           };
         }
         const ref = await clock.write(() => (stateParents ? stateStorage : durable).store(bytes, pin)),
@@ -651,6 +692,7 @@ export function convexSourceTransport(
             ...(stateGeneration === undefined ? {} : { stateGeneration }),
             ...(stateParents === undefined ? {} : { stateParents }),
             ...(manifest ? { statePhysical: manifest.statePhysical } : {}),
+            ...dimensions,
             storageId: r2 ? null : (ref as Id<'_storage'>),
             url: null,
           },
@@ -660,6 +702,7 @@ export function convexSourceTransport(
           ...(stateGeneration === undefined ? {} : { stateGeneration }),
           ...(stateParents === undefined ? {} : { stateParents }),
           ...(manifest ?? {}),
+          ...dimensions,
           ...(r2 ? { r2Key: r2Key(projectId, r2.sha256) } : { storageId: ref as Id<'_storage'> }),
         };
       },
@@ -667,6 +710,7 @@ export function convexSourceTransport(
   }
   return {
     io,
+    observedStates: () => [...observedStates.values()],
     outputs,
     putMetrics,
     /** Wait for overlapped writes; `outputs` is complete only after this. */

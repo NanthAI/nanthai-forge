@@ -143,10 +143,12 @@ export async function prepareMergeStep(
       yieldStep(m, 'bytes');
       return;
     }
+    for (const id of tips) io.expectState?.(id);
     await io.prepareRead?.(tips.map(id => c.inventory[id]!.object));
     const files = new Map<string, NativeFile[]>();
-    const tipStates = await mapSourceOrdered(tips, async id =>
-      parseNativeState(await new MemorySourceReader(source, io).bytes(c.inventory[id]!)),
+    const tipStates = await mapSourceOrdered(
+      tips,
+      async id => await new MemorySourceReader(source, io).state(c.inventory[id]!),
     );
     for (const [index, id] of tips.entries()) {
       const state = tipStates[index]!;
@@ -436,7 +438,10 @@ export async function computeMergeStep(
     // (and cut parents) for ancestry walking, which would never rebuild the exact head.
     const verified = (id: string) => {
       try {
-        return parseNativeState(source.object(id));
+        const bytes = source.object(id);
+        const state = parseNativeState(bytes);
+        io.rememberLoadedState?.({ sha256: id, size: bytes.length }, state.files.length);
+        return state;
       } catch {
         return null;
       }

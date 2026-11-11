@@ -101,7 +101,14 @@ test('native main and complete record bytes seed through bounded pages without a
     } catch {
       continue;
     }
-    if (value.kind === 'forge-source-state' && !value.parents.length) assert.equal(row.stateGeneration, 1);
+    if (value.kind === 'forge-source-state') {
+      if (!value.parents.length) assert.equal(row.stateGeneration, 1);
+      assert.deepEqual(
+        row.stateSize,
+        { fileCount: value.files.length, manifestBytes: bytes.length },
+        'seed records State size on its existing validation/completion',
+      );
+    }
   }
   const selected = JSON.parse([...f.s.tables.projectHostedChannels.values()][0].selection);
   assert.equal(selected.head, f.store.load().nativeHead);

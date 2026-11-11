@@ -45,7 +45,8 @@ export const page = query({
       const auth = { projectId: input.projectId, actor: user.subject };
       const states = new Map<string, Awaited<ReturnType<typeof saveObject>>>();
       const state = async (head: string) => {
-        if (!states.has(head)) states.set(head, await saveObject(ctx, input.projectId, { sha256: head }));
+        if (!states.has(head))
+          states.set(head, await saveObject(ctx, input.projectId, { sha256: head }, 'compose'));
         return states.get(head)!;
       };
       const inputs = [];

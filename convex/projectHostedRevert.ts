@@ -68,8 +68,8 @@ export async function prepareHostedRevert(
     work: {
       mode: 'revert' as const,
       receiptId: receipt.id,
-      previous: await saveObject(ctx, auth.projectId, { sha256: receipt.previous.head }),
-      accepted: await saveObject(ctx, auth.projectId, { sha256: receipt.candidate.head }),
+      previous: await saveObject(ctx, auth.projectId, { sha256: receipt.previous.head }, 'sync'),
+      accepted: await saveObject(ctx, auth.projectId, { sha256: receipt.candidate.head }, 'sync'),
     },
   };
 }

@@ -148,6 +148,18 @@ Goal: Forge live as a beta on a proper domain and on production, usable by a str
 - **8.3 Sharing and permissions**: project visibility (private, public read), members and roles, invites by link or GitHub account, what agents may do with each role, hosted versions of the agent commands, and public reads served from R2 through the edge cache. GitHub norms: frictionless but secure.
 - **8.4 Launch**: the gate-time and cost figures (G8), a real-user scenario matrix, and inviting people when the owner decides who and when.
 
+### Streaming source steps (P8)
+
+Issue `c3add134-5583-4d45-8af6-98704b9aab84` owns the shared streaming State
+reader/writer and all four source phases before outside users. Read the Issue and
+its current acceptance lines with
+`nforge agent ROOT planning '{"id":"c3add134-5583-4d45-8af6-98704b9aab84"}'`.
+It must retain byte-identical States, flat R2 requests/bytes and Convex calls,
+zero idle work, and acceptable wall time at 4k/29k while every phase stays below
+512 MiB with margin at 190k files. It then relaxes or removes the
+[temporary repository envelope](operations/source-exchange.md#supported-repository-envelope).
+See the [measured spike and streaming prototype](research/source-step-memory.md).
+
 ## Phase 9: grow (planned)
 
 Moves up only if the public beta needs it: open-source mode (proposal limits, anonymous visibility, an optional CLA), monetisation with a free core (any limit or price needs an owner decision), cross-repo coordination with shared usage pools, Git serving from hosted Forge with Lane refs, deploy after landing, per-path visibility, bring-your-own CI, the making-of view, a compute pool view and an extension framework.

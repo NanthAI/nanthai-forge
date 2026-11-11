@@ -12,7 +12,8 @@ import {
   sourcePool,
 } from './projectConvexSourcePool';
 import { receiveConvexSourceJobCallback } from './projectSourceJobCallbacks';
-import { sourceFailure, sourceTaskData } from './projectSourceStepFields';
+import { sourceFailure, sourceTaskData, sourceStateSizes } from './projectSourceStepFields';
+import { recordSourceStateSizes } from './projectConvexSourceOutput';
 import { recordSourceStep, sourceStepTiming } from './projectSourceStepTiming';
 import { sourceDispatch } from '../src/hosted-source-job-controller';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -58,6 +59,7 @@ export const fork = sourceMutation({
     end: v.number(),
     tasks: v.array(v.string()),
     timing: v.optional(sourceStepTiming),
+    stateSizes: sourceStateSizes,
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -76,6 +78,7 @@ export const fork = sourceMutation({
       'SOURCE_JOB_INVALID',
       'Fork a bounded source window.',
     );
+    await recordSourceStateSizes(ctx, args.projectId, args.stateSizes);
     const step = args.step + 1,
       batchId = await ctx.db.insert('projectSourceBatches', {
         projectId: args.projectId,
@@ -160,7 +163,7 @@ export const begin = sourceMutation({
       await retireSourceTask(ctx, args);
       return null;
     }
-    return canonicalPayload({ input: task.input, progress: task.progress });
+    return canonicalPayload({ input: task.input, progress: task.progress, jobKind: active.job.jobKind });
   },
 });
 export const complete = sourceMutation({
@@ -170,6 +173,8 @@ export const complete = sourceMutation({
     progress: v.union(sourceTaskData, v.null()),
     output: v.union(sourceTaskData, v.null()),
     failure: v.union(v.string(), v.null()),
+    failureReason: v.optional(v.string()),
+    stateSizes: sourceStateSizes,
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -189,6 +194,7 @@ export const complete = sourceMutation({
       await retireSourceTask(ctx, args);
       return null;
     }
+    if (!args.failure) await recordSourceStateSizes(ctx, args.projectId, args.stateSizes);
     await heartbeat(ctx, active);
     if (!args.done && !args.failure) {
       await ctx.db.patch(task._id, {
@@ -220,6 +226,9 @@ export const complete = sourceMutation({
     await ctx.db.patch(batch._id, {
       completed,
       failure: batch.failure ?? args.failure,
+      ...(batch.failureReason || args.failureReason
+        ? { failureReason: batch.failureReason ?? args.failureReason }
+        : {}),
       status: completed === batch.total ? 'done' : batch.status,
     });
     if (completed === batch.total) {
@@ -259,6 +268,7 @@ export const results = sourceMutation({
       kind: batch.kind,
       end: batch.end,
       failure: batch.failure,
+      ...(batch.failureReason ? { failureReason: batch.failureReason } : {}),
       outputs: tasks.map(task => task.output),
     });
   },

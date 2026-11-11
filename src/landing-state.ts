@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { sourceSizeDocs } from './source-state-size.js';
 import { landingHold, type LandingHold } from './hosted-landing-hold.js';
 import type { StateTone } from './check-run-state.js';
 import type { PendingReason, SubmissionCause } from './landing-submission-state.js';
@@ -184,7 +185,11 @@ export function landingStateOf(record: LandingRecord | null | undefined, laneId?
   const state = record ? stateOf(record) : 'unknown';
   const hold = record ? landingHold(record, laneId) : null;
   const view = views[state];
-  return { state, ...view, nextStep: hold?.next ?? view.nextStep, hold };
+  const nextStep =
+    record?.error?.code === 'SOURCE_STATE_TOO_LARGE'
+      ? `Split the repository. ${sourceSizeDocs}`
+      : (hold?.next ?? view.nextStep);
+  return { state, ...view, nextStep, hold };
 }
 
 /** Additive JSON for CLI and MCP replies: the same state word and next step people see. */

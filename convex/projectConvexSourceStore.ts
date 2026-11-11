@@ -28,8 +28,8 @@ import { sourceMutation } from './projectConvexSourceErrors';
 import { hostedWriteProject } from './projectHostedRecords';
 import { drainSourcePool, requeueSourceBatch } from './projectConvexSourcePool';
 import { ForgeError } from '../src/errors';
-import { sourceOutput, sourceFailure } from './projectSourceStepFields';
-import { storeSourceOutputs } from './projectConvexSourceOutput';
+import { sourceOutput, sourceFailure, sourceStateSizes } from './projectSourceStepFields';
+import { storeSourceOutputs, recordSourceStateSizes } from './projectConvexSourceOutput';
 import {
   exhaustSourceExecution,
   sourceFailureUpdate,
@@ -306,6 +306,8 @@ export const commit = sourceMutation({
     objects: v.array(sourceOutput),
     output: v.union(v.object({ sha256: v.string(), size: v.number() }), v.null()),
     failure: v.union(v.string(), v.null()),
+    failureReason: v.optional(v.string()),
+    stateSizes: sourceStateSizes,
     timing: v.optional(sourceStepTiming),
     /** The output manifest's exact text when small: publication then needs no R2 re-read. */
     result: v.optional(v.string()),
@@ -326,6 +328,7 @@ export const commit = sourceMutation({
       return null;
     }
     invariant(args.objects.length <= 100, 'SOURCE_JOB_INVALID', 'Commit source output in bounded windows.');
+    if (!args.failure) await recordSourceStateSizes(ctx, args.projectId, args.stateSizes);
     await storeSourceOutputs(ctx, args.projectId, active.row.executionId, args.objects);
     // The submitting action ran this step itself: its delayed fallback is no longer needed. One that
     // already started (it is running this commit, or raced it) is left alone.
@@ -337,7 +340,11 @@ export const commit = sourceMutation({
       ...JSON.parse(active.row.dispatch),
       executionId: active.row.executionId,
       result: args.failure
-        ? { status: 'failed', code: args.failure }
+        ? {
+            status: 'failed',
+            code: args.failure,
+            ...(args.failureReason ? { reason: args.failureReason } : {}),
+          }
         : args.output
           ? { status: 'completed', output: args.output }
           : { status: 'heartbeat', sequence: active.job.control.heartbeat + 1 },

@@ -141,6 +141,12 @@ It pauses on red or stale main, 3 real red audits in 50 audited landings, or 3 u
 required drill. Settings and landing receipts explain each pause and its next step
 ([landing modes](pre-queue-checks.md#landing-modes)).
 
+Hosted save, compose, sync and conflict resolution enforce the
+[supported repository envelope](operations/source-exchange.md#supported-repository-envelope)
+from logical State sizes carried on existing descriptors. Legacy States proceed
+and gain size metadata on a successful load; no backfill or extra call is added.
+[P8 streaming](roadmap.md#streaming-source-steps-p8) owns lifting the temporary bounds.
+
 ## Works
 
 Managed CLI work checks accepted Forge main once per process. When main moved,

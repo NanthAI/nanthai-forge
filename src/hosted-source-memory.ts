@@ -14,6 +14,11 @@ import { mapSourceOrdered } from './hosted-source-parallel.js';
  * native merge actually requests it, rather than for every ancestor visited. */
 export class MemoryMergeSource extends LazyMergeSource {
   readonly objects = new Map<string, Buffer>();
+  onExpectState?: (id: string) => void;
+  expectState(id: string) {
+    this.onExpectState?.(id);
+  }
+  onLoadedState?: (pin: WorkerPin, fileCount: number) => void;
   private readonly parsed = new Map<string, NativeState>();
   private readonly generatedBytes = new WeakMap<Buffer, string>();
   private cutList: string[] | undefined;
@@ -74,9 +79,12 @@ export class MemoryMergeSource extends LazyMergeSource {
     };
   }
   private fullState(id: string) {
+    this.expectState(id);
     let value = this.parsed.get(id);
     if (!value) {
-      value = parseNativeState(this.object(id));
+      const bytes = this.object(id);
+      value = parseNativeState(bytes);
+      this.onLoadedState?.({ sha256: id, size: bytes.length }, value.files.length);
       this.parsed.set(id, value);
       this.parents[id] = value.parents;
       this.states.add(id);
@@ -133,8 +141,17 @@ export class MemorySourceReader extends SourceWorkerReader {
     private readonly io: SourceWorkerTransport,
   ) {
     super('', io);
+    source.onExpectState = id => io.expectState?.(id);
+    source.onLoadedState = (pin, count) => io.rememberLoadedState?.(pin, count);
+  }
+  async state(ref: WorkerObject) {
+    this.source.expectState(ref.object.sha256);
+    const state = parseNativeState(await this.bytes(ref));
+    this.io.rememberLoadedState?.(ref.object, state.files.length);
+    return state;
   }
   override async bytes(ref: WorkerObject): Promise<Buffer> {
+    this.io.checkStateSize?.(ref.object);
     const prior = this.source.objects.get(ref.object.sha256);
     if (prior) {
       invariant(prior.length === ref.object.size, 'SOURCE_HASH_MISMATCH', 'Object size changed.');

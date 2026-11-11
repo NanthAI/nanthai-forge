@@ -48,6 +48,11 @@ URL call sites use `src/project-routes.ts`: the hosted route gate and frame, pro
 list navigation, existing copy/share links through the shell codec, CLI/MCP agent
 links (`src/agent-links.ts`), and CLI hosting output (`convex/projectHosting.ts`).
 
+Hosted source operations currently support up to 56,800 files and 9,200,000
+logical manifest bytes per State across all phases; save and compose have larger
+individual bounds. See the [repository envelope](docs/operations/source-exchange.md#supported-repository-envelope)
+and [P8 streaming work](docs/roadmap.md#streaming-source-steps-p8).
+
 ## More
 
 [Documentation](docs/README.md) · [Why Forge](docs/why-forge.md) · [Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md) · [Development](docs/development.md) · [Security](docs/security.md) · [Operations](docs/operations.md) · [Contributing](CONTRIBUTING.md) · [License](LICENSE.md)

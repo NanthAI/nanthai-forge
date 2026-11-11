@@ -1037,6 +1037,21 @@ measured heap ceilings. The completed catch-up's provider usage is recorded [abo
 JSON bytes and reserved-memory figures still do not establish heap or physical-storage savings.
 No new vendor, worker or paid service is introduced.
 
+## State size metadata
+
+The approved source-envelope guard (Issue `5975c9e0`) adds logical `fileCount` and
+`manifestBytes` beside each State's existing descriptor. In the whole-document
+storage-per-landing fixture this adds **204 serialized bytes** to the dogfood
+`projectObjects` budget: 3,297 → 3,501 bytes, both immediately and after exhaust
+expiry. Fresh remains 738 bytes; fixed per-project storage and source identities
+are unchanged. The ratchet records exactly this metadata cost, with no new table,
+source object, RPC, backfill or idle worker. Bytes remain in R2; these numbers are
+serialized synthetic document bytes, not provider/index amplification or billed
+savings. The [supported envelope](source-exchange.md#supported-repository-envelope)
+and [margin evidence](../research/source-step-memory.md#supported-source-step-envelope)
+explain why both dimensions are needed. Legacy successful loads enrich metadata
+inside the existing completion call; sized inputs add no metadata write.
+
 ## Backup export cadence
 
 `hosted-backup.yml` stays weekly (Monday 03:00 UTC). Manual dispatches require

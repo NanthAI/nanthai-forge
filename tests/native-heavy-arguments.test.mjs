@@ -114,3 +114,36 @@ test('scripts/test-files.mjs with no files runs nothing and never discovers a de
   assert.equal(result.status, 0, 'the static shard calls it with an empty list');
   assert.match(result.stdout, /# tests 0/);
 });
+
+test('CLI and MCP source recovery keeps a memory-envelope refusal terminal without advertising retry', async () => {
+  const error = {
+    code: 'SOURCE_STATE_TOO_LARGE',
+    message:
+      'sync: fileCount 56801 exceeds 56800. Split the repository. docs/operations/source-exchange.md#supported-repository-envelope',
+  };
+  const session = {
+    journal: { id: () => assert.fail('terminal size refusal must not allocate another operation') },
+  };
+  for (const value of [
+    { status: 'failed', jobId: 'retained', error },
+    { outcome: { status: 'failed', error } },
+  ])
+    assert.equal(await withSourceRecovery(session, 'save', {}, value), value);
+});
+
+test('terminal source-size failures never gain a finish retry command after observation', async () => {
+  const { normalizeHostedFinishResult } = await import('../dist/hosted-agent-finish-result.js');
+  const error = { code: 'SOURCE_STATE_TOO_LARGE', message: 'Split the repository.' };
+  const selection = { laneId: 'retained', operationId: 'original' };
+  for (const result of [
+    { submission: { phase: 'terminal-failed', error } },
+    { phase: 'compose', progress: { status: 'failed', error } },
+    { phase: 'save', progress: { outcome: { status: 'failed', error } } },
+  ]) {
+    const reply = normalizeHostedFinishResult('/synthetic', selection, result);
+    assert.equal(reply.terminal, true);
+    assert.equal(reply.retryCommand, undefined);
+    assert.equal(reply.command, undefined);
+    if (reply.landingState) assert.match(reply.landingState.nextStep, /Split the repository\./);
+  }
+});

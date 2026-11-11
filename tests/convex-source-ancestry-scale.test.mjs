@@ -117,9 +117,11 @@ for (const count of [29000, 58000])
             JSON.stringify(report),
           );
           assert(
-            report.documentsWritten <= (chainLength === 1 ? 66 : count === 29000 ? 74 : 97),
+            report.documentsWritten - report.stateSizeWrites <=
+              (chainLength === 1 ? 66 : count === 29000 ? 74 : 97),
             JSON.stringify(report),
           );
+          assert(report.stateSizeWrites <= stateReads, 'only verified legacy States acquire dimensions');
           assert(report.maxRssBytes < 400 * 1024 * 1024);
           assert.equal(report.storageCalls, 0);
           assert.equal(s.tables.projectSourceSteps.size, 1);

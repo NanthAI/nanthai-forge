@@ -27,6 +27,16 @@ export const sourceOutput = v.object({
   recipeClosure: v.optional(recipeClosure),
   recipe: v.optional(v.object({ sha256: v.string(), size: v.number() })),
 });
+export const sourceStateSizes = v.optional(
+  v.array(
+    v.object({
+      sha256: v.string(),
+      size: v.number(),
+      fileCount: v.number(),
+      manifestBytes: v.number(),
+    }),
+  ),
+);
 export const sourceTaskData = v.object({ id: v.string(), sha256: v.string() });
 export const sourceFailure = v.object({
   stage: v.union(...sourceFailureStages.map(value => v.literal(value))),
@@ -81,6 +91,7 @@ export const sourceStepTables = {
     // Only lease-fenced recovery needs a sparse queue; completed siblings stay retained.
     retryIndices: v.optional(v.array(v.number())),
     status: v.union(v.literal('queued'), v.literal('waiting'), v.literal('done'), v.literal('fenced')),
+    failureReason: v.optional(v.string()),
     failure: v.union(v.string(), v.null()),
   })
     .index('by_status', ['status'])

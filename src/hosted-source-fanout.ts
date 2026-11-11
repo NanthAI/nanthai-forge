@@ -51,6 +51,7 @@ export async function stateSummary(
   const invalid = (code: string) => ({ id: ref.object.sha256, parents: [], files: [], error: code });
   let bytes: Uint8Array;
   try {
+    io.expectState?.(ref.object.sha256);
     bytes = await new MemorySourceReader(new MemoryMergeSource({}), io).bytes(ref);
   } catch (error) {
     // Byte acquisition proves invalidity only for exact missing/hash/recipe
@@ -69,8 +70,9 @@ export async function stateSummary(
     return invalid(error.code);
   }
   try {
-    const state = parseNativeState(bytes),
-      generation = io.stateGeneration?.(ref.object.sha256);
+    const state = parseNativeState(bytes);
+    io.rememberLoadedState?.(ref.object, state.files.length);
+    const generation = io.stateGeneration?.(ref.object.sha256);
     return {
       id: ref.object.sha256,
       ...(generation === undefined ? {} : { generation }),

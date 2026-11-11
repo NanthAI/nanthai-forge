@@ -55,6 +55,7 @@ export const sourceJobCallbackSchema = z
         .object({
           status: z.literal('failed'),
           code: z.string().min(1),
+          reason: z.string().min(1).max(240).optional(),
           cause: sourceFailureSchema.optional(),
         })
         .strict(),

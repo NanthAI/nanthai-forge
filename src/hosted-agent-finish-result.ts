@@ -166,5 +166,12 @@ export function normalizeObservedFinish(root: string, selection: Reply, result: 
     delete clean.recovery;
   }
   if (!failed) return clean;
+  const error =
+    submission?.error ??
+    result.error ??
+    (progress as { error?: unknown; outcome?: { error?: unknown } } | undefined)?.error ??
+    (progress as { outcome?: { error?: unknown } } | undefined)?.outcome?.error;
+  if ((error as { code?: string } | undefined)?.code === 'SOURCE_STATE_TOO_LARGE')
+    return { ...clean, status: 'failed', terminal: true };
   return { ...clean, status: 'failed', terminal: true, ...finishRetryContinuation(root, selection) };
 }

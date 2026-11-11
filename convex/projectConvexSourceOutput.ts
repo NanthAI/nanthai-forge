@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { StateSize } from '../src/state/size';
+import { validStateSize, type StateSize } from '../src/state/size';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
@@ -147,6 +147,20 @@ export async function storeSourceOutputs(
       'Immutable State parents changed.',
     );
     invariant(!old || old.size === pin.size, 'SOURCE_HASH_MISMATCH', 'Stored source size changed.');
+    invariant(
+      pin.stateSize === undefined ||
+        (validStateSize(pin.stateSize) && pin.stateSize.manifestBytes === pin.size),
+      'SOURCE_JOB_INVALID',
+      'State dimensions must describe the exact logical bytes.',
+    );
+    invariant(
+      !old?.stateSize ||
+        !pin.stateSize ||
+        (old.stateSize.fileCount === pin.stateSize.fileCount &&
+          old.stateSize.manifestBytes === pin.stateSize.manifestBytes),
+      'SOURCE_HASH_MISMATCH',
+      'Immutable State dimensions changed.',
+    );
     if (pin.statePhysical) {
       const root = await findObject(ctx, projectId, pin.statePhysical.sha256);
       invariant(
@@ -173,6 +187,7 @@ export async function storeSourceOutputs(
       ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
       ...(pin.stateParents === undefined ? {} : { stateParents: pin.stateParents }),
       ...(pin.statePhysical === undefined ? {} : { statePhysical: pin.statePhysical }),
+      ...(pin.stateSize === undefined ? {} : { stateSize: pin.stateSize }),
     };
     if (!old)
       await ctx.db.insert('projectObjects', {
@@ -202,10 +217,44 @@ export async function storeSourceOutputs(
       (old.stateGeneration === undefined && pin.stateGeneration !== undefined) ||
       (old.stateParents === undefined && pin.stateParents !== undefined) ||
       (old.statePhysical === undefined && pin.statePhysical !== undefined) ||
+      (old.stateSize === undefined && pin.stateSize !== undefined) ||
       (old.recipeClosure === undefined && pin.recipeClosure !== undefined)
     )
       await ctx.db.patch((await objectRow(ctx, old))._id, { sourceReferenced: true, ...graph });
     if (!old?.sourceReferenced) fence = pin.sha256;
   }
   if (fence) await ctx.db.insert('projectCheckLogSourcePins', { projectId, digest: fence });
+}
+
+/** The fixed action's successfully parsed legacy inputs, on its existing commit.
+ * Healthy sized States send no observations and cost no DB I/O here. */
+export async function recordSourceStateSizes(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  observations: ({ sha256: string; size: number } & StateSize)[] = [],
+) {
+  if (!observations.length) return;
+  const unique = [...new Map(observations.map(pin => [pin.sha256, pin])).values()];
+  const rows = await findObjects(
+    ctx,
+    projectId,
+    unique.map(pin => pin.sha256),
+  );
+  for (const [index, pin] of unique.entries()) {
+    const row = rows[index];
+    invariant(
+      row && !row.removed && row.size === pin.size && validStateSize(pin) && pin.manifestBytes === pin.size,
+      'SOURCE_HASH_MISMATCH',
+      'Loaded State dimensions differ from their exact pin.',
+    );
+    const stateSize = { fileCount: pin.fileCount, manifestBytes: pin.manifestBytes };
+    invariant(
+      !row.stateSize ||
+        (row.stateSize.fileCount === stateSize.fileCount &&
+          row.stateSize.manifestBytes === stateSize.manifestBytes),
+      'SOURCE_HASH_MISMATCH',
+      'Immutable State dimensions changed.',
+    );
+    if (!row.stateSize) await ctx.db.patch((await objectRow(ctx, row))._id, { stateSize });
+  }
 }

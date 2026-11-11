@@ -51,6 +51,45 @@ nforge exchange NEW_DIR pull --command-file forge-pull.json
 nforge exchange ROOT migrate-archive --command-file forge-migrate.json
 ```
 
+## Supported repository envelope
+
+Hosted source steps currently materialize logical State manifests in memory. Before
+loading a State, its recorded logical file count and manifest bytes must fit both
+bounds for the operation:
+
+| Operation | Files per State | Logical manifest bytes per State |
+| --- | ---: | ---: |
+| Save | 122,400 | 19,360,000 |
+| Compose | 68,800 | 11,200,000 |
+| Sync, conflict sync and conflict resolution | 56,800 | 9,200,000 |
+
+These are manifest bytes (paths, hashes, modes and State metadata), independent of
+file-content sizes and of raw, packed or recipe storage. Long paths can reach the
+byte bound before the file bound. To use every phase, keep each State within the
+smallest pair. The boundary itself is accepted; exceeding either number returns
+`SOURCE_STATE_TOO_LARGE`, the phase, measured dimension and limit, one next step
+(split the repository), and this documentation link. CLI, MCP and web retain the
+same error. The refusal is terminal: it does not retry, publish a State or change a
+Lane. Its control receipt is retained through the ordinary failure path.
+
+Sync reserves the conflict-sync envelope because the same sync request can be
+clean or conflicting; deciding which requires reading its source. Both bounds
+include a 20% margin below the smallest fitted conflict crossing. Save and compose
+use the same margin against their own crossings. The
+[measurement and margin derivation](../research/source-step-memory.md#supported-source-step-envelope)
+are local risk evidence, not a guarantee for every content or ancestry shape.
+
+New States record both dimensions in their existing metadata write. A legacy
+State without them proceeds as before, with no extra read or backfill job; its
+next successful load records them in the step's existing completion write. Until
+then the early guard cannot cover that State. Hosting and import record dimensions
+on the existing seed/import completion, and use the same guard wherever they run
+these source steps. This adds no Convex call or R2 request on the healthy path;
+idle work remains zero. Logical source bytes remain in R2.
+
+The [P8 streaming source-steps Issue](../roadmap.md#streaming-source-steps-p8)
+owns replacing whole-manifest work and relaxing or removing these temporary bounds.
+
 ## Long actions
 
 Index rebuilds yield after committed batches. Pending responses continue the original request with `continuation:true`; unchanged saved progress stops with `EXCHANGE_ACTION_STALLED`. Long transfer actions retain seven-minute header and total deadlines, including Node's HTTP dispatch deadline. Reads, archive migration, initialization and object-recipe completion retain their existing retry and validation behavior.

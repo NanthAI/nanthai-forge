@@ -90,10 +90,12 @@ async function publishRows(
     }
   }
   const upload = new ImportUpload(ctx, job.projectId, job.owner, 8, catalog);
+  let fileCount = 0;
   async function* stateBytes() {
     yield Buffer.from('{"schema":1,"kind":"forge-source-state","parents":[],"files":[');
     let first = true;
     for await (const rows of pages('imported')) {
+      fileCount += rows.length;
       const values = rows.map(row => {
         const { path, blob, mode }: GithubHostedFile = JSON.parse(row);
         return JSON.stringify({ path, blob, mode });
@@ -105,7 +107,7 @@ async function publishRows(
       `],"message":${JSON.stringify(`Imported GitHub commit ${job.commit}`)},"at":${JSON.stringify(job.at)}}`,
     );
   }
-  const state = await upload.stream(stateBytes(), 1, true),
+  const state = await upload.stream(stateBytes(), 1, true, () => fileCount),
     head = state.sha256;
   const data = githubImportedWork(job.operationId, job.at, head);
   const workText = JSON.stringify(data, null, 2),

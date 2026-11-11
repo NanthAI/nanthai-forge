@@ -49,7 +49,7 @@ export const step = internalAction({
         const state = JSON.parse(loaded);
         generation = state.generation ?? generation;
         input.generation = generation;
-        const { io, outputs, settle, clock, smallOutput, putMetrics } = convexSourceTransport(
+        const { io, outputs, settle, clock, smallOutput, putMetrics, observedStates } = convexSourceTransport(
             ctx,
             input,
             state.locations,
@@ -62,6 +62,7 @@ export const step = internalAction({
               physicalManifests: state.physicalManifests === true,
               sourceKind: state.jobKind,
               bindings: supplied ? state.bindings : undefined,
+              observed: supplied ? state.observedStates : undefined,
             },
           ),
           durable = sourceStorage(ctx, input.projectId, nativeDigest, putMetrics.observer('progress'));
@@ -85,7 +86,7 @@ export const step = internalAction({
             invariant(
               !joined.failure,
               joined.failure ?? 'SOURCE_WORKER_FAILED',
-              'A bounded source step failed.',
+              joined.failureReason ?? 'A bounded source step failed.',
             );
             const results: SourceTaskProgress[] = [];
             for (const ref of joined.outputs) if (ref) results.push(await loadTaskData(ref, durable.read));
@@ -153,6 +154,7 @@ export const step = internalAction({
               end: plan.end,
               tasks: plan.tasks.map(task => JSON.stringify(task)),
               timing: { ...clock.value(), ...result.metrics.detail },
+              stateSizes: observedStates(),
             });
             logStep();
             return null;
@@ -172,6 +174,7 @@ export const step = internalAction({
               objects: outputs,
               output: result.cursor.output,
               failure: null,
+              stateSizes: observedStates(),
               timing: { ...clock.value(), ...result.metrics.detail },
               ...(resultText === null ? {} : { result: resultText }),
             },
@@ -192,6 +195,7 @@ export const step = internalAction({
             objects: [],
             output: null,
             failure: domain.code,
+            ...(domain.code === 'SOURCE_STATE_TOO_LARGE' ? { failureReason: domain.message } : {}),
           });
           return null;
         }

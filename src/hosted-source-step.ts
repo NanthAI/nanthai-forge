@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { parseNativeState, type NativeFile } from './state/format.js';
+import { type NativeFile } from './state/format.js';
+import { sourceSizePhase } from './source-state-size.js';
 import { MemoryMergeSource, MemorySourceReader } from './hosted-source-memory.js';
 import {
   workerInputSchema,
@@ -202,7 +203,7 @@ async function saveStep(c: SourceStepCursor, io: StepTransport, m: StepMeter) {
     const source = new MemoryMergeSource(c.parents, c.ancestryBoundary, c.ancestryCuts),
       reader = new MemorySourceReader(source, io);
     await io.prepareRead?.([plan.baseline.object, plan.pages]);
-    const baseline = parseNativeState(await reader.bytes(plan.baseline));
+    const baseline = await reader.state(plan.baseline);
     c.files = baseline.files;
     // The baseline is registered immutable source authority; a rename or mode
     // change reuses its verified bytes. Staging checked the exact object recipe.
@@ -337,7 +338,7 @@ async function closureStep(c: SourceStepCursor, io: StepTransport, m: StepMeter)
     }
     const source = new MemoryMergeSource({}),
       reader = new MemorySourceReader(source, io);
-    const state = parseNativeState(await reader.bytes(ref));
+    const state = await reader.state(ref);
     c.parents[id] = state.parents;
     const generation = io.stateGeneration?.(id);
     if (generation !== undefined) (c.generations ??= {})[id] = generation;
@@ -370,6 +371,7 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
     m = meter(),
     original = io,
     from = c.phase;
+  if (c.plan) io.setSourceSizePhase?.(sourceSizePhase(c.plan as { kind: string }));
   io.rememberStateGenerations?.(c.generations ?? {});
   let mergeSource = new MemoryMergeSource(c.parents, c.ancestryBoundary, c.ancestryCuts);
   io = {
@@ -431,6 +433,7 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
   ) {
     if (c.phase === 'input') {
       c.plan = parseSourcePlan(await readJson(io, c.input, m));
+      io.setSourceSizePhase?.(sourceSizePhase(c.plan as { kind: string }));
       const kind = (c.plan as { kind: string }).kind;
       if (kind === 'forge-hosted-save-input') {
         const p = sourceValidation('SOURCE_JOB_INVALID', () => saveInputSchema.parse(c.plan));

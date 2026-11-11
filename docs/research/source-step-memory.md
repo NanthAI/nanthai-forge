@@ -34,7 +34,7 @@ mark (`resourceUsage().maxRSS * 1024`), including imports, transport and IPC;
 the phase peak is the maximum over its actions. It is not just JS heap, a
 continuous isolate measurement, or a deployed out-of-memory test. Processes are
 allowed to exceed 512 MiB to observe the curve. Comparisons to that action
-budget are local risk evidence, not a new enforced product limit.
+budget are local risk evidence, research risk evidence; the separately approved temporary guard is described below.
 
 All fixtures share one unchanged nine-byte blob. Two siblings each change one
 path, or both change the same path for conflict sync. Compose merges siblings,
@@ -94,6 +94,36 @@ synthetic DB work, excluding fixture setup:
 | 60,000 | 481.8 | 512.3 | 688.3 | 1,138.6 |
 | 100,000 | 630.4 | 798.5 | 977.1 | 1,758.0 |
 | 190,000 | 971.1 | 1,470.1 | 1,720.2 | 3,561.3 |
+
+## Supported source-step envelope
+
+The owner-approved temporary guard (Issue `5975c9e0`) compares both trusted
+logical dimensions before source-body work. The user-facing
+[supported repository envelope](../operations/source-exchange.md#supported-repository-envelope)
+is save 122,400 files / 19,360,000 bytes, compose 68,800 / 11,200,000, and sync,
+conflict sync and resolution 56,800 / 9,200,000. A legacy State with no recorded
+size proceeds; a successful load adds metadata on the existing completion write.
+This does not change State identity, add a backfill or add a healthy-path call.
+
+Margin derivation: group the retained current-implementation RSS observations in
+[the raw fixture](../../tests/fixtures/source-step-memory.json) by phase and file
+count. The largest `maximum / median - 1` among the three-repeat groups is about
+9.5% (4k conflict sync, 177.9 / 162.5 MiB). Double that observed spread and round
+up to the next five percentage points: **20%**. Apply 80% to the spike's rounded
+file crossings (153k save, 86k compose, 71k conflict) and logical-byte crossings
+(24.2 MB, 14.0 MB, 11.5 MB). Bytes are decimal logical bytes, not compressed or
+packed sizes. The guard tests recompute the spread from all retained runs.
+
+Clean and conflicting sync have identical request shapes, so every sync reserves
+the smaller conflict envelope before loading source. That also sits about 27%
+below sync's own 78k / 12.9 MB fit. This uncertainty is separate from measured
+repeat variance: neither count nor bytes model all content, ancestry or GC costs.
+Forge (4,222 files), the counted zoo maximum (1,387) and the synthetic deep-path
+29k shape fit both bounds in every phase; uncounted zoo rows remain unknown.
+
+[P8 streaming source steps](../roadmap.md#streaming-source-steps-p8), Issue
+`c3add134-5583-4d45-8af6-98704b9aab84`, owns raising or removing this guard after
+all four phases meet the measured memory and byte-parity bar.
 
 ## One-phase streaming prototype
 

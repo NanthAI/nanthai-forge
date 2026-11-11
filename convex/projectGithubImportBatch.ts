@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { internalMutation, internalQuery, type MutationCtx, type QueryCtx } from './server';
+import { validStateSize, type StateSize } from '../src/state/size';
 import type { Id } from './_generated/dataModel';
 import { activeOwnedProject } from './projectAuthority';
-import { isStored } from './projectObjectFields';
+import { stateSize, isStored } from './projectObjectFields';
 import { storageDigest, removeExclusive } from './projectStorage';
 import { r2Config, r2Key } from './r2';
 import { invariant } from '../src/errors';
@@ -20,6 +21,7 @@ export const recipePin = v.object({
   recipeDigest: v.string(),
   recipeSize: v.number(),
   stateGeneration: v.optional(v.number()),
+  stateSize: v.optional(stateSize),
 });
 const identity = { projectId: v.id('hostedProjects'), actor: v.string() };
 export const prepare = internalMutation({
@@ -90,6 +92,7 @@ export async function completeObjects(
     recipeDigest: string;
     recipeSize: number;
     stateGeneration?: number;
+    stateSize?: StateSize;
   }[],
 ) {
   invariant(
@@ -140,7 +143,14 @@ export async function completeObjects(
       'Logical binding changed.',
     );
     if (row && isStored(row)) continue;
+    invariant(
+      pin.stateSize === undefined ||
+        (validStateSize(pin.stateSize) && pin.stateSize.manifestBytes === pin.size),
+      'SOURCE_HASH_MISMATCH',
+      'Imported State dimensions changed.',
+    );
     const value = {
+      ...(pin.stateSize === undefined ? {} : { stateSize: pin.stateSize }),
       ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
       recipe: { digest: pin.recipeDigest, size: pin.recipeSize },
     };

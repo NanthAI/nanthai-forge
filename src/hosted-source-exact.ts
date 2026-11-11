@@ -5,6 +5,7 @@ import type { WorkerPin } from './hosted-source-worker-format.js';
 import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
 
 export async function readSourceExact(io: SourceWorkerTransport, pin: WorkerPin) {
+  io.checkStateSize?.(pin);
   const bytes = new Uint8Array(pin.size);
   let offset = 0;
   if (await io.readInto?.(pin, bytes)) offset = pin.size;

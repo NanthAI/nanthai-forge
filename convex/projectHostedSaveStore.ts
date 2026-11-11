@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { assertSourceStateSize, type SourceSizePhase } from '../src/source-state-size';
 import { z } from 'zod';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -77,8 +78,9 @@ export async function saveObject(
   ctx: QueryCtx | MutationCtx,
   projectId: Id<'hostedProjects'>,
   pin: { sha256: string; size?: number },
+  phase?: SourceSizePhase,
 ) {
-  return (await saveObjects(ctx, projectId, [pin]))[0]!;
+  return (await saveObjects(ctx, projectId, [pin], [], phase))[0]!;
 }
 /** The caller supplies one already-bounded source window. Each exact object is
  * checked and marked, but cleanup needs just one new fence for this transaction,
@@ -89,6 +91,7 @@ export async function saveObjects(
   pins: readonly { sha256: string; size?: number }[],
   /** Rows this transaction already read for the same project; they are not read again. */
   loaded: readonly ObjectView[] = [],
+  phase?: SourceSizePhase,
 ) {
   const rows = new Map<string, ObjectView>(
     loaded.filter(row => row.projectId === projectId).map(row => [row.digest, row]),
@@ -103,6 +106,7 @@ export async function saveObjects(
       'SOURCE_UNAVAILABLE',
       'Commit the exact project source object before staging it.',
     );
+    if (phase) assertSourceStateSize(phase, row.stateSize);
     // Catalog objects are source by construction (sourceReferenced, no row).
     if ('patch' in ctx.db && !row.sourceReferenced && row._id !== undefined) {
       await ctx.db.patch(row._id, { sourceReferenced: true });

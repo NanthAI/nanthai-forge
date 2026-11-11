@@ -27,6 +27,7 @@ export async function runSmallSourceCompose(
   input: WorkerPin,
   io: SourceWorkerTransport,
 ): Promise<WorkerPin | null> {
+  io.setSourceSizePhase?.('compose');
   if (input.size > 128 * 1024) return null;
   const awaitedInput = await readSourceExact(io, input);
   const plan = sourceValidation('SOURCE_JOB_INVALID', () =>
@@ -34,6 +35,12 @@ export async function runSmallSourceCompose(
   );
   return compose(plan);
 
+  async function loadState(ref: WorkerObject) {
+    io.expectState?.(ref.object.sha256);
+    const state = parseNativeState(await readSourceExact(io, ref.object));
+    io.rememberLoadedState?.(ref.object, state.files.length);
+    return state;
+  }
   // Read the exact input once before interpreting any routing hint.
   async function compose(plan: ReturnType<typeof composeInputSchema.parse>): Promise<WorkerPin | null> {
     invariant(plan.main.object.sha256 === plan.base.head, 'SOURCE_JOB_INVALID', 'Compose main pins differ.');
@@ -83,11 +90,7 @@ export async function runSmallSourceCompose(
     const tips = [...new Map([plan.main, entry.state].map(ref => [ref.object.sha256, ref])).values()];
     await io.prepareRead?.(tips.map(ref => ref.object));
     const states = new Map(
-      await Promise.all(
-        tips.map(
-          async ref => [ref.object.sha256, parseNativeState(await readSourceExact(io, ref.object))] as const,
-        ),
-      ),
+      await Promise.all(tips.map(async ref => [ref.object.sha256, await loadState(ref)] as const)),
     );
     const left = states.get(plan.base.head)!,
       right = states.get(entry.head)!;
@@ -121,7 +124,7 @@ export async function runSmallSourceCompose(
         tips.reduce((n, r) => n + r.object.size, ref.object.size) > 2 * 1024 * 1024
       )
         return null;
-      const base = parseNativeState(await readSourceExact(io, ref.object));
+      const base = await loadState(ref);
       const a = new Map(base.files.map(f => [f.path, f])),
         b = new Map(left.files.map(f => [f.path, f])),
         c = new Map(right.files.map(f => [f.path, f]));

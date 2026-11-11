@@ -356,7 +356,10 @@ export async function scaleFixture({
       callsStart = calls.length,
       storageStart = storageCalls,
       readsStart = readObjects,
-      bytesStart = readBytes;
+      bytesStart = readBytes,
+      legacyStates = new Set(
+        [...f.tables.projectObjects.values()].filter(row => !row.stateSize).map(row => row._id),
+      );
     while (ready.length || running.size) {
       while (ready.length) {
         const item = ready.shift();
@@ -403,6 +406,12 @@ export async function scaleFixture({
       peakWork,
       documentsRead: f.counts.slice(countsStart).reduce((n, c) => n + c.documents, 0),
       documentsWritten: f.counts.slice(countsStart).reduce((n, c) => n + c.writes, 0),
+      // The approved legacy transition adds at most one metadata patch per
+      // successfully loaded existing State, inside the existing completion.
+      // Count distinct transitions, so duplicate writes still fail old budgets.
+      stateSizeWrites: [...f.tables.projectObjects.values()].filter(
+        row => legacyStates.has(row._id) && row.stateSize,
+      ).length,
       calls: callCount,
       functionCalls: calls.length - callsStart,
       storageCalls: storageCalls - storageStart,

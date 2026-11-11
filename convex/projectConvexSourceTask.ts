@@ -4,7 +4,7 @@ import { v } from 'convex/values';
 import { digest as nativeDigest } from '../src/hash';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction } from './_generated/server';
-import { convexSourceTransport } from './projectConvexSource';
+import { convexSourceTransport } from './projectConvexSourceTransport';
 import { runSourceTask, type SourceTaskInput } from '../src/hosted-source-fanout';
 import { storeTaskData, loadTaskData } from '../src/hosted-source-task-data';
 import { sourceDomainError } from './projectConvexSourceErrors';
@@ -33,10 +33,15 @@ export const run = internalAction({
         );
         if (!loaded) return null;
         const state = JSON.parse(loaded),
-          { io, outputs } = convexSourceTransport(ctx, input, [], undefined, { hash: nativeDigest });
+          { io, outputs, observedStates } = convexSourceTransport(ctx, input, [], undefined, {
+            hash: nativeDigest,
+          });
         const { read, store } = sourceStorage(ctx, input.projectId, nativeDigest);
         let result: Awaited<ReturnType<typeof runSourceTask>>;
         try {
+          io.setSourceSizePhase?.(
+            state.jobKind === 'compose' ? 'compose' : state.jobKind === 'sync' ? 'sync' : 'save',
+          );
           const previous = state.progress
             ? await sourceCall('task-progress-read', () => loadTaskData(state.progress, read))
             : null;
@@ -67,6 +72,7 @@ export const run = internalAction({
               progress: result.done ? null : saved,
               output: result.done ? saved : null,
               failure: null,
+              stateSizes: observedStates(),
             }),
           );
           return null;
@@ -81,6 +87,7 @@ export const run = internalAction({
               progress: null,
               output: null,
               failure: domain.code,
+              ...(domain.code === 'SOURCE_STATE_TOO_LARGE' ? { failureReason: domain.message } : {}),
             }),
           );
           return null;

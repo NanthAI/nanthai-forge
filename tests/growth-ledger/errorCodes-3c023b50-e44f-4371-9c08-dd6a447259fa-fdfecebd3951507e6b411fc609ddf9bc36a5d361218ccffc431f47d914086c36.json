@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 1,
+  "reason": "Nothing can be removed yet: temporary SOURCE_STATE_TOO_LARGE makes the approved memory envelope explicit until P8 c3add134 streams every phase; reuses existing source errors, metadata and completion calls.",
+  "date": "2026-11-11"
+}

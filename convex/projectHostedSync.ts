@@ -173,7 +173,7 @@ export async function prepareHostedSync(
     intentId = lane.intentId;
     base = lane.base;
     if (request.kind === 'sync' && lane.actor === auth.actor) origin = laneOrigin(lane);
-    const left = await saveObject(ctx, auth.projectId, { sha256: lane.head });
+    const left = await saveObject(ctx, auth.projectId, { sha256: lane.head }, 'sync');
     if (request.kind === 'resolve') {
       invariant(lane.resolution?.status === 'pending', 'WORK_STALE', 'Select the pending resolution Lane.');
       work = {
@@ -210,7 +210,8 @@ export async function prepareHostedSync(
         'STACK_ALREADY',
         `This Lane is already stacked on Lane ${lane.stack?.laneId}; sync without stackOn restacks onto it.`,
       );
-      if (lane.restoreBase) stackBase = await saveObject(ctx, auth.projectId, { sha256: lane.restoreBase });
+      if (lane.restoreBase)
+        stackBase = await saveObject(ctx, auth.projectId, { sha256: lane.restoreBase }, 'sync');
       if (target.kind === 'main' && lane.stack && !lane.stack.detached) {
         const parentRow = await readHostedRecord(ctx, { ...auth, kind: 'lane', key: lane.stack.laneId });
         invariant(parentRow, 'NOT_FOUND', 'Stack parent Lane not found.');
@@ -232,7 +233,7 @@ export async function prepareHostedSync(
         right = detached ? target.head : parent.head;
         ownerInputs =
           ownerInputs && (detached || (parent.actor === project.owner && parentRow.ownerOnly === true));
-        stackBase = await saveObject(ctx, auth.projectId, { sha256: lane.stack.head });
+        stackBase = await saveObject(ctx, auth.projectId, { sha256: lane.stack.head }, 'sync');
         stackAfter = { ...lane.stack, head: right, ...(detached ? { detached: true } : {}) };
       } else if (request.stackOn) {
         // Stack on a peer's pending head (D2): a true three-way merge of this Lane and the peer's
@@ -266,7 +267,7 @@ export async function prepareHostedSync(
       work = {
         mode: 'sync',
         left,
-        right: await saveObject(ctx, auth.projectId, { sha256: right }),
+        right: await saveObject(ctx, auth.projectId, { sha256: right }, 'sync'),
         ...(stackBase ? { stackBase } : {}),
         // A first stack (stackOn) has no previous parent head: the merge base is the common ancestor.
         ...(stackAfter ? { stackAfter } : {}),

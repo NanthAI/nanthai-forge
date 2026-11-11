@@ -106,6 +106,7 @@ export async function runConvexSourceStep(
               locations: [...transport.locations.values()],
               preloaded: transport.preloaded(),
               ...(options.bindings ? { bindings: options.bindings } : {}),
+              observedStates: transport.observedStates(),
             }),
             delegatedAt: Date.now(),
           });
@@ -119,6 +120,7 @@ export async function runConvexSourceStep(
           objects: transport.outputs,
           output,
           failure: null,
+          stateSizes: transport.observedStates(),
           timing: { ...transport.clock.value(), phase: 'input>done', stop: 'done' },
           ...(resultText === null ? {} : { result: resultText }),
           ...(options.chain ? { chain: true } : {}),
@@ -158,6 +160,7 @@ export async function runConvexSourceStep(
           objects: [],
           output: null,
           failure: domain.code,
+          ...(domain.code === 'SOURCE_STATE_TOO_LARGE' ? { failureReason: domain.message } : {}),
         });
         return null;
       }

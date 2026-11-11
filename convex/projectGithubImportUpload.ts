@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import { createHash } from 'node:crypto';
+import type { StateSize } from '../src/state/size';
 import type { ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
@@ -22,6 +23,7 @@ export type Recipes = {
   digest: string;
   size: number;
   stateGeneration?: number;
+  stateSize?: StateSize;
   recipeDigest: string;
   recipeSize: number;
 }[];
@@ -230,6 +232,7 @@ export class ImportUpload {
         digest: pin.digest,
         size: pin.size,
         ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
+        ...(pin.stateSize === undefined ? {} : { stateSize: pin.stateSize }),
         recipe: { digest: pin.recipeDigest, size: pin.recipeSize },
       };
       if (stored.has(pin.digest)) continue;
@@ -246,10 +249,16 @@ export class ImportUpload {
     this.recipes = [];
     return value;
   }
-  recipe(pin: { blob: string; size: number }, bytes: Buffer, stateGeneration?: number) {
+  recipe(
+    pin: { blob: string; size: number },
+    bytes: Buffer,
+    stateGeneration?: number,
+    stateSize?: StateSize,
+  ) {
     const ref = this.put(bytes);
     this.recipes.push({
       ...(stateGeneration === undefined ? {} : { stateGeneration }),
+      ...(stateSize === undefined ? {} : { stateSize }),
       digest: pin.blob,
       size: pin.size,
       recipeDigest: ref.sha256,
@@ -258,7 +267,12 @@ export class ImportUpload {
   }
   /** Stream arbitrarily large logical metadata without a whole-repository buffer.
    * `markState` records the finished object on the import job with its last window. */
-  async stream(parts: AsyncIterable<Buffer>, stateGeneration?: number, markState = false) {
+  async stream(
+    parts: AsyncIterable<Buffer>,
+    stateGeneration?: number,
+    markState = false,
+    fileCount?: () => number,
+  ) {
     const hash = createHash('sha256');
     let size = 0;
     const builder = new ObjectRecipeBuilder(this.put);
@@ -270,7 +284,12 @@ export class ImportUpload {
     }
     const pin = { blob: hash.digest('hex'), size };
     const recipe = builder.finish({ sha256: pin.blob, size });
-    this.recipe(pin, recipe.bytes, stateGeneration);
+    this.recipe(
+      pin,
+      recipe.bytes,
+      stateGeneration,
+      fileCount ? { fileCount: fileCount(), manifestBytes: size } : undefined,
+    );
     await this.drain(true);
     await this.commit(markState ? { sha256: pin.blob, size } : undefined);
     return { sha256: pin.blob, size };

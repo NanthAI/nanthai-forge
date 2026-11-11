@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { digest } from './hash.js';
+import type { SourceSizePhase } from './source-state-size.js';
 import { ForgeError, invariant } from './errors.js';
 import { objectRecipeSchema, readObjectRecipe } from './object-chunks.js';
 import { jobObject } from './hosted-source-job.js';
@@ -15,6 +16,12 @@ import type { NativeFile } from './state/format.js';
 /** Trusted transport resolves current job-scoped grants; repo bytes supply no URL.
  * upload consumes the stream completely and commits only the supplied exact pin. */
 export interface SourceWorkerTransport {
+  setSourceSizePhase?(phase: SourceSizePhase): void;
+  /** Mark a manifest body, distinct from a file whose bytes happen to be a State. */
+  expectState?(id: string): void;
+  checkStateSize?(pin: WorkerPin): void;
+  /** Successful hash-verified loads enrich old metadata in the existing completion write. */
+  rememberLoadedState?(pin: WorkerPin, fileCount: number): void;
   /** Trusted, current descriptor metadata; never a field in client plans. */
   /** Fixed source builders may register parents of their own already validated
    * generated State. Publication still verifies the exact whole-object hash. */
@@ -56,6 +63,10 @@ export class SourceWorkerReader {
     maxUploadWindowBytes: 0,
   };
   resolvedObjects = 0;
+  /** State prefetches declare their interpretation before any parallel body read. */
+  expectStates(ids: readonly string[]) {
+    for (const id of ids) this.transport.expectState?.(id);
+  }
   async resolve(sha256: string) {
     await this.resolveMany([sha256]);
   }

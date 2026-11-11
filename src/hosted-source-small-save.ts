@@ -4,7 +4,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { digest } from './state/hash.js';
 import { saveInputSchema, validateSavePage, savePin } from './hosted-save.js';
-import { parseNativeState, overlappingPaths, type NativeState } from './state/format.js';
+import { parseNativeState, overlappingPaths, type NativeFile, type NativeState } from './state/format.js';
 import { workerResultSchema, type WorkerPin } from './hosted-source-worker-format.js';
 import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
 import { canonicalPayload } from './hosted-source-operation.js';
@@ -32,7 +32,11 @@ export async function runSmallSourceSave(
    * download them again only to re-hash them. Every other changed object is read and checked. */
   verified: readonly WorkerPin[] = [],
 ): Promise<WorkerPin | null> {
+  io.setSourceSizePhase?.('save');
   if (input.size > smallSaveInputBytes) return null;
+  // Hinted baseline metadata is already available: refuse before starting any
+  // concurrent read, rather than retaining a rejected read while fetching pages.
+  for (const pin of hints) io.expectState?.(pin.sha256);
   const early = new Map(
     hints
       .filter(pin => pin.size <= smallSaveStateBytes)
@@ -53,6 +57,7 @@ export async function runSmallSourceSave(
     plan.baseline.object.size > smallSaveStateBytes
   )
     return null;
+  io.expectState?.(plan.baseline.object.sha256);
   const started = (pin: WorkerPin) => {
     const hinted = early.get(pin.sha256);
     return hinted && hinted.pin.size === pin.size ? hinted.read : null;
@@ -90,8 +95,9 @@ export async function runSmallSourceSave(
     baselineRead,
     objects.length ? io.prepareRead?.(objects) : undefined,
   ]);
-  const baseline = parseNativeState(baselineBytes!),
-    files = new Map(baseline.files.map(file => [file.path, file])),
+  const baseline = parseNativeState(baselineBytes!);
+  io.rememberLoadedState?.(plan.baseline.object, baseline.files.length);
+  const files = new Map(baseline.files.map(file => [file.path, file])),
     seen = new Set(baseline.files.map(file => file.blob));
   const verify = [
     ...new Map(
@@ -128,11 +134,7 @@ export async function runSmallSourceSave(
     else files.delete(change.path);
   }
   const uploads: Promise<void>[] = [];
-  const publish = (
-    bytes: Uint8Array,
-    parents?: readonly string[],
-    files?: readonly import('./state/format.js').NativeFile[],
-  ) => {
+  const publish = (bytes: Uint8Array, parents?: readonly string[], files?: readonly NativeFile[]) => {
     const pin = { sha256: digest(bytes), size: bytes.length };
     if (parents) io.rememberOutputState?.(pin, parents, files);
     uploads.push(

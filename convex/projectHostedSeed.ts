@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { sourceStateSizes } from './projectSourceStepFields';
+import { recordSourceStateSizes } from './projectConvexSourceOutput';
 import { v } from 'convex/values';
 import { mutation, internalMutation, internalQuery } from './cliServer';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -165,6 +167,7 @@ export const commitPage = internalMutation({
     body: v.string(),
     previous: v.string(),
     rootStates: v.optional(v.array(v.string())),
+    stateSizes: sourceStateSizes,
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -228,6 +231,7 @@ export const commitPage = internalMutation({
         if (stored.stateGeneration === undefined) await ctx.db.patch(stored._id, { stateGeneration: 1 });
       }
     }
+    await recordSourceStateSizes(ctx, input.projectId, input.stateSizes);
     const next = {
       nextPage: row.nextPage + 1,
       objects: row.objects + entries.length,

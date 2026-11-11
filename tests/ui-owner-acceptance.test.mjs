@@ -153,3 +153,26 @@ test('landed acceptance shows optional proof beside the receipt and hides absent
   const html = render(h(LandingDecision, { ...props, read }));
   assert.match(html, /proof: 3 tests fail on base and pass on head; 1 pass on base too/);
 });
+
+test('a source-size refusal shows phase, count, limit and docs in the ordinary landing failure without retry', async () => {
+  const { assertSourceStateSize, sourceStateLimits, sourceSizeDocs } =
+    await import('../dist/source-state-size.js');
+  let error;
+  try {
+    assertSourceStateSize('compose', {
+      fileCount: sourceStateLimits.compose.fileCount + 1,
+      manifestBytes: 1,
+    });
+  } catch (cause) {
+    error = { code: cause.code, message: cause.message };
+  }
+  const props = variantProps('04-failed');
+  const read = structuredClone(props.read);
+  read.request.error = error;
+  read.request.observation = { state: 'terminal-failed', cause: 'policy', pendingReason: null };
+  const html = render(h(LandingDecision, { ...props, read, runHref: undefined, repairHref: undefined }));
+  assert.match(html, /compose: fileCount 68801 exceeds 68800/);
+  assert.match(html, /Split the repository\./);
+  assert(html.includes(sourceSizeDocs));
+  assert.doesNotMatch(html, /Try again|Retry source|Repair in Lane/);
+});

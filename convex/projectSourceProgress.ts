@@ -44,7 +44,8 @@ export async function sourceProgress(
         message:
           control.failureCode === 'SOURCE_RETRY_EXHAUSTED'
             ? sourceRetryFailureMessage(control.failureCause)
-            : 'The original source job stopped; its inputs and operation are retained.',
+            : (control.failureReason ??
+              'The original source job stopped; its inputs and operation are retained.'),
       },
     };
   if (job.status === 'completed')

@@ -110,7 +110,7 @@ export const prepare = mutation({
         request,
         ownerInputs: true,
         ownerProvenance: 1,
-        main: await saveObject(ctx, input.projectId, { sha256: main.head }),
+        main: await saveObject(ctx, input.projectId, { sha256: main.head }, 'compose'),
         inputs: { next: request.inputs.root, pages: 0, count: 0 },
         dependencies: { next: request.dependencies.root, pages: 0, count: 0 },
         candidateId: prepared.operation.firstAttempt.ids.candidate!,
@@ -208,7 +208,7 @@ export const stage = mutation({
           if (lane.restoreBase)
             state.restoreBases = {
               ...state.restoreBases,
-              [lane.id]: await saveObject(ctx, input.projectId, { sha256: lane.restoreBase }),
+              [lane.id]: await saveObject(ctx, input.projectId, { sha256: lane.restoreBase }, 'compose'),
             };
           invariant(
             lane.resolution?.status !== 'pending',
@@ -250,7 +250,7 @@ export const stage = mutation({
           'SOURCE_UNAVAILABLE',
           'The selected State needs trusted source registration.',
         );
-        const stored = await saveObject(ctx, input.projectId, { sha256: entry.head });
+        const stored = await saveObject(ctx, input.projectId, { sha256: entry.head }, 'compose');
         invariant(
           canonicalPayload(stored) === canonicalPayload(entry.state) &&
             (!registered || registered.size === stored.object.size),

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { assertSourceStateSize } from '../src/source-state-size';
 import { v } from 'convex/values';
 import { activeStep } from './projectConvexSourceStore';
 import { saveObjects } from './projectHostedSaveStore';
@@ -19,6 +20,10 @@ export const resolve = sourceMutation({
     ...identity,
     digests: v.array(v.string()),
     ancestry: v.boolean(),
+    sizePhase: v.optional(
+      v.union(v.literal('save'), v.literal('sync'), v.literal('compose'), v.literal('conflict-sync')),
+    ),
+    states: v.optional(v.array(v.string())),
     probe: v.optional(v.boolean()),
     known: v.array(v.string()),
     windows: v.optional(v.number()),
@@ -87,6 +92,10 @@ export const resolve = sourceMutation({
         }
         continue;
       }
+      // Ancestry hints can include States beyond the proven cut that are never
+      // loaded. Guard exact body acquisitions, not metadata-only history walks.
+      if (args.sizePhase && args.states?.includes(id) && !args.ancestry && !args.probe)
+        assertSourceStateSize(args.sizePhase, row.stateSize);
       if (selected.length && bytes + row.size > 8 * 1024 * 1024 * (args.windows ?? 1)) break;
       bytes += row.size;
       const url =

@@ -33,6 +33,7 @@ export async function buildHostedSyncState(
   };
   let result: typeof syncOutputSchema._output.result;
   if (work.mode === 'revert') {
+    reader.expectStates([work.previous.object.sha256, work.accepted.object.sha256]);
     await reader.files([work.previous, work.accepted]);
     const head = await calculate(() =>
       compensatingState(source, work.previous.object.sha256, work.accepted.object.sha256, plan.at),
@@ -41,6 +42,7 @@ export async function buildHostedSyncState(
   } else if (work.mode === 'resolve') {
     // The draft manifest and the first conflict page are read next; fetch them in the same wave.
     const first = work.resolution.conflicts;
+    reader.expectStates([work.left.object.sha256, work.resolution.draftHead]);
     await reader.prefetch(
       [work.left, ...(first.size <= 2 * 1024 * 1024 ? [{ object: first, recipe: null }] : [])],
       [work.resolution.draftHead],
@@ -136,10 +138,17 @@ export async function buildHostedSyncState(
       left = page.left;
       right = page.right;
       // Both tips and their merge bases in one wave, not one miss round each.
-      await reader.prefetch([], [left, right, ...source.mergeBases(left, right)]);
+      const states = [left, right, ...source.mergeBases(left, right)];
+      reader.expectStates(states);
+      await reader.prefetch([], states);
     } else {
       left = work.left.object.sha256;
       right = work.right.object.sha256;
+      reader.expectStates([
+        left,
+        right,
+        ...(work.stackBase ? [work.stackBase.object.sha256] : source.mergeBases(left, right)),
+      ]);
       // The merge base manifests are read with the tips (a stack sync's base is its stack parent).
       await reader.prefetch(
         [work.left, work.right, ...(work.stackBase ? [work.stackBase] : [])],

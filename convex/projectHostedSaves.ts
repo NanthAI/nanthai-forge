@@ -161,7 +161,7 @@ export const prepare = mutation({
         'WORK_STALE',
         'Hosted Lane changed from the expected save baseline.',
       );
-      const baseline = await saveObject(ctx, input.projectId, { sha256: lane.head });
+      const baseline = await saveObject(ctx, input.projectId, { sha256: lane.head }, 'save');
       const state = {
         request,
         baseline,

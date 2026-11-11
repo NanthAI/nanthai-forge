@@ -52,6 +52,7 @@ export async function buildHostedComposeState(
 ) {
   const plan = composeInputSchema.parse(value),
     source = original instanceof LazyMergeSource ? original : new LazyMergeSource(original.owner);
+  reader.expectStates([plan.main.object.sha256]);
   await reader.file(plan.main);
   invariant(plan.main.object.sha256 === plan.base.head, 'SOURCE_JOB_INVALID', 'Compose main pins differ.');
   const calculate = <T>(action: () => T) => lazyMerge(reader, progress, action, source);
@@ -104,6 +105,10 @@ export async function buildHostedComposeState(
           'Compose input State differs.',
         );
         const restoreBase = 'laneId' in entry ? plan.restoreBases?.[entry.laneId] : undefined;
+        reader.expectStates([
+          entry.state.object.sha256,
+          ...(restoreBase ? [restoreBase.object.sha256] : source.mergeBases(head, entry.head)),
+        ]);
         // The input, its restore base and the merge bases with the current head in one wave.
         await reader.prefetch(
           [entry.state, ...(restoreBase ? [restoreBase] : [])],

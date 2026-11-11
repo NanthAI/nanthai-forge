@@ -166,6 +166,9 @@ test('incident replay: fallback detaches and requeues all three members atomical
       ),
     );
   const originalListings = listingPins();
+  const legacyStates = new Set(
+    [...f.tables.projectObjects.values()].filter(row => !row.stateSize).map(row => row._id),
+  );
   const before = f.counts.length,
     started = performance.now();
   await f.drain();
@@ -232,6 +235,11 @@ test('incident replay: fallback detaches and requeues all three members atomical
     // S4: each distinct new source listing can mark its descriptor once in
     // existing publication calls. Keep the controller's original write bound.
     listingWriteAllowance: [...listingPins()].filter(pin => !originalListings.has(pin)).length,
+    // Existing legacy States learn dimensions once in source completion. Keep
+    // the controller ceiling unchanged; duplicate patches earn no allowance.
+    stateSizeWrites: [...f.tables.projectObjects.values()].filter(
+      row => legacyStates.has(row._id) && row.stateSize,
+    ).length,
     wallMs: performance.now() - started,
     peakRssBytes: process.resourceUsage().maxRSS * 1024,
     includingAdmission: {
@@ -241,7 +249,9 @@ test('incident replay: fallback detaches and requeues all three members atomical
     },
   };
   assert(
-    cost.calls < 220 && cost.reads < 4500 && cost.writes - cost.listingWriteAllowance < 1300,
+    cost.calls < 220 &&
+      cost.reads < 4500 &&
+      cost.writes - cost.listingWriteAllowance - cost.stateSizeWrites < 1300,
     JSON.stringify(cost),
   );
   t.diagnostic(JSON.stringify({ members: 3, unrelatedIntents: 600, retainedReceipts: 575, ...cost }));

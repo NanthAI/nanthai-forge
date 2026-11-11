@@ -99,6 +99,9 @@ export async function receiveConvexSourceJobCallback(
         dispatch: 'accepted',
         callbackDigest,
         failureCode: callback.result.status === 'failed' ? callback.result.code : null,
+        ...(callback.result.status === 'failed' && callback.result.reason
+          ? { failureReason: callback.result.reason }
+          : {}),
         ...(callback.result.status === 'failed' && callback.result.cause
           ? { failureCause: callback.result.cause }
           : {}),

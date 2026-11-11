@@ -32,9 +32,19 @@ export const stage = action({
       const reader = exchangeObjectReader(ctx);
       const bodies = states.length ? await reader.read(input.projectId, owner, states) : [];
       const rootStates: string[] = [];
+      const stateSizes: { sha256: string; size: number; fileCount: number; manifestBytes: number }[] = [];
       for (const [index, pin] of states.entries()) {
         const bytes = bodies[index];
-        if (pin.kind === 'state' && !parseNativeState(bytes!).parents.length) rootStates.push(pin.sha256);
+        if (pin.kind === 'state') {
+          const state = parseNativeState(bytes!);
+          if (!state.parents.length) rootStates.push(pin.sha256);
+          stateSizes.push({
+            sha256: pin.sha256,
+            size: pin.size,
+            fileCount: state.files.length,
+            manifestBytes: pin.size,
+          });
+        }
         for (const record of pin.records ?? []) {
           const value = JSON.parse(bytes!.toString('utf8'));
           invariant(
@@ -49,6 +59,7 @@ export const stage = action({
         ...input,
         owner,
         rootStates,
+        stateSizes,
         body: canonicalPayload(entries),
       });
     } catch (error) {

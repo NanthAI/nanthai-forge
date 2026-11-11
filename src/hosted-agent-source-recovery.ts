@@ -36,6 +36,8 @@ export async function withSourceRecovery(
   }
   const source = sourceReply(value);
   if (!source) return landing(value);
+  if ((source.error as { code?: string } | undefined)?.code === 'SOURCE_STATE_TOO_LARGE')
+    return landing(value);
   const replay = { action, ...session.address, ...command, operationId: session.journal.operationId };
   const next = {
     action,

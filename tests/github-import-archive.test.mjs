@@ -374,6 +374,11 @@ test('a 28,905-file tree imports through one archive stream within an O(pages) b
   const state = JSON.parse(row.recipe ? Buffer.concat(chunks) : await read({ sha256: main.head }));
   assert.equal(state.files.length, repo.files);
   assert.equal(row.stateGeneration, 1, 'snapshot import derives its root generation during publication');
+  assert.deepEqual(
+    row.stateSize,
+    { fileCount: repo.files, manifestBytes: row.size },
+    'streaming import records logical State size on the final catalog write',
+  );
   const byPath = new Map(state.files.map(f => [f.path, f]));
   assert.equal(byPath.get('vendor-0').mode, 'gitlink');
   assert.equal(byPath.get('dir-1/file-1').mode, 'symlink');
