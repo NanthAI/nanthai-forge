@@ -29,6 +29,7 @@ const tsVersion = JSON.parse(
 ).version;
 const options = { target: 'ES2022', module: 'ESNext', jsx: 'ReactJSX' };
 const fromPattern = /from (['"])([^'"]+)\1/g;
+const dynamicPattern = /\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/g;
 let ts;
 
 let privateCache;
@@ -63,7 +64,10 @@ function moduleFacts(file, keys) {
   const source = readFileSync(file);
   const hash = createHash('sha256').update(file.href).update(source);
   const nested = [];
-  for (const [, , name] of source.toString('utf8').matchAll(fromPattern)) {
+  for (const [, , name] of [
+    ...source.toString('utf8').matchAll(fromPattern),
+    ...source.toString('utf8').matchAll(dynamicPattern),
+  ]) {
     const resolved = resolveSpecifier(name, file);
     hash.update(`\0${name}\0${resolved.nested?.href ?? resolved.href}`);
     if (resolved.nested) nested.push(resolved.nested);
@@ -94,7 +98,7 @@ function moduleKey(file, keys) {
   return key;
 }
 
-const moduleKeys = () => Object.assign(new Map(), { facts: new Map() });
+const moduleKeys = () => Object.assign(new Map(), { facts: new Map(), outputs: new Map() });
 
 function compile(file, directory, keys) {
   ts ??= require('typescript');
@@ -111,14 +115,23 @@ function compile(file, directory, keys) {
     .replace(fromPattern, (_, quote, name) => {
       const { href, nested } = resolveSpecifier(name, file);
       return `from ${quote}${nested ? build(nested, directory, keys) : href}${quote}`;
+    })
+    .replace(dynamicPattern, (_, quote, name) => {
+      const { href, nested } = resolveSpecifier(name, file);
+      return `import(${quote}${nested ? build(nested, directory, keys) : href}${quote})`;
     });
 }
 
 function build(file, directory, keys) {
+  // Literal lazy imports can close value-import cycles (UI route -> page ->
+  // route). Reserve the content-addressed URL before compiling dependencies;
+  // each member is published once before the caller imports the root.
+  if (keys.outputs.has(file.href)) return keys.outputs.get(file.href);
   const output = directory && join(directory, `${moduleKey(file, keys)}.mjs`);
   if (output && existsSync(output)) return pathToFileURL(output).href;
   if (process.env.FORGE_TEST_PRECOMPILED === '1')
     throw new Error(`Precompiled test module is missing: ${file.pathname}`);
+  if (output) keys.outputs.set(file.href, pathToFileURL(output).href);
   const code = compile(file, directory, keys);
   if (!output) return `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`;
   const temp = `${output}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;

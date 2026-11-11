@@ -16,6 +16,8 @@ export const objectFields = {
   /** Exact parents of a hash-verified State (Git commit-graph parity), written once beside its
    * generation so ancestry walks read this row instead of the manifest. Absent on old rows. */
   stateParents: v.optional(v.array(v.string())),
+  /** Trusted State-bound physical recipe root; absent until the writer is enabled. */
+  statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
   /** Legacy, trees in packs (tried and dropped, docs/decisions.md): never written or read. Kept
    * as a tolerated field so a row written before the rollback still validates; remove once no
    * deployment holds one (the dev deployment's were stripped). */

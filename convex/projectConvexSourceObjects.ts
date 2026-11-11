@@ -86,6 +86,7 @@ export const resolve = sourceMutation({
         descriptor: descriptors[i]!,
         ...(row.stateGeneration === undefined ? {} : { stateGeneration: row.stateGeneration }),
         ...(row.stateParents === undefined ? {} : { stateParents: row.stateParents }),
+        ...(row.statePhysical === undefined ? {} : { statePhysical: row.statePhysical }),
         storageId: url ? null : (row.storageId ?? null),
         url,
         ...(row.recipeClosure ? { closure: await signRecipeClosure(row) } : {}),

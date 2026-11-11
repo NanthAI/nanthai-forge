@@ -12,6 +12,7 @@ import {
 export const sourceOutput = v.object({
   stateGeneration: v.optional(v.number()),
   stateParents: v.optional(v.array(v.string())),
+  statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
   sha256: v.string(),
   size: v.number(),
   storageId: v.optional(v.id('_storage')),

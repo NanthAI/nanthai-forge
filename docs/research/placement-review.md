@@ -421,7 +421,7 @@ It removes per-file rows from onboarding, two build phases and the uncalled `pro
 
 The source step that writes a State also writes its physical manifest: digest to binding (raw key, pack range or recipe), stored as a recipe that shares unchanged chunks with the parent's manifest. The source worker reads it directly instead of descriptor windows. CI and clones read the source pack, and every grant outside it is signed from the manifest ([bulk read grants](#s5-bulk-read-grants)).
 
-Done when: a 29k-file CI job on a fresh runner reads under 100 KB from Convex and receives under 100 KB of grants in at most 3 resolver calls, both with a source pack and up to 300 changed paths, and with no source pack on a State stored in packs (2,105,060 B read, 15,951,085 B of reply and 11 calls today without a pack); a State with neither takes the windowed path, says so, and its check run publishes the pack; no grant covers a byte outside the selected State (asserted, with a refusal test); source-worker descriptor calls per landing fall from about 41 to at most 5; no State write scans descriptors (reads are O(changed files), asserted); every object is still verified by hash and size; a missing or invalid manifest falls back to the catalog and says so; a point lookup of one digest, stored or not, reads at most about 1 KB on the guard's 402- and 1,387-descriptor fixtures once bulk readers use the manifest. Removes: descriptor rows for new blobs; the dense catalog pages for manifest-bound projects later. Risk: medium; this is the trusted incremental writer Issue 298f9675 left open.
+Done when: a 29k-file CI job on a fresh runner reads under 100 KB from Convex and receives under 100 KB of grants in at most 3 resolver calls, both with a source pack and up to 300 changed paths, and with no source pack on a State stored in compact packs of at most about 130 runs (2,105,060 B read, 15,951,085 B of reply and 11 calls today without a pack); an all-raw or fragmented packed State takes the one-time windowed path, says so, its check run publishes the pack and the following job takes the source-pack path; no grant covers a byte outside the selected State (asserted, with a refusal test); source-worker descriptor calls per landing fall from about 41 to at most 5; no State write scans descriptors (reads are O(changed files), asserted); every object is still verified by hash and size; a missing or invalid manifest falls back to the catalog and says so; a point lookup of one digest, stored or not, reads at most about 1 KB on the guard's 402- and 1,387-descriptor fixtures once bulk readers use the manifest. Removes: descriptor rows for new blobs; the dense catalog pages for manifest-bound projects later. Risk: medium; this is the trusted incremental writer Issue 298f9675 left open.
 
 The design review amended the first line and added the authority line. The original first line asked for under 100 KB on any cold job. 29,002 separately signed objects need at least 928 KB of signatures, so the line now names the two shapes a bulk reader meets after this slice and bounds the reply as well as the database read.
 
@@ -593,14 +593,26 @@ Granting whole packs would include the non-State neighbour bytes. A physical
 manifest can remove the descriptor reads, but cannot remove this signature floor.
 These are synthetic resolver/signing observations, not executed body GETs or bills.
 
-The general no-source-pack, stored-in-packs acceptance line therefore needs lead
-review before the writer rollout. The cheapest existing-stack alternative is to
-name fragmented packs alongside all-raw States in the one-time windowed fallback
-whose check run publishes a source pack, while retaining the 100 KB / three-call
-target for compact packed States and source-pack deltas. This is a proposal,
-**not an amended contract or enabled behavior**. No restriction, wider grant,
-credential, service, repack job or setting is introduced by the run reader.
-All physical-manifest implementation acceptance lines remain open.
+The lead accepted fragmented packed States alongside all-raw States in the named
+one-time windowed fallback. Its check run publishes a source pack and the following
+job takes that pack. The 100 KB / three-call target holds for compact packed States
+(at most about 130 runs) and source-pack deltas of up to 300 changed paths. This
+uses the existing source-pack publication; it adds no credential, service, repack
+job, setting or user step.
+
+The trusted source transport accepts an optional `statePhysical` pin beside the
+State's generation and parents. It verifies the recipe root against its hash,
+size and exact State, then verifies the requested digest-bucket chunks before
+using any binding. Fixed digest buckets make a lookup of k distinct digests read
+at most k + 1 chunks (including the root). Entries retain raw, pack-range and
+recipe bindings in a compact binary encoding. Missing, corrupt or unavailable
+manifests explicitly name the catalog fallback for the same requested digests;
+ordinary body hash, size and exact-range checks still apply. The cache belongs to
+one authorized action. This reader-first stage writes no manifest; catalogs and
+legacy external readers remain until the later writer and signer rollout.
+It merges the new lookup into the existing worker transport without a new RPC,
+table, public error, agent action or CLI command. Codec exports are shared with
+the subsequent writer and the format guards; no parallel source protocol is added.
 
 `tests/hosted-actions-runs-scale.test.mjs` measures the shared run signer in fresh
 Node processes at 29k and 100k files (one sample per shape). It includes the whole

@@ -23,6 +23,8 @@ import { retryR2Lag } from '../src/hosted-r2-retry';
 import { sourceDomainError } from './projectConvexSourceErrors';
 import { packHeaders, verifyPackRange, type PackRange } from '../src/object-pack-range';
 import { sourceStepClock } from '../src/source-step-clock';
+import type { PhysicalManifestReader } from '../src/physical-manifest';
+import type { PhysicalPin, PhysicalEntry } from '../src/physical-manifest-codec';
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
 /** Result manifests up to this size ride on the step's commit instead of a later R2 read. */
 export const sourceResultInlineBytes = 64 * 1024;
@@ -30,6 +32,7 @@ export type ObjectLocation = {
   descriptor: WorkerObject;
   stateGeneration?: number;
   stateParents?: string[];
+  statePhysical?: WorkerPin;
   storageId: Id<'_storage'> | null;
   url: string | null;
   range?: PackRange;
@@ -111,6 +114,12 @@ export function convexSourceTransport(
     if (bytes.length === value.size && hash(bytes) === value.sha256) held.set(value.sha256, bytes);
   }
   let heldBytes = [...held.values()].reduce((n, bytes) => n + bytes.length, 0);
+  const bindingNotices = new Set<string>();
+  const reportBindings = (message: string) => {
+    if (bindingNotices.has(message)) return;
+    bindingNotices.add(message);
+    console.log(`FORGE_SOURCE_BINDINGS ${JSON.stringify({ message })}`);
+  };
   const keep = (pin: WorkerPin, bytes: Uint8Array, verified = false) => {
     if (
       !held.has(pin.sha256) &&
@@ -128,6 +137,29 @@ export function convexSourceTransport(
     known: string[] = [],
     windows = 1,
   ): Promise<WorkerObject[]> => {
+    const roots = !ancestry && ids.length ? [...locations.values()].filter(row => row.statePhysical) : [];
+    if (roots.length) {
+      // Old States must not grow the worker's cold static graph. Load the reader
+      // only once a trusted descriptor actually names the new representation.
+      const { manifestOrCatalog } = await import('../src/physical-manifest');
+      const found = await manifestOrCatalog(
+        async () => {
+          for (const row of roots) {
+            const reader = await manifestReader(row);
+            const entries = await reader.lookup(ids);
+            if (!entries.every((entry): entry is PhysicalEntry => !!entry)) continue;
+            const rows = await Promise.all(entries.map(manifestLocation));
+            remember(rows);
+            return rows.map(row => row.descriptor);
+          }
+          return null;
+        },
+        async () => null,
+        reportBindings,
+      );
+      if (found) return found;
+    } else if (!ancestry && ids.length)
+      reportBindings('source bindings: catalog (physical manifest missing)');
     const rows: ObjectLocation[] = JSON.parse(
       await clock
         .call(() =>
@@ -155,6 +187,45 @@ export function convexSourceTransport(
       return [...rows.map(r => r.descriptor), ...(await resolve(ids.slice(rows.length)))];
     }
     return rows.map(row => row.descriptor);
+  };
+  const manifests = new Map<string, Promise<PhysicalManifestReader>>();
+  const manifestLocation = async (entry: PhysicalEntry): Promise<ObjectLocation> => ({
+    descriptor: { object: { sha256: entry.sha256, size: entry.size }, recipe: entry.recipe ?? null },
+    storageId: null,
+    url: entry.recipe
+      ? null
+      : await presignGet(
+          r2Config(),
+          r2Key(projectId, entry.pack?.digest ?? entry.sha256),
+          packHeaders(
+            entry.pack ? { offset: entry.pack.offset, total: entry.pack.size } : undefined,
+            entry.size,
+          ),
+        ),
+    ...(entry.pack ? { range: { offset: entry.pack.offset, total: entry.pack.size } } : {}),
+  });
+  const readManifest = async (pin: PhysicalPin) => {
+    const row = await manifestLocation(pin),
+      bytes = new Uint8Array(pin.size);
+    let at = 0;
+    for await (const part of await clock.read(() => openRead(pin, row))) {
+      invariant(at + part.length <= pin.size, 'SOURCE_HASH_MISMATCH', 'Physical manifest exceeds its pin.');
+      bytes.set(part, at);
+      at += part.length;
+    }
+    invariant(at === pin.size, 'SOURCE_HASH_MISMATCH', 'Physical manifest is incomplete.');
+    return bytes;
+  };
+  const manifestReader = (row: ObjectLocation) => {
+    const id = row.descriptor.object.sha256;
+    let reader = manifests.get(id);
+    if (!reader) {
+      reader = import('../src/physical-manifest').then(({ PhysicalManifestReader }) =>
+        PhysicalManifestReader.open(id, row.statePhysical!, readManifest),
+      );
+      manifests.set(id, reader);
+    }
+    return reader;
   };
   const io: StepTransport = {
     rememberOutputState: (pin, parents) => {

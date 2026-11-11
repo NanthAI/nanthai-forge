@@ -28,6 +28,7 @@ export async function sourceObjectLocation(
     descriptor: descriptor!,
     ...(object.stateGeneration === undefined ? {} : { stateGeneration: object.stateGeneration }),
     ...(object.stateParents === undefined ? {} : { stateParents: object.stateParents }),
+    ...(object.statePhysical === undefined ? {} : { statePhysical: object.statePhysical }),
     storageId: url ? null : (object.storageId ?? null),
     url,
     ...(object.recipeClosure ? { closure: await signRecipeClosure(object) } : {}),

@@ -71,6 +71,31 @@ test('compiled modules are content addressed: reused when unchanged, rekeyed by 
   assert.equal(readdirSync(cache).length, 4);
 });
 
+test('lazy Convex readers resolve literal dynamic imports and rekey after a dependency edit', async t => {
+  const { cache, src, top } = workspace(t);
+  writeFileSync(join(src, 'top.ts'), "export const top = (await import('./leaf')).leaf;\n");
+  const first = await load(cache, top);
+  assert.equal(first.top, 1);
+  writeFileSync(join(src, 'leaf.ts'), 'export const leaf: number = 42;\n');
+  const edited = await load(cache, top);
+  assert.equal(edited.top, 42);
+  assert.notEqual(edited.url, first.url, 'lazy dependency bytes belong to the cache key');
+});
+
+test('literal lazy imports can close a value-import cycle without recursively compiling it', async t => {
+  const { cache, src, top } = workspace(t);
+  writeFileSync(
+    join(src, 'top.ts'),
+    "export const top = 42;\nexport const lazy = async () => (await import('./leaf')).leaf;\n",
+  );
+  writeFileSync(
+    join(src, 'leaf.ts'),
+    "import { lazy } from './top';\nexport const leaf = 42;\nexport const later = () => lazy();\n",
+  );
+  assert.equal((await load(cache, top)).top, 42);
+  assert.equal(readdirSync(cache).length, 2);
+});
+
 test('parallel cold processes share one cache without partial or temporary files', async t => {
   const { cache, top } = workspace(t);
   const results = await Promise.all(Array.from({ length: 6 }, () => load(cache, top)));
