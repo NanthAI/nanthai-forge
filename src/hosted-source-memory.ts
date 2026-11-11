@@ -159,7 +159,11 @@ export class MemorySourceReader extends SourceWorkerReader {
         'Recipe selects different logical content.',
       );
       const parts: Buffer[] = [];
-      for await (const chunk of readObjectRecipe(recipe, pin => this.bytes({ object: pin, recipe: null })))
+      for await (const chunk of readObjectRecipe(
+        recipe,
+        pin => this.bytes({ object: pin, recipe: null }),
+        this.recipePreparation(),
+      ))
         parts.push(chunk);
       bytes = Buffer.concat(parts);
     } else {

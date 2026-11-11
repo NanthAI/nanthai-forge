@@ -142,7 +142,12 @@ projection together without leaf lookups or new calls. Browser, exchange, Lane c
 projection in their existing signed descriptor/signature call. Leaves fill their
 final destination spans in bounded byte windows; only logical bytes enter existing
 caches. Physical leaf and whole-object hashes, pack ranges and ordinary final
-access fences remain checked. Small saves can consume a projected recipe baseline
+access fences remain checked. Legacy recipes without that projection batch known
+sibling descriptors in disjoint windows through the existing 100-pin preparation
+window in both source
+readers, then read and verify the same physical objects. This removes per-leaf
+descriptor round trips without prefetching file bodies or changing State identity.
+Small saves can consume a projected recipe baseline
 within their existing byte bound. Legacy recipes without the projection retain
 their original readers. State identity and recipe bytes are unchanged.
 

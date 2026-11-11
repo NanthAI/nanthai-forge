@@ -2,6 +2,7 @@
 // Common, opt-in child-process observer; never records URLs, request data or credentials.
 import { writeFileSync } from 'node:fs';
 const calls = [];
+let firstNetwork = null;
 let startupMs = null,
   writePassWaitMs = 0;
 globalThis.__forgePrepWritePassWait = ms => {
@@ -12,6 +13,7 @@ globalThis.__forgePrepCliReady = () => {
 };
 const original = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
+  firstNetwork ??= { atMs: performance.now(), cpu: process.cpuUsage() };
   const url = String(input),
     rpc = /\/api\/(query|query_at_ts|mutation|action)$/.test(url),
     begin = performance.now();
@@ -22,6 +24,7 @@ globalThis.fetch = async (input, init) => {
     } catch {}
   const row = {
     name,
+    method: init?.method ?? 'GET',
     rpc,
     startMs: begin,
     wallMs: 0,
@@ -82,6 +85,7 @@ process.on('exit', () =>
     process.env.FORGE_PREP_TRACE,
     JSON.stringify({
       startupMs,
+      firstNetwork,
       writePassWaitMs,
       processMs: performance.now(),
       maxRssKiB: process.resourceUsage().maxRSS,

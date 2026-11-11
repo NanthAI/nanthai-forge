@@ -157,6 +157,18 @@ export class SourceWorkerReader {
     private readonly concurrency = 1,
   ) {}
   /** A job-private verified cache, never a persistent authorization cache. */
+  /** Prepare disjoint windows: sliding one leaf into every warmed window would restore one RPC
+   * per leaf above 100 nodes. Retain only the current window, never a recipe-sized pin set. */
+  protected recipePreparation() {
+    const prepare = this.transport.prepareRead?.bind(this.transport);
+    if (!prepare) return undefined;
+    let prepared = new Set<string>();
+    return async (pins: WorkerPin[]) => {
+      if (!pins[0] || prepared.has(pins[0].sha256)) return;
+      await prepare(pins);
+      prepared = new Set(pins.map(pin => pin.sha256));
+    };
+  }
   async file(input: WorkerObject, read?: () => Promise<AsyncIterable<Uint8Array>>): Promise<string> {
     const pin = jobObject.parse(input.object),
       prior = this.saved.get(pin.sha256);
@@ -175,7 +187,11 @@ export class SourceWorkerReader {
         'SOURCE_RECIPE_INVALID',
         'Recipe selects different logical content.',
       );
-      bytes = readObjectRecipe(recipe, async ref => readFile(await this.file({ object: ref, recipe: null })));
+      bytes = readObjectRecipe(
+        recipe,
+        async ref => readFile(await this.file({ object: ref, recipe: null })),
+        this.recipePreparation(),
+      );
     } else {
       bytes = await (read ? read() : this.transport.read(pin));
       this.metrics.downloads++;
