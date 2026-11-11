@@ -60,8 +60,24 @@ export const mainAuditFields = {
   /** Newest main revision that landed on its first check (7fe54c7c); audited promptly. */
   firstCheck: v.optional(v.number()),
   wake: v.optional(v.object({ taskId: v.id('_scheduled_functions'), at: v.number() })),
-  /** What the project's audit history has earned toward fast landing mode (src/landing-mode.ts,
-   * 81d12a32). Written only in transactions that already write this row. */
+  /** Circuit breaker (509a0ffa): at most 50 compact verdicts, written only by existing
+   * audit/landing transactions. Missing starts empty, without a history backfill. */
+  window: v.optional(
+    v.array(
+      v.object({
+        red: v.optional(v.object({ age: v.number(), count: v.number(), drill: v.number() })),
+        audit: v.optional(
+          v.object({
+            verdict: v.union(v.literal('green'), v.literal('red'), v.literal('unclear'), v.literal('drill')),
+            runId: v.optional(v.string()),
+            landings: v.optional(v.number()),
+          }),
+        ),
+      }),
+    ),
+  ),
+  /** Retired counters: validator only, to accept existing rows during deployment.
+   * No runtime reader. The next verdict removes them in its existing row write. */
   earned: v.optional(
     v.object({
       audited: v.number(),

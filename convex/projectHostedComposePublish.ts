@@ -59,11 +59,6 @@ export async function publishHostedCompose(
     'The result selected different original compose inputs.',
   );
   const result = output.result;
-  invariant(
-    result.status !== 'clean' || !result.candidateFiles || state.candidateFiles === true,
-    'SOURCE_JOB_INVALID',
-    'The original compose did not request a Candidate file list.',
-  );
   await saveObjects(ctx, input.projectId, [
     job.output,
     result.status === 'clean' ? result.state : result.conflicts,

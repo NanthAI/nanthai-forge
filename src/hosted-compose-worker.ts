@@ -47,7 +47,8 @@ export async function buildHostedComposeState(
   progress: () => Promise<void>,
   /** Base entries of every path changed so far; null when that coverage is unknown. */
   bases: ComposeBases | null = new Map(),
-  fileListContext?: { base: string; selections: unknown[] },
+  /** null marks an intermediate merge, which publishes no Candidate listing. */
+  fileListContext?: { base: string; selections: unknown[] } | null,
 ) {
   const plan = composeInputSchema.parse(value),
     source = original instanceof LazyMergeSource ? original : new LazyMergeSource(original.owner);
@@ -241,7 +242,7 @@ export async function buildHostedComposeState(
     // source scans, graph queries or provider calls are needed for changed paths.
     const paths = bases && changedPaths(bases, source.state(plan.base.head).files, source.state(head).files);
     const docs = docsMerge(docsPaths);
-    if (plan.candidateFiles && bases)
+    if (fileListContext !== null && bases)
       listing = Buffer.from(
         saveBytes(
           candidateFileList(

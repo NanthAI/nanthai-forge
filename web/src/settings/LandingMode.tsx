@@ -8,7 +8,7 @@ import type { LandingModeView } from '../../../src/landing-mode';
 import { Button, Panel } from '../ui/primitives';
 
 /** The project's landing mode as the server derives it (src/landing-mode.ts): what is in effect,
- * progress toward earned fast mode, and the one switch Forge advises, if any. Read once when the
+ * its circuit breaker, and the one next step. Read once when the
  * section opens; an open tab holds no subscription. */
 export function LandingMode({
   projectId,
@@ -63,13 +63,13 @@ export function LandingMode({
       <div className="fx-setting">
         <b>{view.label}</b>
         <span className="fx-muted">
-          {view.progress.audited} of {view.progress.needed} audited landings ·{' '}
-          {view.progress.drill ? 'red-audit drill done' : 'no red-audit drill yet'}
+          Policy: {view.mode} · Effective: {view.effective}
         </span>
       </div>
+      {view.reason && <p>{view.reason}</p>}
+      {view.state === 'suspended' && <p>{view.nextStep}</p>}
       {advice && (
         <div className="fx-setting">
-          <span>{advice.reason}</span>
           {owner && (
             <Button onClick={() => void apply()} disabled={busy}>
               Switch to {advice.switchTo} landing

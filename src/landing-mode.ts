@@ -1,172 +1,120 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 
-/** Hosted landing modes (Issue 81d12a32). One derive for server, CLI and web.
- *
- * `strict` (absent): a change lands on its own check only when main is unchanged or the
- * clean-disjoint proof holds; everything else gets the second check.
- * `fast`: the proof also carries a `tested-doc` overlap and `global-risk` that is not
- * order-sensitive, but only while the project has earned it and the main audit is fresh.
- * Fast never claims main is always green: main is verified after the landing and a proven
- * culprit is reverted. The policy is the owner's consent; earned is Forge's evidence. */
+/** One rule for server, CLI and web: the owner's policy, live audit freshness and a
+ * circuit breaker. Fast relaxes tested-doc and non-order-sensitive global-risk only. */
 export const landingModeSchema = z.enum(['strict', 'fast']);
 export type LandingMode = z.infer<typeof landingModeSchema>;
-
-/** Audited landings since the last red audit that earn fast mode. */
-export const FAST_EARN_AUDITED = 200;
-/** Share of landings whose audit gave no clean verdict (stalled or flaky) that un-earns it. */
-export const FAST_UNCLEAR_SHARE = 0.05;
-/** Counters halve at this total, so the share follows recent history; an earned project stays earned. */
-export const FAST_WINDOW = 4 * FAST_EARN_AUDITED;
-/** Audit lag bound, by count and by time (the oldest unaudited landing). Past either, fast falls back. */
+export const FAST_WINDOW = 50;
+export const FAST_BREAKER_COUNT = 3;
 export const FAST_MAX_UNAUDITED = 10;
 export const FAST_MAX_AUDIT_AGE_MS = 60 * 60_000;
-/** The refusal classes fast mode relaxes. Every other class always gets the second check. */
 export const FAST_RELAXED = ['global-risk', 'tested-doc'] as const;
 export type FastRelaxed = (typeof FAST_RELAXED)[number];
 
-const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
-export const landingEarnedSchema = z
-  .object({
-    /** Landings covered by a green full audit or an exact full check, since the last red audit. */
-    audited: count,
-    /** Landings whose audit ended with no clean verdict: stalled, or a failure the flake guard cleared. */
-    unclear: count,
-    /** The last red audit that was detected and recovered (the drill); `reverted` when Forge reverted its culprit.
-     * `started` and `red` are set only for an owner's deliberate drill that recovered in time. */
-    drill: z
-      .object({
-        at: z.string(),
-        sequence: count,
-        reverted: z.boolean(),
-        started: z.string().optional(),
-        red: z.string().optional(),
-      })
-      .strict()
-      .optional(),
-    /** Set when a red audit took earned fast mode away; cleared once it is earned again. */
-    lost: z
-      .object({ at: z.string(), reason: z.literal('red') })
-      .strict()
-      .optional(),
-  })
-  .strict();
-export type LandingEarned = z.infer<typeof landingEarnedSchema>;
-const none: LandingEarned = { audited: 0, unclear: 0 };
-
-const settle = (next: LandingEarned): LandingEarned => {
-  const halve = next.audited + next.unclear >= FAST_WINDOW;
-  const value = halve
-    ? { ...next, audited: Math.floor(next.audited / 2), unclear: Math.floor(next.unclear / 2) }
-    : next;
-  if (!value.lost || !landingEarned(value).earned) return value;
-  const { lost: _lost, ...kept } = value;
-  void _lost;
-  return kept;
+/** Two bounded clocks share at most 50 compact slots: red counts by audited landing
+ * position, and verdicts by audit position. They must not share an eviction clock: one
+ * audit may cover many landings, and a stalled audit covers none. */
+type Verdict = 'green' | 'red' | 'unclear' | 'drill';
+export type AuditOutcome = { verdict: Verdict; landings: number; runId?: string };
+export type AuditWindowSlot = {
+  /** Age relative to lastGreen; a failed audit's unaudited position has negative age. */
+  red?: { age: number; count: number; drill: number };
+  audit?: { verdict: Verdict; runId?: string; landings?: number };
 };
-/** Red-audit drill (Issue fe7d67a8). Only the owner person starts one; an agent's request waits for
- * their grant. The first red audit within this long of the start is the drill's red, and it must
- * recover within this long of that red. A drill that recovers in time is the recovered red on record
- * and keeps the count; one that recovers late is a real red. */
+function streams(window: readonly AuditWindowSlot[] | undefined) {
+  return {
+    reds: (window ?? []).flatMap(slot => (slot.red ? [{ ...slot.red }] : [])),
+    audits: (window ?? []).flatMap(slot => (slot.audit ? [{ ...slot.audit }] : [])),
+  };
+}
+function pack({ reds, audits }: ReturnType<typeof streams>): AuditWindowSlot[] {
+  const retained = reds
+    .filter(red => red.age < FAST_WINDOW && red.count + red.drill > 0)
+    .sort((a, b) => a.age - b.age)
+    .slice(0, FAST_WINDOW);
+  const recent = audits.slice(-FAST_WINDOW);
+  return Array.from({ length: Math.max(retained.length, recent.length) }, (_, index) => ({
+    ...(retained[index] ? { red: retained[index] } : {}),
+    ...(recent[index] ? { audit: recent[index] } : {}),
+  }));
+}
+/** Existing terminal guards make writes idempotent. Reds at the same landing position
+ * share a count; the last 50 distinct positions cover every red that can remain relevant. */
+export function auditWindow(window: readonly AuditWindowSlot[] | undefined, outcome: AuditOutcome) {
+  const next = streams(window);
+  if (outcome.verdict === 'green') {
+    for (const red of next.reds) red.age += outcome.landings;
+  } else if (outcome.verdict === 'red' || outcome.verdict === 'drill') {
+    const age = -outcome.landings;
+    let red = next.reds.find(entry => entry.age === age);
+    if (!red) {
+      red = { age, count: 0, drill: 0 };
+      next.reds.push(red);
+    }
+    if (outcome.verdict === 'drill') red.drill++;
+    else red.count++;
+  }
+  next.audits.push({
+    verdict: outcome.verdict,
+    ...(outcome.runId ? { runId: outcome.runId, landings: outcome.landings } : {}),
+  });
+  return pack(next);
+}
+/** The later pass vouches for the failed audit: replace its verdict rather than
+ * counting a second audit. Its covered landing position identifies the red bucket. */
+export function auditWindowFlake(
+  window: readonly AuditWindowSlot[] | undefined,
+  runId: string,
+  landings: number,
+) {
+  const next = streams(window);
+  const failed = next.audits.find(entry => entry.runId === runId);
+  const red = next.reds.find(entry => entry.age === -(failed?.landings ?? landings));
+  if (red) {
+    if (failed?.verdict === 'drill') red.drill = Math.max(0, red.drill - 1);
+    else red.count = Math.max(0, red.count - 1);
+  }
+  for (const entry of next.reds) entry.age += landings;
+  if (failed) {
+    failed.verdict = 'unclear';
+    delete failed.runId;
+    delete failed.landings;
+  } else next.audits.push({ verdict: 'unclear' });
+  return pack(next);
+}
+/** A timely optional drill is excluded from real reds; a late drill is real.
+ * Recovery advances the landing clock and retires the flake-classification pins. */
+export function auditWindowGreen(
+  window: readonly AuditWindowSlot[] | undefined,
+  landings: number,
+  drill?: { startedAt: string; redAt: string; recoveredAt: string },
+) {
+  const next = streams(window);
+  for (const red of next.reds) {
+    if (drill && !drillInTime(drill, drill.recoveredAt)) red.count += red.drill;
+    red.drill = 0;
+  }
+  for (const entry of next.audits) {
+    delete entry.runId;
+    delete entry.landings;
+  }
+  return auditWindow(pack(next), { verdict: 'green', landings });
+}
 export const FAST_DRILL_MS = 2 * 60 * 60_000;
 export type DrillRed = { startedAt: string; redAt: string };
-/** An armed drill claims a red audit at `at` when it has no red yet and its start window is open. */
 export const drillClaims = (drill: { startedAt: string; red?: unknown } | undefined, at: string) =>
   !!drill && !drill.red && Date.parse(at) - Date.parse(drill.startedAt) <= FAST_DRILL_MS;
 export const drillInTime = (drill: DrillRed, recoveredAt: string) =>
   Date.parse(recoveredAt) - Date.parse(drill.redAt) <= FAST_DRILL_MS;
-type Recovered = { at: string; sequence: number; reverted: boolean; drill?: DrillRed };
-/** A green full verdict covered `landings`. `recovered` is set when it ended a red episode: a real
- * red costs the earned state (re-earn from zero) and is the drill on record. An owner's drill that
- * recovered in time is the drill on record and keeps the count; its red episode adds nothing. */
-export function earnedAfterGreen(
-  earned: LandingEarned | undefined,
-  landings: number,
-  recovered?: Recovered,
-): LandingEarned {
-  const current = earned ?? none;
-  if (recovered?.drill && drillInTime(recovered.drill, recovered.at)) {
-    const { drill, ...record } = recovered;
-    return settle({ ...current, drill: { ...record, started: drill.startedAt, red: drill.redAt } });
-  }
-  if (recovered) {
-    const { drill: _late, ...record } = recovered;
-    void _late;
-    return { audited: 0, unclear: 0, drill: record, lost: { at: recovered.at, reason: 'red' } };
-  }
-  return settle({ ...current, audited: current.audited + Math.max(0, landings) });
-}
-/** An audit of `landings` ended with no clean verdict (stalled, or a flake the guard cleared). */
-export function earnedAfterUnclear(earned: LandingEarned | undefined, landings: number): LandingEarned {
-  const current = earned ?? none;
-  return settle({ ...current, unclear: current.unclear + Math.max(0, landings) });
-}
-export type EarnLanding = { sequence: number; kind: 'docs' | 'exact' | 'proof' };
-export type EarnEvent = {
-  /** A confirmed compensating green verdict, including an interacting set. */
-  reverted?: boolean;
-  kind: 'green' | 'red' | 'stalled' | 'flake' | 'culprit';
-  at: string;
-  runId: string;
-  sequence: number;
-  drill?: { startedAt: string; redAt?: string; recoveredAt?: string; outcome?: string };
-};
-/** Replays retained history with the live counter's rules (the owner's backfill, fe7d67a8). An exact
- * full check audits its landing; a landing on its own check is audited by the first audit verdict at or
- * after its sequence: green audits it, stalled is unclear and its retry audits it, red ends the episode
- * (a flake-cleared red is unclear), and nothing after it means a later exact full landing covered it. Landings in sequence order, at or below the last green; events in
- * (sequence, creation) order. */
-export function earnedFromHistory(landings: readonly EarnLanding[], events: readonly EarnEvent[]) {
-  const flaked = new Set(events.filter(e => e.kind === 'flake').map(e => e.runId));
-  const culprits = new Set(events.filter(e => e.kind === 'culprit').map(e => e.runId));
-  const verdicts = events.filter(e => e.kind !== 'flake' && e.kind !== 'culprit');
-  const ended = new Set<string>();
-  const drillGreens = new Set<string>();
-  let earned: LandingEarned = none;
-  let next = 0;
-  for (const landing of landings) {
-    while (next < verdicts.length && verdicts[next]!.sequence < landing.sequence) next++;
-    const event = verdicts[next];
-    if (event?.kind === 'red') {
-      if (flaked.has(event.runId)) {
-        if (landing.kind !== 'docs') earned = earnedAfterUnclear(earned, 1);
-      } else if (!ended.has(event.runId)) {
-        ended.add(event.runId);
-        const green = verdicts.slice(next).find(e => e.kind === 'green');
-        const drill = event.drill;
-        // A claimed drill red that was never closed recovered at the green that ended its episode.
-        const recoveredAt = drill?.recoveredAt ?? (drill?.redAt && !drill.outcome ? green?.at : undefined);
-        if (drill?.redAt && recoveredAt && green) drillGreens.add(green.runId);
-        earned = earnedAfterGreen(earned, 0, {
-          at: recoveredAt ?? green?.at ?? event.at,
-          sequence: green?.sequence ?? event.sequence,
-          reverted: green?.reverted ?? culprits.has(event.runId),
-          ...(drill?.redAt && recoveredAt
-            ? { drill: { startedAt: drill.startedAt, redAt: drill.redAt } }
-            : {}),
-        });
-      }
-      continue;
-    }
-    // The verdict that ended an owner's drill adds nothing, as live; a docs pass never counts.
-    if ((event?.kind === 'green' && (event.drill || drillGreens.has(event.runId))) || landing.kind === 'docs')
-      continue;
-    // An exact full landing audits itself, so a later stalled audit never covered it (as live).
-    if (event?.kind === 'stalled' && landing.kind === 'proof') earned = earnedAfterUnclear(earned, 1);
-    earned = earnedAfterGreen(earned, 1);
-  }
-  return earned;
-}
-/** Whether the project's own history has earned fast mode, and what is still missing. */
-export function landingEarned(earned: LandingEarned | undefined) {
-  const { audited, unclear, drill } = earned ?? none;
-  const total = audited + unclear;
-  const unclearShare = total ? unclear / total : 0;
-  const missing: ('audited' | 'unclear' | 'drill')[] = [];
-  if (audited < FAST_EARN_AUDITED) missing.push('audited');
-  if (unclearShare >= FAST_UNCLEAR_SHARE) missing.push('unclear');
-  if (!drill) missing.push('drill');
-  return { earned: missing.length === 0, missing, audited, unclear, unclearShare, drill: drill ?? null };
+
+function breaker(window: readonly AuditWindowSlot[] | undefined) {
+  const { reds, audits } = streams(window);
+  return {
+    red: reds.filter(entry => entry.age < FAST_WINDOW).reduce((sum, entry) => sum + entry.count, 0),
+    unclear: audits.slice(-FAST_WINDOW).filter(entry => entry.verdict === 'unclear').length,
+    audits: Math.min(FAST_WINDOW, audits.length),
+  };
 }
 
 export type AuditFreshness = {
@@ -190,30 +138,36 @@ export function auditStale(audit: AuditFreshness, now = Date.now()) {
     return 'audit-old' as const;
   return null;
 }
-/** Fast mode carries a relaxed class only when all three hold. */
+/** The live rule is checked at proof decision and again at publication. */
 export const fastEffective = (
   mode: LandingMode | undefined,
-  earned: LandingEarned | undefined,
+  window: readonly AuditWindowSlot[] | undefined,
   audit: AuditFreshness,
   now = Date.now(),
-) => mode === 'fast' && landingEarned(earned).earned && auditStale(audit, now) === null;
+) => {
+  const history = breaker(window);
+  return (
+    mode === 'fast' &&
+    auditStale(audit, now) === null &&
+    history.red < FAST_BREAKER_COUNT &&
+    history.unclear < FAST_BREAKER_COUNT
+  );
+};
 
-export type LandingModeState = 'strict' | 'earned' | 'fast' | 'suspended' | 'earning' | 'lost';
 export type LandingModeView = {
   mode: LandingMode;
-  /** What landings get right now. */
   effective: LandingMode;
-  state: LandingModeState;
+  state: 'strict' | 'fast' | 'suspended';
   label: string;
   tone: 'ok' | 'waiting' | 'attention';
+  reason: string | null;
   nextStep: string;
-  /** Present only when the project should switch; the policy change for the owner or the next agent. */
   advice: {
     switchTo: LandingMode;
     reason: string;
     policy: { acceptance: { landingMode: LandingMode } };
   } | null;
-  progress: { audited: number; needed: number; unclearShare: number; drill: boolean };
+  window: { red: number; unclear: number; audits: number; limit: number };
 };
 const STALE_TEXT: Record<NonNullable<ReturnType<typeof auditStale>>, string> = {
   'main-red': 'main is red',
@@ -222,108 +176,68 @@ const STALE_TEXT: Record<NonNullable<ReturnType<typeof auditStale>>, string> = {
   'unaudited-landings': `more than ${FAST_MAX_UNAUDITED} landings are unaudited`,
   'audit-old': 'the oldest unaudited landing is over an hour old',
 };
-const percent = (share: number) => `${Math.round(share * 1000) / 10}%`;
-/** The one view of a project's landing mode: state, plain label, and the next step. */
+/** The owner's choice never changes automatically. Pauses clear with live recovery or
+ * as bad verdicts leave the window; repeated trouble advises switching to strict. */
 export function landingModeView(
   mode: LandingMode | undefined,
-  earned: LandingEarned | undefined,
+  window: readonly AuditWindowSlot[] | undefined,
   audit: AuditFreshness,
   now = Date.now(),
 ): LandingModeView {
-  const history = landingEarned(earned);
-  const progress = {
-    audited: history.audited,
-    needed: FAST_EARN_AUDITED,
-    unclearShare: history.unclearShare,
-    drill: history.drill !== null,
-  };
-  const policy = (landingMode: LandingMode) => ({ acceptance: { landingMode } });
-  const numbers = `${history.audited} audited landings since the last red audit, ${percent(history.unclearShare)} without a clean audit verdict`;
-  const todo = [
-    ...(history.missing.includes('audited')
-      ? [`${history.audited} of ${FAST_EARN_AUDITED} audited landings`]
-      : []),
-    ...(history.missing.includes('unclear')
-      ? [
-          `${percent(history.unclearShare)} of audits stalled or flaky (needs under ${percent(FAST_UNCLEAR_SHARE)})`,
-        ]
-      : []),
-    ...(history.missing.includes('drill')
-      ? ['no recovered red audit on record (run one red-audit drill)']
-      : []),
-  ].join('; ');
-  if (mode !== 'fast') {
-    if (!history.earned)
-      return {
-        mode: 'strict',
-        effective: 'strict',
-        state: 'strict',
-        label: 'Strict landing',
-        tone: 'ok',
-        nextStep: 'Nothing to do.',
-        advice: null,
-        progress,
-      };
-    const reason = `This project has earned fast landing: ${numbers}, and a red audit was recovered.`;
+  const history = breaker(window);
+  const progress = { ...history, limit: FAST_WINDOW };
+  const base = { mode: mode ?? 'strict', window: progress };
+  if (mode !== 'fast')
     return {
-      mode: 'strict',
+      ...base,
       effective: 'strict',
-      state: 'earned',
-      label: 'Strict landing; fast is earned',
-      tone: 'attention',
-      nextStep: `${reason} Switch it on: set-policy ${JSON.stringify(policy('fast'))}. Changes then land on their own check for tested-doc and global-risk overlaps; main is verified after and a culprit is reverted.`,
-      advice: { switchTo: 'fast', reason, policy: policy('fast') },
-      progress,
-    };
-  }
-  if (history.earned) {
-    const stale = auditStale(audit, now);
-    return stale
-      ? {
-          mode: 'fast',
-          effective: 'strict',
-          state: 'suspended',
-          label: 'Fast landing paused',
-          tone: 'waiting',
-          nextStep: `Fast landing is paused because ${STALE_TEXT[stale]}; landings get the second check until the main audit is green and current. Nothing to do.`,
-          advice: null,
-          progress,
-        }
-      : {
-          mode: 'fast',
-          effective: 'fast',
-          state: 'fast',
-          label: 'Fast landing',
-          tone: 'ok',
-          nextStep: 'Nothing to do.',
-          advice: null,
-          progress,
-        };
-  }
-  const lost = earned?.lost;
-  const unclear = history.missing.includes('unclear');
-  if (!lost && !unclear)
-    return {
-      mode: 'fast',
-      effective: 'strict',
-      state: 'earning',
-      label: 'Fast landing not earned yet',
-      tone: 'waiting',
-      nextStep: `Fast landing starts once this project has earned it: ${todo}. Until then every landing is strict. Nothing to do.`,
+      state: 'strict',
+      label: 'Strict landing',
+      tone: 'ok',
+      reason: null,
+      nextStep: 'Nothing to do.',
       advice: null,
-      progress,
     };
-  const reason = lost
-    ? `A main audit went red on ${lost.at.slice(0, 10)}, so fast landing is off until it is earned again: ${todo}.`
-    : `Main audits are often stalled or flaky (${percent(history.unclearShare)}), so fast landing is off: ${todo}.`;
+  const repeated =
+    history.red >= FAST_BREAKER_COUNT
+      ? `${history.red} real red audits in the last ${FAST_WINDOW} audited landings`
+      : history.unclear >= FAST_BREAKER_COUNT
+        ? `${history.unclear} audits ended without a clean verdict (flaky or stalled) in the last ${FAST_WINDOW} audits`
+        : null;
+  const stale = auditStale(audit, now);
+  if (repeated) {
+    const reason = `Fast landing is paused: ${repeated}. It resumes automatically when the window clears and main is green and audited.`;
+    const policy = { acceptance: { landingMode: 'strict' as const } };
+    return {
+      ...base,
+      effective: 'strict',
+      state: 'suspended',
+      label: 'Fast landing paused',
+      tone: 'attention',
+      reason,
+      nextStep: `${reason} Switch to strict: set-policy ${JSON.stringify(policy)}.`,
+      advice: { switchTo: 'strict', reason, policy },
+    };
+  }
+  if (stale)
+    return {
+      ...base,
+      effective: 'strict',
+      state: 'suspended',
+      label: 'Fast landing paused',
+      tone: 'waiting',
+      reason: STALE_TEXT[stale],
+      nextStep: `Fast landing is paused because ${STALE_TEXT[stale]}. Land with the second check; fast resumes automatically once main is green and audited.`,
+      advice: null,
+    };
   return {
-    mode: 'fast',
-    effective: 'strict',
-    state: 'lost',
-    label: 'Fast landing lost',
-    tone: 'attention',
-    nextStep: `${reason} Switch it off so the policy says what happens: set-policy ${JSON.stringify(policy('strict'))}.`,
-    advice: { switchTo: 'strict', reason, policy: policy('strict') },
-    progress,
+    ...base,
+    effective: 'fast',
+    state: 'fast',
+    label: 'Fast landing',
+    tone: 'ok',
+    reason: null,
+    nextStep: 'Nothing to do.',
+    advice: null,
   };
 }

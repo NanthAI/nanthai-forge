@@ -79,16 +79,23 @@ export function agentSourceOutcome(value: unknown) {
 }
 /** The journal key holding the public-logs notice of the runner a check was selected on. */
 export const checkLogsKey = 'check-logs';
-/** The journal key holding the landing-mode advice of the project (src/landing-mode.ts), when it should switch. */
+/** The journal key holding the observed landing mode and next step from check selection. */
 export const landingAdviceKey = 'landing-advice';
-/** The advice the server derived for `check-settings` (`mainAudit.landing`): its next step when the
- * project should switch landing mode, else null. Read from a reply the caller already has. */
+/** Use the settings reply already read by selection: receipts name policy, effective
+ * mode and any pause, with the same next step as settings and the web. */
 export function landingAdvice(mainAudit: unknown): string | null {
   const parsed = z
-    .object({ landing: z.object({ advice: z.object({}).loose().nullable(), nextStep: z.string() }).loose() })
-    .loose()
+    .object({
+      landing: z.object({
+        mode: z.enum(['strict', 'fast']),
+        effective: z.enum(['strict', 'fast']),
+        nextStep: z.string(),
+      }),
+    })
     .safeParse(mainAudit);
-  return parsed.success && parsed.data.landing.advice ? parsed.data.landing.nextStep.slice(0, 800) : null;
+  if (!parsed.success) return null;
+  const { mode, effective, nextStep } = parsed.data.landing;
+  return `Landing mode: ${mode}; effective: ${effective}. ${nextStep}`.slice(0, 800);
 }
 export async function checkSelection(
   session: HostedAgentSession,

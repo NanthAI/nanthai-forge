@@ -557,7 +557,6 @@ test('changed paths span every composition step and action; old cursors sign no 
   const plan = {
     schema: 1,
     kind: 'forge-hosted-compose-input',
-    candidateFiles: true,
     base: { head: base.sha256, receiptId: 'main' },
     main: { object: base, recipe: null },
     inputs: inputs.manifest,
@@ -917,7 +916,7 @@ test('forge.json merge lists compose without a conflict and keep both entries in
 });
 
 test('V8 manifest-only composition is byte-identical to the fixed worker for fast-forwards, contained tips and sibling metadata merges on 4k files', async () => {
-  for (const candidateFiles of [false, true])
+  for (const legacyPlan of [false, true])
     for (const kind of ['forward', 'contained', 'sibling', 'content', 'overlap', 'mode']) {
       const x = fixture(),
         blob = x.put('base'),
@@ -958,7 +957,7 @@ test('V8 manifest-only composition is byte-identical to the fixed worker for fas
       const input = x.json({
         schema: 1,
         kind: 'forge-hosted-compose-input',
-        ...(candidateFiles ? { candidateFiles: true } : {}),
+        ...(legacyPlan ? { candidateFiles: true } : {}),
         base: { head: left.sha256, receiptId: 'main' },
         main: { object: left, recipe: null },
         inputs: inputs.manifest,

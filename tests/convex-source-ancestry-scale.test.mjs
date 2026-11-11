@@ -93,6 +93,7 @@ for (const count of [29000, 58000])
           assert.equal(job.status, 'completed');
           const result = JSON.parse(await s.bytes(job.output));
           assert.equal(result.result.status, 'clean');
+          assert(result.result.candidateFiles, 'the final source result pins its unconditional listing');
           assert.deepEqual(
             JSON.parse(await s.bytes(result.result.state))
               .files.map(f => f.path)
@@ -109,7 +110,10 @@ for (const count of [29000, 58000])
             JSON.stringify(report),
           );
           assert(
-            report.documentsRead <= (chainLength === 1 ? 245 : count === 29000 ? 272 : 372),
+            // S4 adds one listing descriptor: two reads and one write, sharing
+            // existing calls. One read exceeds the old bound's spare document;
+            // the write still fits. Call, memory and history-growth bounds stay.
+            report.documentsRead <= (chainLength === 1 ? 246 : count === 29000 ? 273 : 373),
             JSON.stringify(report),
           );
           assert(

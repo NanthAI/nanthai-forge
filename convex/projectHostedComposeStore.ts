@@ -22,6 +22,7 @@ const progress = z
   .strict();
 export const composeStateSchema = z
   .object({
+    // Read-only compatibility for already pinned compose inputs; new plans omit this field.
     candidateFiles: z.literal(true).optional(),
     retryUntil: z.number().int().nonnegative().optional(),
     semanticPlan: semanticPlanSchema.optional(),
@@ -101,6 +102,7 @@ export function hostedComposeInput(state: ComposeState, at: string) {
     schema: 1,
     ...(state.batch ? { batch: state.batch } : {}),
     kind: 'forge-hosted-compose-input',
+    // Preserve old submitted job digests when replaying their original plan.
     ...(state.candidateFiles ? { candidateFiles: true } : {}),
     ...(state.restoreBases ? { restoreBases: state.restoreBases } : {}),
     base: state.request.expectedMain,

@@ -165,7 +165,7 @@ export async function publishAcceptance(
       'CHECK_EVIDENCE_REFRESH',
       'Main audit changed; prepare fresh evidence.',
     );
-    // A fast-mode proof is published only while the project has earned fast mode and the audit is
+    // A fast-mode proof is published only while the circuit breaker permits fast mode and the audit is
     // fresh, checked here again in the publication transaction (81d12a32, review note N2).
     invariant(
       !fastProof(reuse) || (await fastLanding(ctx, project, audit, reuse.audit.source === 'main-receipt')),

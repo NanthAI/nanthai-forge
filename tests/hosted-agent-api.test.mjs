@@ -10,6 +10,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { revertFixture, synthetic } from './hosted-revert-fixture.mjs';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { digest } from '../dist/hash.js';
+import { policyPreset } from '../dist/autonomy-policy.js';
 const names = [
   'projectHostedAgent',
   'projectHostedChannels',
@@ -130,6 +131,26 @@ test('transport stages real composition pages, resumes original source work and 
   const observed = await s.transport().dispatch('observe', { submissionId: submission.id });
   assert.equal(observed.result.submission.id, submission.id);
   assert.equal(s.f.pending().length, before);
+});
+
+test('the land receipt retains policy mode, effective mode and pause advice from its existing check-settings read', async t => {
+  const s = await setup(t);
+  const policy = policyPreset('trusted');
+  s.f.patch('hostedProjects', s.f.projectId, {
+    autonomyPolicy: { ...policy, acceptance: { ...policy.acceptance, landingMode: 'fast' } },
+  });
+  const receipt = await s.transport().dispatch('finish', {
+    laneId: s.f.lane.laneId,
+    check: { checkId: s.f.rawChecks.checkId },
+  });
+  assert.match(receipt.result.landingAdvice, /^Landing mode: fast; effective: strict\./);
+  assert.match(receipt.result.landingAdvice, /no green audit yet/);
+  assert.match(receipt.result.landingAdvice, /Land with the second check/);
+  assert.equal(s.calls.filter(call => call.name === 'projectHostedCheckDefinitions:current').length, 1);
+  assert.equal(
+    s.calls.some(call => call.name === 'projectHostedMainAudit:status'),
+    false,
+  );
 });
 
 test('revert uses the exact acceptance receipt, retains sync UUID after lost submit and returns a composable Lane', async t => {

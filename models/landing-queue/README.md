@@ -286,6 +286,13 @@ break reaches main.
 
 ## Landing modes (Issue 81d12a32)
 
+The model and recorded runs in this section describe the earlier earned-fast rule.
+Issue 509a0ffa replaces that runtime rule with the circuit breaker in
+`src/landing-mode.ts`; these model results do not verify its window. The current
+thresholds, coalesced coverage, flake classification and publication recheck are covered
+by `tests/hosted-first-check-landing.test.mjs` and `tests/hosted-main-audit.test.mjs`.
+
+
 `Fast` is the project policy (`acceptance.landingMode: "fast"`). `Relaxed` names changes the
 first-check rule refuses only for a class fast mode relaxes (a tested-doc overlap, or global
 risk that is not order-sensitive); an order-sensitive or overlapping change is in neither

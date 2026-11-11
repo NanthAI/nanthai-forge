@@ -5,7 +5,7 @@ import { composeFixture } from './hosted-compose-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { parseNativeState } from '../dist/state/format.js';
 import { reviewPaths } from '../dist/source-review-format.js';
-import { saveBytes } from '../dist/hosted-save.js';
+import { saveBytes, savePin } from '../dist/hosted-save.js';
 import { candidateFileListSchema } from '../dist/hosted-compose.js';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
 import { runSmallSourceCompose } from '../dist/hosted-source-small-compose.js';
@@ -14,7 +14,7 @@ const views = await import(moduleUrl('../convex/projectViewReads.ts'));
 const { canonicalViewFiles } = await import(moduleUrl('../web/src/views/canonical-source.ts'));
 const compose = await import(moduleUrl('../convex/projectHostedCompose.ts'));
 for (const count of [4000, 29000]) {
-  test(`canonical ${count}-file Candidate is readable without legacy projections, while forged bytes and foreign access refuse`, async () => {
+  test(`legacy ${count}-file Candidate without a listing opens through both State manifests; new listings retain access and integrity checks`, async () => {
     const c = await composeFixture({
       baselineFiles: Array.from({ length: count - 2 }, (_, i) => [
         `src/${String(i).padStart(6, '0')}.ts`,
@@ -36,6 +36,13 @@ for (const count of [4000, 29000]) {
     const published = await c.publish(await c.work(selected));
     const candidate = published.outcome.result;
     assert.equal(candidate.result.status, 'clean');
+    const record = [...c.tables.projectHostedRecords.values()].find(
+      r => r.kind === 'candidate' && r.key === candidate.id,
+    );
+    const listingPin = record.candidateFiles;
+    assert(listingPin, 'new Candidates always pin a listing');
+    // Reproduce a retained Candidate composed before source listings existed.
+    c.patch('projectHostedRecords', record._id, { candidateFiles: undefined });
     const canonical = await c.call('candidateRead', compose.candidate, {
       projectId: c.projectId,
       candidateId: candidate.id,
@@ -51,31 +58,22 @@ for (const count of [4000, 29000]) {
       paginationOpts: { cursor: null, numItems: 30 },
     });
     const model = JSON.parse(capable);
+    const legacyReads = [];
     const result = await canonicalViewFiles(
       model,
       { paginationOpts: { cursor: null, numItems: 30 } },
-      async pins => pins.map(pin => c.objects.get(pin.sha256)),
+      async pins => {
+        legacyReads.push(...pins.map(pin => pin.sha256));
+        return pins.map(pin => c.objects.get(pin.sha256));
+      },
     );
+    assert(legacyReads.includes(candidate.base.head));
+    assert(legacyReads.includes(candidate.result.head));
     assert.equal(result.files.total, 1);
     assert.equal(result.files.items[0].path, changed.path);
     assert.equal(result.files.items[0].status, 'modified');
     assert.equal(result.inputs[0].laneId, lane.laneId);
-    // A trusted source-only listing replaces whole-State reads after writer rollout.
-    const listing = candidateFileListSchema.parse({
-      schema: 1,
-      kind: 'forge-candidate-files',
-      inputs: result.inputs.map(({ laneId, head }) => ({ laneId, head })),
-      dependencies: result.dependencies.map(({ viewId: candidateId, head }) => ({ candidateId, head })),
-      base: candidate.base.head,
-      head: candidate.result.head,
-      files: reviewPaths(files, parseNativeState(c.objects.get(candidate.result.head)).files).filter(
-        f => f.status !== 'unchanged',
-      ),
-    });
-    const listingPin = c.put(saveBytes(listing));
-    const record = [...c.tables.projectHostedRecords.values()].find(
-      r => r.kind === 'candidate' && r.key === candidate.id,
-    );
+    const listing = candidateFileListSchema.parse(JSON.parse(c.objects.get(listingPin.sha256)));
     c.patch('projectHostedRecords', record._id, { candidateFiles: listingPin });
     const compactModel = JSON.parse(
       await c.transaction('canonicalCompactRead', views.read, {
@@ -324,7 +322,7 @@ test('Candidate file bytes refuse access revoked during IO and on an immutable c
 });
 
 for (const count of [4000, 29000]) {
-  test(`source-built ${count}-file Candidate pins one listing, survives stepped execution, and changes no client call count`, async t => {
+  test(`source-built ${count}-file Candidate unconditionally pins exactly one listing in fixed, small and stepped execution`, async t => {
     const c = await composeFixture({
       baselineFiles: Array.from({ length: count - 2 }, (_, i) => [
         `src/${String(i).padStart(6, '0')}.ts`,
@@ -338,151 +336,124 @@ for (const count of [4000, 29000]) {
       [c.baseline.sha256],
     );
     const lane = await c.lane(head);
-    const measurements = [];
-    for (const enabled of [false, true]) {
-      const selected = c.selection([lane]);
-      const prior = process.env.FORGE_CANDIDATE_FILES;
-      if (enabled) process.env.FORGE_CANDIDATE_FILES = '1';
-      else delete process.env.FORGE_CANDIDATE_FILES;
-      const start = c.counts.length;
+    const selected = c.selection([lane]);
+    await c.prepare(selected);
+    await c.stage(selected);
+    const plan = (await c.progress(selected)).input;
+    assert(!Object.hasOwn(plan, 'candidateFiles'), 'new plans need no rollout option');
+    await c.submit(selected);
+    const objectStart = new Set(c.objects.keys());
+    const work = await c.work(selected);
+    const published = await c.publish(work);
+    const candidate = published.outcome.result;
+    const row = [...c.tables.projectHostedRecords.values()].find(
+      row => row.key === candidate.id && row.kind === 'candidate',
+    );
+    assert(row.candidateFiles, 'listing publication is unconditional');
+    assert.equal(c.tables.projectWorkDataRecords.size, 0);
+    assert.deepEqual(await c.publish(work), published, 'publication replay keeps the original pointer');
+    const created = [...c.objects].filter(([id]) => !objectStart.has(id));
+    const listings = created.filter(([, bytes]) => {
       try {
-        await c.prepare(selected);
-      } finally {
-        if (prior === undefined) delete process.env.FORGE_CANDIDATE_FILES;
-        else process.env.FORGE_CANDIDATE_FILES = prior;
+        return JSON.parse(bytes).kind === 'forge-candidate-files';
+      } catch {
+        return false;
       }
-      await c.stage(selected);
-      const plan = (await c.progress(selected)).input;
-      assert.equal(plan.candidateFiles, enabled ? true : undefined, 'flag is captured before retries');
-      await c.submit(selected);
-      const objectStart = new Set(c.objects.keys());
-      const work = await c.work(selected);
-      const published = await c.publish(work);
-      const calls = c.counts.slice(start).map(row => row.name);
-      const candidate = published.outcome.result;
-      const row = [...c.tables.projectHostedRecords.values()].find(
-        row => row.key === candidate.id && row.kind === 'candidate',
-      );
-      assert.equal(Boolean(row.candidateFiles), enabled);
-      assert.equal(c.tables.projectWorkDataRecords.size, 0);
-      assert.deepEqual(await c.publish(work), published, 'publication replay keeps the original pointer');
-      const created = [...c.objects].filter(([id]) => !objectStart.has(id));
-      const listings = created.filter(([, bytes]) => {
+    });
+    assert.equal(listings.length, 1, 'exactly one source listing is written');
+    assert.equal(listings[0][0], row.candidateFiles.sha256, 'the Candidate pins that exact object');
+    const listing = candidateFileListSchema.parse(JSON.parse(c.objects.get(row.candidateFiles.sha256)));
+    assert.deepEqual(
+      listing.files,
+      reviewPaths(before, parseNativeState(c.objects.get(head.sha256)).files).filter(
+        f => f.status !== 'unchanged',
+      ),
+    );
+    assert.deepEqual(listing.inputs, [{ laneId: lane.laneId, head: head.sha256 }]);
+    assert.deepEqual(listing.dependencies, []);
+    const model = JSON.parse(
+      await c.transaction('pinnedView', views.read, {
+        projectId: c.projectId,
+        action: 'view',
+        viewId: candidate.id,
+        features: ['candidate-source-files'],
+        paginationOpts: { cursor: null, numItems: 30 },
+      }),
+    );
+    let readBytes = 0;
+    const page = await canonicalViewFiles(
+      model,
+      { paginationOpts: { cursor: null, numItems: 30 } },
+      async pins => {
+        assert(pins.every(pin => pin.sha256 === row.candidateFiles.sha256));
+        readBytes += pins.reduce((sum, pin) => sum + pin.size, 0);
+        return pins.map(pin => c.objects.get(pin.sha256));
+      },
+    );
+    assert.equal(page.files.total, 1);
+    assert(readBytes < 2048, 'page bytes depend on changed files, not repository file count');
+    // The Convex provider uses durable cursors rather than the fixed worker. Read only
+    // committed objects and round-trip every continuation through its schema.
+    const { parseSourceCursor } = await import('../dist/hosted-source-cursor-schema.js');
+    const input = c.put(saveBytes(plan));
+    let cursor = initialSourceStep(input),
+      steps = 0;
+    const uploaded = new Map();
+    const io = {
+      async describeBatch(ids) {
+        return ids.map(id => ({ object: { sha256: id, size: c.objects.get(id).length }, recipe: null }));
+      },
+      async read(pin) {
+        return [c.objects.get(pin.sha256)];
+      },
+      async upload(pin, stream) {
+        const parts = [];
+        for await (const part of stream) parts.push(part);
+        const bytes = Buffer.concat(parts);
+        assert.deepEqual(c.put(bytes), pin);
+        uploaded.set(pin.sha256, bytes);
+      },
+    };
+    while (cursor.phase !== 'done') {
+      assert(++steps < 50, 'bounded source continuations');
+      cursor = parseSourceCursor(JSON.parse(JSON.stringify((await runSourceStep(cursor, io)).cursor)));
+    }
+    const stepped = JSON.parse(c.objects.get(cursor.output.sha256));
+    assert.deepEqual(
+      stepped.result.candidateFiles,
+      row.candidateFiles,
+      'fast-forward and fixed worker derive the same bytes',
+    );
+    assert.equal(
+      [...uploaded.values()].filter(bytes => {
         try {
           return JSON.parse(bytes).kind === 'forge-candidate-files';
         } catch {
           return false;
         }
-      });
-      assert.equal(listings.length, enabled ? 1 : 0, 'only one extra source listing is written');
-      measurements.push({ enabled, calls, objects: created.length });
-      if (!enabled) continue;
-      const listing = candidateFileListSchema.parse(JSON.parse(c.objects.get(row.candidateFiles.sha256)));
-      assert.deepEqual(
-        listing.files,
-        reviewPaths(before, parseNativeState(c.objects.get(head.sha256)).files).filter(
-          f => f.status !== 'unchanged',
-        ),
-      );
-      assert.deepEqual(listing.inputs, [{ laneId: lane.laneId, head: head.sha256 }]);
-      assert.deepEqual(listing.dependencies, []);
-      const model = JSON.parse(
-        await c.transaction('pinnedView', views.read, {
-          projectId: c.projectId,
-          action: 'view',
-          viewId: candidate.id,
-          features: ['candidate-source-files'],
-          paginationOpts: { cursor: null, numItems: 30 },
-        }),
-      );
-      let readBytes = 0;
-      const page = await canonicalViewFiles(
-        model,
-        { paginationOpts: { cursor: null, numItems: 30 } },
-        async pins => {
-          assert(pins.every(pin => pin.sha256 === row.candidateFiles.sha256));
-          readBytes += pins.reduce((sum, pin) => sum + pin.size, 0);
-          return pins.map(pin => c.objects.get(pin.sha256));
-        },
-      );
-      assert.equal(page.files.total, 1);
-      assert(readBytes < 2048, 'page bytes depend on changed files, not repository file count');
-      // The Convex provider uses durable cursors rather than the fixed worker. Read only
-      // committed objects and round-trip every continuation through its schema.
-      const { parseSourceCursor } = await import('../dist/hosted-source-cursor-schema.js');
-      const input = c.put(saveBytes(plan));
-      let cursor = initialSourceStep(input),
-        steps = 0;
-      const uploaded = new Map();
-      const io = {
-        async describeBatch(ids) {
-          return ids.map(id => ({ object: { sha256: id, size: c.objects.get(id).length }, recipe: null }));
-        },
-        async read(pin) {
-          return [c.objects.get(pin.sha256)];
-        },
-        async upload(pin, stream) {
-          const parts = [];
-          for await (const part of stream) parts.push(part);
-          const bytes = Buffer.concat(parts);
-          assert.deepEqual(c.put(bytes), pin);
-          uploaded.set(pin.sha256, bytes);
-        },
-      };
-      while (cursor.phase !== 'done') {
-        assert(++steps < 50, 'bounded source continuations');
-        cursor = parseSourceCursor(JSON.parse(JSON.stringify((await runSourceStep(cursor, io)).cursor)));
-      }
-      const stepped = JSON.parse(c.objects.get(cursor.output.sha256));
-      assert.deepEqual(
-        stepped.result.candidateFiles,
-        row.candidateFiles,
-        'fast-forward and fixed worker derive the same bytes',
-      );
-      assert.equal(
-        [...uploaded.values()].filter(bytes => {
-          try {
-            return JSON.parse(bytes).kind === 'forge-candidate-files';
-          } catch {
-            return false;
-          }
-        }).length,
-        1,
-      );
-      const small = await runSmallSourceCompose(input, io);
-      if (count === 4000) {
-        assert(small, '4k fast path stays eligible');
-        assert.deepEqual(JSON.parse(c.objects.get(small.sha256)).result.candidateFiles, row.candidateFiles);
-      } else assert.equal(small, null, '29k retains the stepped provider');
-      t.diagnostic(
-        JSON.stringify({
-          count,
-          listingReadBytes: readBytes,
-          steppedSourceActions: steps,
-          canonicalDataRows: c.tables.projectWorkDataRecords.size,
-        }),
-      );
-    }
-    assert.deepEqual(
-      measurements[1].calls,
-      measurements[0].calls,
-      'same registered control calls with the setting on',
+      }).length,
+      1,
     );
-    assert.equal(measurements[1].objects, measurements[0].objects + 1, 'exactly one additional R2 object');
+    const small = await runSmallSourceCompose(input, io);
+    if (count === 4000) {
+      assert(small, '4k fast path stays eligible');
+      assert.deepEqual(JSON.parse(c.objects.get(small.sha256)).result.candidateFiles, row.candidateFiles);
+    } else assert.equal(small, null, '29k retains the stepped provider');
+    t.diagnostic(
+      JSON.stringify({
+        count,
+        listingReadBytes: readBytes,
+        steppedSourceActions: steps,
+        canonicalDataRows: c.tables.projectWorkDataRecords.size,
+      }),
+    );
   });
 }
 
 test('an unchanged Lane publishes an exact empty listing in both source execution paths', async () => {
   const c = await composeFixture();
   const selected = c.selection([await c.lane(c.baseline)]);
-  const prior = process.env.FORGE_CANDIDATE_FILES;
-  process.env.FORGE_CANDIDATE_FILES = '1';
-  try {
-    await c.prepare(selected);
-  } finally {
-    if (prior === undefined) delete process.env.FORGE_CANDIDATE_FILES;
-    else process.env.FORGE_CANDIDATE_FILES = prior;
-  }
+  await c.prepare(selected);
   await c.stage(selected);
   await c.submit(selected);
   const work = await c.work(selected);
@@ -514,4 +485,31 @@ test('an unchanged Lane publishes an exact empty listing in both source executio
   const listing = JSON.parse(c.objects.get(stepped.result.candidateFiles.sha256));
   assert.equal(listing.base, listing.head);
   assert.deepEqual(listing.files, []);
+});
+
+test('an already pinned rollout plan replays its original input digest and publishes one listing', async () => {
+  const c = await composeFixture();
+  const head = c.state([c.file('new.txt', 'new\n')], [c.baseline.sha256]);
+  const selected = c.selection([await c.lane(head)]);
+  await c.prepare(selected);
+  await c.stage(selected);
+  const row = [...c.tables.projectHostedComposes.values()].find(
+    row => row.operationId === selected.request.operationId,
+  );
+  // A persisted pre-cutover operation can still carry the former true-only wire field.
+  c.patch('projectHostedComposes', row._id, {
+    value: JSON.stringify({ ...JSON.parse(row.value), candidateFiles: true }),
+  });
+  const plan = (await c.progress(selected)).input;
+  assert.equal(plan.candidateFiles, true);
+  await c.submit(selected);
+  const work = await c.work(selected);
+  assert.deepEqual(JSON.parse(work.manifest).input, savePin(plan));
+  const published = await c.publish(work);
+  assert.deepEqual(await c.publish(work), published);
+  assert.equal(published.outcome.result.result.status, 'clean');
+  const candidate = [...c.tables.projectHostedRecords.values()].find(
+    row => row.key === published.outcome.result.id && row.kind === 'candidate',
+  );
+  assert(candidate.candidateFiles);
 });

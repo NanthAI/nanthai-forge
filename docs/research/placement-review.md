@@ -325,12 +325,10 @@ Done when: a landing writes zero rows to `projectWorkDataRecords`; the Candidate
 
 S4 readers negotiate `candidate-source-files` using the existing contract-feature
 mechanism. Canonical web Candidates do not require a legacy Work generation;
-legacy indexed Views remain readable. After the readers deployed, a source-only file-list writer was added behind
-`FORGE_CANDIDATE_FILES=1`, default off, using S1's server-environment mechanism.
-The original operation captures the choice for retries. The small-compose,
-fixed-worker and stepped paths publish at most one listing with exact final
-base/head and all selected input identities. Batch intermediates do not each
-publish a listing. Existing recovery includes the server metadata pin. There is
+legacy indexed Views remain readable. Every compose producer now publishes one
+source-only file listing unconditionally. Small-compose, fixed-worker and stepped
+paths pin the exact final base/head and all selected input identities. Batch
+intermediates do not each publish a listing. Existing recovery includes the server metadata pin. There is
 no new settings table or user step. Old indexed Candidate readers receive
 `CLI_UPGRADE_REQUIRED` when the selected Candidate uses this protocol.
 
@@ -376,7 +374,7 @@ export/restore before removing a verified projection copy. Keep a resumable,
 retry-safe cursor and the original canonical source/Work/audit history. No
 maintenance runs implicitly, and no table is dropped until old generations,
 generic readers, selected lookups and snapshot readers have all moved. Removal
-and billed savings remain unverified while the old writer or flag remains.
+and billed savings for legacy projections remain unverified while their writers remain.
 
 #### S4 remaining writers
 
@@ -386,7 +384,7 @@ Row counts and bytes are serialized row JSON from the built projection code, on 
 
 | Writer | Runs | Rows and bytes | Cost at list price | Verdict |
 | --- | --- | --- | --- | --- |
-| Hosted landing: save, compose, check, accept | Every landing | 0 rows and 0 reads, with the listing setting on or off (measured, six-landing fixture). `tests/landing-cost-guard.test.mjs` fails the build on any access | $0 per 1,000 landings | Done |
+| Hosted landing: save, compose, check, accept | Every landing | 0 rows and 0 reads (measured, six-landing fixture). `tests/landing-cost-guard.test.mjs` fails the build on any access | $0 per 1,000 landings | Done |
 | Work commands (`projectWork.appendWork`): Intent, note, status, planning put and comment | Per command; not per landing and not per file | One `intents:payload` chunk set for each Intent the command changes, replacing the previous set: the Intent's attributes, at most 32,000 characters a chunk. A planning item or version writes chunks only above 32,000 characters | About 3P + 1 KB of I/O for a payload of P bytes (read it, write it, retire the old one): $0.0000014 at 2 KB, $0.00002 at 32 KB. At three such commands a landing, $0.004 to $0.06 per 1,000 landings, 0.2% to 3% of the $2 target (modelled; payload sizes on dev are unknown) | **Stay.** This is the Work read model (job 3), sized by the record and not by the repository |
 | GitHub import, archive path (`projectGithubImportPublication.stage`) | Once per imported project whose GitHub listing is complete | Six fixed source rows plus one `sourceTreePaths` row per 500 files: 14 rows and 0.15 MB at 4k files, 64 rows and 1.21 MB at 29k. No row per blob | Write $0.00003 and $0.00025 per project. Retained $0.00003 to $0.0003 and $0.0002 to $0.002 a month | Cheap. The path rows go in the onboarding slice below |
 | GitHub import, paged path | Once per project whose listing GitHub truncates (over 100,000 entries or 7 MB) | As above, plus one `sourceBlobs` row of 317 B per blob: 31.7 MB at 100,000 files | Write $0.025 per project; retained $0.006 to $0.06 a month | Rare. Same slice |
@@ -398,10 +396,19 @@ Row counts and bytes are serialized row JSON from the built projection code, on 
 
 **Why Work payloads stay in Convex.** A mutation can neither read nor write R2, so a payload in R2 turns the one-mutation command into an action, a query and a mutation at best (seven calls on the existing indexed route, measured in a fixture). A reference with overlays removes the read but not the write: every command that changes an Intent produces a new leaf, which only an action can store, or leaves overlays to pile up for a later job to fold. Both break the budget. It would also cost more at every size below the chunk cap: one R2 write is $0.0000045 and needs an action call ($0.000002), against $0.0000006 for a 2 KB chunk in Convex and $0.0000066 at the 32,000-character cap. R2's cheaper storage does not offset it; a 2 KB chunk retained at nine copies costs $0.000000004 a month. These rows do grow by one chunk set per Intent ever filed. That is the Work read model's own growth, and archiving closed Work belongs to S2, which already owns superseded records.
 
-**What S4 still owes.** The timing line is met only for a Candidate that carries the listing. With it, the full page shows a paired median difference of -0.2 ms at 4k files (95% interval -0.7 to -0.1) and about 0 ms at 29k (-0.8 to +0.1) on 33 ms medians, eleven pairs each: faster at 4k and not distinguishable from no change at 29k, which is what "within the current time" asks. Without it the browser reads both State manifests, 0.9 MB at 4k and 6.6 MB at 29k where the legacy page read a few kilobytes (measured, fixture), and the listing writer is still off by default. So S4 closes in this order:
+**Candidate file-list cutover.** New clean Candidates carry one listing
+unconditionally; the rollout setting has been removed. The prerequisite dev check
+confirmed one listing pin per new Candidate and unchanged Convex writes per
+landing attempt. Candidates composed before listings existed remain readable
+through the two-manifest comparison. Readers of both forms and
+`CLI_UPGRADE_REQUIRED` for old indexed readers are already deployed.
 
-1. The lead sets `FORGE_CANDIDATE_FILES=1` on dev, which one unset reverses, and checks the next dogfood landing: its Candidate pins a listing, one listing object exists, and Convex calls for the landing are unchanged.
-2. One landing makes the writer unconditional and deletes the setting. A Candidate composed earlier still opens through the two-manifest comparison. Readers of both forms and `CLI_UPGRADE_REQUIRED` for old indexed readers are already deployed.
+With the listing, the full page shows a paired median difference of -0.2 ms at
+4k files (95% interval -0.7 to -0.1) and about 0 ms at 29k (-0.8 to +0.1) on
+33 ms medians, eleven pairs each: faster at 4k and not distinguishable from no
+change at 29k, which is what "within the current time" asks. The legacy fallback
+reads both State manifests, 0.9 MB at 4k and 6.6 MB at 29k where the legacy
+indexed page read a few kilobytes (measured, fixture).
 
 The listing adds 0.67 R2 Class A and 0.67 Class B requests per landing in the fixture mix (642 B for one changed file): $0.003 per 1,000 landings, 0.16% of the target, and no Convex call.
 

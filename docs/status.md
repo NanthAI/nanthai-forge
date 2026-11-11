@@ -2,9 +2,9 @@
 
 Canonical hosted Candidates show their changed-file list without requiring a
 legacy Work generation. Browser and CLI readers accept a server-pinned R2
-file-list object and retain the exact-State fallback. The source writer can pin
-one listing behind default-off `FORGE_CANDIDATE_FILES=1`; legacy projection
-writers remain unchanged. Canonical browser save attribution remains incomplete.
+file-list object and retain the two-State-manifest fallback for older Candidates.
+Every compose producer unconditionally pins one listing for a new clean Candidate;
+legacy projection writers remain unchanged. Canonical browser save attribution remains incomplete.
 The Candidate page reuses its opening file metadata and reads per-file provenance
 on expansion. Canonical Intent copies retain imported attributes whose names
 also occur in projection headers; legacy data retirement remains unproven.
@@ -126,6 +126,12 @@ solo run followed by a serial recheck. Publication remains fenced by the exact
 predecessor head/receipt; failure and review holds restore original selections.
 The [zoo report](research/zoo-mini-report.md#rust-check-and-overtake-diagnosis)
 separates Cargo execution from landing wall time; its live timing gate remains open.
+
+Fast landing follows the owner's `acceptance.landingMode` policy after one green main audit.
+It pauses on red or stale main, 3 real red audits in 50 audited landings, or 3 unclear audits in
+50 audits, and resumes automatically as those conditions clear. There is no earning count or
+required drill. Settings and landing receipts explain each pause and its next step
+([landing modes](pre-queue-checks.md#landing-modes)).
 
 ## Works
 

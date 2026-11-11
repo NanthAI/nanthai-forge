@@ -38,12 +38,6 @@ test('canonical Intent copy retains imported attributes whose names also occur i
 });
 
 test('legacy copy and status mutations preserve imported attributes before data projections can retire', async t => {
-  const oldFlag = process.env.FORGE_CANDIDATE_FILES;
-  process.env.FORGE_CANDIDATE_FILES = '1';
-  t.after(() => {
-    if (oldFlag === undefined) delete process.env.FORGE_CANDIDATE_FILES;
-    else process.env.FORGE_CANDIDATE_FILES = oldFlag;
-  });
   const id = randomUUID();
   let original;
   const s = await setup(t, true, root => {

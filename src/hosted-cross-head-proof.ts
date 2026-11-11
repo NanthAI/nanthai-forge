@@ -83,7 +83,7 @@ const cleanDisjointProof = z
   })
   .strict();
 /** Fast landing mode (Issue 81d12a32): clean-disjoint-v2's composition rules, but the named refusal
- * classes were relaxed because the project has earned fast mode and its main audit was fresh. Never
+ * classes were relaxed because the circuit breaker permits fast mode and its main audit was fresh. Never
  * holds an order-sensitive risk path. The main audit verifies the new head at once. */
 const fastFirstCheckProof = z
   .object({
@@ -116,7 +116,7 @@ export const crossHeadProofSchema = z.discriminatedUnion('algorithm', [
   exactTreeProof,
 ]);
 export type FastFirstCheckProof = z.infer<typeof fastFirstCheckProof>;
-/** A proof that needs the project's earned fast mode and a fresh audit when it is published. */
+/** A proof that needs the project's effective fast mode and a fresh audit when it is published. */
 export const fastProof = (proof: CrossHeadProof | undefined): proof is FastFirstCheckProof =>
   proof?.algorithm === 'fast-first-check-v1';
 export type CrossHeadProof = z.infer<typeof crossHeadProofSchema>;

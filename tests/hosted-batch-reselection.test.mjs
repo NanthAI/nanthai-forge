@@ -159,6 +159,13 @@ test('incident replay: fallback detaches and requeues all three members atomical
       sequence: i + 100,
       value: '{"unrelated":true}',
     });
+  const listingPins = () =>
+    new Set(
+      [...f.tables.projectHostedRecords.values()].flatMap(row =>
+        row.kind === 'candidate' && row.candidateFiles ? [row.candidateFiles.sha256] : [],
+      ),
+    );
+  const originalListings = listingPins();
   const before = f.counts.length,
     started = performance.now();
   await f.drain();
@@ -222,6 +229,9 @@ test('incident replay: fallback detaches and requeues all three members atomical
     calls: counts.length,
     reads: sum(counts, 'documents'),
     writes: sum(counts, 'writes'),
+    // S4: each distinct new source listing can mark its descriptor once in
+    // existing publication calls. Keep the controller's original write bound.
+    listingWriteAllowance: [...listingPins()].filter(pin => !originalListings.has(pin)).length,
     wallMs: performance.now() - started,
     peakRssBytes: process.resourceUsage().maxRSS * 1024,
     includingAdmission: {
@@ -230,7 +240,10 @@ test('incident replay: fallback detaches and requeues all three members atomical
       writes: sum(counts, 'writes') + sum(admission, 'writes'),
     },
   };
-  assert(cost.calls < 220 && cost.reads < 4500 && cost.writes < 1300, JSON.stringify(cost));
+  assert(
+    cost.calls < 220 && cost.reads < 4500 && cost.writes - cost.listingWriteAllowance < 1300,
+    JSON.stringify(cost),
+  );
   t.diagnostic(JSON.stringify({ members: 3, unrelatedIntents: 600, retainedReceipts: 575, ...cost }));
   assert.equal(f.pending().length, 0);
 });

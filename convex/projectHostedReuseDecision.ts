@@ -197,10 +197,10 @@ export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingI
       : {}),
     // The project's own check and setup-action entry files are global-risk (any runner).
     checkEntries: checkRunEntryPaths(run.check),
-    // Fast landing mode: the policy asks for it, the project has earned it, the audit is fresh.
+    // Fast landing mode: the policy asks for it, the breaker is clear, the audit is fresh.
     fast: fastEffective(
       policy.acceptance.landingMode,
-      savedAudit?.earned,
+      savedAudit?.window,
       sourceKind === 'main-receipt' ? VERIFIED_MAIN : auditFreshness(savedAudit, audit),
     ),
     basis: {

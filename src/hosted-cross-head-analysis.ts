@@ -67,7 +67,7 @@ const json = (bytes: Uint8Array | undefined, pin: string): Record<string, unknow
  * inside a package is risk only for the packages the checked selection's pinned
  * package graph says it reaches. Any doubt returns a recheck reason.
  *
- * `fast` (the project's earned, fresh fast landing mode, src/landing-mode.ts) relaxes two
+ * `fast` (the project's effective, fresh fast landing mode, src/landing-mode.ts) relaxes two
  * refusals: a tested-doc overlap, and global risk that is not order-sensitive. Risk that is
  * order-sensitive is refused as `order-sensitive` in both modes, so the reason class says what
  * fast mode would and would not have carried. */

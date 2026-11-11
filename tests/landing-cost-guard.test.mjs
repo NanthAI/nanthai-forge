@@ -203,6 +203,7 @@ function meter(f, { extraShard = false, extraSetupSeconds = 0 } = {}) {
       );
     return f.rawChecks.callback(f.rawChecks.complete(run));
   };
+  const candidatesBefore = new Set(f.tables.projectHostedRecords.keys());
   const from = f.counts.length,
     sourceFrom = f.metrics.convexSourceCalls.length,
     reuseFrom = f.reuseDecisions?.length ?? 0,
@@ -222,6 +223,14 @@ function meter(f, { extraShard = false, extraSetupSeconds = 0 } = {}) {
     tasks,
     async stop() {
       globalThis.fetch = inner;
+      for (const row of f.tables.projectHostedRecords.values())
+        if (
+          !candidatesBefore.has(row._id) &&
+          row.kind === 'candidate' &&
+          JSON.parse(row.inline ?? f.tables.projectHostedRecordBodies.get(row.bodyId).value).result.status ===
+            'clean'
+        )
+          assert(row.candidateFiles, 'every clean Candidate producer pins its source listing');
       const counts = f.counts.slice(from);
       const observers = counts.filter(c => c.name === 'observerBudgetPage');
       const sum = key => counts.reduce((total, c) => total + c[key], 0);
@@ -454,31 +463,22 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   );
 });
 
-test('Candidate file-list rollout adds no Convex executions or data-table access to the complete landing mix', async t => {
-  const prior = process.env.FORGE_CANDIDATE_FILES;
-  process.env.FORGE_CANDIDATE_FILES = '1';
-  let selected;
-  try {
-    selected = await measureLandingCosts(t);
-  } finally {
-    if (prior === undefined) delete process.env.FORGE_CANDIDATE_FILES;
-    else process.env.FORGE_CANDIDATE_FILES = prior;
-  }
-  for (const metric of ['queries', 'observerQueries', 'mutations', 'v8Actions', 'nodeActions'])
-    assert.equal(
-      selected.measured[metric],
-      baseline.measured[metric],
-      `file-list publication shares existing ${metric}`,
-    );
-  for (const scenario of Object.values(selected.scenarios))
+test('unconditional Candidate listings keep the landing call ledger and zero legacy data-table access', () => {
+  const unchangedCalls = {
+    queries: 0,
+    observerQueries: 53 / 6,
+    mutations: 163 / 6,
+    v8Actions: 59 / 6,
+    nodeActions: 3 / 6,
+  };
+  for (const [metric, limit] of Object.entries(unchangedCalls))
+    assert(baseline.measured[metric] <= limit, `listing publication adds no ${metric}`);
+  for (const scenario of Object.values(baseline.scenarios))
     assert.equal(
       scenario.dataRecordCalls,
       0,
       'canonical landings never access the legacy per-file data table',
     );
-  t.diagnostic(
-    JSON.stringify({ enabled: selected.measured, baseline: baseline.measured, landings: selected.landings }),
-  );
 });
 
 test('runner-minute ledger rejects extra shard setup without an increase in check runs', async t => {

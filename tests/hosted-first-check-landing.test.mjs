@@ -15,12 +15,11 @@ import {
 import { validCrossHeadProof } from '../dist/hosted-cross-head-proof.js';
 import {
   auditStale,
-  earnedAfterGreen,
-  earnedAfterUnclear,
-  earnedFromHistory,
+  auditWindow,
+  auditWindowFlake,
+  auditWindowGreen,
   fastEffective,
   FAST_DRILL_MS,
-  landingEarned,
   landingModeView,
 } from '../dist/landing-mode.js';
 import { acceptancePolicyDigest } from '../dist/policy-digest.js';
@@ -335,7 +334,7 @@ for (const [path, reason] of [
   });
 
 // The reason class says which kind of risk it was (81d12a32): `order-sensitive` is never relaxed,
-// `global-risk` is what an earned fast landing mode carries.
+// `global-risk` is what an effective fast landing mode carries.
 for (const [name, memberPaths, reason] of [
   ['the change (type rules)', ['src/a.ts', 'web/tsconfig.json'], 'order-sensitive'],
   ['main (CI configuration)', ['.github/workflows/check.yml', 'src/b.ts'], 'order-sensitive'],
@@ -379,25 +378,25 @@ for (const [name, memberPaths, reason = 'global-risk'] of [
     assert.equal(runCount(f), 3);
   });
 
-// Fast landing mode (Issue 81d12a32): the policy asks for it, the project's audit history has
-// earned it, and the main audit is fresh. Only then are the two relaxed classes carried.
-const EARNED = {
-  audited: 200,
-  unclear: 0,
-  drill: { at: '2026-01-01T00:00:00.000Z', sequence: 1, reverted: true },
-};
+// Policy fast, an empty breaker window and a green main baseline suffice (509a0ffa).
+const CLEAR = [];
+const history = outcomes => outcomes.reduce((window, outcome) => auditWindow(window, outcome), undefined);
 const fastMode =
-  (earned = EARNED, audit = {}) =>
+  (window = CLEAR, audit = {}) =>
   f => {
     const policy = f.tables.hostedProjects.get(f.projectId).autonomyPolicy;
     f.patch('hostedProjects', f.projectId, {
       autonomyPolicy: { ...policy, acceptance: { ...policy.acceptance, landingMode: 'fast' } },
     });
-    f.insert('projectHostedMainAudits', { projectId: f.projectId, ...(earned ? { earned } : {}), ...audit });
+    f.insert('projectHostedMainAudits', {
+      projectId: f.projectId,
+      ...(window ? { window: history(window) } : {}),
+      ...audit,
+    });
   };
 const riskyOvertake = { memberPaths: ['src/cart.ts', 'packages/x/vitest.setup.ts'], fileCount: 2 };
 
-test('fast mode, earned and fresh: a global-risk overtake that is not order-sensitive lands on its own check', async t => {
+test('fast mode, clear breaker and fresh: a global-risk overtake that is not order-sensitive lands on its own check', async t => {
   const f = await wave(t, { ...riskyOvertake, landing: fastMode() });
   assert.deepEqual(
     states(f).map(s => s.phase),
@@ -431,19 +430,23 @@ test('fast mode makes no more Convex calls or DB IO than the second check it rep
   for (const key of Object.keys(a)) assert(a[key] <= b[key], `${key}: ${a[key]} <= ${b[key]}`);
 });
 
-for (const [name, earned] of [
-  ['no audit history', null],
-  ['199 of 200 audited landings', { ...EARNED, audited: 199 }],
-  ['no recovered red audit on record (no drill)', { audited: 500, unclear: 0 }],
-  ['5% of audits stalled or flaky', { ...EARNED, audited: 380, unclear: 20 }],
+for (const [name, window] of [
+  ['3 real reds', Array.from({ length: 3 }, () => ({ verdict: 'red', landings: 0 }))],
+  ['3 unclear audits', Array.from({ length: 3 }, () => ({ verdict: 'unclear', landings: 0 }))],
 ])
-  test(`fast policy that is not earned keeps the second check: ${name}`, async t => {
-    const f = await wave(t, { ...riskyOvertake, landing: fastMode(earned) });
+  test(`fast policy with an open circuit breaker keeps the second check: ${name}`, async t => {
+    const f = await wave(t, { ...riskyOvertake, landing: fastMode(window) });
     assert.deepEqual(f.reuseDecisions, ['global-risk']);
     assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason: 'global-risk' });
     assert.equal(receipts(f)[1].crossHeadProof, undefined);
     assert.equal(runCount(f), 3);
   });
+
+test('a missing window starts empty: the first green main check enables fast without earning or a drill', async t => {
+  const f = await wave(t, { ...riskyOvertake, landing: fastMode(null) });
+  assert.equal(receipts(f)[1].firstCheck.rule, 'fast-first-check-v1');
+  assert.equal(runCount(f), 2);
+});
 
 for (const [name, memberPaths] of [
   ['a database schema file', ['src/a.ts', 'convex/schema.ts']],
@@ -528,6 +531,18 @@ test('a fast proof decided on a fresh audit is refused at publication once the a
   assert.equal(third.crossHeadProof, undefined, 'never published on the stale audit');
   assert.deepEqual(third.firstCheck, { landedOn: 'recheck', reason: 'global-risk' });
   assert.equal(runCount(f), 4);
+});
+
+test('a breaker that opens after proof decision is checked again at publication', async t => {
+  const decided = f => attemptsOf(f).some(a => a.crossHeadProof?.algorithm === 'fast-first-check-v1');
+  const f = await wave(t, { ...riskyOvertake, landing: fastMode(), until: decided });
+  const row = auditRowOf(f);
+  f.patch('projectHostedMainAudits', row._id, {
+    window: history([result('unclear'), result('unclear'), result('unclear')]),
+  });
+  await drive(f);
+  assert.equal(receipts(f)[1].crossHeadProof, undefined);
+  assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason: 'global-risk' });
 });
 
 test('fast mode never relaxes different code edits on a path both changes touch', async t => {
@@ -844,7 +859,7 @@ for (const [name, options, reason] of [
     assert.equal(runCount(f), 3);
   });
 
-test('fast mode, earned and fresh: a clean merge of a tested Markdown file lands on its own check', async t => {
+test('fast mode, clear breaker and fresh: a clean merge of a tested Markdown file lands on its own check', async t => {
   const f = await wave(t, { ...markdown('AGENTS.md', ['AGENTS.md']), landing: fastMode() });
   assert.deepEqual(f.reuseDecisions, ['proof']);
   const second = receipts(f)[1];
@@ -1070,125 +1085,128 @@ test('a fast proof is invalid once it names an order-sensitive path or hides the
   assert.equal(validCrossHeadProof(proof(['src/a.ts'], ['tested-doc'])), false);
 });
 
-test('earned fast mode: 200 audited landings, a recovered red on record, under 5% unclear audits', () => {
-  let earned = earnedAfterGreen(undefined, 199);
-  assert.deepEqual(landingEarned(earned).missing, ['audited', 'drill']);
-  // A red audit that was detected and recovered is the drill, and costs every landing counted so far.
-  earned = earnedAfterGreen(earned, 3, { at: '2026-11-09T10:00:00.000Z', sequence: 7, reverted: true });
-  assert.deepEqual(earned, {
-    audited: 0,
-    unclear: 0,
-    drill: { at: '2026-11-09T10:00:00.000Z', sequence: 7, reverted: true },
-    lost: { at: '2026-11-09T10:00:00.000Z', reason: 'red' },
-  });
-  earned = earnedAfterGreen(earned, 200);
-  assert.equal(landingEarned(earned).earned, true);
-  assert.equal(earned.lost, undefined, 'earned again: the loss marker is cleared');
-  // Flake policy: stalled or flaky audits are counted, and at 5% they un-earn fast mode.
-  earned = earnedAfterUnclear(earned, 10);
-  assert.equal(landingEarned(earned).earned, true);
-  earned = earnedAfterUnclear(earned, 1);
-  assert.deepEqual(landingEarned(earned).missing, ['unclear']);
-  // The window halves at 800 so the share follows recent history; an earned project stays earned.
-  earned = earnedAfterGreen({ ...EARNED, audited: 770, unclear: 29 }, 1);
-  assert.deepEqual([earned.audited, earned.unclear], [385, 14]);
-  assert.equal(landingEarned(earned).earned, true);
+const fresh = { status: 'green', unaudited: { count: 0, firstAt: null }, stalled: false };
+const result = (verdict, landings = 0) => ({ verdict, landings });
+
+test('a recovered red pauses fast only until the next green audit, without an earning or drill requirement', () => {
+  const window = history([result('red')]);
+  assert.equal(fastEffective('fast', window, { ...fresh, status: 'red' }), false);
+  assert.equal(fastEffective('fast', auditWindowGreen(window, 2), fresh), true);
 });
 
-// Lead decision on Issue fe7d67a8: an owner's red-audit drill that recovers is the recovered red and
-// keeps the audited count; a real red, or a drill that recovers late, restarts it.
-test('red-audit drill rule: a drill that recovers in time counts and keeps the count; a real red and a late drill reset', () => {
-  const counted = { audited: 295, unclear: 4 };
-  const redAt = '2026-11-10T09:00:00.000Z';
-  const later = minutes => new Date(Date.parse(redAt) + minutes * 60_000).toISOString();
-  const drill = { startedAt: '2026-11-10T08:50:00.000Z', redAt };
-  const inTime = earnedAfterGreen(counted, 3, { at: later(40), sequence: 9, reverted: true, drill });
-  assert.deepEqual(inTime, {
-    audited: 295,
-    unclear: 4,
-    drill: { at: later(40), sequence: 9, reverted: true, started: drill.startedAt, red: redAt },
-  });
-  assert.equal(landingEarned(inTime).earned, true, 'the drill completes the bar');
-  const late = earnedAfterGreen(counted, 3, {
-    at: later(FAST_DRILL_MS / 60_000 + 1),
-    sequence: 9,
-    reverted: true,
-    drill,
-  });
-  assert.deepEqual(
-    [late.audited, late.unclear, late.lost.reason, late.drill.started],
-    [0, 0, 'red', undefined],
-  );
-  const real = earnedAfterGreen(counted, 3, { at: later(40), sequence: 9, reverted: false });
-  assert.deepEqual([real.audited, real.lost.reason], [0, 'red']);
+test('3 real reds in 50 audited landings pause with advice; the clearing window resumes automatically', () => {
+  let window = history([result('red'), result('green', 1), result('red'), result('green', 1), result('red')]);
+  const paused = landingModeView('fast', window, fresh);
+  assert.equal(paused.effective, 'strict');
+  assert.equal(paused.advice.switchTo, 'strict');
+  assert.match(paused.reason, /3 real red audits/);
+  assert.match(paused.nextStep, /set-policy/);
+  window = auditWindowGreen(window, 47);
+  assert.equal(fastEffective('fast', window, fresh), false, 'oldest red is still in the last 50 landings');
+  window = auditWindowGreen(window, 1);
+  assert.equal(fastEffective('fast', window, fresh), true, 'oldest red left the 50-landing horizon');
+  assert.equal(landingModeView('fast', window, fresh).advice, null);
 });
 
-test('the owner recount replays history with the live rules: exact, own-check, stalled, flake, drill and real reds', () => {
-  const e = (kind, sequence, extra = {}) => ({
-    kind,
-    at: `2026-11-10T0${sequence % 10}:00:00.000Z`,
-    runId: `r${sequence}`,
-    sequence,
-    ...extra,
-  });
-  const drill = {
-    startedAt: '2026-11-10T00:00:00.000Z',
-    redAt: '2026-11-10T05:00:00.000Z',
-    recoveredAt: '2026-11-10T05:40:00.000Z',
-  };
-  const landings = [
-    { sequence: 1, kind: 'exact' },
-    { sequence: 2, kind: 'proof' },
-    { sequence: 3, kind: 'docs' },
-    { sequence: 4, kind: 'proof' }, // stalled, then its retry audits it
-    { sequence: 5, kind: 'proof' }, // a red the flake guard cleared
-    { sequence: 6, kind: 'proof' }, // the drill's red
-    { sequence: 7, kind: 'proof' }, // the drill's recovery adds nothing
-    { sequence: 8, kind: 'proof' }, // covered by a later exact full landing
-  ];
-  const events = [
-    e('green', 2),
-    e('stalled', 4),
-    e('green', 4),
-    e('red', 5),
-    e('flake', 5, { runId: 'r5' }),
-    e('red', 6, { drill }),
-    e('culprit', 6, { runId: 'r6' }),
-    e('green', 7, { drill: { ...drill, outcome: 'recovered' } }),
-  ];
-  assert.deepEqual(earnedFromHistory(landings, events), {
-    audited: 4,
-    unclear: 2,
-    drill: { at: drill.recoveredAt, sequence: 7, reverted: true, started: drill.startedAt, red: drill.redAt },
-  });
-  // An exact full landing audits itself: a stalled audit after it never makes it unclear (as live).
-  assert.deepEqual(earnedFromHistory([{ sequence: 1, kind: 'exact' }], [e('stalled', 1), e('green', 1)]), {
-    audited: 1,
-    unclear: 0,
-  });
-  // 2026-11-10 dogfood drill: a claimed red the live counter never closed (a second failed audit lost the
-  // claim) recovered at its episode's green, in time, so the recount keeps the count.
-  const unclosed = { startedAt: drill.startedAt, redAt: drill.redAt };
-  assert.deepEqual(
-    earnedFromHistory(landings, [...events.slice(0, 5), e('red', 6, { drill: unclosed }), e('green', 7)]),
-    {
-      audited: 4,
-      unclear: 2,
-      drill: {
-        at: e('green', 7).at,
-        sequence: 7,
-        reverted: false,
-        started: drill.startedAt,
-        red: drill.redAt,
-      },
+test('3 unclear audits in the last 50 audits pause fast, counted per audit rather than covered landing', () => {
+  let window = history([result('unclear', 40), result('unclear', 1)]);
+  assert.equal(fastEffective('fast', window, fresh), true);
+  window = auditWindow(window, result('unclear'));
+  assert.equal(fastEffective('fast', window, fresh), false);
+  assert.match(landingModeView('fast', window, fresh).reason, /flaky or stalled/);
+  for (let i = 0; i < 47; i++) window = auditWindowGreen(window, 1);
+  assert.equal(fastEffective('fast', window, fresh), false);
+  window = auditWindowGreen(window, 1);
+  assert.equal(fastEffective('fast', window, fresh), true);
+  assert.equal(window.length, 50);
+});
+
+test('reds stay in the 50-landing horizon even when over 50 stalled audits pass without auditing a landing', () => {
+  let window = history([result('red'), result('red'), result('red')]);
+  for (let i = 0; i < 60; i++) window = auditWindow(window, result('unclear'));
+  for (let i = 0; i < 48; i++) window = auditWindowGreen(window, 1);
+  const view = landingModeView('fast', window, fresh);
+  assert.equal(view.window.unclear, 2);
+  assert.equal(view.window.red, 3, 'evicting an old audit must not evict a recent landing position');
+  assert.equal(view.effective, 'strict');
+  window = auditWindowGreen(window, 2);
+  assert.equal(fastEffective('fast', window, fresh), true);
+  assert.equal(window.length, 50);
+});
+
+test('a failed coalesced audit anchors reds at its landing position rather than aging its own reds out on recovery', () => {
+  let window = history([result('red', 498), result('red', 499), result('red', 500)]);
+  window = auditWindowGreen(window, 500);
+  assert.equal(landingModeView('fast', window, fresh).window.red, 3);
+  window = auditWindowGreen(window, 47);
+  assert.equal(fastEffective('fast', window, fresh), false);
+  window = auditWindowGreen(window, 1);
+  assert.equal(fastEffective('fast', window, fresh), true);
+});
+
+test('the circuit breaker retains at most 50 compact slots at 500 audited landings and repeated flakes', t => {
+  let window;
+  for (let i = 1; i <= 500; i++) {
+    window = auditWindow(window, {
+      verdict: 'red',
+      landings: i,
+      runId: '00000000-0000-4000-8000-000000000000',
+    });
+    assert(window.length <= 50);
+  }
+  window = auditWindowGreen(window, 500);
+  assert.equal(window.length, 50);
+  assert.equal(landingModeView('fast', window, fresh).window.red, 50);
+  // Pairing the two horizons uses one bounded row field, including the classification pins.
+  const worst = Array.from({ length: 50 }, () => ({
+    red: { age: -Number.MAX_SAFE_INTEGER, count: Number.MAX_SAFE_INTEGER, drill: Number.MAX_SAFE_INTEGER },
+    audit: {
+      verdict: 'drill',
+      runId: '00000000-0000-4000-8000-000000000000',
+      landings: Number.MAX_SAFE_INTEGER,
     },
+  }));
+  const bytes = Buffer.byteLength(JSON.stringify({ window: worst }));
+  assert(bytes <= 12000);
+  t.diagnostic(`window JSON upper-bound fixture: ${bytes} bytes for 50 slots`);
+  let flakes;
+  for (let i = 0; i < 3; i++) {
+    flakes = auditWindow(flakes, { verdict: 'red', landings: 1, runId: `audit-${i}` });
+    flakes = auditWindowFlake(flakes, `audit-${i}`, 1);
+  }
+  const view = landingModeView('fast', flakes, fresh);
+  assert.equal(view.window.red, 0);
+  assert.equal(view.window.unclear, 3);
+  assert.equal(view.effective, 'strict');
+});
+
+test('a new project with fast policy resumes after its first green main audit', () => {
+  assert.equal(fastEffective('fast', undefined, { ...fresh, status: 'unknown' }), false);
+  assert.equal(fastEffective('fast', undefined, fresh), true);
+  assert.equal(fastEffective('strict', undefined, fresh), false);
+});
+
+test('flake classification replaces the failed audit, and coalesced green coverage advances the red horizon', () => {
+  const failed = auditWindow(undefined, { verdict: 'red', landings: 0, runId: 'audit' });
+  const flake = auditWindowFlake(failed, 'audit', 50);
+  assert.deepEqual(flake, [{ audit: { verdict: 'unclear' } }]);
+  assert.equal(fastEffective('fast', flake, fresh), true);
+  const green = auditWindowGreen(history([result('red'), result('red'), result('red')]), 500);
+  assert.equal(fastEffective('fast', green, fresh), true);
+  assert.equal(
+    green.some(slot => slot.red),
+    false,
   );
-  // The same red without the owner's drill is a real red: everything before it is lost.
-  const real = earnedFromHistory(landings, [...events.slice(0, 5), e('red', 6), e('green', 7)]);
-  assert.deepEqual(
-    [real.audited, real.unclear, real.lost.reason, real.drill.at],
-    [2, 0, 'red', e('green', 7).at],
-  );
+});
+
+test('optional timely drill reds are excluded; a late drill is real and never resets history', () => {
+  const drill = { startedAt: '2026-11-10T08:00:00.000Z', redAt: '2026-11-10T09:00:00.000Z' };
+  const window = history([result('unclear'), ...Array.from({ length: 3 }, () => result('drill'))]);
+  const timely = auditWindowGreen(window, 1, { ...drill, recoveredAt: '2026-11-10T10:00:00.000Z' });
+  assert.equal(fastEffective('fast', timely, fresh), true);
+  const late = auditWindowGreen(window, 1, { ...drill, recoveredAt: '2026-11-10T12:00:00.000Z' });
+  assert.equal(fastEffective('fast', late, fresh), false);
+  assert.equal(landingModeView('fast', late, fresh).window.unclear, 1);
 });
 
 test('audit freshness bounds lag by count and by time, and a stalled audit closes fast mode', () => {
@@ -1206,51 +1224,32 @@ test('audit freshness bounds lag by count and by time, and a stalled audit close
   assert.equal(auditStale(audit(1, 5, { stalled: true }), now), 'audit-stalled');
   assert.equal(auditStale(audit(0, 0, { status: 'red' }), now), 'main-red');
   assert.equal(auditStale(audit(0, 0, { status: 'unknown' }), now), 'no-green-audit');
-  assert.equal(fastEffective('fast', EARNED, audit(1, 5), now), true);
-  assert.equal(fastEffective('strict', EARNED, audit(1, 5), now), false);
-  assert.equal(fastEffective(undefined, EARNED, audit(1, 5), now), false);
+  assert.equal(fastEffective('fast', CLEAR, audit(1, 5), now), true);
+  assert.equal(fastEffective('strict', CLEAR, audit(1, 5), now), false);
+  assert.equal(fastEffective(undefined, CLEAR, audit(1, 5), now), false);
 });
 
-test('landing mode advice: switch fast on once earned, off after a red or flaky audits, never otherwise', () => {
-  const fresh = { status: 'green', unaudited: { count: 0, firstAt: null }, stalled: false };
-  const view = (mode, earned, audit = fresh) => landingModeView(mode, earned, audit);
-  assert.equal(view(undefined, undefined).advice, null);
-  assert.deepEqual(view(undefined, undefined).state, 'strict');
-  const on = view('strict', EARNED);
-  assert.equal(on.state, 'earned');
-  assert.deepEqual(on.advice.policy, { acceptance: { landingMode: 'fast' } });
-  assert.match(on.nextStep, /set-policy \{"acceptance":\{"landingMode":"fast"\}\}/);
-  assert.equal(view('fast', EARNED).state, 'fast');
-  assert.equal(view('fast', EARNED).effective, 'fast');
-  // A stale audit pauses fast without advice: it resumes by itself.
-  const paused = view('fast', EARNED, { ...fresh, stalled: true });
-  assert.deepEqual([paused.state, paused.effective, paused.advice], ['suspended', 'strict', null]);
-  // Not earned yet: progress only.
-  const earning = view('fast', { audited: 12, unclear: 0 });
-  assert.deepEqual([earning.state, earning.effective, earning.advice], ['earning', 'strict', null]);
-  assert.match(earning.nextStep, /12 of 200 audited landings/);
-  // Lost on a red audit, or on flaky and stalled audits: advise the owner and the next agent to switch off.
-  const lost = view('fast', {
-    audited: 3,
-    unclear: 0,
-    drill: EARNED.drill,
-    lost: { at: '2026-11-09T10:00:00.000Z', reason: 'red' },
-  });
-  assert.equal(lost.state, 'lost');
-  assert.deepEqual(lost.advice.policy, { acceptance: { landingMode: 'strict' } });
-  assert.match(lost.nextStep, /went red on 2026-11-09/);
-  const flaky = view('fast', { ...EARNED, audited: 300, unclear: 30 });
-  assert.equal(flaky.advice.switchTo, 'strict');
-  assert.match(flaky.nextStep, /stalled or flaky/);
-  // The next agent's next step: the land receipt carries the advice only when there is a switch to make.
-  assert.equal(landingAdvice({ landing: on }), on.nextStep);
-  assert.equal(landingAdvice({ landing: lost }), lost.nextStep);
-  for (const quiet of [paused, earning, view('fast', EARNED), view(undefined, undefined)])
-    assert.equal(landingAdvice({ landing: quiet }), null);
+test('check-settings and land receipt explain every pause and give one next step without earning wording', () => {
+  const view = (window, audit = fresh) => landingModeView('fast', history(window ?? []), audit);
+  const paused = view(undefined, { ...fresh, stalled: true });
+  const first = view(undefined, { ...fresh, status: 'unknown' });
+  const red = view([result('red')], { ...fresh, status: 'red' });
+  const repeated = view([result('red'), result('red'), result('red')]);
+  for (const state of [paused, first, red, repeated]) {
+    assert.deepEqual([state.mode, state.effective, state.state], ['fast', 'strict', 'suspended']);
+    assert(state.reason);
+    assert.equal(
+      landingAdvice({ landing: state }),
+      `Landing mode: fast; effective: strict. ${state.nextStep}`,
+    );
+    assert.doesNotMatch(state.nextStep, /earn|200|always green/i);
+  }
+  for (const quiet of [view(undefined), landingModeView('strict', undefined, fresh)])
+    assert.equal(
+      landingAdvice({ landing: quiet }),
+      `Landing mode: ${quiet.mode}; effective: ${quiet.effective}. Nothing to do.`,
+    );
   assert.equal(landingAdvice(undefined), null);
-  // The wording never promises a green main.
-  for (const text of [on, lost, flaky, paused, earning].map(v => v.nextStep))
-    assert.doesNotMatch(text, /always green/i);
 });
 
 test('the landing mode is read live: switching it never invalidates a pinned landing', () => {

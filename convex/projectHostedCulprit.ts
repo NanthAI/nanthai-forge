@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { earnedAfterUnclear } from '../src/landing-mode';
+import { auditWindowFlake } from '../src/landing-mode';
 import { convexFetch, networkTimeout } from './networkFetch';
 import { noteTrustCulprit } from './projectHostedTrust';
 import { v } from 'convex/values';
@@ -692,7 +692,8 @@ async function classify(
         debt: count ? auditDebt(count, firstAt, settings) : false,
         ...(!count ? { wake: undefined } : {}),
         // Flake policy (81d12a32): the later pass vouches for the audit, the flake is counted.
-        earned: earnedAfterUnclear(auditRow.earned, covered),
+        window: auditWindowFlake(auditRow.window, state.audit.id, covered),
+        earned: undefined,
       });
       if (count) await armAudit(ctx, auditRow, auditDue(count, firstAt, settings));
       await ctx.scheduler.runAfter(
@@ -1008,7 +1009,6 @@ async function prepareSystemCompose(
     jobOperation: culpritId({ composeJobOperation: operationId }),
   });
   const compose: ComposeState = {
-    ...(process.env.FORGE_CANDIDATE_FILES === '1' ? { candidateFiles: true } : {}),
     request,
     ownerInputs: true,
     main: await saveObject(ctx, project._id, { sha256: main.head }),

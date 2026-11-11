@@ -54,7 +54,7 @@ export const autonomyPolicySchema = z.object({
     hostedCrossHeadReuse: z.boolean().optional(),
     /** Hosted landing mode (src/landing-mode.ts); absent is strict. `fast` also lands a change on its
      * own check across a tested-doc or non-order-sensitive global-risk overlap, only while the project
-     * has earned it and the main audit is fresh. Read live, so a change never invalidates a landing. */
+     * has a clear circuit breaker and the main audit is fresh. Read live, so a change never invalidates a landing. */
     landingMode: landingModeSchema.optional(),
     /** Hosted main-race recheck under the contract gate: run only tests affected by
      * both the main delta and this change; absent means on. */

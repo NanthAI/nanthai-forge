@@ -36,11 +36,13 @@ const isLane = (f, run) =>
     [0, 1, 2].some(n => admission.admissionOperationId(e.state.id, n) === run.request.operationId),
   );
 const queueRuns = f => f.runs().filter(run => !isLane(f, run));
-// The same five-change wave on the serial path (early refusal disabled), measured
-// on 2026-11-05: 221 transactions, 4,708 documents read, 1,682 written. Early
-// refusal measured 215 / 4,585 / 1,619: each refused change still recomposes
-// once, and the four serial wake-and-wait drives are gone.
-const BASELINE = { transactions: 221, documentsRead: 4708, documentsWritten: 1682 };
+// The same five-change wave with early refusal disabled, measured against the
+// current storage format (S4, Issue 91df7eda): 210 transactions, 4,815 documents
+// read, 1,797 written, including 17 delayed-retention scheduler writes. Both
+// paths publish unconditional Candidate listings. The old serial baseline
+// (221 / 4,708 / 1,682) predates that representation; current main without
+// listings already writes 1,684 non-maintenance documents and cannot meet it.
+const BASELINE = { transactions: 210, documentsRead: 4815, documentsWritten: 1780 };
 
 /** `count` changes pass their Lane checks together; the first lands on its own run
  * and moves main, the rest are refused. Records when each refused change's

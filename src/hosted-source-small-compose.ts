@@ -151,25 +151,23 @@ export async function runSmallSourceCompose(
     const paths = [...new Set([...before.keys(), ...after.keys()])]
       .filter(path => !same(before.get(path), after.get(path)))
       .sort();
-    const listing = plan.candidateFiles
-      ? saveBytes(
-          candidateFileList(
-            plan.base.head,
-            state.sha256,
-            new Map(paths.map(path => [path, before.get(path) ?? null])),
-            files,
-            pages.flat(),
-          ),
-        )
-      : null;
-    const listingPin = listing ? { sha256: digest(listing), size: listing.length } : null;
+    const listing = saveBytes(
+      candidateFileList(
+        plan.base.head,
+        state.sha256,
+        new Map(paths.map(path => [path, before.get(path) ?? null])),
+        files,
+        pages.flat(),
+      ),
+    );
+    const listingPin = { sha256: digest(listing), size: listing.length };
     const bytes = saveBytes(
       composeResultSchema.parse({
         schema: 1,
         kind: 'forge-hosted-compose-result',
         input,
         algorithm: plan.algorithm,
-        result: { status: 'clean', state, paths, ...(listingPin ? { candidateFiles: listingPin } : {}) },
+        result: { status: 'clean', state, paths, candidateFiles: listingPin },
       }),
     );
     const output = { sha256: digest(bytes), size: bytes.length };
@@ -183,7 +181,7 @@ export async function runSmallSourceCompose(
     // No output before eligibility is proven, so fallback reuses the same input and descriptors.
     const results = await Promise.allSettled([
       ...(generated ? [upload(state, generated)] : []),
-      ...(listing && listingPin ? [upload(listingPin, listing)] : []),
+      upload(listingPin, listing),
       upload(output, bytes),
     ]);
     for (const result of results) if (result.status === 'rejected') throw result.reason;

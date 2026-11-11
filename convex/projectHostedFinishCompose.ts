@@ -222,7 +222,6 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
   }
   const project = await hostedWriteProject(ctx, input.projectId, state.actor, request.authorityEpoch);
   const stateValue: ComposeState = {
-    ...(process.env.FORGE_CANDIDATE_FILES === '1' ? { candidateFiles: true } : {}),
     retryUntil: Date.parse(pending.at) + HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS,
     ownerProvenance: 1,
     ...(value.restoreBases ? { restoreBases: value.restoreBases } : {}),

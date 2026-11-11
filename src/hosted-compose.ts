@@ -103,6 +103,7 @@ export const composeInputSchema = z
   .object({
     schema: z.literal(1),
     kind: z.literal('forge-hosted-compose-input'),
+    // Read-only compatibility for already pinned compose inputs; new plans omit this field.
     candidateFiles: z.literal(true).optional(),
     restoreBases: z.record(z.uuid(), saveWorkerObjectSchema).optional(),
     batch: batchComposeSchema.optional(),

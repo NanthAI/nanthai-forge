@@ -248,55 +248,57 @@ configuration; lint, format and type-rule configuration (`tsconfig*.json`, ESLin
 Prettier, Biome, Ruff, RuboCop, Clippy and similar). To keep any other path on the second
 check, declare it in the check's `globalRiskPaths`.
 
-**Fast is earned per project.** The policy is the owner's consent; the project's own audit
-history is the evidence. Fast mode carries a landing only while all three hold:
+**Fast follows the owner's policy, with a circuit breaker.** No earning count or drill is
+required. Fast carries a landing while all of these hold:
 
 1. the policy is `fast`;
-2. the project has earned it: 200 audited landings since the last red audit, fewer than 5% of
-   landings whose audit gave no clean verdict, and one red audit on record that was detected
-   and recovered (a red-audit drill, or a real one);
-3. the main audit is fresh: main is not red, no audit newer than the last green ended
-   without a verdict, at most 10 landings are unaudited and the oldest of them is at most
-   60 minutes old. Freshness is checked when the proof is decided and again in the
-   transaction that publishes it. A change that lands on main's own exact full check has no
-   lag to bound.
+2. a green main audit is on record (an accepted exact full check also establishes this baseline);
+3. main is not red and the audit is fresh: no audit newer than the last green ended without a
+   verdict, at most 10 landings are unaudited and their oldest is at most 60 minutes old;
+4. fewer than 3 real red audits occurred in the last 50 audited landings, and fewer than 3 of
+   the last 50 audits ended without a clean verdict (flaky or stalled).
 
-**Red-audit drill.** A project that has never had a red audit runs one drill. Only the owner
-person starts it; from an agent sign-in (the owner's own CLI included) the request opens an
-approval request and nothing starts until the owner grants it on the approve link:
+Freshness and the breaker are checked when the proof is decided and again in the publication
+transaction. A proof based on main's own exact full check has no audit lag to bound. Otherwise
+it gets the second check; a passed full second check audits main too. A single recovered red
+pauses fast only until main is green and audited again. A new project can use fast after its
+first green main audit. Repeated trouble pauses fast and advises the owner and next agent to
+switch to strict; it resumes automatically when the window clears, if policy remains fast.
+Forge never edits that policy automatically.
+
+The existing main audit row retains at most 50 compact verdicts, updated only in transactions
+that already write the row. Each compact slot pairs a red count at an audited landing position with a recent audit
+verdict. The two horizons advance independently: a coalesced green audit advances the red
+horizon by its covered landings, while unclear verdicts count once per audit, including its
+retry. At most 50 landing positions and 50 audit verdicts fit in those 50 slots. A flake replaces the failed verdict with one unclear
+verdict. A missing window starts empty; no history recount or backfill runs. Retired earning
+fields have no readers and are removed by the next verdict write; their schema validator
+only tolerates existing rows during deployment. Older CLIs' recount requests return an inert
+compatibility reply: nothing is scheduled and the window stays unchanged.
+
+**Optional red-audit drill.** To exercise detection and recovery, the owner can start a drill.
+It is advice, never an eligibility condition. From an agent sign-in, the existing owner
+approval still applies:
 
 ```sh
 nforge x ROOT configure-runner '{"mainAudit":{"drill":"start"}}'
 ```
 
-The drill claims the first red main audit within 2 hours of its start; it cannot start while
-main is red, so no red can be marked as a drill after the fact. The red is a normal red: landings
-are held, the culprit is found and reverted or a fix is opened. If main recovers within 2 hours
-of the red, the drill is the recovered red on record and the audited count is kept (the
-landings of that red episode are not counted). A drill that recovers later is a real red. A red
-the flake guard clears ends the drill without counting. The audit history records the drill on
-the red event and on the verdict that ended it: start, red, recovery and end times, and the
-outcome (`recovered`, `late` or `flake`). `check-settings` `mainAudit.drill` shows one in
-progress.
-
-Otherwise the landing gets the second check, and a passed second check is itself a full audit
-of main. A real red audit takes the earned state away: the count restarts from zero. Counters
-halve at 800 landings, so the share follows recent history. They live on the project's main
-audit row and are written only by transactions that already write it, and by the owner's
-recount: `configure-runner '{"mainAudit":{"backfill":{"since":"ISO_TIME"}}}'` (owner person, or
-granted the same way as a drill) replays the retained receipts and audit events since that time
-with the same rules and replaces the counters. It reads each receipt and event once, writes once,
-and a rerun gives the same counters.
+The drill claims the first red main audit within 2 hours of its start and cannot start while
+main is red. Normal recovery still applies. A deliberate drill recovered within 2 hours of its
+red is recorded as a drill rather than a real red; a late drill counts as real. A flake-cleared
+red counts as unclear. Events retain start, red, recovery and end times and the outcome
+(`recovered`, `late` or `flake`); `check-settings` `mainAudit.drill` shows a drill in progress.
 
 **Flake policy.** A failed audit re-runs its failing files once on the same head. A pass there
-vouches for the audit: it is recorded as a `flake`, main is not red and fast mode is not lost.
-Each flaky or stalled audit counts as "no clean verdict"; at 5% fast mode is un-earned, because
-a flaky suite turns red audits into false culprit hunts. The retry count is fixed at one.
+vouches for the audit, records a `flake` and clears main red; its verdict counts as one unclear
+audit. The retry count stays fixed at one.
 
-**Advice.** Forge never edits the policy. `check-settings` (`mainAudit.landing`), the web
-project settings and the next land receipt show the mode, what is in effect, progress toward
-earning, and one next step only when the project should switch: on once earned, off after a
-red audit or when audits are often stalled or flaky.
+**Advice.** `check-settings` (`mainAudit.landing`), web project settings and the next land
+receipt show the policy mode, effective mode, reason when paused and one next step. The
+receipt retains the observation from check selection, without another status call. Live
+trouble resumes automatically after a green, fresh audit. The circuit breaker advises switching
+to strict after 3 real reds or 3 unclear audits in the stated windows. To choose fast:
 
 ```sh
 nforge x ROOT set-policy '{"acceptance":{"landingMode":"fast"}}'

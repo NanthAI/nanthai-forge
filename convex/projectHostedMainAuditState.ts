@@ -25,8 +25,8 @@ import { recordAuditRunnerSeconds } from './projectLandingSpeed';
 import {
   drillClaims,
   drillInTime,
-  earnedAfterGreen,
-  earnedAfterUnclear,
+  auditWindow,
+  auditWindowGreen,
   fastEffective,
   landingModeView,
   type AuditFreshness,
@@ -100,7 +100,7 @@ export const VERIFIED_MAIN: AuditFreshness = {
   unaudited: { count: 0, firstAt: null },
   stalled: false,
 };
-/** Whether a fast-mode proof may carry a landing right now: policy, earned history and a fresh
+/** Whether a fast-mode proof may carry a landing right now: policy, the circuit breaker and a fresh
  * audit. `verifiedMain`: the proof's baseline is the current main receipt, re-checked by its caller. */
 export async function fastLanding(
   ctx: QueryCtx | MutationCtx,
@@ -113,7 +113,7 @@ export async function fastLanding(
   const row = await auditRow(ctx, project._id);
   return fastEffective(
     mode,
-    row?.earned,
+    row?.window,
     verifiedMain && gate.status !== 'red' ? VERIFIED_MAIN : auditFreshness(row, gate),
   );
 }
@@ -309,7 +309,14 @@ export async function noteMainLanding(
       wake: undefined,
       startFailure: undefined,
       // An exact full pass audits this landing and every unaudited one below it.
-      earned: earnedAfterGreen(row.earned, (row.unaudited?.count ?? 0) + 1, ended.recovered),
+      window: auditWindowGreen(
+        row.window,
+        (row.unaudited?.count ?? 0) + 1,
+        ended.record?.redAt
+          ? { startedAt: ended.record.startedAt, redAt: ended.record.redAt, recoveredAt: receipt.at }
+          : undefined,
+      ),
+      earned: undefined,
     });
     if (row.red) {
       await auditEvent(
@@ -416,7 +423,14 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
       red: undefined,
       debt: false,
       ...(count ? {} : { startFailure: undefined }),
-      earned: earnedAfterGreen(row.earned, meta.count, ended.recovered),
+      window: auditWindowGreen(
+        row.window,
+        meta.count,
+        ended.record?.redAt
+          ? { startedAt: ended.record.startedAt, redAt: ended.record.redAt, recoveredAt: at }
+          : undefined,
+      ),
+      earned: undefined,
     });
     await auditEvent(ctx, row, 'green', at, run.request.expectedHead, run.id, meta.sequence, ended.record);
     await releaseMainHolds(ctx, projectId);
@@ -439,6 +453,12 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
     const claims = !row.red && drillClaims(row.drill, at);
     await ctx.db.patch(row._id, {
       red: { ...row.red, since: row.red?.since ?? at, head: run.request.expectedHead, runId: run.id },
+      window: auditWindow(row.window, {
+        verdict: claims || row.drill?.red ? 'drill' : 'red',
+        landings: meta.count,
+        runId: run.id,
+      }),
+      earned: undefined,
       ...(!row.red && row.drill && !row.drill.red
         ? {
             drill: claims ? { ...row.drill, red: { at, runId: run.id, sequence: meta.sequence } } : undefined,
@@ -469,7 +489,9 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
     await ctx.db.patch(row._id, {
       unaudited: { count: row.unaudited!.count, firstAt },
       // Counted once per audit, not again for its retry.
-      ...(meta.attempt === 0 ? { earned: earnedAfterUnclear(row.earned, meta.count) } : {}),
+      ...(meta.attempt === 0
+        ? { window: auditWindow(row.window, { verdict: 'unclear', landings: 0 }), earned: undefined }
+        : {}),
     });
     await auditEvent(ctx, row, 'stalled', at, run.request.expectedHead, run.id, meta.sequence);
     // A reduced pass is inconclusive, not a runner outage. Keep the actual run
@@ -546,7 +568,7 @@ export async function mainAuditStatus(ctx: QueryCtx | MutationCtx, projectId: Id
     // One derive of the landing mode for status, the CLI and the web (src/landing-mode.ts).
     landing: landingModeView(
       project ? effectivePolicy(project).acceptance.landingMode : undefined,
-      row?.earned,
+      row?.window,
       auditFreshness(row, {
         status: row?.red ? 'red' : row?.lastGreen ? 'green' : 'unknown',
         unaudited: pending,

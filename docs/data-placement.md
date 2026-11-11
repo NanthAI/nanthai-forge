@@ -86,20 +86,36 @@ only verified frozen-manifest files; the repair records a backfill time and move
 | `secretObjects`, `secretVersions`, `secretGrants`, `secretEvents`, `secretDeletions` | Encrypted Secret Objects and grants. | Fixed |
 
 Canonical Candidate file readers negotiate `candidate-source-files`. Their
-source-only R2 listing, when a trusted producer supplies it, pins the exact base
+source-only R2 listing pins the exact base
 and head and contains changed paths, modes and blob identities, with no people
-or Work payloads. The browser otherwise compares the two exact State manifests;
-CLI provenance retains its canonical history reader. The source writer captures default-off
-`FORGE_CANDIDATE_FILES=1` in the original compose plan. All compose producers
-(public, finish, batch, GitHub inbound and culprit) use that server environment
-mechanism, as S1 does for capsules. Small, stepped and fixed workers build one
+or Work payloads. Candidates composed before listings existed still open through
+the two exact State manifests; CLI provenance retains its canonical history
+reader. All compose producers (public, finish, batch, GitHub inbound and culprit)
+write the listing unconditionally, with no environment setting.
+Small, stepped and fixed workers build one
 listing from their already verified manifests; publication pins its digest/size
 as server metadata on the immutable Candidate, with no new landing RPC. Old
 indexed readers of a Candidate carrying that pointer return `CLI_UPGRADE_REQUIRED`.
 Compatible canonical Candidate header reads keep their original shape.
 
+The unconditional-listing fixture budgets (Issue `91df7eda`) account for one
+R2 object and its descriptor: the dogfood recompose retains 109 B more Candidate
+metadata and 424 B more `projectObjects` JSON. Existing R2 counters add 1 B each
+to the source step, landing request, finish-read header and speed row, and 7 B to immediate landing
+observations; no new Convex call or per-file row is needed. The 29k/58k ancestry
+fixture accounts for two descriptor reads and one descriptor write per listing
+inside its existing source calls; its history-growth and memory bounds remain.
+The batch fallback guard keeps its controller write bound and separately allows
+at most one descriptor mark per distinct new listing pin in existing calls.
+The six-landing mix
+adds exactly four PUTs and four GET/HEADs; the inbound fixture adds one of each
+and 631 uploaded bytes. These are synthetic deltas, not billed usage. The cost
+ledger retains a Class B warning for a pre-existing 0.83 request difference
+between its old budget and the current baseline, separately from the approved
+0.67 listing requests per landing.
+
 Legacy projection writers remain unchanged. Existing `projectWorkDataRecords`
-rows are unchanged; no migration, deletion or flag enablement runs implicitly. See the [replacement and migration plan](research/placement-review.md#s4-per-file-projections-leave-convex).
+rows are unchanged; no migration or deletion runs implicitly. See the [replacement and migration plan](research/placement-review.md#s4-per-file-projections-leave-convex).
 Those writers stay in Convex by design: the [S4 remaining-writers verdict](research/placement-review.md#s4-remaining-writers)
 sizes each one and proposes a single change, onboarding without per-file rows.
 
@@ -236,7 +252,7 @@ Convex/R2 networks and billed usage are outside this local fixture. The browser
 harness is separate from the normal Node suite; the landing runner does not
 install a browser. No time assertion is used as a build gate.
 
-The remaining projection cutover is not implemented by the Candidate setting.
+The remaining projection cutover is separate from Candidate listing publication.
 Revision-free Work mutations still require selected payload attributes in their
 transaction, and canonical `hostedRecordBody` still reads Convex bodies. A
 canonical copy therefore does not yet replace those reads with R2. Imported

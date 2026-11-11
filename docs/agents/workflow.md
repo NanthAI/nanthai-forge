@@ -847,7 +847,7 @@ that transition `BATCH_FALLBACK`; only an actual main head or receipt advance is
 `CHANNEL_CHANGED`. A check-binding change is `ATTEMPT_REPLACED`, and an audit
 proof refresh without source churn is `CHECK_EVIDENCE_REFRESH`.
 
-`acceptance.landingMode` (absent is `strict`; `fast` once the project has earned it) decides
+`acceptance.landingMode` (absent is `strict`; `fast` while main is green, the audit is fresh and the 50-outcome circuit breaker is clear) decides
 which refused proofs still land on the Lane's own check: [landing modes](../pre-queue-checks.md#landing-modes).
 Hosted main-only finish retries can reuse a READY pass through
 `acceptance.hostedCrossHeadReuse` (absent means on). This is separate from the

@@ -610,11 +610,11 @@
       "measuredBy": "landing-fixture",
       "metric": "r2ClassA",
       "unit": "ops",
-      "value": 3.17,
+      "value": 3.83,
       "floor": 0.1,
-      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo accepted-Candidate submission (initial save/compose excluded), one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
+      "source": "Six-landing S4 fixture on c840855b: 19 -> 23 PUTs, divided by six landings; original worker modules verified against the pinned base and replayed with the listing absent. Synthetic counts, not billed usage.",
       "issue": "9db58ca6",
-      "reason": "Class A costs ten times class B. Source bytes go to R2 (data placement); a recompose uploads its result once."
+      "reason": "Issue 91df7eda makes one listing unconditional per Candidate: exactly four additional PUTs across this mix, within the approved +0.67 Class A per landing ($0.003 per 1,000 landings with Class B). No additional Convex executions."
     },
     {
       "id": "landing-r2-class-b",
@@ -622,11 +622,11 @@
       "measuredBy": "landing-fixture",
       "metric": "r2ClassB",
       "unit": "ops",
-      "value": 10.67,
+      "value": 11.34,
       "floor": 0.25,
-      "source": "tests/landing-cost-guard.test.mjs, unchanged six-landing mix; Issue 71dbe458: manifest-only V8 composition and shared per-action descriptors/read cache. Synthetic counts, not billed usage.",
+      "source": "Six-landing S4 fixture: 69 -> 73 GET/HEAD requests. Add only the approved 4/6 listing requests to the existing 10.67 ledger; the measured pre-existing baseline of 11.5 remains a visible warning. Synthetic counts, not billed usage.",
       "issue": "71dbe458",
-      "reason": "Object reads per landing: no per-step object re-resolve was part of the fewer-steps decision. Source-step cut (71dbe458) ratchets 11.67 to 10.67; total calls 38 to 37.5 per landing, Node actions 4/6 to 3/6, V8 unchanged at 59/6. Starter modeled Convex subtotal includes $2.20/M calls, $0.22/GB DB I/O, $0.33/GB-h actions and $0.132/GB R2 upload egress; see hosted-source-worker.md for scope and arithmetic."
+      "reason": "Issue 91df7eda permits +0.67 Class B per landing for one Candidate listing. The remaining 0.83 request difference predates this cutover; do not absorb it into the listing budget. Convex executions are unchanged."
     },
     {
       "id": "landing-r2-bytes-put",
@@ -766,11 +766,11 @@
       "measuredBy": "github-inbound-fixture",
       "metric": "r2ClassA",
       "unit": "ops",
-      "value": 5,
+      "value": 6,
       "floor": 0,
-      "source": "tests/landing-cost-guard.test.mjs with hosted-github-inbound-cost-fixture.mjs: one 24-byte new blob on an already mirrored three-file main. Includes webhook receive, real Node inbound action, R2 prepare/PUT/HEAD/commit, composition, desired landing, one synthetic passed check and post-acceptance mirror drain. Bootstrap, real CI/provider delivery and client observers excluded; nominal action durations from costGuard.actionModel.",
+      "source": "S4 inbound fixture on c840855b: 5 -> 6 PUTs for the same 24-byte push and one clean Candidate; synthetic counts, not billed usage.",
       "issue": "3e3f9fe6",
-      "reason": "Ratchets the two-way GitHub path separately, preserving the six-Candidate denominator and its zero-query guard. An inbound change pays for object import plus a full Forge landing; dogfood outbound-only traffic cannot measure this share."
+      "reason": "Issue 91df7eda makes the one source-only Candidate listing unconditional; exactly one extra PUT shares the existing source job and publication."
     },
     {
       "id": "github-inbound-r2-class-b",
@@ -778,11 +778,11 @@
       "measuredBy": "github-inbound-fixture",
       "metric": "r2ClassB",
       "unit": "ops",
-      "value": 15,
+      "value": 16,
       "floor": 0,
-      "source": "tests/landing-cost-guard.test.mjs with hosted-github-inbound-cost-fixture.mjs: one 24-byte new blob on an already mirrored three-file main. Includes webhook receive, real Node inbound action, R2 prepare/PUT/HEAD/commit, composition, desired landing, one synthetic passed check and post-acceptance mirror drain. Bootstrap, real CI/provider delivery and client observers excluded; nominal action durations from costGuard.actionModel.",
+      "source": "S4 inbound fixture: 15 -> 16 GET/HEAD requests for the same 24-byte push; synthetic counts, not billed usage.",
       "issue": "3e3f9fe6",
-      "reason": "Ratchets the two-way GitHub path separately, preserving the six-Candidate denominator and its zero-query guard. An inbound change pays for object import plus a full Forge landing; dogfood outbound-only traffic cannot measure this share."
+      "reason": "Issue 91df7eda adds one listing-object verification request; no new Convex execution or idle work."
     },
     {
       "id": "github-inbound-r2-bytes-put",
@@ -790,11 +790,11 @@
       "measuredBy": "github-inbound-fixture",
       "metric": "r2BytesPut",
       "unit": "bytes",
-      "value": 2188,
+      "value": 2819,
       "floor": 128,
-      "source": "tests/landing-cost-guard.test.mjs with hosted-github-inbound-cost-fixture.mjs: one 24-byte new blob on an already mirrored three-file main. Includes webhook receive, real Node inbound action, R2 prepare/PUT/HEAD/commit, composition, desired landing, one synthetic passed check and post-acceptance mirror drain. Bootstrap, real CI/provider delivery and client observers excluded; nominal action durations from costGuard.actionModel.",
+      "source": "S4 inbound fixture: 2188 -> 2819 uploaded bytes for the same 24-byte push; synthetic counts, not billed usage.",
       "issue": "3e3f9fe6",
-      "reason": "Ratchets the two-way GitHub path separately, preserving the six-Candidate denominator and its zero-query guard. An inbound change pays for object import plus a full Forge landing; dogfood outbound-only traffic cannot measure this share."
+      "reason": "Issue 91df7eda adds the one source-only listing and its exact result pointer, within the approved one-object-per-Candidate budget."
     },
     {
       "id": "github-inbound-github-requests",

@@ -104,7 +104,7 @@ const lines = edits => {
   return out.join('\n') + '\n';
 };
 
-function incident(candidateFiles = false) {
+function incident() {
   const x = committedFixture(),
     file = (path, text) => ({ path, mode: 'file', blob: x.put(text).sha256 });
   const root = x.state([file('shared.txt', lines({}))]);
@@ -128,7 +128,6 @@ function incident(candidateFiles = false) {
   const input = x.json({
     schema: 1,
     kind: 'forge-hosted-compose-input',
-    ...(candidateFiles ? { candidateFiles: true } : {}),
     batch: { members: members.map(m => m.candidateId) },
     base: { head: main.sha256, receiptId: randomUUID() },
     main: { object: main, recipe: null },
@@ -167,7 +166,7 @@ test('incident replay: a member whose on-main probe needs a fresh merge is dropp
 });
 
 test('a batch publishes one exact file listing even when its last member is dropped after a resumed merge', async () => {
-  const { x, members, input } = incident(true);
+  const { x, members, input } = incident();
   const cursor = await drainCommitted(x, input);
   const output = JSON.parse(x.committed.get(cursor.output.sha256));
   const listing = JSON.parse(x.committed.get(output.result.candidateFiles.sha256));

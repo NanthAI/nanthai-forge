@@ -254,7 +254,7 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
   const notSaved = session.journal.get<NotSaved>(finishNotSavedKey);
   // Retained by the check selection (no extra read): the runner's logs are public.
   const checkLogs = session.journal.get<string>(checkLogsKey);
-  // Present only when the project should switch landing mode (earned fast, or fast after a red audit).
+  // Mode observed at check selection, its effective state and any pause/next step.
   const landingAdvice = session.journal.get<string>(landingAdviceKey);
   const receipt = {
     ...(result as Record<string, unknown>),

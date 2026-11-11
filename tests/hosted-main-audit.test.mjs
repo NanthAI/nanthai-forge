@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { auditFixture, audit, state } from './hosted-main-audit-fixture.mjs';
 import { auditDebt, defaultMainAuditSettings, mainAuditKey } from '../dist/main-audit.js';
 import { checkArgs } from './convex-args.mjs';
+import { policyPreset } from '../dist/autonomy-policy.js';
 const readGate = f => f.run('mainGate', ctx => state.mainGate(ctx, f.projectId));
 const readStatus = f => f.call('auditStatus', audit.status, { projectId: f.projectId }).then(JSON.parse);
 
@@ -197,35 +198,34 @@ test('full-gate failure requests early audit; a failed contract does not', async
   assert.equal(f.pending().length, 1);
 });
 
-test('audit history earns fast landing: green verdicts count, a stalled audit is unclear, a recovered red is the drill and costs the count (81d12a32)', async () => {
+test('circuit breaker uses the existing audit row: coalesced green coverage, one unclear per stalled audit, recovered red resumes', async () => {
   const f = await auditFixture();
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: {
+      ...policyPreset('trusted'),
+      acceptance: { ...policyPreset('trusted').acceptance, landingMode: 'fast' },
+    },
+  });
   await f.land('full');
-  assert.deepEqual(f.row().earned, { audited: 1, unclear: 0 }, 'an exact full landing audits itself');
+  assert.deepEqual(f.row().window, [{ audit: { verdict: 'green' } }]);
   for (let i = 0; i < 12; i++) await f.land();
   await f.tick(f.pending()[0]);
   await f.terminal();
-  assert.deepEqual(f.row().earned, { audited: 13, unclear: 0 }, 'one green audit covers all twelve');
+  assert.equal(f.row().window.at(-1).audit.verdict, 'green');
   await f.land();
   await f.start();
   await f.terminal('runner-unavailable');
-  assert.deepEqual(f.row().earned, { audited: 13, unclear: 1 });
-  // Its one retry fails: main is red. The stalled landing is not counted a second time.
+  assert.equal(f.row().window.at(-1).audit.verdict, 'unclear');
   await f.tick(f.pending()[0]);
   await f.terminal('failed');
-  assert.deepEqual(f.row().earned, { audited: 13, unclear: 1 });
+  assert.equal(f.row().window.filter(e => e.audit?.verdict === 'unclear').length, 1);
   assert.equal((await readStatus(f)).landing.effective, 'strict');
-  // A full-gated fix ends the red episode: the drill is on record, and earning restarts from zero.
-  const fix = await f.land('full');
-  const earned = f.row().earned;
-  assert.deepEqual([earned.audited, earned.unclear, earned.lost.reason], [0, 0, 'red']);
-  assert.deepEqual(earned.drill, {
-    at: fix.receipt.at,
-    sequence: fix.receipt.snapshot.revision,
-    reverted: false,
-  });
+  await f.land('full');
   const landing = (await readStatus(f)).landing;
-  assert.deepEqual([landing.mode, landing.state, landing.advice], ['strict', 'strict', null]);
-  assert.deepEqual(landing.progress, { audited: 0, needed: 200, unclearShare: 0, drill: true });
+  assert.deepEqual([landing.mode, landing.state, landing.advice], ['fast', 'fast', null]);
+  assert.equal(landing.window.red, 1);
+  assert.equal(landing.window.unclear, 1);
+  assert.equal(f.row().earned, undefined);
 });
 
 test('identical content is never dispatched twice and an unavailable audit retries only once', async () => {
@@ -266,8 +266,7 @@ test('15-minute stall status is read-only; provider completion clears it without
   assert.equal((await readStatus(f)).alarm, null);
 });
 
-// Lead decision on Issue fe7d67a8: the owner person starts a red-audit drill; its red, if it recovers in
-// time, is the recovered red on record and keeps the audited count. A real red or a late drill resets it.
+// Optional drills retain their existing owner approval and audit-event evidence, without an earning gate.
 const device = { subject: 'owner', forgeCredential: 'synthetic-device' };
 const earn = (f, body, actor = 'owner') =>
   f
@@ -297,7 +296,7 @@ async function counted(f) {
   for (let i = 0; i < 12; i++) await f.land();
   await f.tick(f.pending()[0]);
   await f.terminal();
-  assert.deepEqual(f.row().earned, { audited: 13, unclear: 0 });
+  assert.deepEqual(f.row().window, [{ audit: { verdict: 'green' } }, { audit: { verdict: 'green' } }]);
 }
 async function red(f) {
   await f.land();
@@ -305,7 +304,7 @@ async function red(f) {
   await f.terminal('failed');
 }
 
-test('an owner drill that recovers in time is the recovered red and keeps the count; a real red resets it (fe7d67a8)', async () => {
+test('an optional owner drill retains its approval and recovery evidence without gating fast mode', async () => {
   const { moduleUrl } = await import('./convex-module.mjs');
   const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
   const f = await auditFixture();
@@ -339,24 +338,16 @@ test('an owner drill that recovers in time is the recovered red and keeps the co
     decision: 'grant',
     head: request.head,
   });
-  const startedAt = f.row().drill.startedAt;
-  assert.ok(startedAt);
+  assert.ok(f.row().drill.startedAt);
   await red(f);
   assert.equal(f.row().drill.red.runId, f.row().red.runId, 'the armed drill claims the next red');
   assert.equal((await readStatus(f)).landing.effective, 'strict', 'a drill red holds landings like any red');
   // 2026-11-10 dogfood drill: a second failed audit in the same red episode keeps the drill's claim.
   await red(f);
   assert.notEqual(f.row().drill.red.runId, f.row().red.runId);
-  const fix = await f.land('full');
-  const earned = f.row().earned;
-  assert.deepEqual([earned.audited, earned.unclear, earned.lost], [13, 0, undefined]);
-  assert.deepEqual(earned.drill, {
-    at: fix.receipt.at,
-    sequence: fix.receipt.snapshot.revision,
-    reverted: false,
-    started: startedAt,
-    red: auditEvents(f).find(e => e.kind === 'red').at,
-  });
+  await f.land('full');
+  assert.equal(f.row().window.filter(e => e.red?.count > 0).length, 0);
+  assert.equal(f.row().earned, undefined);
   assert.equal(f.row().drill, undefined);
   // The audit history records it as a drill: start, red, recovery and end, on the red and on its recovery.
   const [redEvent, greenEvent] = auditEvents(f).filter(e => e.drill);
@@ -370,19 +361,14 @@ test('an owner drill that recovers in time is the recovered red and keeps the co
     'startedAt',
   ]);
   assert.equal(redEvent.drill.outcome, 'recovered');
-  assert.deepEqual((await readStatus(f)).landing.progress, {
-    audited: 13,
-    needed: 200,
-    unclearShare: 0,
-    drill: true,
-  });
-  // A real red, with no drill armed, still resets the count.
+  assert.equal((await readStatus(f)).landing.window.red, 0);
+  // A real red remains one event in the window after recovery; there is no counter reset.
   await red(f);
   await f.land('full');
-  assert.deepEqual([f.row().earned.audited, f.row().earned.lost.reason], [0, 'red']);
+  assert.equal((await readStatus(f)).landing.window.red, 1);
 });
 
-test('a drill that recovers late is a real red; an agent cannot start a drill or mark a red as one (fe7d67a8)', async () => {
+test('a late optional drill counts as a real red; agents cannot start a drill or retroactively claim a red', async () => {
   const f = await auditFixture();
   await counted(f);
   assert.equal(
@@ -397,11 +383,7 @@ test('a drill that recovers late is a real red; an agent cannot start a drill or
     drill: { ...row.drill, red: { ...row.drill.red, at: lateRed } },
   });
   await f.land('full');
-  assert.deepEqual(
-    [f.row().earned.audited, f.row().earned.lost.reason],
-    [0, 'red'],
-    'late: the count restarts',
-  );
+  assert.equal((await readStatus(f)).landing.window.red, 1, 'late drill: a real red in the window');
   assert.equal(auditEvents(f).find(e => e.kind === 'red').drill.outcome, 'late');
   // While main is red no drill can start, so a red can never be claimed after the fact.
   await red(f);
@@ -424,38 +406,17 @@ test('a drill that recovers late is a real red; an agent cannot start a drill or
   );
 });
 
-test('the owner recount replaces the counters with the live rules and is held for an agent (fe7d67a8)', async () => {
-  const { moduleUrl } = await import('./convex-module.mjs');
-  const { getFunctionName } = await import('convex/server');
-  const earnModule = await import(moduleUrl('../convex/projectHostedMainAuditEarn.ts'));
+test('legacy recount requests remain compatible but do not read history, schedule work or alter the window', async () => {
   const f = await auditFixture();
-  // The fixture's creation times count from zero; a deployment's are epoch milliseconds.
-  const since = new Date(0).toISOString();
   await counted(f);
-  await earn(f, { drill: 'start' });
-  await red(f);
-  await f.land('full');
-  const live = f.row().earned;
-  assert.equal((await earn(f, { backfill: { since } }, device)).rule, 'held');
-  f.patch('projectHostedMainAudits', f.row()._id, { earned: { audited: 0, unclear: 0 } });
-  const scheduled = await earn(f, { backfill: { since } });
-  assert.deepEqual(scheduled.backfill, { since, scheduled: true });
-  const ctx = {
-    runQuery: (ref, args) => f.call('recount', earnModule[getFunctionName(ref).split(':')[1]], args),
-  };
-  ctx.runMutation = ctx.runQuery;
-  for (let run = 0; run < 2; run++) {
-    await earnModule.backfill._handler(ctx, { projectId: f.projectId, since });
-    assert.deepEqual(f.row().earned, live, 'the recount equals the live counter, and again on a rerun');
-  }
-  // A recount that main moved past is not written.
-  const written = await f.call('stale', earnModule.write, {
-    projectId: f.projectId,
-    through: f.row().lastGreen.sequence - 1,
-    earned: JSON.stringify({ audited: 1, unclear: 0 }),
-  });
-  assert.equal(written, false);
-  assert.deepEqual(f.row().earned, live);
+  const window = structuredClone(f.row().window);
+  const pending = f.pending().length;
+  const since = new Date(0).toISOString();
+  const reply = await earn(f, { backfill: { since } }, device);
+  assert.equal(reply.backfill.scheduled, false);
+  assert.match(reply.backfill.reason, /circuit breaker/);
+  assert.deepEqual(f.row().window, window);
+  assert.equal(f.pending().length, pending);
 });
 
 test('project cadence settings are owner-only, validated, operation-idempotent and CAS protected', async () => {

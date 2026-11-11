@@ -118,7 +118,6 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
       },
     });
     const state: ComposeState = {
-      ...(process.env.FORGE_CANDIDATE_FILES === '1' ? { candidateFiles: true } : {}),
       request,
       ownerInputs,
       ownerProvenance: 1,

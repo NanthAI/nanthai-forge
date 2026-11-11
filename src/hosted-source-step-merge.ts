@@ -166,7 +166,7 @@ export async function prepareMergeStep(
           c.composeBases = [...bases];
         } else delete c.composeBases;
       }
-      if (plan.candidateFiles && c.composeBases && files.has(c.head)) {
+      if (c.composeBases && files.has(c.head)) {
         const listing = candidateFileList(
           plan.base.head,
           c.head,
@@ -437,7 +437,7 @@ export async function computeMergeStep(
     const reader = new MemorySourceReader(source, io);
     const docs = docsMerge(c.docsPaths ?? []);
     const listing =
-      plan.candidateFiles && !c.candidateFiles && c.composeBases && c.head === plan.base.head
+      !c.candidateFiles && c.composeBases && c.head === plan.base.head
         ? candidateFileList(plan.base.head, c.head, new Map(), [], c.selections)
         : null;
     const listingPin = listing ? savePin(listing) : c.candidateFiles;
@@ -495,8 +495,6 @@ export async function computeMergeStep(
     {
       ...plan,
       batch: undefined, // This quantum retains its own member-conflict result.
-      candidateFiles:
-        plan.candidateFiles && c.index + 1 === c.selections.length && !plan.batch ? true : undefined,
       base: { ...plan.base, head: c.head },
       main,
       inputs: inputs.manifest,
@@ -506,7 +504,9 @@ export async function computeMergeStep(
     source,
     async () => {},
     bases,
-    { base: plan.base.head, selections: c.selections },
+    c.index + 1 === c.selections.length && !plan.batch
+      ? { base: plan.base.head, selections: c.selections }
+      : null,
   );
   let manifest = composeResultSchema.parse(JSON.parse(source.object(result.output.sha256).toString('utf8')));
   const member =
@@ -521,13 +521,14 @@ export async function computeMergeStep(
       {
         ...plan,
         batch: undefined,
-        candidateFiles: undefined,
         inputs: inputs.manifest,
         dependencies: dependencies.manifest,
       },
       reader,
       source,
       async () => {},
+      undefined,
+      null,
     );
     const checked = composeResultSchema.parse(
       JSON.parse(source.object(onMain.output.sha256).toString('utf8')),
@@ -562,12 +563,7 @@ export async function computeMergeStep(
   // Publish exactly one listing in the last batch quantum while the final State is resident.
   // The later terminal quantum only references this pin; it never re-reads a whole State.
   let candidateFiles = c.candidateFiles;
-  if (
-    plan.candidateFiles &&
-    plan.batch &&
-    c.index + 1 === c.selections.length &&
-    (member || manifest.result.status === 'clean')
-  ) {
+  if (plan.batch && c.index + 1 === c.selections.length && (member || manifest.result.status === 'clean')) {
     const finalHead = member
       ? c.head!
       : manifest.result.status === 'clean'

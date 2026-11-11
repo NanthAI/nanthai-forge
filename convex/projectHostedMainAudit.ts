@@ -86,7 +86,7 @@ export async function configureMainAudit(
   text: string,
   approved = false,
 ) {
-  // The same owner-only door starts a red-audit drill or recounts the earned counters (fe7d67a8).
+  // The same owner-only door starts an optional drill (legacy earn transport key).
   if (isEarnRequest(text)) return earnMainAudit(ctx, projectId, text, approved);
   const input = { projectId };
   const request = configureSchema.parse(JSON.parse(text));

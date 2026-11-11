@@ -1414,11 +1414,7 @@ async function replaySystemReverse(
     assert.equal((await f.readIntent(f.intents[574].id)).needsFix.state, 'reverted');
     assert.equal(recovered.addition, pair ? 2 : 1);
     if (pair) {
-      assert.equal(
-        f.tables.projectHostedMainAudits.get(f.auditRow).earned.drill.reverted,
-        true,
-        'the live recovery counter records a pair compensation',
-      );
+      assert.equal(f.tables.projectHostedMainAudits.get(f.auditRow).window.at(-1).audit.verdict, 'green');
       const confirmed = [...f.tables.projectHostedMainAuditEvents.values()].filter(e => e.kind === 'culprit');
       assert.equal(confirmed.length, 0, 'a confirmed pair never claims a single culprit');
       const green = [...f.tables.projectHostedMainAuditEvents.values()].find(e => e.kind === 'green');
@@ -1432,30 +1428,6 @@ async function replaySystemReverse(
         [...f.tables.projectHostedMainAuditEvents.values()].filter(e => e.kind === 'culprit').length,
         0,
       );
-      const earn = await import(moduleUrl('../convex/projectHostedMainAuditEarn.ts'));
-      const page = JSON.parse(
-        await f.transaction('pairHistoryPage', earn.eventPage, {
-          projectId: f.projectId,
-          since: 575,
-          through: 576,
-          cursor: null,
-        }),
-      );
-      const retainedGreen = page.events.find(e => e.kind === 'green');
-      assert.equal(
-        retainedGreen.reverted,
-        true,
-        'the history page preserves confirmed compensation evidence',
-      );
-      const { earnedFromHistory } = await import('../dist/landing-mode.js');
-      const history = earnedFromHistory(
-        [
-          { sequence: 575, kind: 'proof' },
-          { sequence: 576, kind: 'exact' },
-        ],
-        [{ kind: 'red', at, sequence: 575, runId: randomUUID() }, retainedGreen],
-      );
-      assert.equal(history.drill.reverted, true, 'history replay agrees with the live pair-recovery counter');
       assert.deepEqual(
         recovered.targets.map(r => r.id),
         f.receipts
