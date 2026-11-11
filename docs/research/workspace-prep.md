@@ -1,13 +1,180 @@
 # Workspace prep: retained evidence and remaining attribution
 
-The two scripted N=3 smokes locate most of the increase against B1.5d in
-Lane open. They do **not** distinguish a product regression from machine load.
-No runtime fix or speed-up is claimed. The prep Issue stays open; a new smoke
-is outside this analysis's authorization.
+The matched 29,000-file synthetic A/B does not reproduce a current-CLI
+slowdown: 11 valid interleaved pairs put current start/open prep **6.982 s
+faster**, with a paired 95% bootstrap interval **[−9.875, −5.120] s**.
+This is a comparison of two frozen CLIs on one synthetic workload, not the
+next smoke or proof that load alone caused the historical +4.4 s.
+Historical startup/RPC/swap clocks cannot be reconstructed. The Issue remains
+open for its missing historical evidence and the authorized next smoke.
 
 This analysis owns the increase against B1.5d
 ([c83c4451][prep]), while the remaining absolute gap to GitHub belongs to
 [a245bcf0][gap]. It does not replace either Issue's acceptance contract.
+
+## Matched CLI A/B
+
+[Complete observations and calculation inputs](../../evals/workspace-prep-ab-results.json)
+retain every process, HTTP attempt, phase, pressure sample, void and replacement.
+A is B1.5d Git `0383f90dbba51600c921cd19ac5014f17fdb2d35`; B is hosted main
+at work start, State `6d15c8d512b3830c84789617fd95ea9a8af92136ca0f90665d81df7d90a2b4f9`.
+Both built with their own pinned lockfiles on Node 24.22.1. Source and dependency
+pins stayed fixed. One dev-only fixture has 29,000 unique 4 KiB regular files
+(118,784,000 source bytes) in 29 directories: each file is an ordinal header
+followed by repeats of that ordinal's SHA-256 hexadecimal digest, truncated to
+4 KiB. Its exact State is
+`d3b9151ba40f90a33d443c60d5ae8dbddcc0fb46a568db2026c5c67d37239a77`.
+
+The driver is `scripts/measure-workspace-prep.mjs`, with the same opt-in
+`workspace-prep-trace.mjs` observer in both builds. Disposable compiled files
+receive only startup/write-wait callbacks; before/after hashes are retained.
+Each run executes `start {open:false}` then `open` in separate processes,
+with an explicit frozen-build canary pin and no release update. Startup is the
+process monotonic origin through hosted CLI dispatch, including imports and
+local discovery. RPC walls in this A/B are individual HTTP attempts through
+body consumption, not server time or SDK decode time. Parent process walls
+exclude pressure sampling, fixture preparation, verification and cleanup.
+Every completed tree was checked against all source hashes, modes and the same
+State pin. All **34 opens** passed; none failed or silently changed source.
+
+Cold means an empty machine-object cache per open, not a flushed OS page cache.
+Warm means independent cached objects cloned from the same fixture before the
+sequence. The 3,211,540-byte source pack is the same for both builds. The
+fixture has no dependencies, hooks, submodules, model agents or landing work;
+those parts of full smoke prep are not simulated. Warm-up and setup are outside
+the measured windows. Builds, fixtures and test batches used the shared heavy
+limiter; each measured process checked the brief's disk reserve.
+
+The initial ABAB sequence ran 11 pairs, alternating cold/warm. A successful
+dev deployment workflow (`42997254381`, `d84c5fca`) ran 09:41:12–09:42:18 UTC.
+Initial pairs **6 cold, 7 warm and 8 cold** overlap that conservative window
+and are void for revision drift, despite successful byte checks. Their values
+remain below and in the data. Three replacement pairs used those same cache
+modes, preserving 11 valid pairs (6 cold, 5 warm). The initial accepted backend
+was `e7f64079`; the latest successful backend for the replacements was
+`d84c5fca`. Failed deployment `42998296222` finished at 09:49:24, before the
+first replacement at 09:49:34; it reported schema failure and no successful
+push. There was no deployment workflow overlapping a replacement pair.
+Runtime versions are workflow evidence, not a direct server build attestation.
+The initial measurement window was 09:35:39–09:46:16 UTC; replacements ended
+09:52:48. Total: 34 start/open runs, 68 measured CLI processes.
+
+| Pair | Cache | A prep s | B prep s | B − A s | Use |
+| --- | --- | ---: | ---: | ---: | --- |
+| 0 | cold | 31.966 | 24.984 | -6.982 | valid |
+| 1 | warm | 13.644 | 7.726 | -5.918 | valid |
+| 2 | cold | 31.248 | 23.801 | -7.446 | valid |
+| 3 | warm | 12.413 | 7.449 | -4.963 | valid |
+| 4 | cold | 28.889 | 23.769 | -5.120 | valid |
+| 5 | warm | 13.048 | 7.105 | -5.943 | valid |
+| 6 | cold | 28.935 | 24.321 | -4.614 | void: deployment |
+| 7 | warm | 13.143 | 7.090 | -6.054 | void: deployment |
+| 8 | cold | 35.256 | 25.883 | -9.373 | void: deployment |
+| 9 | warm | 18.329 | 7.770 | -10.559 | valid |
+| 10 | cold | 32.696 | 23.840 | -8.856 | valid |
+| 6R | cold | 43.248 | 26.203 | -17.045 | valid |
+| 7R | warm | 18.542 | 8.667 | -9.875 | valid |
+| 8R | cold | 33.042 | 28.468 | -4.575 | valid |
+
+The [adopted method](../agents/perf-claims.md) uses 10,000 resamples and seed 1.
+These are median **paired** differences; subtracting separate medians produces
+a different number. Cache-stratified N=6/N=5 intervals are small-sample
+observations. The combined interval covers the registered mix of cache modes,
+not the distribution of a real smoke. It does not cover different source
+sizes, dependency/link work, model dispatch, observer overhead, backend
+interactions across epochs or unmeasured changes in machine conditions.
+
+| Component | A median s | B median s | Paired difference s | 95% interval s |
+| --- | ---: | ---: | ---: | --- |
+| Start + open | 28.889 | 23.769 | -6.982 | [-9.875, -5.120] |
+| Start process | 2.257 | 1.498 | -0.684 | [-0.908, -0.435] |
+| Open process | 26.796 | 22.038 | -5.975 | [-8.737, -4.602] |
+| Startup, both processes | 1.475 | 0.426 | -1.010 | [-1.374, -0.918] |
+| Checkout core | 25.908 | 21.204 | -5.824 | [-7.920, -4.483] |
+| HTTP source-body spans, summed | 1.703 | 1.550 | +0.000 | [-0.453, +0.000] |
+| Cache verification/fill, inclusive | 19.686 | 16.190 | -4.226 | [-4.728, -3.905] |
+| Copy/hash | 4.108 | 4.246 | +0.145 | [-0.287, +0.376] |
+| Durability | 1.076 | 0.000 | -1.076 | [-1.309, -0.958] |
+| Stat index | 0.110 | 0.125 | +0.022 | [+0.005, +0.043] |
+| Publication | 0.066 | 0.077 | +0.012 | [+0.005, +0.014] |
+
+Warm prep medians are **13.644 / 7.726 s**, paired difference −5.943 s
+[−10.559, −4.963], N=5. Cold prep medians are **32.331 / 24.412 s**, paired
+difference −7.214 s [−12.950, −4.847], N=6. Neither is a full-smoke result.
+Cache work and startup are smaller in current. Copy/hash is not distinguishable
+from no change. Indexing and publication have positive paired shifts of about
+22 and 12 ms. These small phase associations remain disclosed: the stat-index
+loop is identical in the two builds, publication gained preservation/recovery
+bookkeeping, and this experiment does not isolate a generic defect behind those
+shifts. They cannot account for the historical +4.4 s. No speculative runtime
+optimization or component-fix guard is claimed for them.
+
+### Concurrent opens and the write pass
+
+One three-open warm cohort per build ran after the initial sequence, on the
+same settled deployment. These are observations, not interleaved cohort pairs.
+
+| Build | Open completion order s | Shared write-pass wait s | Total worker + write wait s |
+| --- | --- | --- | --- |
+| B1.5d | 13.774 / 33.992 / 51.093 | 0.001 / 5.707 / 23.162 | 0.878 / 8.125 / 27.367 |
+| Current | 7.229 / 15.892 / 20.006 | 0.002 / 5.049 / 10.498 | 0.056 / 5.143 / 10.573 |
+
+**Both builds already have the shared single write-pass lease.** Current did
+not introduce it. Source inspection names `withCheckoutWritePass` in each pin;
+the identical callback probe measures only that lease's admission wait, while
+`slotWait` also includes worker stalls. The later old completions additionally
+spent 13.967 / 12.619 s in durability; current's whole-stage durability phase
+is zero. Cohort load was 9.33 for A and 7.32 for B, so the cohort wall difference
+is not claimed as a causal concurrency speed-up. Existing qualification found
+three overlapping APFS passes worse; this run supplies no reason to expand
+concurrency or remove correctness barriers. No concurrency policy changed.
+
+### Calls, bytes, load and pressure
+
+Warm start/open totals are exactly **7 / 5 client RPCs** (A/B), with **0 source
+GETs and 0 source-body bytes**. The core warm selection counts are **2 / 1**.
+Cold totals range **63–64 / 46–47**, with exactly **17 source GETs and
+7,606,875 source-body bytes per open in both builds**. The per-attempt RPC names,
+walls, request/response body bytes and statuses are retained in the data; these
+are actual client HTTP attempts, not inferred per-task shares of a whole cell.
+The complete State descriptor is a recipe; the sampled source blob is R2.
+Source bytes remain in R2 and metadata in Convex. These observations are not
+provider-billed R2 traffic or TLS/header bytes.
+
+Both provider log windows were live-proven and valid, with no coverage problem:
+**1,061 project executions**, 4,622 documents read, 277 written, 2,757,201 DB
+read bytes, 310,760 DB write bytes and 231,046 function egress bytes. The helper's
+list-rate estimate is **$0.003686**, excluding R2 and storage; no invoice was
+read. Totals include probes, voids, cohorts and replacements and cannot be
+divided into a per-task bill. No monetary saving is claimed. Fixture seeding
+(30,156 uploaded objects / 132,466,663 bytes) and source-pack publication are
+outside those windows and outside prep time.
+
+Every start/open retains all three load averages, free RAM, swap and VM
+compressor/pageout/swap counters immediately before and after; process peak RSS
+comes from `resourceUsage`. Initial one-minute load ranges were 5.35–10.68 for
+A and 5.63–10.39 for B, with peak child RSS 453.95 / 423.81 MiB. All replacement
+pressure samples and peaks are retained too. Endpoint samples do not establish
+continuous memory pressure or remove shared-machine confounding.
+
+### Existing receipt, with explicit scope
+
+Open receipts now retain `prep.startupMs`, actual HTTP RPC attempt counts,
+per-function complete SDK call/failure counts and summed walls, ordinary-object logical bytes, pack objects/compressed
+bytes, summed download spans and `writePassWaitMs`. Executable agent observation
+begins before freshness checks. Direct library checkout callers retain unknown
+startup as null. [Scope and overlap rules](../operations/source-exchange.md)
+explain why RPC/download walls and write-pass wait cannot all be added to total.
+The SDK-level receipt includes response decode, unlike the common A/B HTTP probe.
+
+This adds local clocks/counters to the **existing one-append receipt**, with
+**zero added Convex calls, DB I/O, R2 source bytes, tables or idle work**. A
+fake-clock/exact-request guard passes on the change and a receipt-attribution
+assertion fails on untouched current. Tests cover failed calls, concurrent
+scope isolation, freshness calls and cold/warm logical-byte receipts. No
+checkout algorithm, pin, source mode or durability rule changed. This merges
+the missing attribution into existing diagnostics; no runtime code can be
+responsibly removed from the measured evidence alone.
 
 ## Method and populations
 
@@ -240,30 +407,23 @@ was not available during these observations; no speed-up is claimed.
 
 ## Acceptance and next measurement
 
-- Decomposition: start/open/dependencies/relay, two CLI spawns per task,
-  checkout phases, logical transfer bytes and recorded load/free RAM are
-  evidenced above. Separate historical startup time, prep-attributed Convex
-  calls and actual memory-pressure/swap samples are **not retained**. The
-  first Done-when line remains open for that missing attribution; a later
-  run cannot retroactively supply a historical clock.
-- Conditional regression fix: open is the grown component, but a causal
-  product regression is unproven. No speculative runtime change or build
-  guard is presented as a fix. The second line stays open pending a diagnosis
-  with interleaved B1.5d/current local fixtures, capturing each CLI process,
-  actual RPCs, checkout phases, bytes, load and swap. If a component regresses,
-  fix it generically and add the failing call/byte/fake-clock guard there.
-- Next smoke: **unrun and unticked**. With unchanged runtime and comparable
-  shared-machine conditions, the working expectation is about **19.4 s**,
-  based on a2, not a demonstrated return to 15.3 s. The unchanged acceptance
-  target is at most **16.83 s** (15.3 s +10%). At a2's observed medians,
-  Forge's remaining GitHub gap is **9.306 s** (19.3715 − 10.0655), owned by
-  [a245bcf0][gap]; a1's gap was 7.038 s. B1.5d's published gap was 10.8 s.
-  A new owner-authorized smoke must record the missing timings/calls/load
-  and show the target; this analysis authorizes no such run.
-
-This evidence replaces an unexplained headline with measured components and
-explicit unknowns. No product code can responsibly be removed or merged from
-these observations alone; no new policy, restriction, process or cost is added.
+- Decomposition: historical per-task start/open/dependency/relay and checkout
+  phases remain below, with the matched CLI experiment above supplying startup,
+  actual client RPC/byte attribution, RSS and endpoint swap/VM samples for its
+  own runs. The historical smoke and B1.5d separate startup/RPC/swap clocks were
+  not retained and cannot be retroactively supplied. The first Done-when line
+  stays open for that historical and post-fix smoke coverage.
+- Conditional regression fix: the matched synthetic workload does not reproduce
+  the seconds-scale current-CLI regression. It does not prove load alone caused
+  the historical increase. No runtime or queue fix is invented. The small
+  indexing/publication associations are named above, without a diagnosed
+  component defect or a claimed fix. The second line stays open rather than
+  claiming an unevidenced root-cause correction; the telemetry guard fixes the
+  separately observed missing-attribution defect.
+- Next smoke: **unrun and unticked**. The acceptance bar remains **16.83 s**
+  (15.3 s +10%). Synthetic warm prep is not a smoke prediction. Smoke a2's
+  recorded GitHub gap remains **9.306 s** (19.3715 − 10.0655), owned by
+  [a245bcf0][gap]; the remaining absolute gap is not reassigned here.
 
 [prep]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=c83c4451-a30a-4f0e-8b45-1ff35300a001
 [gap]: https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=a245bcf0-b1ff-4ea5-ba8d-a2c9c9e14dff

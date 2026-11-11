@@ -14,6 +14,12 @@ preserves the root and surviving directory inodes for existing shells/editors an
 applies through the Lane checkout's in-place delta journal, so its file work
 scales with changed paths (unchanged files are trusted through the stat index).
 
+Local Lane-open receipts attribute startup through hosted dispatch, complete client
+RPC counts and wall time, ordinary-object logical bytes and compressed pack bytes,
+download time and the shared write-pass wait. They reuse the existing local
+journal with zero added calls; [measurement scope](operations/source-exchange.md)
+distinguishes client observations from billed server usage.
+
 The CLI lists open hosted Lanes in a single bounded page query (`agent ROOT lanes`),
 records project friction without a Lane (`friction-list` pages it with its triage status; `x friction-triage` dismisses or links an Issue), diagnoses unaddressed roots and unavailable
 cwd, queues local heavy commands first come, first served (waiters see their position and an estimate) and exposes holder and queue status by Lane without acquiring a slot.

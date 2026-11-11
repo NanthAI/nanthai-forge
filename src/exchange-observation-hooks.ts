@@ -11,7 +11,13 @@ let current: (() => ExchangeMeasurements | undefined) | undefined;
 export function registerExchangeObserver(reader: () => ExchangeMeasurements | undefined) {
   current = reader;
 }
+let rpcAttempt: (() => void) | undefined;
+/** A Node command can count actual HTTP attempts without making portable readers import Node. */
+export function registerRpcAttemptObserver(observer: () => void) {
+  rpcAttempt = observer;
+}
 export function observeExchangeRequest(url: string | URL | Request, init: RequestInit) {
+  if (/\/api\/(query|query_at_ts|mutation|action)$/.test(String(url))) rpcAttempt?.();
   const value = current?.();
   if (!value) return;
   value.requests++;

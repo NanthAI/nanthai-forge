@@ -7,6 +7,7 @@ const exempt = new Map([
   // Measurement harnesses replace the global under networkFetch to count requests;
   // the shared helper still owns every deadline and retry above them.
   ['scripts/measure-host.mjs', 'intercept'],
+  ['scripts/workspace-prep-trace.mjs', 'intercept'],
   ['scripts/measure-exchange-latency.mjs', 'intercept'],
   ['scripts/benchmark-import-projection.mjs', 'intercept'],
   // Stops a CLI at its first request to measure the CPU before it (Issue 7b2ae8d8); nothing is sent.

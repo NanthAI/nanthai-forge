@@ -141,9 +141,25 @@ test('full Lane checkout round-trips executable, regular, binary, live and dangl
   assert.equal(existsSync(join(s.root, '.forge/native.json')), false);
   assert.equal(existsSync(join(s.root, '.forge/work')), false);
   assert.equal(result.downloadedObjects, 6);
+  const receipt = JSON.parse(
+    readFileSync(s.root + '.forge-metrics.jsonl', 'utf8')
+      .trim()
+      .split('\n')
+      .at(-1),
+  );
+  assert.equal(receipt.checkout.transfer.downloadedObjects, result.downloadedObjects);
+  assert.equal(receipt.checkout.transfer.downloadedBytes, result.downloadedBytes);
+  assert.equal(receipt.checkout.transfer.packBytes, 0);
   const warm = await checkoutHostedLane(s.root, s.request(), s.transport);
   assert.equal(warm.downloadedObjects, 0);
   assert.equal(warm.downloadedBytes, 0);
+  const warmReceipt = JSON.parse(
+    readFileSync(s.root + '.forge-metrics.jsonl', 'utf8')
+      .trim()
+      .split('\n')
+      .at(-1),
+  );
+  assert.equal(warmReceipt.checkout.transfer.downloadedBytes, 0);
 });
 
 test('a nested checkout lazily builds exact overlap evidence from its shared baseline objects', async t => {

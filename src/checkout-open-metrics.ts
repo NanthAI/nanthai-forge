@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+import {
+  checkoutPrepObservation,
+  withCheckoutPrepObservation,
+  type CheckoutPrepObservation,
+} from './checkout-prep-observation.js';
 import { canonicalRoot, rootSibling } from './root-paths.js';
 import { basename, dirname } from 'node:path';
 import { ForgeError } from './errors.js';
@@ -8,6 +13,16 @@ const phases = ['slotWait', 'cacheVerify', 'copyHash', 'durability', 'index', 'p
 export type CheckoutOpenMeasurement = {
   phasesMs: Record<(typeof phases)[number], number>;
   totalMs: number;
+  writePassWaitMs: number;
+  prep: CheckoutPrepObservation;
+  transfer: {
+    downloadedObjects: number;
+    downloadedBytes: number;
+    packObjects: number;
+    packBytes: number;
+    downloadMs: number;
+    sourcePack: string | null;
+  };
   laneId: string;
   files: number;
   replayed: boolean;
@@ -22,6 +37,8 @@ export async function withCheckoutOpenMetrics<T>(
   request: { operationId: string; laneId: string },
   run: (metrics: CheckoutOpenMetrics) => Promise<T>,
 ): Promise<T> {
+  if (!checkoutPrepObservation())
+    return withCheckoutPrepObservation(() => withCheckoutOpenMetrics(root, request, run));
   root = canonicalRoot(root);
   const metrics = new CheckoutOpenMetrics(),
     start = performance.now();
@@ -50,6 +67,9 @@ export async function withCheckoutOpenMetrics<T>(
           laneId: request.laneId,
           phasesMs: metrics.phasesMs,
           totalMs: performance.now() - start,
+          writePassWaitMs: metrics.writePassWaitMs,
+          prep: checkoutPrepObservation()!,
+          transfer: metrics.transfer(),
           files: metrics.files,
           replayed: metrics.replayed,
           maxRssKiB: process.resourceUsage().maxRSS,
@@ -66,6 +86,15 @@ export class CheckoutOpenMetrics {
     phases.map(phase => [phase, 0]),
   ) as CheckoutOpenMeasurement['phasesMs'];
   ioBudget: CheckoutOpenMeasurement['ioBudget'] = null;
+  transfer: () => CheckoutOpenMeasurement['transfer'] = () => ({
+    downloadedObjects: 0,
+    downloadedBytes: 0,
+    packObjects: 0,
+    packBytes: 0,
+    downloadMs: 0,
+    sourcePack: null,
+  });
+  writePassWaitMs = 0;
   files = 0;
   replayed = false;
   async measure<T>(phase: keyof CheckoutOpenMeasurement['phasesMs'], run: () => Promise<T>): Promise<T> {

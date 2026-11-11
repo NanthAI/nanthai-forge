@@ -385,7 +385,28 @@ It retains milliseconds for local worker stall (pending I/O with no active worke
 durability, stat indexing and publication, plus total time, file count and process
 peak RSS and the selected host/local worker budgets. Cache time includes downloads on misses; other local setup remains in
 total time. Phase times exclude recorded worker stall; the phases, stall and remaining
-setup/selection time account for the total. These receipts add no Convex calls and no idle work.
+setup/selection time account for the total. `writePassWaitMs` identifies the shared
+editing write-pass wait within `slotWait`; it is a subset, never another phase to
+add to the total.
+
+`prep` covers the hosted command through checkout completion. `startupMs` is the
+process monotonic origin through hosted CLI dispatch (module loading, validation
+and address discovery included, plus any release-check wait), or null for direct
+library checkout callers. Executable agent commands begin observing before
+freshness checks, so their RPCs are retained too. `rpc` groups complete SDK calls by function name, with call/failure counts and
+summed wall milliseconds, including queueing, retries and response decoding.
+`rpcAttempts` counts actual HTTP attempts, including retries; a queued SDK call
+cancelled before sending contributes no attempt. Overlapping RPC walls do not
+add up to elapsed time. These are client calls, not server-internal executions or a billed-usage meter; dependency linking and later
+command bookkeeping are outside the receipt's scope.
+
+`transfer` retains successfully cached ordinary-object counts and logical bytes,
+source-pack object counts and compressed pack bytes, the pack outcome, and summed
+transport download milliseconds (including failed attempts). Download spans may
+overlap and remain included in cache time. Pack bytes and logical object bytes
+are different units; neither includes HTTP/TLS overhead or provider billing.
+These fields reuse local clocks, counters and the existing receipt; they add no
+Convex calls, tables or idle work.
 Opening verifies source hashes without building syntax or line summaries for the
 whole tree. On save, overlap evidence for changed paths is derived lazily from
 the retained baseline objects, with their digest and private-file identity checked

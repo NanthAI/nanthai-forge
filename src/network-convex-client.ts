@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { measureCheckoutRpc } from './checkout-prep-observation.js';
 import { getFunctionName } from 'convex/server';
 import { longConvexAction } from './long-action.js';
 import { LONG_ACTION_DEADLINE_MS } from './long-action.js';
@@ -65,21 +66,24 @@ function boundedClient<T extends object>(client: T, timeoutMs: number): T {
         methods.set(key, {
           source: value,
           bound: ['query', 'mutation', 'action', 'consistentQuery', 'close'].includes(String(key))
-            ? (...args: unknown[]) =>
-                networkDeadline(
-                  signal => invoke(key, value as (...args: unknown[]) => unknown, target, args, signal),
-                  key === 'close'
-                    ? 5_000
-                    : key === 'action' &&
-                        timeoutMs === 120_000 &&
-                        longConvexAction(getFunctionName(args[0] as never))
-                      ? LONG_ACTION_DEADLINE_MS
-                      : timeoutMs,
-                  key === 'close' ? undefined : currentExchangeProgress()?.signal,
-                  key === 'close'
-                    ? 'Convex close'
-                    : `Convex ${String(key)} ${getFunctionName(args[0] as never)}`,
-                )
+            ? (...args: unknown[]) => {
+                const call = () =>
+                  networkDeadline(
+                    signal => invoke(key, value as (...args: unknown[]) => unknown, target, args, signal),
+                    key === 'close'
+                      ? 5_000
+                      : key === 'action' &&
+                          timeoutMs === 120_000 &&
+                          longConvexAction(getFunctionName(args[0] as never))
+                        ? LONG_ACTION_DEADLINE_MS
+                        : timeoutMs,
+                    key === 'close' ? undefined : currentExchangeProgress()?.signal,
+                    key === 'close'
+                      ? 'Convex close'
+                      : `Convex ${String(key)} ${getFunctionName(args[0] as never)}`,
+                  );
+                return key === 'close' ? call() : measureCheckoutRpc(getFunctionName(args[0] as never), call);
+              }
             : value.bind(target),
         });
       return methods.get(key)!.bound;

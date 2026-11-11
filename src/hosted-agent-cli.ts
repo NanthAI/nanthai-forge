@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { withCheckoutPrepObservation } from './checkout-prep-observation.js';
 import { retainedChangedPaths } from './hosted-finish-guard.js';
 import { waitFailure } from './wait-failure.js';
 import { isNetworkPending } from './network-continuation.js';
@@ -42,7 +43,10 @@ function receiptMatches(path: string, body: string) {
     return false;
   }
 }
-export async function hostedAgentCli(
+export function hostedAgentCli(...args: Parameters<typeof dispatchHostedAgentCli>) {
+  return withCheckoutPrepObservation(() => dispatchHostedAgentCli(...args), performance.now());
+}
+async function dispatchHostedAgentCli(
   root: string,
   action: string,
   selected: Record<string, unknown>,

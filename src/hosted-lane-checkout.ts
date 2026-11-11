@@ -97,6 +97,14 @@ async function checkout(
     lock = join(cache.root, 'lock'),
     previous = join(cache.root, 'previous'),
     receiptPath = join(cache.root, `${request.operationId}.json`);
+  metrics.transfer = () => ({
+    downloadedObjects: cache.downloadedObjects,
+    downloadedBytes: cache.downloadedBytes,
+    packObjects: cache.packObjects,
+    packBytes: cache.packBytes,
+    downloadMs: cache.downloadMs,
+    sourcePack: cache.sourcePack,
+  });
   const preservationPath = join(cache.root, `preserve-${request.operationId}.json`);
   const recoveryPath = join(cache.root, `legacy-cache-recovery-${request.operationId}.json`);
   const preserveCaches = (files: readonly { path: string }[] = []) => {
@@ -558,6 +566,7 @@ async function checkout(
         {
           waited: ms => {
             metrics.phasesMs.slotWait += ms;
+            metrics.writePassWaitMs += ms;
           },
         },
       );

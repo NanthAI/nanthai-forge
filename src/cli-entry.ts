@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
+import { beginCheckoutPrepObservation } from './checkout-prep-observation.js';
 import { isAbsolute } from 'node:path';
 import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { ForgeError, invariant } from './errors.js';
 import { describeFailure, recordFailure } from './system-errors.js';
 import { cliTeachContext } from './error-teaching.js';
+
+if (['agent', 'x'].includes(process.argv[2]!)) beginCheckoutPrepObservation();
 
 // Check before hook setup and imports that resolve relative paths.
 try {

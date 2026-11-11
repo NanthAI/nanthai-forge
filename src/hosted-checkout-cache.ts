@@ -55,6 +55,7 @@ export function sizeGroups(pins: ContentPin[]) {
 export const checkoutPackMinimum = 500;
 /** Disposable bytes only; fresh selection/access checks remain the caller's responsibility. */
 export class HostedCheckoutCache {
+  downloadMs = 0;
   downloadedObjects = 0;
   downloadedBytes = 0;
   /** Objects taken from the machine store, and from the source pack (with its bytes). */
@@ -187,8 +188,13 @@ export class HostedCheckoutCache {
     const temporary = await checkoutIo(async () => mkdtempSync(join(this.root, 'download-')));
     const files = pins.map(pin => ({ pin, path: join(temporary, pin.sha256) }));
     try {
-      if (this.transport.downloadFiles) await this.transport.downloadFiles(files);
-      else for (const { pin, path } of files) await this.transport.downloadToFile(pin, path);
+      const started = performance.now();
+      try {
+        if (this.transport.downloadFiles) await this.transport.downloadFiles(files);
+        else for (const { pin, path } of files) await this.transport.downloadToFile(pin, path);
+      } finally {
+        this.downloadMs += performance.now() - started;
+      }
       const verified = this.transport.verifiesDownloads === true;
       await mapCheckoutIo(files, async ({ pin, path }) => {
         const stat = lstatSync(path);
@@ -272,7 +278,12 @@ export class HostedCheckoutCache {
       const archive = join(temporary, 'pack.gz'),
         unpacked = join(temporary, 'objects'),
         wanted = new Set(missing);
-      await downloadSourcePack(pack, archive);
+      const started = performance.now();
+      try {
+        await downloadSourcePack(pack, archive);
+      } finally {
+        this.downloadMs += performance.now() - started;
+      }
       // Objects saved after this pack are not in it: they are described and downloaded while the
       // pack unpacks, as soon as its header lists its blobs, instead of after it (fea47345 round 3).
       const written = await unpackSourcePackObjects(
