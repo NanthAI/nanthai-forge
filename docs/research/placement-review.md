@@ -170,6 +170,8 @@ All 182 tables in `convex/` at review time, grouped where rows are alike. "Per l
 
 **What is idle and per-project fixed cost?** Zero calls in every option. An idle 10,000-file project holds about $0.004 a month of storage today (modelled, [cost to serve](../operations/cost-to-serve.md#idle-storage-and-an-active-month)), about half of it Convex rows. How much of that S5 removes is unknown. The fixed platform fee is $25 a month for A, $30 for B, $5 for C.
 
+**Should descriptors be dense catalog pages or single rows?** The catalog work referred this to the review. Neither shape serves both readers. A bulk reader wants pages: a cold 29k-file CI job reads 2.1 MB from 256-entry pages against 10.2 MB from rows (measured, fixture). A point reader wants rows: one lookup reads about 470 bytes from a row and 6.8 to 48.9 KB from a page, with two seeks instead of one (measured, synthetic guard in `tests/object-catalog.test.mjs`). A digest that is not stored yet pays for a page too, because the lookup reads the page that would hold it (`convex/projectObjectFind.ts`); every new file in a save is such a lookup. The verdict is to stop asking Convex the bulk question at all. S5 gives bulk readers a manifest in R2; the rows left in Convex then answer point lookups only and can be shaped for them, as slim rows with the three receipt indexes or as small pages. Until S5 lands, keep the dense pages and do not change the page size: the bulk saving is the larger measured effect, and moving the same rows twice costs more than either shape saves. The billed cost of point lookups on a large repository is **unknown**; the guard's fixtures hold 35 to 1,387 descriptors.
+
 ## Whole-system options
 
 The planning vector is one landing on the smoke's 28,900-file repository. "Before" reproduces the measured $8.94; its split between classes is modelled. Everything else is modelled. Usage outside landings (extra saves, planning, sessions) adds about 10 to 15% in the serving model and is not included.
@@ -215,6 +217,8 @@ The planning vector is one landing on the smoke's 28,900-file repository. "Befor
 A flat State makes each landing O(files) in bytes, CPU and memory. On the 28,900-file repository action compute alone is about $1.5 per 1,000 landings under A ($2.2 today). B makes that floor about 30 times cheaper; only a State identity that names a tree root removes it, and that was tried and dropped for stated reasons ([decisions](../decisions.md#trees-in-packs-issue-676efbc2)). The $2 target should be read as a target for small and mid-size repositories until that changes.
 
 ## Proposed slices
+
+Every open candidate in [data placement](../data-placement.md#open-placement-candidates) maps to a slice: observations, attempts and finish read rows to S1; record bodies, records, operations and saves to S2; landing requests and Actions results to S3. Record heads stay as they are. Overlap path interning is not pursued (0.03 to 0.12 GB modelled, no reader gains), and Work payload or actor interning is superseded by S4, which removes those rows.
 
 Sized for one builder each. None is filed. Every slice keeps idle at zero calls, adds no user step and no product limit, and names what it removes. Order: S0 first; then S1, S3 and S7 in parallel; then S2 and S4; then S5 and S6; S8 only on the owner's decision.
 
@@ -265,7 +269,7 @@ Done when: a landing writes zero rows to `projectWorkDataRecords`; the Candidate
 
 The source step that writes a State also writes its physical manifest: digest to binding (raw key, pack range or recipe), stored as a recipe that shares unchanged chunks with the parent's manifest. CI, clones and the source worker read it with one signed grant instead of descriptor windows.
 
-Done when: a cold 29k-file CI job reads under 100 KB from Convex in at most 3 calls (2,105,060 B and 11 today); source-worker descriptor calls per landing fall from about 41 to at most 5; no State write scans descriptors (reads are O(changed files), asserted); every object is still verified by hash and size; a missing or invalid manifest falls back to the catalog and says so. Removes: descriptor rows for new blobs; the catalog for manifest-bound projects later. Risk: medium; this is the trusted incremental writer Issue 298f9675 left open.
+Done when: a cold 29k-file CI job reads under 100 KB from Convex in at most 3 calls (2,105,060 B and 11 today); source-worker descriptor calls per landing fall from about 41 to at most 5; no State write scans descriptors (reads are O(changed files), asserted); every object is still verified by hash and size; a missing or invalid manifest falls back to the catalog and says so; a point lookup of one digest, stored or not, reads at most about 1 KB on the guard's 402- and 1,387-descriptor fixtures once bulk readers use the manifest. Removes: descriptor rows for new blobs; the dense catalog pages for manifest-bound projects later. Risk: medium; this is the trusted incremental writer Issue 298f9675 left open.
 
 ### S6. One source job per landing attempt
 
@@ -320,6 +324,7 @@ Done when: egress per landing is at most 0.5 MB and action compute at most 4 GB-
 
 - The post-fix billed smoke and its per-function split.
 - Billed bytes per patch of an indexed document.
+- Billed bytes of descriptor point lookups, stored and absent, on a catalog-backed repository of 29k files.
 - Source steps per landing by kind; how the egress divides between State, progress and result bodies.
 - R2 requests by class and caller; whether backup generation is also billed as egress.
 - The post-cleanup dashboard; why the dashboard is about twice the one-copy-per-index model.
