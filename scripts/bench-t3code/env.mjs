@@ -578,7 +578,7 @@ export function buildSteps(ctx) {
       if (!baseSource)
         throw Error(
           `BENCH_SETUP_NEEDS_BASE: the base commit ${L().baseSha?.slice(0, 12) ?? '(config.github.mainBase unset)'} is not in the meta repo. ` +
-            'Pass --base-source PATH (a git repo or bundle that holds it). The base is not rebuildable from upstream (evals/bench-t3code/README.md: fa3b7349 reconstruction is unproven); ' +
+            'Pass --base-source PATH (a git repo or bundle that holds it). Restore the synthesized commit or reconstruct it from retained inputs (evals/bench-t3code/README.md); setup does not reconstruct it. ' +
             'a rebuilt tree with a new commit id needs --new-base and is a new base: it must be registered in the plan before any scored cell.',
         );
       const sha = L().baseSha;

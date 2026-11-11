@@ -6,17 +6,19 @@ Main retains the harness in `scripts/bench-t3code/`, the [registered B1.5d plan]
 
 Ask the owner for the frozen ten-task `tasks.json` (prompts, ordered IDs and oracle metadata), original saved PR metadata if rebuilding it, CI/oracle scaffolding (`.bench/ci.sh`, `.bench/oracle.sh`, `.github/workflows/bench-ci.yml`), and qualified-base/reference reconstruction inputs. Preserve upstream attribution and licenses. Do not copy private Git history, bindings, runtime configuration or archived source into this repository. Only public-upstream or synthetic inputs can become public fixtures after review.
 
-Synthesized base **fa3b7349 is not in the retained upstream objects, but its reconstruction is proven by object ids** (Issue 8c9b84fc, 2026-11-07): its tree is upstream C (`52f4ec6f`) with the nine preview-prerequisite files of source base a2f901ef, `.github/workflows/` holding only the bench `bench-ci.yml`, and `.bench/` holding only the plan's `ci.sh` (mode 100755). Computing that tree from the owner-held inputs gives the tree id recorded for fa3b7349, and `git commit-tree` with its recorded parent (2d1f007f), identity, date and message gives the commit id itself. Online, the meta repo fetches upstream C's public blobs and, through partial-clone fetches, the parent commits (2d1f007f, 50edd7a7, df7f4325), which GitHub still serves from the upstream fork network. A matching task digest alone still does not prove the benchmark tree; the tree and commit ids do.
+Synthesized base **fa3b7349 is not in the retained upstream objects, but its reconstruction is proven by object ids**: its tree is upstream C (`52f4ec6f`) with the nine preview-prerequisite files of source base a2f901ef, `.github/workflows/` holding only the bench `bench-ci.yml`, and `.bench/` holding only the plan's `ci.sh` (mode 100755). Applying the retained prerequisite patch to C, verifying each pre-image and post-image blob id, and adding the exact scaffolding reconstructs tree `69b02a9698224128735d98d1b6b5664acfcdb38d`. Hashing the commit object with its recorded parent (2d1f007f), identity, date and message reconstructs `fa3b73491d3a3965c4719139411c460e153632fb`. This proof works offline from retained objects and patch bytes, even when the a2f901ef commit object itself is absent. Retain the patch, scaffolding and commit metadata with the private inputs. A matching task digest alone does not prove the benchmark tree; the tree and commit ids do.
+
+Restoring missing objects is separate from this offline proof. A partial clone can try to fetch missing blobs or parents automatically; use an offline object reader for the proof, and report any missing object id instead of fetching or substituting a base. The two gitlink entries are preserved by mode and object id; their submodule contents are outside the base tree.
 
 ## Point the harness at a restored input set
 
-Every bench script reads the bench folder from `BENCH_ROOT` and refuses to run without it (`BENCH_ROOT_REQUIRED`, exit 2); it must be an absolute path and there is no default. Put the owner's restored private inputs (`config.json`, `tasks.json`) in one folder outside this repository, then run from the Forge checkout:
+Every bench script reads the bench folder from `BENCH_ROOT` and refuses to run without it (`BENCH_ROOT_REQUIRED`); it must be an absolute path and there is no default. Entry points exit 2, except preflight, which reports NO-GO and exits 1. Put the owner's restored private inputs (`config.json`, `tasks.json`) in one folder outside this repository, then point the harness at it in the current shell:
 
 ```sh
-BENCH_ROOT=/absolute/path/to/restored-inputs scripts/bench-t3code/setup --dry
+export BENCH_ROOT=/absolute/path/to/restored-inputs
 ```
 
-That one command checks the inputs, copies `PLAN.md` if absent and prints every remaining step and its cost; it creates nothing else. `export BENCH_ROOT=...` once to use the other scripts in the same shell.
+That command selects the restored inputs for every harness script in this shell. It creates nothing and starts no setup, qualification or benchmark. The offline checks below verify the inputs; environment setup and live qualification require their separate authorization.
 
 ## Offline rebuild and verification
 

@@ -13,6 +13,7 @@ import {
   symlinkSync,
   writeFileSync,
   existsSync,
+  rmSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -71,26 +72,37 @@ test('no bench script falls back to a machine path (guard for the whole class)',
   }
 });
 
-test('entry points refuse without BENCH_ROOT (exit 2) and create nothing', () => {
+test('entry points reject unset or relative BENCH_ROOT before any workspace or workload', t => {
   const cwd = mkdtempSync(join(tmpdir(), 'bench-noroot-'));
-  const env = { ...process.env };
-  delete env.BENCH_ROOT;
-  for (const args of [
-    ['setup.mjs', '--dry'],
-    ['teardown.mjs', '--dry'],
-    ['plan.mjs', 'check'],
-    ['summarize.mjs'],
-    ['pin.mjs'],
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  // A private empty home and no tool PATH keep a regressed guard away from real inputs/services.
+  const env = { HOME: cwd, USERPROFILE: cwd, PATH: '', TMPDIR: cwd };
+  for (const [value, code] of [
+    [undefined, 'BENCH_ROOT_REQUIRED'],
+    ['relative', 'BENCH_ROOT_NOT_ABSOLUTE'],
   ]) {
-    const r = spawnSync(process.execPath, [join(HARNESS, args[0]), ...args.slice(1)], {
-      cwd,
-      env,
-      encoding: 'utf8',
-    });
-    assert.equal(r.status, 2, `${args.join(' ')}: ${r.stderr}`);
-    assert.match(r.stderr, /BENCH_ROOT_REQUIRED/, args[0]);
+    for (const args of [
+      ['setup.mjs', '--dry'],
+      ['teardown.mjs', '--dry'],
+      ['deps.mjs', 'build'],
+      ['drive.mjs'],
+      ['pin.mjs'],
+      ['plan.mjs', 'check'],
+      ['preflight.mjs'],
+      ['rescore.mjs', 'fixture-cell', 'offline root guard'],
+      ['run-cell.mjs'],
+      ['summarize.mjs'],
+    ]) {
+      const r = spawnSync(process.execPath, [join(HARNESS, args[0]), ...args.slice(1)], {
+        cwd,
+        env: { ...env, ...(value === undefined ? {} : { BENCH_ROOT: value }) },
+        encoding: 'utf8',
+      });
+      assert.equal(r.status, args[0] === 'preflight.mjs' ? 1 : 2, `${args.join(' ')}: ${r.stderr}`);
+      assert.match(r.stdout + r.stderr, new RegExp(code), args[0]);
+      assert.deepEqual(readdirSync(cwd), [], args[0]);
+    }
   }
-  assert.deepEqual(readdirSync(cwd), []);
 });
 
 test('the CLI build comes from the product installation the PATH launcher enters', () => {

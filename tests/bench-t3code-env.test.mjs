@@ -256,13 +256,18 @@ test('a repo that exists but is not in the manifest is never adopted (and so nev
   assert.equal(readManifest(B).entries.length, 0);
 });
 
-test('base step refuses without --base-source and explains why it cannot rebuild from upstream', async () => {
+test('base step preserves the registered base until its exact source is supplied', async () => {
   const B = bench();
   const f = fakeContext(B);
   const r = await runSetup(f.ctx, { only: ['base'] });
   assert.equal(r.ok, false);
   assert.match(r.error, /BENCH_SETUP_NEEDS_BASE/);
-  assert.match(r.error, /unproven/);
+  assert.equal(JSON.parse(readFileSync(join(B, 'config.json'), 'utf8')).github.mainBase, BASE);
+  assert.deepEqual(readManifest(B).entries, []);
+  assert.deepEqual(
+    f.calls.filter(c => MUTATING.test(c)),
+    [],
+  );
 });
 
 test('base step: --base-source keeps the commit id; --new-base patches config and records the old one', async () => {

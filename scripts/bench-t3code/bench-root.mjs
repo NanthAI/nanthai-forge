@@ -7,7 +7,7 @@
 import { isAbsolute, resolve } from 'node:path';
 
 export const BENCH_ROOT_HELP =
-  'set BENCH_ROOT to the private bench folder, for example `export BENCH_ROOT="$HOME/forge-bench/exit"` (evals/bench-t3code/README.md, "Point the harness at a restored input set")';
+  'set BENCH_ROOT to the private bench folder, for example `export BENCH_ROOT=/absolute/path/to/restored-inputs` (evals/bench-t3code/README.md, "Point the harness at a restored input set")';
 
 /** The bench folder, or a thrown BENCH_ROOT_REQUIRED / BENCH_ROOT_NOT_ABSOLUTE error. */
 export function benchRoot(env = process.env) {
