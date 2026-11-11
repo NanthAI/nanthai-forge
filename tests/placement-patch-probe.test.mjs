@@ -63,12 +63,13 @@ test('synthetic writer refuses every deployment except the explicitly authorized
   assert.equal(rows.size, 0);
 });
 
-// The experiment changes only index count; each index carries the same small key.
-test('billed patch calibration has exactly 1, 9 and 24 identical-key custom indexes', async () => {
+// Every table has identical document columns; only the number of distinct indexes changes.
+test('billed patch calibration has exactly 1, 9 and 24 distinct small-key custom indexes', async () => {
   const { placementPatchProbeTables } = await import(moduleUrl('../convex/placementPatchProbeFields.ts'));
   for (const count of [1, 9, 24]) {
     const definition = placementPatchProbeTables[`placementPatchProbe${count}`].export();
     assert.equal(definition.indexes.length, count);
-    assert(definition.indexes.every(index => JSON.stringify(index.fields) === '["key"]'));
+    assert.equal(new Set(definition.indexes.map(index => JSON.stringify(index.fields))).size, count);
+    assert(definition.indexes.every(index => index.fields.length === 2 && index.fields[0] === 'key'));
   }
 });

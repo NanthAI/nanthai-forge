@@ -24,7 +24,35 @@ export const setup = internalMutation({
           .withIndex('by_key_01', q => q.eq('key', key))
           .unique();
         if (!old) {
-          const row = { key, step: 0, payload: '' };
+          const row = {
+            key,
+            step: 0,
+            payload: '',
+            k01: 0,
+            k02: 0,
+            k03: 0,
+            k04: 0,
+            k05: 0,
+            k06: 0,
+            k07: 0,
+            k08: 0,
+            k09: 0,
+            k10: 0,
+            k11: 0,
+            k12: 0,
+            k13: 0,
+            k14: 0,
+            k15: 0,
+            k16: 0,
+            k17: 0,
+            k18: 0,
+            k19: 0,
+            k20: 0,
+            k21: 0,
+            k22: 0,
+            k23: 0,
+            k24: 0,
+          };
           row.payload = 'x'.repeat(bytes - JSON.stringify(row).length);
           await ctx.db.insert(table, row);
         }
