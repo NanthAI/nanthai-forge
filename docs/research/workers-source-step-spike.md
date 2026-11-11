@@ -14,8 +14,8 @@ service purchase, new product restriction or user step is introduced.
 
 Issue: `9e4ba8c6-be09-4ccd-bee3-2ed359f56b27`.
 Review: [S8](placement-review.md#s8-byte-plane-beside-r2-owner-decision-adds-5-a-month).
-Harness: [local spike](../../spikes/workers-source-step/README.md).
-Raw observations, gaps, void and source hashes: [evidence.json](../../spikes/workers-source-step/evidence.json).
+Harness: [local spike](https://github.com/NanthAI/nanthai-forge/blob/3bab66a32df959344617dfd37d6081e204be607a/spikes/workers-source-step/README.md), removed from main after Option B closed (1018d0f8); the link pins the last State that holds it.
+Raw observations, gaps, void and source hashes: [evidence.json](https://github.com/NanthAI/nanthai-forge/blob/3bab66a32df959344617dfd37d6081e204be607a/spikes/workers-source-step/evidence.json).
 
 ## What ran and what stopped
 
@@ -149,7 +149,7 @@ billing was not read.
 | R2 operations | $0.03132 | $0.01116 |
 | **Illustrative subtotal** | **$0.17804** | **$0.04291 + unknown bridge compute/bytes** |
 
-`tests/workers-source-step-spike-metrics.mjs` computes these values from the retained observation. Future Worker
+[`tests/workers-source-step-spike-metrics.mjs`](https://github.com/NanthAI/nanthai-forge/blob/3bab66a32df959344617dfd37d6081e204be607a/tests/workers-source-step-spike-metrics.mjs) (removed with the harness) computed these values from the retained observation. Future Worker
 orchestration is absent, so preserving baseline calls/DB bytes is an assumption,
 not a measured Worker total or a promise of no added calls. No bootstrap interval
 is justified for this unpaired deterministic sensitivity model.
