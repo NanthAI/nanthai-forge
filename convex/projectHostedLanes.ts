@@ -3,7 +3,7 @@ import { v } from 'convex/values';
 import { query, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
-import { hostedRecordPage, readHostedRecord, recordHead } from './projectHostedRecords';
+import { hostedRecordPage, hostedRecordBody, readHostedRecord, recordHead } from './projectHostedRecords';
 import { effectiveLifecycleRecord } from './projectHostedLifecycleOverlay';
 import { hostedLaneSchema, hostedLaneSelectionSchema, hostedIntentSchema } from '../src/hosted-lane';
 import { sourceAuthority } from '../src/hosted-source-authority';
@@ -98,6 +98,7 @@ export const states = query({
   args: {
     projectId: v.id('hostedProjects'),
     laneIds: v.array(v.string()),
+    sourcePins: v.optional(v.literal(1)),
     additionalProjects: v.optional(
       v.array(
         v.object({
@@ -113,6 +114,7 @@ export const states = query({
       state: v.string(),
       version: v.number(),
       pinned: v.optional(v.boolean()),
+      source: v.optional(v.object({ head: v.string(), intentId: v.string() })),
       reason: v.optional(v.string()),
     }),
   ),
@@ -149,10 +151,15 @@ export const states = query({
           const head = await recordHead(ctx, group.projectId, 'lane', laneId);
           const row = head ? await ctx.db.get(head.recordId) : null;
           const effective = row ? await effectiveLifecycleRecord(ctx, row) : null;
+          const source =
+            input.sourcePins && effective
+              ? hostedLaneSchema.parse(JSON.parse(await hostedRecordBody(ctx, effective)))
+              : null;
           result.push(
             effective
               ? {
                   laneId,
+                  ...(source ? { source: { head: source.head, intentId: source.intentId } } : {}),
                   state: String(effective.status),
                   version: effective.version,
                   ...(effective.pinned ? { pinned: true } : {}),

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { landingHistoryQuery, watchLandingHistory } from './landing-history';
 import type { ConvexReactClient } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import type { Id } from '../../../convex/_generated/dataModel';
@@ -11,31 +12,31 @@ import { packHeaders, verifyPackRange, type PackRange } from '../../../src/objec
 export function landingBrowserIO(client: ConvexReactClient, projectId: Id<'hostedProjects'>): LandingIO {
   const parse = <T>(value: unknown): T => (typeof value === 'string' ? JSON.parse(value) : value) as T;
   const io: LandingIO = {
-    query: async (name, args) =>
-      parse(await client.query(makeFunctionReference<'query'>(name), { ...args, projectId })),
+    query: async (name, args) => parse(await landingHistoryQuery(client, name, { ...args, projectId })),
     mutation: async (name, args) =>
       parse(await client.mutation(makeFunctionReference<'mutation'>(name), { ...args, projectId })),
     wait: (name, args, done) =>
       new Promise((resolve, reject) => {
-        const watch = client.watchQuery(makeFunctionReference<'query'>(name), { ...args, projectId });
         let stop = () => {};
-        const update = () => {
-          try {
-            const value = watch.localQueryResult();
-            if (value !== undefined) {
-              const parsed = parse(value);
-              if (done(parsed as never)) {
-                stop();
-                resolve(parsed as never);
-              }
+        let settled = false;
+        stop = watchLandingHistory(
+          client,
+          name,
+          { ...args, projectId },
+          value => {
+            if (!settled && value !== undefined && done(value as never)) {
+              settled = true;
+              stop();
+              resolve(value as never);
             }
-          } catch (error) {
+          },
+          error => {
+            settled = true;
             stop();
             reject(error);
-          }
-        };
-        stop = watch.onUpdate(update);
-        update();
+          },
+        );
+        if (settled) stop();
       }),
     read: async (pin: Pin) => {
       const [row] = await client.mutation(api.projectObjectDownloads.describe, {

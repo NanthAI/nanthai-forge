@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx, QueryCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { Id, Doc } from './_generated/dataModel';
 import { hostedLandingAttemptSchema, type HostedLandingAttempt } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
 export const landingAttemptRow = (
@@ -25,12 +25,13 @@ export function pinsFor(ctx: QueryCtx | MutationCtx) {
 export async function loadLandingAttempt(
   ctx: QueryCtx | MutationCtx,
   input: { projectId: Id<'hostedProjects'>; attemptId: string },
+  known?: Doc<'projectHostedLandingAttempts'> | null,
 ) {
   const pins = pinsFor(ctx),
     key = `${input.projectId}:${input.attemptId}`;
   const retained = pins.get(key);
   if (retained) return retained;
-  const row = await landingAttemptRow(ctx, input);
+  const row = known === undefined ? await landingAttemptRow(ctx, input) : known;
   invariant(row, 'SOURCE_UNAVAILABLE', 'The original landing attempt is unavailable.');
   const attempt = hostedLandingAttemptSchema.parse(JSON.parse(row.value));
   invariant(

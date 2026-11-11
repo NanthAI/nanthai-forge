@@ -303,3 +303,30 @@ export function readLandingTransition(value: string, current: HostedLandingState
     ...(stored.wouldConflict === undefined ? {} : { wouldConflict: stored.wouldConflict }),
   };
 }
+
+/** Immutable landing history tables; shared aliases are never capsule members. */
+export const LANDING_CAPSULE_TABLES = [
+  'projectHostedLandingObservations',
+  'projectHostedLandingAttempts',
+  'projectFinishReadRows',
+  'projectHostedAcceptanceEvents',
+  'projectHostedAcceptancePages',
+  'projectHostedAcceptancePlans',
+  'projectHostedAcceptanceSnapshots',
+  'projectHostedComposePages',
+  'projectHostedCheckCallbacks',
+  'legacyStorageCleanupPages',
+] as const;
+export type LandingCapsulePointer = {
+  protocol: 1;
+  sha256: string;
+  size: number;
+  rawSize: number;
+  version: number;
+  /** Projection commitment; the canonical pointer retains every table digest. */
+  tablesDigest?: string;
+  /** [table ordinal, count, logical bytes, digest], excluding empty tables. */
+  tables: string;
+  /** Transaction-required pins only; never returned by a public history query. */
+  summary?: string;
+};

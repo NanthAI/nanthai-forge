@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useConvex, useQuery } from 'convex/react';
-import { landingCandidate } from './landing-api';
+import { useConvex } from 'convex/react';
+import { watchLandingHistory } from './landing-history';
 import type { Id } from '../../../convex/_generated/dataModel';
 import { BrowserLanding } from './hosted-landing-client';
 import { landingBrowserIO } from './landing-browser-io';
-import type { HostedCheckRun } from '../../../src/hosted-check';
 import type { LandingRead } from './landing-model';
 import { hostedError } from '../snapshot';
 import { landingFailureExcerpt } from './landing-output';
@@ -26,19 +25,49 @@ export function useHostedLanding(projectId: Id<'hostedProjects'>, candidateId: s
   }, [client, projectId]);
   const [reversing, setReversing] = useState(false),
     [reverseId, setReverseId] = useState('');
-  const selected = useQuery(landingCandidate, { projectId, candidateId });
-  const candidate = selected
-    ? (JSON.parse(selected) as LandingRead | { request: null; run: HostedCheckRun | null })
-    : null;
-  const read = candidate?.request ? (candidate as LandingRead) : null;
+  const retryRead = useReadRetry();
+  const candidateKey = `${projectId}:${candidateId}`;
+  const [history, setHistory] = useState<{ key: string; value: unknown }>({ key: '', value: null });
+  const candidate = history.key === candidateKey ? (history.value as LandingRead | null) : null;
+  const read = candidate?.request ? candidate : null;
   const readyRun = candidate?.run ?? null;
   const reverseCandidateId = reverseId || read?.reverseCandidateId;
-  const reverse = useQuery(
-    landingCandidate,
-    reverseCandidateId ? { projectId, candidateId: reverseCandidateId } : 'skip',
+  const [reverseHistory, setReverseHistory] = useState<{ key: string; value: unknown }>({
+    key: '',
+    value: null,
+  });
+  const reverseKey = `${projectId}:${reverseCandidateId}`;
+  const reverseRead = reverseHistory.key === reverseKey ? (reverseHistory.value as LandingRead | null) : null;
+  useEffect(
+    () =>
+      watchLandingHistory(
+        client,
+        'projectHostedLanding:candidate',
+        { projectId, candidateId },
+        value => setHistory({ key: candidateKey, value }),
+        e => {
+          setHistory({ key: candidateKey, value: null });
+          setError(hostedError(e));
+        },
+      ),
+    [client, projectId, candidateId, candidateKey, retryRead],
   );
-  const reverseRead = reverse ? (JSON.parse(reverse) as LandingRead) : null;
-  const retryRead = useReadRetry();
+  useEffect(
+    () =>
+      reverseCandidateId
+        ? watchLandingHistory(
+            client,
+            'projectHostedLanding:candidate',
+            { projectId, candidateId: reverseCandidateId },
+            value => setReverseHistory({ key: reverseKey, value }),
+            e => {
+              setReverseHistory({ key: reverseKey, value: null });
+              setError(hostedError(e));
+            },
+          )
+        : undefined,
+    [client, projectId, reverseCandidateId, reverseKey, retryRead],
+  );
   const [excerpt, setExcerpt] = useState<{ id: string; failures: string[]; log: string }>({
     id: '',
     failures: [],

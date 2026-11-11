@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { capsuleHistoryContext } from './projectLandingCapsuleContext';
 import { supersededOutcome } from '../src/landing-state';
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
 import { landingOrderWaitForReader, landingStateForReader } from './projectHostedLandingOrder';
@@ -87,25 +88,30 @@ export const status = query({
 /** Explicit immutable input-page read, with current Lane-relative S01 states.
  * Regular status stays constant-size even for a many-Lane finish. */
 export const inputs = query({
-  args: { ...identity, attemptId: v.string(), index: v.number() },
+  args: { ...identity, attemptId: v.string(), index: v.number(), capsuleProtocol: v.optional(v.literal(1)) },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted finish inputs.');
-      await accessibleProject(ctx, input.projectId, user.subject);
+      const project = await accessibleProject(ctx, input.projectId, user.subject);
       invariant(
         Number.isSafeInteger(input.index) && input.index >= 0,
         'BAD_ARGUMENT',
         'Select an input page index.',
       );
-      const { state } = await loadLanding(ctx, input),
-        attempt = await loadLandingAttempt(ctx, input);
+      const { row: selected, state } = await loadLanding(ctx, input);
+      const attemptRow = await landingAttemptRow(ctx, input);
+      if (selected.capsule && !attemptRow)
+        return capsuleHistoryContext(ctx, project, selected.capsule, input.capsuleProtocol, state.id, {
+          capsuleState: state,
+        });
+      const attempt = await loadLandingAttempt(ctx, input, attemptRow);
       invariant(attempt.submissionId === state.id, 'NOT_FOUND', 'Attempt belongs to a different submission.');
       const identity = { projectId: input.projectId, receiptId: attempt.operations.accept };
       const plan = await acceptancePlan(ctx, identity);
       const page = await acceptancePage(ctx, { ...identity, kind: 'inputs', index: input.index });
-      const attemptRow = (await landingAttemptRow(ctx, input))!;
+      invariant(attemptRow, 'SOURCE_UNAVAILABLE', 'The original landing attempt is unavailable.');
       const progress = landingAttemptProgress(attemptRow, state);
       const entries = [];
       for (const item of page ? validateComposePage(JSON.parse(page.value)).entries : []) {

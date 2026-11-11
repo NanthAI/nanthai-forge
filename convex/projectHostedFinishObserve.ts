@@ -7,6 +7,7 @@ import { landingReservationForReader } from './projectHostedLandingReservation';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { capsuleHistoryContext } from './projectLandingCapsuleContext';
 import { readLandingTransition } from '../src/hosted-landing';
 import { landingAlias } from './projectHostedLandingIdentity';
 import { finishPendingForReader } from '../src/hosted-finish';
@@ -32,6 +33,7 @@ export const page = query({
     operationId: v.string(),
     nextVersion: v.number(),
     priorityInfo: v.optional(v.literal(1)),
+    capsuleProtocol: v.optional(v.literal(1)),
     /** Wait delivery (feature board-wait): the live wait subscription only, never a page drain.
      * Adds `board` when a note reached this Lane's own inbox after the client's cursor. */
     board: v.optional(v.object({ laneId: v.string(), after: v.number() })),
@@ -62,6 +64,7 @@ async function observePage(
     operationId: string;
     nextVersion: number;
     priorityInfo?: 1;
+    capsuleProtocol?: 1;
   },
 ) {
   const ctx = finishReadReader(rawCtx);
@@ -138,6 +141,7 @@ async function observePage(
     const selectedRow = rows[0];
     invariant(selectedRow, 'NOT_FOUND', 'Hosted landing request not found.');
     const state = landingStateFromRow(selectedRow);
+    const cold = selectedRow.capsule && input.nextVersion <= selectedRow.capsule.version;
     phase = state.phase;
     version = state.version;
     stage = 'queue';
@@ -152,12 +156,12 @@ async function observePage(
     });
     const pendingAttempt = finish ? finishPendingForReader(JSON.parse(finish.value).pending) : null;
     const events = [];
-    let nextVersion = input.nextVersion,
+    let nextVersion = cold ? selectedRow.capsule!.version + 1 : input.nextVersion,
       resnapshot = false;
     // Exact indexed reads keep both documents and ranges bounded, including gaps
     // in pre-journal history. Never scan unrelated operations or Work/source data.
     stage = 'history';
-    for (let n = 0; n < 20 && nextVersion <= state.version; n++) {
+    for (let n = 0; n < 20 && nextVersion <= Math.min(state.version, input.nextVersion + 19); n++) {
       const row = await ctx.db
         .query('projectHostedLandingObservations')
         .withIndex('by_project_and_submission_and_version', q =>
@@ -193,7 +197,7 @@ async function observePage(
       for (const event of events)
         if (event.submission.version === state.version)
           event.submission = noteHeldPolicy(event.submission, pin);
-    return canonicalPayload({
+    const payload = {
       projectId: input.projectId,
       operationId: input.operationId,
       canonicalOperationId: state.operationId,
@@ -213,7 +217,10 @@ async function observePage(
       nextVersion,
       isDone: nextVersion > state.version,
       resnapshot,
-    });
+    };
+    return cold
+      ? capsuleHistoryContext(ctx, project, selectedRow.capsule!, input.capsuleProtocol, state.id, payload)
+      : canonicalPayload(payload);
   } catch (error) {
     // Error-only, constant-size context. Do not log source, row values, caller
     // strings or exception payloads. Platform failures before execution need

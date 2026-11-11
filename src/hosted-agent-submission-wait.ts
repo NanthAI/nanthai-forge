@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { hasLandingCapsule } from './landing-capsule-client.js';
 import { isNetworkPending } from './network-continuation.js';
 import { observedConflictRecovery } from './hosted-observed-conflict.js';
 import { makeFunctionReference } from 'convex/server';
@@ -193,6 +194,8 @@ async function observeHostedSubmissionsOnce(
   // The board rides on the first operation's existing subscription, only on servers that say so.
   const features = (discovery.result as { features?: unknown }).features;
   const boardWait = board && Array.isArray(features) && features.includes('board-wait') ? board : undefined;
+  const capsuleArgs =
+    Array.isArray(features) && features.includes('landing-capsules-v1') ? { capsuleProtocol: 1 } : {};
   const actor = z.object({ actor: z.string() }).parse(discovery.result).actor;
   // A reply read only in part across a deploy (Issue 71ef0a66): reported, never silent.
   let skew: ReplySkew | undefined;
@@ -235,6 +238,7 @@ async function observeHostedSubmissionsOnce(
         submissionId: selected.id,
         attemptId: selected.attemptId,
         index,
+        ...capsuleArgs,
       };
       const key = `${operationId}:${selected.attemptId}:${index}`;
       if (client && !inputSubscriptions.has(key)) {
@@ -534,7 +538,8 @@ async function observeHostedSubmissionsOnce(
           if (decoded && typeof decoded === 'object') {
             const page = { ...(decoded as Record<string, unknown>) };
             delete page.board;
-            live.set(operationId, page);
+            if (hasLandingCapsule(page)) live.delete(operationId);
+            else live.set(operationId, page);
           }
         } catch {
           /* Unreadable: the next drain reads the page itself. */
@@ -559,6 +564,7 @@ async function observeHostedSubmissionsOnce(
               projectId: transport.address.projectId,
               operationId,
               nextVersion: cursor.versions.get(operationId) ?? 0,
+              ...capsuleArgs,
               ...(boardWait && index === 0
                 ? {
                     board: { laneId: boardWait.laneId, after: boardWait.after },

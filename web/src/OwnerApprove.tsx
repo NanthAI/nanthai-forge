@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { watchLandingHistory } from './lane/landing-history';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SignInButton } from '@clerk/react';
 import { useConvex, useConvexAuth } from 'convex/react';
@@ -14,11 +15,6 @@ import { LaneApproval, type LaneApprovalPhase, type LaneApprovalRead } from './r
 import type { HostedLandingAttempt, HostedLandingState } from '../../src/hosted-landing';
 
 type Read = { request: HostedLandingState; attempt: HostedLandingAttempt };
-const status = makeFunctionReference<
-  'query',
-  { projectId: Id<'hostedProjects'>; submissionId: string },
-  string
->('projectHostedLanding:status');
 const approvalRead = makeFunctionReference<
   'query',
   { projectId: Id<'hostedProjects'>; laneId: string; detail: 1 },
@@ -138,18 +134,14 @@ function LandingApprove() {
     [declineId] = useState(() => crypto.randomUUID());
   useEffect(() => {
     if (!isAuthenticated || !projectId || !submissionId) return;
-    const watch = client.watchQuery(status, { projectId, submissionId });
-    const update = () => {
-      try {
-        const value = watch.localQueryResult();
-        if (value !== undefined) setRead(JSON.parse(value) as Read);
-      } catch {
-        setRead(null);
-      }
-    };
-    const stop = watch.onUpdate(update);
-    update();
-    return stop;
+    setRead(undefined);
+    return watchLandingHistory(
+      client,
+      'projectHostedLanding:status',
+      { projectId, submissionId },
+      value => setRead(value as Read | null | undefined),
+      () => setRead(null),
+    );
   }, [client, isAuthenticated, projectId, submissionId]);
   const act = async (call: (held: Read) => Promise<unknown>) => {
     if (!read) return;

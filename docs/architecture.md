@@ -1642,6 +1642,18 @@ the canonical handle through operation aliases; current access is checked on eve
 observation. `projectHostedFinishObserve:page` returns preparing, queued and terminal
 versions through the same selected-operation read without scheduling work.
 
+Capsule-capable reads declare `capsuleProtocol: 1` on the five landing-history
+queries. A selected capsule returns a content-pin marker and current redacted
+context. `projectLandingCapsuleRead:history` calls the same authorized query before
+and after its private R2 read, verifies the complete compressed object and each
+table digest, then reconstructs the ordinary reply and applies current public
+identity mapping. The CLI negotiates `landing-capsules-v1` on its existing
+capability read; browser reads negotiate only after the existing
+`CLI_UPGRADE_REQUIRED` history error. An old-protocol history request that needs a
+capsule receives that error; uncapsuled reads and past-end current-state probes
+retain their existing calls. Attempt ordinal cursors remain stable across
+relocation. No capsule writer or automatic relocation is installed in this stage.
+
 `projectHostedLanding:enqueue` records a durable submission, immutable first attempt,
 original H01 operation and coalesced Channel wake in one transaction. The request
 selects an exact canonical Candidate/head (or a retained conflict), main head and

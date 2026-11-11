@@ -1,4 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+import {
+  capsuleHistoryContext,
+  readCapsuleAttemptCursor,
+  capsuleAttemptCursor,
+  isCapsuleAttemptCursor,
+} from './projectLandingCapsuleContext';
 import { runProof } from './projectLandingProof';
 import { held, heldPolicy, noteHeldPolicy } from './projectHostedOwnerReview';
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
@@ -36,6 +42,7 @@ import {
   recordLandingObservation,
   retainLandingProgress,
   landingAttemptProgress,
+  landingAttemptRow,
 } from './projectHostedLandingStore';
 import { wakeLandingQueue, notifyLandingCheck } from './projectHostedLandingWake';
 import { initializeFinish } from './projectHostedFinishStore';
@@ -122,6 +129,7 @@ export const status = query({
     projectId: v.id('hostedProjects'),
     submissionId: v.string(),
     priorityInfo: v.optional(v.literal(1)),
+    capsuleProtocol: v.optional(v.literal(1)),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -138,16 +146,16 @@ export const status = query({
       }
       const wouldConflict = state.phase === 'queued' ? readWouldConflict(row) : undefined;
       const stallAlert = await latestStallAlert(ctx, input, state);
-      const attempt = await loadLandingAttempt(ctx, {
-        projectId: input.projectId,
-        attemptId: state.attemptId,
-      });
+      const attemptKey = { projectId: input.projectId, attemptId: state.attemptId };
+      const liveAttempt = await landingAttemptRow(ctx, attemptKey);
+      const archived = !!row.capsule && !liveAttempt;
+      const attempt = archived ? null : await loadLandingAttempt(ctx, attemptKey, liveAttempt);
       // A held landing says which policy it is pinned to and when it re-reads it: no extra read.
-      const pin = held(state) ? heldPolicy(project, attempt) : null;
+      const pin = held(state) && attempt ? heldPolicy(project, attempt) : null;
       const queue = await readQueueStatus(ctx, state);
       const orderWait = landingOrderWaitForReader(row, state);
       const reservation = landingReservationForReader(row);
-      return canonicalPayload({
+      const payload = {
         request: noteHeldPolicy(
           landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
           pin,
@@ -160,7 +168,10 @@ export const status = query({
         ...(wouldConflict ? { wouldConflict } : {}),
         ...(stallAlert ? { stallAlert } : {}),
         ...(reservation ? { reservation } : {}),
-      });
+      };
+      return archived
+        ? capsuleHistoryContext(ctx, project, row.capsule!, input.capsuleProtocol, state.id, payload)
+        : canonicalPayload(payload);
     } catch (error) {
       return report(error);
     }
@@ -219,26 +230,41 @@ export const attempts = query({
     projectId: v.id('hostedProjects'),
     submissionId: v.string(),
     cursor: v.union(v.string(), v.null()),
+    capsuleProtocol: v.optional(v.literal(1)),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      await reader(ctx, input.projectId);
-      invariant(await landingRow(ctx, input), 'NOT_FOUND', 'Hosted landing request not found.');
+      const project = await reader(ctx, input.projectId);
+      const { row, state } = await loadLanding(ctx, input);
+      if (row.capsule && !input.capsuleProtocol)
+        return capsuleHistoryContext(ctx, project, row.capsule, input.capsuleProtocol, state.id, {});
+      const after =
+        input.capsuleProtocol && (row.capsule || isCapsuleAttemptCursor(input.cursor))
+          ? readCapsuleAttemptCursor(input.cursor, input.submissionId)
+          : null;
       const page = await ctx.db
         .query('projectHostedLandingAttempts')
-        .withIndex('by_project_and_submission_and_number', q =>
-          q.eq('projectId', input.projectId).eq('submissionId', input.submissionId),
-        )
+        .withIndex('by_project_and_submission_and_number', q => {
+          const selected = q.eq('projectId', input.projectId).eq('submissionId', input.submissionId);
+          return after === null ? selected : selected.gt('number', after);
+        })
         .paginate({
-          cursor: input.cursor,
+          cursor: after === null ? input.cursor : null,
           numItems: 100,
           maximumRowsRead: 100,
           maximumBytesRead: 128 * 1024,
         });
-      const { state } = await loadLanding(ctx, input);
-      return canonicalPayload({
+      const payload = {
         ...page,
+        ...(input.capsuleProtocol
+          ? {
+              continueCursor: capsuleAttemptCursor(
+                input.submissionId,
+                page.page.at(-1)?.number ?? after ?? -1,
+              ),
+            }
+          : {}),
         version: state.version,
         page: page.page.map(row => ({
           ...JSON.parse(row.value),
@@ -246,7 +272,17 @@ export const attempts = query({
           observation: landingAttemptProgress(row, state)?.observation ?? null,
           superseded: row.attemptId !== state.attemptId,
         })),
-      });
+      };
+      return row.capsule
+        ? capsuleHistoryContext(ctx, project, row.capsule, input.capsuleProtocol, state.id, {
+            ...payload,
+            capsuleState: state,
+            capsuleLiveBytes: page.page.map(row => [
+              row.number,
+              new TextEncoder().encode(canonicalPayload(row)).length,
+            ]),
+          })
+        : canonicalPayload(payload);
     } catch (error) {
       return report(error);
     }
@@ -437,11 +473,15 @@ export async function enqueueHostedLanding(
 
 /** One Candidate subscription, no project queue scan or observer-driven work. */
 export const candidate = query({
-  args: { projectId: v.id('hostedProjects'), candidateId: v.string() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    candidateId: v.string(),
+    capsuleProtocol: v.optional(v.literal(1)),
+  },
   returns: v.union(v.string(), v.null()),
   handler: async (ctx, input) => {
     try {
-      await reader(ctx, input.projectId);
+      const project = await reader(ctx, input.projectId);
       const [row] = await ctx.db
         .query('projectHostedLandingRequests')
         .withIndex('by_project_and_candidate_and_sequence', q =>
@@ -468,11 +508,11 @@ export const candidate = query({
         projectId: input.projectId,
         submissionId: row.submissionId,
       });
-      const attempt = await loadLandingAttempt(ctx, {
-        projectId: input.projectId,
-        attemptId: state.attemptId,
-      });
-      const run = attempt.check
+      const attemptKey = { projectId: input.projectId, attemptId: state.attemptId };
+      const liveAttempt = await landingAttemptRow(ctx, attemptKey);
+      const archived = !!row.capsule && !liveAttempt;
+      const attempt = archived ? null : await loadLandingAttempt(ctx, attemptKey, liveAttempt);
+      const run = attempt?.check
         ? (await loadHostedCheck(ctx, { projectId: input.projectId, runId: attempt.check.runId })).run
         : null;
       if (state.acceptance?.proofRunId) {
@@ -510,7 +550,7 @@ export const candidate = query({
             .order('desc')
             .take(1)
         : [];
-      return canonicalPayload({
+      const payload = {
         request:
           state.observation.state === 'pending' && run?.status === 'unknown'
             ? { ...state, observation: { ...state.observation, pendingReason: 'pending-infra' } }
@@ -525,7 +565,10 @@ export const candidate = query({
           ahead && !['landed', 'terminal-failed'].includes(ahead.phase)
             ? JSON.parse(ahead.value).request.candidateId
             : null,
-      });
+      };
+      return archived
+        ? capsuleHistoryContext(ctx, project, row.capsule!, input.capsuleProtocol, state.id, payload)
+        : canonicalPayload(payload);
     } catch (error) {
       return report(error);
     }

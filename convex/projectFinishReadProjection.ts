@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { digest } from '../src/state/hash';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { finishPendingForReader } from '../src/hosted-finish';
 import type { Doc } from './_generated/dataModel';
@@ -7,6 +8,7 @@ import type { Doc } from './_generated/dataModel';
 export const finishReadFields = {
   hostedProjects: ['owner', 'visibility', 'removal', 'sourceAuthority', 'name', 'key'],
   projectHostedLandingRequests: [
+    'capsule',
     'projectId',
     'submissionId',
     'operationId',
@@ -35,6 +37,11 @@ export type FinishReadKind = keyof typeof finishReadFields;
 export function finishReadProjection(kind: FinishReadKind, row: Record<string, unknown>) {
   const result: Record<string, unknown> = {};
   for (const key of finishReadFields[kind]) if (row[key] !== undefined) result[key] = row[key];
+  if (kind === 'projectHostedLandingRequests' && row.capsule) {
+    const { protocol, sha256, size, rawSize, version, tables } =
+      row.capsule as import('../src/hosted-landing').LandingCapsulePointer;
+    result.capsule = { protocol, sha256, size, rawSize, version, tables: '', tablesDigest: digest(tables) };
+  }
   if (kind === 'projectHostedFinishes') {
     result.value = canonicalPayload({
       pending: finishPendingForReader(JSON.parse(row.value as string).pending),

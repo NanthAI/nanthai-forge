@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
+import { landingCapsulePointer } from './projectLandingCapsuleFields';
 const alarm = v.optional(
   v.union(
     v.object({
@@ -126,6 +127,7 @@ export const hostedLandingTables = {
     ),
   }).index('by_project_and_channel', ['projectId', 'channel']),
   projectHostedLandingRequests: defineTable({
+    capsule: v.optional(landingCapsulePointer),
     alarm,
     projectId: v.id('hostedProjects'),
     channel: v.literal('main'),
