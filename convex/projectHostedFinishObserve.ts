@@ -7,6 +7,7 @@ import { landingReservationForReader } from './projectHostedLandingReservation';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { readLandingTransition } from '../src/hosted-landing';
 import { landingAlias } from './projectHostedLandingIdentity';
 import { finishPendingForReader } from '../src/hosted-finish';
 import { ConvexError, v } from 'convex/values';
@@ -173,7 +174,7 @@ async function observePage(
         resnapshot = true;
         break;
       }
-      const event = JSON.parse(row.value);
+      const event = readLandingTransition(row.value, state);
       events.push({
         ...event,
         pendingAttempt: finishPendingForReader(event.pendingAttempt),

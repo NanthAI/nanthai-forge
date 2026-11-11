@@ -3,7 +3,7 @@ import { retainQueueStatus } from './projectHostedQueueStatus';
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { semanticPayload } from '../src/semantic-payload';
+import { landingTransition } from '../src/hosted-landing';
 import type { HostedLandingState } from '../src/hosted-landing';
 import { finishPendingForReader, type HostedFinish } from '../src/hosted-finish';
 export type LandingChannel = { projectId: Id<'hostedProjects'>; channel: 'main' };
@@ -54,7 +54,7 @@ export async function wakeLandingQueue(ctx: MutationCtx, input: LandingChannel, 
     now,
   );
 }
-/** One retained version per committed state; no observer drives or schedules work. */
+/** One compact transition per committed state; the request holds the current snapshot. */
 export async function recordLandingObservation(
   ctx: MutationCtx,
   state: HostedLandingState,
@@ -75,7 +75,7 @@ export async function recordLandingObservation(
     projectId: state.projectId as Id<'hostedProjects'>,
     submissionId: state.id,
     version: state.version,
-    value: semanticPayload({
+    value: landingTransition({
       submission: state,
       pendingAttempt: finishPendingForReader(
         (pendingAttempt ?? (finish ? JSON.parse(finish.value).pending : null)) as HostedFinish['pending'],

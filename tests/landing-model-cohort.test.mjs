@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Regression for Issue 6e587f06: an unaccepted prefix cannot terminalize its peer.
 import test from 'node:test';
+import { readLandingTransition } from '../dist/hosted-landing.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
@@ -68,7 +69,17 @@ for (const count of [2, 8])
     assert.equal(rowOf(f, 1).wouldConflict, undefined);
     assert(
       ![...f.tables.projectHostedLandingObservations.values()]
-        .map(row => JSON.parse(row.value).submission)
+        .map(
+          row =>
+            readLandingTransition(
+              row.value,
+              JSON.parse(
+                [...f.tables.projectHostedLandingRequests.values()].find(
+                  request => request.submissionId === row.submissionId,
+                ).value,
+              ),
+            ).submission,
+        )
         .some(state => state.id === current(f, 1).id && state.error?.code === 'COMPOSITION_CONFLICT'),
     );
     assert.equal(

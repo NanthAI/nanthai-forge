@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { readLandingTransition } from '../dist/hosted-landing.js';
 import assert from 'node:assert/strict';
 import { batchesFixture, synthetic, states } from './hosted-landing-batches-fixture.mjs';
 import { hostedLandingStateSchema } from '../dist/hosted-landing.js';
@@ -482,7 +483,15 @@ for (const notified of [false, true])
     assert.equal((await f.current(f.entries[0].state.id)).submission.error, null);
     assert(
       [...f.tables.projectHostedLandingObservations.values()].every(
-        row => JSON.parse(row.value).submission.error?.code !== 'COMPOSITION_CONFLICT',
+        row =>
+          readLandingTransition(
+            row.value,
+            JSON.parse(
+              [...f.tables.projectHostedLandingRequests.values()].find(
+                request => request.submissionId === row.submissionId,
+              ).value,
+            ),
+          ).submission.error?.code !== 'COMPOSITION_CONFLICT',
       ),
     );
     await f.passChecks();

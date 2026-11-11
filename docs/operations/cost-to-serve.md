@@ -812,8 +812,8 @@ The fixtures do not model every save, large source fan-out or a whole user month
 
 | Fixture | Per-landing immediate ceiling | Per-landing retained ceiling, including page receipts | Fixed per-project full rows, each phase |
 | --- | ---: | ---: | ---: |
-| Fresh project, two test shards | 49,453 B | 49,885 B | 1,070 B / 3 rows |
-| Dogfood-shaped, main race / two large checks | 828,056 B | 263,308 B | 97,716 B / 3 rows |
+| Fresh project, two test shards | 41,781 B | 42,213 B | 1,070 B / 3 rows |
+| Dogfood-shaped, main race / two large checks | 812,712 B | 247,964 B | 97,716 B / 3 rows |
 
 These are the committed fixture ceilings, not an observed saving. The fixed
 rows' respective byte ceilings are 638 / 279 / 153 B (fresh) and
@@ -821,8 +821,12 @@ rows' respective byte ceilings are 638 / 279 / 153 B (fresh) and
 50,417 / 360,486 B included their *deltas* (532 / 97,178 B), which must not be
 charged again for every landing. The joint S1/S2 retained targets of
 15,000 / 60,000 B apply to per-landing rows; the fixed rows keep their own
-ratchets. This split changes accounting only: runtime calls, DB I/O, byte
-placement and retention are unchanged.
+ratchets. The accounting split itself changes no runtime calls, DB I/O, byte
+placement or retention. Compact live observations subsequently lower their
+fixture ceiling from 15,145 to 7,473 B fresh and from 30,998 to 15,654 B
+dogfood-shaped, by sharing immutable request fields with the current snapshot.
+History answers and selected document-read counts remain identical; these are
+serialized fixture bytes, not a billed storage or performance claim.
 
 The retained totals include 1,368 / 3,176 bytes of maintenance audit receipts in
 `legacyStorageCleanupPages`; these remain durable. The dominant reclaimed table

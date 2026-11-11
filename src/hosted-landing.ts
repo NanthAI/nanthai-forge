@@ -3,6 +3,9 @@ import { batchDiagnosticSchema } from './hosted-batch-diagnosis.js';
 import { checkFileSummarySchema } from './check-file-summary.js';
 import { semanticConflictsSchema, semanticPlanSchema } from './intent-semantic-conflict.js';
 import { z } from 'zod';
+import { semanticPayload } from './semantic-payload.js';
+import { invariant } from './errors.js';
+import type { finishPendingForReader } from './hosted-finish.js';
 import { proofSummarySchema } from './landing-proof.js';
 import { landingMessageSchema } from './landing-message.js';
 import { landingStallSchema } from './landing-stall-schema.js';
@@ -251,3 +254,52 @@ export const landingObservation = (status: string, code?: string) => {
     : { ...outcome, state: outcome.state };
 };
 export const HOSTED_LANDING_LEASE_MS = 30_000;
+
+// writeLanding fences these fields against the original request. Historical entries
+// retain only the changing part; the request row is the sole current snapshot.
+const identityFields = [
+  'schema',
+  'projectId',
+  'id',
+  'operationId',
+  'actor',
+  'at',
+  'request',
+  'sequence',
+  'firstAttemptId',
+] as const;
+type Observation = {
+  submission: HostedLandingState;
+  pendingAttempt: ReturnType<typeof finishPendingForReader>;
+  wouldConflict?: unknown;
+};
+export function landingTransition(event: Observation) {
+  const transition: Record<string, unknown> = { ...event.submission };
+  for (const key of identityFields) delete transition[key];
+  return semanticPayload({
+    encoding: 'landing-transition-v1',
+    transition,
+    pendingAttempt: event.pendingAttempt,
+    ...(event.wouldConflict === undefined ? {} : { wouldConflict: event.wouldConflict }),
+  });
+}
+
+/** Legacy full observations and compact transitions have the same logical value.
+ * Reconstruction reads no other version, regardless of the age of the cursor. */
+export function readLandingTransition(value: string, current: HostedLandingState): Observation {
+  const stored = JSON.parse(value);
+  if (stored.encoding !== 'landing-transition-v1') return stored;
+  const submission: Record<string, unknown> = {};
+  for (const key of identityFields) submission[key] = current[key];
+  // A transition cannot replace its identity or request anchor.
+  invariant(
+    stored.transition && identityFields.every(key => !(key in stored.transition)),
+    'EVIDENCE_CHANGED',
+    'Landing transition differs from its original request.',
+  );
+  return {
+    submission: { ...submission, ...stored.transition } as HostedLandingState,
+    pendingAttempt: stored.pendingAttempt,
+    ...(stored.wouldConflict === undefined ? {} : { wouldConflict: stored.wouldConflict }),
+  };
+}

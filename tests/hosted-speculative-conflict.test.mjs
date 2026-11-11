@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { readLandingTransition } from '../dist/hosted-landing.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
@@ -255,7 +256,17 @@ for (const count of [10, 50])
     assert.equal(current(f, 3).phase, 'landed');
     assert(
       ![...f.tables.projectHostedLandingObservations.values()]
-        .map(row => JSON.parse(row.value).submission)
+        .map(
+          row =>
+            readLandingTransition(
+              row.value,
+              JSON.parse(
+                [...f.tables.projectHostedLandingRequests.values()].find(
+                  request => request.submissionId === row.submissionId,
+                ).value,
+              ),
+            ).submission,
+        )
         .some(state => state.id === f.entries[3].state.id && state.error?.code === 'COMPOSITION_CONFLICT'),
       'no historical terminal conflict is emitted for a discarded speculative prefix',
     );

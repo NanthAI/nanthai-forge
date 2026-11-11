@@ -1889,7 +1889,10 @@ registered source, exact check and main CAS remain H14's publication conditions.
 Submission status reuses the native pending reasons and terminal causes. Input-page
 status shares the native source-relative projection: later Lane saves show
 `superseded` while preserving the actual pending/failed/landed outcome. Versioned
-status reads are observation only and start no compute. This API and its crash,
+status reads are observation only and start no compute. The landing request is the sole current snapshot.
+Each observation stores a compact transition with only changing fields; readers
+rebuild its immutable identity and request from that snapshot without reading a
+predecessor. Previously stored full observations remain readable. This API and its crash,
 contention and scale tests use local fakes; deployment and live provider qualification
 remain separate.
 

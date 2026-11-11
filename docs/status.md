@@ -1,5 +1,10 @@
 # Status
 
+Live landing observations keep one current request snapshot and compact transition
+entries that share its immutable identity and request. Selected history pages
+reconstruct the same replies, including older full observations, without reading
+predecessor versions or adding calls.
+
 Web typechecking uses the existing native TypeScript compiler in both npm and
 the landing verifier. The JavaScript compiler remains an explicit all-scope
 fallback; scratch-copy checks cover strict and JSX diagnostic parity.
