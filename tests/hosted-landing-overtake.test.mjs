@@ -212,7 +212,14 @@ const receipts = f =>
  * fixed in a real deployment). Returns landing ticks, run counts and receipts by entry. */
 async function drive(
   t,
-  { memberPaths, memberContents, baselineFiles = [], duration, pick = tasks => tasks[0] },
+  {
+    memberPaths,
+    memberContents,
+    baselineFiles = [],
+    duration,
+    pick = tasks => tasks[0],
+    unknownAdmissionRisk = false,
+  },
 ) {
   const f = await batchesFixture(t, {
     batchMaxSize: null,
@@ -221,8 +228,14 @@ async function drive(
     memberContents,
     baselineFiles,
     fileCount: 2,
-    count: memberPaths.length,
+    count: 0,
   });
+  const entries = f.tables.hostedProjects.get(f.projectId).checkEntries;
+  for (let i = 0; i < memberPaths.length; i++) {
+    if (unknownAdmissionRisk) f.patch('hostedProjects', f.projectId, { checkEntries: undefined });
+    await f.add(i);
+  }
+  if (unknownAdmissionRisk) f.patch('hostedProjects', f.projectId, { checkEntries: entries });
   f.rawChecks.setPlanSelection(JSON.stringify({ scope: 'full', tests: [] }));
   const ids = f.entries.map(e => e.state.id);
   const rows = () => [...f.tables.projectHostedLandingRequests.values()];
@@ -256,12 +269,21 @@ async function drive(
     await f.execute(pick(tasks, ids));
     for (const s of states(f)) if (s.phase === 'landed' && !before.has(s.id)) landedAt.set(s.id, tick);
   }
+  for (let step = 0; step < 100; step++) {
+    const task = f.pending().find(task => !/MainAudit:start|LandingStall/.test(task.name));
+    if (!task) break;
+    await f.execute(task);
+  }
   const byId = new Map(receipts(f).map(r => [r.submissionId, r]));
   const result = {
     ids,
     landedAt: ids.map(id => landedAt.get(id)),
     runs: ids.map(id => runsOf.get(id)?.size ?? 0),
     orderWaits: ids.map(id => byId.get(id)?.orderWaits ?? []),
+    calls: f.counts.length,
+    readBytes: f.counts.reduce((n, c) => n + c.readBytes, 0),
+    writeBytes: f.counts.reduce((n, c) => n + c.writeBytes, 0),
+    idle: f.pending().filter(task => !/MainAudit:start|LandingStall/.test(task.name)).length,
   };
   t.diagnostic(JSON.stringify({ ...result, ids: undefined, firstCheck: f.reuseDecisions }));
   assert(
@@ -355,4 +377,62 @@ test('c6b81429: an accepting wait ends when that entry re-checks instead', async
       waits.filter(w => w.submissionId === r.ids[1]),
       waits.filter(w => w.submissionId === r.ids[1] && w.held === 'accepting'),
     );
+});
+
+// Zoo timing incident 70a9bd2f: a build input and disjoint source arrive together.
+// The required combined check must fit within 1.5 solo check durations.
+test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5x solo timing bar', async t => {
+  const CHECK = 1000;
+  const solo = await drive(t, {
+    memberPaths: ['src/feature.ts'],
+    duration: () => CHECK,
+  });
+  const pairInput = {
+    memberPaths: ['build.rs', 'src/feature.ts'],
+    duration: (i, nth) => CHECK + (i === 1 && nth === 1 ? 20 : 0),
+  };
+  const before = await drive(t, { ...pairInput, unknownAdmissionRisk: true });
+  const pair = await drive(t, pairInput);
+  assert(before.landedAt[1] > 1.5 * solo.landedAt[0], 'the original path reproduces the miss');
+  assert(pair.calls <= before.calls, `Convex transactions ${before.calls} -> ${pair.calls}`);
+  assert(pair.readBytes <= before.readBytes, `DB reads ${before.readBytes} -> ${pair.readBytes}`);
+  assert(pair.writeBytes <= before.writeBytes, `DB writes ${before.writeBytes} -> ${pair.writeBytes}`);
+  assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
+  assert.equal(pair.runs[0], 1);
+  assert.equal(pair.runs[1], 1, 'C runs the exact combined tree instead of a wasted solo admission');
+  assert(
+    pair.landedAt[1] <= 1.5 * solo.landedAt[0],
+    `C reached main at ${pair.landedAt[1]} ticks; solo ${solo.landedAt[0]}, bar ${1.5 * solo.landedAt[0]}`,
+  );
+});
+
+test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000 source files', async t => {
+  const input = {
+    memberPaths: ['build.rs', 'src/feature.ts'],
+    baselineFiles: Array.from({ length: 4000 }, (_, i) => [
+      `lib/file-${i}.ts`,
+      `export const value = ${i};\n`,
+    ]),
+    duration: (i, nth) => 1000 + (i === 1 && nth === 1 ? 20 : 0),
+  };
+  const before = await drive(t, { ...input, unknownAdmissionRisk: true });
+  const after = await drive(t, input);
+  assert(after.landedAt[1] <= 1500, 'one check duration plus bounded source/queue progress');
+  assert.deepEqual(after.runs, [1, 1]);
+  assert(after.calls <= before.calls, `transactions ${before.calls} -> ${after.calls}`);
+  assert(after.readBytes <= before.readBytes, `DB reads ${before.readBytes} -> ${after.readBytes}`);
+  assert(after.writeBytes <= before.writeBytes, `DB writes ${before.writeBytes} -> ${after.writeBytes}`);
+  assert.equal(after.idle, 0);
+});
+
+test('70a9bd2f: a follower that finishes before its predecessor keeps the exact combined pass', async t => {
+  const solo = await drive(t, { memberPaths: ['src/feature.ts'], duration: () => 1000 });
+  const pair = await drive(t, {
+    memberPaths: ['build.rs', 'src/feature.ts'],
+    duration: i => (i === 0 ? 1020 : 1000),
+  });
+  assert.deepEqual(pair.runs, [1, 1]);
+  assert(pair.landedAt[1] > pair.landedAt[0], 'A is the accepted predecessor even when C finishes first');
+  assert(pair.landedAt[1] <= solo.landedAt[0] * 1.5);
+  assert.equal(pair.idle, 0);
 });

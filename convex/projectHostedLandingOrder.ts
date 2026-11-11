@@ -118,9 +118,28 @@ export async function olderLandingAhead(
   // A solo entry overtakes; a combined group keeps strict order. One batch read for a
   // pipelined solo group, which must not overtake its own predicted predecessor.
   const solo = Boolean(spent) && (!state.batchId || Boolean(state.batchSolo));
-  const batch =
-    solo && state.batchId ? await batchRow(ctx, { projectId: row.projectId, batchId: state.batchId }) : null;
-  const canOvertake = solo && !(batch && batchSchema.parse(JSON.parse(batch.value)).predecessor);
+  const batch = state.batchId
+    ? await batchRow(ctx, { projectId: row.projectId, batchId: state.batchId })
+    : null;
+  const predecessor = batch ? batchSchema.parse(JSON.parse(batch.value)).predecessor : undefined;
+  // A full admission holds no general queue order, but this exact successor
+  // checked its predicted tree. Keep the pass parked on that admission's
+  // terminal event instead of mistaking its still-unaccepted base for a race.
+  if (predecessor) {
+    const ahead = await ctx.db
+      .query('projectHostedLandingRequests')
+      .withIndex('by_project_and_submission', q =>
+        q.eq('projectId', row.projectId).eq('submissionId', predecessor.submissionId),
+      )
+      .unique();
+    if (
+      ahead?.admitting &&
+      ahead.admission?.full &&
+      holdsLandingOrder(ahead, hostedLandingStateSchema.parse(JSON.parse(ahead.value)))
+    )
+      return { row: ahead, until: null, held: 'combined' as const, footprints: 'unknown' as const };
+  }
+  const canOvertake = solo && !predecessor;
   let mine: Awaited<ReturnType<typeof overtakingSide>> | undefined;
   const side = async () => (mine === undefined ? (mine = await overtakingSide(ctx, row, state)) : mine);
   let reserved: string[] | null | undefined;

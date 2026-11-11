@@ -10,7 +10,7 @@ import {
   writeLanding,
 } from './projectHostedLandingStore';
 import { type BatchIdentity, type LandingBatch } from './projectHostedLandingBatchState';
-import { hostedLandingStateSchema } from '../src/hosted-landing';
+import { hostedLandingStateSchema, type HostedLandingAttempt } from '../src/hosted-landing';
 import { hostedBatching, hostedPipelineWidth } from '../src/hosted-landing-batch';
 import { landingSuspect } from '../src/hosted-landing-suspect';
 import { invalidatePipeline as retirePipeline } from './projectHostedLandingPipelineInvalidation';
@@ -18,9 +18,22 @@ import { invalidatePipeline as retirePipeline } from './projectHostedLandingPipe
 export const livePipelineRow = (row: LandingRow | null): row is LandingRow =>
   Boolean(row && row.phase !== 'landed' && row.phase !== 'terminal-failed');
 
+// A refused admission keeps its historical metadata but no longer owns its
+// predicted head. Only the live original admission or its bound exact run may
+// bridge the checking -> queued -> ready transition.
+const liveAdmission = (row: LandingRow) =>
+  row.admission?.full &&
+  ['checking', 'passed'].includes(row.admission.status) &&
+  (!row.admission.reuse || row.runId === row.admission.runId);
+
 /** Read only the bounded retained train, never the active queue or history. A
  * tail becomes a base only after its exact head and acceptance IDs are fixed. */
-export async function pipelinePredecessor(ctx: MutationCtx, input: LandingChannel, selected?: LandingRow[]) {
+export async function pipelinePredecessor(
+  ctx: MutationCtx,
+  input: LandingChannel,
+  selected?: LandingRow[],
+  onSelected?: (row: LandingRow, attempt: HostedLandingAttempt) => void,
+) {
   const live =
     selected ??
     (
@@ -38,7 +51,16 @@ export async function pipelinePredecessor(ctx: MutationCtx, input: LandingChanne
     (_, index) =>
       !landingSuspect(states[index]!) && states[index]!.observation.pendingReason !== 'waiting-for-review',
   );
-  if (!rows.length || rows.some(row => row.hold || (row.phase !== 'checking' && row.phase !== 'ready')))
+  if (
+    !rows.length ||
+    rows.some(
+      row =>
+        row.hold ||
+        (row.phase !== 'checking' &&
+          row.phase !== 'ready' &&
+          !(row.phase === 'queued' && liveAdmission(row))),
+    )
+  )
     return undefined;
   const tail = rows.at(-1)!;
   if (tail.pipelineRetiredAttemptId === tail.attemptId) return undefined;
@@ -47,10 +69,11 @@ export async function pipelinePredecessor(ctx: MutationCtx, input: LandingChanne
   if (
     !hostedBatching(attempt.policy) ||
     groups.size >= hostedPipelineWidth(attempt.policy) ||
-    !attempt.check ||
+    (!attempt.check && !liveAdmission(tail)) ||
     !attempt.candidate.head
   )
     return undefined;
+  onSelected?.(tail, attempt);
   return {
     submissionId: tail.submissionId,
     head: attempt.candidate.head,
@@ -73,7 +96,11 @@ export async function predecessorStatus(ctx: MutationCtx, input: BatchIdentity, 
       state.acceptance.receiptId === batch.predecessor.receiptId
       ? ('landed' as const)
       : ('invalid' as const);
-  if (state.phase !== 'checking' && state.phase !== 'ready' && !(state.phase === 'queued' && state.batchId))
+  if (
+    state.phase !== 'checking' &&
+    state.phase !== 'ready' &&
+    !(state.phase === 'queued' && (state.batchId || liveAdmission(row)))
+  )
     return 'invalid' as const;
   const attempt = await loadLandingAttempt(ctx, { projectId: input.projectId, attemptId: state.attemptId });
   return attempt.candidate.head === batch.predecessor.head &&

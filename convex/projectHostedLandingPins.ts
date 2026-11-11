@@ -44,6 +44,7 @@ export async function pinLandingAttempt(
     recheck?: ScopedRecheckBasis;
     /** Receives the pinned Candidate's Intent (landing reservation, 10d253c6): no second read. */
     intent?: (intentId: string) => void;
+    paths?: (paths: string[] | null) => void;
   },
 ) {
   invariant(
@@ -91,6 +92,7 @@ export async function pinLandingAttempt(
     'CHANNEL_CHANGED',
     'The Candidate retains a different main base receipt.',
   );
+  input.paths?.(candidate.governance?.paths ?? null);
   if (input.retainedSelection) {
     invariant(
       canonicalPayload(candidate.inputs) === canonicalPayload(input.retainedSelection.inputs) &&

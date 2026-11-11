@@ -366,6 +366,27 @@ the same runner minutes as without the Lane check.
 - A group never waits for an older entry stacked behind it in the pipeline: that
   entry can publish only after the group.
 
+A pending full admission can be the first predicted-head predecessor when a
+strict-mode follower has known disjoint paths with unplaceable global risk.
+Instead of checking the follower alone and repeating after the predecessor
+lands, the follower uses one full check of their exact union in the existing
+pipeline. Unknown paths, overlapping changes, placeable manifests, fast mode,
+different actor/policy/check/priority pins and a full execution width keep the
+ordinary admission path. The predecessor keeps its admission and holds no general queue
+order. A successor that passes first parks its exact proof on that predecessor's
+existing settlement event; it does not treat the still-unaccepted base as a main
+race or repeat its check. Admission platform retries retain those waiters and pins. Its admission pass preserves the same predicted head and receipt; failure,
+review or changed source/receipt invalidates descendants through ordinary train
+recovery. No publication uses an unchecked combination.
+
+A successful two-entry risk pair uses two checks instead of three, with no extra
+runner minutes. If a pending predecessor fails or changes, an already executing
+follower may waste one full combined check before checking its restored selection;
+that costs that check's runner minutes. The existing pipeline width bounds such
+speculation. No new table, queue timer, per-file call or idle work is added. The
+fake-clock A/C replay and its 4,000-file metadata budget are in
+`tests/hosted-landing-overtake.test.mjs`.
+
 Lane checks wake their submission only when the run reaches a terminal state;
 nothing polls and an idle queue costs nothing.
 

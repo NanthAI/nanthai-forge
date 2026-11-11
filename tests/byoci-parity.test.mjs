@@ -67,6 +67,9 @@ async function wave(t, check, options) {
   const f = await batchesFixture(t, {
     batchMaxSize: null,
     admissionCheck: 'default',
+    // Keep the main-race refusal cases on one slot; the two-slot case below
+    // verifies the exact combined check without spending a solo follower run.
+    concurrency: 1,
     checkCommand: check,
     baselineFiles: tree,
     ...options,
@@ -198,6 +201,26 @@ for (const [name, decisions, options] of scenarios)
     assert.deepEqual(outcomes.standard.decisions, decisions, 'the fast path this scenario exercises');
     assert.deepEqual(outcomes.project, outcomes.standard);
   });
+
+test('parity: speculative slots check the changed entry and follower together for either command', async t => {
+  const outcomes = {};
+  for (const [arm, check] of Object.entries(arms)) {
+    outcomes[arm] = await wave(t, check, {
+      concurrency: 2,
+      memberPaths: [entry(check), 'packages/b/src/b.ts'],
+      fileCount: 2,
+      noOwnerApproval: true,
+    });
+    assert.deepEqual(outcomes[arm].phases, [
+      ['landed', null],
+      ['landed', null],
+    ]);
+    assert.equal(outcomes[arm].runs, 2, 'one predecessor check and one exact combined check');
+    assert.deepEqual(outcomes[arm].decisions, [], 'no admission check was reused across the entry change');
+    assert(outcomes[arm].ranCommand, 'both runs use the configured command');
+  }
+  assert.deepEqual(outcomes.project, outcomes.standard);
+});
 
 test('parity: the setup action entry is global-risk like the check entry', async t => {
   const outcome = await wave(t, project, {

@@ -191,7 +191,15 @@ export async function writeLanding(
       entersReview || state.phase === 'terminal-failed',
       // A new attempt that still proves the same head under the same receipt
       // (a platform retry) keeps dependents pinned to that pair (ea86f3fb).
-      !entersReview && (state.phase === 'checking' || state.phase === 'ready') && attempt.candidate.head
+      !entersReview &&
+        (state.phase === 'checking' ||
+          state.phase === 'ready' ||
+          (previous.phase === 'checking' &&
+            state.phase === 'queued' &&
+            row.admission?.full &&
+            row.admission.status === 'passed' &&
+            !row.admission.reuse)) &&
+        attempt.candidate.head
         ? { head: attempt.candidate.head, receiptId: attempt.operations.accept }
         : undefined,
       entersReview,
@@ -272,12 +280,12 @@ export async function writeLanding(
     // Queued advisory conflicts also depend on an existing settlement event.
     // A same-attempt diagnostic write must not silently discard that owner.
     orderWait: state.phase === 'ready' || (speculative && !retireAdvice) ? row.orderWait : undefined,
-    orderWaited: orderLive || reserving ? row.orderWaited : undefined,
+    orderWaited: orderLive || reserving || admitting ? row.orderWaited : undefined,
     value: semanticPayload(state),
   });
   if (row.admitting && !admitting) await releaseAdmissionWaiters(ctx, row.projectId);
   if (row.deciding !== undefined && deciding === undefined) await releaseCohortHolds(ctx, row.projectId);
-  if (row.orderWaited && ((!orderLive && !reserving) || retiresSolo))
+  if (row.orderWaited && ((!orderLive && !reserving && !admitting) || retiresSolo))
     await wakeLandingOrderWaiters(ctx, row, orderLive);
   if (
     releaseRun &&

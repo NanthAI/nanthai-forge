@@ -70,6 +70,13 @@ Per-landing [speed and cost budgets](agents/speed-budgets.md) cover submit-to-ma
 
 The [batched CI result inbox](operations/github-actions-checks.md#batched-result-inbox) folds shard results by metadata page and keeps per-file reports off run heads; independent provider conclusions authorize exact-verdict reuse. A landing records its [first-check proof](pre-queue-checks.md#decision) or the reason it rechecks. Identical shared entries clear overlap but retain the existing global/declared-input and shared-folder risk checks; unchanged complete trees retain exact-tree reuse. The exit bench uses its [own manually pinned deployment](workflows.md#automatic-main-mirror), while pushed mirror commits touching deploy paths deploy dev automatically.
 
+Strict disjoint global-risk followers can use a pending full admission as an
+exact predicted-head predecessor in the existing landing pipeline, replacing a
+solo run followed by a serial recheck. Publication remains fenced by the exact
+predecessor head/receipt; failure and review holds restore original selections.
+The [zoo report](research/zoo-mini-report.md#rust-check-and-overtake-diagnosis)
+separates Cargo execution from landing wall time; its live timing gate remains open.
+
 ## Works
 
 Managed CLI work checks accepted Forge main once per process. When main moved,

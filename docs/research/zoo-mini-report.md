@@ -496,6 +496,45 @@ Automatic cache cleanup reuses the explicit cleanup process guard and existing b
 
 This report replaces the accumulated mini-run history. The code changes reuse existing recovery, cleanup, logging and report mechanisms; no new command, public error, table, service or quota was introduced. Larger host-delete catalog polling work remains tracked in P6 rather than being hidden by a fixture-only workaround.
 
+## Rust check and overtake diagnosis
+
+The timing columns measure landing wall time, including runner preparation and any second run. They are not Cargo test duration. Retained baseline and replacement run records distinguish those clocks:
+
+| Row / Lane | Run | Command execution s | Enqueue to terminal s |
+| --- | --- | --- | --- |
+| Baseline C | admission, landed first | 20.946 | 66.184 |
+| Baseline A | admission | 28.194 | 73.717 |
+| Baseline A | combined recheck | 31.591 | 68.197 |
+| Baseline B | resolved solo check | 20.838 | 50.014 |
+| Replacement A | admission, landed first | 23.646 | 65.997 |
+| Replacement C | admission | 26.861 | 73.743 |
+| Replacement C | combined recheck | 45.262 | 84.809 |
+| Replacement B | resolved solo check | 43.767 | 84.169 |
+
+The zoo installs `bash .forge-zoo/ci.sh`, containing `cargo build --verbose --workspace` followed by `cargo test --verbose --workspace`, in both Forge and the plain GitHub workflow. Rust declares no extra toolchain or dependency cache. Both retained Forge jobs report `ubuntu-26.04`, image `20261101.186.1`; that image lists Rust/Cargo 1.99.1. [Baseline job](https://github.com/NanthAI/nanthai-forge/actions/runs/42751904996) and [replacement admission](https://github.com/NanthAI/nanthai-forge/actions/runs/42923483250) logs show cold crate downloads and compilation. The build and test commands share `target/` within one job; neither `target/` nor the registry is restored between these jobs. Forge's Node/control-runtime cache hits are separate. The declared Cargo preset, when used by a project, restores dependency downloads only; it does not restore Candidate build outputs.
+
+For the baseline C job, Cargo reports 8.87 s to finish the build and 6.60 s to finish test compilation; replacement A reports 10.34 / 7.42 s. The replacement combined check reports 25.87 / 8.60 s. First download bursts in those two admission jobs last about 0.2–0.3 s. Check duration varies, including a slower resolved B job, but this evidence does not show one Rust check taking 300 seconds. All show ripgrep 15.2.0. The replacement source is `f64a4c1e3a0041b59e517c2d76001e9f288cd6c2`; the exact original fork SHA was not retained and its deleted fork/run cannot now establish whether upstream bytes changed. Matching package versions and runner images do not prove identical source.
+
+The baseline overtaken A took 168.367 s, beside first-to-land C at 82.406 s. Replacement C took 181.991 s because it became the overtaken Lane. Its first check ended at 23:28:27.722; the combined check was enqueued at 23:28:37.591 and ended at 23:30:02.400. The unchanged strict C baseline and five-repeat miss remain in force. A cache-key change cannot remove that serial second check; no Rust-only cache or timing exemption has been added.
+
+The exact risk paths in retained rechecking rows are below. A and C never edit the zoo setup script or workflow in this scenario; both checks already see those accepted setup bytes. The paths come from the probes, rather than a newly installed check harness.
+
+| Row | A path | C path | Why the existing rule refuses reuse | Assessment |
+| --- | --- | --- | --- | --- |
+| rust | `build.rs` | `crates/core/haystack.rs` | Root build script | Required combined check |
+| mixed | `crates/jiter/build.rs` | `crates/fuzz/fuzz_targets/compare_skip.rs` | Nested Cargo build script | Required combined check |
+| electron | `index.js` | `test.js` | Root configuration catch-all | Conservative rule covers ordinary root source; no retained stronger proof |
+| swift | `Package.swift` | `Plugins/GenerateCommon/GeneratePlugin.swift` | Root package/build input | Required combined check |
+| zig | `build.zig` | `clap/args.zig` | Root build input | Required combined check |
+| history | `karma.conf-sauce.js` | `modules/_baseCreate.js` | Root configuration catch-all | Test configuration; required combined check |
+| binaries | `ammo.h` | `bullet/src/Bullet-C-Api.h` | Root configuration catch-all | Conservative rule covers a source header; no retained stronger proof |
+
+A disjoint path alone cannot prove the changed build script or configuration had no effect. The risk classifier is unchanged. Root source/header classification is broader than a semantic dependency proof would require; removing that catch-all without such proof would also remove coverage for unknown root check inputs.
+
+The synthetic scheduler replay uses 1,000-tick checks: the conservative A/C path lands C at tick 2,035, against solo 1,005 and the unchanged 1.5× target of 1,507.5. The admission pipeline instead checks the exact A+C tree beside A and lands C at tick 1,033; if C finishes first it retains that pass until A lands. At 4,000 source files the same replay uses 104 transactions per pair instead of 121, with lower measured metadata reads/writes and no idle tasks. These are fixture measurements, not live Rust timings. A successful pair removes one solo check; invalidating a pending predecessor can waste an already executing follower's full-check duration before original-selection recovery. The existing pipeline width bounds that cost. Live verification and billed usage remain unverified here.
+
+The import median has a separate cause. Eleven replacement rows exceed 1.5× their import baseline: JVM, mixed, C#, electron, Elixir, Swift, Android, C++, npmws, history and shapes-posix. Every one retains a `GITHUB_RATE_LIMIT` reset wait in the provider-wait table above. The qualified Rust target-import median is 76.660 s; its five walls are 76.660, 1,792.129, 13.946, 13.933 and 5,392.718 s. Those waits are elapsed time, including the final long wait, and cannot be replaced by active-attempt timings. The previously qualified JVM fresh-import median passes. Other import overruns remain singleton observations, not five-repeat qualifications. Import authorization/provider work remains on Issue `2abda01f`; queue scheduling does not fix it.
+
 ## Qualification scope
 
 The five fresh matched Rust C overtakes establish that the strict timing bar is unmet. The numeric C baseline remains unchanged even though that baseline C landed first. This is a strict column miss with an execution-order mismatch, not causal proof of a code performance regression. The five Rust target-import wall times also exceed the import bar at their median because provider waits remain in elapsed time. The successful-attempt median is retained separately and never substitutes for the wall-time verdict.

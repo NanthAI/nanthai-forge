@@ -36,6 +36,18 @@ configured check (no `configure-check`) skips it and queues as before.
    the ordinary `enqueueHostedCheck` path, so every runner provider is eligible.
    WIP saves never start a check; `land --save --check-only` keeps its existing
    reuse.
+   A strict-mode arrival with known, disjoint paths that have an unplaceable
+   global-risk interaction with a pending full admission uses the existing
+   predicted-head pipeline instead of spending a solo run that cannot carry the
+   combination. It checks the exact union on the predecessor's reserved head and
+   receipt while that predecessor is still checking. The same actor, authority,
+   policy, priority and check pins must agree, and a pipeline slot must be free.
+   Independent arrivals, overlapping paths, placeable manifests, fast mode and
+   unknown evidence retain their ordinary Lane checks. Publication still waits
+   for the exact predecessor to land; failure, a review hold or changed pins
+   retire the dependent generation and restore its original selection. A failed
+   speculative combination cannot reject that fresh selection.
+
 2. **Admission rules.** The submission is not in the queue while its Lane check
    runs: it is not runnable, not batchable and holds no queue order.
    - A failing test ends it with `CHECK_FAILED` and its failing files. A change
@@ -338,6 +350,9 @@ Each tier answers a different question. None depends on a particular CI provider
      set (a custom command that declares `selection.scope` and scopes itself, or a
      contract gate that declares fewer tests): the pre-queue tier then covers only
      what that check selects. A custom command without that declaration runs in full;
+   - a disjoint global-risk interaction uses the pending full admission's exact
+     predicted head in the pipeline: the left-out tests run in the combined full
+     check before publication, rather than in a separate solo admission;
    - the project opted out (`admissionCheck: false` or `true`): there is no
      pre-queue tier, and left-out tests run first in the queue check.
 3. **Landing (queue check of the combination): the authority.** It checks the

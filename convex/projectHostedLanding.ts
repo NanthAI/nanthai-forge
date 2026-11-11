@@ -16,6 +16,7 @@ import { readWouldConflict, syncRequiredQueue } from './projectHostedLandingWoul
 import { latestStallAlert } from './projectHostedLandingStallAlert';
 import { reuseHostedLanding } from './projectHostedLandingIdentity';
 import { startLandingAdmission } from './projectHostedLandingAdmission';
+import { pipelineAdmission } from './projectHostedLandingAdmissionPipeline';
 import { submissionReservation, landingReservationForReader } from './projectHostedLandingReservation';
 import { preQueueCheck } from '../src/hosted-landing-admission';
 import { landGateTiming } from '../src/hosted-land-gates';
@@ -331,6 +332,7 @@ export async function enqueueHostedLanding(
     });
   const submissionId = first.ids.submission!;
   let intentId: string | undefined;
+  let paths: string[] | null = null;
   const attempt = await pinLandingAttempt(ctx, {
     projectId: input.projectId,
     actor,
@@ -343,11 +345,15 @@ export async function enqueueHostedLanding(
     at: first.at,
     operations: { check: first.ids.check!, accept: first.ids.accept! },
     intent: id => (intentId = id),
+    paths: value => (paths = value),
   });
-  const admission = await startLandingAdmission(ctx, { projectId: input.projectId, attempt, request });
+  const queue = await ensureLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
+  const stacked = await pipelineAdmission(ctx, { project, attempt, request, paths, queue });
+  const admission = stacked
+    ? null
+    : await startLandingAdmission(ctx, { projectId: input.projectId, attempt, request });
   // Issue 10d253c6: the same work superseded after a passed check reserves its files now.
   const reservation = await submissionReservation(ctx, { projectId: input.projectId, intentId }, Date.now());
-  const queue = await ensureLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
   const sequence = queue.sequence + 1;
   const state = hostedLandingStateSchema.parse({
     schema: 1,
@@ -417,7 +423,10 @@ export async function enqueueHostedLanding(
     attemptId: attempt.id,
     value: canonicalPayload(state),
   });
-  await ctx.db.patch(queue._id, { sequence });
+  await ctx.db.patch(queue._id, {
+    sequence,
+    ...(stacked && !queue.train?.length ? { train: [stacked] } : {}),
+  });
   await wakeLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
   if (finish) await scheduleFinish(ctx, finish);
   await retainLandingProgress(ctx, state);

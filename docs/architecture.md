@@ -1675,7 +1675,15 @@ recomposes the held submission on then-current main. Unstarted batches yield
 to urgent work before reserving
 a check; reserved checks continue. Admission runs (`acceptance.admissionCheck`; the default `"full"` is the
 [pre-queue Lane check](pre-queue-checks.md) on any runner, `false` opts out) hold no
-queue order while they run, wake their request only on a terminal run write, and size and split cohorts as
+queue order while they run. A strict, disjoint unplaceable global-risk follower
+can use a compatible pending full admission as the first exact predicted-head
+predecessor instead of running a solo admission that would need a combined recheck.
+One indexed admitting head and bounded train metadata select this route; unchanged
+head/receipt pins survive admission settlement, while refused or changed generations
+cannot supply a predecessor. Publication and invalidation use the existing train
+fences. Independent, overlapping, placed-manifest, fast-mode and unknown-evidence
+arrivals retain ordinary admission. Admissions wake their request only on a terminal
+run write, and size and split cohorts as
 described in [hosted queue priority](operations/landing-batches.md#hosted-queue-priority). A retained train with no member checking holds
 later deferred entries for at most `HOSTED_TRAIN_HOLD_MS` after its newest compose;
 then selection drops it, with one scheduled queue wake for the hold's end. See [hosted queue priority](operations/landing-batches.md#hosted-queue-priority). Checking,

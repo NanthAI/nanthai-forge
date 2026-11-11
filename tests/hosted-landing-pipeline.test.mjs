@@ -9,8 +9,9 @@ import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
 const acceptance = await import(moduleUrl('../convex/projectHostedAcceptance.ts'));
-const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
-test.before(() => Object.assign(process.env, synthetic));
+const pipelineEnv = { ...synthetic, FORGE_HOSTED_CHECK_KEY_SYNTHETIC: 'synthetic-admission-pipeline' };
+const prior = Object.fromEntries(Object.keys(pipelineEnv).map(key => [key, process.env[key]]));
+test.before(() => Object.assign(process.env, pipelineEnv));
 test.after(() => {
   for (const [key, value] of Object.entries(prior)) {
     if (value === undefined) delete process.env[key];
@@ -390,4 +391,249 @@ test('a failing predecessor discards speculative descendants, returns the bad me
       discardedInitialRuns: initial.length - 1,
     }),
   );
+});
+
+// A full pre-queue admission can reserve the exact first head without holding
+// queue order. A global-risk follower uses its combined check immediately.
+for (const failed of ['predecessor', 'follower', 'follower-source', 'neither'])
+  test(`70a9bd2f: admission train preserves original source after ${failed} fails`, async t => {
+    const f = await batchesFixture(t, {
+      count: 2,
+      admissionCheck: 'default',
+      batchMaxSize: null,
+      memberPaths: ['build.rs', 'src/feature.ts'],
+      fileCount: 2,
+    });
+    f.rawChecks.setPlanSelection(JSON.stringify({ scope: 'full', tests: [] }));
+    await drainActive(f);
+    const runs = f.runs();
+    assert.equal(runs.length, 2, 'one admission and one exact combined check');
+    const a = runs.find(run => {
+      const manifest = JSON.parse(f.c.objects.get(run.request.expectedHead));
+      return !manifest.files.some(file => file.path === 'src/feature.ts');
+    });
+    const c = runs.find(run => run.id !== a.id);
+    const combined = JSON.parse(f.c.objects.get(c.request.expectedHead));
+    assert(combined.files.some(file => file.path === 'build.rs'));
+    assert(combined.files.some(file => file.path === 'src/feature.ts'));
+    if (failed === 'predecessor') {
+      const late = await f.rawChecks.activate(c.id);
+      await f.fail(a.id);
+      await drainActive(f);
+      assert.equal(states(f)[0].phase, 'terminal-failed');
+      // A late success of the invalidated combined tree cannot publish A.
+      await assert.rejects(f.rawChecks.pass(late), error => error.data?.code === 'CHECK_CANCELLED');
+    } else {
+      if (failed.startsWith('follower')) await f.fail(c.id);
+      else await f.rawChecks.pass(await f.rawChecks.activate(c.id));
+      await drainActive(f);
+      assert.equal(states(f)[0].phase, 'checking', 'C never publishes before A passes');
+      assert.notEqual(states(f)[1].phase, 'landed');
+      await f.rawChecks.pass(await f.rawChecks.activate(a.id));
+    }
+    await drainActive(f);
+    for (let step = 0; !['landed', 'terminal-failed'].includes(states(f)[1].phase); step++) {
+      assert(step < 10, JSON.stringify(states(f)));
+      for (const run of f.runs().filter(run => run.status === 'queued')) {
+        if (failed === 'follower-source') await f.fail(run.id);
+        else await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+      }
+      await drainActive(f);
+    }
+    const main = JSON.parse(f.c.objects.get(f.currentMain().head));
+    assert.equal(
+      main.files.some(file => file.path === 'build.rs'),
+      failed !== 'predecessor',
+    );
+    assert.equal(
+      main.files.some(file => file.path === 'src/feature.ts'),
+      failed !== 'follower-source',
+      'only a passing original C selection may publish',
+    );
+    assert.equal(states(f)[1].phase, failed === 'follower-source' ? 'terminal-failed' : 'landed');
+    if (failed === 'neither') {
+      assert.equal(f.runs().length, 2, 'an early passing follower keeps its combined check');
+      assert(
+        [...f.tables.projectHostedAcceptances.values()].some(
+          row => JSON.parse(row.value).check.runId === c.id,
+        ),
+      );
+    }
+    assert.equal(f.pending().length, 0, 'settled admission train costs zero while idle');
+  });
+
+for (const [name, options] of [
+  ['one pipeline slot', { concurrency: 1 }],
+  ['overlapping paths', { memberPaths: ['src/same.ts', 'src/same.ts'] }],
+  ['independent paths', { memberPaths: ['src/a.ts', 'src/b.ts'] }],
+])
+  test(`70a9bd2f: ${name} retains the ordinary solo admissions`, async t => {
+    const f = await batchesFixture(t, {
+      count: 2,
+      fileCount: 2,
+      admissionCheck: 'default',
+      batchMaxSize: null,
+      memberPaths: ['build.rs', 'src/feature.ts'],
+      ...options,
+    });
+    const rows = [...f.tables.projectHostedLandingRequests.values()];
+    assert(rows.every(row => row.admission?.full && row.admission.status === 'checking'));
+    assert.equal(f.runs().length, 2);
+    assert(![...f.tables.projectHostedLandingQueues.values()].some(queue => queue.train?.length));
+  });
+
+test('70a9bd2f: an admission platform retry keeps the exact combined successor', async t => {
+  const f = await batchesFixture(t, {
+    count: 2,
+    fileCount: 2,
+    admissionCheck: 'default',
+    batchMaxSize: null,
+    memberPaths: ['build.rs', 'src/feature.ts'],
+  });
+  f.rawChecks.setPlanSelection(JSON.stringify({ scope: 'full', tests: [] }));
+  await drainActive(f);
+  const a = f
+    .runs()
+    .find(
+      run =>
+        !JSON.parse(f.c.objects.get(run.request.expectedHead)).files.some(
+          file => file.path === 'src/feature.ts',
+        ),
+    );
+  const c = f.runs().find(run => run.id !== a.id);
+  await f.rawChecks.pass(await f.rawChecks.activate(c.id));
+  await drainActive(f);
+  const active = await f.rawChecks.activate(a.id);
+  await f.rawChecks.callback(f.rawChecks.complete(active, 'cancelled'));
+  await drainActive(f);
+  t.diagnostic(
+    JSON.stringify({
+      admission: [...f.tables.projectHostedLandingRequests.values()].map(row => ({
+        admission: row.admission,
+        phase: row.phase,
+        attemptId: row.attemptId,
+      })),
+      runs: f.runs().map(run => ({ id: run.id, status: run.status, head: run.request.expectedHead })),
+    }),
+  );
+  const retry = f.runs().find(run => run.status === 'queued');
+  assert(retry && retry.id !== a.id);
+  assert.equal(retry.request.expectedHead, a.request.expectedHead);
+  await f.rawChecks.pass(await f.rawChecks.activate(retry.id));
+  await drainActive(f);
+  assert(states(f).every(state => state.phase === 'landed'));
+  assert.equal(f.runs().length, 3, 'only the platform-failed admission repeats');
+  assert(
+    [...f.tables.projectHostedAcceptances.values()].some(row => JSON.parse(row.value).check.runId === c.id),
+  );
+  assert.equal(f.pending().length, 0);
+});
+
+test('70a9bd2f: a self-hosted check uses the same exact admission pipeline', async t => {
+  const f = await batchesFixture(t, {
+    count: 2,
+    fileCount: 2,
+    admissionCheck: 'default',
+    batchMaxSize: null,
+    memberPaths: ['build.rs', 'src/feature.ts'],
+    runner: {
+      provider: 'self-hosted',
+      machineId: randomUUID(),
+      environmentFingerprint: 'd'.repeat(64),
+      platform: { os: 'linux', arch: 'x64' },
+    },
+  });
+  f.rawChecks.setPlanSelection(JSON.stringify({ scope: 'full', tests: [] }));
+  await drainActive(f);
+  assert.equal(f.runs().length, 2);
+  for (const run of f.runs()) {
+    assert.equal(run.configuration.provider, 'self-hosted');
+    await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+    await drainActive(f);
+  }
+  assert(states(f).every(state => state.phase === 'landed'));
+  assert.equal(f.runs().length, 2);
+  assert.equal(f.pending().length, 0);
+});
+
+test('70a9bd2f: an owner-held admission releases its predicted successor onto surviving main', async t => {
+  const f = await batchesFixture(t, {
+    count: 2,
+    fileCount: 2,
+    admissionCheck: 'default',
+    batchMaxSize: null,
+    memberPaths: ['build.rs', 'src/feature.ts'],
+  });
+  f.rawChecks.setPlanSelection(JSON.stringify({ scope: 'full', tests: [] }));
+  await drainActive(f);
+  f.insert('cliCredentials', {
+    credentialId: 'admission-hold',
+    owner: 'owner',
+    name: 'Synthetic device',
+    tokenHash: 'synthetic',
+    issuedAt: Date.now(),
+    scope: 'cli',
+    expiresAt: Date.now() + 3600000,
+    revoked: false,
+  });
+  await f.tx(
+    'holdAdmission',
+    approvals.request,
+    {
+      projectId: f.projectId,
+      operationId: randomUUID(),
+      laneId: f.entries[0].lane.laneId,
+      reason: 'Synthetic owner decision',
+    },
+    { subject: 'owner', forgeCredential: 'admission-hold' },
+  );
+  for (let step = 0; states(f)[1].phase !== 'landed'; step++) {
+    assert(step < 10, JSON.stringify(states(f)));
+    for (const run of f.runs().filter(run => run.status === 'queued'))
+      await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+    await drainActive(f);
+  }
+  assert.equal(states(f)[0].observation.pendingReason, 'waiting-for-review');
+  const main = JSON.parse(f.c.objects.get(f.currentMain().head));
+  assert(!main.files.some(file => file.path === 'build.rs'));
+  assert(main.files.some(file => file.path === 'src/feature.ts'));
+  assert.equal(f.pending().length, 0);
+});
+
+test('70a9bd2f: a moved main retires the admission prediction and retains accepted source', async t => {
+  const f = await batchesFixture(t, {
+    count: 2,
+    fileCount: 2,
+    admissionCheck: 'default',
+    batchMaxSize: null,
+    memberPaths: ['build.rs', 'src/feature.ts'],
+  });
+  f.rawChecks.setPlanSelection(JSON.stringify({ scope: 'full', tests: [] }));
+  await drainActive(f);
+  const combined = f
+    .runs()
+    .find(run =>
+      JSON.parse(f.c.objects.get(run.request.expectedHead)).files.some(
+        file => file.path === 'src/feature.ts',
+      ),
+    );
+  await f.rawChecks.pass(await f.rawChecks.activate(combined.id));
+  await drainActive(f);
+  f.moveMain();
+  for (let step = 0; states(f).some(state => state.phase !== 'landed'); step++) {
+    assert(step < 10, JSON.stringify(states(f)));
+    for (const run of f.runs().filter(run => run.status === 'queued'))
+      await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+    await drainActive(f);
+  }
+  const main = JSON.parse(f.c.objects.get(f.currentMain().head));
+  for (const path of ['accepted.txt', 'build.rs', 'src/feature.ts'])
+    assert(main.files.some(file => file.path === path));
+  assert(
+    ![...f.tables.projectHostedAcceptances.values()].some(
+      row => JSON.parse(row.value).check.runId === combined.id,
+    ),
+    'the stale combined tree is never published',
+  );
+  assert.equal(f.pending().length, 0);
 });

@@ -67,7 +67,15 @@ function noOwnerApproval(f) {
   });
 }
 async function wave(t, options = {}) {
-  const f = await batchesFixture(t, { batchMaxSize: null, admissionCheck: 'default', ...options, count: 0 });
+  // One execution slot keeps these proof/refusal cases on the main-race path;
+  // the admission-pipeline tests separately cover speculative combined checks.
+  const f = await batchesFixture(t, {
+    batchMaxSize: null,
+    admissionCheck: 'default',
+    concurrency: 1,
+    ...options,
+    count: 0,
+  });
   f.rawChecks.setPlanSelection(options.selection ?? full);
   if (options.runnerSeconds !== undefined)
     f.rawChecks.pass = async run => {
