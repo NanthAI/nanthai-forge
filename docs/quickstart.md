@@ -129,6 +129,9 @@ existing policy requests local preflight, save first, then run
 
 ## No background process
 
+Cloning into an absent or empty directory inside a Lane keeps the clone’s address and replay journal
+in its own sibling cache. Immediate `nforge pull` uses that clone without an extra setup step.
+
 A normal user never needs a Forge background process. `login`, `clone`, `start`,
 `save`, `land`, `wait`, `pull` and `status` are short commands: each runs, prints
 its result and exits. Nothing starts at login or boot, and no service, launchd or

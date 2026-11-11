@@ -42,8 +42,9 @@ export function hostedAgentRoot(root: string) {
     selected = parent;
   }
 }
-export function hostedAgentDirectory(root: string) {
-  const cache = clientCacheRoot(hostedAgentRoot(root)),
+/** Clone binds an exact destination before its marker exists; ordinary agent calls discover a Lane. */
+export function hostedAgentDirectory(root: string, options: { exactRoot?: boolean } = {}) {
+  const cache = clientCacheRoot(options.exactRoot ? root : hostedAgentRoot(root)),
     directory = join(cache, 'agent');
   for (const path of [cache, directory]) {
     mkdirSync(path, { recursive: true, mode: 0o700 });

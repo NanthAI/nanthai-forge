@@ -22,7 +22,7 @@ export async function cloneHostedProject(
   transport: MainTransport,
 ) {
   root = resolve(root);
-  const directory = hostedAgentDirectory(root),
+  const directory = hostedAgentDirectory(root, { exactRoot: true }),
     path = join(directory, 'clone.json');
   const select = (fresh: boolean) =>
     workLocked(join(directory, 'clone.lock'), () => {
