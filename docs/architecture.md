@@ -235,6 +235,18 @@ A whole plan above 64 grants takes the named catalog fallback. Content grants
 remain exact. Root encoding alone does not bound metadata key fragmentation;
 descriptor retirement remains pending.
 
+Compatible point readers also understand complete immutable bindings in the existing
+receipt table (`source-point:PROJECT:DIGEST`), enabled by one request-cached
+`source-points:PROJECT` format-1 header. Full mutable object rows retain precedence;
+point misses still consult every legacy catalog. Bindings preserve exact raw/pack
+nonce keys or a recipe pin, and old upload-id receipts still reconcile through the
+same lookup. The catalog verifier checks point bindings as well as original-id
+receipts. No writer publishes these records yet, and no descriptor or catalog is
+retired. Without the header, a legacy request adds only one empty indexed DB probe
+(no RPC); healthy manifest reads keep their existing resolver calls. Reader-only
+fixtures with complete point records use under 1 KB for stored and absent lookups;
+this does not qualify existing dense catalogs or billed usage.
+
 **Save-time upload packs.** A save (and any hosting upload window) with more than one new small object sends them as one pack in the same format: members back to back, nothing between, at most 8 MiB (`src/object-pack-upload.ts`, contract feature `upload-packs`). The client names the pack (digest, size, member indexes) in the prepare it already makes (`projectHostedSaves:prepare` `uploadPack`, `projectObjects:prepareBatch` `pack`); the server signs one create-only, checksum-bound PUT and writes one pending pack row holding the member list, and no member row. R2's checksum covers the pack, not its members, so the commit that already runs (`commitObjects`, inside `projectSourceRun:submit` or `commitBatch`) reads the pack once and checks every member digest before it writes the member rows with their byte ranges, in the transaction that commits the pack. An unverified member therefore never exists as a stored row: a planted member fails closed, binds nothing, never dedupes, and a later honest upload of that digest prepares afresh; readers still check every digest. A member that is already stored makes the whole proposal fall back to per-object PUTs, so no bytes are kept twice. The commit hands the small checked members (the save's delta page) to the save step in memory. A clone reads each save's new objects with one ranged GET per run, like an import window; `tests/r2-write-path.test.mjs`, `tests/r2-read-path.test.mjs` and `tests/hosted-save-sync-efficiency.test.mjs` cover the PUT and GET counts, the planted member and mixed history.
 
 **Source packs.** A large checkout does not fetch objects one by one. A project keeps one gzip source pack of a State in R2 (`convex/projectSourcePacks.ts`, `src/source-pack.ts`): at most 300 MiB and 100,000 files, with one latest pack and one in-flight slot reserved before the signed PUT. When a client checkout is missing 500 or more objects, after the shared machine object store (`src/machine-object-store.ts`; `FORGE_OBJECT_CACHE` moves it, `off` disables it), `src/hosted-checkout-cache.ts` downloads the latest pack and unpacks it, then fetches only what is still missing. A pack is a cache: if it is absent or fails, ordinary object transfer runs. The check runner publishes packs for its pinned base through the same reservation. `nforge x ROOT source-pack` packs current hosted main from the operator's machine; run it after a seed, cutover or large import.

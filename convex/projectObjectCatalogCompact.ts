@@ -89,7 +89,9 @@ export const verify = internalQuery({
       .query('projectObjectReceipts')
       .withIndex('by_project_and_nonce_and_value', q => q.eq('projectId', input.projectId))
       .paginate({ cursor: input.cursor, numItems: 256, maximumRowsRead: 256, maximumBytesRead: 128 * 1024 });
-    const receipts = page.page.filter(row => !row.key.startsWith('catalog-migration:'));
+    const receipts = page.page.filter(
+      row => !row.key.startsWith('catalog-migration:') && row.key !== `source-points:${input.projectId}`,
+    );
     const objects = await findObjects(
       ctx,
       input.projectId,

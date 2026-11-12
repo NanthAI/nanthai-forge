@@ -3,6 +3,7 @@ import type { StateSize } from '../src/state/size';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { r2Key } from './r2';
+import { findPointObjects, clearPointObjectCache } from './projectObjectPoints';
 import type { ObjectPack } from '../src/object-pack-range';
 
 /** Objects per catalog row (~19 KB): a lookup reads one small document. */
@@ -64,6 +65,7 @@ function entry(page: Page, digest: string): CatalogObject | null {
 const requests = new WeakMap<QueryCtx, Page[]>();
 export function clearObjectCatalogCache(ctx: QueryCtx) {
   requests.delete(ctx);
+  clearPointObjectCache(ctx);
 }
 async function page(ctx: QueryCtx, projectId: Id<'hostedProjects'>, digest: string) {
   let seen = requests.get(ctx);
@@ -91,6 +93,8 @@ export async function findObject(
     .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', digest))
     .unique();
   if (row || !digestPattern.test(digest)) return row;
+  const point = (await findPointObjects(ctx, projectId, [digest])).get(digest);
+  if (point) return point;
   const found = await page(ctx, projectId, digest);
   return found && entry(found, digest);
 }
@@ -112,7 +116,9 @@ export async function findObjects(
     ),
   );
   const found = new Map<string, ObjectView | null>(unique.map((digest, i) => [digest, rows[i] ?? null]));
-  for (const digest of unique.filter(digest => !found.get(digest) && digestPattern.test(digest)).sort()) {
+  const missing = unique.filter(digest => !found.get(digest) && digestPattern.test(digest));
+  for (const [digest, point] of await findPointObjects(ctx, projectId, missing)) found.set(digest, point);
+  for (const digest of missing.filter(digest => !found.get(digest)).sort()) {
     const row = await page(ctx, projectId, digest);
     found.set(digest, row && entry(row, digest));
   }

@@ -207,12 +207,28 @@ test('a batch result that neither merges nor drops a member is refused', () => {
 });
 
 const h = c => c.repeat(64);
-/** The only read acceptance adds: projectObjects by (projectId, digest), counted. */
+/** Count the spine reads and the complete catalog/point-authority miss path. */
 function objectsCtx(parents) {
   const reads = [];
   const ctx = {
     db: {
       query(table) {
+        if (table === 'projectObjectReceipts') {
+          return {
+            withIndex(index, build) {
+              assert.equal(index, 'by_key');
+              const q = {
+                eq(field, value) {
+                  assert.equal(field, 'key');
+                  assert.equal(value, 'source-points:p');
+                  return q;
+                },
+              };
+              build(q);
+              return { unique: async () => (reads.push(table), null) };
+            },
+          };
+        }
         if (table === 'projectObjectCatalog') {
           // No imported catalog page covers these digests.
           const chain = {

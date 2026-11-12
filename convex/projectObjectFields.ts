@@ -68,6 +68,13 @@ export const objectTables = {
     value: v.string(),
     nonce: v.optional(v.string()),
     size: v.optional(v.number()),
+    /** Complete immutable source point binding; upload-id receipts keep their original shape. */
+    sourceBinding: v.optional(
+      v.union(
+        v.object({ r2Key: v.string(), pack: v.optional(objectPack) }),
+        v.object({ recipe: v.object({ digest: v.string(), size: v.number() }) }),
+      ),
+    ),
   })
     .index('by_key', ['key'])
     .index('by_project_and_nonce_and_value', ['projectId', 'nonce', 'value']),
