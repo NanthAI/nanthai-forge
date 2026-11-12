@@ -35,9 +35,11 @@ export const publicationTables = {
     expiresAt: v.number(),
   })
     .index('by_project_and_operation', ['projectId', 'operationId'])
+    // index-order: Purge .take pages retain creation-time order within projectId; adding operationId changes selected rows.
     .index('by_project', ['projectId']),
   projectPublications: defineTable(publicationFields)
     .index('by_project_and_operation', ['projectId', 'operationId'])
+    // index-order: Purge .take pages retain creation-time order within projectId; adding operationId changes selected rows.
     .index('by_project', ['projectId']),
   projectPublicationPages: defineTable({
     projectId: v.id('hostedProjects'),
@@ -46,7 +48,5 @@ export const publicationTables = {
     body: v.string(),
     previous: v.string(),
     chain: v.string(),
-  })
-    .index('by_publication_and_position', ['publicationId', 'position'])
-    .index('by_project', ['projectId']),
+  }).index('by_project', ['projectId']),
 };

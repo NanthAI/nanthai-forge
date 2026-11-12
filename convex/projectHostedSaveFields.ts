@@ -30,5 +30,6 @@ export const hostedSaveTables = {
     output: v.string(),
   })
     .index('by_project_and_head', ['projectId', 'head'])
+    // index-order: Purge .take pages retain creation-time order within projectId; adding head changes selected rows.
     .index('by_project', ['projectId']),
 };

@@ -31,6 +31,7 @@ export const hostedOutputTables = {
     seal: v.union(v.string(), v.null()),
   })
     .index('by_project_and_run_and_stream', ['projectId', 'runId', 'streamId'])
+    // index-order: Purge .take pages retain creation-time order within projectId, runId; adding streamId changes selected rows.
     .index('by_project_and_run', ['projectId', 'runId']),
   projectHostedOutputChunks: defineTable({
     ...identity,
@@ -43,5 +44,6 @@ export const hostedOutputTables = {
     .index('by_project_and_run_and_stream_and_sequence', ['projectId', 'runId', 'streamId', 'sequence'])
     .index('by_project_and_run_and_digest', ['projectId', 'runId', 'digest'])
     .index('by_project_and_run_and_revision', ['projectId', 'runId', 'revision'])
+    // index-order: Purge .take pages retain creation-time order within projectId, runId; adding digest, revision, streamId changes selected rows.
     .index('by_project_and_run', ['projectId', 'runId']),
 };

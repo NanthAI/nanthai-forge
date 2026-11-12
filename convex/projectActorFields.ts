@@ -10,5 +10,6 @@ export const actorTables = {
     wasMember: v.optional(v.boolean()),
   })
     .index('by_project_and_actor', ['projectId', 'actor'])
+    // index-order: Purge .take pages retain creation-time order within projectId; adding actor changes selected rows.
     .index('by_project', ['projectId']),
 };

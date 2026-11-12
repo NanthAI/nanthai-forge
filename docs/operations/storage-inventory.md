@@ -53,3 +53,42 @@ Confirm completion by rerunning the owner inventory and checking each affected
 owner range is empty. Report actual provider read/write bytes separately from
 deleted document bytes and R2 object bytes. Storage reclaimed from indexes is
 not established by deleted JSON bytes.
+
+
+## Index inventory and guard
+
+`node scripts/convex-index-inventory.mjs > inventory.json` inventories every table,
+its custom database/search indexes and fields, query source locations and chains,
+and dynamically selected operational consumers. It parses source with TypeScript;
+it never imports or executes repository modules and makes no Convex calls.
+Database index prefixes are classified structurally as `prefix-redundant`; a
+retained prefix carries its order-dependence reason in the report. Tables without
+indexes remain in the table inventory.
+
+The existing `tests/convex-schema-indexes.test.mjs` deployment contract runs in
+landing verification. It rejects duplicate field sequences, indexes without a
+query on their table, unresolved dynamic queries, and database prefixes without
+an `index-order:` reason immediately before their definition. It also checks that
+the static inventory covers the entire deployed schema. There is no index-name
+allowlist. New dynamic selectors need static analysis alongside their runtime
+implementation; they cannot silently count a shared index name on another table.
+
+The finite selectors cover project purge registries, ownership seeks, the finish
+read proxy, recovery benchmark selection and serialized sandbox queries in scripts.
+Ownership and benchmark selection preserve schema declaration order. Prefix
+reasons retain creation-time pagination, bounded selections and ownership samples
+where another field would change the selected rows or cursors. An unused index
+has no consumer even through these operational paths.
+
+The landing cost and storage fixtures count custom index entries for inserts and
+updates, separately from removed entries. The ten-landing measurement extends the
+existing six-landing controller mix with another batch of four, and separately
+executes one real Actions export claim per check. The controller ledger still
+excludes provider dispatch; export claims are reported separately rather than
+silently folded into its call budget. Storage budgets also ratchet entries and
+serialized JSON key payload bytes for fresh and dogfood-shaped fixtures, both
+immediately and after maintenance. Key payloads include declared fields plus
+creation time (normalized to zero) and document id. These are reproducible fixture
+measurements, excluding system/search indexes and provider B-tree overhead; they
+are not billed physical index storage. Live row counts come from the read-only
+inventory above, and physical reclamation needs provider storage evidence.

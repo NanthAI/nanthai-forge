@@ -71,8 +71,10 @@ export const objectTables = {
   })
     .index('by_key', ['key'])
     .index('by_project_and_nonce_and_value', ['projectId', 'nonce', 'value'])
+    // index-order: Purge .take pages retain creation-time order within projectId; adding nonce changes selected rows.
     .index('by_project', ['projectId']),
   projectObjects: defineTable(objectFields)
+    // index-order: Purge .take pages retain creation-time order within projectId; adding digest, removed, storageId changes selected rows.
     .index('by_project', ['projectId'])
     .index('by_project_and_digest', ['projectId', 'digest'])
     .index('by_project_and_removed', ['projectId', 'removed'])
@@ -98,6 +100,7 @@ export const objectTables = {
     ),
     origin: v.string(),
   })
+    // index-order: Purge .take pages retain creation-time order within projectId; adding first changes selected rows.
     .index('by_project', ['projectId'])
     .index('by_project_and_first', ['projectId', 'first']),
 };

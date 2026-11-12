@@ -1,5 +1,10 @@
 # Status
 
+The existing Convex schema-index deployment guard rejects unused table indexes and
+unexplained database-index prefixes. Static inventory resolves operational helpers
+and inline scripts; landing fixtures ratchet custom index writes and serialized
+key payload storage ([inventory](operations/storage-inventory.md#index-inventory-and-guard)).
+
 Canonical hosted Candidates show their changed-file list without requiring a
 legacy Work generation. Browser and CLI readers accept a server-pinned R2
 file-list object and retain the two-State-manifest fallback for older Candidates.

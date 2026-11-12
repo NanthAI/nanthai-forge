@@ -22,7 +22,5 @@ export const hostedActionsTables = {
     runId: v.string(),
     head: v.string(),
     value: v.string(),
-  })
-    .index('by_project_and_run', ['projectId', 'runId'])
-    .index('by_project_and_head', ['projectId', 'head']),
+  }).index('by_project_and_run', ['projectId', 'runId']),
 };

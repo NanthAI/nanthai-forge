@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { assertWorkRecordDomain } from './work-record-domain-fixture.mjs';
 import assert from 'node:assert/strict';
+import { indexEntriesPerWrite } from './convex-index-cost.mjs';
 import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { checkArgs, checkDocument, checkReturn, insertedDocument, updatedDocument } from './convex-args.mjs';
@@ -65,6 +66,8 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         readRangesByTable: {},
         readBytesByTable: {},
         writes: 0,
+        indexEntriesWritten: 0,
+        indexEntriesRemoved: 0,
         writeBytes: 0,
         writeBytesByTable: {},
         touched: [],
@@ -93,6 +96,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         writable(table).set(id, structuredClone(row));
         writes.push([table, id, structuredClone(row)]);
         meter.written.push(table);
+        meter.indexEntriesWritten += indexEntriesPerWrite(schema, table);
         meter.writes++;
         meter.writeBytes += bytes(row);
         // Keep real totals intact; controller-only guards account for delayed retention
@@ -143,6 +147,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
             const table = locate(id);
             if (!table) return;
             writable(table).delete(id);
+            meter.indexEntriesRemoved += indexEntriesPerWrite(schema, table);
             writes.push([table, id, null]);
             meter.written.push(table);
             meter.writes++;

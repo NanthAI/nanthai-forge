@@ -11,6 +11,7 @@ export const hostedAcceptanceTables = {
     sequence: v.number(),
     value: v.string(),
   })
+    // index-order: Purge .take pages retain creation-time order within projectId; adding receiptId, sequence, submissionId changes selected rows.
     .index('by_project', ['projectId'])
     .index('by_project_and_receipt', ['projectId', 'receiptId'])
     .index('by_project_and_submission', ['projectId', 'submissionId'])

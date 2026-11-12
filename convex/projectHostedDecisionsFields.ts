@@ -11,6 +11,7 @@ export const hostedDecisionTables = {
     supersedes: v.optional(v.string()),
     actor: v.string(),
   })
+    // index-order: Purge .take pages retain creation-time order within projectId; adding id, target changes selected rows.
     .index('by_project', ['projectId'])
     .index('by_project_and_id', ['projectId', 'id'])
     .index('by_project_and_target', ['projectId', 'target']),

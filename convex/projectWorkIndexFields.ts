@@ -94,10 +94,9 @@ export const indexTables = {
       'intentMigrationOperationId',
       'revision',
     ])
-    .index('by_project_and_returnAt', ['projectId', 'returnAt'])
-    .index('by_project_and_return_operation', ['projectId', 'returnOperationId'])
+    // index-order: Purge .take pages retain creation-time order within projectId; adding backupId, intentMigrationOperationId changes selected rows.
     .index('by_project', ['projectId'])
-    .index('by_project_and_backup_and_revision', ['projectId', 'backupId', 'revision'])
+    // index-order: convex/projectWorkIndexBuildStore.ts retains creation-time query order within projectId, backupId, revision, format; adding workSchema changes ordering or bounded selections.
     .index('by_project_and_backup_and_revision_and_format', ['projectId', 'backupId', 'revision', 'format'])
     .index('by_project_and_backup_and_revision_and_format_and_work_schema', [
       'projectId',
@@ -121,6 +120,7 @@ export const indexTables = {
       'position',
     ])
     .index('by_project', ['projectId'])
+    // index-order: convex/projectWorkIndexStore.ts retains creation-time query order within generationId; adding actor, collection changes ordering or bounded selections.
     .index('by_generation', ['generationId'])
     .index('by_planning_initiativeId', ['generationId', 'collection', 'planning.initiativeId', 'position'])
     .index('by_planning_kind', ['generationId', 'collection', 'planning.kind', 'position'])
@@ -181,6 +181,7 @@ export const indexTables = {
       'position',
     ])
     .index('by_project', ['projectId'])
+    // index-order: convex/projectWorkIndexStore.ts retains creation-time query order within generationId; adding actor, collection changes ordering or bounded selections.
     .index('by_generation', ['generationId']),
   projectWorkRecords: defineTable({
     projectId: v.id('hostedProjects'),
@@ -204,5 +205,6 @@ export const indexTables = {
       'position',
     ])
     .index('by_project', ['projectId'])
+    // index-order: convex/projectWorkIndexStore.ts retains creation-time query order within generationId; adding actor, collection changes ordering or bounded selections.
     .index('by_generation', ['generationId']),
 };

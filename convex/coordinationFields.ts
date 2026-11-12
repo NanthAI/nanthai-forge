@@ -167,13 +167,14 @@ export const claimDocument = v.object({
 });
 export const coordinationTables = {
   projectCoordinationSessions: defineTable(sessionFields)
+    // index-order: Purge .take pages retain creation-time order within projectId; adding actor, lastSeen, parentSessionId, sessionId changes selected rows.
     .index('by_project', ['projectId'])
     .index('by_project_and_parent', ['projectId', 'parentSessionId'])
     .index('by_project_and_session', ['projectId', 'sessionId'])
     .index('by_project_and_actor', ['projectId', 'actor'])
-    .index('by_project_and_parent_and_lastSeen', ['projectId', 'parentSessionId', 'lastSeen'])
     .index('by_project_and_lastSeen', ['projectId', 'lastSeen']),
   projectCoordinationEvents: defineTable(eventFields)
+    // index-order: Purge .take pages retain creation-time order within projectId; adding actor, at, intentId, kind, laneId, operationId, recipientActor changes selected rows.
     .index('by_project', ['projectId'])
     .index('by_project_and_actor', ['projectId', 'actor'])
     .index('by_project_and_at', ['projectId', 'at'])
@@ -184,6 +185,7 @@ export const coordinationTables = {
     .index('by_project_and_laneId', ['projectId', 'laneId']),
   projectCoordinationReceipts: defineTable(receiptFields)
     .index('by_project_and_message_and_actor', ['projectId', 'messageId', 'actor'])
+    // index-order: Purge .take pages retain creation-time order within projectId; adding messageId changes selected rows.
     .index('by_project', ['projectId']),
   projectCoordinationClaims: defineTable(claimFields)
     .index('by_project_and_claim', ['projectId', 'claimId'])

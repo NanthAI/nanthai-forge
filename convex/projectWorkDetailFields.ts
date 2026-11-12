@@ -20,5 +20,6 @@ export const workDetailTables = {
     root: v.optional(v.object({ sha256: v.string(), size: v.number() })),
   })
     .index('by_project_and_operation', ['projectId', 'operationId'])
+    // index-order: Purge .take pages retain creation-time order within projectId; adding operationId changes selected rows.
     .index('by_project', ['projectId']),
 };

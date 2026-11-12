@@ -36,6 +36,7 @@ export const journalTables = {
     .index('by_project_and_lane_and_last', ['projectId', 'laneId', 'lastPosition'])
     .index('by_project_and_intent_and_last', ['projectId', 'intentId', 'lastPosition'])
     .index('by_project_and_recipient_and_last', ['projectId', 'recipientActor', 'lastPosition'])
+    // index-order: Purge .take pages retain creation-time order within projectId; adding category, intentId, key, laneId, pageId, recipientActor, recordKind, scope changes selected rows.
     .index('by_project', ['projectId']),
 };
 
@@ -49,5 +50,6 @@ export const journalReceiptTables = {
     envelope: v.string(),
   })
     .index('by_project_and_operation', ['projectId', 'operationId'])
+    // index-order: Purge .take pages retain creation-time order within projectId; adding operationId changes selected rows.
     .index('by_project', ['projectId']),
 };

@@ -11,6 +11,7 @@ export const hostedFrictionTables = {
     triage: v.optional(v.string()),
   })
     .index('by_project_and_id', ['projectId', 'id'])
+    // index-order: Recovery benchmark pagination retains creation-time order within projectId; adding id changes pages and cursors.
     .index('by_project', ['projectId']),
   projectHostedFrictionHints: defineTable({
     projectId: v.id('hostedProjects'),
@@ -18,5 +19,6 @@ export const hostedFrictionTables = {
     value: v.string(),
   })
     .index('by_project_and_id', ['projectId', 'id'])
+    // index-order: Purge .take pages retain creation-time order within projectId; adding id changes selected rows.
     .index('by_project', ['projectId']),
 };

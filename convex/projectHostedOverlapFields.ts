@@ -59,6 +59,7 @@ export const hostedOverlapTables = {
     conflicted: v.optional(v.literal(true)),
   })
     .index('by_project_and_lane', ['projectId', 'laneId'])
+    // index-order: convex/projectHostedDormancy.ts retains creation-time query order within projectId, open; adding lastActivityAt changes ordering or bounded selections.
     .index('by_project_and_open', ['projectId', 'open'])
     .index('by_project_and_open_and_activity', ['projectId', 'open', 'lastActivityAt']),
   /** Stacked Lanes (Issue dc62b120): one row per open Lane stacked on a parent Lane, written only by

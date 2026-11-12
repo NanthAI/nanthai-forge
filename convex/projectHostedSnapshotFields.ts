@@ -71,6 +71,5 @@ export const hostedSnapshotTables = {
     value: v.string(),
   })
     .index('by_snapshot_and_kind_and_key_and_version', ['snapshotId', 'kind', 'key', 'version'])
-    .index('by_snapshot_and_kind_and_parent', ['snapshotId', 'kind', 'parent'])
     .index('by_project', ['projectId']),
 };

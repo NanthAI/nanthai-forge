@@ -4,6 +4,8 @@
 // src/speed-budgets.json (`costs`). Deterministic counts, not live billing: a change that adds work
 // per landing fails here, a saving asks the author to ratchet the ledger down.
 import test from 'node:test';
+import { indexStorage, measureIndexExportClaims } from './convex-index-cost.mjs';
+const indexSchema = (await import(moduleUrl('../convex/schema.ts'))).default;
 import { storageClock as fixedClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
@@ -237,7 +239,9 @@ function meter(f, { extraShard = false, extraSetupSeconds = 0 } = {}) {
             'clean'
         )
           assert(row.candidateFiles, 'every clean Candidate producer pins its source listing');
-      const counts = f.counts.slice(from);
+      const allCounts = f.counts.slice(from);
+      const exports = allCounts.filter(c => c.name === 'fixtureIndexExportClaim');
+      const counts = allCounts.filter(c => c.name !== 'fixtureIndexExportClaim');
       const observers = counts.filter(c => c.name === 'observerBudgetPage');
       const sum = key => counts.reduce((total, c) => total + c[key], 0);
       // Source tasks record themselves in convexSourceCalls with their nested actions.
@@ -256,6 +260,11 @@ function meter(f, { extraShard = false, extraSetupSeconds = 0 } = {}) {
         nodeActions: runtimes.filter(r => r === 'node').length,
         readBytes: sum('readBytes') - observers.reduce((n, c) => n + c.readBytes, 0),
         writeBytes: sum('writeBytes'),
+        indexEntriesWritten: sum('indexEntriesWritten'),
+        indexEntriesRemoved: sum('indexEntriesRemoved'),
+        exportIndexEntriesWritten: exports.reduce((n, c) => n + c.indexEntriesWritten, 0),
+        exportClaims: exports.length,
+        storedIndexes: indexStorage(indexSchema, f.tables),
         r2ClassA: r2.a,
         r2ClassB: r2.b,
         r2BytesPut: r2.bytesPut,
@@ -326,9 +335,13 @@ const landed = f =>
 
 /** One accepted-Candidate submission through check and acceptance; `moveMain` moves main during
  * the check, so it recomposes on a source job and checks again (the common dogfood case). */
-async function solo(t, { moveMain = false, extraQuery = false, durations = false, ...runner } = {}) {
+async function solo(
+  t,
+  { moveMain = false, extraQuery = false, durations = false, indexExports = false, ...runner } = {},
+) {
   const f = await finishFixture(t);
   const m = meter(f, runner);
+  if (indexExports) await measureIndexExportClaims(f);
   const state = await f.enqueue(
     f.request(),
     durations
@@ -371,12 +384,13 @@ async function solo(t, { moveMain = false, extraQuery = false, durations = false
   };
 }
 /** Four queued landings composed and checked together under the default batching policy. */
-async function batch(t, { extraQuery = false, ...runner } = {}) {
+async function batch(t, { extraQuery = false, indexExports = false, ...runner } = {}) {
   const f = await batchesFixture(t, { count: 0, batching: 'default', batchMaxSize: null });
   const entries = [];
   for (let i = 0; i < 4; i++) entries.push(await f.add(i));
   // Measured after enqueue: Candidate composition and the four enqueue mutations are outside it.
   const m = meter(f, runner);
+  if (indexExports) await measureIndexExportClaims(f);
   const observers = [];
   for (const state of entries) {
     const observer = {};
@@ -448,13 +462,41 @@ async function measureLandingCosts(t, options = {}) {
 let baseline;
 test('cost guard: the scripted landing mix stays within its per-landing cost ledger', async t => {
   const started = performance.now();
-  baseline = await measureLandingCosts(t);
+  baseline = await measureLandingCosts(t, { indexExports: true });
   const verdicts = judgeCosts(costs, costGuard, 'landing-fixture', baseline.measured);
   const lines = formatCostVerdicts(verdicts);
   // Warnings and ratchet notices go to the check log; only a fail stops the landing.
   for (const line of lines) t.diagnostic(line);
   if (verdicts.some(v => v.status !== 'pass')) console.warn(lines.join('\n'));
   t.diagnostic(`scenarios ${JSON.stringify(baseline.scenarios)}`);
+  // Retain the current six-landing cost mix; extend it by one real batch to
+  // measure the brief's ten-landing index workload without changing its ledger.
+  const ten = [...Object.values(baseline.scenarios), await batch(t, { indexExports: true })];
+  t.diagnostic(
+    `tenLandingIndexes ${JSON.stringify({
+      landings: ten.reduce((n, s) => n + s.landings, 0),
+      written: ten.reduce((n, s) => n + s.indexEntriesWritten, 0),
+      exportClaims: ten.reduce((n, s) => n + s.exportClaims, 0),
+      exportWritten: ten.reduce((n, s) => n + s.exportIndexEntriesWritten, 0),
+      removed: ten.reduce((n, s) => n + s.indexEntriesRemoved, 0),
+      stored: ten.map(s => s.storedIndexes),
+    })}`,
+  );
+  const indexBudget = storageBudgets.tenLandingIndexes;
+  assert.equal(
+    ten.reduce((n, s) => n + s.landings, 0),
+    indexBudget.landings,
+  );
+  assert(
+    ten.reduce((n, s) => n + s.indexEntriesWritten + s.exportIndexEntriesWritten, 0) <= indexBudget.written,
+    'ten-landing custom index writes must not exceed the accepted storage budget',
+  );
+  for (const [i, scenario] of ten.entries())
+    for (const metric of ['entries', 'keyBytes'])
+      assert(
+        scenario.storedIndexes[metric] <= indexBudget.stored[i][metric],
+        `scenario ${i}: stored index ${metric} must not grow without a storage decision`,
+      );
   t.diagnostic(`measured in ${Math.round(performance.now() - started)} ms`);
   assert.equal(baseline.landings, 6);
   assert(
@@ -871,6 +913,14 @@ test('storage per landing ratchets every table on fresh and dogfood-shaped check
   };
   t.diagnostic(`storagePerLanding ${JSON.stringify(scenarios)}`);
   for (const [name, scenario] of Object.entries(scenarios)) {
+    const indexBudget = storageBudgets[name].indexes;
+    assert(scenario.indexes.written <= indexBudget.written, `${name}: custom index write budget`);
+    for (const phase of ['before', 'immediate', 'retained'])
+      for (const metric of ['entries', 'keyBytes'])
+        assert(
+          scenario.indexes[phase][metric] <= indexBudget[phase][metric],
+          `${name}/${phase}: stored index ${metric} budget`,
+        );
     assert.equal(scenario.capsule.classA, 1, `${name}: one complete capsule PUT`);
     assert(scenario.capsule.compressedBytes < 100_000, `${name}: capsule egress budget`);
     for (const [phase, tables] of Object.entries(scenario.perProject))

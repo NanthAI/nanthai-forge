@@ -413,6 +413,21 @@
           "bytes": 4771
         }
       }
+    },
+    "indexes": {
+      "before": {
+        "entries": 232,
+        "keyBytes": 15881
+      },
+      "immediate": {
+        "entries": 433,
+        "keyBytes": 32269
+      },
+      "retained": {
+        "entries": 440,
+        "keyBytes": 32666
+      },
+      "written": 1563
     }
   },
   "dogfood": {
@@ -829,6 +844,21 @@
           "bytes": 4783
         }
       }
+    },
+    "indexes": {
+      "before": {
+        "entries": 28890,
+        "keyBytes": 1859201
+      },
+      "immediate": {
+        "entries": 29308,
+        "keyBytes": 1892681
+      },
+      "retained": {
+        "entries": 29340,
+        "keyBytes": 1895346
+      },
+      "written": 2972
     }
   },
   "journal": {
@@ -848,5 +878,27 @@
       "beforeRetainedBytes": 227216,
       "retainedBytes": 217279
     }
+  },
+  "tenLandingIndexes": {
+    "landings": 10,
+    "written": 10957,
+    "stored": [
+      {
+        "entries": 434,
+        "keyBytes": 32364
+      },
+      {
+        "entries": 652,
+        "keyBytes": 48896
+      },
+      {
+        "entries": 1867,
+        "keyBytes": 140747
+      },
+      {
+        "entries": 1867,
+        "keyBytes": 140747
+      }
+    ]
   }
 }

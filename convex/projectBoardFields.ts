@@ -109,7 +109,7 @@ export const boardTables = {
     reason: v.string(),
     at: v.number(),
     detail: v.optional(v.string()),
-  }).index('by_at', ['at']),
+  }),
   /** Metadata without bodies, kept after the body expires for abuse investigation. */
   boardEvidence: defineTable({
     messageId: v.string(),
@@ -124,6 +124,5 @@ export const boardTables = {
     expiresAt: v.number(),
   })
     .index('by_expiry', ['expiresAt'])
-    .index('by_author_and_at', ['author', 'at'])
     .index('by_project_and_at', ['projectId', 'at']),
 };
