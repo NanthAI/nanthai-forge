@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { requireSourceProtocol } from './projectSourceProtocol';
 import { v } from 'convex/values';
 import { mutation, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -10,7 +11,7 @@ import { selectedGeneration, readRecord, recordPartition } from './projectWorkIn
 import { workProject } from './projectWorkHead';
 import { accessibleProject } from './projectAuthority';
 import { isR2Object } from './projectObjectFields';
-import { r2Config, r2Key, presignGet } from './r2';
+import { r2Config, presignGet, r2ObjectKey } from './r2';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { hostedDownloadPageSize, type HostedDownloadDescriptor } from '../src/hosted-download-page';
@@ -72,12 +73,12 @@ export const signDownloads = mutation({
           row &&
           !row.removed &&
           isR2Object(row) &&
-          row.r2Key === r2Key(projectId, row.pack?.digest ?? digest)
+          r2ObjectKey(projectId, row.r2Key)?.digest === (row.pack?.digest ?? digest)
         )
           found.push({
             digest,
             size: row.size,
-            key: row.r2Key,
+            key: row.r2Key!,
             ...(row.pack ? { range: packRange(row)! } : {}),
           });
       }
@@ -119,6 +120,7 @@ export const describe = mutation({
         size: v.number(),
         location: v.literal('r2'),
         statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
+        sourceVersion: v.optional(v.literal(2)),
         url: v.optional(v.string()),
         range: rangeValue,
         run: runValue,
@@ -129,12 +131,14 @@ export const describe = mutation({
         location: v.literal('convex'),
         url: v.string(),
         statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
+        sourceVersion: v.optional(v.literal(2)),
       }),
       v.object({
         digest: v.string(),
         size: v.number(),
         location: v.literal('recipe'),
         statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
+        sourceVersion: v.optional(v.literal(2)),
         closure: v.optional(signedClosureValue),
         /** Signed calls also sign the recipe object itself, so reading it needs no second call. */
         recipe: v.object({
@@ -168,7 +172,8 @@ export async function describeObjects(
   charge = true,
 ) {
   try {
-    await readableProject(ctx, projectId, charge);
+    const project = await readableProject(ctx, projectId, charge);
+    if (stateSource) requireSourceProtocol(project, stateSource);
     invariant(
       digests.length <= maximum && digests.every(id => /^[a-f0-9]{64}$/.test(id)) && (!runs || signed),
       'BAD_ARGUMENT',
@@ -189,23 +194,24 @@ export async function describeObjects(
         digest,
         size: row.size,
         ...(stateSource && row.statePhysical ? { statePhysical: row.statePhysical } : {}),
+        ...(stateSource === 2 && project.sourceManifestVersion === 2 ? { sourceVersion: 2 as const } : {}),
       };
       if (isR2Object(row)) {
         invariant(
-          row.r2Key === r2Key(projectId, row.pack?.digest ?? digest),
+          r2ObjectKey(projectId, row.r2Key)?.digest === (row.pack?.digest ?? digest),
           'INVALID_WORK_BACKUP',
           'Stored content has a different project binding.',
         );
         // Packed rows are signed after the page is read (runs); every other row as before.
         const deferred = runs === true && !!row.pack && row.size > 0 && !seen.has(digest);
         seen.add(digest);
-        if (deferred) packed.push({ index: result.length, size: row.size, pack: row.pack!, key: row.r2Key });
+        if (deferred) packed.push({ index: result.length, size: row.size, pack: row.pack!, key: row.r2Key! });
         result.push({
           ...pin,
           location: 'r2',
           ...(row.pack ? { range: packRange(row)! } : {}),
           ...(signed && !deferred
-            ? { url: await presignGet(r2Config(), row.r2Key, packHeaders(packRange(row), row.size)) }
+            ? { url: await presignGet(r2Config(), row.r2Key!, packHeaders(packRange(row), row.size)) }
             : {}),
         });
       } else if (row.storageId) {
@@ -225,7 +231,7 @@ export async function describeObjects(
           !node.removed &&
           isR2Object(node) &&
           node.size === row.recipe.size &&
-          node.r2Key === r2Key(projectId, node.pack?.digest ?? row.recipe.digest);
+          r2ObjectKey(projectId, node.r2Key)?.digest === (node.pack?.digest ?? row.recipe.digest);
         result.push({
           ...pin,
           location: 'recipe',
@@ -321,6 +327,7 @@ export const lanePage = mutation({
       digest: v.string(),
       size: v.number(),
       statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
+      sourceVersion: v.optional(v.literal(2)),
       url: v.optional(v.string()),
       range: rangeValue,
       closure: v.optional(signedClosureValue),
@@ -331,7 +338,8 @@ export const lanePage = mutation({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted source.');
-      await accessibleProject(ctx, projectId, user.subject);
+      const project = await accessibleProject(ctx, projectId, user.subject);
+      if (stateSource) requireSourceProtocol(project, stateSource);
       invariant(
         digests.length <= hostedDownloadPageSize && digests.every(id => /^[a-f0-9]{64}$/.test(id)),
         'BAD_ARGUMENT',
@@ -354,7 +362,7 @@ export const lanePage = mutation({
         if (deferred) packed.push({ index: result.length, size: row.size, pack: row.pack!, key: row.r2Key! });
         if (isR2Object(row)) {
           invariant(
-            row.r2Key === r2Key(projectId, row.pack?.digest ?? digest),
+            r2ObjectKey(projectId, row.r2Key)?.digest === (row.pack?.digest ?? digest),
             'INVALID_WORK_BACKUP',
             'Stored content has a different project binding.',
           );
@@ -363,6 +371,7 @@ export const lanePage = mutation({
           digest,
           size: row.size,
           ...(stateSource && row.statePhysical ? { statePhysical: row.statePhysical } : {}),
+          ...(stateSource === 2 && project.sourceManifestVersion === 2 ? { sourceVersion: 2 as const } : {}),
           ...(signed && row.recipeClosure ? { closure: (await signRecipeClosure(row))! } : {}),
           ...(row.pack ? { range: packRange(row)! } : {}),
           ...(signed && isR2Object(row) && !deferred

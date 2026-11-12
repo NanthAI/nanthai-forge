@@ -44,15 +44,16 @@ export type PackRun = { members: number[]; offset: number; length: number; total
  * bytes are exactly the requested objects). Only runs of two or more are returned; every
  * other row keeps its own signed range. `index` is the caller's row position. */
 export function packRuns(
-  rows: readonly { index: number; size: number; pack: ObjectPack }[],
+  rows: readonly { index: number; size: number; pack: ObjectPack; key?: string }[],
   maxBytes = packRunMaxBytes,
 ): PackRun[] {
   const byPack = new Map<string, { index: number; size: number; pack: ObjectPack }[]>();
   for (const row of rows) {
     if (row.size <= 0) continue;
-    const group = byPack.get(row.pack.digest) ?? [];
+    const key = row.key ?? row.pack.digest;
+    const group = byPack.get(key) ?? [];
     group.push(row);
-    byPack.set(row.pack.digest, group);
+    byPack.set(key, group);
   }
   const runs: PackRun[] = [];
   for (const group of byPack.values()) {

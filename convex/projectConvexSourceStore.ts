@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { qualifySourceProtocol } from './projectSourceProtocol';
 import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';
@@ -330,6 +331,7 @@ export const commit = sourceMutation({
     invariant(args.objects.length <= 100, 'SOURCE_JOB_INVALID', 'Commit source output in bounded windows.');
     if (!args.failure) await recordSourceStateSizes(ctx, args.projectId, args.stateSizes);
     await storeSourceOutputs(ctx, args.projectId, active.row.executionId, args.objects);
+    await qualifySourceProtocol(ctx, active, args.objects);
     // The submitting action ran this step itself: its delayed fallback is no longer needed. One that
     // already started (it is running this commit, or raced it) is left alone.
     if (active.row.inlineFallback && active.row.scheduledId) {
@@ -481,6 +483,7 @@ export const stage = sourceMutation({
     invariant(active, 'SOURCE_JOB_FENCED', 'Source step advanced.');
     invariant(args.objects.length <= 100, 'SOURCE_JOB_INVALID', 'Stage source outputs in windows.');
     await storeSourceOutputs(ctx, args.projectId, active.row.executionId, args.objects);
+    await qualifySourceProtocol(ctx, active, args.objects);
     return null;
   },
 });

@@ -44,6 +44,7 @@ const rowSchema = z.discriminatedUnion('location', [
     size: z.number().safe().nonnegative(),
     location: z.literal('r2'),
     statePhysical: downloadPinSchema.optional(),
+    sourceVersion: z.literal(2).optional(),
     url: z.url().optional(),
     range: z
       .object({ offset: z.number().safe().nonnegative(), total: z.number().safe().positive() })
@@ -63,6 +64,7 @@ const rowSchema = z.discriminatedUnion('location', [
     size: z.number().safe().nonnegative(),
     location: z.literal('convex'),
     statePhysical: downloadPinSchema.optional(),
+    sourceVersion: z.literal(2).optional(),
     url: z.url(),
   }),
   z.object({
@@ -70,6 +72,7 @@ const rowSchema = z.discriminatedUnion('location', [
     size: z.number().safe().nonnegative(),
     location: z.literal('recipe'),
     statePhysical: downloadPinSchema.optional(),
+    sourceVersion: z.literal(2).optional(),
     closure: downloadClosureSchema.optional(),
     recipe: z.object({
       digest: z.string(),
@@ -95,6 +98,7 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
   private readonly window = new AsyncLocalStorage<Window>();
   private runs = true;
   private readonly physicalStates = new Map<string, { sha256: string; size: number }>();
+  private requiredStateSource = false;
   private selectedState: { id: string; count: number } | undefined;
   private pages = 0;
   /** Every written file's size and digest is checked here (stream hash, run hash, recipe identity). */
@@ -107,9 +111,15 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
       sourceStateVersion?: 1 | 2;
     },
   ) {}
-  selectState(state: string, files: readonly NativeFile[], pin?: { sha256: string; size: number }) {
+  selectState(
+    state: string,
+    files: readonly NativeFile[],
+    pin?: { sha256: string; size: number },
+    required = false,
+  ) {
+    if (required) this.requiredStateSource = true;
     if (pin) this.physicalStates.set(state, pin);
-    if (this.exchange.sourceStateReads && this.physicalStates.has(state))
+    if (this.exchange.sourceStateReads && (this.physicalStates.has(state) || this.requiredStateSource))
       this.selectedState = { id: state, count: new Set(files.map(file => file.blob)).size };
     else this.selectedState = undefined;
   }
@@ -299,6 +309,7 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
     const page = this.pages++;
     for (const row of rows) {
       if (row.statePhysical) this.physicalStates.set(row.digest, row.statePhysical);
+      if (row.sourceVersion === 2) this.requiredStateSource = true;
       const { run, ...rest } = row as typeof row & { run?: SignedRun & { id: number } };
       invariant(
         row.location !== 'r2' || row.url || run,

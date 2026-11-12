@@ -43,6 +43,7 @@ export async function runnerStateSource(
             batch: true,
             ...(command.version ? { version: command.version } : {}),
             closures: true,
+            stateProof: true,
             ...(command.runs ? { runs: true } : {}),
           }),
         ),

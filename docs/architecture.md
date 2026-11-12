@@ -203,9 +203,19 @@ Readers negotiate protocol 2 through `source.state.v2` (Actions) and `source-sta
 changed root; it never selects another State. The server also rechecks a rebound
 root once before falling back, then checks current access again. Healthy reads
 keep their existing calls. A second rebind refuses the reply. Catalogs remain
-available; descriptor retirement and mandatory old-client enforcement are pending.
+available; descriptor retirement remains pending. A trusted, enabled source step that
+commits a complete root marks that project as requiring protocol 2. Its existing
+project read supplies the marker; only the first qualification writes it, with no
+extra resolver call. Discovery, State bootstrap and State-source endpoints return
+`CLI_UPGRADE_REQUIRED` to older clients. Runner source reads are State-bound; the
+legacy arbitrary-digest route cannot bypass selection. A skipped or missing root
+keeps the protocol requirement and its complete State-checked catalog fallback.
+Unqualified projects keep the compatible contract; general project browsing is unchanged.
 Readers also accept FPR2 roots with optional membership fingerprints and FPM2
-bindings that preserve exact raw/pack nonce keys (`/o/SHA/u/UUID`). Grant grouping,
+bindings that preserve exact raw/pack nonce keys (`/o/SHA/u/UUID`). Catalog,
+bootstrap and Lane download routes use the same project-key grammar, including
+recipe metadata and leaves. Adjacent content runs group by the exact stored key,
+so nonce copies never coalesce. Grant grouping,
 metadata downloads and operation-local caches distinguish nonce copies. FPR1/FPM1
 bytes remain compatible. The default-off writer emits fingerprint-free FPR2 roots and
 exact nonce bindings; it compares verified parent-State membership before sharing a

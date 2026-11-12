@@ -367,6 +367,8 @@ const projectFields = {
     v.object({ generation: v.number(), cursor: v.union(v.string(), v.null()), failures: v.number() }),
   ),
   sourceAuthority: v.optional(sourceAuthority),
+  /** Minimum State-source reader after a trusted complete physical root is committed. */
+  sourceManifestVersion: v.optional(v.literal(2)),
   /** Legacy, trees in packs (tried and dropped, docs/decisions.md): never written or read; tolerated so
    * a project row written before the rollback still validates. Remove with `stateTree` on objects. */
   stateTrees: v.optional(v.any()),

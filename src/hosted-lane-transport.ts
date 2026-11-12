@@ -37,12 +37,12 @@ export class ConvexLaneTransport implements LaneTransport {
   ) {}
   selectState(state: string, files: readonly NativeFile[]) {
     const physical = this.descriptors.get(state)?.statePhysical;
-    if (!this.exchange.sourceStateReads || !physical) {
+    if (!this.exchange.sourceStateReads || (!physical && this.descriptors.get(state)?.sourceVersion !== 2)) {
       this.stateDownloads = undefined;
       return;
     }
     this.stateDownloads ??= new HostedCheckoutDownloads(this.exchange);
-    this.stateDownloads.selectState(state, files, physical);
+    this.stateDownloads.selectState(state, files, physical, this.descriptors.get(state)?.sourceVersion === 2);
   }
   prepareObjects(ids: string[]) {
     return this.stateDownloads?.prepareObjects(ids) ?? Promise.resolve(null);

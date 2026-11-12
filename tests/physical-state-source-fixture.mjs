@@ -14,7 +14,11 @@ const selections = await import(moduleUrl('../convex/projectStateSourceSelection
 const packs = await import(moduleUrl('../convex/projectSourcePacks.ts'));
 const { catalogPages } = await import(moduleUrl('../convex/projectObjectFind.ts'));
 const { runnerStateSource } = await import(moduleUrl('../convex/projectStateSourceApi.ts'));
-export async function physicalStateSourceFixture(t, count, { rawTail = 0, fragmented = false } = {}) {
+export async function physicalStateSourceFixture(
+  t,
+  count,
+  { rawTail = 0, fragmented = false, protocol } = {},
+) {
   const files = [],
     entries = [],
     bodies = new Map();
@@ -78,6 +82,7 @@ export async function physicalStateSourceFixture(t, count, { rawTail = 0, fragme
   const run = await s.enqueue(
     s.selection({ expectedConfiguration: configuration.digest, expectedDefinition: s.definition.digest }),
   );
+  if (protocol === 2) s.patch('hostedProjects', s.projectId, { sourceManifestVersion: 2 });
   const id = { projectId: s.projectId, runId: run.id };
   const reserved = JSON.parse(await s.transaction('physical-source-reserve', direct.reserve, id));
   await s.transaction('physical-source-bind', direct.observe, {
@@ -156,6 +161,7 @@ export async function physicalStateSourceFixture(t, count, { rawTail = 0, fragme
     ctx
       .runMutation(makeFunctionReference('projectHostedActionsSource:resolve'), {
         ...input,
+        ...(protocol === 2 ? { version: 2 } : {}),
         digests: [...new Set([run.request.expectedHead, run.candidate.base.head])],
         batch: true,
         closures: true,
@@ -174,6 +180,7 @@ export async function physicalStateSourceFixture(t, count, { rawTail = 0, fragme
     calls,
     ctx,
     heads: readHeads,
-    source: command => runnerStateSource(ctx, input, command),
+    source: command =>
+      runnerStateSource(ctx, input, { ...(protocol === 2 ? { version: 2 } : {}), ...command }),
   };
 }

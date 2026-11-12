@@ -286,6 +286,7 @@ export class ActionsJobClient {
     let selectedState: string | null = null;
     const recipeOwners = new Map<string, string>(),
       authorizedStates = new Set<string>();
+    let requiredStateSource = false;
     let sourcePage = 0;
     const runFiles = new Map<string, string>();
     const signedLeaves = new Map<string, NonNullable<ReturnType<typeof rows.get>>>();
@@ -330,11 +331,13 @@ export class ActionsJobClient {
             | StateSourceRow[]
             | {
                 rows: StateSourceRow[];
+                sourceVersion?: 2;
                 physical?: { state: string; pin: { sha256: string; size: number } };
                 plan?: PhysicalGrantPlan;
                 extraStates?: StateSourceRow[];
               };
           const envelope = Array.isArray(found) ? null : found;
+          if (envelope?.sourceVersion === 2) requiredStateSource = true;
           if (envelope?.physical) bound.set(envelope.physical.state, envelope.physical.pin);
           const values = Array.isArray(found) ? found : found.rows;
           invariant(
@@ -653,7 +656,7 @@ export class ActionsJobClient {
               rows.set(leaf.digest, signed);
             }
         }
-        if (!bound.has(state)) {
+        if (!bound.has(state) && !(requiredStateSource && authorizedStates.has(state))) {
           selectedState = null;
           return false;
         }

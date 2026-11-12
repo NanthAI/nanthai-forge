@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { requireSourceProtocol } from './projectSourceProtocol';
 import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
@@ -55,7 +56,8 @@ export const runner = internalMutation({
   args: { ...sessionArgs, state: v.string(), version: v.optional(v.literal(2)) },
   returns: v.string(),
   handler: async (ctx, input) => {
-    const { run } = await actionsSession(ctx, input, false);
+    const { run, project } = await actionsSession(ctx, input, false);
+    requireSourceProtocol(project, input.version);
     invariant(
       (await actionsSourceStates(ctx, input.projectId, run)).allowed.has(input.state),
       'SOURCE_UNAVAILABLE',
@@ -73,7 +75,8 @@ export const client = internalMutation({
   },
   returns: v.string(),
   handler: async (ctx, input) => {
-    await readableProject(ctx, input.projectId, !input.recheck);
+    const project = await readableProject(ctx, input.projectId, !input.recheck);
+    requireSourceProtocol(project, input.version);
     return selection(ctx, input.projectId, input.state, true);
   },
 });

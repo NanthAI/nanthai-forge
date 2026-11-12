@@ -7,7 +7,7 @@ import type { PhysicalManifestReader } from '../src/physical-manifest';
 import type { SourceOutput } from './projectConvexSourceOutput';
 import type { ObjectLocation } from './projectConvexSourceTransport';
 import { ForgeError } from '../src/errors';
-import { r2Key } from './r2';
+import { r2Key, r2ObjectKey } from './r2';
 import { writePhysicalManifest, repairPhysicalRoot } from '../src/physical-manifest-write';
 type PhysicalOutput = NonNullable<SourceOutput['physical']>[number];
 /** Preserve exact canonical and maintenance nonce keys; never infer an arbitrary URL. */
@@ -22,21 +22,19 @@ export function physicalSourceBinding(
     path = storedKey ?? (row.url ? new URL(row.url).pathname : ''),
     at = path.lastIndexOf(prefix),
     key = at < 0 ? '' : path.slice(at + prefix.length),
-    match = /^([a-f0-9]{64})(?:\/u\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}))?$/.exec(
-      key,
-    );
+    parsed = at < 0 ? null : r2ObjectKey(projectId, path.slice(at));
   if (
-    !match ||
+    !parsed ||
     (storedKey !== undefined && storedKey !== prefix + key) ||
-    (!row.range && match[1] !== object.sha256)
+    (!row.range && parsed.digest !== object.sha256)
   )
     return null;
   if (row.url && !new URL(row.url).pathname.endsWith('/' + r2Key(projectId, key))) return null;
-  const nonce = match[2] === undefined ? {} : { nonce: match[2] };
+  const nonce = parsed.nonce === undefined ? {} : { nonce: parsed.nonce };
   return {
     ...object,
     ...(row.range
-      ? { pack: { digest: match[1]!, size: row.range.total, offset: row.range.offset, ...nonce } }
+      ? { pack: { digest: parsed.digest, size: row.range.total, offset: row.range.offset, ...nonce } }
       : nonce),
   };
 }

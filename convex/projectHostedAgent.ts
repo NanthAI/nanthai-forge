@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { requireSourceProtocol } from './projectSourceProtocol';
 import { needsFix } from '../src/culprit-bisect';
 import { githubMirrorStatus } from './projectGithubMirrorStatus';
 import { v } from 'convex/values';
@@ -102,6 +103,7 @@ export const capabilities = query({
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to discover hosted agent capabilities.');
       const project = await accessibleProject(ctx, projectId, user.subject),
         authority = sourceAuthority(project);
+      requireSourceProtocol(project, features?.includes('source-state-v2') ? 2 : undefined);
       if (project.sourceCutover && authority.mode === 'server') requireCutoverVersion(clientVersion);
       invariant(
         !features || features.length <= MAX_CONTRACT_FEATURES,

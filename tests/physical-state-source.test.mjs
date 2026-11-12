@@ -7,7 +7,7 @@ import { digest } from '../dist/hash.js';
 import { moduleUrl } from './convex-module.mjs';
 const { makeFunctionReference } = await import('convex/server');
 test('full29k State signer includes fresh run authority and stays under100KB DB/reply in three resolver mutations', async t => {
-  const f = await physicalStateSourceFixture(t, 29000),
+  const f = await physicalStateSourceFixture(t, 29000, { protocol: 2 }),
     start = f.s.counts.length;
   const heads = await f.heads();
   assert.equal(heads.physical.pin.sha256, f.root.pin.sha256);
@@ -29,6 +29,7 @@ test('full29k State signer includes fresh run authority and stays under100KB DB/
     f.ctx.runMutation(makeFunctionReference('projectStateSourceSelection:runner'), {
       ...f.input,
       state: digest('unselected State'),
+      version: 2,
     }),
     error => (error.data?.code ?? error.code) === 'SOURCE_UNAVAILABLE',
   );
@@ -44,7 +45,7 @@ test('full29k State signer includes fresh run authority and stays under100KB DB/
   );
 });
 test('full29k State signer with300 raw changes preserves exact-key grants below100KB including State descriptors', async t => {
-  const f = await physicalStateSourceFixture(t, 29000, { rawTail: 300 }),
+  const f = await physicalStateSourceFixture(t, 29000, { rawTail: 300, protocol: 2 }),
     start = f.s.counts.length;
   const heads = await f.heads(),
     wire = await f.source({

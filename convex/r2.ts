@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // R2 object access for Convex functions (V8 runtime): config from the Convex
 // environment, presigned PUT targets, and signed HEAD checks. Secrets never leave Convex.
+import { physicalKey } from '../src/physical-manifest-binary';
 import { exchangeFetch } from '../src/exchange-request';
 import { ForgeError } from '../src/errors';
 import { presign } from './presign';
@@ -65,6 +66,23 @@ function endpointOf(value: string | undefined): R2Endpoint | undefined {
 export const r2Endpoint = (config: R2Config): R2Endpoint =>
   config.endpoint ?? { scheme: 'https', host: `${config.accountId}.r2.cloudflarestorage.com` };
 export const r2Key = (projectId: string, digest: string) => `v1/p/${projectId}/o/${digest}`;
+/** Parse only this project's exact canonical or maintenance-nonce object key. */
+export function r2ObjectKey(projectId: string, key?: string) {
+  const prefix = r2Key(projectId, '');
+  if (!key?.startsWith(prefix)) return null;
+  const suffix = key.slice(prefix.length),
+    parts = suffix.split('/u/');
+  if (parts.length > 2) return null;
+  const digest = parts[0]!,
+    nonce = parts[1];
+  try {
+    if (physicalKey(digest, nonce) !== suffix) return null;
+  } catch {
+    return null;
+  }
+  return { digest, ...(nonce === undefined ? {} : { nonce }) };
+}
+
 /** Scratch table of an archive import's file listing; outside `/o/`, so no object sweep sees it. */
 export const r2ImportListingKey = (projectId: string, digest: string) => `v1/p/${projectId}/import/${digest}`;
 const target = (config: R2Config, key: string) => ({

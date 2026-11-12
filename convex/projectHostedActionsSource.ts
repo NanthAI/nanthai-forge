@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { requireSourceProtocol } from './projectSourceProtocol';
 import { v } from 'convex/values';
 import { internalMutation } from './server';
 import { sourceObjectLocation } from './projectSourceBeginReads';
@@ -20,6 +21,8 @@ export const resolve = internalMutation({
     ...sessionArgs,
     digests: v.array(v.string()),
     version: v.optional(v.literal(2)),
+    /** Only the trusted State/recipe verifier sets this; the HTTP schema cannot. */
+    stateProof: v.optional(v.literal(true)),
     batch: v.optional(v.literal(true)),
     closures: v.optional(v.literal(true)),
     runs: v.optional(v.literal(true)),
@@ -27,7 +30,13 @@ export const resolve = internalMutation({
   },
   returns: v.any(),
   handler: async (ctx, input) => {
-    const { run } = await actionsSession(ctx, input, false);
+    const { run, project } = await actionsSession(ctx, input, false);
+    requireSourceProtocol(project, input.version);
+    invariant(
+      project.sourceManifestVersion !== 2 || input.bound || input.stateProof,
+      'SOURCE_UNAVAILABLE',
+      'Read source through a selected State.',
+    );
     let packState: string | undefined;
     if (input.bound) {
       const scope = await actionsSourceStates(ctx, input.projectId, run);
@@ -86,6 +95,7 @@ export const resolve = internalMutation({
           return input.bound
             ? JSON.stringify({
                 rows: result,
+                ...(project.sourceManifestVersion === 2 ? { sourceVersion: 2 } : {}),
                 ...(physical ? { physical } : {}),
                 ...(extraStates.length ? { extraStates } : {}),
               })
