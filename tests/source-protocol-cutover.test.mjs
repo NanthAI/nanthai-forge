@@ -25,6 +25,7 @@ test('only an enabled trusted source step qualifies a project, and later skipped
   const skipped = await f.compose(f.files, f.base, 'main-0', false);
   assert.equal(f.s.tables.hostedProjects.get(f.s.projectId).sourceManifestVersion, undefined);
   const enabled = await f.compose(f.files, skipped.head, 'main-0', true);
+  await f.seed();
   assert.equal(f.s.tables.hostedProjects.get(f.s.projectId).sourceManifestVersion, 2);
   await f.compose(f.files, enabled.head, 'main-0', false);
   assert.equal(f.s.tables.hostedProjects.get(f.s.projectId).sourceManifestVersion, 2);

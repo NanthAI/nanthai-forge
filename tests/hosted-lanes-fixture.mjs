@@ -48,6 +48,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
           Object.entries(tables).map(([table, rows]) => [table, new Map(rows)]),
         ),
         written = {},
+        equalityIndexes = new WeakMap(),
         view = table => written[table] ?? baseline[table],
         writable = table => (written[table] ??= new Map(baseline[table])),
         reads = [],
@@ -76,8 +77,9 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
       };
       const read = (table, select) => {
         meter.touched.push(table);
-        const rows = select(view(table));
-        const original = encoded(select(baseline[table]));
+        const current = view(table),
+          rows = select(current);
+        const original = encoded(current === baseline[table] ? rows : select(baseline[table]));
         reads.push(() => encoded(select(tables[table])) === original);
         meter.ranges++;
         meter.readRangesByTable[table] = (meter.readRangesByTable[table] ?? 0) + 1;
@@ -92,9 +94,47 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         assert(meter.readBytes < 16 * 1024 * 1024, `${name}: Convex read bytes`);
         return structuredClone(rows);
       };
+      // Cache repeated equality prefixes per immutable transaction snapshot. A
+      // single lookup scans once without allocating a whole-table group index.
+      // Provider counters still count every real lookup, including misses and OCC reads.
+      // Own writes invalidate the writable view; OCC evaluates live tables only
+      // synchronously at commit, so it sees concurrent changes afresh.
+      const equalRows = (rows, terms) => {
+        if (!terms.length || terms.some(([, value]) => value !== null && typeof value === 'object'))
+          return [...rows.values()];
+        let indexes = equalityIndexes.get(rows);
+        if (!indexes) equalityIndexes.set(rows, (indexes = new Map()));
+        const fields = terms.map(([field]) => field),
+          key = JSON.stringify(fields);
+        const prior = indexes.get(key) ?? 0;
+        if (typeof prior === 'number' && prior < 8) {
+          indexes.set(key, prior + 1);
+          return [...rows.values()];
+        }
+        if (typeof prior === 'number') {
+          const groups = new Map();
+          for (const row of rows.values()) {
+            let group = groups;
+            for (const [at, field] of fields.entries()) {
+              const value = row[field];
+              if (!group.has(value)) group.set(value, at === fields.length - 1 ? [] : new Map());
+              group = group.get(value);
+            }
+            group.push(row);
+          }
+          indexes.set(key, groups);
+        }
+        let group = indexes.get(key);
+        for (const [, value] of terms) {
+          group = group.get(value);
+          if (!group) return [];
+        }
+        return group;
+      };
       const put = (table, id, row) => {
         row = checkDocument(schema, table, row);
         assert(bytes(row) < 1024 * 1024, `${name}: document size`);
+        equalityIndexes.delete(writable(table));
         writable(table).set(id, structuredClone(row));
         writes.push([table, id, structuredClone(row)]);
         meter.written.push(table);
@@ -149,6 +189,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
           delete: async id => {
             const table = locate(id);
             if (!table) return;
+            equalityIndexes.delete(writable(table));
             writable(table).delete(id);
             meter.indexEntriesRemoved += indexEntriesPerWrite(schema, table);
             writes.push([table, id, null]);
@@ -224,7 +265,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
                 };
                 build(bounds);
                 match = rows =>
-                  [...rows.values()]
+                  equalRows(rows, terms)
                     .filter(
                       row =>
                         terms.every(([k, v]) => row[k] === v) &&
@@ -315,6 +356,12 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
           },
         },
       });
+      const unchanged = () => {
+        // A retained read set can be checked again after later transactions.
+        // Rebuild each live-table equality index once for this validation.
+        for (const table of new Set(meter.touched)) equalityIndexes.delete(tables[table]);
+        return reads.every(unchanged => unchanged());
+      };
       try {
         if (decorate) await decorate(ctx, input, name);
         const result = await fn._handler(
@@ -323,12 +370,12 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         );
         // Convex rejects an oversized return value, which rolls the mutation back.
         if (fn.exportArgs) checkReturn(result, name);
-        if (reads.every(unchanged => unchanged())) {
+        if (unchanged()) {
           for (const [table, id, row] of writes) {
             if (row === null) tables[table].delete(id);
             else tables[table].set(id, row);
           }
-          if (name === 'observerBudgetPage') lastReadSet = () => reads.every(unchanged => unchanged());
+          if (name === 'observerBudgetPage') lastReadSet = unchanged;
           counts.push(meter);
           return result;
         }

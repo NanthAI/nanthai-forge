@@ -808,3 +808,29 @@ test('a pending checkpoint is reconciled before reserving finish source on repla
   assert.equal(finished.result.phase, 'finish');
   assert.deepEqual(saves, [saveId, saveId], 'the original checkpoint is resumed, without a new save');
 });
+
+test('finish admission reconciles an unknown timeout with the original operation and reports its real receipt', async t => {
+  const f = agentFixture(t),
+    operationId = randomUUID(),
+    send = f.exchange.client.mutation;
+  let lost = false;
+  f.exchange.client.mutation = async (ref, args) => {
+    const value = await send(ref, args);
+    if (!lost && getFunctionName(ref) === 'projectHostedLanding:enqueue') {
+      lost = true;
+      throw new ForgeError('EXCHANGE_REQUEST_TIMEOUT', 'server completed after the client request window');
+    }
+    return value;
+  };
+  const result = await f.transport().dispatch('finish', { operationId, laneId: f.lane.laneId });
+  assert(lost);
+  assert.equal(result.operationId, operationId);
+  assert.equal(result.result.submission.operationId, operationId);
+  assert.equal(
+    [...f.operations.values()].filter(value => value?.observation).length,
+    1,
+    'only the original landing exists',
+  );
+  assert.equal(result.result.submission.id, f.operations.get(operationId).id);
+  assert.equal(result.result.error, undefined, 'a transport timeout is not the server outcome');
+});

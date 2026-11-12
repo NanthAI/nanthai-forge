@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { takeSourceOutputs } from './projectConvexSourceOutputPages';
-import { sourceSeedPageSize } from '../src/source-object-window';
+import { readSourceExact } from '../src/hosted-source-exact';
 import { physicalKey } from '../src/physical-manifest-binary';
 import { assertSourceStateSize, type SourceSizePhase } from '../src/source-state-size';
 import type { StateSize } from '../src/state/size';
@@ -282,38 +282,46 @@ export function convexSourceTransport(
       );
       return { ...pin, r2Key: r2Key(projectId, pin.sha256) };
     },
-    describe: async (ids, seed) => {
-      if (!seed) {
-        await io.describeBatch!(ids);
-        return ids.map(id => physicalSourceBinding(projectId, locations.get(id)!, generatedKeys.get(id)));
+    seed: async (pin, files) => {
+      if (locations.get(pin.sha256)?.statePhysical) return;
+      const base: ObjectLocation | null = JSON.parse(
+        await clock.call(() =>
+          ctx.runMutation(reference('projectPhysicalSeed:queue'), { ...input, state: pin }),
+        ),
+      );
+      if (!base) {
+        reportBindings('source bindings: catalog (physical manifest seed scheduled)');
+        return;
       }
-      const found: (PhysicalEntry | null)[] = [];
-      for (let at = 0; at < ids.length;) {
-        const selected = ids.slice(at, at + sourceSeedPageSize);
-        const page: { rows: (PhysicalEntry | null)[]; next: number } = JSON.parse(
-          await clock.call(() =>
-            ctx.runMutation(reference('projectConvexSourceObjects:resolve'), {
-              ...input,
-              digests: selected,
-              ancestry: false,
-              known: [],
-              seed: true,
-              paged: true,
-            }),
-          ),
+      if (base.descriptor.recipe) {
+        await clock.call(() =>
+          ctx.runMutation(reference('projectPhysicalSeed:queue'), {
+            ...input,
+            state: pin,
+            refresh: true,
+          }),
         );
-        invariant(
-          Number.isInteger(page.next) &&
-            page.next > 0 &&
-            page.next <= selected.length &&
-            page.rows.length === page.next,
-          'SOURCE_UNAVAILABLE',
-          'Source seed continuation omitted a binding.',
-        );
-        found.push(...page.rows);
-        at += page.next;
+        return;
       }
-      return found;
+      const id = base.descriptor.object.sha256;
+      locations.set(id, base);
+      // Read the exact verified seed State, never infer membership from its metadata.
+      const bytes = await readSourceExact(io, base.descriptor.object);
+      const state = parseNativeState(bytes);
+      outputFiles.set(id, state.files);
+      await physical.writePhysicalState?.(pin, files, [id]);
+      if (!locations.get(pin.sha256)?.statePhysical)
+        await clock.call(() =>
+          ctx.runMutation(reference('projectPhysicalSeed:queue'), {
+            ...input,
+            state: pin,
+            refresh: true,
+          }),
+        );
+    },
+    describe: async ids => {
+      await io.describeBatch!(ids);
+      return ids.map(id => physicalSourceBinding(projectId, locations.get(id)!, generatedKeys.get(id)));
     },
   });
   const io: StepTransport = {

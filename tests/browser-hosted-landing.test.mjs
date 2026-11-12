@@ -377,3 +377,35 @@ test('ready review finds exact hosted check evidence without a landing request o
   assert.equal(ready.run.status, 'passed');
   assert.equal(f.tables.projectHostedLandingRequests.size, 0);
 });
+
+test('browser finish observes the same operation after admission outlives its request window', async t => {
+  const { ForgeError } = await import('../dist/errors.js');
+  const { f, client } = await browser(t),
+    operationId = randomUUID(),
+    send = client.io.mutation;
+  let original,
+    admitted = 0;
+  client.io.mutation = async (name, args) => {
+    const reply = await send(name, args);
+    if (name === 'projectHostedLanding:enqueue') {
+      admitted++;
+      original = reply;
+      throw new ForgeError('EXCHANGE_REQUEST_TIMEOUT', 'browser request window ended');
+    }
+    return reply;
+  };
+  client.io.wait = async (name, args, done) => {
+    assert.equal(name, 'projectHostedFinishObserve:page');
+    assert.equal(args.operationId, operationId);
+    await f.drain();
+    const actual = await f.current(original.id);
+    assert(done(actual));
+    return actual;
+  };
+  const result = await client.accept(operationId, f.candidate.id);
+  assert.equal(result.operationId, operationId);
+  assert.equal(result.id, original.id);
+  assert.equal(result.phase, 'landed');
+  assert.equal(admitted, 1, 'no replacement submission or repeated admission');
+  assert.equal(f.tables.projectHostedAcceptances.size, 1);
+});

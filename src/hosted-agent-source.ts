@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { reconcileSourceRequest } from './hosted-source-request.js';
 import { z } from 'zod';
 import {
   buildComposePages,
@@ -118,18 +119,39 @@ export async function driveAgentSource(
       await session.exchange.uploadPrepared(upload, prepared.targets, deferred);
     else await session.exchange.uploadLazyBatch(upload, { deferCommit: deferred });
     const published = features.includes('source-run-publish');
-    return session.action('projectSourceRun:submit', {
+    return reconcileSourceRequest(
       operationId,
-      kind: kind === 'Sync' ? 'sync' : 'compose',
-      ...(deferred.length ? { objects: deferred } : {}),
-      // source-run-publish: the outcome in the reply, and the small input inline (no download back).
-      ...(published
-        ? { progress: true, ...(input.length <= 64 * 1024 ? { input: input.toString('utf8') } : {}) }
-        : {}),
-    });
+      () =>
+        session.action('projectSourceRun:submit', {
+          operationId,
+          kind: kind === 'Sync' ? 'sync' : 'compose',
+          ...(deferred.length ? { objects: deferred } : {}),
+          // source-run-publish: the outcome in the reply, and the small input inline (no download back).
+          ...(published
+            ? { progress: true, ...(input.length <= 64 * 1024 ? { input: input.toString('utf8') } : {}) }
+            : {}),
+        }),
+      () =>
+        session.waitSource(
+          operationId,
+          { status: 'submitted' },
+          kind,
+          Math.max(0, (session.waitUntil - Date.now()) / 1000),
+        ),
+    );
   }
   await session.exchange.upload(savePin(progress.input), input);
-  return session.mutation(`projectHosted${kind}Jobs:submit`, { operationId });
+  return reconcileSourceRequest(
+    operationId,
+    () => session.mutation(`projectHosted${kind}Jobs:submit`, { operationId }),
+    () =>
+      session.waitSource(
+        operationId,
+        { status: 'submitted' },
+        kind,
+        Math.max(0, (session.waitUntil - Date.now()) / 1000),
+      ),
+  );
 }
 export async function composeAgentSource(
   session: HostedAgentSession,

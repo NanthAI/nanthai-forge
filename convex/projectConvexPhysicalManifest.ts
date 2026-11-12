@@ -40,7 +40,7 @@ export function physicalSourceBinding(
   };
 }
 /** The same action/commit owns State bytes and their derived physical recipe.
- * Only compose may seed. Ordinary saves/syncs never enumerate the catalog. */
+ * Compose only schedules seeds; ordinary writes always need a verified parent. */
 export function sourcePhysicalManifests(options: {
   enabled: boolean;
   sourceKind?: string | undefined;
@@ -50,19 +50,15 @@ export function sourcePhysicalManifests(options: {
   key: (id: string) => string | undefined;
   reader: (row: ObjectLocation) => Promise<PhysicalManifestReader>;
   members: (state: string) => readonly string[] | undefined;
-  describe: (ids: string[], seed: boolean) => Promise<(PhysicalEntry | null)[]>;
+  describe: (ids: string[]) => Promise<(PhysicalEntry | null)[]>;
   put: (bytes: Uint8Array) => Promise<PhysicalOutput>;
   log: (message: string) => void;
+  seed?: (pin: WorkerPin, files: readonly NativeFile[]) => Promise<void>;
 }) {
   const pending = new Map<string, Promise<{ statePhysical: WorkerPin; physical: PhysicalOutput[] } | null>>();
   const entry = (row: ObjectLocation) =>
     physicalSourceBinding(options.projectId, row, options.key(row.descriptor.object.sha256));
-  const create = async (
-    pin: WorkerPin,
-    files: readonly NativeFile[],
-    bases: readonly string[],
-    seed: boolean,
-  ) => {
+  const create = async (pin: WorkerPin, files: readonly NativeFile[], bases: readonly string[]) => {
     if (!options.enabled) return null;
     const old = options.locations.get(pin.sha256)?.statePhysical;
     if (old) return { statePhysical: old, physical: [] };
@@ -86,8 +82,16 @@ export function sourcePhysicalManifests(options: {
           options.log('source bindings: catalog (physical parent invalid or unavailable; writer skipped)');
         }
       }
-      if (!parent && !seed) return null;
+      if (!parent) return null;
       const physical: PhysicalOutput[] = [];
+      // Wide catch-up stays background work too. Ordinary incremental writes only resolve changes.
+      if (parent) {
+        const before = new Set(options.members(parent.root.state) ?? []);
+        if (new Set(files.filter(file => !before.has(file.blob)).map(file => file.blob)).size > 100) {
+          options.log('source bindings: catalog (physical catch-up deferred)');
+          return null;
+        }
+      }
       const result = await writePhysicalManifest({
         state: pin.sha256,
         members: files.map(file => file.blob),
@@ -96,7 +100,7 @@ export function sourcePhysicalManifests(options: {
         describe: async ids => {
           const known = ids.map(id => options.locations.get(id)),
             missing = ids.filter((_id, index) => !known[index]);
-          const described = missing.length ? await options.describe(missing, seed) : [];
+          const described = missing.length ? await options.describe(missing) : [];
           const byId = new Map(missing.map((id, index) => [id, described[index] ?? null]));
           return ids.map((id, index) => (known[index] ? entry(known[index]!) : (byId.get(id) ?? null)));
         },
@@ -110,28 +114,19 @@ export function sourcePhysicalManifests(options: {
         options.log('source bindings: catalog (legacy physical bindings; writer skipped)');
         return null;
       }
-      options.log(
-        seed
-          ? 'source bindings: compose physical manifest seed'
-          : 'source bindings: incremental physical manifest',
-      );
+      options.log('source bindings: incremental physical manifest');
       return { statePhysical: result.pin, physical };
     })();
     pending.set(pin.sha256, running);
     return running;
   };
-  const existing = async (
-    pin: WorkerPin,
-    files: readonly NativeFile[],
-    bases: readonly string[],
-    seed: boolean,
-  ) => {
+  const existing = async (pin: WorkerPin, files: readonly NativeFile[], bases: readonly string[]) => {
     if (options.locations.get(pin.sha256)?.statePhysical) return;
     const row = options.locations.get(pin.sha256);
     if (!row) return;
     const binding = entry(row);
     if (!binding) return;
-    const result = await create(pin, files, bases, seed);
+    const result = await create(pin, files, bases);
     if (!result) return;
     const output: SourceOutput = {
       ...pin,
@@ -171,13 +166,13 @@ export function sourcePhysicalManifests(options: {
       }
     };
     const [head, main] = await Promise.all([open(row), open(mainRow)]);
-    if (!head && !row.statePhysical) return existing(pin, files, [mainId], false);
+    if (!head && !row.statePhysical) return existing(pin, files, [mainId]);
     if (!head) {
       // Regenerate the invalid derived root from verified main membership.
       const original = row.statePhysical;
       delete row.statePhysical;
       try {
-        await existing(pin, files, [mainId], false);
+        await existing(pin, files, [mainId]);
         const output = options.outputs.at(-1);
         if (output?.sha256 === pin.sha256 && output.statePhysical) output.statePhysicalRebind = true;
         else
@@ -236,16 +231,16 @@ export function sourcePhysicalManifests(options: {
   };
   return {
     output: (pin: WorkerPin, files: readonly NativeFile[], bases: readonly string[]) =>
-      create(pin, files, bases, false),
+      create(pin, files, bases),
     ...(options.enabled && options.sourceKind === 'compose' ? { composePhysicalState: compose } : {}),
     ...(options.enabled
       ? {
           writePhysicalState: (pin: WorkerPin, files: readonly NativeFile[], bases: readonly string[]) =>
-            existing(pin, files, bases, false),
+            existing(pin, files, bases),
           ...(options.sourceKind === 'compose'
             ? {
                 seedPhysicalState: (pin: WorkerPin, files: readonly NativeFile[]) =>
-                  existing(pin, files, [], true),
+                  options.seed?.(pin, files) ?? Promise.resolve(),
               }
             : {}),
         }

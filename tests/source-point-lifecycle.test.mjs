@@ -13,8 +13,10 @@ const { projectGuard } = await import(moduleUrl('../convex/projectCheckLogCleanu
 const { PhysicalManifestReader } = await import('../dist/physical-manifest.js');
 
 test('Done-when5: whole shared metadata packs stay live through catalog compaction, point retirement and stale cleanup/sweep jobs', async t => {
-  const f = await physicalProject(t, 1000),
-    first = await f.compose(f.files, f.base, 'main-0');
+  const f = await physicalProject(t, 1000);
+  await f.queueSeed();
+  await f.seed();
+  const first = await f.compose(f.files, f.base, 'main-0');
   const run = (name, handler) => f.s.transaction(name, { _handler: handler }, {});
   f.s.main.head = first.head.sha256;
   f.s.main.receipt.id = 'main-1';

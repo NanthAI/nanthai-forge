@@ -261,6 +261,9 @@ export const begin = sourceMutation({
       generation: active.row.generation ?? 0,
       input: active.job.input,
       jobKind: active.job.jobKind,
+      ...(active.project.physicalSeed?.jobId === args.jobId
+        ? { physicalSeed: active.project.physicalSeed }
+        : {}),
       ...(active.row.physicalManifests ? { physicalManifests: true } : {}),
       dispatch: active.row.dispatch,
       executionId: active.row.executionId,
@@ -282,6 +285,10 @@ async function inlineFallbackGate(
   job: LoadedSourceJob,
   row: Parameters<StepGate>[1],
 ): Promise<LoadedSourceJob | null> {
+  if (row.physicalSeed && job.control.workerUntil <= Date.now()) {
+    const control = { ...job.control, workerUntil: Date.now() + job.control.workerLeaseMs };
+    return { ...(await saveSourceJob(ctx, args.projectId, job, { ...job, control }, Date.now())), control };
+  }
   if (!row.inlineFallback || (row.generation ?? 0) !== (args.generation ?? 0)) return job;
   const now = Date.now(),
     leaseMs = job.control.workerLeaseMs,
@@ -371,6 +378,20 @@ export const commit = sourceMutation({
       retryAt: undefined,
       timing,
     });
+    if (active.row.physicalSeed) {
+      if (active.row.seedWatchId) {
+        const watched = await ctx.db.system.get(active.row.seedWatchId);
+        if (watched?.state.kind === 'pending') await ctx.scheduler.cancel(active.row.seedWatchId);
+      }
+      const seedWatchId = terminal
+        ? undefined
+        : await ctx.scheduler.runAfter(
+            650000,
+            makeFunctionReference<'mutation'>('projectPhysicalSeed:watch'),
+            { projectId: args.projectId, jobId: args.jobId, step: args.step + 1 },
+          );
+      await ctx.db.patch(active.row._id, { seedWatchId });
+    }
     if (terminal) {
       const kind = active.job.jobKind;
       const api =
@@ -507,10 +528,32 @@ export const failed = sourceMutation({
     await ctx.db.patch(active.row._id, update);
     if (update.failedAttempts >= SOURCE_MAX_FAILED_ATTEMPTS || sourceRetryExpired(active)) {
       await exhaustSourceExecution(ctx, args, update.lastFailure);
+      if (active.row.seedWatchId) {
+        const watched = await ctx.db.system.get(active.row.seedWatchId);
+        if (watched?.state.kind === 'pending') await ctx.scheduler.cancel(active.row.seedWatchId);
+        await ctx.db.patch(active.row._id, { seedWatchId: undefined });
+      }
       await drainSourcePool(ctx, async batch => {
         const live = await activeStep(ctx, batch);
         return !!live && live.row.batchId === batch._id;
       });
+    } else if (active.row.physicalSeed) {
+      if (active.row.seedWatchId) {
+        const watched = await ctx.db.system.get(active.row.seedWatchId);
+        if (watched?.state.kind === 'pending') await ctx.scheduler.cancel(active.row.seedWatchId);
+      }
+      const generation = args.generation + 1;
+      const scheduledId = await ctx.scheduler.runAfter(
+        Math.max(0, (update.retryAt ?? 0) - Date.now()),
+        makeFunctionReference<'action'>('projectConvexSourceNode:step'),
+        { projectId: args.projectId, jobId: args.jobId, step: args.step, generation },
+      );
+      const seedWatchId = await ctx.scheduler.runAfter(
+        650000,
+        makeFunctionReference<'mutation'>('projectPhysicalSeed:watch'),
+        { projectId: args.projectId, jobId: args.jobId, step: args.step },
+      );
+      await ctx.db.patch(active.row._id, { generation, scheduledId, seedWatchId });
     } else if (active.row.inlineFallback && active.row.scheduledId) {
       // The submitting action's inline step failed: retry on the normal schedule, not the fallback's.
       const fallback = await ctx.db.system.get(active.row.scheduledId);

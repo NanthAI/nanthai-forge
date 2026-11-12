@@ -60,6 +60,8 @@ const retryFields = {
 };
 export const sourceStepTables = {
   projectSourceSteps: defineTable({
+    physicalSeed: v.optional(v.literal(true)),
+    seedWatchId: v.optional(v.id('_scheduled_functions')),
     ...retryFields,
     generation: v.optional(v.number()),
     /** Captured once at dispatch, so retries never follow a later setting change. */

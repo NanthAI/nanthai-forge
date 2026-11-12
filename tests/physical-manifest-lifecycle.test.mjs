@@ -11,6 +11,8 @@ const { planStep } = await import(moduleUrl('../convex/projectCheckLogCleanupPla
 const { projectGuard } = await import(moduleUrl('../convex/projectCheckLogCleanupGuard.ts'));
 test('retained State roots keep whole shared metadata packs protected in sweep and cleanup inventory', async t => {
   const f = await physicalProject(t, 1000);
+  await f.queueSeed();
+  await f.seed();
   const first = await f.compose(f.files, f.base, 'main-0');
   f.s.main.head = first.head.sha256;
   f.s.main.receipt.id = 'main-1';

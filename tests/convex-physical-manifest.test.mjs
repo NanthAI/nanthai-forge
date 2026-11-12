@@ -11,27 +11,56 @@ test('captured default-off physical writer leaves old dispatches unchanged even 
   assert.equal(row(f.s, result.head.sha256).statePhysical, undefined);
   assert.equal(f.requests.filter(request => request.seed).length, 0);
 });
-test('29k compose seeds once in catalog windows, extends only changed bindings, and retries retain the same physical root', async t => {
+test('29k rootless compose returns catalog fallback before any seed resolver; durable background pages seed once and later compose extends changed bindings', async t => {
   const f = await project(t, 29000),
     changed = f.files.map((file, index) =>
       index < 8 ? f.s.file(file.path, `first\nchanged-${index}\nlast\n`) : file,
     );
+  const withoutWriter = await f.compose(changed, f.base, 'main-0', false);
+  const original = f.c.context.runMutation;
+  let synchronous = true,
+    requestWorkMs = 0;
+  f.c.context.runMutation = async (ref, args) => {
+    if (synchronous && args.seed) {
+      requestWorkMs += 1600; // 29 legacy pages model the incident's >46 s seed.
+      if (requestWorkMs > 30000) {
+        const { ForgeError } = await import('../dist/errors.js');
+        throw new ForgeError('EXCHANGE_REQUEST_TIMEOUT', 'synthetic ordinary request budget exhausted');
+      }
+    }
+    return original(ref, args);
+  };
   const first = await f.compose(changed, f.base, 'main-0');
-  const basePin = row(f.s, f.base.sha256).statePhysical,
-    firstPin = row(f.s, first.head.sha256).statePhysical;
-  assert(basePin && firstPin);
+  assert.equal(row(f.s, f.base.sha256).statePhysical, undefined);
+  assert.equal(row(f.s, first.head.sha256).statePhysical, undefined);
+  assert.equal(
+    f.requests.filter(request => request.seed).length,
+    0,
+    'the 46-second legacy seed cannot consume any compose request budget',
+  );
+  assert.equal(
+    first.head.sha256,
+    withoutWriter.head.sha256,
+    'catalog fallback publishes identical State bytes',
+  );
+  assert.equal(requestWorkMs, 0, 'no first-seed work can stretch the synchronous request');
+  synchronous = false;
+  const seedJobId = f.s.tables.hostedProjects.get(f.s.projectId).physicalSeed.jobId;
+  await f.seed();
+  const basePin = row(f.s, f.base.sha256).statePhysical;
+  assert(basePin);
   const seeds = f.requests.filter(request => request.seed);
   assert.equal(seeds.length, 29);
   assert.equal(
     seeds.reduce((sum, request) => sum + request.digests.length, 0),
     29000,
   );
-  const firstReader = await PhysicalManifestReader.open(first.head.sha256, firstPin, f.read);
+  assert(seeds.every(request => request.jobId === seedJobId));
+  const firstReader = await PhysicalManifestReader.open(f.base.sha256, basePin, f.read);
   assert.deepEqual(
-    (await firstReader.lookup(changed.slice(0, 8).map(file => file.blob))).map(entry => entry.sha256),
-    changed.slice(0, 8).map(file => file.blob),
+    (await firstReader.lookup(f.files.slice(0, 8).map(file => file.blob))).map(entry => entry.sha256),
+    f.files.slice(0, 8).map(file => file.blob),
   );
-  assert.deepEqual(await firstReader.lookup(f.files.slice(0, 8).map(file => file.blob)), Array(8).fill(null));
   f.s.main.head = first.head.sha256;
   f.s.main.receipt.id = 'main-1';
   f.s.moveMain(first.head.sha256, 'main-1');
@@ -50,7 +79,14 @@ test('29k compose seeds once in catalog windows, extends only changed bindings, 
     .filter(request => !request.ancestry && !request.probe)
     .flatMap(request => request.digests)
     .filter(id => next.some(file => file.blob === id));
-  assert.deepEqual(catalogFiles, [next[8].blob], 'ordinary writer reads only its new file binding');
+  assert.deepEqual(
+    [...new Set(catalogFiles)].sort(),
+    next
+      .slice(0, 9)
+      .map(file => file.blob)
+      .sort(),
+    'catch-up reads only files changed while the initial seed was running',
+  );
   const secondPin = row(f.s, second.head.sha256).statePhysical;
   assert(secondPin);
   const reader = await PhysicalManifestReader.open(second.head.sha256, secondPin, f.read);
@@ -109,7 +145,8 @@ test('the writer preserves canonical raw and pack nonce bindings and skips forei
 for (const count of [2500, 29000])
   test(`${count}-file first seed after dense retirement bounds every function's queries and documents`, async t => {
     const f = await project(t, count, { points: true });
-    const result = await f.compose(f.files, f.base, 'main-0');
+    await f.compose(f.files, f.base, 'main-0');
+    await f.seed();
     const seeds = f.requests.filter(request => request.seed);
     assert.equal(seeds.length, Math.ceil(count / 1000));
     assert.equal(
@@ -121,8 +158,8 @@ for (const count of [2500, 29000])
       assert(row.ranges <= 3100, `${row.ranges} queries`);
       assert(row.documents <= 3100, `${row.documents} document reads including misses`);
     }
-    const pin = row(f.s, result.head.sha256).statePhysical;
-    const reader = await PhysicalManifestReader.open(result.head.sha256, pin, f.read);
+    const pin = row(f.s, f.base.sha256).statePhysical;
+    const reader = await PhysicalManifestReader.open(f.base.sha256, pin, f.read);
     const members = f.files.map(file => file.blob);
     assert.deepEqual(
       (await reader.lookup(members)).map(pin => pin?.sha256),
@@ -254,5 +291,6 @@ test('seed byte-prefix continuation preserves every requested binding across a s
     return original(ref, args);
   };
   await f.compose(f.files, f.base, 'main-0');
+  await f.seed();
   assert(checked);
 });

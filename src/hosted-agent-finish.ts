@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { reconcileSourceRequest } from './hosted-source-request.js';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
@@ -104,7 +105,17 @@ async function replayFinish(session: HostedAgentSession, pinnedCandidate: boolea
       });
       progress =
         observed.status === 'retryable'
-          ? await session.mutation('projectHostedComposeJobs:submit', { operationId: composeOperationId })
+          ? await reconcileSourceRequest(
+              composeOperationId!,
+              () => session.mutation('projectHostedComposeJobs:submit', { operationId: composeOperationId }),
+              () =>
+                session.waitSource(
+                  composeOperationId!,
+                  observed,
+                  'Compose',
+                  Math.max(0, (session.waitUntil - Date.now()) / 1000),
+                ),
+            )
           : observed.status
             ? sourceWaitSnapshot(observed)
             : undefined;

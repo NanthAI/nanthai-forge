@@ -34,8 +34,10 @@ async function compose(f, state, main) {
   return JSON.parse(f.s.objects.get(job.output.sha256)).result.state;
 }
 async function setup(t) {
-  const f = await physicalProject(t, 1000),
-    seeded = await f.compose(f.files, f.base, 'main-0');
+  const f = await physicalProject(t, 1000);
+  await f.queueSeed();
+  await f.seed();
+  const seeded = await f.compose(f.files, f.base, 'main-0');
   f.s.main.head = seeded.head.sha256;
   f.s.main.receipt.id = 'main-1';
   f.s.moveMain(seeded.head.sha256, 'main-1');

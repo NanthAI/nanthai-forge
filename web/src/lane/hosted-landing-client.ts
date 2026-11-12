@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { reconcileSourceRequest } from '../../../src/hosted-source-request';
 import type { HostedLandingRequest, HostedLandingState } from '../../../src/hosted-landing';
 import type { ComposeRequest } from '../../../src/hosted-compose';
 import { validateComposePage, buildComposePages } from '../../../src/hosted-compose';
@@ -20,6 +21,23 @@ export class BrowserLanding {
   private requests = new Map<string, Promise<HostedLandingRequest>>();
   private reverts = new Map<string, Promise<{ candidateId: string; submission: HostedLandingState }>>();
   constructor(readonly io: LandingIO) {}
+  private admit(request: HostedLandingRequest) {
+    return reconcileSourceRequest(
+      request.operationId,
+      () =>
+        this.io.mutation<HostedLandingState>('projectHostedLanding:enqueue', {
+          request: JSON.stringify(request),
+        }),
+      async () =>
+        (
+          await this.io.wait<{ submission: HostedLandingState }>(
+            'projectHostedFinishObserve:page',
+            { operationId: request.operationId, nextVersion: 0 },
+            value => Boolean(value.submission),
+          )
+        ).submission,
+    );
+  }
   private async manifest(root: Pin) {
     let next: Pin | null = root,
       pages = 0,
@@ -74,9 +92,7 @@ export class BrowserLanding {
       void prepared.catch(() => this.requests.delete(operationId));
     }
     const request = await this.requests.get(operationId)!;
-    return this.io.mutation<HostedLandingState>('projectHostedLanding:enqueue', {
-      request: JSON.stringify(request),
-    });
+    return this.admit(request);
   }
   retry(
     operationId: string,
@@ -96,9 +112,7 @@ export class BrowserLanding {
           }
         : null,
     };
-    return this.io.mutation<HostedLandingState>('projectHostedLanding:enqueue', {
-      request: JSON.stringify(request),
-    });
+    return this.admit(request);
   }
   cancel(operationId: string, submission: HostedLandingState) {
     return this.io.mutation('projectHostedLanding:cancel', {
@@ -146,12 +160,20 @@ export class BrowserLanding {
     );
     if (progress.terminal) return progress.terminal;
     await this.io.upload(progress.input);
-    await this.io.mutation(`projectHosted${kind}Jobs:submit`, { operationId });
-    return (
-      await this.io.wait<{ terminal: unknown }>(`projectHosted${kind}:progress`, { operationId }, value =>
-        Boolean(value.terminal),
-      )
-    ).terminal;
+    const wait = async () =>
+      (
+        await this.io.wait<{ terminal: unknown }>(`projectHosted${kind}:progress`, { operationId }, value =>
+          Boolean(value.terminal),
+        )
+      ).terminal;
+    return reconcileSourceRequest(
+      operationId,
+      async () => {
+        await this.io.mutation(`projectHosted${kind}Jobs:submit`, { operationId });
+        return wait();
+      },
+      wait,
+    );
   }
   private compositions = new Map<
     string,
@@ -257,9 +279,7 @@ export class BrowserLanding {
       );
     return {
       candidateId: candidate.id,
-      submission: await this.io.mutation<HostedLandingState>('projectHostedLanding:enqueue', {
-        request: JSON.stringify(await this.requests.get(pins.land)),
-      }),
+      submission: await this.admit((await this.requests.get(pins.land))!),
     };
   }
   private async check(): Promise<HostedLandingRequest['check']> {

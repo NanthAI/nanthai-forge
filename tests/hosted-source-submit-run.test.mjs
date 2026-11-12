@@ -202,3 +202,66 @@ test('only a save settles in the background (save-settle-background, fea47345 C)
     error => error.data?.code === 'BAD_ARGUMENT',
   );
 });
+
+// The server may finish after the HTTP caller deadline (S5 first-seed incident).
+// The fake subscription delivers the retained operation's outcome without sleeps.
+for (const kind of ['Compose', 'Sync'])
+  for (const modern of [false, true])
+    for (const status of ['completed', 'failed'])
+      test(`${kind} ${modern ? 'inline' : 'scheduled'} submit reconciles ${status} after its request window by the same operationId`, async () => {
+        const { ForgeError } = await import('../dist/errors.js');
+        const { waitHostedAgentSource } = await import('../dist/hosted-agent-source-wait.js');
+        const run = session(modern ? ['source-submit-run'] : []);
+        const terminal = {
+          outcome:
+            status === 'completed'
+              ? { status, result: { state: savePin({ actual: 'server outcome' }) } }
+              : { status, error: { code: 'SOURCE_HASH_MISMATCH', message: 'real server failure' } },
+        };
+        let submits = 0,
+          closed = 0,
+          release;
+        const server = new Promise(resolve => {
+          release = resolve;
+        });
+        const loseReply = async () => {
+          submits++;
+          throw new ForgeError('EXCHANGE_REQUEST_TIMEOUT', 'ordinary caller window ended');
+        };
+        if (modern) run.session.action = loseReply;
+        else {
+          const mutate = run.session.mutation;
+          run.session.mutation = (name, args) =>
+            name.endsWith('Jobs:submit') ? loseReply() : mutate(name, args);
+        }
+        run.session.waitUntil = Date.now() + 60000;
+        run.session.waitSource = (operationId, initial, selected, budget) => {
+          assert.equal(operationId, run.operationId);
+          assert.equal(selected, kind);
+          return waitHostedAgentSource(
+            { url: 'https://fixture.invalid', projectId: 'synthetic' },
+            operationId,
+            initial,
+            undefined,
+            () => ({
+              onUpdate(_ref, args, update) {
+                assert.equal(args.operationId, run.operationId);
+                server.then(() => update(JSON.stringify({ terminal })));
+                queueMicrotask(() => release());
+                return () => {};
+              },
+              async close() {
+                closed++;
+              },
+            }),
+            selected,
+            budget,
+          );
+        };
+        const result = await driveAgentSource(run.session, kind, run.operationId, {
+          operationId: run.operationId,
+        });
+        assert.deepEqual(result, terminal, 'surface the real server success or failure');
+        assert.equal(submits, 1, 'a timeout never creates or resubmits source work');
+        assert.equal(closed, 1, 'the active subscription stops on the real outcome');
+      });

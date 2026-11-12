@@ -47,6 +47,8 @@ function dogfood(s) {
 }
 test('29k dogfood landing keeps save, real disjoint sync and compose descriptor calls at most five with no per-file writer scan', async t => {
   const f = await physicalProject(t, 29000);
+  await f.queueSeed();
+  await f.seed();
   const initial = await f.compose(f.files, f.base, 'main-0');
   moveMain(f, initial.head, 'main-1');
   // Build the peer with the real writer before this landing, as an accepted main

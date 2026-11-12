@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { runPhysicalSeedStep } from './projectPhysicalSeedStep';
 import { takeSourceOutputs } from './projectConvexSourceOutputPages';
 import { v } from 'convex/values';
 import { digest as nativeDigest } from '../src/hash';
@@ -50,6 +51,23 @@ export const step = internalAction({
         const state = JSON.parse(loaded);
         generation = state.generation ?? generation;
         input.generation = generation;
+        if (state.physicalSeed) {
+          try {
+            return await runPhysicalSeedStep(ctx, input, state);
+          } catch (error) {
+            const domain = sourceDomainError(error);
+            if (!domain || domain.code === 'SOURCE_JOB_FENCED') throw error;
+            logSourceFailure(error, input, 'step', started);
+            await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
+              ...input,
+              cursor: state.cursor,
+              objects: [],
+              output: null,
+              failure: domain.code,
+            });
+            return null;
+          }
+        }
         const { io, outputs, settle, clock, smallOutput, putMetrics, observedStates } = convexSourceTransport(
             ctx,
             input,

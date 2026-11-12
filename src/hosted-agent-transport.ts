@@ -1815,6 +1815,16 @@ export class HostedAgentTransport {
         // receipt-pinned payload; never rediscover main, source or the epoch.
         const typed = hostedActionError(error, name);
         // A 429/503 refusal also ran nothing; wait out a short Retry-After (72d50375).
+        if (
+          typed.code === 'EXCHANGE_REQUEST_TIMEOUT' &&
+          retry === 0 &&
+          [
+            'projectHostedLanding:enqueue',
+            'projectHostedLandingDesired:submit',
+            'projectHostedChecks:enqueue',
+          ].includes(name)
+        )
+          continue;
         const wait = refusedWait(typed, retry);
         if ((typed.code !== 'HOSTED_CONFLICT' && wait === null) || retry >= 3)
           throw retryableExchangeError(typed, this.callerOperationId) ?? error;

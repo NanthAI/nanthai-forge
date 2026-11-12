@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { reconcileSourceRequest } from './hosted-source-request.js';
+import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
+import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { z } from 'zod';
 import type { ConflictContinuation } from './hosted-conflict-precheck.js';
 import { clientCacheRoot } from './root-paths.js';
@@ -449,26 +452,50 @@ async function saveOnce(
         .parse(JSON.parse(readFileSync(path, 'utf8'))),
     };
   };
+  const submit = (send: () => Promise<string>) =>
+    reconcileSourceRequest(command.operationId, send, async () => {
+      const progress = JSON.parse(
+        await exchange.client.query(makeFunctionReference<'query'>('projectHostedSaves:progress'), args),
+      );
+      if (progress.terminal) return JSON.stringify(progress.terminal);
+      return JSON.stringify(
+        await (waitPrior
+          ? waitPrior(command.operationId, progress)
+          : waitHostedAgentSource(
+              { url: capture.marker.url, projectId: exchange.projectId },
+              command.operationId,
+              progress,
+              undefined,
+              undefined,
+              'Saves',
+              AGENT_WAIT_SECONDS,
+              observe,
+            )),
+      );
+    });
+
   if (run) {
     // Recorded before the call: a save whose reply is lost is still reported by the next command.
     if (background) durableReplace(join(directory, backgroundSaveName), '');
     const inputText = canonicalPayload(prepared.input);
     const reply = JSON.parse(
-      await exchange.client.action(makeFunctionReference<'action'>('projectSourceRun:submit'), {
-        ...args,
-        kind: 'save',
-        ...measured(),
-        ...(committedInRun.length ? { objects: committedInRun } : {}),
-        ...(last === null ? {} : { index: last, page: canonicalPayload(pages[last]!.value) }),
-        ...(background ? { settle: 'background' } : {}),
-        // source-run-publish: the outcome in the reply when the step finished, and the input inline.
-        ...(runPublish && !background
-          ? {
-              progress: true,
-              ...(Buffer.byteLength(inputText) <= 64 * 1024 ? { input: inputText } : {}),
-            }
-          : {}),
-      }),
+      await submit(() =>
+        exchange.client.action(makeFunctionReference<'action'>('projectSourceRun:submit'), {
+          ...args,
+          kind: 'save',
+          ...measured(),
+          ...(committedInRun.length ? { objects: committedInRun } : {}),
+          ...(last === null ? {} : { index: last, page: canonicalPayload(pages[last]!.value) }),
+          ...(background ? { settle: 'background' } : {}),
+          // source-run-publish: the outcome in the reply when the step finished, and the input inline.
+          ...(runPublish && !background
+            ? {
+                progress: true,
+                ...(Buffer.byteLength(inputText) <= 64 * 1024 ? { input: inputText } : {}),
+              }
+            : {}),
+        }),
+      ),
     );
     writeFileSync(acknowledged, '', { mode: 0o600 });
     dropStagedBlobs(directory);
@@ -506,11 +533,13 @@ async function saveOnce(
     if (progress.input) await objects.put(Buffer.from(saveBytes(progress.input)));
   }
   const result = JSON.parse(
-    await exchange.client.mutation(makeFunctionReference<'mutation'>('projectHostedSaveJobs:submit'), {
-      ...args,
-      ...measured(),
-      ...(last === null ? {} : { index: last, page: canonicalPayload(pages[last]!.value) }),
-    }),
+    await submit(() =>
+      exchange.client.mutation(makeFunctionReference<'mutation'>('projectHostedSaveJobs:submit'), {
+        ...args,
+        ...measured(),
+        ...(last === null ? {} : { index: last, page: canonicalPayload(pages[last]!.value) }),
+      }),
+    ),
   );
   markLandStep('saveSubmitted');
   timing?.mark('submit');

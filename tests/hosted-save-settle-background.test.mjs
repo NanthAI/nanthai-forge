@@ -212,3 +212,42 @@ test('a settle that fails after the save returned is reported by the next comman
   await settleBackgroundSave(f.root, f.exchange);
   assert.equal(f.c.calls.length, retry);
 });
+
+test('a save whose server outlives the request window waits on its original operation and applies the real receipt', async t => {
+  const { ForgeError } = await import('../dist/errors.js');
+  const f = await setup(t),
+    command = { operationId: randomUUID(), message: 'reconcile original save' },
+    action = f.exchange.client.action;
+  let serverReply,
+    submits = 0;
+  f.exchange.client.action = async (ref, args) => {
+    if (getFunctionName(ref) !== 'projectSourceRun:submit') return action(ref, args);
+    submits++;
+    // Server work is durable, but has not run its source step at caller expiry.
+    serverReply = JSON.parse(await action(ref, { ...args, settle: 'background' }));
+    throw new ForgeError('EXCHANGE_REQUEST_TIMEOUT', 'ordinary request window ended');
+  };
+  const saved = await saveHostedLane(
+    f.root,
+    command,
+    f.exchange,
+    { ...contract, settleBackground: false },
+    false,
+    undefined,
+    async operationId => {
+      assert.equal(operationId, command.operationId);
+      assert.equal(readHostedLaneCheckout(f.root).selection.head, f.entry.head);
+      await f.settle(serverReply.jobId);
+      const progress = JSON.parse(
+        await f.exchange.client.query(makeFunctionReference('projectHostedSaves:progress'), {
+          projectId: f.s.projectId,
+          operationId,
+        }),
+      );
+      return progress.terminal;
+    },
+  );
+  assert.equal(saved.outcome.status, 'completed');
+  assert.notEqual(readHostedLaneCheckout(f.root).selection.head, f.entry.head);
+  assert.equal(submits, 1, 'the retained source work is never submitted again');
+});

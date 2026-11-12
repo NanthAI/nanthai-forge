@@ -9,8 +9,10 @@ import { writePhysicalManifest } from '../dist/physical-manifest-write.js';
 import { physicalBucket } from '../dist/physical-manifest-codec.js';
 const jobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
 test('fast-forward compose excludes every metadata pack containing a removed Lane-only file', async t => {
-  const f = await physicalProject(t, 1000),
-    initial = await f.compose(f.files, f.base, 'main-0');
+  const f = await physicalProject(t, 1000);
+  await f.queueSeed();
+  await f.seed();
+  const initial = await f.compose(f.files, f.base, 'main-0');
   f.s.main.head = initial.head.sha256;
   f.s.main.receipt.id = 'main-1';
   f.s.moveMain(initial.head.sha256, 'main-1');

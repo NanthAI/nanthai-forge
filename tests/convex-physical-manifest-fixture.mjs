@@ -127,5 +127,51 @@ export async function physicalProject(t, count, { points = false } = {}) {
       else process.env.FORGE_PHYSICAL_MANIFESTS = old;
     }
   }
-  return { s, c, base, files, read, requests, compose };
+  async function queueSeed() {
+    const entry = await s.lane(base, { base: { head: base.sha256, receiptId: 'main-0' } }),
+      selection = s.selection([entry]);
+    await s.prepare(selection);
+    await s.stage(selection);
+    const pending = await s.submit(selection),
+      identity = { projectId: s.projectId, jobId: pending.jobId };
+    const old = process.env.FORGE_PHYSICAL_MANIFESTS;
+    try {
+      process.env.FORGE_PHYSICAL_MANIFESTS = '1';
+      await c.call('projectConvexSource:dispatch', identity);
+      await c.call('projectPhysicalSeed:queue', { ...identity, step: 0, state: base });
+    } finally {
+      if (old === undefined) delete process.env.FORGE_PHYSICAL_MANIFESTS;
+      else process.env.FORGE_PHYSICAL_MANIFESTS = old;
+    }
+    const seedId = s.tables.hostedProjects.get(s.projectId).physicalSeed.jobId;
+    await c.call('projectPhysicalSeed:dispatch', { projectId: s.projectId, jobId: seedId });
+    return identity;
+  }
+  const seedStats = [];
+  async function seed() {
+    const project = s.tables.hostedProjects.get(s.projectId),
+      identity = { projectId: s.projectId, jobId: project.physicalSeed.jobId };
+    if (![...s.tables.projectSourceSteps.values()].some(row => row.jobId === identity.jobId))
+      await c.call('projectPhysicalSeed:dispatch', identity);
+    let job;
+    for (let at = 0; at < 2000; at++) {
+      job = await s.run('load background seed', ctx => jobs.loadSourceJob(ctx, s.projectId, identity.jobId));
+      if (['completed', 'failed'].includes(job.status)) break;
+      const step = [...s.tables.projectSourceSteps.values()].find(row => row.jobId === identity.jobId);
+      const putAt = c.r2Puts.length;
+      await c.call('projectConvexSourceNode:step', {
+        ...identity,
+        step: step.step,
+        generation: step.generation ?? 0,
+      });
+      seedStats.push({
+        step: step.step,
+        putBytes: c.r2Puts.slice(putAt).reduce((sum, id) => sum + s.objects.get(id).length, 0),
+        puts: c.r2Puts.length - putAt,
+      });
+    }
+    assert.equal(job.status, 'completed');
+    return job;
+  }
+  return { s, c, base, files, read, requests, compose, seed, queueSeed, seedStats };
 }

@@ -52,9 +52,13 @@ export const resolve = sourceMutation({
     );
     if (args.seed) {
       invariant(
-        active.job.jobKind === 'compose' && active.row.physicalManifests && !args.ancestry && !args.probe,
+        active.job.jobKind === 'register-state' &&
+          active.project.physicalSeed?.jobId === args.jobId &&
+          active.row.physicalManifests &&
+          !args.ancestry &&
+          !args.probe,
         'SOURCE_JOB_INVALID',
-        'Only the captured compose seed reads a physical inventory.',
+        'Only the background seed reads a physical inventory.',
       );
       const rows: (ObjectView | null)[] = [];
       if (args.paged) {

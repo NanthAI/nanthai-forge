@@ -22,6 +22,7 @@ const names = [
   'projectHostedSourceTransferBatch',
   'projectHostedComposeSelection',
   'projectConvexSource',
+  'projectPhysicalSeed',
   'projectConvexSourceNode',
   'projectConvexSourceStore',
   'projectConvexSourceObjects',

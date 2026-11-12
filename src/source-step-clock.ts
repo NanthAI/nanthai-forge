@@ -63,6 +63,10 @@ export function sourceStepClock(delegatedAt?: number, r2?: R2Meter) {
       writes++;
       return timed(write, run);
     },
+    readBytes<T>(run: () => Promise<T>) {
+      reads++;
+      return timed(read, run);
+    },
     /** A read stays in flight until its body is consumed or abandoned. */
     async read(open: () => Promise<AsyncIterable<Uint8Array>>): Promise<AsyncIterable<Uint8Array>> {
       reads++;

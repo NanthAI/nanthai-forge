@@ -186,15 +186,33 @@ are hash/size verified and State-bound before their raw, packed or recipe
 bindings enter the action-local transport. Missing or invalid manifests name the
 catalog fallback without changing selected digests. The shared default-off
 `FORGE_PHYSICAL_MANIFESTS` setting is captured when a source step is dispatched.
-With it enabled, compose seeds legacy main once; later State writes share
-unchanged manifest buckets and resolve only new bindings. Ordinary save and sync
-never seed. The one-time seed uses 1,000-digest resolver pages: 29 pages at
-29k files and 100 at 100k. Each page performs at most 3,001 object queries
-(primary row, slim point, then mixed-mode catalog fallback), leaving 1,095
-queries for its current step/fence. Seed replies explicitly continue a prefix
-when the remaining byte budget cannot cover the next lookups; unread digests
-never become missing bindings. Each lookup reserves three maximum-size provider
-documents and leaves 1 MiB / 64 queries for completion. Completed point authority needs 2,001;
+With it enabled, a rootless compose publishes its ordinary catalog result and
+reserves one background seed per project. It never resolves a seed inventory
+inside the source request. The existing `register-state` source job and step
+records own the seed's authority fence, cursor, retries and successor schedule;
+a project pointer makes concurrent composes reuse that job. A failed scheduled
+action has one recovery wake, cancelled by a healthy commit or terminal outcome.
+No polling or idle worker is added. Ordinary save and sync never seed.
+
+The first background step verifies the selected State and writes a sorted,
+hash-paged binary membership index to R2. Each later step reads one 32 KB index
+page and resolves at most one 1,000-digest prefix, retaining partial buckets and
+pack tails in R2. Only verified, fully live metadata packs enter the final root.
+An ordinary complete 29k seed takes 30 steps (one index plus 29 resolver pages);
+100k takes 101. Byte-limited legacy/mixed prefixes can take additional steps:
+unread digests never become missing bindings. Each resolver page performs at
+most 3,001 object queries (primary row, slim point, mixed catalog), with the
+existing fence and completion allowance. Each lookup reserves three maximum-size
+provider documents and leaves 1 MiB / 64 queries for completion. Completed point
+authority needs 2,001 object queries. These are internal page shapes, not new
+repository limits. The existing synchronous repository envelope is unchanged.
+
+Later composes use the verified root. If main advanced during the seed, compose
+can extend the seed State after verifying its exact membership; more than 100
+new bindings or a chunked parent routes catch-up to background pages, preserving
+catalog publication and the normal request budget. Background catch-up reuses
+verified parent bindings and resolves only missing ones, then emits fully live
+packs. Ordinary incremental State writes share unchanged manifest buckets; the
 ordinary 100-object windows and their call counts stay unchanged. Ancestry
 prefetch bounds attempted lookups, including absent hints, rather than only
 successful descriptors; verified State parents still drive subsequent reads.

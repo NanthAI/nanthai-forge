@@ -148,7 +148,13 @@ also override Node's underlying HTTP header deadline to seven minutes; extending
 only the application timer would still stop them at the transport's five-minute
 default. Reads and replay-safe actions retry
 three times after 100, 200 and 400 ms; each retry keeps the exact payload and operation
-ID. Exhausted network failures report `EXCHANGE_REQUEST_TIMEOUT` or
+ID. Prepared save, sync and compose submissions whose HTTP request window ends
+subscribe to the original operation's progress instead of treating the timeout
+as its outcome. The wait reports the server's real receipt or the existing
+same-operation continuation when its own budget ends. Successful submissions
+add no read or subscription. Landing admission retries its identical retained
+request after a lost timeout reply; it never generates a replacement operation
+or raises HTTP timeouts. Exhausted network failures report `EXCHANGE_REQUEST_TIMEOUT` or
 `EXCHANGE_REQUEST_FAILED` with the call name, never a signed URL. Structured Convex
 function errors keep their original code. Upload POSTs to Convex storage are bounded
 but not blindly replayed: retrying the original transfer reconciles its existing nonce-bound

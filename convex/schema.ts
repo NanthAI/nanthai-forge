@@ -332,6 +332,14 @@ export const projectPurge = v.object({
   completedAt: v.optional(v.number()),
 });
 const projectFields = {
+  /** One durable, project-scoped physical seed; source jobs own its pages and retries. */
+  physicalSeed: v.optional(
+    v.object({
+      jobId: v.string(),
+      state: v.object({ sha256: v.string(), size: v.number() }),
+      base: v.optional(v.object({ sha256: v.string(), size: v.number() })),
+    }),
+  ),
   /** Physical history relocation fence, independent of logical Work revision. */
   journalRevision: v.optional(v.number()),
   journalRecordReceipts: v.optional(v.literal(true)),
