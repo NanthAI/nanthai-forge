@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import assert from 'node:assert/strict';
 import { state, projectRow } from './hosted-fixture.mjs';
 import { digest } from '../dist/hash.js';
 import { moduleUrl } from './convex-module.mjs';
@@ -40,8 +41,17 @@ export function migrationFixture(count = 402) {
   const read = (table, value) => {
     if (!active) return;
     const rows = Array.isArray(value) ? value : value ? [value] : [];
+    active.documents += rows.length;
+    assert(active.documents <= 4096, 'Convex per-function document budget');
     active.readBytes += rows.reduce((sum, row) => sum + length(row), 0);
+    assert(active.readBytes < 16 * 1024 * 1024, 'Convex per-function read bytes');
     active.reads[table] = (active.reads[table] ?? 0) + rows.length;
+  };
+  const queryRead = () => {
+    if (active) {
+      active.queries++;
+      assert(active.queries <= 4096, 'Convex per-function query budget, including empty reads');
+    }
   };
   const rowFor = id =>
     Object.entries(s.tables)
@@ -49,6 +59,7 @@ export function migrationFixture(count = 402) {
       .find(([, row]) => row) ?? ['unknown', null];
   const get = s.ctx.db.get;
   s.ctx.db.get = async id => {
+    queryRead();
     const value = await get(id);
     read(rowFor(id)[0], value);
     return value;
@@ -59,6 +70,7 @@ export function migrationFixture(count = 402) {
       wrapped = { ...original };
     for (const name of ['unique', 'take', 'paginate'])
       wrapped[name] = async (...args) => {
+        queryRead();
         const value = await original[name](...args);
         read(table, name === 'paginate' ? value.page : value);
         return value;
@@ -86,7 +98,15 @@ export function migrationFixture(count = 402) {
   }
   const measurements = [];
   const run = async fn => {
-    const measure = { reads: {}, readBytes: 0, writes: 0, writeBytes: 0, deletedBytes: 0 };
+    const measure = {
+      queries: 0,
+      documents: 0,
+      reads: {},
+      readBytes: 0,
+      writes: 0,
+      writeBytes: 0,
+      deletedBytes: 0,
+    };
     active = measure;
     try {
       return await s.transaction(() => fn({ ...s.ctx }));

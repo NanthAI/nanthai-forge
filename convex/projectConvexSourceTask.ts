@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { takeSourceOutputs } from './projectConvexSourceOutputPages';
 import { v } from 'convex/values';
 import { digest as nativeDigest } from '../src/hash';
 import { makeFunctionReference } from 'convex/server';
@@ -58,7 +59,7 @@ export const run = internalAction({
                 projectId: input.projectId,
                 jobId: input.jobId,
                 step: input.step,
-                objects: outputs.splice(0, 100),
+                objects: takeSourceOutputs(outputs),
               }),
             );
           const saved =

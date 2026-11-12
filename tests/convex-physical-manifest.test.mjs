@@ -21,7 +21,7 @@ test('29k compose seeds once in catalog windows, extends only changed bindings, 
     firstPin = row(f.s, first.head.sha256).statePhysical;
   assert(basePin && firstPin);
   const seeds = f.requests.filter(request => request.seed);
-  assert.equal(seeds.length, 11);
+  assert.equal(seeds.length, 29);
   assert.equal(
     seeds.reduce((sum, request) => sum + request.digests.length, 0),
     29000,
@@ -104,4 +104,97 @@ test('the writer preserves canonical raw and pack nonce bindings and skips forei
     physicalSourceBinding('project', signed),
     physicalSourceBinding('project', packed, `v1/p/project/o/${pack}/u/${nonce}`),
   );
+});
+
+for (const count of [2500, 29000])
+  test(`${count}-file first seed after dense retirement bounds every function's queries and documents`, async t => {
+    const f = await project(t, count, { points: true });
+    const result = await f.compose(f.files, f.base, 'main-0');
+    const seeds = f.requests.filter(request => request.seed);
+    assert.equal(seeds.length, Math.ceil(count / 1000));
+    assert.equal(
+      seeds.reduce((sum, request) => sum + request.digests.length, 0),
+      count,
+    );
+    const measurements = f.s.counts.filter(row => row.name === 'projectConvexSourceObjects:resolve');
+    for (const row of measurements) {
+      assert(row.ranges <= 3100, `${row.ranges} queries`);
+      assert(row.documents <= 3100, `${row.documents} document reads including misses`);
+    }
+    const pin = row(f.s, result.head.sha256).statePhysical;
+    const reader = await PhysicalManifestReader.open(result.head.sha256, pin, f.read);
+    const members = f.files.map(file => file.blob);
+    assert.deepEqual(
+      (await reader.lookup(members)).map(pin => pin?.sha256),
+      members,
+    );
+    t.diagnostic(
+      JSON.stringify({
+        files: count,
+        seedCalls: seeds.length,
+        maxQueries: Math.max(...measurements.map(row => row.ranges)),
+        maxDocuments: Math.max(...measurements.map(row => row.documents)),
+        maxReturnedDocuments: Math.max(...measurements.map(row => row.returnedDocuments)),
+      }),
+    );
+  });
+
+test('ancestry prefetch counts absent hints and leaves exact requested reads available', async t => {
+  const f = await project(t, 1);
+  const { getFunctionName } = await import('convex/server');
+  const roots = Array.from({ length: 100 }, (_, index) => {
+    const id = digest(`hint-root-${index}`);
+    f.s.insert('projectObjects', {
+      projectId: f.s.projectId,
+      digest: id,
+      size: 0,
+      nonce: 'synthetic',
+      removed: false,
+      location: 'r2',
+      r2Committed: true,
+      r2Key: `v1/p/${f.s.projectId}/o/${id}`,
+      stateParents: Array.from({ length: 16 }, (_, parent) => digest(`missing-${index}-${parent}`)),
+    });
+    return id;
+  });
+  const original = f.c.context.runMutation;
+  let checked = false;
+  f.c.context.runMutation = async (ref, args) => {
+    if (!checked && getFunctionName(ref) === 'projectConvexSourceObjects:resolve') {
+      checked = true;
+      const rows = JSON.parse(
+        await original(ref, {
+          projectId: args.projectId,
+          jobId: args.jobId,
+          step: args.step,
+          digests: roots,
+          ancestry: true,
+          known: [],
+          windows: 4,
+        }),
+      );
+      assert(rows.length > 0 && rows.length < roots.length);
+      const measured = f.s.counts.at(-1);
+      assert(measured.ranges < 1300, 'one bounded function includes missing primary/catalog probes');
+      // Prefetch hints never establish absence: every requested root still resolves
+      // when the caller later asks for its exact descriptor.
+      const exact = JSON.parse(
+        await original(ref, {
+          projectId: args.projectId,
+          jobId: args.jobId,
+          step: args.step,
+          digests: roots,
+          ancestry: false,
+          known: [],
+        }),
+      );
+      assert.deepEqual(
+        exact.map(row => row.descriptor.object.sha256),
+        roots,
+      );
+    }
+    return original(ref, args);
+  };
+  await f.compose(f.files, f.base, 'main-0', false);
+  assert(checked);
 });

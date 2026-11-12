@@ -188,7 +188,18 @@ catalog fallback without changing selected digests. The shared default-off
 `FORGE_PHYSICAL_MANIFESTS` setting is captured when a source step is dispatched.
 With it enabled, compose seeds legacy main once; later State writes share
 unchanged manifest buckets and resolve only new bindings. Ordinary save and sync
-never seed. Roots and packed changed chunks use the existing R2 output commit;
+never seed. The one-time seed uses 1,000-digest resolver pages: 29 pages at
+29k files and 100 at 100k. Each page performs at most 3,001 object queries
+(primary row, slim point, then mixed-mode catalog fallback), leaving 1,095
+queries for its current step/fence. Completed point authority needs 2,001;
+ordinary 100-object windows and their call counts stay unchanged. Ancestry
+prefetch bounds attempted lookups, including absent hints, rather than only
+successful descriptors; verified State parents still drive subsequent reads.
+Output staging also counts nested recipe leaves and physical projections in its
+query allowance: at most 2,048 estimated lookups, with the rest reserved for
+step observations and publication. Oversized projections stage their verified
+physical children first, retaining each page's cleanup fence. Ordinary batches
+still stage 100 raw outputs per call. Roots and packed changed chunks use the existing R2 output commit;
 Convex holds one root pin per State. Legacy noncanonical bindings retain explicit
 catalog fallback. State-bound external endpoints and Actions/clone readers accept
 compact grant replies and full physical-run plans through the negotiated `source.state`

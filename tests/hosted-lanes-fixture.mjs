@@ -61,6 +61,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         retries,
         ranges: 0,
         documents: 0,
+        returnedDocuments: 0,
         readBytes: 0,
         readDocumentsByTable: {},
         readRangesByTable: {},
@@ -80,6 +81,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         reads.push(() => encoded(select(tables[table])) === original);
         meter.ranges++;
         meter.readRangesByTable[table] = (meter.readRangesByTable[table] ?? 0) + 1;
+        meter.returnedDocuments += rows.filter(Boolean).length;
         meter.documents += Math.max(1, rows.length);
         meter.readDocumentsByTable[table] =
           (meter.readDocumentsByTable[table] ?? 0) + Math.max(1, rows.length);
@@ -139,6 +141,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
             if (!table) {
               meter.documents++;
               meter.ranges++;
+              assert(meter.documents <= 4096 && meter.ranges <= 4096, `${name}: Convex read budget`);
               return null;
             }
             return read(table, rows => [rows.get(id) ?? null])[0];

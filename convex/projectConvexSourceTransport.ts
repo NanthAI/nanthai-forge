@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { takeSourceOutputs } from './projectConvexSourceOutputPages';
+import { sourceSeedPageSize } from '../src/source-object-window';
 import { physicalKey } from '../src/physical-manifest-binary';
 import { assertSourceStateSize, type SourceSizePhase } from '../src/source-state-size';
 import type { StateSize } from '../src/state/size';
@@ -286,13 +288,13 @@ export function convexSourceTransport(
         return ids.map(id => physicalSourceBinding(projectId, locations.get(id)!, generatedKeys.get(id)));
       }
       const found: (PhysicalEntry | null)[] = [];
-      for (let at = 0; at < ids.length; at += 2700)
+      for (let at = 0; at < ids.length; at += sourceSeedPageSize)
         found.push(
           ...JSON.parse(
             await clock.call(() =>
               ctx.runMutation(reference('projectConvexSourceObjects:resolve'), {
                 ...input,
-                digests: ids.slice(at, at + 2700),
+                digests: ids.slice(at, at + sourceSeedPageSize),
                 ancestry: false,
                 known: [],
                 seed: true,
@@ -472,7 +474,7 @@ export function convexSourceTransport(
       for (const object of objects) prepared.push(await prepareOutput(object.pin, object.bytes));
       outputs.push(...(await mapSourceOrdered(prepared, output => output.store())));
       while (outputs.length >= 100) {
-        const objects = outputs.splice(0, 100);
+        const objects = takeSourceOutputs(outputs);
         await clock.call(() =>
           ctx.runMutation(reference('projectConvexSourceStore:stage'), { ...input, objects }),
         );

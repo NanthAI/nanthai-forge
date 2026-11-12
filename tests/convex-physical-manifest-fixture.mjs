@@ -6,9 +6,10 @@ import { controls, environment } from './hosted-source-efficiency-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const { catalogPages } = await import(moduleUrl('../convex/projectObjectFind.ts'));
 const jobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
+const { pointBinding } = await import(moduleUrl('../convex/projectObjectPointBinding.ts'));
 export const physicalObjectRow = (s, id) =>
   [...s.tables.projectObjects.values()].find(row => row.digest === id);
-export async function physicalProject(t, count) {
+export async function physicalProject(t, count, { points = false } = {}) {
   environment(t);
   const now = Date.now();
   t.mock.method(Date, 'now', () => now);
@@ -34,6 +35,31 @@ export async function physicalProject(t, count) {
     if (members.has(value.digest)) s.tables.projectObjects.delete(id);
   for (const page of catalogPages(bindings))
     s.insert('projectObjectCatalog', { projectId: s.projectId, origin: 'synthetic import', ...page });
+  if (points) {
+    s.insert('projectObjectReceipts', {
+      projectId: s.projectId,
+      key: `source-points:${s.projectId}`,
+      value: '2',
+    });
+    for (const pin of bindings)
+      s.insert('projectObjectReceipts', {
+        projectId: s.projectId,
+        key: `source-point:${s.projectId}:${pin.digest}`,
+        value: pin.digest,
+        size: pin.size,
+        sourceBinding: pointBinding({
+          ...pin,
+          projectId: s.projectId,
+          nonce: '',
+          removed: false,
+          sourceReferenced: true,
+          location: 'r2',
+          r2Committed: true,
+          r2Key: `v1/p/${s.projectId}/o/${pin.pack.digest}`,
+        }),
+      });
+    s.tables.projectObjectCatalog.clear();
+  }
   const base = s.state(files);
   s.register(base);
   s.patch('projectObjects', physicalObjectRow(s, base.sha256)._id, { stateGeneration: 1, stateParents: [] });
@@ -49,7 +75,7 @@ export async function physicalProject(t, count) {
     } catch (error) {
       console.error('synthetic physical source failure', {
         call: getFunctionName(ref),
-        digests: args.digests,
+        digests: args.digests?.length,
         code: error.data?.code ?? error.code,
         message: error.data?.message ?? error.message,
       });

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { takeSourceOutputs } from './projectConvexSourceOutputPages';
 import { v } from 'convex/values';
 import { digest as nativeDigest } from '../src/hash';
 import { makeFunctionReference } from 'convex/server';
@@ -142,7 +143,7 @@ export const step = internalAction({
             // The saved cursor refers to States this step already uploaded; the step
             // after the join resolves them, so they must be recorded before the fork.
             while (outputs.length) {
-              const objects = outputs.splice(0, 100);
+              const objects = takeSourceOutputs(outputs);
               await clock.call(() =>
                 ctx.runMutation(reference('projectConvexSourceStore:stage'), { ...input, objects }),
               );
@@ -159,8 +160,9 @@ export const step = internalAction({
             logStep();
             return null;
           }
-          while (outputs.length > 100) {
-            const objects = outputs.splice(0, 100);
+          for (;;) {
+            const objects = takeSourceOutputs(outputs, true);
+            if (!objects.length) break;
             await clock.call(() =>
               ctx.runMutation(reference('projectConvexSourceStore:stage'), { ...input, objects }),
             );

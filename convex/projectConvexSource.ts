@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { takeSourceOutputs } from './projectConvexSourceOutputPages';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction, type ActionCtx } from './_generated/server';
@@ -113,6 +114,13 @@ export async function runConvexSourceStep(
         }
         await transport.settle();
         const outputCount = transport.outputs.length;
+        for (;;) {
+          const objects = takeSourceOutputs(transport.outputs, true);
+          if (!objects.length) break;
+          await transport.clock.call(() =>
+            ctx.runMutation(reference('projectConvexSourceStore:stage'), { ...input, objects }),
+          );
+        }
         const resultText = transport.smallOutput(output);
         const published: string | null = await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
           ...input,

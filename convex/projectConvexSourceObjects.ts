@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { sourceSeedPageSize } from '../src/source-object-window';
 import { assertSourceStateSize } from '../src/source-state-size';
 import { v } from 'convex/values';
 import { activeStep } from './projectConvexSourceStore';
@@ -44,7 +45,7 @@ export const resolve = sourceMutation({
     const active = await activeStep(ctx, args);
     invariant(active, 'SOURCE_JOB_FENCED', 'Source step advanced.');
     invariant(
-      args.digests.length <= (args.seed ? 2700 : 100),
+      args.digests.length <= (args.seed ? sourceSeedPageSize : 100),
       'SOURCE_JOB_INVALID',
       'Resolve source in bounded windows.',
     );
@@ -84,14 +85,16 @@ export const resolve = sourceMutation({
       selected: { row: ObjectView; url: string | null }[] = [],
       unavailable: string[] = [];
     let bytes = 0,
-      position = 0;
+      position = 0,
+      examined = 0;
     while (
       (args.probe ? position < pending.length : pending.length) &&
-      selected.length < 100 * (args.windows ?? 1)
+      examined < 100 * (args.windows ?? 1)
     ) {
       const id = args.probe ? pending[position++]! : pending.pop()!;
       if (seen.has(id)) continue;
       seen.add(id);
+      examined++;
       const row = await findObject(ctx, args.projectId, id);
       if (!row || row.removed || !isStored(row)) {
         if (args.digests.includes(id)) {
