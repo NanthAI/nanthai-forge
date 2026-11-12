@@ -204,8 +204,11 @@ bindings that preserve exact raw/pack nonce keys (`/o/SHA/u/UUID`). Grant groupi
 metadata downloads and operation-local caches distinguish nonce copies. FPR1/FPM1
 bytes remain compatible; runtime writers still emit those earlier forms and skip
 nonce bindings. A future fingerprint-free writer must compare membership from the
-verified parent State before sharing a bucket. Root encoding alone does not bound
-metadata key fragmentation; descriptor retirement remains pending.
+verified parent State before sharing a bucket. Metadata plans grant one covering range per exact root-listed pack key, from its
+first live bucket to its last; only hash-checked root-listed chunks are decoded.
+A whole plan above 64 grants takes the named catalog fallback. Content grants
+remain exact. Root encoding alone does not bound metadata key fragmentation;
+descriptor retirement remains pending.
 
 **Save-time upload packs.** A save (and any hosting upload window) with more than one new small object sends them as one pack in the same format: members back to back, nothing between, at most 8 MiB (`src/object-pack-upload.ts`, contract feature `upload-packs`). The client names the pack (digest, size, member indexes) in the prepare it already makes (`projectHostedSaves:prepare` `uploadPack`, `projectObjects:prepareBatch` `pack`); the server signs one create-only, checksum-bound PUT and writes one pending pack row holding the member list, and no member row. R2's checksum covers the pack, not its members, so the commit that already runs (`commitObjects`, inside `projectSourceRun:submit` or `commitBatch`) reads the pack once and checks every member digest before it writes the member rows with their byte ranges, in the transaction that commits the pack. An unverified member therefore never exists as a stored row: a planted member fails closed, binds nothing, never dedupes, and a later honest upload of that digest prepares afresh; readers still check every digest. A member that is already stored makes the whole proposal fall back to per-object PUTs, so no bytes are kept twice. The commit hands the small checked members (the save's delta page) to the save step in memory. A clone reads each save's new objects with one ranged GET per run, like an import window; `tests/r2-write-path.test.mjs`, `tests/r2-read-path.test.mjs` and `tests/hosted-save-sync-efficiency.test.mjs` cover the PUT and GET counts, the planted member and mixed history.
 

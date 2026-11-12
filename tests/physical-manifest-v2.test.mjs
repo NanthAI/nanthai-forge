@@ -256,3 +256,51 @@ test('29k long-history FPR2 preserves all1024chunks and k+1 lookup without claim
     }),
   );
 });
+
+test('metadata covering grants stay inside the selected root live bounds and ignore unlisted corrupt bytes', async t => {
+  const r2 = fakeSourceR2(t),
+    objects = new Map();
+  const put = bytes => {
+    const pin = { sha256: digest(bytes), size: bytes.length };
+    objects.set(pin.sha256, bytes);
+    r2.objects.set(`/synthetic/v1/p/project/o/${pin.sha256}`, bytes);
+    return pin;
+  };
+  const entries = ['first', 'last']
+    .map(value => ({ sha256: digest(value), size: 3 }))
+    .sort((a, b) => physicalBucket(a.sha256) - physicalBucket(b.sha256));
+  const bodies = entries.map(entry => encodePhysicalEntries([entry]));
+  const garbage = Buffer.from('unlisted bytes are not a bucket');
+  const packed = Buffer.concat([garbage, bodies[0], garbage, bodies[1], garbage]);
+  const pack = put(packed);
+  const root = {
+    schema: 1,
+    kind: 'forge-physical-manifest',
+    state,
+    chunks: entries.map((entry, index) => ({
+      bucket: physicalBucket(entry.sha256),
+      sha256: digest(bodies[index]),
+      size: bodies[index].length,
+      pack: {
+        digest: pack.sha256,
+        size: pack.size,
+        offset: index ? garbage.length * 2 + bodies[0].length : garbage.length,
+      },
+    })),
+  };
+  const pin = put(encodePhysicalRoot(root));
+  const plan = await stateSourceReader('project').plan(state, pin);
+  assert.equal(plan.chunks.length, 1);
+  const [run] = plan.chunks;
+  assert.equal(run.digest, pack.sha256);
+  assert.equal(run.offset, garbage.length);
+  assert.equal(run.offset + run.length, packed.length - garbage.length);
+  assert.equal(new URL(run.url).pathname.split('/').at(-1), pack.sha256);
+  const reader = await downloadPhysicalManifest(plan, fetch);
+  assert.deepEqual(await reader.lookup(entries.map(entry => entry.sha256)), entries);
+  // A selected-State mismatch is refused before any metadata grants are returned.
+  await assert.rejects(
+    stateSourceReader('project').plan(digest('another State'), pin),
+    error => error.code === 'SOURCE_HASH_MISMATCH',
+  );
+});

@@ -301,3 +301,14 @@ test('a reader with the new capability keeps the legacy file path when the State
   await materializeActionsSource(client, join(root, 'candidate'), cache);
   assert.equal(f.calls.length, 2);
 });
+
+test('a runner not entitled to the whole selected State receives no metadata plan', async t => {
+  const f = await physicalStateSourceFixture(t, 1001);
+  const unrelated = f.s.put('unrelated retained State');
+  const before = f.r2.requests.length;
+  await assert.rejects(
+    f.source({ state: unrelated.sha256, digests: [], all: true }),
+    error => (error.code ?? error.data?.code) === 'SOURCE_UNAVAILABLE',
+  );
+  assert.equal(f.r2.requests.length, before, 'authorization refuses before metadata I/O');
+});

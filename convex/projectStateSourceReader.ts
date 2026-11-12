@@ -72,8 +72,24 @@ export function stateSourceReader(projectId: Id<'hostedProjects'>) {
     open: (state: string, pin: PhysicalPin) => PhysicalManifestReader.open(state, pin, read),
     async plan(state: string, pin: PhysicalPin): Promise<PhysicalGrantPlan | null> {
       const reader = await PhysicalManifestReader.open(state, pin, read),
-        runs = await physicalRuns(reader.root.chunks);
-      if (!runs || runs.length + 1 > 64) return null;
+        exact = await physicalRuns(reader.root.chunks);
+      if (!exact) return null;
+      // Metadata may include superseded ancestor buckets between live chunks.
+      // Content grants continue to use physicalRuns without this covering step.
+      const keys = new Map<string, PhysicalRun>();
+      for (const run of exact) {
+        const key = physicalKey(run.digest, run.nonce),
+          prior = keys.get(key);
+        if (!prior) keys.set(key, { ...run });
+        else {
+          invariant(prior.total === run.total, 'SOURCE_HASH_MISMATCH', 'Metadata pack size changed.');
+          const end = Math.max(prior.offset + prior.length, run.offset + run.length);
+          prior.offset = Math.min(prior.offset, run.offset);
+          prior.length = end - prior.offset;
+        }
+      }
+      const runs = [...keys.values()];
+      if (runs.length + 1 > 64) return null;
       return {
         state,
         pin,

@@ -5,12 +5,13 @@ import { digest } from '../dist/hash.js';
 import { PhysicalManifestReader } from '../dist/physical-manifest.js';
 import { encodePhysicalRoot } from '../dist/physical-manifest-root.js';
 import { writePhysicalManifest } from '../dist/physical-manifest-write.js';
+import { downloadPhysicalManifest } from '../dist/physical-manifest-download.js';
 import { physicalRuns } from '../dist/physical-manifest-runs.js';
 import { fakeSourceR2 } from './convex-source-r2-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const { stateSourceReader } = await import(moduleUrl('../convex/projectStateSourceReader.ts'));
 
-test('four saves after compact metadata seeding need66 exact grants from five keys; FPR2 must refuse rather than include obsolete buckets', async t => {
+test('four saves grant one covering metadata range per selected root key and decode only hash-checked live buckets', async t => {
   const r2 = fakeSourceR2(t),
     bindings = new Map(
       Array.from({ length: 29000 }, (_, index) => {
@@ -81,8 +82,23 @@ test('four saves after compact metadata seeding need66 exact grants from five ke
       grants = 1 + (await physicalRuns(root.chunks)).length,
       plan = await stateSourceReader('project').plan(state, pin);
     assert.equal(bytes[3], 2);
-    if (grants <= 64) assert.equal(plan.chunks.length + 1, grants);
-    else assert.equal(plan, null, 'count exact ranges, never only distinct metadata keys');
+    assert.equal(plan.chunks.length + 1, step + 2);
+    assert.equal(plan.chunks.length, keys);
+    for (const run of plan.chunks) {
+      const live = root.chunks.filter(chunk => chunk.pack?.digest === run.digest);
+      assert(live.length, 'no key outside the selected root');
+      assert.equal(run.offset, Math.min(...live.map(chunk => chunk.pack.offset)));
+      assert.equal(run.offset + run.length, Math.max(...live.map(chunk => chunk.pack.offset + chunk.size)));
+      assert.equal(run.total, live[0].pack.size);
+    }
+    const downloaded = await downloadPhysicalManifest(plan, fetch);
+    const downloadedMembers = [];
+    for await (const entry of downloaded.all(false)) downloadedMembers.push(entry.sha256);
+    assert.deepEqual(downloadedMembers.sort(), [...ids].sort());
+    assert.deepEqual(
+      await downloaded.lookup(removed),
+      removed.map(() => null),
+    );
     observations.push({ step, keys, grants });
     if (step === 4) {
       const reader = await PhysicalManifestReader.open(state, pin, read);
