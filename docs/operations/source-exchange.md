@@ -214,6 +214,14 @@ calls/GETs. Access is checked even for cached/completed retries, then again afte
 transfer/staging before publication. All new bytes come from R2. No Work owner,
 background refresh or idle network call is added. Lane sync semantics are unchanged.
 
+State-bound readers verify an optional physical manifest against the selected
+State before using its raw, packed or recipe bindings. A missing or invalid
+manifest reports catalog fallback for that same State; complete point authority
+keeps this fallback available after dense catalog pages are retired. Content
+continues through the shared hash, size and exact-range verifier. See
+[physical source manifests](../architecture.md#storage) for the reader and writer
+boundaries.
+
 The low-level exchange commands below remain available with explicit requests.
 
 Large downloads stream to private files and validate their complete hash; recovery creates independent writable root/Lane files before publishing the new owner. Source bytes are content-addressed objects in R2. A checkout missing 500 or more objects takes the project's latest source pack instead of object pages, and falls back to objects if the pack is unavailable (see [data placement](../data-placement.md)). The owner repair `nforge x ROOT source-pack '{}'` packs the current hosted main from this machine and publishes it to R2, so checks and Lane opens read one pack; run it after seeding, cutover or importing a large repository. Ready indexes keep the same public generation ID, preserving browser query identities. CLI cursors pin the source revision and return WORK_STALE when it changes; multipart payload reads compare revisions before returning a record. Root receipt digest and logical manifest digest are distinct. Original-operation retry uses its pinned payload and asks for the exact existing receipt before rediscovering content; preserve that operation until reconciled. A receipt lookup rechecks current authority and does not rewind a later selected checkpoint or establish fresh storage health.
