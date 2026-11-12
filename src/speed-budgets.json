@@ -228,27 +228,15 @@
       "stat": "p90"
     },
     {
-      "id": "landing-r2-class-a-mean",
-      "area": "R2 class A requests (writes, listings) signed by a landing's composes",
+      "id": "landing-r2-request-usd-mean",
+      "area": "R2 request cost signed by a landing's composes (Class A $4.50/M, Class B $0.36/M; deletes free)",
       "measuredBy": "landing-record",
-      "metric": "r2ClassA",
+      "metric": "r2RequestUsd",
       "stat": "mean",
-      "unit": "ops",
-      "max": 6.2,
-      "source": "One bounded dogfood landings read after dev deploy ae4816f5 (2026-11-10 12:57Z): 29 accepted landings (27 carry R2 stamps) since 09:26:46Z, 560,232 DB bytes, 45,583 reply bytes, no continuation. Last 20 stamped landings committed 10:52:24Z to 12:56:27Z. Observed rolling-20 mean: 4.1 ops per landing, from the costs already on each landing row.",
-      "reason": "About 1.5 times the observed rolling-20 mean, rounded up to the report precision (or 10 KB for bytes): about 50% headroom for normal workload variation. Replaces the fixture seed with live compose counts; missing stamps remain unknown. Ratchet from the same bounded read when the source path changes (Issue 3e3f9fe6).",
-      "issue": "9db58ca6"
-    },
-    {
-      "id": "landing-r2-class-b-mean",
-      "area": "R2 class B requests (reads, heads) signed by a landing's composes",
-      "measuredBy": "landing-record",
-      "metric": "r2ClassB",
-      "stat": "mean",
-      "unit": "ops",
-      "max": 0.9,
-      "source": "One bounded dogfood landings read after dev deploy ae4816f5 (2026-11-10 12:57Z): 29 accepted landings (27 carry R2 stamps) since 09:26:46Z, 560,232 DB bytes, 45,583 reply bytes, no continuation. Last 20 stamped landings committed 10:52:24Z to 12:56:27Z. Observed rolling-20 mean: 0.55 ops per landing, from the costs already on each landing row.",
-      "reason": "About 1.5 times the observed rolling-20 mean, rounded up to the report precision (or 10 KB for bytes): about 50% headroom for normal workload variation. Replaces the fixture seed with live compose counts; missing stamps remain unknown. Ratchet from the same bounded read when the source path changes (Issue 3e3f9fe6).",
+      "unit": "USD",
+      "max": 1.8e-05,
+      "source": "Live dev calibration before n3-r1-dry-a5, 2026-11-12: latest 20 jointly stamped landings from 09:39:14.575Z to 23:08:34.233Z, A mean 2.55, B mean 1.0; weighted mean $0.000011835 per landing. Four bounded pages cover 109 accepted landings and 1,758,742 bytes in the serialized evidence-read estimate; no continuation remains. Counts are compose signatures, not executed bucket requests or invoices.",
+      "reason": "Replaces both operation-count alerts with one price-weighted cost alert. About 50% headroom, rounded up to a microdollar, with an absolute $0.000010 per-landing floor (one cent per thousand). Unknown stamps are excluded together. No extra call, query or DB read; existing counts and alert transitions are reused.",
       "issue": "ac5200f5"
     },
     {

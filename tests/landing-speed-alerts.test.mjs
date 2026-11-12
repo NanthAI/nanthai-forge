@@ -494,10 +494,10 @@ test('live cost counts: R2 requests and runner minutes are stamped on the landin
       return out.events;
     };
     // The ledger is ratcheted from real data; the fixture must exercise below/above today's limits.
-    const classA = Math.floor(byId('landing-r2-class-a-mean').max),
-      classB = Math.floor(byId('landing-r2-class-b-mean').max / 2),
+    const classA = 1,
+      classB = 1,
       bytesPut = Math.floor(byId('landing-r2-bytes-put-mean').max / 2),
-      excessiveB = Math.ceil(byId('landing-r2-class-b-mean').max + 1);
+      excessiveB = Math.ceil(byId('landing-r2-request-usd-mean').max / 0.36e-6) + 1;
     for (let i = 0; i < WINDOW; i++) assert.deepEqual(feed([classA, classB, bytesPut, 3260, 280, 1120]), []);
     assert.equal(windowValue(rows.samples, 'runnerAccepted', 'mean', WINDOW), 54.3);
     assert.equal(windowValue(rows.samples, 'runnerDiscarded', 'mean', WINDOW), 4.7);
@@ -513,23 +513,88 @@ test('live cost counts: R2 requests and runner minutes are stamped on the landin
     const broke = [];
     for (let i = 0; i < WINDOW; i++) broke.push(...feed([classA, excessiveB, bytesPut, 7000, 280, 1120]));
     assert.deepEqual(broke.map(e => [e.kind, e.budget.id]).sort(), [
-      ['broken', 'landing-r2-class-b-mean'],
+      ['broken', 'landing-r2-request-usd-mean'],
       ['broken', 'landing-runner-accepted-mean'],
     ]);
-    const r2 = broke.find(e => e.budget.id === 'landing-r2-class-b-mean');
+    const r2 = broke.find(e => e.budget.id === 'landing-r2-request-usd-mean');
     assert.match(
       speedBudgetMessage(r2, 'forge', budgets).text,
-      /R2 class B requests per landing mean over the last 20 landings is \S+ ops; budget \S+ ops/,
+      /R2 request dollars per landing mean over the last 20 landings is \S+ USD; budget \S+ USD/,
     );
     assert(
       speedBudgetMessage(r2, 'forge', budgets).text.includes(
-        `budget ${byId('landing-r2-class-b-mean').max} ops`,
+        `budget ${byId('landing-r2-request-usd-mean').max} USD`,
       ),
     );
     assert.match(speedBudgetMessage(r2, 'forge', budgets).text, /forge-source-step/);
     assert.match(speedBudgetIssue(r2, 'p', budgets).body, /Decision it protects: Issue ac5200f5/);
     assert.deepEqual(feed([classA, excessiveB, bytesPut, 7000, 280, 1120]), []);
   });
+});
+
+test('R2 cost weights request classes, preserves fractional dollars and excludes either missing stamp', () => {
+  const row = counts => [noon, 12, 6, 'priced00', 8.5, 1, 7, counts];
+  const price = rows => windowValue(rows, 'r2RequestUsd', 'mean', rows.length);
+  assert.equal(price([row([2, 0, 0, null, null, null])]), 0.000009);
+  assert.equal(price([row([0, 25, 0, null, null, null])]), 0.000009);
+  assert.equal(price([row([0, 1, 0, null, null, null])]), 0.00000036);
+  assert.equal(price([row([0, 0, 999999, null, null, null])]), 0, 'body bytes are a separate budget');
+  for (const counts of [
+    [null, 1],
+    [1, null],
+    [null, null],
+  ]) {
+    const incomplete = row([...counts, 0, null, null, null]);
+    assert.equal(price([incomplete]), null);
+    assert.equal(price([row([2, 0, 0, null, null, null]), incomplete]), null);
+  }
+});
+
+test('one weighted R2 break creates one stable P0, stays quiet and recovers without the retired alerts', () => {
+  const budget = { ...byId('landing-r2-request-usd-mean'), max: 0.000018 };
+  const config = { ...budgets, budgets: [budget], window: { landings: 5 } };
+  let state = {
+    schema: 2,
+    samples: [],
+    broken: {
+      'landing-r2-class-a-mean': { since: new Date(noon).toISOString(), landing: 'old00000', value: 99 },
+      'landing-r2-class-b-mean': { since: new Date(noon).toISOString(), landing: 'old00000', value: 99 },
+    },
+  };
+  let tick = 0;
+  const feed = (a, b) => {
+    const out = observeLandingSpeed(
+      state,
+      {
+        at: noon + tick++ * minute,
+        id: `price${tick}`,
+        toMain: 12,
+        check: 6,
+        settle: 8.5,
+        counts: [a, b, 0, null, null, null],
+        stages: { queue: 5, check: 6, settle: 1 },
+      },
+      config,
+    );
+    state = out.state;
+    return out.events;
+  };
+  for (let i = 0; i < 5; i++) assert.deepEqual(feed(3, 12), []);
+  assert.deepEqual(state.broken, {}, 'retired request-count budgets leave no stale broken state');
+  assert.equal(windowValue(state.samples, 'r2RequestUsd', 'mean', 5), 0.00001782);
+  const events = [];
+  for (let i = 0; i < 5; i++) events.push(...feed(3, 13));
+  assert.equal(events.length, 1, 'a sub-microdollar crossing is not rounded to zero');
+  assert.equal(events[0].kind, 'broken');
+  assert.equal(events[0].budget.id, budget.id);
+  assert.deepEqual(feed(3, 13), []);
+  const first = speedBudgetIssue(events[0], 'project', config);
+  const recovery = [];
+  for (let i = 0; i < 5; i++) recovery.push(...feed(0, 0));
+  assert.equal(recovery.length, 1);
+  assert.equal(recovery[0].kind, 'recovered');
+  assert.equal(speedBudgetIssue(recovery[0], 'project', config).itemId, first.itemId);
+  assert.deepEqual(feed(0, 0), []);
 });
 
 /** Seeds today's slow landings and the baseline relative to the landing's own clock. */

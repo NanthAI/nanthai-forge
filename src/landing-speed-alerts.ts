@@ -19,7 +19,7 @@ export const speedBudgetSchema = z
     metric: z.string().min(1),
     /** mean: cost budgets, where every landing's share adds up; p50/p90: speed budgets. */
     stat: z.enum(['p50', 'p90', 'mean']).optional(),
-    unit: z.enum(['min', 's', 'ms', 'calls', 'bytes', 'attempts', 'writes', 'ops']),
+    unit: z.enum(['min', 's', 'ms', 'calls', 'bytes', 'attempts', 'writes', 'ops', 'USD']),
     max: z.number().min(0).nullable(),
     source: z.string().min(1),
     reason: z.string().min(1),
@@ -55,6 +55,7 @@ export type LandingMetric =
   | 'writes'
   | 'r2ClassA'
   | 'r2ClassB'
+  | 'r2RequestUsd'
   | 'r2BytesPut'
   | 'runnerAccepted'
   | 'runnerDiscarded'
@@ -78,7 +79,7 @@ const COUNT: Partial<Record<LandingMetric, [number, number]>> = {
   runnerDiscarded: [4, 60],
   runnerAudit: [5, 60],
 };
-const METRICS = [...Object.keys(INDEX), ...Object.keys(COUNT)] as LandingMetric[];
+const METRICS = [...Object.keys(INDEX), ...Object.keys(COUNT), 'r2RequestUsd'] as LandingMetric[];
 const isLanding = (b: SpeedBudget): b is SpeedBudget & { metric: LandingMetric; stat: Stat; max: number } =>
   b.measuredBy === 'landing-record' && !!b.stat && b.max !== null && (METRICS as string[]).includes(b.metric);
 /** The budgets a landing's own stamps can judge. */
@@ -227,13 +228,23 @@ export function windowValue(
     count = COUNT[metric];
   const values = samples
     .flatMap(row => {
+      // Price the two stamps together: a missing class never becomes free usage.
+      if (metric === 'r2RequestUsd') {
+        const a = row[7]?.[0],
+          b = row[7]?.[1];
+        return a == null || b == null ? [] : [(a * 4.5 + b * 0.36) / 1e6];
+      }
       const value: number | null | undefined = count ? row[7]?.[count[0]] : (row[index!] as number | null);
       return value == null ? [] : [value / (count?.[1] ?? 1)];
     })
     .slice(-window);
   if (values.length < window) return null;
-  if (stat === 'mean') return round(values.reduce((sum, value) => sum + value, 0) / values.length);
-  return round(percentile(values, stat === 'p50' ? 0.5 : 0.9)!);
+  const value =
+    stat === 'mean'
+      ? values.reduce((sum, value) => sum + value, 0) / values.length
+      : percentile(values, stat === 'p50' ? 0.5 : 0.9)!;
+  // Dollar fractions must survive judgment and reporting; other metrics keep their precision.
+  return metric === 'r2RequestUsd' ? Math.round(value * 1e12) / 1e12 : round(value);
 }
 
 /** Pure: append one landing and report each budget it breaks or recovers. A budget alerts once when
@@ -275,9 +286,11 @@ export function observeLandingSpeed(
           ...durations,
         ] as Row,
     );
-  const broken = { ...previous?.broken };
+  const judged = landingBudgets(budgets);
+  const ids = new Set(judged.map(b => b.id));
+  const broken = Object.fromEntries(Object.entries(previous?.broken ?? {}).filter(([id]) => ids.has(id)));
   const events: SpeedBudgetEvent[] = [];
-  for (const budget of landingBudgets(budgets)) {
+  for (const budget of judged) {
     const value = windowValue(samples, budget.metric, budget.stat, budgets.window.landings);
     if (value === null) continue;
     const unknown = samples
@@ -338,6 +351,7 @@ const NAME: Record<LandingMetric, string> = {
   writes: 'landing-state writes per landing',
   r2ClassA: 'R2 class A requests per landing',
   r2ClassB: 'R2 class B requests per landing',
+  r2RequestUsd: 'R2 request dollars per landing',
   r2BytesPut: 'R2 bytes put per landing',
   runnerAccepted: 'runner minutes of the accepted check per landing',
   runnerDiscarded: 'runner minutes of discarded checks per landing',
@@ -368,6 +382,7 @@ const NEXT: Record<LandingMetric, string> = {
     'compare the slowest test files with the previous week and the latest change to the verify script or check runner.',
   r2ClassA: R2_NEXT,
   r2ClassB: R2_NEXT,
+  r2RequestUsd: R2_NEXT,
   r2BytesPut: R2_NEXT,
   runnerAccepted:
     'Next: shard execution seconds of the accepted check rose: run `nforge agent ROOT status {"runId":"RUN","summary":true}` ' +

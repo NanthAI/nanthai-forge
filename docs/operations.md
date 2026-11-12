@@ -1232,8 +1232,11 @@ fewer than 20 is `unrun`. Audit minutes come from terminal audit runs in the sam
 pages, counted once on the newest landing at the audit's end. The live stamp uses report arrival;
 a delayed report can shift an audit's share across a window boundary, and the report labels this basis.
 They are not stored on the landing row. Metrics adds no calls or DB reads; reply growth is under
-300 bytes per projected row. R2 calibration uses one bounded landings page after the stamp deploy;
-keep the seeds if it contains fewer than 20 stamped landings.
+300 bytes per projected row. R2 calibration uses bounded landings pages through a fixed observation window;
+keep the previous baseline until twenty jointly stamped landings are available. The final-smoke
+calibration on 2026-11-12 read four pages (109 landings, 1,758,742-byte serialized evidence-read estimate) and selected
+the latest twenty: 2.55 A and 1.00 B per landing. These are signed requests, not executed
+bucket operations or an invoice.
 
 **Live drift alert.** Each landing's accept mutation adds its counts to the `projectLandingSpeed` row it
 already writes (the row keeps the last 40 landings, about 3.7 KB, so it does not grow). The `budgets`
@@ -1243,8 +1246,13 @@ one P0 Issue per break, a recovery message, nothing while it stays broken
 
 - `landing-attempts-mean`, `landing-writes-mean`: attempts (the accepted attempt's ordinal plus one)
   and landing-state writes (the state's version plus one).
-- `landing-r2-class-a-mean`, `-class-b-mean`, `-bytes-put-mean`: R2 requests the landing's composes
-  signed. Every R2 request needs a URL signed in `convex/presign.ts`, which counts them by class (A:
+- `landing-r2-request-usd-mean`: combined request dollars from the landing's compose signatures,
+  `(4.50 * Class A + 0.36 * Class B) / 1,000,000`; deletes are free. Its live twenty-landing
+  baseline is $0.000011835 and its ceiling is $0.000018 per landing (about 1.5x, rounded up
+  to a microdollar, with an absolute floor of $0.000010). Both classes must be known on the same
+  landing; a missing stamp stays unknown. This replaces the two operation-count alerts;
+  fractional-dollar precision is preserved in judgment, messages and reports.
+- `landing-r2-bytes-put-mean`: bytes put from those same compose signatures. Every R2 request needs a URL signed in `convex/presign.ts`, which counts them by class (A:
   writes and listings, B: reads and heads, deletes free); each source step reports its difference with
   the step row it already writes, the compose publication sums them into the compose state, and the
   landing adds each attempt's sum to `counts.r2`. A landing whose Candidate was not composed for it

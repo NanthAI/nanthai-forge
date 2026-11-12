@@ -459,6 +459,140 @@ The quoted-provider-log marker bug caused missing project/landing attribution;
 the split builder added balanced-quote parsing, but a new paired coverage-checked
 window is still required. No missing metric is treated as zero.
 
+### Final pre-bench smoke (n3-r1-dry-a5)
+
+The final-pin attempt on 2026-11-12 is **setup-only void, not a completed smoke**.
+The batch window is 23:20:21.801–23:29:55.536 UTC. Harness and bench deployment
+are Git [`41327a04159b`](https://github.com/NanthAI/nanthai-forge/commit/41327a04159bbbf8da7695c0751d62d80dfd24e4),
+CLI accepted State `3fa6b4909525`. Dry preflight passes all 27 lines, with no WARN
+or NO-GO. Actual Data-volume free space is 128 GiB before and 126 GiB after,
+above the 60-GiB full-bench flag threshold and 20-GiB reserve.
+
+Both arms retain concurrent N=3, the a2 ten-task order and seed
+`b15d-rerun-2026-11-01/n3/r1`, and `agent: scripted-no-model`. No agent dispatch,
+task landing, model request, scored or coordination cell runs. The version guard
+finds no changed measurement pin. `qualifiedHarness`, copied `PLAN.md`, registered
+plan and prior a3/a4 evidence remain unchanged. This attempt is not rerun.
+
+**The reset landed after its client observation budget ended.** Reset operation
+`69fcfd50-e24f-4a7a-8df5-1eb07b982727` waits from 23:21:12.106 for 513,601 ms.
+At 23:29:45.693 its journal says timeout, checking/pending, nonterminal. The reset
+consumer throws on that exit before following the advertised continuation, so
+GitHub stops at the start barrier. A read-only wait on the same operation returns
+accepted receipt `06ae962c-1bd5-4b32-b4c5-3067988adca6`, State `5f404b7025e7`,
+at 23:31:37.324. The [reset check](https://github.com/NanthAI/nanthai-forge/actions/runs/43328132148)
+succeeds; its optional source-pack refresh ends at 23:32:10. This is the reset
+branch of the continuation-consumer defect, recorded on Issue `34cedd25`.
+No S5-caused landing refusal, missing file or failed check is observed; the
+conditional rollback is not executed and the bench writer remains on.
+
+**There is no task denominator.** The historical readings below retain their
+original scope and price basis; the single reset is setup, never a substitute for
+ten task receipts. B1.5d is $9.40/1,000 and the target is about $2/1,000; neither
+comparison can be judged for a5. No new live `costGuard.reference` is fabricated.
+
+| Dollars per 1,000 task landings | a2 | a3 | a5 |
+| --- | ---: | ---: | --- |
+| Driver, original mixed rates | 6.2531 | 5.7864 | Unmeasured |
+| Driver, Professional rates | 5.868 | 5.427 | Unmeasured |
+| Independent journal, original mixed rates | 6.7955 | 6.2096 | Unmeasured |
+| Independent journal, Professional rates | 6.3763 | 5.8233 | Unmeasured |
+| Executed R2 operations | 0.1839 | 0.174456 | Unmeasured |
+| Covered serving, R2 and weekly-backup model | 6.8356 | 6.3298 | Unmeasured |
+
+The independent journal covers the entire failed batch, with zero detected gaps
+or missing usage fields: 790 executions, 36,994,335 DB I/O bytes, 5,129,468 egress
+bytes and 0.006581916 action GB-hours. Its **setup-window total**, without dividing
+by landings, is $0.01252842 at the original mixed rates or $0.01156898 at
+Professional rates. Extending the same capture through 23:32:11, including reset
+acceptance and pack refresh, gives 838 executions, 37,861,813 DB I/O bytes,
+5,129,875 egress bytes and 0.007036904 GB-hours: $0.01296141 original or
+$0.01197502 Professional. Both windows have full detected coverage. These are
+provider-reported execution usage priced at the rates above, **not invoices**.
+The task-attributed driver never reaches its task-meter window.
+
+For continuity, a2's per-function driver attribution is retained beside a5's
+unmeasured task units. The separate setup subtotal below must not be compared as
+though it were a ten-task after measurement.
+
+| Function | a2 calls | a2 DB read/write MB | a2 egress MB | a2 action GB-h | a2 $/1,000 | a5 $/1,000 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `projectConvexSourceNode:step` | 76 | 0/0 | 155.710 | 0.050229 | 3.5790 | Unmeasured |
+| `projectHostedActionsSource:resolve` | 114 | 13.848/0 | 0 | 0 | 0.3297 | Unmeasured |
+| `projectConvexSourceObjects:resolve` | 290 | 4.086/0 | 0 | 0 | 0.1537 | Unmeasured |
+| `POST /checks/actions` | 189 | 0/0 | 1.186 | 0.001840 | 0.1125 | Unmeasured |
+| `projectHostedReuse:prove` | 8 | 0/0 | 0.526 | 0.007953 | 0.2473 | Unmeasured |
+| `projectConvexSourceStore:commit` | 82 | 7.421/1.058 | 0 | 0 | 0.2046 | Unmeasured |
+| `projectHostedFinishDriver:step` | 95 | 6.419/1.194 | 0 | 0 | 0.1884 | Unmeasured |
+| All functions | 2,682 | 62.869/8.250 | 157.439 | 0.067342 | 6.2531 | Unmeasured |
+
+| a5 setup through reset/pack completion | Executions | DB I/O MB | Egress MB | Action GB-h | Professional dollars, total |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `projectHostedActionsSource:resolve` | 335 | 33.894745 | 0 | 0 | 0.007448949 |
+| `POST /checks/actions` | 135 | 0 | 0.006648 | 0.004315971 | 0.001565589 |
+| `projectConvexSourceNode:step` | 2 | 0 | 5.122724 | 0.001961726 | 0.001207245 |
+| `projectStateSourceSelection:runner` | 248 | 1.597864 | 0 | 0 | 0.000815573 |
+| All functions | 838 | 37.861813 | 5.129875 | 0.007036904 | 0.011975019 |
+
+**S5 and fallback coverage.** The writer is on against the unmigrated legacy/mixed
+catalog, but this is **not a cold background-seed proof**. Reset save reports an
+incremental physical manifest and compose reports a kept physical manifest; no
+`projectPhysicalSeed` call or `physical-seed` step occurs during capture. A retained
+root is consistent with the previous a4 source job having completed after its
+client timeout. No root is removed or reset to force a seed. Seed start/end,
+per-step time, resolver count and one-off seed cost on this build remain
+unmeasured; this attempt does not prove landings can proceed during a seed.
+
+The save/compose request trees contain 9/12 function completions and 1/4 source
+resolver calls. Together they read/write 564,981/97,343 provider-reported DB
+bytes. The five source resolver executions read 73,692 bytes, largest 18,626.
+Source-step elapsed times are 8,543/4,908 ms; logical read counters are
+4,911,493/9,817,216 bytes. Attempted PUT bodies are 4,949,090 State + 246 result
+bytes for save, and 832 result + 3,216 other bytes for compose. These log counters
+are serialized/logical or attempted bodies, not billed bytes or retained storage.
+
+The reset runner reports an unusable source pack (`RUNNER_UNAVAILABLE`) and the
+explicit one-time catalog fallback, then verifies 28,003 unique objects /
+323,240,504 bytes for 28,881 files. Its object-fetch phase is 440.967 s. The plan
+and optional pack job each encounter three unbound-source refusals; selected-State
+reads subsequently succeed. Across setup, CI source resolution makes 335
+executions, six refused, reading 33,894,745 DB bytes. This does not qualify the
+cold-job three-resolver/100-KB contract. No S5 checkbox is newly ticked.
+
+**R2 coverage.** There are no a5 per-task-landing request or byte values. Setup
+through reset/pack completion observes 15 A / 9,401 B signatures and 4,961,663
+signed PUT bytes, including source, CI and HTTP callers. They price to $0.00345186
+in requests, total; they are neither executed bucket counts nor new stored bytes.
+No executed-operation analytics or net inventory is substituted. For comparison,
+a2/a3 executed counts are 31.9/112.0 and 30.2/107.1 A/B per task landing; a2
+compose-signed PUT bytes are 5,406,888 per landing.
+
+| Timing, seconds unless labelled | a2 Forge | a2 GitHub | a3 Forge | a3 GitHub | a5 both arms |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Task time to main, p50 | 223.0 | 400.5 | 219.3 | 352.5 | Unmeasured |
+| Task time to main, p90 | 526.5 | 632.9 | 501.0 | 685.3 | Unmeasured |
+| Wall to all ten landed | 1279.0 | 1580.3 | 1174.9 | 1768.1 | Unmeasured |
+| Workspace prep, p50 | 19.4 | 10.1 | 8.9 | 4.2 | Unmeasured |
+| All check wall / landing | 301.1 | 370.6 | 303.8 | 400.0 | Unmeasured |
+| Landed check wall, p50 | 158.0 | Unmeasured | 168.5 | Unmeasured | Unmeasured |
+| Submit/queue to accept, p50 | 178.7 | Unmeasured | 193.8 | Unmeasured | Unmeasured |
+| CI billed-equivalent minutes | 56 | 81 | 55 | 87 | No task checks |
+
+**Independent R2 cost ratchet.** A fixed dev observation ending 23:20 UTC reads
+109 accepted landings in four bounded pages, with a 1,758,742-byte serialized
+evidence-read estimate and no remaining cursor. This estimate sums retained value
+lengths and is not provider-billed DB I/O. The latest twenty jointly stamped landings span 09:39:14.575–23:08:34.233
+on 12 November: mean 2.55 A and 1.00 B, or **$0.000011835 per landing** at
+$4.50/M A and $0.36/M B. The two operation-count alerts become one
+`landing-r2-request-usd-mean`, ceiling **$0.000018** (about 1.5x, rounded up to a
+microdollar, with a $0.000010 absolute floor). Deletes are free, either missing
+stamp excludes the sample, bytes retain their separate budget, and the existing
+one-alert/one-P0 transition path adds no call or DB read. This calibration can
+replace the noisy sub-operation budget independently of the incomplete smoke;
+`costGuard.reference` still awaits a valid ten-task run. Historical capture
+entries remain until such a measured replacement exists.
+
+
 ## Evidence and the allocation we cannot yet measure
 
 The [`costs` ledger](../../src/speed-budgets.json) and

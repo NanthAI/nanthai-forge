@@ -236,8 +236,7 @@ test('metrics projects every live cost budget from existing landing and run page
   assert.equal(value('preflight'), 49779);
   assert.equal(value('landing-attempts-mean'), 1);
   assert.equal(value('landing-writes-mean'), 12);
-  assert.equal(value('landing-r2-class-a-mean'), 3);
-  assert.equal(value('landing-r2-class-b-mean'), 12);
+  assert.equal(value('landing-r2-request-usd-mean'), 0.00001782);
   assert.equal(value('landing-r2-bytes-put-mean'), 1000000);
   assert.equal(value('landing-runner-accepted-mean'), 50);
   assert.equal(value('landing-runner-discarded-mean'), 0);
@@ -247,7 +246,7 @@ test('metrics projects every live cost budget from existing landing and run page
   }));
   const missing = speedBudgetRows({ ...records, finishTimings: gaps.reverse() }, period, speedBudgets);
   assert.equal(
-    missing.find(row => row.id === 'landing-r2-class-a-mean').status,
+    missing.find(row => row.id === 'landing-r2-request-usd-mean').status,
     'unrun',
     '19 known stamps never pass as 20',
   );

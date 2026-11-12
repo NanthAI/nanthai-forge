@@ -16,7 +16,7 @@ it was set from and why. Change a number there, with the new data, and nowhere e
 | Unsaved-work snapshot added to a command: no changed file / one or fifty changed files (p90) | `perf-harness --snapshot-lane` | 5.9 ms / 16.2 ms (the walk and uploads run in a detached worker; before, in the command: 144 ms / 1,818 ms); budget 50 / 300 ms |
 | Idle Convex calls | the build (`check-idle-queries`, landing tests) | 0; budget 0 |
 | Attempts and landing-state writes per landing, mean (cost drift, Issue 3e3f9fe6) | every landing | attempts 1.6 over the 36 landings of 2026-11-10 (2.3 over 285 landings 11-08 to 11-10; worst 20-landing window 3.55); writes 11.1 live (8, 12, 20 to 22 for one, two, three attempts); budget 4 / 22 |
-| R2 requests and bytes put by a landing's composes, mean (Issue 3e3f9fe6) | every recomposed landing | 4.1 class A / 0.55 class B / 895,243 bytes put over the last 20 stamped landings at 2026-11-10 12:57Z; budgets 6.2 / 0.9 / 1.35 MB (about 1.5x live; missing stamps are skipped) |
+| R2 request dollars and bytes put by a landing's composes, mean (Issue 3e3f9fe6) | every recomposed landing | Latest 20 jointly stamped dev landings at 2026-11-12 23:20Z: 2.55 A / 1.00 B, or $0.000011835 per landing; request budget $0.000018 (about 1.5x, rounded up to a microdollar, absolute floor $0.000010). Separate bytes budget remains 1.35 MB; missing stamps are skipped |
 | GitHub runner minutes of a landing's checks, mean: accepted / discarded / audit (Issue 3e3f9fe6) | every landing | 54.4 / 4.7 / 18.8 shard minutes over the 36 landings of 2026-11-10 (rolling 20-landing means 49 to 57 / 2.5 to 5.9 / 13 to 23); budget 70 / 12 / 32 min |
 | Save / preflight, p90 | every landing with a recorded duration | initial budgets 30 / 120 s; sources and calibration below |
 
@@ -37,6 +37,13 @@ The accept mutation of each landing appends its own stamps (`timing`, already on
 Each budget has one Issue with a fixed id (a hash of project and budget id), so a retry or a repeat break finds
 it instead of duplicating it. With `stallAlerts` off, samples and Issues are still written; only the channel
 message is skipped.
+
+R2 request cost uses Standard list rates: $4.50/million Class A and $0.36/million
+Class B; deletes are free. The single `landing-r2-request-usd-mean` replaces the two
+operation-count alerts. It prices both counts from the same retained sample, preserving
+fractional dollars; either missing count excludes that sample. Existing signatures do not
+measure executed retries or every caller. The byte budget remains separate. Retired budget
+ids leave the retained broken map at the next observation; no migration call is needed.
 
 ## Cost
 
