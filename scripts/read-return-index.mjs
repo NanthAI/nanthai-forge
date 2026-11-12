@@ -17,7 +17,7 @@ let cursor = null,
   bytes = 0;
 const tables = ['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords'];
 for (let pages = 1; pages <= 200; pages++) {
-  const query = `JSON.stringify(await ctx.db.query(${JSON.stringify(tables[tableIndex])}).withIndex("by_generation", q => q.eq("generationId", ${JSON.stringify(generation)})).paginate({cursor:${JSON.stringify(cursor)},numItems:4000,maximumRowsRead:4000,maximumBytesRead:4000000}))`;
+  const query = `JSON.stringify(await ctx.db.query(${JSON.stringify(tables[tableIndex])}).withIndex("by_generation_and_collection_and_key", q => q.eq("generationId", ${JSON.stringify(generation)})).paginate({cursor:${JSON.stringify(cursor)},numItems:4000,maximumRowsRead:4000,maximumBytesRead:4000000}))`;
   const result = spawnSync(
     process.execPath,
     [resolve('node_modules/convex/bin/main.js'), 'run', '--deployment', deployment, '--inline-query', query],

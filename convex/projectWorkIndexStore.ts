@@ -341,7 +341,7 @@ export const retire = internalMutation({
     for (const [tableIndex, table] of workRecordTables.entries()) {
       const rows = await db
         .query(table)
-        .withIndex('by_generation', q => q.eq('generationId', generationId))
+        .withIndex('by_generation_and_collection_and_key', q => q.eq('generationId', generationId))
         .paginate({
           ...retirementPage,
           numItems: remainingRows,
@@ -429,7 +429,9 @@ export const sweep = internalMutation({
     if (!project) return null;
     const page = await ctx.db
       .query('projectWorkGenerations')
-      .withIndex('by_project', q => q.eq('projectId', projectId))
+      .withIndex('by_project_and_backup_and_revision_and_format_and_work_schema', q =>
+        q.eq('projectId', projectId),
+      )
       .paginate({ cursor, numItems: 100 });
     for (const generation of page.page)
       if (

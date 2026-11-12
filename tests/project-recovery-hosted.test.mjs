@@ -76,6 +76,9 @@ test('all hosted recovery tables use project-prefixed indexes and bounded resuma
         _id: `${table}-${i}`,
         _creationTime: i,
         projectId: 'project',
+        revision: 133 - i,
+        kind: String(i % 3),
+        key: String(133 - i),
         value: `exact-${i}`,
       });
     f.tables[table].set('foreign', {
@@ -89,14 +92,17 @@ test('all hosted recovery tables use project-prefixed indexes and bounded resuma
   for (const table of recoveryTables) {
     let cursor = null,
       count = 0;
+    const ids = new Set();
     do {
       const result = await f.page(selection, table, cursor);
       assert(result.rows.length <= 64);
       assert(result.rows.every(text => JSON.parse(text).projectId === 'project'));
+      for (const text of result.rows) ids.add(JSON.parse(text)._id);
       count += result.rows.length;
       cursor = result.cursor;
     } while (cursor);
     assert.equal(count, 133, table);
+    assert.equal(ids.size, 133, `${table}: every identity survives changed suffix ordering`);
   }
   assert.deepEqual(f.tables, before, 'paging does not mutate hosted data');
 });

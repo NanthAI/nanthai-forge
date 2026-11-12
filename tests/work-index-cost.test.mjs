@@ -339,14 +339,14 @@ test('browser and briefing entry points contain no implicit full-build path', ()
   }
 });
 
-test('indexed Work writes ratchet per-kind index copies and the projection bytes of a landing-shaped fixture', () => {
+test('indexed Work writes ratchet per-kind index copies and the projection bytes of a landing-shaped fixture', t => {
   const schema = awaitSchema.tables;
   const copies = table => {
     const value = schema[table].export();
     return 3 + value.indexes.length + value.searchIndexes.length;
   };
-  assert.equal(copies('projectPlanningRecords'), 17);
-  assert.equal(copies('projectWorkDataRecords'), 9);
+  assert.equal(copies('projectPlanningRecords'), 16);
+  assert.equal(copies('projectWorkDataRecords'), 8);
   assert.equal(copies('projectWorkRecords'), 11, 'planning and search indexes cover only their own records');
   const groups = {
     core: { table: 'projectWorkRecords', rows: [] },
@@ -396,9 +396,11 @@ test('indexed Work writes ratchet per-kind index copies and the projection bytes
       group.rows.reduce((n, row) => n + bytes(row) * copies(group.table), 0),
     ]),
   );
+  // Planning/data retirement prefixes are removed; core retains migration search-tie order (1082e2ee).
+  t.diagnostic(JSON.stringify({ modeledIndexCopies: model }));
   assert(model.core <= 1859, JSON.stringify(model));
-  assert(model.planning <= 11526, JSON.stringify(model));
-  assert(model.data <= 205542, JSON.stringify(model));
+  assert(model.planning <= 10848, JSON.stringify(model));
+  assert(model.data <= 182704, JSON.stringify(model));
   assert(model.data < groups.data.rows.reduce((n, row) => n + bytes(row) * 19, 0) / 2);
 });
 

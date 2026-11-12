@@ -619,3 +619,115 @@ test('orphan ticket purge removes both unindexed bodies, preserves foreign bodie
   assert.equal(s.tables.projectHostedLandingBodies.size, 2);
   assert(result.bytes > Buffer.byteLength(JSON.stringify(row)), 'cleanup meters its removed companion bytes');
 });
+
+test('project purge drains non-creation-ordered suffix indexes with the same row page bound and preserves foreign rows', async () => {
+  for (const reversed of [false, true]) {
+    const s = state([]);
+    const project = {
+      ...sample(schema.tables.hostedProjects.validator.json),
+      _id: 'purge-project',
+      _creationTime: 1,
+    };
+    s.tables.hostedProjects.set(project._id, project);
+    const tables = ['projectActorNames', 'projectObjectCatalog', 'projectJournalReceipts'];
+    const suffix = ['actor', 'first', 'operationId'];
+    for (const [n, table] of tables.entries()) {
+      for (let i = 0; i < 1101; i++) {
+        const id = `${table}-${String(i).padStart(4, '0')}`;
+        s.tables[table].set(id, {
+          _id: id,
+          _creationTime: i,
+          projectId: project._id,
+          [suffix[n]]: String(reversed ? 1101 - i : i).padStart(4, '0'),
+        });
+      }
+      s.tables[table].set('foreign', { _id: 'foreign', _creationTime: 0, projectId: 'foreign' });
+      const first = await rowsPage.projectRows(s.ctx, table, project._id, 8);
+      assert.equal(first.length, 8);
+      assert.equal(
+        first[0]._creationTime,
+        reversed ? 1100 : 0,
+        'compare creation order with reversed suffix order',
+      );
+    }
+    let done = false,
+      pages = 0,
+      prior = 3303;
+    while (!done) {
+      done = await rowsPage.purgeProjectRowsPage(s.ctx, s.tables.hostedProjects.get(project._id));
+      const remaining = tables.reduce((sum, table) => sum + s.tables[table].size - 1, 0);
+      assert(prior - remaining <= rowsPage.purgePageBudget.rows, 'same per-page row cap');
+      assert(remaining < prior || done, 'each nonempty page reduces the remaining set');
+      prior = remaining;
+      pages++;
+      assert(pages <= 4, '3,303 small rows still finish in ceil(rows / 1,000) pages');
+    }
+    assert.equal(pages, 4);
+    for (const table of tables) assert.deepEqual([...s.tables[table].keys()], ['foreign']);
+    console.log(
+      JSON.stringify({ purgeUniformPages: { order: reversed ? 'suffix' : 'creation', rows: 3303, pages } }),
+    );
+  }
+});
+
+// Compare the old creation ordering with the new suffix ordering on the same
+// row sizes. Lead decision on 1082e2ee allows total pages to vary, never the
+// per-page stopping threshold, read chunk or termination guarantee.
+test('variable-size purge pages may vary by suffix order while retaining row and byte bounds', async () => {
+  const run = async suffixOrder => {
+    const s = state([]);
+    const project = {
+      ...sample(schema.tables.hostedProjects.validator.json),
+      _id: 'purge-project',
+      _creationTime: 1,
+    };
+    s.tables.hostedProjects.set(project._id, project);
+    const big = 8,
+      small = 3;
+    const order = suffixOrder
+      ? [0, 1, 2, 3, 8, 4, 5, 6, 7, 9, 10]
+      : Array.from({ length: big + small }, (_, i) => i);
+    for (let i = 0; i < big + small; i++) {
+      const id = `receipt-${i}`;
+      s.tables.projectJournalReceipts.set(id, {
+        _id: id,
+        _creationTime: i,
+        projectId: project._id,
+        operationId: String(order.indexOf(i)).padStart(3, '0'),
+        hash: 'a'.repeat(64),
+        envelope: 'x'.repeat(Math.floor((i < big ? 0.99 : 0.04) * 1024 * 1024)),
+      });
+    }
+    const bytes = () =>
+      [...s.tables.projectJournalReceipts.values()].reduce((n, row) => n + rowsPage.documentBytes(row), 0);
+    const maxRow = Math.max(...[...s.tables.projectJournalReceipts.values()].map(rowsPage.documentBytes));
+    const rowsPerPage = [],
+      bytesPerPage = [];
+    let done = false,
+      remainingBytes = bytes();
+    while (!done) {
+      const count = s.tables.projectJournalReceipts.size;
+      done = await rowsPage.purgeProjectRowsPage(s.ctx, s.tables.hostedProjects.get(project._id));
+      const remaining = s.tables.projectJournalReceipts.size,
+        nextBytes = bytes();
+      const removed = count - remaining,
+        removedBytes = remainingBytes - nextBytes;
+      assert(removed <= rowsPage.purgePageBudget.rows);
+      // Existing budget stops after the crossing row, with at most one-document overshoot.
+      assert(removedBytes < rowsPage.purgePageBudget.bytes + maxRow);
+      assert(removed > 0 || done, 'a nonterminal page always makes progress');
+      rowsPerPage.push(removed);
+      bytesPerPage.push(removedBytes);
+      remainingBytes = nextBytes;
+      assert(rowsPerPage.length <= 3, 'the constructed worst reorder terminates');
+    }
+    assert.equal(s.tables.projectJournalReceipts.size, 0);
+    return { rowsPerPage, bytesPerPage };
+  };
+  const creation = await run(false),
+    suffix = await run(true);
+  assert.deepEqual(creation.rowsPerPage, [5, 6]);
+  assert.deepEqual(suffix.rowsPerPage, [5, 5, 1]);
+  // This is a 50% call increase for this small adversarial purge, paid only on removal.
+  console.log(JSON.stringify({ purgeOrderPages: { creation, suffix } }));
+});

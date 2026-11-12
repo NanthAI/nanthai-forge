@@ -81,7 +81,7 @@ export const historyTables = {
     ),
     at: v.number(),
   })
-    // index-order: Purge .take pages retain creation-time order within projectId; adding tip changes selected rows.
+    // index-order: caller: convex/gitServeLaneStore.ts#plan; order: Lane refs read the newest history pack window in creation-time order.
     .index('by_project', ['projectId'])
     .index('by_project_and_tip', ['projectId', 'tip']),
   /** One built Git commit per Lane, made on the first Git fetch of its saved head and replaced
@@ -108,7 +108,7 @@ export const historyTables = {
     ),
     at: v.number(),
   })
-    // index-order: Purge .take pages retain creation-time order within projectId; adding commit, laneId changes selected rows.
+    // index-order: caller: convex/gitServeLaneStore.ts#laneRefs; order: Lane refs read the newest commit window in creation-time order.
     .index('by_project', ['projectId'])
     .index('by_project_and_lane', ['projectId', 'laneId'])
     .index('by_project_and_commit', ['projectId', 'commit']),

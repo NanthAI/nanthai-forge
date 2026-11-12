@@ -251,7 +251,7 @@ export const hostedLandingTables = {
     ),
     value: v.string(),
   })
-    // index-order: Purge .take pages retain creation-time order within projectId; adding actor, candidateId, channel, hold, intentId, operationId, orderWait, revertOf, runId, selectionKey, submissionId changes selected rows.
+    // index-order: caller: convex/projectSelfMetrics.ts#page; order: metrics bound _creationTime for submission windows.
     .index('by_project', ['projectId'])
     .index('by_project_and_submission', ['projectId', 'submissionId'])
     .index('by_project_and_channel_and_orderLive_and_sequence', [
@@ -319,8 +319,7 @@ export const hostedLandingTables = {
     .index('by_project_and_channel_and_deciding', ['projectId', 'channel', 'deciding'])
     .index('by_project_and_intent', ['projectId', 'intentId'])
     .index('by_project_and_channel_and_reservedUntil', ['projectId', 'channel', 'reservedUntil'])
-    // index-order: convex/projectHostedCheckCancel.ts retains creation-time query order within projectId, runId, phase; adding checkWakeVersion changes ordering or bounded selections.
-    .index('by_project_and_run_and_phase', ['projectId', 'runId', 'phase'])
+
     .index('by_project_run_phase_checkWakeVersion', ['projectId', 'runId', 'phase', 'checkWakeVersion']),
   projectHostedLandingAttempts: defineTable({
     sourceCreatedAt: v.optional(v.number()),
@@ -331,7 +330,7 @@ export const hostedLandingTables = {
     progress: v.optional(v.string()),
     value: v.string(),
   })
-    // index-order: Purge .take pages retain creation-time order within projectId; adding attemptId, submissionId changes selected rows.
+    // index-order: caller: convex/projectSelfMetrics.ts#page; order: metrics bound _creationTime for attempt windows.
     .index('by_project', ['projectId'])
     .index('by_project_and_attempt', ['projectId', 'attemptId'])
     .index('by_project_and_submission_and_number', ['projectId', 'submissionId', 'number']),

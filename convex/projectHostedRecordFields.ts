@@ -70,18 +70,14 @@ export const hostedRecordTables = {
     journalCommand: v.optional(v.string()),
     baseBackupId: v.optional(v.id('projectBackups')),
   })
-    // index-order: Purge .take pages retain creation-time order within projectId; adding operationId, revision changes selected rows.
-    .index('by_project', ['projectId'])
     .index('by_project_and_revision', ['projectId', 'revision'])
     .index('by_project_and_operation', ['projectId', 'operationId']),
   // Canonical immutable versions; the head is only a per-resource CAS pointer.
   projectHostedRecords: defineTable(hostedRecordFields)
     .index('by_project_and_journal_ready_at', ['projectId', 'journalReadyAt'])
     .index('by_project_and_body', ['projectId', 'bodyId'])
-    // index-order: convex/projectSelfMetrics.ts retains creation-time query order within projectId, kind; adding key, parent changes ordering or bounded selections.
+    // index-order: caller: convex/projectSelfMetrics.ts#page; order: Lane and save metrics bound _creationTime within each kind.
     .index('by_project_and_kind', ['projectId', 'kind'])
-    // index-order: convex/projectJournalRecordPage.ts retains creation-time query order within projectId, kind, key, version; adding lifecyclePlanId changes ordering or bounded selections.
-    .index('by_project_and_kind_and_key_and_version', ['projectId', 'kind', 'key', 'version'])
     .index('by_project_and_kind_and_key_and_version_and_plan', [
       'projectId',
       'kind',
@@ -90,7 +86,7 @@ export const hostedRecordTables = {
       'lifecyclePlanId',
     ])
     .index('by_project_and_kind_and_parent', ['projectId', 'kind', 'parent'])
-    // index-order: Purge .take pages retain creation-time order within projectId; adding bodyId, journalReadyAt, kind changes selected rows.
+    // index-order: caller: convex/projectJournalSelect.ts#selectJournal; order: existing-record scan persists creation-time index keys in the journal continuation cursor.
     .index('by_project', ['projectId']),
   projectHostedRecordHeads: defineTable({
     ...identity,
@@ -101,16 +97,14 @@ export const hostedRecordTables = {
     value: v.optional(v.string()),
   })
     // Creation order within a kind: the Work store's planning list pages in the journal's append order.
-    // index-order: Owner .take(1) inventory retains the creation-time sample within projectId, kind; adding key, parent, status changes the representative row.
+    // index-order: caller: convex/projectWorkStore.ts#journalWorkStoreCompare; order: planning comparison exposes newest-first creation-time pages of Issues.
     .index('by_project_and_kind', ['projectId', 'kind'])
     .index('by_project_and_kind_and_key', ['projectId', 'kind', 'key'])
-    // index-order: convex/projectBoard.ts retains creation-time query order within projectId, kind, parent; adding status changes ordering or bounded selections.
+    // index-order: caller: convex/projectHostedDormancy.ts#landedByReceipt; order: receipt discovery selects the newest Candidate by creation time within an Intent.
     .index('by_project_and_kind_and_parent', ['projectId', 'kind', 'parent'])
     // An Issue's comments or its Intent's notes, without reading the other.
     .index('by_project_and_kind_and_parent_and_status', ['projectId', 'kind', 'parent', 'status'])
-    .index('by_project_and_kind_and_status', ['projectId', 'kind', 'status'])
-    // index-order: Purge .take pages retain creation-time order within projectId; adding kind changes selected rows.
-    .index('by_project', ['projectId']),
+    .index('by_project_and_kind_and_status', ['projectId', 'kind', 'status']),
   projectHostedOperations: defineTable({
     recovery: v.optional(v.string()),
     journalDigest: v.optional(v.string()),
@@ -139,7 +133,7 @@ export const hostedRecordTables = {
     ),
     value: v.string(),
   })
-    // index-order: Owner .take(1) inventory retains the creation-time sample within projectId; adding actor, journalReadyAt, metricMutation.action changes the representative row.
+    // index-order: caller: convex/projectJournalSelect.ts#selectJournal; order: existing-operation scan persists creation-time index keys in the journal continuation cursor.
     .index('by_project', ['projectId'])
     .index('by_project_and_journal_ready_at', ['projectId', 'journalReadyAt'])
     .index('by_project_and_metric_action', ['projectId', 'metricMutation.action'])

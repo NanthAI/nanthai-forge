@@ -68,7 +68,9 @@ indexes remain in the table inventory.
 The existing `tests/convex-schema-indexes.test.mjs` deployment contract runs in
 landing verification. It rejects duplicate field sequences, indexes without a
 query on their table, unresolved dynamic queries, and database prefixes without
-an `index-order:` reason immediately before their definition. It also checks that
+an `index-order: caller: convex/file.ts#symbol; order: …` reason immediately before
+their definition. The named symbol must query that table/index and the reason must
+state its required creation-time ordering or time-window contract. It also checks that
 the static inventory covers the entire deployed schema. There is no index-name
 allowlist. New dynamic selectors need static analysis alongside their runtime
 implementation; they cannot silently count a shared index name on another table.
@@ -76,8 +78,16 @@ implementation; they cannot silently count a shared index name on another table.
 The finite selectors cover project purge registries, ownership seeks, the finish
 read proxy, recovery benchmark selection and serialized sandbox queries in scripts.
 Ownership and benchmark selection preserve schema declaration order. Prefix
-reasons retain creation-time pagination, bounded selections and ownership samples
-where another field would change the selected rows or cursors. An unused index
+reasons retain caller-required creation-time pagination, newest/oldest selections
+and time windows. Purges, exhaustive cleanup and representative inventory samples
+do not justify a prefix: their page order is incidental. They use longer indexes
+with the same equality fields. Destructive scans keep their page bounds and delete
+each selected row before repeating, so every nonempty iteration reduces the
+remaining set; suffix order cannot strand a row. Total purge page counts may vary
+with suffix order and differently sized rows; the existing row/byte bounds remain
+unchanged. This one-time project-removal tradeoff does not justify an index write
+on every landing. Recovery and benchmark scans
+consume all pages and identify rows by identity, not by their page position. An unused index
 has no consumer even through these operational paths.
 
 The landing cost and storage fixtures count custom index entries for inserts and

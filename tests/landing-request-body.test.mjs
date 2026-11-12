@@ -30,7 +30,7 @@ const logical = row => {
   return value;
 };
 
-test('all 24 landing ticket indexes retain exact logical reads while cold bodies and observer projections stay unindexed', async () => {
+test('all 23 landing ticket indexes retain exact logical reads while cold bodies and observer projections stay unindexed', async () => {
   const s = state([]),
     ctx = landingRequestBodies(finishReadWriter(s.ctx));
   const value = ticket();
@@ -41,7 +41,7 @@ test('all 24 landing ticket indexes retain exact logical reads while cold bodies
   assert.equal(raw.batchSelection, undefined);
   assert.equal(schema.tables.projectHostedLandingBodies.export().indexes.length, 0);
   const indexes = schema.tables.projectHostedLandingRequests.export().indexes;
-  assert.equal(indexes.length, 24);
+  assert.equal(indexes.length, 23, 'run/phase probes reuse the longer checkWakeVersion index');
   for (const index of indexes) {
     const row = await ctx.db
       .query('projectHostedLandingRequests')

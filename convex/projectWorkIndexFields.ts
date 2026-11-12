@@ -94,9 +94,8 @@ export const indexTables = {
       'intentMigrationOperationId',
       'revision',
     ])
-    // index-order: Purge .take pages retain creation-time order within projectId; adding backupId, intentMigrationOperationId changes selected rows.
-    .index('by_project', ['projectId'])
-    // index-order: convex/projectWorkIndexBuildStore.ts retains creation-time query order within projectId, backupId, revision, format; adding workSchema changes ordering or bounded selections.
+
+    // index-order: caller: convex/projectWorkIndexBuildStore.ts#resume; order: resume selects newest generation by creation time across workSchema values.
     .index('by_project_and_backup_and_revision_and_format', ['projectId', 'backupId', 'revision', 'format'])
     .index('by_project_and_backup_and_revision_and_format_and_work_schema', [
       'projectId',
@@ -120,8 +119,7 @@ export const indexTables = {
       'position',
     ])
     .index('by_project', ['projectId'])
-    // index-order: convex/projectWorkIndexStore.ts retains creation-time query order within generationId; adding actor, collection changes ordering or bounded selections.
-    .index('by_generation', ['generationId'])
+
     .index('by_planning_initiativeId', ['generationId', 'collection', 'planning.initiativeId', 'position'])
     .index('by_planning_kind', ['generationId', 'collection', 'planning.kind', 'position'])
     .index('by_planning_status', ['generationId', 'collection', 'planning.status', 'position'])
@@ -180,9 +178,7 @@ export const indexTables = {
       'parent',
       'position',
     ])
-    .index('by_project', ['projectId'])
-    // index-order: convex/projectWorkIndexStore.ts retains creation-time query order within generationId; adding actor, collection changes ordering or bounded selections.
-    .index('by_generation', ['generationId']),
+    .index('by_project', ['projectId']),
   projectWorkRecords: defineTable({
     projectId: v.id('hostedProjects'),
     generationId: v.id('projectWorkGenerations'),
@@ -205,6 +201,6 @@ export const indexTables = {
       'position',
     ])
     .index('by_project', ['projectId'])
-    // index-order: convex/projectWorkIndexStore.ts retains creation-time query order within generationId; adding actor, collection changes ordering or bounded selections.
+    // index-order: caller: convex/projectWorkRecordMigration.ts#page; order: copy legacy rows in creation-time order so equal-score planning search ties retain newest-first order after cutover.
     .index('by_generation', ['generationId']),
 };

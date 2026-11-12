@@ -70,7 +70,7 @@ async function readPage(
     case 'projectHostedRecordBodies':
       return ctx.db
         .query('projectHostedRecordBodies')
-        .withIndex('by_project', q => q.eq('projectId', projectId))
+        .withIndex('by_project_and_revision', q => q.eq('projectId', projectId))
         .paginate(options);
     case 'projectHostedRecords':
       return ctx.db
@@ -80,7 +80,7 @@ async function readPage(
     case 'projectHostedRecordHeads':
       return ctx.db
         .query('projectHostedRecordHeads')
-        .withIndex('by_project', q => q.eq('projectId', projectId))
+        .withIndex('by_project_and_kind', q => q.eq('projectId', projectId))
         .paginate(options);
     case 'projectHostedOperations':
       return ctx.db

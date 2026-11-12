@@ -42,7 +42,9 @@ export const retained = internalQuery({
     await activeOwnedProject(ctx, input.projectId, input.actor);
     const page = await ctx.db
       .query('projectHostedOutputChunks')
-      .withIndex('by_project_and_run', q => q.eq('projectId', input.projectId).eq('runId', input.runId))
+      .withIndex('by_project_and_run_and_stream_and_sequence', q =>
+        q.eq('projectId', input.projectId).eq('runId', input.runId),
+      )
       .paginate({ cursor: input.cursor, numItems: 50 });
     const pins: string[] = [];
     for (const row of page.page) {

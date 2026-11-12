@@ -63,12 +63,10 @@ export const requestDocument = v.object({
 });
 export const checkTables = {
   projectCheckRunners: defineTable(runnerFields)
-    // index-order: Purge .take pages retain creation-time order within projectId; adding runnerId changes selected rows.
+    // index-order: caller: convex/projectCheckRequests.ts#runners; order: runner list exposes creation-time pagination cursors.
     .index('by_project', ['projectId'])
     .index('by_project_and_runner', ['projectId', 'runnerId']),
   projectCheckRequests: defineTable(requestFields)
-    // index-order: Purge .take pages retain creation-time order within projectId; adding operationId, runnerId, updatedAt, viewId changes selected rows.
-    .index('by_project', ['projectId'])
     .index('by_project_and_updatedAt', ['projectId', 'updatedAt'])
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_project_and_view', ['projectId', 'viewId'])

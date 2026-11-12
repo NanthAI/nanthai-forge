@@ -37,7 +37,7 @@ export const inventory = internalQuery({
         : kind === 'objects'
           ? await ctx.db
               .query('projectObjects')
-              .withIndex('by_project', q => q.eq('projectId', projectId))
+              .withIndex('by_project_and_digest', q => q.eq('projectId', projectId))
               .paginate(options)
           : kind === 'proposals'
             ? await ctx.db

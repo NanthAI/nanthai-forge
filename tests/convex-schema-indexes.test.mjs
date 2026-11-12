@@ -104,9 +104,9 @@ test('unresolved dynamic query expressions fail instead of claiming an index is 
 });
 test('same-table prefixes require a definition-local reason even when both have callers', t => {
   const schema = reason => `const tables = { one: defineTable({a: v.string(), b: v.string()})
-    ${reason ? '// index-order: Creation-time pagination within a must not reorder by b.' : ''}
+    ${reason ? '// index-order: caller: convex/queries.ts#list; order: list exposes creation-time pagination cursors.' : ''}
     .index('a', ['a']).index('ab', ['a', 'b']) };`;
-  const queries = `ctx.db.query('one').withIndex('a').paginate(opts); ctx.db.query('one').withIndex('ab').first();`;
+  const queries = `export function list() { return ctx.db.query('one').withIndex('a').paginate(opts); } ctx.db.query('one').withIndex('ab').first();`;
   assert.match(indexIssues(sourceFixture(t, schema(false), queries)).join('\n'), /index-order:/);
   assert.deepEqual(indexIssues(sourceFixture(t, schema(true), queries)), []);
 });
@@ -122,4 +122,24 @@ test('sandbox query table arrays resolve to every finite table without running t
     "const tables = ['one', 'two']; const source = `return ctx.db.query(${JSON.stringify(tables[i])}).withIndex('a').first()`; throw Error('never run');",
   );
   assert.deepEqual(indexIssues(i), []);
+});
+
+test('prefix guard rejects purge and representative-sample reasons even with a named caller', t => {
+  const schema = reason => `const tables = { one: defineTable({a: v.string(), b: v.string()})
+    // index-order: ${reason}
+    .index('a', ['a']).index('ab', ['a', 'b']) };`;
+  const query = `export function cleanup() { return ctx.db.query('one').withIndex('a').take(1); }
+    ctx.db.query('one').withIndex('ab').first();`;
+  for (const reason of [
+    'Purge .take pages retain creation-time order; adding b changes selected rows.',
+    'Owner .take(1) inventory retains the creation-time representative sample.',
+    'caller: convex/queries.ts#cleanup; order: purge pages retain creation-time order.',
+    'caller: convex/queries.ts#cleanup; order: creation-time representative sample.',
+    'caller: convex/queries.ts#missing; order: newest-first creation-time list.',
+    'caller: convex/queries.ts#cleanup; order: any row serves the caller.',
+  ])
+    assert.match(
+      indexIssues(sourceFixture(t, schema(reason), query)).join('\n'),
+      /purge\/sample order is insufficient/,
+    );
 });

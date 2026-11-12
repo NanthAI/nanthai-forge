@@ -26,7 +26,7 @@ export async function cancelHostedCheck(
     for (const phase of ['queued', 'checking', 'ready'] as const) {
       const live = await ctx.db
         .query('projectHostedLandingRequests')
-        .withIndex('by_project_and_run_and_phase', q =>
+        .withIndex('by_project_run_phase_checkWakeVersion', q =>
           q.eq('projectId', input.projectId).eq('runId', input.runId).eq('phase', phase),
         )
         .take(1);

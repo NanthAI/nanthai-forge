@@ -102,7 +102,7 @@ export const measure = internalMutation({
             .withIndex('by_project_and_removed', q => q.eq('projectId', projectId).eq('removed', false))
             .paginate({ cursor, numItems: measurePageRows })
         : await ctx.db
-            .query(table)
+            .query(table === 'projectBackups' ? 'projectBackups' : 'projectProposals')
             .withIndex('by_project', q => q.eq('projectId', projectId))
             .paginate({ cursor, numItems: measurePageRows });
     const next = page.isDone ? stage + 1 : stage,

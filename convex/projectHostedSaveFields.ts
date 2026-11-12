@@ -30,6 +30,6 @@ export const hostedSaveTables = {
     output: v.string(),
   })
     .index('by_project_and_head', ['projectId', 'head'])
-    // index-order: Purge .take pages retain creation-time order within projectId; adding head changes selected rows.
+    // index-order: caller: convex/projectStateGenerationRepair.ts#fromParents; order: repair bounds _creationTime and visits parents before children in publication order.
     .index('by_project', ['projectId']),
 };

@@ -42,14 +42,14 @@ export async function notifyLandingCheck(
   // never walk that history, even when many submissions reused the same run.
   let [waiting] = await ctx.db
     .query('projectHostedLandingRequests')
-    .withIndex('by_project_and_run_and_phase', q =>
+    .withIndex('by_project_run_phase_checkWakeVersion', q =>
       q.eq('projectId', input.projectId).eq('runId', input.runId).lte('phase', 'queued'),
     )
     .take(1);
   if (waiting?.phase === 'landed')
     [waiting] = await ctx.db
       .query('projectHostedLandingRequests')
-      .withIndex('by_project_and_run_and_phase', q =>
+      .withIndex('by_project_run_phase_checkWakeVersion', q =>
         q.eq('projectId', input.projectId).eq('runId', input.runId).eq('phase', 'queued'),
       )
       .take(1);
@@ -84,7 +84,7 @@ async function skippable(
   if (state.batchId || progressWakeDue(state.timing?.ciProgressAt, Date.now())) return false;
   const waiters = await ctx.db
     .query('projectHostedLandingRequests')
-    .withIndex('by_project_and_run_and_phase', q =>
+    .withIndex('by_project_run_phase_checkWakeVersion', q =>
       q.eq('projectId', input.projectId).eq('runId', input.runId).lte('phase', 'queued'),
     )
     .take(2);

@@ -3,7 +3,7 @@ import { v } from 'convex/values';
 import { query, mutation, internalQuery, internalMutation } from './cliServer';
 import { activeOwnedProject, accessibleProject } from './projectAuthority';
 import { backfillKind, backfillPin } from './r2BackfillFields';
-import { tableFor, pinFor, selected, current } from './r2BackfillRows';
+import { pinFor, selected, current } from './r2BackfillRows';
 import { r2Key, r2Config, presignPut, presignGet } from './r2';
 import { invariant } from '../src/errors';
 import { report } from './errors';
@@ -31,10 +31,16 @@ export const page = query({
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to maintain project storage.');
       const project = await activeOwnedProject(ctx, projectId, user.subject);
-      const result = await ctx.db
-        .query(tableFor[kind])
-        .withIndex('by_project', q => q.eq('projectId', projectId))
-        .paginate({ cursor, numItems: 100 });
+      const result =
+        kind === 'objects'
+          ? await ctx.db
+              .query('projectObjects')
+              .withIndex('by_project_and_digest', q => q.eq('projectId', projectId))
+              .paginate({ cursor, numItems: 100 })
+          : await ctx.db
+              .query(kind === 'proposals' ? 'projectProposals' : 'projectBackups')
+              .withIndex('by_project', q => q.eq('projectId', projectId))
+              .paginate({ cursor, numItems: 100 });
       const retained = { count: 0, bytes: 0 };
       for (const row of result.page) {
         const pin = pinFor(row, kind),

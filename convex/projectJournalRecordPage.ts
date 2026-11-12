@@ -47,7 +47,7 @@ export async function journalRecordPage(
   );
   const live = await ctx.db
     .query('projectHostedRecords')
-    .withIndex('by_project_and_kind_and_key_and_version', q => {
+    .withIndex('by_project_and_kind_and_key_and_version_and_plan', q => {
       const selected = q.eq('projectId', input.projectId).eq('kind', input.kind).eq('key', input.key);
       return descending
         ? selected.lt('version', position)

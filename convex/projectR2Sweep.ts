@@ -19,7 +19,7 @@ export const page = internalQuery({
     invariant(project && !project.removal, 'PROJECT_UNAVAILABLE', 'Select an active project.');
     const result = await ctx.db
       .query('projectObjects')
-      .withIndex('by_project', q => q.eq('projectId', projectId))
+      .withIndex('by_project_and_digest', q => q.eq('projectId', projectId))
       .paginate({ cursor, numItems: maintenancePageSize });
     return {
       ids: result.page.map(row => row._id),

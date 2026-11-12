@@ -39,7 +39,7 @@ export const hostedCheckTables = {
   }).index('by_project_and_machine', ['projectId', 'machineId']),
   projectHostedCheckSettings: defineTable(setting)
     .index('by_project_and_kind_and_key', ['projectId', 'kind', 'key'])
-    // index-order: Purge .take pages retain creation-time order within projectId, kind; adding key changes selected rows.
+    // index-order: caller: convex/projectHostedCheckDefinitions.ts#list; order: check definition list exposes creation-time pagination cursors.
     .index('by_project_and_kind', ['projectId', 'kind']),
   projectHostedCheckSettingVersions: defineTable(setting).index('by_project_and_kind_and_key_and_version', [
     'projectId',
@@ -82,7 +82,7 @@ export const hostedCheckTables = {
     value: v.string(),
     gate: v.optional(checkGate),
   })
-    // index-order: Purge .take pages retain creation-time order within projectId; adding candidateId, machineId, metricsProjected, runId, status, verdictKey changes selected rows.
+    // index-order: caller: convex/projectMetricReadRuns.ts#metricRunsPage; order: metrics bound _creationTime before paging check runs.
     .index('by_project', ['projectId'])
     .index('by_project_and_metrics_projection', ['projectId', 'metricsProjected'])
     .index('by_ci_mirror_job', ['ciMirrorJob'])
@@ -100,7 +100,7 @@ export const hostedCheckTables = {
     value: v.string(),
   })
     .index('by_project_and_run_and_event', ['projectId', 'runId', 'eventId'])
-    // index-order: Purge .take pages retain creation-time order within projectId, runId; adding eventId changes selected rows.
+    // index-order: caller: convex/projectHostedMainAuditState.ts#mainAuditStatus; order: audit selects the newest callback by creation time; expiry also bounds _creationTime.
     .index('by_project_and_run', ['projectId', 'runId']),
   projectHostedCheckShards: defineTable({
     resultDigest: v.optional(v.string()),
@@ -112,6 +112,6 @@ export const hostedCheckTables = {
     value: v.string(),
   })
     .index('by_project_and_run_and_index', ['projectId', 'runId', 'index'])
-    // index-order: Purge .take pages retain creation-time order within projectId, runId; adding index changes selected rows.
+    // index-order: caller: convex/projectHostedCheckRead.ts#shards; order: shard list exposes creation-time pagination cursors.
     .index('by_project_and_run', ['projectId', 'runId']),
 };

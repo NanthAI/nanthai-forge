@@ -318,11 +318,20 @@ test('source snapshot transport preserves indexed search fields and skips compar
   meter.restore();
 });
 
-test('table cutover rejects outstanding cursors with WORK_STALE and fresh pages retain the same planning items', async t => {
+test('table cutover rejects outstanding cursors with WORK_STALE and retains equal-score planning order and items', async t => {
   const s = await setup(t);
   installPlanningSearch(s);
-  await add(s, { title: 'cutover first', body: 'unchanged first body' });
-  await add(s, { title: 'cutover second', body: 'unchanged second body' });
+  // Opposite UUID order makes creation-time search ties differ from key-order copies.
+  await add(s, {
+    itemId: 'f0000000-0000-4000-8000-000000000001',
+    title: 'cutover first',
+    body: 'unchanged first body',
+  });
+  await add(s, {
+    itemId: '00000000-0000-4000-8000-000000000002',
+    title: 'cutover second',
+    body: 'unchanged second body',
+  });
   const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
   const migration = await import(moduleUrl('../convex/projectWorkRecordMigration.ts'));
   const project = s.tables.hostedProjects.get(s.projectId);

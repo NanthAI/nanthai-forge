@@ -233,6 +233,31 @@ export function indexInventory(root = process.cwd()) {
           index.fields.every((f, n) => i.fields[n] === f),
       )
       .map(i => i.name);
+    const reason = index.reason.match(/^caller: ([\w/.-]+)#(\w+); order: (.+)$/);
+    if (reason) {
+      const [, path, name, contract] = reason;
+      const source = sources.find(s => relative(root, s.fileName) === path);
+      const declarations =
+        source?.statements.flatMap(node =>
+          ts.isVariableStatement(node) ? [...node.declarationList.declarations] : [node],
+        ) ?? [];
+      index.ordering = {
+        caller: `${path}#${name}`,
+        contract,
+        verified: declarations.some(
+          node =>
+            node.name?.getText() === name &&
+            calls.some(
+              call =>
+                call.node.getSourceFile() === source &&
+                call.node.pos >= node.pos &&
+                call.node.end <= node.end &&
+                call.tables.includes(index.table) &&
+                call.names.includes(index.name),
+            ),
+        ),
+      };
+    }
     index.classification = !index.uses.length
       ? 'unused'
       : index.prefixOf.length
@@ -259,13 +284,22 @@ export function indexInventory(root = process.cwd()) {
   };
 }
 
+// Purge order is incidental: changing suffix order may change total byte-capped
+// page counts (Issue 1082e2ee). Keep per-page row/byte bounds and termination;
+// compare total pages in purge fixtures, rather than retaining a write-costly
+// prefix to select the same rows on each page. Representative samples are any-row.
 export function indexIssues(inventory) {
   const issues = inventory.unresolved.map(u => `${u.location}: ${u.text}`);
   for (const index of inventory.indexes) {
     if (!index.uses.length) issues.push(`${index.location}: unused ${index.table}.${index.name}`);
-    if (index.prefixOf.length && index.reason.length < 20)
+    if (
+      index.prefixOf.length &&
+      (!index.ordering?.verified ||
+        !/(?:creation.time|_creationTime|publication order|chronolog)/i.test(index.ordering.contract) ||
+        /\b(?:purge|sample|representative|benchmark)\b/i.test(index.ordering.contract))
+    )
       issues.push(
-        `${index.location}: ${index.table}.${index.name} prefixes ${index.prefixOf.join(', ')}; record an index-order: reason next to its definition`,
+        `${index.location}: ${index.table}.${index.name} prefixes ${index.prefixOf.join(', ')}; record an index-order: caller: path#symbol; order: required creation-time contract (purge/sample order is insufficient) next to its definition`,
       );
   }
   return issues;

@@ -87,7 +87,7 @@ export const verify = internalQuery({
     await activeOwnedProject(ctx, input.projectId, input.actor);
     const page = await ctx.db
       .query('projectObjectReceipts')
-      .withIndex('by_project', q => q.eq('projectId', input.projectId))
+      .withIndex('by_project_and_nonce_and_value', q => q.eq('projectId', input.projectId))
       .paginate({ cursor: input.cursor, numItems: 256, maximumRowsRead: 256, maximumBytesRead: 128 * 1024 });
     const receipts = page.page.filter(row => !row.key.startsWith('catalog-migration:'));
     const objects = await findObjects(

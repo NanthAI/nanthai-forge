@@ -2,7 +2,7 @@
 import { v } from 'convex/values';
 import { internalMutation, internalQuery } from './server';
 import { backfillKind, backfillPin } from './r2BackfillFields';
-import { current, pinFor, selected, tableFor } from './r2BackfillRows';
+import { current, pinFor, selected } from './r2BackfillRows';
 import { checkPass, maintenanceEnabled, maintenancePageSize, purgeable, verifiedPass } from './r2Maintenance';
 import { invariant } from '../src/errors';
 import { blobStore } from './blobStore';
@@ -18,10 +18,16 @@ export const page = internalQuery({
   }),
   handler: async (ctx, { projectId, pass, kind, cursor }) => {
     checkPass(await ctx.db.get(projectId), pass);
-    const result = await ctx.db
-      .query(tableFor[kind])
-      .withIndex('by_project', q => q.eq('projectId', projectId))
-      .paginate({ cursor, numItems: maintenancePageSize });
+    const result =
+      kind === 'objects'
+        ? await ctx.db
+            .query('projectObjects')
+            .withIndex('by_project_and_digest', q => q.eq('projectId', projectId))
+            .paginate({ cursor, numItems: maintenancePageSize })
+        : await ctx.db
+            .query(kind === 'proposals' ? 'projectProposals' : 'projectBackups')
+            .withIndex('by_project', q => q.eq('projectId', projectId))
+            .paginate({ cursor, numItems: maintenancePageSize });
     return {
       pins: result.page.flatMap(row => {
         const source = selected(row, kind),

@@ -608,7 +608,7 @@ export default defineSchema({
     .index('by_original_and_removed', ['original', 'removed']),
   accountOperations: defineTable(accountFields)
     .index('by_owner_and_operation', ['owner', 'operationId'])
-    // index-order: convex/accountPlan.ts retains creation-time query order within owner; adding operationId changes ordering or bounded selections.
+    // index-order: caller: convex/accountPlan.ts#receipts; order: account receipt list exposes newest-first creation-time pages.
     .index('by_owner', ['owner']),
   accountItems: defineTable(accountItemFields)
     .index('by_account_and_key', ['accountId', 'key'])
@@ -635,8 +635,7 @@ export default defineSchema({
     task: v.optional(v.id('_scheduled_functions')),
   })
     .index('by_upload', ['uploadId'])
-    // index-order: Purge .take pages retain creation-time order within projectId; adding pending changes selected rows.
-    .index('by_project', ['projectId'])
+
     .index('by_project_and_pending', ['projectId', 'pending']),
   projectReaders: defineTable({ projectId: v.id('hostedProjects'), reader: v.string() })
     .index('by_project_and_reader', ['projectId', 'reader'])
@@ -661,7 +660,7 @@ export default defineSchema({
     .index('by_project_and_contributor', ['projectId', 'contributor'])
     .index('by_contributor', ['contributor']),
   projectProposals: defineTable(projectProposalFields)
-    // index-order: Purge .take pages retain creation-time order within projectId; adding operationId changes selected rows.
+    // index-order: caller: convex/projectProposals.ts#list; order: proposal list exposes newest-first creation-time pages.
     .index('by_project', ['projectId'])
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_storage', ['storageId']),
@@ -681,13 +680,13 @@ export default defineSchema({
     receipt: v.string(),
   }).index('by_project_and_operation', ['projectId', 'operationId']),
   hostedProjects: defineTable(projectFields)
-    // index-order: convex/accountResources.ts retains creation-time query order within owner; adding key changes ordering or bounded selections.
+    // index-order: caller: convex/projectBackups.ts#list; order: project list exposes newest-first creation-time pages.
     .index('by_owner', ['owner'])
     .index('by_owner_and_key', ['owner', 'key']),
   ...publicationTables,
   projectBackups: defineTable(projectBackupFields)
     .index('by_archive_storage', ['archiveReceipt.storageId'])
-    // index-order: Purge .take pages retain creation-time order within projectId; adding operationId changes selected rows.
+    // index-order: caller: convex/projectBackups.ts#history; order: backup history exposes newest-first creation-time pages.
     .index('by_project', ['projectId'])
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_storage', ['storageId']),
@@ -705,13 +704,10 @@ export default defineSchema({
   zoneReaders: defineTable({ zoneId: v.id('sourceZones'), reader: v.string() })
     .index('by_zoneId_and_reader', ['zoneId', 'reader'])
     .index('by_reader_and_zoneId', ['reader', 'zoneId']),
-  zoneChanges: defineTable(zoneChange)
-    .index('by_zoneId_and_operationId', ['zoneId', 'operationId'])
-    // index-order: convex/sourceZones.ts retains creation-time query order within zoneId; adding operationId changes ordering or bounded selections.
-    .index('by_zoneId', ['zoneId']),
+  zoneChanges: defineTable(zoneChange).index('by_zoneId_and_operationId', ['zoneId', 'operationId']),
   agentGrants: defineTable(agentFields)
     .index('by_owner_and_operationId', ['owner', 'operationId'])
-    // index-order: convex/accountResources.ts retains creation-time query order within owner; adding operationId changes ordering or bounded selections.
+    // index-order: caller: convex/agentGrants.ts#listRows; order: grant list exposes newest-first creation-time pages.
     .index('by_owner', ['owner'])
     .index('by_tokenHash', ['tokenHash'])
     .index('by_importId', ['importId']),
@@ -742,7 +738,7 @@ export default defineSchema({
     task: v.optional(v.id('_scheduled_functions')),
   })
     .index('by_secretId', ['secretId'])
-    // index-order: convex/secretLifecycle.ts retains creation-time query order within owner; adding creationOperationId changes ordering or bounded selections.
+    // index-order: caller: convex/secretLifecycle.ts#deletions; order: deletion receipt list exposes newest-first creation-time pages.
     .index('by_owner', ['owner'])
     .index('by_owner_and_creationOperationId', ['owner', 'creationOperationId']),
   secretObjects: defineTable(secretFields).index('by_owner_and_operationId', ['owner', 'operationId']),
@@ -764,7 +760,7 @@ export default defineSchema({
     .index('by_principal_and_discover_and_secretId', ['principal', 'discover', 'secretId']),
   secretEvents: defineTable(secretEventFields)
     .index('by_secretId_and_principal_and_policyRevision', ['secretId', 'principal', 'policyRevision'])
-    // index-order: convex/secretLifecycle.ts retains creation-time query order within secretId; adding actor, principal changes ordering or bounded selections.
+    // index-order: caller: convex/secretLifecycle.ts#exportInfo; order: export pins the newest event by creation time; exportPage bounds _creationTime.
     .index('by_secretId', ['secretId'])
     .index('by_secretId_and_actor_and_operationId', ['secretId', 'actor', 'operationId']),
   teams: defineTable({
@@ -789,7 +785,7 @@ export default defineSchema({
   ...selfMetricBillTables,
   savedViews: defineTable({ owner: v.string(), ...savedLink })
     .index('by_importId', ['importId'])
-    // index-order: convex/accountResources.ts retains creation-time query order within owner; adding operationId changes ordering or bounded selections.
+    // index-order: caller: convex/savedViews.ts#listRows; order: saved view list exposes newest-first creation-time pages.
     .index('by_owner', ['owner'])
     .index('by_owner_and_operationId', ['owner', 'operationId']),
   ...hostedFrictionTables,

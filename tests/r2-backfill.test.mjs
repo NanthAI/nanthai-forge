@@ -550,7 +550,10 @@ test('full digest failure on an unsampled row resumes the original page and reje
     Array.from({ length: 102 }, (_, i) => `resume digest ${i}`),
   );
   await runR2Backfill(h.transport, h.options);
-  const secondPageRow = allRows(h.s)[101],
+  // Choose the failure by its actual page, independent of the inventory index's suffix order.
+  const firstPage = await h.transport.page('objects', null, true);
+  const secondPage = await h.transport.page('objects', firstPage.cursor, true);
+  const secondPageRow = stored(h.s, secondPage.page[1].id),
     key = h.fake.key(`v1/p/project/o/${secondPageRow.digest}`);
   h.fake.corrupt.add(key);
   const options = { ...h.options, verify: true, fullDigest: true, statePath: join(h.dir, 'full.json') };

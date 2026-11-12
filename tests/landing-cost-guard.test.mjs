@@ -4,7 +4,7 @@
 // src/speed-budgets.json (`costs`). Deterministic counts, not live billing: a change that adds work
 // per landing fails here, a saving asks the author to ratchet the ledger down.
 import test from 'node:test';
-import { indexStorage, measureIndexExportClaims } from './convex-index-cost.mjs';
+import { indexEntriesPerWrite, indexStorage, measureIndexExportClaims } from './convex-index-cost.mjs';
 const indexSchema = (await import(moduleUrl('../convex/schema.ts'))).default;
 import { storageClock as fixedClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
@@ -119,9 +119,10 @@ test('S3 phase transitions write only the ticket; cold bytes fall by the measure
       batchSelection: value.batchSelection,
       value: canonicalPayload({ ...JSON.parse(header.value), request }),
     };
-    const before = fittedWrite(legacy, 24),
-      after = fittedWrite(header, 24);
-    assert(after < before, 'all 24 ticket indexes operate on the smaller header');
+    const indexes = indexEntriesPerWrite(indexSchema, 'projectHostedLandingRequests');
+    const before = fittedWrite(legacy, indexes),
+      after = fittedWrite(header, indexes);
+    assert(after < before, 'every ticket index operates on the smaller header');
     assert(before - after > size - 256, 'cold request bytes do not return on a phase write');
     assert.deepEqual(JSON.parse((await ctx.db.get(id)).value).request, request);
     t.diagnostic(

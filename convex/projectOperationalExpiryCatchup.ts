@@ -195,7 +195,9 @@ async function next(ctx: MutationCtx, projectId: Id<'hostedProjects'>, operation
   }
   const page = await ctx.db
     .query('projectWorkGenerations')
-    .withIndex('by_project', q => q.eq('projectId', projectId))
+    .withIndex('by_project_and_backup_and_revision_and_format_and_work_schema', q =>
+      q.eq('projectId', projectId),
+    )
     .paginate({ cursor: p.cursor, numItems: 8, maximumBytesRead: 64 * 1024, maximumRowsRead: 8 });
   const project = await ctx.db.get(projectId);
   for (const generation of page.page) {

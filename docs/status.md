@@ -1,7 +1,8 @@
 # Status
 
 The existing Convex schema-index deployment guard rejects unused table indexes and
-unexplained database-index prefixes. Static inventory resolves operational helpers
+database-index prefixes without a verified named caller and required ordering contract.
+Purge-only and representative-sample order do not qualify. Static inventory resolves operational helpers
 and inline scripts; landing fixtures ratchet custom index writes and serialized
 key payload storage ([inventory](operations/storage-inventory.md#index-inventory-and-guard)).
 
@@ -385,7 +386,7 @@ retains inaccessible or missing records with a recovery reason, and preserves li
 copies. Test files use private temporary roots; the supervisor reclaims them after timeouts, and
 normal file exit fails on leaked Forge temporary entries.
 
-Landing request tickets retain all 24 indexes and reader contracts while cold request and
+Landing request tickets retain their reader contracts while cold request and
 batch-selection metadata live in unindexed parent-owned bodies. Phase writes leave those
 bodies unchanged; the S0 model and storage/call guards cover the split. New report runs retain headers and one pinned R2 object, with no result-report rows;
 legacy replay remains for old runs. No billed S3 saving is claimed.

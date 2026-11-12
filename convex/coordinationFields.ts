@@ -167,14 +167,14 @@ export const claimDocument = v.object({
 });
 export const coordinationTables = {
   projectCoordinationSessions: defineTable(sessionFields)
-    // index-order: Purge .take pages retain creation-time order within projectId; adding actor, lastSeen, parentSessionId, sessionId changes selected rows.
+    // index-order: caller: convex/projectCoordination.ts#sessions; order: all=true lists newest sessions by creation time; parentSessionId must not lead the order.
     .index('by_project', ['projectId'])
     .index('by_project_and_parent', ['projectId', 'parentSessionId'])
     .index('by_project_and_session', ['projectId', 'sessionId'])
     .index('by_project_and_actor', ['projectId', 'actor'])
     .index('by_project_and_lastSeen', ['projectId', 'lastSeen']),
   projectCoordinationEvents: defineTable(eventFields)
-    // index-order: Purge .take pages retain creation-time order within projectId; adding actor, at, intentId, kind, laneId, operationId, recipientActor changes selected rows.
+    // index-order: caller: convex/coordinationFeed.ts#coordinationRecent; order: recent activity pages merge live and journal events in creation-time order.
     .index('by_project', ['projectId'])
     .index('by_project_and_actor', ['projectId', 'actor'])
     .index('by_project_and_at', ['projectId', 'at'])
@@ -183,10 +183,11 @@ export const coordinationTables = {
     .index('by_project_and_kind_and_recipientActor', ['projectId', 'kind', 'recipientActor'])
     .index('by_project_and_intentId', ['projectId', 'intentId'])
     .index('by_project_and_laneId', ['projectId', 'laneId']),
-  projectCoordinationReceipts: defineTable(receiptFields)
-    .index('by_project_and_message_and_actor', ['projectId', 'messageId', 'actor'])
-    // index-order: Purge .take pages retain creation-time order within projectId; adding messageId changes selected rows.
-    .index('by_project', ['projectId']),
+  projectCoordinationReceipts: defineTable(receiptFields).index('by_project_and_message_and_actor', [
+    'projectId',
+    'messageId',
+    'actor',
+  ]),
   projectCoordinationClaims: defineTable(claimFields)
     .index('by_project_and_claim', ['projectId', 'claimId'])
     .index('by_project_and_expiresAt', ['projectId', 'expiresAt'])

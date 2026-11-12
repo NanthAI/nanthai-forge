@@ -254,7 +254,7 @@ export async function purgeSourceZones(ctx: MutationCtx, importId: Id<'imports'>
       .take(50);
     const changes = await ctx.db
       .query('zoneChanges')
-      .withIndex('by_zoneId', q => q.eq('zoneId', zone._id))
+      .withIndex('by_zoneId_and_operationId', q => q.eq('zoneId', zone._id))
       .take(50);
     for (const row of [...readers, ...changes]) await ctx.db.delete(row._id);
     if (readers.length === 50 || changes.length === 50) remaining = true;
