@@ -202,10 +202,20 @@ Catalogs remain available until external-reader cutover and descriptor retiremen
 Readers also accept FPR2 roots with optional membership fingerprints and FPM2
 bindings that preserve exact raw/pack nonce keys (`/o/SHA/u/UUID`). Grant grouping,
 metadata downloads and operation-local caches distinguish nonce copies. FPR1/FPM1
-bytes remain compatible; runtime writers still emit those earlier forms and skip
-nonce bindings. A future fingerprint-free writer must compare membership from the
-verified parent State before sharing a bucket. Metadata plans grant one covering range per exact root-listed pack key, from its
+bytes remain compatible. The default-off writer emits fingerprint-free FPR2 roots and
+exact nonce bindings; it compares verified parent-State membership before sharing a
+bucket, packs changed buckets together, and carries the smallest live parent pack
+when needed to stay within 63 metadata keys. The carry is bounded by one 63rd of
+the parent manifest. It never scans descriptors for unchanged files. Metadata plans grant one covering range per exact root-listed pack key, from its
 first live bucket to its last; only hash-checked root-listed chunks are decoded.
+Before returning an adopted State, compose checks its root against main: each key
+must already belong to main or contain only live chunks. It copies failing keys
+with one verified range read per key and rebinds the same State in the existing
+commit. Saves and syncs keep their working roots; only trusted compose outputs may
+replace a binding. A kept compose writes no metadata. A repairing fast-forward
+adds the row work of one State write inside the existing commit, with no added
+resolver call. Invalid roots are rebuilt from main; other storage errors fail the
+step for ordinary retry.
 A whole plan above 64 grants takes the named catalog fallback. Content grants
 remain exact. Root encoding alone does not bound metadata key fragmentation;
 descriptor retirement remains pending.

@@ -2,6 +2,7 @@
 import { assertSourceStateSize } from '../src/source-state-size';
 import { v } from 'convex/values';
 import { activeStep } from './projectConvexSourceStore';
+import { physicalSourceBinding } from './projectConvexPhysicalManifest';
 import { saveObjects } from './projectHostedSaveStore';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { isStored } from './projectObjectFields';
@@ -9,7 +10,7 @@ import { invariant } from '../src/errors';
 import { sourceMutation } from './projectConvexSourceErrors';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { signRecipeClosure } from './projectRecipeClosure';
-import { presignGet, r2Config, r2Key } from './r2';
+import { presignGet, r2Config } from './r2';
 import { findObject, findObjects, type ObjectView } from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string(), step: v.number() };
@@ -52,17 +53,20 @@ export const resolve = sourceMutation({
       const rows = await findObjects(ctx, args.projectId, args.digests);
       return canonicalPayload(
         rows.map(row =>
-          row &&
-          !row.removed &&
-          isStored(row) &&
-          (row.recipe ||
-            (row.location === 'r2' && row.r2Key === r2Key(args.projectId, row.pack?.digest ?? row.digest)))
-            ? {
-                sha256: row.digest,
-                size: row.size,
-                ...(row.recipe ? { recipe: { sha256: row.recipe.digest, size: row.recipe.size } } : {}),
-                ...(row.pack ? { pack: row.pack } : {}),
-              }
+          row && !row.removed && isStored(row)
+            ? physicalSourceBinding(
+                args.projectId,
+                {
+                  descriptor: {
+                    object: { sha256: row.digest, size: row.size },
+                    recipe: row.recipe ? { sha256: row.recipe.digest, size: row.recipe.size } : null,
+                  },
+                  storageId: null,
+                  url: null,
+                  ...(row.pack ? { range: packRange(row)! } : {}),
+                },
+                row.r2Key,
+              )
             : null,
         ),
       );

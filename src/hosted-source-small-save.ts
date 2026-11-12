@@ -96,7 +96,7 @@ export async function runSmallSourceSave(
     objects.length ? io.prepareRead?.(objects) : undefined,
   ]);
   const baseline = parseNativeState(baselineBytes!);
-  io.rememberLoadedState?.(plan.baseline.object, baseline.files.length);
+  io.rememberLoadedState?.(plan.baseline.object, baseline.files.length, baseline.files);
   const files = new Map(baseline.files.map(file => [file.path, file])),
     seen = new Set(baseline.files.map(file => file.blob));
   const verify = [

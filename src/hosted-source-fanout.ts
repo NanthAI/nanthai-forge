@@ -71,7 +71,7 @@ export async function stateSummary(
   }
   try {
     const state = parseNativeState(bytes);
-    io.rememberLoadedState?.(ref.object, state.files.length);
+    io.rememberLoadedState?.(ref.object, state.files.length, state.files);
     const generation = io.stateGeneration?.(ref.object.sha256);
     return {
       id: ref.object.sha256,

@@ -304,3 +304,34 @@ test('metadata covering grants stay inside the selected root live bounds and ign
     error => error.code === 'SOURCE_HASH_MISMATCH',
   );
 });
+
+test('binary codec preserves exact FPR1,FPR2,FPM1 and FPM2 bytes after indexed pack encoding', () => {
+  const state = '11'.repeat(32),
+    sha256 = '22'.repeat(32),
+    digest = '33'.repeat(32),
+    members = '44'.repeat(32);
+  const pack = { digest, size: 100, offset: 7 };
+  const root = {
+    schema: 1,
+    kind: 'forge-physical-manifest',
+    state,
+    chunks: [{ bucket: 12, sha256, size: 9, pack }],
+  };
+  const hex = bytes => Buffer.from(bytes).toString('hex');
+  assert.equal(
+    hex(encodePhysicalRoot(root)),
+    '46505202' + state + '01' + digest + '6400010c' + sha256 + '09000107',
+  );
+  assert.equal(
+    hex(encodePhysicalRoot({ ...root, chunks: [{ ...root.chunks[0], members }] })),
+    '46505201' + state + '01' + digest + '64010c' + sha256 + '09' + members + '0107',
+  );
+  assert.equal(
+    hex(encodePhysicalEntries([{ sha256, size: 9, pack }])),
+    '46504d0101' + sha256 + '0901' + digest + '6407',
+  );
+  assert.equal(
+    hex(encodePhysicalEntries([{ sha256, size: 9, pack: { ...pack, nonce: nonceA } }])),
+    '46504d0201' + sha256 + '0901' + digest + '640701' + nonceA.replaceAll('-', ''),
+  );
+});

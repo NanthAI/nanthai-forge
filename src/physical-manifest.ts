@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { digest } from './state/hash.js';
+import { sha256Hex } from './verified-blob.js';
 import { invariant } from './errors.js';
 import {
   decodePhysicalEntries,
@@ -8,6 +9,7 @@ import {
   type PhysicalEntry,
   type PhysicalPin,
 } from './physical-manifest-codec.js';
+import { physicalKey } from './physical-manifest-binary.js';
 import { decodePhysicalRoot } from './physical-manifest-root.js';
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const size = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -40,7 +42,7 @@ type Read = (pin: PhysicalPin) => Promise<Uint8Array>;
 export async function readPhysicalPin(pin: PhysicalPin, read: Read) {
   const bytes = await read(pin);
   invariant(
-    bytes.length === pin.size && digest(bytes) === pin.sha256,
+    bytes.length === pin.size && (await sha256Hex(bytes)) === pin.sha256,
     'SOURCE_HASH_MISMATCH',
     'Physical manifest differs from its exact hash and size.',
   );
@@ -76,12 +78,60 @@ export class PhysicalManifestReader {
     );
     return new PhysicalManifestReader(root, read);
   }
+  /** Copy only a selected parent chunk, byte for byte, after its hash check. */
+  async readChunk(bucket: number) {
+    const pin = this.root.chunks.find(chunk => chunk.bucket === bucket);
+    invariant(pin, 'SOURCE_HASH_MISMATCH', 'Physical manifest chunk is not in the selected root.');
+    return readPhysicalPin(pin, this.read);
+  }
+  /** Read one covering range per exact metadata key; check each selected chunk
+   * separately and never parse the superseded bytes between live chunks. */
+  async readChunks(buckets: readonly number[]) {
+    const groups = new Map<string, PhysicalManifest['chunks']>();
+    for (const bucket of buckets) {
+      const pin = this.root.chunks.find(chunk => chunk.bucket === bucket);
+      invariant(pin, 'SOURCE_HASH_MISMATCH', 'Physical manifest chunk is not in the selected root.');
+      const key = physicalKey(pin.pack?.digest ?? pin.sha256, pin.pack?.nonce);
+      groups.set(key, [...(groups.get(key) ?? []), pin]);
+    }
+    const result = new Map<number, Uint8Array>();
+    for (const pins of groups.values()) {
+      const first = pins[0]!;
+      if (!first.pack) {
+        result.set(first.bucket, await this.readChunk(first.bucket));
+        continue;
+      }
+      const start = Math.min(...pins.map(pin => pin.pack!.offset)),
+        end = Math.max(...pins.map(pin => pin.pack!.offset + pin.size));
+      invariant(
+        pins.every(pin => pin.pack?.size === first.pack!.size),
+        'SOURCE_HASH_MISMATCH',
+        'Physical metadata pack sizes differ.',
+      );
+      const bytes = await this.read({ ...first, size: end - start, pack: { ...first.pack, offset: start } });
+      invariant(
+        bytes.length === end - start,
+        'SOURCE_HASH_MISMATCH',
+        'Physical metadata range is incomplete.',
+      );
+      for (const pin of pins) {
+        const chunk = bytes.slice(pin.pack!.offset - start, pin.pack!.offset - start + pin.size);
+        invariant(
+          chunk.length === pin.size && (await sha256Hex(chunk)) === pin.sha256,
+          'SOURCE_HASH_MISMATCH',
+          'Physical manifest differs from its exact hash and size.',
+        );
+        result.set(pin.bucket, chunk);
+      }
+    }
+    return result;
+  }
   private chunk(bucket: number) {
     let pending = this.chunks.get(bucket);
     if (!pending) {
       const pin = this.root.chunks.find(chunk => chunk.bucket === bucket);
       pending = pin
-        ? readPhysicalPin(pin, this.read).then(bytes => {
+        ? this.readChunk(bucket).then(bytes => {
             const entries = decodePhysicalEntries(bytes, bucket);
             invariant(
               !pin.members || digest(entries.map(entry => entry.sha256).join('')) === pin.members,

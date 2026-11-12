@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { LazyMergeSource, NeededObject } from './hosted-merge-reader.js';
-import { parseNativeState, validateNativeStateFiles, type NativeState } from './state/format.js';
+import {
+  parseNativeState,
+  validateNativeStateFiles,
+  type NativeState,
+  type NativeFile,
+} from './state/format.js';
 import { SourceWorkerReader, type SourceWorkerTransport } from './hosted-source-worker-reader.js';
 import { readObjectRecipe, objectRecipeSchema } from './object-chunks.js';
 import { digest } from './hash.js';
@@ -18,7 +23,7 @@ export class MemoryMergeSource extends LazyMergeSource {
   expectState(id: string) {
     this.onExpectState?.(id);
   }
-  onLoadedState?: (pin: WorkerPin, fileCount: number) => void;
+  onLoadedState?: (pin: WorkerPin, fileCount: number, files: readonly NativeFile[]) => void;
   private readonly parsed = new Map<string, NativeState>();
   private readonly generatedBytes = new WeakMap<Buffer, string>();
   private cutList: string[] | undefined;
@@ -84,7 +89,7 @@ export class MemoryMergeSource extends LazyMergeSource {
     if (!value) {
       const bytes = this.object(id);
       value = parseNativeState(bytes);
-      this.onLoadedState?.({ sha256: id, size: bytes.length }, value.files.length);
+      this.onLoadedState?.({ sha256: id, size: bytes.length }, value.files.length, value.files);
       this.parsed.set(id, value);
       this.parents[id] = value.parents;
       this.states.add(id);
@@ -142,12 +147,12 @@ export class MemorySourceReader extends SourceWorkerReader {
   ) {
     super('', io);
     source.onExpectState = id => io.expectState?.(id);
-    source.onLoadedState = (pin, count) => io.rememberLoadedState?.(pin, count);
+    source.onLoadedState = (pin, count, files) => io.rememberLoadedState?.(pin, count, files);
   }
   async state(ref: WorkerObject) {
     this.source.expectState(ref.object.sha256);
     const state = parseNativeState(await this.bytes(ref));
-    this.io.rememberLoadedState?.(ref.object, state.files.length);
+    this.io.rememberLoadedState?.(ref.object, state.files.length, state.files);
     return state;
   }
   override async bytes(ref: WorkerObject): Promise<Buffer> {

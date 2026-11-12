@@ -70,3 +70,38 @@ test('29k compose seeds once in catalog windows, extends only changed bindings, 
     }),
   );
 });
+
+test('the writer preserves canonical raw and pack nonce bindings and skips foreign or malformed keys', async () => {
+  const { moduleUrl } = await import('./convex-module.mjs');
+  const { physicalSourceBinding } = await import(moduleUrl('../convex/projectConvexPhysicalManifest.ts'));
+  const sha256 = digest('source'),
+    pack = digest('pack'),
+    nonce = '00000000-0000-4000-8000-000000000001';
+  const raw = { descriptor: { object: { sha256, size: 3 }, recipe: null }, storageId: null, url: null };
+  assert.deepEqual(physicalSourceBinding('project', raw, `v1/p/project/o/${sha256}/u/${nonce}`), {
+    sha256,
+    size: 3,
+    nonce,
+  });
+  const packed = { ...raw, range: { offset: 4, total: 10 } };
+  assert.deepEqual(physicalSourceBinding('project', packed, `v1/p/project/o/${pack}/u/${nonce}`), {
+    sha256,
+    size: 3,
+    pack: { digest: pack, size: 10, offset: 4, nonce },
+  });
+  for (const key of [
+    `v1/p/other/o/${sha256}`,
+    `bad/v1/p/project/o/${sha256}`,
+    `v1/p/project/o/${sha256}/u/not-a-nonce`,
+    `v1/p/project/o/${pack}`,
+  ])
+    assert.equal(physicalSourceBinding('project', raw, key), null);
+  const signed = {
+    ...packed,
+    url: `https://store.invalid/bucket/v1/p/project/o/${pack}/u/${nonce}?signed=synthetic`,
+  };
+  assert.deepEqual(
+    physicalSourceBinding('project', signed),
+    physicalSourceBinding('project', packed, `v1/p/project/o/${pack}/u/${nonce}`),
+  );
+});

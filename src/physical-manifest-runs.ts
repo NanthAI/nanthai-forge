@@ -59,6 +59,24 @@ export async function physicalRuns(entries: AsyncIterable<PhysicalEntry> | Itera
   }
   return runs;
 }
+/** Metadata may cover superseded ancestor buckets between root-listed live chunks.
+ * Content grants continue to use physicalRuns without this covering step. */
+export async function physicalMetadataRuns(chunks: Iterable<PhysicalPin>): Promise<PhysicalRun[]> {
+  const exact = await physicalRuns(chunks),
+    keys = new Map<string, PhysicalRun>();
+  for (const run of exact!) {
+    const key = physicalKey(run.digest, run.nonce),
+      prior = keys.get(key);
+    if (!prior) keys.set(key, { ...run });
+    else {
+      invariant(prior.total === run.total, 'SOURCE_HASH_MISMATCH', 'Metadata pack size changed.');
+      const end = Math.max(prior.offset + prior.length, run.offset + run.length);
+      prior.offset = Math.min(prior.offset, run.offset);
+      prior.length = end - prior.offset;
+    }
+  }
+  return [...keys.values()];
+}
 export function physicalRunFor(runs: readonly PhysicalRun[], entry: PhysicalEntry) {
   return runs.find(
     run =>

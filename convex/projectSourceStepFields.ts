@@ -14,6 +14,7 @@ export const sourceOutput = v.object({
   stateSize: v.optional(stateSize),
   stateParents: v.optional(v.array(v.string())),
   statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
+  statePhysicalRebind: v.optional(v.boolean()),
   sha256: v.string(),
   size: v.number(),
   storageId: v.optional(v.id('_storage')),

@@ -16,6 +16,7 @@ export function encodePhysicalRoot(root: PhysicalManifest): Uint8Array {
       ),
     ).values(),
   ].sort((a, b) => physicalKey(a.digest, a.nonce).localeCompare(physicalKey(b.digest, b.nonce)));
+  const packIndices = new Map(packs.map((pack, index) => [physicalKey(pack.digest, pack.nonce), index + 1]));
   out.integer(packs.length);
   for (const pack of packs) {
     out.hash(pack.digest);
@@ -32,11 +33,7 @@ export function encodePhysicalRoot(root: PhysicalManifest): Uint8Array {
     out.integer(chunk.size);
     if (version === 2) out.byte(chunk.members ? 1 : 0);
     if (chunk.members) out.hash(chunk.members);
-    const pack = chunk.pack
-      ? packs.findIndex(
-          pack => physicalKey(pack.digest, pack.nonce) === physicalKey(chunk.pack!.digest, chunk.pack!.nonce),
-        ) + 1
-      : 0;
+    const pack = chunk.pack ? packIndices.get(physicalKey(chunk.pack.digest, chunk.pack.nonce))! : 0;
     out.integer(pack);
     if (chunk.pack) {
       valid(

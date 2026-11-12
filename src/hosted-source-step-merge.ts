@@ -172,7 +172,11 @@ export async function prepareMergeStep(
         if (!files.has(left)) await new MemorySourceReader(source, io).bytes(plan.main);
         await io.seedPhysicalState(plan.main.object, files.get(left) ?? source.state(left).files);
       }
-      if (io.writePhysicalState && !io.hasPhysicalState?.(c.head)) {
+      if (io.composePhysicalState && c.head !== left) {
+        const ref = c.inventory[c.head]!;
+        if (!files.has(c.head)) await new MemorySourceReader(source, io).bytes(ref);
+        await io.composePhysicalState(ref.object, files.get(c.head) ?? source.state(c.head).files, left);
+      } else if (io.writePhysicalState && !io.hasPhysicalState?.(c.head)) {
         const ref = c.inventory[c.head]!;
         if (!files.has(c.head)) await new MemorySourceReader(source, io).bytes(ref);
         await io.writePhysicalState(ref.object, files.get(c.head) ?? source.state(c.head).files, [left]);
@@ -440,7 +444,7 @@ export async function computeMergeStep(
       try {
         const bytes = source.object(id);
         const state = parseNativeState(bytes);
-        io.rememberLoadedState?.({ sha256: id, size: bytes.length }, state.files.length);
+        io.rememberLoadedState?.({ sha256: id, size: bytes.length }, state.files.length, state.files);
         return state;
       } catch {
         return null;
@@ -470,7 +474,11 @@ export async function computeMergeStep(
     }
     const reader = new MemorySourceReader(source, io);
     const own = source.objects.get(c.head);
-    if (io.writePhysicalState && !io.hasPhysicalState?.(c.head) && !(own && source.outputState(own))) {
+    if (io.composePhysicalState && c.head !== plan.main.object.sha256 && !(own && source.outputState(own))) {
+      const ref = c.inventory[c.head] ?? (await io.describeBatch!([c.head]))[0]!;
+      await reader.bytes(ref);
+      await io.composePhysicalState(state, source.state(c.head).files, plan.main.object.sha256);
+    } else if (io.writePhysicalState && !io.hasPhysicalState?.(c.head) && !(own && source.outputState(own))) {
       const ref = c.inventory[c.head] ?? (await io.describeBatch!([c.head]))[0]!;
       await reader.bytes(ref);
       await io.writePhysicalState(state, source.state(c.head).files, [plan.main.object.sha256]);
@@ -656,6 +664,13 @@ export async function computeMergeStep(
     )
       c.batchMerged.push(value.candidateId);
     if (c.index === c.selections.length && !plan.batch) {
+      const own = source.objects.get(c.head);
+      if (io.composePhysicalState && c.head !== plan.main.object.sha256 && !(own && source.outputState(own)))
+        await io.composePhysicalState(
+          manifest.result.state,
+          source.state(c.head).files,
+          plan.main.object.sha256,
+        );
       c.output = output;
       c.phase = 'done';
     }

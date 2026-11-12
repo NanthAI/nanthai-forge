@@ -21,7 +21,7 @@ export interface SourceWorkerTransport {
   expectState?(id: string): void;
   checkStateSize?(pin: WorkerPin): void;
   /** Successful hash-verified loads enrich old metadata in the existing completion write. */
-  rememberLoadedState?(pin: WorkerPin, fileCount: number): void;
+  rememberLoadedState?(pin: WorkerPin, fileCount: number, files?: readonly NativeFile[]): void;
   /** Trusted, current descriptor metadata; never a field in client plans. */
   /** Fixed source builders may register parents of their own already validated
    * generated State. Publication still verifies the exact whole-object hash. */
@@ -31,6 +31,8 @@ export interface SourceWorkerTransport {
   /** Fast-forwards can select an existing State without uploading its bytes again. */
   writePhysicalState?(pin: WorkerPin, files: readonly NativeFile[], bases: readonly string[]): Promise<void>;
   hasPhysicalState?(id: string): boolean;
+  /** Only trusted compose may replace a working physical root. */
+  composePhysicalState?(pin: WorkerPin, files: readonly NativeFile[], main: string): Promise<void>;
   stateGeneration?(id: string): number | undefined;
   rememberStateGenerations?(values: Record<string, number>): void;
   publishRecipe?(object: WorkerPin, recipe: WorkerPin): Promise<void>;

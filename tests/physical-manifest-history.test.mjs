@@ -32,6 +32,7 @@ test('four saves grant one covering metadata range per selected root key and dec
     ),
     ids = [...bindings.keys()],
     objects = new Map(),
+    memberships = new Map(),
     put = async bytes => {
       const pin = { sha256: digest(bytes), size: bytes.length };
       objects.set(pin.sha256, bytes);
@@ -42,14 +43,18 @@ test('four saves grant one covering metadata range per selected root key and dec
       pin.pack
         ? objects.get(pin.pack.digest).subarray(pin.pack.offset, pin.pack.offset + pin.size)
         : objects.get(pin.sha256),
-    write = (state, parent) =>
-      writePhysicalManifest({
+    write = async (state, parent) => {
+      const result = await writePhysicalManifest({
         state,
         members: ids,
         parent,
+        parentMembers: parent ? memberships.get(parent.root.state) : undefined,
         put,
         describe: async requested => requested.map(id => bindings.get(id)),
       });
+      memberships.set(state, [...ids]);
+      return result;
+    };
   let state = digest('compact seed'),
     current = await write(state, null);
   assert.equal(1 + (await physicalRuns(current.root.chunks)).length, 2);

@@ -2,6 +2,7 @@
 import { invariant } from './errors.js';
 const valid = (ok: unknown) =>
   invariant(ok, 'SOURCE_HASH_MISMATCH', 'Physical manifest encoding is invalid.');
+const hexBytes = Array.from({ length: 256 }, (_, byte) => byte.toString(16).padStart(2, '0'));
 const noncePattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 /** A physical identity is an exact immutable key, including maintenance upload nonces. */
 export function physicalKey(digest: string, nonce?: string): string {
@@ -10,13 +11,23 @@ export function physicalKey(digest: string, nonce?: string): string {
 }
 /** Shared bounded primitives for roots and digest buckets. No Node runtime is required. */
 export class PhysicalWriter {
-  private readonly bytes: number[];
+  private bytes = new Uint8Array(256);
+  private at = 0;
+  private reserve(size: number) {
+    if (this.at + size <= this.bytes.length) return;
+    const next = new Uint8Array(Math.max(this.bytes.length * 2, this.at + size));
+    next.set(this.bytes);
+    this.bytes = next;
+  }
   constructor(header: number[]) {
-    this.bytes = [...header];
+    this.bytes = new Uint8Array(Math.max(256, header.length));
+    this.bytes.set(header);
+    this.at = header.length;
   }
   byte(value: number) {
     valid(Number.isInteger(value) && value >= 0 && value <= 255);
-    this.bytes.push(value);
+    this.reserve(1);
+    this.bytes[this.at++] = value;
   }
   integer(value: number) {
     valid(Number.isSafeInteger(value) && value >= 0);
@@ -27,7 +38,12 @@ export class PhysicalWriter {
     } while (value);
   }
   private hex(value: string) {
-    for (let at = 0; at < value.length; at += 2) this.byte(Number.parseInt(value.slice(at, at + 2), 16));
+    this.reserve(value.length / 2);
+    for (let at = 0; at < value.length; at += 2) {
+      const high = value.charCodeAt(at),
+        low = value.charCodeAt(at + 1);
+      this.bytes[this.at++] = (high <= 57 ? high - 48 : high - 87) * 16 + (low <= 57 ? low - 48 : low - 87);
+    }
   }
   hash(id: string) {
     physicalKey(id);
@@ -39,7 +55,7 @@ export class PhysicalWriter {
     if (value !== undefined) this.hex(value.replaceAll('-', ''));
   }
   finish() {
-    return Uint8Array.from(this.bytes);
+    return this.bytes.slice(0, this.at);
   }
 }
 export class PhysicalReader {
@@ -68,7 +84,8 @@ export class PhysicalReader {
   private hex(size: number) {
     valid(this.remaining >= size);
     let id = '';
-    for (let index = 0; index < size; index++) id += this.byte().toString(16).padStart(2, '0');
+    const end = this.at + size;
+    while (this.at < end) id += hexBytes[this.bytes[this.at++]!]!;
     return id;
   }
   hash() {

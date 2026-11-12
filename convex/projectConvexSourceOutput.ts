@@ -16,6 +16,7 @@ export type SourceOutput = {
   stateSize?: StateSize;
   stateParents?: string[];
   statePhysical?: { sha256: string; size: number };
+  statePhysicalRebind?: boolean;
   storageId?: Id<'_storage'>;
   r2Key?: string;
   recipe?: { sha256: string; size: number };
@@ -175,13 +176,15 @@ export async function storeSourceOutputs(
       );
       invariant(
         !old?.statePhysical ||
+          pin.statePhysicalRebind ||
           (old.statePhysical.sha256 === pin.statePhysical.sha256 &&
             old.statePhysical.size === pin.statePhysical.size),
         'SOURCE_HASH_MISMATCH',
         'Immutable State physical manifest changed.',
       );
     }
-    // Written once from the hash-verified manifest, like the generation; never cleared.
+    // Source metadata stays immutable; only the trusted compose flag may replace
+    // the derived physical root with equivalent live buckets.
     const graph = {
       ...(closure === undefined ? {} : { recipeClosure: closure }),
       ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
@@ -217,6 +220,9 @@ export async function storeSourceOutputs(
       (old.stateGeneration === undefined && pin.stateGeneration !== undefined) ||
       (old.stateParents === undefined && pin.stateParents !== undefined) ||
       (old.statePhysical === undefined && pin.statePhysical !== undefined) ||
+      (pin.statePhysicalRebind &&
+        (old.statePhysical?.sha256 !== pin.statePhysical?.sha256 ||
+          old.statePhysical?.size !== pin.statePhysical?.size)) ||
       (old.stateSize === undefined && pin.stateSize !== undefined) ||
       (old.recipeClosure === undefined && pin.recipeClosure !== undefined)
     )

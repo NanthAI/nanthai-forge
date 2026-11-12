@@ -27,7 +27,8 @@ function fixture(count) {
   const objects = new Map(),
     reads = [],
     described = [],
-    puts = [];
+    puts = [],
+    memberships = new Map();
   const put = async bytes => {
     const pin = { sha256: digest(bytes), size: bytes.length };
     objects.set(pin.sha256, bytes);
@@ -53,8 +54,18 @@ function fixture(count) {
     put,
     read,
     describe,
-    write: (state, members, parent = null) =>
-      writePhysicalManifest({ state, members, parent, describe, put }),
+    write: async (state, members, parent = null) => {
+      const result = await writePhysicalManifest({
+        state,
+        members,
+        parent,
+        parentMembers: parent ? memberships.get(parent.root.state) : undefined,
+        describe,
+        put,
+      });
+      memberships.set(state, [...members]);
+      return result;
+    },
   };
 }
 test('29k physical writer shares unchanged chunks: eight replacements stay within 150 KB, four PUTs and eight descriptor reads', async t => {
@@ -153,4 +164,65 @@ test('legacy or unavailable bindings do not publish a partial manifest; changed 
     }),
     error => error.code === 'SOURCE_HASH_MISMATCH',
   );
+});
+
+test('an FPR1 parent extends deterministically from verified membership, drops fingerprints and skips when membership is unavailable', async () => {
+  const { encodePhysicalRoot } = await import('../dist/physical-manifest-root.js');
+  const f = fixture(1500),
+    ids = [...f.bindings.keys()],
+    state = digest('legacy State'),
+    seed = await f.write(state, ids);
+  const root = {
+    ...seed.root,
+    chunks: seed.root.chunks.map(chunk => ({
+      ...chunk,
+      members: digest(
+        ids
+          .filter(id => physicalBucket(id) === chunk.bucket)
+          .sort()
+          .join(''),
+      ),
+    })),
+  };
+  const pin = await f.put(encodePhysicalRoot(root));
+  assert.equal(f.objects.get(pin.sha256)[3], 1);
+  const parent = await PhysicalManifestReader.open(state, pin, f.read);
+  f.puts.length = 0;
+  const missing = await writePhysicalManifest({
+    state: digest('next'),
+    members: ids,
+    parent,
+    describe: f.describe,
+    put: f.put,
+  });
+  assert.equal(missing, null, 'an absent fingerprint never causes a whole-manifest scan');
+  assert.equal(f.puts.length, 0);
+  const next = await f.write(digest('next'), ids, parent);
+  assert.equal(next.changedChunks, 0);
+  assert.equal(f.puts.length, 1);
+  assert(next.root.chunks.every(chunk => chunk.members === undefined));
+  const replay = await f.write(digest('next'), [...ids].reverse(), parent);
+  assert.deepEqual(replay.pin, next.pin, 'order and retry do not change bytes');
+});
+
+test('replacing every bucket member reads no parent chunks and resolves only the new bindings', async () => {
+  const f = fixture(1500),
+    before = [...f.bindings.keys()],
+    seeded = await f.write(digest('old tree'), before),
+    parent = await PhysicalManifestReader.open(digest('old tree'), seeded.pin, f.read),
+    next = before.map((_id, index) => {
+      const sha256 = digest(`new complete tree ${index}`);
+      f.bindings.set(sha256, { sha256, size: 3 });
+      return sha256;
+    });
+  f.reads.length = 0;
+  f.described.length = 0;
+  const result = await f.write(digest('new tree'), next, parent);
+  assert(result);
+  assert.equal(f.reads.length, 0, 'verified membership proves no parent binding survives');
+  assert.deepEqual([...f.described].sort(), [...next].sort());
+  const reader = await PhysicalManifestReader.open(result.root.state, result.pin, f.read),
+    members = [];
+  for await (const entry of reader.all(false)) members.push(entry.sha256);
+  assert.deepEqual(members.sort(), [...next].sort());
 });

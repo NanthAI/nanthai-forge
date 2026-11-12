@@ -20,7 +20,7 @@ import { r2Key, presignGet, r2Config } from './r2';
 import { r2Counts } from './presign';
 import { ForgeError, invariant } from '../src/errors';
 import { parseNativeState, type NativeFile } from '../src/state/format';
-import { sourcePhysicalManifests } from './projectConvexPhysicalManifest';
+import { sourcePhysicalManifests, physicalSourceBinding } from './projectConvexPhysicalManifest';
 import { nextStateGeneration, validStateGeneration, validStateParents } from '../src/state/generation';
 import { SourceIoError, transientSourceStatus } from '../src/hosted-source-io-error';
 import { retryR2Lag } from '../src/hosted-r2-retry';
@@ -252,10 +252,11 @@ export function convexSourceTransport(
   };
   const manifestReader = (row: ObjectLocation) => {
     const id = row.descriptor.object.sha256;
-    let reader = manifests.get(id);
+    const cacheKey = `${id}:${row.statePhysical?.sha256}`;
+    let reader = manifests.get(cacheKey);
     if (!reader) {
       reader = PhysicalManifestReader.open(id, row.statePhysical!, readManifest);
-      manifests.set(id, reader);
+      manifests.set(cacheKey, reader);
     }
     return reader;
   };
@@ -265,8 +266,9 @@ export function convexSourceTransport(
     projectId,
     locations,
     outputs,
-    key: id => generatedKeys.get(id)?.split('/').at(-1),
+    key: id => generatedKeys.get(id),
     reader: manifestReader,
+    members: id => outputFiles.get(id)?.map(file => file.blob),
     log: reportBindings,
     put: async bytes => {
       const pin = { sha256: hash(bytes), size: bytes.length };
@@ -281,21 +283,7 @@ export function convexSourceTransport(
     describe: async (ids, seed) => {
       if (!seed) {
         await io.describeBatch!(ids);
-        return ids.map(id => {
-          const row = locations.get(id)!;
-          if (row.descriptor.recipe) return { ...row.descriptor.object, recipe: row.descriptor.recipe };
-          const key =
-            generatedKeys.get(id)?.split('/').at(-1) ??
-            (row.url ? new URL(row.url).pathname.split('/').at(-1) : undefined);
-          return key && /^[a-f0-9]{64}$/.test(key)
-            ? {
-                ...row.descriptor.object,
-                ...(row.range
-                  ? { pack: { digest: key, size: row.range.total, offset: row.range.offset } }
-                  : {}),
-              }
-            : null;
-        });
+        return ids.map(id => physicalSourceBinding(projectId, locations.get(id)!, generatedKeys.get(id)));
       }
       const found: (PhysicalEntry | null)[] = [];
       for (let at = 0; at < ids.length; at += 2700)
@@ -316,6 +304,7 @@ export function convexSourceTransport(
     },
   });
   const io: StepTransport = {
+    ...(physical.composePhysicalState ? { composePhysicalState: physical.composePhysicalState } : {}),
     hasPhysicalState: id => !!locations.get(id)?.statePhysical,
     ...(physical.seedPhysicalState ? { seedPhysicalState: physical.seedPhysicalState } : {}),
     ...(physical.writePhysicalState ? { writePhysicalState: physical.writePhysicalState } : {}),
@@ -328,7 +317,8 @@ export function convexSourceTransport(
       if (row) checkSize(row.descriptor.object);
     },
     checkStateSize: checkSize,
-    rememberLoadedState: (pin, fileCount) => {
+    rememberLoadedState: (pin, fileCount, files) => {
+      if (physicalManifests && files) outputFiles.set(pin.sha256, files);
       if (!locations.get(pin.sha256)?.stateSize && !outputSizes.has(pin.sha256))
         observedStates.set(pin.sha256, { ...pin, fileCount, manifestBytes: pin.size });
     },
