@@ -175,7 +175,10 @@ export const apply = mutation({
         sourceAuthority: prepared.plan.authority,
         sourceCutover: { minimumCliVersion: CUTOVER_CLI_VERSION, at: receipt.at },
       });
-      await ctx.db.patch(prepared.channel._id, { selection: canonicalPayload(prepared.plan.main) });
+      const main = hostedMainV2Schema.parse(JSON.parse(prepared.channel.selection));
+      await ctx.db.patch(prepared.channel._id, {
+        selection: canonicalPayload({ ...main, authority: prepared.plan.authority }),
+      });
       await ctx.db.insert('projectSourceCutovers', {
         projectId: input.projectId,
         operationId: prepared.request.operationId,

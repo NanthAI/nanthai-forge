@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import { physicalProject, physicalObjectRow } from './convex-physical-manifest-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { PhysicalManifestReader } from '../dist/physical-manifest.js';
@@ -98,5 +99,108 @@ test('fast-forward compose excludes every metadata pack containing a removed Lan
     reachable.length,
     0,
     'compose must extend main metadata; no pack containing a removed Lane-only digest is reachable',
+  );
+});
+
+test('every Candidate/main publisher proves composed source, a rootless seed, or an unchanged authoritative head', async t => {
+  const { publicationInventory } = await import('./physical-manifest-publication-guard.mjs');
+  const report = publicationInventory(fileURLToPath(new URL('../', import.meta.url)));
+  assert.deepEqual(report.findings, []);
+  assert(report.inventory.length > 0);
+  t.diagnostic(JSON.stringify(report.inventory));
+});
+
+test('publisher inventory rejects new direct, aliased, generic and unproven Candidate writes without a name allowlist', async () => {
+  const { publicationInventory } = await import('./physical-manifest-publication-guard.mjs');
+  const report = publicationInventory(fileURLToPath(new URL('../', import.meta.url)), {
+    'convex/publicationProbe.ts': `
+      import type { MutationCtx, Id } from './_generated/server';
+      import { internalMutation } from './server';
+      import { v } from 'convex/values';
+      import { writeHostedRecord as persist } from './projectHostedRecords';
+      import { assertRootlessSeed as checkedSeed } from './projectHostedChannels';
+      import { canonicalPayload as encode } from '../src/hosted-source-operation';
+      import { hostedMainV2Schema } from '../src/hosted-main';
+      import type { z } from 'zod';
+      type Main = z.infer<typeof hostedMainV2Schema>;
+      export async function direct(ctx: MutationCtx, projectId: Id<'hostedProjects'>, main: Main) {
+        await ctx.db.insert('projectHostedChannels', { projectId, operationId: 'synthetic', name: 'main', selection: encode(main) });
+      }
+      export async function aliased(ctx: MutationCtx, value: any) {
+        const insert = ctx.db['insert'];
+        await insert('projectHostedChannels', value);
+      }
+      export async function generic(ctx: MutationCtx, table: any, value: any) {
+        await ctx.db.insert(table, { ...value });
+      }
+      export async function forwarding(ctx: MutationCtx, table: any, value: any) {
+        await ctx.db.insert(table, value);
+      }
+      export async function computed(ctx: MutationCtx, method: any, args: any[]) {
+        await ctx.db[method](...args);
+      }
+      export async function replacement(ctx: MutationCtx, id: Id<'projectHostedRecords'>, value: any) {
+        await ctx.db.replace(id, value);
+      }
+      export async function patching(ctx: MutationCtx, id: Id<'projectHostedRecords'>, value: any) {
+        await ctx.db.patch(id, { digest: value.digest, bodyId: value.bodyId });
+      }
+      export function changedForwarder(ctx: MutationCtx) {
+        return new Proxy(ctx.db, { get(_db, method) {
+          if (method === 'insert') return async (table: any, value: any) => {
+            let selected = value;
+            selected = { ...value, selection: 'changed source' };
+            return ctx.db.insert(table, selected);
+          };
+        }});
+      }
+      export async function arbitrary(ctx: MutationCtx, projectId: Id<'hostedProjects'>, record: unknown) {
+        await persist(ctx, { projectId, actor: 'owner', authorityEpoch: 1, expectedVersion: null, record });
+      }
+      export async function wrongPin(ctx: MutationCtx, projectId: Id<'hostedProjects'>, main: Main) {
+        await checkedSeed(ctx, projectId, 'b'.repeat(64));
+        await ctx.db.insert('projectHostedChannels', { projectId, operationId: 'synthetic', name: 'main', selection: encode(main) });
+      }
+      export async function conditional(ctx: MutationCtx, projectId: Id<'hostedProjects'>, main: Main) {
+        if (false) { await checkedSeed(ctx, projectId, main.head); }
+        await ctx.db.insert('projectHostedChannels', { projectId, operationId: 'synthetic', name: 'main', selection: encode(main) });
+      }
+      async function exposed(ctx: MutationCtx, input: { record: any }) {
+        await ctx.db.insert('projectHostedRecords', input.record); return null;
+      }
+      export const exposedMutation = internalMutation({ args: { record: v.any() }, returns: v.null(), handler: exposed });
+      export const raw = internalMutation({ args: { row: v.any() }, returns: v.null(), handler: async (ctx, { row }) => {
+        await ctx.db.insert('projectHostedRecords', row); return null;
+      }});
+    `,
+  });
+  const bad = report.findings.filter(item => item.file === 'convex/publicationProbe.ts');
+  assert(
+    bad.some(item => item.kind === 'dynamic-record-entry'),
+    'a generic writer registered by function reference must fail',
+  );
+  for (const name of [
+    'direct',
+    'aliased',
+    'generic',
+    'forwarding',
+    'computed',
+    'replacement',
+    'patching',
+    'arbitrary',
+    'wrongPin',
+    'conditional',
+  ])
+    assert(
+      bad.some(item => item.function === name),
+      `${name} bypass must fail`,
+    );
+  assert(
+    bad.some(item => item.line > 0 && item.kind === 'main-insert' && item.function === '<handler>'),
+    'a changed DB forwarder must fail',
+  );
+  assert(
+    bad.some(item => item.kind === 'dynamic-record-sink'),
+    'registered raw record sink must fail',
   );
 });

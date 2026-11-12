@@ -233,6 +233,12 @@ resolver call. Invalid roots are rebuilt from main; other storage errors fail th
 step for ordinary retry. Adopted raw and packed nonce States retain the exact
 verified object key when compose adds or repairs a root; the commit validates and
 protects that same whole carrier pack instead of reconstructing a canonical key.
+A compiler-based publication inventory follows Candidate and Channel writes,
+including record dispatch, DB wrappers and renamed imports. Seeds check the exact
+selected head has no working physical root. Work metadata copies cannot create
+Candidates; authority cutover preserves the selected Channel's source and changes
+only its authority pin. These checks add no RPC or idle work; a seed checks its
+head through the existing indexed object lookup in its publication mutation.
 A whole plan above 64 grants takes the named catalog fallback. Content grants
 remain exact. Root encoding alone does not bound metadata key fragmentation;
 descriptor retirement remains pending.

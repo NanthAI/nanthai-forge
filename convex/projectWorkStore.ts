@@ -191,6 +191,7 @@ async function insertVersion(
   migrationDigests = true,
 ) {
   const { record, ref, value } = encoded;
+  invariant(record.kind !== 'candidate', 'BAD_ARGUMENT', 'Work metadata copies cannot publish a Candidate.');
   const indexed = { ...hostedRecordIndex(record), version: record.version },
     identity = { projectId, kind: record.kind, key: record.id };
   const bodyId = await ctx.db.insert(

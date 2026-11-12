@@ -5,7 +5,7 @@ import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { mutation } from './cliServer';
 import { activeOwnedProject } from './projectAuthority';
-import { channelRow } from './projectHostedChannels';
+import { channelRow, assertRootlessSeed } from './projectHostedChannels';
 import { requireHostedOwnerDrained } from './projectSourceAuthorityDrain';
 import { nextSourceAuthority, requireSourceAuthority, sourceAuthority } from '../src/hosted-source-authority';
 import { hostedMainV2Schema } from '../src/hosted-main';
@@ -51,6 +51,7 @@ export async function selectBornMain(ctx: MutationCtx, project: Doc<'hostedProje
     receipt: { id: `bootstrap:${input.head}`, kind: 'native', previousHead: null, previousReceiptId: null },
     seed: { backupId: input.backupId, generationId: input.generationId },
   });
+  await assertRootlessSeed(ctx, project._id, main.head);
   await ctx.db.insert('projectHostedChannels', {
     projectId: project._id,
     operationId: input.operationId,

@@ -199,3 +199,52 @@ test('transition reports indexed nonterminal owner entries and batches without r
   s.patch('projectWorkRecords', batch, { status: 'completed' });
   assert.deepEqual(await s.transition(), server);
 });
+
+test('a bootstrap seed refuses a retained working physical root without selecting main', async t => {
+  const s = setup();
+  await s.transition();
+  const head = 'a'.repeat(64);
+  const id = s.insert('projectObjects', {
+    projectId: s.projectId,
+    digest: head,
+    size: 1,
+    nonce: randomUUID(),
+    removed: false,
+    location: 'r2',
+    r2Committed: true,
+    r2Key: `v1/p/${s.projectId}/o/${head}`,
+    statePhysical: { sha256: 'b'.repeat(64), size: 1 },
+  });
+  const selection = {
+    schema: 2,
+    projectId: s.projectId,
+    snapshotId: randomUUID(),
+    sourceRevision: 0,
+    channel: 'main',
+    head,
+    authority: server,
+    receipt: { id: 'main-0', kind: 'server', previousHead: null, previousReceiptId: null },
+  };
+  const input = {
+    projectId: s.projectId,
+    actor: 'owner',
+    operationId: randomUUID(),
+    selection: JSON.stringify(selection),
+  };
+  await assert.rejects(s.call('seed-working-root', channels.seed, input), code('SOURCE_HASH_MISMATCH'));
+  assert.equal(s.tables.projectHostedChannels.size, 0);
+  s.patch('projectObjects', id, { statePhysical: undefined });
+  await s.call('seed-rootless', channels.seed, input);
+  const count = s.counts.findLast(item => item.name === 'seed-rootless');
+  t.diagnostic(
+    JSON.stringify({
+      seed: 'rootless',
+      calls: 1,
+      documents: count.documents,
+      readBytes: count.readBytes,
+      writes: count.writes,
+      writeBytes: count.writeBytes,
+    }),
+  );
+  assert.equal(s.tables.projectHostedChannels.size, 1);
+});

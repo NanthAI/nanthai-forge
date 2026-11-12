@@ -6,7 +6,7 @@ import { mutation, internalMutation, internalQuery } from './cliServer';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { activeOwnedProject } from './projectAuthority';
-import { channelRow } from './projectHostedChannels';
+import { channelRow, assertRootlessSeed } from './projectHostedChannels';
 import { isStored } from './projectObjectFields';
 import { nextSourceAuthority, requireSourceAuthority, sourceAuthority } from '../src/hosted-source-authority';
 import { CUTOVER_CLI_VERSION } from '../src/cutover-version';
@@ -352,6 +352,7 @@ export const commit = internalMutation({
         'SOURCE_HASH_MISMATCH',
         'Hosted main must match native main exactly.',
       );
+      await assertRootlessSeed(ctx, input.projectId, selected.head);
       await ctx.db.insert('projectHostedChannels', {
         projectId: input.projectId,
         operationId: input.operationId,

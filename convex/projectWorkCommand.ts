@@ -8,6 +8,7 @@ import { mutation, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { hostedWorkEventDocument } from './schema';
 import { metadataCommandSchema } from '../src/work-intent-types';
+import { hostedRecordSchema } from '../src/hosted-records';
 import { metadataRequest, validateMetadataSource } from '../src/work-metadata';
 import { invariant } from '../src/errors';
 import { report } from './errors';
@@ -88,7 +89,7 @@ export async function executeCommand(
       key: command.intentId,
     });
     invariant(row, 'NOT_FOUND', 'The recovery Intent is unavailable.');
-    const intent = JSON.parse(row.value);
+    const intent = hostedRecordSchema.options[0].parse(JSON.parse(row.value));
     await writeHostedRecord(ctx, {
       projectId: input.projectId,
       actor: user.subject,

@@ -12,6 +12,7 @@ import {
 } from '../dist/hosted-source-operation.js';
 import {
   hostedRecordRef,
+  hostedRecordValue,
   hostedRecordIndex,
   hostedSnapshotPages,
   recordRefOrder,
@@ -590,4 +591,16 @@ test('snapshot references cannot cross projects or substitute a different seed/r
     s.call('changed-seed', snapshots.begin, changedSeed.input),
     code('WORK_OPERATION_CHANGED'),
   );
+});
+
+test('generic Work metadata copies cannot publish a clean Candidate outside compose', async () => {
+  const s = await setup(),
+    { storeVersion } = await import(moduleUrl('../convex/projectWorkStore.ts'));
+  await assert.rejects(
+    s.run('copy Candidate refusal', () =>
+      storeVersion(s.ctx, s.auth.projectId, hostedRecordValue(candidate()), null),
+    ),
+    code('BAD_ARGUMENT'),
+  );
+  assert.equal([...s.tables.projectHostedRecords.values()].filter(row => row.kind === 'candidate').length, 0);
 });

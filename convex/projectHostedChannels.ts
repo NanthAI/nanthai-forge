@@ -11,6 +11,7 @@ import { hostedMainV2Schema } from '../src/hosted-main';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { beginHostedOperation, finishHostedOperation } from './projectHostedOperations';
 import { invariant } from '../src/errors';
+import { findObject } from './projectObjectFind';
 
 export const channelRow = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) =>
   ctx.db
@@ -29,6 +30,12 @@ export async function hostedStartMain(ctx: QueryCtx | MutationCtx, projectId: Id
     'Hosted main belongs to another project.',
   );
   return selected;
+}
+
+/** Seeds have no compose lineage. A retained working root is never a seed proof. */
+export async function assertRootlessSeed(ctx: MutationCtx, projectId: Id<'hostedProjects'>, head: string) {
+  const object = await findObject(ctx, projectId, head);
+  invariant(!object?.statePhysical, 'SOURCE_HASH_MISMATCH', 'A source seed must have no physical root.');
 }
 
 /** Trusted cutover/bootstrap boundary only. Its caller supplies already validated
@@ -94,13 +101,15 @@ export const seed = internalMutation({
       'CHANNEL_CHANGED',
       'Main is already seeded; retain its current receipt.',
     );
-    if (!old)
+    if (!old) {
+      await assertRootlessSeed(ctx, input.projectId, selected.head);
       await ctx.db.insert('projectHostedChannels', {
         projectId: input.projectId,
         operationId: input.operationId,
         name: 'main',
         selection,
       });
+    }
     const first = prepared.operation.firstAttempt;
     await finishHostedOperation(ctx, {
       projectId: input.projectId,
