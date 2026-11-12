@@ -290,8 +290,10 @@ Original-ID commit and reconciliation use their complete receipt after checking
 current project access. Completed projects do not read a predecessor catalog row
 for a point miss. The 402/1,387 packed fixtures preserve their original
 48,542/48,919 B dense-row baselines and enforce under 1 KB for stored, absent and
-original-ID retry lookups. These are serialized whole-document fixture reads;
-billed usage and live deployment qualification remain open.
+original-ID retry lookups. Query-count guards also include empty primary and point probes: these spend the
+provider's execution budget even when no document is returned. The byte numbers
+are serialized whole-document fixture reads; billed usage and live deployment
+qualification remain separate.
 
 Whole physical keys remain protected after descriptor retirement. Raw and metadata
 carriers resolve through the existing digest index. Member packs retain one
