@@ -8,7 +8,8 @@ import { objectDocument, isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { r2Config, r2Key, presignPut, type R2Config } from './r2';
-import { findObject, objectRow } from './projectObjectFind';
+import { pointObject } from './projectObjectPointBinding';
+import { findObject, findStoredObject, objectRow } from './projectObjectFind';
 import { chargeStorage, checkObjectSize } from './abuseLimits';
 import { preparePack, uploadPackProposal } from './projectObjectPacks';
 import type { UploadPackProposal } from '../src/object-pack-upload';
@@ -255,8 +256,26 @@ export const reconcile = mutation({
   returns: v.object({ stored: v.boolean(), isDone: v.boolean(), cursor: v.string() }),
   handler: async (ctx, { id }) => {
     try {
-      const user = await ctx.auth.getUserIdentity(),
-        row = await ctx.db.get(id);
+      const user = await ctx.auth.getUserIdentity();
+      let row: import('./projectObjectFind').ObjectView | null = await ctx.db.get(id);
+      if (!row && user) {
+        const receipt = await ctx.db
+          .query('projectObjectReceipts')
+          .withIndex('by_key', q => q.eq('key', id))
+          .unique();
+        if (receipt) {
+          await activeProject(ctx, receipt.projectId, user.subject);
+          row = receipt.sourceBinding
+            ? pointObject(receipt, receipt.projectId, receipt.value)
+            : await findStoredObject(ctx, receipt.projectId, receipt.value);
+          invariant(
+            row && (receipt.size === undefined || row.size === receipt.size),
+            'PROJECT_UNAVAILABLE',
+            'This original upload is unavailable.',
+          );
+          return { stored: isStored(row), isDone: true, cursor: '' };
+        }
+      }
       invariant(user && row, 'PROJECT_UNAVAILABLE', 'This original upload is unavailable.');
       await activeProject(ctx, row.projectId, user.subject);
       if (isStored(row)) return { stored: true, isDone: true, cursor: '' };
@@ -285,7 +304,7 @@ export const resolve = internalQuery({
       );
       const rows = [];
       for (const digest of digests) {
-        const row = await findObject(ctx, projectId, digest);
+        const row = await findStoredObject(ctx, projectId, digest);
         invariant(
           row && isStored(row) && !row.removed,
           'INVALID_WORK_BACKUP',

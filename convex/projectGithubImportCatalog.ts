@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { retainCatalogFallback } from './projectObjectPointStore';
 import { v } from 'convex/values';
 import { internalMutation, internalQuery, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -138,6 +139,7 @@ export const publish = internalMutation({
       'IMPORT_PAGE_CHANGED',
       'Publish the catalog of the current archive import in bounded pages.',
     );
+    if (input.pages.length) await retainCatalogFallback(ctx, job.projectId);
     for (const page of input.pages) {
       const count = page.sizes.length;
       invariant(

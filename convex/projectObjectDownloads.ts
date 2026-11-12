@@ -15,7 +15,7 @@ import { r2Config, presignGet, r2ObjectKey } from './r2';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { hostedDownloadPageSize, type HostedDownloadDescriptor } from '../src/hosted-download-page';
-import { findObject, findObjects } from './projectObjectFind';
+import { findStoredObject as findObject, findStoredObjects as findObjects } from './projectObjectFind';
 import { chargeAnonymousRead } from './abuseLimits';
 import { packRange, packHeaders, type ObjectPack } from '../src/object-pack-range';
 import { signRecipeClosure } from './projectRecipeClosure';

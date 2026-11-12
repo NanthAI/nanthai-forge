@@ -19,6 +19,8 @@ export const physicalArchiveEntrySchema = z
     state: pin,
     root: pin,
     objects: z.array(physicalArchiveObjectSchema),
+    unavailable: z.enum(['SOURCE_UNAVAILABLE', 'SOURCE_HASH_MISMATCH']).optional(),
+    rootRetained: z.literal(true).optional(),
   })
   .strict()
   .refine(

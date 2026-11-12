@@ -6,7 +6,7 @@ import type { Id } from './_generated/dataModel';
 import { sessionArgs, actionsSession } from './projectHostedActionsSession';
 import { scopedRecheckBase, scopedRecheckPairs } from '../src/scoped-recheck-policy';
 import { selectedSourcePacks } from './projectSourcePackStore';
-import { findObject } from './projectObjectFind';
+import { findStoredObject as findObject } from './projectObjectFind';
 import { isStored } from './projectObjectFields';
 import { readableProject, describeObjects } from './projectObjectDownloads';
 import { blobStore } from './blobStore';

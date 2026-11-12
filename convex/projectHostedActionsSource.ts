@@ -10,7 +10,7 @@ import { presignGet, r2Config } from './r2';
 import { blobStore } from './blobStore';
 import { directSourceWindow, directSourceBatch } from '../src/hosted-actions-direct';
 import { invariant } from '../src/errors';
-import { findObjects } from './projectObjectFind';
+import { findStoredObjects as findObjects } from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
 import { signRecipeClosure } from './projectRecipeClosure';
 import { signRuns, type RunBinding } from './projectObjectRuns';

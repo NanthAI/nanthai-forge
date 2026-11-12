@@ -8,7 +8,8 @@ import { r2Config, headObject, checksumOf, presignGet, type HeadResult } from '.
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { bindPackMembers } from './projectObjectPacks';
-import { findObject } from './projectObjectFind';
+import { pointObject } from './projectObjectPointBinding';
+import { findStoredObject } from './projectObjectFind';
 import { readExactObject } from './projectR2ExactRead';
 import { uploadPackMismatch } from '../src/object-pack-upload';
 import { mapExchange } from '../src/exchange-parallel';
@@ -38,7 +39,9 @@ export const pendingRows = internalQuery({
             .unique();
           invariant(receipt, 'PROJECT_UNAVAILABLE', 'This original upload is unavailable.');
           await activeProject(ctx, receipt.projectId, actor);
-          const stored = await findObject(ctx, receipt.projectId, receipt.value);
+          const stored = receipt.sourceBinding
+            ? pointObject(receipt, receipt.projectId, receipt.value)
+            : await findStoredObject(ctx, receipt.projectId, receipt.value);
           invariant(
             stored &&
               !stored.removed &&

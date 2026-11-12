@@ -12,7 +12,7 @@ import { hostedOperationRow } from './projectHostedOperations';
 import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
 import { hostedSaveStatuses } from '../src/hosted-save-state';
-import { findObject, type ObjectView } from './projectObjectFind';
+import { findStoredObject, type ObjectView } from './projectObjectFind';
 import { sourceServerTimingSchema } from './projectSourceStepTiming';
 
 export const saveStateSchema = z
@@ -100,7 +100,8 @@ export async function saveObjects(
   let fence: string | undefined;
   for (const pin of pins) {
     let row = rows.get(pin.sha256);
-    if (!row) row = (await findObject(ctx, projectId, pin.sha256)) ?? undefined;
+    if (!row || (!row.removed && !isStored(row)))
+      row = (await findStoredObject(ctx, projectId, pin.sha256)) ?? undefined;
     invariant(
       row && !row.removed && isStored(row) && (pin.size === undefined || row.size === pin.size),
       'SOURCE_UNAVAILABLE',

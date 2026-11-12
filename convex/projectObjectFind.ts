@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+import { isStored } from './projectObjectFields';
 import type { StateSize } from '../src/state/size';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { r2Key } from './r2';
-import { findPointObjects, clearPointObjectCache } from './projectObjectPoints';
+import { findPointObjects, clearPointObjectCache, pointMode } from './projectObjectPoints';
 import type { ObjectPack } from '../src/object-pack-range';
 
 /** Objects per catalog row (~19 KB): a lookup reads one small document. */
@@ -93,10 +94,7 @@ export async function findObject(
     .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', digest))
     .unique();
   if (row || !digestPattern.test(digest)) return row;
-  const point = (await findPointObjects(ctx, projectId, [digest])).get(digest);
-  if (point) return point;
-  const found = await page(ctx, projectId, digest);
-  return found && entry(found, digest);
+  return (await findSourceObjects(ctx, projectId, [digest])).get(digest) ?? null;
 }
 /** findObject for a page: per-object rows are read concurrently (one point read per
  * distinct digest), then catalog misses resolve in sorted order through the request
@@ -117,35 +115,63 @@ export async function findObjects(
   );
   const found = new Map<string, ObjectView | null>(unique.map((digest, i) => [digest, rows[i] ?? null]));
   const missing = unique.filter(digest => !found.get(digest) && digestPattern.test(digest));
-  for (const [digest, point] of await findPointObjects(ctx, projectId, missing)) found.set(digest, point);
-  for (const digest of missing.filter(digest => !found.get(digest)).sort()) {
-    const row = await page(ctx, projectId, digest);
-    found.set(digest, row && entry(row, digest));
-  }
+  for (const [digest, object] of await findSourceObjects(ctx, projectId, missing)) found.set(digest, object);
   return digests.map(digest => found.get(digest) ?? null);
+}
+/** Immutable authority behind mutable/pending rows. Retry receipts and cleanup
+ * can consult the original stored binding without replacing current row authority. */
+export async function findSourceObjects(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  digests: readonly string[],
+) {
+  const unique = [...new Set(digests)].filter(digest => digestPattern.test(digest));
+  const found = await findPointObjects(ctx, projectId, unique);
+  if (!unique.length || (await pointMode(ctx, projectId)) === 2) return found;
+  for (const digest of unique.filter(digest => !found.has(digest)).sort()) {
+    const row = await page(ctx, projectId, digest),
+      object = row && entry(row, digest);
+    if (object) found.set(digest, object);
+  }
+  return found;
+}
+/** Content reads may use an already committed immutable binding while another
+ * raw/pack upload of that hash is still pending. Upload preparation/commit keep
+ * the primary row and original ID; trusted State metadata stays on that row. */
+export async function findStoredObjects(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  digests: readonly string[],
+) {
+  const rows = await findObjects(ctx, projectId, digests);
+  const pending = rows.flatMap(row => (row && !row.removed && !isStored(row) ? [row.digest] : []));
+  if (!pending.length) return rows;
+  const fallback = await findSourceObjects(ctx, projectId, pending);
+  return rows.map(row => {
+    if (!row || row.removed || isStored(row)) return row;
+    const stored = fallback.get(row.digest);
+    if (!stored || stored.size !== row.size) return row;
+    return {
+      ...stored,
+      ...(row.stateGeneration === undefined ? {} : { stateGeneration: row.stateGeneration }),
+      ...(row.stateSize === undefined ? {} : { stateSize: row.stateSize }),
+      ...(row.stateParents === undefined ? {} : { stateParents: row.stateParents }),
+      ...(row.statePhysical === undefined ? {} : { statePhysical: row.statePhysical }),
+      ...(row.recipeClosure === undefined ? {} : { recipeClosure: row.recipeClosure }),
+    };
+  });
+}
+export async function findStoredObject(ctx: QueryCtx, projectId: Id<'hostedProjects'>, digest: string) {
+  return (await findStoredObjects(ctx, projectId, [digest]))[0] ?? null;
 }
 /** Writers that must return or patch a row id: a catalog entry is copied into an
  * equivalent stored row (rare: catalog objects are already stored). */
 export async function objectRow(ctx: MutationCtx, object: ObjectView): Promise<Doc<'projectObjects'>> {
   if (object._id !== undefined) return object;
-  const id = await ctx.db.insert('projectObjects', {
-    projectId: object.projectId,
-    digest: object.digest,
-    size: object.size,
-    nonce: crypto.randomUUID(),
-    ...(object.stateGeneration === undefined ? {} : { stateGeneration: object.stateGeneration }),
-    ...(object.stateSize === undefined ? {} : { stateSize: object.stateSize }),
-    removed: false,
-    sourceReferenced: true,
-    ...(object.recipe
-      ? { recipe: object.recipe }
-      : {
-          location: 'r2' as const,
-          r2Key: object.r2Key,
-          r2Committed: true,
-          ...(object.pack ? { pack: object.pack } : {}),
-        }),
-  });
+  const fields = { ...object };
+  delete fields._id;
+  delete fields._creationTime;
+  const id = await ctx.db.insert('projectObjects', { ...fields, nonce: object.nonce || crypto.randomUUID() });
   return (await ctx.db.get(id))!;
 }
 type CatalogPageEntry = {

@@ -227,51 +227,60 @@ test('slim points preserve nonce downloads, upload dedup and original upload-id 
   );
 });
 
-test('a qualified rootless State resolves every member through complete slim points with no dense catalog', async t => {
-  const { physicalStateSourceFixture } = await import('./physical-state-source-fixture.mjs');
-  const { expandSourceGrants } = await import('../dist/source-grant-wire.js');
-  const api = await import(moduleUrl('../convex/projectStateSourceApi.ts'));
-  const { readSignedPhysical } = await import(moduleUrl('../convex/projectStateSourceReader.ts'));
-  const f = await physicalStateSourceFixture(t, 1001);
-  f.s.patch('hostedProjects', f.s.projectId, { sourceManifestVersion: 2 });
-  const stateRow = [...f.s.tables.projectObjects.values()].find(row => row.digest === f.s.state.sha256);
-  f.s.patch('projectObjects', stateRow._id, { statePhysical: undefined, stateGeneration: 1 });
-  f.s.insert('projectObjectReceipts', {
-    projectId: f.s.projectId,
-    key: `source-points:${f.s.projectId}`,
-    value: '1',
+for (const fault of ['missing', 'fragmented', 'corrupt'])
+  test(`Done-when6: ${fault} roots keep exact-State complete fallback after real dense retirement`, async t => {
+    const { physicalStateSourceFixture } = await import('./physical-state-source-fixture.mjs');
+    const { expandSourceGrants } = await import('../dist/source-grant-wire.js');
+    const api = await import(moduleUrl('../convex/projectStateSourceApi.ts'));
+    const compact = await import(moduleUrl('../convex/projectObjectCatalogCompact.ts'));
+    const { readSignedPhysical } = await import(moduleUrl('../convex/projectStateSourceReader.ts'));
+    const f = await physicalStateSourceFixture(t, 1001, { fragmented: fault === 'fragmented' });
+    f.s.patch('hostedProjects', f.s.projectId, { sourceManifestVersion: 2 });
+    const stateRow = [...f.s.tables.projectObjects.values()].find(row => row.digest === f.s.state.sha256);
+    if (fault === 'missing')
+      f.s.patch('projectObjects', stateRow._id, { statePhysical: undefined, stateGeneration: 1 });
+    if (fault === 'corrupt')
+      f.r2.objects.set(
+        `/synthetic/v1/p/${f.s.projectId}/o/${stateRow.statePhysical.sha256}`,
+        Buffer.from('corrupt metadata'),
+      );
+    let after = null,
+      result;
+    do {
+      result = JSON.parse(
+        await f.s.transaction('retire fallback bindings', compact.step, {
+          projectId: f.s.projectId,
+          actor: 'owner',
+          operationId: `fallback-${fault}`,
+          points: true,
+          after,
+        }),
+      );
+      after = result.after;
+    } while (!result.done);
+    assert.equal(f.s.tables.projectObjectCatalog.size, 0);
+    const request = { projectId: f.s.projectId, state: f.s.state.sha256, version: 2, digests: [], all: true };
+    const reply = expandSourceGrants(JSON.parse(await api.read._handler(f.ctx, request)));
+    assert.equal(reply.mode, 'catalog');
+    assert.equal(reply.rows.length, f.entries.length);
+    const expected = new Map(f.entries.map(entry => [entry.sha256, entry]));
+    for (const row of reply.rows) {
+      const pin = expected.get(row.digest);
+      assert(pin, 'every binding belongs to the selected State');
+      await readSignedPhysical(pin, row.url);
+      expected.delete(row.digest);
+    }
+    assert.equal(expected.size, 0, 'every hash/size-verified member survives retirement');
+    const first = f.entries[0],
+      point = [...f.s.tables.projectObjectReceipts.values()].find(
+        row => row.key === `source-point:${f.s.projectId}:${first.sha256}`,
+      );
+    f.s.tables.projectObjectReceipts.delete(point._id);
+    await assert.rejects(
+      api.read._handler(f.ctx, request),
+      'a missing point must not silently omit a selected member',
+    );
+    t.diagnostic(
+      JSON.stringify({ fault, selectedMembers: f.entries.length, retired: result.moved, densePages: 0 }),
+    );
   });
-  for (const entry of f.entries)
-    f.s.insert('projectObjectReceipts', {
-      projectId: f.s.projectId,
-      key: `source-point:${f.s.projectId}:${entry.sha256}`,
-      value: entry.sha256,
-      size: entry.size,
-      sourceBinding: {
-        r2Key: `v1/p/${f.s.projectId}/o/${entry.pack?.digest ?? entry.sha256}`,
-        ...(entry.pack ? { pack: entry.pack } : {}),
-      },
-    });
-  f.s.tables.projectObjectCatalog.clear();
-  const reply = expandSourceGrants(
-    JSON.parse(
-      await api.read._handler(f.ctx, {
-        projectId: f.s.projectId,
-        state: f.s.state.sha256,
-        version: 2,
-        digests: [],
-        all: true,
-      }),
-    ),
-  );
-  assert.equal(reply.mode, 'catalog');
-  assert.equal(reply.rows.length, f.entries.length);
-  const expected = new Map(f.entries.map(entry => [entry.sha256, entry]));
-  for (const row of reply.rows) {
-    const pin = expected.get(row.digest);
-    assert(pin, 'every binding belongs to the selected State');
-    await readSignedPhysical(pin, row.url);
-    expected.delete(row.digest);
-  }
-  assert.equal(expected.size, 0, 'every hash/size-verified member survives descriptor retirement');
-});

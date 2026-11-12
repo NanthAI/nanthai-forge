@@ -8,7 +8,15 @@ import { r2Key, r2ObjectKey } from './r2';
 import { isR2Object } from './projectObjectFields';
 import { validStateGeneration, validStateParents } from '../src/state/generation';
 import { validateRecipeClosure } from './projectRecipeClosure';
-import { findObject, findObjects, objectRow } from './projectObjectFind';
+import { retainSourceKey, retainedSourceKey } from './projectSourceKeyProtection';
+import {
+  findObject,
+  findObjects,
+  findStoredObject,
+  findStoredObjects,
+  findSourceObjects,
+  objectRow,
+} from './projectObjectFind';
 export type SourceOutput = {
   sha256: string;
   size: number;
@@ -58,10 +66,11 @@ export async function storeSourceOutputs(
       );
       if (pin.pack) {
         packHeaders(packRange(pin), pin.size);
-        let pack = packs.get(pin.pack.digest);
+        let pack = packs.get(pin.r2Key);
         if (!pack) {
-          pack = await findObject(ctx, projectId, pin.pack.digest);
-          packs.set(pin.pack.digest, pack);
+          pack = await findStoredObject(ctx, projectId, pin.pack.digest);
+          if (pack?.r2Key !== pin.r2Key) pack = await retainedSourceKey(ctx, projectId, pin.r2Key);
+          packs.set(pin.r2Key, pack);
         }
         invariant(
           pack &&
@@ -76,11 +85,11 @@ export async function storeSourceOutputs(
         if (!pack.sourceReferenced) {
           await ctx.db.patch((await objectRow(ctx, pack))._id, { sourceReferenced: true });
           fence = pack.digest;
-          packs.set(pack.digest, { ...pack, sourceReferenced: true });
+          packs.set(pin.r2Key, { ...pack, sourceReferenced: true });
         }
       }
     } else {
-      const recipe = await findObject(ctx, projectId, pin.recipe!.sha256);
+      const recipe = await findStoredObject(ctx, projectId, pin.recipe!.sha256);
       invariant(
         recipe &&
           !recipe.removed &&
@@ -94,7 +103,7 @@ export async function storeSourceOutputs(
     if (pin.recipeClosure) {
       invariant(pin.recipe, 'SOURCE_JOB_INVALID', 'Only a recipe has a leaf closure.');
       validateRecipeClosure(pin, pin.recipeClosure);
-      const leaves = await findObjects(
+      const leaves = await findStoredObjects(
         ctx,
         projectId,
         pin.recipeClosure.map(leaf => leaf.sha256),
@@ -123,6 +132,15 @@ export async function storeSourceOutputs(
         ? { storageId: pin.storageId, recipe: undefined }
         : { storageId: undefined, recipe: { digest: pin.recipe!.sha256, size: pin.recipe!.size } };
     const old = await findObject(ctx, projectId, pin.sha256);
+    if (old?.sourceReferenced && isR2Object(old) && pin.r2Key && old.r2Key !== pin.r2Key) {
+      await retainSourceKey(ctx, projectId, {
+        sha256: old.digest,
+        size: old.size,
+        r2Key: old.r2Key!,
+        ...(old.pack ? { pack: old.pack } : {}),
+      });
+      fence = pin.sha256;
+    }
     invariant(
       pin.stateGeneration === undefined || validStateGeneration(pin.stateGeneration),
       'SOURCE_JOB_INVALID',
@@ -163,7 +181,7 @@ export async function storeSourceOutputs(
       'Immutable State dimensions changed.',
     );
     if (pin.statePhysical) {
-      const root = await findObject(ctx, projectId, pin.statePhysical.sha256);
+      const root = await findStoredObject(ctx, projectId, pin.statePhysical.sha256);
       invariant(
         root &&
           !root.removed &&
@@ -192,6 +210,24 @@ export async function storeSourceOutputs(
       ...(pin.statePhysical === undefined ? {} : { statePhysical: pin.statePhysical }),
       ...(pin.stateSize === undefined ? {} : { stateSize: pin.stateSize }),
     };
+    if (old?._id !== undefined && old.packMembers && !old.r2Committed) {
+      const retained = (await findSourceObjects(ctx, projectId, [pin.sha256])).get(pin.sha256);
+      if (retained && retained.size === pin.size) {
+        // A concurrent pending upload pack keeps its original member verification.
+        // The already retained body serves source reads; committing an unrelated
+        // source output must not pretend that this pack's members were checked.
+        if (pin.r2Key && pin.r2Key !== retained.r2Key)
+          await retainSourceKey(ctx, projectId, {
+            sha256: pin.sha256,
+            size: pin.size,
+            r2Key: pin.r2Key,
+            ...(pin.pack ? { pack: pin.pack } : {}),
+          });
+        if (Object.keys(graph).length) await ctx.db.patch(old._id, graph);
+        fence = pin.sha256;
+        continue;
+      }
+    }
     if (!old)
       await ctx.db.insert('projectObjects', {
         projectId: projectId,

@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { sourceKeyReferenced } from './projectSourceKeyProtection';
+import { findObjects } from './projectObjectFind';
+import type { Doc } from './_generated/dataModel';
 import { v } from 'convex/values';
 import { protectSourceUnion } from './projectCheckLogCleanupSource';
 import { internalMutation, internalQuery } from './server';
@@ -105,7 +108,16 @@ export const nodes = internalQuery({
       const node: Node = JSON.parse(row.value);
       const object =
         node.candidate && !node.protected ? await page(ctx, input, `object:${node.key}`, 0) : null;
-      rows.push({ ...row, object: object ? JSON.parse(object.value) : null });
+      const selected = object ? (JSON.parse(object.value) as Doc<'projectObjects'>) : null;
+      if (selected?.r2Key) {
+        const physical = await page(ctx, input, `node:physical:${selected.r2Key}`, 0);
+        if (
+          (physical && JSON.parse(physical.value).protected) ||
+          (await sourceKeyReferenced(ctx, input.projectId, selected.r2Key))
+        )
+          node.protected = true;
+      }
+      rows.push({ ...row, value: JSON.stringify(node), object: selected });
     }
     return JSON.stringify({ ...result, page: rows });
   },
@@ -206,6 +218,12 @@ export const sources = internalQuery({
           .lt('part', 'sourceUnion;'),
       )
       .paginate({ cursor: input.cursor, numItems: 1 });
-    return JSON.stringify({ ...result, page: result.page.flatMap(row => JSON.parse(row.value).pins) });
+    const pins: string[] = result.page.flatMap(row => JSON.parse(row.value).pins);
+    const objects = await findObjects(ctx, input.projectId, pins);
+    return JSON.stringify({
+      ...result,
+      page: pins,
+      physical: [...new Set(objects.flatMap(row => (row?.r2Key ? [row.r2Key] : [])))],
+    });
   },
 });

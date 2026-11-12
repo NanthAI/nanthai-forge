@@ -68,7 +68,9 @@ export const objectTables = {
     value: v.string(),
     nonce: v.optional(v.string()),
     size: v.optional(v.number()),
-    /** Complete immutable source point binding; upload-id receipts keep their original shape. */
+    stateGeneration: v.optional(v.number()),
+    stateSize: v.optional(stateSize),
+    /** Complete immutable source point or original-upload binding. */
     sourceBinding: v.optional(
       v.union(
         v.object({ r2Key: v.string(), pack: v.optional(objectPack) }),

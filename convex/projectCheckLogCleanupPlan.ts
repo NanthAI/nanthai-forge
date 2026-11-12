@@ -203,6 +203,7 @@ export async function planStep(
   } else if (state.phase === 'source-union') {
     const page = JSON.parse(await ctx.runQuery(sourcesRef, { ...input, cursor: state.cursor }));
     for (const key of page.page) mark(key, { protected: true });
+    for (const key of page.physical ?? []) mark(`physical:${key}`, { protected: true });
     state.cursor = page.isDone ? null : page.continueCursor;
     if (page.isDone) advance();
   } else if (['closure', 'source-closure'].includes(state.phase)) {

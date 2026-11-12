@@ -11,7 +11,11 @@ import { sourceMutation } from './projectConvexSourceErrors';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { signRecipeClosure } from './projectRecipeClosure';
 import { presignGet, r2Config } from './r2';
-import { findObject, findObjects, type ObjectView } from './projectObjectFind';
+import {
+  findStoredObject as findObject,
+  findStoredObjects as findObjects,
+  type ObjectView,
+} from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string(), step: v.number() };
 /** Object storage locations stay inside the trusted action. No worker HTTP

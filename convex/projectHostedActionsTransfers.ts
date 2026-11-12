@@ -16,7 +16,7 @@ import { invariant } from '../src/errors';
 import { r2Config, r2Key, presignGet, presignPut, headObject, checksumOf } from './r2';
 import { blobStore } from './blobStore';
 import { isStored } from './projectObjectFields';
-import { findObject, objectRow } from './projectObjectFind';
+import { findObject, findStoredObject, objectRow } from './projectObjectFind';
 import { packHeaders, packRange } from '../src/object-pack-range';
 
 const args = {
@@ -81,7 +81,7 @@ export const grant = internalMutation({
       // The fixed trusted reader requests only hash-pinned input/recipe closure.
       // Project membership is checked for each exact object, including recipe leaves.
       await saveObject(ctx, input.projectId, pin);
-      const object = await findObject(ctx, input.projectId, pin.sha256);
+      const object = await findStoredObject(ctx, input.projectId, pin.sha256);
       const url =
         object?.location === 'r2' && object.r2Key
           ? await presignGet(r2Config(), object.r2Key, packHeaders(packRange(object), object.size))

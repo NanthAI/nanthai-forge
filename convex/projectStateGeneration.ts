@@ -4,7 +4,7 @@ import type { Id } from './_generated/dataModel';
 import { v } from 'convex/values';
 import { internalMutation, internalQuery, type QueryCtx } from './server';
 import { activeOwnedProject } from './projectAuthority';
-import { findObject } from './projectObjectFind';
+import { findObject, findStoredObject, objectRow } from './projectObjectFind';
 import { validStateGeneration } from '../src/state/generation';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { channelRow } from './projectHostedChannels';
@@ -18,7 +18,7 @@ const generationOperator = {
 async function readLevels(ctx: QueryCtx, projectId: Id<'hostedProjects'>, heads: string[]) {
   const result = [];
   for (const head of heads) {
-    const row = await findObject(ctx, projectId, head);
+    const row = await findStoredObject(ctx, projectId, head);
     result.push({
       head,
       size: row && !row.removed ? row.size : null,
@@ -102,7 +102,7 @@ export const page = internalQuery({
     for (; position < uniqueHeads.length; position++) {
       if (!input.preview && bytes >= 2 * 1024 * 1024) break;
       const head = uniqueHeads[position]!,
-        object = await findObject(ctx, input.projectId, head);
+        object = await findStoredObject(ctx, input.projectId, head);
       invariant(object && !object.removed, 'SOURCE_UNAVAILABLE', 'A retained State object is unavailable.');
       if (
         !input.preview &&
@@ -153,7 +153,6 @@ export const commit = internalMutation({
   handler: async (ctx, input) => {
     await activeOwnedProject(ctx, input.projectId, input.actor);
     invariant(input.states.length <= 100, 'BAD_ARGUMENT', 'Commit one verified generation page.');
-    const catalog = new Map();
     let assigned = 0;
     for (const { head, size, generation } of input.states) {
       invariant(
@@ -174,33 +173,9 @@ export const commit = internalMutation({
       );
       if (row.stateGeneration !== undefined) continue;
       assigned++;
-      if (row._id) await ctx.db.patch(row._id, { stateGeneration: generation });
-      else {
-        const [page] = await ctx.db
-          .query('projectObjectCatalog')
-          .withIndex('by_project_and_first', q => q.eq('projectId', input.projectId).lte('first', head))
-          .order('desc')
-          .take(1);
-        invariant(page && page.last >= head, 'SOURCE_UNAVAILABLE', 'State catalog changed.');
-        let value = catalog.get(page._id);
-        if (!value) catalog.set(page._id, (value = { page, levels: [...(page.stateGenerations ?? [])] }));
-        const index = page.digests.indexOf(head) / 64;
-        invariant(
-          Number.isInteger(index) && index >= 0,
-          'SOURCE_HASH_MISMATCH',
-          'State catalog identity changed.',
-        );
-        const prior = value.levels.find((item: { index: number }) => item.index === index);
-        invariant(
-          !prior || prior.generation === generation,
-          'SOURCE_HASH_MISMATCH',
-          'Immutable State generation differs.',
-        );
-        if (!prior) value.levels.push({ index, generation });
-      }
+      const stored = await objectRow(ctx, row);
+      await ctx.db.patch(stored._id, { stateGeneration: generation });
     }
-    for (const { page, levels } of catalog.values())
-      await ctx.db.patch(page._id, { stateGenerations: levels });
     return JSON.stringify({ assigned });
   },
 });

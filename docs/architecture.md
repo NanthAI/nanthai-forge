@@ -203,7 +203,7 @@ Readers negotiate protocol 2 through `source.state.v2` (Actions) and `source-sta
 changed root; it never selects another State. The server also rechecks a rebound
 root once before falling back, then checks current access again. Healthy reads
 keep their existing calls. A second rebind refuses the reply. Catalogs remain
-available; descriptor retirement remains pending. A trusted, enabled source step that
+available; descriptor retirement requires complete point authority independently of root encoding. A trusted, enabled source step that
 commits a complete root marks that project as requiring protocol 2. Its existing
 project read supplies the marker; only the first qualification writes it, with no
 extra resolver call. Discovery, State bootstrap and State-source endpoints return
@@ -243,17 +243,51 @@ A whole plan above 64 grants takes the named catalog fallback. Content grants
 remain exact. Root encoding alone does not bound metadata key fragmentation;
 descriptor retirement remains pending.
 
-Compatible point readers also understand complete immutable bindings in the existing
-receipt table (`source-point:PROJECT:DIGEST`), enabled by one request-cached
-`source-points:PROJECT` format-1 header. Full mutable object rows retain precedence;
-point misses still consult every legacy catalog. Bindings preserve exact raw/pack
-nonce keys or a recipe pin, and old upload-id receipts still reconcile through the
-same lookup. The catalog verifier checks point bindings as well as original-id
-receipts. No writer publishes these records yet, and no descriptor or catalog is
-retired. Without the header, a legacy request adds only one empty indexed DB probe
-(no RPC); healthy manifest reads keep their existing resolver calls. Reader-only
-fixtures with complete point records use under 1 KB for stored and absent lookups;
-this does not qualify existing dense catalogs or billed usage.
+Immutable point bindings share the existing receipt table
+(`source-point:PROJECT:DIGEST`). The request-cached `source-points:PROJECT`
+header is `1` while any dense fallback remains and `2` only after the bounded
+writer verifies the catalog is empty. Full mutable rows retain precedence.
+Complete points preserve exact raw/pack nonce keys, recipe pins and imported
+State dimensions. Row promotion preserves every existing State/recipe field;
+generation repair promotes a point or legacy catalog State before changing its
+metadata instead of rewriting its dense page.
+
+The existing internal catalog compactor accepts an explicit `points:true`
+operation that qualifies point authority without changing client protocol policy. It first
+copies original upload IDs, nonces and sizes into self-contained binding
+receipts, at most 64 rows/64 KiB per mutation. It then publishes at most one
+256-pin catalog page's complete points and removes that page in the same
+transaction. The final empty-catalog check also catches a concurrent page placed
+before its cursor. Original operation/cursor retries reconcile without repeated
+writes. Pending raw/pack uploads and mutable State provenance stay in their
+original rows. Content reads can use a complete retained binding while another
+upload of that hash is pending, without consuming its original ID or unverified
+pack members. Trusted publication retains any additional verified physical key
+in the same receipt/index authority rather than pretending the pending members
+were committed. New catalog-store/compaction writes use point authority; a direct
+bulk import reopens mixed fallback before publishing dense pages, which the same
+bounded writer can subsequently retire. Nothing automatically runs a migration,
+schedules work or changes the default-off physical writer.
+
+Original-ID commit and reconciliation use their complete receipt after checking
+current project access. Completed projects do not read a predecessor catalog row
+for a point miss. The 402/1,387 packed fixtures preserve their original
+48,542/48,919 B dense-row baselines and enforce under 1 KB for stored, absent and
+original-ID retry lookups. These are serialized whole-document fixture reads;
+billed usage and live deployment qualification remain open.
+
+Whole physical keys remain protected after descriptor retirement. Raw and metadata
+carriers resolve through the existing digest index. Member packs retain one
+whole-key proof through the existing receipt-key index before their descriptors
+disappear; this avoids adding index writes to every ordinary upload. Cleanup's existing source-union page
+also retains known physical keys; logical protection still works when optional
+old descriptors are missing. Reviewed log selection, final claim and R2 sweep
+consult exact key ownership, including a source member inside a shared pack.
+Point/receipt publication appends the existing cleanup fence atomically. This
+removes dense pages and the separate State-generation page rewrite, merges point
+and original-ID binding validation, and adds no healthy source RPC or idle call.
+The explicit migration holds one descriptor page (or a bounded 64-receipt lookup
+window), never a State/file body. All source and metadata bytes remain in R2.
 
 **Save-time upload packs.** A save (and any hosting upload window) with more than one new small object sends them as one pack in the same format: members back to back, nothing between, at most 8 MiB (`src/object-pack-upload.ts`, contract feature `upload-packs`). The client names the pack (digest, size, member indexes) in the prepare it already makes (`projectHostedSaves:prepare` `uploadPack`, `projectObjects:prepareBatch` `pack`); the server signs one create-only, checksum-bound PUT and writes one pending pack row holding the member list, and no member row. R2's checksum covers the pack, not its members, so the commit that already runs (`commitObjects`, inside `projectSourceRun:submit` or `commitBatch`) reads the pack once and checks every member digest before it writes the member rows with their byte ranges, in the transaction that commits the pack. An unverified member therefore never exists as a stored row: a planted member fails closed, binds nothing, never dedupes, and a later honest upload of that digest prepares afresh; readers still check every digest. A member that is already stored makes the whole proposal fall back to per-object PUTs, so no bytes are kept twice. The commit hands the small checked members (the save's delta page) to the save step in memory. A clone reads each save's new objects with one ranged GET per run, like an import window; `tests/r2-write-path.test.mjs`, `tests/r2-read-path.test.mjs` and `tests/hosted-save-sync-efficiency.test.mjs` cover the PUT and GET counts, the planted member and mixed history.
 
@@ -930,7 +964,9 @@ legacy chunks and nonce pack identities. Export validates every chunk against
 its whole carrier; retained roots keep their packs in the native archive closure.
 Work exports carry all retained entries. A Source release filters entries to its
 selected ancestry and carries no unrelated Lane source or original Work records.
-Skipped roots retain their complete logical source closure.
+Skipped roots retain their complete logical source closure. Missing or corrupt derived metadata
+records its exact expected pins and an unavailable physical closure, preserving
+any verified root and the complete canonical Source/Work recovery.
 
 These coordinates are explicitly archival, never destination-project read
 authority. Independent restore preserves their bytes and nonce identities, while

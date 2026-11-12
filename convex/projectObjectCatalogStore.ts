@@ -2,6 +2,8 @@
 import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { catalogPages, clearObjectCatalogCache } from './projectObjectFind';
+import { pointMode } from './projectObjectPoints';
+import { storePointObjects } from './projectObjectPointStore';
 import { windowEntries } from './projectGithubImportCatalog';
 import { r2Key } from './r2';
 import { invariant } from '../src/errors';
@@ -46,6 +48,24 @@ export async function storeCatalogObjects(
   pins: Entry[],
   origin: string,
 ) {
+  if (await pointMode(ctx, projectId)) {
+    const objects = pins.map(pin => ({
+      ...pin,
+      projectId,
+      nonce: '',
+      removed: false,
+      sourceReferenced: true,
+      ...(pin.recipe
+        ? {}
+        : {
+            location: 'r2' as const,
+            r2Committed: true,
+            r2Key: r2Key(projectId, pin.pack?.digest ?? pin.digest),
+          }),
+    }));
+    const saved = await storePointObjects(ctx, projectId, objects);
+    return { bytes: saved.bytes, pages: 0, readBytes: saved.readBytes };
+  }
   let pending = [...pins].sort((a, b) => (a.digest < b.digest ? -1 : a.digest > b.digest ? 1 : 0));
   let bytes = 0,
     pages = 0,

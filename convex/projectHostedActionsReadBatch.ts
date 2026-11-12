@@ -7,7 +7,7 @@ import { blobStore } from './blobStore';
 import { presignGet, r2Config } from './r2';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
-import { findObject } from './projectObjectFind';
+import { findStoredObject as findObject } from './projectObjectFind';
 import { packHeaders, packRange } from '../src/object-pack-range';
 
 /** One live job/actor/epoch/lease check per bounded window, never a reusable

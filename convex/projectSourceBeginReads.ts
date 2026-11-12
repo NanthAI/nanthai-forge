@@ -4,7 +4,7 @@ import type { Id } from './_generated/dataModel';
 import { saveObjects, saveStateSchema } from './projectHostedSaveStore';
 import { signRecipeClosure } from './projectRecipeClosure';
 import { presignGet, r2Config } from './r2';
-import { findObject } from './projectObjectFind';
+import { findStoredObject as findObject } from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
 import { invariant } from '../src/errors';
 import { smallSavePageBytes, smallSaveStateBytes } from '../src/hosted-source-small-save';

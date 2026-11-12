@@ -3,7 +3,10 @@ import { v } from 'convex/values';
 import { internalMutation, internalQuery } from './server';
 import { activeOwnedProject } from './projectAuthority';
 import { catalogEligible, catalogPin, storeCatalogObjects } from './projectObjectCatalogStore';
-import { findObjects } from './projectObjectFind';
+import { pointMode } from './projectObjectPoints';
+import { pointMigration } from './projectObjectPointMigration';
+import { pointBinding } from './projectObjectPointBinding';
+import { findStoredObjects } from './projectObjectFind';
 import { invariant } from '../src/errors';
 const address = { projectId: v.id('hostedProjects'), actor: v.string() };
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length;
@@ -19,10 +22,16 @@ type Receipt = {
 /** Explicit foreground migration; one idempotent transaction per <=64-row,
  * <=64 KiB page. No scheduler, source downloads, export or idle work. */
 export const step = internalMutation({
-  args: { ...address, operationId: v.string(), after: v.union(v.string(), v.null()) },
+  args: {
+    ...address,
+    operationId: v.string(),
+    after: v.union(v.string(), v.null()),
+    points: v.optional(v.literal(true)),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     await activeOwnedProject(ctx, input.projectId, input.actor);
+    if (input.points) return pointMigration(ctx, input);
     const key = `catalog-migration:${input.operationId}`;
     const old = await ctx.db
       .query('projectObjectReceipts')
@@ -32,6 +41,11 @@ export const step = internalMutation({
       !old || old.projectId === input.projectId,
       'WORK_OPERATION_CHANGED',
       'Resume the original catalog migration.',
+    );
+    invariant(
+      !old || JSON.parse(old.value).mode !== 'points',
+      'WORK_OPERATION_CHANGED',
+      'Resume the original catalog migration mode.',
     );
     const receipt: Receipt = old
       ? JSON.parse(old.value)
@@ -57,6 +71,7 @@ export const step = internalMutation({
         value: row.digest,
         nonce: row.nonce,
         size: row.size,
+        ...((await pointMode(ctx, input.projectId)) ? { sourceBinding: pointBinding(row) } : {}),
       };
       await ctx.db.insert('projectObjectReceipts', value);
       written += bytes(value);
@@ -92,7 +107,7 @@ export const verify = internalQuery({
     const receipts = page.page.filter(
       row => !row.key.startsWith('catalog-migration:') && row.key !== `source-points:${input.projectId}`,
     );
-    const objects = await findObjects(
+    const objects = await findStoredObjects(
       ctx,
       input.projectId,
       receipts.map(row => row.value),

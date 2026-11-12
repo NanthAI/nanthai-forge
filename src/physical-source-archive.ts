@@ -80,6 +80,7 @@ export function* physicalArchiveClosure(source: NativeSource, selected?: Downloa
   for (const entry of physicalArchiveEntries(source, selected)) {
     bytes(source, entry.state);
     ids.add(entry.state.sha256);
+    if (entry.unavailable && !entry.rootRetained) continue;
     ids.add(entry.root.sha256);
     const value = bytes(source, entry.root),
       root = physicalManifestSchema.parse(
@@ -95,6 +96,7 @@ export function* physicalArchiveClosure(source: NativeSource, selected?: Downloa
       'INVALID_WORK_BACKUP',
       'Archive must retain every whole metadata key named by its root.',
     );
+    if (entry.unavailable) continue;
     for (const chunk of root.chunks) {
       const id = chunk.pack?.digest ?? chunk.sha256,
         size = chunk.pack?.size ?? chunk.size;

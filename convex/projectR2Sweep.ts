@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { sourceKeyReferenced } from './projectSourceKeyProtection';
 import { v } from 'convex/values';
 import { internalMutation, internalQuery } from './server';
 import { abandonedWindow, maintenanceEnabled, maintenancePageSize } from './r2Maintenance';
@@ -51,12 +52,15 @@ export const claim = internalMutation({
     invariant(project && !project.removal, 'PROJECT_UNAVAILABLE', 'Select an active project.');
     invariant(ids.length <= maintenancePageSize, 'BAD_ARGUMENT', 'Use one maintenance page.');
     const jobs = [];
+    const protectedKeys = new Map<string, boolean>();
     for (const id of ids) {
       const row = await ctx.db.get(id);
       if (!row || row.projectId !== projectId || row.removed) continue;
       const key = row.r2SweepKey ?? (abandoned(row) ? row.r2Key : undefined);
       if (!key || !key.startsWith(projectPrefix(projectId)) || (row.r2Committed && row.r2Key === key))
         continue;
+      if (!protectedKeys.has(key)) protectedKeys.set(key, await sourceKeyReferenced(ctx, projectId, key));
+      if (protectedKeys.get(key)) continue;
       if (!dryRun && !row.r2SweepKey) await ctx.db.patch(id, { r2SweepKey: key });
       jobs.push({ id, key });
     }

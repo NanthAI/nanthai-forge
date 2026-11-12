@@ -133,3 +133,66 @@ for (const packed of [false, true])
       }),
     );
   });
+
+for (const fault of ['missing-root', 'corrupt-root', 'invalid-root', 'missing-pack'])
+  test(`Done-when6: ${fault} metadata preserves canonical recovery and explicitly records its unavailable physical closure`, async t => {
+    const f = await hostedRecoveryFixture(t),
+      source = new NativeSource(f.root);
+    const put = bytes => ({ sha256: source.put(Buffer.from(bytes)), size: bytes.length });
+    const written = await writePhysicalManifest({
+      state: f.head,
+      members: source.state(f.head).files.map(file => file.blob),
+      put,
+      describe: async ids => ids.map(sha256 => ({ sha256, size: source.object(sha256).length })),
+    });
+    const root = fault === 'invalid-root' ? put(Buffer.from('unparseable metadata')) : written.pin;
+    const pack = written.root.chunks[0].pack.digest;
+    const page = f.transport.hostedPage,
+      download = f.transport.download;
+    f.transport.hostedPage = async (...args) => {
+      const value = await page(...args);
+      return {
+        ...value,
+        ...(value.table === 'projectHostedStates'
+          ? { physicalRoots: [{ state: { sha256: f.head, size: source.object(f.head).length }, root }] }
+          : {}),
+      };
+    };
+    f.transport.download = async pin => {
+      if (
+        (fault === 'missing-root' && pin.sha256 === root.sha256) ||
+        (fault === 'missing-pack' && pin.sha256 === pack)
+      )
+        throw Object.assign(new Error('Derived metadata unavailable'), { code: 'SOURCE_UNAVAILABLE' });
+      if (fault === 'corrupt-root' && pin.sha256 === root.sha256) return Buffer.from('corrupt metadata');
+      return download(pin);
+    };
+    const directory = join(f.directory, 'unavailable-stage'),
+      target = join(directory, 'owner');
+    mkdirSync(directory);
+    const recovered = await restoreRecoverySource(directory, target, f.request, f.selection, f.transport);
+    assert.equal(recovered.main.head, f.head);
+    const store = new WorkStore(target),
+      currentSource = new NativeSource(target);
+    const [entry] = [...physicalArchiveEntries(currentSource, store.load().physicalSource)];
+    assert.deepEqual(entry.root, root);
+    assert.equal(
+      entry.unavailable,
+      fault.startsWith('missing') ? 'SOURCE_UNAVAILABLE' : 'SOURCE_HASH_MISMATCH',
+    );
+    assert.equal(entry.rootRetained, fault === 'missing-pack' ? true : undefined);
+    for (const sourceOnly of [false, true]) {
+      const exported = (
+        await (sourceOnly
+          ? exportNativeSource(store, store.revision(), f.head)
+          : exportNativeWork(store, store.revision(), true))
+      ).result;
+      const restored = join(f.directory, sourceOnly ? 'source-unavailable' : 'work-unavailable');
+      await restoreNativeWork(exported.archive.path, restored);
+      const copy = new NativeSource(restored),
+        data = new WorkStore(restored).load();
+      for (const file of copy.state(f.head).files)
+        assert.deepEqual(copy.object(file.blob), source.object(file.blob));
+      assert.deepEqual([...physicalArchiveEntries(copy, data.physicalSource)][0], entry);
+    }
+  });

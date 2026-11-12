@@ -10,6 +10,7 @@ import { WorkStore } from '../dist/work-store.js';
 import { WorkService } from '../dist/work.js';
 import { exportNativeWork, exportNativeSource, restoreNativeWork } from '../dist/native-backup.js';
 import { digest } from '../dist/hash.js';
+import { moduleUrl } from './convex-module.mjs';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { encodePhysicalEntries, physicalBucket } from '../dist/physical-manifest-codec.js';
 import { encodePhysicalRoot } from '../dist/physical-manifest-root.js';
@@ -254,7 +255,7 @@ for (const packed of [false, true])
       { makeFunctionReference } = await import('convex/server'),
       { readFileSync } = await import('node:fs');
     const f = await fixture(t),
-      { s } = await setup(t),
+      { s, fake } = await setup(t),
       exchange = client(s);
     const exported = (await exportNativeWork(f.store, f.store.revision(), false)).result,
       manifestBytes = readFileSync(join(exported.path, 'manifest.json')),
@@ -289,6 +290,39 @@ for (const packed of [false, true])
     const commit = makeFunctionReference('projectObjectCommit:commitBatch');
     await exchange.client.action(commit, { objects: retried });
     await exchange.client.action(commit, { objects: pending });
+    const compact = await import(moduleUrl('../convex/projectObjectCatalogCompact.ts'));
+    const sourceIds = new Set(
+      manifest.files.filter(file => file.path.startsWith('objects/')).map(file => file.sha256),
+    );
+    for (const row of s.tables.projectObjects.values())
+      if (sourceIds.has(row.digest)) row.sourceReferenced = true;
+    s.tables.hostedProjects.get('project').sourceManifestVersion = 2;
+    const puts = fake.requests.filter(request => request.method === 'PUT').length;
+    for (const points of [false, true]) {
+      let after = null,
+        result;
+      do {
+        result = JSON.parse(
+          await s.transaction(() =>
+            compact.step._handler(s.ctx, {
+              projectId: 'project',
+              actor: 'owner',
+              operationId: points ? 'archive-points' : 'archive-catalog',
+              after,
+              ...(points ? { points: true } : {}),
+            }),
+          ),
+        );
+        after = result.after;
+      } while (!result.done);
+    }
+    assert.equal(s.tables.projectObjectCatalog.size, 0);
+    await exchange.client.action(commit, { objects: pending });
+    assert.equal(
+      fake.requests.filter(request => request.method === 'PUT').length,
+      puts,
+      'metadata retirement and old-id replay never reupload bytes',
+    );
     const target = join(f.directory, 'transferred');
     exchange.manifest = async () => ({
       json: manifestBytes.toString(),
@@ -301,11 +335,16 @@ for (const packed of [false, true])
     assert.equal(data.nativeHead, f.skipped);
     assert.deepEqual(source.object(f.carrier.sha256), f.source.object(f.carrier.sha256));
     assert.deepEqual([...physicalArchiveEntries(source, data.physicalSource)], f.entries);
-    assert.equal(
-      s.tables.projectObjects.size,
-      packed
-        ? 1 + new Set(objects.map(row => row.pin.sha256)).size
-        : new Set(objects.map(row => row.pin.sha256)).size,
+    const { findObjects } = await import(moduleUrl('../convex/projectObjectFind.ts'));
+    const retained = await findObjects(
+      { ...s.ctx },
+      'project',
+      objects.map(row => row.pin.sha256),
+    );
+    assert(
+      retained.every(
+        (row, index) => row?.digest === objects[index].pin.sha256 && row.size === objects[index].pin.size,
+      ),
     );
     t.diagnostic(
       JSON.stringify({

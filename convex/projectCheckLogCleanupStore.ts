@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { sourceKeyReferenced } from './projectSourceKeyProtection';
 import { projectGuard } from './projectCheckLogCleanupGuard';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { v } from 'convex/values';
@@ -106,6 +107,11 @@ export const claim = internalMutation({
         row && canonicalPayload(row) === canonicalPayload(original),
         'EVIDENCE_CHANGED',
         'A selected log object changed; retain the original operation and re-observe its scope.',
+      );
+      invariant(
+        !row.r2Key || !(await sourceKeyReferenced(ctx, input.projectId, row.r2Key)),
+        'EVIDENCE_CHANGED',
+        'A selected physical key is retained source; re-observe the cleanup scope.',
       );
       if (row.storageId) {
         const removed = await removeExclusive(ctx, row.storageId, row._id);
