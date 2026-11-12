@@ -1355,3 +1355,35 @@ test('S3 duration arguments above 768 KiB page through idempotent settlement wit
   await l.conclude();
   assert.equal([...l.s.tables.projectHostedTestTimings.values()][0].history, before);
 });
+
+test('incident 238b3573 delayed pass retains the exact R2 report pointer and file outcomes', async t => {
+  const steps = Array.from({ length: 12 }, (_, index) => ({
+    index,
+    exitCode: 0,
+    contractReports: { [`tests/delayed-${index}.test.mjs`]: { failed: false, durationMs: 10 } },
+  }));
+  const f = await batchedLanding(t, 12, steps, { conclude: false, r2Reports: true });
+  const held = f.stored();
+  assert.equal(held.actions.verdictPending, true);
+  const pointer = held.reportPointer;
+  assert(pointer, 'the signed shard results already folded to R2');
+  const verdicts = await import(moduleUrl('../convex/projectHostedActionsVerdict.ts'));
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  await f.s.transaction('delayedProviderSteps', verdicts.confirmed, {
+    ...f.id,
+    fence: f.fence,
+    attempt: 1,
+    since: now - 30 * 60_000,
+    lagged: true,
+    jobs: true,
+    completed: false,
+    conclusion: null,
+    stepVerdict: 'passed',
+  });
+  const settled = f.stored();
+  assert.equal(settled.status, 'passed');
+  assert.deepEqual(settled.reportPointer, pointer);
+  assert.deepEqual(settled.testFiles, held.testFiles);
+  assert.match(settled.failureReason, /provider-delayed/);
+});

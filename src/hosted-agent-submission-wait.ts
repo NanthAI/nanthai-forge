@@ -38,6 +38,7 @@ export const hostedSubmissionWaitSchema = z
   .strict();
 const eventSchema = z.object({
   submission: hostedLandingStateSchema,
+  providerDelay: z.string().optional(),
   pendingAttempt: hostedFinishSchema.shape.pending,
   queue: z.unknown().optional(),
   queueAheadSelection: z.unknown().optional(),
@@ -124,6 +125,7 @@ export async function observeHostedSubmissions(
               // cursor per operation (which would retain quadratic metadata).
               const {
                 submission,
+                providerDelay,
                 pendingAttempt,
                 queue,
                 wouldConflict,
@@ -135,6 +137,7 @@ export async function observeHostedSubmissions(
               } = event;
               current.set(event.operationId, {
                 submission,
+                ...(providerDelay ? { providerDelay } : {}),
                 pendingAttempt,
                 ...(recovery ? { recovery } : {}),
                 ...(conflict ? { conflict } : {}),
@@ -437,6 +440,7 @@ async function observeHostedSubmissionsOnce(
         page.isDone
           ? await observedConflictRecovery(transport, {
               submission: page.submission,
+              ...(page.providerDelay ? { providerDelay: page.providerDelay } : {}),
               ...((page.recovery ?? suppliedAdvice?.recovery)
                 ? { recovery: page.recovery ?? suppliedAdvice?.recovery }
                 : {}),

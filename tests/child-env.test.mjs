@@ -758,7 +758,10 @@ test('a failed Candidate command names the path and the user it could not use', 
 test("a pass needs the CI provider's success; any other conclusion never passes", () => {
   assert.deepEqual(providerVerdict('success'), { status: 'passed' });
   assert.equal(providerVerdict('cancelled').status, 'cancelled');
-  for (const conclusion of ['failure', 'timed_out', 'action_required', 'neutral', 'skipped', null]) {
+  for (const conclusion of ['failure', 'timed_out', 'action_required']) {
+    assert.equal(providerVerdict(conclusion).status, 'failed', String(conclusion));
+  }
+  for (const conclusion of ['neutral', 'skipped', null]) {
     const verdict = providerVerdict(conclusion);
     assert.equal(verdict.status, 'runner-unavailable', String(conclusion));
     assert.match(verdict.reason, /only with the provider's success/);

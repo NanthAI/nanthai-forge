@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { providerAckMs, providerStartupUnavailable } from '../src/ci-provider-recovery';
 import { convexFetch } from './networkFetch';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
@@ -28,7 +29,7 @@ export const directActionsWatchdogMs = 12 * 60 * 60_000;
 /** Incident a7de3a93: a dispatch whose reply was lost has no executionId until the
  * workflow_run webhook binds it. GitHub lists a dispatched run within about a
  * minute, so after this bound one lookup by run-name decides: adopt or re-check. */
-export const directActionsAckMs = 5 * 60_000;
+export const directActionsAckMs = providerAckMs;
 const rateLimitMs = { min: 60_000, max: 15 * 60_000 };
 const repositoryOf = (run: HostedCheckRun) =>
   run.configuration.provider === 'github-actions' ? run.configuration.repository : 'the repository';
@@ -214,24 +215,26 @@ export const observe = internalMutation({
     if (!input.executionId && !run.executionId && input.outcome !== 'rejected')
       run.actions.dispatchedWithoutId = true;
     if (input.failure) run.actions.failure = input.failure.slice(0, 80);
-    if (
-      run.status !== 'cancelled' &&
-      !input.executionId &&
-      !run.executionId &&
-      input.outcome !== 'accepted'
-    ) {
+    if (run.status !== 'cancelled' && !run.actions.workflowSha && run.counts.completed === 0) {
       // Unknown: one lookup after the acknowledgement bound. Rate-limited: wait
       // for Retry-After, then settle; the platform retry re-dispatches and counts.
       const unknown = input.outcome === 'unknown';
-      if (unknown || input.retryAfterMs !== undefined) {
-        run.status = 'unknown';
-        await writeHostedCheck(ctx, row._id, run);
-        await ctx.scheduler.runAfter(
-          unknown ? directActionsAckMs : input.retryAfterMs!,
+      if (
+        !run.actions.confirm &&
+        (input.outcome === 'accepted' || unknown || input.retryAfterMs !== undefined)
+      ) {
+        // The response's run id is not evidence a runner started. Cancel this same
+        // deadline in the first authenticated session/event write (healthy: no call).
+        run.actions.confirm = await ctx.scheduler.runAfter(
+          input.outcome === 'rejected' ? input.retryAfterMs! : directActionsAckMs,
           makeFunctionReference<'action'>('projectHostedActionsDirect:reconcile'),
           { projectId: input.projectId, runId: input.runId, fence: input.fence },
         );
-        return null;
+        if (unknown || input.outcome === 'rejected') run.status = 'unknown';
+        if (input.outcome === 'rejected') {
+          await writeHostedCheck(ctx, row._id, run);
+          return null;
+        }
       }
     }
     if (input.executionId) {
@@ -370,7 +373,8 @@ function unacknowledged(run: HostedCheckRun, fence: number) {
     run.actions?.fence === fence &&
     run.fence === fence &&
     run.dispatchStarted &&
-    !run.executionId
+    !run.actions.workflowSha &&
+    run.counts.completed === 0
     ? run.actions
     : null;
 }
@@ -382,16 +386,23 @@ export const pendingReconcile = internalMutation({
       lookup: v.boolean(),
       repository: v.string(),
       reservedAt: v.number(),
+      executionId: v.union(v.string(), v.null()),
       runnerScope: v.union(v.null(), v.object({ repoId: v.number(), installationId: v.number() })),
     }),
   ),
   handler: async (ctx, input) => {
-    const { run } = await writableHostedCheck(ctx, input);
+    const { row, run } = await writableHostedCheck(ctx, input);
     const actions = unacknowledged(run, input.fence);
-    if (!actions || run.configuration.provider !== 'github-actions') return null;
+    if (!actions || run.configuration.provider !== 'github-actions' || actions.failure?.includes('lookup:'))
+      return null;
+    if (actions.outcome !== 'rejected') {
+      actions.failure = `${actions.failure ? actions.failure + '; ' : ''}lookup:pending`.slice(0, 80);
+      await writeHostedCheck(ctx, row._id, run);
+    }
     // A refused (rate-limited) dispatch created no run: nothing to look up.
     return {
-      lookup: actions.outcome === 'unknown',
+      lookup: actions.outcome !== 'rejected',
+      executionId: run.executionId,
       repository: run.configuration.repository,
       reservedAt: actions.reservedAt,
       runnerScope: await runnerTokenScope(ctx, input.projectId, run.configuration.repository),
@@ -403,20 +414,42 @@ export const pendingReconcile = internalMutation({
  * then refused by run id: no session, result or webhook binds it. */
 export async function reconcileDirectActions(
   ctx: MutationCtx,
-  input: CheckIdentity & { fence: number; executionId?: string; lookup: string },
+  input: CheckIdentity & { fence: number; executionId?: string; lookup: string; conclusion?: string },
 ) {
   const selected = await writableHostedCheck(ctx, input),
     { row, run } = selected;
   const actions = unacknowledged(run, input.fence);
   if (!actions) return null;
+  actions.confirm = null;
+  if (
+    (actions.outcome === 'accepted' && input.lookup === 'absent') ||
+    (input.executionId && providerStartupUnavailable(true, input.conclusion ?? null))
+  )
+    return settleDirectActions(
+      ctx,
+      selected,
+      'runner-unavailable',
+      `Provider outage: GitHub ${input.lookup === 'absent' ? 'has no run for the accepted dispatch' : `concluded ${input.conclusion} before any runner acknowledged the check`}; one lookup after 5 minutes. Forge checks again.`,
+    );
   if (input.executionId) {
+    invariant(
+      !run.executionId || run.executionId === input.executionId,
+      'EVIDENCE_CHANGED',
+      'Actions execution changed.',
+    );
     run.executionId = input.executionId;
     actions.outcome = 'accepted';
     if (!run.plan) run.status = 'preparing';
+    run.failureReason = `provider-delayed: waiting on GitHub startup since ${new Date(actions.reservedAt).toISOString()}; one lookup found the dispatched run still pending.`;
     await writeHostedCheck(ctx, row._id, run);
     return null;
   }
-  const failure = actions.failure;
+  if (actions.outcome === 'accepted') {
+    run.failureReason = `provider-delayed: GitHub has not acknowledged its accepted dispatch after 5 minutes (lookup ${input.lookup}); the execution watchdog remains active.`;
+    await writeHostedCheck(ctx, row._id, run);
+    return null;
+  }
+  const failure = actions.failure?.split('; lookup:')[0];
   if (actions.outcome === 'rejected')
     return settleDirectActions(
       ctx,
@@ -432,7 +465,13 @@ export async function reconcileDirectActions(
   );
 }
 export const reconciled = internalMutation({
-  args: { ...identity, fence: v.number(), executionId: v.optional(v.string()), lookup: v.string() },
+  args: {
+    ...identity,
+    fence: v.number(),
+    executionId: v.optional(v.string()),
+    lookup: v.string(),
+    conclusion: v.optional(v.string()),
+  },
   returns: v.null(),
   handler: async (ctx, input) => {
     await reconcileDirectActions(ctx, input);
@@ -449,6 +488,7 @@ export const reconcile = internalAction({
       lookup: boolean;
       repository: string;
       reservedAt: number;
+      executionId: string | null;
       runnerScope?: RunnerScope | null;
     } | null = await ctx.runMutation(
       makeFunctionReference<'mutation'>('projectHostedActionsDirect:pendingReconcile'),
@@ -456,25 +496,52 @@ export const reconcile = internalAction({
     );
     if (!pending) return null;
     let executionId: string | undefined,
+      conclusion: string | undefined,
       lookup = 'skipped';
+    let lookupStatus: number | undefined;
     if (pending.lookup)
       try {
         const token = await actionsToken(ctx, input.projectId, pending.repository, pending.runnerScope);
         const since = new Date(Math.floor(pending.reservedAt / 1000) * 1000 - 60_000).toISOString();
         const response = await githubAppRequest(
-          `repos/${pending.repository}/actions/workflows/forge-check.yml/runs?event=workflow_dispatch&per_page=100&created=${encodeURIComponent(`>=${since}`)}`,
+          pending.executionId
+            ? `repos/${pending.repository}/actions/runs/${pending.executionId}`
+            : `repos/${pending.repository}/actions/workflows/forge-check.yml/runs?event=workflow_dispatch&per_page=100&created=${encodeURIComponent(`>=${since}`)}`,
           token,
+          async (url, init) => {
+            const response = await convexFetch(url, init);
+            lookupStatus = response.status;
+            return response;
+          },
         );
-        const body = (await response.json()) as { workflow_runs?: { id?: number; display_title?: string }[] };
-        const found = body.workflow_runs?.find(item => item.display_title === `forge-check/${input.runId}`);
-        lookup = found ? 'found' : 'absent';
+        const body = (await response.json()) as {
+          id?: number;
+          conclusion?: unknown;
+          total_count?: number;
+          workflow_runs?: { id?: number; display_title?: string; conclusion?: unknown }[];
+        };
+        invariant(
+          pending.executionId ? Number.isSafeInteger(body.id) : Array.isArray(body.workflow_runs),
+          'RUNNER_UNAVAILABLE',
+          'Provider lookup was incomplete.',
+        );
+        const found = pending.executionId
+          ? body
+          : body.workflow_runs?.find(item => item.display_title === `forge-check/${input.runId}`);
+        lookup = found
+          ? 'found'
+          : body.total_count !== undefined && body.total_count > (body.workflow_runs?.length ?? 0)
+            ? 'incomplete'
+            : 'absent';
         if (found && Number.isSafeInteger(found.id) && found.id! > 0) executionId = String(found.id);
+        if (typeof found?.conclusion === 'string') conclusion = found.conclusion.slice(0, 40);
       } catch (error) {
-        lookup = `failed ${timedOut(error) ? 'timeout' : 'error'}`;
+        lookup = lookupStatus === 404 ? 'absent' : `failed ${timedOut(error) ? 'timeout' : 'error'}`;
       }
     await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsDirect:reconciled'), {
       ...input,
       lookup,
+      ...(conclusion ? { conclusion } : {}),
       ...(executionId ? { executionId } : {}),
     });
     return null;

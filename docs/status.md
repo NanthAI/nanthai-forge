@@ -390,3 +390,11 @@ Landing request tickets retain their reader contracts while cold request and
 batch-selection metadata live in unindexed parent-owned bodies. Phase writes leave those
 bodies unchanged; the S0 model and storage/call guards cover the split. New report runs retain headers and one pinned R2 object, with no result-report rows;
 legacy replay remains for old runs. No billed S3 saving is claimed.
+
+Checks recover provider outages with finite reads: an accepted but unacknowledged
+dispatch gets one lookup at +5 minutes, and a held pass gets its existing early
+reads plus at most three more at +1/+2/+4 hours. At +30 minutes, all signed shard
+passes and a complete provider job list with every step completed without failure
+can settle a pass despite lagging run status. Status and land wait retain the
+provider-delay reason. See [provider outage recovery](pre-queue-checks.md#provider-outage-recovery);
+live replay and billed usage remain unverified.

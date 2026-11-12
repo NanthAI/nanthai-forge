@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { providerRetryDelay } from '../src/ci-provider-recovery';
 import type { MutationCtx } from './_generated/server';
 import type { LandingClaim } from './projectHostedLandingControl';
 import type { HostedLandingAttempt } from '../src/hosted-landing';
@@ -25,7 +26,9 @@ export async function retrySoloLandingCheck(
   )
     return false;
   const operationId = crypto.randomUUID();
+  const reason = providerRetryDelay(run.failureReason);
   const next = await enqueueHostedCheck(ctx, {
+    ...(reason ? { providerDelayReason: reason } : {}),
     projectId: claim.projectId,
     actor: attempt.actor.id,
     ...(attempt.recheck ? { recheck: attempt.recheck } : {}),
@@ -33,6 +36,7 @@ export async function retrySoloLandingCheck(
   });
   await installBatchAttempt(ctx, {
     projectId: claim.projectId,
+    ...(reason ? { providerDelayed: true } : {}),
     original: { ...attempt, platformRetries: (attempt.platformRetries ?? 0) + 1 },
     checkOperationId: operationId,
     check: {

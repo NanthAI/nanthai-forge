@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { retainCheckProgress } from './projectHostedLandingCheckProgress';
 import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
 import { checkWakeRow, scheduleCheckWake } from './projectHostedLandingCheckWake';
 export { notifyLandingCheck } from './projectHostedLandingCheckWake';
@@ -12,7 +13,7 @@ import {
   type LandingChannel,
 } from './projectHostedLandingEvents';
 export { scheduleLandingWake, wakeLandingQueue } from './projectHostedLandingEvents';
-import { landingRow } from './projectHostedLandingStore';
+import { landingRow, writeLanding } from './projectHostedLandingStore';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { hostedCheckTerminal } from '../src/hosted-check';
 import { settleLandingAdmission } from './projectHostedLandingAdmission';
@@ -283,6 +284,24 @@ async function wakeLandingCheckPage(
       if (hostedCheckTerminal(run)) {
         await settleLandingAdmission(ctx, row, run);
         woken = true;
+      } else if (
+        run.failureReason?.startsWith('provider-delayed:') ||
+        hostedLandingStateSchema.parse(JSON.parse(row.value)).observation.pendingReason === 'pending-infra'
+      ) {
+        const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+        retainCheckProgress(state, run, Date.now());
+        await writeLanding(
+          ctx,
+          row,
+          {
+            ...state,
+            version: state.version + 1,
+            observation: run.failureReason?.startsWith('provider-delayed:')
+              ? { state: 'pending', pendingReason: 'pending-infra', cause: null }
+              : { state: 'pending', pendingReason: 'checking', cause: null },
+          },
+          false,
+        );
       }
       continue;
     }
@@ -294,7 +313,12 @@ async function wakeLandingCheckPage(
       !progressWakeDue(hostedLandingStateSchema.parse(JSON.parse(row.value)).timing?.ciProgressAt, Date.now())
     ) {
       run ??= (await loadHostedCheck(ctx, input)).run;
-      if (!hostedCheckTerminal(run)) continue;
+      if (
+        !hostedCheckTerminal(run) &&
+        !run.failureReason?.startsWith('provider-delayed:') &&
+        hostedLandingStateSchema.parse(JSON.parse(row.value)).observation.pendingReason !== 'pending-infra'
+      )
+        continue;
     }
     woken = true;
     await ctx.db.patch(row._id, { checkWakeVersion: version, runnable: true });

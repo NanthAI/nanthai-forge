@@ -82,11 +82,16 @@ only from places that code cannot write (Issue 432164bf). For every CI adapter:
   source-pack job (`Refresh optional Forge source pack`, continue-on-error, so the run's conclusion
   never depends on it but still waits for it) must have completed as success or skipped. If both
   jobs reads find a job still running, one read of the run follows 5 minutes after the last result,
-  and once more at 30 minutes; after that the 12-hour watchdog settles it. A lost event therefore
-  costs about 10 s and one action and one mutation, never the 5 minutes it once did (Issue 03a749a5),
-  and a pass never waits for the pack job. Any conclusion other than success (failure, timeout,
-  cancelled) never passes; it ends the run as `runner-unavailable` (or `cancelled`) with that
-  reason, and the retry policy decides what follows. The rule is `src/hosted-check-verdict.ts`. The
+  then the job list at 30 minutes. At that read, all verified signed shards passing
+  plus a complete provider list with every job's steps completed without failure
+  settles the check as passed even if GitHub's status lags; the check records
+  `provider-delayed` evidence. Otherwise fixed reads at +1 h, +2 h and +4 h follow,
+  then the existing 12-hour watchdog. A failure seen at any read fails the check;
+  cancelled and unavailable results retain their ordinary platform handling.
+  [Provider outage recovery](../pre-queue-checks.md#provider-outage-recovery) records
+  the lead's decision, finite read budget and the CI-neutral adapter contract.
+  The ordinary lost event still costs about 10 s and one action and one mutation,
+  and a pass never waits for the optional pack job. The
   plan call still says when it starts the pack job (capability `checks.packVerdict`; an older server
   never sees the field).
   A new adapter supplies the same record from a channel the job cannot write: a signed provider event
@@ -138,7 +143,7 @@ only from places that code cannot write (Issue 432164bf). For every CI adapter:
 and every generated one (`tests/action-pins.test.mjs`).
 
 What a pass therefore attests: the pinned plan ran on the provider, every planned shard reported its
-tests from the supervisor, and the provider recorded the run as successful. On a runner the owner
+tests from the supervisor, and the provider confirmed success (or, at +30 minutes, confirmed every job step completed without failure while its run status lagged). On a runner the owner
 allowed to run without a Candidate user (`isolation:"shared"` above; the receipt's
 `check.isolation` is `shared`), project code shares the runner user's access during its own step, so
 treat such a pass as no stronger than the check's own tests.
@@ -655,7 +660,10 @@ retries, three runs total, with exact Candidate/check pins and parent-linked
 attempts. Exhaustion is infrastructure `CHECK_NOT_PASSED`; genuine failures remain
 `CHECK_FAILED`. Standalone cancellation is not retried. One
 12-hour watchdog bounds a missing completion event and is cancelled on terminal
-results. There are no project scans, active-run pollers, or idle scheduled functions.
+results. Accepted dispatches without an authenticated execution acknowledgement or
+shard result also have a +5 minute, one-lookup startup deadline: a missing run,
+`startup_failure` or cancellation goes through the same bounded platform retry
+with a provider-outage reason. Healthy startup cancels that deadline in its existing write. There are no project scans, active-run pollers, or idle scheduled functions.
 
 For legacy 400-descriptor servers, success uses
 `17 + 2 * ceil(sourceObjects / 400) + 6 * jobs` Convex calls,

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readProviderDelay } from './projectHostedLandingCheckProgress';
 import { finishReadReader } from './projectFinishReadReader';
 import { readWouldConflict, syncRequiredQueue } from './projectHostedLandingWouldConflict';
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
@@ -198,7 +199,10 @@ async function observePage(
       for (const event of events)
         if (event.submission.version === state.version)
           event.submission = noteHeldPolicy(event.submission, pin);
+    const delay = await readProviderDelay(ctx, selectedRow, state);
+    for (const event of events) if (event.submission.version === state.version) Object.assign(event, delay);
     const payload = {
+      ...delay,
       projectId: input.projectId,
       operationId: input.operationId,
       canonicalOperationId: state.operationId,

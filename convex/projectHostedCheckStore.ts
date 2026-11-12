@@ -166,6 +166,22 @@ export async function writeHostedCheck(
   run: HostedCheckRun,
   providerAttested = false,
 ) {
+  const providerDelayChanged = run.failureReason?.startsWith('provider-delayed:') === true;
+  if (
+    !hostedCheckTerminal(run) &&
+    !run.actions?.verdictPending &&
+    run.actions?.workflowSha &&
+    run.failureReason?.startsWith('provider-delayed:')
+  )
+    delete run.failureReason;
+  if (
+    run.actions?.confirm &&
+    (hostedCheckTerminal(run) ||
+      (!run.actions.verdictPending && (run.actions.workflowSha || run.counts.completed > 0)))
+  ) {
+    await ctx.scheduler.cancel(run.actions.confirm as Id<'_scheduled_functions'>);
+    run.actions.confirm = null;
+  }
   if (run.actions?.watchdog && hostedCheckTerminal(run)) {
     await ctx.scheduler.cancel(run.actions.watchdog as Id<'_scheduled_functions'>);
     run.actions.watchdog = null;
@@ -184,6 +200,7 @@ export async function writeHostedCheck(
     projectId: run.projectId as Id<'hostedProjects'>,
     runId: run.id,
     terminal: hostedCheckTerminal(run),
+    ...(providerDelayChanged ? { providerDelayed: true } : {}),
   });
 }
 export async function completeHostedCheck(ctx: MutationCtx, run: HostedCheckRun) {

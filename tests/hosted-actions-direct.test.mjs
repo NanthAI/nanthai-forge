@@ -473,7 +473,7 @@ test('duplicate results are immutable and complete shard evidence is needed to p
   assert.equal((await send(first)).status, 'passed');
   assert.equal([...s.tables.projectHostedTestTimings.values()][0].history, histories[0].history);
   // The watchdog and the one confirm read are both cancelled.
-  assert.equal(s.cancelled.length, 2);
+  assert.equal(s.cancelled.length, 3);
   const scheduled = s.scheduled.length;
   await s.call(direct, 'expire', { ...s.id, fence: terminal.fence });
   assert.equal(s.scheduled.length, scheduled);
@@ -653,7 +653,7 @@ test('webhook backstops cancellation, failure, timeout and missing evidence; doe
     await s.call(webhooks, 'receive', { payload: JSON.stringify(webhook(s, 'completed', conclusion)) });
     assert.equal((await s.status(s.run.id)).status, status);
     await s.call(webhooks, 'receive', { payload: JSON.stringify(webhook(s, 'completed', conclusion)) });
-    assert.equal(s.cancelled.length, 1);
+    assert.equal(s.cancelled.length, 2);
   }
 });
 const passAll = async s => {
@@ -666,8 +666,8 @@ const passAll = async s => {
 test("passing shard results alone never pass: the provider's conclusion decides (Issue 432164bf)", async t => {
   for (const [conclusion, status] of [
     ['success', 'passed'],
-    ['failure', 'runner-unavailable'],
-    ['timed_out', 'runner-unavailable'],
+    ['failure', 'failed'],
+    ['timed_out', 'failed'],
     ['cancelled', 'cancelled'],
   ]) {
     const s = await fixture(t);
@@ -681,66 +681,66 @@ test("passing shard results alone never pass: the provider's conclusion decides 
     const settled = await s.conclude(conclusion);
     assert.equal(settled.status, status, conclusion);
     assert.ok(s.cancelled.includes(confirm.id), 'the fallback read is cancelled once the event arrives');
-    if (conclusion === 'failure') assert.match(settled.failureReason, /only with the provider's success/);
+    if (conclusion === 'failure')
+      assert.match(settled.failureReason, /CI provider concluded the run failure/);
     // A replayed event changes nothing.
     await s.conclude('success');
     assert.equal((await s.status(s.run.id)).status, status);
   }
 });
-test('a lost completed event: two jobs reads, at most two bounded reads of the run, then only the watchdog', async t => {
+test('incident 238b3573 replay: a delayed provider uses seven fixed reads then the existing watchdog', async t => {
   variables(t, {
     GITHUB_APP_ID: '12345',
     GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
   });
-  const ctx = s => ({
-    runMutation: (ref, input) => s.call(verdicts, getFunctionName(ref).split(':')[1], input),
-  });
-  const running = {
-    total_count: 1,
-    jobs: [{ name: 'hosted-plan', status: 'in_progress', conclusion: null }],
-  };
-  for (const answers of [
-    ['completed:success'],
-    ['in_progress', 'completed:failure'],
-    ['in_progress', 'in_progress'],
-  ]) {
-    const s = await fixture(t);
-    bindRepository(t, s.id.projectId, repository);
-    const reads = [];
-    t.mock.method(globalThis, 'fetch', async url => {
-      if (url.endsWith('/installation')) return Response.json({ id: 9 });
-      if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
-      reads.push(url);
-      // A job still running in both jobs reads (a long post-step), then the run reads.
-      if (url.endsWith('/jobs?per_page=100')) return Response.json(running);
-      const [state, conclusion = null] = answers[reads.length - 3].split(':');
-      return Response.json({ status: state, conclusion });
-    });
-    await passAll(s);
-    const delays = [10_000, 30_000, 5 * 60_000, 30 * 60_000];
-    for (let attempt = 0; attempt < answers.length + 2; attempt++) {
-      const pending = s.scheduled.filter(item => item.name.endsWith('projectHostedActionsVerdict:confirm'));
-      assert.equal(pending.length, attempt + 1);
-      assert.equal(pending.at(-1).delay, delays[attempt]);
-      assert.equal(pending.at(-1).input.jobs, attempt < 2 ? true : undefined);
-      await verdicts.confirm._handler(ctx(s), pending.at(-1).input);
-    }
-    assert.equal(reads.length, answers.length + 2);
-    assert.ok(reads.slice(2).every(url => url.endsWith(`/repos/${repository}/actions/runs/123`)));
-    const run = await s.status(s.run.id);
-    const expected = {
-      'completed:success': 'passed',
-      'completed:failure': 'runner-unavailable',
-      in_progress: 'running',
-    };
-    assert.equal(run.status, expected[answers.at(-1)]);
-    assert.equal(
-      s.scheduled.filter(item => item.name.endsWith('projectHostedActionsVerdict:confirm')).length,
-      answers.length + 2,
-      'no further read: the 12 h watchdog is the backstop',
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const s = await fixture(t);
+  const reads = [];
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (url.endsWith('/installation')) return Response.json({ id: 9 });
+    if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+    reads.push(url);
+    return Response.json(
+      url.endsWith('/jobs?per_page=100')
+        ? {
+            total_count: 1,
+            jobs: [
+              {
+                name: 'hosted-plan',
+                status: 'in_progress',
+                conclusion: null,
+                steps: [{ status: 'in_progress', conclusion: null }],
+              },
+            ],
+          }
+        : { status: 'in_progress', conclusion: null },
     );
+  });
+  await passAll(s);
+  const since = now;
+  const tasks = () => s.scheduled.filter(item => item.name.endsWith('projectHostedActionsVerdict:confirm'));
+  const offsets = [10_000, 30_000, 5 * 60_000, 30 * 60_000, 60 * 60_000, 2 * 60 * 60_000, 4 * 60 * 60_000];
+  for (const [index, offset] of offsets.entries()) {
+    const task = tasks().at(-1);
+    assert.equal(task.delay, since + offset - now);
+    assert.equal(Boolean(task.input.jobs), [0, 1, 3].includes(index));
+    now = since + offset;
+    await verdicts.confirm._handler(
+      { runMutation: (ref, input) => s.call(verdicts, getFunctionName(ref).split(':')[1], input) },
+      task.input,
+    );
+    const run = await s.status(s.run.id);
+    assert.equal(run.status, 'running');
+    if (offset >= 30 * 60_000) assert.match(run.failureReason, /^provider-delayed: waiting on GitHub since/);
   }
+  assert.equal(reads.length, 7, 'only three reads beyond the original four');
+  assert.equal(tasks().length, 7, 'the finite series is exhausted');
+  assert.equal((await s.status(s.run.id)).actions.confirm, null);
+  await s.call(direct, 'expire', { ...s.id, fence: 1 });
+  assert.equal((await s.status(s.run.id)).status, 'interrupted');
 });
+
 test('Issue 03a749a5 replay: a pass with no pack job whose completed event is lost settles within 10 s of its result', async t => {
   // The dart resolution run of 2026-11-09: one hosted-plan job ran the whole check, the plan
   // started no pack job, GitHub concluded success 3 s after the result, and the signed event never
@@ -801,6 +801,8 @@ test('Issue 03a749a5 replay: a pass with no pack job whose completed event is lo
   }
 });
 test('friction 0064c3b2: a pass settles on the required jobs, never on the optional pack job', async t => {
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now);
   variables(t, {
     GITHUB_APP_ID: '12345',
     GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
@@ -820,7 +822,7 @@ test('friction 0064c3b2: a pass settles on the required jobs, never on the optio
       'passed',
       2,
     ],
-    [[[plan('completed', 'failure'), pack]], 'runner-unavailable', 1],
+    [[[plan('completed', 'failure'), pack]], 'failed', 1],
     // Still running after both jobs reads: the run's own reads and its event decide, as before.
     [
       [
@@ -868,7 +870,7 @@ test('friction 0064c3b2: a pass settles on the required jobs, never on the optio
       s.scheduled.filter(item => item.name.endsWith('projectHostedActionsVerdict:confirm'));
     for (let attempt = 0; attempt < answers.length; attempt++) {
       const read = confirms().at(-1);
-      assert.equal(read.delay, [10_000, 30_000][attempt], 'seconds after the last result, not minutes');
+      assert.equal(read.delay, [10_000, 30_000][attempt], 'fixed offsets from the last result');
       assert.equal(read.input.jobs, true);
       assert.equal(read.input.target.executionId, '123');
       await verdicts.confirm._handler(ctx, read.input);
@@ -883,7 +885,7 @@ test('friction 0064c3b2: a pass settles on the required jobs, never on the optio
     assert.equal((await s.status(s.run.id)).status, expected);
     if (expected === 'running') {
       const fallback = confirms().at(-1);
-      assert.equal(fallback.delay, 5 * 60_000);
+      assert(fallback.delay <= 5 * 60_000);
       assert.equal(fallback.input.jobs, undefined, 'then the run reads');
       assert.equal((await s.conclude('success')).status, 'passed', 'the event still settles it');
     } else {
@@ -3307,4 +3309,189 @@ test('proof write ticket is scoped to the exact run and cannot reuse the read-on
     s.transaction('proofStaleTicket', proof.report, { ...input, ticket: signature }),
     code('EVIDENCE_CHANGED'),
   );
+});
+
+test('incident 238b3573 replay: accepted startup failure without a webhook gets one lookup at five minutes', async t => {
+  for (const [withId, conclusion] of [
+    [true, 'startup_failure'],
+    [false, 'startup_failure'],
+    [true, 'cancelled'],
+    [false, null],
+  ]) {
+    t.mock.restoreAll();
+    const s = await fixture(t);
+    variables(t, {
+      GITHUB_APP_ID: '12345',
+      GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+    });
+    const reads = [];
+    t.mock.method(globalThis, 'fetch', async url => {
+      if (url.endsWith('/installation')) return Response.json({ id: 9 });
+      if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+      const visibility = repositoryRead(url);
+      if (visibility) return visibility;
+      if (url.endsWith('/dispatches'))
+        return withId ? Response.json({ workflow_run_id: 123 }) : new Response(null, { status: 204 });
+      reads.push(url);
+      return Response.json(
+        withId
+          ? { id: 123, status: 'completed', conclusion }
+          : {
+              workflow_runs: conclusion
+                ? [{ id: 123, display_title: `forge-check/${s.run.id}`, status: 'completed', conclusion }]
+                : [],
+            },
+      );
+    });
+    const ctx = { runMutation: (ref, input) => s.raw(direct, getFunctionName(ref).split(':')[1], input) };
+    await direct.dispatch._handler(ctx, s.id);
+    const [task] = reconcileTasks(s);
+    assert.equal(task.delay, 5 * 60_000);
+    assert.equal(reads.length, 0);
+    await direct.reconcile._handler(ctx, task.input);
+    const run = await s.status(s.run.id);
+    assert.equal(run.status, 'runner-unavailable');
+    assert.match(run.failureReason, /Provider outage: GitHub/);
+    await direct.reconcile._handler(ctx, task.input);
+    assert.equal(reads.length, 1, 'retry and the stall alarm cannot repeat the provider lookup');
+    await s.call(webhooks, 'receive', { payload: JSON.stringify(webhook(s, 'requested', null)) });
+    assert.equal(
+      (await s.status(s.run.id)).status,
+      'runner-unavailable',
+      'late events never revive the old check',
+    );
+  }
+});
+
+test('incident 238b3573 replay: signed passes and completed provider steps settle at thirty minutes despite in-progress jobs', async t => {
+  variables(t, {
+    GITHUB_APP_ID: '12345',
+    GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+  });
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const s = await fixture(t, 12);
+  const reads = [];
+  const steps = [{ status: 'completed', conclusion: 'success' }];
+  const jobs = Array.from({ length: 12 }, (_, i) => ({
+    name: `forge-hosted-${i}`,
+    status: i === 0 ? 'completed' : 'in_progress',
+    conclusion: i === 0 ? 'success' : null,
+    steps,
+  }));
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (url.endsWith('/installation')) return Response.json({ id: 9 });
+    if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+    reads.push(url);
+    return Response.json(
+      url.endsWith('/jobs?per_page=100')
+        ? { total_count: jobs.length, jobs }
+        : { status: 'in_progress', conclusion: null },
+    );
+  });
+  await s.bind();
+  await s.prepare();
+  const ack = reconcileTasks(s)[0];
+  assert(s.cancelled.includes(ack.id), 'healthy startup cancels the deadline in its existing session write');
+  for (let index = 0; index < 12; index++)
+    await s.call(results, 'result', { ...s.input(), result: JSON.stringify({ index, exitCode: 0 }) });
+  const since = now;
+  for (const offset of [10_000, 30_000, 300_000, 1_800_000]) {
+    now = since + offset;
+    const task = s.scheduled.filter(item => item.name.endsWith('projectHostedActionsVerdict:confirm')).at(-1);
+    await verdicts.confirm._handler(
+      { runMutation: (ref, input) => s.call(verdicts, getFunctionName(ref).split(':')[1], input) },
+      task.input,
+    );
+  }
+  const run = await s.status(s.run.id);
+  assert.equal(run.status, 'passed');
+  assert.match(run.failureReason, /provider-delayed: GitHub run status lagged/);
+  assert.equal(reads.length, 4, 'reuses the existing four fallback reads');
+  assert.equal(run.actions.confirm, null);
+  assert(s.cancelled.includes(run.actions.watchdog) || run.actions.watchdog === null);
+  assert.equal(
+    (await s.conclude('failure')).status,
+    'passed',
+    'a late provider event cannot rewrite accepted evidence',
+  );
+});
+
+test('startup recovery never treats an unreadable or incomplete listing as a missing run; healthy startup adds no lookup', async t => {
+  for (const answer of ['not-found', 'incomplete', 'unreadable', 'healthy']) {
+    t.mock.restoreAll();
+    const s = await fixture(t);
+    variables(t, {
+      GITHUB_APP_ID: '12345',
+      GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+    });
+    let reads = 0;
+    t.mock.method(globalThis, 'fetch', async url => {
+      if (url.endsWith('/installation')) return Response.json({ id: 9 });
+      if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+      const visibility = repositoryRead(url);
+      if (visibility) return visibility;
+      if (url.endsWith('/dispatches'))
+        return answer === 'incomplete'
+          ? new Response(null, { status: 204 })
+          : Response.json({ workflow_run_id: 123 });
+      reads++;
+      if (answer === 'not-found') return new Response(null, { status: 404 });
+      if (answer === 'unreadable') throw new TypeError('synthetic outage');
+      return Response.json({ total_count: 101, workflow_runs: [] });
+    });
+    const ctx = { runMutation: (ref, input) => s.raw(direct, getFunctionName(ref).split(':')[1], input) };
+    await direct.dispatch._handler(ctx, s.id);
+    const [task] = reconcileTasks(s);
+    if (answer === 'healthy') {
+      await s.prepare();
+      assert(s.cancelled.includes(task.id));
+      await direct.reconcile._handler(ctx, task.input);
+      assert.equal(reads, 0, 'a healthy session cancels before any provider-record read');
+    } else {
+      await direct.reconcile._handler(ctx, task.input);
+      const run = await s.status(s.run.id);
+      assert.equal(
+        run.status,
+        { 'not-found': 'runner-unavailable', incomplete: 'unknown', unreadable: 'preparing' }[answer],
+      );
+      if (answer !== 'not-found') assert.match(run.failureReason, /^provider-delayed:/);
+      await direct.reconcile._handler(ctx, task.input);
+      assert.equal(reads, 1, 'the single lookup budget includes unreadable answers');
+      if (answer === 'unreadable') {
+        await s.prepare();
+        assert.equal(
+          (await s.status(s.run.id)).failureReason,
+          undefined,
+          'authenticated startup clears the delay reason without another provider read',
+        );
+        assert.equal(reads, 1);
+      }
+    }
+  }
+});
+
+test('provider cancellation in the jobs fallback keeps ordinary cancellation semantics after signed passes', async t => {
+  variables(t, {
+    GITHUB_APP_ID: '12345',
+    GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+  });
+  const s = await fixture(t);
+  await passAll(s);
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (url.endsWith('/installation')) return Response.json({ id: 9 });
+    if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+    return Response.json({
+      total_count: 1,
+      jobs: [{ name: 'hosted-plan', status: 'completed', conclusion: 'cancelled' }],
+    });
+  });
+  const task = s.scheduled.find(item => item.name.endsWith('projectHostedActionsVerdict:confirm'));
+  await verdicts.confirm._handler(
+    { runMutation: (ref, input) => s.call(verdicts, getFunctionName(ref).split(':')[1], input) },
+    task.input,
+  );
+  const run = await s.status(s.run.id);
+  assert.equal(run.status, 'cancelled');
+  assert.match(run.failureReason, /provider cancelled/);
 });

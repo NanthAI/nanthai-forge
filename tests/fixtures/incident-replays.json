@@ -193,6 +193,18 @@
       "what": "Existing null alert samples need bounded one-time operation-stamp repair and explicit unknown coverage",
       "file": "tests/hosted-checks.test.mjs",
       "test": "incident f5c45985: existing maintenance backfills null discard samples once from operation stamps and preserves unknowns"
+    },
+    {
+      "incident": "238b3573",
+      "what": "Accepted dispatch startup_failure without a webhook strands the landing",
+      "file": "tests/hosted-actions-direct.test.mjs",
+      "test": "incident 238b3573 replay: accepted startup failure without a webhook gets one lookup at five minutes"
+    },
+    {
+      "incident": "238b3573",
+      "what": "Twelve passing shards but run and eleven jobs stay in_progress after every step completed",
+      "file": "tests/hosted-actions-direct.test.mjs",
+      "test": "incident 238b3573 replay: signed passes and completed provider steps settle at thirty minutes despite in-progress jobs"
     }
   ]
 }

@@ -8,13 +8,18 @@ import { hostedCheckTerminal, type HostedCheckRun } from './hosted-check.js';
  * also needs the provider's own record that the run succeeded, received on a channel that job
  * cannot write (a signed provider event, or a provider API read with the adapter's credential).
  * The supervisor exits non-zero whenever it saw a failure, so a provider success means it saw a pass.
+ * A lagged run may instead be confirmed by the bounded, signed-shards-plus-steps rule
+ * in ci-provider-recovery.ts; supervisor results alone still never pass.
  */
 export type ProviderVerdict =
   | { status: 'passed' }
+  | { status: 'failed'; reason: string }
   | { status: 'cancelled'; reason: string }
   | { status: 'runner-unavailable'; reason: string };
 export function providerVerdict(conclusion: string | null | undefined): ProviderVerdict {
   if (conclusion === 'success') return { status: 'passed' };
+  if (['failure', 'failed', 'timed_out', 'action_required'].includes(conclusion ?? ''))
+    return { status: 'failed', reason: `The CI provider concluded the run ${conclusion}.` };
   if (conclusion === 'cancelled')
     return { status: 'cancelled', reason: 'The CI provider cancelled the run after every shard reported.' };
   return {
@@ -48,8 +53,11 @@ export function requiredJobsConclusion(body: unknown): string | null {
   };
   if (!Array.isArray(page?.jobs) || page.total_count !== page.jobs.length) return null;
   const required = page.jobs.filter(job => job.name !== OPTIONAL_PACK_JOB && job.name !== OPTIONAL_PROOF_JOB);
-  if (!required.length || required.some(job => job.status !== 'completed')) return null;
-  const failed = required.find(job => job.conclusion !== 'success' && job.conclusion !== 'skipped');
+  if (!required.length) return null;
+  const failed = required.find(
+    job => job.status === 'completed' && job.conclusion !== 'success' && job.conclusion !== 'skipped',
+  );
   if (failed) return typeof failed.conclusion === 'string' ? failed.conclusion.slice(0, 40) : 'unknown';
+  if (required.some(job => job.status !== 'completed')) return null;
   return required.some(job => job.conclusion === 'success') ? 'success' : null;
 }

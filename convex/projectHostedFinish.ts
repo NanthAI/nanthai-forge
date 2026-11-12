@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readProviderDelay } from './projectHostedLandingCheckProgress';
 import { capsuleHistoryContext } from './projectLandingCapsuleContext';
 import { supersededOutcome } from '../src/landing-state';
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
@@ -67,6 +68,7 @@ export const status = query({
       const reservation = landingReservationForReader(row);
       return canonicalPayload({
         ...(reservation ? { reservation } : {}),
+        ...(await readProviderDelay(ctx, row, state)),
         version: state.version,
         unchanged: state.phase !== 'queued' && input.version === state.version,
         submission: landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),

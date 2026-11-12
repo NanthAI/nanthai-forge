@@ -84,3 +84,5 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.
+
+`238b3573`: accepted dispatch startup failure with a lost webhook, and twelve signed passing shards whose provider run and eleven jobs remain in progress after every step completes; both replays are registered in `tests/fixtures/incident-replays.json`.

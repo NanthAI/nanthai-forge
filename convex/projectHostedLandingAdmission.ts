@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { providerRetryDelay } from '../src/ci-provider-recovery';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { LandingClaim, requireLandingLease } from './projectHostedLandingControl';
@@ -53,6 +54,7 @@ export async function startLandingAdmission(
     projectId: Id<'hostedProjects'>;
     attempt: HostedLandingAttempt;
     request: HostedLandingRequest;
+    providerDelayReason?: string;
   },
   retry = 0,
 ) {
@@ -69,6 +71,7 @@ export async function startLandingAdmission(
   const { kind: _kind, ...settings } = check;
   void _kind;
   const run = await enqueueHostedCheck(ctx, {
+    ...(input.providerDelayReason ? { providerDelayReason: input.providerDelayReason } : {}),
     projectId: input.projectId,
     actor: attempt.actor.id,
     request: {
@@ -110,9 +113,15 @@ export async function settleLandingAdmission(ctx: MutationCtx, original: Landing
   if (row.admission.full && kind === 'platform' && retries < HOSTED_PLATFORM_RETRIES) {
     // Unknown is not red: the same Candidate checks again, still before the queue.
     const attempt = await loadLandingAttempt(ctx, { projectId: row.projectId, attemptId: state.attemptId });
+    const reason = providerRetryDelay(run.failureReason);
     const runId = await startLandingAdmission(
       ctx,
-      { projectId: row.projectId, attempt, request: state.request },
+      {
+        projectId: row.projectId,
+        attempt,
+        request: state.request,
+        ...(reason ? { providerDelayReason: reason } : {}),
+      },
       retries + 1,
     );
     if (runId) {
@@ -124,7 +133,9 @@ export async function settleLandingAdmission(ctx: MutationCtx, original: Landing
         {
           ...state,
           version: state.version + 1,
-          observation: landingObservation('checking'),
+          observation: reason
+            ? { state: 'pending', pendingReason: 'pending-infra', cause: null }
+            : landingObservation('checking'),
           // A re-dispatched admission is progress: no false still-stalled alert (a7de3a93).
           timing: { submittedAt: state.at, ...state.timing, ciProgressAt: new Date().toISOString() },
         },

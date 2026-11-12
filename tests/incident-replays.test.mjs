@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from 'node:fs';
 const registry = JSON.parse(readFileSync('tests/fixtures/incident-replays.json', 'utf8'));
 const LADDER = 'docs/agents/regression-ladder.md';
 /** Incidents the ladder requires (45f49fb7): B1.5d case studies and core-claim incidents. */
-const REQUIRED = ['n3-r3-a1', 't27456', 'a930de4c', 'c329d191', 'a7de3a93', '19328518'];
+const REQUIRED = ['n3-r3-a1', 't27456', 'a930de4c', 'c329d191', 'a7de3a93', '19328518', '238b3573'];
 
 const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** Problems for one entry; `read` returns a file's source or null when missing. */

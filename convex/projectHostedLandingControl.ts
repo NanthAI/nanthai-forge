@@ -266,7 +266,9 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
         return (await loadLanding(ctx, claim)).state;
       } else if (!hostedCheckTerminal(run)) {
         phase = 'checking';
-        observation = landingObservation('checking');
+        observation = run.failureReason?.startsWith('provider-delayed:')
+          ? { state: 'pending', pendingReason: 'pending-infra', cause: null }
+          : landingObservation('checking');
       } else if (run.status !== 'passed') {
         phase = 'terminal-failed';
         observation = landingObservation(run.status);

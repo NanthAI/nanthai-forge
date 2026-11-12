@@ -111,6 +111,7 @@ export async function enqueueHostedCheck(
     projectId: Id<'hostedProjects'>;
     actor: string;
     request: unknown;
+    providerDelayReason?: string;
     /** Main-race retry: a full gate may become the scoped recheck selection. */
     recheck?: ScopedRecheckBasis;
     /** A cohort's main-race retry (Issue 28f08555): every included member's full-pass basis. */
@@ -257,6 +258,7 @@ export async function enqueueHostedCheck(
   )
     gate = scopedRecheckBatchGate(input.cohortRecheck);
   const run = hostedCheckRunSchema.parse({
+    ...(input.providerDelayReason ? { failureReason: input.providerDelayReason } : {}),
     ...(gate ? { gate } : {}),
     ...(semantic && semantic.members.length > 1 ? { semanticPlan: semantic } : {}),
     ...(project.autonomyPolicy?.acceptance.proofOnLanding ? { proofOnLanding: true } : {}),

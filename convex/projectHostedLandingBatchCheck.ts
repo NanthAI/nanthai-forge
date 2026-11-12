@@ -188,7 +188,9 @@ async function prepareLandingCheckOnce(
             ...state,
             phase: 'checking',
             version: state.version + 1,
-            observation: landingObservation('checking'),
+            observation: run.failureReason?.startsWith('provider-delayed:')
+              ? { state: 'pending', pendingReason: 'pending-infra', cause: null }
+              : landingObservation('checking'),
           },
           false,
         );

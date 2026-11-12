@@ -454,3 +454,49 @@ landings per hour rose from 6.1 (8.2 without the hold) to 12.3 and Convex calls
 per landing from 121 (99) to 77. A single Lane uses one run (22 runner minutes) with or without the Lane check.
 Details are in [landing batches](operations/landing-batches.md#pre-queue-lane-checks).
 The live effect on the project's runner is not yet measured.
+
+## Provider outage recovery
+
+The lead's decision for Issue 238b3573 applies to every CI adapter: once every required
+shard has reported a verified signed pass, the provider confirms that evidence. If
+its run or job statuses lag, a complete provider job list showing **every job's
+steps completed without failure** is sufficient to pass at the +30 minute read.
+A job report alone never supplies that provider confirmation. A missing or
+incomplete page, unknown step conclusion, absent steps on a nonterminal job, or
+missing signed shard evidence never passes by this rule. The check retains the
+provider's lag in `failureReason` as `provider-delayed` evidence, even when passed.
+The ordinary provider-success path is unchanged.
+
+Reads are fixed offsets from the last shard: jobs at +10 s and +30 s, the run at
++5 min, jobs/steps at +30 min (replacing the former run read), then the run at
++1 h, +2 h and +4 h. A provider failure at any read fails the check. Otherwise it
+shows `provider-delayed`, with the time since the last shard and next fixed read;
+after the series, the existing 12-hour execution watchdog remains the backstop.
+There is no polling loop or periodic job.
+
+An accepted dispatch that has neither an authenticated execution acknowledgement
+nor any shard result gets one provider lookup at +5 minutes, by its returned run
+id or dispatch run-name. A missing run, `startup_failure` or cancellation settles
+as `runner-unavailable` with a provider-outage reason and uses the existing bounded
+platform retry (two retries, three checks total). A still-pending run is adopted;
+an unreadable provider response remains uncertain and never licenses a duplicate
+dispatch. Healthy startup cancels this deadline within its existing session/event
+write; healthy completion cancels the verdict fallback within its existing write.
+Replayed deadlines and the stall alarm cannot issue a second startup lookup.
+
+The shared contract is `src/ci-provider-recovery.ts`; the GitHub and GitLab-shaped
+adapter contract tests cover the same startup and lagged-step decisions. An adapter
+normalizes its own authenticated provider records, supplies complete-page coverage,
+and proves signed passes for the entire plan before applying the delayed-pass rule.
+GitLab Candidate publication remains unsupported; these tests are contract parity,
+not a claim of a live GitLab deployment.
+
+Budget per check: healthy execution adds zero Convex calls, application DB reads or
+writes and provider reads; a startup deadline is scheduled and cancelled in existing
+transactions. A stuck startup adds one provider lookup and two short mutations.
+A delayed verdict uses at most seven provider reads in total, three beyond the
+previous four. Provider authentication/token calls are additional to these record
+reads, as before. At most 100 jobs and their steps are inspected in memory; larger
+or incomplete pages stay delayed rather than being treated as complete. No source
+or log bytes move, no new storage table is added, and idle costs zero calls.
+Live deployment, replay and billed-usage deltas remain separate qualification.

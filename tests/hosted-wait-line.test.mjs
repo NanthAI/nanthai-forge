@@ -127,3 +127,12 @@ test('wait line: a check that ran in full names its reason; a scoped one adds no
   assert.notEqual(waitEventLine(full).key, waitEventLine(event()).key, 'the reason prints once');
   assert.equal('ranInFull' in waitEventLine(event()).line, false);
 });
+
+test('provider-delayed wakes show the provider reason and the next fixed read in the land wait', () => {
+  const reason =
+    'provider-delayed: waiting on GitHub since 2026-11-11T20:19:00Z; the next fixed provider read is at +60 minutes.';
+  const full = event({ providerDelay: reason });
+  assert.equal(waitEventLine(full).line.providerDelay, reason);
+  assert.notEqual(waitEventLine(full).key, waitEventLine(event()).key);
+  assert.equal('providerDelay' in waitEventLine(event()).line, false);
+});

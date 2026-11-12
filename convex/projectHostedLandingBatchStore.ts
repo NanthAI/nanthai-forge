@@ -182,6 +182,7 @@ export async function enqueueBatchCheck(
     actor: string;
     request: unknown;
     recheck?: ScopedRecheckBasis[] | undefined;
+    providerDelayReason?: string;
   },
 ) {
   const { recheck, ...check } = input;
@@ -205,6 +206,7 @@ export async function installBatchAttempt(
     /** A platform retry of the same generation keeps its reserved receipt, so
      * groups stacked on (head, receipt) stay valid (ea86f3fb). */
     keepReceipt?: boolean;
+    providerDelayed?: true;
   },
 ) {
   const { original } = input;
@@ -242,7 +244,9 @@ export async function installBatchAttempt(
       version: state.version + 1,
       attemptId: attempt.id,
       phase: 'checking',
-      observation: landingObservation('checking'),
+      observation: input.providerDelayed
+        ? { state: 'pending', pendingReason: 'pending-infra', cause: null }
+        : landingObservation('checking'),
       error: null,
     },
     false,

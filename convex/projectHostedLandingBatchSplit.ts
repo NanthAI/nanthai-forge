@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { providerRetryDelay } from '../src/ci-provider-recovery';
 import { settleBatchConflicts } from './projectHostedLandingCohortConflicts';
 import type { MutationCtx } from './_generated/server';
 import type { BatchFailure } from '../src/hosted-batch-diagnosis';
@@ -267,7 +268,9 @@ export async function retryLandingBatchCheck(
   const { kind: _kind, ...check } = settings;
   void _kind;
   const checkOperationId = crypto.randomUUID();
+  const reason = providerRetryDelay(run.failureReason);
   const next = await enqueueBatchCheck(ctx, {
+    ...(reason ? { providerDelayReason: reason } : {}),
     projectId: input.projectId,
     actor: shared.actor.id,
     request: {
@@ -286,6 +289,7 @@ export async function retryLandingBatchCheck(
       checkOperationId,
       candidate: shared.candidate,
       keepReceipt: true,
+      ...(reason ? { providerDelayed: true } : {}),
       check: {
         runId: next.id,
         checkId: next.check.id,

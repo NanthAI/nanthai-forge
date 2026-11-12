@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { QueryCtx, MutationCtx } from './server';
+import type { Doc } from './_generated/dataModel';
+import { loadHostedCheck } from './projectHostedCheckStore';
 import type { HostedLandingState } from '../src/hosted-landing';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { digest } from '../src/state/hash';
@@ -15,6 +18,7 @@ export function retainCheckProgress(state: HostedLandingState, run: HostedCheckR
       plan: run.planDigest,
       execution: run.executionId,
       terminal: run.terminalDigest,
+      ...(run.failureReason?.startsWith('provider-delayed:') ? { providerDelay: run.failureReason } : {}),
     }),
   );
   if (state.checkProgress !== progress) {
@@ -35,4 +39,16 @@ export function retainCheckProgress(state: HostedLandingState, run: HostedCheckR
     state.counts = { ...state.counts, runnerSeconds: Math.round(run.execution.seconds) };
   if (run.testFiles) state.testFiles = run.testFiles;
   if (run.fallbackReason) state.ranInFull = run.fallbackReason;
+}
+
+/** Read only for an affected check, on the observer's existing subscription. Healthy
+ * status adds zero reads. The reason uses the existing run record, no new stored shape. */
+export async function readProviderDelay(
+  ctx: QueryCtx | MutationCtx,
+  row: Doc<'projectHostedLandingRequests'>,
+  state: HostedLandingState,
+) {
+  if (state.observation.pendingReason !== 'pending-infra' || !row.runId) return {};
+  const { run } = await loadHostedCheck(ctx, { projectId: row.projectId, runId: row.runId }, false);
+  return run.failureReason ? { providerDelay: run.failureReason } : {};
 }

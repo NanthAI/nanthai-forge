@@ -32,6 +32,7 @@ export async function notifyLandingCheck(
     runId: string;
     /** Admission evaluation still waits for a terminal result. */
     terminal?: boolean;
+    providerDelayed?: true;
   },
 ) {
   // The current run binding owns completion in either live queue phase. A
@@ -53,7 +54,7 @@ export async function notifyLandingCheck(
         q.eq('projectId', input.projectId).eq('runId', input.runId).eq('phase', 'queued'),
       )
       .take(1);
-  if (!waiting || (input.terminal === false && waiting.admitting)) return;
+  if (!waiting || (input.terminal === false && waiting.admitting && !input.providerDelayed)) return;
   const row = await checkWakeRow(ctx, { projectId: input.projectId, runId: input.runId });
   // Advance even while a fanout is in flight. Pages which already consumed a
   // progress event must see a later terminal event before that fanout retires.
@@ -63,7 +64,12 @@ export async function notifyLandingCheck(
   // read that row and the run, skip it unconsumed and retire. Schedule nothing.
   // The next event outside the window (or the terminal one, always) reaches the
   // entry through the version bumped above, exactly as a skipped wake would.
-  if (input.terminal === false && waiting.phase === 'checking' && (await skippable(ctx, input, waiting)))
+  if (
+    input.terminal === false &&
+    !input.providerDelayed &&
+    waiting.phase === 'checking' &&
+    (await skippable(ctx, input, waiting))
+  )
     return;
   if (row?.wake) {
     const task = await ctx.db.system.get(row.wake.taskId);

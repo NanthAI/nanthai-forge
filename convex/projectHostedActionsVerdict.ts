@@ -14,11 +14,21 @@ import { runnerTokenScope, type RunnerScope } from './githubBindingAccess';
 import { directCallback, actionsExecutionCost } from '../src/hosted-actions-direct';
 import { signHostedCheckCallback } from '../src/hosted-check-evidence';
 import { hostedCheckTerminal, type HostedCheckRun } from '../src/hosted-check';
-import { providerVerdict, requiredJobsConclusion } from '../src/hosted-check-verdict';
+import {
+  delayedProviderVerdict,
+  providerVerdictReadsMs,
+  type ProviderJob,
+} from '../src/ci-provider-recovery';
+import {
+  providerVerdict,
+  requiredJobsConclusion,
+  OPTIONAL_PACK_JOB,
+  OPTIONAL_PROOF_JOB,
+} from '../src/hosted-check-verdict';
 
-/** Still unsettled after the jobs reads below: one read of the run's conclusion this long after
- * the last shard result, and one more if the run was still going; the 12 h watchdog stays the backstop. */
-export const verdictConfirmMs = [5 * 60_000, 30 * 60_000] as const;
+/** Fixed offsets from the last shard: run at +5 min, jobs/steps at +30 min, then
+ * run at +1/+2/+4 h. The existing execution watchdog remains the final backstop. */
+export const verdictConfirmMs = providerVerdictReadsMs;
 /** Every held pass: reads of the required jobs' conclusions this long after the last shard result
  * (the job that posted it completes a few seconds later), then the reads above. The run's signed
  * `workflow_run` event usually settles it first and cancels the read, so the common path adds no
@@ -87,13 +97,18 @@ export async function completeFromResults(
  * The run stays active; its output may already be finalized. */
 export async function holdForConclusion(ctx: MutationCtx, loaded: LoadedHostedCheck, deferWrite = false) {
   const { row, run } = loaded;
+  if (run.actions!.confirm) {
+    await ctx.scheduler.cancel(run.actions!.confirm as never);
+    run.actions!.confirm = null;
+  }
   run.actions!.verdictPending = true;
+  const since = Date.now();
   // Not only runs with the pack job: one lost provider event must never cost minutes (Issue 03a749a5).
   const jobs = await jobsRead(ctx, row.projectId, run);
   run.actions!.confirm = await ctx.scheduler.runAfter(
     jobs ? verdictJobsMs[0] : verdictConfirmMs[0],
     makeFunctionReference<'action'>('projectHostedActionsVerdict:confirm'),
-    { projectId: row.projectId, runId: run.id, fence: run.fence, attempt: 0, ...jobs },
+    { projectId: row.projectId, runId: run.id, fence: run.fence, attempt: 0, since, ...jobs },
   );
   if (!deferWrite) await writeHostedCheck(ctx, row._id, run);
   return run;
@@ -118,6 +133,14 @@ export async function applyConclusion(
     verdict.status,
     'reason' in verdict ? verdict.reason : 'Cancelled.',
   );
+}
+
+/** The same report collection and attested completion as a provider success. */
+async function prepareDelayedPass(ctx: MutationCtx, selected: LoadedHostedCheck) {
+  if (objectReportTransport(selected.run))
+    return prepareReportCollection(ctx, selected, 'success', applyConclusion);
+  await completeFromResults(ctx, selected, 'passed');
+  return null;
 }
 
 export const pendingConfirm = internalMutation({
@@ -148,12 +171,46 @@ export const confirmed = internalMutation({
     completed: v.boolean(),
     conclusion: v.union(v.string(), v.null()),
     jobs: v.optional(v.literal(true)),
+    since: v.optional(v.number()),
+    lagged: v.optional(v.literal(true)),
+    stepVerdict: v.optional(v.union(v.literal('passed'), v.literal('failed'), v.literal('provider-delayed'))),
   },
   returns: v.union(v.string(), v.null()),
   handler: async (ctx, input) => {
     const selected = await writableHostedCheck(ctx, input),
       { row, run } = selected;
     if (run.fence !== input.fence) return null;
+    const scheduledFunctionId = run.actions?.confirm;
+    // The scheduled action is executing; never cancel it from its completion.
+    if (run.actions) run.actions.confirm = null;
+    if (!hostedCheckTerminal(run) && input.stepVerdict === 'failed') {
+      await settleDirectActions(
+        ctx,
+        selected,
+        'failed',
+        'The CI provider recorded a failed job or step while its run status was delayed.',
+      );
+      return null;
+    }
+    const signedShardsPassed =
+      !!run.plan &&
+      run.counts.completed === run.plan.shardCount &&
+      run.counts.passed === run.plan.shardCount &&
+      run.counts.failed === 0;
+    if (
+      !hostedCheckTerminal(run) &&
+      input.stepVerdict === 'passed' &&
+      input.lagged &&
+      input.since !== undefined &&
+      Date.now() - input.since >= verdictConfirmMs[1] &&
+      run.actions?.verdictPending &&
+      signedShardsPassed
+    ) {
+      run.failureReason = `provider-delayed: GitHub run status lagged; all signed shards passed and the provider job list confirmed every step completed without failure at the +30 minute read.`;
+      if (objectReportTransport(run) && !run.reportPointer) await writeHostedCheck(ctx, row._id, run);
+      const reports = await prepareDelayedPass(ctx, selected);
+      return reports ? JSON.stringify(reports) : null;
+    }
     // Collector recovery is independent of provider completion: a real jobs read
     // must recover a stopped owner even while the provider is still running.
     if (objectReportTransport(run)?.collection && !run.reportPointer) {
@@ -163,7 +220,7 @@ export const confirmed = internalMutation({
         input.completed ? input.conclusion : undefined,
         applyConclusion,
         {
-          scheduledFunctionId: run.actions?.confirm as
+          scheduledFunctionId: scheduledFunctionId as
             | import('./_generated/dataModel').Id<'_scheduled_functions'>
             | undefined,
         },
@@ -182,7 +239,7 @@ export const confirmed = internalMutation({
     )
       return JSON.stringify(
         await prepareReportCollection(ctx, selected, input.conclusion, applyConclusion, {
-          scheduledFunctionId: run.actions?.confirm as
+          scheduledFunctionId: scheduledFunctionId as
             | import('./_generated/dataModel').Id<'_scheduled_functions'>
             | undefined,
         }),
@@ -193,20 +250,28 @@ export const confirmed = internalMutation({
       await applyConclusion(ctx, selected, input.conclusion);
       return null;
     }
-    // Still running: the next jobs read, then the run reads, then only the watchdog.
-    const jobsNext = input.jobs ? verdictJobsMs[input.attempt + 1] : undefined;
-    const next = input.jobs ? (jobsNext ?? verdictConfirmMs[0]) : verdictConfirmMs[input.attempt + 1];
-    const jobs = jobsNext === undefined ? null : await jobsRead(ctx, input.projectId, run);
+    // Fixed offsets from the last shard, never a poll or an unbounded retry.
+    const since = input.since ?? Date.now();
+    const earlyJobs = input.jobs && !input.lagged;
+    const jobsNext = earlyJobs ? verdictJobsMs[input.attempt + 1] : undefined;
+    const attempt = earlyJobs ? (jobsNext === undefined ? 0 : input.attempt + 1) : input.attempt + 1;
+    const next = jobsNext ?? verdictConfirmMs[attempt];
+    // Replace the existing +30 min run read with its job-list read; no extra provider read.
+    const jobs = jobsNext !== undefined || attempt === 1 ? await jobsRead(ctx, input.projectId, run) : null;
+    if (!earlyJobs && input.attempt >= 1)
+      run.failureReason = `provider-delayed: waiting on GitHub since ${new Date(since).toISOString()}; its provider record has not settled. ${next === undefined ? 'The execution watchdog is the backstop.' : 'The next fixed provider read is at +' + next / 60_000 + ' minutes.'}`;
     if (next !== undefined)
       run.actions.confirm = await ctx.scheduler.runAfter(
-        next,
+        Math.max(0, since + next - Date.now()),
         makeFunctionReference<'action'>('projectHostedActionsVerdict:confirm'),
         {
           projectId: input.projectId,
           runId: input.runId,
           fence: input.fence,
-          attempt: input.jobs && !jobs ? 0 : input.attempt + 1,
+          attempt,
+          since,
           ...jobs,
+          ...(attempt === 1 && jobsNext === undefined ? { lagged: true as const } : {}),
         },
       );
     await writeHostedCheck(ctx, row._id, run);
@@ -221,6 +286,8 @@ export const confirm = internalAction({
     attempt: v.number(),
     jobs: v.optional(v.literal(true)),
     target: v.optional(jobsTarget),
+    since: v.optional(v.number()),
+    lagged: v.optional(v.literal(true)),
   },
   returns: v.null(),
   handler: async (ctx, input): Promise<null> => {
@@ -238,7 +305,8 @@ export const confirm = internalAction({
       )) as { repository: string; executionId: string; runnerScope?: RunnerScope | null } | null);
     if (!pending) return null;
     let completed = false,
-      conclusion: string | null = null;
+      conclusion: string | null = null,
+      stepVerdict: 'passed' | 'failed' | 'provider-delayed' | undefined;
     try {
       const token = await actionsToken(ctx, input.projectId, pending.repository, pending.runnerScope);
       const response = await githubAppRequest(
@@ -247,12 +315,38 @@ export const confirm = internalAction({
       );
       if (input.jobs) {
         // The required jobs only: the optional pack job never decides, nor holds, the verdict.
-        conclusion = requiredJobsConclusion(await response.json());
+        const body = (await response.json()) as { total_count?: number; jobs?: ProviderJob[] };
+        conclusion = requiredJobsConclusion(body);
+        const jobs = body.jobs ?? [];
+        const required = jobs.filter(job => {
+          const name = (job as ProviderJob & { name?: string }).name;
+          return name !== OPTIONAL_PACK_JOB && name !== OPTIONAL_PROOF_JOB;
+        });
+        if (
+          delayedProviderVerdict({ signedShardsPassed: false, complete: false, jobs: required }) === 'failed'
+        )
+          stepVerdict = 'failed';
+        else if (
+          input.lagged &&
+          input.since !== undefined &&
+          Date.now() - input.since >= verdictConfirmMs[1]
+        ) {
+          const steps = delayedProviderVerdict({
+            signedShardsPassed: true,
+            complete: Array.isArray(body.jobs) && body.total_count === jobs.length,
+            jobs,
+          });
+          // Optional jobs cannot fail a check; their failure only rules out this
+          // stronger whole-job-list shortcut while required statuses still lag.
+          stepVerdict = steps === 'passed' ? 'passed' : 'provider-delayed';
+        }
         completed = conclusion !== null;
       } else {
         const body = (await response.json()) as { status?: unknown; conclusion?: unknown };
         completed = body.status === 'completed';
         conclusion = typeof body.conclusion === 'string' ? body.conclusion.slice(0, 40) : null;
+        if (['failure', 'failed', 'timed_out', 'action_required'].includes(conclusion ?? ''))
+          completed = true;
       }
     } catch {
       // An unreadable answer is not a conclusion: treat it as still running.
@@ -263,6 +357,7 @@ export const confirm = internalAction({
         ...identityInput,
         completed,
         conclusion,
+        ...(stepVerdict ? { stepVerdict } : {}),
       },
     );
     if (reports) {
@@ -275,7 +370,7 @@ export const confirm = internalAction({
           fence: input.fence,
           executionId: prepared.run.executionId,
         },
-        completed ? conclusion : undefined,
+        stepVerdict === 'passed' ? 'success' : completed ? conclusion : undefined,
         prepared,
       );
     }
