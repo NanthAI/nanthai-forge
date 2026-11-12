@@ -27,7 +27,7 @@ import { retryR2Lag } from '../src/hosted-r2-retry';
 import { sourceDomainError } from './projectConvexSourceErrors';
 import { packHeaders, verifyPackRange, type PackRange, type ObjectPack } from '../src/object-pack-range';
 import { sourceStepClock } from '../src/source-step-clock';
-import type { PhysicalManifestReader } from '../src/physical-manifest';
+import { PhysicalManifestReader, manifestOrCatalog } from '../src/physical-manifest';
 import type { PhysicalPin, PhysicalEntry } from '../src/physical-manifest-codec';
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
 /** Result manifests up to this size ride on the step's commit instead of a later R2 read. */
@@ -174,9 +174,6 @@ export function convexSourceTransport(
   ): Promise<WorkerObject[]> => {
     const roots = !ancestry && ids.length ? [...locations.values()].filter(row => row.statePhysical) : [];
     if (roots.length) {
-      // Old States must not grow the worker's cold static graph. Load the reader
-      // only once a trusted descriptor actually names the new representation.
-      const { manifestOrCatalog } = await import('../src/physical-manifest');
       const found = await manifestOrCatalog(
         async () => {
           for (const row of roots) {
@@ -257,9 +254,7 @@ export function convexSourceTransport(
     const id = row.descriptor.object.sha256;
     let reader = manifests.get(id);
     if (!reader) {
-      reader = import('../src/physical-manifest').then(({ PhysicalManifestReader }) =>
-        PhysicalManifestReader.open(id, row.statePhysical!, readManifest),
-      );
+      reader = PhysicalManifestReader.open(id, row.statePhysical!, readManifest);
       manifests.set(id, reader);
     }
     return reader;

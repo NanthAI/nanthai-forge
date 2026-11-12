@@ -70,9 +70,11 @@
           ],
           "inputs": [
             "convex/**",
+            "src/**",
             "package.json",
             "package-lock.json",
-            "scripts/check-convex-runtime.mjs"
+            "scripts/check-convex-runtime.mjs",
+            "scripts/check-convex-bundle.mjs"
           ]
         }
       ],

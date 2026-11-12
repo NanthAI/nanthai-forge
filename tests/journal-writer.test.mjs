@@ -32,6 +32,65 @@ async function restored(w) {
   }
   return Object.fromEntries(Object.entries(data).map(([table, rows]) => [table, rows.sort()]));
 }
+test('existing-row phases 1, 2 and 3 publish archives and archived receipts answer exact retries', async t => {
+  const w = await journalMaintenanceFixture(t);
+  const closed = [...w.f.tables.projectHostedRecordHeads.values()].find(
+    row => row.kind === 'lane' && row.status === 'completed',
+  );
+  assert(closed);
+  const operationId = randomUUID();
+  await w.insert('projectHostedSaves', {
+    projectId: w.f.projectId,
+    actor: 'owner',
+    operationId,
+    jobId: 'job',
+    value: JSON.stringify({ request: { laneId: closed.key }, status: 'completed' }),
+  });
+  const pageId = await w.insert('projectHostedSavePages', {
+    projectId: w.f.projectId,
+    actor: 'owner',
+    operationId,
+    index: 0,
+    digest: 'a'.repeat(64),
+  });
+  const eventId = await w.insert('projectHostedRecordBodies', {
+    projectId: w.f.projectId,
+    actor: 'owner',
+    operationId: randomUUID(),
+    request: 'b'.repeat(64),
+    revision: 1,
+    at: new Date().toISOString(),
+    value: '[]',
+    command: canonicalPayload({ action: 'note', kind: 'comment', text: 'Original rationale' }),
+  });
+  w.f.advanceClock(8 * 86_400_000);
+  const before = snapshot(w.f);
+  const originals = [...w.f.tables.projectHostedOperations.values()].filter(
+    row => JSON.parse(row.value).terminal,
+  );
+  assert(originals.length > 0);
+  await w.drain({ ...w.input, phase: 1 });
+  for (const phase of [1, 2, 3]) {
+    const captures = w.transcript.filter(
+      step => step.name.endsWith('Capture:page') && step.args.phase === phase,
+    );
+    assert(
+      captures.some(step => JSON.parse(step.value).texts?.length),
+      `phase ${phase} captures original rows`,
+    );
+  }
+  assert(!w.f.tables.projectHostedSavePages.has(pageId));
+  assert(w.f.tables.projectHostedRecordBodies.get(eventId).journalSegment);
+  assert.deepEqual(await restored(w), before);
+  const operations = await import(moduleUrl('../convex/projectHostedOperations.ts'));
+  for (const original of originals) {
+    assert(w.f.tables.projectHostedOperations.get(original._id).journalSegment);
+    const row = await w.mutate(ctx =>
+      operations.hostedOperationRow(ctx, w.f.projectId, original.actor, original.operationId),
+    );
+    assert.deepEqual(JSON.parse(row.value), JSON.parse(original.value));
+  }
+});
 test('existing settled history relocates without changing current heads, source rows or complete retry outcomes', async t => {
   const w = await journalMaintenanceFixture(t),
     before = snapshot(w.f),

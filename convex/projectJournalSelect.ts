@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { expandOperationReceipt } from '../src/compact-operation-receipt';
 import { stream, type QueryStream } from 'convex-helpers/server/stream';
 import schema from './schema';
 import type { MutationCtx } from './_generated/server';
@@ -168,7 +169,6 @@ export async function selectJournal(
         !operation.metricMutation &&
         (!operation.journalSegment || operation.journalReadyAt !== undefined)
       ) {
-        const { expandOperationReceipt } = await import('../src/compact-operation-receipt');
         const value = expandOperationReceipt(operation);
         const expired = operation._creationTime < now - HOSTED_OPERATION_RETENTION_MS;
         const dueAt =

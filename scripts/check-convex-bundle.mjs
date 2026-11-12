@@ -93,7 +93,11 @@ export async function checkConvexBundles(root, { registeredOnly = false } = {}) 
     if (result.warnings.length)
       throw new Error(`CONVEX_BUNDLE_WARNING ${result.warnings.map(w => w.id).join(',')}`);
     isolatedImports(root, out, result, selectedEntries);
-    return { modules: Object.keys(result.metafile.inputs).length, entries: entries.length };
+    return {
+      modules: Object.keys(result.metafile.inputs).length,
+      entries: entries.length,
+      bytes: Object.values(result.metafile.outputs).reduce((total, output) => total + output.bytes, 0),
+    };
   } finally {
     rmSync(out, { recursive: true, force: true });
   }

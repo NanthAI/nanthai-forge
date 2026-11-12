@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { expandOperationReceipt } from '../src/compact-operation-receipt';
 import { digest } from '../src/state/hash';
 import { wakeJournal, journalGraceMs } from './projectJournalWake';
 import { semanticPayload } from '../src/semantic-payload';
@@ -37,7 +38,6 @@ export async function hostedOperationRow(
     .order('desc')
     .take(1);
   if (!row?.journalSegment) return row ?? null;
-  const { expandOperationReceipt } = await import('../src/compact-operation-receipt');
   return { ...row, value: canonicalPayload(expandOperationReceipt(row)) };
 }
 

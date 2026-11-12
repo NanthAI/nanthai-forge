@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { expandOperationReceipt } from '../src/compact-operation-receipt';
 import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx } from './_generated/server';
@@ -85,7 +86,6 @@ export const sourceText = async (row: JournalRow, table?: JournalTable) => {
     table === 'projectHostedOperations' &&
     row.journalSegment
   ) {
-    const { expandOperationReceipt } = await import('../src/compact-operation-receipt');
     source.value = canonicalPayload(expandOperationReceipt(row as Doc<'projectHostedOperations'>));
   }
   return canonicalPayload(source);

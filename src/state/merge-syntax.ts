@@ -22,7 +22,9 @@ export const syntaxCheckedPath = (path: string) => CHECKED.test(path) || !!other
 export type SyntaxProblem = { line: number; column: number; message: string };
 
 let loaded: Promise<typeof ts> | undefined;
-/** Loaded on first use only: the compiler is about 9 MB and 100 ms to start. */
+/** Loaded on first use only: the compiler is about 9 MB and 100 ms to start.
+ * Convex reaches this gate only from "use node" source/overlap actions; the
+ * V8 runtime-import guard rejects any new V8 path to this lazy loader. */
 const compiler = () =>
   (loaded ??= import('typescript').then(
     module => ((module as { default?: typeof ts }).default ?? module) as typeof ts,

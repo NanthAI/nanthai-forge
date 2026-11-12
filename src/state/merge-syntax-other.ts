@@ -17,7 +17,9 @@ export function otherSyntaxLanguage(path: string): Language | undefined {
 }
 
 const loaded = new Map<Language, Promise<Parser>>();
-/** Each parser loads on first use for its language only. */
+/** Each parser loads on first use for its language only. Convex callers are
+ * isolated behind "use node" source/overlap actions, like merge-syntax.ts;
+ * the V8 runtime-import guard rejects any new V8 path to these lazy loaders. */
 const parserFor = (language: Exclude<Language, 'json'>) => {
   let found = loaded.get(language);
   if (!found) {

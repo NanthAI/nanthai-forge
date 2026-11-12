@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { compactOperationReceipt } from '../src/compact-operation-receipt';
 import type { MutationCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import type { Pending, JournalRow } from './projectJournalMaintenance';
@@ -81,7 +82,6 @@ export async function applyJournal(ctx: MutationCtx, pending: Pending, rows: Jou
         else await ctx.db.insert('projectJournalReceipts', fields);
         await ctx.db.delete(operation._id);
       } else {
-        const { compactOperationReceipt } = await import('../src/compact-operation-receipt');
         await ctx.db.patch(operation._id, {
           value: compactOperationReceipt(JSON.parse(JSON.parse(original).value)),
           journalSegment: '1',

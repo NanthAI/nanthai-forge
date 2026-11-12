@@ -4,13 +4,20 @@
 // esbuild resolution and TypeScript import elision, with builtins left external so they show up in the metafile.
 import { readdirSync, readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
+import ts from 'typescript';
 import { checkConvexBundles } from './check-convex-bundle.mjs';
 
 const builtins = new Set(builtinModules.flatMap(name => [name, `node:${name}`]));
-const nodeDirective = /^\s*(?:(?:\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)\s*)*['"]use node['"]/;
+const usesNode = source => {
+  for (const statement of source.statements) {
+    if (!ts.isExpressionStatement(statement) || !ts.isStringLiteral(statement.expression)) break;
+    if (statement.expression.text === 'use node') return true;
+  }
+  return false;
+};
 const isBuiltin = path => path.startsWith('node:') || builtins.has(path.split('/')[0]);
 const nodeGlobal = /\b(Buffer)\.\w+\(|\b(__dirname|__filename)\b|\b(setImmediate)\(/;
 /** First Node-only global a source uses outside comments, or null. */
@@ -20,13 +27,24 @@ export function nodeGlobalUse(source) {
   return match ? match.slice(1).find(Boolean) : null;
 }
 
-/** Convex modules that run in V8 and, per module, the shortest import chain to a node: builtin. */
-export async function findRuntimeViolations(root) {
-  const convex = join(root, 'convex');
-  const entries = readdirSync(convex)
-    .filter(name => name.endsWith('.ts') && !name.endsWith('.d.ts'))
-    .map(name => join(convex, name))
-    .filter(file => !nodeDirective.test(readFileSync(file, 'utf8')));
+/** V8 roots and their shortest chain to an unsupported import, loader or global. */
+export async function findRuntimeViolations(root, { onBundle } = {}) {
+  const sources = new Map();
+  const source = path => {
+    if (!sources.has(path))
+      sources.set(
+        path,
+        ts.createSourceFile(path, readFileSync(join(root, path), 'utf8'), ts.ScriptTarget.Latest, true),
+      );
+    return sources.get(path);
+  };
+  const walk = directory =>
+    readdirSync(join(root, directory), { withFileTypes: true }).flatMap(item => {
+      if (item.name.startsWith('.') || item.name === 'node_modules') return [];
+      const path = join(directory, item.name);
+      return item.isDirectory() ? walk(path) : path.endsWith('.ts') && !path.endsWith('.d.ts') ? [path] : [];
+    });
+  const entries = walk('convex').filter(path => !usesNode(source(path)));
   if (!entries.length) return [];
   const { metafile } = await build({
     absWorkingDir: root,
@@ -41,6 +59,30 @@ export async function findRuntimeViolations(root) {
     packages: 'external',
     external: [...builtins],
   });
+  onBundle?.({
+    entries: entries.length,
+    modules: Object.keys(metafile.inputs).length,
+    bytes: Object.values(metafile.outputs).reduce((total, output) => total + output.bytes, 0),
+  });
+  const unsupported = new Map();
+  const unsupportedUse = path => {
+    if (unsupported.has(path)) return unsupported.get(path);
+    const file = source(path);
+    let hit = null;
+    const visit = node => {
+      if (hit) return;
+      if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+        hit = `dynamic import ${node.arguments[0]?.getText(file) ?? '(missing argument)'}`;
+        return;
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(file);
+    const used = nodeGlobalUse(file.text);
+    if (!hit && used) hit = `global ${used}`;
+    unsupported.set(path, hit);
+    return hit;
+  };
   const imports = new Map(
     Object.entries(metafile.inputs).map(([path, input]) => [
       path,
@@ -48,7 +90,7 @@ export async function findRuntimeViolations(root) {
     ]),
   );
   const violations = [];
-  for (const entry of entries.map(file => relative(root, file))) {
+  for (const entry of entries) {
     // Breadth-first so the reported chain is the shortest one a reviewer can act on.
     const parent = new Map([[entry, null]]);
     const queue = [entry];
@@ -64,10 +106,11 @@ export async function findRuntimeViolations(root) {
           queue.push(next.path);
         }
       }
-    // Node globals (Buffer, __dirname) need no import, so the metafile misses them; V8 throws at call time.
+    // Inspect source ASTs too: computed import() has no metafile edge, and
+    // a literal import can deploy yet fail only when V8 executes the branch.
     for (let i = 0; i < queue.length && !hit; i++) {
-      const used = nodeGlobalUse(readFileSync(join(root, queue[i]), 'utf8'));
-      if (used) hit = [queue[i], `global ${used}`];
+      const used = unsupportedUse(queue[i]);
+      if (used) hit = [queue[i], used];
     }
     if (!hit) continue;
     const chain = [hit[1]];
@@ -79,14 +122,23 @@ export async function findRuntimeViolations(root) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const root = fileURLToPath(new URL('..', import.meta.url));
-  const violations = await findRuntimeViolations(root);
+  let v8;
+  const violations = await findRuntimeViolations(root, {
+    onBundle: metrics => {
+      v8 = metrics;
+    },
+  });
   for (const { module, chain } of violations)
     console.error(
-      `CONVEX_RUNTIME_IMPORT ${module} runs in V8 (no "use node") but reaches ${chain.at(-1)}: ${chain.join(' -> ')}. Use a portable module (src/state/hash instead of src/hash) or split the helper out.`,
+      `CONVEX_RUNTIME_IMPORT ${module} runs in V8 (no "use node") but reaches ${chain.at(-1)}: ${chain.join(' -> ')}. Use static, portable imports or move the caller behind a "use node" action boundary.`,
     );
   if (violations.length) process.exit(1);
+  if (v8)
+    console.log(
+      `Convex V8 graph: ${v8.entries} entries, ${v8.modules} modules, ${v8.bytes} bundled bytes (unshared entry outputs).`,
+    );
   const bundled = await checkConvexBundles(root, { registeredOnly: true });
   console.log(
-    `Convex V8 modules bundle without node: builtins; ${bundled.entries} entries and ${bundled.modules} reachable modules resolve in isolated bundles.`,
+    `Convex V8 modules use static portable imports; ${bundled.entries} entries and ${bundled.modules} reachable modules (${bundled.bytes} bytes) resolve in isolated bundles.`,
   );
 }

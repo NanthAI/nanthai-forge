@@ -7,6 +7,7 @@ import type { PhysicalManifestReader } from '../src/physical-manifest';
 import type { SourceOutput } from './projectConvexSourceOutput';
 import type { ObjectLocation } from './projectConvexSourceTransport';
 import { r2Key } from './r2';
+import { writePhysicalManifest } from '../src/physical-manifest-write';
 type PhysicalOutput = NonNullable<SourceOutput['physical']>[number];
 /** The same action/commit owns State bytes and their derived physical recipe.
  * Only compose may seed. Ordinary saves/syncs never enumerate the catalog. */
@@ -60,7 +61,6 @@ export function sourcePhysicalManifests(options: {
         }
       }
       if (!parent && !seed) return null;
-      const { writePhysicalManifest } = await import('../src/physical-manifest-write');
       const physical: PhysicalOutput[] = [];
       const result = await writePhysicalManifest({
         state: pin.sha256,
