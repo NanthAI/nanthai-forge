@@ -9,9 +9,16 @@ CI can be much larger; its payer follows the configured runner repository.
 The model freezes today's implementation. It separates serving from Forge's own
 migrations, metrics investigations, compares, experiments, drills, benchmark and
 zoo imports, backup-export experiments, deployments and development workflows.
-A customer's first import is onboarding expense, shown separately. Taxes, support,
-agent/model tokens, fixed web-hosting plans and developer seats are outside these
-infrastructure units. No production workload was run to produce this document.
+A customer's first import is onboarding expense, shown separately. Initial physical-manifest
+seeds are also project setup work; these steady-serving estimates do not price them.
+Taxes, support, agent/model tokens, fixed web-hosting plans and developer seats are
+outside these infrastructure units. No production workload was run to produce this document.
+
+A rootless compose publishes through the catalog while one bounded background seed runs
+per project. Its membership index, cursor, partial metadata packs and root live in R2.
+Attempted seed PUT bodies include progress rewrites and do not measure net retained bytes.
+Completion cancels the recovery wake, leaving no idle seed calls. Ordinary manifest
+updates resolve changed bindings; the initial seed's page calls stay separate from them.
 
 ## Prices and calculation basis
 
