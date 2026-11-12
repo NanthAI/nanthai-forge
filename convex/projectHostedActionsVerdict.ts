@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { prepareReportCollection } from './projectHostedReportCollection';
 import { objectReportTransport } from './projectHostedCheckReports';
 import { collectResultBatch } from './projectHostedActionsBatch';
 import { v } from 'convex/values';
@@ -152,11 +153,42 @@ export const confirmed = internalMutation({
   handler: async (ctx, input) => {
     const selected = await writableHostedCheck(ctx, input),
       { row, run } = selected;
-    if (hostedCheckTerminal(run) || run.fence !== input.fence || run.actions?.verdictPending !== true)
-      return null;
+    if (run.fence !== input.fence) return null;
+    // Collector recovery is independent of provider completion: a real jobs read
+    // must recover a stopped owner even while the provider is still running.
+    if (objectReportTransport(run)?.collection && !run.reportPointer) {
+      const reports = await prepareReportCollection(
+        ctx,
+        selected,
+        input.completed ? input.conclusion : undefined,
+        applyConclusion,
+        {
+          scheduledFunctionId: run.actions?.confirm as
+            | import('./_generated/dataModel').Id<'_scheduled_functions'>
+            | undefined,
+        },
+      );
+      if (reports.collect || input.completed || hostedCheckTerminal(run) || !run.actions?.verdictPending)
+        return JSON.stringify(reports);
+      // A live owner remains protected; retain the existing confirmation fallback below.
+    }
+
+    if (
+      input.completed &&
+      objectReportTransport(run) &&
+      (run.actions?.verdictPending ||
+        (hostedCheckTerminal(run) && run.reportPointer) ||
+        objectReportTransport(run)?.collection)
+    )
+      return JSON.stringify(
+        await prepareReportCollection(ctx, selected, input.conclusion, applyConclusion, {
+          scheduledFunctionId: run.actions?.confirm as
+            | import('./_generated/dataModel').Id<'_scheduled_functions'>
+            | undefined,
+        }),
+      );
+    if (hostedCheckTerminal(run) || run.actions?.verdictPending !== true) return null;
     run.actions.confirm = null;
-    if (input.completed && objectReportTransport(run))
-      return JSON.stringify({ run, packed: objectReportTransport(run)!.packed, reportStorage: 'r2' });
     if (input.completed) {
       await applyConclusion(ctx, selected, input.conclusion);
       return null;
@@ -243,7 +275,7 @@ export const confirm = internalAction({
           fence: input.fence,
           executionId: prepared.run.executionId,
         },
-        conclusion,
+        completed ? conclusion : undefined,
         prepared,
       );
     }

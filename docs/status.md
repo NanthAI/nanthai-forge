@@ -132,7 +132,7 @@ server action serves exact paged reports from retained inline or paged runs and 
 R2 report objects. New runs use the writer only with the server setting
 `FORGE_CHECK_REPORTS_R2=1` (default off). Failure lists are bounded to 8 KiB with
 exact counts, including mass failures. CLI/MCP `status {runId,reports:"failed"}` and the landing
-page's Test reports disclosure read detail on demand.
+page's Test reports disclosure read detail on demand. Uploader, provider webhook and verdict confirmation coalesce report ingestion; settled replays skip report I/O while unfinished timing and output work remains repairable.
 
 The [batched CI result inbox](operations/github-actions-checks.md#batched-result-inbox) folds shard results by metadata page and keeps per-file reports off run heads. Negotiated packed results retain one combined object per shard and elect early collection with required-shard HEAD discovery and one conditional marker, with a 14-Class-A legacy or 15-Class-A R2-report twelve-shard fixture guard; independent provider conclusions authorize exact-verdict reuse. A landing records its [first-check proof](pre-queue-checks.md#decision) or the reason it rechecks. Identical shared entries clear overlap but retain the existing global/declared-input and shared-folder risk checks; unchanged complete trees retain exact-tree reuse. The exit bench has a [single resumable runner and local progress snapshot](../evals/bench-t3code/README.md#run-the-bench), and uses its [own manually pinned deployment](workflows.md#automatic-main-mirror), while pushed mirror commits touching deploy paths deploy dev automatically.
 

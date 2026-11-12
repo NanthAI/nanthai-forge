@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { canonicalPayload } from '../src/hosted-source-operation';
 import type { MutationCtx } from './_generated/server';
 import type { LoadedHostedCheck } from './projectHostedCheckStore';
 import { writeHostedCheck } from './projectHostedCheckStore';
@@ -22,6 +23,7 @@ export async function settleObjectBatch(
     timings?: string;
     coveredShards?: number;
     timingFinal?: boolean;
+    collectionToken?: string;
     conclusion?: string | null;
   },
   selected: LoadedHostedCheck,
@@ -31,7 +33,24 @@ export async function settleObjectBatch(
 ) {
   let run = selected.run;
   const transport = objectReportTransport(run)!;
+  if (transport.collection) {
+    invariant(
+      input.collectionToken === transport.collection.token && transport.collection.fence === run.fence,
+      'EVIDENCE_CHANGED',
+      'Settle only the reserved report collection.',
+    );
+  }
   transport.collecting = true;
+  input = {
+    ...input,
+    // null is an explicit completed/unknown provider result, not an absent event.
+    conclusion:
+      typeof transport.conclusion === 'string' && input.conclusion == null
+        ? transport.conclusion
+        : input.conclusion === undefined
+          ? transport.conclusion
+          : input.conclusion,
+  };
   if (input.workflowSha && run.actions) {
     invariant(
       !run.actions.workflowSha || run.actions.workflowSha === input.workflowSha,
@@ -70,6 +89,18 @@ export async function settleObjectBatch(
     'EVIDENCE_CHANGED',
     'Final check reports are immutable.',
   );
+  const identical =
+    run.reportPointer &&
+    canonicalPayload(run.reportPointer) === canonicalPayload(header.reportPointer) &&
+    (input.conclusion === undefined || input.conclusion === transport.conclusion) &&
+    (hostedCheckTerminal(run) || run.actions?.verdictPending);
+  if (
+    identical &&
+    (transport.timingComplete || typeof input.conclusion !== 'string' || input.conclusion === 'cancelled')
+  ) {
+    const final = hostedCheckOutputSettled(run) ? await finalOutputTarget(ctx, input, run) : null;
+    return JSON.stringify({ run, final: final === undefined ? 'prepare' : final });
+  }
   run.testFiles = header.testFiles;
   run.reportSummary = header.reportSummary;
   if (header.reportPointer) run.reportPointer = header.reportPointer;
@@ -116,14 +147,14 @@ export async function settleObjectBatch(
       );
     } else if (all && !run.actions?.verdictPending) run = await holdForConclusion(ctx, selected, true);
   }
-  if (typeof input.conclusion === 'string') {
+  if (input.conclusion !== undefined) {
     const conclusion = input.conclusion;
     invariant(
-      transport.conclusion === undefined || transport.conclusion === conclusion,
+      conclusion === null || transport.conclusion == null || transport.conclusion === conclusion,
       'EVIDENCE_CHANGED',
       'The provider conclusion is immutable.',
     );
-    transport.conclusion = conclusion;
+    if (transport.conclusion == null) transport.conclusion = conclusion;
   }
   // A provider's final conclusion, not an early failed result, authorizes the timing sample.
   if (
@@ -136,8 +167,16 @@ export async function settleObjectBatch(
       .parse(JSON.parse(input.timings ?? '{}'));
     await recordHostedTestTimings(ctx, input.projectId, run, durations, input.timingFinal !== false);
   }
+  delete transport.collection;
   await writeHostedCheck(ctx, selected.row._id, run, run.status === 'passed');
   await notifyActionsProgress(ctx, run);
   const final = hostedCheckOutputSettled(run) ? await finalOutputTarget(ctx, input, run) : null;
-  return JSON.stringify({ run, final: final === undefined ? 'prepare' : final });
+  return JSON.stringify({
+    run,
+    timings:
+      typeof input.conclusion === 'string' &&
+      input.conclusion !== 'cancelled' &&
+      ['passed', 'failed'].includes(run.status),
+    final: final === undefined ? 'prepare' : final,
+  });
 }

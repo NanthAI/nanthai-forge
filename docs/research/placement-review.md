@@ -293,6 +293,20 @@ The object is server-only, as S1 decided for capsules. First-error excerpts are 
 
 The object lives as long as the run's check logs and is removed by the same cleanup; no new retention rule.
 
+Uploader, completed webhook and verdict confirmation share collection admission in their existing
+mutation. One fenced execution owns ingestion; a concurrent provider event records its conclusion
+for that owner to consume at settlement. Scheduled ownership retains the function's system id.
+A later real event reads its state
+inside that same mutation and immediately reclaims a failed, canceled or succeeded-without-fold
+holder; pending and in-progress holders are never stolen. Non-scheduled HTTP collectors use
+the V8 action's maximum execution window only as a backstop. No timer or poll is scheduled.
+An already pinned fold
+reuses its header and performs no ingestion. Provider verdicts settle from that header; only
+unfinished timing pages or final output are repaired from the retained object. Identical settled
+replays rewrite no run or timing rows and perform no object I/O. The landing cost guard covers
+all six ingress orders and replays with eighteen ingestions for eighteen checks in a ten-landing
+fixture; these request counts do not establish a live billed saving.
+
 **Restore and reuse.**
 
 - *Verdict reuse* reads the header only: `verdictKey` and the reuse alias, as now.

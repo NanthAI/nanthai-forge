@@ -62,7 +62,15 @@ export const hostedCheckTables = {
     reportTimingStamp: v.optional(v.object({ generation: v.string(), sequence: v.number() })),
     reportTimingComplete: v.optional(v.boolean()),
     reportTimingParts: v.optional(v.array(v.string())),
-    reportConclusion: v.optional(v.string()),
+    reportConclusion: v.optional(v.union(v.string(), v.null())),
+    reportCollection: v.optional(
+      v.object({
+        token: v.string(),
+        fence: v.number(),
+        until: v.number(),
+        scheduledFunctionId: v.optional(v.id('_scheduled_functions')),
+      }),
+    ),
     reportParts: v.optional(v.number()),
     reportDigest: v.optional(v.string()),
     reportFlakes: v.optional(v.string()),

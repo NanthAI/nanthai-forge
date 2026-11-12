@@ -36,6 +36,11 @@ test.after(() => {
 });
 
 const { costs, costGuard } = speedBudgets;
+const { guardReportFoldOrders } = await import('./hosted-report-fold-guard.mjs');
+test(
+  'S3 event-order and replay cost: uploader, webhook and confirmation ingest once per run',
+  guardReportFoldOrders,
+);
 const finishApi = await import(moduleUrl('../convex/projectHostedFinish.ts'));
 const { landingRequestBodies } = await import(moduleUrl('../convex/projectLandingRequestBody.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));

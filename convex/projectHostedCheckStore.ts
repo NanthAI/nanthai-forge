@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   reportsDetached,
+  reportCollectionBusy,
   objectReportTransport,
   useObjectReports,
   detachCheckReports,
@@ -133,6 +134,7 @@ export async function loadHostedCheck(
       timingComplete: row.reportTimingComplete,
       timingParts: row.reportTimingParts,
       conclusion: row.reportConclusion,
+      collection: row.reportCollection,
     });
   if (row.reportParts !== undefined && row.reportStorage !== 'r2') {
     detachCheckReports(run, row.reportParts, row.reportDigest ?? '');
@@ -195,14 +197,31 @@ export async function completeHostedCheck(ctx: MutationCtx, run: HostedCheckRun)
     run.plan &&
     run.executionId &&
     !['passed', 'failed'].includes(run.status)
-  )
-    await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedActionsBatch:collect'), {
-      projectId: run.projectId,
-      runId: run.id,
-      fence: run.fence,
-      executionId: run.executionId,
-      conclusion: null,
-    });
+  ) {
+    const transport = objectReportTransport(run);
+    if (!transport || !(await reportCollectionBusy(ctx, run))) {
+      const collectionToken = transport ? crypto.randomUUID() : undefined;
+      const scheduledFunctionId = await ctx.scheduler.runAfter(
+        0,
+        makeFunctionReference<'action'>('projectHostedActionsBatch:collect'),
+        {
+          projectId: run.projectId,
+          runId: run.id,
+          fence: run.fence,
+          executionId: run.executionId,
+          conclusion: null,
+          ...(collectionToken ? { collectionToken } : {}),
+        },
+      );
+      if (transport)
+        transport.collection = {
+          token: collectionToken!,
+          fence: run.fence,
+          until: Date.now() + 30 * 60_000,
+          scheduledFunctionId,
+        };
+    }
+  }
   await restoreShardReports(ctx, run);
   await onGateRunTerminal(ctx, run);
   // Two-way sync: a pull request check-only run settles forge/verify (one indexed read).

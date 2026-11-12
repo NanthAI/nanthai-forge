@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { prepareReportCollection } from './projectHostedReportCollection';
 import { resultBatchIndex } from '../src/hosted-actions-result-batch';
 import { convexFetch } from './networkFetch';
 import { z } from 'zod';
@@ -76,9 +77,19 @@ export const receive = internalMutation({
     // observed without one; earlier (or after a rejection) it is ignored, so a run another actor
     // titled `forge-check/<runId>` cannot take the binding.
     if (!run.executionId && !run.actions.dispatchedWithoutId) return null;
-    if (row.reportStorage === 'r2' && row.resultBatch && payload.action === 'completed')
+    invariant(
+      !run.actions.workflowSha || run.actions.workflowSha === workflow.head_sha,
+      'EVIDENCE_CHANGED',
+      'Workflow revision changed.',
+    );
+    if (row.reportStorage === 'r2' && row.resultBatch && payload.action === 'completed') {
+      if (!run.executionId || !run.actions.workflowSha) {
+        run.executionId = String(workflow.id);
+        run.actions.workflowSha = workflow.head_sha;
+        await writeHostedCheck(ctx, row._id, run);
+      }
       return JSON.stringify({
-        reportBatch: { run, packed: row.resultBatch.packed, reportStorage: 'r2' },
+        reportBatch: await prepareReportCollection(ctx, selected, workflow.conclusion, applyConclusion),
         identity: {
           projectId: row.projectId,
           runId: run.id,
@@ -88,6 +99,7 @@ export const receive = internalMutation({
         },
         conclusion: workflow.conclusion,
       });
+    }
     if (hostedCheckTerminal(run)) {
       if (run.status === 'cancelled' && payload.action !== 'completed' && !run.executionId) {
         run.executionId = String(workflow.id);
@@ -96,11 +108,6 @@ export const receive = internalMutation({
       }
       return null;
     }
-    invariant(
-      !run.actions.workflowSha || run.actions.workflowSha === workflow.head_sha,
-      'EVIDENCE_CHANGED',
-      'Workflow revision changed.',
-    );
     run.executionId = String(workflow.id);
     run.actions.workflowSha = workflow.head_sha;
     if (payload.action === 'completed' && run.actions.verdictPending) {

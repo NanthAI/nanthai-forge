@@ -29,7 +29,15 @@ import { checkReportHeader, checkReportPointer } from '../src/check-file-summary
 import { checkReportsKey } from './projectHostedCheckReports';
 import { semanticReportsSchema } from '../src/intent-semantic-conflict';
 import { runFlakes } from '../src/self-metrics-flakes';
-export type PreparedResultBatch = { run: HostedCheckRun; packed: boolean; reportStorage?: 'r2' };
+export type PreparedResultBatch = {
+  run: HostedCheckRun;
+  packed: boolean;
+  reportStorage?: 'r2';
+  collect?: boolean;
+  collectionToken?: string;
+  timings?: boolean;
+  final?: Awaited<ReturnType<typeof import('./projectHostedActionsOutput').finalOutputTarget>>;
+};
 
 /** CPU-only targets added to the existing plan response; never stored in the run or given to
  * Candidate code. The exact run/fence/execution namespace cannot accept an earlier run's upload. */
@@ -73,6 +81,20 @@ async function cleanupInbox(run: HostedCheckRun, packed = false) {
   if (run.poolClaimed) await cleanPoolClaims(run.projectId, run.id);
 }
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
+async function commitBatchOutput(
+  ctx: ActionCtx,
+  input: BatchInput,
+  run: HostedCheckRun,
+  final: NonNullable<PreparedResultBatch['final']>,
+) {
+  await storeOutputObject(final.target, canonicalPayload(final.root));
+  await verifyOutputObject(input.projectId, outputMessage(run, { kind: 'final', root: final.root }));
+  await ctx.runMutation(reference('projectHostedActionsBatchStore:output'), {
+    ...input,
+    root: canonicalPayload(final.root),
+  });
+}
+
 /** One event-driven collector; no polling or hosted worker. The last uploader invokes it using
  * OIDC. A signed completed webhook invokes the same path if that uploader lost its process/reply.
  * Peak buffers are one 512 KiB metadata slot plus its encoded 64 KiB log and a <768 KiB page. */
@@ -90,8 +112,13 @@ export async function collectResultBatch(
           fence: identity.fence!,
           executionId: String(JSON.parse(identity.claims).run_id),
         };
-  const { run, packed, reportStorage }: PreparedResultBatch =
+  const work: PreparedResultBatch =
     prepared ?? JSON.parse(await ctx.runMutation(reference('projectHostedActionsBatchStore:prepare'), input));
+  const { run, packed, reportStorage } = work;
+  if (reportStorage && work.collect === false && !work.timings) {
+    if (work.final) await commitBatchOutput(ctx, input, run, work.final);
+    return { id: run.id, status: run.status, counts: run.counts };
+  }
   const config = r2Config();
   if (!reportStorage && hostedCheckTerminal(run) && !['passed', 'failed'].includes(run.status)) {
     await cleanupInbox(run, packed);
@@ -105,7 +132,7 @@ export async function collectResultBatch(
   const resultDigests: Record<number, string> = {};
   let folded = { reports: {} as NonNullable<HostedCheckRun['contractReports']>, pending: [] as string[] };
   let fromObject = false;
-  if (reportStorage && prepared && run.reportPointer) {
+  if (reportStorage && run.reportPointer) {
     const response = await convexFetch(await presignGet(config, checkReportsKey(run)));
     invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Retained check reports are unavailable.');
     const body = await response.text();
@@ -135,12 +162,7 @@ export async function collectResultBatch(
     pageSize = 2;
     invariant(final !== 'prepare', 'EVIDENCE_CHANGED', 'Finalize only settled output with complete seals.');
     if (final) {
-      await storeOutputObject(final.target, canonicalPayload(final.root));
-      await verifyOutputObject(input.projectId, outputMessage(settled, { kind: 'final', root: final.root }));
-      await ctx.runMutation(reference('projectHostedActionsBatchStore:output'), {
-        ...input,
-        root: canonicalPayload(final.root),
-      });
+      await commitBatchOutput(ctx, input, settled, final);
     }
   };
   if (!fromObject && (!hostedCheckTerminal(run) || reportStorage)) {
@@ -266,33 +288,32 @@ export async function collectResultBatch(
     }
     timingPages.push(canonicalPayload(timingPage));
     page = receipts;
-    const result = JSON.parse(
-      await ctx.runMutation(reference('projectHostedActionsResults:batch'), {
-        ...input,
-        results: canonicalPayload(receipts),
-        envelopes: canonicalPayload(envelopes),
-        coveredShards: fromObject ? run.counts.completed : receipts.length,
-        reportHeader: canonicalPayload(metadata),
-        reportDigests: canonicalPayload(resultDigests),
-        ...(typeof conclusion !== 'string' || conclusion === 'cancelled'
-          ? {}
-          : { timings: timingPages[0], timingFinal: timingPages.length === 1 }),
-        ...(conclusion === undefined ? {} : { conclusion }),
-      }),
-    );
+    const result =
+      work.collect === false
+        ? { run, final: work.final, timings: work.timings }
+        : JSON.parse(
+            await ctx.runMutation(reference('projectHostedActionsResults:batch'), {
+              ...input,
+              results: canonicalPayload(receipts),
+              envelopes: canonicalPayload(envelopes),
+              coveredShards: fromObject ? run.counts.completed : receipts.length,
+              reportHeader: canonicalPayload(metadata),
+              reportDigests: canonicalPayload(resultDigests),
+              timings: timingPages[0],
+              timingFinal: timingPages.length === 1,
+              ...(work.collectionToken ? { collectionToken: work.collectionToken } : {}),
+              ...(conclusion === undefined ? {} : { conclusion }),
+            }),
+          );
     settled = result.run;
-    if (
-      conclusion !== undefined &&
-      conclusion !== 'cancelled' &&
-      ['passed', 'failed'].includes(settled.status)
-    )
-      for (const [index, durations] of timingPages.slice(1).entries())
+    if (result.timings)
+      for (const [index, durations] of timingPages.slice(work.collect === false ? 0 : 1).entries())
         await ctx.runMutation(reference('projectHostedTestTimings:argumentsPage'), {
           projectId: input.projectId,
           runId: run.id,
           reportDigest: settled.reportPointer!.digest,
           durations,
-          final: index === timingPages.length - 2,
+          final: index === timingPages.length - (work.collect === false ? 1 : 2),
         });
     if (result.final) {
       invariant(
@@ -300,20 +321,12 @@ export async function collectResultBatch(
         'EVIDENCE_CHANGED',
         'Finalize only settled output with complete seals.',
       );
-      await storeOutputObject(result.final.target, canonicalPayload(result.final.root));
-      await verifyOutputObject(
-        input.projectId,
-        outputMessage(settled, { kind: 'final', root: result.final.root }),
-      );
-      await ctx.runMutation(reference('projectHostedActionsBatchStore:output'), {
-        ...input,
-        root: canonicalPayload(result.final.root),
-      });
+      await commitBatchOutput(ctx, input, settled, result.final);
     }
   } else await flush(true);
   // Legacy inboxes are scratch. Packed objects back the retained output pins and remain under
   // the existing output cleanup path; terminal replay must never delete that backing object.
-  if (hostedCheckTerminal(settled) || settled.actions?.verdictPending) {
+  if (work.collect !== false && (hostedCheckTerminal(settled) || settled.actions?.verdictPending)) {
     await cleanupInbox(settled, packed);
   }
   return { id: settled.id, status: settled.status, counts: settled.counts };

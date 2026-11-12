@@ -163,8 +163,13 @@ export const argumentsPage = internalMutation({
       'EVIDENCE_CHANGED',
       'Record timing arguments for their original report pin.',
     );
-    if (transport.conclusion === undefined || transport.conclusion === 'cancelled' || run.cancelRequested)
+    if (
+      typeof transport.conclusion !== 'string' ||
+      transport.conclusion === 'cancelled' ||
+      run.cancelRequested
+    )
       return null;
+    const before = JSON.stringify(transport);
     await recordHostedTestTimings(
       ctx,
       input.projectId,
@@ -172,7 +177,7 @@ export const argumentsPage = internalMutation({
       z.record(z.string(), z.number().finite().nonnegative()).parse(JSON.parse(input.durations)),
       input.final,
     );
-    await writeHostedCheck(ctx, row._id, run);
+    if (JSON.stringify(transport) !== before) await writeHostedCheck(ctx, row._id, run);
     return null;
   },
 });

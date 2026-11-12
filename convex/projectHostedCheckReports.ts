@@ -21,11 +21,28 @@ type Transport = {
   timingComplete?: boolean;
   collecting?: boolean;
   timingParts?: string[];
-  conclusion?: string;
+  conclusion?: string | null;
+  collection?: {
+    token: string;
+    fence: number;
+    until: number;
+    scheduledFunctionId?: Id<'_scheduled_functions'>;
+  };
 };
 const objectReports = new WeakMap<HostedCheckRun, Transport>();
 export function objectReportTransport(run: HostedCheckRun) {
   return objectReports.get(run);
+}
+/** Scheduled holders are reclaimable on their next real event as soon as they stop.
+ * A timestamp is only the backstop for an HTTP action, whose V8 runtime has no shorter budget. */
+export async function reportCollectionBusy(ctx: MutationCtx, run: HostedCheckRun) {
+  const holder = objectReportTransport(run)?.collection;
+  if (!holder || holder.fence !== run.fence) return false;
+  if (holder.scheduledFunctionId) {
+    const scheduled = await ctx.db.system.get(holder.scheduledFunctionId);
+    return scheduled?.state.kind === 'pending' || scheduled?.state.kind === 'inProgress';
+  }
+  return holder.until > Date.now();
 }
 export function useObjectReports(run: HostedCheckRun, metadata: Transport = {}) {
   objectReports.set(run, metadata);
@@ -98,6 +115,7 @@ export async function storeCheckReports(ctx: MutationCtx, run: HostedCheckRun) {
       ...(transport.timingComplete === undefined ? {} : { reportTimingComplete: transport.timingComplete }),
       ...(transport.timingParts === undefined ? {} : { reportTimingParts: transport.timingParts }),
       ...(transport.conclusion === undefined ? {} : { reportConclusion: transport.conclusion }),
+      reportCollection: transport.collection,
     };
   }
   const meta = detached.get(run);
