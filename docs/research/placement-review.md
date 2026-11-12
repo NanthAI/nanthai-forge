@@ -444,7 +444,7 @@ The source step that writes a State also writes its physical manifest: digest to
 
 Done when: a 29k-file CI job on a fresh runner reads under 100 KB from Convex and receives under 100 KB of grants in at most 3 resolver calls, both with a source pack and up to 300 changed paths, and with no source pack on a State stored in compact packs of at most about 130 runs (2,105,060 B read, 15,951,085 B of reply and 11 calls today without a pack); an all-raw or fragmented packed State takes the one-time windowed path, says so, its check run publishes the pack and the following job takes the source-pack path; no content grant covers a byte outside the selected State, and a metadata grant stays inside the selected State's own manifest lineage (asserted, with refusal tests); source-worker descriptor calls per landing fall from about 41 to at most 5; no State write scans descriptors (reads are O(changed files), asserted); every object is still verified by hash and size; a missing or invalid manifest falls back to the catalog and says so; a point lookup of one digest, stored or not, reads at most about 1 KB on the guard's 402- and 1,387-descriptor fixtures once bulk readers use the manifest. Removes: descriptor rows for new blobs; the dense catalog pages for manifest-bound projects later. Risk: medium; this is the trusted incremental writer Issue 298f9675 left open.
 
-The design review amended the first line and added the authority line. The original first line asked for under 100 KB on any cold job. 29,002 separately signed objects need at least 928 KB of signatures, so the line now names the two shapes a bulk reader meets after this slice and bounds the reply as well as the database read. The layout review then split the authority line into file contents (exact, unchanged) and manifest metadata ([S5 metadata layout](#s5-metadata-layout)).
+The design review amended the first line and added the authority line. The original first line asked for under 100 KB on any cold job. 29,002 separately signed objects need at least 928 KB of signatures, so the line now names the two shapes a bulk reader meets after this slice and bounds the reply as well as the database read. The layout review then split the authority line into file contents (exact, unchanged) and manifest metadata ([S5 metadata layout](#s5-metadata-layout)). The lineage review kept that wording and added the compose rule that makes it true when a compose adopts a Lane's State as it is (rule 3 there).
 
 #### S5 delivery boundary: bindings and download authority
 
@@ -655,7 +655,8 @@ never supply different source. It could widen a run, which is why only the trust
 source step writes manifests and the signer checks the chunk hashes first.
 
 **Legacy seeding.** A State write extends the manifest of an input that has one: the
-parent for a save, main's side for a sync or compose. With no such input it writes no
+parent for a save, main's side for a sync or compose. A compose that returns an existing
+State checks that State's root instead ([metadata layout](#s5-metadata-layout), rule 3). With no such input it writes no
 manifest and never scans (asserted O(changed files)); readers of that State use the
 catalog and say so. The first manifest of a project is a separate **seed step** inside
 the first compose that meets a main without one. It reads the catalog once in digest
@@ -768,7 +769,8 @@ gives way (exact metadata ranges) and why.
 4. Metadata plan: the signer grants one covering range per metadata key
    ([metadata layout](#s5-metadata-layout), builder lines 1 to 3). Readers already on main
    accept it unchanged. Then the writer behind its default-off project setting: the seed
-   step, then capped-pack writes (builder lines 4 to 9). Two landings, plan first.
+   step, then capped-pack writes (builder lines 4 to 9) with the compose repair (lines 13
+   to 19) in the same landing. Two landings, plan first.
 5. Signer reads the manifest for pinned States; a missing or invalid one falls back to
    the catalog and says so. The lead enables it on dev and reads billed usage and byte
    placement.
@@ -776,7 +778,8 @@ gives way (exact metadata ranges) and why.
    rows are reshaped for the 1 KB lookup, and runners and clients without the capability
    get `CLI_UPGRADE_REQUIRED`. The same contract closes the runner's any-digest resolver
    (a security condition of the metadata layout) and keeps every metadata pack that a
-   retained State root names.
+   retained State root names. A reader whose pinned root was replaced re-reads the State
+   descriptor once.
 
 **Guards that change.** The cold job guard in `tests/hosted-actions-direct.test.mjs`
 keeps today's raw fixture as the named one-time fallback ratchet and gains the two
@@ -791,14 +794,16 @@ per-member signing into the run signer clients already use. **Removes,** at step
 O(files) grant reply for packed States and descriptor rows for new blobs.
 The metadata layout changes two guards and adds one: `physical-manifest-history.test.mjs`
 stops refusing the fourth save's plan and expects 6 grants; `physical-manifest-v2.test.mjs`
-keeps refusing the 1,024-key root; a new 2,000-save chain guard asserts builder line 10.
+keeps refusing the 1,024-key root; a new 2,000-save chain guard asserts builder line 10;
+a lineage guard on the real compose paths asserts builder line 19.
 
 #### S5 metadata layout
 
-**Decision.** Two rules, and no stored-format change: FPR2 roots and FPM1/FPM2 buckets stay as the readers on main parse them.
+**Decision.** Three rules, and no stored-format change: FPR2 roots and FPM1/FPM2 buckets stay as the readers on main parse them.
 
 1. **Writer: capped packs.** A State's manifest names at most 63 metadata packs. A write puts its changed buckets into one new pack, as today. When the parent's surviving packs plus the new one would exceed 63, the pack that holds the fewest live bytes moves its live buckets, byte for byte, into the new pack and leaves the root. Among 63 packs the emptiest holds at most one 63rd of the manifest, so the carry is bounded on every write. There is no rebuild, no merge step and no dependence on compose: a save-only chain of any length stays inside the bounds.
 2. **Grants: one range per pack.** A whole read gets the root plus one signed range per metadata pack, from its first live bucket to its last: at most 64 grants after any history. Such a range can include superseded buckets that lie between live ones. File contents keep exact ranges.
+3. **Compose: repaired roots.** Before a compose returns a State, every metadata pack that State's root names must either be named by the root of the main State it is composed onto, or hold no byte outside the State's live buckets. A pack that fails is a pack a Lane's save wrote and a later save partly replaced. The compose copies its live buckets, byte for byte, into one new pack and binds the new root to the State. Saves and syncs keep extending their parent cheaply; what they write is a working root until a compose has checked it. See [lineage under compose](#lineage-under-compose).
 
 **Why one demand had to give.** Buckets are chosen by content hash, so an eight-file save replaces 16 buckets spread evenly over the manifest and leaves 16 holes wherever the old ones sit. Exact ranges, at most 64 grants and writes in proportion to the change cannot all hold on immutable objects:
 
@@ -818,6 +823,7 @@ keeps refusing the 1,024-key root; a new 2,000-save chain guard asserts builder 
 | k + 1 chunk reads for k digests | Kept | The format is unchanged. |
 | Writes read O(changed files), no descriptor scan | Kept | Carried buckets are copied from hash-checked parent chunks: 8 descriptor reads for 8 new files (measured). |
 | At most 5 descriptor calls a landing; cold job under 100 KB in at most 3 calls; Convex grows only with open work | Kept, untouched | No Convex call, row or read is added; idle stays zero. |
+| One State, one root, written once | Kept for saves, syncs and seeds. A compose may replace the root of the State it returns, with a root that holds the same buckets byte for byte | See [lineage under compose](#lineage-under-compose). A State still has one root at a time, and readers still check it against their pin. |
 
 **Measured.** A private prototype of the writer runs on the accepted codecs, and every 100th State is read back whole through the accepted client reader (`downloadPhysicalManifest`) with one covering grant per pack: every member present, removed members absent. Fixtures are synthetic and the object store is in memory. These are body and count measurements, not billed usage or latency.
 
@@ -849,11 +855,67 @@ keeps refusing the 1,024-key root; a new 2,000-save chain guard asserts builder 
 
 Convex calls, rows and DB reads added on the healthy landing path: zero. Idle: zero.
 
+##### Lineage under compose
+
+**The gap.** A State has one root, written once. A compose that fast-forwards adopts the Lane's final State as it is, so it also adopted the root the Lane's saves wrote. That root names the packs of the Lane's earlier saves, and a covering range over such a pack can include a bucket that a later save replaced. Measured on the real compose (1,000 files on main, a Lane that adds 8 files and removes 1 of them before composing): 7 live buckets of the accepted State named the earlier save's pack, and their one covering grant of 1,168 B included the 181 B bucket that listed the removed file. A compose that merges was never affected: it writes a new State from main's root.
+
+**The rule (rule 3) for every kind of write.**
+
+| Write | Root it extends | Result |
+| --- | --- | --- |
+| Save | The parent State's root | A working root. It may leave holes in the Lane's own earlier packs. |
+| Sync | Main's side | A working root. Its one new pack is fully live. |
+| Compose that generates a State (merge) | Main's root | One new fully live pack: passes with no extra work. |
+| Compose that returns a State it did not generate from main in the same step (fast-forward, repeat compose, the final State of a batch) | None: it checks the State's root | Kept when every pack is main's or fully live; otherwise repaired. |
+| Seed and import | None | Fully live packs. |
+
+A pack is fully live when its live buckets fill it exactly. The repair reads the State's root and main's root, copies the live buckets of each failing pack into one new pack in bucket order, and writes a new root for the same State. It needs no file list, descriptor or binding, so nonce bindings and recipes pass through as stored bytes. The result depends only on the two roots: a retry or a racing compose writes identical bytes.
+
+**What this guarantees.** Start from a seed, where every pack is fully live. Each later main State passed the check when it was composed, so each of its packs was either already in main's lineage or fully live for that State. Holes appear later only where a newer accepted State replaced a bucket. So every byte a metadata grant on a Candidate or an accepted State can cover is a bucket of the seed, of an accepted State or of that State itself. Runners can select only such States (the run's Candidate, its base, the recheck pairs and the source pack State).
+
+**What it does not change.** A Lane's saved States stay registered States and ancestors of the accepted State. A client with project access can read them and their working roots, as before. Rule 3 is about what a grant on a Candidate or an accepted State covers.
+
+**One State, one root.** That rule gave three things: a retry cannot bind different bytes, readers agree on the root they pinned, and a second writer cannot swap a State's bindings. All three hold another way. The compose step is the only writer that may replace a root, it replaces it with a root that holds the same buckets byte for byte, and it does so before it returns the State as a Candidate. A save or sync that offers a different root for a bound State is refused as today. A reader that pinned the replaced root fails its hash check and takes the path a missing manifest takes.
+
+**Measured.** The builder's writer candidate with the repair added, on the real source handlers, and a landing chain on the same writer with an in-memory store. Synthetic fixtures; bodies and counts, not billed usage or latency.
+
+- The builder's lineage test, assertion unchanged, passes on the real fast-forward compose: the accepted State's root names no pack that holds the removed file's bucket (0 buckets, against 7 before). The compose stored one 987 B pack and a 26,317 B root.
+- One save on main, then compose: root kept, nothing stored. Two saves that touch different buckets: kept. A State composed twice: the second compose changes nothing. A compose after main moved (a merge): the merged State names no pack a Lane save wrote.
+- The 29k save, sync and compose guard still makes at most 5 descriptor calls; its compose keeps the synced State's root.
+
+| Landing shape (each save after the first re-edits half of the previous save's files; one file is added by the first save and removed by the second) | Landings | Composes that repair | Repair upload | Repair R2 reads | Metadata upload per landing | Grants on any accepted State | Whole read |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 29k files, one 8-file save | 400 | 0 | none | 2 (the two roots) | mean 90,067 B, max 99,313 B | at most 64 | 4.0 MB mean, 5.1 MB max |
+| 29k, two 8-file saves | 300 | 300 | mean 83,143 B, max 90,979 B, 2 PUTs | 3 | mean 271,695 B, max 293,767 B | at most 64 | 3.7 MB mean, 5.0 MB max |
+| 29k, three 8-file saves | 400 | 400 | mean 106,897 B, max 115,251 B, 2 PUTs | 4 | mean 367,808 B, max 387,647 B | at most 63 | 3.8 MB mean, 5.3 MB max |
+| 29k, three 8-file saves, nonce bindings | 150 | 150 | mean 118,827 B, max 131,094 B | 4 | mean 404,334 B, max 437,908 B | at most 63 | 5.6 MB mean, 6.6 MB max |
+| 29k, five 60-file saves (180 files a landing) | 200 | 200 | mean 590,288 B, max 627,196 B | 6 | mean 1,963,618 B, max 2,030,180 B | at most 30 | 7.1 MB mean, 8.2 MB max |
+| 100k, one 8-file save | 150 | 0 | none | 2 | mean 181,205 B, max 220,088 B | at most 64 | 13.3 MB mean, 16.3 MB max |
+| 100k, three 8-file saves | 150 | 150 | mean 251,546 B, max 280,341 B, 2 PUTs | 4 | mean 809,836 B, max 878,749 B | at most 63 | 15.4 MB mean, 18.3 MB max |
+| 100k, five 60-file saves | 80 | 80 | mean 1,941,317 B, max 2,043,511 B | 6 | mean 6,139,422 B, max 6,310,131 B | at most 29 | 24.1 MB mean, 28.2 MB max |
+
+- In every landing of every chain: no pack written by a save held a dead byte in an accepted root, and no accepted root named the pack with the removed file's bucket. Every 50th accepted State was read whole: every member present, the removed file absent.
+- The repair uploads the root plus the live buckets of the failing packs: never more than the buckets in which the State differs from main. It reads two roots and one range per failing pack (at most one per save since the last sync or compose).
+- Saves are unchanged: at most 104,681 B at 29k in these chains for a save of 8 files, or 9 with the added file (111,957 B with nonce bindings), 2 PUTs.
+- The chosen shapes are the worst case for the repair: every save but the last leaves a hole. A Lane with one save, a Lane that synced after its last overlapping save and a merge compose repair nothing.
+
+**Cost (list prices: $0.12 per GB of Convex egress, $4.50 per million Class A, $0.36 per million Class B).**
+
+| | 29k files | 100k files |
+| --- | ---: | ---: |
+| Repair, three-save landing (measured mean) | 106,897 B: $0.000013 of egress, 0.64% of the $0.002 target | 251,546 B: $0.000030, 1.5% |
+| Repair R2 operations | 2 Class A ($0.000009), 4 Class B ($0.0000014) | the same |
+| Whole landing, one save, no repair | $0.000011, 0.54% | $0.000022, 1.1% |
+| Whole landing, three saves and a repair | $0.000044, 2.2% | $0.000097, 4.9% |
+| Whole landing, five 60-file saves and a repair | $0.00024, 12%, of which the repair is 3.5% | $0.00074, 37%, of which the repair is 12% |
+
+Convex calls added: zero, on every path. A compose that keeps the root adds no row work and at most 2 Class B reads. A compose that repairs adds to its existing commit the row work one State write already has (two metadata object rows and one patch of the State row): the earlier cost model already counted a compose as a State write, but a fast-forward did none before this rule. Idle: zero.
+
 **Security verdict: acceptable, with five conditions.**
 
 What a superseded bucket holds: for about 28 files at 29k, the SHA-256 of each file's content, its size and where its bytes are stored (pack digest and offset, recipe hash, maintenance nonce). No path and no content.
 
-Whose buckets: only those of States in the selected State's own manifest lineage, the chain of manifests it was extended from. The writer reuses or copies only chunks of the one parent root it extends, after checking their hashes. Sync and compose extend main's side, so a Lane's intermediate saves never enter the lineage of an accepted State.
+Whose buckets: only those of States in the selected State's own manifest lineage, the chain of manifests it was extended from. The writer reuses or copies only chunks of the one parent root it extends, after checking their hashes. For a Candidate or an accepted State, rule 3 narrows that lineage to the seed and accepted States: a Lane's intermediate saves never enter it, whether the compose merged or adopted the Lane's State as it is. An earlier version of this section claimed that without rule 3. It was wrong for a fast-forward compose, which adopts the Lane's final State together with the root the Lane's saves wrote.
 
 Who receives them: readers who are already granted the whole selected State. A client with project access can already read every registered State and sign any committed digest of the project (`signDownloads`), so it learns nothing new. A runner is limited to its run's States, so it does learn something new: digests, sizes and positions of files that main held earlier and the run's States no longer hold. The State-bound signer still refuses to sign those digests. This is narrower than Git hosting practice, where any reader can fetch any reachable object and a pack carries unrelated history.
 
@@ -863,7 +925,7 @@ Conditions, each asserted by a test:
 
 1. Content grants stay exact (the existing refusal test, unchanged).
 2. A metadata plan names only keys in the selected root, one range per key, never starting before the first live bucket or ending after the last, and is refused above 64 grants.
-3. Lineage: a file saved in a Lane and removed before landing appears in no pack reachable from an accepted State.
+3. Lineage: every metadata pack named by the root of a Candidate or an accepted State is named by the root of the main State it was composed onto, or holds no byte outside that State's live buckets. So a file saved in a Lane and removed before landing appears in no pack reachable from an accepted State. Asserted on the real fast-forward compose, on an ordinary compose and on a repeated compose.
 4. Readers parse only root-listed chunks, each checked against its hash; bytes between them are never decoded (existing behaviour).
 5. A reader not entitled to the whole selected State receives no metadata plan; it is served per digest by the server.
 
@@ -872,7 +934,7 @@ The security assessment (Issue a31ea521) must check:
 - The runner's any-digest resolver (`projectHostedActionsSource:resolve`). While it exists, a runner that learns an old digest can fetch that file. Stage 6 closes it; until then the exposure is the resolver's, not the layout's, but the layout supplies digests.
 - Purge, redaction or expiry. Whenever an ancestor State or a file becomes unreadable to readers of its descendants, the metadata packs written for it must be rewritten or retired too, superseded buckets included.
 - A content digest as a guessing oracle for low-entropy files that were removed.
-- Lineage isolation across Lanes, Candidates and imports; and on public projects, that nothing member-only sits in a public State's lineage.
+- Lineage isolation across Lanes, Candidates and imports; and on public projects, that nothing member-only sits in a public State's lineage. In particular: that every path which publishes a Candidate or moves main takes its State from a compose result or a seed (rule 3 runs only there); that a runner can select no other State; and that only the compose step can replace a root.
 - That a storage position or nonce in a bucket grants nothing without a signature.
 - Bucket stuffing: a writer can choose file contents whose digests fall in chosen buckets and make those buckets, and so that project's own writes, large (measured: up to 936,695 B a save after 2,000 aimed saves). It cannot raise the grant count.
 
@@ -893,6 +955,13 @@ If the assessment wants no readable superseded byte at all, the upgrade is to en
 - The whole manifest rewritten on every save: one exact object and one grant, at 2.1 MB a save at 29k, 22 times the bytes.
 - Server-side compaction by multipart copy: parts must be megabytes; buckets are 2 to 7 KB (documented S3 limit, not tested on R2).
 - Scoped credentials, a Worker in front of R2 or signed cookies: rejected in [bulk read grants](#s5-bulk-read-grants); nothing here changes that.
+- For the fast-forward case, relaxing condition 3 (a Lane's saves are ancestor States that any project client can already read): free, but a runner would learn digests of files that never reached main, and rule 3 costs about 1% of the landing target.
+- Encrypting buckets now: it hides every superseded byte, but needs a new format version, a reader stage on four readers and a cipher in the V8 action. It stays the upgrade named above.
+- Deriving the adopted State's root from main's root (rewrite every bucket that differs from main): the same guarantee for more bytes (115,613 B against 106,897 B at 29k for a three-save Lane, measured), and it needs both States' file lists.
+- A second root per State (working and accepted): two written-once pins, but every reader site must choose one, and a Lane's superseded packs stay referenced for good.
+- A distinct State for a fast-forward compose: changes State identity, check reuse and how a Lane learns it landed; the Lane's saves stay ancestors either way.
+- Saves that extend the Lane's base root, or that never leave a hole in a Lane-written pack: the upload grows with everything the Lane changed since its base, up to the whole manifest on every save (2.1 MB at 29k).
+- Exact ranges for Lane-written packs only: the signer cannot tell them apart from the root, and a long Lane has no grant bound.
 
 **Builder lines.** No design choice is left open.
 
@@ -905,13 +974,26 @@ If the assessment wants no readable superseded byte at all, the upgrade is to en
 7. New pack: changed and carried chunks concatenated in bucket order, split only at 16 MiB. A write with no changed bucket and a parent within the cap writes the root alone.
 8. Seed: no parent, every bucket, the same pack rule. A parent with more than 63 keys uses the same loop and budget; it needs no rebuild step and no compose.
 9. Determinism: the output depends only on the parent root, the two memberships and the bindings, so a retry or a racing compose writes identical bytes.
-10. Guard, build-failing, one file. 2,000 eight-file saves at 29k from a seed with no compose: every write at most 64 grants under line 2, at most 150,000 B, 2 PUTs and 8 descriptor reads; every 100th State read whole through the client reader, every member present, removed members absent. The 1,024-key parent: at most 64 grants from write 43, and every write within root plus changed buckets plus the budget. 300 saves at 100k: at most 64 grants, every write within the same formula. Security condition 3 as its own case.
+10. Guard, build-failing, one file. 2,000 eight-file saves at 29k from a seed with no compose: every write at most 64 grants under line 2, at most 150,000 B, 2 PUTs and 8 descriptor reads; every 100th State read whole through the client reader, every member present, removed members absent. The 1,024-key parent: at most 64 grants from write 43, and every write within root plus changed buckets plus the budget. 300 saves at 100k: at most 64 grants, every write within the same formula. Security condition 3 is line 19.
 11. Stage 5 is unchanged: the setting stays off until the lead enables it on dev and reads billed egress, R2 operations by class and byte placement.
 12. Stage 6 keeps its inventory and adds three lines: close or State-bind the runner's any-digest resolver; treat a metadata pack as live while any retained State root names it, in cleanup, export and restore, and copy it whole; drop the rebuild, the merge cap and the amortized merge budget from the qualification list.
 
-**Removes.** The compose rebuild, the size-tiered merges and their cap (decided earlier, never built); exact-range planning for metadata and its refusal on ordinary chains.
+Lines 13 to 19 are rule 3. They belong to the writer landing (stage 4, second landing), after the readers that are already on main; no reader, client, runner, format or capability changes.
 
-**Unverified.** Billed egress, R2 operations and latency; action memory in a deployed isolate; a hard cap on whole-read bytes (measured 2.4 times live on ordinary chains and 4.5 on the stress mix; if one is wanted it is a writer-only rule with no format or reader change); metadata packs stored under nonce keys (the prototype covers nonce bindings inside buckets, not nonce-keyed metadata packs); real imported projects; the multipart-copy limit on R2.
+13. Repair, one pure function beside `writePhysicalManifest`. Inputs: the State's verified root reader, main's root, `put`. Group the State's chunks by exact key (`physicalKey` of the pack digest and nonce, or of the chunk itself when it is its own object). A key fails when main's root names no chunk under it and its chunk sizes do not sum to the pack size; a chunk that is its own object never fails. No failing key: return nothing. Otherwise read every chunk of the failing keys through the reader (each checked against its hash), concatenate them in bucket order into a new pack split only at 16 MiB, keep every other chunk pin as it is, and write the FPR2 root for the same State.
+14. Reads. Fetch each failing key with one ranged GET from its first to its last live chunk, then slice. The repair reads the two roots and at most one range per failing key, and never a State, a descriptor or the catalog.
+15. Compose step only, in `sourcePhysicalManifests`: `composePhysicalState(state, files, main)`. The State or main has no root: today's first write from main, unchanged. The State is main: nothing. Otherwise run line 13. Nothing returned: log that the root was kept. Otherwise emit one output for the State with the new root as `statePhysical`, the new pack and root as its `physical` leaves and `statePhysicalRebind: true`, and update the action's own location for that State.
+16. Call sites. Every place a compose returns a State it did not generate from main in the same action: the direct-parent fast path, the single-selection completion and the terminal quantum in `hosted-source-step-merge.ts`, and the adopted branch of `hosted-source-small-compose.ts`. It replaces the `hasPhysicalState` skip there. A batch runs it on its final State. Save and sync sites do not change; a sync keeps extending main's side.
+17. Binding. `storeSourceOutputs` keeps refusing a different root for a bound State, except from an output that carries `statePhysicalRebind`; that output patches the State row in the same commit. Add the optional boolean to `SourceOutput` and the step field validator. Only line 15 sets it, inside the trusted action.
+18. A missing or unreadable root at compose. A root that fails its hash is treated as absent, as readers treat it. A read that fails for another reason fails the step, which retries as today. A compose never returns a State whose root it could not check.
+19. Guards, build-failing. (a) `tests/physical-manifest-lineage.test.mjs` from the preserved Lane, assertion unchanged. (b) On the same real handlers: one save then compose keeps the root and stores no metadata; two saves in different buckets keep it; a State with a failing pack is repaired and a second compose of it changes nothing; a compose after main moved names no pack a save wrote. (c) A save or sync output with a different root for a bound State is refused; the compose output with the flag replaces it. (d) In the line 10 guard file: 400 landings at 29k of three 8-file saves, each re-editing half of the previous save's files, one file added then removed, then the repair. Every accepted root: at most 64 grants; no key written by a save holds a dead byte; repair at most 150,000 B, 2 PUTs, and 2 reads plus one per failing key. Every 50th accepted State read whole. 150 landings at 100k: the same, with the repair within the root plus the live bytes of the failing keys.
+20. The preserved writer candidate (Lane 90d00359, saved State 668cd862) is kept whole. Sync it onto main, add lines 13 to 19 in that Lane and land it as the writer landing. Nothing in it is discarded; its failing lineage test becomes guard 19 (a).
+21. Stage 5 adds two readings to line 11: composes that kept against composes that repaired, and repair PUT bytes per landing. Projects that hold roots written by the earlier default-off writer are reset or seeded again first: their main roots predate rule 3.
+22. Stage 6 adds to line 12: a reader whose pinned root was replaced re-reads the State descriptor once instead of taking the catalog path; and an inventory, asserted, that every path which publishes a Candidate or moves main (acceptance, owner acceptance, revert, restore, import, the GitHub mirror) takes its State from a compose result or a seed, or leaves it without a root.
+
+**Removes.** The compose rebuild, the size-tiered merges and their cap (decided earlier, never built); exact-range planning for metadata and its refusal on ordinary chains; the `hasPhysicalState` skip on the four compose paths, replaced by the one check of rule 3.
+
+**Unverified.** Billed egress, R2 operations and latency; action memory in a deployed isolate; a hard cap on whole-read bytes (measured 2.4 times live on ordinary chains and 4.5 on the stress mix; if one is wanted it is a writer-only rule with no format or reader change); metadata packs stored under nonce keys (the prototype covers nonce bindings inside buckets, not nonce-keyed metadata packs); real imported projects; the multipart-copy limit on R2. For rule 3: the repair on a batch compose and on a restore plan (the prototype ran the single-Lane paths); the inventory of line 22 (acceptance paths other than compose were not traced); the replaced-pin path on a client or runner in mid-read; deployed memory of a compose that repairs a very large Lane (it holds the copied buckets, 2.0 MB at 100k for 180 files).
 
 ### S6. One source job per landing attempt
 
