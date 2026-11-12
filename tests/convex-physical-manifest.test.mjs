@@ -198,3 +198,61 @@ test('ancestry prefetch counts absent hints and leaves exact requested reads ava
   await f.compose(f.files, f.base, 'main-0', false);
   assert(checked);
 });
+
+test('seed byte-prefix continuation preserves every requested binding across a sparse 100k legacy catalog', async t => {
+  const f = await project(t, 1);
+  const { getFunctionName } = await import('convex/server');
+  const { moduleUrl } = await import('./convex-module.mjs');
+  const { catalogPages } = await import(moduleUrl('../convex/projectObjectFind.ts'));
+  const previous = [...f.s.tables.projectObjectCatalog.values()][0];
+  const { index: _index, ...pack } = previous.packs[0];
+  const originalBinding = { digest: previous.digests, size: previous.sizes[0], pack };
+  const wide = Array.from({ length: 100000 }, (_, index) => ({
+    digest: digest(`wide-${index}`),
+    size: 1024,
+    pack: {
+      digest: digest(`pack-${Math.floor(index / 1000)}`),
+      size: 1024000,
+      offset: (index % 1000) * 1024,
+    },
+  }));
+  f.s.tables.projectObjectCatalog.clear();
+  for (const page of catalogPages([...wide, originalBinding]))
+    f.s.insert('projectObjectCatalog', {
+      projectId: f.s.projectId,
+      origin: 'synthetic wide import',
+      ...page,
+    });
+  const original = f.c.context.runMutation;
+  let checked = false;
+  f.c.context.runMutation = async (ref, args) => {
+    if (!checked && getFunctionName(ref) === 'projectConvexSourceObjects:resolve' && args.seed) {
+      checked = true;
+      const requested = wide.slice(0, 1000).map(pin => pin.digest),
+        found = [],
+        measurements = [];
+      while (found.length < requested.length) {
+        const value = JSON.parse(await original(ref, { ...args, digests: requested.slice(found.length) }));
+        const page = Array.isArray(value) ? { rows: value, next: value.length } : value;
+        assert(page.next > 0 && page.next === page.rows.length);
+        found.push(...page.rows.map(row => row.sha256));
+        measurements.push(f.s.counts.at(-1));
+      }
+      assert.deepEqual(found, requested);
+      assert(measurements.length > 1, 'the old full window exceeds the unchanged 16 MiB byte guard');
+      assert(measurements.every(row => row.readBytes < 16 * 1024 * 1024 && row.ranges < 4096));
+      t.diagnostic(
+        JSON.stringify({
+          inventory: 100000,
+          requested: 1000,
+          calls: measurements.length,
+          maxReadBytes: Math.max(...measurements.map(row => row.readBytes)),
+          maxQueries: Math.max(...measurements.map(row => row.ranges)),
+        }),
+      );
+    }
+    return original(ref, args);
+  };
+  await f.compose(f.files, f.base, 'main-0');
+  assert(checked);
+});

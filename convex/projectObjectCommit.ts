@@ -30,7 +30,7 @@ export const pendingRows = internalQuery({
   handler: async (ctx, { actor, ids }) => {
     try {
       const rows = [];
-      for (const id of ids) {
+      for (const id of new Set(ids)) {
         const row = await ctx.db.get(id);
         if (!row) {
           const receipt = await ctx.db
@@ -239,7 +239,22 @@ export async function commitObjects(
   ]);
   const results = [...heads, ...packs];
   const verified = results.filter(r => !r.failure).map(r => r.row);
-  if (verified.length) await ctx.runMutation(internal.projectObjectCommit.markCommitted, { rows: verified });
+  // One public page can name 100 distinct upload packs, each with 100 members.
+  // Bound the expanded lookups/writes, not only the number of pack rows. A
+  // normal <=100-object upload still commits in its existing single mutation.
+  let page: typeof verified = [],
+    members = 0;
+  for (const row of verified) {
+    const count = row.members?.length ?? 1;
+    if (page.length && members + count > 100) {
+      await ctx.runMutation(internal.projectObjectCommit.markCommitted, { rows: page });
+      page = [];
+      members = 0;
+    }
+    page.push(row);
+    members += count;
+  }
+  if (page.length) await ctx.runMutation(internal.projectObjectCommit.markCommitted, { rows: page });
   const failed = results.find(r => r.failure);
   invariant(!failed, failed?.failure?.[0] ?? '', failed?.failure?.[1] ?? '');
   for (const { row, checked } of results) {

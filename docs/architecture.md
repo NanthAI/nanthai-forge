@@ -191,7 +191,10 @@ unchanged manifest buckets and resolve only new bindings. Ordinary save and sync
 never seed. The one-time seed uses 1,000-digest resolver pages: 29 pages at
 29k files and 100 at 100k. Each page performs at most 3,001 object queries
 (primary row, slim point, then mixed-mode catalog fallback), leaving 1,095
-queries for its current step/fence. Completed point authority needs 2,001;
+queries for its current step/fence. Seed replies explicitly continue a prefix
+when the remaining byte budget cannot cover the next lookups; unread digests
+never become missing bindings. Each lookup reserves three maximum-size provider
+documents and leaves 1 MiB / 64 queries for completion. Completed point authority needs 2,001;
 ordinary 100-object windows and their call counts stay unchanged. Ancestry
 prefetch bounds attempted lookups, including absent hints, rather than only
 successful descriptors; verified State parents still drive subsequent reads.
@@ -199,7 +202,10 @@ Output staging also counts nested recipe leaves and physical projections in its
 query allowance: at most 2,048 estimated lookups, with the rest reserved for
 step observations and publication. Oversized projections stage their verified
 physical children first, retaining each page's cleanup fence. Ordinary batches
-still stage 100 raw outputs per call. Roots and packed changed chunks use the existing R2 output commit;
+still stage 100 raw outputs per call. Upload completion likewise counts the
+expanded pack members: each commit binds at most 100 logical members, and
+original upload IDs are deduplicated before verification. A normal 100-object
+upload retains one commit call. Roots and packed changed chunks use the existing R2 output commit;
 Convex holds one root pin per State. Legacy noncanonical bindings retain explicit
 catalog fallback. State-bound external endpoints and Actions/clone readers accept
 compact grant replies and full physical-run plans through the negotiated `source.state`

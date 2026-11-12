@@ -34,6 +34,7 @@ export const resolve = sourceMutation({
     known: v.array(v.string()),
     windows: v.optional(v.number()),
     seed: v.optional(v.literal(true)),
+    paged: v.optional(v.literal(true)),
   },
   returns: v.string(),
   handler: async (ctx, args) => {
@@ -55,26 +56,47 @@ export const resolve = sourceMutation({
         'SOURCE_JOB_INVALID',
         'Only the captured compose seed reads a physical inventory.',
       );
-      const rows = await findObjects(ctx, args.projectId, args.digests);
-      return canonicalPayload(
-        rows.map(row =>
-          row && !row.removed && isStored(row)
-            ? physicalSourceBinding(
-                args.projectId,
-                {
-                  descriptor: {
-                    object: { sha256: row.digest, size: row.size },
-                    recipe: row.recipe ? { sha256: row.recipe.digest, size: row.recipe.size } : null,
-                  },
-                  storageId: null,
-                  url: null,
-                  ...(row.pack ? { range: packRange(row)! } : {}),
+      const rows: (ObjectView | null)[] = [];
+      if (args.paged) {
+        while (rows.length < args.digests.length) {
+          const remaining = await ctx.meta.getTransactionMetrics();
+          // Each digest can read three documents, each at most 1 MiB. Leave
+          // 1 MiB / 64 queries for the enclosing fence and completion. Prefix
+          // continuation is explicit: an unread digest is never an absent one.
+          const count = Math.min(
+            args.digests.length - rows.length,
+            Math.floor((remaining.bytesRead.remaining - 1024 * 1024) / (3 * 1024 * 1024)),
+            Math.floor((remaining.databaseQueries.remaining - 64) / 3),
+          );
+          if (count < 1) break;
+          rows.push(
+            ...(await findObjects(ctx, args.projectId, args.digests.slice(rows.length, rows.length + count))),
+          );
+        }
+        invariant(
+          rows.length > 0 || !args.digests.length,
+          'SOURCE_UNAVAILABLE',
+          'Source seed window made no progress.',
+        );
+      } else rows.push(...(await findObjects(ctx, args.projectId, args.digests)));
+      const bindings = rows.map(row =>
+        row && !row.removed && isStored(row)
+          ? physicalSourceBinding(
+              args.projectId,
+              {
+                descriptor: {
+                  object: { sha256: row.digest, size: row.size },
+                  recipe: row.recipe ? { sha256: row.recipe.digest, size: row.recipe.size } : null,
                 },
-                row.r2Key,
-              )
-            : null,
-        ),
+                storageId: null,
+                url: null,
+                ...(row.pack ? { range: packRange(row)! } : {}),
+              },
+              row.r2Key,
+            )
+          : null,
       );
+      return canonicalPayload(args.paged ? { rows: bindings, next: rows.length } : bindings);
     }
     const project = await ctx.db.get(args.projectId),
       generation = project ? await selectedGeneration(ctx, project) : null;

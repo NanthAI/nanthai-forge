@@ -288,20 +288,31 @@ export function convexSourceTransport(
         return ids.map(id => physicalSourceBinding(projectId, locations.get(id)!, generatedKeys.get(id)));
       }
       const found: (PhysicalEntry | null)[] = [];
-      for (let at = 0; at < ids.length; at += sourceSeedPageSize)
-        found.push(
-          ...JSON.parse(
-            await clock.call(() =>
-              ctx.runMutation(reference('projectConvexSourceObjects:resolve'), {
-                ...input,
-                digests: ids.slice(at, at + sourceSeedPageSize),
-                ancestry: false,
-                known: [],
-                seed: true,
-              }),
-            ),
+      for (let at = 0; at < ids.length;) {
+        const selected = ids.slice(at, at + sourceSeedPageSize);
+        const page: { rows: (PhysicalEntry | null)[]; next: number } = JSON.parse(
+          await clock.call(() =>
+            ctx.runMutation(reference('projectConvexSourceObjects:resolve'), {
+              ...input,
+              digests: selected,
+              ancestry: false,
+              known: [],
+              seed: true,
+              paged: true,
+            }),
           ),
         );
+        invariant(
+          Number.isInteger(page.next) &&
+            page.next > 0 &&
+            page.next <= selected.length &&
+            page.rows.length === page.next,
+          'SOURCE_UNAVAILABLE',
+          'Source seed continuation omitted a binding.',
+        );
+        found.push(...page.rows);
+        at += page.next;
+      }
       return found;
     },
   });
