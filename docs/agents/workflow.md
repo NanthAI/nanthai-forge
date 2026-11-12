@@ -429,9 +429,13 @@ row already, so it adds no call; it costs about 8 tokens per item.
 `land --save` waits by default; `--no-wait` returns after submission. Killing the client never stops the landing. Stderr prints progress, the operation ID, canonical blocking wait and overlap notice at admission. Source preparation before admission retains its replay command. A long queue returns one `waitCommand`, resuming by subscription without polling. Overlaps exclude completed/landed work. `status {laneId}` reports `lastActivityAt` (last Lane-record change), `landing` (`{state:"landed",receiptId,commit,at,current}` once an accepted landing carried the Lane's saved head, `commit` being the accepted State id and `current:false` when the Lane was saved again afterwards; absent until then, written with the acceptance completion and read in the same query) and `local` (this machine's last command and whether one is running). Idle adds no server reads.
 
 CLI/MCP network requests and complete Convex RPCs have deadlines and bounded replay-safe retries.
-Exhaustion returns `IN PROGRESS` (exit 3), `inProgress:true`, and exact `next`/`command`
-replay with the original inputs and operation ID (or pre-journal shorthand).
-Observation keeps its cursor/deadline; idle makes no calls. Transfers stream and retain explicit caller budgets.
+A source submission that outlives its request window reconciles through the existing
+wait on its original operation ID and reports the server's recorded outcome. Healthy
+submissions add no read. Exhausting the complete observation budget returns `IN PROGRESS`
+(exit 3), `inProgress:true`, and exact `next`/`command` replay with the original inputs
+and operation ID (or pre-journal shorthand). A request timeout alone does not settle
+the operation as failed. Observation keeps its cursor/deadline; idle makes no calls.
+Transfers stream and retain explicit caller budgets.
 
 Hosted land waits for acceptance; check-only stops after its check. NDJSON wake events carry progress and advisory conflicts; speculative advice never settles a landing. A conflict returns its retained sync/resolve command. Following it or ordinary sync reuses the draft; a new sync `operationId` creates a new draft. Before a new land selects source, it installs any pinned sync/resolve result that outlived the client wait. Idle adds no calls.
 
