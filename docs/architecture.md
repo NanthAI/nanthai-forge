@@ -230,7 +230,9 @@ commit. Saves and syncs keep their working roots; only trusted compose outputs m
 replace a binding. A kept compose writes no metadata. A repairing fast-forward
 adds the row work of one State write inside the existing commit, with no added
 resolver call. Invalid roots are rebuilt from main; other storage errors fail the
-step for ordinary retry.
+step for ordinary retry. Adopted raw and packed nonce States retain the exact
+verified object key when compose adds or repairs a root; the commit validates and
+protects that same whole carrier pack instead of reconstructing a canonical key.
 A whole plan above 64 grants takes the named catalog fallback. Content grants
 remain exact. Root encoding alone does not bound metadata key fragmentation;
 descriptor retirement remains pending.

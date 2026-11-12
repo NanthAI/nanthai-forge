@@ -4,7 +4,7 @@ import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { packHeaders, packRange, type ObjectPack } from '../src/object-pack-range';
-import { r2Key } from './r2';
+import { r2Key, r2ObjectKey } from './r2';
 import { isR2Object } from './projectObjectFields';
 import { validStateGeneration, validStateParents } from '../src/state/generation';
 import { validateRecipeClosure } from './projectRecipeClosure';
@@ -52,7 +52,7 @@ export async function storeSourceOutputs(
       // The fixed action supplies checksum-confirmed bodies or hash-verified
       // ranges in an existing committed project body.
       invariant(
-        pin.r2Key === r2Key(projectId, pin.pack?.digest ?? pin.sha256),
+        r2ObjectKey(projectId, pin.r2Key)?.digest === (pin.pack?.digest ?? pin.sha256),
         'SOURCE_HASH_MISMATCH',
         'Source output project binding changed.',
       );
@@ -69,7 +69,7 @@ export async function storeSourceOutputs(
             isR2Object(pack) &&
             !pack.pack &&
             pack.size === pin.pack.size &&
-            pack.r2Key === r2Key(projectId, pin.pack.digest),
+            pack.r2Key === pin.r2Key,
           'SOURCE_HASH_MISMATCH',
           'Source pack is not committed in this project.',
         );
@@ -106,7 +106,7 @@ export async function storeSourceOutputs(
             !leaf.removed &&
             isR2Object(leaf) &&
             leaf.size === pin.recipeClosure![i]!.size &&
-            leaf.r2Key === r2Key(projectId, leaf.pack?.digest ?? leaf.digest),
+            r2ObjectKey(projectId, leaf.r2Key)?.digest === (leaf.pack?.digest ?? leaf.digest),
         ),
         'SOURCE_HASH_MISMATCH',
         'Worker closure contains an unstaged leaf.',

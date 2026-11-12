@@ -276,3 +276,95 @@ test('a batch terminal quantum repairs its adopted final State after the action-
   assert(!reader.root.chunks.some(chunk => chunk.pack?.digest === removedChunk.pack.digest));
   assert.deepEqual(await reader.lookup([extras[0].blob]), [null]);
 });
+
+for (const packed of [false, true])
+  for (const repair of [false, true])
+    test(`compose ${repair ? 'repairs' : 'adds'} a root on an adopted ${packed ? 'packed' : 'raw'} nonce State without rebinding its bytes`, async t => {
+      const f = await setup(t),
+        extras = Array.from({ length: 8 }, (_, i) => f.s.file(`nonce-${i}.txt`, `nonce member ${i}`));
+      const first = await f.save([...f.files, ...extras], f.main, f.files),
+        files = [...f.files, ...extras.slice(1)],
+        saved = await f.save(files, first.state, [...f.files, ...extras]),
+        row = physicalObjectRow(f.s, saved.state.sha256),
+        nonce = '11111111-1111-4111-8111-111111111111',
+        carrier = packed
+          ? f.s.put(
+              Buffer.concat([
+                Buffer.from('prefix'),
+                f.s.objects.get(saved.state.sha256),
+                Buffer.from('suffix'),
+              ]),
+            )
+          : saved.state,
+        key = `v1/p/${f.s.projectId}/o/${carrier.sha256}/u/${nonce}`;
+      f.s.patch('projectObjects', row._id, {
+        r2Key: key,
+        ...(packed ? { pack: { digest: carrier.sha256, size: carrier.size, offset: 6 } } : {}),
+        ...(!repair ? { statePhysical: undefined } : {}),
+      });
+      if (packed) f.s.patch('projectObjects', physicalObjectRow(f.s, carrier.sha256)._id, { r2Key: key });
+      const fetch = globalThis.fetch;
+      let reads = 0;
+      t.mock.method(globalThis, 'fetch', (url, init = {}) => {
+        const path = new URL(url).pathname;
+        if (path.includes('/o/' + carrier.sha256) && init.method !== 'PUT') {
+          assert(path.endsWith('/' + key), 'only the adopted exact key is readable');
+          reads++;
+        }
+        return fetch(url, init);
+      });
+      const before = f.c.calls.length,
+        oldRoot = row.statePhysical,
+        selected = await compose(f, saved.state, f.main),
+        stored = physicalObjectRow(f.s, selected.sha256);
+      assert.equal(stored.r2Key, key, 'publication preserves the exact hash-verified nonce key');
+      assert(reads > 0, 'the real compose verified bytes through the adopted nonce key');
+      t.diagnostic(
+        JSON.stringify({
+          packed,
+          repair,
+          descriptorCalls: f.c.calls
+            .slice(before)
+            .filter(name => name === 'projectConvexSourceObjects:resolve').length,
+        }),
+      );
+      assert.notEqual(stored.statePhysical.sha256, oldRoot?.sha256);
+      assert.equal(stored.sourceReferenced, true);
+      assert.equal(physicalObjectRow(f.s, carrier.sha256).sourceReferenced, true, 'whole carrier stays live');
+      const reader = await PhysicalManifestReader.open(selected.sha256, stored.statePhysical, f.read);
+      assert.deepEqual(await reader.lookup([extras[0].blob]), [null]);
+      assert.deepEqual(
+        (await reader.lookup([extras[1].blob])).map(pin => pin.sha256),
+        [extras[1].blob],
+      );
+    });
+
+test('trusted source publication refuses wrong-project keys, wrong digests and a different nonce copy of a committed pack', async t => {
+  const f = await setup(t),
+    { storeSourceOutputs } = await import(moduleUrl('../convex/projectConvexSourceOutput.ts')),
+    pin = f.s.put(Buffer.from('publication member')),
+    carrier = f.s.put(Buffer.concat([f.s.objects.get(pin.sha256), Buffer.from('neighbour')])),
+    prefix = `v1/p/${f.s.projectId}/o/`,
+    nonce = '11111111-1111-4111-8111-111111111111',
+    key = prefix + carrier.sha256 + '/u/' + nonce;
+  f.s.patch('projectObjects', physicalObjectRow(f.s, carrier.sha256)._id, { r2Key: key });
+  for (const r2Key of [
+    `v1/p/other/o/${pin.sha256}`,
+    prefix + carrier.sha256,
+    prefix + pin.sha256 + '/u/bad',
+    key.replace(nonce, '22222222-2222-4222-8222-222222222222'),
+  ])
+    await assert.rejects(
+      f.s.run('refuse publication binding', ctx =>
+        storeSourceOutputs(ctx, f.s.projectId, 'synthetic', [
+          {
+            ...pin,
+            r2Key,
+            pack: { digest: carrier.sha256, size: carrier.size, offset: 0 },
+          },
+        ]),
+      ),
+      error => (error.code ?? error.data?.code) === 'SOURCE_HASH_MISMATCH',
+    );
+  assert.equal(physicalObjectRow(f.s, carrier.sha256).sourceReferenced, undefined);
+});

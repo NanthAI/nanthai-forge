@@ -8,6 +8,7 @@ import type { SourceOutput } from './projectConvexSourceOutput';
 import type { ObjectLocation } from './projectConvexSourceTransport';
 import { ForgeError } from '../src/errors';
 import { r2Key, r2ObjectKey } from './r2';
+import { physicalKey } from '../src/physical-manifest-binary';
 import { writePhysicalManifest, repairPhysicalRoot } from '../src/physical-manifest-write';
 type PhysicalOutput = NonNullable<SourceOutput['physical']>[number];
 /** Preserve exact canonical and maintenance nonce keys; never infer an arbitrary URL. */
@@ -138,8 +139,15 @@ export function sourcePhysicalManifests(options: {
       ...(binding.recipe
         ? { recipe: binding.recipe }
         : {
-            r2Key: r2Key(options.projectId, binding.pack?.digest ?? pin.sha256),
-            ...(binding.pack ? { pack: binding.pack } : {}),
+            r2Key: r2Key(
+              options.projectId,
+              physicalKey(binding.pack?.digest ?? pin.sha256, binding.pack?.nonce ?? binding.nonce),
+            ),
+            ...(binding.pack
+              ? {
+                  pack: { digest: binding.pack.digest, size: binding.pack.size, offset: binding.pack.offset },
+                }
+              : {}),
           }),
     };
     row.statePhysical = result.statePhysical;
@@ -210,8 +218,15 @@ export function sourcePhysicalManifests(options: {
       ...(binding.recipe
         ? { recipe: binding.recipe }
         : {
-            r2Key: r2Key(options.projectId, binding.pack?.digest ?? pin.sha256),
-            ...(binding.pack ? { pack: binding.pack } : {}),
+            r2Key: r2Key(
+              options.projectId,
+              physicalKey(binding.pack?.digest ?? pin.sha256, binding.pack?.nonce ?? binding.nonce),
+            ),
+            ...(binding.pack
+              ? {
+                  pack: { digest: binding.pack.digest, size: binding.pack.size, offset: binding.pack.offset },
+                }
+              : {}),
           }),
     });
     row.statePhysical = result.pin;
