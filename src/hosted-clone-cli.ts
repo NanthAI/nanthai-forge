@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { hostedContractFeatures, sourceStateFeature } from './hosted-contract-features.js';
+import {
+  hostedContractFeatures,
+  sourceStateFeature,
+  sourceStateV2Feature,
+} from './hosted-contract-features.js';
 import { hostedMainV2Schema } from './hosted-main.js';
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
 import { randomUUID } from 'node:crypto';
@@ -179,11 +183,19 @@ async function sourceCurrent(
     {
       projectId: exchange.projectId,
       clientVersion: CUTOVER_CLI_VERSION,
-      features: [...new Set([...hostedContractFeatures, sourceStateFeature, 'capabilities-main'])],
+      features: [
+        ...new Set([
+          ...hostedContractFeatures,
+          sourceStateFeature,
+          sourceStateV2Feature,
+          'capabilities-main',
+        ]),
+      ],
     },
   );
   const capabilities = typeof value === 'string' ? JSON.parse(value) : value;
   exchange.sourceStateReads = capabilities.features?.includes(sourceStateFeature) === true;
+  exchange.sourceStateVersion = capabilities.features?.includes(sourceStateV2Feature) ? 2 : 1;
   const parsed = hostedMainV2Schema.safeParse(capabilities.main);
   if (!parsed.success) return exchange.current(expected);
   invariant(

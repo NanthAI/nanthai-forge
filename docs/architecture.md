@@ -198,7 +198,12 @@ access before and after R2 I/O, refuse nonmembers,
 and prove recipe descendants from a selected logical member. Full metadata is
 hash/size checked before member rows enter the client cache. Raw or fragmented
 States use the named one-time window and existing check-published source pack.
-Catalogs remain available until external-reader cutover and descriptor retirement.
+Readers negotiate protocol 2 through `source.state.v2` (Actions) and `source-state-v2`
+(CLI). A failed transfer refreshes the selected State descriptor once and follows a
+changed root; it never selects another State. The server also rechecks a rebound
+root once before falling back, then checks current access again. Healthy reads
+keep their existing calls. A second rebind refuses the reply. Catalogs remain
+available; descriptor retirement and mandatory old-client enforcement are pending.
 Readers also accept FPR2 roots with optional membership fingerprints and FPM2
 bindings that preserve exact raw/pack nonce keys (`/o/SHA/u/UUID`). Grant grouping,
 metadata downloads and operation-local caches distinguish nonce copies. FPR1/FPM1

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from '../src/errors';
-import { digest } from '../src/state/hash';
+import { sha256Hex } from '../src/verified-blob';
 import type { PhysicalPin, PhysicalEntry } from '../src/physical-manifest-codec';
 import { readSignedPhysical } from './projectStateSourceReader';
 import { stateRecipePins } from './projectStateSourceRecipe';
@@ -110,7 +110,7 @@ export function stateCatalogReader(
           }
         }
         invariant(
-          offset === pin.size && digest(bytes) === pin.sha256,
+          offset === pin.size && (await sha256Hex(bytes)) === pin.sha256,
           'SOURCE_HASH_MISMATCH',
           'Catalog bytes changed.',
         );

@@ -111,6 +111,7 @@ export const handle = httpAction(async (ctx, request) => {
         {
           ...input,
           digests: command.digests,
+          ...(command.version ? { version: command.version } : {}),
           ...(command.batch ? { batch: true } : {}),
           ...(command.closures ? { closures: true } : {}),
           ...(command.runs ? { runs: true } : {}),

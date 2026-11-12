@@ -19,6 +19,7 @@ export const resolve = internalMutation({
   args: {
     ...sessionArgs,
     digests: v.array(v.string()),
+    version: v.optional(v.literal(2)),
     batch: v.optional(v.literal(true)),
     closures: v.optional(v.literal(true)),
     runs: v.optional(v.literal(true)),

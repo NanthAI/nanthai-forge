@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from '../src/errors';
-import { digest } from '../src/state/hash';
+import { sha256Hex } from '../src/verified-blob';
 import { parseNativeState } from '../src/state/format';
 import { packRange } from '../src/object-pack-range';
 import type { PhysicalEntry } from '../src/physical-manifest-codec';
@@ -11,19 +11,23 @@ import { directSourceBatch, sourceWindowOrder } from '../src/hosted-actions-dire
 import { stateSourceReader, readSignedPhysical } from './projectStateSourceReader';
 import type { ObjectLocation } from './projectConvexSourceTransport';
 import type { Id } from './_generated/dataModel';
+const refreshManifest = Symbol('refresh selected physical manifest');
 /** Selector and catalog callbacks are current-access operations, never supplied by repository input. */
-async function buildStateSourceGrants(options: {
-  projectId: Id<'hostedProjects'>;
-  state: string;
-  digests: string[];
-  all?: boolean | undefined;
-  object?: string | undefined;
-  runs?: boolean | undefined;
-  fallback?: boolean | undefined;
-  select: () => Promise<ObjectLocation>;
-  catalog: (ids: string[]) => Promise<unknown[]>;
-  log: (message: string) => void;
-}) {
+async function buildStateSourceGrants(
+  options: {
+    projectId: Id<'hostedProjects'>;
+    state: string;
+    digests: string[];
+    all?: boolean | undefined;
+    object?: string | undefined;
+    runs?: boolean | undefined;
+    fallback?: boolean | undefined;
+    select: () => Promise<ObjectLocation>;
+    catalog: (ids: string[]) => Promise<unknown[]>;
+    log: (message: string) => void;
+  },
+  retryInvalid = false,
+) {
   const location = await options.select(),
     source = stateSourceReader(options.projectId),
     readRecipePin = stateCatalogReader(source.read, options.catalog);
@@ -54,6 +58,7 @@ async function buildStateSourceGrants(options: {
       reader = await source.open(options.state, location.statePhysical);
       if (!options.all) entries = await reader.lookup(options.object ? [options.object] : options.digests);
     } catch {
+      if (retryInvalid) throw refreshManifest;
       options.log('source bindings: catalog (physical manifest invalid or unavailable)');
       reader = null;
     }
@@ -63,6 +68,7 @@ async function buildStateSourceGrants(options: {
     try {
       runs = await physicalRuns(reader.all(false));
     } catch {
+      if (retryInvalid) throw refreshManifest;
       options.log('source bindings: catalog (physical manifest invalid or unavailable)');
     }
     const plan =
@@ -199,7 +205,7 @@ async function buildStateSourceGrants(options: {
     );
   }
   invariant(
-    bytes.length === pin.size && digest(bytes) === pin.sha256,
+    bytes.length === pin.size && (await sha256Hex(bytes)) === pin.sha256,
     'SOURCE_HASH_MISMATCH',
     'Selected State bytes changed.',
   );
@@ -233,23 +239,42 @@ async function buildStateSourceGrants(options: {
   };
 }
 
-/** R2 I/O must not let an earlier access decision outlive current policy or the run fence. */
+/** R2 I/O must not let an earlier access decision outlive current policy or the run fence.
+ * A rebind keeps the logical State unchanged. Reuse the fresh authorized descriptor
+ * once, then check access and its exact pin again after the replacement transfer. */
 export async function stateSourceGrants(options: Parameters<typeof buildStateSourceGrants>[0]) {
-  let selected: ObjectLocation | undefined;
-  const value = await buildStateSourceGrants({
-    ...options,
-    select: async () => (selected = await options.select()),
-  });
-  const current = await options.select();
-  invariant(
-    selected &&
-      current.descriptor.object.sha256 === selected.descriptor.object.sha256 &&
-      current.descriptor.object.size === selected.descriptor.object.size &&
-      (!selected.statePhysical ||
-        (current.statePhysical?.sha256 === selected.statePhysical.sha256 &&
-          current.statePhysical.size === selected.statePhysical.size)),
-    'SOURCE_UNAVAILABLE',
-    'Selected State changed during source resolution.',
-  );
+  let selected = await options.select();
+  let value: Awaited<ReturnType<typeof buildStateSourceGrants>> | undefined;
+  const build = (retryInvalid = false) =>
+    buildStateSourceGrants(
+      {
+        ...options,
+        select: async () => selected,
+      },
+      retryInvalid,
+    );
+  const sameState = (current: ObjectLocation) =>
+    current.descriptor.object.sha256 === selected.descriptor.object.sha256 &&
+    current.descriptor.object.size === selected.descriptor.object.size;
+  const sameRoot = (current: ObjectLocation) =>
+    current.statePhysical?.sha256 === selected.statePhysical?.sha256 &&
+    current.statePhysical?.size === selected.statePhysical?.size;
+  try {
+    value = await build(true);
+  } catch (error) {
+    if (error !== refreshManifest) throw error;
+  }
+  let current = await options.select();
+  invariant(sameState(current), 'SOURCE_UNAVAILABLE', 'Selected State changed during source resolution.');
+  if (!value || !sameRoot(current)) {
+    selected = current;
+    value = await build();
+    current = await options.select();
+    invariant(
+      sameState(current) && sameRoot(current),
+      'SOURCE_UNAVAILABLE',
+      'Selected State changed during source resolution.',
+    );
+  }
   return value;
 }

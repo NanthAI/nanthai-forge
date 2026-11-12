@@ -52,7 +52,7 @@ async function selection(
   return JSON.stringify(value);
 }
 export const runner = internalMutation({
-  args: { ...sessionArgs, state: v.string() },
+  args: { ...sessionArgs, state: v.string(), version: v.optional(v.literal(2)) },
   returns: v.string(),
   handler: async (ctx, input) => {
     const { run } = await actionsSession(ctx, input, false);
@@ -65,7 +65,12 @@ export const runner = internalMutation({
   },
 });
 export const client = internalMutation({
-  args: { projectId: v.id('hostedProjects'), state: v.string(), recheck: v.optional(v.boolean()) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    state: v.string(),
+    version: v.optional(v.literal(2)),
+    recheck: v.optional(v.boolean()),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     await readableProject(ctx, input.projectId, !input.recheck);

@@ -2,7 +2,7 @@
 import type { Id } from './_generated/dataModel';
 import { r2Config, r2Key, presignGet } from './r2';
 import { convexFetch, networkTimeout } from './networkFetch';
-import { digest } from '../src/state/hash';
+import { sha256Hex } from '../src/verified-blob';
 import { physicalKey } from '../src/physical-manifest-binary';
 import { invariant } from '../src/errors';
 import { packHeaders, verifyPackRange } from '../src/object-pack-range';
@@ -32,7 +32,7 @@ export function stateSourceReader(projectId: Id<'hostedProjects'>) {
         invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Pinned physical source is unavailable.');
         const bytes = new Uint8Array(await response.arrayBuffer());
         invariant(
-          bytes.length === pin.size && digest(bytes) === pin.sha256,
+          bytes.length === pin.size && (await sha256Hex(bytes)) === pin.sha256,
           'SOURCE_HASH_MISMATCH',
           'Pinned physical source changed.',
         );

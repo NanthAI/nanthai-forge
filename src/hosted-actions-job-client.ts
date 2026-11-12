@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { refreshPhysicalManifest } from './physical-manifest-refresh.js';
 import { expandSourceGrants } from './source-grant-wire.js';
 import {
   rowsFromPhysicalRuns,
@@ -6,7 +7,10 @@ import {
   type StateSourceReply,
 } from './hosted-actions-state-source.js';
 import type { PhysicalGrantPlan, SignedPhysicalRun } from './physical-manifest-download.js';
-import { actionsSourceStateCapability } from './hosted-actions-capabilities.js';
+import {
+  actionsSourceStateCapability,
+  actionsSourceStateV2Capability,
+} from './hosted-actions-capabilities.js';
 import { mapSourceOrdered } from './hosted-source-parallel.js';
 import type { ResultBatchTargets } from './hosted-actions-result-batch.js';
 import { networkFetch } from './network-fetch.js';
@@ -74,7 +78,12 @@ export class ActionsJobClient {
       projectId: this.projectId,
       runId: this.runId,
       ...(this.run ? { fence: this.run.fence } : {}),
-      command: actionsCommandForCapabilities(command, this.capabilities),
+      command: actionsCommandForCapabilities(
+        command.kind === 'source' && this.capabilities.includes(actionsSourceStateV2Capability)
+          ? { ...command, version: 2 }
+          : command,
+        this.capabilities,
+      ),
     });
     // A finished check's output and result outlast a write outage (72d50375).
     const delivery = command.kind === 'result' || command.kind === 'results' || command.kind === 'output';
@@ -653,19 +662,61 @@ export class ActionsJobClient {
         let reply = await clientCall({ kind: 'source', digests: [state], state, all: true, batch: true });
         if (reply.mode === 'runs') {
           try {
-            const plan = reply.plan as PhysicalGrantPlan,
-              pin = bound.get(state)!;
-            invariant(
-              plan && plan.state === state && plan.pin.sha256 === pin.sha256 && plan.pin.size === pin.size,
-              'SOURCE_HASH_MISMATCH',
-              'State manifest plan is unavailable.',
-            );
-            await rowsFromPhysicalRuns(
-              plan,
-              reply.runs as SignedPhysicalRun[],
-              clientRequest,
-              (id, row) => rows.set(id, row),
-              `manifest-${sourcePage++}`,
+            let retried = false;
+            await refreshPhysicalManifest(
+              bound.get(state)!,
+              async pin => {
+                if (retried)
+                  reply = await clientCall({
+                    kind: 'source',
+                    digests: [state],
+                    state,
+                    all: true,
+                    batch: true,
+                  });
+                retried = true;
+                invariant(
+                  reply.mode === 'runs',
+                  'SOURCE_HASH_MISMATCH',
+                  'State manifest plan is unavailable.',
+                );
+                const plan = reply.plan as PhysicalGrantPlan;
+                invariant(
+                  plan &&
+                    plan.state === state &&
+                    plan.pin.sha256 === pin.sha256 &&
+                    plan.pin.size === pin.size,
+                  'SOURCE_HASH_MISMATCH',
+                  'State manifest plan is unavailable.',
+                );
+                await rowsFromPhysicalRuns(
+                  plan,
+                  reply.runs as SignedPhysicalRun[],
+                  clientRequest,
+                  (id, row) => rows.set(id, row),
+                  `manifest-${sourcePage++}`,
+                );
+              },
+              async () => {
+                const fresh = (await clientCall({
+                  kind: 'source',
+                  digests: [state],
+                  bound: true,
+                  batch: true,
+                })) as unknown as
+                  | StateSourceRow[]
+                  | {
+                      physical?: { state: string; pin: { sha256: string; size: number } };
+                      rows: StateSourceRow[];
+                    };
+                const values = Array.isArray(fresh) ? fresh : fresh.rows;
+                const pin =
+                  !Array.isArray(fresh) && fresh.physical?.state === state
+                    ? fresh.physical.pin
+                    : values.find(row => row.descriptor.object.sha256 === state)?.statePhysical;
+                if (pin) bound.set(state, pin);
+                return pin;
+              },
             );
             console.log('source: State-bound physical manifest runs');
             return true;

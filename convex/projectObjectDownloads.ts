@@ -108,7 +108,7 @@ export const describe = mutation({
     projectId: v.id('hostedProjects'),
     digests: v.array(v.string()),
     signed: v.optional(v.boolean()),
-    stateSource: v.optional(v.boolean()),
+    stateSource: v.optional(v.union(v.boolean(), v.literal(2))),
     /** Signed pages of up to hostedDownloadPageSize; neighbours in one stored pack share a run. */
     runs: v.optional(v.boolean()),
   },
@@ -161,7 +161,7 @@ export async function describeObjects(
     projectId: Id<'hostedProjects'>;
     digests: string[];
     signed?: boolean;
-    stateSource?: boolean;
+    stateSource?: boolean | 2;
     runs?: boolean;
   },
   maximum = runs ? hostedDownloadPageSize : 100,
@@ -312,7 +312,7 @@ export const lanePage = mutation({
     projectId: v.id('hostedProjects'),
     digests: v.array(v.string()),
     signed: v.boolean(),
-    stateSource: v.optional(v.boolean()),
+    stateSource: v.optional(v.union(v.boolean(), v.literal(2))),
     /** Neighbours in one stored pack share one signed run (see describe). */
     runs: v.optional(v.boolean()),
   },

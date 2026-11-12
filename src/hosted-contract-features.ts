@@ -13,9 +13,12 @@
  * reuse or remove a name; the CLI keeps the old safe behaviour whenever a name is not advertised.
  */
 export const sourceStateFeature = 'source-state';
+/** Source/bootstrap version 2 and one descriptor refresh after a root replacement. */
+export const sourceStateV2Feature = 'source-state-v2';
 export const hostedContractFeatures = [
   /** State-bound physical run and recipe grants; bootstrap replies carry the trusted root pin. */
   sourceStateFeature,
+  sourceStateV2Feature,
   /** Candidate files read from exact R2 States without a legacy Work generation. */
   'candidate-source-files',
   /** put-planning-item keeps every stored field the put omits (c0255160). Without it the CLI sends

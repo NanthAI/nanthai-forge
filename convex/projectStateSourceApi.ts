@@ -15,6 +15,7 @@ export async function runnerStateSource(
   input: SessionInput,
   command: {
     state: string;
+    version?: 2 | undefined;
     digests: string[];
     all?: boolean | undefined;
     object?: string | undefined;
@@ -31,6 +32,7 @@ export async function runnerStateSource(
           await ctx.runMutation(makeFunctionReference<'mutation'>('projectStateSourceSelection:runner'), {
             ...input,
             state: command.state,
+            ...(command.version ? { version: command.version } : {}),
           }),
         ),
       catalog: async digests =>
@@ -39,6 +41,7 @@ export async function runnerStateSource(
             ...input,
             digests,
             batch: true,
+            ...(command.version ? { version: command.version } : {}),
             closures: true,
             ...(command.runs ? { runs: true } : {}),
           }),
@@ -52,6 +55,7 @@ export const read = action({
   args: {
     projectId: v.id('hostedProjects'),
     state: v.string(),
+    version: v.optional(v.literal(2)),
     digests: v.array(v.string()),
     all: v.optional(v.boolean()),
     object: v.optional(v.string()),
@@ -75,6 +79,7 @@ export const read = action({
             await ctx.runMutation(makeFunctionReference<'mutation'>('projectStateSourceSelection:client'), {
               projectId: input.projectId,
               state: input.state,
+              ...(input.version ? { version: input.version } : {}),
               ...(selections++ ? { recheck: true } : {}),
             }),
           ),

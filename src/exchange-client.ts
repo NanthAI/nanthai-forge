@@ -40,6 +40,7 @@ export class ConvexExchange implements ExchangeTransport {
   metadataCacheDirectory?: string;
   /** Negotiated State-bound physical source reader, carried by existing capability discovery. */
   sourceStateReads = false;
+  sourceStateVersion: 1 | 2 = 1;
   private readonly downloadCache = new ExchangeDownloadCache();
   private readonly signedDownloads = new WeakMap<ConvexHttpClient, SignedDownloadCache>();
   onCall?: (name: string, pending: boolean) => void;

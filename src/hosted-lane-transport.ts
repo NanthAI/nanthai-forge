@@ -33,7 +33,7 @@ export class ConvexLaneTransport implements LaneTransport {
       | 'prepareDownloads'
       | 'onCall'
       | 'onDownloadProgress'
-    > & { sourceStateReads?: boolean },
+    > & { sourceStateReads?: boolean; sourceStateVersion?: 1 | 2 },
   ) {}
   selectState(state: string, files: readonly NativeFile[]) {
     const physical = this.descriptors.get(state)?.statePhysical;
@@ -69,7 +69,9 @@ export class ConvexLaneTransport implements LaneTransport {
           projectId: this.exchange.projectId,
           digests,
           signed,
-          ...(this.exchange.sourceStateReads ? { stateSource: true } : {}),
+          ...(this.exchange.sourceStateReads
+            ? { stateSource: this.exchange.sourceStateVersion === 2 ? 2 : true }
+            : {}),
           ...(withRuns ? { runs: true } : {}),
         },
         { skipQueue: true },

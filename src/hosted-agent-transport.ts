@@ -217,7 +217,7 @@ export type HostedAgentExchange = Pick<
   | 'prepareDownloads'
   | 'uploadLazyBatch'
 > &
-  Partial<Pick<ConvexExchange, 'uploadPrepared' | 'sourceStateReads'>>;
+  Partial<Pick<ConvexExchange, 'uploadPrepared' | 'sourceStateReads' | 'sourceStateVersion'>>;
 export type HostedAgentResponse = {
   cliCommit?: string;
   schema: 1;
@@ -793,6 +793,7 @@ export class HostedAgentTransport {
       this.callerActor = capabilities.actor;
       this.serverFeatures = capabilities.features ?? [];
       this.exchange.sourceStateReads = this.serverFeatures.includes('source-state');
+      this.exchange.sourceStateVersion = this.serverFeatures.includes('source-state-v2') ? 2 : 1;
       // Named features (a83b6fd5); presenceVersion/boardVersion are still accepted from older CLIs.
       this.presenceAction =
         this.serverFeatures.includes('agent-presence') &&

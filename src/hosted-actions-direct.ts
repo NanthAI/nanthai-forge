@@ -100,6 +100,7 @@ export const directCommandSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('source'),
+      version: z.literal(2).optional(),
       digests: z.array(checkHash).min(1).max(directSourceBatch),
       batch: z.literal(true).optional(),
       closures: z.literal(true).optional(),

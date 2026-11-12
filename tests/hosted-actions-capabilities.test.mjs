@@ -164,3 +164,15 @@ test('an uncaught runner refusal prints its safe reason on stderr', () => {
   assert.match(result.stderr, /Convex Actions request failed \(403; reason: validation\)/);
   assert.doesNotMatch(result.stderr, /private-body/);
 });
+
+test('source protocol 2 is sent only to a server advertising the rebound-root reader capability', () => {
+  const command = directCommandSchema.parse({ kind: 'source', digests: ['a'.repeat(64)], version: 2 });
+  assert.equal(actionsCommandForCapabilities(command, hostedActionsCapabilities).version, 2);
+  assert.equal(
+    actionsCommandForCapabilities(
+      command,
+      hostedActionsCapabilities.filter(name => name !== 'source.state.v2'),
+    ).version,
+    undefined,
+  );
+});

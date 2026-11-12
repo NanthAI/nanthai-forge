@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { refreshPhysicalManifest } from './physical-manifest-refresh.js';
 import { expandSourceGrants } from './source-grant-wire.js';
 import { rowsFromPhysicalRuns, type StateSourceRow } from './hosted-actions-state-source.js';
 import type { PhysicalGrantPlan, SignedPhysicalRun } from './physical-manifest-download.js';
@@ -93,7 +94,7 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
    * so overlapping windows never remove or replace one another's. */
   private readonly window = new AsyncLocalStorage<Window>();
   private runs = true;
-  private readonly physicalStates = new Set<string>();
+  private readonly physicalStates = new Map<string, { sha256: string; size: number }>();
   private selectedState: { id: string; count: number } | undefined;
   private pages = 0;
   /** Every written file's size and digest is checked here (stream hash, run hash, recipe identity). */
@@ -101,21 +102,30 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
   /** Two windows at once; each keeps its own state in `window`. */
   readonly downloadWindows = 2;
   constructor(
-    private readonly exchange: Pick<ConvexExchange, 'client' | 'projectId'> & { sourceStateReads?: boolean },
+    private readonly exchange: Pick<ConvexExchange, 'client' | 'projectId'> & {
+      sourceStateReads?: boolean;
+      sourceStateVersion?: 1 | 2;
+    },
   ) {}
   selectState(state: string, files: readonly NativeFile[], pin?: { sha256: string; size: number }) {
-    if (pin) this.physicalStates.add(state);
+    if (pin) this.physicalStates.set(state, pin);
     if (this.exchange.sourceStateReads && this.physicalStates.has(state))
       this.selectedState = { id: state, count: new Set(files.map(file => file.blob)).size };
     else this.selectedState = undefined;
   }
-  private async sourceRows(ids: string[], all = false, runs = false, fallback = false) {
-    const state = this.selectedState!;
+  private async sourceRows(
+    ids: string[],
+    all = false,
+    runs = false,
+    fallback = false,
+    state = this.selectedState!,
+  ) {
     return expandSourceGrants(
       JSON.parse(
         await this.exchange.client.action(makeFunctionReference<'action'>('projectStateSourceApi:read'), {
           projectId: this.exchange.projectId,
           state: state.id,
+          ...(this.exchange.sourceStateVersion === 2 ? { version: 2 } : {}),
           digests: ids,
           ...(all ? { all: true } : {}),
           ...(runs ? { runs: true } : {}),
@@ -146,8 +156,9 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
     };
   }
   async prepareObjects(ids: string[]): Promise<ContentPin[] | null> {
-    if (!this.selectedState || ids.length < 500 || ids.length !== this.selectedState.count) return null;
-    const reply = await this.sourceRows([this.selectedState.id], true);
+    const selected = this.selectedState;
+    if (!selected || ids.length < 500 || ids.length !== selected.count) return null;
+    let reply = await this.sourceRows([selected.id], true, false, false, selected);
     if (reply.mode !== 'runs') {
       for (const value of reply.rows) {
         const row = this.sourceRow(value);
@@ -162,17 +173,52 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
       return null;
     }
     try {
-      invariant(
-        reply.plan?.state === this.selectedState.id && reply.runs,
-        'SOURCE_HASH_MISMATCH',
-        'State physical plan changed.',
-      );
-      await rowsFromPhysicalRuns(
-        reply.plan,
-        reply.runs,
-        (url, init) => exchangeFetch('Manifest download', url, init),
-        (id, value) => this.rows.set(id, this.sourceRow(value)),
-        `manifest-${this.pages++}`,
+      let retried = false;
+      await refreshPhysicalManifest(
+        this.physicalStates.get(selected.id)!,
+        async pin => {
+          if (retried) reply = await this.sourceRows([selected.id], true, false, false, selected);
+          retried = true;
+          invariant(
+            reply.mode === 'runs' &&
+              reply.plan?.state === selected.id &&
+              reply.runs &&
+              reply.plan.pin.sha256 === pin.sha256 &&
+              reply.plan.pin.size === pin.size,
+            'SOURCE_HASH_MISMATCH',
+            'State physical plan changed.',
+          );
+          await rowsFromPhysicalRuns(
+            reply.plan,
+            reply.runs,
+            (url, init) => exchangeFetch('Manifest download', url, init),
+            (id, value) => this.rows.set(id, this.sourceRow(value)),
+            `manifest-${this.pages++}`,
+          );
+        },
+        async () => {
+          const state = selected.id;
+          const fresh = z.array(rowSchema).parse(
+            await this.exchange.client.mutation(
+              makeFunctionReference<'mutation'>('projectObjectDownloads:describe'),
+              {
+                projectId: this.exchange.projectId,
+                digests: [state],
+                signed: true,
+                stateSource: this.exchange.sourceStateVersion === 2 ? 2 : true,
+              },
+              { skipQueue: true },
+            ),
+          );
+          invariant(
+            fresh.length === 1 && fresh[0]!.digest === state,
+            'SOURCE_HASH_MISMATCH',
+            'Selected State changed.',
+          );
+          const pin = fresh[0]!.statePhysical;
+          if (pin) this.physicalStates.set(state, pin);
+          return pin;
+        },
       );
       return ids.map(id => {
         const row = this.rows.get(id);
@@ -181,7 +227,7 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
       });
     } catch {
       console.log('source bindings: catalog (physical manifest transfer invalid or unavailable)');
-      const fallback = await this.sourceRows([this.selectedState.id], true, false, true);
+      const fallback = await this.sourceRows([selected.id], true, false, true, selected);
       for (const value of fallback.rows) {
         const row = this.sourceRow(value);
         this.rows.set(row.digest, row);
@@ -236,7 +282,9 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
               projectId: this.exchange.projectId,
               digests,
               signed: true,
-              ...(this.exchange.sourceStateReads ? { stateSource: true } : {}),
+              ...(this.exchange.sourceStateReads
+                ? { stateSource: this.exchange.sourceStateVersion === 2 ? 2 : true }
+                : {}),
               ...(runs ? { runs: true } : {}),
             },
             // Signing writes nothing: pages described ahead need not wait in the SDK's mutation queue.
@@ -250,7 +298,7 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
     );
     const page = this.pages++;
     for (const row of rows) {
-      if (row.statePhysical) this.physicalStates.add(row.digest);
+      if (row.statePhysical) this.physicalStates.set(row.digest, row.statePhysical);
       const { run, ...rest } = row as typeof row & { run?: SignedRun & { id: number } };
       invariant(
         row.location !== 'r2' || row.url || run,

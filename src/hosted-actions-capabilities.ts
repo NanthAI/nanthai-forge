@@ -11,6 +11,8 @@ export const actionsSourceClosureCapability = 'source.closures';
 export const actionsSourceRunsCapability = 'source.runs';
 /** State-bound physical manifest plans and compact exact-key grant replies. */
 export const actionsSourceStateCapability = 'source.state';
+/** Root replacement refresh and explicit source protocol 2, before retirement. */
+export const actionsSourceStateV2Capability = 'source.state.v2';
 /** The result call carries the log bytes; the server stores them, so a job skips
  * its separate output call and the result's session read. */
 export const actionsInlineLogCapability = 'results.inlineLog';
@@ -38,6 +40,7 @@ export const hostedActionsCapabilities = [
   actionsSourceClosureCapability,
   actionsSourceRunsCapability,
   actionsSourceStateCapability,
+  actionsSourceStateV2Capability,
   actionsPreflightCapability,
   actionsInlineLogCapability,
   actionsPoolCapability,
@@ -59,6 +62,7 @@ export const actionsJobCalls = (capabilities: readonly string[]) =>
       ? 4
       : 6;
 export const actionsCapabilityFields: Readonly<Record<string, string>> = {
+  'source.version': actionsSourceStateV2Capability,
   'source.batch': actionsSourceBatchCapability,
   'source.closures': actionsSourceClosureCapability,
   'source.runs': actionsSourceRunsCapability,
