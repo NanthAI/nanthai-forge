@@ -147,3 +147,53 @@ test('revocation is enforced again on every continued page', async () => {
   });
   await assert.rejects(f.page(selection, 'projectHostedAcceptances'), e => e.data.code === 'AUTH_REVOKED');
 });
+
+test('Done-when5: opted-in State recovery pages carry exact retained roots without changing canonical rows', async () => {
+  const f = fixture(),
+    { selection } = await f.prepare();
+  const root = { sha256: 'd'.repeat(64), size: 321 };
+  const state = {
+    _id: 'registered',
+    projectId: 'project',
+    head: f.main.head,
+    size: 123,
+    input: 'i',
+    jobId: 'j',
+    output: 'o',
+  };
+  f.tables.projectHostedStates.set(state._id, state);
+  f.tables.projectObjects.set('state', {
+    _id: 'state',
+    projectId: 'project',
+    digest: state.head,
+    size: state.size,
+    nonce: '',
+    removed: false,
+    sourceReferenced: true,
+    statePhysical: root,
+  });
+  const legacy = await f.page(selection, 'projectHostedStates');
+  assert.equal(legacy.physicalRoots, undefined);
+  const page = JSON.parse(
+    await hosted.page._handler(f.ctx, {
+      projectId: 'project',
+      selection: JSON.stringify(selection),
+      physicalProtocol: 1,
+      table: 'projectHostedStates',
+      cursor: null,
+    }),
+  );
+  assert.deepEqual(page.rows, legacy.rows);
+  assert.deepEqual(page.physicalRoots, [{ state: { sha256: state.head, size: state.size }, root }]);
+  f.tables.projectObjects.get('state').projectId = 'other';
+  const absent = JSON.parse(
+    await hosted.page._handler(f.ctx, {
+      projectId: 'project',
+      selection: JSON.stringify(selection),
+      physicalProtocol: 1,
+      table: 'projectHostedStates',
+      cursor: null,
+    }),
+  );
+  assert.deepEqual(absent.physicalRoots, [], 'another project never supplies an archival root');
+});

@@ -37,6 +37,37 @@ export class RecoveryObjects {
     private readonly directory: string,
     private readonly transport: RecoveryTransport,
   ) {}
+  /** Reuse the existing batch transport in a 2 MiB / 100-object byte window.
+   * Large opaque bodies retain their existing streaming path. */
+  async prefetch(pins: Pin[]) {
+    let window: Pin[] = [],
+      size = 0;
+    const flush = async () => {
+      if (!window.length) return;
+      const bytes = this.transport.downloadBatch
+        ? await this.transport.downloadBatch(window)
+        : await Promise.all(window.map(pin => this.transport.download(pin)));
+      invariant(bytes.length === window.length, 'INVALID_WORK_BACKUP', 'Recovery download omitted content.');
+      for (const [index, pin] of window.entries()) {
+        const value = bytes[index]!;
+        invariant(
+          value.length === pin.size && digest(value) === pin.sha256,
+          'INVALID_WORK_BACKUP',
+          'Hosted recovery object bytes differ.',
+        );
+        this.source.put(value);
+      }
+      window = [];
+      size = 0;
+    };
+    for (const pin of pins) {
+      if (existsSync(join(this.source.directory, pin.sha256)) || pin.size > 2 * 1024 * 1024) continue;
+      if (window.length && (window.length === 100 || size + pin.size > 2 * 1024 * 1024)) await flush();
+      window.push(pin);
+      size += pin.size;
+    }
+    await flush();
+  }
   async state(id: string) {
     invariant(this.transport.objects, 'SOURCE_UNAVAILABLE', 'Recovery requires project-scoped object reads.');
     const [pin] = await this.transport.objects([id]);

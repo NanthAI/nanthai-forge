@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { workDetailPins } from './work-record-details.js';
 import { hostedRecoveryObjects } from './recovery-hosted-read.js';
+import { physicalArchiveClosure, physicalArchiveEntries } from './physical-source-archive.js';
 import { validateNativeContributions } from './native-contribution-objects.js';
 import { NativeSource, parseNativeState } from './native-source.js';
 import { WorkStore } from './work-store.js';
@@ -21,9 +22,13 @@ export function nativeReachable(
 ) {
   const source = new NativeSource(store.root);
   invariant(data.nativeHead, 'INVALID_NATIVE_SOURCE', 'Native bootstrap source is unavailable.');
+  const physicalStates = function* () {
+    for (const entry of physicalArchiveEntries(source, data.physicalSource)) yield entry.state.sha256;
+  };
   const roots = [
     ...new Set([
       ...workSourcePins(data),
+      ...physicalStates(),
       ...[...data.runs, ...data.playbookRuns].flatMap(run => [
         run.head,
         run.base,
@@ -99,6 +104,11 @@ export function nativeReachable(
       }
     }
   for (const id of hostedRecoveryObjects(source, data)) {
+    const bytes = source.object(id);
+    onObject?.(id, bytes, false);
+    ids.add(id);
+  }
+  for (const id of physicalArchiveClosure(source, data.physicalSource)) {
     const bytes = source.object(id);
     onObject?.(id, bytes, false);
     ids.add(id);

@@ -50,37 +50,6 @@ export class RecoveryStateQueue {
     );
     return root;
   }
-  /** Reuse the existing batch transport in a 2 MiB / 100-object byte window.
-   * Large opaque bodies retain their existing streaming path. */
-  private async prefetch(pins: Pin[]) {
-    let window: Pin[] = [],
-      size = 0;
-    const flush = async () => {
-      if (!window.length) return;
-      const bytes = this.transport.downloadBatch
-        ? await this.transport.downloadBatch(window)
-        : await Promise.all(window.map(pin => this.transport.download(pin)));
-      invariant(bytes.length === window.length, 'INVALID_WORK_BACKUP', 'Recovery download omitted content.');
-      for (const [index, pin] of window.entries()) {
-        const value = bytes[index]!;
-        invariant(
-          value.length === pin.size && digest(value) === pin.sha256,
-          'INVALID_WORK_BACKUP',
-          'Hosted recovery object bytes differ.',
-        );
-        this.source.put(value);
-      }
-      window = [];
-      size = 0;
-    };
-    for (const pin of pins) {
-      if (existsSync(join(this.source.directory, pin.sha256)) || pin.size > 2 * 1024 * 1024) continue;
-      if (window.length && (window.length === 100 || size + pin.size > 2 * 1024 * 1024)) await flush();
-      window.push(pin);
-      size += pin.size;
-    }
-    await flush();
-  }
   private async resolve(ids: string[]): Promise<Pin[]> {
     invariant(this.transport.objects, 'SOURCE_UNAVAILABLE', 'Recovery requires project-scoped object reads.');
     const pins = await this.transport.objects(ids);
@@ -167,7 +136,7 @@ export class RecoveryStateQueue {
       const pins = page.flatMap(id =>
         this.receipt(id, 'state', pending.get(id) ?? undefined) ? [] : [pending.get(id)!],
       );
-      await this.prefetch(pins);
+      await this.retained.prefetch(pins);
       for (const id of page) {
         const complete = this.receipt(id, 'state', pending.get(id) ?? undefined);
         pending.delete(id);
@@ -212,7 +181,7 @@ export class RecoveryStateQueue {
       // Sign the whole page of pins once (large streams and small prefetch windows alike).
       const wanted = pins.filter(pin => !existsSync(join(this.source.directory, pin.sha256)));
       if (wanted.length) await this.transport.prepareDownloads?.(wanted);
-      await this.prefetch(pins);
+      await this.retained.prefetch(pins);
       for (const pin of pins) include(await this.retained.retain(pin, false, false), true);
     }
     root ??= this.put({ kind: 'forge-hosted-recovery-empty' });

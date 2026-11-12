@@ -1154,6 +1154,11 @@ export const workSchema = z
     environmentMoves: z.array(environmentMoveSchema).default([]),
     hostedChannelMoves: z.array(hostedChannelMoveSchema).optional(),
     hostedRecovery: hostedRecoverySchema.optional(),
+    /** Whole metadata bodies retained by portable Source/Work archives; never live R2 bindings. */
+    physicalSource: z
+      .object({ sha256: z.string().regex(/^[a-f0-9]{64}$/), size: z.number().safe().nonnegative() })
+      .strict()
+      .optional(),
   })
   .refine(
     data =>

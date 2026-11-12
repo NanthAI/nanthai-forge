@@ -33,6 +33,7 @@ import {
 } from './work-archive-metadata.js';
 import { inspectArtifacts } from './work-artifacts.js';
 import { NativeSource, nativeMarker } from './native-source.js';
+import { selectPhysicalArchive } from './physical-source-archive.js';
 import { NativeMaterialization } from './native-materialization.js';
 import { WorkStore } from './work-store.js';
 import { parseWorkBytes } from './work-metadata.js';
@@ -90,10 +91,25 @@ async function exportSnapshot(
     const data: WorkData = head ? createWork(head) : current;
     // Source-only releases retain their existing unspecified policy defaults.
     if (head) delete data.autonomyPolicy;
+    const selectedStates = new Set<string>();
+    let ids = nativeReachable(store, data, (id, _bytes, state) => {
+      if (state) selectedStates.add(id);
+    });
+    if (head && current.physicalSource) {
+      const physicalSource = selectPhysicalArchive(
+        new NativeSource(store.root),
+        current.physicalSource,
+        selectedStates,
+      );
+      if (physicalSource) {
+        data.physicalSource = physicalSource;
+        ids = nativeReachable(store, data);
+      }
+    }
     return {
       data,
       capturedAt: new Date().toISOString(),
-      ids: nativeReachable(store, data),
+      ids,
       bytes: head ? Buffer.from(JSON.stringify(data, null, 2)) : store.snapshotBytes(),
     };
   });

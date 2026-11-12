@@ -45,12 +45,14 @@ export const recoveryTables = [
 ] as const;
 export const recoveryTableSchema = z.enum(recoveryTables);
 export type RecoveryTable = z.infer<typeof recoveryTableSchema>;
+const recoveryPhysicalRootSchema = z.object({ state: saveObjectSchema, root: saveObjectSchema }).strict();
 export const hostedRecoveryPageSchema = z
   .object({
     table: recoveryTableSchema,
     rows: z.array(z.string()).max(RECOVERY_PAGE_ROWS),
     cursor: z.string().nullable(),
     done: z.boolean(),
+    physicalRoots: z.array(recoveryPhysicalRootSchema).max(RECOVERY_PAGE_ROWS).optional(),
   })
   .strict();
 export type HostedRecoveryPage = z.infer<typeof hostedRecoveryPageSchema>;

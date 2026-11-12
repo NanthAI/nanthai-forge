@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
+import { findObjects } from './projectObjectFind';
 import { journalSourceRow } from './projectJournalCanonical';
 import { journalRecoveryPage } from './projectJournalRecovery';
 import { JournalNeeded, journalReadReply } from './projectJournalStore';
 import { v } from 'convex/values';
 import { query, type QueryCtx } from './cliServer';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { recoveryOwned, recoverySelection } from './projectRecovery';
 import { recoverySelectionSchema, sameRecoveryPins } from '../src/recovery-protocol';
 import {
@@ -221,6 +222,7 @@ export const page = query({
     projectId: v.id('hostedProjects'),
     selection: v.string(),
     capsuleProtocol: v.optional(v.literal(1)),
+    physicalProtocol: v.optional(v.literal(1)),
     table: v.string(),
     cursor: v.union(v.string(), v.null()),
   },
@@ -234,6 +236,7 @@ export async function journalRecoveryRead(
     projectId: Id<'hostedProjects'>;
     selection: string;
     capsuleProtocol?: 1;
+    physicalProtocol?: 1;
     table: string;
     cursor: string | null;
   },
@@ -271,7 +274,23 @@ export async function journalRecoveryRead(
           !(await capsuleOwnsRecoveryRow(ctx, input.projectId, table, row)))
       )
         rows.push(canonicalPayload(journalSourceRow(row)));
+    const physicalRoots = [];
+    if (input.physicalProtocol === 1 && table === 'projectHostedStates') {
+      const states = result.page.filter((row): row is Doc<'projectHostedStates'> => 'head' in row);
+      const objects = await findObjects(
+        ctx,
+        input.projectId,
+        states.map(row => row.head),
+      );
+      for (const [index, object] of objects.entries())
+        if (object?.statePhysical)
+          physicalRoots.push({
+            state: { sha256: states[index]!.head, size: states[index]!.size },
+            root: object.statePhysical,
+          });
+    }
     return canonicalPayload({
+      ...(input.physicalProtocol === 1 ? { physicalRoots } : {}),
       table,
       rows,
       cursor: !result.isDone

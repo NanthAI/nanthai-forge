@@ -920,6 +920,27 @@ full retained-closure recovery operation. Client cache and retry receipts are
 transport state; they do not grant hosted access or move a Channel. See
 [hosted main client checkout](operations/source-exchange.md#hosted-main-client-checkout).
 
+Source and Work archives retain physical metadata through an optional `physicalSource`
+linked inventory. Recovery protocol 1 adds roots to the existing bounded State
+registration pages without changing canonical hosted rows. Downloads share the
+logical recovery queue: at most 100 objects and 2 MiB per buffered window, with
+large opaque bodies streamed and successful objects reused after interruption.
+Each entry retains the exact State/root pins and whole metadata objects, including
+legacy chunks and nonce pack identities. Export validates every chunk against
+its whole carrier; retained roots keep their packs in the native archive closure.
+Work exports carry all retained entries. A Source release filters entries to its
+selected ancestry and carries no unrelated Lane source or original Work records.
+Skipped roots retain their complete logical source closure.
+
+These coordinates are explicitly archival, never destination-project read
+authority. Independent restore preserves their bytes and nonce identities, while
+ordinary transfer establishes destination bindings and a rootless seed; trusted
+compose can subsequently write a root for that namespace. Pending transfers keep
+their existing durable content receipts and resume only unfinished bodies. No
+State job, save, sync or compose RPC, scheduler or idle call is added. This merges
+metadata capture with the existing recovery download queue; the inventory is needed
+because a logical State/file closure alone cannot retain whole metadata packs.
+
 ### Hosted source authority and operation contracts
 
 Plain-directory hosting reuses the native capture initializer before opening

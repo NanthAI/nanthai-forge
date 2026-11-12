@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { retainPhysicalRoots } from './recovery-physical.js';
+import { physicalArchiveClosure } from './physical-source-archive.js';
+import type { DownloadPin } from './blob-download-format.js';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -35,6 +38,8 @@ type Progress = {
   hashes: Record<string, string>;
   recovery: HostedRecovery;
   sourceComplete?: boolean;
+  physicalSource?: DownloadPin | undefined;
+  originalPhysicalSource?: DownloadPin | undefined;
 };
 
 /** Fold into immutable source objects, not an in-memory table or growing Work
@@ -59,12 +64,16 @@ export async function foldHostedRecovery(
   let state: Progress;
   if (existsSync(path)) state = JSON.parse(readFileSync(path, 'utf8'));
   else {
+    const initial = store?.load();
     state = {
       identity,
-      baseline: store ? digest(canonicalPayload(store.load())) : 'runner-cache',
+      baseline: initial ? digest(canonicalPayload(initial)) : 'runner-cache',
       table: 0,
       cursor: null,
       phase: 'capture',
+      ...(initial?.physicalSource
+        ? { physicalSource: initial.physicalSource, originalPhysicalSource: initial.physicalSource }
+        : {}),
       hash: initialHash,
       hashes: {},
       recovery: {
@@ -150,6 +159,23 @@ export async function foldHostedRecovery(
         });
       }
     }
+    if (page.physicalRoots?.length) {
+      const registered = new Set(page.rows.map(text => JSON.parse(text).head));
+      invariant(
+        table === 'projectHostedStates' && page.physicalRoots.every(row => registered.has(row.state.sha256)),
+        'INVALID_WORK_BACKUP',
+        'Archived roots must belong to the selected State page.',
+      );
+      hash = rowHash(hash, canonicalPayload(page.physicalRoots));
+      if (state.phase === 'capture')
+        state.physicalSource = await retainPhysicalRoots(
+          source,
+          retained,
+          transport,
+          page.physicalRoots,
+          state.physicalSource,
+        );
+    }
     if (state.phase === 'capture') {
       state.recovery.pages = put({
         kind: 'forge-hosted-recovery-page',
@@ -186,6 +212,10 @@ export async function foldHostedRecovery(
   // Validate the selected head even when a missing registration row omitted its closure.
   validateRecoveryTables(directory, source, state.recovery);
   source.state(selected.hostedMain.head);
+  const metadata = physicalArchiveClosure(source, state.physicalSource);
+  while (!metadata.next().done) {
+    /* Verify whole metadata and selected States before publication. */
+  }
   if (!store) return hostedRecoverySchema.parse(state.recovery);
   const data = store.load();
   if (data.hostedRecovery) {
@@ -195,6 +225,13 @@ export async function foldHostedRecovery(
       'Staged hosted recovery differs from its original pages.',
     );
     delete data.hostedRecovery;
+    invariant(
+      canonicalPayload(data.physicalSource ?? null) === canonicalPayload(state.physicalSource ?? null),
+      'SOURCE_CHANGED',
+      'Staged physical archive differs from its original pages.',
+    );
+    if (state.originalPhysicalSource) data.physicalSource = state.originalPhysicalSource;
+    else delete data.physicalSource;
     invariant(
       digest(canonicalPayload(data)) === state.baseline,
       'SOURCE_CHANGED',
@@ -207,6 +244,7 @@ export async function foldHostedRecovery(
       'Staged Work changed during hosted recovery.',
     );
   data.hostedRecovery = hostedRecoverySchema.parse(state.recovery);
+  if (state.physicalSource) data.physicalSource = state.physicalSource;
   store.save(data);
   return data.hostedRecovery;
 }

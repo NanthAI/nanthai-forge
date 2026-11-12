@@ -18,6 +18,7 @@ export function recoveryTransport(request: RecoveryRequest): RecoveryTransport {
   );
   const scope = { projectId: request.projectId, operationId: request.operationId };
   let capsuleProtocol = true;
+  let physicalProtocol = true;
   const query = async (name: string, args: Record<string, unknown>) => {
     const reference = makeFunctionReference<'query'>(name);
     try {
@@ -42,7 +43,23 @@ export function recoveryTransport(request: RecoveryRequest): RecoveryTransport {
     prepare: async () => JSON.parse(await query('projectRecovery:prepare', scope)),
     hostedPage: async (selection: RecoverySelection, table: RecoveryTable, cursor: string | null) => {
       const args = { projectId: request.projectId, selection: JSON.stringify(selection), table, cursor };
-      const value = await query('projectRecoveryHosted:page', args);
+      let value;
+      try {
+        value = await query('projectRecoveryHosted:page', {
+          ...args,
+          ...(physicalProtocol ? { physicalProtocol: 1 } : {}),
+        });
+      } catch (error) {
+        if (
+          !physicalProtocol ||
+          !(error instanceof Error) ||
+          !error.message.includes('ArgumentValidationError') ||
+          !error.message.includes('physicalProtocol')
+        )
+          throw error;
+        physicalProtocol = false;
+        value = await query('projectRecoveryHosted:page', args);
+      }
       const hydrated = await hydrateLandingHistory('projectRecoveryHosted:page', args, value, (name, input) =>
         exchange.client.action(makeFunctionReference<'action'>(name), {
           ...input,
