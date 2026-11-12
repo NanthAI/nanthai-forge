@@ -119,3 +119,46 @@ test('bench Convex deploys only on dispatch, from a main commit, inside its own 
   // The guard runs before the checkout and the deploy.
   assert(bench.indexOf('Refuse a commit that is not on main') < bench.indexOf('actions/checkout'));
 });
+
+// Execute only the audited deploy step with a fake npx; no deployment or package script runs.
+function deployArgs(script) {
+  const result = spawnSync('bash', ['-c', `npx() { printf '%s\\n' "$@"; }\n${script}`], {
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim().split('\n');
+}
+
+test('dev CI completes guard-approved large-index removals without an interactive confirmation', () => {
+  const command = workflow.match(/run: (npx --no-install convex deploy[^\n]+)/)[1];
+  assert.deepEqual(deployArgs(command), [
+    '--no-install',
+    'convex',
+    'deploy',
+    '--typecheck',
+    'enable',
+    '--allow-deleting-large-indexes',
+  ]);
+});
+
+test('bench large-index deletion is default-off and only the explicit true dispatch input enables it', () => {
+  const bench = readFileSync('.github/workflows/convex-bench-deploy.yml', 'utf8');
+  assert.match(
+    bench,
+    /allow_deleting_large_indexes:\n\s+description:[^\n]+\n\s+required: false\n\s+type: boolean\n\s+default: false/,
+  );
+  const script = bench
+    .match(/Deploy functions and schema to the bench deployment\n\s+run: \|\n((?:          .*\n)+)/)[1]
+    .replace(/^ {10}/gm, '');
+  for (const value of ['', 'false', 'true']) {
+    const args = deployArgs(script.replaceAll('${{ inputs.allow_deleting_large_indexes }}', value));
+    assert.deepEqual(args, [
+      '--no-install',
+      'convex',
+      'deploy',
+      '--typecheck',
+      'enable',
+      ...(value === 'true' ? ['--allow-deleting-large-indexes'] : []),
+    ]);
+  }
+});
