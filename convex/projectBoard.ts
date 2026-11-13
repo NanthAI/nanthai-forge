@@ -4,6 +4,7 @@ import { mutation, query, type MutationCtx, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { recordCaller } from './projectHostedFrictionStore';
 import { boardInbox, boardMessageView } from './projectBoardDelivery';
+import { laneConflicts } from './projectHostedConflicts';
 import {
   BOARD_EVIDENCE_MS,
   BOARD_LANE_WINDOW,
@@ -311,7 +312,8 @@ export const read = query({
     try {
       await recordCaller(ctx, input.projectId, true);
       const projectId = input.projectId;
-      if (await boardStopped(ctx, projectId))
+      const off = await boardStopped(ctx, projectId);
+      if (off && (!input.laneId || input.id))
         return canonicalPayload({ status: 'off', messages: [], more: 0 });
       if (input.id) {
         const message = await messageRow(ctx, projectId, input.id);
@@ -327,11 +329,14 @@ export const read = query({
         });
       }
       let intentId: string | undefined, laneId: string | undefined;
+      let conflicts: Awaited<ReturnType<typeof laneConflicts>> = [];
       if (input.laneId) {
         const lane = await laneRow(ctx, projectId, input.laneId.toLowerCase());
         laneId = lane.laneId;
         intentId = lane.intentId;
+        if (lane.open) conflicts = await laneConflicts(ctx, projectId, laneId, lane.head);
       }
+      if (off) return canonicalPayload({ status: 'off', messages: [], more: 0, conflicts });
       const limit = Math.min(10, Math.max(1, Math.floor(input.limit ?? 10)));
       const inbox = await boardInbox(ctx, {
         projectId,
@@ -342,7 +347,7 @@ export const read = query({
         order: 'desc',
         ...(input.all ? { includeResolved: true } : {}),
       });
-      return canonicalPayload({ status: 'ok', ...inbox });
+      return canonicalPayload({ status: 'ok', ...inbox, ...(conflicts.length ? { conflicts } : {}) });
     } catch (error) {
       return report(error);
     }

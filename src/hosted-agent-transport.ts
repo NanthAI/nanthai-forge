@@ -38,6 +38,7 @@ import { rememberBoardReader } from './board-local.js';
 import { rememberBoardServerFeatures } from './board-local.js';
 import { restackAfterSave, type StackHint } from './hosted-stack-restack.js';
 import { memberDataNotice } from './member-data-notice.js';
+import type { BoardWaitOption } from './hosted-board-wait.js';
 import { exactConflictNotice, type ExactConflictNotice } from './hosted-conflict-notice.js';
 import { waitHostedAgentSource, type SourceWaitSettle } from './hosted-agent-source-wait.js';
 import {
@@ -345,6 +346,8 @@ export class HostedAgentTransport {
   /** Epoch ms deadline for actions that wait for their own outcome; default: the agent wait
    * budget from dispatch. `wait` sets its own so a resumed save never outlives that budget. */
   waitUntil?: number;
+  /** Lane inbox context of an explicit wait; piggybacks its existing status read. */
+  waitBoard?: BoardWaitOption | undefined;
   constructor(
     readonly root: string,
     readonly address: HostedAgentAddress,
@@ -425,15 +428,19 @@ export class HostedAgentTransport {
         resolved: null,
         result: await queueHostedSource(this, input),
       };
-    if (Object.hasOwn(hostedBoardSchemas, requestedAction))
+    if (Object.hasOwn(hostedBoardSchemas, requestedAction)) {
+      const result = await boardHostedSource(this, requestedAction as keyof typeof hostedBoardSchemas, input);
+      const { conflictNotice, notice } = result as { conflictNotice?: ExactConflictNotice; notice?: string };
       return {
         schema: 1,
         transport: 'hosted',
         action: requestedAction as keyof typeof hostedBoardSchemas,
         operationId: null,
         resolved: null,
-        result: await boardHostedSource(this, requestedAction as keyof typeof hostedBoardSchemas, input),
+        result,
+        ...(conflictNotice ? { conflictNotice, notice } : {}),
       };
+    }
     if (requestedAction === 'peers')
       return {
         schema: 1,
@@ -1064,6 +1071,7 @@ export class HostedAgentTransport {
             timeoutSeconds,
             observe,
             settle,
+            this.serverFeatures?.includes('source-board-wait') ? this.waitBoard : undefined,
           ),
         waitUntil: this.waitUntil ?? dispatchedAt + AGENT_WAIT_SECONDS * 1000,
         finishGates: async (laneId: string, head: string, tree?: string) => {
@@ -1878,7 +1886,14 @@ export class HostedAgentTransport {
     if (runId)
       return this.query(`projectHostedCheckRead:${summary ? 'summary' : 'status'}`, {
         runId,
-        ...(!summary ? { features: ['ci-status-check', 'check-report-detail'] } : {}),
+        ...(!summary
+          ? {
+              features: ['ci-status-check', 'check-report-detail'],
+              ...(this.waitBoard && this.serverFeatures?.includes('run-board-wait')
+                ? { board: { laneId: this.waitBoard.laneId, after: this.waitBoard.after } }
+                : {}),
+            }
+          : {}),
       });
     if (laneId) return this.query('projectHostedLanes:head', { laneId });
     if (!kind)

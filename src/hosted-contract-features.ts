@@ -36,6 +36,10 @@ export const hostedContractFeatures = [
   /** Wait delivery: the landing page subscription takes `board`, projectBoardWait:peer exists, and
    * the overlap read lists claims on a first-write path. Without it waits carry no board argument. */
   'board-wait',
+  /** The existing check status subscription also takes the Lane inbox cursor. */
+  'run-board-wait',
+  /** Save, sync and compose progress subscriptions also accept the existing Lane inbox cursor. */
+  'source-board-wait',
   /** Automatic file claims: projectBoardClaims:claim exists, and the overlap read's board arg takes
    * `claim` (lists `touching` and says when the first-write hook should claim). Without it the
    * hook records no claim. */

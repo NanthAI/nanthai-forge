@@ -278,3 +278,46 @@ test('persistent run observation outage reaches the deadline as in progress', as
   assert.equal(result.result.inProgress, true);
   assert.equal(attempts, 1);
 });
+
+for (const negotiated of [false, true]) {
+  test(`83e6d0d3: finite run wait ${negotiated ? 'delivers an existing inbox notice' : 'keeps the older-server query unchanged'}`, async t => {
+    const { hostedAgentCli } = await import('../dist/hosted-agent-cli.js');
+    const s = fixture(t),
+      transport = s.transport();
+    await transport.dispatch('open', { laneId: s.lane.laneId });
+    s.caps.features = negotiated ? ['run-board-wait'] : [];
+    const peer = randomUUID();
+    if (negotiated)
+      s.current({
+        board: {
+          messages: [],
+          more: 0,
+          cursor: Date.now(),
+          conflicts: [
+            {
+              with: peer,
+              goal: 'Synthetic',
+              flaggedAt: new Date().toISOString(),
+              files: [{ path: 'src/service.ts', mine: [[1, 1]], theirs: [[1, 1]], reason: 'text' }],
+            },
+          ],
+        },
+      });
+    const exit = process.exitCode;
+    t.after(() => {
+      process.exitCode = exit;
+    });
+    const reply = await hostedAgentCli(
+      s.root,
+      'wait',
+      { runId: s.runId, timeoutSeconds: 0 },
+      s.address,
+      transport,
+    );
+    const read = s.calls.findLast(call => call.name === 'projectHostedCheckRead:status');
+    assert.equal(Boolean(read.args.board), negotiated);
+    assert.equal(reply.result.reason, negotiated ? 'message' : 'budget');
+    if (negotiated) assert.equal(reply.conflictNotice.items[0].with, peer);
+    assert.equal(s.counts().opens, 0, 'finite reads never subscribe');
+  });
+}

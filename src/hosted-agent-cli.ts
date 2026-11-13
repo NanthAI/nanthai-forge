@@ -23,6 +23,7 @@ import { recordTurnWait, settleTurnWork } from './agent-turn-work.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { networkTimeout } from './network-fetch.js';
+import type { BoardWaitOption } from './hosted-board-wait.js';
 import { canonicalOperationIds } from './operation-id-case.js';
 export { hostedAgentAddress } from './hosted-agent-address.js';
 /** The CLI sends a hosted save under its wire name `checkpoint`; both mean save. */
@@ -33,8 +34,15 @@ const sourcePending = (response: { result?: unknown } | undefined) => {
 };
 /** Replaceable in tests; production waits on the source progress subscription. */
 export const sourceWaitHooks = { wait: waitHostedAgentSource };
-const waitSource = (...args: Parameters<typeof waitHostedAgentSource>) =>
-  sourceWaitHooks.wait(args[0], args[1], args[2], args[3], undefined, 'Saves');
+const waitSource = (
+  address: HostedAgentAddress,
+  id: string,
+  initial: unknown,
+  signal: AbortSignal,
+  board?: BoardWaitOption,
+  kind: 'Saves' | 'Sync' | 'Compose' = 'Saves',
+) =>
+  sourceWaitHooks.wait(address, id, initial, signal, undefined, kind, undefined, undefined, undefined, board);
 /** True when the retained address receipt already holds exactly these bytes. */
 function receiptMatches(path: string, body: string) {
   try {
@@ -101,41 +109,81 @@ async function dispatchHostedAgentCli(
         deadline = Date.now() + budgetMs;
       // A replayed save waits for its own outcome inside dispatch: within this wait's budget.
       transport.waitUntil = deadline;
-      let response: Awaited<ReturnType<HostedAgentTransport['dispatch']>> | undefined;
-      for (const operation of retained) {
-        const replay = { ...operation.command, operationId: operation.id };
-        response = await transport.dispatch(operation.action, replay);
-        // A replay of a still-running save returns `submitted`: wait on its source
-        // progress subscription (event-driven, no polling), then replay once more.
-        while (sourcePending(response) && Date.now() < deadline) {
-          await waitSource(
-            address,
-            operation.id,
-            response.result,
-            networkTimeout(Math.max(1, deadline - Date.now())),
-          );
+      const board = boardWaitOption(root, markerIdentity(root)?.laneId ?? undefined);
+      const previousBoard = transport.waitBoard;
+      transport.waitBoard = board;
+      const sourceMessage = (
+        response: Awaited<ReturnType<HostedAgentTransport['dispatch']>>,
+        value: unknown,
+      ) => {
+        const delivery = (value as { board?: Parameters<typeof boardWakeEnvelope>[2] } | undefined)?.board;
+        if (!board || !delivery) return undefined;
+        const { conflictNotice, notice, ...envelope } = boardWakeEnvelope(root, board.laneId, delivery);
+        process.exitCode = 3;
+        const { next, waitCommand, inProgress } = operationWait(root, { ...selectedWait, ...address });
+        return {
+          ...response,
+          ...(conflictNotice ? { conflictNotice, notice } : {}),
+          result: {
+            status: 'IN_PROGRESS',
+            reason: 'message',
+            board: { ...envelope, ...(!conflictNotice && notice ? { notice } : {}) },
+            next,
+            waitCommand,
+            command: waitCommand,
+            inProgress,
+          },
+        };
+      };
+      try {
+        let response: Awaited<ReturnType<HostedAgentTransport['dispatch']>> | undefined;
+        for (const operation of retained) {
+          const replay = { ...operation.command, operationId: operation.id };
           response = await transport.dispatch(operation.action, replay);
+          const delivered = sourceMessage(response, response.result);
+          if (delivered) return delivered;
+          // A replay of a still-running save returns `submitted`: wait on its source
+          // progress subscription (event-driven, no polling), then replay once more.
+          while (sourcePending(response) && Date.now() < deadline) {
+            const progress = await waitSource(
+              address,
+              operation.id,
+              response.result,
+              networkTimeout(Math.max(1, deadline - Date.now())),
+              transport.advertisedFeatures?.includes('source-board-wait') ? board : undefined,
+              operation.action === 'compose'
+                ? 'Compose'
+                : ['sync', 'resolve', 'revert'].includes(operation.action)
+                  ? 'Sync'
+                  : 'Saves',
+            );
+            const delivered = sourceMessage(response, progress);
+            if (delivered) return delivered;
+            response = await transport.dispatch(operation.action, replay);
+          }
+          if (isNetworkPending(response) || sourcePending(response)) {
+            process.exitCode = 3;
+            const resume = operationWait(root, {
+              operationIds: selectedWait.operationIds!,
+              ...address,
+            });
+            return {
+              ...response,
+              result: {
+                ...(response.result as object),
+                status: 'IN_PROGRESS',
+                reason: 'budget',
+                ...resume,
+              },
+            };
+          }
+          process.stderr.write(`${operation.action.toUpperCase()} ${operation.id} finished\n`);
         }
-        if (isNetworkPending(response) || sourcePending(response)) {
-          process.exitCode = 3;
-          const resume = operationWait(root, {
-            operationIds: selectedWait.operationIds!,
-            ...address,
-          });
-          return {
-            ...response,
-            result: {
-              ...(response.result as object),
-              status: 'IN_PROGRESS',
-              reason: 'budget',
-              ...resume,
-            },
-          };
-        }
-        process.stderr.write(`${operation.action.toUpperCase()} ${operation.id} finished\n`);
+        settleTurnWork(retained.map(operation => operation.id));
+        return response;
+      } finally {
+        transport.waitBoard = previousBoard;
       }
-      settleTurnWork(retained.map(operation => operation.id));
-      return response;
     }
     const controller = new AbortController(),
       stop = () => controller.abort();
@@ -148,7 +196,7 @@ async function dispatchHostedAgentCli(
       const observed = { ...command, timeoutSeconds: budgetSeconds };
       const laneId = markerIdentity(root)?.laneId ?? undefined;
       // Wait delivery: a note to this checkout's own Lane ends a landing or peer wait early.
-      const board = selectedWait.runId ? undefined : boardWaitOption(root, laneId);
+      const board = boardWaitOption(root, laneId);
       const { next, waitCommand, inProgress } = continuation;
       const resume = { next, command: waitCommand, waitCommand, inProgress };
       if (selectedWait.approval) {
@@ -189,8 +237,8 @@ async function dispatchHostedAgentCli(
         );
         const notes =
           outcome.status === 'message' && board
-            ? { board: boardWakeEnvelope(root, board.laneId, outcome.board) }
-            : {};
+            ? boardWakeEnvelope(root, board.laneId, outcome.board)
+            : undefined;
         process.exitCode = outcome.status === 'terminal' ? 0 : outcome.status === 'cancelled' ? 130 : 3;
         return {
           schema: 1 as const,
@@ -198,6 +246,7 @@ async function dispatchHostedAgentCli(
           action: 'observe' as const,
           operationId: null,
           resolved: null,
+          ...(notes?.conflictNotice ? { conflictNotice: notes.conflictNotice, notice: notes.notice } : {}),
           result:
             outcome.status === 'terminal'
               ? {
@@ -214,7 +263,15 @@ async function dispatchHostedAgentCli(
                   reason: outcome.status === 'timeout' ? 'budget' : outcome.status,
                   budgetSeconds,
                   peer: outcome.peer,
-                  ...notes,
+                  ...(notes
+                    ? {
+                        board: {
+                          notices: notes.notices,
+                          more: notes.more,
+                          ...(!notes.conflictNotice && notes.notice ? { notice: notes.notice } : {}),
+                        },
+                      }
+                    : {}),
                   ...resume,
                 },
         };
@@ -224,7 +281,7 @@ async function dispatchHostedAgentCli(
       // Events stay internal: the caller gets one line when the budget or outcome returns.
       const response = await withLaneCommand(laneId, 'wait', async () =>
         selectedWait.runId
-          ? await observeHostedRun(transport, observed, controller.signal)
+          ? await observeHostedRun(transport, observed, controller.signal, undefined, undefined, board)
           : await observeOperations(
               transport,
               root,
@@ -271,7 +328,9 @@ async function dispatchHostedAgentCli(
             status: 'IN_PROGRESS',
             reason: 'message',
             budgetSeconds,
-            operationIds: selectedWait.operationIds,
+            ...(selectedWait.runId
+              ? { runId: selectedWait.runId }
+              : { operationIds: selectedWait.operationIds }),
             phase: submissions?.length === 1 ? (submissions[0]!.submission.phase ?? 'unknown') : 'pending',
             ...held,
             board: { ...envelope, ...(!conflictNotice && notice ? { notice } : {}) },

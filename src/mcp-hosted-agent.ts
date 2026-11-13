@@ -324,9 +324,7 @@ export function registerHostedAgentWorkflow(
           // Wait delivery: a note to this root's own Lane ends a landing or peer wait early.
           let board: ReturnType<typeof boardWaitOption>;
           try {
-            board = input.runId
-              ? undefined
-              : boardWaitOption(transport.root, readHostedLaneCheckout(transport.root)?.selection.laneId);
+            board = boardWaitOption(transport.root, readHostedLaneCheckout(transport.root)?.selection.laneId);
           } catch {
             board = undefined;
           }
@@ -378,12 +376,16 @@ export function registerHostedAgentWorkflow(
               controller.signal,
               subscribe,
             );
+            const notes = outcome.status === 'message' && board ? await delivered(outcome.board) : undefined;
             return {
               schema: 1 as const,
               transport: 'hosted' as const,
               action: 'observe' as const,
               operationId: null,
               resolved: null,
+              ...(notes?.conflictNotice
+                ? { conflictNotice: notes.conflictNotice, notice: notes.notice }
+                : {}),
               result:
                 outcome.status === 'terminal'
                   ? { status: 'terminal', reason: 'peer', peer: outcome.peer }
@@ -392,8 +394,14 @@ export function registerHostedAgentWorkflow(
                       reason: outcome.status === 'timeout' ? 'budget' : outcome.status,
                       budgetSeconds,
                       peer: outcome.peer,
-                      ...(outcome.status === 'message' && board
-                        ? { board: await delivered(outcome.board) }
+                      ...(notes
+                        ? {
+                            board: {
+                              notices: notes.notices,
+                              more: notes.more,
+                              ...(!notes.conflictNotice && notes.notice ? { notice: notes.notice } : {}),
+                            },
+                          }
                         : {}),
                       ...resumeOf(),
                     },
@@ -432,12 +440,17 @@ export function registerHostedAgentWorkflow(
             const notes = await delivered(observed.result.board as Parameters<typeof boardWakeEnvelope>[2]);
             return {
               ...observed,
+              ...(notes.conflictNotice ? { conflictNotice: notes.conflictNotice, notice: notes.notice } : {}),
               result: {
                 status: 'IN_PROGRESS',
                 reason: 'message',
                 budgetSeconds,
                 phase: (single?.submission as { phase?: string } | undefined)?.phase ?? 'pending',
-                board: notes,
+                board: {
+                  notices: notes.notices,
+                  more: notes.more,
+                  ...(!notes.conflictNotice && notes.notice ? { notice: notes.notice } : {}),
+                },
                 ...('cursor' in observed.result ? { cursor: observed.result.cursor } : {}),
                 ...resumeOf(),
               },

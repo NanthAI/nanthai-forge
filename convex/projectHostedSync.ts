@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { sourceProgress } from './projectSourceProgress';
+import { boardWake } from './projectBoardDelivery';
 import { loadLanding } from './projectHostedLandingStore';
 import { v } from 'convex/values';
 import { receiptMutation, query, type QueryCtx, type MutationCtx } from './cliServer';
@@ -312,13 +313,17 @@ export async function prepareHostedSync(
   });
 }
 export const progress = query({
-  args: identity,
+  args: { ...identity, board: v.optional(v.object({ laneId: v.string(), after: v.number() })) },
   returns: v.string(),
-  handler: async (ctx, input) => {
+  handler: async (ctx, { board: cursor, ...input }) => {
     try {
       const auth = await caller(ctx, input),
         { row, state, operation } = await loadSync(ctx, auth, false);
+      const board = cursor
+        ? await boardWake(ctx, { projectId: input.projectId, viewer: auth.actor, ...cursor })
+        : undefined;
       return canonicalPayload({
+        ...(board ? { board } : {}),
         ...(state.status === 'submitted' || state.status === 'failed'
           ? await sourceProgress(ctx, input.projectId, row.jobId)
           : {}),

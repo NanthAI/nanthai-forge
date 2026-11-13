@@ -51,7 +51,16 @@ export function boardWaker(option: BoardWaitOption, wake: (delivery: BoardDelive
         boardDeliverySchema,
         (value as { board?: unknown } | undefined)?.board,
       );
-      if (!parsed.success || (!parsed.data.messages.length && !parsed.data.conflicts?.length)) return;
+      if (!parsed.success || (!parsed.data.messages.length && !parsed.data.conflicts?.length)) {
+        // A later subscription value revalidated the saved head and withdrew the queued conflict.
+        if (latest?.conflicts?.length) {
+          latest = undefined;
+          if (timer) clearTimeout(timer);
+          timer = undefined;
+          timerAt = Infinity;
+        }
+        return;
+      }
       latest = parsed.data;
       // A newly proven conflict uses the same batching timer, without the member-note cooldown.
       const at = Math.max(

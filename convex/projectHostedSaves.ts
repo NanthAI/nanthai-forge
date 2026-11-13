@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { journalIndexAt } from './projectJournalStore';
 import { sourceProgress } from './projectSourceProgress';
+import { boardWake } from './projectBoardDelivery';
 import { hostedSaveState } from '../src/hosted-save-state';
 import { boundOverlapChanges, type OverlapChange } from '../src/hosted-overlap';
 import { v } from 'convex/values';
@@ -313,13 +314,17 @@ export function hostedSaveInput(state: Awaited<ReturnType<typeof loadSave>>['sta
   });
 }
 export const progress = query({
-  args: identity,
+  args: { ...identity, board: v.optional(v.object({ laneId: v.string(), after: v.number() })) },
   returns: v.string(),
-  handler: async (ctx, input) => {
+  handler: async (ctx, { board: cursor, ...input }) => {
     try {
       const auth = await caller(ctx, input),
         { row, state, operation } = await loadSave(ctx, auth, false);
+      const board = cursor
+        ? await boardWake(ctx, { projectId: input.projectId, viewer: auth.actor, ...cursor })
+        : undefined;
       return canonicalPayload({
+        ...(board ? { board } : {}),
         ...(state.status === 'submitted' || state.status === 'failed'
           ? await sourceProgress(ctx, input.projectId, row.jobId)
           : {}),

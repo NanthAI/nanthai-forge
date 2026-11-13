@@ -14,6 +14,7 @@ import { exactHostedCheckEvidence } from '../src/hosted-check-evidence';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { boardWake } from './projectBoardDelivery';
 
 const identity = { projectId: v.id('hostedProjects'), runId: v.string() };
 export async function checkReader(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
@@ -22,9 +23,13 @@ export async function checkReader(ctx: QueryCtx | MutationCtx, projectId: Id<'ho
   await accessibleProject(ctx, projectId, user.subject);
 }
 export const status = query({
-  args: { ...identity, features: v.optional(v.array(v.string())) },
+  args: {
+    ...identity,
+    features: v.optional(v.array(v.string())),
+    board: v.optional(v.object({ laneId: v.string(), after: v.number() })),
+  },
   returns: v.string(),
-  handler: async (ctx, { features, ...input }) => {
+  handler: async (ctx, { features, board: cursor, ...input }) => {
     try {
       await checkReader(ctx, input.projectId);
       const { run } = await loadHostedCheck(ctx, input, !features?.includes('check-report-detail'));
@@ -40,7 +45,16 @@ export const status = query({
         'BAD_ARGUMENT',
         `Check run ${run.id} uses the ci-status provider; update the Forge CLI to read it.`,
       );
-      return canonicalPayload(run);
+      const user = cursor ? await ctx.auth.getUserIdentity() : null;
+      const board =
+        cursor && user
+          ? await boardWake(ctx, {
+              projectId: input.projectId,
+              viewer: user.subject,
+              ...cursor,
+            })
+          : undefined;
+      return canonicalPayload({ ...run, ...(board ? { board } : {}) });
     } catch (error) {
       return report(error);
     }

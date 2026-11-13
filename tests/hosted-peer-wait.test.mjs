@@ -10,7 +10,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { getFunctionName, makeFunctionReference } from 'convex/server';
 import { agentCli } from '../dist/agent-cli.js';
 import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
-import { peerWaitHooks } from '../dist/hosted-board-wait.js';
+import { boardWakeTiming, peerWaitHooks } from '../dist/hosted-board-wait.js';
 import { approvalWaitHooks } from '../dist/hosted-agent-approval.js';
 import { hostedAgentHelp } from '../dist/hosted-agent-help.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
@@ -272,4 +272,88 @@ test('MCP forge_wait {peer} ends on accepted, failed and cancelled; one capabili
     arguments: { peer: peer.slice(0, 8), runId: randomUUID() },
   });
   assert.equal(refused.isError, true);
+});
+
+test('83e6d0d3: the real peer-wait CLI reply promotes an exact conflict and retains its resume selection', async t => {
+  const { s, subs } = environment(t);
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const timing = { ...boardWakeTiming };
+  boardWakeTiming.batchMs = 0;
+  t.after(() => Object.assign(boardWakeTiming, timing));
+  const peer = randomUUID();
+  const waiting = agentCli([s.root, 'wait', JSON.stringify({ peer })], binary);
+  await until(() => subs.length > 0);
+  const subscription = subs[0];
+  const calls = s.calls.length;
+  subscription.next(
+    JSON.stringify({
+      peer: { laneId: peer, state: 'open', terminal: false },
+      board: {
+        messages: [],
+        more: 0,
+        cursor: Date.now(),
+        conflicts: [
+          {
+            with: peer,
+            goal: 'Synthetic peer',
+            flaggedAt: new Date().toISOString(),
+            files: [{ path: 'src/service.ts', mine: [[1, 1]], theirs: [[1, 1]], reason: 'text' }],
+          },
+        ],
+      },
+    }),
+  );
+  const reply = await waiting;
+  assert.equal(reply.conflictNotice?.items[0].with, peer);
+  assert.equal(reply.result.status, 'IN_PROGRESS');
+  assert.equal(reply.result.reason, 'message');
+  assert.equal(reply.result.next.peer, peer);
+  assert.equal(reply.result.board.conflictNotice, undefined, 'the banner uses the top-level reply');
+  assert.equal(s.calls.length, calls, 'wake adds no query or page drain');
+});
+
+test('83e6d0d3: MCP peer wait promotes source conflicts to the same top-level reply as CLI', async t => {
+  const { s, subs } = environment(t);
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const timing = { ...boardWakeTiming };
+  boardWakeTiming.batchMs = 0;
+  t.after(() => Object.assign(boardWakeTiming, timing));
+  const server = new McpServer({ name: 'nanthai-forge', version: 'test' });
+  const close = registerHostedAgentWorkflow(server, s.transport(), () => peerWaitHooks.subscribe());
+  const client = new Client({ name: 'test', version: '1' }),
+    [a, b] = InMemoryTransport.createLinkedPair();
+  await server.connect(a);
+  await client.connect(b);
+  t.after(async () => {
+    close();
+    await client.close();
+    await server.close();
+  });
+  const peer = randomUUID(),
+    waiting = client.callTool({ name: 'forge_wait', arguments: { peer } });
+  await until(() => subs.length > 0);
+  subs[0].next(
+    JSON.stringify({
+      peer: { laneId: peer, state: 'open', terminal: false },
+      board: {
+        messages: [],
+        more: 0,
+        cursor: Date.now(),
+        conflicts: [
+          {
+            with: peer,
+            goal: 'Synthetic',
+            flaggedAt: new Date().toISOString(),
+            files: [{ path: 'src/service.ts', mine: [[1, 1]], theirs: [[1, 1]], reason: 'text' }],
+          },
+        ],
+      },
+    }),
+  );
+  const response = await waiting;
+  assert.notEqual(response.isError, true, response.content[0].text);
+  const reply = JSON.parse(response.content[0].text);
+  assert.equal(reply.conflictNotice.items[0].with, peer);
+  assert.equal(reply.result.reason, 'message');
+  assert.equal(reply.result.next.peer, peer);
 });

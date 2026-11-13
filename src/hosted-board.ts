@@ -15,7 +15,7 @@ import {
   writeBoardProjectCursor,
 } from './board-local.js';
 import { ForgeError, invariant } from './errors.js';
-import { exactConflictsSchema } from './hosted-conflict-notice.js';
+import { exactConflictNotice, exactConflictsSchema } from './hosted-conflict-notice.js';
 import { hostedActionError } from './hosted-action-error.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 
@@ -143,7 +143,14 @@ export async function boardHostedSource(
       boardNoticeLine(boardMessageSchema.parse(message), laneId),
     );
     // One marker per read, only when it carries member text (S-17).
-    return { ...result, notices, ...(notices.length ? { notice: memberDataNotice } : {}) };
+    const conflicts = result.conflicts ? exactConflictsSchema.parse(result.conflicts) : [];
+    const conflictNotice = laneId ? exactConflictNotice(laneId, conflicts) : undefined;
+    return {
+      ...result,
+      notices,
+      ...(conflictNotice ? { conflictNotice } : {}),
+      ...(notices.length || conflictNotice ? { notice: memberDataNotice } : {}),
+    };
   }
   // The note names this agent session (c29d0780) once the server takes it.
   const agent = features.includes('agent-slug') ? transport.agentSlug?.() : undefined;

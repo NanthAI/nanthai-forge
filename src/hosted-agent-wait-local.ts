@@ -21,7 +21,8 @@ import {
   type HostedRunSubscription,
 } from './hosted-agent-observe.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
-import type { BoardWaitOption } from './hosted-board-wait.js';
+import { boardWaker, type BoardWaitOption } from './hosted-board-wait.js';
+import { boardDeliverySchema } from './hosted-board.js';
 
 /** What this client's own records say an operation id is, when the server has no landing for it. */
 export type LocalOperation =
@@ -80,7 +81,10 @@ async function observeHostedSave(
   timeoutSeconds: number,
   signal: AbortSignal | undefined,
   subscribe: () => HostedRunSubscription,
+  board?: BoardWaitOption,
 ) {
+  const boardWait = transport.advertisedFeatures?.includes('source-board-wait') ? board : undefined;
+  const boardArgs = boardWait ? { board: { laneId: boardWait.laneId, after: boardWait.after } } : {};
   const terminal = (value: unknown) => {
     const outcome = progressSchema.parse(value).terminal?.outcome;
     if (!outcome) return null;
@@ -97,7 +101,15 @@ async function observeHostedSave(
   };
   const read = async () => {
     try {
-      return terminal(await transport.query('projectHostedSaves:progress', { operationId }));
+      const value = await transport.query('projectHostedSaves:progress', { operationId, ...boardArgs });
+      const done = terminal(value);
+      if (done) return done;
+      const delivery = boardWait
+        ? boardDeliverySchema.safeParse((value as { board?: unknown }).board)
+        : undefined;
+      return delivery?.success && (delivery.data.messages.length || delivery.data.conflicts?.length)
+        ? response({ status: 'message', board: delivery.data, inProgress: true })
+        : null;
     } catch (error) {
       if (hostedActionError(error, 'save observation').code !== 'NOT_FOUND') throw error;
       return response({
@@ -125,15 +137,22 @@ async function observeHostedSave(
   let release = () => {};
   try {
     return await new Promise<ReturnType<typeof response>>((resolve, reject) => {
+      const waker = boardWait
+        ? boardWaker(boardWait, delivery =>
+            settle(response({ status: 'message', board: delivery, inProgress: true })),
+          )
+        : undefined;
       const timer = setTimeout(() => settle(pending('timeout')), timeoutSeconds * 1000);
       const stop = () => settle(pending('cancelled'));
       const unsubscribe = client.onUpdate(
         makeFunctionReference<'query'>('projectHostedSaves:progress'),
-        { projectId: transport.address.projectId, operationId },
+        { projectId: transport.address.projectId, operationId, ...boardArgs },
         value => {
           try {
-            const done = terminal(typeof value === 'string' ? JSON.parse(value) : value);
+            const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+            const done = terminal(parsed);
             if (done) settle(done);
+            else waker?.offer(parsed);
           } catch (error) {
             release();
             reject(error);
@@ -145,6 +164,7 @@ async function observeHostedSave(
         },
       );
       release = () => {
+        waker?.stop();
         clearTimeout(timer);
         signal?.removeEventListener('abort', stop);
         unsubscribe();
@@ -173,6 +193,7 @@ async function continueFinish(
   signal: AbortSignal | undefined,
   emit: ((value: unknown) => void) | undefined,
   subscribe: () => HostedRunSubscription,
+  board?: BoardWaitOption,
 ) {
   const deadline = Date.now() + input.timeoutSeconds * 1000;
   transport.waitUntil = deadline;
@@ -186,11 +207,19 @@ async function continueFinish(
       signal,
       emit,
       subscribe,
+      board,
     );
   // A check-only finish that reserved its run: wait on that run, as land does.
   const run = result.run as { id?: unknown } | undefined;
   if (result.phase === 'check' && typeof run?.id === 'string')
-    return observeHostedRun(transport, { runId: run.id, timeoutSeconds: remaining }, signal, emit, subscribe);
+    return observeHostedRun(
+      transport,
+      { runId: run.id, timeoutSeconds: remaining },
+      signal,
+      emit,
+      subscribe,
+      board,
+    );
   // Source still running (not retryable or failed, which carry their own recovery): the same wait resumes it.
   const preparing = preparingFinishSource(result);
   return response({
@@ -212,6 +241,7 @@ export async function followLocalOperation(
   signal?: AbortSignal,
   emit?: (value: unknown) => void,
   subscribe: () => HostedRunSubscription = () => hostedRunSubscription(transport.address),
+  board?: BoardWaitOption,
 ) {
   if (hostedActionError(error, 'observation').code !== 'NOT_FOUND' || input.operationIds.length !== 1)
     return undefined;
@@ -225,11 +255,12 @@ export async function followLocalOperation(
       signal,
       emit,
       subscribe,
+      board,
     );
   if (local.kind === 'save')
-    return observeHostedSave(transport, operationId, input.timeoutSeconds, signal, subscribe);
+    return observeHostedSave(transport, operationId, input.timeoutSeconds, signal, subscribe, board);
   if (local.kind === 'finish')
-    return continueFinish(transport, operationId, local.command, input, signal, emit, subscribe);
+    return continueFinish(transport, operationId, local.command, input, signal, emit, subscribe, board);
   return response({
     status: 'terminal',
     successful: false,
@@ -258,7 +289,16 @@ export async function observeOperations(
   try {
     return await observeHostedSubmissions(transport, input, signal, emit, subscribe, board);
   } catch (error) {
-    const followed = await followLocalOperation(transport, root, input, error, signal, emit, subscribe);
+    const followed = await followLocalOperation(
+      transport,
+      root,
+      input,
+      error,
+      signal,
+      emit,
+      subscribe,
+      board,
+    );
     if (followed) return followed;
     throw error;
   }

@@ -1817,7 +1817,7 @@ Lane's base, and against the latest saved head of every other open Lane that sav
 The merge is composition's own: the per-file rule, `mergeNativeText` and the compose syntax gate,
 so a notice and a real compose agree (two independent insertions at one place merge, as on land).
 Only a real conflict is reported, to both Lanes, as `conflictNotice` on their next start, save,
-status or land response, or a running landing wait: each item names the file, the line ranges in your file and in theirs, the
+status, board or land response, or a running landing-operation, source-operation, peer or run wait: each item names the file, the line ranges in your file and in theirs, the
 reason, and the other Lane's goal (member-written data, quoted, at most 160 characters) or `main`.
 `next` says what to do: sync for a main conflict; for a Lane conflict, agree an order or split with
 that Lane (a board note) or change your edit, then save. There is nothing to acknowledge. A notice
@@ -1828,7 +1828,10 @@ Save publication does not wait for its advisory trial. When a trial records a ne
 notice, that same mutation advances the Lane's existing inbox clock. The running wait's existing
 subscription delivers the notice as `conflictNotice` and returns `IN_PROGRESS`, reason `message`,
 with its original resume command. The existing two-second batching timer applies; exact conflicts
-bypass the member-note cooldown. Retrying the same trial does not wake the Lane twice. Board-note
+bypass the member-note cooldown. Run waits negotiate `run-board-wait` on their existing
+capability read before sending the Lane cursor to the existing check-status subscription.
+Source-operation waits negotiate `source-board-wait` for save, sync and compose progress.
+Every wait returns the notice at the top level beside its original resume selection. Retrying the same trial does not wake the Lane twice. Board-note
 switches do not suppress source conflicts. A trial that dies cannot leave a save unpublished.
 Saved-peer conflicts remain advisory: they never hold admission or cancel a landing; main's own
 composition still decides. There is no guarantee that the trial finishes before the save or land

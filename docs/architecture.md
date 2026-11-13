@@ -1466,8 +1466,10 @@ The advisory saved-file trial runs separately from publication. It resolves pack
 bytes through the same verified physical readers as composition, and derives both sides from the
 Lane's pinned base and saved State, including resolution Lanes whose delta describes a marker draft.
 A new or changed exact-conflict row advances the recipient's existing board inbox and logical clock
-in the trial's existing result mutation. The live finish observer delivers that row through its
-existing Lane-inbox subscription; it adds no healthy-path call, poller or scheduled task. A duplicate
+in the trial's existing result mutation. Landing-operation, peer and negotiated run/source-operation waits deliver
+that row through their existing subscriptions. Board reads and the existing Lane-action overlap
+read carry the same source notice; the CLI and MCP promote it to the reply's `conflictNotice`.
+This adds no call, poller or scheduled task. A duplicate
 result neither changes the clock nor wakes again. The save's terminal receipt and any chained
 resolution remain independent of the advisory action, including process death before its result.
 See the [save API](operations/source-exchange.md#hosted-lane-save-api) for transfer,

@@ -40,6 +40,7 @@ const landed = await import(moduleUrl('../convex/projectHostedOverlapLanded.ts')
 const mainLog = await import(moduleUrl('../convex/projectHostedOverlapMainLog.ts'));
 const capabilities = await import(moduleUrl('../convex/projectHostedAgent.ts'));
 const exact = await import(moduleUrl('../convex/projectHostedConflicts.ts'));
+const boardApi = await import(moduleUrl('../convex/projectBoard.ts'));
 // Path notices are gone (flip 4, Issue 853fcde3); peers stay readable on a detail read.
 const peerEvidence = async (s, laneId, name = 'peers') =>
   JSON.parse(
@@ -194,6 +195,7 @@ async function setup(t, options = {}) {
           return s.transaction(name, capabilities.capabilities, args);
         }
         if (name === 'projectHostedOverlaps:read') return s.transaction(name, overlaps.read, args);
+        if (name === 'projectBoard:read') return s.transaction(name, boardApi.read, args);
         if (name === 'projectHostedSaves:progress') return s.call('progress', api.progress, args);
         if (name === 'projectHostedLanes:head') {
           const row = [...s.tables.projectHostedOverlapLanes.values()].find(
@@ -1770,3 +1772,40 @@ test('drift nudge: log entries written before the fix, with an account id, are n
   assert(nudge.includes('aaaaaaaa (Lane bbbbbbbb)'), nudge);
   assertNoAccountIds(assert, nudge, 'legacy nudge');
 });
+
+for (const action of ['status', 'board', 'save']) {
+  test(`83e6d0d3: a retained exact conflict reaches the next ${action} reply, including same-run Lanes`, async t => {
+    const { s, lane, peer, transport } = await setup(t);
+    const first = transport(lane),
+      second = transport(peer);
+    const saveStart = s.counts.length;
+    await first.dispatch('save', { operationId: randomUUID(), message: 'first' });
+    const saveMid = s.counts.length;
+    await second.dispatch('save', { operationId: randomUUID(), message: 'second' });
+    const before = s.counts.length;
+    const response = await second.dispatch(action, { laneId: peer.id });
+    assert.equal(response.conflictNotice?.items[0].with, lane.id);
+    assert.equal(response.conflictNotice.items[0].file, 'a.txt');
+    const measure = rows => ({
+      calls: rows.length,
+      readBytes: rows.reduce((n, r) => n + r.readBytes, 0),
+      writeBytes: rows.reduce((n, r) => n + r.writeBytes, 0),
+    });
+    t.diagnostic(
+      JSON.stringify({
+        surface: action,
+        firstSave: measure(s.counts.slice(saveStart, saveMid)),
+        conflictingSave: measure(s.counts.slice(saveMid, before)),
+        reply: measure(s.counts.slice(before)),
+      }),
+    );
+    if (action === 'board') assert.equal(s.counts.length - before, 1, 'board remains one query');
+    // A board switch only disables member notes, never a retained source conflict.
+    if (action === 'board') {
+      s.insert('boardSwitches', { key: 'global', off: true, at: Date.now() });
+      const off = await second.dispatch(action, { laneId: peer.id });
+      assert.equal(off.result.status, 'off');
+      assert.equal(off.conflictNotice.items[0].with, lane.id);
+    }
+  });
+}

@@ -13,6 +13,8 @@ import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { replyIssuePaths, safeParseHostedResponse } from './hosted-response.js';
 import { replySkewError } from './hosted-reply-skew.js';
 import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
+import { boardWaker, type BoardDelivery, type BoardWaitOption } from './hosted-board-wait.js';
+import { boardDeliverySchema } from './hosted-board.js';
 
 export const hostedRunWaitSchema = z
   .object({
@@ -29,7 +31,11 @@ export interface HostedRunSubscription {
   ): () => void;
   close(): Promise<void>;
 }
+/** Test transport only; production uses the same live client for run and operation waits. */
+export const observationWaitHooks: { subscribe?: (address: HostedAgentAddress) => HostedRunSubscription } =
+  {};
 export function hostedRunSubscription(address: HostedAgentAddress): HostedRunSubscription {
+  if (observationWaitHooks.subscribe) return observationWaitHooks.subscribe(address);
   const token = resolveAuthToken(address.url, process.env.FORGE_AUTH_TOKEN);
   invariant(token, 'AUTH_REQUIRED', 'Run nforge login or supply your current Forge sign-in token.');
   const client = deadlineConvexSubscription(address.url, {
@@ -51,8 +57,11 @@ export async function observeHostedRun(
   signal?: AbortSignal,
   emit: (value: unknown) => void = () => {},
   subscribe: () => HostedRunSubscription = () => hostedRunSubscription(transport.address),
+  board?: BoardWaitOption,
 ) {
   const command = hostedRunWaitSchema.parse(input);
+  const previousBoard = transport.waitBoard;
+  if (board) transport.waitBoard = board;
   let latest: unknown = null,
     active = true;
   try {
@@ -79,6 +88,7 @@ export async function observeHostedRun(
             emit(value);
           },
           subscribe,
+          board,
         ),
     });
     return {
@@ -89,6 +99,7 @@ export async function observeHostedRun(
       },
     };
   } finally {
+    transport.waitBoard = previousBoard;
     active = false;
   }
 }
@@ -98,6 +109,7 @@ async function observeHostedRunOnce(
   signal: AbortSignal,
   emit: (value: unknown) => void,
   subscribe: () => HostedRunSubscription,
+  board?: BoardWaitOption,
 ) {
   const command = hostedRunWaitSchema.parse(input);
   const initial = await transport.dispatch('observe', { runId: command.runId });
@@ -132,21 +144,31 @@ async function observeHostedRunOnce(
     );
     return { value, terminal: hostedCheckTerminal(parsed.data) };
   }
+  const boardWait = transport.advertisedFeatures?.includes('run-board-wait') ? board : undefined;
   let latest = initial.result;
   let terminal = run(latest).terminal;
-  const result = (status: 'terminal' | 'timeout' | 'cancelled') => ({
+  const result = (status: 'terminal' | 'timeout' | 'cancelled' | 'message', delivery?: BoardDelivery) => ({
     ...initial,
-    result: { status, run: latest },
+    result: { status, run: latest, ...(delivery ? { board: delivery } : {}) },
   });
   emit(latest);
   if (terminal) return result('terminal');
   if (signal?.aborted) return result('cancelled');
-  if (!command.timeoutSeconds) return result('timeout');
+  if (!command.timeoutSeconds) {
+    const delivery = boardWait
+      ? boardDeliverySchema.safeParse((latest as { board?: unknown }).board)
+      : undefined;
+    return delivery?.success && (delivery.data.messages.length || delivery.data.conflicts?.length)
+      ? result('message', delivery.data)
+      : result('timeout');
+  }
   const client = subscribe();
   let unsubscribe: (() => void) | undefined;
   let stop: (() => void) | undefined;
+  let waker: ReturnType<typeof boardWaker> | undefined;
   try {
     return await new Promise<ReturnType<typeof result>>((resolve, reject) => {
+      waker = boardWait ? boardWaker(boardWait, delivery => resolve(result('message', delivery))) : undefined;
       stop = () => resolve(result('cancelled'));
       signal?.addEventListener('abort', stop, { once: true });
       if (signal?.aborted) {
@@ -159,6 +181,7 @@ async function observeHostedRunOnce(
           projectId: transport.address.projectId,
           runId: command.runId,
           features: ['ci-status-check', 'check-report-detail'],
+          ...(boardWait ? { board: { laneId: boardWait.laneId, after: boardWait.after } } : {}),
         },
         value => {
           try {
@@ -167,6 +190,7 @@ async function observeHostedRunOnce(
             terminal = next.terminal;
             emit(latest);
             if (terminal) resolve(result('terminal'));
+            else waker?.offer(next.value);
           } catch (error) {
             reject(error);
           }
@@ -179,6 +203,7 @@ async function observeHostedRunOnce(
       throw new ForgeError('HOSTED_PROTOCOL_INVALID', 'Hosted run observation is invalid.');
     throw hostedActionError(error, 'run observation');
   } finally {
+    waker?.stop();
     if (stop) signal?.removeEventListener('abort', stop);
     try {
       unsubscribe?.();

@@ -4,6 +4,7 @@ import { makeFunctionReference } from 'convex/server';
 import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agent-observe.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
 import { hostedActionError } from './hosted-action-error.js';
+import { boardWaker, type BoardWaitOption } from './hosted-board-wait.js';
 /** Compact the public observation without retaining source inputs in a pending reply.
  * A live query does not tick when wall time alone crosses a lease deadline. */
 export function sourceWaitSnapshot(value: unknown, now = Date.now()): unknown {
@@ -56,6 +57,7 @@ export async function waitHostedAgentSource(
   /** Sees each raw progress value (the receipt reads its server timing); never changes the result. */
   observe?: (progress: unknown) => void,
   settle?: SourceWaitSettle,
+  board?: BoardWaitOption,
 ) {
   let latest = initial;
   return retryHostedObservation({
@@ -76,6 +78,7 @@ export async function waitHostedAgentSource(
         },
         observe,
         settle,
+        board,
       ),
   });
 }
@@ -89,6 +92,7 @@ async function waitHostedAgentSourceOnce(
   remember: (value: unknown) => void,
   observe?: (progress: unknown) => void,
   settle?: SourceWaitSettle,
+  board?: BoardWaitOption,
 ) {
   const raw = initial;
   initial = sourceWaitSnapshot(initial);
@@ -104,18 +108,29 @@ async function waitHostedAgentSourceOnce(
   let unsubscribe: (() => void) | undefined;
   let stop: (() => void) | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let waker: ReturnType<typeof boardWaker> | undefined;
   try {
     return await new Promise<unknown>((resolve, reject) => {
+      waker = board
+        ? boardWaker(board, delivery =>
+            resolve({ ...(sourceWaitSnapshot(latest) as object), board: delivery }),
+          )
+        : undefined;
       stop = () => resolve(sourceWaitSnapshot(latest));
       signal?.addEventListener('abort', stop, { once: true });
       if (signal?.aborted) return stop();
       unsubscribe = client.onUpdate(
         makeFunctionReference<'query'>(`projectHosted${kind}:progress`),
-        { projectId: address.projectId, operationId },
+        {
+          projectId: address.projectId,
+          operationId,
+          ...(board ? { board: { laneId: board.laneId, after: board.after } } : {}),
+        },
         value => {
           try {
             const progress = typeof value === 'string' ? JSON.parse(value) : value;
             observe?.(progress);
+            waker?.offer(progress);
             const settled = settle?.(progress);
             if (settled && 'value' in settled) return resolve(settled.value);
             if (settled) {
@@ -136,6 +151,7 @@ async function waitHostedAgentSourceOnce(
       );
     });
   } finally {
+    waker?.stop();
     if (timer) clearTimeout(timer);
     if (stop) signal?.removeEventListener('abort', stop);
     try {

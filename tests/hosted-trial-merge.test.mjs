@@ -576,3 +576,18 @@ test('83e6d0d3: a resolution inherits every saved origin path, including files w
   const present = [...f.s.tables.projectHostedPresence.values()].find(row => row.laneId === resolution);
   assert.equal(present.pathCount, 2, 'an inherited edit remains visible before the next save');
 });
+
+test('83e6d0d3: Markdown heading suffix appends are clean composition, while replacing the heading records a real conflict', async () => {
+  const base = Buffer.from('# Status\n\nText.\n');
+  const first = Buffer.from('# Status <!-- proof A -->\n\nText.\n');
+  const second = Buffer.from('# Status <!-- proof B -->\n\nText.\n');
+  const task = (a, b) => ({
+    path: 'docs/status.md',
+    mine: { before: file(base), after: file(a) },
+    peers: [{ laneId: 'peer', before: file(base), after: file(b) }],
+  });
+  assert.equal((await trialMerge([task(first, second)], store(base, first, second))).conflicts.length, 0);
+  const a = Buffer.from('# Proof A\n\nText.\n'),
+    b = Buffer.from('# Proof B\n\nText.\n');
+  assert.equal((await trialMerge([task(a, b)], store(base, a, b))).conflicts.length, 1);
+});
