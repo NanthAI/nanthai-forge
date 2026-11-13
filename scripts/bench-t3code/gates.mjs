@@ -55,10 +55,19 @@ export function usageGate(provider = 'codex') {
   }
 }
 
-/** Why a cell may not start on these usage readings: weekly >= 85%, or a 5h window > 40%. */
-export function usageProblems(u) {
+/** Weekly stop from `config.usageGate.weeklyStopPercent`: 85 by default; null means the owner pays
+ * past the weekly limit with credits, so only an unreadable probe or the 5h window waits. */
+export const weeklyStopOf = config => {
+  const v = config?.usageGate?.weeklyStopPercent;
+  return v === null ? null : typeof v === 'number' ? v : 85;
+};
+
+/** Why a cell may not start on these usage readings: weekly at or above the stop, or a 5h window > 40%. */
+export function usageProblems(u, weeklyStop = 85) {
   const p = [];
-  if (u.weekly === null || u.weekly >= 85) p.push(`${u.provider} weekly usage ${u.weekly}% at or above 85%`);
+  if (u.error) p.push(`${u.provider} usage unreadable`);
+  else if (weeklyStop !== null && (u.weekly === null || u.weekly >= weeklyStop))
+    p.push(`${u.provider} weekly usage ${u.weekly}% at or above ${weeklyStop}%`);
   if (u.has5h && (u.session5h === null || u.session5h > 40))
     p.push(`${u.provider} 5h usage ${u.session5h}% above 40%`);
   return p;

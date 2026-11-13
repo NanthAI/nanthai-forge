@@ -42,7 +42,7 @@ import {
   CLAUDE_TOOLS,
 } from '../scripts/bench-t3code/agent.mjs';
 import { readSession } from '../scripts/bench-t3code/transcripts.mjs';
-import { usageProblems } from '../scripts/bench-t3code/gates.mjs';
+import { usageProblems, weeklyStopOf } from '../scripts/bench-t3code/gates.mjs';
 import {
   mkdtempSync,
   writeFileSync,
@@ -955,6 +955,15 @@ test('codex: usage over every request, quota from CLI errors only, args and sand
   // No 5h window reported (none open): nothing to wait for; an open one above 40% waits.
   assert.deepEqual(usageProblems({ provider: 'claude', weekly: 10, has5h: false, session5h: null }), []);
   assert.equal(usageProblems({ provider: 'claude', weekly: 10, has5h: true, session5h: 41 }).length, 1);
+  // Owner credits: config.usageGate.weeklyStopPercent null lifts only the weekly stop.
+  assert.equal(weeklyStopOf({}), 85);
+  assert.equal(weeklyStopOf({ usageGate: { weeklyStopPercent: null } }), null);
+  assert.deepEqual(usageProblems({ provider: 'codex', weekly: 100, has5h: false }, null), []);
+  assert.equal(usageProblems({ provider: 'codex', weekly: 100, has5h: true, session5h: 41 }, null).length, 1);
+  assert.equal(
+    usageProblems({ provider: 'codex', weekly: null, error: 'unreadable', has5h: false }, null).length,
+    1,
+  );
 });
 
 test('claude driver: tool allowlist, prompt last, effort only when set, isolated home in the sandbox', () => {

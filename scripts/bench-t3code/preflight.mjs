@@ -12,7 +12,7 @@ import { benchRoot as requiredBenchRoot } from './bench-root.mjs';
 import { benchCli } from './cli-install.mjs';
 import { checkPlan, DESIGN, batches, loadTasks, schedule, repNs } from './plan.mjs';
 import { snapshot, snapshotProblems, pinProblems, benchFreeze } from './versions.mjs';
-import { usageGate, diskFreeGb, diskNeed, filesystemEventGate } from './gates.mjs';
+import { usageGate, weeklyStopOf, diskFreeGb, diskNeed, filesystemEventGate } from './gates.mjs';
 import { probeFilesystemEvents } from '../filesystem-event-health.mjs';
 import { pathToFileURL } from 'node:url';
 import { networkFetch } from '../../dist/network-fetch.js';
@@ -194,10 +194,11 @@ export async function main({ benchRoot, filesystemProbe = probeFilesystemEvents,
     );
   }
   if (!dry) {
+    const stop = weeklyStopOf(config);
     check(
       'usage weekly',
-      u.weekly !== null && u.weekly < 85,
-      `${u.provider} weekly ${u.weekly}% (stop at 85%)`,
+      !u.error && (stop === null || (u.weekly !== null && u.weekly < stop)),
+      `${u.provider} weekly ${u.weekly}% (${stop === null ? 'no weekly stop: owner credits' : `stop at ${stop}%`})`,
     );
     if (u.has5h)
       check(

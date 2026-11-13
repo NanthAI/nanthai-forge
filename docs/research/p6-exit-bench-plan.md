@@ -42,6 +42,10 @@ The sections below are the only changes.
 - **Usage gate:** before every batch the driver waits until the Codex weekly usage
   (`codex-usage`) is below 85% and, when a 5h window is reported, that window is at 40% or
   less. An unreadable reading refuses. A usage, rate or capacity stop voids that task.
+  Amendment 2026-11-13 (owner, after the first three batches): the owner pays past the weekly
+  limit with Codex credits, so `config.usageGate.weeklyStopPercent: null` lifts the weekly stop
+  from batch 4 on; the 5h window and the unreadable-reading rule stay. Agent, model, effort and
+  the measured path are unchanged.
 - **Tokens:** totals over every model request of the session from the Codex rollout's thread
   total, cross-checked against `codex exec --json` turn totals: input, cached input, output,
   reasoning output and the request count. Codex input includes its cached part and output

@@ -47,7 +47,7 @@ import { snapshot, snapshotProblems, moved, differences, benchFreeze, benchHoldT
 import { benchRootOrExit } from './bench-root.mjs';
 import { driverProgress } from './driver-progress.mjs';
 import { benchCli } from './cli-install.mjs';
-import { usageGate, usageProblems, diskFreeGb, diskNeed } from './gates.mjs';
+import { usageGate, usageProblems, weeklyStopOf, diskFreeGb, diskNeed } from './gates.mjs';
 import { agentOf } from './agent.mjs';
 import { runnerFairness } from './runners.mjs';
 import { oracleBranchRecord } from './oracle-branches.mjs';
@@ -231,7 +231,7 @@ async function main() {
   /** Start rules a batch checks before taking the hold. */
   async function batchRefusals(b) {
     const r = [];
-    if (!dry) r.push(...usageProblems(usageGate(agentOf(config).provider)));
+    if (!dry) r.push(...usageProblems(usageGate(agentOf(config).provider), weeklyStopOf(config)));
     const need = b.cells.reduce((sum, c) => sum + diskNeed(c.arm, b.N, dry).needGb, 0) + 15;
     const free = diskFreeGb();
     if (free < need) r.push(`disk ${free.toFixed(1)} GB free < ${need.toFixed(1)} GB for the batch`);
