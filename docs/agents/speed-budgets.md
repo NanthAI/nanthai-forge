@@ -171,3 +171,11 @@ and draft States. The isolated real-handler fixture exercises a fresh action pro
 actual synthetic R2 bodies and checks authority changes, marker rejection and retry safety.
 The 16 MiB retained-input routing allowance, source envelopes and 512 MiB action allocation are
 unchanged. Independent-chain fallback remains available; these guards add no source restriction.
+
+The admission default guard drives the production queue and audit controllers with
+three clean, mixed-arrival timelines. Central `admissionQueueOnly*` budgets cap
+checks, rounded CI minutes, audits, transactions, document I/O and maximum
+submit-to-land time relative to check service. Explicit full-admission incident
+fixtures keep their existing assertions. Red-change sensitivity is measured
+separately: the clean-wave caps do not claim queue-only admission is cheaper when
+changes frequently fail. See [the decision](../pre-queue-checks.md).

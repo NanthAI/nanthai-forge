@@ -66,7 +66,7 @@ const receipts = f =>
 async function wave(t, check, options) {
   const f = await batchesFixture(t, {
     batchMaxSize: null,
-    admissionCheck: 'default',
+    admissionCheck: 'full',
     // Keep the main-race refusal cases on one slot; the two-slot case below
     // verifies the exact combined check without spending a solo follower run.
     concurrency: 1,

@@ -50,7 +50,7 @@ const BASELINE = { transactions: 210, documentsRead: 4815, documentsWritten: 178
  * refusal itself starts that recomposition one backoff earlier). `stop(task, f,
  * ids)` ends the wave before that task runs. */
 async function wave(t, { count = 5, batchMaxSize = null, stop = () => false } = {}) {
-  const f = await batchesFixture(t, { count, batchMaxSize, admissionCheck: 'default' });
+  const f = await batchesFixture(t, { count, batchMaxSize, admissionCheck: 'full' });
   const ids = f.entries.map(e => e.state.id);
   const t0 = Date.now();
   const refused = new Map();

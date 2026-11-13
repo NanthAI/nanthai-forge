@@ -326,8 +326,8 @@ queue order, so younger submissions that are already queued never wait for it.
 
 ### Pre-queue Lane checks
 
-`acceptance.admissionCheck: "full"` is the default (absent means `"full"`;
-`false` opts out). It makes admission the project's configured check on any configured runner: GitHub Actions, other hosted CI or a registered
+Absent or `false`, `acceptance.admissionCheck` checks the composed head in the queue.
+`"full"` opts in to a separate pre-queue Lane check. It makes admission the project's configured check on any configured runner: GitHub Actions, other hosted CI or a registered
 self-hosted or Mac machine. Each batchable arrival's check runs at once, with
 its configured gate, on the main it composed on, in parallel with every other
 arrival ([decision record](../pre-queue-checks.md)). A finish that carries no
@@ -393,7 +393,7 @@ nothing polls and an idle queue costs nothing.
 Measured on the synthetic 12-Lane wave (`tests/hosted-landing-prequeue.test.mjs`:
 real queue code, fake 22-minute runs, 12 changes arriving together, 3 of them red):
 
-| | Before (`admissionCheck: false`) | Lane check (e7d27937) | With cohort hold (default) |
+| | Before (`admissionCheck: false`) | Lane check (e7d27937) | With full admission and cohort hold |
 | --- | --- | --- | --- |
 | Queue checks containing a red change | 8 of 19 (0.42) | 0 of 7 | 0 of 2 |
 | Accepted landings per hour | 6.1 | 8.2 | 12.3 |

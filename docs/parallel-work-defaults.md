@@ -550,8 +550,8 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   every ranked local tier with no budget and no filler, and reused passes make it run only what
   was skipped, so its results are recorded and learned like any other run. Trimmed and farther consumers (three
   or more edges, dynamic) are
-  `deferredTests`: they run in the pre-queue Lane check (`acceptance.admissionCheck`, on by
-  default; with `false` they run first in the queue check). The receipt also reports build and
+  `deferredTests`: they run first in the queue check by default. Explicit
+  `acceptance.admissionCheck: "full"` runs them in the pre-queue Lane check instead. The receipt also reports build and
   test wall time (`buildMs`, `testMs`) and the largest test process's `peakRssMb` where
   `/usr/bin/time` can report it (macOS, Linux).
 - Private gzip receipts retain per-file passes, even from failed runs. Delta selection checks

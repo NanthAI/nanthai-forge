@@ -22,7 +22,7 @@ export async function fixture(t, { conflict = true, memberPaths, count = 2, runn
   const f = await batchesFixture(t, {
     count: 0,
     fileCount: 2,
-    admissionCheck: 'default',
+    admissionCheck: 'full',
     batchMaxSize: 3,
     baselineFiles: [['src/shared.ts', 'a\nb\nc\n']],
     memberPaths: memberPaths ?? ['src/shared.ts', 'src/shared.ts', 'src/other.ts'],

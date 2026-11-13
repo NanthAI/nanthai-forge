@@ -1,0 +1,678 @@
+{
+  "description": "Relative successful-submission timelines and runner-service samples. Source uses synthetic clean line edits and file-equivalence only. Retired revisions and agent conflict recovery are not simulated; physical ledgers are retained separately for honest calibration. Canonical task path-equivalence is shared across all cells, excluding inherited sync-only paths.",
+  "cells": [
+    {
+      "concurrency": 10,
+      "entries": [
+        {
+          "label": "A",
+          "submitMs": 0,
+          "checkMs": 158000,
+          "files": [
+            "src/file-16.ts",
+            "src/file-17.ts"
+          ],
+          "dispatchMs": -79895,
+          "observedLandMs": 171352
+        },
+        {
+          "label": "B",
+          "submitMs": 7840,
+          "checkMs": 150000,
+          "files": [
+            "src/file-13.ts",
+            "src/file-14.ts"
+          ],
+          "dispatchMs": -77187,
+          "observedLandMs": 196185
+        },
+        {
+          "label": "C",
+          "submitMs": 61248,
+          "checkMs": 173000,
+          "files": [
+            "src/file-8.ts",
+            "src/file-9.ts"
+          ],
+          "dispatchMs": -84867,
+          "observedLandMs": 274558
+        },
+        {
+          "label": "D",
+          "submitMs": 61670,
+          "checkMs": 178000,
+          "files": [
+            "src/file-18.ts",
+            "src/file-19.ts",
+            "src/file-20.ts"
+          ],
+          "dispatchMs": -87331,
+          "observedLandMs": 323016
+        },
+        {
+          "label": "E",
+          "submitMs": 65253,
+          "checkMs": 171000,
+          "files": [
+            "src/file-11.ts",
+            "src/file-12.ts"
+          ],
+          "dispatchMs": -68961,
+          "observedLandMs": 353350
+        },
+        {
+          "label": "F",
+          "submitMs": 126981,
+          "checkMs": 141000,
+          "files": [
+            "src/file-0.ts",
+            "src/file-1.ts",
+            "src/file-11.ts",
+            "src/file-12.ts"
+          ],
+          "dispatchMs": -71944,
+          "observedLandMs": 819385
+        },
+        {
+          "label": "G",
+          "submitMs": 160929,
+          "checkMs": 117000,
+          "files": [
+            "src/file-2.ts",
+            "src/file-3.ts"
+          ],
+          "dispatchMs": -89110,
+          "observedLandMs": 388710
+        },
+        {
+          "label": "H",
+          "submitMs": 169241,
+          "checkMs": 160000,
+          "files": [
+            "src/file-15.ts",
+            "src/file-2.ts",
+            "src/file-3.ts",
+            "src/file-4.ts",
+            "src/file-5.ts"
+          ],
+          "dispatchMs": -66569,
+          "observedLandMs": 819385
+        },
+        {
+          "label": "I",
+          "submitMs": 388328,
+          "checkMs": 149000,
+          "files": [
+            "src/file-10.ts",
+            "src/file-6.ts",
+            "src/file-7.ts",
+            "src/file-8.ts",
+            "src/file-9.ts"
+          ],
+          "dispatchMs": -74361,
+          "observedLandMs": 596760
+        },
+        {
+          "label": "J",
+          "submitMs": 390071,
+          "checkMs": 151000,
+          "files": [
+            "src/file-2.ts",
+            "src/file-3.ts"
+          ],
+          "dispatchMs": -82424,
+          "observedLandMs": 1024254
+        }
+      ],
+      "physicalChecks": [
+        {
+          "startMs": 5527,
+          "durationMs": 158000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 13527,
+          "durationMs": 150000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 67527,
+          "durationMs": 173000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 67527,
+          "durationMs": 178000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 71527,
+          "durationMs": 171000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 133527,
+          "durationMs": 141000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 166527,
+          "durationMs": 117000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 171527,
+          "durationMs": 121000,
+          "outcome": "cancelled"
+        },
+        {
+          "startMs": 174527,
+          "durationMs": 160000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 201527,
+          "durationMs": 164000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 374527,
+          "durationMs": 171000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 407527,
+          "durationMs": 149000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 407527,
+          "durationMs": 151000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 472527,
+          "durationMs": 146000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 553527,
+          "durationMs": 161000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 670527,
+          "durationMs": 142000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 724527,
+          "durationMs": 150000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 867527,
+          "durationMs": 150000,
+          "outcome": "success"
+        }
+      ],
+      "observed": {
+        "wallMs": 1120888,
+        "checks": 18,
+        "ciMinutes": 53
+      }
+    },
+    {
+      "concurrency": 5,
+      "entries": [
+        {
+          "label": "A",
+          "submitMs": 0,
+          "checkMs": 159000,
+          "files": [
+            "src/file-16.ts",
+            "src/file-17.ts"
+          ],
+          "dispatchMs": -83512,
+          "observedLandMs": 171433
+        },
+        {
+          "label": "B",
+          "submitMs": 1742,
+          "checkMs": 162000,
+          "files": [
+            "src/file-13.ts",
+            "src/file-14.ts"
+          ],
+          "dispatchMs": -89558,
+          "observedLandMs": 204170
+        },
+        {
+          "label": "C",
+          "submitMs": 64604,
+          "checkMs": 140000,
+          "files": [
+            "src/file-18.ts",
+            "src/file-19.ts",
+            "src/file-20.ts"
+          ],
+          "dispatchMs": -76963,
+          "observedLandMs": 244281
+        },
+        {
+          "label": "D",
+          "submitMs": 110824,
+          "checkMs": 147000,
+          "files": [
+            "src/file-15.ts",
+            "src/file-2.ts",
+            "src/file-3.ts",
+            "src/file-4.ts",
+            "src/file-5.ts"
+          ],
+          "dispatchMs": -80749,
+          "observedLandMs": 304343
+        },
+        {
+          "label": "E",
+          "submitMs": 401380,
+          "checkMs": 150000,
+          "files": [
+            "src/file-8.ts",
+            "src/file-9.ts"
+          ],
+          "dispatchMs": 216943,
+          "observedLandMs": 573132
+        },
+        {
+          "label": "F",
+          "submitMs": 401757,
+          "checkMs": 156000,
+          "files": [
+            "src/file-2.ts",
+            "src/file-3.ts"
+          ],
+          "dispatchMs": 186216,
+          "observedLandMs": 621374
+        },
+        {
+          "label": "G",
+          "submitMs": 538393,
+          "checkMs": 127000,
+          "files": [
+            "src/file-10.ts",
+            "src/file-6.ts",
+            "src/file-7.ts",
+            "src/file-8.ts",
+            "src/file-9.ts"
+          ],
+          "dispatchMs": 257585,
+          "observedLandMs": 795812
+        },
+        {
+          "label": "H",
+          "submitMs": 539899,
+          "checkMs": 145000,
+          "files": [
+            "src/file-0.ts",
+            "src/file-1.ts",
+            "src/file-11.ts",
+            "src/file-12.ts"
+          ],
+          "dispatchMs": 321195,
+          "observedLandMs": 725666
+        },
+        {
+          "label": "I",
+          "submitMs": 719584,
+          "checkMs": 162000,
+          "files": [
+            "src/file-11.ts",
+            "src/file-12.ts"
+          ],
+          "dispatchMs": 586829,
+          "observedLandMs": 1131194
+        },
+        {
+          "label": "J",
+          "submitMs": 829327,
+          "checkMs": 153000,
+          "files": [
+            "src/file-2.ts",
+            "src/file-3.ts"
+          ],
+          "dispatchMs": -85994,
+          "observedLandMs": 1014144
+        }
+      ],
+      "physicalChecks": [
+        {
+          "startMs": 7053,
+          "durationMs": 159000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 8053,
+          "durationMs": 162000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 70053,
+          "durationMs": 140000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 117053,
+          "durationMs": 147000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 220053,
+          "durationMs": 175000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 404053,
+          "durationMs": 142000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 416053,
+          "durationMs": 150000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 427053,
+          "durationMs": 156000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 472053,
+          "durationMs": 166000,
+          "outcome": "cancelled"
+        },
+        {
+          "startMs": 545053,
+          "durationMs": 145000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 556053,
+          "durationMs": 20000,
+          "outcome": "cancelled"
+        },
+        {
+          "startMs": 629053,
+          "durationMs": 127000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 629053,
+          "durationMs": 131000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 650053,
+          "durationMs": 129000,
+          "outcome": "cancelled"
+        },
+        {
+          "startMs": 736053,
+          "durationMs": 162000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 769053,
+          "durationMs": 139000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 854053,
+          "durationMs": 153000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 919053,
+          "durationMs": 152000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 959053,
+          "durationMs": 128000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 1137053,
+          "durationMs": 161000,
+          "outcome": "success"
+        }
+      ],
+      "observed": {
+        "wallMs": 1232791,
+        "checks": 20,
+        "ciMinutes": 58
+      }
+    },
+    {
+      "concurrency": 3,
+      "entries": [
+        {
+          "label": "A",
+          "submitMs": 0,
+          "checkMs": 166000,
+          "files": [
+            "src/file-11.ts",
+            "src/file-12.ts"
+          ],
+          "dispatchMs": -131842,
+          "observedLandMs": 176969
+        },
+        {
+          "label": "B",
+          "submitMs": 11512,
+          "checkMs": 154000,
+          "files": [
+            "src/file-15.ts",
+            "src/file-2.ts",
+            "src/file-3.ts",
+            "src/file-4.ts",
+            "src/file-5.ts"
+          ],
+          "dispatchMs": -129317,
+          "observedLandMs": 207338
+        },
+        {
+          "label": "C",
+          "submitMs": 75315,
+          "checkMs": 163000,
+          "files": [
+            "src/file-0.ts",
+            "src/file-1.ts",
+            "src/file-11.ts",
+            "src/file-12.ts"
+          ],
+          "dispatchMs": -127456,
+          "observedLandMs": 415666
+        },
+        {
+          "label": "D",
+          "submitMs": 421400,
+          "checkMs": 182000,
+          "files": [
+            "src/file-2.ts",
+            "src/file-3.ts"
+          ],
+          "dispatchMs": 191960,
+          "observedLandMs": 670183
+        },
+        {
+          "label": "E",
+          "submitMs": 507400,
+          "checkMs": 155000,
+          "files": [
+            "src/file-16.ts",
+            "src/file-17.ts"
+          ],
+          "dispatchMs": 434975,
+          "observedLandMs": 700616
+        },
+        {
+          "label": "F",
+          "submitMs": 823009,
+          "checkMs": 170000,
+          "files": [
+            "src/file-18.ts",
+            "src/file-19.ts",
+            "src/file-20.ts"
+          ],
+          "dispatchMs": 689086,
+          "observedLandMs": 1015477
+        },
+        {
+          "label": "G",
+          "submitMs": 942521,
+          "checkMs": 145000,
+          "files": [
+            "src/file-2.ts",
+            "src/file-3.ts"
+          ],
+          "dispatchMs": 219870,
+          "observedLandMs": 1143180
+        },
+        {
+          "label": "H",
+          "submitMs": 986598,
+          "checkMs": 178000,
+          "files": [
+            "src/file-10.ts",
+            "src/file-6.ts",
+            "src/file-7.ts",
+            "src/file-8.ts",
+            "src/file-9.ts"
+          ],
+          "dispatchMs": 716645,
+          "observedLandMs": 1207061
+        },
+        {
+          "label": "I",
+          "submitMs": 1147597,
+          "checkMs": 166000,
+          "files": [
+            "src/file-8.ts",
+            "src/file-9.ts"
+          ],
+          "dispatchMs": 1029042,
+          "observedLandMs": 1408195
+        },
+        {
+          "label": "J",
+          "submitMs": 1244961,
+          "checkMs": 145000,
+          "files": [
+            "src/file-13.ts",
+            "src/file-14.ts"
+          ],
+          "dispatchMs": 1163419,
+          "observedLandMs": 1441851
+        }
+      ],
+      "physicalChecks": [
+        {
+          "startMs": 6524,
+          "durationMs": 166000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 16524,
+          "durationMs": 154000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 80524,
+          "durationMs": 114000,
+          "outcome": "cancelled"
+        },
+        {
+          "startMs": 211524,
+          "durationMs": 163000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 213524,
+          "durationMs": 140000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 421524,
+          "durationMs": 153000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 446524,
+          "durationMs": 182000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 513524,
+          "durationMs": 155000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 675524,
+          "durationMs": 127000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 812524,
+          "durationMs": 155000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 838524,
+          "durationMs": 170000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 956524,
+          "durationMs": 145000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 992524,
+          "durationMs": 178000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 1150524,
+          "durationMs": 164000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 1153524,
+          "durationMs": 73000,
+          "outcome": "cancelled"
+        },
+        {
+          "startMs": 1235524,
+          "durationMs": 166000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 1260524,
+          "durationMs": 145000,
+          "outcome": "success"
+        },
+        {
+          "startMs": 1324524,
+          "durationMs": 165000,
+          "outcome": "success"
+        }
+      ],
+      "observed": {
+        "wallMs": 1582772,
+        "checks": 18,
+        "ciMinutes": 53
+      }
+    }
+  ]
+}

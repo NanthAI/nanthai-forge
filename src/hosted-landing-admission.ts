@@ -2,11 +2,11 @@
 import type { AutonomyPolicy } from './autonomy-policy.js';
 import { HOSTED_BATCH_MEMBERS, hostedBatching } from './hosted-landing-batch.js';
 
-/** Arrival checks before the queue. Absent, the mode is `"full"`: the pre-queue Lane
- * check (docs/pre-queue-checks.md), the project's configured check and gate on any
- * runner provider. It starts only for finishes that carry a configured check.
- * `false` opts out; `true` is the older scoped admission (GitHub Actions only). */
-export const admissionMode = (policy: AutonomyPolicy) => policy.acceptance.admissionCheck ?? 'full';
+/** Arrival checks before the queue are opt-in. Absent or `false` checks the composed
+ * head in the queue. `"full"` runs the configured check and gate on any runner
+ * before queue entry; `true` retains scoped admission (GitHub Actions only).
+ * See docs/pre-queue-checks.md for the measured red-rate tradeoff. */
+export const admissionMode = (policy: AutonomyPolicy) => policy.acceptance.admissionCheck ?? false;
 export const hostedAdmission = (policy: AutonomyPolicy) =>
   hostedBatching(policy) && admissionMode(policy) !== false;
 export const preQueueCheck = (policy: AutonomyPolicy) =>

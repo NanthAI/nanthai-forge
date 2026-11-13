@@ -399,7 +399,7 @@ for (const failed of ['predecessor', 'follower', 'follower-source', 'neither'])
   test(`70a9bd2f: admission train preserves original source after ${failed} fails`, async t => {
     const f = await batchesFixture(t, {
       count: 2,
-      admissionCheck: 'default',
+      admissionCheck: 'full',
       batchMaxSize: null,
       memberPaths: ['build.rs', 'src/feature.ts'],
       fileCount: 2,
@@ -471,7 +471,7 @@ for (const [name, options] of [
     const f = await batchesFixture(t, {
       count: 2,
       fileCount: 2,
-      admissionCheck: 'default',
+      admissionCheck: 'full',
       batchMaxSize: null,
       memberPaths: ['build.rs', 'src/feature.ts'],
       ...options,
@@ -486,7 +486,7 @@ test('70a9bd2f: an admission platform retry keeps the exact combined successor',
   const f = await batchesFixture(t, {
     count: 2,
     fileCount: 2,
-    admissionCheck: 'default',
+    admissionCheck: 'full',
     batchMaxSize: null,
     memberPaths: ['build.rs', 'src/feature.ts'],
   });
@@ -533,7 +533,7 @@ test('70a9bd2f: a self-hosted check uses the same exact admission pipeline', asy
   const f = await batchesFixture(t, {
     count: 2,
     fileCount: 2,
-    admissionCheck: 'default',
+    admissionCheck: 'full',
     batchMaxSize: null,
     memberPaths: ['build.rs', 'src/feature.ts'],
     runner: {
@@ -560,7 +560,7 @@ test('70a9bd2f: an owner-held admission releases its predicted successor onto su
   const f = await batchesFixture(t, {
     count: 2,
     fileCount: 2,
-    admissionCheck: 'default',
+    admissionCheck: 'full',
     batchMaxSize: null,
     memberPaths: ['build.rs', 'src/feature.ts'],
   });
@@ -604,7 +604,7 @@ test('70a9bd2f: a moved main retires the admission prediction and retains accept
   const f = await batchesFixture(t, {
     count: 2,
     fileCount: 2,
-    admissionCheck: 'default',
+    admissionCheck: 'full',
     batchMaxSize: null,
     memberPaths: ['build.rs', 'src/feature.ts'],
   });

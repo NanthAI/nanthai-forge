@@ -356,7 +356,7 @@ test('slow learned timings trim by time, and the advisory names the rule, the cu
   assert.match(result.preflight.local, /Trimmed wide 18 of 80/);
   assert.match(
     result.preflight.local,
-    /62 test file\(s\) deferred; they run in the pre-queue Lane check \(on by default/,
+    /62 test file\(s\) deferred; the queue check runs them first by default/,
   );
 });
 

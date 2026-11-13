@@ -65,7 +65,7 @@ test('only a plan without test shards can record skipped tests', () => {
 async function landing(t, { path, plan }) {
   const f = await batchesFixture(t, {
     batchMaxSize: null,
-    admissionCheck: 'default',
+    admissionCheck: 'full',
     count: 0,
     memberPaths: [path],
   });

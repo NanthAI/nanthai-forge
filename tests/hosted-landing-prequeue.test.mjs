@@ -23,8 +23,8 @@ test.after(() => {
 });
 /** A full check takes about 22 minutes on the current runner (wave 1, 2026-11-05). */
 const CHECK_MINUTES = 22;
-// The policy default: no admissionCheck setting means the pre-queue Lane check.
-const full = { admissionCheck: 'default', batchMaxSize: null };
+// Explicit full admission retains the pre-queue runner and incident contracts.
+const full = { admissionCheck: 'full', batchMaxSize: null };
 const selfHosted = {
   provider: 'self-hosted',
   machineId: randomUUID(),
@@ -164,7 +164,7 @@ async function wave(t, options, red) {
 test('synthetic 12-Lane wave: red-in-queue, landings per hour and superseded runs, before and after', async t => {
   const red = ['member-1', 'member-5', 'member-9'];
   const before = await wave(t, { admissionCheck: false }, red);
-  const after = await wave(t, { admissionCheck: 'default' }, red);
+  const after = await wave(t, { admissionCheck: 'full' }, red);
   t.diagnostic(JSON.stringify({ before, after }));
   assert.equal(before.landed, 9);
   assert.equal(after.landed, 9);
@@ -203,7 +203,7 @@ test('a single Lane pays no extra runner minutes: its pre-queue run is the landi
     };
   };
   const before = await solo(false);
-  const after = await solo('default');
+  const after = await solo('full');
   t.diagnostic(JSON.stringify({ before, after }));
   assert.equal(after.runs, before.runs, 'one run either way');
   assert.equal(after.runnerMinutes, before.runnerMinutes);

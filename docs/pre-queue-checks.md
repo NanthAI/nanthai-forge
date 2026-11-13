@@ -1,7 +1,7 @@
 # Pre-queue Lane checks
 
-Decision record for running each Lane's own full check before the hosted landing
-queue, on whatever runner the project configured. Behaviour lives in
+Decision record for checking the composed head in the hosted landing queue by
+default, with optional full Lane checks before the queue on any configured runner. Behaviour lives in
 [landing batches](operations/landing-batches.md#pre-queue-lane-checks); the model
 is [`models/landing-queue`](../models/landing-queue/README.md).
 
@@ -24,10 +24,17 @@ and **proved reuse** as the S2 contract for acceptance across a main move.
 
 ## Decision
 
-`acceptance.admissionCheck: "full"` turns the existing admission run into a
-pre-queue Lane check. It is the default: a project without the setting gets it,
-and `false` opts out (owner decision, 2026-11-05). A finish that carries no
-configured check (no `configure-check`) skips it and queues as before.
+Absent or `false`, `acceptance.admissionCheck` checks the composed head in the
+queue. This removes isolated checks that would need another check after overlapping
+work lands, and avoids first-check reuse audits when an exact queue check already
+covers main. Queue checks still isolate red members through the existing cohort
+failure and bisection path. Required check coverage and publication fences remain.
+
+`acceptance.admissionCheck: "full"` explicitly enables the pre-queue Lane check.
+Existing explicit settings keep their meaning; projects with no setting use the
+queue path. `true` retains the older scoped admission. A finish with no configured
+check skips admission. The following Lane-check mechanics apply when full admission
+is enabled; the measured comparison below explains the default.
 
 1. **Lane check.** When a batchable owner-agent finish is submitted (`land`,
    `land --save`), Forge enqueues the project's configured check, with its
@@ -365,7 +372,7 @@ Each tier answers a different question. None depends on a particular CI provider
    transitive test importer of the change plus fixed smoke coverage, all static
    checks included. That is the same selector with no closeness cut, so it contains
    every test the local tier left out. **Guarantee:** with
-   the pre-queue check on (the default), every test left out locally runs on the Lane's own
+   the pre-queue check explicitly enabled, every test left out locally runs on the Lane's own
    Candidate before it can enter the queue, unless one of these is true:
    - the Lane check ended without a verdict after two restarts (unknown): the left-out
      tests then run first in the change's queue check;
@@ -376,7 +383,8 @@ Each tier answers a different question. None depends on a particular CI provider
    - a disjoint global-risk interaction uses the pending full admission's exact
      predicted head in the pipeline: the left-out tests run in the combined full
      check before publication, rather than in a separate solo admission;
-   - the project opted out (`admissionCheck: false` or `true`): there is no
+   - the project uses queue-only checks (absent or `admissionCheck: false`) or
+     scoped admission (`true`): there is no
      pre-queue tier, and left-out tests run first in the queue check.
 3. **Landing (queue check of the combination): the authority.** It checks the
    exact combined head, or accepts by exact or proved reuse of tier 2, and the
@@ -397,8 +405,8 @@ Each tier answers a different question. None depends on a particular CI provider
 
 ## Consequences
 
-- Every submitted change costs one full check on the project's runner, in parallel,
-  before the queue. A single Lane on unchanged main pays nothing extra: its Lane
+- With full admission enabled, every submitted change costs one full check on the
+  project's runner, in parallel, before the queue. A single Lane on unchanged main pays nothing extra: its Lane
   run is the landing check (one run, as without the Lane check). Queue checks run only for changes that are not independent of
   what landed meanwhile, or for unadmitted changes.
 - Proved reuse works with any configured check command on any runner: the rule
@@ -449,8 +457,8 @@ nforge x ROOT configure-check '{"command":{"name":"verify","executable":"bash","
 
 ## When to turn it off
 
-Set `acceptance.admissionCheck: false` when one full check per change costs more
-than the queue saves:
+Leave admission absent or set `acceptance.admissionCheck: false` when one full
+check per change costs more than the queue saves:
 
 - the runner bills per minute and changes rarely fail their first check;
 - the check is very long and the queue rarely holds more than one change, so
@@ -470,7 +478,10 @@ cohort checks instead of 7 groups: runner minutes per landing fell from 46 to 34
 landings per hour rose from 6.1 (8.2 without the hold) to 12.3 and Convex calls
 per landing from 121 (99) to 77. A single Lane uses one run (22 runner minutes) with or without the Lane check.
 Details are in [landing batches](operations/landing-batches.md#pre-queue-lane-checks).
-The live effect on the project's runner is not yet measured.
+These incident fixtures establish the benefit for a red-heavy wave. They do not
+establish that full admission is cheaper for a mostly green project. The replay
+comparison below measures that distinction; a live default-change qualification
+remains separate.
 
 ## Provider outage recovery
 
@@ -517,3 +528,91 @@ reads, as before. At most 100 jobs and their steps are inspected in memory; larg
 or incomplete pages stay delayed rather than being treated as complete. No source
 or log bytes move, no new storage table is added, and idle costs zero calls.
 Live deployment, replay and billed-usage deltas remain separate qualification.
+
+## Replay comparison and default choice
+
+The production queue, composition, completion and audit controllers were replayed
+under a fake clock on three ten-change arrival timelines. Source bodies are
+synthetic clean line edits; fixtures retain only relative timings and synthetic
+path-equivalence. Full admission is A, queue-only is B, and C skips a solo full
+admission when its paths overlap an earlier checking, queued or composing entry.
+The C experiment retains full admission for other arrivals; it is not a product
+setting or an additional runtime branch.
+
+| Arrival width | A checks / rounded CI min | B checks / rounded CI min | C checks / rounded CI min | B minus A mean submit-to-land (s) | B minus A all-landed wall (s) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 10 | 17 / 46 | 10 / 29 | 18 / 51 | -26.974 | -49.858 |
+| 5 | 16 / 46 | 10 / 30 | 16 / 46 | -1.674 | -0.500 |
+| 3 | 16 / 46 | 10 / 31 | 16 / 46 | -11.120 | -0.500 |
+
+B executes no separate audit in these clean waves: each accepted queued check
+covers its exact composed head. A executes four, five and four audits respectively;
+the width-three wave also retains one later cadence wake. C does not consistently
+save checks and adds overlap-selection work. The default therefore uses B, while
+explicit full admission remains available for projects where red isolation pays.
+No audit scheduling or publication-proof rule changes with this default.
+
+### Red-change sensitivity
+
+At 10% red, each of the ten arrivals is made red once. At 30%, ten rotations of
+three spaced red arrivals give each arrival equal weight. Green survivors must
+land, every red must end with its own check failure, and no red source may accept.
+A red change fails after a full measured service interval; fixes and agent editing
+are not simulated. Values below are means across rotations, with each CI job
+rounded separately before averaging.
+
+| Width / red submissions | A CI min | B CI min | A mean submit-to-land, green (s) | B mean submit-to-land, green (s) | A mean culprit isolation (s) | B mean culprit isolation (s) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10 / 10% | 44.5 | 35.5 | 178.552 | 211.723 | 181.682 | 293.550 |
+| 10 / 30% | 39.1 | 62.2 | 169.770 | 393.395 | 165.286 | 424.904 |
+| 5 / 10% | 45.0 | 32.2 | 151.604 | 174.072 | 151.424 | 253.450 |
+| 5 / 30% | 41.8 | 43.3 | 151.121 | 268.886 | 151.424 | 287.150 |
+| 3 / 10% | 44.8 | 33.8 | 172.333 | 178.388 | 173.319 | 273.350 |
+| 3 / 30% | 40.9 | 42.1 | 168.803 | 222.011 | 163.375 | 280.200 |
+
+For three red changes, isolation is the per-rotation median, then averaged across
+rotations; it is not the time to isolate the final culprit. Full admission catches
+most reds before queue entry, but a stale admission may be cancelled before its
+red verdict and the replacement then isolates it in the queue. Existing stale-run
+cancellation is preserved.
+
+Linear interpolation between the measured 10% and 30% points puts the CI-cost
+crossovers near 15.6%, 27.9% and 28.0% respectively. These are sensitivity estimates
+for these timelines, not universal thresholds: survivor-latency crossovers are
+different, and runner capacity, duration, overlap and queue depth change the cost.
+The historical dogfood prior in `src/hosted-landing-admission.ts` is about 30% first
+checks failing. Recent self-metrics expose failed attempts and total started runs,
+but do not supply a matching first-submission denominator; they cannot establish a
+new first-check red rate. Zero test failures in the three observed cells explain
+why their expensive red-isolation path supplies no measured benefit.
+
+Prefer a recommendation derived from the project's compatible measured checks,
+red submissions and queue depth, comparing expected CI minutes and survivor
+latency under both designs. Do not automatically change an explicit project
+setting or install one of these interpolated constants as policy. Existing cohort
+sizing already adapts from retained outcome history; this draft adds no history
+query, counter, poller or automatic policy change.
+
+### Limits and I/O
+
+This is a replay of successful-submission arrival/service shapes, not the complete
+agent experiment. Withdrawn/conflicted revisions, provider setup and post-conflict
+agent edits are not reconstructed. Keeping an additive observed-minus-A calibration offset unchanged
+and adding only B-minus-A replay deltas projects 36, 42 and 38 CI minutes from
+observed totals 53, 58 and 53. The offsets are not attributed individual jobs. Those estimates do not establish the exit benchmark
+bar or eliminate its real cancelled-job costs. The observed rounded job ledgers
+are retained separately in the synthetic fixture.
+
+The default selector itself adds zero calls, reads or writes; it bypasses the
+existing admission path. Whole-wave transaction counts fall 628 to 506, 571 to 493
+and 542 to 499; writes fall 4508 to 3585, 3983 to 3458 and 3739 to 3476. Reads fall
+13384 to 11694 and 11384 to 10765, but rise **10521 to 10717** at width three.
+Thus this draft has not met a whole-workload no-read-regression bar. Byte totals,
+live billed usage, source placement, provider capacity and exact earlier-revision
+replay remain qualification work; no live cost improvement is claimed. Landing
+work settles without idle calls; a deferred cadence audit retains its existing
+one-shot wake.
+
+Build-failing `admissionQueueOnly*` budgets retain the measured clean-wave ceilings.
+Full-admission incident tests explicitly select `"full"`, keeping their existing
+assertions, retries, stale cancellation, overtaking and exact-proof requirements.

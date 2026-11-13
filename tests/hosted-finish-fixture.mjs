@@ -119,7 +119,7 @@ export async function finishFixture(
       ...policyPreset('trusted'),
       acceptance: {
         ...policyPreset('trusted').acceptance,
-        ...(admission ? {} : { admissionCheck: false }),
+        admissionCheck: admission ? 'full' : false,
       },
       // Server land gates (Issue 029138ef) have their own tests (hosted-landing-desired.test.mjs).
       agentDefaults: { stallAlerts: { enabled: false }, preflight: 'advise' },

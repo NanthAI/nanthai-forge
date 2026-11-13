@@ -11,6 +11,7 @@ export const batchPublish = await import(moduleUrl('../convex/projectHostedLandi
 export const batchStore = await import(moduleUrl('../convex/projectHostedLandingBatchStore.ts'));
 export const checkStore = await import(moduleUrl('../convex/projectHostedCheckStore.ts'));
 const checkWorker = await import(moduleUrl('../convex/projectHostedCheckWorker.ts'));
+const mainAudit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
 export const states = f => [...f.tables.projectHostedLandingRequests.values()].map(r => ticketState(f, r));
 export async function batchesFixture(
   t,
@@ -37,6 +38,7 @@ export async function batchesFixture(
     requestCheck = false,
     // Any configured runner (BYOCI). Same runtime and environment pins, other provider.
     runner,
+    runAudits = false,
     // Any configured check command (BYOCI), e.g. `{ executable: 'bash', args: ['ci/check.sh'] }`.
     checkCommand,
   } = {},
@@ -193,7 +195,12 @@ export async function batchesFixture(
     // fixtures record it instead of running a deferred full audit.
     if (task.name === 'projectHostedMainAudit:start') {
       auditWakes.push(task.args[0]);
-      f.patch('_scheduled_functions', task._id, { state: { kind: 'canceled' } });
+      if (runAudits) {
+        f.advanceClock(Math.max(0, task.scheduledTime - Date.now()));
+        f.patch('_scheduled_functions', task._id, { state: { kind: 'inProgress' } });
+        await f.transaction('replay-audit-start', mainAudit.start, task.args[0]);
+        f.patch('_scheduled_functions', task._id, { state: { kind: 'success' } });
+      } else f.patch('_scheduled_functions', task._id, { state: { kind: 'canceled' } });
       return;
     }
     // A synthetic machine runner always claims and reports inside its lease; the

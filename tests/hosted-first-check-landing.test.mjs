@@ -70,7 +70,7 @@ async function wave(t, options = {}) {
   // the admission-pipeline tests separately cover speculative combined checks.
   const f = await batchesFixture(t, {
     batchMaxSize: null,
-    admissionCheck: 'default',
+    admissionCheck: 'full',
     concurrency: 1,
     ...options,
     count: 0,

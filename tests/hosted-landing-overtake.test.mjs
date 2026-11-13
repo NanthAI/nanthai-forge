@@ -82,7 +82,7 @@ test('incident replay 7d98c7da: N parallel non-overlapping landings do not wait 
   ];
   const f = await batchesFixture(t, {
     batchMaxSize: null,
-    admissionCheck: 'default',
+    admissionCheck: 'full',
     memberPaths,
     baselineFiles: [['src/shared.ts', overlapBase]],
     memberContents: overlapEdits,
@@ -223,7 +223,7 @@ async function drive(
 ) {
   const f = await batchesFixture(t, {
     batchMaxSize: null,
-    admissionCheck: 'default',
+    admissionCheck: 'full',
     memberPaths,
     memberContents,
     baselineFiles,

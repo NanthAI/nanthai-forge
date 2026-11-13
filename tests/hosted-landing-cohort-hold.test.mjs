@@ -59,7 +59,7 @@ async function wave(t, hook = () => null, stop = () => false) {
   const f = await batchesFixture(t, {
     count,
     batchMaxSize: null,
-    admissionCheck: 'default',
+    admissionCheck: 'full',
   });
   const ids = f.entries.map(e => e.state.id);
   const events = [];

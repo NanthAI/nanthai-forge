@@ -61,8 +61,8 @@ export const autonomyPolicySchema = z.object({
     scopedRecheck: z.boolean().optional(),
     /** Hosted grouping defaults on; `serial` and legacy `optimistic` opt out. Native `optimistic` is unchanged. */
     landing: z.enum(['batched', 'optimistic', 'serial']).optional(),
-    /** Hosted batches: `"full"` (the default when absent) runs the configured check on any
-     * runner before the queue (docs/pre-queue-checks.md); `false` opts out; `true` checks
+    /** Hosted batches: absent or `false` checks in the queue; `"full"` opts in to the
+     * configured check on any runner before the queue (docs/pre-queue-checks.md); `true` checks
      * each member's own affected set (GitHub Actions) before it joins a cohort. */
     admissionCheck: z.union([z.boolean(), z.literal('full')]).optional(),
     /** Hosted batches: fixed cohort size; absent picks it from the recent failure rate. */

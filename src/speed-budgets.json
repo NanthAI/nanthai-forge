@@ -38,6 +38,83 @@
       "issue": "6fbba986"
     },
     {
+      "id": "admission-queue-only-checks",
+      "area": "clean mixed-arrival queue-only admission replay",
+      "measuredBy": "build-guard",
+      "metric": "admissionQueueOnlyChecks",
+      "unit": "ops",
+      "max": 10,
+      "source": "Issue 8c9b84fc: tests/hosted-landing-admission-default.test.mjs drives production queue and audit controllers on three relative synthetic timelines.",
+      "reason": "Queue-only defaults remove isolated-then-combined checks and their reuse audits. The largest measured clean-wave count is the ceiling; red sensitivity is a separate tradeoff, not a universal cost claim.",
+      "issue": "8c9b84fc"
+    },
+    {
+      "id": "admission-queue-only-ci-minutes",
+      "area": "clean mixed-arrival queue-only admission replay",
+      "measuredBy": "build-guard",
+      "metric": "admissionQueueOnlyCiMinutes",
+      "unit": "min",
+      "max": 31,
+      "source": "Issue 8c9b84fc: tests/hosted-landing-admission-default.test.mjs drives production queue and audit controllers on three relative synthetic timelines.",
+      "reason": "Queue-only defaults remove isolated-then-combined checks and their reuse audits. The largest measured clean-wave count is the ceiling; red sensitivity is a separate tradeoff, not a universal cost claim.",
+      "issue": "8c9b84fc"
+    },
+    {
+      "id": "admission-queue-only-audits",
+      "area": "clean mixed-arrival queue-only admission replay",
+      "measuredBy": "build-guard",
+      "metric": "admissionQueueOnlyAudits",
+      "unit": "ops",
+      "max": 0,
+      "source": "Issue 8c9b84fc: tests/hosted-landing-admission-default.test.mjs drives production queue and audit controllers on three relative synthetic timelines.",
+      "reason": "Queue-only defaults remove isolated-then-combined checks and their reuse audits. The largest measured clean-wave count is the ceiling; red sensitivity is a separate tradeoff, not a universal cost claim.",
+      "issue": "8c9b84fc"
+    },
+    {
+      "id": "admission-queue-only-calls",
+      "area": "clean mixed-arrival queue-only admission replay",
+      "measuredBy": "build-guard",
+      "metric": "admissionQueueOnlyCalls",
+      "unit": "ops",
+      "max": 506,
+      "source": "Issue 8c9b84fc: tests/hosted-landing-admission-default.test.mjs drives production queue and audit controllers on three relative synthetic timelines.",
+      "reason": "Queue-only defaults remove isolated-then-combined checks and their reuse audits. The largest measured clean-wave count is the ceiling; red sensitivity is a separate tradeoff, not a universal cost claim.",
+      "issue": "8c9b84fc"
+    },
+    {
+      "id": "admission-queue-only-documents-read",
+      "area": "clean mixed-arrival queue-only admission replay",
+      "measuredBy": "build-guard",
+      "metric": "admissionQueueOnlyDocumentsRead",
+      "unit": "ops",
+      "max": 11694,
+      "source": "Issue 8c9b84fc: tests/hosted-landing-admission-default.test.mjs drives production queue and audit controllers on three relative synthetic timelines.",
+      "reason": "Queue-only defaults remove isolated-then-combined checks and their reuse audits. The largest measured clean-wave count is the ceiling; red sensitivity is a separate tradeoff, not a universal cost claim.",
+      "issue": "8c9b84fc"
+    },
+    {
+      "id": "admission-queue-only-documents-written",
+      "area": "clean mixed-arrival queue-only admission replay",
+      "measuredBy": "build-guard",
+      "metric": "admissionQueueOnlyDocumentsWritten",
+      "unit": "ops",
+      "max": 3585,
+      "source": "Issue 8c9b84fc: tests/hosted-landing-admission-default.test.mjs drives production queue and audit controllers on three relative synthetic timelines.",
+      "reason": "Queue-only defaults remove isolated-then-combined checks and their reuse audits. The largest measured clean-wave count is the ceiling; red sensitivity is a separate tradeoff, not a universal cost claim.",
+      "issue": "8c9b84fc"
+    },
+    {
+      "id": "admission-queue-only-service-delay",
+      "area": "clean mixed-arrival queue-only admission replay",
+      "measuredBy": "build-guard",
+      "metric": "admissionQueueOnlySubmitOverServiceMs",
+      "unit": "ms",
+      "max": 0,
+      "source": "Issue 8c9b84fc: tests/hosted-landing-admission-default.test.mjs drives production queue and audit controllers on three relative synthetic timelines.",
+      "reason": "Queue-only defaults remove isolated-then-combined checks and their reuse audits. The largest measured clean-wave count is the ceiling; red sensitivity is a separate tradeoff, not a universal cost claim.",
+      "issue": "8c9b84fc"
+    },
+    {
       "id": "land-to-main-p50",
       "area": "landing loop: queue, compose, check, settle",
       "measuredBy": "landing-record",

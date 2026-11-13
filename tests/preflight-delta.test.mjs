@@ -252,7 +252,7 @@ test('a tiny budget trims by time, names the trimmed files and the one command t
   assert.match(plan.local.rerun, /preflight '\{"laneId":"[^"]+","trim":false\}'$/);
   assert.match(plan.local.summary, /Trimmed near 0 of 1/);
   assert.match(plan.local.summary, /1 trimmed file\(s\) are named in trimmedTests; run them: nforge agent /);
-  assert.match(plan.local.summary, /1 test file\(s\) deferred; they run in the pre-queue Lane check/);
+  assert.match(plan.local.summary, /1 test file\(s\) deferred; the queue check runs them first by default/);
   const receipt = f.run(plan);
   assert.equal(receipt.deferredTests, 1);
   assert.equal(receipt.deferredTo, 'pre-queue');

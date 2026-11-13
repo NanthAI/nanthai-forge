@@ -1170,8 +1170,8 @@ function localSelection(input: {
         : '') +
       ' ' +
       (input.deferred
-        ? `${input.deferred} test file(s) deferred; they run in the pre-queue Lane check (on by default; ` +
-          'acceptance.admissionCheck:false opts out, then the queue check runs them first).'
+        ? `${input.deferred} test file(s) deferred; the queue check runs them first by default ` +
+          '(acceptance.admissionCheck:"full" runs them before queue entry).'
         : 'No test file deferred.'),
   };
 }
@@ -1594,7 +1594,7 @@ function runSummary(receipt: PreflightReceipt, plan: PreflightPlan & { status: '
         }. Run them: ${receipt.rerun}`
       : '') +
     (deferred
-      ? ` ${deferred} test file(s) deferred; they run in the pre-queue Lane check (on by default).`
+      ? ` ${deferred} test file(s) deferred; the queue check runs them first by default (full admission opts in before queue entry).`
       : ' No test file deferred.')
   );
 }
