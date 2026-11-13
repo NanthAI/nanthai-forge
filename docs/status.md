@@ -168,6 +168,13 @@ from logical State sizes carried on existing descriptors. Legacy States proceed
 and gain size metadata on a successful load; no backfill or extra call is added.
 [P8 streaming](roadmap.md#streaming-source-steps-p8) owns lifting the temporary bounds.
 
+Small conflict sync and resolve calculations reuse verified input States within
+the existing bounded execution paths. Source file-binding lookup excludes cached
+ancestry manifests and sends State descriptors directly to the catalog. The 4k/29k
+build guards enforce one source action per small conflict sync or resolve; complete
+resolve still includes its save. See [sync/resolve costs](research/sync-resolve-costs.md)
+for measured scope and remaining live latency qualifications.
+
 ## Works
 
 Managed CLI work checks accepted Forge main once per process. When main moved,

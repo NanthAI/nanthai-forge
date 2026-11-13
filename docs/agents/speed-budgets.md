@@ -127,3 +127,30 @@ ten task receipts. Setup, late CI and final-main export are included; this is no
 an isolated steady-state price, executed R2 accounting or an invoice. The ordinary
 task-period subtotal and project-attributed driver appear alongside it in the report.
 The active fixture budgets, action model and weighted R2 alert are unchanged.
+
+## Conflict recovery source guards
+
+`source-state-manifest-probes` permits zero R2 file-manifest probes when resolving a
+State descriptor. `source-selected-manifest-probes` permits three reads for a file
+present in the second of two selected States (two roots and one bucket), regardless
+of cached ancestry. The 60-ancestor fixture failed with 60 and 61 reads before the
+fix. Catalog fallback and current-access rejection remain covered.
+
+`source-conflict-sync-actions` and `source-resolve-actions` permit one source action
+for a small conflict/edit at both 4,000 and 29,000 files. The real-handler guards
+previously needed two at 29k. They count source actions, not complete CLI operations;
+resolve still includes its separate save. Larger calculations, input sets beyond
+re-entry's memory routing window and the existing time boundary retain durable
+continuations. These are internal execution choices, not repository limits.
+
+The build runs `tests/source-manifest-lookup-speed.test.mjs` and
+`tests/sync-resolve-cost-guard.test.mjs`. Their thresholds live only in
+`src/speed-budgets.json`. Existing query, byte, cost and idle guards are unchanged.
+The [cost decomposition](../research/sync-resolve-costs.md) separates local paired
+CPU evidence, real-handler accounting and live end-to-end observations. A source
+action count is not proof of the ten-second complete-operation target.
+
+`resolve-state-download-bytes` permits zero manifest bytes in the full resolve-chain
+fixture: the verified saved file list and pinned final header rebuild to the exact
+State hash. Legacy or mismatching encodings retain the download fallback. This is
+an unchanged-content transfer guard, not a limit on resolving source.

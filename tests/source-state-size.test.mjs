@@ -218,7 +218,10 @@ for (const files of [4000, 29000])
         const outputState = result.state ?? result.result.state;
         assert.deepEqual(outputState, expected.state, 'logical State still matches the measured spike');
         assert.equal(metrics.functionCalls, before.calls, 'zero added Convex calls');
-        assert.equal(metrics.functionCalls, expected.functionCalls, 'also retains the spike call budget');
+        assert(
+          metrics.functionCalls <= expected.functionCalls,
+          'also retains the original spike call ceiling; fewer descriptor calls are allowed',
+        );
         const r2 = {
           get: s.events.filter(event => event.fetch).length,
           head: s.events.filter(event => event.head).length,

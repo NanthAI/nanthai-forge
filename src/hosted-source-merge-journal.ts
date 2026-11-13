@@ -51,7 +51,11 @@ const labelsOf = (request: SourceCalculation): [string, string] =>
   request.labels ?? ['lane', request.channel];
 /** Replay the native algorithm on compact outcomes, including recursive virtual
  * bases. No body from an acknowledged calculation is read during assembly. */
-export function journalSourceCalculations(c: SourceStepCursor, source: MemoryMergeSource) {
+export function journalSourceCalculations(
+  c: SourceStepCursor,
+  source: MemoryMergeSource,
+  markers: (requests: SourceCalculation[]) => Promise<SourceCalculationResult[] | null>,
+) {
   const pending = new Map<string, SourceCalculation>();
   const reasons = new Map<string, string>();
   const compose = (c.plan as { kind?: string }).kind === 'forge-hosted-compose-input';
@@ -80,13 +84,27 @@ export function journalSourceCalculations(c: SourceStepCursor, source: MemoryMer
     if (pending.size >= 100) throw new SourceCalculationsPending();
     return null;
   };
-  source.resolvedContent = file => {
-    const result = request('markers', { path: file.path, left: file }, 'right-first');
-    invariant(
-      !result?.markers,
-      'CONFLICT_MARKERS',
-      `Resolve the conflict markers before completing resolution: ${file.path}.`,
-    );
+  source.resolvedContent = async files => {
+    for (const file of files) request('markers', { path: file.path, left: file }, 'right-first');
+    // Marker validation does not change the tree. Finish a small page while its verified
+    // draft and saved State are already resident, instead of reassembling both in another action.
+    const work = [...pending.values()].filter(value => value.kind === 'markers');
+    if (work.length) {
+      const results = await markers(work);
+      if (!results) throw new SourceCalculationsPending();
+      for (const result of results) {
+        (c.calculations ??= {})[result.key] = result;
+        pending.delete(result.key);
+      }
+    }
+    for (const file of files) {
+      const result = request('markers', { path: file.path, left: file }, 'right-first');
+      invariant(
+        !result?.markers,
+        'CONFLICT_MARKERS',
+        `Resolve the conflict markers before completing resolution: ${file.path}.`,
+      );
+    }
   };
   source.mergeContent = (base, left, right, options, resolutions) => {
     const result = request(

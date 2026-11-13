@@ -101,7 +101,7 @@ export const nativeSourceTestHooks: {
 export class NativeSource {
   /** Hosted execution journals these byte calculations between bounded actions. */
   mergeConflictReason?: (path: string) => string | undefined;
-  resolvedContent?: (file: NativeFile) => void;
+  resolvedContent?: (files: NativeFile[]) => Promise<void>;
   mergeContent?: (
     base: NativeFile,
     left: NativeFile,

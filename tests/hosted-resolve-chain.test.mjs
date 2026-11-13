@@ -15,6 +15,7 @@ import { chainSettle, chainStallMs, resolveSyncRequest } from '../dist/hosted-re
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { hostedAgentDirectory } from '../dist/hosted-agent-journal.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
+import speedBudgets from '../src/speed-budgets.json' with { type: 'json' };
 
 // save-then-resolve (1eef1b43): the resolve's save names the sync that follows it; the save's
 // completion schedules the chain, and the CLI's one save subscription sees that sync finish.
@@ -134,6 +135,11 @@ test('a resolve gets its sync receipt from the save subscription: the server cha
   const result = await waiting;
   assert.equal(result.result.source.outcome.result.status, 'resolved');
   assert.deepEqual(result.result.source, chained);
+  assert.equal(
+    result.result.applied.downloadedBytes,
+    speedBudgets.budgets.find(value => value.id === 'resolve-state-download-bytes').max,
+    'the resolved header rebuilds from the exact saved State without a manifest download',
+  );
   for (const name of [
     'projectHostedSync:prepare',
     'projectHostedSyncJobs:submit',
@@ -349,7 +355,10 @@ test('the submit action reply with its chained resolve settles the save wait at 
   const done = JSON.parse(publishedReply({ ...save, chainRun }, JSON.stringify(sync), true));
   assert.equal(done.chainRun, undefined, 'the chain identity never reaches the client');
   assert.deepEqual(chainSettle(done), {
-    value: { save: save.terminal, chained: { terminal: sync.terminal, state: sync.state } },
+    value: {
+      save: save.terminal,
+      chained: { terminal: sync.terminal, state: sync.state },
+    },
   });
   // The chained step did not finish: the CLI waits on the save subscription for its receipt.
   const running = JSON.parse(publishedReply({ ...save, chainRun }, null, true));

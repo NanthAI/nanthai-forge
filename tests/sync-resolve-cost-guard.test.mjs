@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { measureSync } from './measure-sync-ancestry.mjs';
+import { measureSync, syncHistory, syncInput, resolveInput } from './measure-sync-ancestry.mjs';
 import { syncApplyFixture } from './measure-sync-apply.mjs';
+import speedBudgets from '../src/speed-budgets.json' with { type: 'json' };
+import { scaleFixture } from './convex-source-scale-fixture.mjs';
 
 // Guard the selected source job, independently of deployment latency. Flat State bytes are
 // unavoidable under today's identity; unchanged file bodies and per-file descriptor RPCs are not.
@@ -11,6 +13,15 @@ for (const files of [4000, 29000]) {
     const clean = await measureSync({ files, changed: 1, distance: 1, conflict: false });
     const wider = await measureSync({ files, changed: 8, distance: 1, conflict: false });
     const conflict = await measureSync({ files, changed: 1, distance: 1, conflict: true });
+    assert(
+      conflict.sync.steps <=
+        speedBudgets.budgets.find(value => value.id === 'source-conflict-sync-actions').max,
+      'small conflict sync reuses its verified and parsed merge inputs',
+    );
+    assert(
+      conflict.resolve.steps <= speedBudgets.budgets.find(value => value.id === 'source-resolve-actions').max,
+      'small conflict resolution validates its edited page without reloading both full States',
+    );
     for (const [run, stateReads] of [
       [clean.sync, 3],
       [wider.sync, 3],
@@ -56,3 +67,28 @@ for (const files of [4000, 29000]) {
     t.diagnostic(JSON.stringify({ files, ordinary, live }));
   });
 }
+
+for (const padding of [0, 1200 * 1024])
+  test(`resolve rejects remaining conflict markers through ${padding ? 'continued' : 'inline'} page validation`, async () => {
+    const s = await scaleFixture();
+    try {
+      const h = await syncHistory(s, { files: 4000, changed: 1, distance: 1, conflict: true }),
+        id = await s.enqueue(await syncInput(s, h));
+      await s.drain();
+      const job = await s.job(id),
+        output = JSON.parse((await s.bytes(job.output)).toString()),
+        input = await resolveInput(
+          s,
+          h,
+          output,
+          () => 'x'.repeat(padding) + '\n<<<<<<< lane\nleft\n=======\nright\n>>>>>>> main\n',
+        ),
+        resolveId = await s.enqueue(input);
+      await s.drain();
+      const resolved = await s.job(resolveId);
+      assert.equal(resolved.status, 'failed');
+      assert.equal(resolved.control.failureCode, 'CONFLICT_MARKERS');
+    } finally {
+      s.restore();
+    }
+  });

@@ -334,3 +334,107 @@ Acceptance remains qualified:
 This change removes per-leaf descriptor round trips by sharing the existing
 preparation window in both readers. It adds no Convex call, table, public command,
 service, State format, source-body buffer, user obligation or product restriction.
+
+## Conflict recovery source path
+
+The exit-bench incident supplied four complete operation windows. The two syncs
+spent 41.756 / 54.727 seconds in the CLI; their phase clocks account for
+39.909 / 52.606 seconds. Both were Candidate-resolution syncs. Their source steps
+spent 24.050 + 10.485 / 35.788 + 10.762 seconds, with 101 + 18 / 185 + 18
+read opens. The first steps alone had R2 reads in flight for 14.923 / 25.724 seconds.
+They stopped for `recompute`, then loaded the same three State manifests again.
+
+The two resolves spent 28.294 / 28.556 seconds in the CLI. Their phase clocks were
+26.609 / 26.680 seconds: save 9.893 / 10.243, source submit 0.948 / 0.929,
+source wait 12.849 / 12.330, apply 2.169 / 2.424, selection 0.750 / 0.753.
+The source jobs each repeated their two large States in a second action; their
+step walls were 6.362 + 5.701 / 6.139 + 5.820 seconds. Save itself had one source
+action (5.409 / 6.300 seconds). CLI startup, capability reads and command teardown
+are outside those phase clocks, accounting for the remaining 1.6–2.1 seconds.
+These observations do not identify that residual as pure CPU. The retained read,
+write and call clocks overlap; none is an exclusive compute clock.
+
+Filtered, read-only inspection recovered the second sync's missing server timing
+from its original operation. Selected ancestry rows already had recorded parents,
+generations and physical manifests. The extra reads were not missing parent
+metadata: ordinary descriptor lookup tried the physical file manifests of every
+cached ancestor. Those manifests do not contain State descriptors. Searching one
+new object could therefore open dozens of unrelated R2 roots and buckets.
+
+The source transport now excludes ancestry hints from file-binding lookup and
+sends known State descriptors directly to the existing catalog page. Selected
+file manifests and catalog fallback keep their existing integrity and access
+checks. Descriptor-only graph probes share the existing four-window allowance;
+body acquisition still obeys the original byte windows.
+
+Small text calculations now discard tentative generated outputs and replay on
+the same verified, parsed inputs, rather than allocating another input tree. Input
+sets above two existing 8 MiB windows keep the fresh-action path. Small resolve
+pages validate markers while their saved and draft States are already loaded.
+Large pages, created-blob dependencies and the time boundary retain continuations.
+Resolve also reconstructs its metadata-only final State from the verified saved
+checkout and pinned resolution receipt. The existing delta hash check proves the
+exact bytes; a legacy or mismatching encoding retains exact-State download.
+No State encoding or identity, repository limit, user step, timer or policy changes.
+
+### Local count and byte guards
+
+The 60-ancestor lookup fixture failed before the fix with 60 R2 probes for a State
+and 61 for one file. It now permits zero for the State and three for a file found
+in the second of two explicitly selected States. Missing membership still reaches
+the catalog access fence. The new speed thresholds live in
+[`src/speed-budgets.json`](../../src/speed-budgets.json).
+
+The following are real-handler/R2-fake observations on the same 29k, 4,698,180-byte
+raw-State shape. They exclude the CLI, prepare, save-before-resolve and final Lane
+publication. DB byte counts are serialized fixture accounting, not billed usage.
+Existing call, query, byte and cost guards have not been relaxed.
+
+| Source operation | Actions before → after | Convex calls before → after | DB read / write B before → after | R2 GET body B before → after |
+| --- | ---: | ---: | --- | ---: |
+| clean sync | 1 → 1 | 7 → 6 | 46,037 / 21,820 → 42,324 / 21,656 | 14,094,873 → 14,094,873 |
+| conflict sync | 2 → 1 | 14 → 7 | 72,523 / 28,470 → 46,584 / 23,603 | 28,194,434 → 14,095,019 |
+| source-only resolve | 2 → 1 | 14 → 7 | 71,712 / 24,823 → 45,751 / 20,212 | 18,798,150 → 9,397,902 |
+
+Conflict sync PUT bodies fall from 4,704,683 to 4,699,738 B; resolve from
+4,702,024 to 4,698,941 B, by removing continuations. Idle executions remain zero.
+The qualified 29k action peak observations were 346 MiB for conflict sync and
+248 MiB for resolve; these are fresh local process high-water marks, not deployed
+isolate heap measurements. Larger-tree memory routing remains in place.
+
+### Paired source-kernel CPU
+
+[`measure-conflict-reentry.mjs`](../../tests/measure-conflict-reentry.mjs) compares a
+frozen installed baseline with the Lane build. The
+[raw pairs](../../tests/fixtures/conflict-reentry-pairs.json) retain eleven AB/BA
+pairs per shape and operation, exact output hashes, CPU, wall and load. Both
+implementations produced identical output bytes in qualification and all 44
+measured pairs; no sample was voided. Module load, fixture setup, Convex transport,
+network, checkout and action cold starts are excluded. Each run starts a new object
+map, retaining no prior calculation cache. Process RSS in that dataset is cumulative
+and is not attributed to either build. Concurrent machine load and GC remain outside
+the bootstrap interval's coverage.
+
+Milliseconds; interval is the median paired candidate-minus-baseline CPU difference,
+10,000 resamples, seed 1. These results establish a local kernel CPU change, not a
+hosted latency or billed-cost improvement.
+
+| Shape / operation | Baseline median CPU | Candidate median CPU | Paired difference, 95% interval |
+| --- | ---: | ---: | --- |
+| 4k conflict sync | 53.8 | 43.5 | −10.3 [−16.9, −7.4] |
+| 4k resolve | 30.5 | 17.3 | −13.6 [−15.1, −4.3] |
+| 29k conflict sync | 466.5 | 371.6 | −93.0 [−98.8, −83.8] |
+| 29k resolve | 272.8 | 156.0 | −123.6 [−126.4, −112.3] |
+
+### Complete-operation target
+
+A fresh private dev reproduction has 29,000 synthetic paths and a 4.84 MB manifest,
+one conflicting path and no checked landing in its source-resolution clock.
+The installed baseline took 23.140 seconds for conflict sync and 19.310 for resolve
+(N=1, exploratory). Sync phase time was 21.404 seconds: submit 10.222, source wait
+8.686, conflict apply 2.149 and settle 0.347. Resolve phase time was 18.097 seconds:
+save 6.179, submit 1.181, source wait 8.587 and apply 2.150. Source work again used
+two actions. This light ancestry differs from the incident's larger cached history.
+The separate save and resolve still publish two full flat States. The local paired
+kernel result alone cannot establish the complete ten-second target or Git parity;
+post-acceptance dev evidence belongs with the Issue's exact runtime and request ids.

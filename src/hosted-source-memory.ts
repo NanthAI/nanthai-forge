@@ -62,6 +62,22 @@ export class MemoryMergeSource extends LazyMergeSource {
       ? { pin: { sha256: id, size: bytes.length }, parents: state.parents, files: state.files }
       : null;
   }
+  /** Discard an interrupted calculation's tentative outputs, retaining the verified and parsed
+   * input States. Re-entry allocates no second input tree and downloads none of them again. */
+  resetGenerated() {
+    for (const id of this.generated) {
+      this.objects.delete(id);
+      this.parsed.delete(id);
+      this.states.delete(id);
+      delete this.parents[id];
+    }
+    this.generated.clear();
+  }
+  inputBytes() {
+    let size = 0;
+    for (const [id, bytes] of this.objects) if (!this.generated.has(id)) size += bytes.length;
+    return size;
+  }
   override state(id: string): NativeState {
     // This is an explicit proven graph cut, not a claim about stored parents.
     // File bytes still come from the exact original hash-verified State.

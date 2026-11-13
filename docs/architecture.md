@@ -1281,7 +1281,20 @@ then re-runs the merge, once per round of a recursive merge. A round that needs 
 blob this step created (a virtual-base merge result used as the next base) yields to
 a fresh step, since that blob's object row exists only after the step commits. Inline
 rounds of one step reuse the merge inputs an earlier round read (at most 4 MiB), and
-a step reuses descriptors it already resolved instead of asking Convex again. Merges
+a step reuses descriptors it already resolved instead of asking Convex again. Small
+calculation rounds retain their verified, parsed input States and discard tentative
+generated outputs before replay. Re-entry retains at most two existing 8 MiB input
+windows; larger input sets keep the fresh-action path. The 20-second boundary and
+created-blob continuation remain. A small resolve page validates markers in that
+same calculation window and continues assembling its already loaded States,
+without a second action. Descriptor-only probes use the existing four-window
+allowance; body reads still obey their original windows.
+
+Physical file-binding lookup searches only explicitly selected States, excluding
+cached ancestry hints. A requested State descriptor goes straight to the existing
+catalog page, because a file manifest contains no State descriptors. Missing file
+membership retains the catalog fallback and its current-access fence. This avoids
+history-sized R2 probe chains without adding calls, metadata caches or idle work. Merges
 read the merge base manifests (found from parents already verified) in the same wave
 as the tips; a resolve reads its draft and first conflict page with the saved head;
 compose merges from the tip manifests its graph step read. Native text calculations are journaled per path, while

@@ -89,6 +89,7 @@ export async function buildHostedSyncState(
           }),
         );
       }
+      const resolvedFiles: NativeFile[] = [];
       for (const conflict of page.paths) {
         const original = draftFiles.get(conflict.path),
           file = currentFiles.get(conflict.path);
@@ -102,7 +103,7 @@ export async function buildHostedSyncState(
         }
         if (!file) continue;
         if (source.resolvedContent) {
-          source.resolvedContent(file);
+          resolvedFiles.push(file);
           continue;
         }
         const bytes = await resolveCalculate(() => source.object(file.blob));
@@ -112,6 +113,7 @@ export async function buildHostedSyncState(
           `Resolve the conflict markers before completing resolution: ${file.path}.`,
         );
       }
+      if (source.resolvedContent) await source.resolvedContent(resolvedFiles);
       pin = page.next;
     }
     if (unchanged.length) throw unchangedConflictSides(unchanged, resolution);

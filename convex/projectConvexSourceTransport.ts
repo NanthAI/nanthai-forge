@@ -174,15 +174,28 @@ export function convexSourceTransport(
     known: string[] = [],
     windows = 1,
   ): Promise<WorkerObject[]> => {
-    const roots = !ancestry && ids.length ? [...locations.values()].filter(row => row.statePhysical) : [];
+    // File manifests contain file bindings, never State descriptors. Ancestry hint rows are
+    // also only metadata: searching each one's manifest turns one miss into O(history) R2 reads.
+    // Only explicitly selected State bodies can supply the merge's file bindings; the existing
+    // catalog page handles States, protocol objects and files absent from those selections.
+    // Before interpretation is declared, only the caller's directly supplied roots are selected.
+    const roots =
+      !ancestry && ids.length && !ids.some(id => expectedStates.has(id))
+        ? (expectedStates.size
+            ? [...locations.values()].filter(row => expectedStates.has(row.descriptor.object.sha256))
+            : initial
+          ).filter(row => row.statePhysical)
+        : [];
     if (roots.length) {
       const found = await manifestOrCatalog(
         async () => {
+          const selected = new Map<string, PhysicalEntry>();
           for (const row of roots) {
             const reader = await manifestReader(row);
-            const entries = await reader.lookup(ids);
-            if (!entries.every((entry): entry is PhysicalEntry => !!entry)) continue;
-            const rows = await Promise.all(entries.map(manifestLocation));
+            const entries = await reader.lookup(ids.filter(id => !selected.has(id)));
+            for (const entry of entries) if (entry) selected.set(entry.sha256, entry);
+            if (!ids.every(id => selected.has(id))) continue;
+            const rows = await Promise.all(ids.map(id => manifestLocation(selected.get(id)!)));
             remember(rows);
             return rows.map(row => row.descriptor);
           }
@@ -392,7 +405,9 @@ export function convexSourceTransport(
               ...(sizePhase ? { sizePhase, states: pending.filter(id => expectedStates.has(id)) } : {}),
               known: hints?.known ?? [],
               probe: true,
-              ...(hints ? { windows: hints.windows } : {}),
+              // A probe returns only descriptors. Use the existing four-window allowance for
+              // selected large tips too; their bodies still pass through sourceWindows below.
+              windows: hints?.windows ?? 4,
             }),
           )
           .catch(error => {

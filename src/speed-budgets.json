@@ -286,6 +286,61 @@
       "source": "Shard execution seconds of the check runs of the 36 landings that settled 2026-11-10 04:06Z to 08:31Z, from each run's stored summary (timings.executionSeconds); the live stamp is the same field of the run row, read when the landing sees the run end. Audit: 12 audit runs shared by the 36 landings, counted once each; mean 18.8 min per landing, rolling 20-landing mean 13.3 to 23.4.",
       "reason": "The audit's shard seconds join the newest landing when the audit ends (once per audit run). Peak 23.4 plus about 35%: an audit after every landing (about 54) breaks it, a busier cadence does not.",
       "issue": "51bbbd00"
+    },
+    {
+      "id": "source-state-manifest-probes",
+      "area": "source descriptor lookup",
+      "measuredBy": "build-guard",
+      "metric": "sourceStateManifestProbes",
+      "unit": "ops",
+      "max": 0,
+      "source": "Issue 6fbba986: 29k conflict recovery made 101/185 reads in its first source action. tests/source-manifest-lookup-speed.test.mjs reproduces a lookup with 60 cached ancestor descriptors.",
+      "reason": "State descriptors are not file members. Looking them up must go directly to the existing catalog page, never scan physical file manifests.",
+      "issue": "6fbba986"
+    },
+    {
+      "id": "source-selected-manifest-probes",
+      "area": "source descriptor lookup",
+      "measuredBy": "build-guard",
+      "metric": "sourceSelectedManifestProbes",
+      "unit": "ops",
+      "max": 3,
+      "source": "Issue 6fbba986: 29k conflict recovery made 101/185 reads in its first source action. tests/source-manifest-lookup-speed.test.mjs reproduces a lookup with 60 cached ancestor descriptors.",
+      "reason": "A file lookup may read the two explicitly selected State roots and one matching bucket; cached ancestor descriptors cannot extend this search.",
+      "issue": "6fbba986"
+    },
+    {
+      "id": "source-resolve-actions",
+      "area": "source-only conflict resolution at 29k files",
+      "measuredBy": "build-guard",
+      "metric": "sourceResolveActions",
+      "unit": "ops",
+      "max": 1,
+      "source": "Issue 6fbba986: recorded 29k resolves reread and reassembled their saved/draft States in two source actions. tests/sync-resolve-cost-guard.test.mjs runs the real source handlers at 4k/29k.",
+      "reason": "A small edited conflict page validates markers in its existing bounded calculation window and publishes the result in the action that already loaded both States. Large marker pages retain durable continuations.",
+      "issue": "6fbba986"
+    },
+    {
+      "id": "source-conflict-sync-actions",
+      "area": "conflict sync at 29k files",
+      "measuredBy": "build-guard",
+      "metric": "sourceConflictSyncActions",
+      "unit": "ops",
+      "max": 1,
+      "source": "Issue 6fbba986: 29k conflict sync recomputed after its small text calculation, reading all three full State manifests again. tests/sync-resolve-cost-guard.test.mjs runs the real source handlers.",
+      "reason": "Small text calculations reuse the existing verified and parsed inputs. Tentative generated outputs are discarded before replay; the 20-second boundary and larger-calculation continuations remain.",
+      "issue": "6fbba986"
+    },
+    {
+      "id": "resolve-state-download-bytes",
+      "area": "resolve checkout of an unchanged saved file list",
+      "measuredBy": "build-guard",
+      "metric": "resolveStateDownloadBytes",
+      "unit": "bytes",
+      "max": 0,
+      "source": "Issue 6fbba986: recorded 29k resolves downloaded another4.9MB State after saving identical file metadata. tests/hosted-resolve-chain.test.mjs exercises the full save-chain and client apply.",
+      "reason": "Reconstruct the final State header from the authenticated receipt and retained request, proving its whole hash before apply. Legacy or mismatching encodings keep their ordinary download fallback; this fixture budget adds no product restriction.",
+      "issue": "6fbba986"
     }
   ],
   "costGuard": {

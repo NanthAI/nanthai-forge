@@ -386,7 +386,7 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
   );
   const handoff = await retainSyncHandoff(session, 'resolve', command);
   timing.mark('save');
-  let progress;
+  let progress, observed: unknown;
   try {
     if (chained) {
       // The server ran the resolve from the save: its receipt arrived on the save's subscription.
@@ -396,7 +396,6 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
     } else {
       progress = await driveAgentSource(session, 'Sync', session.journal.operationId, request);
       timing.mark('submit');
-      let observed: unknown;
       progress = await session.waitSource(session.journal.operationId, progress, 'Sync', undefined, value => {
         observed = value;
       });
@@ -423,7 +422,25 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
   const parsed = syncResultSchema.safeParse(completed(progress));
   if (!parsed.success || parsed.data.status !== 'resolved' || !parsed.data.from)
     return { ...(progress as object), ...continuation };
-  const source = parsed.data;
+  const source = parsed.data,
+    from = parsed.data.from;
+  // Resolve changes only the saved State's parents/message/time. Rebuild that exact header from
+  // the retained request and authenticated receipt, then let the existing delta hash check prove
+  // every byte. A mismatching/legacy encoding keeps the ordinary exact-State download fallback.
+  const delta =
+    (observed as { delta?: unknown } | undefined)?.delta ??
+    (source.resolution
+      ? {
+          schema: 1,
+          from: from.head,
+          head: source.lane.head,
+          parents: [from.head, source.resolution.right],
+          message: then.message,
+          at: source.at,
+          files: [],
+          removed: [],
+        }
+      : undefined);
   const applied = await applyHostedSync(
     session.root,
     {
@@ -434,6 +451,7 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
       status: source.status,
     },
     new ConvexLaneTransport(session.exchange),
+    { delta },
   );
   clearSyncHandoff(session.root, session.journal.operationId);
   completeConflictRecovery(session.root);

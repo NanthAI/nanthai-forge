@@ -373,7 +373,7 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
     from = c.phase;
   if (c.plan) io.setSourceSizePhase?.(sourceSizePhase(c.plan as { kind: string }));
   io.rememberStateGenerations?.(c.generations ?? {});
-  let mergeSource = new MemoryMergeSource(c.parents, c.ancestryBoundary, c.ancestryCuts);
+  const mergeSource = new MemoryMergeSource(c.parents, c.ancestryBoundary, c.ancestryCuts);
   io = {
     ...original,
     upload: async (pin, bytes) => {
@@ -463,12 +463,9 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
         const again = recompute;
         recompute = false;
         if (again) {
-          // An interrupted merge leaves partial results in its source; recompute as a fresh action
-          // would, keeping only the hash-verified input bytes already read (never generated ones).
-          const prior = mergeSource;
-          mergeSource = new MemoryMergeSource(c.parents, c.ancestryBoundary, c.ancestryCuts);
-          for (const [id, bytes] of prior.objects)
-            if (!prior.generated.has(id)) mergeSource.objects.set(id, bytes);
+          // Keep the same verified/parsed inputs, and release tentative outputs before replay.
+          // A fresh source would parse and allocate every large input tree a second time.
+          mergeSource.resetGenerated();
         }
         if (m.bytes > 2 * 1024 * 1024 && !again) {
           yieldStep(m, 'compute-bytes');
@@ -485,7 +482,11 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
             refs.filter(ref => !mergeSource.objects.has(ref.object.sha256)).map(ref => ref.object),
           );
         }
-        const pending = journalSourceCalculations(c, mergeSource);
+        const pending = journalSourceCalculations(c, mergeSource, async requests => {
+          const tasks = await calculationWindows(requests, io);
+          if (!inlineCalculations(tasks) || performance.now() - m.started >= 20000) return null;
+          return runInlineCalculations(tasks, cachedReads(io, inlineReads, 4 * inlineCalculationBytes));
+        });
         const guarded = {
           ...io,
           upload: async (...args: Parameters<StepTransport['upload']>) => {
@@ -508,22 +509,14 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
           if (!inline) io.fanout!({ kind: 'calculate', end: 0, tasks });
           else {
             const taskIo = cachedReads(io, inlineReads, 4 * inlineCalculationBytes);
-            for (const task of tasks) {
-              let previous: import('./hosted-source-fanout.js').SourceTaskProgress | null = null,
-                result;
-              do {
-                result = await runSourceTask(task, previous, taskIo);
-                previous = result.progress;
-              } while (!result.done);
-              for (const value of result.progress.calculations ?? []) {
-                (c.calculations ??= {})[value.key] = value;
-                if (value.blob) created.add(value.blob);
-              }
+            for (const value of await runInlineCalculations(tasks, taskIo)) {
+              (c.calculations ??= {})[value.key] = value;
+              if (value.blob) created.add(value.blob);
             }
           }
-          // The same heap re-enters only when this action read at most one step of bytes; bigger
-          // trees still skip the fan-out round but recompute in a fresh action.
-          if (inline && io.fanout && m.bytes + m.outputBytes <= sourceStepBytes) recompute = true;
+          // Re-entry reads no new State bodies: the bounded inline calculation uses the same
+          // verified inputs, and resetGenerated releases its tentative outputs before replay.
+          if (inline && io.fanout && mergeSource.inputBytes() <= 2 * sourceStepBytes) recompute = true;
           else yieldStep(m, inline ? 'recompute' : 'fanout');
         }
       }
@@ -552,6 +545,19 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
  * here (one read each) instead of in parallel slots. Larger sets keep the parallel, separately
  * metered tasks. */
 export const inlineCalculationBytes = 1024 * 1024;
+async function runInlineCalculations(tasks: Parameters<typeof runSourceTask>[0][], io: StepTransport) {
+  const values: import('./hosted-source-merge-journal.js').SourceCalculationResult[] = [];
+  for (const task of tasks) {
+    let previous: import('./hosted-source-fanout.js').SourceTaskProgress | null = null,
+      result;
+    do {
+      result = await runSourceTask(task, previous, io);
+      previous = result.progress;
+    } while (!result.done);
+    values.push(...(result.progress.calculations ?? []));
+  }
+  return values;
+}
 function inlineCalculations(tasks: { kind: string; refs: WorkerObject[] }[]) {
   return (
     tasks.filter(task => task.kind !== 'markers').length <= 16 &&
