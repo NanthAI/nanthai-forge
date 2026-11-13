@@ -394,9 +394,14 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   const before = await drive(t, { ...pairInput, unknownAdmissionRisk: true });
   const pair = await drive(t, pairInput);
   assert(before.landedAt[1] > 1.5 * solo.landedAt[0], 'the original path reproduces the miss');
-  assert(pair.calls <= before.calls, `Convex transactions ${before.calls} -> ${pair.calls}`);
-  assert(pair.readBytes <= before.readBytes, `DB reads ${before.readBytes} -> ${pair.readBytes}`);
-  assert(pair.writeBytes <= before.writeBytes, `DB writes ${before.writeBytes} -> ${pair.writeBytes}`);
+  // Accepted pre-cancellation control: 121 calls, 1,822,710 read / 676,662 write B.
+  // Early retirement now improves the unknown-risk arm too (102 calls), so it
+  // no longer isolates the old path. Keep its original measured cost ceiling;
+  // the live arm still guards latency, one exact check and zero idle work below.
+  const baseline = { calls: 121, readBytes: 1_822_710, writeBytes: 676_662 };
+  assert(pair.calls <= baseline.calls, `Convex transactions ${baseline.calls} -> ${pair.calls}`);
+  assert(pair.readBytes <= baseline.readBytes, `DB reads ${baseline.readBytes} -> ${pair.readBytes}`);
+  assert(pair.writeBytes <= baseline.writeBytes, `DB writes ${baseline.writeBytes} -> ${pair.writeBytes}`);
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
   assert.equal(pair.runs[0], 1);
   assert.equal(pair.runs[1], 1, 'C runs the exact combined tree instead of a wasted solo admission');
@@ -415,13 +420,16 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
     ]),
     duration: (i, nth) => 1000 + (i === 1 && nth === 1 ? 20 : 0),
   };
-  const before = await drive(t, { ...input, unknownAdmissionRisk: true });
+  await drive(t, { ...input, unknownAdmissionRisk: true });
   const after = await drive(t, input);
   assert(after.landedAt[1] <= 1500, 'one check duration plus bounded source/queue progress');
   assert.deepEqual(after.runs, [1, 1]);
-  assert(after.calls <= before.calls, `transactions ${before.calls} -> ${after.calls}`);
-  assert(after.readBytes <= before.readBytes, `DB reads ${before.readBytes} -> ${after.readBytes}`);
-  assert(after.writeBytes <= before.writeBytes, `DB writes ${before.writeBytes} -> ${after.writeBytes}`);
+  // Same pre-cancellation control ceiling as the small replay, measured at 4000
+  // files. The live unknown-risk arm now benefits from early retirement too.
+  const baseline = { calls: 121, readBytes: 1_827_467, writeBytes: 679_017 };
+  assert(after.calls <= baseline.calls, `transactions ${baseline.calls} -> ${after.calls}`);
+  assert(after.readBytes <= baseline.readBytes, `DB reads ${baseline.readBytes} -> ${after.readBytes}`);
+  assert(after.writeBytes <= baseline.writeBytes, `DB writes ${baseline.writeBytes} -> ${after.writeBytes}`);
   assert.equal(after.idle, 0);
 });
 

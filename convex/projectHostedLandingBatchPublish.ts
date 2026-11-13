@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelStaleLandingChecks } from './projectHostedLandingStaleChecks';
 import { settleBatchConflicts } from './projectHostedLandingCohortConflicts';
 import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
 import type { MutationCtx } from './_generated/server';
@@ -440,12 +441,20 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
   };
   for (const [index, { identity, planId }] of completions.entries())
     await scheduleAcceptanceCompletion(ctx, planId, { ...identity, ...(index === 0 ? { precompose } : {}) });
-  if (!completions.length)
+  if (!completions.length) {
+    await cancelStaleLandingChecks(ctx, {
+      projectId: claim.projectId,
+      sequence: last.snapshot.revision,
+      receiptIds: precompose.receiptIds,
+      head,
+      candidate: { id: last.candidate.id, actor: last.actor.id, digest: last.candidate.digest },
+    });
     await scheduleLandingPrecompose(ctx, {
       projectId: claim.projectId,
       ...precompose,
       candidate: { id: last.candidate.id, actor: last.actor.id, digest: last.candidate.digest },
     });
+  }
   await endLandedApprovals(ctx, granted);
   await writeBatch(ctx, key, { ...batch, phase: 'landed' });
   await releaseLandingQueue(ctx, queue, now);

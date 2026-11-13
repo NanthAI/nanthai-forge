@@ -156,6 +156,14 @@ predecessor head/receipt; failure and review holds restore original selections.
 The [zoo report](research/zoo-mini-report.md#rust-check-and-overtake-diagnosis)
 separates Cargo execution from landing wall time; its live timing gate remains open.
 
+Accepted-main events retire still-running landing checks on shared Candidate
+paths or global-risk changes, using the existing CI cancellation adapter and a
+replacement wake in the same transaction. Clean replacements check immediately;
+conflicts reach the existing wait/status recovery. Unrelated and already-covered
+predicted checks retain their run. The pass reads metadata for at most eight
+checking entries, with zero extra DB bytes when none are running, and does not
+change acceptance proofs ([pre-queue checks](pre-queue-checks.md#decision)).
+
 Fast landing follows the owner's `acceptance.landingMode` policy after one green main audit.
 It pauses on red or stale main, 3 real red audits in 50 audited landings, or 3 unclear audits in
 50 audits, and resumes automatically as those conditions clear. There is no earning count or

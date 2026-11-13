@@ -76,6 +76,23 @@ configured check (no `configure-check`) skips it and queues as before.
      indexed window of live reservations and, only while one is live, the paths.
      The landing-queue model checks it (`reserve`, `reserve-fixed`: within two
      attempts, no deadlock, every reservation ends).
+   When main accepts while a Lane check is still running, the existing first
+   post-acceptance transaction examines at most eight checking entries in that
+   Channel. A shared Candidate path or a global-risk path changed by the new
+   landing retires the stale run through its existing CI adapter. Unrelated
+   checks finish normally. Predicted-head checks that already include that
+   acceptance retain their run. This decision uses path metadata only; it does
+   not change the proof needed to accept a check after main moved.
+
+   Cancellation and the replacement composition's durable wake commit together.
+   A clean merge starts the exact replacement check without another agent turn;
+   a real conflict ends the landing with its ordinary recovery continuation in
+   status and the open wait. Source failures retain ordinary failure/retry
+   recovery. The operation and sequence stay the same, and late results from the
+   retired run cannot accept. Back-to-back main moves refresh an unfinished
+   replacement before spending CI on obsolete source. There is no added
+   observer job, polling or idle work; an empty checking window reads zero DB bytes.
+
 3. **The queue re-verifies only the combination.** An admitted change first tries
    its own Lane run, once:
    - on unchanged main, that run is the exact acceptance evidence and the change

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelStaleLandingChecks } from './projectHostedLandingStaleChecks';
 import { wakeLandingCapsule } from './projectLandingCapsuleWake';
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
@@ -117,12 +118,20 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
   );
   // Reuse the already scheduled post-publication tick. No queue query or new
   // scheduling write belongs in the acceptance CAS, including an empty queue.
-  if (input.precompose && plan.appliedPage === 0 && plan.appliedEntry === 0)
+  if (input.precompose && plan.appliedPage === 0 && plan.appliedEntry === 0) {
+    await cancelStaleLandingChecks(ctx, {
+      projectId: input.projectId,
+      sequence: receipt.snapshot.revision,
+      receiptIds: input.precompose.receiptIds,
+      head: receipt.candidate.head,
+      candidate: { id: receipt.candidate.id, actor: receipt.actor.id, digest: receipt.candidate.digest },
+    });
     await scheduleLandingPrecompose(ctx, {
       projectId: input.projectId,
       receiptIds: input.precompose.receiptIds,
       candidate: { id: receipt.candidate.id, actor: receipt.actor.id, digest: receipt.candidate.digest },
     });
+  }
   // Landed work leaves the open-overlap index on the first tick, even when completion is off (keepOpen)
   // or skips a Lane whose pins moved after finish. Idempotent and bounded to one input page.
   const landed = { commit: receipt.candidate.head, at: receipt.at, sequence: row.sequence };

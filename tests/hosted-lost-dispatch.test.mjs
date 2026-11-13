@@ -99,7 +99,13 @@ for (const [name, options] of Object.entries({
 }))
   test(`incident a7de3a93 shape: a lost dispatch on ${name} is re-checked and every entry lands`, async t => {
     // 77d20db5 in the incident was an admission run, 9e7e9db0 a train recheck.
-    const f = await batchesFixture(t, options);
+    // Independent source edits keep this replay focused on lost-dispatch repair;
+    // global-risk/overlap cancellation has its own stale-check guards.
+    const f = await batchesFixture(t, {
+      ...options,
+      fileCount: 2,
+      memberPaths: ['src/first.ts', 'src/second.ts'],
+    });
     const started = Date.now();
     let lost = null;
     for (let tick = 0; !states(f).every(s => s.phase === 'landed'); tick++) {

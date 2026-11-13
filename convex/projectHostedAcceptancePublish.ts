@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelStaleLandingChecks } from './projectHostedLandingStaleChecks';
 import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
 import { trackHostedOverlapMain } from './projectHostedOverlapStore';
 import { hostedAcceptGate, holdMainRed } from './projectHostedGate';
@@ -440,12 +441,20 @@ export async function publishAcceptance(
   // The completion tick also retires landed work from overlap, so it runs even when keepOpen or policy skips completion.
   const precompose = { receiptIds: [receipt.id] };
   if (plan.inputPages) await scheduleAcceptanceCompletion(ctx, plan._id, { ...identity, precompose });
-  else
+  else {
+    await cancelStaleLandingChecks(ctx, {
+      projectId: claim.projectId,
+      sequence: receipt.snapshot.revision,
+      receiptIds: precompose.receiptIds,
+      head,
+      candidate: { id: receipt.candidate.id, actor: receipt.actor.id, digest: receipt.candidate.digest },
+    });
     await scheduleLandingPrecompose(ctx, {
       projectId: claim.projectId,
       ...precompose,
       candidate: { id: receipt.candidate.id, actor: receipt.actor.id, digest: receipt.candidate.digest },
     });
+  }
   // Numeric only: shared operator log streams must contain no receipt or user data.
   if (state.request.closes !== false) console.log('FORGE_ACCEPTED_LANDINGS 1');
   return { status: 'landed' as const, receipt };

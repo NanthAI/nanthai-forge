@@ -555,7 +555,10 @@ for (const legacy of [false, true])
     await f.drain();
     const shared = f.runs()[0];
     const base = JSON.parse(f.c.objects.get(f.c.baseline.sha256));
-    const head = f.c.state([...base.files, f.c.file('owner-work', 'owner change')], [f.c.baseline.sha256]);
+    const head = f.c.state(
+      [...base.files, f.c.file('src/owner-work.ts', 'owner change')],
+      [f.c.baseline.sha256],
+    );
     const lane = await f.c.lane(head),
       selection = f.c.selection([lane]);
     const candidate = await compose(f.c, selection);
@@ -601,7 +604,10 @@ test('urgent non-batchable owner work bypasses older normal work while a cohort 
     entries = [];
   for (const priority of ['normal', 'urgent']) {
     const base = JSON.parse(f.c.objects.get(f.c.baseline.sha256));
-    const head = f.c.state([...base.files, f.c.file(`outside-${priority}`, priority)], [f.c.baseline.sha256]);
+    const head = f.c.state(
+      [...base.files, f.c.file(`src/outside-${priority}.ts`, priority)],
+      [f.c.baseline.sha256],
+    );
     const lane = await f.c.lane(head),
       selection = f.c.selection([lane]);
     const candidate = await compose(f.c, selection);

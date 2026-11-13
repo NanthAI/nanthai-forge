@@ -31,13 +31,16 @@ async function drainAll(f, label) {
 }
 /** `count` landings, each with its own 8-shard check; one shard result every
  * `gapMs` round-robin, then the terminal result. */
-async function landings(t, { count, gapMs, batching }) {
-  const f = await batchesFixture(t, { count, batching, requestCheck: true });
+async function landings(t, { count, gapMs, batching, shared = false }) {
+  const f = await batchesFixture(t, { count, batching, requestCheck: !shared });
   await drainAll(f, 'submit');
   const live = new Map();
   const activate = async () => {
     for (const run of f.runs())
-      if (!live.has(run.id) && run.status !== 'passed' && run.status !== 'failed')
+      if (
+        !live.has(run.id) &&
+        !['passed', 'failed', 'cancelled', 'interrupted', 'runner-unavailable'].includes(run.status)
+      )
         live.set(run.id, await f.rawChecks.activate(run.id, SHARDS));
   };
   await activate();
@@ -48,7 +51,7 @@ async function landings(t, { count, gapMs, batching }) {
     await activate();
     const open = [...live.entries()].filter(([id]) => {
       const run = f.runs().find(run => run.id === id);
-      return run.status !== 'passed' && run.status !== 'failed';
+      return !['passed', 'failed', 'cancelled', 'interrupted', 'runner-unavailable'].includes(run.status);
     });
     if (!open.length) break;
     const [id, activated] = open[step % open.length];
@@ -120,11 +123,12 @@ test('a terminal result inside the throttle window is never skipped (lost-wakeup
 });
 
 test('three landings with shared batch runs still settle, and no wake is lost or idle', async t => {
-  const run = await landings(t, { count: 3, gapMs: 20_000, batching: 'default' });
+  const run = await landings(t, { count: 3, gapMs: 20_000, batching: 'default', shared: true });
   assert.deepEqual(
     states(run.f).map(state => state.phase),
     ['landed', 'landed', 'landed'],
   );
+  assert.equal(run.f.runs().length, 1, 'all three entries share the one cohort run');
   assert.equal(run.f.pending().filter(task => !task.name.startsWith('projectHostedLandingStall')).length, 0);
   // Before: 45 wakes. Several waiters on one run keep the old (conservative) rule.
   assert(run.checkWakes <= 31, `wakes ${run.checkWakes}`);

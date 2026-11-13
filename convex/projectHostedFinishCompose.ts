@@ -283,6 +283,23 @@ export async function installFinishCompose(
   }
   const terminal = source.operation.terminal;
   invariant(terminal, 'WORK_STALE', 'Wait for the original source job to settle.');
+  // A running check retired by an acceptance owns a fresh exact composition.
+  // Back-to-back main moves must not spend its replacement CI on an obsolete
+  // source generation, or expose an obsolete conflict as the final outcome.
+  if (!pending.precompose && state.batchNeedsSoloCompose) {
+    const main = await hostedStartMain(ctx, row.projectId);
+    if (main.head !== pending.main.head || main.receipt.id !== pending.main.receiptId) {
+      await reserveFinishRetry(
+        ctx,
+        row,
+        { ...value, pending: null },
+        'CHECK_EVIDENCE_REFRESH',
+        undefined,
+        main,
+      );
+      return;
+    }
+  }
   if (terminal.outcome.status === 'failed') {
     if (pending.precompose) {
       if (await continuePrecompose(ctx, row, value)) return;

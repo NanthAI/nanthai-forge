@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic, batchStore } from './hosted-landing-batches-fixture.mjs';
 import { landingApi } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { assertLandingProgress } from './landing-progress-invariant.mjs';
 const finishCompose = await import(moduleUrl('../convex/projectHostedFinishCompose.ts'));
 const finishStore = await import(moduleUrl('../convex/projectHostedFinishStore.ts'));
 const finishWake = await import(moduleUrl('../convex/projectHostedFinishWake.ts'));
@@ -25,21 +26,30 @@ const rowOf = (f, id) =>
   [...f.tables.projectHostedLandingRequests.values()].find(row => row.submissionId === id);
 const queueOf = f => [...f.tables.projectHostedLandingQueues.values()][0];
 const invoke = (f, name, handler) => f.transaction(name, { _handler: handler }, {});
-async function drain(f, skip = () => false) {
+async function drain(f, skip = () => false, guard = false) {
   for (let steps = 0; ; steps++) {
     const task = f.pending().find(task => !task.name.startsWith('projectHostedLandingStall:') && !skip(task));
     if (!task) return;
     assert(steps < 2000, 'finite event-driven progress');
     await f.execute(task);
+    if (guard)
+      assertLandingProgress(f, {
+        externalRuns: new Set(
+          f
+            .runs()
+            .filter(run => ['queued', 'running'].includes(run.status))
+            .map(run => run.id),
+        ),
+      });
   }
 }
-async function finish(f) {
+async function finish(f, guard = false) {
   for (let wave = 0; states(f).some(state => !['landed', 'terminal-failed'].includes(state.phase)); wave++) {
     assert(wave < 20);
     const runs = f.runs().filter(run => run.status === 'queued');
-    assert(runs.length, JSON.stringify(states(f).map(({ phase, error }) => ({ phase, error }))));
+    assert(runs.length, 'pending cohort retains a runnable check');
     for (const run of runs) await f.rawChecks.pass(await f.rawChecks.activate(run.id));
-    await drain(f);
+    await drain(f, () => false, guard);
   }
   assert.equal(f.pending().length, 0);
 }
@@ -126,11 +136,11 @@ for (const change of ['retry', 'head', 'receipt', 'fail', 'cancel'])
 
 test('failed survivor cohort recomposes parked rejection on actual main without failed peer attribution', async t => {
   const f = await batchesFixture(t, mixed);
-  await drain(f);
+  await drain(f, () => false, true);
   const cohort = batches(f).find(batch => batch.predecessor);
   assert.equal(current(f, 3).phase, 'queued');
   await f.fail(cohort.runId);
-  await drain(f);
+  await drain(f, () => false, true);
   // 51bbbd00: the failing file names no member and the predecessor has not
   // passed, so the stacked cohort first rechecks once on current main without it.
   const unstacked = batches(f).find(batch => batch.id === cohort.id);
@@ -139,7 +149,7 @@ test('failed survivor cohort recomposes parked rejection on actual main without 
   assert.notEqual(unstacked.runId, cohort.runId);
   // Failing again on its own base, it splits as before.
   await f.fail(unstacked.runId);
-  await drain(f);
+  await drain(f, () => false, true);
   const rejected = current(f, 3);
   assert.equal(batches(f).find(batch => batch.id === cohort.id).phase, 'split');
   assert.notEqual(rejected.error?.code, 'COMPOSITION_CONFLICT', 'failed survivors were never main');
@@ -150,8 +160,8 @@ test('failed survivor cohort recomposes parked rejection on actual main without 
   assert.equal(JSON.parse(attempt.value).main.head, f.currentMain().head);
   assert.equal(rowOf(f, rejected.id).wouldConflict, undefined);
   await f.rawChecks.pass(await f.rawChecks.activate(f.runs()[0].id));
-  await drain(f);
-  await finish(f);
+  await drain(f, () => false, true);
+  await finish(f, true);
   if (current(f, 3).error?.code === 'COMPOSITION_CONFLICT') {
     for (const index of [4, 5]) assert(!current(f, 3).error.message.includes(f.entries[index].lane.laneId));
   }
