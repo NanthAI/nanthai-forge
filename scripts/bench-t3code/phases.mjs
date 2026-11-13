@@ -208,7 +208,7 @@ export function callKinds(call) {
 export const TRIGGERS = [
   [
     'conflict',
-    /\b(COMPOSITION_CONFLICT|WORK_CONFLICT|HOSTED_CONFLICT)\b|<<<<<<< lane|CONFLICT \(|Automatic merge failed|"mergeStateStatus"\s*:\s*"DIRTY"/,
+    /\b(COMPOSITION_CONFLICT|WORK_CONFLICT|HOSTED_CONFLICT)\b|<<<<<<< lane|^CONFLICT \([^)\r\n]+\): .+|Automatic merge failed|"mergeStateStatus"\s*:\s*"DIRTY"/,
   ],
   ['channel-changed', /\bCHANNEL_CHANGED\b/],
   ['check-failed', /\bCHECK_FAILED\b|"phase"\s*:\s*"terminal-failed"|"conclusion"\s*:\s*"FAILURE"|\tfail\t/i],

@@ -151,6 +151,18 @@ separate owner operations.
 
 ## What each harness file does
 
+The GitHub arm's shared read helper retries HTTP 5xx and transient network failures
+up to three attempts, with 250 ms then 500 ms backoffs. Healthy reads run once;
+4xx and other failures return immediately. Writes do not use this read retry;
+reset retains its separate fixed-target recovery. Settlement and CI evidence
+collection use the same helper.
+
+Rework counts Git's line-shaped `CONFLICT (kind): detail` merge failures, Forge's
+structured conflict errors and real conflict markers. Advisory
+`EXACT CONFLICT (trial merge of saved files)` notices are coordination. Recompute
+retained results offline with `node scripts/bench-t3code/rework.mjs RUN_DIR...`;
+the command prints JSON without changing retained inputs.
+
 `tasks.mjs` constructs the manifest; `plan.mjs` fixes digest/order/repetition rules; `deps.mjs` prepares shared dependencies; `oracle.mjs`, `oracle.sh` and `score.mjs` qualify and score; `run.mjs` joins the registered sequence, `progress.mjs` reads its local progress, and `drive.mjs` schedules `run-cell.mjs`; `github-arm.mjs` and `forge-arm.mjs` implement the arms; `preflight.mjs`, `versions.mjs`, `meter.mjs`, `samplers.mjs` and `summarize.mjs` capture conditions and results. `bench-root.mjs` and `cli-install.mjs` hold the folder and CLI rules every script shares. `phases.mjs` classifies each turn of an agent session (coding, landing, rework, waiting, done) and `rework.mjs` turns that into rework tokens per landing, the convoy pass rule and order waits; `cells.mjs` generates the coordination cells (convoy, overlap with the stacking A/B) from the base's workspace manifest. Both are in the [exit bench plan](../../docs/research/p6-exit-bench-plan.md).
 
 `preflight.mjs --dry` and `drive.mjs --dry` are **live qualification**, not offline recovery: they inspect external services and can prepare workspaces. Recover private configuration through the owner, authorize its resources/spend, review those scripts and preconditions, and qualify the exact harness before using them. This handover runs neither a dry cell nor a scored cell. The Phase 6 exit repeat has its own registered plan (the outlier rule, Claude Code in both arms); the historical result is unchanged.

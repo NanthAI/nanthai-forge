@@ -17,7 +17,42 @@ const upstream = 'pingdotgg/t3code';
 // Agents' clones see main only (B1): no other branch of the fork is ever fetched.
 export const REFSPEC = '+refs/heads/main:refs/remotes/origin/main';
 
-const gh = async args => (await run('gh', args, { maxBuffer: 256 << 20 })).stdout;
+const ghOnce = async args => (await run('gh', args, { maxBuffer: 256 << 20 })).stdout;
+
+// Only known read commands can be replayed after an unknown network outcome. API fields
+// imply POST unless an explicit GET/HEAD overrides them; GraphQL may contain mutations.
+function ghRead(args) {
+  if (args[0] !== 'api')
+    return /^(pr (list|view|checks|status)|run (list|view)|search prs)$/.test(args.slice(0, 2).join(' '));
+  if (args.some(arg => /^\/?graphql(?:\?|$)/.test(arg))) return false;
+  const methods = args.flatMap((arg, i) => {
+    if (arg === '-X' || arg === '--method') return [args[i + 1]];
+    const attached = /^(?:-X|--method=)(.+)$/.exec(arg);
+    return attached ? [attached[1]] : [];
+  });
+  if (methods.length) return methods.every(method => /^(GET|HEAD)$/i.test(method ?? ''));
+  return !args.some(arg => /^(?:-[fF].*|--(?:raw-field|field|input)(?:=|$))/.test(arg));
+}
+
+/** Finite read recovery shared by queue settlement and all GitHub-arm evidence reads. */
+export async function gh(args, { execute = run, pause = wait } = {}) {
+  const delays = [250, 500];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return (await execute('gh', args, { maxBuffer: 256 << 20 })).stdout;
+    } catch (error) {
+      const message = `${error.stderr ?? ''}\n${error.message ?? ''}`;
+      const status = /\bHTTP(?:\/\d(?:\.\d)?)?\s+(\d{3})\b/i.exec(message)?.[1];
+      const transient = status
+        ? /^5\d\d$/.test(status)
+        : /\b(ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|EPIPE|ENOTFOUND)\b|\b(?:EOF|connection reset|connection refused|connection timed out|i\/o timeout|TLS handshake timeout|context deadline exceeded|Client\.Timeout exceeded|temporary failure in name resolution|no such host|network is unreachable|error connecting to api\.github\.com)\b/i.test(
+            `${error.code ?? ''}\n${message}`,
+          );
+      if (!ghRead(args) || !transient || attempt === delays.length) throw error;
+      await pause(delays[attempt]);
+    }
+  }
+}
 const api = async (path, ...rest) => JSON.parse((await gh(['api', ...rest, path])) || 'null');
 const pages = async path => JSON.parse(await gh(['api', '--paginate', '--slurp', path])).flat();
 
@@ -115,7 +150,7 @@ export async function retryResetRequest(request, pause = wait) {
  * `finishedCell(cellId)` says whether a cell of this harness's ledger has ended; the grading
  * branch (oracle/<cellId>) of such a cell is removed here, because a network blip can leave
  * it behind. Any other non-agent branch still fails the reset (BENCH_FORK_NOT_CLEAN). */
-export async function reset(base, { request = gh, pause = wait, finishedCell = () => false } = {}) {
+export async function reset(base, { request = ghOnce, pause = wait, finishedCell = () => false } = {}) {
   const gh = args => retryResetRequest(() => request(args), pause);
   const api = async (path, ...rest) => JSON.parse((await gh(['api', ...rest, path])) || 'null');
   const branches = async () =>

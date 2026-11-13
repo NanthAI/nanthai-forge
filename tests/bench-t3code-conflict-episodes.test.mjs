@@ -19,6 +19,17 @@ const call = (verb, n, extra = {}) => ({
 });
 const conflict = n => call('land --save', n, { code: 2, errorCodes: ['COMPOSITION_CONFLICT'] });
 
+test('GitHub coordination counters ignore advisory conflict prose', () => {
+  const result = githubTask({
+    task: 'synthetic',
+    landing: { landed: true },
+    runs: [],
+    session: { actions: [], seen: ['EXACT CONFLICT (trial merge of saved files): a.ts'] },
+  });
+  assert.equal(result.conflictEpisodes, 0);
+  assert.equal(result.mergeConflictOutputs, 0);
+});
+
 test('Forge counts land failure, retries, sync markers and failed resolution as one episode', () => {
   const result = forge([
     conflict(1),

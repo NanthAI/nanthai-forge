@@ -77,6 +77,30 @@ const finalText = () => [
 ];
 const land = `nforge agent . land --save '{"message":"x"}'`;
 
+test('advisory exact-conflict notices are coordination; real merge failures still trigger rework', () => {
+  for (const [result, rework] of [
+    ['EXACT CONFLICT (trial merge of saved files): src/a.ts', false],
+    ['{"conflictNotice":"EXACT CONFLICT (trial merge of saved files): src/a.ts"}', false],
+    ['CONFLICT (content): Merge conflict in src/a.ts', true],
+    ['CONFLICT (add/add): Merge conflict in src/a.ts', true],
+    ['CONFLICT (modify/delete): src/a.ts deleted in main and modified in HEAD.', true],
+    ['COMPOSITION_CONFLICT', true],
+    ['WORK_CONFLICT', true],
+    ['HOSTED_CONFLICT', true],
+    ['<<<<<<< lane', true],
+  ]) {
+    const r = classify(
+      sessionTurns([
+        ...claudeTurn(land, 'queued'),
+        ...claudeTurn("nforge agent . status '{}'", result),
+        ...claudeTurn('git status', 'working'),
+      ]),
+    );
+    assert.equal(r.events.reworkEpisodes, rework ? 1 : 0, result);
+    assert.equal(r.phases[2], rework ? 'rework' : 'landing', result);
+  }
+});
+
 /** A Forge session: code, land (check fails), fix, land, poll, landed, summary. */
 function forgeSession() {
   return [

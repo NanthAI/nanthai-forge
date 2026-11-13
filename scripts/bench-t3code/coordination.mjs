@@ -162,7 +162,7 @@ export function githubTask({ task, landing, session, runs }) {
   }).length;
   const seen = session.seen;
   const commands = session.actions.map(a => a.input);
-  const conflictPattern = /CONFLICT \(|Automatic merge failed/;
+  const conflictPattern = /^CONFLICT \([^)\r\n]+\): .+|Automatic merge failed/m;
   const conflictEpisodes = episodes(
     seen.flatMap(output =>
       output.split('\n').map(line => ({
