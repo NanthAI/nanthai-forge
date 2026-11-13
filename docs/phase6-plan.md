@@ -58,6 +58,16 @@ read fresh planning before close. No checkbox or Issue status changes here.
 | [6ab11d19](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=6ab11d19-472f-44e4-bc84-daaa27c1fdd8) | Summary/default report/baseline preserve actual A/C `mainMoved`, first-check class/reason and recompose count; `landReuse` is C, not necessarily the overtaken Lane. Keep baseline values/strict checks unchanged; exact historical matching, reversed-order guard and full report; only matched C overtakes count toward the requested five. |
 | [8c9b84fc](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=8c9b84fc-737e-4d1e-8bca-0d0f847566e6) | Finish offline qualified-base/ten-task reconstruction and setup/harness portability proofs with receipts, then final frozen plan, estimate and owner go. Publish every N against GitHub and B1.5d: seconds to main/wall/prep/CLI/queue, correctness, rework tokens/turns, CI and Convex cost; preserve preregistered outlier/contamination rules and every void. Prove multi-agent coordination, N16 convoy bar and zero independent-order waits; report stacking A/B and weaker-model error/turn evidence. Later owner amendments soften N1 parity and CI-minute reduction; they do not waive reporting or generic regression fixes. |
 
+Added 13 November, after the first exit-bench batches were stopped to fix conflict signals (the bench then
+restarted fresh on the fixed build):
+
+| Issue | Remaining line(s) / evidence needed |
+| --- | --- |
+| [83e6d0d3](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=83e6d0d3-adf8-4390-814c-60b680607098) | Lines 1, 2 and 4 landed (exact conflicts at save, delivery on every surface and wait, stale-check cancellation); live landing-wait and billed-cost evidence from the restarted bench. **Line 3 is bench-gated** (see 7fe54c7c). |
+| [6fbba986](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=6fbba986-3b78-439d-878d-afbd66510414) | Sync and resolve after a conflict at about 29,000 files: two rounds landed (sync 27.7 to 19.9 s); the 10 s target is still open. |
+| [d730121f](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=d730121f-bc82-46cf-9d3b-e7c640bbd65d) | Distinct agent run per session landed for the CLI and the bench harness; live confirmation from the restarted bench. |
+| [7fe54c7c](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=7fe54c7c-5a64-48b9-a20f-4c6352a62e45) | **Bench-gated, may not be done at all.** Stacked checks and overtaking are built and parked (Lane f36318fb). Run a narrower round only if the restarted bench still shows overlap waits on the slow tail; otherwise the lead proposes closing it and the owner decides. |
+
 The bench Issue retains its exact bars and amendments; this table is not a new
 bench plan. Older stage-map items below are context, not additional live Issues
 or authority to move an unresolved acceptance line.
