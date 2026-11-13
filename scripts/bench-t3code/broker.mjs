@@ -15,9 +15,17 @@ import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { operationsOf, cliError } from './receipts.mjs';
+import { taskIdentity, withTaskIdentity } from './task-identity.mjs';
 
 // Env an agent passes through to its CLI call; everything else is the relay's own.
-const PASS = ['PATH', 'VP_HOME', 'npm_config_store_dir', 'FORGE_OBJECT_CACHE'];
+const PASS = [
+  'PATH',
+  'VP_HOME',
+  'npm_config_store_dir',
+  'FORGE_OBJECT_CACHE',
+  'FORGE_AGENT_SESSION',
+  'FORGE_AGENT_MODEL',
+];
 
 /** JSON receipts printed by one CLI call (one per line). */
 function receipts(text) {
@@ -149,7 +157,11 @@ export function startBroker(cli, callLog, { now = () => new Date().toISOString()
       }
       if (req.url === '/register') {
         if (call.admin !== admin) return reply({ ok: false });
-        agents.set(call.token, { root: call.root, env: call.env ?? {}, task: call.task ?? null });
+        agents.set(call.token, {
+          root: call.root,
+          env: { ...taskIdentity(), ...call.env },
+          task: call.task ?? null,
+        });
         return reply({ ok: true });
       }
       if (req.url === '/ping') return reply({ ok: true, at: now() });
@@ -158,8 +170,10 @@ export function startBroker(cli, callLog, { now = () => new Date().toISOString()
       const target = ['agent', 'x'].includes(args[0]) && args[1] ? resolve(cwd, args[1]) : cwd;
       if (!agent || !inside(agent.root, resolve(cwd)) || !inside(agent.root, target))
         return reply({ stdout: '', stderr: 'bench: nforge is limited to your workspace\n', code: 2 });
-      const env = { ...process.env };
-      for (const key of PASS) if (agent.env[key]) env[key] = agent.env[key];
+      const assigned = Object.fromEntries(
+        PASS.filter(key => agent.env[key]).map(key => [key, agent.env[key]]),
+      );
+      const env = withTaskIdentity(process.env, assigned);
       const execStartedAt = now();
       const callId = randomUUID();
       // Separate journal keeps completed-call scoring unchanged. Persist before exec:

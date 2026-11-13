@@ -20,6 +20,7 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSyn
 import { join } from 'node:path';
 import { loadavg } from 'node:os';
 import { benchRootOrExit } from './bench-root.mjs';
+import { taskIdentity } from './task-identity.mjs';
 import { launchAgent, agentOf, killAgents, claudeTokenFile, claudeTokenProblem } from './agent.mjs';
 import { prompt } from './prompt.mjs';
 import * as github from './github-arm.mjs';
@@ -385,6 +386,8 @@ async function dispatch(task, k) {
   };
   try {
     let env = {
+      ...taskIdentity(),
+      FORGE_AGENT_MODEL: agentOf(config).model,
       PATH: `${bin}:${shared ? join(vpHome, 'bin') + ':' : ''}/usr/local/bin:${process.env.PATH}`,
       ...depsEnv,
     };
@@ -399,6 +402,7 @@ async function dispatch(task, k) {
         `${task.id}: ${task.prompt.split('\n')[0]}`,
         record.prep,
         task.id,
+        env,
       );
       lanes.set(record.laneId, { task: task.id, root });
       const t = Date.now();

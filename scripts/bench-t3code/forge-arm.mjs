@@ -18,6 +18,7 @@ import {
 } from 'node:fs';
 import { rm, mkdir } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { withTaskIdentity } from './task-identity.mjs';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -99,12 +100,13 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
     appendFileSync(ledger, JSON.stringify({ op, laneId, at: new Date().toISOString(), ...extra }) + '\n');
   const { url, projectId, cli } = config;
   const X = { url, projectId };
-  const nf = async (root, verb, body, extra = []) => {
+  const nf = async (root, verb, body, extra = [], taskEnv) => {
     const { stdout } = await run(
       '/usr/local/bin/node',
       [cli, 'agent', root, verb, ...extra, JSON.stringify(body)],
       {
         maxBuffer: 64 << 20,
+        ...(taskEnv ? { env: withTaskIdentity(process.env, taskEnv) } : {}),
       },
     );
     const line = stdout
@@ -120,16 +122,16 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
     nf,
     /** Start a Lane on main and materialize it at root (outside agent timing). */
     /** New Lane, then its checkout at root; `phases` gets each step's seconds. */
-    async startLane(root, outcome, phases = {}, task = null) {
+    async startLane(root, outcome, phases = {}, task = null, taskEnv) {
       let t = Date.now();
       await mkdir(anchor, { recursive: true });
-      const started = await nf(anchor, 'start', { ...X, operationId: randomUUID(), outcome });
+      const started = await nf(anchor, 'start', { ...X, operationId: randomUUID(), outcome }, [], taskEnv);
       const laneId = JSON.stringify(started).match(/"laneId":"([0-9a-f-]{36})"/)?.[1];
       if (!laneId) throw Error(`BENCH_FORGE_START ${JSON.stringify(started).slice(0, 500)}`);
       log('open', laneId, { outcome: outcome.slice(0, 80), root, callLog, task });
       phases.start = (Date.now() - t) / 1000;
       t = Date.now();
-      await nf(root, 'open', { ...X, laneId });
+      await nf(root, 'open', { ...X, laneId }, [], taskEnv);
       if (!existsSync(join(root, '.forge', 'hosted-lane.json'))) throw Error('BENCH_FORGE_OPEN');
       phases.open = (Date.now() - t) / 1000;
       return laneId;

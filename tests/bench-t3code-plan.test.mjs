@@ -58,7 +58,8 @@ import { scanTask } from '../scripts/bench-t3code/contamination.mjs';
 import { forgeTask, githubTask, cellCoordination, gateTime } from '../scripts/bench-t3code/coordination.mjs';
 import { differences } from '../scripts/bench-t3code/versions.mjs';
 import { coordinationOf } from '../scripts/bench-t3code/broker.mjs';
-import { settled, openLanes, resolveLanes } from '../scripts/bench-t3code/forge-arm.mjs';
+import { taskIdentity } from '../scripts/bench-t3code/task-identity.mjs';
+import { forgeArm, settled, openLanes, resolveLanes } from '../scripts/bench-t3code/forge-arm.mjs';
 
 const ids = [
   't27514',
@@ -1080,7 +1081,9 @@ console.log(JSON.stringify({ type: 'system', subtype: 'init', tools: ['Bash'] })
 console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, session_id: sid, num_turns: 1,
   modelUsage: { m: { inputTokens: 1, outputTokens: 2 } },
   result: JSON.stringify({ tokenSha: createHash('sha256').update(token).digest('hex'), leaked,
-    memoryOff: process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, last: process.argv.at(-1) }) }));
+    memoryOff: process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, last: process.argv.at(-1),
+    enclosingSession: !!(process.env.CLAUDE_CODE_SESSION_ID || process.env.CODEX_THREAD_ID || process.env.FORGE_HUMAN),
+    taskSession: process.env.FORGE_AGENT_SESSION === 'task-session' }) }));
 `,
     { mode: 0o755 },
   );
@@ -1090,6 +1093,9 @@ console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false
   const saved = { ...process.env };
   process.env.ANTHROPIC_API_KEY = 'must-not-pass';
   process.env.CLAUDE_CODE_OAUTH_TOKEN = 'must-not-pass';
+  process.env.CLAUDE_CODE_SESSION_ID = 'enclosing-claude';
+  process.env.CODEX_THREAD_ID = 'enclosing-codex';
+  process.env.FORGE_HUMAN = '1';
   try {
     const { spawnSync } = await import('node:child_process');
     // CLAUDE is read at import: run the launch in a child with BENCH_CLAUDE set.
@@ -1100,7 +1106,7 @@ console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false
         '-e',
         `import { launchAgent } from ${JSON.stringify(new URL('../scripts/bench-t3code/agent.mjs', import.meta.url).href)};
 const r = await launchAgent({ workspace: ${JSON.stringify(ws)}, benchRoot: ${JSON.stringify(join(dir, 'bench'))},
-  prefix: ${JSON.stringify(join(dir, 'out', 't1'))}, prompt: 'do it', env: {}, timeoutMs: 60000,
+  prefix: ${JSON.stringify(join(dir, 'out', 't1'))}, prompt: 'do it', env: { FORGE_AGENT_SESSION: 'task-session' }, timeoutMs: 60000,
   agent: { provider: 'claude', model: 'm', effort: 'cli-default' }, claudeToken: ${JSON.stringify(token)},
   homes: { claude: ${JSON.stringify(join(dir, 'homes'))} }, extraReads: [${JSON.stringify(dir)}] });
 console.log(JSON.stringify(r));`,
@@ -1116,6 +1122,8 @@ console.log(JSON.stringify(r));`,
     assert.equal(seen.tokenSha, createHash('sha256').update(token).digest('hex'));
     assert.deepEqual(seen.leaked, []);
     assert.equal(seen.memoryOff, '1');
+    assert.equal(seen.enclosingSession, false);
+    assert.equal(seen.taskSession, true);
     assert.equal(seen.last, 'do it');
     assert.ok(
       !stdout.includes(token) && !readFileSync(join(dir, 'out', 't1.session.json'), 'utf8').includes(token),
@@ -1187,6 +1195,121 @@ test('codex transcripts: the leak scan and coordination counters read rollout ac
     assert.equal(help.landAttempts, 1, 'land --help is not an attempt');
     assert.equal(help.clean, true);
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('task preparation and relayed calls keep one run across Lanes; concurrent tasks never use the parent run', async () => {
+  const { spawn } = await import('node:child_process');
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'forge-task-identity-')));
+  const cli = join(dir, 'cli.mjs'),
+    log = join(dir, 'calls.jsonl');
+  const slugModule = new URL('../dist/agent-slug-session.js', import.meta.url).href;
+  writeFileSync(
+    cli,
+    `import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { sessionAgentSlug } from ${JSON.stringify(slugModule)};
+const [, , , root, action] = process.argv;
+if (action === 'open') { mkdirSync(root + '/.forge', { recursive: true }); writeFileSync(root + '/.forge/hosted-lane.json', '{}'); }
+const result = { action, result: { lane: { laneId: randomUUID() } }, run: sessionAgentSlug(),
+  parentLeaked: !!(process.env.CLAUDE_CODE_SESSION_ID || process.env.CODEX_THREAD_ID || process.env.FORGE_HUMAN),
+  model: process.env.FORGE_AGENT_MODEL ?? null };
+appendFileSync(${JSON.stringify(join(dir, 'preparation.jsonl'))}, JSON.stringify({ root, ...result }) + '\\n');
+console.log(JSON.stringify(result));`,
+  );
+  const saved = { ...process.env };
+  process.env.CLAUDE_CODE_SESSION_ID = 'enclosing-claude';
+  process.env.CODEX_THREAD_ID = 'enclosing-codex';
+  process.env.FORGE_AGENT_SESSION = 'enclosing-forge';
+  process.env.FORGE_AGENT_MODEL = 'parent-model';
+  let broker;
+  try {
+    const arm = forgeArm(
+      { cli, url: 'https://example.test', projectId: 'project' },
+      { callLog: log, ws: dir },
+    );
+    const tasks = [taskIdentity(), taskIdentity()].map(identity => ({
+      ...identity,
+      FORGE_AGENT_MODEL: 'task-model',
+    }));
+    const roots = [join(dir, 'one'), join(dir, 'two')];
+    const prepared = await Promise.all(
+      tasks.map(async (env, i) => {
+        const laneId = await arm.startLane(roots[i], 'same goal', {}, `task-${i}`, env);
+        return { laneId, ...(await arm.nf(roots[i], 'start', {}, [], env)) };
+      }),
+    );
+    const preparation = readFileSync(join(dir, 'preparation.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map(JSON.parse);
+    for (const [i, root] of roots.entries())
+      assert.ok(
+        preparation
+          .filter(r => r.root === root || (r.action === 'start' && r.run === prepared[i].run))
+          .every(r => r.run === prepared[i].run && !r.parentLeaked),
+      );
+    assert.equal(
+      new Set(preparation.filter(r => r.action === 'start').map(r => r.run)).size,
+      2,
+      'pre-created Lanes belong to distinct task runs',
+    );
+    for (const task of prepared) {
+      const created = preparation.find(r => r.result.lane.laneId === task.laneId);
+      assert.equal(created.run, task.run, 'the task owns its pre-created Lane');
+      assert.equal(created.parentLeaked, false);
+    }
+    assert.ok(prepared.every(r => !r.parentLeaked));
+    assert.notEqual(prepared[0].run, prepared[1].run);
+    broker = spawn(
+      process.execPath,
+      [new URL('../scripts/bench-t3code/broker.mjs', import.meta.url).pathname, cli, log],
+      { stdio: ['pipe', 'pipe', 'inherit'] },
+    );
+    const { port, admin } = await new Promise(done => broker.stdout.once('data', d => done(JSON.parse(d))));
+    const post = (path, body) =>
+      fetch(`http://127.0.0.1:${port}${path}`, { method: 'POST', body: JSON.stringify(body) }).then(r =>
+        r.text(),
+      );
+    await Promise.all(
+      tasks.map((env, i) => post('/register', { admin, token: `task-${i}`, root: roots[i], env })),
+    );
+    const call = async i => {
+      const text = await post('/', {
+        token: `task-${i}`,
+        cwd: roots[i],
+        args: ['agent', '.', 'start', '{}'],
+      });
+      const stdout = text
+        .split('\n')
+        .filter(Boolean)
+        .map(JSON.parse)
+        .map(frame => frame.stdout ?? '')
+        .join('');
+      return JSON.parse(stdout.trim());
+    };
+    const first = await Promise.all(tasks.map((_, i) => call(i)));
+    const restarted = await Promise.all(tasks.map((_, i) => call(i)));
+    assert.deepEqual(
+      first.map(r => r.run),
+      prepared.map(r => r.run),
+      'preparation and agent calls agree',
+    );
+    assert.deepEqual(
+      restarted.map(r => r.run),
+      first.map(r => r.run),
+      'another CLI process and Lane keep the run',
+    );
+    assert.ok(first.every(r => !r.parentLeaked && r.model === 'task-model'));
+    assert.notEqual(first[0].run, first[1].run);
+  } finally {
+    process.env = saved;
+    if (broker) {
+      const exited = new Promise(done => broker.once('exit', done));
+      broker.kill();
+      await exited;
+    }
     rmSync(dir, { recursive: true, force: true });
   }
 });

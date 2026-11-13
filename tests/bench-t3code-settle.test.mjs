@@ -8,9 +8,10 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync, readFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
+import { taskIdentity } from '../scripts/bench-t3code/task-identity.mjs';
 import ts from 'typescript';
 import { forgeArm, inProgressCalls, readCalls } from '../scripts/bench-t3code/forge-arm.mjs';
-import { codexUsage, quotaHit } from '../scripts/bench-t3code/agent.mjs';
+import { codexUsage, quotaHit, agentOf } from '../scripts/bench-t3code/agent.mjs';
 
 const fixture = t => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'forge-test-settle-')));
@@ -203,6 +204,8 @@ test('run-cell task-error and abnormal cleanup observe before close and retain i
       arrive: () => assert.fail('only coordination cells wait for the start signal'),
       startSignal: Promise.resolve(),
       config: {},
+      taskIdentity,
+      agentOf,
       bin: '/synthetic/bin',
       shared: null,
       depsEnv: {},
@@ -265,6 +268,8 @@ test('coordination cell: a workspace that fails before the start signal still ar
     arrive: () => arrived++,
     startSignal: new Promise(() => {}), // never released: the failed task must not wait for it
     config: {},
+    taskIdentity,
+    agentOf,
     bin: '/synthetic/bin',
     shared: null,
     depsEnv: {},

@@ -157,6 +157,15 @@ separate owner operations.
 
 **Agent.** The P6 exit bench runs GPT `gpt-6.1-sol` (effort high) through the Codex CLI in both arms (`plan.mjs DESIGN.agent`, owner decision cfe33f2c), B1.5d's agent: each task gets a fresh `CODEX_HOME` holding only a link to the owner's Codex login, with sub-agents, web search and the other extras disabled (`agent.mjs CODEX_DISABLED`).
 
+**Task identity.** Before preparing either arm's workspace, the harness assigns one opaque
+`FORGE_AGENT_SESSION` to each task. Forge Lane creation and every relayed CLI call use
+that same session, including calls from resolution Lanes. The relay and both client
+launchers clear enclosing Claude, Codex and Forge session declarations, the human flag
+and the parent's model declaration; task model metadata comes from the configured agent.
+The relay keeps the assigned identity for the registration's lifetime, rather than deriving
+it from its shared parent process. Native client thread IDs still identify their own
+transcripts. A changed identity adapter needs fresh harness qualification before scoring.
+
 **Claude agent.** With `config.agent.provider: claude` each task runs Claude Code in a fresh `CLAUDE_CONFIG_DIR` (no owner settings, memory, sessions, skills or MCP) with the tools `Bash`, `Read`, `Edit`, `Write`, `TodoWrite` only. A fresh home has no login, so the owner saves a long-lived token (`claude setup-token`) at `BENCH_ROOT/secrets/claude-oauth-token` (mode 600; `config.agent.tokenFile` overrides the path). The harness hands it to the CLI on a pipe, never in the agent's environment, and a real cell refuses with `BENCH_CLAUDE_TOKEN_REQUIRED` without it.
 
 ## Harness rules that scoring and batching depend on

@@ -226,6 +226,33 @@ async function startProject() {
   return { s, projectId, input, begin };
 }
 
+test('supported clients: concurrent sessions see each other in presence and keep their own run across Lanes', async () => {
+  const clients = [
+    n => sessionAgentSlug(undefined, { CLAUDE_CODE_SESSION_ID: `claude-${n}` }),
+    n => sessionAgentSlug(undefined, { CODEX_THREAD_ID: `codex-${n}` }),
+    n => sessionAgentSlug(`mcp:${n}`, {}),
+    n => sessionAgentSlug(undefined, { FORGE_AGENT_SESSION: `task-${n}` }),
+  ];
+  for (const identify of clients) {
+    const { s, projectId, input, begin } = await startProject();
+    const [one, two] = [identify(1), identify(2)];
+    assert.notEqual(one, two);
+    const first = await begin(input({ kind: 'new', outcome: 'Same work' }, { agent: one }));
+    const second = await begin(input({ kind: 'existing', intentId: first.intentId }, { agent: two }));
+    const another = await begin(
+      input({ kind: 'existing', intentId: first.intentId }, { agent: identify(1) }),
+    );
+    const presence = async laneId =>
+      JSON.parse(await s.call('read', overlaps.read, { projectId, laneId, presence: {} })).presence.lanes;
+    assert.ok((await presence(first.lane.laneId)).some(lane => lane.laneId === second.lane.laneId));
+    assert.ok((await presence(second.lane.laneId)).some(lane => lane.laneId === first.lane.laneId));
+    assert.ok(
+      !(await presence(first.lane.laneId)).some(lane => lane.laneId === another.lane.laneId),
+      'own Lanes stay in the same run',
+    );
+  }
+});
+
 test('start (server): the session slug labels its Lane in presence, peer wait and overlap; retries ignore it', async () => {
   const { s, projectId, input, begin } = await startProject();
   const firstInput = input({ kind: 'new', outcome: 'Agent identities' }, { agent: 'quiet-otter' });

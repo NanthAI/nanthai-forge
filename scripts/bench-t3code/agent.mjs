@@ -6,6 +6,7 @@
 // caches); bench data (tasks, oracle, results, other workspaces, sibling bench folders) is
 // unreadable. `scripted` replaces the model for the no-model dry run.
 import { spawn } from 'node:child_process';
+import { taskIdentity, withTaskIdentity } from './task-identity.mjs';
 import {
   createWriteStream,
   writeFileSync,
@@ -469,8 +470,7 @@ export function launchAgent({
       : claudeArgs({ model: agent.model, effort: agent.effort, sessionId: id, prompt });
   const command = scripted ? scripted.command : codex ? CODEX : CLAUDE;
   const childEnv = {
-    ...process.env,
-    ...env,
+    ...withTaskIdentity(process.env, { ...taskIdentity(), ...env }),
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     DISABLE_AUTOUPDATER: '1',
     ...(codexHome ? { CODEX_HOME: codexHome } : {}),
