@@ -19,7 +19,8 @@ export function sourceStateChunks(
   avoided: (size: number) => void,
 ) {
   const known = new Map<string, Physical>(),
-    writing = new Map<string, Promise<Physical>>();
+    writing = new Map<string, Promise<Physical>>(),
+    loaded = new Set<string>();
   function binding(
     pin: WorkerPin,
     url: string | null,
@@ -42,11 +43,12 @@ export function sourceStateChunks(
     }
   };
   const rememberBytes = (pin: WorkerPin, bytes: Uint8Array, row?: ObjectLocation) => {
-    if (!row || row.closure) return;
+    if (!row || row.closure || loaded.has(pin.sha256)) return;
     const base = binding(pin, row.url, row.range);
     if (!base) return;
     const chunks = stateByteChunks(bytes, hash);
     if (!chunks) return;
+    loaded.add(pin.sha256);
     for (const chunk of chunks)
       known.set(chunk.sha256, {
         sha256: chunk.sha256,

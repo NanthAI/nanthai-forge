@@ -162,3 +162,12 @@ action count is not proof of the ten-second complete-operation target.
 fixture: the verified saved file list and pinned final header rebuild to the exact
 State hash. Legacy or mismatching encodings retain the download fallback. This is
 an unchanged-content transfer guard, not a limit on resolving source.
+
+`source-sync-metadata-merges` permits one exact metadata merge per calculation round, shared by
+composition, docs handling, drafting and conflict details. `source-chain-control-calls` permits fourteen function executions after preparation.
+`source-chain-node-actions` permits one Node action for a bounded 29k save plus resolve. `source-chain-extra-read-bytes` permits
+128 KiB beyond the save's one draft-State read across that cycle; the resolve reuses its saved
+and draft States. The isolated real-handler fixture exercises a fresh action process, counts
+actual synthetic R2 bodies and checks authority changes, marker rejection and retry safety.
+The 16 MiB retained-input routing allowance, source envelopes and 512 MiB action allocation are
+unchanged. Independent-chain fallback remains available; these guards add no source restriction.

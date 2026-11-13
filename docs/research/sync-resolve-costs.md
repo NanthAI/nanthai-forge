@@ -435,7 +435,7 @@ The installed baseline took 23.140 seconds for conflict sync and 19.310 for reso
 8.686, conflict apply 2.149 and settle 0.347. Resolve phase time was 18.097 seconds:
 save 6.179, submit 1.181, source wait 8.587 and apply 2.150. Source work again used
 two actions. This light ancestry differs from the incident's larger cached history.
-The separate save and resolve still publish two full flat States. The local paired
+The separate save and resolve still process whole logical States. The local paired
 kernel result alone cannot establish the complete ten-second target or Git parity;
 post-acceptance dev evidence belongs with the Issue's exact runtime and request ids.
 
@@ -490,3 +490,46 @@ conflict sync. Both exceed the configured 512 MiB action allocation in some
 shapes. Removing duplicate retained buffers does not prove complete heap safety;
 these observations neither raise an envelope nor justify increasing one. The
 existing source-envelope and byte/query guards remain unchanged.
+
+
+## Reuse across the serial save and resolve
+
+A Node save retains the inline resolve-chain option through delegation. A bounded one-page
+save can run the resolve in that same Node action, retaining hash-verified source bytes and
+parsed States within the existing 16 MiB routing allowance. The new job keeps its own current
+authority/execution fence and describes its two cached inputs and right parent together through
+the existing descriptor-only probe. Those fresh bindings also seed byte-range publication;
+reusing bytes without the bindings would regress to a full-State upload. Larger saves retain
+the independent chain and continuations, with unchanged source envelopes and action allocation.
+
+Sync composition, docs handling, conflict drafting and details reuse one exact metadata merge
+per calculation round, previously four. Both tips, selected ancestor sets and insertion order
+form the key. Inline replay clears it before calculation answers change.
+
+Eleven alternating AB/BA real-handler pairs at 29,000 files preserve identical draft, saved and
+resolved State hashes. Each Node action uses a fresh local process, with synthetic DB/R2; setup,
+network, client apply and invoices are excluded. Raw observations and the separate 4k/29k kernel
+pairs are in [`sync-resolve-serial-pairs.json`](../../tests/fixtures/sync-resolve-serial-pairs.json).
+No qualified final-code pair was discarded. Earlier exploratory timestamp and writer prototypes
+are excluded from this final-code comparison.
+
+| Save plus resolve source/control metric | Before | After |
+| --- | ---: | ---: |
+| Node actions | 2 | 1 |
+| Function executions after preparation | 17 | 14 |
+| GET body bytes | 14,182,255 | 4,728,105 |
+| GET / HEAD / PUT requests | 14 / 12 / 12 | 5 / 12 / 12 |
+| PUT body bytes | 497,416 | 497,416 |
+| Median DB read / write bytes | 243,826 / 73,820 | 237,492 / 73,805 |
+| Median maximum Node-process RSS, MiB | 235 | 219 |
+
+The summed Node action wall difference is -169 ms, 95% bootstrap interval [-178,-164]; work CPU
+is -162 ms [-175,-155], seed 1 and 10,000 resamples. The process-peak paired difference is
+-20 MiB [-26,-15]. This does not qualify deployed heap safety
+at larger envelopes. The shared coordinator keeps V8 step registration out of the Node import graph: 195 source
+modules, below the unchanged 220-module guard. The unchanged 512 MiB guard passes; the independent-chain routing boundary
+also has a larger-source guard. Byte, query and R2 ceilings are unchanged or tighter.
+
+The pure kernel comparison separately measures metadata merge reuse; it does not include
+save-to-resolve sharing or prove complete-operation latency. The full ten-second and Git-parity
+targets still require live evidence and the Issue's repeat/noise and next-zoo qualifications.

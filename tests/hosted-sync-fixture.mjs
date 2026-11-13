@@ -9,8 +9,8 @@ export const records = await import(moduleUrl('../convex/projectHostedRecords.ts
 const saves = await import(moduleUrl('../convex/projectHostedSaves.ts'));
 const saveJobs = await import(moduleUrl('../convex/projectHostedSaveJobs.ts'));
 export { code } from './hosted-compose-fixture.mjs';
-export async function syncFixture() {
-  const s = await composeFixture();
+export async function syncFixture(options) {
+  const s = await composeFixture(options);
   const request = (kind, extra = {}) => ({
     operationId: randomUUID(),
     authorityEpoch: 1,

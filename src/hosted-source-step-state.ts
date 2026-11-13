@@ -3,11 +3,14 @@ import { MemoryMergeSource, MemorySourceReader } from './hosted-source-memory.js
 import { saveInputSchema } from './hosted-save.js';
 import { workerResultSchema } from './hosted-source-worker-format.js';
 import type { SourceStepCursor, StepTransport } from './hosted-source-step.js';
-export async function publishSourceStepState(c: SourceStepCursor, io: StepTransport) {
+export async function publishSourceStepState(
+  c: SourceStepCursor,
+  io: StepTransport,
+  source = new MemoryMergeSource(c.parents),
+) {
   io.rememberStateGenerations?.(c.generations ?? {});
   const value = c.plan as { kind: string; parents?: string[]; message: string; at: string };
-  const source = new MemoryMergeSource(c.parents),
-    reader = new MemorySourceReader(source, io);
+  const reader = new MemorySourceReader(source, io);
   const parents =
     value.kind === 'forge-hosted-save-input'
       ? [saveInputSchema.parse(value).baseline.object.sha256]

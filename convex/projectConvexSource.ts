@@ -108,6 +108,7 @@ export async function runConvexSourceStep(
               preloaded: transport.preloaded(),
               ...(options.bindings ? { bindings: options.bindings } : {}),
               observedStates: transport.observedStates(),
+              ...(options.chain ? { chain: true } : {}),
             }),
             delegatedAt: Date.now(),
           });

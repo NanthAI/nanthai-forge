@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { type NativeFile } from './state/format.js';
+import { syncInputSchema } from './hosted-sync.js';
 import { sourceSizePhase } from './source-state-size.js';
 import { MemoryMergeSource, MemorySourceReader } from './hosted-source-memory.js';
 import {
@@ -197,12 +198,16 @@ export function enqueueSourceObject(c: SourceStepCursor, ref: WorkerObject) {
     c.queue.push(id);
   }
 }
-async function saveStep(c: SourceStepCursor, io: StepTransport, m: StepMeter) {
+async function saveStep(
+  c: SourceStepCursor,
+  io: StepTransport,
+  m: StepMeter,
+  source = new MemoryMergeSource(c.parents, c.ancestryBoundary, c.ancestryCuts),
+) {
   const plan = sourceValidation('SOURCE_JOB_INVALID', () => saveInputSchema.parse(c.plan));
   let firstPage: { value: unknown } | undefined;
   if (c.pages === 0 && c.count === 0 && !c.files.length && !c.changes.length) {
-    const source = new MemoryMergeSource(c.parents, c.ancestryBoundary, c.ancestryCuts),
-      reader = new MemorySourceReader(source, io);
+    const reader = new MemorySourceReader(source, io);
     await io.prepareRead?.([plan.baseline.object, plan.pages]);
     // The first delta page and baseline are independently pinned. Read them in one
     // wave only when their combined bytes fit the existing quantum; larger saves
@@ -377,14 +382,25 @@ async function closureStep(c: SourceStepCursor, io: StepTransport, m: StepMeter)
 }
 /** One deterministic, retryable quantum. Caller atomically commits the cursor
  * and its successor schedule; repository bytes never choose executable code. */
-export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport) {
+export async function runSourceStep(
+  cursor: SourceStepCursor,
+  io: StepTransport,
+  retained?: MemoryMergeSource,
+) {
   const c = structuredClone(cursor),
     m = meter(),
     original = io,
     from = c.phase;
   if (c.plan) io.setSourceSizePhase?.(sourceSizePhase(c.plan as { kind: string }));
   io.rememberStateGenerations?.(c.generations ?? {});
-  const mergeSource = new MemoryMergeSource(c.parents, c.ancestryBoundary, c.ancestryCuts);
+  const mergeSource = retained ?? new MemoryMergeSource(c.parents, c.ancestryBoundary, c.ancestryCuts);
+  if (retained) {
+    Object.assign(c.parents, retained.parents);
+    retained.parents = c.parents;
+    retained.ancestryBoundary = c.ancestryBoundary;
+    retained.ancestryCuts = c.ancestryCuts;
+    retained.nextRound();
+  }
   io = {
     ...original,
     upload: async (pin, bytes) => {
@@ -446,6 +462,35 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
       c.plan = parseSourcePlan(await readJson(io, c.input, m));
       io.setSourceSizePhase?.(sourceSizePhase(c.plan as { kind: string }));
       const kind = (c.plan as { kind: string }).kind;
+      if (retained && kind === 'forge-hosted-sync-input') {
+        const work = syncInputSchema.parse(c.plan).work;
+        if (work.mode === 'resolve') {
+          // Shared bytes are not shared grants. The fresh job describes the two
+          // cached inputs and right parent in the one window the ordinary resolve
+          // uses. This also gives its writer the exact current chunk bindings;
+          // byte reuse alone must not turn a recipe output back into a flat PUT.
+          const ids = [
+            ...new Set([work.left.object.sha256, work.resolution.draftHead, work.resolution.right]),
+          ];
+          for (const id of [work.left.object.sha256, work.resolution.draftHead]) io.expectState?.(id);
+          invariant(
+            io.describeBatch,
+            'SOURCE_WORKER_UNAVAILABLE',
+            'Resolve exact source metadata in batches.',
+          );
+          if (io.probeStates) {
+            const page = await io.probeStates(ids);
+            invariant(!page.unavailable.length, 'SOURCE_UNAVAILABLE', 'Exact source object is absent.');
+          } else await io.describeBatch(ids);
+          for (const id of ids) {
+            const parents = io.stateParents?.(id),
+              generation = io.stateGeneration?.(id);
+            if (parents) c.parents[id] = [...parents];
+            if (generation !== undefined) (c.generations ??= {})[id] = generation;
+          }
+          c.resolveRightProbed = true;
+        }
+      }
       if (kind === 'forge-hosted-save-input') {
         const p = sourceValidation('SOURCE_JOB_INVALID', () => saveInputSchema.parse(c.plan));
         c.next = p.pages;
@@ -457,7 +502,7 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
       } else {
         c.phase = 'selection';
       }
-    } else if (c.phase === 'save') await saveStep(c, io, m);
+    } else if (c.phase === 'save') await saveStep(c, io, m, retained);
     else if (c.phase === 'inventory') await inventoryStep(c, io, m);
     else if (c.phase === 'closure') await closureStep(c, io, m);
     else if (c.phase === 'selection' || c.phase === 'graph') await prepareMergeStep(c, io, m, mergeSource);
@@ -467,7 +512,7 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
       mergeSource.ancestryCuts = c.ancestryCuts;
       const kind = (c.plan as { kind: string }).kind;
       if (kind === 'forge-hosted-save-input' || kind === 'forge-source-worker-state')
-        await publishSourceStepState(c, io);
+        await publishSourceStepState(c, io, retained);
       else {
         // Large manifests read for ancestry in this action stay live until it
         // returns; whole-State merge computation starts with a fresh heap.

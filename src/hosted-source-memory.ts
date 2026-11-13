@@ -25,11 +25,36 @@ export class MemoryMergeSource extends LazyMergeSource {
   }
   onLoadedState?: (pin: WorkerPin, fileCount: number, files: readonly NativeFile[]) => void;
   private readonly parsed = new Map<string, NativeState>();
+  private merged: { key: string; value: ReturnType<LazyMergeSource['mergeFiles']> } | undefined;
+  override mergeFiles(...args: Parameters<LazyMergeSource['mergeFiles']>) {
+    const [left, right, a, b, supplied, options = {}] = args,
+      ancestry = supplied ?? this.ancestry(),
+      first = a ?? ancestry.ancestors(left),
+      second = b ?? ancestry.ancestors(right),
+      key = JSON.stringify([left, right, [...first].sort(), [...second].sort(), options.insertionOrder]);
+    if (this.merged?.key === key) return this.merged.value;
+    const value = super.mergeFiles(left, right, first, second, ancestry, options);
+    this.merged = { key, value };
+    return value;
+  }
+  /** A calculation round may change merge/marker answers. Its metadata result is
+   * reusable only until those answers or the selected ancestry proof change. */
+  nextRound() {
+    this.merged = undefined;
+  }
+  /** A committed save is now immutable input to its action's chained resolve.
+   * Release the prior round's metadata; retain verified State trees and bytes. */
+  committedInputs() {
+    this.nextRound();
+    this.generated.clear();
+    delete this.onExpectState;
+    delete this.onLoadedState;
+  }
   private readonly generatedBytes = new WeakMap<Buffer, string>();
   private cutList: string[] | undefined;
   private cutIds = new Set<string>();
   constructor(
-    readonly parents: Record<string, string[]>,
+    public parents: Record<string, string[]>,
     public ancestryBoundary?: string,
     public ancestryCuts?: string[],
   ) {
@@ -65,6 +90,7 @@ export class MemoryMergeSource extends LazyMergeSource {
   /** Discard an interrupted calculation's tentative outputs, retaining the verified and parsed
    * input States. Re-entry allocates no second input tree and downloads none of them again. */
   resetGenerated() {
+    this.nextRound();
     for (const id of this.generated) {
       this.objects.delete(id);
       this.parsed.delete(id);
@@ -109,11 +135,12 @@ export class MemoryMergeSource extends LazyMergeSource {
     if (!value) {
       const bytes = this.object(id);
       value = parseNativeState(bytes);
-      this.onLoadedState?.({ sha256: id, size: bytes.length }, value.files.length, value.files);
       this.parsed.set(id, value);
       this.parents[id] = value.parents;
       this.states.add(id);
     }
+    const bytes = this.objects.get(id);
+    if (bytes) this.onLoadedState?.({ sha256: id, size: bytes.length }, value.files.length, value.files);
     return value;
   }
   override async fetchMissing(reader: SourceWorkerReader, error: NeededObject) {
@@ -179,6 +206,7 @@ export class MemorySourceReader extends SourceWorkerReader {
     const prior = this.source.objects.get(ref.object.sha256);
     if (prior) {
       invariant(prior.length === ref.object.size, 'SOURCE_HASH_MISMATCH', 'Object size changed.');
+      this.io.rememberBytes?.(ref.object, prior);
       this.metrics.cacheHits++;
       return prior;
     }

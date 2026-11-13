@@ -374,6 +374,50 @@
       "source": "Issue 6fbba986: recorded 29k resolves downloaded another4.9MB State after saving identical file metadata. tests/hosted-resolve-chain.test.mjs exercises the full save-chain and client apply.",
       "reason": "Reconstruct the final State header from the authenticated receipt and retained request, proving its whole hash before apply. Legacy or mismatching encodings keep their ordinary download fallback; this fixture budget adds no product restriction.",
       "issue": "6fbba986"
+    },
+    {
+      "id": "source-sync-metadata-merges",
+      "area": "conflict sync and serial save/resolve",
+      "measuredBy": "build-guard",
+      "metric": "metadataMerges",
+      "unit": "calls",
+      "max": 1,
+      "source": "tests/sync-resolve-serial-speed.test.mjs at 29,000 files; source execution only, no complete-operation latency claim.",
+      "reason": "Reuse one exact metadata merge within a calculation round; clear it when inline answers change. No user capability, source limit, identity or action allocation changes.",
+      "issue": "6fbba986"
+    },
+    {
+      "id": "source-chain-extra-read-bytes",
+      "area": "conflict sync and serial save/resolve",
+      "measuredBy": "build-guard",
+      "metric": "extraReadBytes",
+      "unit": "bytes",
+      "max": 131072,
+      "source": "tests/sync-resolve-serial-speed.test.mjs at 29,000 files; source execution only, no complete-operation latency claim.",
+      "reason": "The bounded Node save and chained resolve share verified immutable State bytes and parsed files. No user capability, source limit, identity or action allocation changes.",
+      "issue": "6fbba986"
+    },
+    {
+      "id": "source-chain-node-actions",
+      "area": "conflict sync and serial save/resolve",
+      "measuredBy": "build-guard",
+      "metric": "nodeActions",
+      "unit": "calls",
+      "max": 1,
+      "source": "tests/sync-resolve-serial-speed.test.mjs at 29,000 files; source execution only, no complete-operation latency claim.",
+      "reason": "The save keeps the inline chain option through Node delegation and executes the resolve without another Node action. No user capability, source limit, identity or action allocation changes.",
+      "issue": "6fbba986"
+    },
+    {
+      "id": "source-chain-control-calls",
+      "area": "bounded Node save plus chained resolve",
+      "measuredBy": "build-guard",
+      "metric": "functionCalls",
+      "unit": "calls",
+      "max": 14,
+      "source": "tests/sync-resolve-serial-speed.test.mjs: full real submit/save/resolve handlers at 29,000 files, excluding request preparation and client apply. Previously 17 calls.",
+      "reason": "Removes the separate scheduled chain and second Node/V8 dispatch, sharing verified inputs while retaining each job authority fence. Existing query, byte, R2 and memory ceilings stay unchanged.",
+      "issue": "6fbba986"
     }
   ],
   "costGuard": {

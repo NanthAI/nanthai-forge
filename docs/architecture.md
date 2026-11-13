@@ -1447,9 +1447,17 @@ replies `{terminal, state}` (the receipt and its server timing), so the CLI open
 When the server advertises `save-then-resolve`, a resolve's save request names the sync that
 follows it (`then`: its operation id, authority epoch, lifecycle version and message); the CLI
 retains `then` in its journal before the save and builds its own resolve request from that value.
-When the save's step published inside `projectSourceRun:submit`, that action runs the chain at
-once and adds it to its reply as `chain` (the resolve receipt, or `submitted` while the chained
-step continues); the publication schedules `projectHostedResolveChain:run` only as a fallback 5 s
+When the save's step publishes inside `projectSourceRun:submit`, the same action runs the chain
+and adds it to its reply as `chain` (the resolve receipt, or `submitted` while it continues).
+Node delegation preserves that inline-chain option. A verified one-page plan whose baseline,
+maximum delta and saved State fit the existing 16 MiB retained-input allowance lets the Node
+action run the resolve directly, reusing the save's hash-verified bytes and parsed States.
+Each job still begins under its own current authority and execution fence; no access decision
+or descriptor grant is reused. The resolve acquires its right parent's current descriptor even
+when retained parents already prove descent. Larger, unknown and continued saves keep the
+independent chain path; the existing 20 s re-entry boundary and action allocation are unchanged.
+The private chained result is consumed by the submitting action, never exposed as a new reply field.
+The publication schedules `projectHostedResolveChain:run` only as a fallback 5 s
 out, which the chain's prepare cancels. Any other publication schedules it at once. The chain builds the resolve request
 from the save's own result with the same function the CLI uses, prepares it as the save's actor,
 writes its input to R2 (checksum-bound PUT, then HEAD), submits with the dispatch inline and runs
@@ -1552,6 +1560,11 @@ plus its conflict root, or completion of a pending resolution Lane. Progress
 returns the original worker plan; `projectHostedSyncJobs:submit` dispatches the
 existing fixed source worker once under the retained job identity. There is no
 recurring sync, idle worker, owner listener or browser lifetime dependency.
+
+A bounded memory source shares one exact file-metadata merge between composition, docs handling,
+conflict drafting and conflict details. The key includes both tips, selected ancestor sets and
+insertion order; inline calculation replay and every new quantum discard that result before
+answers or ancestry proofs can change. It retains at most the latest pair's result.
 
 The sync worker uses native right-first sync composition and `conflictPlan`.
 A Lane sync onto main, and every hosted compose, whose only conflicts are

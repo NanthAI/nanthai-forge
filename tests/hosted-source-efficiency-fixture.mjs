@@ -28,6 +28,10 @@ const names = [
   'projectConvexSourceObjects',
   'projectSourceRun',
   'projectSourceRunStore',
+  'projectHostedSync',
+  'projectHostedSyncJobs',
+  'projectHostedResolveChainStore',
+  'projectHostedResolveChain',
   // The agent's capability call (it carries a split save's outcome, fea47345 C).
   'projectHostedAgent',
 ];
@@ -55,7 +59,10 @@ export function environment(t) {
 /** Real function handlers/nested calls and storage checks, with local R2 bytes. */
 export function controls(t, s) {
   const calls = [];
-  let storageCalls = 0;
+  let storageCalls = 0,
+    r2ReadBytes = 0,
+    r2PutBytes = 0,
+    r2Heads = 0;
   const blobs = new Map(),
     // Every R2 object GET by digest: a step that re-downloads what its own call wrote shows here.
     r2Gets = [],
@@ -144,6 +151,7 @@ export function controls(t, s) {
       const bytes = Buffer.concat(parts);
       assert.equal(digest(bytes), id);
       r2Puts.push(id);
+      r2PutBytes += bytes.length;
       s.objects.set(id, bytes);
       return new Response(null);
     }
@@ -152,18 +160,23 @@ export function controls(t, s) {
     if (!bytes) return new Response(null, { status: 404 });
     // A pack member's signed exact Range (object-pack-range.ts) reads its interval, as R2 does.
     const range = /^bytes=(\d+)-(\d+)$/.exec(new Headers(init.headers).get('range') ?? '');
-    if (range && init.method !== 'HEAD')
+    if (range && init.method !== 'HEAD') {
+      r2ReadBytes += Number(range[2]) - Number(range[1]) + 1;
       return new Response(bytes.subarray(Number(range[1]), Number(range[2]) + 1), {
         status: 206,
         headers: { 'content-range': `bytes ${range[1]}-${range[2]}/${bytes.length}` },
       });
-    if (init.method === 'HEAD')
+    }
+    if (init.method === 'HEAD') {
+      r2Heads++;
       return new Response(null, {
         headers: {
           'content-length': String(bytes.length),
           'x-amz-checksum-sha256': Buffer.from(id, 'hex').toString('base64'),
         },
       });
+    }
+    r2ReadBytes += bytes.length;
     return new Response(bytes);
   };
   t.mock.method(globalThis, 'fetch', fetch);
@@ -193,6 +206,9 @@ export function controls(t, s) {
     storageCalls: () => storageCalls,
     r2Gets,
     r2Puts,
+    r2ReadBytes: () => r2ReadBytes,
+    r2PutBytes: () => r2PutBytes,
+    r2Heads: () => r2Heads,
   };
 }
 export const ref = name => makeFunctionReference(name);

@@ -112,8 +112,9 @@ export const submit = action({
         // The step recorded its failure; the scheduled fallback retries it and observation reports it.
       }
       if (!published) return submitted.payload;
-      const { chainRun } = JSON.parse(published) as InlinePublication;
-      const chained = chainRun ? await runResolveChain(ctx, chainRun) : null;
+      const { chainRun, chainResult } = JSON.parse(published) as InlinePublication;
+      const chained =
+        chainResult !== undefined ? chainResult : chainRun ? await runResolveChain(ctx, chainRun) : null;
       return publishedReply(JSON.parse(published) as InlinePublication, chained, shaped === true);
     } catch (error) {
       return report(error);
@@ -125,6 +126,7 @@ export const submit = action({
  * when the chained step finished it, else `submitted`). The chain's identity stays server-side. */
 export function publishedReply(published: InlinePublication, chained: string | null, shaped: boolean) {
   const { chainRun, ...progress } = published;
+  delete progress.chainResult;
   if (!shaped) return canonicalPayload(progress.terminal);
   if (!chainRun) return canonicalPayload(progress);
   const chain = chained ? (JSON.parse(chained) as InlinePublication) : null;

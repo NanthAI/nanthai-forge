@@ -1,0 +1,3324 @@
+{
+  "schema": 1,
+  "node": "v24.22.1",
+  "method": "Eleven alternating AB/BA pairs. Full submit/save/chained-resolve handlers; each Node action in a fresh process. Synthetic DB/R2 and fixed State timestamps. Fixture setup, network and client apply excluded. Baseline fails the new guards; no qualified pair discarded.",
+  "pairs": [
+    {
+      "pair": 0,
+      "order": [
+        "a",
+        "b"
+      ],
+      "metadata": {
+        "a": {
+          "files": 29000,
+          "metadataMerges": 4,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        },
+        "b": {
+          "files": 29000,
+          "metadataMerges": 1,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        }
+      },
+      "a": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "07d8532e-33a8-4ccd-87f8-0d95819a89fc",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 201
+              }
+            ],
+            "elapsedMs": 288.164,
+            "maxRssBytes": 194805760,
+            "cpuMicros": 353172,
+            "workCpuMicros": 231246
+          },
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "78cd9090-d253-4d1f-a4cf-9bd2f92fb7b0",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 5,
+                "bytes": 9455648,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 186
+              }
+            ],
+            "elapsedMs": 268.0795,
+            "maxRssBytes": 228720640,
+            "cpuMicros": 381972,
+            "workCpuMicros": 264822
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 7,
+        "calls": 17,
+        "reads": 14,
+        "readBytes": 14182255,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 243832,
+        "dbWriteBytes": 73824,
+        "peakMiB": 219
+      },
+      "b": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "2e51413a-f946-4b7e-a995-4d55c7653f24",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 143
+              },
+              {
+                "event": "forge-source-step",
+                "job": "054a7c45-0be8-450b-b559-a91832ec7ff0",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 3,
+                "bytes": 1498,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 61
+              }
+            ],
+            "elapsedMs": 291.146209,
+            "maxRssBytes": 202850304,
+            "cpuMicros": 358154,
+            "workCpuMicros": 249512
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 1,
+        "calls": 14,
+        "reads": 5,
+        "readBytes": 4728105,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 237492,
+        "dbWriteBytes": 73805,
+        "peakMiB": 194
+      }
+    },
+    {
+      "pair": 1,
+      "order": [
+        "b",
+        "a"
+      ],
+      "metadata": {
+        "a": {
+          "files": 29000,
+          "metadataMerges": 4,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        },
+        "b": {
+          "files": 29000,
+          "metadataMerges": 1,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        }
+      },
+      "a": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "dced9116-dd37-4519-8f6a-7e3c9a134d78",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 141
+              }
+            ],
+            "elapsedMs": 218.332375,
+            "maxRssBytes": 206471168,
+            "cpuMicros": 291232,
+            "workCpuMicros": 186016
+          },
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "21b6027a-06b9-456f-bf13-e92e03257e1a",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 5,
+                "bytes": 9455648,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 153
+              }
+            ],
+            "elapsedMs": 229.137042,
+            "maxRssBytes": 246235136,
+            "cpuMicros": 315739,
+            "workCpuMicros": 211540
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 7,
+        "calls": 17,
+        "reads": 14,
+        "readBytes": 14182255,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 243826,
+        "dbWriteBytes": 73820,
+        "peakMiB": 235
+      },
+      "b": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "7aadc722-2cbb-4e90-aa83-c8a7d2fccc8f",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 146
+              },
+              {
+                "event": "forge-source-step",
+                "job": "2ac1d0f8-ffad-4800-aa98-a3097f28689c",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 3,
+                "bytes": 1498,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 60
+              }
+            ],
+            "elapsedMs": 287.11687500000005,
+            "maxRssBytes": 229670912,
+            "cpuMicros": 361981,
+            "workCpuMicros": 258914
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 1,
+        "calls": 14,
+        "reads": 5,
+        "readBytes": 4728105,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 237492,
+        "dbWriteBytes": 73805,
+        "peakMiB": 220
+      }
+    },
+    {
+      "pair": 2,
+      "order": [
+        "a",
+        "b"
+      ],
+      "metadata": {
+        "a": {
+          "files": 29000,
+          "metadataMerges": 4,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        },
+        "b": {
+          "files": 29000,
+          "metadataMerges": 1,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        }
+      },
+      "a": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "d79feb66-1508-458d-b181-1242dbd0cf12",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 140
+              }
+            ],
+            "elapsedMs": 216.95091599999998,
+            "maxRssBytes": 205881344,
+            "cpuMicros": 289398,
+            "workCpuMicros": 183819
+          },
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "21dde14b-7561-42a1-967c-e7e15f69abec",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 5,
+                "bytes": 9455648,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 159
+              }
+            ],
+            "elapsedMs": 234.82345899999999,
+            "maxRssBytes": 250200064,
+            "cpuMicros": 336166,
+            "workCpuMicros": 231755
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 7,
+        "calls": 17,
+        "reads": 14,
+        "readBytes": 14182255,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 243826,
+        "dbWriteBytes": 73820,
+        "peakMiB": 239
+      },
+      "b": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "7cb842ae-b866-43cf-8c52-d60856280e12",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 145
+              },
+              {
+                "event": "forge-source-step",
+                "job": "89a5cfe3-24f9-48b9-b41d-b502501ab7ca",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 3,
+                "bytes": 1498,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 59
+              }
+            ],
+            "elapsedMs": 287.551584,
+            "maxRssBytes": 229081088,
+            "cpuMicros": 360387,
+            "workCpuMicros": 257286
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 1,
+        "calls": 14,
+        "reads": 5,
+        "readBytes": 4728105,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 237492,
+        "dbWriteBytes": 73805,
+        "peakMiB": 219
+      }
+    },
+    {
+      "pair": 3,
+      "order": [
+        "b",
+        "a"
+      ],
+      "metadata": {
+        "a": {
+          "files": 29000,
+          "metadataMerges": 4,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        },
+        "b": {
+          "files": 29000,
+          "metadataMerges": 1,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        }
+      },
+      "a": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "1f10df91-006d-4619-a8b2-fa26a88f2f49",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 140
+              }
+            ],
+            "elapsedMs": 217.301375,
+            "maxRssBytes": 206077952,
+            "cpuMicros": 289277,
+            "workCpuMicros": 184193
+          },
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "8a42ad66-0857-4f6e-a280-f00bb1525c01",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 5,
+                "bytes": 9455648,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 160
+              }
+            ],
+            "elapsedMs": 238.28220900000002,
+            "maxRssBytes": 226099200,
+            "cpuMicros": 334478,
+            "workCpuMicros": 229319
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 7,
+        "calls": 17,
+        "reads": 14,
+        "readBytes": 14182255,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 243829,
+        "dbWriteBytes": 73822,
+        "peakMiB": 216
+      },
+      "b": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "295acfcb-5034-4ca9-9564-c5e17c329a8c",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 145
+              },
+              {
+                "event": "forge-source-step",
+                "job": "5f227c8f-3b2c-4794-bed0-af84c46afba8",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 3,
+                "bytes": 1498,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 60
+              }
+            ],
+            "elapsedMs": 288.28499999999997,
+            "maxRssBytes": 229277696,
+            "cpuMicros": 361886,
+            "workCpuMicros": 258242
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 1,
+        "calls": 14,
+        "reads": 5,
+        "readBytes": 4728105,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 237492,
+        "dbWriteBytes": 73805,
+        "peakMiB": 219
+      }
+    },
+    {
+      "pair": 4,
+      "order": [
+        "a",
+        "b"
+      ],
+      "metadata": {
+        "a": {
+          "files": 29000,
+          "metadataMerges": 4,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        },
+        "b": {
+          "files": 29000,
+          "metadataMerges": 1,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        }
+      },
+      "a": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "5265da6f-f3fb-4cff-b791-b160243a89d9",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 153
+              }
+            ],
+            "elapsedMs": 233.673542,
+            "maxRssBytes": 209010688,
+            "cpuMicros": 305041,
+            "workCpuMicros": 197863
+          },
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "3c13b6b9-a2a1-4406-8d5e-4fb1f2045a4f",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 5,
+                "bytes": 9455648,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 159
+              }
+            ],
+            "elapsedMs": 237.18650000000002,
+            "maxRssBytes": 223510528,
+            "cpuMicros": 333345,
+            "workCpuMicros": 227210
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 7,
+        "calls": 17,
+        "reads": 14,
+        "readBytes": 14182255,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 243826,
+        "dbWriteBytes": 73820,
+        "peakMiB": 214
+      },
+      "b": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "6981ea4b-b826-4f61-a74b-7f53cd0bb2e0",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 148
+              },
+              {
+                "event": "forge-source-step",
+                "job": "38ce29ce-fbf8-4258-8714-fd7bb3a76035",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 3,
+                "bytes": 1498,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 59
+              }
+            ],
+            "elapsedMs": 292.498083,
+            "maxRssBytes": 229703680,
+            "cpuMicros": 367241,
+            "workCpuMicros": 261585
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 1,
+        "calls": 14,
+        "reads": 5,
+        "readBytes": 4728105,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 237492,
+        "dbWriteBytes": 73805,
+        "peakMiB": 220
+      }
+    },
+    {
+      "pair": 5,
+      "order": [
+        "b",
+        "a"
+      ],
+      "metadata": {
+        "a": {
+          "files": 29000,
+          "metadataMerges": 4,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        },
+        "b": {
+          "files": 29000,
+          "metadataMerges": 1,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        }
+      },
+      "a": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "dcd93069-b931-4f9b-8809-e03f1c861ab5",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 145
+              }
+            ],
+            "elapsedMs": 222.15533399999998,
+            "maxRssBytes": 209338368,
+            "cpuMicros": 294616,
+            "workCpuMicros": 191199
+          },
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "bcba6c1a-fbda-44a9-b4e1-0f301df84c23",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 5,
+                "bytes": 9455648,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 158
+              }
+            ],
+            "elapsedMs": 233.75904100000002,
+            "maxRssBytes": 249724928,
+            "cpuMicros": 333274,
+            "workCpuMicros": 230112
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 7,
+        "calls": 17,
+        "reads": 14,
+        "readBytes": 14182255,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 243823,
+        "dbWriteBytes": 73818,
+        "peakMiB": 239
+      },
+      "b": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "85b10ed0-d7cf-4887-9e21-35c063f831e4",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 140
+              },
+              {
+                "event": "forge-source-step",
+                "job": "325ed05d-67e0-4419-ab0b-5c0ed4c60fd5",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 3,
+                "bytes": 1498,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 59
+              }
+            ],
+            "elapsedMs": 281.93625,
+            "maxRssBytes": 203046912,
+            "cpuMicros": 348365,
+            "workCpuMicros": 245919
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 1,
+        "calls": 14,
+        "reads": 5,
+        "readBytes": 4728105,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 237492,
+        "dbWriteBytes": 73805,
+        "peakMiB": 194
+      }
+    },
+    {
+      "pair": 6,
+      "order": [
+        "a",
+        "b"
+      ],
+      "metadata": {
+        "a": {
+          "files": 29000,
+          "metadataMerges": 4,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        },
+        "b": {
+          "files": 29000,
+          "metadataMerges": 1,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        }
+      },
+      "a": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "f6f82235-6e7f-498b-9374-628c88257e5b",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 140
+              }
+            ],
+            "elapsedMs": 217.511167,
+            "maxRssBytes": 206831616,
+            "cpuMicros": 290005,
+            "workCpuMicros": 184474
+          },
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "a8747792-1a9a-4303-98b6-7ba214f6d12f",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 5,
+                "bytes": 9455648,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 163
+              }
+            ],
+            "elapsedMs": 238.99075000000002,
+            "maxRssBytes": 230113280,
+            "cpuMicros": 335314,
+            "workCpuMicros": 232414
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 7,
+        "calls": 17,
+        "reads": 14,
+        "readBytes": 14182255,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 243829,
+        "dbWriteBytes": 73822,
+        "peakMiB": 220
+      },
+      "b": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "0890ec8e-c8ea-4f4c-b189-1a359f8b94dd",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 141
+              },
+              {
+                "event": "forge-source-step",
+                "job": "5cbcdb2c-6653-4fa6-b434-07a44fd90efb",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 3,
+                "bytes": 1498,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 60
+              }
+            ],
+            "elapsedMs": 285.39212499999996,
+            "maxRssBytes": 203390976,
+            "cpuMicros": 352867,
+            "workCpuMicros": 248508
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 1,
+        "calls": 14,
+        "reads": 5,
+        "readBytes": 4728105,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 237492,
+        "dbWriteBytes": 73805,
+        "peakMiB": 194
+      }
+    },
+    {
+      "pair": 7,
+      "order": [
+        "b",
+        "a"
+      ],
+      "metadata": {
+        "a": {
+          "files": 29000,
+          "metadataMerges": 4,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        },
+        "b": {
+          "files": 29000,
+          "metadataMerges": 1,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        }
+      },
+      "a": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "b5f6b9bd-1a6f-48ba-b297-d3ce2b8d450f",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 140
+              }
+            ],
+            "elapsedMs": 216.370333,
+            "maxRssBytes": 206487552,
+            "cpuMicros": 288281,
+            "workCpuMicros": 183600
+          },
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "50c9d0ea-0341-4bcd-831d-9fdb639df1c5",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 5,
+                "bytes": 9455648,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 151
+              }
+            ],
+            "elapsedMs": 227.22233400000002,
+            "maxRssBytes": 248545280,
+            "cpuMicros": 313865,
+            "workCpuMicros": 210185
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 7,
+        "calls": 17,
+        "reads": 14,
+        "readBytes": 14182255,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 243823,
+        "dbWriteBytes": 73818,
+        "peakMiB": 238
+      },
+      "b": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "adfaa367-f2a2-4998-83e6-29d8e666b28e",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 150
+              },
+              {
+                "event": "forge-source-step",
+                "job": "195624b2-156b-476d-8008-a367953b791c",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 3,
+                "bytes": 1498,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 59
+              }
+            ],
+            "elapsedMs": 295.35,
+            "maxRssBytes": 228982784,
+            "cpuMicros": 365361,
+            "workCpuMicros": 260497
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 1,
+        "calls": 14,
+        "reads": 5,
+        "readBytes": 4728105,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 237492,
+        "dbWriteBytes": 73805,
+        "peakMiB": 219
+      }
+    },
+    {
+      "pair": 8,
+      "order": [
+        "a",
+        "b"
+      ],
+      "metadata": {
+        "a": {
+          "files": 29000,
+          "metadataMerges": 4,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        },
+        "b": {
+          "files": 29000,
+          "metadataMerges": 1,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        }
+      },
+      "a": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "fd8e3e11-0daf-48ea-9ded-6c350f659819",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 148
+              }
+            ],
+            "elapsedMs": 225.62179099999997,
+            "maxRssBytes": 221429760,
+            "cpuMicros": 301179,
+            "workCpuMicros": 196016
+          },
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "27e17f55-35c8-4053-b2ab-1225dde6fc59",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 5,
+                "bytes": 9455648,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 159
+              }
+            ],
+            "elapsedMs": 234.86120800000003,
+            "maxRssBytes": 250740736,
+            "cpuMicros": 336647,
+            "workCpuMicros": 232458
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 7,
+        "calls": 17,
+        "reads": 14,
+        "readBytes": 14182255,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 243823,
+        "dbWriteBytes": 73818,
+        "peakMiB": 240
+      },
+      "b": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "3b35b0c5-7679-47e4-9fdb-57528db0bfe7",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 141
+              },
+              {
+                "event": "forge-source-step",
+                "job": "12e20990-73eb-4835-af5f-d3310065fdad",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 3,
+                "bytes": 1498,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 59
+              }
+            ],
+            "elapsedMs": 282.589833,
+            "maxRssBytes": 202915840,
+            "cpuMicros": 349673,
+            "workCpuMicros": 246877
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 1,
+        "calls": 14,
+        "reads": 5,
+        "readBytes": 4728105,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 237492,
+        "dbWriteBytes": 73805,
+        "peakMiB": 194
+      }
+    },
+    {
+      "pair": 9,
+      "order": [
+        "b",
+        "a"
+      ],
+      "metadata": {
+        "a": {
+          "files": 29000,
+          "metadataMerges": 4,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        },
+        "b": {
+          "files": 29000,
+          "metadataMerges": 1,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        }
+      },
+      "a": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "a7532416-6956-46dd-b1b6-89e7194d0df1",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 142
+              }
+            ],
+            "elapsedMs": 220.214291,
+            "maxRssBytes": 205684736,
+            "cpuMicros": 293630,
+            "workCpuMicros": 186829
+          },
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "cdc78745-8dcf-48f9-8225-f4751cb017ca",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 5,
+                "bytes": 9455648,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 162
+              }
+            ],
+            "elapsedMs": 238.27120900000003,
+            "maxRssBytes": 255934464,
+            "cpuMicros": 334127,
+            "workCpuMicros": 229390
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 7,
+        "calls": 17,
+        "reads": 14,
+        "readBytes": 14182255,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 243829,
+        "dbWriteBytes": 73822,
+        "peakMiB": 245
+      },
+      "b": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "e9acfcdf-e195-4aab-9d10-cf47461364a7",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 146
+              },
+              {
+                "event": "forge-source-step",
+                "job": "6ba31781-847d-4d25-935d-7c5ea42c1ab4",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 3,
+                "bytes": 1498,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 60
+              }
+            ],
+            "elapsedMs": 289.639167,
+            "maxRssBytes": 229277696,
+            "cpuMicros": 363952,
+            "workCpuMicros": 260091
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 1,
+        "calls": 14,
+        "reads": 5,
+        "readBytes": 4728105,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 237492,
+        "dbWriteBytes": 73805,
+        "peakMiB": 219
+      }
+    },
+    {
+      "pair": 10,
+      "order": [
+        "a",
+        "b"
+      ],
+      "metadata": {
+        "a": {
+          "files": 29000,
+          "metadataMerges": 4,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        },
+        "b": {
+          "files": 29000,
+          "metadataMerges": 1,
+          "state": "0dcf2e84570e0afbf5d438ba8e504ddb4e438c4ea40754c358d10f5b2aa83261"
+        }
+      },
+      "a": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "1aeb33b0-f760-46a2-9e1b-6cf6a6e5dcf1",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 140
+              }
+            ],
+            "elapsedMs": 218.190167,
+            "maxRssBytes": 207224832,
+            "cpuMicros": 290466,
+            "workCpuMicros": 184290
+          },
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "85b19459-f6c4-4243-93a4-8a782aa31085",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 5,
+                "bytes": 9455648,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 157
+              }
+            ],
+            "elapsedMs": 232.72308399999997,
+            "maxRssBytes": 223477760,
+            "cpuMicros": 327066,
+            "workCpuMicros": 223837
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 7,
+        "calls": 17,
+        "reads": 14,
+        "readBytes": 14182255,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 243829,
+        "dbWriteBytes": 73822,
+        "peakMiB": 214
+      },
+      "b": {
+        "files": 29000,
+        "savedState": "0637661b4caf4c4fa19b1777dfe9ef34856fbda46e9021ad2f0b3e60e1b346ab",
+        "resolvedState": "30de7ede5254c4b0c30f3d66045c8aefe79b26624569f14dd9396eaddaef9688",
+        "actionMetrics": [
+          {
+            "sourceSteps": [
+              {
+                "event": "forge-source-step",
+                "job": "959cb72b-2f56-4b12-8fb7-485d2910053f",
+                "step": 0,
+                "runtime": "node",
+                "kind": "save",
+                "from": "input",
+                "to": "done",
+                "objects": 4,
+                "bytes": 4727858,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 493914,
+                  "progress": 0,
+                  "result": 246,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4234414
+                },
+                "elapsedMs": 141
+              },
+              {
+                "event": "forge-source-step",
+                "job": "de1f3d7c-0c8d-4b34-9da9-e1dc0b4aac5f",
+                "step": 0,
+                "runtime": "node",
+                "kind": "sync",
+                "from": "input",
+                "to": "done",
+                "objects": 3,
+                "bytes": 1498,
+                "outputs": 2,
+                "putBytes": {
+                  "state": 1511,
+                  "progress": 0,
+                  "result": 844,
+                  "other": 0,
+                  "refused": 0,
+                  "avoided": 4726888
+                },
+                "elapsedMs": 60
+              }
+            ],
+            "elapsedMs": 284.343792,
+            "maxRssBytes": 202997760,
+            "cpuMicros": 349828,
+            "workCpuMicros": 245759
+          }
+        ],
+        "savedGets": 0,
+        "draftGets": 1,
+        "calls": 14,
+        "reads": 5,
+        "readBytes": 4728105,
+        "puts": 12,
+        "putBytes": 497416,
+        "heads": 12,
+        "dbReadBytes": 237492,
+        "dbWriteBytes": 73805,
+        "peakMiB": 194
+      }
+    }
+  ],
+  "summary": {
+    "calls": {
+      "a": 17,
+      "b": 14,
+      "interval": {
+        "n": 11,
+        "medianDifference": -3,
+        "ci95": [
+          -3,
+          -3
+        ],
+        "excludesZero": true,
+        "resamples": 10000,
+        "seed": 1,
+        "smallSample": false
+      }
+    },
+    "readBytes": {
+      "a": 14182255,
+      "b": 4728105,
+      "interval": {
+        "n": 11,
+        "medianDifference": -9454150,
+        "ci95": [
+          -9454150,
+          -9454150
+        ],
+        "excludesZero": true,
+        "resamples": 10000,
+        "seed": 1,
+        "smallSample": false
+      }
+    },
+    "reads": {
+      "a": 14,
+      "b": 5,
+      "interval": {
+        "n": 11,
+        "medianDifference": -9,
+        "ci95": [
+          -9,
+          -9
+        ],
+        "excludesZero": true,
+        "resamples": 10000,
+        "seed": 1,
+        "smallSample": false
+      }
+    },
+    "puts": {
+      "a": 12,
+      "b": 12,
+      "interval": {
+        "n": 11,
+        "medianDifference": 0,
+        "ci95": [
+          0,
+          0
+        ],
+        "excludesZero": false,
+        "resamples": 10000,
+        "seed": 1,
+        "smallSample": false
+      }
+    },
+    "heads": {
+      "a": 12,
+      "b": 12,
+      "interval": {
+        "n": 11,
+        "medianDifference": 0,
+        "ci95": [
+          0,
+          0
+        ],
+        "excludesZero": false,
+        "resamples": 10000,
+        "seed": 1,
+        "smallSample": false
+      }
+    },
+    "putBytes": {
+      "a": 497416,
+      "b": 497416,
+      "interval": {
+        "n": 11,
+        "medianDifference": 0,
+        "ci95": [
+          0,
+          0
+        ],
+        "excludesZero": false,
+        "resamples": 10000,
+        "seed": 1,
+        "smallSample": false
+      }
+    },
+    "dbReadBytes": {
+      "a": 243826,
+      "b": 237492,
+      "interval": {
+        "n": 11,
+        "medianDifference": -6334,
+        "ci95": [
+          -6337,
+          -6331
+        ],
+        "excludesZero": true,
+        "resamples": 10000,
+        "seed": 1,
+        "smallSample": false
+      }
+    },
+    "dbWriteBytes": {
+      "a": 73820,
+      "b": 73805,
+      "interval": {
+        "n": 11,
+        "medianDifference": -15,
+        "ci95": [
+          -17,
+          -13
+        ],
+        "excludesZero": true,
+        "resamples": 10000,
+        "seed": 1,
+        "smallSample": false
+      }
+    },
+    "peakMiB": {
+      "a": 235,
+      "b": 219,
+      "interval": {
+        "n": 11,
+        "medianDifference": -20,
+        "ci95": [
+          -26,
+          -15
+        ],
+        "excludesZero": true,
+        "resamples": 10000,
+        "seed": 1,
+        "smallSample": false
+      }
+    },
+    "elapsedMs": {
+      "a": 455.914375,
+      "b": 287.551584,
+      "interval": {
+        "n": 11,
+        "medianDifference": -168.84633300000002,
+        "ci95": [
+          -177.893166,
+          -164.22279099999997
+        ],
+        "excludesZero": true,
+        "resamples": 10000,
+        "seed": 1,
+        "smallSample": false
+      }
+    },
+    "cpuMicros": {
+      "a": 625564,
+      "b": 360387,
+      "interval": {
+        "n": 11,
+        "medianDifference": -267704,
+        "ci95": [
+          -279525,
+          -261869
+        ],
+        "excludesZero": true,
+        "resamples": 10000,
+        "seed": 1,
+        "smallSample": false
+      }
+    },
+    "workCpuMicros": {
+      "a": 416219,
+      "b": 257286,
+      "interval": {
+        "n": 11,
+        "medianDifference": -162368,
+        "ci95": [
+          -175392,
+          -155270
+        ],
+        "excludesZero": true,
+        "resamples": 10000,
+        "seed": 1,
+        "smallSample": false
+      }
+    }
+  },
+  "kernel": {
+    "schema": 1,
+    "node": "v24.22.1",
+    "method": "alternating AB/BA; fresh object maps; module load and fixture setup excluded; CPU and wall overlap",
+    "baselineStep": "6989dcf54073ae05d527d22924242cbce49c2fbe5fa0198e07afa4b9845c8c14",
+    "candidateStep": "f7c70e21430e46d947fa95055406331669b4699df984f100cf17a42793a3927d",
+    "samples": [
+      {
+        "files": 4000,
+        "operation": "sync",
+        "pair": 0,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "a": {
+          "wallMs": 31.048874999999953,
+          "cpuMs": 38.915,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        },
+        "b": {
+          "wallMs": 22.830292000000043,
+          "cpuMs": 29.901,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "resolve",
+        "pair": 0,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "a": {
+          "wallMs": 9.762999999999977,
+          "cpuMs": 10.522,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        },
+        "b": {
+          "wallMs": 12.03212499999995,
+          "cpuMs": 14.991,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "sync",
+        "pair": 1,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "b": {
+          "wallMs": 22.018083999999988,
+          "cpuMs": 23.247,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        },
+        "a": {
+          "wallMs": 32.422957999999994,
+          "cpuMs": 58.153,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "resolve",
+        "pair": 1,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "b": {
+          "wallMs": 10.822457999999983,
+          "cpuMs": 12.892,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        },
+        "a": {
+          "wallMs": 10.848875000000021,
+          "cpuMs": 12.247,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "sync",
+        "pair": 2,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "a": {
+          "wallMs": 30.466583000000014,
+          "cpuMs": 33.949,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        },
+        "b": {
+          "wallMs": 23.820375000000013,
+          "cpuMs": 30.161,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "resolve",
+        "pair": 2,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "a": {
+          "wallMs": 9.628333999999995,
+          "cpuMs": 9.628,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        },
+        "b": {
+          "wallMs": 9.700417000000016,
+          "cpuMs": 10.132,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "sync",
+        "pair": 3,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "b": {
+          "wallMs": 23.42783300000002,
+          "cpuMs": 28.146,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        },
+        "a": {
+          "wallMs": 27.260082999999952,
+          "cpuMs": 28.253,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "resolve",
+        "pair": 3,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "b": {
+          "wallMs": 11.020374999999945,
+          "cpuMs": 15.01,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        },
+        "a": {
+          "wallMs": 9.49187500000005,
+          "cpuMs": 9.914,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "sync",
+        "pair": 4,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "a": {
+          "wallMs": 28.986041999999998,
+          "cpuMs": 31.944,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        },
+        "b": {
+          "wallMs": 25.93395799999996,
+          "cpuMs": 33.255,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "resolve",
+        "pair": 4,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "a": {
+          "wallMs": 10.506750000000011,
+          "cpuMs": 11.158,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        },
+        "b": {
+          "wallMs": 10.347208000000023,
+          "cpuMs": 10.396,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "sync",
+        "pair": 5,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "b": {
+          "wallMs": 24.703457999999955,
+          "cpuMs": 28.223,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        },
+        "a": {
+          "wallMs": 30.322374999999965,
+          "cpuMs": 35.386,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "resolve",
+        "pair": 5,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "b": {
+          "wallMs": 10.234833999999978,
+          "cpuMs": 10.34,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        },
+        "a": {
+          "wallMs": 10.003958000000011,
+          "cpuMs": 10.062,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "sync",
+        "pair": 6,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "a": {
+          "wallMs": 38.697,
+          "cpuMs": 42.875,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        },
+        "b": {
+          "wallMs": 31.905917000000045,
+          "cpuMs": 31.219,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "resolve",
+        "pair": 6,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "a": {
+          "wallMs": 18.71791600000006,
+          "cpuMs": 25.431,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        },
+        "b": {
+          "wallMs": 23.07841600000006,
+          "cpuMs": 20.193,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "sync",
+        "pair": 7,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "b": {
+          "wallMs": 38.74362499999995,
+          "cpuMs": 82.961,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        },
+        "a": {
+          "wallMs": 56.60129099999995,
+          "cpuMs": 55.252,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "resolve",
+        "pair": 7,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "b": {
+          "wallMs": 12.712041999999997,
+          "cpuMs": 13.396,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        },
+        "a": {
+          "wallMs": 12.879458,
+          "cpuMs": 13.331,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "sync",
+        "pair": 8,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "a": {
+          "wallMs": 37.141166999999996,
+          "cpuMs": 51.368,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        },
+        "b": {
+          "wallMs": 29.830291999999986,
+          "cpuMs": 30.645,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "resolve",
+        "pair": 8,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "a": {
+          "wallMs": 18.25954200000001,
+          "cpuMs": 18.274,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        },
+        "b": {
+          "wallMs": 29.340250000000196,
+          "cpuMs": 31.893,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "sync",
+        "pair": 9,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "b": {
+          "wallMs": 26.644000000000005,
+          "cpuMs": 26.604,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        },
+        "a": {
+          "wallMs": 37.76350000000002,
+          "cpuMs": 45.817,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "resolve",
+        "pair": 9,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "b": {
+          "wallMs": 11.123415999999906,
+          "cpuMs": 12.113,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        },
+        "a": {
+          "wallMs": 11.858874999999898,
+          "cpuMs": 12.896,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "sync",
+        "pair": 10,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "a": {
+          "wallMs": 38.911790999999994,
+          "cpuMs": 46.069,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        },
+        "b": {
+          "wallMs": 31.009750000000167,
+          "cpuMs": 36.451,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 1956886,
+          "output": "b0ca96380f0008ba68d70f7c27b075da20def992d849f94130922cf3e2afd004"
+        }
+      },
+      {
+        "files": 4000,
+        "operation": "resolve",
+        "pair": 10,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "a": {
+          "wallMs": 10.701250000000073,
+          "cpuMs": 10.701,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        },
+        "b": {
+          "wallMs": 10.544542000000092,
+          "cpuMs": 10.544,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 1305836,
+          "output": "9e19bfe7e80d2fa489d8b3d5e35078b51c86b1281e9a3ccf6529090c1d149b62"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "sync",
+        "pair": 0,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "a": {
+          "wallMs": 393.851416,
+          "cpuMs": 406.625,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        },
+        "b": {
+          "wallMs": 312.3787500000003,
+          "cpuMs": 330.186,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "resolve",
+        "pair": 0,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "a": {
+          "wallMs": 106.6111249999999,
+          "cpuMs": 115.482,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        },
+        "b": {
+          "wallMs": 107.52833399999963,
+          "cpuMs": 130.29,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "sync",
+        "pair": 1,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "b": {
+          "wallMs": 229.08737500000007,
+          "cpuMs": 287.921,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        },
+        "a": {
+          "wallMs": 500.63170800000034,
+          "cpuMs": 427.942,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "resolve",
+        "pair": 1,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "b": {
+          "wallMs": 127.66529199999968,
+          "cpuMs": 176.688,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        },
+        "a": {
+          "wallMs": 105.69741599999998,
+          "cpuMs": 113.965,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "sync",
+        "pair": 2,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "a": {
+          "wallMs": 334.73662500000046,
+          "cpuMs": 377.765,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        },
+        "b": {
+          "wallMs": 244.48504200000025,
+          "cpuMs": 307.487,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "resolve",
+        "pair": 2,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.79150390625,
+          3.28271484375,
+          3.53466796875
+        ],
+        "a": {
+          "wallMs": 107.38374999999996,
+          "cpuMs": 128.926,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        },
+        "b": {
+          "wallMs": 96.73654199999964,
+          "cpuMs": 106.043,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "sync",
+        "pair": 3,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.96826171875,
+          3.34423828125,
+          3.5546875
+        ],
+        "b": {
+          "wallMs": 249.53549999999996,
+          "cpuMs": 310.051,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        },
+        "a": {
+          "wallMs": 302.7417080000005,
+          "cpuMs": 346.214,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "resolve",
+        "pair": 3,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.96826171875,
+          3.34423828125,
+          3.5546875
+        ],
+        "b": {
+          "wallMs": 182.66550000000007,
+          "cpuMs": 219.184,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        },
+        "a": {
+          "wallMs": 152.852167,
+          "cpuMs": 144.952,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "sync",
+        "pair": 4,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.96826171875,
+          3.34423828125,
+          3.5546875
+        ],
+        "a": {
+          "wallMs": 302.04583300000013,
+          "cpuMs": 344.373,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        },
+        "b": {
+          "wallMs": 268.07629199999974,
+          "cpuMs": 331.263,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "resolve",
+        "pair": 4,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.96826171875,
+          3.34423828125,
+          3.5546875
+        ],
+        "a": {
+          "wallMs": 118.4059159999997,
+          "cpuMs": 139.083,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        },
+        "b": {
+          "wallMs": 113.32279199999994,
+          "cpuMs": 126.157,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "sync",
+        "pair": 5,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.96826171875,
+          3.34423828125,
+          3.5546875
+        ],
+        "b": {
+          "wallMs": 233.87091599999985,
+          "cpuMs": 294.728,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        },
+        "a": {
+          "wallMs": 292.5173329999998,
+          "cpuMs": 313.192,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "resolve",
+        "pair": 5,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.96826171875,
+          3.34423828125,
+          3.5546875
+        ],
+        "b": {
+          "wallMs": 111.09950000000026,
+          "cpuMs": 165.608,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        },
+        "a": {
+          "wallMs": 105.39329200000066,
+          "cpuMs": 118.805,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "sync",
+        "pair": 6,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.96826171875,
+          3.34423828125,
+          3.5546875
+        ],
+        "a": {
+          "wallMs": 345.67012500000055,
+          "cpuMs": 371.906,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        },
+        "b": {
+          "wallMs": 229.12854100000004,
+          "cpuMs": 285.643,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "resolve",
+        "pair": 6,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.96826171875,
+          3.34423828125,
+          3.5546875
+        ],
+        "a": {
+          "wallMs": 109.55195800000001,
+          "cpuMs": 131.599,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        },
+        "b": {
+          "wallMs": 99.9323749999985,
+          "cpuMs": 110.126,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "sync",
+        "pair": 7,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.96826171875,
+          3.34423828125,
+          3.5546875
+        ],
+        "b": {
+          "wallMs": 296.3132910000004,
+          "cpuMs": 341.796,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        },
+        "a": {
+          "wallMs": 316.3442500000001,
+          "cpuMs": 357.484,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "resolve",
+        "pair": 7,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.96826171875,
+          3.34423828125,
+          3.5546875
+        ],
+        "b": {
+          "wallMs": 116.64233400000012,
+          "cpuMs": 173.283,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        },
+        "a": {
+          "wallMs": 110.5484579999993,
+          "cpuMs": 117.945,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "sync",
+        "pair": 8,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.96826171875,
+          3.34423828125,
+          3.5546875
+        ],
+        "a": {
+          "wallMs": 318.2071670000005,
+          "cpuMs": 357.727,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        },
+        "b": {
+          "wallMs": 248.76908399999957,
+          "cpuMs": 301.524,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "resolve",
+        "pair": 8,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.96826171875,
+          3.34423828125,
+          3.5546875
+        ],
+        "a": {
+          "wallMs": 110.56441700000141,
+          "cpuMs": 120.346,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        },
+        "b": {
+          "wallMs": 111.77266700000109,
+          "cpuMs": 133.883,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "sync",
+        "pair": 9,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.96826171875,
+          3.34423828125,
+          3.5546875
+        ],
+        "b": {
+          "wallMs": 292.52395799999977,
+          "cpuMs": 328.52,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        },
+        "a": {
+          "wallMs": 372.1062919999986,
+          "cpuMs": 404.543,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "resolve",
+        "pair": 9,
+        "order": [
+          "b",
+          "a"
+        ],
+        "load": [
+          4.970703125,
+          3.37158203125,
+          3.56298828125
+        ],
+        "b": {
+          "wallMs": 113.0169590000005,
+          "cpuMs": 158.349,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        },
+        "a": {
+          "wallMs": 123.25200000000041,
+          "cpuMs": 137.779,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "sync",
+        "pair": 10,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.970703125,
+          3.37158203125,
+          3.56298828125
+        ],
+        "a": {
+          "wallMs": 325.3222079999996,
+          "cpuMs": 368.735,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        },
+        "b": {
+          "wallMs": 254.72666700000082,
+          "cpuMs": 310.257,
+          "steps": 1,
+          "reads": 7,
+          "readBytes": 14181888,
+          "output": "fa3739c5e852565a9fbce3c8a4fbd57e3589ee4742ae5ecc370c0ac9026f2f2b"
+        }
+      },
+      {
+        "files": 29000,
+        "operation": "resolve",
+        "pair": 10,
+        "order": [
+          "a",
+          "b"
+        ],
+        "load": [
+          4.970703125,
+          3.37158203125,
+          3.56298828125
+        ],
+        "a": {
+          "wallMs": 118.13145799999984,
+          "cpuMs": 127.106,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        },
+        "b": {
+          "wallMs": 110.98808300000019,
+          "cpuMs": 133.672,
+          "steps": 1,
+          "reads": 5,
+          "readBytes": 9455837,
+          "output": "3149c91c24b883ed0a845da76a6997ecf889969d1645b0aaa0f805153c7f4635"
+        }
+      }
+    ],
+    "peakProcessRss": 521584640
+  }
+}

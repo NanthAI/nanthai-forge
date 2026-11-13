@@ -100,9 +100,10 @@ process.on('message', async message => {
     }
     const module = await import(message.url);
     const workCpuStarted = process.cpuUsage();
-    await module[message.method]._handler(ctx, message.args);
+    const value = await module[message.method]._handler(ctx, message.args);
     process.send({
       done: true,
+      value,
       metrics: {
         sourceSteps,
         elapsedMs: performance.now() - started,
