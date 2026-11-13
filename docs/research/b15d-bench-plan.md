@@ -265,7 +265,8 @@ keep their recovery or stop with the retained failure. Pending waits follow thei
 continuation without another landing attempt. An unrelated accepted receipt is never success.
 Reset and setup landings use this same driver, including nonzero wait-budget replies;
 they keep waiting on the advertised original operation without resubmission or polling.
-A healthy blocking reset needs no extra observation call.
+The driver requests the public detailed CLI reply because compact wait projections omit
+the operation identities it must select. A healthy blocking reset needs no extra observation call.
 The collector records typed executed CLI receipts, observes only finish/land operations, and retains structured stderr errors on nonzero exits.
 
 There are no task-name, marker-path or Forge-repository exceptions in recovery. Missing or

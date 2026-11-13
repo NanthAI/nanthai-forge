@@ -241,6 +241,8 @@ export async function callForge(command, { executable = 'nforge', prefix = [] } 
         'agent',
         command.root,
         command.action,
+        // Compact replies omit nested operation identities; protocol consumers need exact targets.
+        '--detail',
         ...(command.flags ?? []),
         JSON.stringify(command.body),
       ],

@@ -144,6 +144,9 @@ if (calls.length === 1 && reply?.value.result.submissions) {
   reply.value.operationId = ${JSON.stringify(operationId)};
 }
 if (!reply) throw Error('Unexpected reset call ' + action);
+// The public compact CLI projection omits operation IDs from wait entries.
+if (!args.includes('--detail'))
+  for (const entry of reply.value.result.submissions ?? []) delete entry.submission.operationId;
 console.log(JSON.stringify(reply.value));
 process.exitCode = reply.code ?? 0;
 `,
@@ -186,6 +189,10 @@ test('reset consumes nonzero IN PROGRESS through the original operation and veri
     ['land', 'wait', 'wait'],
   );
   assert.equal(calls[0].body.laneId, 'reset-lane');
+  assert(
+    calls.every(call => call.flags.includes('--detail')),
+    'the protocol consumer requests operation-selected evidence',
+  );
   assert.deepEqual(calls[1], calls[2]);
   assert.deepEqual(calls[1].body.operationIds, [operationId]);
   assert.deepEqual(f.cleanup(), { abandoned: 2, removed: 2 });
