@@ -407,8 +407,8 @@ async function main() {
         cells,
         runner,
         voided,
-        // Every cell crashed before any agent ran: not an attempt (plan.mjs nextBatch).
-        setupOnly: cells.length > 0 && cells.every(c => c.setupCrash),
+        // Every cell crashed or was refused before any agent ran: not an attempt (plan.mjs nextBatch).
+        setupOnly: cells.length > 0 && cells.every(c => c.setupCrash || c.refused),
       };
       writeFileSync(join(dir, 'batch.json'), JSON.stringify(result, null, 1) + '\n', { flag: 'wx' });
       say(

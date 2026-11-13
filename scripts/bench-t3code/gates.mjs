@@ -76,7 +76,7 @@ export function usageProblems(u, weeklyStop = 85) {
 /** Every start rule from PLAN.md, with the readings behind it. */
 export async function gates(
   { arm, N, dry, config, start, flags, B, pinProblems, snapshotProblems, differences, pinFile },
-  { filesystemProbe = probeFilesystemEvents } = {},
+  { filesystemProbe = probeFilesystemEvents, usageProbe = usageGate, diskProbe = diskFreeGb } = {},
 ) {
   const { filesystemEvents, refusals } = await filesystemEventGate(join(B, 'ws'), filesystemProbe);
   if (refusals.length) return { refusals, warnings: [], filesystemEvents };
@@ -97,9 +97,10 @@ export async function gates(
     const d = differences(runPin, start, { liveMain, unpinned: dry && flags.includes('--unpinned') });
     if (d.length) refusals.push(`versions differ from the run pin: ${d.join('; ')}`);
   }
-  const usage = usageGate(agentOf(config).provider);
+  const usage = usageProbe(agentOf(config).provider);
   if (!dry) {
-    refusals.push(...usageProblems(usage));
+    // Same weekly stop as the batch gate and preflight (owner credits: null lifts it).
+    refusals.push(...usageProblems(usage, weeklyStopOf(config)));
     if (config.qualifiedHarness !== start.harness.commit)
       refusals.push(
         `no passing dry run of harness ${start.harness.commit?.slice(0, 12)} (config.qualifiedHarness)`,
@@ -109,7 +110,7 @@ export async function gates(
   if (config.forge.mainBase !== config.github.mainBase)
     refusals.push('both arms must start from one base tree (config forge.mainBase = github.mainBase)');
   if (!existsSync(join(B, 'PLAN.md'))) refusals.push('PLAN.md missing in BENCH_ROOT');
-  const disk = { freeGb: diskFreeGb(), ...diskNeed(arm, N, dry) };
+  const disk = { freeGb: diskProbe(), ...diskNeed(arm, N, dry) };
   if (disk.freeGb < disk.requiredGb)
     refusals.push(`disk ${disk.freeGb.toFixed(1)} GB free < ${disk.requiredGb.toFixed(1)} GB required`);
   return {

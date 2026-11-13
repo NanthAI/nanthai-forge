@@ -42,7 +42,7 @@ import {
   CLAUDE_TOOLS,
 } from '../scripts/bench-t3code/agent.mjs';
 import { readSession } from '../scripts/bench-t3code/transcripts.mjs';
-import { usageProblems, weeklyStopOf } from '../scripts/bench-t3code/gates.mjs';
+import { usageProblems, weeklyStopOf, gates } from '../scripts/bench-t3code/gates.mjs';
 import {
   mkdtempSync,
   writeFileSync,
@@ -965,6 +965,32 @@ test('codex: usage over every request, quota from CLI errors only, args and sand
     usageProblems({ provider: 'codex', weekly: null, error: 'unreadable', has5h: false }, null).length,
     1,
   );
+});
+
+test('cell start gate applies the configured weekly stop (owner credits lift it)', async () => {
+  const B = mkdtempSync(join(tmpdir(), 'bench-gate-'));
+  writeFileSync(join(B, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+  const args = weeklyStopPercent => ({
+    arm: 'forge',
+    N: 3,
+    dry: false,
+    config: { usageGate: { weeklyStopPercent }, baseCheckout: B, forge: {}, github: {} },
+    start: { harness: { commit: 'h' } },
+    flags: [],
+    B,
+    pinProblems: async () => [],
+    snapshotProblems: () => [],
+    differences: () => [],
+    pinFile: null,
+  });
+  const opts = {
+    filesystemProbe: async () => ({ ok: true }),
+    usageProbe: provider => ({ provider, weekly: 91, has5h: false, session5h: null }),
+    diskProbe: () => 1000,
+  };
+  const weekly = r => r.refusals.filter(x => /weekly usage/.test(x));
+  assert.equal(weekly(await gates(args(undefined), opts)).length, 1);
+  assert.deepEqual(weekly(await gates(args(null), opts)), []);
 });
 
 test('claude driver: tool allowlist, prompt last, effort only when set, isolated home in the sandbox', () => {
