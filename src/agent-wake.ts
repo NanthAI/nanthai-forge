@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { resolveAgentSession } from './agent-session.js';
 import { operationWait } from './agent-operation-wait.js';
 
 /** Settle-wait budget for a background wake: under the 2 h ceiling of common agent
@@ -16,7 +17,7 @@ export function backgroundWake(env: NodeJS.ProcessEnv = process.env): WakeDelive
   const chosen = env.FORGE_AGENT_WAKE;
   if (chosen === 'off') return undefined;
   if (chosen === 'background-exit') return 'trusted';
-  return env.CLAUDE_CODE_SESSION_ID ? 'background' : undefined;
+  return resolveAgentSession(env)?.harness === 'claude-code' ? 'background' : undefined;
 }
 
 /** The one command whose exit wakes the agent when the landing (or check run) settles.

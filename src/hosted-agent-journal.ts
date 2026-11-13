@@ -12,11 +12,11 @@ import { checkoutPathExists } from './hosted-checkout-files.js';
 import { invariant } from './errors.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
 import { neverIndex } from './forge-disk.js';
-import { turnSessionKey } from './agent-turn-work.js';
-/** The calling agent session: the client's session id (Claude Code, Codex). Undefined when
- * nothing identifies the session. Only its digest reaches disk. */
-export function agentSessionKey(env: NodeJS.ProcessEnv = process.env) {
-  return turnSessionKey(env);
+import { resolveAgentSession } from './agent-session.js';
+/** The calling agent's explicit/native session or opaque ancestor identity.
+ * Undefined for a person; only its digest reaches the journal index. */
+export function agentSessionKey(env: NodeJS.ProcessEnv = process.env, session?: string | null) {
+  return resolveAgentSession(env, undefined, session)?.key;
 }
 /** The auto-address index of an identical request. A session-scoped request (start) replays only
  * within the agent session that made it; the operation's own identity never includes the session,

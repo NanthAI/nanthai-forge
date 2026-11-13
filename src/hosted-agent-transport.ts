@@ -322,7 +322,7 @@ export class HostedAgentTransport {
     return this.serverFeatures?.includes('agent-slug') ? this.agentSlug() : undefined;
   }
   private startScope(): string | undefined {
-    const session = this.agentSession === undefined ? agentSessionKey() : this.agentSession;
+    const session = agentSessionKey(process.env, this.agentSession);
     if (!session) return undefined;
     const client = this.agentProcess === undefined ? detectedClientProcess() : this.agentProcess;
     return client ? `${session}\u0000${client}` : session;

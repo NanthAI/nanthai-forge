@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { resolveAgentSession } from './agent-session.js';
 import { backgroundWake } from './agent-wake.js';
 import { turnLedgerDirectory, turnLedgerFile, turnSessionKey } from './agent-turn-state.js';
 import { processStartTime } from './local-process.js';
@@ -41,7 +42,7 @@ const MAX_ENTRIES = 32;
  * identify its session, and the model when the launcher declared it in `FORGE_AGENT_MODEL` (no
  * harness exposes its model to shell commands). Undefined outside an agent session. */
 export function agentClient(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const tool = env.CLAUDE_CODE_SESSION_ID ? 'claude-code' : env.CODEX_THREAD_ID ? 'codex' : undefined;
+  const tool = resolveAgentSession(env)?.harness;
   const declared = env.FORGE_AGENT_MODEL?.trim();
   const model = declared && /^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/.test(declared) ? declared : undefined;
   if (!tool && !model) return undefined;

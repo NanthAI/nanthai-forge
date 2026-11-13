@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFileSync } from 'node:child_process';
 import { basename } from 'node:path';
+import { windowsPowerShell } from './local-process.js';
 
 /** One process as `ps` reports it. */
 export type ProcessInfo = { ppid: number; command: string; started: string };
@@ -26,9 +27,19 @@ const WRAPPERS = new Set([
 ]);
 const MAX_DEPTH = 16;
 
-/** Local `ps` read (no network). Undefined where `ps` or the process is unavailable. */
+/** Local executable, parent and start metadata (no arguments or network). Unavailable processes return undefined. */
 export const readProcess: ProcessReader = pid => {
   try {
+    if (process.platform === 'win32') {
+      const script = `$p=Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; if($p){[pscustomobject]@{ppid=[int]$p.ParentProcessId;command=$p.Name;started=$p.CreationDate.ToUniversalTime().ToFileTimeUtc().ToString()}|ConvertTo-Json -Compress}`;
+      return JSON.parse(
+        execFileSync(windowsPowerShell(), ['-NoProfile', '-NonInteractive', '-Command', script], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+          timeout: 5000,
+        }),
+      ) as ProcessInfo;
+    }
     const out = execFileSync('ps', ['-o', 'ppid=,lstart=,comm=', '-p', String(pid)], {
       encoding: 'utf8',
       env: { ...process.env, LC_ALL: 'C' },

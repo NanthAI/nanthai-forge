@@ -495,14 +495,14 @@ for (const count of [560, 1120])
     );
   });
 
-/** Agent client environment for one test: `claude` wakes on background exit, `plain` does not. */
+/** Synthetic client capability: background wakes are explicit; native detection has subprocess guards. */
 function client(t, kind) {
   const keys = ['CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID', 'FORGE_AGENT_WAKE', 'FORGE_CLIENT_SETTINGS'];
   const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   for (const key of keys) delete process.env[key];
   // Default client settings (landWait true), never the developer's own file.
   process.env.FORGE_CLIENT_SETTINGS = join(tmpdir(), `forge-settings-${randomUUID()}.json`);
-  if (kind === 'claude') process.env.CLAUDE_CODE_SESSION_ID = `synthetic-${randomUUID()}`;
+  if (kind === 'background') process.env.FORGE_AGENT_WAKE = 'background-exit';
   if (kind === 'off') {
     process.env.CLAUDE_CODE_SESSION_ID = `synthetic-${randomUUID()}`;
     process.env.FORGE_AGENT_WAKE = 'off';
@@ -515,7 +515,7 @@ function client(t, kind) {
 }
 
 test('agent land returns at once after submission with the one background wake command', async t => {
-  client(t, 'claude');
+  client(t, 'background');
   const s = await fixture(t);
   const result = await s.run('/synthetic', { detach: false });
   assert.deepEqual(s.events, [], 'no observer opens in the land command');
@@ -558,7 +558,7 @@ test('without background wakes (or FORGE_AGENT_WAKE=off) land still waits in the
 });
 
 test('an explicit --wait keeps the foreground wait even when the client wakes on background exit', async t => {
-  client(t, 'claude');
+  client(t, 'background');
   const s = await fixture(t);
   const pending = s.run('/synthetic', { detach: false, wait: true });
   await turn();

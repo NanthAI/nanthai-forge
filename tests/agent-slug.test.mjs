@@ -16,6 +16,7 @@ import {
   splitAgentActor,
 } from '../dist/agent-slug.js';
 import { agentSlug, sessionAgentSlug } from '../dist/agent-slug-session.js';
+import { AGENT_CLIENTS, resolveAgentSession, nearestAgentProcess } from '../dist/agent-session.js';
 import {
   boardNoticeLine,
   readBoardServerFeatures,
@@ -253,6 +254,60 @@ test('supported clients: concurrent sessions see each other in presence and keep
   }
 });
 
+test('all detected clients and explicit editor sessions see parent and sibling peers without reporting their own other Lane', async () => {
+  const cases = [
+    ...AGENT_CLIENTS.map(client => n => {
+      const env = {
+        CLAUDE_CODE_SESSION_ID: 'parent-claude',
+        CODEX_THREAD_ID: 'parent-codex',
+        ...(client.sessionVariable ? { [client.sessionVariable]: `child-${n}` } : {}),
+      };
+      const ancestor = nearestAgentProcess(
+        pid =>
+          ({
+            30: { ppid: 20 + n, command: '/bin/sh', started: 'shell-start' },
+            [20 + n]: {
+              ppid: 10,
+              command: `/tools/${client.executables[0].replace('*', 'fixture')}`,
+              started: 'client-start',
+            },
+            10: { ppid: 1, command: '/tools/T3', started: 'parent-start' },
+          })[pid],
+        30,
+      );
+      return resolveAgentSession(env, ancestor).key;
+    }),
+    n =>
+      resolveAgentSession({
+        CLAUDE_CODE_SESSION_ID: 'ambient-parent',
+        FORGE_AGENT_SESSION: `lead-proof-${n}`,
+      }).key,
+    // Cline/Roo/Kilo and editor-owned ACP terminals can share one plugin host:
+    // the documented explicit declaration supplies the otherwise missing session signal.
+    ...['cline', 'roo', 'kilo', 'zed-acp'].map(
+      client => n => resolveAgentSession({ FORGE_AGENT_SESSION: `${client}-${n}` }, null).key,
+    ),
+  ];
+  for (const identify of cases) {
+    const { s, projectId, input, begin } = await startProject();
+    const parent = await begin(
+      input({ kind: 'new', outcome: 'Nested sessions' }, { agent: agentSlug('parent-session') }),
+    );
+    const intent = { kind: 'existing', intentId: parent.intentId };
+    const first = await begin(input(intent, { agent: agentSlug(identify(1)) }));
+    const second = await begin(input(intent, { agent: agentSlug(identify(2)) }));
+    const own = await begin(input(intent, { agent: agentSlug(identify(1)) }));
+    const seen = async lane =>
+      JSON.parse(
+        await s.call('read', overlaps.read, { projectId, laneId: lane.lane.laneId, presence: {} }),
+      ).presence.lanes.map(peer => peer.laneId);
+    assert.ok((await seen(first)).includes(parent.lane.laneId), 'child sees its parent');
+    assert.ok((await seen(first)).includes(second.lane.laneId), 'child sees its sibling');
+    assert.ok((await seen(second)).includes(first.lane.laneId), 'siblings see one another');
+    assert.ok(!(await seen(first)).includes(own.lane.laneId), 'same session remains one run across Lanes');
+  }
+});
+
 test('start (server): the session slug labels its Lane in presence, peer wait and overlap; retries ignore it', async () => {
   const { s, projectId, input, begin } = await startProject();
   const firstInput = input({ kind: 'new', outcome: 'Agent identities' }, { agent: 'quiet-otter' });
@@ -396,9 +451,14 @@ test('end to end: two agent sessions on one root post to each other through the 
   const s = agentFixture(t);
   const state = mkdtempSync(join(tmpdir(), 'forge-slug-e2e-'));
   const saved = Object.fromEntries(
-    ['XDG_STATE_HOME', 'FORGE_AUTH_TOKEN', 'CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID', 'FORGE_HUMAN'].map(
-      k => [k, process.env[k]],
-    ),
+    [
+      'XDG_STATE_HOME',
+      'FORGE_AUTH_TOKEN',
+      'CLAUDE_CODE_SESSION_ID',
+      'CODEX_THREAD_ID',
+      'FORGE_HUMAN',
+      'FORGE_AGENT_SESSION',
+    ].map(k => [k, process.env[k]]),
   );
   process.env.XDG_STATE_HOME = state;
   process.env.FORGE_AUTH_TOKEN = 'synthetic-test-credential';
@@ -434,8 +494,15 @@ test('end to end: two agent sessions on one root post to each other through the 
   const address = { url: s.address.url, projectId: s.address.projectId };
   const binary = { process: true, beforeDispatch: async () => true };
   const as = async (session, args) => {
-    if (session) process.env.CLAUDE_CODE_SESSION_ID = session;
-    else delete process.env.CLAUDE_CODE_SESSION_ID;
+    if (session) {
+      process.env.CLAUDE_CODE_SESSION_ID = session;
+      process.env.FORGE_AGENT_SESSION = session;
+      delete process.env.FORGE_HUMAN;
+    } else {
+      delete process.env.CLAUDE_CODE_SESSION_ID;
+      delete process.env.FORGE_AGENT_SESSION;
+      process.env.FORGE_HUMAN = '1';
+    }
     return agentCli([root, ...args], binary);
   };
   const one = '0b7d2a51-0000-4000-8000-00000000000a',

@@ -1398,8 +1398,12 @@ test('two client processes sharing one session id each get their own Lane; a sam
     return JSON.stringify(result);
   };
   const previous = process.env.CLAUDE_CODE_SESSION_ID;
+  const previousExplicit = process.env.FORGE_AGENT_SESSION;
   process.env.CLAUDE_CODE_SESSION_ID = 'shared-client-session';
+  process.env.FORGE_AGENT_SESSION = 'shared-client-session';
   t.after(() => {
+    if (previousExplicit === undefined) delete process.env.FORGE_AGENT_SESSION;
+    else process.env.FORGE_AGENT_SESSION = previousExplicit;
     if (previous === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
     else process.env.CLAUDE_CODE_SESSION_ID = previous;
   });

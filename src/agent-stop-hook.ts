@@ -2,6 +2,7 @@
 import { isMainModule } from '../scripts/main-module.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import type { TurnWork } from './agent-turn-work.js';
+import { AGENT_CLIENTS, resolveAgentSession } from './agent-session.js';
 import { WAKE_BUDGET_SECONDS } from './agent-wake.js';
 import {
   turnLedgerIdle,
@@ -37,7 +38,20 @@ export async function turnEndDecision(
   input: StopInput,
   options: { now?: number; probe?: TurnWorkProbe } = {},
 ): Promise<{ decision?: 'block'; reason?: string }> {
-  const session = typeof input.session_id === 'string' && input.session_id ? input.session_id : undefined;
+  const native = typeof input.session_id === 'string' && input.session_id ? input.session_id : undefined;
+  const current =
+    native &&
+    AGENT_CLIENTS.some(client => client.sessionVariable && process.env[client.sessionVariable] === native);
+  const session = native
+    ? resolveAgentSession(
+        {
+          FORGE_HUMAN: process.env.FORGE_HUMAN,
+          FORGE_AGENT_SESSION: current ? process.env.FORGE_AGENT_SESSION : undefined,
+        },
+        null,
+        native,
+      )?.key
+    : undefined;
   if (!session || (input.hook_event_name !== undefined && input.hook_event_name !== 'Stop')) return {};
   // An idle stop (no ledger, or one with no work) is the common case: it never loads the record schemas.
   if (turnLedgerIdle(session)) return {};

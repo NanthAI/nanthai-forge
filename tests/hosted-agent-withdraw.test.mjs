@@ -124,11 +124,12 @@ for (const verb of ['withdraw', 'cancel'])
   test(`SM-C M1: ${verb} settles the turn ledger entry of the landing it ended`, async t => {
     const s = await setup(t),
       first = await landing(s.f);
-    const keys = ['XDG_STATE_HOME', 'CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID'];
+    const keys = ['XDG_STATE_HOME', 'CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID', 'FORGE_AGENT_SESSION'];
     const before = Object.fromEntries(keys.map(key => [key, process.env[key]]));
     const state = mkdtempSync(join(tmpdir(), 'forge-withdraw-ledger-'));
     process.env.XDG_STATE_HOME = state;
     process.env.CLAUDE_CODE_SESSION_ID = `synthetic-session-${first.id}`;
+    process.env.FORGE_AGENT_SESSION = process.env.CLAUDE_CODE_SESSION_ID;
     delete process.env.CODEX_THREAD_ID;
     t.after(() => {
       for (const [key, value] of Object.entries(before))

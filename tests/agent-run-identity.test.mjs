@@ -363,7 +363,10 @@ test('the CLI sends the run with a landing only to a server that advertises land
   assert.equal(perFinish[0], perFinish[1], 'the run rides the existing landing call: no added call');
   // The client rides the same call, and only to a server that advertises landing-agent-client.
   const declared = Object.fromEntries(
-    ['CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID', 'FORGE_AGENT_MODEL'].map(name => [name, process.env[name]]),
+    ['CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID', 'FORGE_AGENT_MODEL', 'FORGE_AGENT_SESSION'].map(name => [
+      name,
+      process.env[name],
+    ]),
   );
   t.after(() => {
     for (const [name, value] of Object.entries(declared))
@@ -373,10 +376,12 @@ test('the CLI sends the run with a landing only to a server that advertises land
   delete process.env.CLAUDE_CODE_SESSION_ID;
   delete process.env.CODEX_THREAD_ID;
   process.env.FORGE_AGENT_MODEL = 'model-test-1';
+  process.env.FORGE_AGENT_SESSION = 'session-alpha';
   assert.equal('agentClient' in (await finish()), false, 'a server without the feature gets no new argument');
   s.caps.features = ['agent-slug', 'landing-agent-run', 'landing-agent-client'];
   assert.equal((await finish()).agentClient, 'agent:model-test-1');
   assert.equal(perFinish.at(-1), perFinish[1], 'no added call');
+  delete process.env.FORGE_AGENT_SESSION;
   assert.equal(
     'agent' in
       (await (async () => {

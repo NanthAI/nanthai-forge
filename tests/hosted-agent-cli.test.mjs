@@ -12,10 +12,17 @@ import { agentFixture } from './hosted-agent-fixture.mjs';
 const errorCode = expected => error => error.code === expected;
 /** One client session for this test (as Claude Code sets it): an identical start replays only within it. */
 function agentSession(t, id) {
-  const previous = { claude: process.env.CLAUDE_CODE_SESSION_ID, codex: process.env.CODEX_THREAD_ID };
+  const previous = {
+    claude: process.env.CLAUDE_CODE_SESSION_ID,
+    codex: process.env.CODEX_THREAD_ID,
+    explicit: process.env.FORGE_AGENT_SESSION,
+  };
   process.env.CLAUDE_CODE_SESSION_ID = id;
+  process.env.FORGE_AGENT_SESSION = id;
   delete process.env.CODEX_THREAD_ID;
   t.after(() => {
+    if (previous.explicit === undefined) delete process.env.FORGE_AGENT_SESSION;
+    else process.env.FORGE_AGENT_SESSION = previous.explicit;
     if (previous.claude === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
     else process.env.CLAUDE_CODE_SESSION_ID = previous.claude;
     if (previous.codex !== undefined) process.env.CODEX_THREAD_ID = previous.codex;

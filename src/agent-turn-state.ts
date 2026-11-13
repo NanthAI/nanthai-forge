@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { resolveAgentSession } from './agent-session.js';
 import { processAlive } from './local-process.js';
 import { LANDING_DROP_MS } from './landing-stall.js';
 import type { TurnWork } from './agent-turn-work.js';
@@ -45,10 +46,9 @@ export function turnEntry(work: TurnWork, now: number) {
   return { state, ...entryStates[state] };
 }
 
-/** The client's own session id, as both its shell commands and its hooks see it. */
+/** The selected agent run; hook payloads map an explicit run through the same selector. */
 export function turnSessionKey(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const value = env.CLAUDE_CODE_SESSION_ID || env.CODEX_THREAD_ID;
-  return value && value.length <= 200 ? value : undefined;
+  return resolveAgentSession(env)?.key;
 }
 export function turnLedgerDirectory() {
   return join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'forge', 'turns');

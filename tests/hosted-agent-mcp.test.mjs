@@ -155,10 +155,18 @@ function registry(t, s) {
 const body = response => JSON.parse(response.content[0].text);
 /** One client session for this test (as Claude Code sets it): an identical start replays only within it. */
 function agentSession(t, id) {
-  const previous = { claude: process.env.CLAUDE_CODE_SESSION_ID, codex: process.env.CODEX_THREAD_ID };
+  const previous = {
+    claude: process.env.CLAUDE_CODE_SESSION_ID,
+    codex: process.env.CODEX_THREAD_ID,
+    explicit: process.env.FORGE_AGENT_SESSION,
+  };
   process.env.CLAUDE_CODE_SESSION_ID = id;
+  // This is a synthetic client context inside the test runner, not its ancestor agent.
+  process.env.FORGE_AGENT_SESSION = id;
   delete process.env.CODEX_THREAD_ID;
   t.after(() => {
+    if (previous.explicit === undefined) delete process.env.FORGE_AGENT_SESSION;
+    else process.env.FORGE_AGENT_SESSION = previous.explicit;
     if (previous.claude === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
     else process.env.CLAUDE_CODE_SESSION_ID = previous.claude;
     if (previous.codex !== undefined) process.env.CODEX_THREAD_ID = previous.codex;

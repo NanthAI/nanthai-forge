@@ -50,9 +50,11 @@ function session(t, client = 'codex') {
     CLAUDE_CODE_SESSION_ID: process.env.CLAUDE_CODE_SESSION_ID,
     CODEX_THREAD_ID: process.env.CODEX_THREAD_ID,
     FORGE_AGENT_WAKE: process.env.FORGE_AGENT_WAKE,
+    FORGE_AGENT_SESSION: process.env.FORGE_AGENT_SESSION,
   };
   const id = `synthetic-session-${randomUUID()}`;
   process.env.XDG_STATE_HOME = join(directory, 'state');
+  process.env.FORGE_AGENT_SESSION = id;
   delete process.env.CLAUDE_CODE_SESSION_ID;
   delete process.env.CODEX_THREAD_ID;
   delete process.env.FORGE_AGENT_WAKE;
@@ -488,7 +490,7 @@ test('install adds one Stop guard per client beside first-write hooks; uninstall
 
 test('background-wake client: the hook names the one background settle wait, never a foreground poll', async t => {
   const s = session(t, 'claude');
-  const work = landing(s.root, randomUUID(), null);
+  const work = { ...landing(s.root, randomUUID(), null), wake: 'background' };
   recordTurnWork(work);
   assert.equal(readTurnLedger(s.id).work[0].wake, 'background');
   const { calls, probe } = countingProbe();
