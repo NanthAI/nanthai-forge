@@ -459,138 +459,205 @@ The quoted-provider-log marker bug caused missing project/landing attribution;
 the split builder added balanced-quote parsing, but a new paired coverage-checked
 window is still required. No missing metric is treated as zero.
 
-### Final pre-bench smoke (n3-r1-dry-a5)
+### Final pre-bench smokes (n3-r1-dry-a5 and a6)
 
-The final-pin attempt on 2026-11-12 is **setup-only void, not a completed smoke**.
-The batch window is 23:20:21.801–23:29:55.536 UTC. Harness and bench deployment
-are Git [`41327a04159b`](https://github.com/NanthAI/nanthai-forge/commit/41327a04159bbbf8da7695c0751d62d80dfd24e4),
-CLI accepted State `3fa6b4909525`. Dry preflight passes all 27 lines, with no WARN
-or NO-GO. Actual Data-volume free space is 128 GiB before and 126 GiB after,
-above the 60-GiB full-bench flag threshold and 20-GiB reserve.
+**a6 is a valid dry qualification: ten accepted task landings in each arm, all
+20 scripted agents exit 0, zero voids and no measurement-pin changes.** It runs
+2026-11-13 **00:45:36.698–01:25:27.912 UTC**, including setup, collection and grading.
+The harness is Git [`528aba6677c3`](https://github.com/NanthAI/nanthai-forge/commit/528aba6677c3d8593f047967914dc619b7a1f7ad),
+CLI State `737b36bdedc0`; the bench deployment remains Git `41327a04159b`, whose
+`convex/` tree matches the CLI. Preflight is 27 OK, zero WARN/NO-GO. Data-volume
+free space is 127 GiB before the run and remains above the 20-GiB reserve.
+Both arms retain the a2 N=3 concurrent schedule, ten-task order and seed
+`b15d-rerun-2026-11-01/n3/r1`, with `scripted-no-model`. Model requests and tokens
+are zero. Codex CLI 0.167.2 is recorded; the historical plan text names 0.166.0,
+and no model performance is inferred from this dry. `qualifiedHarness`, copied
+`PLAN.md`, the registered P6 plan and earlier attempts remain unchanged.
+No scored or coordination cell runs. Both arms retain the expected scripted oracle:
+strict 0/10, lenient 0.332868, existing suites green. Synthetic edits do not
+establish task-solution correctness.
 
-Both arms retain concurrent N=3, the a2 ten-task order and seed
-`b15d-rerun-2026-11-01/n3/r1`, and `agent: scripted-no-model`. No agent dispatch,
-task landing, model request, scored or coordination cell runs. The version guard
-finds no changed measurement pin. `qualifiedHarness`, copied `PLAN.md`, registered
-plan and prior a3/a4 evidence remain unchanged. This attempt is not rerun.
+**a5 remains a disclosed setup-only void.** Its 2026-11-12 window is
+23:20:21.801–23:29:55.536 UTC at harness/deployment Git `41327a04159b`, CLI
+State `3fa6b4909525`. No task agent or task landing runs. Reset operation
+`69fcfd50-e24f-4a7a-8df5-1eb07b982727` outlives its 513,601-ms wait budget;
+the consumer throws while the server is checking. The original operation later
+lands as receipt `06ae962c-1bd5-4b32-b4c5-3067988adca6`, State `5f404b7025e7`,
+at 23:31:37.324. Its [check](https://github.com/NanthAI/nanthai-forge/actions/runs/43328132148)
+passes and pack refresh ends at 23:32:10. The independent setup-only total through
+23:32:11 is $0.012961414 original / $0.011975019 Professional: 838 executions,
+37,861,813 DB I/O bytes, 5,129,875 egress bytes and 0.007036904 GB-hours. The
+shorter failed-batch total is $0.012528418 / $0.011568978. Neither is normalized
+by ten nonexistent task receipts.
 
-**The reset landed after its client observation budget ended.** Reset operation
-`69fcfd50-e24f-4a7a-8df5-1eb07b982727` waits from 23:21:12.106 for 513,601 ms.
-At 23:29:45.693 its journal says timeout, checking/pending, nonterminal. The reset
-consumer throws on that exit before following the advertised continuation, so
-GitHub stops at the start barrier. A read-only wait on the same operation returns
-accepted receipt `06ae962c-1bd5-4b32-b4c5-3067988adca6`, State `5f404b7025e7`,
-at 23:31:37.324. The [reset check](https://github.com/NanthAI/nanthai-forge/actions/runs/43328132148)
-succeeds; its optional source-pack refresh ends at 23:32:10. This is the reset
-branch of the continuation-consumer defect, recorded on Issue `34cedd25`.
-No S5-caused landing refusal, missing file or failed check is observed; the
-conditional rollback is not executed and the bench writer remains on.
+Reset now shares the operation-selected public continuation driver with task
+agents. Nonzero IN PROGRESS replies continue the same operation through its real
+outcome; the separate reset retry/poll loop is removed. The shared caller requests
+the documented detailed CLI projection, since compact wait entries omit nested
+operation identities. Detailed printing adds no server call or DB I/O. Process
+regressions cover pending-to-landed/failure/cancel/supersede, unrelated operations,
+retained identities and one-call healthy reset. A6's main already equals the base,
+so reset restores zero paths and performs no reset landing; budget exhaustion in
+a6 reset itself is not claimed as exercised.
 
-**There is no task denominator.** The historical readings below retain their
-original scope and price basis; the single reset is setup, never a substitute for
-ten task receipts. B1.5d is $9.40/1,000 and the target is about $2/1,000; neither
-comparison can be judged for a5. No new live `costGuard.reference` is fabricated.
+**Captured serving cost rises from a3 and stays above target.** Amounts are dollars
+per 1,000 accepted task landings; a5 has no task denominator. Original rates remain
+$2.20/M calls, $0.22/GB DB I/O, $0.132/GB egress and $0.30/GB-h actions.
+Professional repricing is $2/M, $0.20/GB, $0.12/GB and $0.30/GB-h. GB is decimal.
+These price provider-reported execution usage; they are not account invoices.
 
-| Dollars per 1,000 task landings | a2 | a3 | a5 |
-| --- | ---: | ---: | --- |
-| Driver, original mixed rates | 6.2531 | 5.7864 | Unmeasured |
-| Driver, Professional rates | 5.868 | 5.427 | Unmeasured |
-| Independent journal, original mixed rates | 6.7955 | 6.2096 | Unmeasured |
-| Independent journal, Professional rates | 6.3763 | 5.8233 | Unmeasured |
-| Executed R2 operations | 0.1839 | 0.174456 | Unmeasured |
-| Covered serving, R2 and weekly-backup model | 6.8356 | 6.3298 | Unmeasured |
+| Dollars per 1,000 task landings | a2 | a3 | a5 | a6 |
+| --- | ---: | ---: | --- | ---: |
+| Driver, original mixed rates | 6.2531 | 5.7864 | Unmeasured | 7.1405 |
+| Driver, Professional rates | 5.8680 | 5.4270 | Unmeasured | 6.7349 |
+| Independent whole batch, original rates | 6.7955 | 6.2096 | Unmeasured | 7.3634 |
+| Independent whole batch, Professional rates | 6.3763 | 5.8233 | Unmeasured | 6.9429 |
+| Executed R2 operations | 0.1839 | 0.174456 | Unmeasured | Unmeasured |
+| Covered driver/R2/weekly-backup model | 6.8356 | 6.3298 | Unmeasured | Unmeasured |
 
-The independent journal covers the entire failed batch, with zero detected gaps
-or missing usage fields: 790 executions, 36,994,335 DB I/O bytes, 5,129,468 egress
-bytes and 0.006581916 action GB-hours. Its **setup-window total**, without dividing
-by landings, is $0.01252842 at the original mixed rates or $0.01156898 at
-Professional rates. Extending the same capture through 23:32:11, including reset
-acceptance and pack refresh, gives 838 executions, 37,861,813 DB I/O bytes,
-5,129,875 egress bytes and 0.007036904 GB-hours: $0.01296141 original or
-$0.01197502 Professional. Both windows have full detected coverage. These are
-provider-reported execution usage priced at the rates above, **not invoices**.
-The task-attributed driver never reaches its task-meter window.
+The a6 original-rate driver rises **23.4%** from a3; the independent original-rate
+batch rises **18.6%** (Professional **19.2%**). Current captured Convex subtotals
+remain below the historical B1.5d **$9.40/1,000** anchor and already exceed the
+**about $2/1,000** whole-serving target. The complete R2/storage/backup total is
+unmeasured. This single dry supplies observations, not a causal attribution or a
+scored exit-bar pass.
 
-For continuity, a2's per-function driver attribution is retained beside a5's
-unmeasured task units. The separate setup subtotal below must not be compared as
-though it were a ten-task after measurement.
+The driver is valid: 2,957 project executions,
+86,226,769 DB I/O bytes, 144,974,459 egress
+bytes and 0.089309619 action GB-hours. The independent
+whole-batch journal records 3,208 executions,
+91,146,278 I/O bytes, 145,039,303 egress bytes and
+0.091263986 GB-hours, with **zero detected gaps or missing
+usage fields** across 2,391,214 ms. Its narrower ordinary task period,
+00:46:27.207–01:06:26.109, prices to $7.2098 original /
+$6.8014 Professional per 1,000; it excludes later
+CI completions. Whole-batch scope also includes reset verification, final-main
+export and deployment-wide traffic. The denominator is ten retained accepted task
+receipts, not the journal's unavailable acceptance-marker count. Silent provider
+loss and invoice reconciliation remain unproved.
 
-| Function | a2 calls | a2 DB read/write MB | a2 egress MB | a2 action GB-h | a2 $/1,000 | a5 $/1,000 |
-| --- | ---: | ---: | ---: | ---: | ---: | --- |
-| `projectConvexSourceNode:step` | 76 | 0/0 | 155.710 | 0.050229 | 3.5790 | Unmeasured |
-| `projectHostedActionsSource:resolve` | 114 | 13.848/0 | 0 | 0 | 0.3297 | Unmeasured |
-| `projectConvexSourceObjects:resolve` | 290 | 4.086/0 | 0 | 0 | 0.1537 | Unmeasured |
-| `POST /checks/actions` | 189 | 0/0 | 1.186 | 0.001840 | 0.1125 | Unmeasured |
-| `projectHostedReuse:prove` | 8 | 0/0 | 0.526 | 0.007953 | 0.2473 | Unmeasured |
-| `projectConvexSourceStore:commit` | 82 | 7.421/1.058 | 0 | 0 | 0.2046 | Unmeasured |
-| `projectHostedFinishDriver:step` | 95 | 6.419/1.194 | 0 | 0 | 0.1884 | Unmeasured |
-| All functions | 2,682 | 62.869/8.250 | 157.439 | 0.067342 | 6.2531 | Unmeasured |
+**Per-function attribution.** Original-rate driver dollars use the same pricing
+and task denominator in each column. Other functions retain the exact remainder;
+all per-function components reconcile to the driver totals. A5 task attribution
+is unmeasured.
 
-| a5 setup through reset/pack completion | Executions | DB I/O MB | Egress MB | Action GB-h | Professional dollars, total |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `projectHostedActionsSource:resolve` | 335 | 33.894745 | 0 | 0 | 0.007448949 |
-| `POST /checks/actions` | 135 | 0 | 0.006648 | 0.004315971 | 0.001565589 |
-| `projectConvexSourceNode:step` | 2 | 0 | 5.122724 | 0.001961726 | 0.001207245 |
-| `projectStateSourceSelection:runner` | 248 | 1.597864 | 0 | 0 | 0.000815573 |
-| All functions | 838 | 37.861813 | 5.129875 | 0.007036904 | 0.011975019 |
+| Function | a2 original $/1,000 | a3 original $/1,000 | a6 original $/1,000 |
+| --- | ---: | ---: | ---: |
+| `projectConvexSourceNode:step` | 3.5790 | 3.3050 | 3.8784 |
+| `projectHostedActionsSource:resolve` | 0.3297 | 0.3069 | 0.4772 |
+| `projectHostedReuse:prove` | 0.2473 | 0.2107 | 0.3612 |
+| `projectConvexSourceStore:commit` | 0.2046 | 0.1955 | 0.2532 |
+| `projectHostedFinishDriver:step` | 0.1884 | 0.1708 | 0.2060 |
+| `projectConvexSourceObjects:resolve` | 0.1537 | 0.1401 | 0.1431 |
+| `POST /checks/actions` | 0.1125 | 0.0877 | 0.1342 |
+| `projectStateSourceSelection:runner` | 0.0000 | 0.0000 | 0.1764 |
+| `projectHostedFinishObserve:page` | 0.1716 | 0.1458 | 0.1734 |
+| Other captured functions | 1.2664 | 1.2239 | 1.3374 |
+| All functions | 6.2531 | 5.7864 | 7.1405 |
 
-**S5 and fallback coverage.** The writer is on against the unmigrated legacy/mixed
-catalog, but this is **not a cold background-seed proof**. Reset save reports an
-incremental physical manifest and compose reports a kept physical manifest; no
-`projectPhysicalSeed` call or `physical-seed` step occurs during capture. A retained
-root is consistent with the previous a4 source job having completed after its
-client timeout. No root is removed or reset to force a seed. Seed start/end,
-per-step time, resolver count and one-off seed cost on this build remain
-unmeasured; this attempt does not prove landings can proceed during a seed.
+The following a6 quantities cover all ten task landings. DB/egress are decimal
+MB from provider usage; action GB-hours are captured memory-times-duration.
+They are not serialized reply sizes or a measured peak-memory profile.
 
-The save/compose request trees contain 9/12 function completions and 1/4 source
-resolver calls. Together they read/write 564,981/97,343 provider-reported DB
-bytes. The five source resolver executions read 73,692 bytes, largest 18,626.
-Source-step elapsed times are 8,543/4,908 ms; logical read counters are
-4,911,493/9,817,216 bytes. Attempted PUT bodies are 4,949,090 State + 246 result
-bytes for save, and 832 result + 3,216 other bytes for compose. These log counters
-are serialized/logical or attempted bodies, not billed bytes or retained storage.
+| a6 function | Calls | DB read/write MB | Egress MB | Action GB-h |
+| --- | ---: | ---: | ---: | ---: |
+| `projectConvexSourceNode:step` | 64 | 0.000/0.000 | 143.900 | 0.065496 |
+| `projectHostedActionsSource:resolve` | 190 | 19.790/0.000 | 0.000 | 0.000000 |
+| `projectHostedReuse:prove` | 12 | 0.000/0.000 | 0.943 | 0.011537 |
+| `projectConvexSourceStore:commit` | 64 | 9.748/1.121 | 0.000 | 0.000000 |
+| `projectHostedFinishDriver:step` | 113 | 6.965/1.268 | 0.000 | 0.000000 |
+| `projectConvexSourceObjects:resolve` | 267 | 3.834/0.000 | 0.000 | 0.000000 |
+| `POST /checks/actions` | 170 | 0.000/0.000 | 0.115 | 0.003175 |
+| `projectStateSourceSelection:runner` | 152 | 6.496/0.000 | 0.000 | 0.000000 |
+| `projectHostedFinishObserve:page` | 349 | 4.392/0.000 | 0.000 | 0.000000 |
 
-The reset runner reports an unusable source pack (`RUNNER_UNAVAILABLE`) and the
-explicit one-time catalog fallback, then verifies 28,003 unique objects /
-323,240,504 bytes for 28,881 files. Its object-fetch phase is 440.967 s. The plan
-and optional pack job each encounter three unbound-source refusals; selected-State
-reads subsequently succeed. Across setup, CI source resolution makes 335
-executions, six refused, reading 33,894,745 DB bytes. This does not qualify the
-cold-job three-resolver/100-KB contract. No S5 checkbox is newly ticked.
+**Source pack finding and S5.** A5 did have a pack. Reading its historical State's
+recipe incorrectly used unbound metadata when that State had no physical
+manifest; the server refused it. The rootless authorized State now retains its
+own recipe identity through the existing selected-State proof. Legacy recipe
+batching is preserved. No backend, schema, authority or deployment change is
+needed. The 29,000-file regression uses the pack plus one changed file, six
+batched source requests and twelve GETs, with 186,695,680 bytes of reader RSS
+growth under the existing 256-MiB fixture bound. This is synthetic, not live
+billed usage or a throughput claim.
 
-**R2 coverage.** There are no a5 per-task-landing request or byte values. Setup
-through reset/pack completion observes 15 A / 9,401 B signatures and 4,961,663
-signed PUT bytes, including source, CI and HTTP callers. They price to $0.00345186
-in requests, total; they are neither executed bucket counts nor new stored bytes.
-No executed-operation analytics or net inventory is substituted. For comparison,
-a2/a3 executed counts are 31.9/112.0 and 30.2/107.1 A/B per task landing; a2
-compose-signed PUT bytes are 5,406,888 per landing.
+All **20/20 a6 CI plan jobs** use the 128,691,503-byte archive of 28,881 files plus
+only **2–14 changed files / 47–489 bytes**, with zero full-object fallbacks.
+Source preparation, including metadata, unpacking and final verification, is
+21.5–29.8 s, median 24.75 s. See the
+[first](https://github.com/NanthAI/nanthai-forge/actions/runs/43339814551) and
+[last](https://github.com/NanthAI/nanthai-forge/actions/runs/43342418328) plans.
+A5's setup instead fetched 28,003 objects / 323,240,504 bytes, with a 440.967-s
+object-fetch phase after `RUNNER_UNAVAILABLE`. Those are different setup/task
+roles; they do not establish a matched latency gain.
 
-| Timing, seconds unless labelled | a2 Forge | a2 GitHub | a3 Forge | a3 GitHub | a5 both arms |
-| --- | ---: | ---: | ---: | ---: | --- |
-| Task time to main, p50 | 223.0 | 400.5 | 219.3 | 352.5 | Unmeasured |
-| Task time to main, p90 | 526.5 | 632.9 | 501.0 | 685.3 | Unmeasured |
-| Wall to all ten landed | 1279.0 | 1580.3 | 1174.9 | 1768.1 | Unmeasured |
-| Workspace prep, p50 | 19.4 | 10.1 | 8.9 | 4.2 | Unmeasured |
-| All check wall / landing | 301.1 | 370.6 | 303.8 | 400.0 | Unmeasured |
-| Landed check wall, p50 | 158.0 | Unmeasured | 168.5 | Unmeasured | Unmeasured |
-| Submit/queue to accept, p50 | 178.7 | Unmeasured | 193.8 | Unmeasured | Unmeasured |
-| CI billed-equivalent minutes | 56 | 81 | 55 | 87 | No task checks |
+The bench writer remains **on** against its unmigrated legacy/mixed catalog.
+Incremental/kept physical manifests are logged; some historical State metadata
+still uses the catalog because its physical manifest is missing. No landing is
+refused, loses a file or fails a check because of S5, so the authorized rollback
+is not triggered. **Cold seed not exercised:** zero physical-seed calls/steps;
+no accepted root is removed or reset. Seed start/end, per-step work and one-off
+cost remain unmeasured, and that S5 line stays open.
 
-**Independent R2 cost ratchet.** A fixed dev observation ending 23:20 UTC reads
-109 accepted landings in four bounded pages, with a 1,758,742-byte serialized
-evidence-read estimate and no remaining cursor. This estimate sums retained value
-lengths and is not provider-billed DB I/O. The latest twenty jointly stamped landings span 09:39:14.575–23:08:34.233
-on 12 November: mean 2.55 A and 1.00 B, or **$0.000011835 per landing** at
-$4.50/M A and $0.36/M B. The two operation-count alerts become one
-`landing-r2-request-usd-mean`, ceiling **$0.000018** (about 1.5x, rounded up to a
-microdollar, with a $0.000010 absolute floor). Deletes are free, either missing
-stamp excludes the sample, bytes retain their separate budget, and the existing
-one-alert/one-P0 transition path adds no call or DB read. This calibration can
-replace the noisy sub-operation budget independently of the incomplete smoke;
-`costGuard.reference` still awaits a valid ten-task run. Historical capture
-entries remain until such a measured replacement exists.
+During the ordinary task period, source object resolution makes 267 executions,
+3,834,115 DB read bytes (largest 17,590); CI source resolution makes 190
+executions / 19,789,856 read bytes; State selection makes 152 / 6,496,296.
+All have zero provider failures. The largest single CI source resolver reads
+**552,601 B**, request `7a13639a0d62698d`, so the 100-KB cold-job read goal is
+not met. Resolver calls are not fully partitioned by job; the three-resolver bar
+is not newly proven. No S5 checkbox is ticked from this smoke.
+
+**R2 coverage.** Signatures are issued capabilities, not executed bucket requests,
+retries or net stored growth. Whole-cell signer scope is comparable between a3
+and a6; a2 has only the narrower compose counter here.
+
+| R2 quantity per task landing | a2 | a3 | a5 | a6 |
+| --- | ---: | ---: | --- | ---: |
+| Executed A / B | 31.9 / 112.0 | 30.2 / 107.1 | Unmeasured | Unmeasured |
+| Whole-cell signed A / B | Unmeasured | 32.1 / 122.1 | Unmeasured | 37.6 / 227.6 |
+| Whole-cell signed PUT bytes | Unmeasured | 14,258,919.0 | Unmeasured | 13,905,213.2 |
+| Whole-cell signature request model, $/1,000 | Unmeasured | 0.188406 | Unmeasured | 0.251136 |
+
+The signature model uses $4.50/M A and $0.36/M B, deletes free. A6 records
+376 A / 2,276 B / 139,052,132 signed PUT bytes over its cell,
+with zero malformed or unattributed counter lines. Node source steps issue 691 B
+signatures versus 72 in a3; the HTTP Actions path issues 500 versus 142. Signed
+PUT bytes fall slightly while signed request cost rises. These explain the
+counter mix, not an executed-request or invoice reconciliation. A5 setup through
+reset/pack completion retains 15 A / 9,401 B / 4,961,663 signed PUT bytes,
+$0.00345186 request model total, with no per-task units. Executed a6 analytics,
+new inventory and weekly-backup allocation are unmeasured.
+
+| Timing, seconds unless labelled | a2 Forge | a2 GitHub | a3 Forge | a3 GitHub | a6 Forge | a6 GitHub |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Task time to main, p50 | 223.0 | 400.5 | 219.3 | 352.5 | 228.2 | 312.0 |
+| Task time to main, p90 | 526.5 | 632.9 | 501.0 | 685.3 | 486.2 | 714.2 |
+| Wall to all ten landed | 1279.0 | 1580.3 | 1174.9 | 1768.1 | 1191.5 | 1669.9 |
+| Workspace prep, p50 | 19.4 | 10.1 | 8.9 | 4.2 | 8.5 | 4.2 |
+| All check wall / landing | 301.1 | 370.6 | 303.8 | 400.0 | 323.2 | 374.1 |
+| Landed check wall, p50 | 158.0 | Unmeasured | 168.5 | Unmeasured | 165.4 | Unmeasured |
+| Submit/queue to accept, p50 | 178.7 | Unmeasured | 193.8 | Unmeasured | 201.1 | Unmeasured |
+| CI billed-equivalent minutes | 56.0 | 81.0 | 55.0 | 87.0 | 59.0 | 75.0 |
+
+Forge all-check wall retains reservation-to-CI-end including discarded/audit
+checks; GitHub uses job-start-to-end. Forge's job-wall-only subtotal is
+307.0 s/landing. GitHub's matching landed-check and
+queue-to-accept stamps remain unmeasured. Public runners incur no paid CI spend;
+minutes above are billed-equivalent. A6 Forge is 26.9% faster on median task time
+to main and 28.6% on arm wall than GitHub. Against a3, Forge median task time rises
+4.1%, arm wall 1.4%, all-check wall 6.4% and CI minutes 7.3%; there is no
+identical-pin noise calibration or model/scored claim.
+
+**Current reference and retained ratchet.** `costGuard.reference` now records this
+valid a6 independent whole-batch Professional capture by function family, total
+**$6.942917/1,000**. Its source labels state the
+window and fixed setup/export coverage; it is not an isolated steady-state price.
+Historical capture references are removed from the current reference array and
+remain in this report/history. Fixture `costs`, thresholds, action model and
+active budgets are unchanged. The already-landed weighted R2 budget remains
+`landing-r2-request-usd-mean`, $0.000018 per landing, calibrated from the dev
+20-landing mean $0.000011835; its one-alert/one-P0 path still adds no call. It is
+not recalibrated from this large-repository smoke.
 
 
 ## Evidence and the allocation we cannot yet measure

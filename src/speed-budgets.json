@@ -306,84 +306,69 @@
     },
     "reference": [
       {
-        "family": "all Convex, per 1,000 accepted landings, capture #3 (list price, not billed)",
-        "usdPer1000": 5.92,
-        "source": "Capture #3, Issue 9db58ca6, 2026-11-07, N=10 (11.85 per acceptance event). Superseded as the latest by the capture #4 lines below; kept as the earlier reading."
+        "family": "all Convex, per 1,000 accepted task landings, a6 independent batch",
+        "usdPer1000": 6.942916814470751,
+        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. This covered batch reference is not an isolated steady-state operation price. Ordinary task-period subtotal: $6.801369939986374/1,000; it excludes late CI."
       },
       {
-        "family": "all Convex, per 1,000 accepted landings, capture #4 (list price, not billed)",
-        "usdPer1000": 9.49,
-        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Like-for-like basis of #3 (one-off imports, purges and work/planning, mirror and signDownloads removed): 8.00 against 5.04. Per acceptance event 5.93. Target about $2. "
+        "family": "source and objects, a6 independent batch",
+        "usdPer1000": 4.570283924383853,
+        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: projectConvexSource:dispatch, projectConvexSource:step, projectConvexSourceNode:step, projectConvexSourceObjects:resolve, projectConvexSourceStore:begin, projectConvexSourceStore:commit, projectHostedCompose:candidate, projectHostedCompose:prepare, projectHostedCompose:progress, projectHostedCompose:stage, projectHostedComposeSelection:page, projectHostedConflictMerge:run, projectHostedConflicts:mainState, projectHostedConflicts:record, projectHostedConflicts:summary, projectHostedResolveChain:run, projectHostedResolveChainStore:prepare, projectHostedResolveChainStore:submit, projectHostedSaves:prepare, projectHostedSync:prepare, projectHostedSync:progress, projectObjectCommit:commitBatch, projectObjectCommit:markCommitted, projectObjectCommit:pendingRows, projectObjectDownloads:lanePage, projectObjectDownloads:signDownloads, projectObjects:available, projectObjects:prepareBatch, projectObjects:resolve, projectSourceRun:submit, projectSourceRunStore:submit."
       },
       {
-        "family": "all Convex, per 1,000 accepted landings, capture #4 with builder test activity removed (list price, not billed)",
-        "usdPer1000": 5.96,
-        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10, N=10 Forge landings, with builder test activity removed: scripted save/sync drills, scratch-project landings, purges, imports and backup polls ($3.53 of the raw $9.49). Capture #3 (9db58ca6, 2026-11-07) was $5.92."
+        "family": "CI results and ingest, a6 independent batch",
+        "usdPer1000": 0.9918554523510417,
+        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: POST /checks/actions, projectHostedActionsBatchStore:output, projectHostedActionsBatchStore:prepare, projectHostedActionsDirect:dispatch, projectHostedActionsDirect:observe, projectHostedActionsDirect:reserve, projectHostedActionsPlan:prepare, projectHostedActionsPreflight:check, projectHostedActionsResults:batch, projectHostedActionsSession:session, projectHostedActionsSource:resolve, projectHostedActionsVerdict:confirm, projectHostedActionsVerdict:confirmed, projectHostedActionsWebhook:receive, projectHostedCheckDefinitions:current, projectHostedCheckDefinitions:list, projectHostedMainAudit:start, projectHostedTestTimings:argumentsPage, projectStateSourceSelection:runner."
       },
       {
-        "family": "source and objects, capture #4",
-        "usdPer1000": 2.99,
-        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 2.24, #2 1.24, #1 1.52. "
+        "family": "check reuse, a6 independent batch",
+        "usdPer1000": 0.42417701568750005,
+        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: projectHostedReuse:prove, projectHostedReuseStore:claim, projectHostedReuseStore:complete, projectHostedReuseStore:context, projectHostedReuseStore:objects."
       },
       {
-        "family": "CI results and ingest, capture #4",
-        "usdPer1000": 1.36,
-        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 1.03. "
+        "family": "finish driver, a6 independent batch",
+        "usdPer1000": 0.35993618031562497,
+        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: projectHostedFinishDriver:drive, projectHostedFinishDriver:resume, projectHostedFinishDriver:step."
       },
       {
-        "family": "other (one-off imports, SourceRun, ConflictMerge), capture #4",
-        "usdPer1000": 1.45,
-        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.13; the new rows are builder one-offs in the window. "
+        "family": "landing controller, a6 independent batch",
+        "usdPer1000": 0.2521851708359375,
+        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: projectBytePlacement:convexWritten, projectHostedAcceptance:complete, projectHostedLanding:status, projectHostedLandingDesired:advance, projectHostedLandingDesired:claim, projectHostedLandingDesired:drive, projectHostedLandingDesired:submit, projectHostedLandingDriver:advance, projectHostedLandingDriver:checkWake, projectHostedLandingDriver:claim, projectHostedLandingDriver:drive, projectHostedLandingStallAlert:deliver, projectHostedLandingWouldConflict:mark, projectLandingSpeedIssue:write."
       },
       {
-        "family": "lane, queue and session, capture #4",
-        "usdPer1000": 0.84,
-        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.25. "
+        "family": "finish observer, a6 independent batch",
+        "usdPer1000": 0.15764352,
+        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: projectHostedFinishObserve:page."
       },
       {
-        "family": "landing controller, capture #4",
-        "usdPer1000": 0.6,
-        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.43. "
+        "family": "lane, queue and session, a6 independent batch",
+        "usdPer1000": 0.06303114,
+        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: projectHostedAgent:capabilities, projectHostedBatchAbandon:reselect, projectHostedChannels:current, projectHostedLanes:select, projectHostedLifecycle:transition, projectHostedStart:start."
       },
       {
-        "family": "finish driver, capture #4",
-        "usdPer1000": 0.57,
-        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.35. "
+        "family": "other captured functions, a6 independent batch",
+        "usdPer1000": 0.05502033999999999,
+        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: projectSelfMetricBills:page, projectSelfMetrics:page."
       },
       {
-        "family": "GitHub mirror, capture #4",
-        "usdPer1000": 0.45,
-        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.32. "
+        "family": "GitHub integrations, a6 independent batch",
+        "usdPer1000": 0.026337502091145833,
+        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: POST /github/webhook."
       },
       {
-        "family": "overlap notices, capture #4",
-        "usdPer1000": 0.32,
-        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.07. "
+        "family": "auth and device, a6 independent batch",
+        "usdPer1000": 0.02491354040364583,
+        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: GET /auth/jwks, deviceActions:jwks, deviceStore:authorize."
       },
       {
-        "family": "auth and device, capture #4",
-        "usdPer1000": 0.32,
-        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.15. "
+        "family": "overlap notices, a6 independent batch",
+        "usdPer1000": 0.01056428,
+        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: projectHostedOverlaps:read."
       },
       {
-        "family": "check reuse, capture #4",
-        "usdPer1000": 0.25,
-        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.16. "
-      },
-      {
-        "family": "finish observer, capture #4",
-        "usdPer1000": 0.23,
-        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.22. "
-      },
-      {
-        "family": "work and planning, capture #4",
-        "usdPer1000": 0.12,
-        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.57; the drop is flip 5 (work store, S0 to S3). "
-      },
-      {
-        "family": "GitHub inbound scratch, project-attributed Convex subtotal per 1,000 inbound landings (N=1; list price, not billed)",
-        "usdPer1000": 0.9953858559270834,
-        "source": "Issue 3e3f9fe6 sample 2026-11-10 17:21:49\u201317:24:36Z, one two-file scratch project; accepted receipt 26332140. After 13 observation/pull executions excluded: 79 executions, 1,031,992 DB read B, 343,581 written B, 49,932 egress B, 6.675353 GB-s. Repriced at capture Professional rates, not the instrument mixed-rate default. Initial push webhook/queue lacks project attribution; R2 charges, runner minutes and invoices unmeasured; silent log loss not excluded. Not a dogfood whole-serving forecast."
+        "family": "work and planning, a6 independent batch",
+        "usdPer1000": 0.006968748402000001,
+        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: projectWorkCommand:commandFromAction, projectWorkIndexStore:current, projectWorkIndexStore:lookups, projectWorkIndexStore:retirePayload."
       }
     ]
   },

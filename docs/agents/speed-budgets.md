@@ -115,3 +115,15 @@ npx convex run projectLandingSpeed:drill '{"projectId":"PROJECT_ID","mode":"rest
 `break` pushes four slow landings among fast ones through the real landing path, so the landing-to-main p90 budget
 breaks: one alert and one P0 Issue (landing ids read `drill0000`..). `recover` pushes a fast window: one recovery
 message and a comment. `restore` puts the project's own window back. Close the drill Issue afterwards.
+
+## Live cost reference
+
+`costGuard.reference` in `src/speed-budgets.json` is reading-only context, separate
+from the active fixture `costs` and their thresholds. The latest reference is the
+[valid a6 smoke](../operations/cost-to-serve.md#final-pre-bench-smokes-n3-r1-dry-a5-and-a6),
+2026-11-13: $6.942917 per 1,000 accepted task landings, by function family, using
+the independent whole-batch capture and Professional list rates. Both arms have
+ten task receipts. Setup, late CI and final-main export are included; this is not
+an isolated steady-state price, executed R2 accounting or an invoice. The ordinary
+task-period subtotal and project-attributed driver appear alongside it in the report.
+The active fixture budgets, action model and weighted R2 alert are unchanged.

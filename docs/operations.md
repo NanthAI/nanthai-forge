@@ -1175,7 +1175,12 @@ The per-landing cost ledger is the `costs` list in
 [`src/speed-budgets.json`](../src/speed-budgets.json), next to the speed budgets. Each entry has its
 value per accepted landing, a `floor` (the change too small to judge), its `source` and the decision
 `issue` it protects. `costGuard` holds the thresholds, the scripted scenario, the action model and the
-latest live dollars per 1,000 landings by family (`reference`, for reading only).
+latest live dollars per 1,000 landings by family (`reference`, for reading only). The current reference is the valid
+[a6 smoke](operations/cost-to-serve.md#final-pre-bench-smokes-n3-r1-dry-a5-and-a6):
+$6.942917 per 1,000 accepted task landings at Professional rates from the independent
+whole-batch capture, including setup, late CI and final-main export. This is captured
+usage priced at list rates, not an invoice or isolated steady-state price. Fixture
+ceilings and the weighted R2 alert are unchanged.
 
 **Reading the numbers.** Values are per accepted landing of a fixed fixture mix: one solo
 accepted-Candidate submission (initial save/compose excluded), one whose main moves during its check (recompose on a source job, second check) and a
