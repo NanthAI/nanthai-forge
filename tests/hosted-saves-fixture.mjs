@@ -60,15 +60,15 @@ export async function saveFixture(originalText = 'original', originalPath = 'a.t
         assert(c.readBytes < 512 * 1024 && c.writeBytes < 512 * 1024, `${name}: metadata only`);
         assert(
           !c.touched.some(table =>
-            [
-              'projectBackups',
-              'projectWorkRecords',
-              'projectWorkEvents',
-              'projectWorkGenerations',
-              'projectHostedChannels',
-            ].includes(table),
+            ['projectBackups', 'projectWorkRecords', 'projectWorkEvents', 'projectWorkGenerations'].includes(
+              table,
+            ),
           ),
           `${name}: no Work/history hydration`,
+        );
+        assert(
+          (c.readDocumentsByTable.projectHostedChannels ?? 0) <= 1,
+          `${name}: trial planning reads only the current main pointer`,
         );
         const max = (maxima[name] ??= { ranges: 0, documents: 0, readBytes: 0, writes: 0, writeBytes: 0 });
         for (const key of Object.keys(max)) max[key] = Math.max(max[key], c[key]);

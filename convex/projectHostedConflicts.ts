@@ -7,7 +7,9 @@ import { findObject } from './projectObjectFind';
 import { query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
 import { report } from './errors';
+import { wakeConflictLane } from './projectHostedConflictDelivery';
 import { invariant } from '../src/errors';
+import { canonicalPayload } from '../src/hosted-source-operation';
 import { hostedMainV2Schema } from '../src/hosted-main';
 import { sameResolution, sameStack, type OverlapChange } from '../src/hosted-overlap';
 import { overlapMainSince } from './projectHostedOverlapMainLog';
@@ -98,17 +100,27 @@ const fileOf = (file: OverlapChange['before']) => (file ? { blob: file.blob, mod
 /** Main's changed paths after the Lane's base: the per-landing log after the base (Issue 750c5929),
  * or the whole main path history the overlap read uses when the log cannot answer. */
 async function mainChanged(ctx: QueryCtx, projectId: Id<'hostedProjects'>, row: Row, paths: Set<string>) {
-  if (row.baseSequence === null) return new Set<string>();
+  const baseSequence =
+    row.baseSequence ??
+    (
+      await ctx.db
+        .query('projectHostedAcceptances')
+        .withIndex('by_project_and_receipt', q =>
+          q.eq('projectId', projectId).eq('receiptId', row.baseReceiptId),
+        )
+        .unique()
+    )?.sequence;
+  if (baseSequence === undefined) return new Set<string>();
   const history =
-    (await overlapMainSince(ctx, projectId, row.baseSequence)) ??
+    (await overlapMainSince(ctx, projectId, baseSequence)) ??
     (await ctx.db
       .query('projectHostedOverlapMain')
       .withIndex('by_project', q => q.eq('projectId', projectId))
       .unique());
-  if (!history || history.sequence <= row.baseSequence) return new Set<string>();
+  if (!history || history.sequence <= baseSequence) return new Set<string>();
   const changed = new Set<string>();
   for (const [path, sequence] of JSON.parse(history.changes) as [string, number][])
-    if (sequence > row.baseSequence && paths.has(path)) changed.add(path);
+    if (sequence > baseSequence && paths.has(path)) changed.add(path);
   return changed;
 }
 
@@ -122,8 +134,10 @@ export async function planTrialMerge(
   if (!row.open || row.head === previousHead) return;
   const changes = changesOf(row);
   const mine = new Map(changes.map(change => [change.path, change]));
-  if (!mine.size)
-    return row.conflicted ? closeConflictNotices(ctx, projectId, row.laneId, 'save') : undefined;
+  if (!mine.size) {
+    if (row.conflicted) await closeConflictNotices(ctx, projectId, row.laneId, 'save');
+    return;
+  }
   // Slim presence rows name each open Lane's saved paths (complete when pathCount fits); only a peer
   // that may share a file costs a point read of its overlap row.
   const presence = await ctx.db
@@ -181,9 +195,9 @@ export async function planTrialMerge(
       });
   }
   const onMain = await mainChanged(ctx, projectId, row, new Set(mine.keys()));
-  const mainState = onMain.size ? await mainStateObject(ctx, projectId) : undefined;
+  const mainState = onMain.size || tasks.size ? await mainStateObject(ctx, projectId) : undefined;
   let main: TrialPlan['main'];
-  if (onMain.size && mainState) {
+  if (mainState) {
     main = { ...mainState, paths: [...onMain].slice(0, TRIAL_PATHS) };
     for (const path of main.paths)
       if (!tasks.has(path)) {
@@ -214,12 +228,29 @@ export async function planTrialMerge(
     const found = await findObject(ctx, projectId, digest);
     if (found && !found.recipe && found.size <= TRIAL_FILE_BYTES) objects.push(trialObject(found));
   }
+  const sources: NonNullable<TrialPlan['sources']> = [];
+  const states = new Map<string, TrialObject>();
+  if (mainState) states.set(mainState.head, mainState.state);
+  const sourceState = async (head: string) => {
+    if (states.has(head)) return states.get(head);
+    const object = await findObject(ctx, projectId, head);
+    if (!object || object.recipe || object.size > TRIAL_MAIN_STATE_BYTES) return undefined;
+    const selected = trialObject(object);
+    states.set(head, selected);
+    return selected;
+  };
+  for (const source of [row, ...peerRows.filter(peer => peers.has(peer.laneId))]) {
+    const base = await sourceState(source.baseHead),
+      head = await sourceState(source.head);
+    if (base && head) sources.push({ laneId: source.laneId, base, head });
+  }
   const plan: TrialPlan = {
     laneId: row.laneId,
     head: row.head,
     peers: [...peers.values()].map(({ laneId, head }) => ({ laneId, head })),
     tasks: [...tasks.values()],
     objects,
+    sources,
     ...(main ? { main } : {}),
   };
   await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedConflictMerge:run'), {
@@ -256,6 +287,7 @@ function trialObject(row: {
   r2Committed?: boolean;
   storageId?: Id<'_storage'>;
   pack?: { digest: string; size: number; offset: number };
+  statePhysical?: { sha256: string; size: number };
 }): TrialObject {
   return {
     digest: row.digest,
@@ -265,6 +297,7 @@ function trialObject(row: {
     ...(row.r2Committed ? { r2Committed: true } : {}),
     ...(row.storageId ? { storageId: row.storageId } : {}),
     ...(row.pack ? { pack: row.pack } : {}),
+    ...(row.statePhysical ? { statePhysical: row.statePhysical } : {}),
   };
 }
 
@@ -292,7 +325,9 @@ export const record = internalMutation({
   handler: async (ctx, input) => {
     const lane = (laneId: string) => laneRow(ctx, input.projectId, laneId);
     const me = await lane(input.laneId);
-    if (!me?.open || me.head !== input.head) return null;
+    if (!me?.open || me.head !== input.head) {
+      return null;
+    }
     const now = Date.now();
     const write = async (
       owner: Row,
@@ -330,12 +365,21 @@ export const record = internalMutation({
         theirs: swap ? item.mine : item.theirs,
         reason: item.reason,
       }));
+      // A retried result never rewakes the agent for the same saved pair and ranges.
+      if (
+        existing &&
+        existing.laneHead === owner.head &&
+        existing.peerHead === peerHead &&
+        canonicalPayload(existing.paths) === canonicalPayload(paths)
+      )
+        return;
+      const updatedAt = await wakeConflictLane(ctx, input.projectId, owner.laneId, now);
       const value = {
         paths,
         laneHead: owner.head,
         peerHead,
         peerGoal: goal.slice(0, 160),
-        updatedAt: now,
+        updatedAt,
       };
       if (!owner.conflicted) await ctx.db.patch(owner._id, { conflicted: true });
       if (existing) await ctx.db.patch(existing._id, value);
@@ -389,6 +433,7 @@ export async function laneConflicts(
   projectId: Id<'hostedProjects'>,
   laneId: string,
   head?: string,
+  after?: number,
 ) {
   const rows = await ctx.db
     .query('projectHostedConflictNotices')
@@ -396,8 +441,16 @@ export async function laneConflicts(
       q.eq('projectId', projectId).eq('laneId', laneId).eq('open', true),
     )
     .take(20);
+  const currentHead =
+    after !== undefined && rows.some(row => row.updatedAt > after)
+      ? (await laneRow(ctx, projectId, laneId))?.head
+      : head;
   return rows
-    .filter(row => head === undefined || row.laneHead === head)
+    .filter(
+      row =>
+        (currentHead === undefined || row.laneHead === currentHead) &&
+        (after === undefined || row.updatedAt > after),
+    )
     .map(row => ({
       with: row.peer,
       goal: row.peerGoal,

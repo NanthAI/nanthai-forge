@@ -18,6 +18,7 @@ export type TrialObject = {
   r2Committed?: boolean;
   storageId?: string;
   pack?: { digest: string; size: number; offset: number };
+  statePhysical?: { sha256: string; size: number };
 };
 export type TrialPlan = {
   laneId: string;
@@ -25,6 +26,8 @@ export type TrialPlan = {
   peers: { laneId: string; head: string }[];
   tasks: TrialTask[];
   objects: TrialObject[];
+  /** Source is authoritative: a sync or resolution delta can describe a draft, not the Lane base. */
+  sources?: { laneId: string; base: TrialObject; head: TrialObject }[];
   /** Main's head State and the Lane's paths main changed after the Lane's base. */
   main?: { head: string; state: TrialObject; paths: string[] };
 };

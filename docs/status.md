@@ -185,6 +185,11 @@ for measured scope and remaining live latency qualifications.
 
 ## Works
 
+Exact saved-file conflict trials use verified physical object bindings and pinned Lane source
+bases. New notices wake a running landing wait through its existing Lane inbox; save publication
+and peer-conflict admission remain independent of the advisory trial. Synthetic replay and wake
+contracts are guarded; deployed delivery and billed-cost qualification remain separate evidence.
+
 Managed CLI work checks accepted Forge main once per process. When main moved,
 commands keep running on the working build while one detached updater stages,
 canary-tests and atomically selects the new one; after a failed install, writes

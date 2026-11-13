@@ -263,8 +263,10 @@ async function dispatchHostedAgentCli(
         process.exitCode = 3;
         recordTurnWait(root, continuation.next, null);
         const delivered = (response.result as { board: Parameters<typeof boardWakeEnvelope>[2] }).board;
+        const { conflictNotice, notice, ...envelope } = boardWakeEnvelope(root, board.laneId, delivered);
         return {
           ...response,
+          ...(conflictNotice ? { conflictNotice, notice } : {}),
           result: {
             status: 'IN_PROGRESS',
             reason: 'message',
@@ -272,7 +274,7 @@ async function dispatchHostedAgentCli(
             operationIds: selectedWait.operationIds,
             phase: submissions?.length === 1 ? (submissions[0]!.submission.phase ?? 'unknown') : 'pending',
             ...held,
-            board: boardWakeEnvelope(root, board.laneId, delivered),
+            board: { ...envelope, ...(!conflictNotice && notice ? { notice } : {}) },
             ...resume,
           },
         };

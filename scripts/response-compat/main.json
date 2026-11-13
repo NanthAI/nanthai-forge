@@ -3744,6 +3744,67 @@
         },
         "cursor": {
           "type": "number"
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "with": {
+                "type": "string"
+              },
+              "goal": {
+                "type": "string"
+              },
+              "flaggedAt": {
+                "type": "string"
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "mine": {
+                      "type": "array",
+                      "items": {
+                        "type": "array",
+                        "items": {
+                          "type": "number"
+                        }
+                      }
+                    },
+                    "theirs": {
+                      "type": "array",
+                      "items": {
+                        "type": "array",
+                        "items": {
+                          "type": "number"
+                        }
+                      }
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "mine",
+                    "theirs",
+                    "reason"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "with",
+              "goal",
+              "flaggedAt",
+              "files"
+            ]
+          }
         }
       },
       "required": [

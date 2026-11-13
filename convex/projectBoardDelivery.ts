@@ -4,6 +4,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { boardStopped } from './projectBoardLimits';
 import { boardPathVisible, claimDecision, readAutoClaims, type ClaimPeers } from './projectBoardClaims';
 import { agentActor } from '../src/agent-slug';
+import { laneConflicts } from './projectHostedConflicts';
 
 type Ctx = QueryCtx | MutationCtx;
 /** A message as returned. `author` is an auth subject here (`subject/slug` for an agent session,
@@ -228,7 +229,10 @@ export async function boardWake(
     )
     .unique();
   if (!inbox || inbox.latestAt <= input.after) return undefined;
-  if (await boardStopped(ctx, input.projectId)) return undefined;
+  const conflicts = await laneConflicts(ctx, input.projectId, input.laneId, undefined, input.after);
+  // Exact source conflicts remain deliverable when member-written board notes are switched off.
+  if (await boardStopped(ctx, input.projectId))
+    return conflicts.length ? { messages: [], more: 0, cursor: inbox.latestAt, conflicts } : undefined;
   const lane = await ctx.db
     .query('projectHostedPresence')
     .withIndex('by_project_and_lane', q => q.eq('projectId', input.projectId).eq('laneId', input.laneId))
@@ -241,5 +245,7 @@ export async function boardWake(
     limit: 2,
     order: 'asc',
   });
-  return delivered.messages.length ? delivered : undefined;
+  return delivered.messages.length || conflicts.length
+    ? { ...delivered, ...(conflicts.length ? { conflicts } : {}) }
+    : undefined;
 }

@@ -542,3 +542,37 @@ test('a save changing only paths beyond the presence list refreshes its filter b
   );
   assert.equal(plan.tasks[0].peers[0].laneId, peer);
 });
+
+test('83e6d0d3: a resolution inherits every saved origin path, including files without markers', async () => {
+  const f = fixture(),
+    origin = randomUUID(),
+    resolution = randomUUID();
+  await f.write(origin, 'b'.repeat(64));
+  await f.write(origin, '1'.repeat(64), {
+    'src/marked.ts': Buffer.from('marked'),
+    'src/inherited.ts': Buffer.from('inherited'),
+  });
+  await f.write(
+    resolution,
+    '2'.repeat(64),
+    {},
+    {
+      resolution: {
+        candidateId: null,
+        conflicts: { sha256: '3'.repeat(64), size: 1 },
+        left: 'b'.repeat(64),
+        right: '1'.repeat(64),
+        draftHead: '2'.repeat(64),
+        status: 'pending',
+        origin: { laneId: origin, head: '1'.repeat(64), sourceVersion: 1 },
+      },
+    },
+  );
+  const row = [...f.s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === resolution);
+  assert.deepEqual(
+    JSON.parse(row.changes).map(change => change.path),
+    ['src/inherited.ts', 'src/marked.ts'],
+  );
+  const present = [...f.s.tables.projectHostedPresence.values()].find(row => row.laneId === resolution);
+  assert.equal(present.pathCount, 2, 'an inherited edit remains visible before the next save');
+});

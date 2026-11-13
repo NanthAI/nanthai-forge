@@ -15,6 +15,7 @@ import {
   writeBoardProjectCursor,
 } from './board-local.js';
 import { ForgeError, invariant } from './errors.js';
+import { exactConflictsSchema } from './hosted-conflict-notice.js';
 import { hostedActionError } from './hosted-action-error.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 
@@ -38,6 +39,7 @@ export const boardDeliverySchema = z.object({
   messages: z.array(boardMessageSchema),
   more: z.number(),
   cursor: z.number(),
+  conflicts: exactConflictsSchema.optional(),
 });
 const ref = z.string().regex(/^[0-9a-fA-F][0-9a-fA-F-]{7,35}$/, 'an id or 8+ character prefix');
 export const hostedBoardReadSchema = z

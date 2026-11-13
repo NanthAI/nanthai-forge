@@ -35,7 +35,7 @@ export async function trackHostedOverlapLane(
   const keepChanges = sameBase || metadata?.rebased === true;
   const sameHead = old?.head === lane.head;
   const unchangedBase = lane.head === lane.base.head && !metadata?.pending;
-  const projection = unchangedBase
+  let projection = unchangedBase
     ? { changes: '[]', complete: true }
     : mergeOverlapChanges(
         keepChanges && old ? JSON.parse(old.changes) : [],
@@ -47,7 +47,7 @@ export async function trackHostedOverlapLane(
   // A resolution Lane is the same agent run's work as the Lane it resolves (d730121f): its first row
   // takes the origin's run slug, one indexed read once per resolution Lane.
   const origin =
-    !old && !metadata?.agent && lane.resolution?.origin
+    !old && lane.resolution?.origin
       ? await ctx.db
           .query('projectHostedOverlapLanes')
           .withIndex('by_project_and_lane', q =>
@@ -55,6 +55,12 @@ export async function trackHostedOverlapLane(
           )
           .unique()
       : null;
+  if (origin && !unchangedBase)
+    projection = mergeOverlapChanges(
+      JSON.parse(origin.changes),
+      JSON.parse(projection.changes),
+      origin.complete && metadata?.complete !== false,
+    );
   // Stack membership (Issue ee9d5738): the root is the parent's own root, read once per (re)stack. A
   // Lane without an attached stack stores nothing and pays no read.
   const stack = lane.stack && !lane.stack.detached ? lane.stack : undefined;

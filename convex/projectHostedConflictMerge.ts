@@ -4,28 +4,11 @@ import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction, type ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
-import type { ObjectView } from './projectObjectFind';
-import { rawContent } from './projectObjectContent';
-import { r2Config, presignGet, r2Key } from './r2';
-import { exchangeFetch } from '../src/exchange-request';
-import { digest } from '../src/hash';
-import { parseNativeState } from '../src/state/format';
-import { trialMerge, TrialUnavailable } from '../src/hosted-trial-merge';
+import { trialReader } from './projectHostedConflictRead';
+import { trialMerge } from '../src/hosted-trial-merge';
 import { mergePathsOf } from '../src/native-docs-resolve';
 import { FORGE_CONFIG_FILE, type DeclaredMergePaths } from '../src/project-config';
-import { TRIAL_FILE_BYTES, type TrialObject, type TrialPlan } from '../src/hosted-trial-plan';
-
-/** A main blob the planning write could not resolve (main changed after it read): raw R2 bytes by
- * digest, verified, at most TRIAL_FILE_BYTES. Anything else is unavailable, never guessed. */
-async function mainBlob(projectId: string, blob: string) {
-  const url = await presignGet(r2Config(), r2Key(projectId, blob));
-  const response = await exchangeFetch('trial merge main blob', url, {
-    headers: { 'accept-encoding': 'identity' },
-  });
-  if (!response.ok) return undefined;
-  const bytes = Buffer.from(await response.arrayBuffer());
-  return bytes.length <= TRIAL_FILE_BYTES && digest(bytes) === blob ? bytes : undefined;
-}
+import { type TrialObject, type TrialPlan } from '../src/hosted-trial-plan';
 
 const mainStateOf = (ctx: ActionCtx, projectId: Id<'hostedProjects'>) =>
   ctx.runQuery(
@@ -36,37 +19,21 @@ const mainStateOf = (ctx: ActionCtx, projectId: Id<'hostedProjects'>) =>
     >('projectHostedConflicts:mainState'),
     { projectId },
   );
-const filesOf = (state: Buffer) => new Map(parseNativeState(state).files.map(file => [file.path, file]));
-type StateFiles = ReturnType<typeof filesOf>;
-
 /** Warm action processes keep the last main head's merge lists: main moves a few times an hour, so
  * most conflicts reuse them without re-reading main's State (megabytes at dogfood scale). */
 let lastLists: { projectId: string; head: string; declared: DeclaredMergePaths } | undefined;
 /** Main's forge.json merge lists, as compose reads them (from main only): from main's State the
  * caller already parsed, else main's current head State. None when absent or unreadable. */
-async function mainMergeLists(
-  ctx: ActionCtx,
-  projectId: Id<'hostedProjects'>,
-  known?: { head: string; files: StateFiles },
-): Promise<DeclaredMergePaths> {
-  const main = known ? undefined : await mainStateOf(ctx, projectId).catch(() => null);
-  const head = known?.head ?? main?.head;
-  if (!head) return mergePathsOf(undefined);
+async function mainMergeLists(ctx: ActionCtx, projectId: Id<'hostedProjects'>): Promise<DeclaredMergePaths> {
+  const main = await mainStateOf(ctx, projectId).catch(() => null);
+  if (!main) return mergePathsOf(undefined);
+  const head = main.head;
   if (lastLists?.projectId === projectId && lastLists.head === head) return lastLists.declared;
-  const files =
-    known?.files ??
-    (main
-      ? await rawContent(ctx, main.state as unknown as ObjectView, {
-          sha256: main.state.digest,
-          size: main.state.size,
-        })
-          .then(filesOf)
-          .catch(() => null)
-      : null);
+  const reader = trialReader(ctx, projectId, { laneId: '', head, peers: [], tasks: [], objects: [] });
+  const files = await reader.state(main.state).catch(() => null);
   if (!files) return mergePathsOf(undefined);
   const config = files.get(FORGE_CONFIG_FILE);
-  const bytes =
-    config?.mode === 'file' ? await mainBlob(projectId, config.blob).catch(() => undefined) : undefined;
+  const bytes = config?.mode === 'file' ? await reader.blob(config.blob).catch(() => undefined) : undefined;
   const declared = mergePathsOf(bytes);
   // A forge.json that could not be read is not remembered as "no lists".
   if (config?.mode !== 'file' || bytes) lastLists = { projectId, head, declared };
@@ -98,61 +65,19 @@ export const run = internalAction({
   handler: async (ctx, { projectId, plan: text }) => {
     const started = performance.now();
     const plan = JSON.parse(text) as TrialPlan;
-    const held = new Map<string, Buffer>();
-    let bytes = 0;
-    const load = async (object: TrialObject) => {
-      try {
-        const value = await rawContent(ctx, object as unknown as ObjectView, {
-          sha256: object.digest,
-          size: object.size,
-        });
-        held.set(object.digest, value);
-        bytes += value.length;
-      } catch {
-        /* Unavailable: the tasks that need it are skipped. */
-      }
-    };
+    const reader = trialReader(ctx, projectId, plan);
+    let found: Awaited<ReturnType<typeof trialMerge>>['conflicts'] = [];
     try {
-      const reads = [...plan.objects];
-      if (plan.main) reads.push(plan.main.state);
-      for (let i = 0; i < reads.length; i += 8) await Promise.all(reads.slice(i, i + 8).map(load));
-      const mainBytes = plan.main && held.get(plan.main.state.digest);
-      const files = mainBytes ? filesOf(mainBytes) : null;
-      if (plan.main) {
-        held.delete(plan.main.state.digest);
-        for (const task of plan.tasks) {
-          if (!files || !plan.main.paths.includes(task.path)) continue;
-          const file = files.get(task.path);
-          task.main = file ? { blob: file.blob, mode: file.mode } : null;
-          if (file && !held.has(file.blob) && file.mode !== 'symlink' && file.mode !== 'gitlink') {
-            const value = await mainBlob(projectId, file.blob).catch(() => undefined);
-            if (value) {
-              held.set(file.blob, value);
-              bytes += value.length;
-            }
-          }
-        }
-      }
-      // Main's forge.json merge lists, as compose reads them: only on a text conflict, from main.
-      const known = plan.main && files ? { head: plan.main.head, files } : undefined;
-      const declared = () => mainMergeLists(ctx, projectId, known);
-      const result = await trialMerge(
-        plan.tasks,
-        blob => {
-          const value = held.get(blob);
-          if (!value) throw new TrialUnavailable(blob);
-          return value;
-        },
-        declared,
-      );
-      await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedConflicts:record'), {
-        projectId,
-        laneId: plan.laneId,
-        head: plan.head,
-        peers: plan.peers,
-        ...(plan.main ? { mainHead: plan.main.head } : {}),
-        conflicts: result.conflicts,
-      });
+      const files = await reader.prepare();
+      const declared = async () => {
+        if (!files) return mainMergeLists(ctx, projectId);
+        const config = files.get(FORGE_CONFIG_FILE);
+        return mergePathsOf(
+          config?.mode === 'file' ? await reader.blob(config.blob).catch(() => undefined) : undefined,
+        );
+      };
+      const result = await trialMerge(plan.tasks, reader.read, declared);
+      found = result.conflicts;
       console.log(
         `FORGE_TRIAL_MERGE ${JSON.stringify({
           lane: plan.laneId.slice(0, 8),
@@ -161,7 +86,7 @@ export const run = internalAction({
           merges: result.merges,
           conflicts: result.conflicts.length,
           unavailable: result.unavailable.length,
-          bytes,
+          bytes: reader.bytes,
           ms: Math.round(performance.now() - started),
         })}`,
       );
@@ -173,6 +98,14 @@ export const run = internalAction({
         })}`,
       );
     }
+    await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedConflicts:record'), {
+      projectId,
+      laneId: plan.laneId,
+      head: plan.head,
+      peers: plan.peers,
+      ...(plan.main ? { mainHead: plan.main.head } : {}),
+      conflicts: found,
+    });
     return null;
   },
 });

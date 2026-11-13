@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import { digest } from '../dist/hash.js';
+import { trialMerge, TrialUnavailable } from '../dist/hosted-trial-merge.js';
 import { assertNoAccountIds } from './account-id-scan.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -38,6 +39,7 @@ const tracking = await import(moduleUrl('../convex/projectHostedOverlapStore.ts'
 const landed = await import(moduleUrl('../convex/projectHostedOverlapLanded.ts'));
 const mainLog = await import(moduleUrl('../convex/projectHostedOverlapMainLog.ts'));
 const capabilities = await import(moduleUrl('../convex/projectHostedAgent.ts'));
+const exact = await import(moduleUrl('../convex/projectHostedConflicts.ts'));
 // Path notices are gone (flip 4, Issue 853fcde3); peers stay readable on a detail read.
 const peerEvidence = async (s, laneId, name = 'peers') =>
   JSON.parse(
@@ -241,7 +243,31 @@ async function setup(t, options = {}) {
           const x = { request: { operationId: args.operationId } };
           const pending = await s.submit(x);
           if (pending.outcome) return JSON.stringify(pending);
-          return JSON.stringify(await s.publish(await s.work(x)));
+          const terminal = await s.publish(await s.work(x));
+          // Model the scheduled advisory completing before the caller's overlap read.
+          // Publication already has a terminal receipt; late delivery has its own wake guard.
+          const task = s.scheduled.find(
+            task =>
+              task.name === 'projectHostedConflictMerge:run' &&
+              JSON.parse(task.args.plan).head === terminal.outcome.result.head,
+          );
+          if (task) {
+            const plan = JSON.parse(task.args.plan);
+            const result = await trialMerge(plan.tasks, id => {
+              const bytes = s.objects.get(id);
+              if (!bytes) throw new TrialUnavailable(id);
+              return bytes;
+            });
+            await s.transaction('trial', exact.record, {
+              projectId: s.projectId,
+              laneId: plan.laneId,
+              head: plan.head,
+              peers: plan.peers,
+              ...(plan.main ? { mainHead: plan.main.head } : {}),
+              conflicts: result.conflicts,
+            });
+          }
+          return JSON.stringify(terminal);
         }
         assert.fail(name);
       },
@@ -311,7 +337,7 @@ const trackChange = (s, lane, paths = [delta('a.txt')], intent = 'My change', ba
     {},
   );
 
-test('two separate checkout roots save the same file; the second save names the peer once as presence and no notice', async t => {
+test('two separate checkout roots save the same file; the second save returns the exact conflict and names the peer once as presence', async t => {
   const { s, lane, peer, transport, discovery } = await setup(t);
   const first = transport(lane),
     second = transport(peer);
@@ -324,6 +350,7 @@ test('two separate checkout roots save the same file; the second save names the 
   assert.equal(response.result.outcome.status, 'completed');
   assert.equal(response.unacknowledgedOverlaps, undefined, 'path notices are gone (Issue 853fcde3)');
   assert.equal(response.overlapNotice, undefined);
+  assert.equal(response.conflictNotice.items[0].with, lane.id);
   const evidence = await peerEvidence(s, peer.id, 'second-peers');
   assert.equal(evidence.count, 1);
   const notice = evidence.items[0];

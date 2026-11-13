@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
+import { exactConflictNotice } from './hosted-conflict-notice.js';
 import { boardDeliverySchema } from './hosted-board.js';
 import { boardEnvelope, readBoardCursor, readBoardWokeAt, writeBoardWokeAt } from './board-local.js';
 import { ForgeError } from './errors.js';
@@ -43,16 +44,23 @@ export function boardWaitOption(root: string, laneId: string | undefined): Board
 export function boardWaker(option: BoardWaitOption, wake: (delivery: BoardDelivery) => void) {
   let latest: BoardDelivery | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let timerAt = Infinity;
   return {
     offer(value: unknown) {
       const parsed = safeParseHostedResponse(
         boardDeliverySchema,
         (value as { board?: unknown } | undefined)?.board,
       );
-      if (!parsed.success || !parsed.data.messages.length) return;
+      if (!parsed.success || (!parsed.data.messages.length && !parsed.data.conflicts?.length)) return;
       latest = parsed.data;
-      if (timer) return;
-      const at = Math.max(Date.now() + boardWakeTiming.batchMs, option.wokeAt + boardWakeTiming.windowMs);
+      // A newly proven conflict uses the same batching timer, without the member-note cooldown.
+      const at = Math.max(
+        Date.now() + boardWakeTiming.batchMs,
+        parsed.data.conflicts?.length ? 0 : option.wokeAt + boardWakeTiming.windowMs,
+      );
+      if (timer && timerAt <= at) return;
+      if (timer) clearTimeout(timer);
+      timerAt = at;
       timer = setTimeout(() => wake(latest!), Math.max(0, at - Date.now()));
     },
     stop() {
@@ -62,12 +70,17 @@ export function boardWaker(option: BoardWaitOption, wake: (delivery: BoardDelive
   };
 }
 
-/** The early return's envelope: writes the board cursor and this Lane's wake time (two local
- * files), so the same notes are not shown again and the next early return waits its window. */
+/** Advance the delivery cursor; only member notes start their existing cooldown. Source
+ * conflicts do not delay a subsequent member-note wake. */
 export function boardWakeEnvelope(root: string, laneId: string, delivery: BoardDelivery) {
   const envelope = boardEnvelope(root, laneId, delivery);
-  writeBoardWokeAt(root, laneId);
-  return delivery.messages.length ? { ...envelope, notice: memberDataNotice } : envelope;
+  if (delivery.messages.length) writeBoardWokeAt(root, laneId);
+  const conflictNotice = exactConflictNotice(laneId, delivery.conflicts ?? []);
+  return {
+    ...envelope,
+    ...(conflictNotice ? { conflictNotice } : {}),
+    ...(delivery.messages.length || conflictNotice ? { notice: memberDataNotice } : {}),
+  };
 }
 
 const peerSchema = z.object({

@@ -1194,8 +1194,8 @@ nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance","
 Run it once as a background command (Claude Code: Bash `run_in_background` with
 `timeout` 7200000). It holds the landing's live subscription, never polls, and exits
 once, when the landing settles: landed, failed or cancelled, with the receipt and its
-recovery. A note to your Lane also ends it early (`IN_PROGRESS`, reason `message`);
-read the note and run the same command again. Do not run `status` or `wait` in
+recovery. A note or a newly recorded exact-conflict notice to your Lane also ends it early
+(`IN_PROGRESS`, reason `message`); read the notice and run the same command again. Do not run `status` or `wait` in
 between. Then:
 
 - If ending your turn ends your task (a delegated builder or sub-agent run), block on
@@ -1817,12 +1817,22 @@ Lane's base, and against the latest saved head of every other open Lane that sav
 The merge is composition's own: the per-file rule, `mergeNativeText` and the compose syntax gate,
 so a notice and a real compose agree (two independent insertions at one place merge, as on land).
 Only a real conflict is reported, to both Lanes, as `conflictNotice` on their next start, save,
-status or land response: each item names the file, the line ranges in your file and in theirs, the
+status or land response, or a running landing wait: each item names the file, the line ranges in your file and in theirs, the
 reason, and the other Lane's goal (member-written data, quoted, at most 160 characters) or `main`.
 `next` says what to do: sync for a main conflict; for a Lane conflict, agree an order or split with
 that Lane (a board note) or change your edit, then save. There is nothing to acknowledge. A notice
 clears when a later save of either Lane no longer conflicts, or when one side lands or is abandoned.
 Hidden or automatic snapshots never run it; only Lane-record head moves do.
+
+Save publication does not wait for its advisory trial. When a trial records a new or changed
+notice, that same mutation advances the Lane's existing inbox clock. The running wait's existing
+subscription delivers the notice as `conflictNotice` and returns `IN_PROGRESS`, reason `message`,
+with its original resume command. The existing two-second batching timer applies; exact conflicts
+bypass the member-note cooldown. Retrying the same trial does not wake the Lane twice. Board-note
+switches do not suppress source conflicts. A trial that dies cannot leave a save unpublished.
+Saved-peer conflicts remain advisory: they never hold admission or cancel a landing; main's own
+composition still decides. There is no guarantee that the trial finishes before the save or land
+reply; a notice recorded later reaches an active wait, or the next Lane action.
 
 A truncated slim presence row includes a fixed 512-character Bloom filter of every saved path, including paths
 omitted from its ten-path list. A definitely disjoint peer costs no full overlap-row read; possible

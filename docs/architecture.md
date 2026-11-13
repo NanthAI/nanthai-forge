@@ -1461,6 +1461,15 @@ updates that Lane and retains the terminal operation receipt. A stale attempt
 retains its original delta and failure receipt. Registered States are immutable
 source evidence for later compose/sync; they confer no main or landing authority.
 Neither staging nor final publication loads retained Work or Channel history.
+
+The advisory saved-file trial runs separately from publication. It resolves packed and nonce-bound
+bytes through the same verified physical readers as composition, and derives both sides from the
+Lane's pinned base and saved State, including resolution Lanes whose delta describes a marker draft.
+A new or changed exact-conflict row advances the recipient's existing board inbox and logical clock
+in the trial's existing result mutation. The live finish observer delivers that row through its
+existing Lane-inbox subscription; it adds no healthy-path call, poller or scheduled task. A duplicate
+result neither changes the clock nor wakes again. The save's terminal receipt and any chained
+resolution remain independent of the advisory action, including process death before its result.
 See the [save API](operations/source-exchange.md#hosted-lane-save-api) for transfer,
 retry and provisioning boundaries.
 
