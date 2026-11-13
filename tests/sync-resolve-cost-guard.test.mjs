@@ -92,3 +92,57 @@ for (const padding of [0, 1200 * 1024])
       s.restore();
     }
   });
+
+test('legacy recipe-backed 29k conflict sync reuses one assembled input per State in a single action', async t => {
+  const run = await measureSync({ files: 29000, changed: 1, distance: 1, conflict: true, recipeBase: true });
+  assert(
+    run.sync.steps <=
+      speedBudgets.budgets.find(value => value.id === 'source-legacy-recipe-sync-actions').max,
+  );
+  assert(run.sync.functionCalls <= 10, 'legacy metadata stays batched and no second source action is needed');
+  assert(
+    run.sync.readBytes <= 3 * run.manifestBytes + 32 * 1024,
+    'the legacy recipe and both raw tips are read once',
+  );
+  assert(run.sync.dbReadBytes < 160 * 1024);
+  assert(run.sync.dbWriteBytes < 96 * 1024);
+  assert.equal(run.idleCalls, 0);
+  t.diagnostic(JSON.stringify(run));
+});
+
+test('multi-MB recovery writes byte-range recipes within the approved call, record and R2 budgets', async t => {
+  const run = await measureSync({
+    files: 29000,
+    changed: 1,
+    distance: 1,
+    conflict: true,
+    recipeBase: true,
+    saveResolve: true,
+  });
+  assert(
+    run.save.functionCalls <= 6 && run.resolve.functionCalls <= 7,
+    'recipe metadata shares the original commit pages',
+  );
+  assert(
+    run.save.documentsWritten + run.resolve.documentsWritten <= 100,
+    'extra record writes fit the approved recovery allowance',
+  );
+  assert(
+    run.save.dbReadBytes + run.resolve.dbReadBytes + run.save.dbWriteBytes + run.resolve.dbWriteBytes <
+      200 * 1024,
+  );
+  assert(
+    run.save.putBytes + run.resolve.putBytes <=
+      speedBudgets.budgets.find(value => value.id === 'source-recovery-output-bytes').max,
+    'only changed file spans and recipe metadata are uploaded',
+  );
+  assert(run.save.putObjects + run.resolve.putObjects <= 12, 'bounded extra R2 objects per recovery');
+  assert(
+    run.save.outputBindings + run.resolve.outputBindings <= 34,
+    'at most 30 additional bindings beyond the four flat outputs',
+  );
+  assert.equal(run.save.steps, 1);
+  assert.equal(run.resolve.steps, 1);
+  assert.equal(run.idleCalls, 0);
+  t.diagnostic(JSON.stringify(run));
+});

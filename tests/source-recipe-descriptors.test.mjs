@@ -8,6 +8,8 @@ import { buildObjectRecipe } from '../dist/object-chunks.js';
 import { digest } from '../dist/hash.js';
 import { MemoryMergeSource, MemorySourceReader } from '../dist/hosted-source-memory.js';
 import { SourceWorkerReader } from '../dist/hosted-source-worker-reader.js';
+import { sourceStateLimits } from '../dist/source-state-size.js';
+import speedBudgets from '../src/speed-budgets.json' with { type: 'json' };
 
 const sharedBlob = digest('synthetic');
 const bytes = Buffer.from(
@@ -78,6 +80,7 @@ function fixture(
       const ref = { object: logical, recipe };
       return kind === 'memory' ? reader.bytes(ref) : readFileSync(await reader.file(ref));
     },
+    reader,
     counts: () => ({ windows, reads }),
   };
 }
@@ -140,3 +143,77 @@ for (const kind of ['memory', 'file']) {
     t.diagnostic(JSON.stringify({ unbatchedDescriptorWindows: f.counts().windows }));
   });
 }
+
+test('legacy recipe retains one backing allocation per logical State and reuses verified leaves', async t => {
+  const f = fixture(t, 'memory');
+  const actual = await f.read();
+  const before = f.counts();
+  const source = f.reader.source;
+  assert(
+    source.inputBytes() <=
+      bytes.length +
+        speedBudgets.budgets.find(value => value.id === 'source-recipe-retained-extra-bytes').max,
+    'no duplicate retained recipe bodies',
+  );
+  for (const [id, value] of built.objects) {
+    const cached = source.objects.get(id);
+    assert.deepEqual(cached, value);
+    if (value.length > 64 * 1024) {
+      assert.equal(cached.buffer, actual.buffer, 'verified leaf is a view into the assembled State');
+      assert.deepEqual(
+        await f.reader.bytes({ object: { sha256: id, size: value.length }, recipe: null }),
+        value,
+      );
+    }
+  }
+  assert.deepEqual(await f.read(), bytes);
+  assert.deepEqual(
+    f.counts(),
+    before,
+    'logical and leaf cache hits perform no extra reads or descriptor calls',
+  );
+});
+
+for (const [phase, limit] of Object.entries(sourceStateLimits))
+  test(`${phase} legacy recipe at its manifest-byte envelope retains no duplicate physical payload`, async t => {
+    const files = Array.from(
+      { length: Math.min(limit.fileCount, Math.floor((limit.manifestBytes - 512) / 162)) },
+      (_, i) => ({
+        path: `src/deep/shared/components/features/generated/module-${String(i).padStart(6, '0')}.ts`,
+        mode: 'file',
+        blob: sharedBlob,
+      }),
+    );
+    const value = {
+      schema: 1,
+      kind: 'forge-source-state',
+      parents: [],
+      files,
+      message: '',
+      at: '2026-01-01T00:00:00.000Z',
+    };
+    const size = Buffer.byteLength(JSON.stringify(value));
+    assert(size <= limit.manifestBytes);
+    value.message = 'x'.repeat(limit.manifestBytes - size);
+    const bytes = Buffer.from(JSON.stringify(value)),
+      built = buildObjectRecipe(bytes),
+      logical = { sha256: digest(bytes), size: bytes.length },
+      recipe = { sha256: digest(built.bytes), size: built.bytes.length };
+    const f = fixture(t, 'memory', { input: { bytes, built, logical, recipe } });
+    assert.deepEqual(await f.read(), bytes);
+    assert.equal(bytes.length, limit.manifestBytes);
+    assert(
+      f.reader.source.inputBytes() <=
+        bytes.length +
+          speedBudgets.budgets.find(value => value.id === 'source-recipe-retained-extra-bytes').max,
+    );
+    t.diagnostic(
+      JSON.stringify({
+        phase,
+        files: files.length,
+        logicalBytes: bytes.length,
+        retainedBytes: f.reader.source.inputBytes(),
+        reads: f.counts(),
+      }),
+    );
+  });

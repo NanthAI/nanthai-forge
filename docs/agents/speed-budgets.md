@@ -138,7 +138,15 @@ fix. Catalog fallback and current-access rejection remain covered.
 
 `source-conflict-sync-actions` and `source-resolve-actions` permit one source action
 for a small conflict/edit at both 4,000 and 29,000 files. The real-handler guards
-previously needed two at 29k. They count source actions, not complete CLI operations;
+previously needed two at 29k. `source-legacy-recipe-sync-actions` applies the same
+one-action ceiling to a legacy recipe base without a trusted closure projection;
+its control-call ceiling is ten, including legacy recipe descriptor pages.
+`source-recipe-retained-extra-bytes` allows at most 64 KiB of retained physical
+metadata beyond the assembled logical body at every source manifest-byte envelope.
+Verified leaves share the logical allocation. `source-recovery-output-bytes` guards
+a real 29k save plus resolve at 1 MiB of new output bodies, with no extra control
+RPCs and at most twelve PUT bodies. These thresholds select runtime work, not user
+capability. The 16 MiB inline input bound is unchanged. They count source actions, not complete CLI operations;
 resolve still includes its separate save. Larger calculations, input sets beyond
 re-entry's memory routing window and the existing time boundary retain durable
 continuations. These are internal execution choices, not repository limits.

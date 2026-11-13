@@ -5,6 +5,39 @@
   },
   "budgets": [
     {
+      "id": "source-legacy-recipe-sync-actions",
+      "area": "legacy recipe-backed conflict sync at 29k files",
+      "measuredBy": "build-guard",
+      "metric": "sourceLegacyRecipeSyncActions",
+      "unit": "ops",
+      "max": 1,
+      "source": "Issue 6fbba986: legacy host bootstrap retained recipe leaves plus the assembled State, exceeding the unchanged 16 MiB input bound and requiring two source actions. tests/sync-resolve-cost-guard.test.mjs reproduces the legacy base.",
+      "reason": "Verified recipe leaves share the assembled allocation; no repeated State downloads, input parsing or action continuation at 29k. Larger envelopes keep the same byte and time bounds.",
+      "issue": "6fbba986"
+    },
+    {
+      "id": "source-recipe-retained-extra-bytes",
+      "area": "legacy recipe retained physical buffers at every source envelope",
+      "measuredBy": "build-guard",
+      "metric": "sourceRecipeRetainedExtraBytes",
+      "unit": "bytes",
+      "max": 65536,
+      "source": "Issue 6fbba986: tests/source-recipe-descriptors.test.mjs exercises exact manifest-byte envelopes for save, compose, sync and conflict-sync. Old main retained one extra full logical body.",
+      "reason": "Verified leaf views share the logical State allocation; only bounded recipe/index metadata remains in addition. The 16 MiB inline routing bound is unchanged.",
+      "issue": "6fbba986"
+    },
+    {
+      "id": "source-recovery-output-bytes",
+      "area": "29k one-path save and conflict resolution output bodies",
+      "measuredBy": "build-guard",
+      "metric": "sourceRecoveryOutputBytes",
+      "unit": "bytes",
+      "max": 1048576,
+      "source": "Issue 6fbba986: tests/sync-resolve-cost-guard.test.mjs executes legacy recipe conflict sync then real save and resolve jobs. The former 4 MiB writer uploaded about 9.4 MB for the recovery pair.",
+      "reason": "The approved 1\u20138 MiB byte-range writer reuses verified spans, with unchanged State identity, call windows, source envelopes and zero idle work. New bodies fit one chunk plus bounded metadata.",
+      "issue": "6fbba986"
+    },
+    {
       "id": "land-to-main-p50",
       "area": "landing loop: queue, compose, check, settle",
       "measuredBy": "landing-record",

@@ -6,15 +6,19 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { scaleFixture, at } from './convex-source-scale-fixture.mjs';
-import { saveBytes } from '../dist/hosted-save.js';
+import { saveBytes, buildSavePages } from '../dist/hosted-save.js';
 import { digest } from '../dist/hash.js';
+import { buildObjectRecipe } from '../dist/object-chunks.js';
 
 const path = i => `src/deep/shared/components/features/generated/module-${String(i).padStart(6, '0')}.ts`;
 
 /** One shared base tree of `files` paths; main moves `distance` States (one path each, the last
  * also changes the `changed` selected paths); the Lane changes the same selected paths (a
  * conflict) or `changed` other paths (clean). Every State carries persisted generation metadata. */
-export async function syncHistory(s, { files, changed, distance, conflict, recordParents = true }) {
+export async function syncHistory(
+  s,
+  { files, changed, distance, conflict, recordParents = true, recipeBase = false },
+) {
   const generations = new Map(),
     blob = async text => s.putSpec(Buffer.from(`${text}\n`));
   const shared = await blob('synthetic'),
@@ -50,6 +54,16 @@ export async function syncHistory(s, { files, changed, distance, conflict, recor
     );
   };
   const base = await state([], 'base', new Map());
+  if (recipeBase) {
+    const built = buildObjectRecipe(await s.bytes(base));
+    for (const value of built.objects.values()) await s.putSpec(value);
+    const recipe = await s.putSpec(built.bytes);
+    const row = [...s.tables.projectObjects.values()].find(row => row.digest === base.sha256);
+    // Legacy host bootstrap has no trusted recipeClosure projection.
+    Object.assign(row, { recipe: { digest: recipe.sha256, size: recipe.size }, r2Committed: false });
+    delete row.r2Key;
+    s.objects.delete(base.sha256);
+  }
   const selected = Array.from({ length: changed }, (_, i) => path(files - 1 - i));
   const mainEdits = new Map();
   let main = base;
@@ -91,7 +105,13 @@ export async function resolveInput(s, h, output, text = p => `resolved ${p}`) {
     algorithm: 'forge-native-sync-v1',
     work: {
       mode: 'resolve',
-      left: source(saved),
+      left: {
+        object: saved,
+        recipe: (() => {
+          const row = [...s.tables.projectObjects.values()].find(row => row.digest === saved.sha256);
+          return row?.recipe ? { sha256: row.recipe.digest, size: row.recipe.size } : null;
+        })(),
+      },
       resolution: {
         candidateId: null,
         conflicts: output.result.conflicts,
@@ -106,10 +126,18 @@ export async function resolveInput(s, h, output, text = p => `resolved ${p}`) {
   });
 }
 
-export async function measureSync({ files, changed, distance, conflict, resolve = conflict }) {
+export async function measureSync({
+  files,
+  changed,
+  distance,
+  conflict,
+  resolve = conflict,
+  recipeBase = false,
+  saveResolve = false,
+}) {
   const s = await scaleFixture();
   try {
-    const h = await syncHistory(s, { files, changed, distance, conflict });
+    const h = await syncHistory(s, { files, changed, distance, conflict, recipeBase });
     const eventStart = s.events.length,
       countStart = s.counts.length;
     const id = await s.enqueue(await syncInput(s, h)),
@@ -128,9 +156,51 @@ export async function measureSync({ files, changed, distance, conflict, resolve 
       conflict,
       sync: summary(s, id, sync, eventStart, countStart),
       output: digest(outputBytes),
+      state: output.result.state.sha256,
     };
     if (resolve) {
-      const input = await resolveInput(s, h, output);
+      let saved;
+      if (saveResolve) {
+        const draft = output.result.state,
+          parsed = JSON.parse((await s.bytes(draft)).toString()),
+          entries = new Map(parsed.files.map(file => [file.path, file]));
+        const changes = [];
+        for (const path of h.selected) {
+          const pin = await h.blob(`resolved ${path}`),
+            before = entries.get(path);
+          changes.push({
+            path,
+            before: { blob: before.blob, mode: before.mode },
+            after: { blob: pin.sha256, mode: 'file', content: source(pin) },
+          });
+        }
+        const pages = buildSavePages(changes);
+        for (const page of pages.pages) await s.json(page.value);
+        const row = [...s.tables.projectObjects.values()].find(row => row.digest === draft.sha256),
+          plan = await s.json({
+            schema: 1,
+            kind: 'forge-hosted-save-input',
+            baseline: {
+              object: draft,
+              recipe: row.recipe ? { sha256: row.recipe.digest, size: row.recipe.size } : null,
+            },
+            pages: pages.root,
+            pageCount: pages.pages.length,
+            changeCount: changes.length,
+            message: 'resolved',
+            at,
+          });
+        const start = s.events.length,
+          counts = s.counts.length,
+          saveId = await s.enqueue(plan),
+          metrics = await s.drain({ memoryBound: false }),
+          job = await s.job(saveId);
+        assert.equal(job.status, 'completed');
+        saved = JSON.parse((await s.bytes(job.output)).toString()).state;
+        report.saveState = saved.sha256;
+        report.save = summary(s, saveId, metrics, start, counts);
+      }
+      const input = await resolveInput(s, saved ? { ...h, state: async () => saved } : h, output);
       const resolveEvents = s.events.length,
         resolveCounts = s.counts.length;
       const resolveId = await s.enqueue(input),
@@ -140,6 +210,7 @@ export async function measureSync({ files, changed, distance, conflict, resolve 
       const resolvedBytes = await s.bytes(resolveJob.output),
         resolvedOutput = JSON.parse(resolvedBytes.toString());
       report.resolvedOutput = digest(resolvedBytes);
+      report.resolvedState = resolvedOutput.result.state.sha256;
       assert.equal(resolvedOutput.result.status, 'resolved');
       report.resolve = summary(s, resolveId, resolveRun, resolveEvents, resolveCounts);
     }
@@ -176,6 +247,15 @@ function summary(s, jobId, r, eventStart, countStart) {
     dbWriteBytes: counts.reduce((n, row) => n + row.writeBytes, 0),
     readObjects: r.readObjects,
     readBytes: r.readBytes,
+    outputBindings: events
+      .filter(
+        event =>
+          event.call &&
+          ['projectConvexSourceStore:commit', 'projectConvexSourceStore:stage'].includes(event.call),
+      )
+      .flatMap(event => event.args.objects ?? [])
+      .reduce((count, object) => count + 1 + (object.physical?.length ?? 0), 0),
+    headObjects: events.filter(event => event.head).length,
     putObjects: puts.length,
     putBytes: puts.reduce((n, event) => n + event.put, 0),
     reusedPutBytes: puts.filter(event => event.existed).reduce((n, event) => n + event.put, 0),

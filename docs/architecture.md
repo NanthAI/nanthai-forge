@@ -162,15 +162,23 @@ Small saves can consume a projected recipe baseline
 within their existing byte bound. Legacy recipes without the projection retain
 their original readers. State identity and recipe bytes are unchanged.
 
-Within the existing 1–4 MiB State window, fixed source writers select path-anchored
+Within the bounded 1–8 MiB State window, fixed source writers select path-anchored
 file-list chunks (256 KiB to 1 MiB), isolating parents and the suffix. Verified raw
 State reads supply reusable ranges in their existing R2 body; projected baselines
 supply their already trusted leaf bindings. Only changed chunks and recipe metadata
 are uploaded. A cold legacy baseline or a layout with no net byte saving keeps the
 flat encoding. Physical bindings travel with the logical output in the existing
 commit, with one atomic cleanup fence, so no chunk staging RPC is added. The State
-pin, parent list and generation retain their original meaning. Larger States keep
-the existing flat path, including its unresolved large-manifest memory risk.
+pin, parent list and generation retain their original meaning. States above this routing band keep the existing flat path and source envelopes.
+The logical State identity and recipe format are unchanged.
+
+Legacy recipe loads assemble directly into one logical buffer. After complete hash
+verification, cached leaves become views into that buffer, preserving verified reuse
+without keeping duplicate physical payloads. Inline replay counts each backing
+allocation once against its unchanged 16 MiB input bound. Exact parsed States also
+supply the client delta without another full parse. A bounded save reads its exact baseline and first delta page together. State body
+publication and its derived file-binding manifest run together; both settle before output bindings are
+exposed, including when either fails.
 
 The existing `forge-source-step` log line includes `putBytes`: State (including
 recipe metadata), continuation/progress, final result and other attempted bodies;

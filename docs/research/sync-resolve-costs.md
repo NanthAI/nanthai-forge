@@ -438,3 +438,55 @@ two actions. This light ancestry differs from the incident's larger cached histo
 The separate save and resolve still publish two full flat States. The local paired
 kernel result alone cannot establish the complete ten-second target or Git parity;
 post-acceptance dev evidence belongs with the Issue's exact runtime and request ids.
+
+## Legacy recipe replay and multi-MB recovery
+
+The fixed reader assembles a legacy recipe into one logical buffer and retains
+verified leaf views into that buffer. It counts distinct backing allocations for
+inline replay, preserving the 16 MiB routing bound. Exact parsed States also
+supply sync deltas without a second complete parse. A bounded save reads its baseline and first delta page in one wave. State content
+and its derived file-binding manifest publish concurrently and settle together before their
+bindings become visible. Failure of either keeps publication incomplete.
+
+The existing path-anchored recipe writer covers 1–8 MiB States, with the same flat
+identity and recipe format. States outside that band, cold baselines without
+verified reusable bindings, and representations with no byte saving keep the
+flat writer. This adds no control RPC or idle work. The owner approved the extra
+physical binding work for this extension.
+
+The synthetic real-handler fixture executes conflict sync from a legacy recipe
+base, then an actual one-path save and source-only resolve at 29,000 files.
+Eleven interleaved AB/BA pairs retain identical logical sync, saved and resolved
+State hashes. Protocol result hashes can differ because their exact input pins
+bind different physical recipes. Raw pairs are in
+[`sync-resolve-recovery-pairs.json`](../../tests/fixtures/sync-resolve-recovery-pairs.json).
+This is local DB/R2 accounting, excluding deployment latency, CLI checkout and
+invoices.
+
+| Source operation | Function calls before → after | GET body bytes before → after | PUT body bytes before → after | New PUT bodies before → after |
+| --- | ---: | ---: | ---: | ---: |
+| Legacy conflict sync | 19 → 10 | 28,196,508 → 14,096,056 | 4,704,683 → 4,699,738 | 5 → 4 |
+| Save edited draft | 6 → 6 | 4,699,066 → 4,699,066 | 4,698,428 → 450,104 | 2 → 6 |
+| Resolve saved draft | 7 → 7 | 9,397,902 → 9,397,986 | 4,698,941 → 2,201 | 2 → 5 |
+
+The recovery pair adds twenty output bindings and fourteen record writes, about
+23 KB of DB I/O, seven PUTs and twenty-one executed GET/HEAD requests. Existing
+100-object commit pages accommodate it. Idle drain performs zero calls. Using
+the approved model rates, added request cost is about $0.039 per 1,000 recoveries;
+added DB I/O is about $0.005, before compute and avoided upload-body egress.
+These are measured fixture quantities priced by the model, not a billed saving.
+
+With seed 1 and 10,000 bootstrap resamples, local wall paired differences
+(95% intervals) are: sync -349 ms [-397, -303]; save 19 ms [-4, 46]; resolve -45 ms [-63, -22]. These clocks include fixture action
+startup and IPC but no network. They cannot establish the complete-operation
+ten-second target. No qualified pair was discarded.
+
+Direct reader guards cover each phase's exact manifest-byte envelope, allowing
+only 64 KiB of recipe/index metadata beyond the logical allocation. Larger input
+sets retain continuations. Full process memory qualification remains incomplete:
+three interleaved near-envelope legacy-recipe observations show old-main RSS
+445–604 MiB and changed RSS 458–610 MiB across save, compose, clean sync and
+conflict sync. Both exceed the configured 512 MiB action allocation in some
+shapes. Removing duplicate retained buffers does not prove complete heap safety;
+these observations neither raise an envelope nor justify increasing one. The
+existing source-envelope and byte/query guards remain unchanged.

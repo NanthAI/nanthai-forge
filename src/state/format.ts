@@ -115,7 +115,7 @@ export function validateNativeStateFiles(state: NativeState) {
 export function stateByteChunks(bytes: Uint8Array, hash: (bytes: Uint8Array) => string) {
   if (
     bytes.length < 1024 * 1024 ||
-    bytes.length > 4 * 1024 * 1024 ||
+    bytes.length > 8 * 1024 * 1024 ||
     !new TextDecoder().decode(bytes.subarray(0, 256)).includes('"kind":"forge-source-state"')
   )
     return null;

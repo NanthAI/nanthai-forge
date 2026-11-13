@@ -12,7 +12,7 @@ import {
 import { syncInputSchema } from './hosted-sync.js';
 import { saveBytes, savePin } from './hosted-save.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { parseNativeState, type NativeFile } from './state/format.js';
+import { type NativeFile } from './state/format.js';
 import { MemoryMergeSource, MemorySourceReader } from './hosted-source-memory.js';
 import { buildHostedComposeState, changedPaths, type ComposeBases } from './hosted-compose-worker.js';
 import { buildHostedSyncState } from './hosted-sync-worker.js';
@@ -442,10 +442,7 @@ export async function computeMergeStep(
     // (and cut parents) for ancestry walking, which would never rebuild the exact head.
     const verified = (id: string) => {
       try {
-        const bytes = source.object(id);
-        const state = parseNativeState(bytes);
-        io.rememberLoadedState?.({ sha256: id, size: bytes.length }, state.files.length, state.files);
-        return state;
+        return source.verifiedState(id);
       } catch {
         return null;
       }

@@ -199,16 +199,27 @@ export function enqueueSourceObject(c: SourceStepCursor, ref: WorkerObject) {
 }
 async function saveStep(c: SourceStepCursor, io: StepTransport, m: StepMeter) {
   const plan = sourceValidation('SOURCE_JOB_INVALID', () => saveInputSchema.parse(c.plan));
+  let firstPage: { value: unknown } | undefined;
   if (c.pages === 0 && c.count === 0 && !c.files.length && !c.changes.length) {
     const source = new MemoryMergeSource(c.parents, c.ancestryBoundary, c.ancestryCuts),
       reader = new MemorySourceReader(source, io);
     await io.prepareRead?.([plan.baseline.object, plan.pages]);
-    const baseline = await reader.state(plan.baseline);
-    c.files = baseline.files;
+    // The first delta page and baseline are independently pinned. Read them in one
+    // wave only when their combined bytes fit the existing quantum; larger saves
+    // keep their durable boundary. A prefetched page is consumed in this quantum.
+    const overlap = c.next && m.bytes + plan.baseline.object.size + c.next.size <= sourceStepBytes;
+    const [baseline, page] = await Promise.allSettled([
+      reader.state(plan.baseline),
+      overlap ? readJson(io, c.next!, m) : undefined,
+    ]);
+    if (baseline.status === 'rejected') throw baseline.reason;
+    if (page.status === 'rejected') throw page.reason;
+    if (overlap) firstPage = { value: page.value };
+    c.files = baseline.value.files;
     // The baseline is registered immutable source authority; a rename or mode
     // change reuses its verified bytes. Staging checked the exact object recipe.
-    for (const file of baseline.files) c.seen[file.blob] = true;
-    c.parents[plan.baseline.object.sha256] = baseline.parents;
+    for (const file of baseline.value.files) c.seen[file.blob] = true;
+    c.parents[plan.baseline.object.sha256] = baseline.value.parents;
     const generation = io.stateGeneration?.(plan.baseline.object.sha256);
     if (generation !== undefined) (c.generations ??= {})[plan.baseline.object.sha256] = generation;
   }
@@ -237,9 +248,9 @@ async function saveStep(c: SourceStepCursor, io: StepTransport, m: StepMeter) {
     c.files = [...files.values()];
     c.changes = [];
   }
-  if (c.next && !full(m)) {
+  if (c.next && (firstPage || !full(m))) {
     const pin = c.next,
-      value = await readJson(io, pin, m),
+      value = firstPage ? firstPage.value : await readJson(io, pin, m),
       validated = sourceValidation('SOURCE_JOB_INVALID', () => validateSavePage(value, c.lastPath)),
       page = validated.page;
     invariant(

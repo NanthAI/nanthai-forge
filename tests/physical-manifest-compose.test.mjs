@@ -370,3 +370,80 @@ test('trusted source publication refuses wrong-project keys, wrong digests and a
     );
   assert.equal(physicalObjectRow(f.s, carrier.sha256).sourceReferenced, undefined);
 });
+
+for (const failure of [false, true])
+  test(`State body publication ${failure ? 'failure settles independent manifest I/O without exposing bindings' : 'overlaps its derived manifest read and settles both before exposing bindings'}`, async t => {
+    const f = await setup(t),
+      { digest } = await import('../dist/hash.js'),
+      { convexSourceTransport } = await import(moduleUrl('../convex/projectConvexSourceTransport.ts'));
+    const bytes = Buffer.from(
+        JSON.stringify({
+          schema: 1,
+          kind: 'forge-source-state',
+          parents: [f.main.sha256],
+          files: f.files,
+          message: 'overlap',
+          at: '2026-01-01T00:00:00.000Z',
+        }),
+      ),
+      pin = { sha256: digest(bytes), size: bytes.length };
+    const locations = [...f.s.tables.projectObjects.values()].map(row => ({
+      descriptor: { object: { sha256: row.digest, size: row.size }, recipe: null },
+      storageId: null,
+      url: `https://store.invalid/synthetic/v1/p/${f.s.projectId}/o/${row.digest}`,
+      ...(row.statePhysical ? { statePhysical: row.statePhysical } : {}),
+      ...(row.stateGeneration ? { stateGeneration: row.stateGeneration } : {}),
+    }));
+    const transport = convexSourceTransport(
+      f.c.context,
+      { projectId: f.s.projectId, jobId: 'overlap', step: 0 },
+      locations,
+      undefined,
+      { overlapWrites: true, physicalManifests: true, sourceKind: 'save' },
+    );
+    transport.io.rememberLoadedState(f.main, f.files.length, f.files);
+    transport.io.rememberOutputState(pin, [f.main.sha256], f.files);
+    const original = globalThis.fetch,
+      started = Promise.withResolvers(),
+      release = Promise.withResolvers();
+    let bodyStarted = false;
+    globalThis.fetch = async (url, init = {}) => {
+      if (String(url).includes('/o/' + pin.sha256) && init.method === 'PUT') {
+        bodyStarted = true;
+        release.resolve();
+        if (failure) throw Error('synthetic State PUT failure');
+      }
+      if (
+        String(url).includes('/o/' + physicalObjectRow(f.s, f.main.sha256).statePhysical.sha256) &&
+        !init.method
+      ) {
+        started.resolve();
+        await release.promise;
+      }
+      return original(url, init);
+    };
+    try {
+      await transport.io.upload(
+        pin,
+        (async function* () {
+          yield bytes;
+        })(),
+      );
+      await started.promise;
+      assert.equal(transport.outputs.length, 0, 'no incomplete representation escapes');
+      // The root GET can finish only after the independent State PUT starts. A serial
+      // implementation cannot settle; no wall-clock sleep or latency assertion is needed.
+      if (failure) await assert.rejects(transport.settle(), { name: 'SourceIoError' });
+      else await transport.settle();
+      assert(bodyStarted, 'State body PUT starts while the independent physical root GET is blocked');
+    } finally {
+      release.resolve();
+      await transport.settle();
+      globalThis.fetch = original;
+    }
+    assert.equal(transport.outputs.length, failure ? 0 : 1);
+    if (!failure) {
+      assert(transport.outputs[0].statePhysical);
+      assert.equal(transport.outputs[0].sha256, pin.sha256);
+    }
+  });

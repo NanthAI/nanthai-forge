@@ -1,5 +1,11 @@
 # Status
 
+Sync and conflict recovery reuse legacy recipe buffers and exact parsed States,
+overlap State body and derived binding publication, and use the existing recipe
+encoding for byte-range reuse in the 1–8 MiB routing band. Larger States retain
+the existing flat path and envelopes. Source-action and output-byte guards cover
+29k recovery; complete-operation latency remains subject to live qualification.
+
 Physical-manifest first seeding continues in 1,000-digest resolver windows,
 including after dense catalog retirement. Strict source guards count empty
 queries as well as returned documents; normal small landing windows retain
@@ -182,6 +188,7 @@ ancestry manifests and sends State descriptors directly to the catalog. The 4k/2
 build guards enforce one source action per small conflict sync or resolve; complete
 resolve still includes its save. See [sync/resolve costs](research/sync-resolve-costs.md)
 for measured scope and remaining live latency qualifications.
+
 
 ## Works
 

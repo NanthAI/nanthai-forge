@@ -102,3 +102,27 @@ test('cost 298f9675: generated memory States retain native identity and semantic
     assert.throws(() => source.writeState(files, [], 'invalid', state.at), { code: 'INVALID_NATIVE_SOURCE' });
   }
 });
+
+test('approved multi-MB recipe routing preserves exact bytes at 8 MiB and keeps larger States on the flat path', () => {
+  const target = 8 * 1024 * 1024;
+  const files = Array.from({ length: Math.floor((target - 1024) / 162) }, (_, i) => ({
+    path: `src/deep/shared/components/features/generated/module-${String(i).padStart(6, '0')}.ts`,
+    blob: 'a'.repeat(64),
+    mode: 'file',
+  }));
+  const value = { ...state, files, message: '' };
+  value.message = 'x'.repeat(target - Buffer.byteLength(JSON.stringify(value)));
+  const bytes = Buffer.from(JSON.stringify(value)),
+    chunks = stateByteChunks(bytes, digest);
+  assert.equal(bytes.length, target);
+  assert(chunks, 'the existing recipe format covers the approved multi-MB routing band');
+  assert(chunks.every(chunk => chunk.size <= 1024 * 1024));
+  assert.deepEqual(
+    Buffer.concat(chunks.map(chunk => bytes.subarray(chunk.offset, chunk.offset + chunk.size))),
+    bytes,
+  );
+  assert.equal(
+    stateByteChunks(Buffer.from(JSON.stringify({ ...value, message: value.message + 'x' })), digest),
+    null,
+  );
+});

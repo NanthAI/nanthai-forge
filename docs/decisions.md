@@ -65,12 +65,14 @@ remains with the lead and owner.
 **Current bounded encoding.** Issue 298f9675 supplies a trusted ordered leaf/range
 projection in the existing authorized read for both reader families, and copies
 leaves directly into the final buffer. Fixed source writers use that path only
-inside the existing 1–4 MiB State window, with unchanged identity, path-stable
+inside the bounded 1–8 MiB State window, with unchanged identity, path-stable
 file-list cuts and verified destination-range reuse. A representation that would
 increase uploaded bytes keeps the flat writer. Physical metadata is published in
 the existing output commit; legacy recipes retain their reader. This addresses
 sequential descriptor calls at this scale. It does not solve the 190k-file flat
-manifest memory failure or authorize a State identity change.
+manifest memory failure or authorize a State identity change. Issue 6fbba986 extends
+the routing band with owner-approved extra object-binding work; exact call, byte,
+record and memory guards retain the existing source envelopes.
 
 ## Decisions from 11 November
 

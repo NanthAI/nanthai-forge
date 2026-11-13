@@ -74,9 +74,12 @@ export class MemoryMergeSource extends LazyMergeSource {
     this.generated.clear();
   }
   inputBytes() {
-    let size = 0;
-    for (const [id, bytes] of this.objects) if (!this.generated.has(id)) size += bytes.length;
-    return size;
+    // Recipe leaves are verified views into their assembled logical object. Count each
+    // backing allocation once, including pooled metadata, rather than charging the same
+    // bytes again for every leaf. This is the retained-memory bound, not logical I/O.
+    const allocations = new Set<ArrayBufferLike>();
+    for (const [id, bytes] of this.objects) if (!this.generated.has(id)) allocations.add(bytes.buffer);
+    return [...allocations].reduce((size, buffer) => size + buffer.byteLength, 0);
   }
   override state(id: string): NativeState {
     // This is an explicit proven graph cut, not a claim about stored parents.
@@ -86,8 +89,8 @@ export class MemoryMergeSource extends LazyMergeSource {
       this.cutIds = new Set(this.ancestryCuts);
     }
     const parents = id === this.ancestryBoundary || this.cutIds.has(id) ? [] : this.parents[id];
-    if (!parents) return this.fullState(id);
-    const fullFiles = () => this.fullState(id).files;
+    if (!parents) return this.verifiedState(id);
+    const fullFiles = () => this.verifiedState(id).files;
     return {
       schema: 1,
       kind: 'forge-source-state',
@@ -99,7 +102,8 @@ export class MemoryMergeSource extends LazyMergeSource {
       },
     };
   }
-  private fullState(id: string) {
+  /** Exact verified header and cached file tree, without ancestry-walk projections. */
+  verifiedState(id: string) {
     this.expectState(id);
     let value = this.parsed.get(id);
     if (!value) {
@@ -167,9 +171,8 @@ export class MemorySourceReader extends SourceWorkerReader {
   }
   async state(ref: WorkerObject) {
     this.source.expectState(ref.object.sha256);
-    const state = parseNativeState(await this.bytes(ref));
-    this.io.rememberLoadedState?.(ref.object, state.files.length, state.files);
-    return state;
+    await this.bytes(ref);
+    return this.source.verifiedState(ref.object.sha256);
   }
   override async bytes(ref: WorkerObject): Promise<Buffer> {
     this.io.checkStateSize?.(ref.object);
@@ -198,14 +201,23 @@ export class MemorySourceReader extends SourceWorkerReader {
         'SOURCE_RECIPE_INVALID',
         'Recipe selects different logical content.',
       );
-      const parts: Buffer[] = [];
+      bytes = Buffer.allocUnsafe(ref.object.size);
+      const leaves: { id: string; offset: number; size: number }[] = [];
+      let offset = 0;
       for await (const chunk of readObjectRecipe(
         recipe,
         pin => this.bytes({ object: pin, recipe: null }),
         this.recipePreparation(),
-      ))
-        parts.push(chunk);
-      bytes = Buffer.concat(parts);
+      )) {
+        chunk.copy(bytes, offset);
+        leaves.push({ id: digest(chunk), offset, size: chunk.length });
+        offset += chunk.length;
+      }
+      // Exhaustion verified every leaf and the complete logical hash. Keep verified
+      // reuse across recipes without retaining a second allocation of every leaf.
+      for (const leaf of leaves)
+        this.source.objects.set(leaf.id, bytes.subarray(leaf.offset, leaf.offset + leaf.size));
+      this.io.rememberBytes?.(ref.object, bytes);
     } else {
       const hash = createHash('sha256');
       bytes = Buffer.allocUnsafe(ref.object.size);

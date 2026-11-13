@@ -101,12 +101,19 @@ export function sourceStateChunks(
       // bytes, retain the exact existing flat writer, including the first save.
       if (reused <= treeBytes.length + recipeBytes.length) return null;
       avoided(reused);
-      const physical = await mapSourceOrdered(chunks, leaf =>
-        store({ sha256: leaf.sha256, size: leaf.size }, bytes.subarray(leaf.offset, leaf.offset + leaf.size)),
-      );
-      physical.push(
-        await store({ sha256: tree.sha256, size: tree.size }, treeBytes),
-        await store(recipe, recipeBytes),
+      // Every digest and body is already fixed. Recipe/index bodies do not need
+      // their leaves' PUT replies; publish all of them in the same bounded wave,
+      // then expose the representation only after every immutable write settled.
+      const physical = await mapSourceOrdered(
+        [
+          ...chunks.map(leaf => ({
+            pin: { sha256: leaf.sha256, size: leaf.size },
+            bytes: bytes.subarray(leaf.offset, leaf.offset + leaf.size),
+          })),
+          { pin: { sha256: tree.sha256, size: tree.size }, bytes: treeBytes },
+          { pin: recipe, bytes: recipeBytes },
+        ],
+        object => store(object.pin, object.bytes),
       );
       return {
         ...pin,

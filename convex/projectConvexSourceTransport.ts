@@ -653,9 +653,25 @@ export function convexSourceTransport(
     }
     return {
       async store(): Promise<SourceOutput> {
-        const manifest =
-          stateParents && stateFiles ? await physical.output(pin, stateFiles, stateParents) : null;
-        const projected = stateParents ? await chunks.output(pin, bytes) : null;
+        // The derived file-binding manifest and the logical State representation have
+        // independent immutable destinations. Settle both before publishing either binding,
+        // including failures; serializing these R2 rounds adds no correctness evidence.
+        const [manifestResult, contentResult] = await Promise.allSettled([
+          stateParents && stateFiles ? physical.output(pin, stateFiles, stateParents) : null,
+          (async () => {
+            const projected = stateParents ? await chunks.output(pin, bytes) : null;
+            return projected
+              ? { projected, ref: null }
+              : {
+                  projected: null,
+                  ref: await clock.write(() => (stateParents ? stateStorage : durable).store(bytes, pin)),
+                };
+          })(),
+        ]);
+        if (manifestResult.status === 'rejected') throw manifestResult.reason;
+        if (contentResult.status === 'rejected') throw contentResult.reason;
+        const manifest = manifestResult.value,
+          { projected, ref } = contentResult.value;
         if (projected) {
           // The closure is signed locally for later quanta only after each body
           // was confirmed; the commit still validates all physical bindings.
@@ -702,8 +718,8 @@ export function convexSourceTransport(
             ...dimensions,
           };
         }
-        const ref = await clock.write(() => (stateParents ? stateStorage : durable).store(bytes, pin)),
-          r2 = sourceR2Pin(ref);
+        invariant(ref, 'SOURCE_HASH_MISMATCH', 'Source publication has no stored representation.');
+        const r2 = sourceR2Pin(ref);
         // This action just hash-verified and stored the bytes. Later quanta can read them
         // before the one final commit registers their rows; no descriptor RPC is needed.
         keep(pin, bytes, true);
