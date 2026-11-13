@@ -1905,6 +1905,90 @@ test('6000-file pack plus 20 changes uses two source windows instead of W2 sixte
   );
 });
 
+test('historical source-pack State recipes stay bound and download only the changed objects', async t => {
+  const s = fixture(t);
+  s.files.push(
+    ...Array.from({ length: 29000 - s.files.length }, (_, index) =>
+      s.entry(`historical-${index}.txt`, `historical content ${index}`),
+    ),
+  );
+  s.run.candidate.base.head = s.state(s.files).sha256;
+  s.run.request.expectedHead = s.state(
+    s.files.map(file => (file.path === 'README.md' ? s.entry(file.path, 'synthetic after') : file)),
+  ).sha256;
+  const pack = await cachedPack(s),
+    historical = pack.stateRef,
+    bytes = s.objects.get(historical),
+    chunkSize = 1024 * 1024,
+    leaves = Array.from({ length: Math.ceil(bytes.length / chunkSize) }, (_, index) =>
+      s.put(bytes.subarray(index * chunkSize, (index + 1) * chunkSize)),
+    ),
+    tree = s.put(
+      JSON.stringify({
+        kind: 'forge-byte-tree',
+        schema: 1,
+        children: leaves.map(leaf => ({ ...leaf, height: 0, length: leaf.size })),
+      }),
+    );
+  s.recipes.set(
+    historical,
+    s.put(
+      JSON.stringify({
+        kind: 'forge-object-recipe',
+        schema: 1,
+        object: { sha256: historical, size: bytes.length },
+        tree: { ...tree, height: 1, length: bytes.length },
+      }),
+    ),
+  );
+  // The pack predates main and has no physical manifest or inline recipe closure.
+  s.run.candidate.base.head = s.state([...s.files, s.entry('base-added.txt', 'base')]).sha256;
+  await s.client.session(true);
+  const call = s.client.call.bind(s.client),
+    metadata = new Set([s.recipes.get(historical).sha256, tree.sha256, ...leaves.map(leaf => leaf.sha256)]);
+  t.mock.method(s.client, 'call', async command => {
+    if (command.kind === 'source' && command.digests.some(id => metadata.has(id))) {
+      assert.equal(command.state, historical, 'State recipe reads retain their authorized State');
+      assert.equal(command.object, historical, 'metadata belongs to the historical logical State');
+    }
+    const result = await call(command);
+    return command.kind === 'source' && command.bound ? { rows: result, sourceVersion: 2 } : result;
+  });
+  const directory = join(s.directory, 'historical-candidate'),
+    cache = join(s.directory, 'historical-cache');
+  mkdirSync(cache);
+  const rssBefore = process.memoryUsage().rss;
+  const result = await materializeActionsSource(s.client, directory, cache);
+  t.diagnostic(JSON.stringify({ readerRssGrowthBytes: process.memoryUsage().rss - rssBefore }));
+  assert.ok(result.packed, 'a valid historical pack must be used');
+  assert.equal(result.packed.files.length, s.files.length);
+  assert.equal(result.deltaFiles, 1);
+  assert.equal(readFileSync(join(directory, 'README.md'), 'utf8'), 'synthetic after');
+  assert.equal(
+    s.traffic.downloads,
+    8 + leaves.length,
+    'two current States, recipe/tree traversal and read, leaves, pack and one changed object',
+  );
+  assert.equal(
+    s.calls.filter(call => call.kind === 'source').length,
+    6,
+    'batched State metadata and one delta window',
+  );
+  assert(
+    process.memoryUsage().rss - rssBefore < 256 * 1024 * 1024,
+    'historical pack reader stays within the existing 256 MiB growth budget',
+  );
+  t.diagnostic(
+    JSON.stringify({
+      files: s.files.length,
+      sourceCalls: 6,
+      gets: 8 + leaves.length,
+      deltaFiles: result.deltaFiles,
+      rssBytes: process.memoryUsage().rss,
+    }),
+  );
+});
+
 test('corrupt, wrong-State, oversized and interior hash-mismatch packs fall back to full W2', async t => {
   for (const failure of ['corrupt', 'wrong-state', 'oversized', 'interior-hash']) {
     const s = fixture(t);

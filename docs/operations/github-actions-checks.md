@@ -714,6 +714,9 @@ The existing planning session optionally returns `sourcePack`: the newest projec
 signed GET. It reuses the negotiated timing-history session; no additional
 pack session or polling is needed. Planning resolves the Candidate,
 base and, if different, pack State through the ordinary hash-verified source path.
+A historical pack State can be recipe-backed without a physical manifest. Its
+authorized State descriptor binds the recipe metadata and leaves to that exact State;
+it does not use unbound object reads or substitute the current Candidate.
 One pack GET seeds a job-private blob cache; only changed content uses W2's paged,
 three-worker downloader. A fresh tree applies deletions, mode changes and path-type
 changes, creates symlinks last, and hashes every final file/link against the Candidate

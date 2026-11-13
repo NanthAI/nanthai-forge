@@ -23,6 +23,7 @@ import { createInterface } from 'node:readline';
 import { setTimeout as wait } from 'node:timers/promises';
 import { archiveThenRemove } from './evidence.mjs';
 import { cliError } from './receipts.mjs';
+import { driveForge, callForge } from './forge-protocol.mjs';
 
 const run = promisify(execFile);
 
@@ -317,20 +318,14 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
       // Closing stdin stops admission; broker.mjs drains existing requests and children.
     },
     diffFromBase,
-    /** Harness-only `land --save` that answers the shipped defaults' refusals the way an
-     * agent would (overlap -> ack accept-order; preflight require -> preflight), then retries. */
+    /** Setup landings consume the same public continuation state machine as task agents. */
     async landAnswering(root, laneId, message) {
-      for (let attempt = 1; ; attempt++) {
-        try {
-          return await nf(root, 'land', { laneId, message }, ['--save']);
-        } catch (error) {
-          const out = String(error.stdout ?? '') + String(error.stderr ?? '');
-          const code = out.match(/"code":"([A-Z_]+)"/)?.[1];
-          if (attempt >= 4 || !['OVERLAP_UNANSWERED', 'PREFLIGHT_REQUIRED'].includes(code)) throw error;
-          if (code === 'OVERLAP_UNANSWERED') await nf(root, 'ack', { laneId, choice: 'accept-order' });
-          else await nf(root, 'preflight', { laneId });
-        }
-      }
+      return driveForge({
+        root,
+        laneId,
+        message,
+        call: command => callForge(command, { executable: process.execPath, prefix: [cli] }),
+      });
     },
     /** Reset main to the base tree with one landing, then prove it on a fresh Lane of main:
      * refuses (throws) unless main equals the base exactly (S4). */
@@ -353,22 +348,10 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
       } finally {
         await rm(index, { force: true });
       }
-      let phase = null,
-        s = null;
+      let phase = null;
       if (changes.length) {
-        // `land --save` may return once the landing is submitted: the submission is the
-        // record. Wait (bounded) for a terminal phase; never abandon a Lane mid-landing (B7).
         const landed = await arm.landAnswering(root, laneId, 'bench: reset main to base');
-        const operationId = JSON.stringify(landed).match(/"operationId":"([0-9a-f-]{36})"/)?.[1];
-        const until = Date.now() + 30 * 60_000;
-        for (;;) {
-          s = operationId ? await arm.observe(operationId) : null;
-          phase = s?.phase ?? s?.error ?? null;
-          if (settled(s?.phase, s?.observation?.state) || !operationId || Date.now() > until) break;
-          await wait(15_000);
-        }
-        if (!settled(s?.phase, s?.observation?.state))
-          throw Error(`BENCH_RESET_NOT_LANDED still ${phase} (Lane ${laneId} kept)`);
+        phase = landed.submission.phase;
       }
       await arm.abandon(root, laneId);
       await arm.removeRoot(root);

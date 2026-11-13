@@ -314,7 +314,7 @@ export class ActionsJobClient {
             kind: 'source',
             digests: page,
             ...(owner
-              ? { state: selectedState ?? owner, object: owner }
+              ? { state: authorizedStates.has(owner) ? owner : (selectedState ?? owner), object: owner }
               : selectedState && !stateRead
                 ? { state: selectedState }
                 : this.capabilities.includes(actionsSourceStateCapability) && stateRead
@@ -580,7 +580,12 @@ export class ActionsJobClient {
       const recipes = digests.flatMap(id => {
         const recipe = rows.get(id)!.descriptor.recipe;
         if (!recipe || (cache && rows.get(id)!.closure)) return [];
-        if (this.capabilities.includes(actionsSourceStateCapability) && (selectedState || bound.has(id)))
+        // A historical pack State may have a recipe without a physical manifest.
+        // Its authenticated descriptor still authorizes its exact recipe metadata/leaves.
+        if (
+          this.capabilities.includes(actionsSourceStateCapability) &&
+          (selectedState || bound.has(id) || (requiredStateSource && authorizedStates.has(id)))
+        )
           recipeOwners.set(recipe.sha256, id);
         return [recipe];
       });

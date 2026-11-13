@@ -119,7 +119,7 @@ export async function driveForge({
   pause = () => wait(10_000),
   maxLandAttempts = 8,
 }) {
-  let command = { root, action: 'land', flags: ['--save'], body: { message } };
+  let command = { root, action: 'land', flags: ['--save'], body: { laneId, message } };
   let landAttempts = 0,
     newLanding = true,
     lastInterrupted = null;
@@ -130,7 +130,7 @@ export async function driveForge({
     const response = await call(command);
     const result = selectedResult(response, command);
     const state = result.submission?.observation?.state ?? result.submission?.phase ?? result.phase;
-    if (state === 'landed') return { root: command.root, landAttempts };
+    if (state === 'landed') return { root: command.root, landAttempts, submission: result.submission };
     const code = response.error?.code;
     if (['OVERLAP_UNANSWERED', 'PREFLIGHT_REQUIRED'].includes(code)) {
       await call({
@@ -188,6 +188,12 @@ export async function driveForge({
       next.body.operationId !== command.body.operationId
     )
       friction('Pending source continuation changed operation identity');
+    if (
+      command.action === 'wait' &&
+      next.action === 'wait' &&
+      JSON.stringify(command.body.operationIds) !== JSON.stringify(next.body.operationIds)
+    )
+      friction('Pending wait continuation changed operation identity');
     if (command.action === 'resolve' && ['land', 'finish'].includes(next.action) && !result.applied)
       friction('Resolve advertised finish without a local apply result');
     newLanding =
@@ -224,13 +230,20 @@ export function keepBoth(conflict) {
 }
 
 const run = promisify(execFile);
-export async function callForge(command) {
+export async function callForge(command, { executable = 'nforge', prefix = [] } = {}) {
   let stdout = '',
     stderr = '';
   try {
     ({ stdout, stderr } = await run(
-      'nforge',
-      ['agent', command.root, command.action, ...(command.flags ?? []), JSON.stringify(command.body)],
+      executable,
+      [
+        ...prefix,
+        'agent',
+        command.root,
+        command.action,
+        ...(command.flags ?? []),
+        JSON.stringify(command.body),
+      ],
       { cwd: command.root, maxBuffer: 64 << 20 },
     ));
   } catch (error) {

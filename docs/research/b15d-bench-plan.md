@@ -263,6 +263,9 @@ Async wake waits and blocking finishes share the same outcome rules: wait envelo
 Only the selected operations landing is success; failed, cancelled and superseded outcomes
 keep their recovery or stop with the retained failure. Pending waits follow their advertised
 continuation without another landing attempt. An unrelated accepted receipt is never success.
+Reset and setup landings use this same driver, including nonzero wait-budget replies;
+they keep waiting on the advertised original operation without resubmission or polling.
+A healthy blocking reset needs no extra observation call.
 The collector records typed executed CLI receipts, observes only finish/land operations, and retains structured stderr errors on nonzero exits.
 
 There are no task-name, marker-path or Forge-repository exceptions in recovery. Missing or

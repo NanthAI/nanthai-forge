@@ -107,6 +107,115 @@ test('async wake wait accepts its terminal observe envelope without replaying th
   assert.equal(f.pauses.length, 0);
 });
 
+// Exercise the actual reset consumer with a CLI process, including nonzero wait-budget exits.
+async function resetFixture(t, replies) {
+  const directory = await local(t),
+    workspace = join(directory, 'reset'),
+    callsFile = join(directory, 'calls.json'),
+    cli = join(directory, 'cli.mjs');
+  await mkdir(workspace);
+  const waitBody = { operationIds: [operationId], until: 'acceptance' };
+  const waiting = {
+    action: 'observe',
+    result: {
+      status: 'IN_PROGRESS',
+      submissions: [entry('unrelated', 'landed'), entry(operationId, 'checking')],
+      next: { action: 'wait', ...waitBody },
+      command: `nforge agent '${workspace}' wait '${JSON.stringify(waitBody)}'`,
+    },
+  };
+  await writeFile(callsFile, '[]');
+  await writeFile(
+    cli,
+    `import { readFileSync, writeFileSync } from 'node:fs';
+const file = ${JSON.stringify(callsFile)};
+const calls = JSON.parse(readFileSync(file));
+const [, root, action, ...args] = process.argv.slice(2);
+calls.push({ root, action, flags: args.slice(0, -1), body: JSON.parse(args.at(-1)) });
+writeFileSync(file, JSON.stringify(calls));
+const replies = ${JSON.stringify(replies(waiting))};
+const reply = replies[calls.length - 1];
+// Blocking land normalizes its own observation as a direct finish submission.
+if (calls.length === 1 && reply?.value.result.submissions) {
+  const result = reply.value.result;
+  Object.assign(result, result.submissions.find(entry => entry.submission.operationId === ${JSON.stringify(operationId)}));
+  delete result.submissions;
+  reply.value.action = 'finish';
+  reply.value.operationId = ${JSON.stringify(operationId)};
+}
+if (!reply) throw Error('Unexpected reset call ' + action);
+console.log(JSON.stringify(reply.value));
+process.exitCode = reply.code ?? 0;
+`,
+  );
+  const arm = forgeArm({ cli }, { ws: directory, callLog: join(directory, 'unused') });
+  let abandoned = 0,
+    removed = 0,
+    diffs = 0;
+  arm.startLane = async root => {
+    await mkdir(join(root, '.forge'), { recursive: true });
+    await writeFile(
+      join(root, '.forge', 'hosted-lane.json'),
+      JSON.stringify({ selection: { base: { head: 'accepted' } } }),
+    );
+    return 'reset-lane';
+  };
+  arm.diffFromBase = async () => (++diffs === 1 ? [{ status: 'A', path: 'old-file' }] : []);
+  arm.observe = async () => assert.fail('Reset must consume its public wait, not poll observations');
+  arm.abandon = async () => abandoned++;
+  arm.removeRoot = async () => removed++;
+  return {
+    run: () => arm.reset({ meta: directory, baseCommit: 'synthetic-base', root: workspace }),
+    calls: async () => JSON.parse(await readFile(callsFile, 'utf8')),
+    cleanup: () => ({ abandoned, removed }),
+  };
+}
+
+test('reset consumes nonzero IN PROGRESS through the original operation and verifies accepted main', async t => {
+  const f = await resetFixture(t, waiting => [
+    { value: waiting, code: 2 },
+    { value: waiting, code: 2 },
+    { value: observed([entry('unrelated', 'terminal-failed'), entry(operationId, 'landed')]) },
+  ]);
+  const result = await f.run(),
+    calls = await f.calls();
+  assert.equal(result.phase, 'landed');
+  assert.equal(result.verifiedMainHead, 'accepted');
+  assert.deepEqual(
+    calls.map(call => call.action),
+    ['land', 'wait', 'wait'],
+  );
+  assert.equal(calls[0].body.laneId, 'reset-lane');
+  assert.deepEqual(calls[1], calls[2]);
+  assert.deepEqual(calls[1].body.operationIds, [operationId]);
+  assert.deepEqual(f.cleanup(), { abandoned: 2, removed: 2 });
+});
+
+for (const state of ['terminal-failed', 'cancelled', 'superseded'])
+  test(`reset records ${state} after a pending wait and keeps its evidence`, async t => {
+    const failed = entry(operationId, state);
+    failed.submission.error = { code: 'ORIGINAL_RESET_FAILURE', message: 'retained failure' };
+    const f = await resetFixture(t, waiting => [
+      { value: waiting, code: 2 },
+      { value: observed([entry('unrelated', 'landed'), failed]), code: 1 },
+    ]);
+    await assert.rejects(f.run(), /BENCH_PRODUCT_FAILURE:.*ORIGINAL_RESET_FAILURE/);
+    assert.deepEqual(
+      (await f.calls()).map(call => call.action),
+      ['land', 'wait'],
+    );
+    assert.deepEqual(f.cleanup(), { abandoned: 0, removed: 0 });
+  });
+
+test('reset accepts a healthy blocking landing without an additional CLI call', async t => {
+  const f = await resetFixture(t, () => [{ value: response(entry(operationId, 'landed')) }]);
+  assert.equal((await f.run()).phase, 'landed');
+  assert.deepEqual(
+    (await f.calls()).map(call => call.action),
+    ['land'],
+  );
+});
+
 test('blocking finish accepts the direct landed submission without a separate wait', async () => {
   const f = await fixture([
     {
@@ -209,6 +318,19 @@ test('pending CLI wait without submission entries follows its exact printed cont
     { maxLandAttempts: 1 },
   );
   assert.deepEqual(f.calls[1], f.calls[2]);
+});
+
+test('pending wait cannot replace the original operation with another advertised landing', async () => {
+  await assert.rejects(
+    fixture([
+      submitted,
+      observed([entry(operationId, 'checking')], {
+        status: 'IN_PROGRESS',
+        next: { ...waitNext, operationIds: ['unrelated'] },
+      }),
+    ]),
+    /Pending wait continuation changed operation identity/,
+  );
 });
 
 test('async wait failure follows only its matching entry recovery through resolve and finish', async () => {
