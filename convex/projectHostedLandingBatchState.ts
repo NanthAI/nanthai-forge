@@ -13,6 +13,10 @@ export const batchSchema = z
   .object({
     id: z.uuid(),
     leaderId: z.uuid().optional(),
+    drive: z
+      .object({ step: z.enum(['retry', 'upload', 'submitted', 'terminal']), at: z.iso.datetime() })
+      .strict()
+      .optional(),
     at: z.iso.datetime(),
     composeOperationId: z.uuid(),
     checkOperationId: z.uuid(),

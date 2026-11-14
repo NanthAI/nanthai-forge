@@ -18,6 +18,13 @@ export type LandingStall = {
   lastProgressAt: string;
   alarmAt: string;
   message: string;
+  owner?:
+    | {
+        finishWake: 'none' | 'pending' | 'inProgress' | 'success' | 'failed' | 'canceled';
+        compose: 'none' | 'ready' | 'submitted' | 'terminal';
+        cohortStep?: 'retry' | 'upload' | 'submitted' | 'terminal' | undefined;
+      }
+    | undefined;
 };
 export function latestLandingProgress(times: (string | undefined)[]) {
   return times

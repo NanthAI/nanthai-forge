@@ -4935,6 +4935,45 @@
                 },
                 "message": {
                   "type": "string"
+                },
+                "owner": {
+                  "type": "object",
+                  "properties": {
+                    "finishWake": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "pending",
+                        "inProgress",
+                        "success",
+                        "failed",
+                        "canceled"
+                      ]
+                    },
+                    "compose": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "ready",
+                        "submitted",
+                        "terminal"
+                      ]
+                    },
+                    "cohortStep": {
+                      "type": "string",
+                      "enum": [
+                        "retry",
+                        "upload",
+                        "submitted",
+                        "terminal"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "finishWake",
+                    "compose"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [

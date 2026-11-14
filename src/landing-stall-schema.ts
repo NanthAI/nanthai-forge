@@ -10,4 +10,12 @@ export const landingStallSchema = z.object({
   lastProgressAt: z.string(),
   alarmAt: z.string(),
   message: z.string(),
+  owner: z
+    .object({
+      finishWake: z.enum(['none', 'pending', 'inProgress', 'success', 'failed', 'canceled']),
+      compose: z.enum(['none', 'ready', 'submitted', 'terminal']),
+      cohortStep: z.enum(['retry', 'upload', 'submitted', 'terminal']).optional(),
+    })
+    .strict()
+    .optional(),
 }) satisfies z.ZodType<LandingStall>;
