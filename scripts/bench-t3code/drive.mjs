@@ -51,6 +51,7 @@ import { usageGate, usageProblems, weeklyStopOf, diskFreeGb, diskNeed } from './
 import { agentOf } from './agent.mjs';
 import { runnerFairness } from './runners.mjs';
 import { oracleBranchRecord } from './oracle-branches.mjs';
+import { parseReplayKey, replayBatch, replayBatches } from './replay-cells.mjs';
 import { coordinationBatch, coordinationBatches, parseCoordinationKey } from './cells.mjs';
 
 let B, FREEZE;
@@ -60,6 +61,7 @@ const dry = flags.includes('--dry');
 const reps = Number(flag('--reps') ?? DESIGN.reps);
 const only = flag('--only');
 const coordination = flags.includes('--coordination');
+const replay = parseReplayKey(only);
 const fakeChange = dry && flags.includes('--fake-version-change');
 // Convex list-price stop for the whole run (lead: report before going past $5).
 export const BUDGET_USD = 5;
@@ -128,7 +130,7 @@ async function main() {
     process.exit(2);
   }
   writeFileSync(lock, String(process.pid));
-  if (!dry) {
+  if (!dry && !replay) {
     writeProgress = driverProgress(B, coordination);
     progressState = writeProgress();
   }
@@ -231,7 +233,7 @@ async function main() {
   /** Start rules a batch checks before taking the hold. */
   async function batchRefusals(b) {
     const r = [];
-    if (!dry) r.push(...usageProblems(usageGate(agentOf(config).provider), weeklyStopOf(config)));
+    if (!dry && !replay) r.push(...usageProblems(usageGate(agentOf(config).provider), weeklyStopOf(config)));
     const need = b.cells.reduce((sum, c) => sum + diskNeed(c.arm, b.N, dry).needGb, 0) + 15;
     const free = diskFreeGb();
     if (free < need) r.push(`disk ${free.toFixed(1)} GB free < ${need.toFixed(1)} GB for the batch`);
@@ -256,6 +258,7 @@ async function main() {
       ...(cell.extra ? ['--extra'] : []),
       ...(cell.kind ? ['--cell', cell.kind] : []),
       ...(cell.stack ? ['--stack', cell.stack] : []),
+      ...(cell.release ? ['--release', cell.release] : []),
       ...(flags.includes('--unpinned') ? ['--unpinned'] : []),
       ...(flag('--tasks') ? ['--tasks', flag('--tasks')] : []),
     ];
@@ -338,6 +341,15 @@ async function main() {
       );
       writeFileSync(join(dir, 'arms.json'), JSON.stringify(b.cells.map(c => c.slot ?? c.arm)) + '\n');
       writeFileSync(join(dir, 'mode.json'), JSON.stringify(b.mode) + '\n');
+      if (b.diagnostic)
+        writeFileSync(
+          join(dir, 'diagnostic-plan.json'),
+          JSON.stringify(
+            { kind: b.kind, pairs: 5, rep: b.rep, scored: false, plan: b.manifest, digest: b.seed },
+            null,
+            1,
+          ) + '\n',
+        );
       const pinFile = join(dir, 'pin.json');
       writeFileSync(pinFile, JSON.stringify(start, null, 1) + '\n');
       say(
@@ -386,6 +398,7 @@ async function main() {
       const result = {
         key: b.key,
         batchId: `${b.key}${suffix}-a${attempt}`,
+        ...(b.diagnostic ? { diagnostic: { kind: b.kind, scored: false } } : {}),
         N: b.N,
         rep: b.rep,
         mode: b.mode,
@@ -434,6 +447,14 @@ async function main() {
     return Object.fromEntries(ok.cells.map(c => [c.arm, readJson(join(runs, c.cellId, 'result.json'))]));
   };
 
+  if (replay) {
+    const batches = replay.rep
+      ? [replayBatch(replay.kind, replay.rep, replay.release)]
+      : replayBatches(replay.kind, replay.release);
+    for (const b of batches) await runBatch(b, (await attempts(b.key)).length + 1);
+    say('ALL DONE diagnostic replay');
+    return;
+  }
   if (coordination) {
     const c = only && parseCoordinationKey(only);
     if (only && !c) throw Error('--only convoy|overlap-n<N>-r<rep>');

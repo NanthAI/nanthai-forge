@@ -16,7 +16,7 @@
 // Pure text work: no network, no product calls. Usage: node phases.mjs PREFIX [CALL_LOG TASK]
 import { existsSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { commandText, shellCommands } from './command-text.mjs';
+import { commandText, shellCommands, commandInvocations } from './command-text.mjs';
 import { codexResult } from './transcripts.mjs';
 
 export const PHASES = ['coding', 'landing', 'rework', 'waiting', 'done'];
@@ -116,23 +116,46 @@ function codexTurns(entries) {
     if (['custom_tool_call', 'function_call', 'local_shell_call'].includes(p.type)) {
       const input =
         p.type === 'local_shell_call' ? JSON.stringify(p.action ?? {}) : String(p.input ?? p.arguments ?? '');
-      const call = { tool: p.name ?? 'shell', input, result: '' };
+      const call = { tool: p.name ?? 'shell', input, result: '', invocations: commandInvocations(input) };
       const owner = ownerOf(call);
-      if (owner) call.owner = owner.owner ?? owner;
+      if (owner) call.owner = owner;
       pending.push(call);
       if (p.call_id) byCall.set(p.call_id, call);
     } else if (/_call_output$/.test(p.type)) {
       const call = byCall.get(p.call_id);
       if (!call) continue;
-      call.result += `${call.result ? '\n' : ''}${codexResult(p.output)}`;
+      const parts = typeof p.output === 'string' ? [p.output] : (p.output ?? []).map(x => x.text ?? '');
+      const bodies = parts.filter(x => !/^(Script (completed|running)|Wall time|Output:)/.test(x.trim()));
+      const invocations = call.invocations?.length ? call.invocations : call.owner?.invocations;
+      if (invocations?.length > 1 && bodies.length === invocations.length) {
+        call.children = invocations.map((inv, index) => {
+          const child = {
+            tool: 'exec_command',
+            input: inv.command,
+            result: codexResult(bodies[index], { structured: true }),
+          };
+          const owner = ownerOf({
+            tool: inv.tool,
+            input: inv.tool === 'write_stdin' ? `write_stdin(${inv.input})` : inv.input,
+          });
+          if (owner) child.owner = owner;
+          const raw = bodies[index];
+          for (const m of raw.matchAll(/session_id[\\"]*:(\d+)/g)) sessions.set(m[1], child.owner ?? child);
+          const cell = /Script running with cell ID (\d+)/.exec(raw)?.[1];
+          if (cell) cells.set(cell, child.owner ?? child);
+          return child;
+        });
+      }
+      call.result += `${call.result ? '\n' : ''}${codexResult(p.output, { structured: true })}`;
       const raw = JSON.stringify(p.output ?? '');
       const cell = /Script running with cell ID (\d+)/.exec(raw)?.[1];
-      if (cell) cells.set(cell, call.owner ?? call);
+      if (cell) cells.set(cell, call);
       for (const m of raw.matchAll(/session_id[\\"]*:(\d+)/g))
         if (!sessions.has(m[1])) sessions.set(m[1], call.owner ?? call);
     }
   }
   if (pending.length) turns.push({ at: null, usage: zero(), calls: pending, usageMissing: true });
+  for (const turn of turns) turn.calls = turn.calls.flatMap(call => call.children ?? [call]);
   return turns;
 }
 
@@ -163,7 +186,16 @@ const ghPoll = w => {
 
 /** What one tool call does to the source: its forge verbs, publish/attempt, polls, re-syncs. */
 export function callKinds(call) {
-  const k = { source: false, publish: false, attempt: false, polls: 0, other: 0, resyncs: 0, forge: [] };
+  const k = {
+    source: false,
+    publish: false,
+    attempt: false,
+    polls: 0,
+    other: 0,
+    resyncs: 0,
+    forge: [],
+    commands: [],
+  };
   // Resuming a running command (Codex `wait`, `write_stdin`) is a poll; so is Codex `sleep`.
   if (call.owner || call.tool === 'sleep') k.polls++;
   if (call.tool === 'sleep' || call.tool === 'wait') return k;
@@ -176,9 +208,10 @@ export function callKinds(call) {
     if (name === 'nforge') {
       const verb = ['agent', 'x'].includes(w[1]) ? w[3] : w[1];
       // Docs pages quote error codes and conflict markers; reading them is help, not a result.
-      if (verb === 'docs') help = true;
+      if (['docs', 'help'].includes(verb)) help = true;
       k.source = true;
       k.forge.push({ verb, help });
+      k.commands.push({ help });
       if (help) k.other++;
       else if (FORGE_POLLS.has(verb)) k.polls++;
       else {
@@ -189,6 +222,8 @@ export function callKinds(call) {
       }
     } else if (name === 'git' || name === 'gh') {
       k.source = true;
+      help ||= (name === 'git' ? gitSub(w) : w[1]) === 'help';
+      k.commands.push({ help });
       if (help) k.other++;
       else if (name === 'gh' && ghPoll(w)) k.polls++;
       else {
@@ -230,6 +265,27 @@ const CODE_TRIGGERS = {
   CHECK_FAILED: 'check-failed',
 };
 
+/** Remove only speculative predecessor advice, retaining sibling real failures. */
+function resultLines(result) {
+  return result.split('\n').flatMap(line => {
+    try {
+      const value = JSON.parse(line);
+      const clean = v => {
+        if (Array.isArray(v)) return v.map(clean);
+        if (!v || typeof v !== 'object') return v;
+        return Object.fromEntries(
+          Object.entries(v)
+            .filter(([k, x]) => !(k === 'wouldConflict' && x?.predecessor))
+            .map(([k, x]) => [k, clean(x)]),
+        );
+      };
+      return [JSON.stringify(clean(value))];
+    } catch {
+      return /^Advisory COMPOSITION_CONFLICT .*No agent action is needed\./.test(line.trim()) ? [] : [line];
+    }
+  });
+}
+
 /** Join the Forge relay's rows (one task) to the session's nforge commands by order and verb. */
 function joinCalls(turns, rows) {
   const ordered = [...rows].sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt)));
@@ -241,7 +297,11 @@ function joinCalls(turns, rows) {
       for (const { verb, help } of call.kinds.forge) {
         commands++;
         const at = ordered.findIndex(
-          (r, i) => i >= next && r.args?.[0] === verb && r.args.includes('--help') === help,
+          (r, i) =>
+            i >= next &&
+            r.args?.[0] === verb &&
+            (r.args.includes('--help') || r.args.includes('-h') || ['docs', 'help'].includes(r.args[0])) ===
+              help,
         );
         if (at < 0) continue;
         matched++;
@@ -251,9 +311,18 @@ function joinCalls(turns, rows) {
   return { commands, matched, rows: rows.length };
 }
 
+function sourceCall(call) {
+  for (let current = call; current; current = current.owner) if (current.kinds?.source) return current;
+  return null;
+}
+
 /** Phase per turn and totals per phase. `rows`: the task's relay rows (Forge arm) or null. */
 export function classify(turns, { rows = null } = {}) {
-  for (const turn of turns) for (const call of turn.calls) call.kinds = callKinds(call);
+  for (const turn of turns)
+    for (const call of turn.calls) {
+      call.kinds = callKinds(call);
+      if (call.owner && !call.owner.kinds) call.owner.kinds = callKinds(call.owner);
+    }
   const joined = rows ? joinCalls(turns, rows) : null;
   // A relay row records how its command ended. A command that keeps running (a Codex exec
   // session resumed by write_stdin/wait) shows that end only on a later read, so its codes count
@@ -261,8 +330,10 @@ export function classify(turns, { rows = null } = {}) {
   // waiting, not rework).
   const lastRead = new Map();
   turns.forEach((turn, i) => {
-    for (const call of turn.calls) lastRead.set(call.owner ?? call, i);
+    for (const call of turn.calls)
+      for (let current = call; current; current = current.owner) lastRead.set(current, i);
   });
+  const recovery = { active: { turns: 0, ...zero() }, waiting: { turns: 0, ...zero() } };
   const totals = Object.fromEntries(PHASES.map(p => [p, { turns: 0, ...zero() }]));
   const events = { publishes: 0, attempts: 0, reworkEpisodes: 0, resyncs: 0, triggers: [] };
   const seen = new Set();
@@ -288,15 +359,29 @@ export function classify(turns, { rows = null } = {}) {
     const t = totals[phase];
     t.turns++;
     for (const k of USAGE_KEYS) t[k] += turn.usage[k];
+    if (phase === 'rework') {
+      const target =
+        calls.length && calls.every(c => c.kinds.other === 0) && calls.some(c => c.kinds.polls > 0)
+          ? recovery.waiting
+          : recovery.active;
+      target.turns++;
+      for (const k of USAGE_KEYS) target[k] += turn.usage[k];
+    }
     // What this turn's commands returned decides the next turn's phase.
     if (state !== 'coding' && state !== 'done') {
       const found = [],
         counted = new Set();
       for (const c of calls) {
-        const from = c.kinds.source ? c : (c.owner ?? c);
-        if (!from.kinds.source || from.kinds.forge.some(f => f.help)) continue;
+        const from = sourceCall(c);
+        if (!from) continue;
+        const help = from.kinds.commands.some(f => f.help);
+        const mixed = help && from.kinds.commands.some(f => !f.help);
+        if (help && !mixed) continue;
         for (const [kind, re] of TRIGGERS)
-          for (const line of c.result.split('\n')) {
+          for (const line of resultLines(c.result)) {
+            // Shell output without child boundaries can quote help. Retain executed CLI
+            // envelopes, actual FAILED/Git replies and relay outcomes, not quoted prose.
+            if (mixed && !/^\s*\{|^FAILED\b|^CONFLICT \(|^! \[rejected\]/.test(line)) continue;
             if (!re.test(line)) continue;
             // A cancelled or conflicted landing ends terminal-failed too; it is not a failed check.
             if (kind === 'check-failed' && (CANCELLED.test(line) || TRIGGERS[0][1].test(line))) continue;
@@ -305,11 +390,23 @@ export function classify(turns, { rows = null } = {}) {
             seen.add(key);
             found.push(kind);
           }
-        const ended = c.owner ?? c;
+        const ended = from;
         if (lastRead.get(ended) !== i || counted.has(ended)) continue;
         counted.add(ended);
         for (const r of ended.rows ?? []) {
-          for (const code of r.errorCodes ?? []) if (CODE_TRIGGERS[code]) found.push(CODE_TRIGGERS[code]);
+          if (['help', 'docs'].includes(r.args?.[0]) || r.args?.includes('--help') || r.args?.includes('-h'))
+            continue;
+          for (const code of r.errorCodes ?? []) {
+            // Older relays scanned nested advice too. An advisory-only final read
+            // cannot turn their raw code list into a terminal outcome.
+            if (
+              code === 'COMPOSITION_CONFLICT' &&
+              /wouldConflict/.test(c.result) &&
+              !resultLines(c.result).some(line => TRIGGERS[0][1].test(line))
+            )
+              continue;
+            if (CODE_TRIGGERS[code]) found.push(CODE_TRIGGERS[code]);
+          }
           if (r.conflictMarkers) found.push('conflict');
         }
       }
@@ -317,14 +414,14 @@ export function classify(turns, { rows = null } = {}) {
         if (state !== 'rework') events.reworkEpisodes++;
         state = 'rework';
         events.triggers.push({ turn: i, kinds: [...new Set(found)] });
-      } else if (calls.some(c => (c.kinds.source || c.owner?.kinds.source) && LANDED.test(c.result))) {
+      } else if (calls.some(c => sourceCall(c)?.kinds.commands.some(f => !f.help) && LANDED.test(c.result))) {
         state = 'done';
         landedAtTurn = i;
       }
     }
     return phase;
   });
-  return { turns: turns.length, phases, totals, events, landedAtTurn, joined };
+  return { turns: turns.length, phases, totals, recovery, events, landedAtTurn, joined };
 }
 
 /** Read a task's session (prefix.transcript.jsonl, else prefix.stdout.json) and classify it. */

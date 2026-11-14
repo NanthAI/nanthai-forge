@@ -14,6 +14,7 @@ import { appendFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
+import { submissionTimings, executedErrorCodes } from './operation-timing.mjs';
 import { operationsOf, cliError } from './receipts.mjs';
 import { taskIdentity, withTaskIdentity } from './task-identity.mjs';
 
@@ -211,7 +212,8 @@ export function startBroker(cli, callLog, { now = () => new Date().toISOString()
               operations,
               operationIds: [...new Set(operations.map(o => o.operationId).filter(Boolean))],
               // Keep the existing coordination/scoring counters unchanged.
-              errorCodes: [...new Set([...output.matchAll(/"code":"([A-Z_]+)"/g)].map(m => m[1]))],
+              submissionTimings: submissionTimings(output),
+              errorCodes: executedErrorCodes(output),
               ...(code
                 ? { error: cliError({ code: error?.code, message: error?.message, stdout, stderr }) }
                 : {}),

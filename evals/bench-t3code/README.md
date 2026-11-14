@@ -186,3 +186,69 @@ transcripts. A changed identity adapter needs fresh harness qualification before
 - **Grading branches** (`oracle-branches.mjs`): `oracle/<cellId>` is deleted with backoff after grading and its outcome is recorded in the cell result (`oracle.branchCleanup`). A reset removes only such a branch whose cell id is in the runs ledger and whose cell has ended; any other extra branch still fails with `BENCH_FORK_NOT_CLEAN`.
 - **Setup-only attempts**: a batch whose every cell crashed before any agent ran (`result.agentsStarted: false`) is marked `setupOnly` in `batch.json`, is disclosed in the driver log, and does not consume one of `DESIGN.maxAttempts`; at most `DESIGN.maxSetupRetries` such re-runs happen per batch.
 - **Separate bench deployment** (exit plan "Separate bench deployment and versions"): `config.forge.url` / `.deployment` select the bench deployment; `.deployWorkflow` is `convex-bench-deploy.yml`. The driver does not read or drain dev landings or deploys. Its `.freeze` belongs only to the bench CLI installation (`BENCH_ROOT/cli`), so builders keep landing. GitHub main moving is recorded (`versions.moved`); changes to the pinned bench deployment, CLI, harness, agent or check workflows still void a scored batch. `dogfood: { projectId, url? }` supplies only the mirror mapping from the CLI State to Git. The shared runner pool and local CPU samplers remain.
+
+## Fixed N=10 protocol diagnostics
+
+The separate `replay-cells.mjs` registration runs synthetic contributions through
+both existing real-service arms with zero model tokens. It does not replace the
+hash-pinned exit plan or produce scored agent-correctness/token-saving evidence.
+The normal explicit `BENCH_ROOT`, service authority, version/hold, filesystem,
+disk, runner, cost and CI instrumentation still apply. Use a separate restored
+private input/config directory; the frozen benchmark inputs need no edits.
+
+After the selected harness/runtime has been accepted and qualified, the lead can
+run the five pre-registered pairs of each scenario:
+
+```sh
+node scripts/bench-t3code/drive.mjs --only replay-conflict-n10
+node scripts/bench-t3code/drive.mjs --only replay-clean-n10
+```
+
+`--only replay-conflict-n10-late-third-r1` selects one registered pair;
+`--only replay-conflict-n10-burst` selects the five burst pairs. Clean supports
+the same suffixes. Repeating a key makes an attempt, not another registered rep.
+Arm order alternates. Diagnostic cells stay visible separately and are excluded
+from scored aggregates, runner comparisons and scored progress/ETA. Each task
+keeps one distinct identity from preparation through relayed recovery. Every batch retains `diagnostic-plan.json`, the plan digest
+and exact version pins. Every cell is marked diagnostic/unscored and records
+`modelTokens: 0`; no agent provider is launched or its usage window queried.
+
+All ten workspaces are pinned and staged before the release clock. Each writes
+a distinct `.txt` contribution; conflict cells also have two shared pairs and a
+shared triple. In the late-third variant s10 releases at +200 s; the other nine
+release at zero. Its manifest also fixes receipt gates: s10's first land waits
+for s08 acceptance; s09 waits until s10 materializes its first conflict; s10's
+first retry waits for s09 acceptance. These in-memory promises issue no observer
+calls. They force the same tail to discover two accepted-predecessor conflicts;
+an unexpected outcome is reported as diagnostic divergence. This intentionally
+controls predecessor ordering; it does not reproduce natural queue-wait latency.
+Burst has no receipt gates. Clean uses the same edits to distinct files and the
+same offsets, with no recovery gates. Release slip, gate events, preparation and
+protocol wall times are retained separately.
+
+Forge uses `driveForge` and its printed continuations, retaining operation ids
+on interrupted/unknown outcomes. GitHub uses branch commit/push, PR, required
+checks and squash/auto merge queue, retaining its existing 15 s active read
+cadence and 160-observation budget. Recovery unions synthetic contributions,
+excluding diff3 ancestor hunks; unexpected paths/lines are divergences. One final
+exact-head source oracle checks every expected byte. Forge uses one canonical
+main checkout (paged transport); GitHub pins one fetched tree, fetches any missing fixture blobs in one pack
+request with lazy per-object fetching disabled, and reads one local `cat-file`
+batch. No per-file service observer is added.
+
+Live cost is **estimated, unmeasured**: up to 60 min and 110 CI min per paired
+scenario run; five pairs up to 5 h / 550 CI min, zero model tokens. Running both
+late-third kinds therefore budgets up to 10 h / 1,100 CI min; burst variants are
+additional scenarios. Resets/cleanup beyond this estimate and full invoice costs
+are uncovered. These are planning estimates, not permission to spend or live
+results. Preparation retains ten ordinary start/open or workspace operations;
+landing/recovery uses each arm's existing protocol and checks. Product Convex
+calls, DB I/O, R2 placement and idle behavior are unchanged. Local oracle memory
+is bounded to 1 MiB of synthetic blobs; no model or repository source is generated.
+
+Failed Forge operations now retain any exact submission timing objects received
+by the relay, keyed by operation identity, plus outer command start/reply/wall
+fields. An outer CLI wall interval is never relabelled as a server phase. The
+replay also retains every command and PR read with request/reply times. Missing
+server clocks remain missing; see the [N=10 diagnosis](../../docs/research/p6-n10-diagnosis.md#implementation-follow-up)
+for the product observability gap and the offline corrected rework table.

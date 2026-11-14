@@ -230,7 +230,7 @@ export function keepBoth(conflict) {
 }
 
 const run = promisify(execFile);
-export async function callForge(command, { executable = 'nforge', prefix = [] } = {}) {
+export async function callForge(command, { executable = 'nforge', prefix = [], env = process.env } = {}) {
   let stdout = '',
     stderr = '';
   try {
@@ -246,7 +246,7 @@ export async function callForge(command, { executable = 'nforge', prefix = [] } 
         ...(command.flags ?? []),
         JSON.stringify(command.body),
       ],
-      { cwd: command.root, maxBuffer: 64 << 20 },
+      { cwd: command.root, maxBuffer: 64 << 20, env },
     ));
   } catch (error) {
     stdout = String(error.stdout ?? '');

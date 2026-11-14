@@ -21,12 +21,14 @@ const median = xs => {
       : (v[v.length / 2 - 1] + v[v.length / 2]) / 2
     : null;
 };
-const cells = readdirSync(join(B, 'runs'))
+const retainedCells = readdirSync(join(B, 'runs'))
   .filter(d => /-a\d+-/.test(d) && d.includes('-dry-') === dry && !d.includes('-modelcheck-'))
   .map(d => join(B, 'runs', d, 'result.json'))
   .filter(existsSync)
   .map(f => JSON.parse(readFileSync(f, 'utf8')))
   .filter(r => !r.refused);
+const diagnosticCells = retainedCells.filter(r => r.diagnostic);
+const cells = retainedCells.filter(r => !r.diagnostic);
 // A cell counts only inside a valid batch (both arms under one freeze, same versions); cells
 // run outside the driver (no batch) are listed but never scored.
 const batchDir = join(B, 'batches');
@@ -34,7 +36,7 @@ const batches = existsSync(batchDir)
   ? readdirSync(batchDir)
       .filter(d => existsSync(join(batchDir, d, 'batch.json')))
       .map(d => JSON.parse(readFileSync(join(batchDir, d, 'batch.json'), 'utf8')))
-      .filter(b => Boolean(b.dry) === dry)
+      .filter(b => Boolean(b.dry) === dry && !b.diagnostic)
   : [];
 const inValidBatch = new Set(
   batches.filter(b => !b.voided?.length).flatMap(b => (b.cells ?? []).map(c => c.cellId)),
@@ -152,7 +154,22 @@ console.log(
             return [`N=${N}`, { run: d.run, reasons: d.reasons }];
           }),
       ),
-      cells: cells.map(r => ({
+      diagnosticCells: diagnosticCells.map(r => ({
+        cellId: r.cellId,
+        kind: r.diagnostic.kind,
+        scored: false,
+        rep: r.rep,
+        arm: r.arm,
+        modelTokens: r.modelTokens,
+        wallSeconds: r.wallSecondsToAllLanded,
+        ci: r.ci,
+        voided: r.voided,
+        planDigest: r.replay?.planDigest,
+        verifiedHead: r.replay?.verifiedHead,
+        error: r.replay?.error,
+      })),
+      cells: retainedCells.map(r => ({
+        diagnostic: r.diagnostic ?? null,
         cellId: r.cellId,
         key: r.key,
         attempt: r.attempt,

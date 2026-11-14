@@ -69,7 +69,7 @@ export function benchProgress({ root = benchRoot(), now = new Date().toISOString
   const batchResults = batchDirectories
     .map(d => {
       const b = read('batches', d, 'batch.json');
-      if (!b || b.dry) return null;
+      if (!b || b.dry || b.diagnostic) return null;
       return {
         key: b.key,
         attempt: b.attempt,
@@ -85,7 +85,7 @@ export function benchProgress({ root = benchRoot(), now = new Date().toISOString
   for (const directory of directories(join(root, 'runs'))) {
     if (/-dry-|-modelcheck-/.test(directory)) continue;
     const result = read('runs', directory, 'result.json');
-    if (result && !result.dry && !result.modelCheck)
+    if (result && !result.dry && !result.modelCheck && !result.diagnostic)
       results.set(directory, {
         key: result.key,
         attempt: result.attempt,
@@ -104,7 +104,7 @@ export function benchProgress({ root = benchRoot(), now = new Date().toISOString
       });
     else if (!result) {
       const cell = read('runs', directory, 'cell.json');
-      if (cell && !cell.dry && !cell.modelCheck)
+      if (cell && !cell.dry && !cell.modelCheck && !cell.diagnostic)
         current.push({
           cellId: directory,
           key: cell.key,

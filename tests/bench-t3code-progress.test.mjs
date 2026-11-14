@@ -195,3 +195,31 @@ test('a status publication failure preserves driver execution and discloses the 
   assert.match(messages.join('\n'), /progress snapshot unavailable/);
   assert.equal(benchProgress({ root: f.root }).driver, null);
 });
+
+test('diagnostic batches and running cells do not enter scored progress or ETA', t => {
+  const f = fixture(t);
+  f.decisions();
+  const before = benchProgress({ root: f.root, now: end });
+  f.json('batches/replay/batch.json', {
+    key: 'replay-conflict-n10-late-third-r1',
+    diagnostic: { scored: false },
+    voided: ['synthetic diagnostic failure'],
+  });
+  f.json('runs/diagnostic/result.json', {
+    key: 'replay-conflict-n10-late-third-r1',
+    diagnostic: { scored: false },
+    startedAt: start,
+    endedAt: end,
+    records: [],
+  });
+  f.json('runs/running/cell.json', {
+    key: 'replay-clean-n10-late-third-r1',
+    diagnostic: { scored: false },
+    startedAt: start,
+  });
+  const after = benchProgress({ root: f.root, now: end });
+  assert.equal(after.done, before.done);
+  assert.equal(after.total, before.total);
+  assert.equal(after.etaSeconds, before.etaSeconds);
+  assert.deepEqual(after.current, []);
+});

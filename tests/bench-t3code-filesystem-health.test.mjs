@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main as preflight } from '../scripts/bench-t3code/preflight.mjs';
@@ -76,5 +76,41 @@ test('result.json retains healthy and refused event evidence and remains write-o
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  }
+});
+
+test('zero-model diagnostic keeps service/version gates without querying model usage', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'replay-gate-'));
+  writeFileSync(join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+  try {
+    const result = await gates(
+      {
+        arm: 'forge',
+        N: 10,
+        dry: false,
+        B: root,
+        flags: ['--cell', 'replay-conflict'],
+        config: {
+          forge: { mainBase: 'base' },
+          github: { mainBase: 'base' },
+          qualifiedHarness: 'harness',
+          baseCheckout: root,
+        },
+        start: { harness: { commit: 'harness' } },
+        pinProblems: async () => [],
+        snapshotProblems: () => [],
+        differences: () => [],
+      },
+      {
+        filesystemProbe: async () => healthy,
+        usageProbe: () => assert.fail('scripted diagnostics do not query model usage'),
+        diskProbe: () => 100,
+      },
+    );
+    assert.equal(result.usage.modelTokens, 0);
+    assert.ok(result.disk.requiredGb > 0);
+    assert.ok(result.refusals.includes('PLAN.md missing in BENCH_ROOT'));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

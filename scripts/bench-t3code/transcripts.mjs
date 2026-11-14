@@ -52,7 +52,7 @@ function codexOutput(output) {
 /** The text a Codex tool output shows the agent, without the harness wrappers: the `output`
  * of a code-mode result (JSON, possibly nested in a Promise.allSettled list) or the plain
  * text. Used to judge what a command returned. */
-export function codexResult(output) {
+export function codexResult(output, { structured = false } = {}) {
   const parts =
     typeof output === 'string' ? [output] : Array.isArray(output) ? output.map(p => p?.text ?? '') : [];
   const out = [];
@@ -67,6 +67,8 @@ export function codexResult(output) {
     } else if (Array.isArray(v)) v.forEach(collect);
     else if (v && typeof v === 'object') {
       if (typeof v.output === 'string') collect(v.output);
+      else if (structured && (v.action || v.type === 'submission' || v.error || v.wouldConflict))
+        out.push(JSON.stringify(v));
       else for (const [k, x] of Object.entries(v)) if (!META.has(k)) collect(x);
     }
   })(parts.filter(p => !/^(Script (completed|running)|Wall time|Output:)/.test(p.trim())));

@@ -639,3 +639,178 @@ test('summary: main cells per N and the stacking A/B per coordination cell', () 
   assert.equal(o.stackingAB.reworkCachedInput.medianDifference, -400);
   assert.equal(s.coordination['convoy N=16'].convoy[0].pass, true);
 });
+
+const queuedAdvice = JSON.stringify({
+  type: 'submission',
+  phase: 'queued',
+  terminal: false,
+  wouldConflict: {
+    code: 'COMPOSITION_CONFLICT',
+    predecessor: { groupId: 'synthetic-group' },
+    next: 'Advisory COMPOSITION_CONFLICT against speculative predecessor group. This entry stays queued. No agent action is needed.',
+  },
+});
+
+test('queued predecessor advice never starts recovery, even beside a real terminal failure', () => {
+  for (const [reply, expected] of [
+    [queuedAdvice, []],
+    [queuedAdvice + '\nFAILED COMPOSITION_CONFLICT: retained conflicts', ['conflict']],
+  ]) {
+    const r = classify(
+      sessionTurns([
+        ...claudeTurn(land, 'queued'),
+        ...claudeTurn("nforge agent . wait '{}'", reply),
+        ...finalText(),
+      ]),
+    );
+    assert.deepEqual(
+      r.events.triggers.flatMap(x => x.kinds),
+      expected,
+    );
+  }
+});
+
+test('agent help and deferred mixed help cannot mask real landing outcomes', () => {
+  for (const verb of ['help check', 'docs agents/workflow', 'land --help'])
+    assert.equal(
+      callKinds({ tool: 'Bash', input: JSON.stringify({ command: 'nforge agent . ' + verb }) }).forge[0].help,
+      true,
+    );
+  const item = (type, payload) => ({ type, payload });
+  for (const [actual, expected] of [
+    ['LANDED receipt synthetic', 0],
+    ['FAILED CHECK_FAILED: real failed check', 1],
+  ]) {
+    const entries = [
+      { type: 'session_meta' },
+      item('response_item', {
+        type: 'custom_tool_call',
+        name: 'exec',
+        call_id: 'a',
+        input: `text(await tools.exec_command({cmd: ${JSON.stringify(land)}}));`,
+      }),
+      item('response_item', {
+        type: 'custom_tool_call_output',
+        call_id: 'a',
+        output: JSON.stringify({ output: 'queued' }),
+      }),
+      item('token_usage_record', { usage: {} }),
+      item('response_item', {
+        type: 'custom_tool_call',
+        name: 'exec',
+        call_id: 'b',
+        input: `text(await tools.exec_command({cmd:"nforge agent . help check"})); text(await tools.exec_command({cmd:"nforge agent . wait '{}'"}));`,
+      }),
+      item('response_item', {
+        type: 'custom_tool_call_output',
+        call_id: 'b',
+        output: [
+          {
+            type: 'input_text',
+            text: JSON.stringify({
+              output: 'A failed check\nCHECK_FAILED: the landing check failed; nothing landed.',
+            }),
+          },
+          { type: 'input_text', text: JSON.stringify({ output: actual }) },
+        ],
+      }),
+      item('token_usage_record', { usage: {} }),
+      item('token_usage_record', { usage: {} }),
+    ];
+    const r = classify(sessionTurns(entries));
+    assert.equal(r.events.reworkEpisodes, expected);
+    if (!expected) assert.equal(r.landedAtTurn, 1);
+  }
+});
+
+test('real recovery retains causal totals and separates active work from command waiting', () => {
+  const r = classify(
+    sessionTurns([
+      ...claudeTurn(land, 'FAILED COMPOSITION_CONFLICT'),
+      ...claudeTurn("nforge agent . sync '{}'", 'working'),
+      ...claudeTurn('sleep 1', ''),
+      ...claudeTurn('edit', 'ok'),
+      ...claudeTurn(land, 'LANDED receipt synthetic'),
+    ]),
+  );
+  assert.equal(r.totals.rework.turns, 3);
+  assert.equal(r.recovery.active.turns, 2);
+  assert.equal(r.recovery.waiting.turns, 1);
+});
+
+test('mixed shell help retains terminal errors instead of excluding the entire call', () => {
+  const r = classify(
+    sessionTurns([
+      ...claudeTurn(land, 'queued'),
+      ...claudeTurn(
+        "nforge agent . help check; nforge agent . wait '{}'",
+        'CHECK_FAILED: quoted help\nFAILED CHECK_FAILED: actual failing job',
+      ),
+      ...finalText(),
+    ]),
+  );
+  assert.equal(r.events.reworkEpisodes, 1);
+});
+
+test('nested command resumes defer relay failures until the last read through a code-mode cell', () => {
+  const item = (type, payload) => ({ type, payload });
+  const entries = [
+    { type: 'session_meta' },
+    item('response_item', {
+      type: 'custom_tool_call',
+      name: 'exec',
+      call_id: 'a',
+      input: `text(await tools.exec_command({cmd:${JSON.stringify(land)}}));`,
+    }),
+    item('response_item', {
+      type: 'custom_tool_call_output',
+      call_id: 'a',
+      output: JSON.stringify({ session_id: 31, output: 'queued' }),
+    }),
+    item('token_usage_record', { usage: {} }),
+    item('response_item', {
+      type: 'custom_tool_call',
+      name: 'exec',
+      call_id: 'b',
+      input: 'text(await tools.write_stdin({session_id:31,chars:""}));',
+    }),
+    item('response_item', {
+      type: 'custom_tool_call_output',
+      call_id: 'b',
+      output: 'Script running with cell ID 17',
+    }),
+    item('token_usage_record', { usage: {} }),
+    item('response_item', {
+      type: 'function_call',
+      name: 'wait',
+      call_id: 'c',
+      arguments: '{"cell_id":"17"}',
+    }),
+    item('response_item', {
+      type: 'function_call_output',
+      call_id: 'c',
+      output: 'FAILED COMPOSITION_CONFLICT: actual retained conflict',
+    }),
+    item('token_usage_record', { usage: {} }),
+    item('token_usage_record', { usage: {} }),
+  ];
+  const r = classify(sessionTurns(entries), {
+    rows: [{ args: ['land', '--save', '{}'], startedAt: '1', errorCodes: ['COMPOSITION_CONFLICT'] }],
+  });
+  assert.deepEqual(r.phases, ['landing', 'waiting', 'waiting', 'rework']);
+  assert.deepEqual(r.events.triggers, [{ turn: 2, kinds: ['conflict'] }]);
+});
+
+test('Git and GitHub help cannot introduce failure or acceptance outcomes', () => {
+  for (const command of ['git help merge', 'gh help pr', 'git merge --help']) {
+    const r = classify(
+      sessionTurns([
+        ...claudeTurn('git push origin branch', 'pushed'),
+        ...claudeTurn(command, 'CONFLICT (content): documented example\nMERGED'),
+        ...finalText(),
+      ]),
+    );
+    assert.equal(r.events.reworkEpisodes, 0);
+    assert.equal(r.landedAtTurn, null);
+  }
+});

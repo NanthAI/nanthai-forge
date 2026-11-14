@@ -24,6 +24,7 @@ import { createInterface } from 'node:readline';
 import { setTimeout as wait } from 'node:timers/promises';
 import { archiveThenRemove } from './evidence.mjs';
 import { cliError } from './receipts.mjs';
+import { operationTiming } from './operation-timing.mjs';
 import { driveForge, callForge } from './forge-protocol.mjs';
 
 const run = promisify(execFile);
@@ -139,7 +140,7 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
     async observe(operationId) {
       try {
         await mkdir(anchor, { recursive: true });
-        return (await nf(anchor, 'observe', { ...X, operationId })).result?.submission ?? null;
+        return (await nf(anchor, 'observe', { ...X, operationId }, ['--detail'])).result?.submission ?? null;
       } catch (error) {
         return { error: cliError(error) };
       }
@@ -184,6 +185,7 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
         }
         const seen = [];
         let landed = null;
+        const taskCalls = readCalls(callLog).filter(c => c.task === task);
         for (const operationId of arm.taskOps(task)) {
           const s = await arm.observe(operationId);
           if (!s?.phase) {
@@ -194,7 +196,7 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
             operationId,
             phase: s.phase,
             observation: s.observation?.state ?? null,
-            timing: s.timing ?? null,
+            ...operationTiming(operationId, s.timing, taskCalls, s.attemptId),
             error: s.error ?? null,
           });
           if (s.phase === 'landed' && !landed) landed = { operationId, s };

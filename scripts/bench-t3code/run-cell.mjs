@@ -47,6 +47,9 @@ import { scanTask } from './contamination.mjs';
 import { forgeTask, githubTask, cellCoordination } from './coordination.mjs';
 import { cellFallbacks } from './fallbacks.mjs';
 import { captureChanges, realConflicts } from './hunks.mjs';
+import { replayPlan, replaySchedule } from './replay-schedule.mjs';
+import { REPLAY, replayBatch } from './replay-cells.mjs';
+import { replayAdapters } from './replay-adapters.mjs';
 import { scriptedForge, dryGroup } from './scripted.mjs';
 import { removeWorkspace } from './evidence.mjs';
 import { gates as cellGates, diskFreeGb } from './gates.mjs';
@@ -74,11 +77,16 @@ const N = Number(nText),
   taskLimit = flag('--tasks') ? Number(flag('--tasks')) : null,
   cellKind = flag('--cell'),
   stack = flag('--stack');
+const replayKind = REPLAY.kinds.includes(cellKind);
+const replay = replayKind
+  ? replayPlan({ release: flag('--release') ?? 'late-third', independent: cellKind === 'replay-clean' })
+  : null;
+if (replayKind) replayBatch(cellKind, rep, replay.release);
 if (!['github', 'forge'].includes(arm) || !(N >= 1) || !(rep >= 1))
   throw Error(
     'usage: run-cell.mjs github|forge N REP [--dry] [--extra] [--cell convoy|overlap [--stack offer|auto]]',
   );
-if (cellKind && !COORDINATION[cellKind]?.ns.includes(N))
+if (cellKind && !(replayKind ? N === 10 : COORDINATION[cellKind]?.ns.includes(N)))
   throw Error(`coordination cell ${cellKind} at N = ${N} is not in PLAN.md`);
 if (stack && !(cellKind === 'overlap' && arm === 'forge' && ['offer', 'auto'].includes(stack)))
   throw Error('--stack offer|auto applies to Forge overlap cells only');
@@ -88,24 +96,39 @@ if (cellKind === 'overlap' && arm === 'forge' && !stack)
 const slot = stack ? `${arm}-${stack}` : arm;
 const all = loadTasks(B);
 const byId = new Map(all.map(t => [t.id, t]));
-const tasks = cellKind ? coordinationTasks(cellKind, N, workspacePackages(config.baseCheckout)) : [];
-const planned = cellKind
+const tasks = replayKind
+  ? replay.tasks.map(t => ({ ...t, prompt: `synthetic replay ${t.id}`, overlap: planOverlap(t) }))
+  : cellKind
+    ? coordinationTasks(cellKind, N, workspacePackages(config.baseCheckout))
+    : [];
+function planOverlap(t) {
+  return t.edits.length > 1 ? 'overlap:synthetic' : 'disjoint:synthetic';
+}
+const planned = replayKind
   ? {
-      key: `${slot}-${cellKind}-n${N}-r${rep}`,
-      seed: `${COORDINATION.seed}/${cellKind}/n${N}`,
-      order: tasks.map(t => t.id),
+      ...replayBatch(cellKind, rep, replay.release),
+      key: `${arm}-${replayBatch(cellKind, rep, replay.release).key}`,
     }
-  : schedule(all.map(t => t.id)).find(c => c.key === cellKey(arm, N, rep) + (extra ? 'x' : ''));
+  : cellKind
+    ? {
+        key: `${slot}-${cellKind}-n${N}-r${rep}`,
+        seed: `${COORDINATION.seed}/${cellKind}/n${N}`,
+        order: tasks.map(t => t.id),
+      }
+    : schedule(all.map(t => t.id)).find(c => c.key === cellKey(arm, N, rep) + (extra ? 'x' : ''));
 if (!planned) throw Error(`cell ${cellKey(arm, N, rep)} is not in PLAN.md`);
 if (!cellKind) tasks.push(...planned.order.map(id => byId.get(id)).slice(0, taskLimit ?? undefined));
 const base = config.github.mainBase;
 // A Claude agent logs in only through the plan's token, handed over a pipe (agent.mjs). Read it
 // once before any folder is made; a dry cell runs the scripted agent and needs none.
 const tokenFile = claudeTokenFile(B, config);
-const tokenProblem = !dry && agentOf(config).provider === 'claude' ? claudeTokenProblem(tokenFile) : null;
+const tokenProblem =
+  !dry && !replayKind && agentOf(config).provider === 'claude' ? claudeTokenProblem(tokenFile) : null;
 if (tokenProblem) throw Error(tokenProblem);
 const claudeToken =
-  !dry && agentOf(config).provider === 'claude' ? readFileSync(tokenFile, 'utf8').trim() : null;
+  !dry && !replayKind && agentOf(config).provider === 'claude'
+    ? readFileSync(tokenFile, 'utf8').trim()
+    : null;
 const batchDir = flag('--batch');
 const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15);
 const cellId = `${planned.key}${dry ? '-dry' : modelCheck ? '-modelcheck' : ''}-a${attempt}-${stamp}`;
@@ -119,6 +142,7 @@ writeFileSync(
   JSON.stringify({
     pid: process.pid,
     key: planned.key,
+    ...(replayKind ? { diagnostic: { kind: cellKind, scored: false } } : {}),
     attempt,
     dry,
     modelCheck,
@@ -147,7 +171,10 @@ const result = {
   extra,
   seed: planned.seed,
   order: tasks.map(t => t.id),
-  ...(cellKind ? { coordinationCell: { kind: cellKind, stack, packages: tasks.map(t => t.package) } } : {}),
+  ...(replayKind ? { diagnostic: { kind: cellKind, scored: false, plan: replay }, modelTokens: 0 } : {}),
+  ...(cellKind && !replayKind
+    ? { coordinationCell: { kind: cellKind, stack, packages: tasks.map(t => t.package) } }
+    : {}),
 };
 const writeResult = more => writeCellResult(dir, result, more);
 const callLog = join(dir, 'nforge-calls.jsonl');
@@ -520,7 +547,47 @@ async function dispatch(task, k) {
 async function worker(k) {
   while (!crashing && queue.length) records.push(await dispatch(queue.shift(), k));
 }
-await Promise.all(Array.from({ length: N }, (_, k) => worker(k + 1)));
+if (replayKind) {
+  const adapter = replayAdapters({
+    plan: replay,
+    arm,
+    forge,
+    github,
+    ws,
+    bin,
+    base,
+    forgeBase: result.resetReceipt.verifiedMainHead,
+    records,
+    lanes,
+    env: {
+      ...taskIdentity(),
+      PATH: `${bin}:/usr/local/bin:${process.env.PATH}`,
+      FORGE_OBJECT_CACHE: objectCache,
+    },
+    event,
+  });
+  try {
+    result.replay = await replaySchedule(replay, adapter, { emit: event });
+  } catch (error) {
+    result.replay = { error: error.message, scored: false, modelTokens: 0 };
+  }
+  // The runner drained every started command before this point. Preserve failed contexts for diagnosis.
+  for (const r of records) {
+    r.landing ??= { landed: false, state: 'diagnostic-failed' };
+    r.originalEdits = replay.tasks.find(t => t.id === r.task).edits;
+    r.changes = await captureChanges({
+      arm,
+      meta: config.meta,
+      baseCommit: base,
+      root: join(ws, r.task),
+      out: join(dir, 'agents', `${r.task}.files`),
+    }).catch(error => ({ error: error.message }));
+    if (forge && !r.harnessError) {
+      r.abandon = await forge.closeTask(join(ws, r.task), r.laneId, r.landing);
+    }
+    if (r.harnessError) r.evidence = { retainedWorkspace: join(ws, r.task) };
+  }
+} else await Promise.all(Array.from({ length: N }, (_, k) => worker(k + 1)));
 await Promise.all(settling);
 const settled =
   arm === 'github'
@@ -666,7 +733,16 @@ try {
   if (result.batchBarrier && !result.batchBarrier.ok)
     throw Error(`batch barrier: ${result.batchBarrier.waiting.join(',')} still running`);
   // Coordination cells measure landing, not task correctness: graded by scope (cells.mjs).
-  oracle = cellKind ? { grade: scopeGrade(tasks, records) } : await gradeMain();
+  oracle = replayKind
+    ? result.replay?.verifiedHead
+      ? {
+          head: result.replay.verifiedHead,
+          grade: { kind: 'synthetic-exact-source', strictSuccess: records.length, tasks: tasks.length },
+        }
+      : { error: result.replay?.error }
+    : cellKind
+      ? { grade: scopeGrade(tasks, records) }
+      : await gradeMain();
 } catch (error) {
   oracle = { error: String(error.message).slice(0, 500) };
 }
@@ -694,7 +770,7 @@ const waivedChanges = trial
 const voided = [];
 if (versionChanges.length) voided.push(`versions changed during cell: ${versionChanges.join('; ')}`);
 // A usage, rate or provider-capacity stop voids that task (listed in taskVoids), not the cell.
-const quotaTasks = dry ? [] : records.filter(r => r.agent?.quotaHit).map(r => r.task);
+const quotaTasks = dry || replayKind ? [] : records.filter(r => r.agent?.quotaHit).map(r => r.task);
 if (convex && !convex.valid) voided.push(`Convex meter under-reported: ${convex.problems.join(', ')}`);
 voided.push(...runner.voided);
 // GitHub times are corrected by the probe at the start; a moving offset makes them unreliable.
@@ -704,19 +780,20 @@ if (!settled.settled) voided.push(`landing still in flight at grading: ${settled
 if (!oracle?.grade) voided.push(`grading failed: ${oracle?.error ?? oracle?.conclusion}`);
 const harnessErrors = records.filter(r => r.harnessError).map(r => r.task);
 if (harnessErrors.length) voided.push(`harness error on ${harnessErrors.join(',')}`);
-const tokens = dry
-  ? null
-  : [
-      'inputTokens',
-      'cacheCreationInputTokens',
-      'cacheReadInputTokens',
-      'outputTokens',
-      'reasoningOutputTokens',
-      'numTurns',
-    ].reduce(
-      (sum, key) => ({ ...sum, [key]: records.reduce((a, r) => a + (r.agent?.usage?.[key] ?? 0), 0) }),
-      {},
-    );
+const tokens =
+  dry || replayKind
+    ? null
+    : [
+        'inputTokens',
+        'cacheCreationInputTokens',
+        'cacheReadInputTokens',
+        'outputTokens',
+        'reasoningOutputTokens',
+        'numTurns',
+      ].reduce(
+        (sum, key) => ({ ...sum, [key]: records.reduce((a, r) => a + (r.agent?.usage?.[key] ?? 0), 0) }),
+        {},
+      );
 writeResult({
   versions: {
     start,
@@ -738,7 +815,7 @@ writeResult({
     ]),
   ],
   quotaTasks,
-  agent: dry ? 'scripted-no-model' : agentOf(config),
+  agent: dry || replayKind ? 'scripted-no-model' : agentOf(config),
   contamination,
   coordination,
   rework,

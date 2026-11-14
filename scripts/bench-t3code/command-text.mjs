@@ -120,9 +120,10 @@ const shellQuote = word => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.repl
  * `tools.<name>(…)` call (cmd, command, chars, arrays of argv words, "a"+"b" concatenations),
  * except patches. When a command is not a literal (`cmd` is a variable), every string literal
  * of the payload outside patches is added, so nothing a script builds from literals is lost. */
-function jsCommands(src) {
+function jsCommands(src, grouped = false) {
   const tokens = jsTokens(src);
-  const out = [];
+  const out = [],
+    groups = [];
   const inCalls = new Set();
   let unresolved = false;
   for (let i = 0; i + 4 < tokens.length; i++) {
@@ -131,6 +132,7 @@ function jsCommands(src) {
     const bracket = dot.v === '[' && name.t === 'str' && open.v === ']' && open2.v === '(';
     if (!((dot.v === '.' && name.t === 'id' && open.v === '(') || bracket)) continue;
     const tool = name.v;
+    const firstOutput = out.length;
     const start = bracket ? i + 5 : i + 4;
     let depth = 1;
     let end = start;
@@ -180,12 +182,25 @@ function jsCommands(src) {
         unresolved = true; // shorthand { cmd }
       }
     }
+    groups.push({
+      tool,
+      input: tokens
+        .slice(start, end - 1)
+        .map(t => (t.t === 'str' ? JSON.stringify(t.v) : t.v))
+        .join(' '),
+      command: out.slice(firstOutput).join('\n'),
+    });
   }
   if (unresolved)
     tokens.forEach((tk, k) => {
       if (tk.t === 'str' && !inCalls.has(k) && tokens[k + 1]?.v !== ':') out.push(tk.v);
     });
-  return out;
+  return grouped ? groups : out;
+}
+
+/** Code-mode child commands, in execution/output order, including resumed commands. */
+export function commandInvocations(input) {
+  return jsCommands(String(input), true);
 }
 
 /** One shell line for an argv array: `["bash","-lc","script"]` is just the script. */

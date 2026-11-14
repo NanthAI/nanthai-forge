@@ -325,3 +325,43 @@ test('chronological endpoints use timestamps even when job IDs increase in the o
   assert.equal(runner.first.jobId, 900);
   assert.equal(runner.last.jobId, 100);
 });
+
+test('diagnostic results stay visible without entering scored aggregates or runner comparisons', () => {
+  const root = mkdtempSync(join(tmpdir(), 'replay-summary-'));
+  const cellId = 'forge-replay-conflict-n10-late-third-r1-a1-synthetic';
+  try {
+    mkdirSync(join(root, 'runs', cellId), { recursive: true });
+    mkdirSync(join(root, 'batches', 'pair'), { recursive: true });
+    writeFileSync(
+      join(root, 'runs', cellId, 'result.json'),
+      JSON.stringify({
+        cellId,
+        arm: 'forge',
+        N: 10,
+        rep: 1,
+        modelTokens: 0,
+        diagnostic: { kind: 'replay-conflict', scored: false },
+        records: [],
+        voided: [],
+        runner: { jobs: [job(1)] },
+      }),
+    );
+    writeFileSync(
+      join(root, 'batches', 'pair', 'batch.json'),
+      JSON.stringify({ diagnostic: { scored: false }, voided: [], cells: [{ cellId, arm: 'forge' }] }),
+    );
+    const output = JSON.parse(
+      execFileSync(process.execPath, ['scripts/bench-t3code/summarize.mjs'], {
+        env: { ...process.env, BENCH_ROOT: root },
+        encoding: 'utf8',
+      }),
+    );
+    assert.deepEqual(output.byArmN, {});
+    assert.equal(output.diagnosticCells.length, 1);
+    assert.equal(output.diagnosticCells[0].scored, false);
+    assert.equal(output.cells.length, 1);
+    assert.equal(output.batches.length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

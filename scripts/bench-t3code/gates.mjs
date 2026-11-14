@@ -97,10 +97,12 @@ export async function gates(
     const d = differences(runPin, start, { liveMain, unpinned: dry && flags.includes('--unpinned') });
     if (d.length) refusals.push(`versions differ from the run pin: ${d.join('; ')}`);
   }
-  const usage = usageProbe(agentOf(config).provider);
+  const replay =
+    flags.includes('--cell') && /^replay-(conflict|clean)$/.test(flags[flags.indexOf('--cell') + 1]);
+  const usage = replay ? { provider: 'scripted', modelTokens: 0 } : usageProbe(agentOf(config).provider);
   if (!dry) {
     // Same weekly stop as the batch gate and preflight (owner credits: null lifts it).
-    refusals.push(...usageProblems(usage, weeklyStopOf(config)));
+    if (!replay) refusals.push(...usageProblems(usage, weeklyStopOf(config)));
     if (config.qualifiedHarness !== start.harness.commit)
       refusals.push(
         `no passing dry run of harness ${start.harness.commit?.slice(0, 12)} (config.qualifiedHarness)`,
