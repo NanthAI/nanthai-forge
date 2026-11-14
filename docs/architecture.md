@@ -2377,3 +2377,7 @@ pages. Legacy provider cursors require the existing format upgrade when archived
 rows exist, rather than silently omitting history. No journal writer is installed
 by this reader expansion. Larger existing documents can use verified transport
 fragments without changing their original row bytes or record limits.
+
+Early-resolution record readers accept optional exact predecessor pins, Lane resolution metadata,
+Candidate/attempt dependency pins and bounded receipt samples. Legacy records remain readable.
+This reader expansion installs no early-resolution writer or automatic guidance.

@@ -5,6 +5,7 @@ import { semanticPlanSchema } from '../src/intent-semantic-conflict';
 import { notifyDesiredCompose } from './projectHostedLandingDesiredWake';
 import { notifyPullCompose } from './projectGithubPullQueue';
 import { z } from 'zod';
+import { earlyResolutionSchema } from '../src/early-resolution';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
@@ -29,6 +30,7 @@ export const composeStateSchema = z
     ownerInputs: z.boolean().optional(),
     /** Every selected input and speculative prefix contributed authenticated proof. */
     ownerProvenance: z.literal(1).optional(),
+    earlyResolutions: z.array(earlyResolutionSchema).optional(),
     restoreBases: z.record(z.uuid(), saveWorkerObjectSchema).optional(),
     batch: batchComposeSchema.optional(),
     dropped: batchDroppedSchema.optional(),

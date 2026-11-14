@@ -3,6 +3,7 @@ import { batchDiagnosticSchema } from './hosted-batch-diagnosis.js';
 import { checkFileSummarySchema } from './check-file-summary.js';
 import { semanticConflictsSchema, semanticPlanSchema } from './intent-semantic-conflict.js';
 import { z } from 'zod';
+import { earlyResolutionSchema } from './early-resolution.js';
 import { semanticPayload } from './semantic-payload.js';
 import { invariant } from './errors.js';
 import type { finishPendingForReader } from './hosted-finish.js';
@@ -76,6 +77,7 @@ export const hostedLandingWithdrawSchema = z
   .strict();
 export const hostedLandingAttemptSchema = z
   .object({
+    earlyResolutions: z.array(earlyResolutionSchema).optional(),
     crossHeadProof: crossHeadProofSchema.optional(),
     /** Main-race retry basis: its check may run the scoped recheck selection. */
     recheck: scopedRecheckBasisSchema.optional(),

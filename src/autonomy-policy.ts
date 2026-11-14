@@ -65,6 +65,8 @@ export const autonomyPolicySchema = z.object({
      * configured check on any runner before the queue (docs/pre-queue-checks.md); `true` checks
      * each member's own affected set (GitHub Actions) before it joins a cohort. */
     admissionCheck: z.union([z.boolean(), z.literal('full')]).optional(),
+    /** Resolve an exact predicted-predecessor conflict while its check runs; absent is Automatic. */
+    earlyResolve: z.enum(['automatic', 'on', 'off']).optional(),
     /** Hosted batches: fixed cohort size; absent picks it from the recent failure rate. */
     batchMaxSize: z.number().int().min(1).max(8).optional(),
     /** Remote runners only: wait up to this long after the oldest queued landing before the first check. */

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { shellQuote } from './shell-quote.js';
 
 const detail = {
+  laneId: z.uuid().optional(),
   paths: z.array(z.string()).max(10),
   more: z.number().int().nonnegative(),
   at: z.iso.datetime(),
@@ -23,6 +24,20 @@ export const wouldConflictSchema = z.union([
     .object({
       ...detail,
       code: z.literal('COMPOSITION_CONFLICT'),
+      resolution: z
+        .object({
+          early: z.boolean(),
+          mode: z.enum(['automatic', 'on', 'off']),
+          failureRate: z.number().nullable(),
+          resolveMs: z.number().nullable(),
+          waitSavedMs: z.number().nullable(),
+          breakEven: z.number().nullable(),
+          samples: z.number(),
+          measuredCosts: z.number(),
+          reason: z.string(),
+        })
+        .strict()
+        .optional(),
       predecessor: z
         .object({
           groupId: z.uuid(),

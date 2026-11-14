@@ -69,6 +69,7 @@ export const autonomyPolicy = v.object({
     landingMode: v.optional(v.union(v.literal('strict'), v.literal('fast'))),
     scopedRecheck: v.optional(v.boolean()),
     landing: v.optional(v.union(v.literal('batched'), v.literal('optimistic'), v.literal('serial'))),
+    earlyResolve: v.optional(v.union(v.literal('automatic'), v.literal('on'), v.literal('off'))),
     admissionCheck: v.optional(v.union(v.boolean(), v.literal('full'))),
     batchMaxSize: v.optional(v.number()),
     batchWindowMs: v.optional(v.number()),

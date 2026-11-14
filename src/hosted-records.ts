@@ -4,6 +4,7 @@ import { semanticPayload } from './semantic-payload.js';
 import { semanticPlanSchema } from './intent-semantic-conflict.js';
 import { intentTestContractSchema } from './intent-test-contract.js';
 import { z } from 'zod';
+import { earlyResolutionSchema } from './early-resolution.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './state/hash.js';
 import { invariant } from './errors.js';
@@ -44,6 +45,7 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
       ...common,
       kind: z.literal('lane'),
       restoreBase: hash.optional(),
+      earlyResolution: earlyResolutionSchema.optional(),
       stack: z
         .object({
           laneId: z.uuid(),
@@ -99,6 +101,7 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
     .object({
       ...common,
       kind: z.literal('candidate'),
+      earlyResolutions: z.array(earlyResolutionSchema).optional(),
       governance: z
         .object({ version: z.literal(1), paths: z.array(z.string()), ownerInputs: z.boolean() })
         .strict()

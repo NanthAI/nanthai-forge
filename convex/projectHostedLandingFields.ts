@@ -120,6 +120,7 @@ export const hostedLandingTables = {
     ),
     lease: v.union(lease, v.null()),
     /** Recent cohort outcomes for sizing (`1` passed, `0` a test failed), newest last. */
+    earlyResolveSamples: v.optional(v.string()),
     checkHistory: v.optional(
       v.object({
         first: v.optional(v.string()),
@@ -198,6 +199,9 @@ export const hostedLandingTables = {
     hold: v.optional(v.literal('main-red')),
     /** Set when main changed a file this queued, not-yet-checked entry changes (JSON). */
     wouldConflict: v.optional(v.string()),
+    earlyResolveDependents: v.optional(v.literal(true)),
+    earlyResolveWatch: v.optional(v.string()),
+    earlyResolveObserved: v.optional(v.string()),
     runnable: v.boolean(),
     /** Holds its place in submission order: no newer entry may take main first. */
     orderLive: v.optional(v.literal(true)),

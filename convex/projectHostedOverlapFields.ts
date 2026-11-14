@@ -72,6 +72,10 @@ export const hostedOverlapTables = {
     laneId: v.string(),
     /** The parent head this child was last restacked onto (the Lane record's stack.head). */
     parentHead: v.string(),
+    predecessorId: v.optional(v.string()),
+    resolutionStartedAt: v.optional(v.string()),
+    resolutionEndedAt: v.optional(v.string()),
+    resolutionReceipt: v.optional(v.string()),
     /** A "parent saved" notice is out and the child has not restacked since. */
     savedNoticed: v.optional(v.literal(true)),
     /** The parent was abandoned and the child was told; cleared when the parent is saved again. */

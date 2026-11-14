@@ -21,9 +21,15 @@ function landingPolicy(policy: AutonomyPolicy) {
   return kept;
 }
 function withoutLandingMode(policy: AutonomyPolicy) {
-  const { landingMode: _mode, proofOnLanding: _proof, ...acceptance } = policy.acceptance;
+  const {
+    landingMode: _mode,
+    proofOnLanding: _proof,
+    earlyResolve: _earlyResolve,
+    ...acceptance
+  } = policy.acceptance;
   void _mode;
   void _proof;
+  void _earlyResolve;
   return acceptance;
 }
 /** The policy a landing is pinned to. */
@@ -100,6 +106,7 @@ export const OWNER_GATE: Readonly<Record<string, GateClass>> = {
   'acceptance.proofOnLanding': {
     exempt: 'adds optional evidence only; never changes the landing verdict or waits for proof',
   },
+  'acceptance.earlyResolve': { exempt: `where a Lane resolves before its exact check; ${notLanding}` },
   'acceptance.mode': 'gated',
   'acceptance.gate': 'gated',
   'acceptance.disjointFastPath': 'gated',

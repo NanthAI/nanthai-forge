@@ -56,6 +56,7 @@ export const hostedLaneSelectionSchema = z
     lifecycleVersion: hostedLaneSchema.shape.lifecycleVersion,
     state: hostedLaneSchema.shape.state,
     stack: hostedLaneSchema.shape.stack,
+    earlyResolution: hostedLaneSchema.shape.earlyResolution,
     base: mainExpectationSchema,
     authority: sourceAuthoritySchema,
   })

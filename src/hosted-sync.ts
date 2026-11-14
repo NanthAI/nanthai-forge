@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { earlyResolutionSchema, predecessorPinSchema } from './early-resolution.js';
 import {
   saveObjectSchema as object,
   saveWorkerObjectSchema as source,
@@ -38,6 +39,7 @@ export const syncRequestSchema = z.discriminatedUnion('kind', [
       /** Stack this unstacked Lane on an open peer Lane's pending head (D2, Issue 1eb42254; feature
        * sync-stack-on): the peer must have a live landing, which this Lane's landing then waits for. */
       stackOn: z.uuid().optional(),
+      predecessor: predecessorPinSchema.optional(),
       target: z.discriminatedUnion('kind', [
         z
           .object({ kind: z.literal('main'), head: object.shape.sha256, receiptId: z.string().min(1) })
@@ -75,6 +77,7 @@ export const syncWorkSchema = z.discriminatedUnion('mode', [
       right: source,
       stackBase: source.optional(),
       stackAfter: hostedLaneSelectionSchema.shape.stack,
+      earlyResolution: earlyResolutionSchema.optional(),
     })
     .strict(),
   z.object({ mode: z.literal('resolution'), candidateId: z.uuid(), conflicts: object }).strict(),
