@@ -61,8 +61,8 @@ test('the hosted tool list stays inside its context budget', async t => {
   t.diagnostic(`MCP UTF-8 bytes: tools/list ${listBytes}, descriptions ${descriptionBytes}`);
   assert.equal(
     listBytes,
-    5749,
-    'Issue aliases and replyDetail retain their budgets; S3 reports adds 8 bytes within the existing ceiling',
+    5723,
+    'Early predecessor pins retain the limits; compact help routing removes 26 bytes overall',
   );
   assert.equal(descriptionBytes, 675, 'cost fixes preserve the per-session MCP description bytes');
   t.diagnostic(`tools/list ${chars} chars (~${Math.ceil(chars / 4)} tokens); descriptions ${descriptions}`);

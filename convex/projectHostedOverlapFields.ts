@@ -89,6 +89,7 @@ export const hostedOverlapTables = {
      * save (a new latestHead) or the child's own restack re-arms it. */
     restackConflict: v.optional(v.string()),
   })
+    .index('by_project_and_predecessor', ['projectId', 'predecessorId'])
     .index('by_project_and_parent', ['projectId', 'parentLaneId'])
     .index('by_project_and_lane', ['projectId', 'laneId']),
   /** Presence (Issue 9c8490a4): one slim row per open Lane, so a start reads ~0.5 KB per peer instead

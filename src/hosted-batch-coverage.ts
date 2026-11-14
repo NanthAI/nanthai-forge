@@ -61,6 +61,10 @@ export async function proveMerged(
   parents: (id: string) => Promise<readonly string[] | null>,
   limit: number,
 ): Promise<boolean> {
+  // Exact shared bytes prove identity without an ancestry walk (including a resolved
+  // child whose predicted base is its second parent). The worker already accounted
+  // for this member; acceptance still requires its exact checked head and main CAS.
+  if (memberHeads.every(id => id === head || id === base)) return true;
   const covered = new Set<string>();
   let node = head;
   for (let steps = 0; node !== base; steps++) {

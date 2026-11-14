@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { earlyPredecessor, predecessorLane } from './projectHostedEarlyResolution';
 import { sourceProgress } from './projectSourceProgress';
 import { boardWake } from './projectBoardDelivery';
 import { loadLanding } from './projectHostedLandingStore';
@@ -206,6 +207,7 @@ export async function prepareHostedSync(
       }
       let right = target.head;
       let stackBase, stackAfter;
+      let earlyResolution;
       invariant(
         !request.stackOn || !lane.stack || lane.stack.detached,
         'STACK_ALREADY',
@@ -213,7 +215,35 @@ export async function prepareHostedSync(
       );
       if (lane.restoreBase)
         stackBase = await saveObject(ctx, auth.projectId, { sha256: lane.restoreBase }, 'sync');
-      if (target.kind === 'main' && lane.stack && !lane.stack.detached) {
+      if (request.predecessor) {
+        invariant(
+          target.kind === 'main' && !request.stackOn && !request.ontoMain && !request.cleanOnly,
+          'BAD_ARGUMENT',
+          'An exact early predecessor is a separate sync target.',
+        );
+        const selected = await earlyPredecessor(ctx, auth.projectId, request.predecessor);
+        right = request.predecessor.head;
+        stackAfter = {
+          laneId: await predecessorLane(ctx, auth.projectId, request.predecessor.submissionId),
+          head: right,
+          entryId: request.predecessor.submissionId,
+        };
+        earlyResolution = {
+          predecessor: request.predecessor,
+          laneId: lane.earlyResolution?.laneId ?? lane.id,
+          originalHead:
+            lane.earlyResolution && !lane.stack?.detached ? lane.earlyResolution.originalHead : lane.head,
+          startedAt: prepared.operation.firstAttempt.at,
+        };
+        const proof = await candidate(selected.attempt.candidate.id);
+        ownerInputs = ownerInputs && proof.ownerInputs;
+        const watch = canonicalPayload(request.predecessor);
+        if (selected.row.earlyResolveWatch !== watch || !selected.row.earlyResolveDependents)
+          await ctx.db.patch(selected.row._id, { earlyResolveWatch: watch, earlyResolveDependents: true });
+      } else if (target.kind === 'main' && lane.stack && !lane.stack.detached) {
+        const exact = lane.earlyResolution
+          ? await earlyPredecessor(ctx, auth.projectId, lane.earlyResolution.predecessor)
+          : null;
         const parentRow = await readHostedRecord(ctx, { ...auth, kind: 'lane', key: lane.stack.laneId });
         invariant(parentRow, 'NOT_FOUND', 'Stack parent Lane not found.');
         const parent = hostedRecordSchema.options[1].parse(JSON.parse(parentRow.value));
@@ -223,6 +253,7 @@ export async function prepareHostedSync(
         const detached =
           request.ontoMain ||
           parent.state === 'abandoned' ||
+          exact?.landed ||
           entry?.phase === 'landed' ||
           entry?.phase === 'terminal-failed';
         // An automatic restack only follows a live parent; a landed or abandoned one has its own notice.
@@ -231,7 +262,8 @@ export async function prepareHostedSync(
           'STACK_PARENT_CHANGED',
           'The stack parent landed or was abandoned: follow its board notice instead of an automatic restack.',
         );
-        right = detached ? target.head : parent.head;
+        right = detached ? target.head : (lane.earlyResolution?.predecessor.head ?? parent.head);
+        if (!detached && lane.earlyResolution) earlyResolution = lane.earlyResolution;
         ownerInputs =
           ownerInputs && (detached || (parent.actor === project.owner && parentRow.ownerOnly === true));
         stackBase = await saveObject(ctx, auth.projectId, { sha256: lane.stack.head }, 'sync');
@@ -272,12 +304,14 @@ export async function prepareHostedSync(
         ...(stackBase ? { stackBase } : {}),
         // A first stack (stackOn) has no previous parent head: the merge base is the common ancestor.
         ...(stackAfter ? { stackAfter } : {}),
+        ...(earlyResolution ? { earlyResolution } : {}),
       };
       // Main has not moved past this Lane: the job would return up-to-date and write nothing, so
       // this transaction settles it (no input upload, no source job, no submit call).
       upToDate =
         target.kind === 'main' &&
         !request.stackOn &&
+        !request.predecessor &&
         (await upToDateSync(ctx, auth.projectId, lane, target, original.ownerOnly && !ownerInputs));
     }
   }

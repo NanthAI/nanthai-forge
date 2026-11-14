@@ -181,8 +181,8 @@ export async function queuedConflict(session: HostedAgentSession, submission: Ho
         wouldConflict,
         ...syncRequiredContinuation(session.root, sync),
       };
-    // A predecessor's speculative conflict cannot settle or replace the live submission. Follow
-    // its canonical wait; an actual conflict then returns the rejected attempt.
+    // An optional predecessor decision leaves the live submission pending. Follow its canonical
+    // wait; the reply still exposes the exact conflict and optional pinned sync.
     const parameters = { operationIds: [current.submission.operationId] };
     const command = `nforge agent ${shellQuote(session.root)} wait ${shellQuote(JSON.stringify(parameters))}`;
     return {
@@ -347,6 +347,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
   if (!command.after && !command.candidateId && !command.inputs)
     command.after = await session.journal.retain('stack-parent-entry', async () => {
       const selected = await selectAgentLane(session, command.laneId);
+      if (selected.earlyResolution) return null; // The exact predicted-head pipeline owns its acceptance fence.
       const entryId = selected.stack && !selected.stack.detached ? (selected.stack.entryId ?? null) : null;
       if (entryId) await refuseFailedStackParent(session, selected.laneId, entryId);
       return entryId;

@@ -179,3 +179,16 @@ submit-to-land time relative to check service. Explicit full-admission incident
 fixtures keep their existing assertions. Red-change sensitivity is measured
 separately: the clean-wave caps do not claim queue-only admission is cheaper when
 changes frequently fail. See [the decision](../pre-queue-checks.md).
+
+## Exact-conflict early-resolution guard
+
+`tests/hosted-early-resolution-speed.test.mjs` replays a synthetic conflict trio
+through the production queue, source and acceptance machinery under a fake clock.
+The central `earlyResolveLateTaskToMainMs` ceiling is the 360-second remaining
+predecessor wait: `max(360, 75 + 180)`. Deferred resolution takes 615 seconds,
+requires two author resolutions and uses the same three checks. Restoring the
+accepted-main advice implementation makes this guard fail. Paired disjoint
+controls assert identical calls, document reads/writes and checks, including
+1,150 retained receipts; conflict controls assert no history-sized I/O. This
+replaces idle exact-conflict advice without raising existing latency or cost
+budgets. The numbers are modeled relative times, not a service measurement.

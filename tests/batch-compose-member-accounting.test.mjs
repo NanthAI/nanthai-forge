@@ -337,3 +337,8 @@ test('acceptance coverage: a net-unchanged path of a merged member still publish
   assert.equal(await proveMerged(aa, base, [m3], async id => incidentParents[id] ?? null, 6), false);
   assert.equal(await proveMerged(aa, base, [m1], async id => incidentParents[id] ?? null, 1), false, 'limit');
 });
+
+test('early resolution exact shared/member State proves coverage even when its base is a second parent', async () => {
+  assert.equal(await proveMerged('resolved', 'predicted', ['resolved'], async () => null, 1), true);
+  assert.equal(await proveMerged('different', 'predicted', ['resolved'], async () => null, 1), false);
+});

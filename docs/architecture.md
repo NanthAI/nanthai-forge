@@ -2380,4 +2380,6 @@ fragments without changing their original row bytes or record limits.
 
 Early-resolution record readers accept optional exact predecessor pins, Lane resolution metadata,
 Candidate/attempt dependency pins and bounded receipt samples. Legacy records remain readable.
-This reader expansion installs no early-resolution writer or automatic guidance.
+Exact conflicting predicted predecessors can be synced and resolved while their checks run.
+Automatic guidance uses recorded predecessor outcomes and resolution/wait costs; acceptance
+still requires each exact predecessor receipt. Rejected generations restore retained author source.

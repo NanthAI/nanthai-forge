@@ -111,7 +111,9 @@ export const read = query({
                 needsSync: {
                   paths: sync.paths,
                   ...(sync.more ? { more: sync.more } : {}),
-                  landedSubmissionId: sync.landedSubmissionId,
+                  ...('landedSubmissionId' in sync
+                    ? { landedSubmissionId: sync.landedSubmissionId }
+                    : { predecessor: sync.predecessor }),
                   next: syncRequiredNext({ ...sync, laneId: sync.laneId ?? laneId ?? undefined }),
                 },
               }

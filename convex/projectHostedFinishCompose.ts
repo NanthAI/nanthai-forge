@@ -225,6 +225,9 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
     retryUntil: Date.parse(pending.at) + HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS,
     ownerProvenance: 1,
     ...(value.restoreBases ? { restoreBases: value.restoreBases } : {}),
+    ...(originalCandidate?.earlyResolutions?.length
+      ? { earlyResolutions: originalCandidate.earlyResolutions }
+      : {}),
     ownerInputs: Boolean(
       originalRow &&
       originalCandidate &&

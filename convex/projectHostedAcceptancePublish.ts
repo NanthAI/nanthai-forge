@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { earlyPredecessor } from './projectHostedEarlyResolution';
 import { cancelStaleLandingChecks } from './projectHostedLandingStaleChecks';
 import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
 import { trackHostedOverlapMain } from './projectHostedOverlapStore';
@@ -123,6 +124,13 @@ export async function publishAcceptance(
     'The exact canonical Candidate differs.',
   );
   const candidate = hostedRecordSchema.parse(JSON.parse(candidateRow.value));
+  if (candidate.kind === 'candidate')
+    for (const early of candidate.earlyResolutions ?? [])
+      invariant(
+        (await earlyPredecessor(ctx, claim.projectId, early.predecessor)).landed,
+        'LANDING_DEPENDENCY_PENDING',
+        'The exact early-resolution predecessor has not landed.',
+      );
   // An owner approval retained for this submission (fe5bea80) carries only to exactly this source.
   const granted =
     ownerApproval || candidate.kind !== 'candidate'

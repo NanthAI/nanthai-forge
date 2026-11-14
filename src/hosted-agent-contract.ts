@@ -5,6 +5,7 @@ import { hostedRecordCommands } from './hosted-record-input.js';
 import { hostedMirrorStatusSchema } from './hosted-github-mirror-status.js';
 import { contractTestsInput } from './intent-test-contract.js';
 import { z } from 'zod';
+import { predecessorPinSchema } from './early-resolution.js';
 import { landingMessageSchema } from './landing-message.js';
 import { githubActionsRunsOnSchema } from './github-actions-runner-label.js';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
@@ -208,6 +209,7 @@ export const hostedAgentCommandSchemas = {
       ontoMain: z.boolean().optional(),
       /** Stack this Lane on an open peer Lane's pending head (its live landing); see stackOffer. */
       stackOn: uuid.optional(),
+      predecessor: predecessorPinSchema.optional(),
       apply: z.boolean().default(true),
       /** Restack onto the stack parent only if it applies cleanly; a conflict changes nothing (save runs it). */
       cleanOnly: z.literal(true).optional(),

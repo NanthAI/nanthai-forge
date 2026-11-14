@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { hostedBatching } from '../src/hosted-landing-batch';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { loadCompose } from './projectHostedComposeStore';
@@ -159,7 +160,11 @@ export async function initializeFinish(ctx: MutationCtx, state: HostedLandingSta
     });
     if (inherited !== undefined) state.message = inherited;
   }
-  const after = state.request.finish.after;
+  const after =
+    state.request.finish.after ??
+    (attempt.earlyResolutions?.length && !(attempt.deferredCheck && hostedBatching(attempt.policy))
+      ? attempt.earlyResolutions.at(-1)!.predecessor.submissionId
+      : null);
   if (after) await loadLanding(ctx, { projectId: input.projectId, submissionId: after });
   const check = attempt.deferredCheck
     ? state.request.check

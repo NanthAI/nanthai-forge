@@ -1,5 +1,14 @@
 # Status
 
+Exact speculative-predecessor conflicts expose pinned early sync/resolve recovery.
+`acceptance.earlyResolve` defaults to Automatic, comparing the project's observed
+failure fraction with measured resolution/wait break-even; explicit on/off wins.
+Resolved work checks through the existing predicted-head pipeline, and a failed,
+withdrawn or changed predecessor restores author source and retires its check.
+The synthetic trio improves 615 to 360 seconds with three checks in both paths.
+Reader-first rollout, live timing and billed qualification remain separate
+([early resolution](pre-queue-checks.md#resolve-an-exact-predecessor-conflict-early)).
+
 Sync and conflict recovery reuse legacy recipe buffers and exact parsed States,
 overlap State body and derived binding publication, and use the existing recipe
 encoding for byte-range reuse in the 1–8 MiB routing band. Larger States retain

@@ -71,7 +71,9 @@ async function parked(f) {
   assert.match(advice.next, /collision/);
   assert.equal(advice.predecessor.submissionId, predecessor.id);
   assert.equal(advice.predecessor.groupId, predecessor.batchId);
-  assert.match(advice.next, /stays queued.*reevaluate.*No agent action/);
+  assert.equal(advice.resolution.early, true);
+  assert.match(advice.next, /Resolve now.*exact predecessor/);
+  assert.doesNotMatch(advice.next, /No agent action/);
   assert.equal(
     rowOf(f, state.id).attemptId,
     f.entries[3].state.attemptId,
@@ -139,9 +141,10 @@ test('predecessor landing rechecks a speculative rejection on real main and repo
     },
     state,
   );
-  assert.deepEqual(replay.next, { action: 'wait', operationIds: [state.operationId] });
-  assert.match(replay.nextCommand, /wait /);
-  assert.doesNotMatch(replay.nextCommand, /sync|land --save/);
+  assert.equal(replay.next.action, 'sync');
+  assert.equal(replay.next.predecessor.receiptId, advice.predecessor.receiptId);
+  assert.match(replay.nextCommand, /sync /);
+  assert.equal(replay.inProgress, false);
   const fresh = { ...state, version: state.version + 1 },
     queue = { position: 2, entriesAhead: 3 },
     canonicalReplay = await queuedConflict(
@@ -154,7 +157,8 @@ test('predecessor landing rechecks a speculative rejection on real main and repo
   assert.deepEqual(canonicalReplay.submission, fresh, 'advice retains the fresh canonical submission');
   assert.deepEqual(canonicalReplay.queue, queue);
   assert.equal(canonicalReplay.queuePosition, 2);
-  assert.deepEqual(canonicalReplay.next, { action: 'wait', operationIds: [state.operationId] });
+  assert.equal(canonicalReplay.next.action, 'sync');
+  assert.equal(canonicalReplay.next.predecessor.head, advice.predecessor.head);
   const checking = { ...fresh, phase: 'checking' },
     settled = await queuedConflict(
       { query: async () => ({ request: checking, wouldConflict: advice }) },

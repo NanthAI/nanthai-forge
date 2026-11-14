@@ -28,7 +28,15 @@ const overlapRow = (ctx: MutationCtx, projectId: Id<'hostedProjects'>, laneId: s
 export async function trackStackDependent(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
-  lane: { id: string; stack?: { laneId: string; head: string; detached?: boolean } },
+  lane: {
+    id: string;
+    stack?: { laneId: string; head: string; detached?: boolean };
+    earlyResolution?: {
+      predecessor: { submissionId: string; receiptId: string };
+      startedAt: string;
+      resolvedAt?: string;
+    };
+  },
   open: boolean,
 ) {
   const stack = lane.stack;
@@ -41,8 +49,27 @@ export async function trackStackDependent(
     if (row) await ctx.db.delete(row._id);
     return;
   }
-  if (row && row.parentLaneId === stack.laneId && row.parentHead === stack.head) return;
-  const value = { projectId, parentLaneId: stack.laneId, laneId: lane.id, parentHead: stack.head };
+  if (
+    row &&
+    row.parentLaneId === stack.laneId &&
+    row.parentHead === stack.head &&
+    row.resolutionEndedAt === lane.earlyResolution?.resolvedAt
+  )
+    return;
+  const value = {
+    projectId,
+    parentLaneId: stack.laneId,
+    laneId: lane.id,
+    parentHead: stack.head,
+    ...(lane.earlyResolution
+      ? {
+          predecessorId: lane.earlyResolution.predecessor.submissionId,
+          resolutionReceipt: lane.earlyResolution.predecessor.receiptId,
+          resolutionStartedAt: lane.earlyResolution.startedAt,
+          ...(lane.earlyResolution.resolvedAt ? { resolutionEndedAt: lane.earlyResolution.resolvedAt } : {}),
+        }
+      : {}),
+  };
   if (row) await ctx.db.replace(row._id, value);
   else await ctx.db.insert('projectHostedStackDependents', value);
   const parent = await overlapRow(ctx, projectId, stack.laneId);
@@ -66,7 +93,7 @@ export async function stackRestackHint(
   projectId: Id<'hostedProjects'>,
   lane: { id: string; state: string; stack?: { laneId: string; head: string; detached?: boolean } },
 ) {
-  if (!lane.stack || lane.stack.detached || lane.state !== 'active') return null;
+  if ('earlyResolution' in lane || !lane.stack || lane.stack.detached || lane.state !== 'active') return null;
   const row = await dependentRow(ctx, projectId, lane.id);
   if (!row || row.ended || !row.latestHead || row.latestHead === row.parentHead) return null;
   if (row.parentHead !== lane.stack.head || row.parentLaneId !== lane.stack.laneId) return null;

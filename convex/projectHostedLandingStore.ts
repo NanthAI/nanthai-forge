@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { recoverEarlyResolutions } from './projectHostedEarlyResolutionRecovery';
 import { wakeLandingCapsule, landingCapsuleGraceMs } from './projectLandingCapsuleWake';
 import { withLandingCapsule } from './projectLandingCapsuleStore';
 import { unsealedBy } from '../src/landing-overtake';
@@ -227,6 +228,7 @@ export async function writeLanding(
       state.attemptId !== previous.attemptId ||
       state.batchId !== previous.batchId);
   const wouldConflict = retireAdvice ? undefined : row.wouldConflict;
+  await recoverEarlyResolutions(ctx, row, previous, state, attempt);
   await recordLandingObservation(ctx, state, undefined, speculative && !retireAdvice ? advice : undefined);
   // An admission run holds the request until it settles; it never joins a cohort meanwhile.
   const admitting = row.admission?.status === 'checking' && state.phase === 'checking';
@@ -279,6 +281,14 @@ export async function writeLanding(
     phase: state.phase as LandingRow['phase'],
     runnable,
     wouldConflict,
+    earlyResolveObserved:
+      row.earlyResolveWatch &&
+      (state.phase === 'landed' ||
+        state.phase === 'terminal-failed' ||
+        entersReview ||
+        previous.attemptId !== state.attemptId)
+        ? JSON.parse(row.earlyResolveWatch).receiptId
+        : row.earlyResolveObserved,
     orderLive: orderLive ? true : undefined,
     reservedUntil: reserving ? row.reservedUntil : undefined,
     // Queued advisory conflicts also depend on an existing settlement event.

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { earlyPredecessor } from './projectHostedEarlyResolution';
 import { candidateOwnerInputs } from './projectHostedProvenance';
 import { fixGate } from '../src/culprit-bisect';
 import { batchEligible } from '../src/hosted-landing-batch';
@@ -92,6 +93,8 @@ export async function pinLandingAttempt(
     'CHANNEL_CHANGED',
     'The Candidate retains a different main base receipt.',
   );
+  for (const early of candidate.earlyResolutions ?? [])
+    await earlyPredecessor(ctx, input.projectId, early.predecessor);
   input.paths?.(candidate.governance?.paths ?? null);
   if (input.retainedSelection) {
     invariant(
@@ -183,6 +186,7 @@ export async function pinLandingAttempt(
   const policy = effectivePolicy(project);
   return hostedLandingAttemptSchema.parse({
     ...(semanticPlan ? { semanticPlan } : {}),
+    ...(candidate.earlyResolutions?.length ? { earlyResolutions: candidate.earlyResolutions } : {}),
     ...(deferredCheck ? { deferredCheck: true } : {}),
     ...(input.recheck ? { recheck: input.recheck } : {}),
     schema: 1,

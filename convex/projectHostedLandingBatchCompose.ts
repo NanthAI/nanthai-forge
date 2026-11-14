@@ -39,6 +39,9 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
       ),
     );
   const memberDetails: BatchMemberDetail[] = [];
+  const earlyResolutions: NonNullable<
+    import('./projectHostedComposeStore').ComposeState['earlyResolutions']
+  > = [];
   if (!existing) {
     const current = await hostedStartMain(ctx, input.projectId);
     invariant(
@@ -77,6 +80,7 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
       const candidate = hostedRecordSchema.options[3].parse(JSON.parse(row.value));
       ownerInputs = ownerInputs && candidateOwnerInputs(project, row, candidate, first.authorityEpoch);
       contracts.push(...(candidate.semanticPlan?.members ?? []));
+      earlyResolutions.push(...(candidate.earlyResolutions ?? []));
     }
     for (const member of batch.members) {
       const row = await readHostedRecord(ctx, { ...auth, kind: 'candidate', key: member.candidate.id });
@@ -89,6 +93,7 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
       if (!request.intentId) request.intentId = candidate.intentId;
       ownerInputs = ownerInputs && candidateOwnerInputs(project, row, candidate, first.authorityEpoch);
       contracts.push(...(candidate.semanticPlan?.members ?? []));
+      earlyResolutions.push(...(candidate.earlyResolutions ?? []));
       const own = await semanticMember(ctx, auth, candidate.intentId);
       if (own) contracts.push(own);
       const declaration = own ?? candidate.semanticPlan?.members.find(m => m.intentId === candidate.intentId);
@@ -120,6 +125,7 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
     const state: ComposeState = {
       request,
       ownerInputs,
+      ...(earlyResolutions.length ? { earlyResolutions } : {}),
       ownerProvenance: 1,
       batch: { members: batch.members.map(m => m.candidate.id) },
       ...(contracts.length

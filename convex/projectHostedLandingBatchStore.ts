@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { earlyPredecessor } from './projectHostedEarlyResolution';
 import { wakeLandingCapsule } from './projectLandingCapsuleWake';
 import { releaseBatchMembers } from './projectHostedLandingBatchRelease';
 import { orderHostedLandingRows } from './projectHostedLandingOrder';
@@ -91,7 +92,20 @@ export async function formLandingBatch(
   const admission = hostedAdmission(own.policy),
     queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' }),
     limit = cohortSize(own.policy, queue?.checkHistory, admission);
-  const predecessor = await pipelinePredecessor(ctx, { projectId: input.projectId, channel: 'main' });
+  const early = own.earlyResolutions?.length;
+  const pending = [];
+  for (const resolution of own.earlyResolutions ?? []) {
+    const pinned = await earlyPredecessor(ctx, input.projectId, resolution.predecessor);
+    if (!pinned.landed) pending.push(resolution.predecessor);
+  }
+  // The last selected predecessor owns the exact publication prefix. All selected
+  // early pins are retained and checked again at final acceptance.
+  pending.sort(
+    (a, b) => (queue?.train?.indexOf(a.submissionId) ?? -1) - (queue?.train?.indexOf(b.submissionId) ?? -1),
+  );
+  const predecessor = early
+    ? pending.at(-1)
+    : await pipelinePredecessor(ctx, { projectId: input.projectId, channel: 'main' });
   const windows = [selected.row];
   // Bounded indexed heads exclude already-selected groups. Never enumerate the
   // queue just to fill one cohort, even with thousands of retained submissions.
@@ -123,12 +137,17 @@ export async function formLandingBatch(
         attempt.actor.id === own.actor.id &&
         attempt.authorityEpoch === own.authorityEpoch &&
         attempt.policyDigest === own.policyDigest &&
+        canonicalPayload(attempt.earlyResolutions ?? null) ===
+          canonicalPayload(own.earlyResolutions ?? null) &&
         canonicalPayload(state.request.check) === canonicalPayload(selected.state.request.check)
         ? [{ row, state, attempt }]
         : [];
     })
     .slice(0, limit);
-  if (members.length < (predecessor ? 1 : 2) || !members.some(m => m.state.id === input.submissionId))
+  if (
+    members.length < (predecessor || early ? 1 : 2) ||
+    !members.some(m => m.state.id === input.submissionId)
+  )
     return false;
   const batch: LandingBatch = {
     id: crypto.randomUUID(),

@@ -95,6 +95,13 @@ export async function publishHostedCompose(
     state.ownerProvenance === 1 && state.ownerInputs === true && input.actor === project.owner;
   const candidate = {
     kind: 'candidate' as const,
+    ...(state.earlyResolutions?.length
+      ? {
+          earlyResolutions: [
+            ...new Map(state.earlyResolutions.map(early => [early.predecessor.receiptId, early])).values(),
+          ],
+        }
+      : {}),
     ...(result.status === 'clean' && result.paths
       ? { governance: { version: 1 as const, paths: result.paths, ownerInputs } }
       : {}),

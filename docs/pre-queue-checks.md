@@ -7,6 +7,73 @@ is [`models/landing-queue`](../models/landing-queue/README.md).
 
 Landing documentation calls the accepted destination Channel `main`; a receipt's target Channel refers to that same destination, including when the project names it differently.
 
+## Resolve an exact predecessor conflict early
+
+`acceptance.earlyResolve` sits beside `admissionCheck`. Its values are
+`"automatic"` (also the absent default), `"on"` and `"off"`. Owners can change it
+with `nforge x ROOT set-policy '{"acceptance":{"earlyResolve":"off"}}'`;
+use `"automatic"` to restore the measured choice. It changes scheduling advice,
+not the strict/fast promise, review policy, runner or acceptance strength.
+
+When a signed trial merge proves a conflict with an unaccepted predecessor,
+`wouldConflict.predecessor` names its exact State and reserved acceptance receipt.
+If the retained checking chain already extends beyond that predecessor, advice
+selects its last exact prefix, excluding the rejected/composing cohort itself.
+With early resolution selected, `land`, `wait` and `observe` return a `sync`
+continuation carrying those pins instead of another wait. Run it from the Lane
+checkout, edit the returned conflict, `resolve`, then `land --save`. The existing
+sync worker creates the draft; the existing predicted-head pipeline checks the
+resolved change while the predecessor checks. A clean merge keeps its ordinary
+no-action path and allocates no conflict work.
+
+Automatic compares the measured predecessor failure fraction with
+`mean resolution milliseconds / (mean resolution milliseconds + mean waiting
+milliseconds)`. The source is the project's last fifty observed exact conflicting
+predecessor receipts, following the Automatic CI outcome-window design. Failed,
+withdrawn, review-held and replaced generations count as failures of the selected
+prefix. Healthy receipts keep entering the window when early resolution is off
+or Automatic chooses to wait, so a high-failure window can recover. Resolution
+cost runs from the pinned sync start to completed `resolve`; waiting time runs
+from that start to predecessor settlement. Unknown timings remain unknown; a
+resolution finishing after settlement fills that same receipt's cost once.
+Without measured costs, Automatic uses the approved cold-start choice: resolve
+early. There are no fixed red-rate or timing thresholds. Explicit on/off wins.
+Every exact-conflict reply includes the choice, reason, measured failure fraction
+and waiting minutes (or their unknown coverage). With early resolution off or
+not favored, it gives both the optional exact `sync` and the choice to wait;
+it never says no action is needed for a proven conflict.
+
+A Lane records its original author State and exact predecessor pins. If that
+predecessor fails, is withdrawn, enters review or changes head **or receipt**,
+Forge retires the dependent check and restores the Lane's original author State.
+All intervening saved resolution States remain retained. Its board note names
+the prior resolution State and recovery: open the restored Lane, sync main and
+resolve again. This deliberately discards the speculative resolution from the
+active head, including edits made during that resolution; those edits stay in
+its retained State. No rejected predecessor content can be accepted through the
+old check. Exact head, receipt, authority, generation, cancellation and main CAS
+checks still apply. Ordinary stacked Lanes retain their existing behavior.
+
+The selector adds no calls, reads or writes on a disjoint landing, and idle adds
+zero calls. An exact conflict reads only the bounded active prefix and the one
+existing queue row. Samples live on that queue row; dependency metadata reuses
+stack-dependents rows, and source bytes remain in R2. Recovery processes one
+indexed dependent page per event-owned continuation; it never polls. Replaying
+unchanged conflict advice performs no writes or repeated train/history walk.
+
+The fake-clock conflict trio runs the production queue, merge, resolve and check
+controllers with synthetic source. A 180-second check quantum, a tail predecessor
+with 360 seconds remaining and a 75-second resolution produce late-task time to
+main of 615 seconds with deferred recovery and 360 seconds with early recovery;
+two resolutions become one and both paths use three checks. The central
+`earlyResolveLateTaskToMainMs` budget fails against the accepted-main advice
+implementation. These are relative synthetic timings, not a live benchmark or
+billed-usage result. Existing byte, query, memory and latency guards remain.
+
+The protocol feature is `early-resolution-v1`. Deploy reader expansion before
+enabling writers for older strict record readers; release/deployment and live
+qualification are separate from this implementation.
+
 ## Context
 
 With 12 builders in parallel, each change's first full check ran inside the serial

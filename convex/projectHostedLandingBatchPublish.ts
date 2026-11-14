@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { earlyPredecessor } from './projectHostedEarlyResolution';
 import { cancelStaleLandingChecks } from './projectHostedLandingStaleChecks';
 import { settleBatchConflicts } from './projectHostedLandingCohortConflicts';
 import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
@@ -184,6 +185,12 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
       'A batch member Candidate changed.',
     );
     const originalCandidate = hostedRecordSchema.options[3].parse(JSON.parse(own.value));
+    for (const early of originalCandidate.earlyResolutions ?? [])
+      invariant(
+        (await earlyPredecessor(ctx, claim.projectId, early.predecessor)).landed,
+        'LANDING_DEPENDENCY_PENDING',
+        'The exact early-resolution predecessor has not landed.',
+      );
     memberPaths.push({
       submissionId: member.state.id,
       head: member.original.candidate.head ?? '',

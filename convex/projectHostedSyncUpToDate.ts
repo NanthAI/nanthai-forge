@@ -92,6 +92,7 @@ export async function syncLaneSelection(
     lifecycleVersion: lane.lifecycleVersion,
     state: lane.state,
     ...(lane.stack ? { stack: lane.stack } : {}),
+    ...(lane.earlyResolution ? { earlyResolution: lane.earlyResolution } : {}),
     base: lane.base,
     authority: sourceAuthority((await ctx.db.get(projectId))!),
   });

@@ -651,6 +651,8 @@ export async function executeHostedAgent(
         command.laneId,
         'Sync updates the Lane checkout as well as the server Lane.',
       );
+    if (command.predecessor && !session.capabilities.features?.includes('early-resolution-v1'))
+      throw unadvertisedActionError('sync predecessor');
     const stacking = session.capabilities.features?.includes('sync-stack-on') ?? false;
     if (command.stackOn && !stacking) throw unadvertisedActionError('sync stackOn');
     // Project setting stacking:auto (D2): the last receipt's offer stacks this Lane at its next plain

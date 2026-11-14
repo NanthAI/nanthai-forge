@@ -215,7 +215,7 @@ async function observeHostedSubmissionsOnce(
     current.size === operations.length &&
     [...current.values()].every(e => e.submission.observation.state !== 'pending');
   // Main already took files a queued entry changes (f7539ebb): waiting cannot land it, so the wait
-  // returns at once with the sync recovery. The predecessor variant keeps waiting (no action needed).
+  // returns at once with sync guidance. Optional predecessor decisions keep waiting with factual advice.
   const syncRequired = () =>
     [...current.values()].some(e => syncRequiredAdvice(e.wouldConflict, e.submission) !== undefined);
   let client: HostedRunSubscription | undefined;

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { failFinish } from './projectHostedFinishStore';
 import type { MutationCtx } from './_generated/server';
 import type { BatchIdentity } from './projectHostedLandingBatchState';
 import { loadBatch } from './projectHostedLandingBatchState';
@@ -78,6 +79,15 @@ async function invalidatePipelineOnce(
         projectId: input.projectId,
         attemptId: state.attemptId,
       });
+      if (original.earlyResolutions?.length) {
+        await failFinish(
+          ctx,
+          { projectId: input.projectId, submissionId: original.submissionId },
+          'STACK_PARENT_CHANGED',
+          'The exact early-resolution predecessor changed or did not land. The speculative Lane returns to its retained author head; open it, sync main and resolve again.',
+        );
+        continue;
+      }
       // An owner hold is not a failed check. Keep the old exact binding until
       // it settles, then recompose this member's original selection on main.
       // Only a byte-identical tree may carry this proof to that new Candidate.

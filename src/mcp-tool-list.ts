@@ -170,7 +170,7 @@ function compactCommand(tool: Tool): Tool {
         command: {
           ...(stripSchemaNoise(rest) as Json),
           type: 'object',
-          description: `${signatures.length ? `Required: ${signatures.join(' ')}. ` : ''}Fields: ${fields.join(' ')} (${LEGEND}). Schema: forge_work_overview help`,
+          description: `${signatures.length ? `Required: ${signatures.join(' ')}. ` : ''}Fields: ${fields.join(' ')} (${LEGEND}). forge_work_overview help`,
           properties: { action: { enum: actions } },
           required: ['action'],
         },

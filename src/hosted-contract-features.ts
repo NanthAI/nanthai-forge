@@ -109,6 +109,8 @@ export const hostedContractFeatures = [
   /** projectHostedSync:prepare takes `stackOn` (D2): stack an unstacked Lane on an open peer's
    * pending head. Without it the CLI refuses stackOn and the stacking:auto setting does nothing. */
   'sync-stack-on',
+  /** Exact predecessor pins survive sync/resolve and use the predicted-head check pipeline. */
+  'early-resolution-v1',
   /** Upload packs (Issue 98ee14e8): projectObjects:prepareBatch takes `pack` and
    * projectHostedSaves:prepare takes `uploadPack` (src/object-pack-upload.ts), so several new small
    * objects go up as one pack with one PUT; the commit reads the pack and checks every member digest

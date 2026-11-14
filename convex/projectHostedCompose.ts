@@ -206,6 +206,9 @@ export const stage = mutation({
             'WORK_STALE',
             'Selected Lane changed or belongs to another Intent.',
           );
+          if (lane.earlyResolution && !lane.stack?.detached) {
+            state.earlyResolutions = [...(state.earlyResolutions ?? []), lane.earlyResolution];
+          }
           if (lane.restoreBase)
             state.restoreBases = {
               ...state.restoreBases,
@@ -227,6 +230,8 @@ export const stage = mutation({
             'WORK_STALE',
             'Select the exact clean dependency Candidate.',
           );
+          if (candidate.earlyResolutions?.length)
+            state.earlyResolutions = [...(state.earlyResolutions ?? []), ...candidate.earlyResolutions];
           state.ownerInputs =
             state.ownerInputs === true &&
             candidateOwnerInputs(project, row, candidate, state.request.authorityEpoch);

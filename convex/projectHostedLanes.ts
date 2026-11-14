@@ -221,6 +221,7 @@ export const select = query({
           lifecycleVersion: lane.lifecycleVersion,
           state: lane.state,
           ...(lane.stack ? { stack: lane.stack } : {}),
+          ...(lane.earlyResolution ? { earlyResolution: lane.earlyResolution } : {}),
           base: lane.base,
           authority: sourceAuthority(project),
         }),

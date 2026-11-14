@@ -495,6 +495,17 @@
       "source": "tests/sync-resolve-serial-speed.test.mjs: full real submit/save/resolve handlers at 29,000 files, excluding request preparation and client apply. Previously 17 calls.",
       "reason": "Removes the separate scheduled chain and second Node/V8 dispatch, sharing verified inputs while retaining each job authority fence. Existing query, byte, R2 and memory ceilings stay unchanged.",
       "issue": "6fbba986"
+    },
+    {
+      "id": "early-resolution-conflict-trio",
+      "area": "exact conflicting predecessor resolution",
+      "measuredBy": "build-guard",
+      "metric": "earlyResolveLateTaskToMainMs",
+      "unit": "ms",
+      "max": 360000,
+      "source": "Issue 8c9b84fc: tests/hosted-early-resolution-speed.test.mjs reuses the production fake-clock queue/source fixtures. Synthetic checks take 180 s (the existing pipeline replay quantum), the tail predecessor owns 360 s remaining wait, and author resolution takes 75 s (rounded observed recovery).",
+      "reason": "The late task resolves and checks during the predecessor wait: max(360 s, 75 s + 180 s) = 360 s, versus 360 s + 75 s + 180 s = 615 s with deferred resolution. Relative synthetic timing only; no service or benchmark result.",
+      "issue": "8c9b84fc"
     }
   ],
   "costGuard": {

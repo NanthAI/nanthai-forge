@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { recordEarlyResolutionTiming } from './projectHostedEarlyResolutionTiming';
+import { earlyPredecessor } from './projectHostedEarlyResolution';
 import { makeFunctionReference } from 'convex/server';
 import type { Id } from './_generated/dataModel';
 import { syncForJob } from './projectHostedSyncStore';
@@ -17,7 +19,7 @@ import { savePin } from '../src/hosted-save';
 import { digest } from '../src/state/hash';
 import { canonicalPayload, type HostedTerminalReceipt } from '../src/hosted-source-operation';
 import { syncLaneSelection } from './projectHostedSyncUpToDate';
-import { invariant } from '../src/errors';
+import { ForgeError, invariant } from '../src/errors';
 /** Constant-size final CAS: never reads other Lane heads, source pages or Channel history. */
 export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & { result: string }) {
   const { row, state, operation } = await loadSync(ctx, input, false);
@@ -52,6 +54,8 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
     'SOURCE_JOB_INVALID',
     'The result selected different original sync inputs.',
   );
+  // Check the exact generation again after source IO, before publishing a conflict or a resolved Lane.
+  const early = state.work.mode === 'sync' ? state.work.earlyResolution : state.lane?.earlyResolution;
   const result = output.result,
     request = state.request;
   invariant(
@@ -92,6 +96,14 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
     await writeSyncState(ctx, row._id, { ...state, status, ...(serverTiming ? { serverTiming } : {}) });
     return terminal;
   };
+  if (early) {
+    try {
+      await earlyPredecessor(ctx, input.projectId, early.predecessor);
+    } catch (error) {
+      if (!(error instanceof ForgeError) || error.code !== 'STACK_PARENT_CHANGED') throw error;
+      return finish({ status: 'failed', error: { code: error.code, message: error.message } }, 'stale');
+    }
+  }
   // Old sync state could derive true from its target alone, omitting a mixed left side.
   const ownerInputs = state.ownerProvenance === 1 && state.ownerInputs === true;
   let lane = state.lane;
@@ -156,6 +168,7 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
       state: 'active',
       authorityEpoch,
       ...(state.work.mode === 'sync' && state.work.stackAfter ? { stack: state.work.stackAfter } : {}),
+      ...(early ? { earlyResolution: early } : {}),
       resolution: {
         ...(state.work.mode === 'sync' && state.work.stackBase
           ? { mergeBase: state.work.stackBase.object.sha256 }
@@ -227,9 +240,19 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
       result.status === 'resolved' ||
       (stack && canonicalPayload(stack) !== canonicalPayload(lane.stack))
     ) {
+      const { earlyResolution: priorEarly, ...retainedLane } = lane;
       lane = {
-        ...lane,
+        ...retainedLane,
+        ...(!stack?.detached && priorEarly ? { earlyResolution: priorEarly } : {}),
         ...(stack ? { stack } : {}),
+        ...(early
+          ? {
+              earlyResolution: {
+                ...early,
+                ...(result.status === 'resolved' ? { resolvedAt: new Date(Date.now()).toISOString() } : {}),
+              },
+            }
+          : {}),
         ...(rebase ? { base: rebase } : {}),
         head: result.state.sha256,
         version: lane.version + 1,
@@ -253,7 +276,11 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
         await supersedeSyncRequired(ctx, { projectId: input.projectId, laneId: lane.id, head: lane.head });
     }
   }
+  if (early && result.status === 'conflict' && state.lane)
+    await supersedeSyncRequired(ctx, { projectId: input.projectId, laneId: state.lane.id, head: lane!.head });
   invariant(lane, 'SOURCE_JOB_INVALID', 'Retain the resulting Lane.');
+  if (result.status === 'resolved' && lane.earlyResolution)
+    await recordEarlyResolutionTiming(ctx, input.projectId, lane.earlyResolution);
   const selection = await syncLaneSelection(ctx, input.projectId, lane);
   return finish(
     {

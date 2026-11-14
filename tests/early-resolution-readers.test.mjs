@@ -54,7 +54,7 @@ for (const [record, field, value] of [
   });
 }
 
-test('reader expansion preserves queued advisory behavior before writer activation', () => {
+test('activated reader keeps exact predecessor recovery pins and legacy advisory behavior', () => {
   const advice = {
     code: 'COMPOSITION_CONFLICT',
     predecessor: { ...predecessor, groupId: randomUUID() },
@@ -78,7 +78,7 @@ test('reader expansion preserves queued advisory behavior before writer activati
     },
   };
   assert.deepEqual(wouldConflictSchema.parse(expanded), expanded);
-  assert.equal(hostedAgentCommandSchemas.sync.safeParse({ predecessor }).success, false);
+  assert.equal(hostedAgentCommandSchemas.sync.safeParse({ predecessor }).success, true);
   assert.equal(syncRequiredAdvice(advice), undefined);
-  assert.equal(syncRequiredAdvice(expanded), undefined);
+  assert.deepEqual(syncRequiredAdvice(expanded), expanded);
 });

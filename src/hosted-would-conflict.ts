@@ -50,10 +50,11 @@ export const wouldConflictSchema = z.union([
     .strict(),
 ]);
 export type WouldConflict = z.infer<typeof wouldConflictSchema>;
-export type SyncRequiredAdvice = Extract<WouldConflict, { landedSubmissionId: string }>;
+export type SyncRequiredAdvice = WouldConflict;
 
 /** The accepted-main variant on a still-queued entry: main already took files this entry changes, so
- * the Lane syncs and lands again (Issue f7539ebb). The predecessor variant needs no agent action. */
+ * the Lane syncs and lands again (Issue f7539ebb). An early predecessor decision instead returns
+ * exact pinned sync guidance while the predecessor remains pending. */
 export function syncRequiredAdvice(
   value: unknown,
   submission?: { phase?: string; observation?: { state?: string } } | null,
@@ -61,25 +62,46 @@ export function syncRequiredAdvice(
   if (submission && (submission.phase !== 'queued' || submission.observation?.state !== 'pending'))
     return undefined;
   const parsed = wouldConflictSchema.safeParse(value);
-  return parsed.success && 'landedSubmissionId' in parsed.data ? parsed.data : undefined;
+  return parsed.success && ('landedSubmissionId' in parsed.data || parsed.data.resolution?.early)
+    ? parsed.data
+    : undefined;
 }
 
 export const syncRequiredSummary = (advice: Pick<SyncRequiredAdvice, 'paths' | 'more'>) =>
   `main changed ${advice.paths.length + advice.more} file(s) this queued landing also changes (${advice.paths.join(', ')}${advice.more ? ', …' : ''})`;
 
 /** Server-side guidance text, shared by the mark and every read that shows it. */
-export const syncRequiredNext = (advice: Pick<SyncRequiredAdvice, 'paths' | 'more' | 'laneId'>) =>
-  `SYNC_REQUIRED: ${syncRequiredSummary(advice)}. Do not keep waiting on this entry: run land --save ` +
-  `${advice.laneId ? `{"laneId":"${advice.laneId}"} ` : 'in its Lane '}` +
-  'now; it syncs main in, saves and lands again, superseding this entry.';
+export const syncRequiredNext = (
+  advice: Pick<WouldConflict, 'paths' | 'more' | 'laneId'> & { predecessor?: unknown; next?: string },
+) =>
+  advice.predecessor
+    ? advice.next!
+    : `SYNC_REQUIRED: ${syncRequiredSummary(advice)}. Do not keep waiting on this entry: run land --save ` +
+      `${advice.laneId ? `{"laneId":"${advice.laneId}"} ` : 'in its Lane '}` +
+      'now; it syncs main in, saves and lands again, superseding this entry.';
 
-/** The one recovery for a sync-required entry: land --save of the same Lane, with the landing's
- * own commit message kept. Every client surface (wait, land, observe, MCP) returns this shape. */
+/** Shared continuation: sync the exact early predecessor, or land --save against accepted main.
+ * Every client surface (wait, land, observe, MCP) returns the same action for the same advice. */
 export function syncRequiredContinuation(
   root: string,
   advice: SyncRequiredAdvice,
   input: { laneId?: string | undefined; message?: string | null | undefined } = {},
 ) {
+  if ('predecessor' in advice) {
+    const { groupId: _group, ...predecessor } = advice.predecessor;
+    void _group;
+    const parameters = { ...(input.laneId ? { laneId: input.laneId } : {}), predecessor };
+    const command = `nforge agent ${shellQuote(root)} sync ${shellQuote(JSON.stringify(parameters))}`;
+    return {
+      code: 'COMPOSITION_CONFLICT' as const,
+      earlyResolution: true,
+      next: { action: 'sync', ...parameters },
+      command,
+      nextCommand: command,
+      inProgress: false,
+      instruction: `${advice.next} Run command in this Lane checkout. Edit and resolve the returned conflict, then land --save; the exact predecessor head and receipt fence its check and acceptance.`,
+    };
+  }
   const laneId = advice.laneId ?? input.laneId;
   const parameters = {
     ...(laneId ? { laneId } : {}),
