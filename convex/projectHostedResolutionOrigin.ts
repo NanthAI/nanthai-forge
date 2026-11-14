@@ -4,6 +4,7 @@ import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
+import { supersedeLaneFinishes } from './projectHostedLaneFinish';
 import { supersedeLane } from './projectHostedSuperseded';
 
 /** A conflict inside a resolution makes a short chain; the walk stays bounded. */
@@ -39,6 +40,13 @@ export async function completeResolutionOrigins(
     });
     if (!row) break;
     const current = hostedLaneSchema.parse(JSON.parse(row.value));
+    await supersedeLaneFinishes(ctx, {
+      projectId: input.projectId,
+      laneId: current.id,
+      head: lane.head,
+      scope: 'live',
+      fromHead: origin.head,
+    });
     if (current.state !== 'active' || current.pinned) break;
     if (current.head !== origin.head || current.sourceVersion !== origin.sourceVersion) {
       // Saved again after the conflict: it keeps its work and stays open, but its original source

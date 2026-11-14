@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { repairComposingBatch } from './projectHostedLandingBatchOwner';
+import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
 import { readQueueStatus } from './projectHostedQueueStatus';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
@@ -95,9 +97,21 @@ export async function raiseLandingAlarm(ctx: MutationCtx, input: Stalled, now = 
   const desired = canonical ? null : await desiredLanding(ctx, input);
   const row = canonical ?? desired;
   if (!row || row.alarm?.lastProgressAt !== input.lastProgressAt) return null;
-  await ctx.db.patch(row._id, { alarm: null });
   const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
   const queue = canonical && state.phase === 'queued' ? await readQueueStatus(ctx, state, now) : null;
+  if (
+    canonical &&
+    state.phase === 'queued' &&
+    state.batchId &&
+    now >= Date.parse(hostedLandingProgressAt(state)) + HOSTED_TRAIN_HOLD_MS
+  ) {
+    const key = { projectId: input.projectId, batchId: state.batchId };
+    if ((await loadBatch(ctx, key)).batch.phase === 'composing') {
+      await ctx.db.patch(row._id, { alarm: null });
+      await repairComposingBatch(ctx, key, (await loadBatch(ctx, key)).batch);
+      return null;
+    }
+  }
   const stall = hostedLandingStall(state, now, queue);
   if (!stall && queue && state.observation.state === 'pending') {
     // Keep the existing orphan-recovery deadline even when a healthy train owns
@@ -110,17 +124,24 @@ export async function raiseLandingAlarm(ctx: MutationCtx, input: Stalled, now = 
     );
     return null;
   }
-  if (!stall) return null;
-  if (state.observation.stall?.lastProgressAt === stall.lastProgressAt)
+  if (!stall) {
+    await ctx.db.patch(row._id, { alarm: null });
+    return null;
+  }
+  if (state.observation.stall?.lastProgressAt === stall.lastProgressAt) {
+    await ctx.db.patch(row._id, { alarm: null });
     // The stall was raised already: this is a supervisor round restored after it
     // was lost (a redrive re-arms a failed one as this alarm). Continue the ladder.
     return canonical && (await supervises(ctx, canonical))
       ? resolveStalledLanding(ctx, { ...input, attempt: 0 }, now)
       : null;
+  }
   // A passed entry waiting for an older submission is not stalled: the older
   // one owns progress and its own alarm. If it no longer holds its place, re-drive.
-  if (canonical?.orderWait && canonical.phase === 'ready' && (await aheadHoldsOrder(ctx, canonical)))
+  if (canonical?.orderWait && canonical.phase === 'ready' && (await aheadHoldsOrder(ctx, canonical))) {
+    await ctx.db.patch(row._id, { alarm: null });
     return null;
+  }
   const token = { ...input, lastProgressAt: stall.lastProgressAt };
   // Only a Ready entry's repair replays settlement IO that can crash (2026-10-30
   // 14:20): it runs as its own task. Queued and checking repairs stay inline, as
@@ -137,7 +158,8 @@ export async function raiseLandingAlarm(ctx: MutationCtx, input: Stalled, now = 
   const project = await ctx.db.get(input.projectId);
   if (project) await scheduleStallAlert(ctx, token, project);
   if (canonical) {
-    await writeLanding(ctx, canonical, next, canonical.runnable);
+    // Consume the fired alarm in the progress write, rather than patching this row twice.
+    await writeLanding(ctx, canonical, next, canonical.runnable, true, row.alarm?.taskId);
     const redriven = inline ? await repairStalledLanding(ctx, { ...token, mode: 'alarm' }, now) : null;
     // A live check keeps its own run lease and execution watchdog: no round follows.
     // A replayed driver (lost check wake or queue step after the run ended) has no
@@ -150,7 +172,7 @@ export async function raiseLandingAlarm(ctx: MutationCtx, input: Stalled, now = 
     if (state.observation.pendingReason !== 'waiting-for-dependency' && (await supervises(ctx, canonical)))
       await scheduleDeadline(ctx, canonical._id, { ...token, attempt: 0, repair }, now + LANDING_STALL_MS);
   } else {
-    await ctx.db.patch(row._id, { value: canonicalPayload(next) });
+    await ctx.db.patch(row._id, { value: canonicalPayload(next), alarm: null });
     await repairStalledLanding(ctx, { ...token, mode: 'alarm' }, now);
   }
   return null;
@@ -454,19 +476,31 @@ async function resolveQueued(
 /** Who will still move this queued entry, or null: the queue (runnable), its own
  * pending attempt, an active batch, or a batch peer that holds the turn or a run.
  * Structural facts only, so clock skew cannot make a live peer look dead. */
-async function liveOwner(
+export async function liveOwner(
   ctx: MutationCtx,
   input: LandingIdentity,
   row: LandingRow,
   state: HostedLandingState,
 ) {
   if (row.runnable) return 'the landing queue';
-  // A pending attempt (source preparation in flight) has the compose watchdog.
-  if ((await finishRow(ctx, input))?.composeOperationId) return 'its own finish attempt';
+  if (row.orderWait) {
+    const ahead = await landingRow(ctx, { ...input, submissionId: row.orderWait });
+    if (ahead && holdsLandingOrder(ahead, hostedLandingStateSchema.parse(JSON.parse(ahead.value))))
+      return 'its live predecessor';
+  }
+  const finish = await finishRow(ctx, input);
+  const task = finish?.wake ? await ctx.db.system.get(finish.wake.taskId) : null;
+  const armed = task?.state.kind === 'pending' || task?.state.kind === 'inProgress';
+  if (armed) return 'its own finish attempt';
   const batchId = state.batchId ?? state.batchOriginId;
   if (!batchId) return null;
   const { batch } = await loadBatch(ctx, { projectId: input.projectId, batchId });
-  if (state.batchId === batch.id && ['composing', 'checking'].includes(batch.phase)) return 'the batch';
+  if (state.batchId === batch.id && batch.phase === 'checking') return 'the batch';
+  if (state.batchId === batch.id && batch.phase === 'composing') {
+    const leader = await finishRow(ctx, { ...input, submissionId: batch.leaderId ?? batch.id });
+    const drive = leader?.wake ? await ctx.db.system.get(leader.wake.taskId) : null;
+    return drive?.state.kind === 'pending' || drive?.state.kind === 'inProgress' ? 'the batch' : null;
+  }
   if (state.batchId === batch.id && batch.phase !== 'fallback' && batch.phase !== 'landed') return null;
   for (const member of batch.members) {
     if (member.submissionId === state.id) continue;

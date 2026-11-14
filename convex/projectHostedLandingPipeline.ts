@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { Doc } from './_generated/dataModel';
 import type { MutationCtx } from './_generated/server';
 import type { LandingChannel, LandingRow } from './projectHostedLandingStore';
 import {
@@ -6,10 +7,11 @@ import {
   landingRow,
   loadLanding,
   loadLandingAttempt,
+  forkLandingAttempt,
   insertLandingAttempt,
   writeLanding,
 } from './projectHostedLandingStore';
-import { type BatchIdentity, type LandingBatch } from './projectHostedLandingBatchState';
+import { loadBatch, type BatchIdentity, type LandingBatch } from './projectHostedLandingBatchState';
 import { hostedLandingStateSchema, type HostedLandingAttempt } from '../src/hosted-landing';
 import { hostedBatching, hostedPipelineWidth } from '../src/hosted-landing-batch';
 import { landingSuspect } from '../src/hosted-landing-suspect';
@@ -33,14 +35,20 @@ export async function pipelinePredecessor(
   input: LandingChannel,
   selected?: LandingRow[],
   onSelected?: (row: LandingRow, attempt: HostedLandingAttempt) => void,
+  options: {
+    queue?: Doc<'projectHostedLandingQueues'> | null;
+    excludeIds?: string[];
+    pins?: { submissionId: string; head: string; receiptId: string }[];
+    requireSlot?: boolean;
+  } = {},
 ) {
   const live =
     selected ??
     (
       await Promise.all(
-        (await landingQueue(ctx, input))?.train?.map(submissionId =>
-          landingRow(ctx, { projectId: input.projectId, submissionId }),
-        ) ?? [],
+        (options.queue ?? (await landingQueue(ctx, input)))?.train
+          ?.filter(id => !options.excludeIds?.includes(id))
+          .map(submissionId => landingRow(ctx, { projectId: input.projectId, submissionId })) ?? [],
       )
     ).filter(livePipelineRow);
   const states = live.map(row => hostedLandingStateSchema.parse(JSON.parse(row.value)));
@@ -68,11 +76,73 @@ export async function pipelinePredecessor(
   const groups = new Set(states.map(state => state.batchId ?? state.id));
   if (
     !hostedBatching(attempt.policy) ||
-    groups.size >= hostedPipelineWidth(attempt.policy) ||
+    (options.requireSlot !== false && groups.size >= hostedPipelineWidth(attempt.policy)) ||
     (!attempt.check && !liveAdmission(tail)) ||
     !attempt.candidate.head
   )
     return undefined;
+  // A pin is an acceptance precondition, never a side-branch compose base. Both advice
+  // and composition use this same fixed tail and its exact predecessor chain.
+  const pending = new Map((options.pins ?? []).map(pin => [pin.submissionId, pin]));
+  let current = {
+    submissionId: tail.submissionId,
+    head: attempt.candidate.head,
+    receiptId: attempt.operations.accept,
+  };
+  let state = hostedLandingStateSchema.parse(JSON.parse(tail.value));
+  for (let depth = 0; pending.size && depth <= live.length; depth++) {
+    const required = pending.get(current.submissionId);
+    if (required?.head === current.head && required.receiptId === current.receiptId)
+      pending.delete(current.submissionId);
+    if (!pending.size) break;
+    if (!state.batchId) return undefined;
+    const group = (await loadBatch(ctx, { projectId: input.projectId, batchId: state.batchId })).batch;
+    // Every included cohort member owns its own acceptance receipt for the same checked State.
+    // Its exact pin is contained even when another member is the train tail.
+    for (const pin of pending.values()) {
+      if (
+        pin.head !== current.head ||
+        !group.members.some(member => member.submissionId === pin.submissionId) ||
+        (group.included && !group.included.includes(pin.submissionId))
+      )
+        continue;
+      const member =
+        live.find(row => row.submissionId === pin.submissionId) ??
+        (await landingRow(ctx, { projectId: input.projectId, submissionId: pin.submissionId }));
+      if (!member || member.pipelineRetiredAttemptId === member.attemptId) continue;
+      const exact = await loadLandingAttempt(ctx, {
+        projectId: input.projectId,
+        attemptId: member.attemptId,
+      });
+      if (
+        exact.candidate.head === pin.head &&
+        exact.operations.accept === pin.receiptId &&
+        group.runId &&
+        exact.check?.runId === group.runId
+      )
+        pending.delete(pin.submissionId);
+    }
+    if (!pending.size) break;
+    const previous = group.predecessor;
+    if (!previous) return undefined;
+    const pin = pending.get(previous.submissionId);
+    if (pin?.head === previous.head && pin.receiptId === previous.receiptId)
+      pending.delete(previous.submissionId);
+    if (!pending.size) break;
+    const parent = await loadLanding(ctx, {
+      projectId: input.projectId,
+      submissionId: previous.submissionId,
+    });
+    const exact = await loadLandingAttempt(ctx, {
+      projectId: input.projectId,
+      attemptId: parent.state.attemptId,
+    });
+    if (exact.candidate.head !== previous.head || exact.operations.accept !== previous.receiptId)
+      return undefined;
+    current = previous;
+    state = parent.state;
+  }
+  if (pending.size) return undefined;
   onSelected?.(tail, attempt);
   return {
     submissionId: tail.submissionId,
@@ -124,6 +194,7 @@ export function invalidatePipeline(
     {
       loadLanding,
       loadLandingAttempt,
+      forkLandingAttempt,
       insertLandingAttempt,
       writeLanding,
     },

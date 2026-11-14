@@ -6,6 +6,7 @@ import { orderLandingEntries } from '../src/landing-batch-order';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import type { Doc } from './_generated/dataModel';
 import { effectivePolicy } from '../src/autonomy-policy';
+import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
 import { stackedBehind } from './projectHostedLandingSuffix';
 import { batchRow, batchSchema } from './projectHostedLandingBatchState';
@@ -75,7 +76,11 @@ export function holdsLandingOrder(row: Pick<LandingRow, 'phase' | 'hold'>, state
     // own check passes; it can still land, only later entries no longer wait.
     !landingSuspect(state) &&
     !state.error &&
-    !state.observation.stall &&
+    (!state.observation.stall ||
+      Boolean(
+        state.observation.stall.owner &&
+        state.observation.stall.lastProgressAt !== hostedLandingProgressAt(state),
+      )) &&
     state.observation.state === 'pending' &&
     state.observation.pendingReason !== 'waiting-for-review' &&
     state.observation.pendingReason !== 'waiting-for-dependency'

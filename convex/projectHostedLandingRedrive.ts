@@ -13,6 +13,7 @@ import { armLandingAlarm } from './projectHostedLandingStallWake';
 import { desiredLanding, scheduleDesired } from './projectHostedLandingDesiredWake';
 import { checkWakeRow, scheduleCheckWake } from './projectHostedLandingCheckWake';
 import { activeStoragePause } from './legacyStoragePause';
+import { loadBatch } from './projectHostedLandingBatchState';
 import { redriveCohortHold } from './projectHostedLandingCohortHold';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -77,7 +78,14 @@ export async function redriveLanding(
     done.push('alarm');
   }
   const finish = await finishRow(ctx, input);
-  if (finish?.wake && (await lost(ctx, finish.wake.taskId))) {
+  if (finish && row.phase === 'queued' && (await idleCohortLeader(ctx, row, finish))) {
+    if (act) await scheduleFinish(ctx, finish, 0, true);
+    done.push('cohort-finish');
+  } else if (
+    finish?.wake &&
+    !(row.phase === 'queued' && row.orderWait) &&
+    (await lost(ctx, finish.wake.taskId))
+  ) {
     // Same generation: the lost step's IO fence stays valid and nothing is repeated twice.
     if (act) await scheduleFinish(ctx, finish, 0, true);
     done.push('finish');
@@ -134,6 +142,21 @@ async function idleReady(
   if (row.orderWait || finish.waiting) return false;
   const reason = hostedLandingStateSchema.parse(JSON.parse(row.value)).observation.pendingReason;
   if (reason === 'waiting-for-review' || reason === 'waiting-for-dependency') return false;
+  const task = finish.wake ? await ctx.db.system.get(finish.wake.taskId) : null;
+  return task?.state.kind !== 'pending' && task?.state.kind !== 'inProgress';
+}
+
+/** A composing leader that stopped without a successor is as ownerless as a Ready finish. */
+async function idleCohortLeader(
+  ctx: MutationCtx,
+  row: Doc<'projectHostedLandingRequests'>,
+  finish: Doc<'projectHostedFinishes'>,
+) {
+  if (row.orderWait || finish.waiting) return false;
+  const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+  if (!state.batchId) return false;
+  const { batch } = await loadBatch(ctx, { projectId: row.projectId, batchId: state.batchId });
+  if (batch.phase !== 'composing' || (batch.leaderId ?? batch.id) !== row.submissionId) return false;
   const task = finish.wake ? await ctx.db.system.get(finish.wake.taskId) : null;
   return task?.state.kind !== 'pending' && task?.state.kind !== 'inProgress';
 }

@@ -19,14 +19,25 @@ test('Automatic compares measured predecessor failure with project resolution/wa
   assert.equal(earlyResolutionChoice(undefined).early, true);
   assert.equal(earlyResolutionChoice('off').early, false);
   assert.equal(earlyResolutionChoice('on', [[randomUUID(), false, 1, 100]]).early, true);
-  const samples = [true, true, true, false].map(passed => [randomUUID(), passed, 75, 225]);
-  assert.equal(earlyResolutionChoice('automatic', samples).breakEven, 0.25);
+  // 75 ms of resolution saves 225 ms of waiting: early work pays until three of four prefixes fail.
+  const samples = [false, false, false, true].map(passed => [randomUUID(), passed, 75, 225]);
+  assert.equal(earlyResolutionChoice('automatic', samples).breakEven, 0.75);
   assert.equal(
     earlyResolutionChoice('automatic', samples).early,
     false,
     'equality does not favor early work',
   );
   assert.equal(earlyResolutionChoice('automatic', [...samples, [randomUUID(), true, 75, 225]]).early, true);
+  // Incident 8c9b84fc review: the rule was inverted, so a long saved wait turned early work off.
+  const oneInFour = [true, true, true, false].map(passed => [randomUUID(), passed, 75, 225]);
+  assert.equal(earlyResolutionChoice('automatic', oneInFour).early, true);
+  const slowResolution = [true, true, true, false].map(passed => [randomUUID(), passed, 225, 75]);
+  assert.equal(earlyResolutionChoice('automatic', slowResolution).breakEven, 0.25);
+  assert.equal(
+    earlyResolutionChoice('automatic', slowResolution).early,
+    false,
+    'a resolution three times its saved wait is not worth a one-in-four failure',
+  );
 });
 test('conflict trio resolves once on the last exact predecessor, checks before it lands, accepts only its exact receipt', async t => {
   const trio = await conflictTrio(t);
@@ -185,7 +196,7 @@ test('Automatic waits when measured failures exceed break-even, and continues ob
   const { f, advice } = await conflictTrio(t, { samples });
   assert.equal(advice.resolution.early, false);
   assert.equal(advice.resolution.failureRate, 0.75);
-  assert.equal(advice.resolution.breakEven, 0.25);
+  assert.equal(advice.resolution.breakEven, 0.75);
   assert.match(advice.next, /3.75 minutes/);
   for (const run of f.runs().filter(r => r.status === 'queued')) {
     await f.rawChecks.pass(await f.rawChecks.activate(run.id));
@@ -339,4 +350,109 @@ test('an exact predecessor with mixed provenance never promotes the early resolu
     }),
   );
   assert.equal(prepared.state.ownerInputs, false);
+});
+
+test('8c9b84fc: accepted prefix clears its dependent link before and after a late resolve', async t => {
+  const trio = await conflictTrio(t);
+  const { f } = trio;
+  const pin = trio.advice.predecessor;
+  await resolveEarly(trio, {
+    submit: false,
+    beforeResolve: async () => {
+      for (const run of f.runs().filter(r => r.status === 'queued')) {
+        await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+        await drainReady(f);
+      }
+      assert(
+        ![...f.tables.projectHostedStackDependents.values()].some(r => r.predecessorId === pin.submissionId),
+        'acceptance releases the event link even before resolutionEndedAt exists',
+      );
+    },
+  });
+  assert(
+    ![...f.tables.projectHostedStackDependents.values()].some(r => r.predecessorId === pin.submissionId),
+    'publishing the later resolution cannot leak the accepted predecessor link again',
+  );
+});
+
+test('8c9b84fc: a third overlapping clean group preserves the resolved landing check through acceptance', async t => {
+  const { replayLinearConflictTrio } = await import('./early-resolution-replay.mjs');
+  const replay = await replayLinearConflictTrio(t);
+  t.diagnostic(JSON.stringify(replay));
+  assert.equal(replay.childChecks.length, 1, 'the resolved landing must not check twice');
+  assert.equal(replay.acceptedCheck, replay.childChecks[0]);
+  assert.equal(replay.lateTaskMs, 360000);
+  assert.equal(replay.checks, 4, 'each of four landed changes checks once');
+  assert.equal(replay.idle, 0);
+});
+
+test('8c9b84fc: a third group conflicting with the resolution yields compose advice before any child check', async t => {
+  const trio = await conflictTrio(t, { lateThird: true });
+  const { f } = trio;
+  const resolved = await resolveEarly(trio, {
+    resolvedContents: 'alpha-ac\nmiddle-c\nomega-bc\n',
+    beforeResolve: async () => {
+      await f.add(3);
+      await drainReady(f);
+    },
+  });
+  const child = await f.current(resolved.state.id);
+  assert.equal(child.submission.phase, 'queued');
+  assert.equal(child.wouldConflict.predecessor.submissionId, f.entries[3].state.id);
+  const attempts = [...f.tables.projectHostedLandingAttempts.values()]
+    .map(r => JSON.parse(r.value))
+    .filter(a => a.submissionId === resolved.state.id);
+  assert(
+    attempts.every(a => !a.check),
+    'a known compose conflict never allocates a check to discard',
+  );
+  assert.equal(f.runs().length, 3);
+});
+
+test('8c9b84fc: an exact non-tail cohort member pin composes on its shared checked tail', async t => {
+  const { batchesFixture } = await import('./hosted-landing-batches-fixture.mjs');
+  const { syncFixture } = await import('./hosted-sync-fixture.mjs');
+  const { moduleUrl } = await import('./convex-module.mjs');
+  const pipeline = await import(moduleUrl('../convex/projectHostedLandingPipeline.ts'));
+  const f = await batchesFixture(t, {
+    count: 0,
+    batchMaxSize: 2,
+    baselineFiles: [['shared.txt', 'alpha\nmiddle\nomega\n']],
+    memberPaths: ['shared.txt', 'root.txt', 'shared.txt'],
+    memberContents: ['alpha-a\nmiddle\nomega\n', 'root', 'alpha-c\nmiddle\nomega\n'],
+  });
+  await f.add(0);
+  await f.add(1);
+  await drainReady(f);
+  assert.equal(states(f)[0].batchId, states(f)[1].batchId);
+  const first = states(f)[0];
+  const attempt = [...f.tables.projectHostedLandingAttempts.values()]
+    .map(r => JSON.parse(r.value))
+    .find(a => a.id === first.attemptId);
+  const pin = { submissionId: first.id, head: attempt.candidate.head, receiptId: attempt.operations.accept };
+  const prefix = await f.transaction(
+    'non-tail-exact-cohort-pin',
+    {
+      _handler: ctx =>
+        pipeline.pipelinePredecessor(ctx, { projectId: f.projectId, channel: 'main' }, undefined, undefined, {
+          pins: [pin],
+        }),
+    },
+    {},
+  );
+  assert(prefix, 'the exact shared checked State contains every included member receipt');
+  assert.equal(prefix.submissionId, states(f)[1].id);
+  await f.add(2);
+  await drainReady(f);
+  const advice = { ...(await f.current(f.entries[2].state.id)).wouldConflict, predecessor: pin };
+  const s = await syncFixture({ store: { ...f.c, call: (name, fn, args) => f.tx(name, fn, args) } });
+  const resolved = await resolveEarly({ f, s, advice, lateEntry: f.entries[2] });
+  assert.equal((await f.current(resolved.state.id)).submission.phase, 'checking');
+  for (const run of f.runs().filter(r => r.status === 'queued')) {
+    await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+    await drainReady(f);
+  }
+  assert.equal((await f.current(resolved.state.id)).submission.phase, 'landed');
+  assert.equal(f.runs().length, 2);
+  assert.equal(f.pending().length, 0);
 });

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { landingAttemptForkFindings } from './check-landing-attempt-forks.mjs';
 import { workStoreAccessFindings } from './check-work-store-access.mjs';
 import { networkBoundaryFindings } from './check-network-boundaries.mjs';
 import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
@@ -56,6 +57,7 @@ for (const file of files) {
   if (['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'].includes(extname(file))) {
     const path = relative(root, file),
       source = readFileSync(file, 'utf8');
+    errors.push(...landingAttemptForkFindings(path.split(sep).join('/'), source));
     errors.push(...networkBoundaryFindings(path, source));
     errors.push(...workStoreAccessFindings(path.split(sep).join('/'), source));
     if (['.ts', '.tsx'].includes(extname(file))) errors.push(...idleQueryFindings(path, source));

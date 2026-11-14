@@ -2,6 +2,10 @@
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { composeRow, composeStateSchema } from './projectHostedComposeStore';
+import { desiredLanding } from './projectHostedLandingDesiredWake';
+import { liveOwner } from './projectHostedLandingStall';
+import { redriveLanding } from './projectHostedLandingRedrive';
+import type { LandingRow } from './projectHostedLandingStore';
 import { landingRow } from './projectHostedLandingStore';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
 import { loadLandingAttempt } from './projectHostedLandingAttemptRead';
@@ -34,8 +38,14 @@ export async function liveLaneFinish(
 export async function laneFinishes(
   ctx: QueryCtx | MutationCtx,
   input: { projectId: Id<'hostedProjects'>; laneId: string; headWrittenAt: string },
-  options: { queuedConflicts?: true } = {},
+  options: { queuedConflicts?: true; all?: true; head?: string } = {},
 ) {
+  const liveSubmissions: string[] = [];
+  let live: {
+    submissionId: string;
+    phase: string;
+    state: ReturnType<typeof hostedLandingStateSchema.parse>;
+  } | null = null;
   const syncRequired: string[] = [];
   const selections = await ctx.db
     .query('projectHostedComposeSelections')
@@ -45,6 +55,7 @@ export async function laneFinishes(
     .order('desc')
     .take(RECENT_COMPOSITIONS);
   for (const selection of selections) {
+    if (options.head && selection.head && selection.head !== options.head) continue;
     const compose = await composeRow(ctx, selection);
     if (!compose) continue;
     const { candidateId } = composeStateSchema.parse(JSON.parse(compose.value));
@@ -55,14 +66,27 @@ export async function laneFinishes(
       )
       .order('desc')
       .take(3);
-    const [desired] = requests.length
-      ? []
-      : await ctx.db
+    const desiredCount = options.all
+      ? Math.max(0, 3 - requests.filter(row => LIVE.has(row.phase)).length)
+      : requests.length
+        ? 0
+        : 1;
+    const desired = desiredCount
+      ? await ctx.db
           .query('projectHostedLandingDesired')
           .withIndex('by_project_and_compose', q =>
             q.eq('projectId', input.projectId).eq('composeOperationId', selection.operationId),
           )
-          .take(1);
+          .order('desc')
+          .take(desiredCount)
+      : [];
+    const preparing: string[] = [];
+    for (const row of desired)
+      if (
+        !requests.some(request => request.submissionId === row.submissionId) &&
+        !(await landingRow(ctx, row))
+      )
+        preparing.push(row.value);
     for (const row of requests)
       if (
         row.wouldConflict &&
@@ -74,16 +98,19 @@ export async function laneFinishes(
     const rows = [
       // A queued entry marked wouldConflict is replaced in place by the Lane's next land (sync + save).
       ...requests.filter(row => options.queuedConflicts || !row.wouldConflict).map(row => row.value),
-      ...(desired && !(await landingRow(ctx, desired)) ? [desired.value] : []),
+      ...preparing,
     ];
     for (const value of rows) {
       const state = hostedLandingStateSchema.parse(JSON.parse(value));
       const composedAt = state.timing?.composeStartedAt ?? state.at;
-      if (LIVE.has(state.phase) && composedAt >= input.headWrittenAt)
-        return { live: { submissionId: state.id, phase: state.phase, state }, syncRequired };
+      if (LIVE.has(state.phase) && composedAt >= input.headWrittenAt) {
+        live ??= { submissionId: state.id, phase: state.phase, state };
+        if (!liveSubmissions.includes(state.id)) liveSubmissions.push(state.id);
+        if (!options.all) return { live, syncRequired, liveSubmissions };
+      }
     }
   }
-  return { live: null, syncRequired };
+  return { live, syncRequired, liveSubmissions };
 }
 
 export const laneFinishActiveMessage = (laneId: string, finish: { submissionId: string; phase: string }) =>
@@ -105,18 +132,54 @@ export async function refuseLiveLaneFinish(
  * so leaving them queued only strands a queue place. Each ends LANDING_SUPERSEDED through the
  * cancellation path (peers reselected, finish IO fenced, queue released). Bounded by the lookup:
  * at most RECENT_COMPOSITIONS * 3 entries; nothing runs when none is marked. */
-export async function supersedeSyncRequired(
+export async function supersedeLaneFinishes(
   ctx: MutationCtx,
-  input: { projectId: Id<'hostedProjects'>; laneId: string; head: string; submissionIds?: string[] },
+  input: {
+    projectId: Id<'hostedProjects'>;
+    laneId: string;
+    head: string;
+    submissionIds?: string[];
+    scope?: 'live';
+    fromHead?: string;
+  },
 ) {
-  const ids =
-    input.submissionIds ??
-    (await laneFinishes(ctx, { ...input, headWrittenAt: '' }, { queuedConflicts: true })).syncRequired;
+  const found = input.submissionIds
+    ? null
+    : await laneFinishes(
+        ctx,
+        { ...input, headWrittenAt: '' },
+        { queuedConflicts: true, all: true, ...(input.fromHead ? { head: input.fromHead } : {}) },
+      );
+  const ids = input.submissionIds ?? (input.scope === 'live' ? found!.liveSubmissions : found!.syncRequired);
   const superseded: string[] = [];
   for (const submissionId of ids) {
-    const row = await landingRow(ctx, { projectId: input.projectId, submissionId });
-    if (!row || row.phase !== 'queued' || !row.wouldConflict) continue;
-    if (!syncRequiredAdvice(JSON.parse(row.wouldConflict))) continue;
+    const key = { projectId: input.projectId, submissionId };
+    const row = await landingRow(ctx, key);
+    if (!row && input.scope === 'live') {
+      const desired = await desiredLanding(ctx, key);
+      const state = desired && hostedLandingStateSchema.parse(JSON.parse(desired.value));
+      if (state && LIVE.has(state.phase)) {
+        await cancelHostedLanding(ctx, {
+          projectId: input.projectId,
+          actor: state.actor,
+          supersede: { laneId: input.laneId, head: input.head },
+          request: {
+            operationId: crypto.randomUUID(),
+            authorityEpoch: state.request.authorityEpoch,
+            submissionId,
+          },
+          reason: `Superseded by Lane ${input.laneId} head ${input.head}: the original source preparation continues in its resolution.`,
+        });
+        superseded.push(submissionId);
+      }
+      continue;
+    }
+    if (!row || !LIVE.has(row.phase)) continue;
+    if (
+      input.scope !== 'live' &&
+      (row.phase !== 'queued' || !row.wouldConflict || !syncRequiredAdvice(JSON.parse(row.wouldConflict)))
+    )
+      continue;
     const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
     // Read-only precondition: an entry whose attempt is unreadable keeps today's path (it ends
     // LANDING_SUPERSEDED at acceptance), so this can never fail the save that moved the head.
@@ -134,9 +197,54 @@ export async function supersedeSyncRequired(
         authorityEpoch: state.request.authorityEpoch,
         submissionId,
       },
-      reason: `Superseded by Lane ${input.laneId} head ${input.head}: main had changed files this queued entry changes, and the Lane moved on. Its next land --save carries this work; nothing else is needed.`,
+      reason: `Superseded by Lane ${input.laneId} head ${input.head}: this work continues in a newer resolution or landing. The original source and checks remain retained.`,
     });
     superseded.push(submissionId);
   }
   return superseded;
+}
+
+/** A new request may join only work that still has an owner. Read-only lost-driver probing
+ * preserves an in-flight IO fence; ordinary lost queue steps are replayed when an owner remains. */
+export async function replaceOwnerlessLanding(ctx: MutationCtx, row: LandingRow) {
+  const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+  if (!LIVE.has(state.phase)) return false;
+  const input = { projectId: row.projectId, submissionId: row.submissionId };
+  const lost = await redriveLanding(ctx, input, { row, probe: true });
+  if (state.phase !== 'queued') {
+    if (lost.length) await redriveLanding(ctx, input, { row });
+    return false;
+  }
+  if (await liveOwner(ctx, input, row, state)) {
+    if (lost.length) await redriveLanding(ctx, input, { row });
+    return false;
+  }
+  const attempt = await loadLandingAttempt(ctx, { projectId: row.projectId, attemptId: state.attemptId });
+  const composeId = state.request.finish?.composeOperationId;
+  const [selection] = composeId
+    ? await ctx.db
+        .query('projectHostedComposeSelections')
+        .withIndex('by_project_and_actor_and_operation_and_kind_and_key', q =>
+          q
+            .eq('projectId', row.projectId)
+            .eq('actor', state.actor)
+            .eq('operationId', composeId)
+            .eq('kind', 'inputs'),
+        )
+        .take(1)
+    : [];
+  if (!selection) return false;
+  await cancelHostedLanding(ctx, {
+    projectId: row.projectId,
+    actor: state.actor,
+    supersede: { laneId: selection.key, head: selection.head ?? attempt.candidate.head ?? '' },
+    request: {
+      operationId: crypto.randomUUID(),
+      authorityEpoch: state.request.authorityEpoch,
+      submissionId: state.id,
+    },
+    reason:
+      'The retry replaces a queued landing whose driver was lost. Its source and attempts remain retained.',
+  });
+  return true;
 }

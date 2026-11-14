@@ -17,18 +17,51 @@ not the strict/fast promise, review policy, runner or acceptance strength.
 
 When a signed trial merge proves a conflict with an unaccepted predecessor,
 `wouldConflict.predecessor` names its exact State and reserved acceptance receipt.
-If the retained checking chain already extends beyond that predecessor, advice
-selects its last exact prefix, excluding the rejected/composing cohort itself.
+Advice and composition share one fixed-tail rule: if the retained checking chain
+extends beyond that predecessor, advice selects its last exact prefix. An internal conflict between cohort members waits
+for the surviving members to install their check, then names that survivor
+State and its reserved receipt. The outer predecessor may be disjoint and is
+used only for conflicts the worker proved against that outer base. Rejected
+and still-composing members never supply the resolution target.
 With early resolution selected, `land`, `wait` and `observe` return a `sync`
 continuation carrying those pins instead of another wait. Run it from the Lane
 checkout, edit the returned conflict, `resolve`, then `land --save`. The existing
 sync worker creates the draft; the existing predicted-head pipeline checks the
-resolved change while the predecessor checks. A clean merge keeps its ordinary
-no-action path and allocates no conflict work.
+resolved change while the predecessor checks. The resolved landing composes on
+the current fixed train tail; its early pins remain exact acceptance preconditions.
+An unfixed tail waits for its next event. A third overlapping group either stays
+in that checked prefix or yields another compose conflict before a check starts.
+Advice is best effort: unavailable optional metadata leaves the ordinary cohort
+wait in place and never discards the survivors' installed check.
+
+A pinned sync that merges cleanly proves the target did not expose the advised
+conflict. It returns the unchanged Lane selection, preserves its head and live
+submission, and records no early pin or timing watch. An ordinary clean merge
+keeps its no-action path and allocates no conflict work.
+
+A conflicting own-Lane sync against main supersedes every live finish from that
+head, including source preparation, through the cancellation path. Resolution
+acceptance retires any remaining origin finish as a backstop. A peer's sync does
+not supersede the Lane actor's work. Joining an existing landing probes its
+driver; a queued ownerless submission is superseded before the new request is
+admitted. Replays retain their original operation identity.
+
+A composing cohort keeps recovery within the existing five-minute train hold.
+Dropping its train replays the leader once, then splits a repeated loss through
+normal recovery. Retry and split entries arm the existing alarm at that bound;
+queue progress defers supervision only behind a live predecessor. Optional
+`drive` metadata names the cohort's last step, and `observation.stall.owner`
+records the observed finish wake, compose and cohort step in observations, queue
+status and repaired receipts. Its retained progress token distinguishes a past
+recovery from a current stall. Every immutable attempt fork takes its parent and
+ordinal from the current attempt; a reserved finish retains its source identity
+and refreshes those fields at installation.
 
 Automatic compares the measured predecessor failure fraction with
-`mean resolution milliseconds / (mean resolution milliseconds + mean waiting
-milliseconds)`. The source is the project's last fifty observed exact conflicting
+`mean waiting milliseconds / (mean resolution milliseconds + mean waiting
+milliseconds)`: early work wastes one resolution when the prefix fails and
+saves the wait when it lands, so a longer saved wait tolerates more failures.
+The source is the project's last fifty observed exact conflicting
 predecessor receipts, following the Automatic CI outcome-window design. Failed,
 withdrawn, review-held and replaced generations count as failures of the selected
 prefix. Healthy receipts keep entering the window when early resolution is off

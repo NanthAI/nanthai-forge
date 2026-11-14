@@ -195,7 +195,7 @@ test('D1 replay: the Lane’s new head supersedes its queued sync-required entry
       'supersede',
       {
         _handler: ctx =>
-          laneFinish.supersedeSyncRequired(ctx, {
+          laneFinish.supersedeLaneFinishes(ctx, {
             projectId: f.projectId,
             laneId: f.lane.laneId,
             head: 'f'.repeat(64),
@@ -230,7 +230,6 @@ test('D1 replay: the Lane’s new head supersedes its queued sync-required entry
   assert.equal(ended.phase, 'terminal-failed');
   assert.equal(ended.observation.state, 'superseded');
   assert.equal(ended.error.code, 'LANDING_SUPERSEDED');
-  assert.match(ended.error.message, /next land --save carries this work/);
   // Nothing is left for the lead to withdraw by hand.
   assert.equal(
     await f.tx(

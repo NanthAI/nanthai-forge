@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { armLandingAlarm } from './projectHostedLandingStallWake';
+import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
+import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
 import { earlyPredecessor } from './projectHostedEarlyResolution';
 import { wakeLandingCapsule } from './projectLandingCapsuleWake';
 import { releaseBatchMembers } from './projectHostedLandingBatchRelease';
@@ -19,6 +22,7 @@ import {
   landingQueue,
   loadLanding,
   loadLandingAttempt,
+  forkLandingAttempt,
   insertLandingAttempt,
   writeLanding,
 } from './projectHostedLandingStore';
@@ -49,6 +53,15 @@ export async function writeBatch(
   replace = false,
 ) {
   const { row } = await loadBatch(ctx, input);
+  const step =
+    batch.phase === 'composing'
+      ? batch.uploads
+        ? 'upload'
+        : 'retry'
+      : batch.phase === 'checking'
+        ? 'submitted'
+        : 'terminal';
+  batch = { ...batch, drive: { step, at: new Date(Date.now()).toISOString() } };
   await ctx.db.patch(row._id, {
     composeOperationId: batch.composeOperationId,
     value: canonicalPayload(batchSchema.parse(replace ? batch : { ...JSON.parse(row.value), ...batch })),
@@ -69,11 +82,26 @@ export async function writeBatch(
       });
   }
 }
-export async function wakeBatch(ctx: MutationCtx, input: BatchIdentity) {
+export async function wakeBatch(ctx: MutationCtx, input: BatchIdentity, recovery = false) {
   const { batch } = await loadBatch(ctx, input);
   if (['landed', 'superseded', 'split', 'failed'].includes(batch.phase)) return;
   const row = await finishRow(ctx, { projectId: input.projectId, submissionId: batch.leaderId ?? batch.id });
   if (row) await scheduleFinish(ctx, row);
+  if (recovery && batch.phase === 'composing') {
+    const leader = await loadLanding(ctx, {
+      projectId: input.projectId,
+      submissionId: batch.leaderId ?? batch.id,
+    });
+    if (leader.row.alarm) await ctx.scheduler.cancel(leader.row.alarm.taskId);
+    await ctx.db.patch(leader.row._id, {
+      alarm: await armLandingAlarm(
+        ctx,
+        leader.row,
+        hostedLandingProgressAt(leader.state),
+        HOSTED_TRAIN_HOLD_MS,
+      ),
+    });
+  }
 }
 /** Bounded active metadata pages, independent of retained history. Eligibility
  * is pinned at admission; current authority and governance are rechecked at publish. */
@@ -98,14 +126,16 @@ export async function formLandingBatch(
     const pinned = await earlyPredecessor(ctx, input.projectId, resolution.predecessor);
     if (!pinned.landed) pending.push(resolution.predecessor);
   }
-  // The last selected predecessor owns the exact publication prefix. All selected
-  // early pins are retained and checked again at final acceptance.
-  pending.sort(
-    (a, b) => (queue?.train?.indexOf(a.submissionId) ?? -1) - (queue?.train?.indexOf(b.submissionId) ?? -1),
+  const predecessor = await pipelinePredecessor(
+    ctx,
+    { projectId: input.projectId, channel: 'main' },
+    undefined,
+    undefined,
+    early ? { queue, pins: pending } : {},
   );
-  const predecessor = early
-    ? pending.at(-1)
-    : await pipelinePredecessor(ctx, { projectId: input.projectId, channel: 'main' });
+  // An unfixed tail is not a selectable base. Keep the entry runnable for the tail's
+  // next event; never fall through to a solo check on an early pin as a side branch.
+  if (early && !predecessor && (pending.length || queue?.train?.length)) return true;
   const windows = [selected.row];
   // Bounded indexed heads exclude already-selected groups. Never enumerate the
   // queue just to fill one cohort, even with thousands of retained submissions.
@@ -156,6 +186,7 @@ export async function formLandingBatch(
     composeOperationId: crypto.randomUUID(),
     checkOperationId: crypto.randomUUID(),
     phase: 'composing',
+    drive: { step: 'retry', at: new Date(Date.now()).toISOString() },
     ...(predecessor ? { predecessor } : {}),
     members: members.map(m => m.attempt),
     ...(admission ? { admitted: members.every(m => m.row.admission?.status === 'passed') } : {}),
@@ -248,9 +279,7 @@ export async function installBatchAttempt(
           : {}),
       ...(input.checkOperationId ? { check: input.checkOperationId } : {}),
     },
-    id: crypto.randomUUID(),
-    parentAttemptId: parent.id,
-    number: parent.number + 1,
+    ...(await forkLandingAttempt(ctx, state)),
     check: input.check,
     ...(input.candidate ? { candidate: input.candidate, memberCandidate: original.candidate } : {}),
   };
@@ -358,5 +387,5 @@ export async function retryLandingBatch(
       train: [...prefix, ...live.map(member => member.state.id), ...suffix],
     });
   }
-  await wakeBatch(ctx, input);
+  await wakeBatch(ctx, input, true);
 }

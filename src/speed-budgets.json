@@ -506,6 +506,17 @@
       "source": "Issue 8c9b84fc: tests/hosted-early-resolution-speed.test.mjs reuses the production fake-clock queue/source fixtures. Synthetic checks take 180 s (the existing pipeline replay quantum), the tail predecessor owns 360 s remaining wait, and author resolution takes 75 s (rounded observed recovery).",
       "reason": "The late task resolves and checks during the predecessor wait: max(360 s, 75 s + 180 s) = 360 s, versus 360 s + 75 s + 180 s = 615 s with deferred resolution. Relative synthetic timing only; no service or benchmark result.",
       "issue": "8c9b84fc"
+    },
+    {
+      "id": "cohort-owner-recovery",
+      "area": "lost composing cohort drive",
+      "measuredBy": "build-guard",
+      "metric": "cohortOwnerRecoveryMs",
+      "unit": "ms",
+      "max": 300000,
+      "source": "Issue 8c9b84fc: failed, cancelled and completed-without-result drives in production controller fake-clock replay.",
+      "reason": "Entering composing retains recovery within the existing train hold; no new timer survives settlement.",
+      "issue": "8c9b84fc"
     }
   ],
   "costGuard": {

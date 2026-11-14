@@ -728,6 +728,14 @@ export async function executeHostedAgent(
     timing.server(observed);
     if (completed?.status === 'completed') {
       const source = parseHostedResponse(syncResultSchema, completed.result);
+      if (command.predecessor && source.status === 'up-to-date' && source.from?.head === source.lane.head) {
+        if (handoff) clearSyncHandoff(session.root, operationId);
+        return {
+          source: result,
+          timing: timing.value(),
+          note: 'The pinned State merged cleanly with this Lane, so it was not an early-resolution target. The Lane head and original landing are unchanged; no early pin was recorded.',
+        };
+      }
       // A retained handoff owns this install even if the marker vanished during the source wait:
       // the apply then refuses with typed recovery instead of the result silently skipping it.
       if (command.apply && (handoff || session.marker()) && source.status !== 'conflict' && source.from) {

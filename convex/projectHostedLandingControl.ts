@@ -39,6 +39,7 @@ import {
 } from '../src/hosted-landing';
 import { ForgeError, invariant } from '../src/errors';
 import { finishRow } from './projectHostedFinishWake';
+import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { claimFinishPrecompose } from './projectHostedFinishPrecompose';
 import { alertExhausted, exhaustLanding, exhaustedReason } from './projectHostedLandingExhaust';
 export type LandingClaim = LandingChannel & {
@@ -83,8 +84,15 @@ export async function claimLandingQueue(
   // a reason after a few re-claims whose advance never committed.
   // The lease records the row version its claim wrote; a row still at that
   // version means no advance committed since (no extra write to settle it).
+  const current = row ? hostedLandingStateSchema.parse(JSON.parse(row.value)) : null;
+  // A stall diagnosis changes the row version without advancing the controller.
+  // Keep its existing retry count until actual progress clears that current stall.
+  const diagnosedWithoutProgress =
+    current?.observation.stall?.lastProgressAt === (current && hostedLandingProgressAt(current));
   const retries =
-    row && queue.lease!.claimed !== undefined && JSON.parse(row.value).version === queue.lease!.claimed
+    row &&
+    queue.lease!.claimed !== undefined &&
+    (current!.version === queue.lease!.claimed || diagnosedWithoutProgress)
       ? (queue.lease!.retries ?? 0) + 1
       : 0;
   if (row && retries > LANDING_LEASE_RETRIES) {

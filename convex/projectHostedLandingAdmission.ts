@@ -11,6 +11,7 @@ import { readHostedRecord } from './projectHostedRecords';
 import { describeCheckFailure } from './projectHostedCheckFailure';
 import { CHECK_FAILED_NEXT } from '../src/check-failure-detail';
 import {
+  forkLandingAttempt,
   insertLandingAttempt,
   landingQueue,
   loadLandingAttempt,
@@ -302,9 +303,7 @@ export async function bindAdmissionProof(
       ...pins.operations,
       ...(attempt.id !== original.id ? { accept: crypto.randomUUID() } : {}),
     },
-    id: crypto.randomUUID(),
-    parentAttemptId: attempt.id,
-    number: attempt.number + 1,
+    ...(await forkLandingAttempt(ctx, state)),
     check,
   };
   await insertLandingAttempt(ctx, next);

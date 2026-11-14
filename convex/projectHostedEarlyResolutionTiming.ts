@@ -13,10 +13,19 @@ export async function recordEarlyResolutionTiming(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   early: EarlyResolution,
+  laneId: string,
 ) {
   if (!early.resolvedAt) return;
   const parent = await earlyPredecessor(ctx, projectId, early.predecessor);
   if (!parent.landed) return; // Its settlement will measure the still-live dependent.
+  // A late resolve rewrites its stack projection after the parent's settlement. Its timing
+  // is filled below without reattaching an event link to a predecessor that already ended.
+  const dependent = await ctx.db
+    .query('projectHostedStackDependents')
+    .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
+    .unique();
+  if (dependent?.predecessorId === early.predecessor.submissionId)
+    await ctx.db.patch(dependent._id, { predecessorId: undefined });
   const queue = await landingQueue(ctx, { projectId, channel: 'main' });
   if (!queue?.earlyResolveSamples) return;
   const samples = earlyResolutionSamplesSchema.parse(JSON.parse(queue.earlyResolveSamples));

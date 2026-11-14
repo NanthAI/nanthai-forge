@@ -72,6 +72,22 @@ export function landingStateFromRow(row: LandingRow) {
   );
   return landingPriorityState(row, state);
 }
+/** One ordinal allocator for every immutable child, including a finish whose source IO
+ * reserved its identity before another writer forked. The current landing head, not a retained
+ * reservation's old parent/number, owns the next ordinal. Existing invocation-local pin reads
+ * are reused; the disjoint path performs no additional DB work. */
+export async function forkLandingAttempt(
+  ctx: MutationCtx,
+  state: HostedLandingState,
+  reserved?: { id: string },
+) {
+  const parent = await loadLandingAttempt(ctx, {
+    projectId: state.projectId as Id<'hostedProjects'>,
+    attemptId: state.attemptId,
+  });
+  return { id: reserved?.id ?? crypto.randomUUID(), parentAttemptId: parent.id, number: parent.number + 1 };
+}
+
 export async function insertLandingAttempt(ctx: MutationCtx, input: HostedLandingAttempt) {
   const attempt = hostedLandingAttemptSchema.parse(input),
     value = semanticPayload(attempt, true);
@@ -124,6 +140,7 @@ export async function writeLanding(
   input: HostedLandingState,
   runnable: boolean,
   releaseRun = true,
+  consumedAlarm?: Id<'_scheduled_functions'>,
 ) {
   invariant(
     input.phase !== 'composing',
@@ -192,7 +209,7 @@ export async function writeLanding(
       ctx,
       { projectId: row.projectId, batchId: state.id },
       { members: [{ submissionId: state.id }] },
-      { loadLanding, loadLandingAttempt, insertLandingAttempt, writeLanding },
+      { loadLanding, loadLandingAttempt, forkLandingAttempt, insertLandingAttempt, writeLanding },
       entersReview || state.phase === 'terminal-failed',
       // A new attempt that still proves the same head under the same receipt
       // (a platform retry) keeps dependents pinned to that pair (ea86f3fb).
@@ -210,14 +227,28 @@ export async function writeLanding(
       entersReview,
     );
   if (previous.attemptId !== state.attemptId) await retainLandingProgress(ctx, previous, true, attempt.main);
+  // Retain a repaired owner's diagnosis in later observations and the terminal receipt.
+  // Its progress token distinguishes historical recovery from a current stall.
+  if (!state.observation.stall && previous.observation.stall?.owner)
+    state.observation.stall = previous.observation.stall;
+  if (
+    state.observation.stall?.owner &&
+    (state.observation.state !== 'pending' ||
+      hostedLandingProgressAt(state) !== state.observation.stall.lastProgressAt)
+  )
+    state.observation.stall = {
+      ...state.observation.stall,
+      message: `Forge recovered this landing after its cohort finish wake was ${state.observation.stall.owner.finishWake}; the retained owner describes that earlier recovery.`,
+    };
   if (
     state.observation.stall &&
+    !state.observation.stall.owner &&
     (state.observation.state !== 'pending' ||
       hostedLandingProgressAt(state) !== state.observation.stall.lastProgressAt)
   )
     delete state.observation.stall;
   // Folded into this row's single write below (c329d191 kept waiter alarms).
-  const alarm = await landingAlarmPatch(ctx, state);
+  const alarm = await landingAlarmPatch(ctx, state, consumedAlarm);
   if (alarm && alarm.id !== row._id) await ctx.db.patch(alarm.id, { alarm: alarm.alarm });
   await retainLandingProgress(ctx, state);
   const advice = row.wouldConflict ? JSON.parse(row.wouldConflict) : undefined;

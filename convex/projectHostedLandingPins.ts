@@ -184,6 +184,7 @@ export async function pinLandingAttempt(
   }
   input.intent?.(candidate.intentId);
   const policy = effectivePolicy(project);
+  const { parentAttemptId, number } = input;
   return hostedLandingAttemptSchema.parse({
     ...(semanticPlan ? { semanticPlan } : {}),
     ...(candidate.earlyResolutions?.length ? { earlyResolutions: candidate.earlyResolutions } : {}),
@@ -194,8 +195,8 @@ export async function pinLandingAttempt(
     submissionId: input.submissionId,
     operationId: r.operationId,
     id: input.attemptId,
-    parentAttemptId: input.parentAttemptId,
-    number: input.number,
+    parentAttemptId,
+    number,
     at: input.at,
     actor: input.actor,
     authorityEpoch: r.authorityEpoch,

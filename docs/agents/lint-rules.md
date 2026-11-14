@@ -30,6 +30,7 @@ This page lists the guards and says where the next one goes.
 | Idle queries | check script `check-idle-queries.mjs` | live query arguments derived from the clock, and `refreshKey`, re-run queries for idle tabs | `tests/idle-queries.test.mjs` |
 | Local paths | check script `check-local-paths.mjs` | machine-specific home paths in tracked files | `tests/local-paths.test.mjs` |
 | SPDX header | check script `check-spdx.mjs` | the licence line pushed below imports (f44ac5e0) | `tests/check-spdx.test.mjs` |
+| Landing attempt forks | check script `check-landing-attempt-forks.mjs` | hand-built child ordinals outside `forkLandingAttempt`; a reserved finish must refresh its lineage from the current immutable attempt when installed (8c9b84fc) | `tests/landing-attempt-fork-guard.test.mjs`, `tests/hosted-landing-attempt-fork.test.mjs` |
 | Recovery advice | check script `check-recovery-advice.mjs` | backend conflict evidence that guesses the caller's checkout | `tests/recovery-advice-guard.test.mjs` |
 | Action pins | check script `check-action-pins.mjs` | workflow `uses:` lines not pinned to a commit SHA | `tests/action-pins.test.mjs` |
 | Candidate steps | check script `check-candidate-steps.mjs` | in a check job: a step after the check step, an `id` or token on it, a cache save after it or off the default branch, an unbounded cache restore or `npm ci` | `tests/action-pins.test.mjs` |

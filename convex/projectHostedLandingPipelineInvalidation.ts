@@ -12,7 +12,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 // generation transition without a store -> pipeline -> store import cycle.
 type PipelineStore = Pick<
   typeof import('./projectHostedLandingStore'),
-  'loadLanding' | 'loadLandingAttempt' | 'insertLandingAttempt' | 'writeLanding'
+  'loadLanding' | 'loadLandingAttempt' | 'forkLandingAttempt' | 'insertLandingAttempt' | 'writeLanding'
 >;
 
 /** Retire only descendants of this generation. Restore each original selection
@@ -30,7 +30,7 @@ async function invalidatePipelineOnce(
   keep?: { head: string; receiptId: string },
   ownerHold = false,
 ) {
-  const { loadLanding, loadLandingAttempt, insertLandingAttempt, writeLanding } = store;
+  const { loadLanding, loadLandingAttempt, forkLandingAttempt, insertLandingAttempt, writeLanding } = store;
   const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
   const train = queue?.train ?? [];
   let last = -1;
@@ -112,9 +112,7 @@ async function invalidatePipelineOnce(
       }
       const attempt = {
         ...original,
-        id: crypto.randomUUID(),
-        parentAttemptId: parent.id,
-        number: parent.number + 1,
+        ...(await forkLandingAttempt(ctx, state)),
         check: null,
         deferredCheck: true as const,
         operations: { check: crypto.randomUUID(), accept: crypto.randomUUID() },

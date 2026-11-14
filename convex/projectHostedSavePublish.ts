@@ -20,7 +20,7 @@ import { saveResultSchema, savePin, saveDurationMs } from '../src/hosted-save';
 import { workerResultSchema } from '../src/hosted-source-worker-format';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
-import { laneFinishes, laneFinishActiveMessage, supersedeSyncRequired } from './projectHostedLaneFinish';
+import { laneFinishes, laneFinishActiveMessage, supersedeLaneFinishes } from './projectHostedLaneFinish';
 import { invariant } from '../src/errors';
 
 /** One small transaction: exact signed worker evidence, committed immutable State,
@@ -150,7 +150,7 @@ export async function publishHostedSave(
   // The same transaction ends this Lane's queued entries that needed a sync: the new head replaces
   // them, so none is left queued beside the next landing (f7539ebb item 5).
   const superseded = finishes?.syncRequired.length
-    ? await supersedeSyncRequired(ctx, {
+    ? await supersedeLaneFinishes(ctx, {
         projectId: input.projectId,
         laneId: lane.id,
         head,

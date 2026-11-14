@@ -237,9 +237,6 @@ export async function prepareHostedSync(
         };
         const proof = await candidate(selected.attempt.candidate.id);
         ownerInputs = ownerInputs && proof.ownerInputs;
-        const watch = canonicalPayload(request.predecessor);
-        if (selected.row.earlyResolveWatch !== watch || !selected.row.earlyResolveDependents)
-          await ctx.db.patch(selected.row._id, { earlyResolveWatch: watch, earlyResolveDependents: true });
       } else if (target.kind === 'main' && lane.stack && !lane.stack.detached) {
         const exact = lane.earlyResolution
           ? await earlyPredecessor(ctx, auth.projectId, lane.earlyResolution.predecessor)

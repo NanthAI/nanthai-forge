@@ -140,9 +140,10 @@ identity/phase/progress and an approximate ETA. Members sharing `batchId` count 
 one service group, including parallel checking groups. ETA uses recent observed
 selection-to-commit service time, or an explicit initial estimate of three minutes
 per group; it is advisory and does not delay admission or change queue order.
-Queue-head progress extends queued entries' progress clock. Waiting behind a live
+Waiting behind a live
 predecessor does not raise `LANDING_STALLED`; old false alarms are retracted from
-current reads. An ownerless wait names its predecessor in the alarm. The existing
+current reads. Unrelated queue progress cannot postpone an ownerless entry's alarm
+or reset a failed controller's retry count. An ownerless wait names its predecessor in the alarm. The existing
 orphan-recovery deadline remains, so losing that predecessor cannot strand work.
 
 ## Hosted queue priority
@@ -289,6 +290,10 @@ Rejected members leave the train even when every member conflicts. A retried
 cohort restores its live members in their original order before successors can
 pin its new tail. Terminal solo rows leave the train after invalidation, so
 later queue events do not repeat it.
+Early-resolution advice distinguishes conflicts against the outer base from
+conflicts between cohort members. Internal conflicts are exposed after the
+survivor check is installed and pin its exact checked State and reserved
+receipt, so a disjoint outer predecessor cannot replace the conflicting peer.
 A conflict from that speculative base becomes terminal `COMPOSITION_CONFLICT`
 only on the matching accepted base or after recomposition on current main. Conflicts composed without a
 speculative predecessor retain their existing immediate terminal behavior.
@@ -423,7 +428,9 @@ share one serial individual line, likely members last, with the existing
 per-member diagnosis, so one landing does not force every other single to
 recheck. A cohort that lands second meets the moved main and rechecks on main
 including the first. A cohort that cannot compose, because its compose fails or
-the stall alarm finds it still composing, splits the same way. A shared check that ends
+the stall alarm finds a repeated lost compose drive, splits the same way. The first
+lost drive replays its retained generation within the existing train hold; only a
+second loss splits it. A shared check that ends
 without a failing test file or report (runner unavailable, Actions 403 or server
 error, cancelled, timed out) is a platform failure: the same cohort checks again,
 recomposing only if main moved, at most twice. After that every member ends with

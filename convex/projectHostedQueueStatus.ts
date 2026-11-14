@@ -84,7 +84,8 @@ export async function readQueueStatus(
   const owner = predecessor
     ? predecessor.phase === 'checking' && liveRun && !hostedCheckTerminal(liveRun)
       ? 'check runner / landing controller'
-      : predecessor.observation.stall
+      : predecessor.observation.stall &&
+          predecessor.observation.stall.lastProgressAt === hostedLandingProgressAt(predecessor)
         ? null
         : pending?.composeOperationId &&
             Date.parse(hostedLandingProgressAt(predecessor)) > now - LANDING_STALL_MS
@@ -143,7 +144,8 @@ export function queueAwareLandingState(state: HostedLandingState, queue: HostedQ
   if (state.phase !== 'queued' || !state.observation.stall || !queue) return state;
   const stall = hostedLandingStall(state, Date.now(), queue);
   const observation = { ...state.observation };
-  if (stall) observation.stall = stall;
-  else delete observation.stall;
+  if (stall)
+    observation.stall = { ...stall, ...(observation.stall?.owner ? { owner: observation.stall.owner } : {}) };
+  else if (!observation.stall?.owner) delete observation.stall;
   return { ...state, observation };
 }

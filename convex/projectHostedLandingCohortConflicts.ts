@@ -3,7 +3,7 @@ import type { MutationCtx } from './_generated/server';
 import type { BatchIdentity, LandingBatch } from './projectHostedLandingBatchState';
 import { prepareBatchCompose } from './projectHostedLandingBatchCompose';
 import { retryLandingBatch, writeBatch } from './projectHostedLandingBatchStore';
-import { deferSpeculativeConflict } from './projectHostedLandingSpeculativeConflict';
+import { deferCohortConflicts } from './projectHostedLandingSpeculativeConflict';
 import { predecessorStatus } from './projectHostedLandingPipeline';
 import { hostedStartMain } from './projectHostedChannels';
 import { landingQueue, loadLanding, writeLanding } from './projectHostedLandingStore';
@@ -12,8 +12,6 @@ import { batchConflictPeers } from './projectHostedLandingConflictPeers';
 import { loadFinish } from './projectHostedFinishStore';
 import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { scheduleFinish } from './projectHostedFinishWake';
-import { hostedRecordSchema } from '../src/hosted-records';
-import { invariant } from '../src/errors';
 
 /** Rejected members wait outside the checking train. Its tail is the last
  * included acceptance receipt, even when the original last member conflicts. */
@@ -49,7 +47,7 @@ export async function settleBatchConflicts(ctx: MutationCtx, input: BatchIdentit
   if (source.operation.terminal?.outcome.status !== 'completed') return;
   const dropped = source.state.dropped ?? [];
   if (predecessor === 'pending') {
-    await deferSpeculativeConflict(ctx, input, batch, dropped);
+    await deferCohortConflicts(ctx, input, batch, dropped);
     return;
   }
   const main = await hostedStartMain(ctx, input.projectId);
@@ -58,16 +56,7 @@ export async function settleBatchConflicts(ctx: MutationCtx, input: BatchIdentit
     main.receipt.id === source.state.request.expectedMain.receiptId;
   const internal = dropped.filter(drop => !drop.againstMain);
   if (exact && internal.length && batch.included?.length && batch.phase !== 'landed') {
-    const tail = batch.members.filter(member => batch.included!.includes(member.submissionId)).at(-1)!;
-    const candidate = hostedRecordSchema.options[3].parse(source.operation.terminal.outcome.result);
-    invariant(candidate.result.status === 'clean', 'COMPOSITION_CONFLICT', 'Retain the survivor head.');
-    // An external predecessor may have just landed. Prefix-only rejections now
-    // belong to this cohort's settlement, rather than its predecessor's event.
-    await deferSpeculativeConflict(ctx, input, batch, internal, {
-      submissionId: tail.submissionId,
-      head: candidate.result.head,
-      receiptId: tail.operations.accept,
-    });
+    await deferCohortConflicts(ctx, input, batch, internal);
   }
   for (const member of batch.members.filter(member => !batch.included?.includes(member.submissionId))) {
     const current = await loadLanding(ctx, { projectId: input.projectId, submissionId: member.submissionId });

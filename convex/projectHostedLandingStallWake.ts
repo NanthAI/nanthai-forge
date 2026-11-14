@@ -13,7 +13,11 @@ export async function scheduleLandingAlarm(ctx: MutationCtx, state: HostedLandin
 }
 /** The alarm change for this state without writing the canonical row, so a
  * caller that writes the row anyway folds it into that one write. */
-export async function landingAlarmPatch(ctx: MutationCtx, state: HostedLandingState) {
+export async function landingAlarmPatch(
+  ctx: MutationCtx,
+  state: HostedLandingState,
+  consumedAlarm?: Id<'_scheduled_functions'>,
+) {
   const projectId = state.projectId as Id<'hostedProjects'>;
   const canonical = await ctx.db
     .query('projectHostedLandingRequests')
@@ -35,8 +39,9 @@ export async function landingAlarmPatch(ctx: MutationCtx, state: HostedLandingSt
   const pending = live && state.observation.stall?.lastProgressAt !== at;
   // Same progress time: keep its alarm, or the supervisor round that follows a
   // raised stall (19328518); writes that make no progress must not cancel it.
-  if (live && row.alarm?.lastProgressAt === at) return null;
-  if (row.alarm) await ctx.scheduler.cancel(row.alarm.taskId);
+  const consumed = row.alarm?.taskId === consumedAlarm && consumedAlarm !== undefined;
+  if (live && row.alarm?.lastProgressAt === at) return consumed ? { id: row._id, alarm: null } : null;
+  if (row.alarm && !consumed) await ctx.scheduler.cancel(row.alarm.taskId);
   if (!pending) return row.alarm ? { id: row._id, alarm: null } : null;
   const taskId = await ctx.scheduler.runAfter(
     Math.max(0, Date.parse(at) + LANDING_STALL_MS - Date.now()),
@@ -53,9 +58,10 @@ export async function armLandingAlarm(
   ctx: MutationCtx,
   row: { projectId: Id<'hostedProjects'>; submissionId: string },
   lastProgressAt: string,
+  delay = LANDING_STALL_MS,
 ) {
   const taskId = await ctx.scheduler.runAfter(
-    Math.max(LANDING_STALL_MS, (Date.parse(lastProgressAt) || 0) + LANDING_STALL_MS - Date.now()),
+    Math.max(delay, (Date.parse(lastProgressAt) || 0) + delay - Date.now()),
     makeFunctionReference<'mutation'>('projectHostedLandingStall:alarm'),
     { projectId: row.projectId, submissionId: row.submissionId, lastProgressAt },
   );

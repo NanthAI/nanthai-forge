@@ -95,6 +95,7 @@ export async function splitLandingBatch(
     composeOperationId: crypto.randomUUID(),
     checkOperationId: crypto.randomUUID(),
     phase,
+    drive: { step: phase === 'composing' ? 'retry' : 'submitted', at },
     members: members.map(member => member.original),
     ...(batch.admitted !== undefined ? { admitted: batch.admitted } : {}),
     uploadIndex: 0,
@@ -138,7 +139,7 @@ export async function splitLandingBatch(
       error: null,
       timing: { submittedAt: member.state.at, ...member.state.timing, selectedAt: at },
     }));
-    await wakeBatch(ctx, { projectId: input.projectId, batchId: cohort.id });
+    await wakeBatch(ctx, { projectId: input.projectId, batchId: cohort.id }, true);
   }
   if (!singles.length) return;
   if (singles.length === 1)

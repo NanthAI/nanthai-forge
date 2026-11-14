@@ -13,11 +13,9 @@ export function hostedLandingStall(
   queue?: HostedQueueStatus | null,
 ) {
   if (state.observation.state !== 'pending') return undefined;
-  if (state.phase === 'queued' && queue?.owner) return undefined;
-  const progressAt =
-    state.phase === 'queued' && queue
-      ? latestLandingProgress([hostedLandingProgressAt(state), queue.lastProgressAt])
-      : hostedLandingProgressAt(state);
+  const waiting = state.phase === 'queued' && queue?.predecessor && queue.owner;
+  if (waiting) return undefined;
+  const progressAt = hostedLandingProgressAt(state);
   const step = state.observation.pendingReason === 'waiting-for-dependency' ? 'dependency' : state.phase;
   const owner =
     step === 'composing'
@@ -29,12 +27,7 @@ export function hostedLandingStall(
           : queue?.predecessor
             ? `predecessor ${queue.predecessor.id} (${queue.predecessor.phase}) / landing controller`
             : 'landing / finish controller';
-  const stall = landingStall(step, owner, progressAt, now);
-  // Retained deadlines use the entry's own progress token. Queue progress only
-  // extends the alarm clock; it must not invalidate that token at publication.
-  return stall && state.phase === 'queued' && queue
-    ? { ...stall, lastProgressAt: hostedLandingProgressAt(state) }
-    : stall;
+  return landingStall(step, owner, progressAt, now);
 }
 /** A stalled goal has one reconciliation wake per hour (three controller calls),
  * while source completion still wakes it immediately. Alarm owns its own deadline. */

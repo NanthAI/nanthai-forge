@@ -166,7 +166,7 @@ test('a main conflict after a clean internal prefix is still terminal before tha
   assert.equal(f.runs().length, 2, 'no diagnostic checks');
 });
 
-test('an internal rejection transfers to its own cohort after the external predecessor lands', async t => {
+test('an internal rejection keeps its checked survivor pins across external predecessor settlement', async t => {
   const f = await batchesFixture(t, {
     count: 6,
     batchMaxSize: 3,
@@ -174,12 +174,14 @@ test('an internal rejection transfers to its own cohort after the external prede
   });
   await f.drain();
   assert.equal(current(f, 4).phase, 'queued');
-  assert.equal(rowOf(f, 4).orderWait, current(f, 2).id);
+  assert.equal(rowOf(f, 4).orderWait, current(f, 5).id);
+  const pinned = JSON.parse(rowOf(f, 4).wouldConflict).predecessor;
+  assert.equal(pinned.groupId, current(f, 3).batchId);
   await f.rawChecks.pass(await f.rawChecks.activate(f.runs()[0].id));
   await f.drain();
   assert.equal(current(f, 4).phase, 'queued');
   assert.equal(rowOf(f, 4).orderWait, current(f, 5).id);
-  assert.equal(JSON.parse(rowOf(f, 4).wouldConflict).predecessor.groupId, current(f, 3).batchId);
+  assert.deepEqual(JSON.parse(rowOf(f, 4).wouldConflict).predecessor, pinned);
   await settle(f, true, 3);
   assert.equal(current(f, 4).phase, 'landed');
   assert.notEqual(current(f, 3).phase, 'landed');

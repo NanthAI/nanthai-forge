@@ -25,6 +25,17 @@ const setState = async (f, state) =>
     { _handler: async ctx => store.writeLanding(ctx, rowOf(f, state.id), state, false) },
     {},
   );
+// A directly invoked alarm is already running. It must not borrow the pending
+// queue wake's identity, or consuming it would cancel that unrelated live owner.
+const runningAlarm = (f, lastProgressAt) => ({
+  taskId: f.insert('_scheduled_functions', {
+    name: 'projectHostedLandingStall:alarm',
+    args: [],
+    scheduledTime: Date.now(),
+    state: { kind: 'inProgress' },
+  }),
+  lastProgressAt,
+});
 
 test('queued receipts name exact position, entries ahead, live predecessor and a group-aware ETA', async () => {
   const f = await landingFixture();
@@ -144,7 +155,7 @@ test('moving train progress suppresses the follower alarm and retracts a retaine
   const oldRow = rowOf(f, b.id);
   f.patch('projectHostedLandingRequests', oldRow._id, {
     value: JSON.stringify(queued),
-    alarm: { taskId: [...f.tables._scheduled_functions.values()][0]._id, lastProgressAt: old },
+    alarm: runningAlarm(f, old),
   });
   assert(hostedLandingStall(queued), 'incident: entry age alone used to raise the alarm');
   const status = await f.status(b.id);
@@ -231,7 +242,7 @@ test('genuinely ownerless queued work alarms with the predecessor identity it wa
   });
   const row = rowOf(f, b.id);
   f.patch('projectHostedLandingRequests', row._id, {
-    alarm: { taskId: [...f.tables._scheduled_functions.values()][0]._id, lastProgressAt: old },
+    alarm: runningAlarm(f, old),
   });
   await f.run('ownerlessAlarm', (ctx, input) => alarms.raiseLandingAlarm(ctx, input), {
     projectId: f.projectId,
@@ -264,15 +275,15 @@ test('legacy directory initialization uses current row priority and preserves or
   const queued = { ...a, at: old, timing: { submittedAt: old } };
   f.patch('projectHostedLandingRequests', row._id, {
     value: JSON.stringify(queued),
-    alarm: { taskId: [...f.tables._scheduled_functions.values()][0]._id, lastProgressAt: old },
+    alarm: runningAlarm(f, old),
   });
   f.patch('projectHostedLandingQueues', f.queue()._id, {
     wake: null,
     lease: null,
     status: { ...f.queue().status, lastProgressAt: new Date().toISOString() },
   });
-  // Remove any predecessor owner too. Recent train progress postpones the alarm,
-  // while the existing deadline still reconciles an unowned entry.
+  // Remove the predecessor owner too. Unrelated recent queue progress cannot
+  // postpone this orphan's diagnosis or its existing recovery deadline.
   f.patch('projectHostedLandingRequests', rowOf(f, b.id)._id, {
     value: JSON.stringify({ ...b, at: old, timing: { submittedAt: old } }),
   });
@@ -281,7 +292,9 @@ test('legacy directory initialization uses current row priority and preserves or
     submissionId: a.id,
     lastProgressAt: old,
   });
-  assert.equal(JSON.parse(rowOf(f, a.id).value).observation.stall, undefined);
+  const stall = JSON.parse(rowOf(f, a.id).value).observation.stall;
+  assert.equal(stall.code, 'LANDING_STALLED');
+  assert.match(stall.missingOwner, /predecessor/);
   assert.equal(f.pendingTasks().filter(task => task.name === 'projectHostedLandingStall:deadline').length, 1);
 });
 

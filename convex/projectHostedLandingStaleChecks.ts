@@ -8,6 +8,7 @@ import { readHostedRecord } from './projectHostedRecords';
 import {
   loadLanding,
   loadLandingAttempt,
+  forkLandingAttempt,
   insertLandingAttempt,
   writeLanding,
 } from './projectHostedLandingStore';
@@ -133,9 +134,7 @@ export async function cancelStaleLandingChecks(
         void [_proof, _check];
         const next = {
           ...pins,
-          id: crypto.randomUUID(),
-          parentAttemptId: attempt.id,
-          number: attempt.number + 1,
+          ...(await forkLandingAttempt(ctx, state)),
           check: null,
           deferredCheck: true as const,
           operations: { check: crypto.randomUUID(), accept: crypto.randomUUID() },

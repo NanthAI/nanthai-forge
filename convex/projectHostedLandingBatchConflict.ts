@@ -6,7 +6,12 @@ import type { Id } from './_generated/dataModel';
 import type { HostedLandingAttempt } from '../src/hosted-landing';
 import type { BatchDropped } from '../src/hosted-landing-batch';
 import { readHostedRecord, writeHostedRecord } from './projectHostedRecords';
-import { insertLandingAttempt, loadLanding, writeLanding } from './projectHostedLandingStore';
+import {
+  forkLandingAttempt,
+  insertLandingAttempt,
+  loadLanding,
+  writeLanding,
+} from './projectHostedLandingStore';
 import { failFinish } from './projectHostedFinishStore';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { ForgeError, invariant } from '../src/errors';
@@ -63,18 +68,17 @@ export async function retainBatchConflict(
     ownerOnly: input.ownerInputs && candidateOwnerInputs(project, row, old, member.authorityEpoch),
     record: candidate,
   });
+  const current = await loadLanding(ctx, { projectId: input.projectId, submissionId: member.submissionId });
   const { deferredCheck, recheckReason, scopedFallback, ...pins } = member;
   void [deferredCheck, recheckReason, scopedFallback];
   const attempt = {
     ...pins,
-    id: crypto.randomUUID(),
-    parentAttemptId: member.id,
-    number: member.number + 1,
+    ...(await forkLandingAttempt(ctx, current.state)),
+    main: input.main,
     check: null,
     candidate: { ...member.candidate, id: candidate.id, digest: record.digest, head: null },
   };
   await insertLandingAttempt(ctx, attempt);
-  const current = await loadLanding(ctx, { projectId: input.projectId, submissionId: member.submissionId });
   await writeLanding(
     ctx,
     current.row,

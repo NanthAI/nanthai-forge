@@ -15,6 +15,7 @@ import { activeProject } from './projectAuthority';
 import { hostedWriteProject } from './projectHostedRecords';
 import { loadCompose } from './projectHostedComposeStore';
 import { enqueueHostedLanding } from './projectHostedLanding';
+import { replaceOwnerlessLanding } from './projectHostedLaneFinish';
 import { landingAlias } from './projectHostedLandingIdentity';
 import { landingRow } from './projectHostedLandingStore';
 import { notifyStackedLandingEnded } from './projectHostedStackNotice';
@@ -136,8 +137,11 @@ export async function submitDesiredLanding(
     )
     .order('desc')
     .take(1);
-  const queuedState = queued && hostedLandingStateSchema.parse(JSON.parse(queued.value));
-  if (queued && queuedState?.observation.state !== 'terminal-failed') {
+  let queuedState = queued && hostedLandingStateSchema.parse(JSON.parse(queued.value));
+  const replaced = queued && queuedState?.phase === 'queued' && (await replaceOwnerlessLanding(ctx, queued));
+  if (replaced)
+    queuedState = hostedLandingStateSchema.parse(JSON.parse((await landingRow(ctx, queued))!.value));
+  if (queued && queuedState?.phase !== 'terminal-failed') {
     await ctx.db.insert('projectHostedLandingAliases', {
       projectId: input.projectId,
       actor: actor.id,
@@ -157,7 +161,11 @@ export async function submitDesiredLanding(
   const existingCanonical = existing && (await landingRow(ctx, existing));
   const existingState =
     existing && hostedLandingStateSchema.parse(JSON.parse(existingCanonical?.value ?? existing.value));
-  if (existing && existingState?.observation.state !== 'terminal-failed') {
+  if (
+    existing &&
+    existingState?.phase !== 'terminal-failed' &&
+    !(existingCanonical && (await replaceOwnerlessLanding(ctx, existingCanonical)))
+  ) {
     await ctx.db.insert('projectHostedLandingAliases', {
       projectId: input.projectId,
       actor: actor.id,
@@ -195,7 +203,7 @@ export async function submitDesiredLanding(
     attemptId,
     phase: 'composing',
     preparing: true,
-    ...(previous?.observation.state === 'terminal-failed'
+    ...(previous?.phase === 'terminal-failed'
       ? { supersedes: previous.id, retryReason: command.retryReason ?? 'other' }
       : {}),
     observation: landingObservation('queued'),

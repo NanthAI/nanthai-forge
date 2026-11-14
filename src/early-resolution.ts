@@ -43,9 +43,11 @@ export function earlyResolutionChoice(
     known.length ? known.reduce((sum, s) => sum + s[index]!, 0) / known.length : null;
   const resolveMs = mean(2),
     waitSavedMs = mean(3);
+  // Early work wastes one resolution when the prefix fails and saves the wait when it lands:
+  // resolve early while failure * resolve < (1 - failure) * wait, so a longer wait tolerates more failures.
   const breakEven =
     resolveMs !== null && waitSavedMs !== null && resolveMs + waitSavedMs > 0
-      ? resolveMs / (resolveMs + waitSavedMs)
+      ? waitSavedMs / (resolveMs + waitSavedMs)
       : null;
   const early =
     mode === 'on' ||

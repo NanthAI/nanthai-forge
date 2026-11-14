@@ -1,11 +1,22 @@
 # Status
 
 Exact speculative-predecessor conflicts expose pinned early sync/resolve recovery.
+An internal cohort conflict names the checked survivor prefix containing the
+conflicting peer; an outer-base conflict keeps its exact outer predecessor.
 `acceptance.earlyResolve` defaults to Automatic, comparing the project's observed
 failure fraction with measured resolution/wait break-even; explicit on/off wins.
-Resolved work checks through the existing predicted-head pipeline, and a failed,
+Resolved work checks on the fixed train tail, preserving its check across later
+mergeable groups; a clean pinned sync changes no Lane or landing. Lineage
+supersession covers conflicting own-main sync, source preparation, ownerless
+retry and resolution completion. Composing cohorts recover within the existing
+five-minute train hold and retain lost-owner diagnostics. One attempt allocator
+refreshes reserved finish ordinals at installation, guarded by foundation checks.
+A failed,
 withdrawn or changed predecessor restores author source and retires its check.
-The synthetic trio improves 615 to 360 seconds with three checks in both paths.
+The synthetic trio improves 615 to 360 seconds with three checks in both paths;
+a later overlapping group improves 540 to 360 seconds with one accepted child
+check. The retained incident replay terminalizes every operation with zero idle
+tasks and at most one live submission per lineage after every transition.
 Reader-first rollout, live timing and billed qualification remain separate
 ([early resolution](pre-queue-checks.md#resolve-an-exact-predecessor-conflict-early)).
 

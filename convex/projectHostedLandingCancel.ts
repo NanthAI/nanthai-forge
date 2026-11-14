@@ -7,11 +7,16 @@ import type { z } from 'zod';
 import { beginHostedOperation, finishHostedOperation } from './projectHostedOperations';
 import {
   loadLanding,
+  landingRow,
+  landingStateFromRow,
   loadLandingAttempt,
   landingQueue,
   writeLanding,
   settleLandingOperation,
 } from './projectHostedLandingStore';
+import { desiredLanding } from './projectHostedLandingDesiredWake';
+import { notifyStackedLandingEnded } from './projectHostedStackNotice';
+import { canonicalPayload } from '../src/hosted-source-operation';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
 import { finishRow } from './projectHostedFinishWake';
 import { releaseLandingQueue } from './projectHostedLandingWake';
@@ -97,7 +102,50 @@ export async function cancelHostedLanding(
     return hostedLandingStateSchema.parse(operation.terminal.outcome.result);
   }
   const identity = { projectId, submissionId: request.submissionId };
-  const { row, state } = await loadLanding(ctx, identity);
+  const canonical = await landingRow(ctx, identity);
+  if (!canonical && input.supersede) {
+    const desired = await desiredLanding(ctx, identity);
+    invariant(desired, 'NOT_FOUND', 'Hosted landing request not found.');
+    const previous = hostedLandingStateSchema.parse(JSON.parse(desired.value));
+    const state =
+      previous.phase === 'terminal-failed'
+        ? previous
+        : hostedLandingStateSchema.parse({
+            ...previous,
+            version: previous.version + 1,
+            phase: 'terminal-failed',
+            observation: { state: 'superseded', pendingReason: null, cause: null },
+            error: {
+              code: 'LANDING_SUPERSEDED',
+              message: input.reason ?? 'The source preparation was superseded.',
+            },
+            timing: { ...previous.timing, submittedAt: previous.at, settledAt: new Date().toISOString() },
+          });
+    if (desired.wake) await ctx.scheduler.cancel(desired.wake.taskId);
+    if (desired.alarm) await ctx.scheduler.cancel(desired.alarm.taskId);
+    await ctx.db.patch(desired._id, { value: canonicalPayload(state), wake: null, alarm: null });
+    await notifyStackedLandingEnded(ctx, {
+      projectId,
+      actor: state.actor,
+      composeOperationId: state.request.finish?.composeOperationId,
+      operationId: state.operationId,
+      code: 'LANDING_SUPERSEDED',
+    });
+    await finishHostedOperation(ctx, {
+      projectId,
+      actor,
+      operationId: request.operationId,
+      receipt: {
+        attemptId: operation.firstAttempt.id,
+        at: new Date().toISOString(),
+        outcome: { status: 'completed', result: state },
+      },
+    });
+    return state;
+  }
+  invariant(canonical, 'NOT_FOUND', 'Hosted landing request not found.');
+  const row = canonical,
+    state = landingStateFromRow(row);
   // An operator cancel needs the submitter or the project owner. Forge's own stall/exhaust drops and
   // the children of an already authorized Lane abandon carry that authority with them.
   if (!input.drop && !input.abandonOperationId && !input.supersede)

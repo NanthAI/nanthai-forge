@@ -80,7 +80,6 @@ export async function recoverEarlyResolutions(
       Number.isFinite(ended - started) ? Math.max(0, ended - started) : null,
       Number.isFinite(started) ? Math.max(0, Date.now() - started) : null,
     ]);
-    if (accepted && !Number.isFinite(ended)) continue;
     if (accepted) {
       await ctx.db.patch(dependent._id, { predecessorId: undefined });
       continue;

@@ -8,7 +8,7 @@ import type { MutationCtx } from './_generated/server';
 import { loadSync, hostedSyncInput, writeSyncState } from './projectHostedSyncStore';
 import { finishHostedOperation } from './projectHostedOperations';
 import { writeHostedRecord } from './projectHostedRecords';
-import { supersedeSyncRequired } from './projectHostedLaneFinish';
+import { supersedeLaneFinishes } from './projectHostedLaneFinish';
 import { markRestackConflict } from './projectHostedStackNotice';
 import { saveObjects, saveLaneRecord, sameSaveLane, type SaveIdentity } from './projectHostedSaveStore';
 import { loadSourceJob } from './projectSourceJobs';
@@ -98,7 +98,14 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
   };
   if (early) {
     try {
-      await earlyPredecessor(ctx, input.projectId, early.predecessor);
+      const parent = await earlyPredecessor(ctx, input.projectId, early.predecessor);
+      // Only a real conflicting sync watches resolution work. A clean target has proved
+      // no conflict and must not enter the timing/outcome window as a cheap success.
+      if (request.kind === 'sync' && request.predecessor && result.status === 'conflict') {
+        const watch = canonicalPayload(early.predecessor);
+        if (parent.row.earlyResolveWatch !== watch || !parent.row.earlyResolveDependents)
+          await ctx.db.patch(parent.row._id, { earlyResolveWatch: watch, earlyResolveDependents: true });
+      }
     } catch (error) {
       if (!(error instanceof ForgeError) || error.code !== 'STACK_PARENT_CHANGED') throw error;
       return finish({ status: 'failed', error: { code: error.code, message: error.message } }, 'stale');
@@ -124,6 +131,34 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
         'stale',
       );
   }
+  // The exact advised author head must conflict with the pin. A clean merge proves the
+  // target was wrong: retain every Lane pin and live submission, and publish no early dependency.
+  if (
+    request.kind === 'sync' &&
+    request.predecessor &&
+    lane &&
+    (result.status === 'merged' || result.status === 'up-to-date')
+  )
+    return finish(
+      {
+        status: 'completed',
+        result: syncResultSchema.parse({
+          schema: 1,
+          operationId: input.operationId,
+          status: 'up-to-date',
+          lane: await syncLaneSelection(ctx, input.projectId, lane),
+          from: {
+            laneId: lane.id,
+            head: lane.head,
+            version: lane.version,
+            sourceVersion: lane.sourceVersion,
+          },
+          resolution: lane.resolution ?? null,
+          at: first.at,
+        }),
+      },
+      'completed',
+    );
   const prior = await ctx.db
     .query('projectHostedStates')
     .withIndex('by_project_and_head', q => q.eq('projectId', input.projectId).eq('head', result.state.sha256))
@@ -273,14 +308,27 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
       });
       // A sync that moved the head replaces the Lane's queued entries that needed it (f7539ebb).
       if (changed)
-        await supersedeSyncRequired(ctx, { projectId: input.projectId, laneId: lane.id, head: lane.head });
+        await supersedeLaneFinishes(ctx, { projectId: input.projectId, laneId: lane.id, head: lane.head });
     }
   }
-  if (early && result.status === 'conflict' && state.lane)
-    await supersedeSyncRequired(ctx, { projectId: input.projectId, laneId: state.lane.id, head: lane!.head });
+  if (result.status === 'conflict' && state.lane) {
+    const ownMain =
+      request.kind === 'sync' &&
+      !request.cleanOnly &&
+      request.target.kind === 'main' &&
+      !request.predecessor &&
+      state.lane.actor === input.actor;
+    if (ownMain || early)
+      await supersedeLaneFinishes(ctx, {
+        projectId: input.projectId,
+        laneId: state.lane.id,
+        head: lane!.head,
+        ...(ownMain ? { scope: 'live', fromHead: state.lane.head } : {}),
+      });
+  }
   invariant(lane, 'SOURCE_JOB_INVALID', 'Retain the resulting Lane.');
   if (result.status === 'resolved' && lane.earlyResolution)
-    await recordEarlyResolutionTiming(ctx, input.projectId, lane.earlyResolution);
+    await recordEarlyResolutionTiming(ctx, input.projectId, lane.earlyResolution, lane.id);
   const selection = await syncLaneSelection(ctx, input.projectId, lane);
   return finish(
     {

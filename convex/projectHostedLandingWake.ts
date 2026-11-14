@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { repairComposingBatch } from './projectHostedLandingBatchOwner';
 import { retainCheckProgress } from './projectHostedLandingCheckProgress';
 import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
 import { checkWakeRow, scheduleCheckWake } from './projectHostedLandingCheckWake';
@@ -128,6 +129,10 @@ export async function nextTrainLandingRow(
             ),
           ) + HOSTED_TRAIN_HOLD_MS;
       if (until !== null && until <= now) {
+        for (const batchId of new Set(states.map(state => state.batchId).filter(id => id !== undefined))) {
+          const key = { projectId: queue.projectId, batchId };
+          await repairComposingBatch(ctx, key, (await loadBatch(ctx, key)).batch);
+        }
         await ctx.db.patch(queue._id, { train: undefined });
         return nextLandingRow(ctx, queue);
       }

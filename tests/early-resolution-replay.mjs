@@ -4,9 +4,9 @@ import { batchesFixture, states } from './hosted-landing-batches-fixture.mjs';
 import { syncFixture } from './hosted-sync-fixture.mjs';
 import { compose } from './hosted-finish-fixture.mjs';
 
-export async function drainReady(f) {
+export async function drainReady(f, skip = () => false) {
   for (let n = 0; ; n++) {
-    const task = f.pending().find(task => !/LandingStall|CheckLease:expire/.test(task.name));
+    const task = f.pending().find(task => !/LandingStall|CheckLease:expire/.test(task.name) && !skip(task));
     if (!task) return;
     assert(n < 1000, 'finite event-driven queue drain');
     if (task.name === 'projectHostedConflictMerge:run') {
@@ -33,7 +33,15 @@ export async function drainReady(f) {
 }
 export async function conflictTrio(
   t,
-  { earlyResolve, history = 0, clean = false, disjoint = false, samples, thirdPredecessor = false } = {},
+  {
+    earlyResolve,
+    history = 0,
+    clean = false,
+    disjoint = false,
+    samples,
+    thirdPredecessor = false,
+    lateThird = false,
+  } = {},
 ) {
   const f = await batchesFixture(t, {
     count: 0,
@@ -43,12 +51,14 @@ export async function conflictTrio(
       [disjoint ? 'first.txt' : 'shared.txt', 'first-only.txt'],
       [disjoint ? 'second.txt' : 'shared.txt', 'second-only.txt'],
       [disjoint ? 'late.txt' : 'shared.txt', 'late-only.txt'],
+      lateThird ? 'shared.txt' : 'member-3',
     ],
     baselineFiles: [['shared.txt', 'alpha\nmiddle\nomega\n']],
     memberContents: [
       'alpha-a\nmiddle\nomega\n',
       'alpha\nmiddle\nomega-b\n',
       clean ? 'alpha\nlate middle\nomega\n' : 'alpha-c\nmiddle\nomega-c\n',
+      lateThird ? 'alpha\nmiddle-d\nomega\n' : 'member 3',
     ],
   });
   const OriginalDate = Date,
@@ -98,7 +108,7 @@ export async function conflictTrio(
 }
 export async function resolveEarly(
   { f, s, advice, lateEntry },
-  { resolveMs = 75000, beforeResolve, submit = true } = {},
+  { resolveMs = 75000, beforeResolve, submit = true, resolvedContents = 'alpha-ac\nmiddle\nomega-bc\n' } = {},
 ) {
   const original = (lateEntry ?? f.entries[2]).lane;
   const { groupId: _group, ...predecessor } = advice.predecessor;
@@ -115,9 +125,7 @@ export async function resolveEarly(
   const files = JSON.parse(f.c.objects.get(pending.head)).files;
   const edited = await s.save(
     pending,
-    files.map(file =>
-      file.path === 'shared.txt' ? f.c.file(file.path, 'alpha-ac\nmiddle\nomega-bc\n') : file,
-    ),
+    files.map(file => (file.path === 'shared.txt' ? f.c.file(file.path, resolvedContents) : file)),
   );
   f.advanceClock(resolveMs);
   await beforeResolve?.();
@@ -265,4 +273,122 @@ export async function replayConflictTrio(
     await drainReady(f);
   }
   assert.fail('bounded conflict trio replay');
+}
+
+/** Retained pre-guard clean-sync State, not a route offered by the current publisher. Source
+ * bytes come from the real synthetic merge; hydrate only the historical record shape to replay
+ * incidents and immutable-attempt recovery after upgrading an already affected project. */
+export async function retainLegacyCleanSync({ f, s, original, predecessor }) {
+  const { moduleUrl } = await import('./convex-module.mjs');
+  const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+  const finishes = await import(moduleUrl('../convex/projectHostedLaneFinish.ts'));
+  const before = await s.readLane(original.laneId);
+  const request = s.request('sync', {
+    laneId: original.laneId,
+    expected: s.pins(original),
+    predecessor,
+    target: { kind: 'main', head: f.currentMain().head, receiptId: f.currentMain().receipt.id },
+  });
+  const executed = await s.execute(request);
+  const output = JSON.parse(executed.output.manifest).result;
+  assert.equal(output.status, 'merged', 'legacy fixture uses a real clean three-way merge');
+  const sync = JSON.parse(
+    [...f.tables.projectHostedSyncs.values()].find(r => r.operationId === request.operationId).value,
+  );
+  if (executed.terminal.outcome.result.status === 'up-to-date')
+    await f.transaction(
+      'retain-synthetic-pre-upgrade-clean-sync',
+      {
+        _handler: async ctx => {
+          await ctx.db.insert('projectHostedStates', {
+            projectId: f.projectId,
+            head: output.state.sha256,
+            size: output.state.size,
+            input: JSON.parse(executed.output.manifest).input.sha256,
+            jobId: executed.output.jobId,
+            output: executed.output.output.sha256,
+          });
+          const lane = {
+            ...before.record,
+            head: output.state.sha256,
+            version: before.record.version + 1,
+            sourceVersion: before.record.sourceVersion + 1,
+            stack: sync.work.stackAfter,
+            earlyResolution: sync.work.earlyResolution,
+          };
+          await records.writeHostedRecord(ctx, {
+            projectId: f.projectId,
+            actor: 'owner',
+            authorityEpoch: 1,
+            expectedVersion: before.record.version,
+            ownerOnly: true,
+            record: lane,
+          });
+          const parent = [...f.tables.projectHostedLandingRequests.values()].find(
+            r => r.submissionId === predecessor.submissionId,
+          );
+          await ctx.db.patch(parent._id, {
+            earlyResolveWatch: JSON.stringify(predecessor),
+            earlyResolveDependents: true,
+          });
+          await finishes.supersedeLaneFinishes(ctx, {
+            projectId: f.projectId,
+            laneId: original.laneId,
+            head: lane.head,
+          });
+        },
+      },
+      {},
+    );
+  return (await s.readLane(original.laneId)).entry;
+}
+
+/** The third group arrives after advice picked its prefix but before the resolved author
+ * resubmits. Its middle-line edit merges with both original predecessors and the resolution. */
+export async function replayLinearConflictTrio(t) {
+  const trio = await conflictTrio(t, { lateThird: true });
+  const { f } = trio;
+  const started = Date.now(),
+    due = new Map();
+  const reserve = async () => {
+    for (const run of f.runs().filter(r => r.status === 'queued' && !due.has(r.id))) {
+      const duration = run.request.expectedHead === trio.advice.predecessor.head ? 360000 : 180000;
+      due.set(run.id, Date.now() + duration);
+      await f.rawChecks.activate(run.id);
+    }
+  };
+  await reserve();
+  const resolved = await resolveEarly(trio, {
+    beforeResolve: async () => {
+      await f.add(3);
+      await drainReady(f);
+    },
+  });
+  for (let n = 0; n < 30; n++) {
+    await reserve();
+    const state = (await f.current(resolved.state.id)).submission;
+    if (state.phase === 'landed') {
+      const attempts = [...f.tables.projectHostedLandingAttempts.values()]
+        .map(r => JSON.parse(r.value))
+        .filter(a => a.submissionId === state.id);
+      const childChecks = [...new Set(attempts.flatMap(a => (a.check ? [a.check.runId] : [])))];
+      const accepted = attempts.find(a => a.id === state.attemptId);
+      return {
+        lateTaskMs: Date.now() - started,
+        childChecks,
+        acceptedCheck: accepted.check.runId,
+        checks: f.runs().length,
+        idle: f.pending().length,
+        ...totals(f),
+      };
+    }
+    assert.notEqual(state.phase, 'terminal-failed', JSON.stringify(state));
+    const running = f.runs().filter(r => r.status === 'running');
+    const next = Math.min(...running.map(r => due.get(r.id)));
+    assert(Number.isFinite(next), 'linear replay stays event-owned');
+    f.advanceClock(Math.max(0, next - Date.now()));
+    for (const run of running.filter(r => due.get(r.id) <= Date.now())) await f.rawChecks.pass(run);
+    await drainReady(f);
+  }
+  assert.fail('bounded linear train replay');
 }

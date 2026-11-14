@@ -2,7 +2,7 @@
 import { exhaustFinishCompose } from './projectHostedComposeExhaustion';
 import { predecessorStatus } from './projectHostedLandingPipeline';
 import { settleBatchConflicts, retainSurvivorTrain } from './projectHostedLandingCohortConflicts';
-import { deferSpeculativeConflict } from './projectHostedLandingSpeculativeConflict';
+import { deferCohortConflicts, deferSpeculativeConflict } from './projectHostedLandingSpeculativeConflict';
 import { wakeLandingQueue } from './projectHostedLandingEvents';
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
 import { splitLandingBatch } from './projectHostedLandingBatchSplit';
@@ -63,6 +63,7 @@ export async function batchFinishStep(
   if (
     state.phase === 'queued' &&
     state.observation.stall &&
+    !state.observation.stall.owner &&
     (batch.phase === 'composing' || batch.phase === 'checking')
   ) {
     // A pre-upgrade alarm may already be consumed. Resume/event repair must
@@ -166,19 +167,6 @@ export async function batchFinishStep(
       if (included.includes(member))
         await hostedWriteProject(ctx, input.projectId, member.actor.id, member.authorityEpoch);
     }
-    if (dropped.length) {
-      if (predecessor === 'pending') await deferSpeculativeConflict(ctx, key, batch, dropped);
-      else if (included.length) {
-        const tail = included.at(-1)!;
-        const unproved = dropped.filter(drop => !drop.againstMain);
-        if (unproved.length)
-          await deferSpeculativeConflict(ctx, key, batch, unproved, {
-            submissionId: tail.submissionId,
-            head: candidate.result.head,
-            receiptId: tail.operations.accept,
-          });
-      }
-    }
     for (const member of batch.members.filter(
       m => predecessor !== 'pending' && dropped.some(d => d.candidateId === m.candidate.id && d.againstMain),
     )) {
@@ -205,6 +193,8 @@ export async function batchFinishStep(
       });
     }
     if (!included.length) {
+      if (predecessor === 'pending' && dropped.length)
+        await deferSpeculativeConflict(ctx, key, batch, dropped);
       await retainSurvivorTrain(ctx, key, [], batch);
       if (predecessor !== 'pending' && dropped.some(drop => !drop.againstMain))
         await settleBatchConflicts(ctx, key, { ...batch, included: [], phase: 'landed' });
@@ -243,8 +233,9 @@ export async function batchFinishStep(
       key: candidate.id,
     });
     invariant(row, 'SOURCE_UNAVAILABLE', 'The stacked Candidate is unavailable.');
+    let checkedTail: import('../src/hosted-landing').HostedLandingAttempt | undefined;
     for (const member of included)
-      await installBatchAttempt(ctx, {
+      checkedTail = await installBatchAttempt(ctx, {
         projectId: input.projectId,
         original: member,
         main: source.state.request.expectedMain,
@@ -277,6 +268,14 @@ export async function batchFinishStep(
       included.map(member => member.submissionId),
       batch,
     );
+    if (dropped.length)
+      await deferCohortConflicts(
+        ctx,
+        key,
+        batch,
+        predecessor === 'pending' ? dropped : dropped.filter(drop => !drop.againstMain),
+        checkedTail,
+      );
     await wakeLandingQueue(ctx, { projectId: input.projectId, channel: 'main' });
     return { handled: true, command: null };
   }

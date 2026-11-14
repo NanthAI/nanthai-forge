@@ -12,6 +12,7 @@ import { saveObject } from './projectHostedSaveStore';
 import {
   loadLanding,
   loadLandingAttempt,
+  forkLandingAttempt,
   insertLandingAttempt,
   writeLanding,
   retainLandingProgress,
@@ -94,9 +95,7 @@ export async function reserveFinishRetry(
   // installation independently checks exact input/dependency roots below.
   const pending = {
     ...(precompose ? { precompose } : {}),
-    id: crypto.randomUUID(),
-    parentAttemptId: previous.id,
-    number: previous.number + 1,
+    ...(await forkLandingAttempt(ctx, state)),
     at: new Date(Date.now()).toISOString(),
     main: { head: main.head, receiptId: main.receipt.id },
     operations: {
@@ -368,6 +367,7 @@ export async function installFinishCompose(
         projectId: row.projectId,
         attemptId: state.firstAttemptId,
       });
+      const { id: attemptId, ...fork } = await forkLandingAttempt(ctx, state, pending);
       const attempt = await pinLandingAttempt(ctx, {
         ...input,
         actor: original.actor,
@@ -379,9 +379,8 @@ export async function installFinishCompose(
           expectedHead: null,
           check: null,
         },
-        attemptId: pending.id,
-        parentAttemptId: pending.parentAttemptId,
-        number: pending.number,
+        attemptId,
+        ...fork,
         at: pending.at,
         operations: { check: pending.operations.check, accept: pending.operations.accept },
         retainedSelection: original.candidate,
@@ -479,6 +478,7 @@ export async function installFinishCompose(
     !proof && previous && candidate.result.status === 'clean'
       ? scopedRecheckFallback(previous, recheck)
       : undefined;
+  const { id: attemptId, ...fork } = await forkLandingAttempt(ctx, state, pending);
   const attempt = await pinLandingAttempt(ctx, {
     ...(recheck ? { recheck } : {}),
     ...input,
@@ -491,9 +491,8 @@ export async function installFinishCompose(
       expectedHead: candidate.result.status === 'clean' ? candidate.result.head : null,
       check: proof ? null : value.check,
     },
-    attemptId: pending.id,
-    parentAttemptId: pending.parentAttemptId,
-    number: pending.number,
+    attemptId,
+    ...fork,
     at: pending.at,
     operations: { check: pending.operations.check, accept: pending.operations.accept },
     retainedSelection: original.candidate,

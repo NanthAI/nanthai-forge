@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
+import { replaceOwnerlessLanding } from './projectHostedLaneFinish';
 import { readHostedRecord } from './projectHostedRecords';
 import { loadLanding } from './projectHostedLandingStore';
 import { hostedRecordSchema } from '../src/hosted-records';
@@ -90,7 +91,7 @@ export async function reuseHostedLanding(
   if (!existing) return { selectionKey };
   const state = (await loadLanding(ctx, { projectId: input.projectId, submissionId: existing.submissionId }))
     .state;
-  if (state.observation.state === 'terminal-failed')
+  if (state.phase === 'terminal-failed' || (await replaceOwnerlessLanding(ctx, existing)))
     return {
       selectionKey,
       supersedes: state.id,

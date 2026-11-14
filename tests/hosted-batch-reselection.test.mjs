@@ -6,6 +6,7 @@ import { batchesFixture, batchStore, states, synthetic } from './hosted-landing-
 import { compose } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { LANDING_STALL_MS } from '../dist/landing-stall.js';
+import { HOSTED_TRAIN_HOLD_MS } from '../dist/hosted-landing-batch.js';
 const stallApi = await import(moduleUrl('../convex/projectHostedLandingStall.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
@@ -607,7 +608,21 @@ for (const stalledPhase of ['composing', 'checking'])
       assert.equal(retained(f).batch.phase, 'fallback');
       assert(states(f).every(state => !state.batchId && state.batchSolo));
     } else {
-      // A cohort that cannot compose splits into groups that compose apart.
+      // The first lost drive replays its retained generation; a repeated loss
+      // at the existing hold deadline splits into groups that compose apart.
+      assert.equal(retained(f).batch.phase, 'composing');
+      const leader = [...f.tables.projectHostedLandingRequests.values()].find(
+        row => row.submissionId === (retained(f).batch.leaderId ?? retained(f).batch.id),
+      );
+      assert(JSON.parse(leader.value).observation.stall.owner);
+      for (const task of f.pending())
+        f.patch('_scheduled_functions', task._id, { state: { kind: 'canceled' } });
+      f.advanceClock(HOSTED_TRAIN_HOLD_MS);
+      await f.transaction('repeated-compose-owner-loss', stallApi.alarm, {
+        projectId: f.projectId,
+        submissionId: leader.submissionId,
+        lastProgressAt: leader.alarm.lastProgressAt,
+      });
       assert.equal(retained(f).batch.phase, 'split');
       // Halves of two and one: the pair is a new cohort, the single checks alone.
       assert.equal(states(f).filter(state => state.batchSolo).length, 1);

@@ -34,6 +34,11 @@ for (const history of [0, 1150])
     for (const metric of ['calls', 'reads', 'writes', 'checks', 'lateTaskMs', 'idle'])
       assert.equal(after[metric], before[metric], metric);
     assert.equal(after.resolutions, 0);
+    assert.deepEqual(
+      [after.calls, after.reads, after.writes, after.lateTaskMs, after.idle],
+      [154, 2980, 1002, 180000, 0],
+      '8c9b84fc: disjoint baseline must not grow',
+    );
     t.diagnostic(JSON.stringify({ history, before, after }));
   });
 
