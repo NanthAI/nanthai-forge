@@ -1,146 +1,137 @@
 # Sync and resolve cost decomposition
 
 Issue `6fbba986-3b78-439d-878d-afbd66510414` owns the remaining single-operation gap.
-Live dev profiling exposes repeated descriptor/R2 rounds on legacy recipe States,
-alongside the flat-State CPU and local-apply floor. Both source readers now use the
-existing batched recipe preparation path. This removes unnecessary descriptor
-rounds; it is not a measured hosted speedup.
+The current 4k/29k full-path cohort identifies source submission, serial recovery,
+R2 transfer and flat-State processing as the dominant elapsed path. Separate local
+native-work clocks do not establish exclusive provider CPU attribution.
 
 State identity remains the SHA-256 of the exact flat manifest, including its
 parents, message and time. The existing clean-sync reply delta remains in place.
 
-## Live dev observations
+## Current full-path observations
 
-[The live dataset](../../tests/fixtures/sync-resolve-live.json) retains ten interleaved
-shape pairs: odd pairs run 4k then 29k, even pairs reverse; each shape runs clean
-sync, conflict sync and its source-only resolve. This is exactly **30 operations per
-shape**, the authorized bound. Each plain directory has 4,000 or 29,000 deep paths
-and a shared synthetic file body. The target changes one file; the clean Lane
-changes a second file, and the conflict Lane changes the target's line. Setup,
-fixture saves and cleanup are outside the operation clocks. No Git commands were
-issued directly; a host-status probe unexpectedly attempted Git metadata and its
-failure is recorded as friction. No benchmark, smoke, zoo rerun, manual deployment
-or paid service was used.
+The [current dataset](../../tests/fixtures/sync-resolve-decomposition.json) retains
+**11 alternating 4k/29k pairs**, each with one single-path conflict sync and its
+source-only resolve: **44 successful timed operations**, none repeated or discarded.
+Resolve includes saving the edited marker file and applying the final State; it
+excludes the subsequent checked landing to main. Setup, Lane opening and cleanup
+are outside both operation clocks. Each operation uses the same saved left/right
+inputs for its shape and a fresh process of the approved installed CLI. The shapes
+contain 4,000 and 29,000 deep paths with shared synthetic bodies.
 
-The target is an exact clean Candidate on the common hosted main, avoiding a checked
-landing solely to prepare this experiment. The CLI trace confirms its normal
-current-main read still happens. Resolution includes its ordinary save, source
-resolution and checkout apply; it excludes the next checked landing. These are
-comparable source paths, not a repetition of the zoo's complete scenario.
+CLI State `f65c824c` matches the deployed mirror `ba5393ca`; automatic dev deployment
+[43733046198](https://github.com/NanthAI/nanthai-forge/actions/runs/43733046198)
+completed before the first timed command, and the final deployment read retained
+that revision. Timing held the shared machine lock. Node was 24.22.1; one-minute
+load ranged 2.32–6.15 on ten logical CPUs. Raw observations retain load and swap.
+This compares repository shapes on one build; it is **not a before/after speedup**.
 
-The installed CLI and Node 24.22.1 ran the real public Lane operations. The existing
-fetch observer now also records first-network wall/CPU and HTTP methods, without
-URLs, headers, credentials or source bodies. Full receipts supply source clocks;
-provider completion logs retain each nested function wall and billed usage metadata.
-All recorded source steps match their receipt steps; no usage fields are missing.
-The first 4k clean receipt was compact, so its client phase split is unknown. One
-read outside the timing window recovered its immutable server timing; replay apply
-timing is not substituted. Its original total and every RPC wall remain included.
+Seconds, medians over eleven observations. Source columns include the save and
+resolve source steps together for recovery. They overlap the client phases and
+each other; they must not be added to total or subtracted as exclusive CPU.
 
-These are **N=10 observations**, below the eleven-pair reference, with no before/after
-runtime claim. No timed sample was dropped or replaced. Load ranged
-4.2–19.7 on ten logical CPUs;
-swap used ranged 5.53–6.93 GiB.
-Every sample retains both endpoints. Later pairs repeat the initially busy shape
-under lower load, within the bound. CLI releases changed automatically; the dataset
-names each receipt's build and records hashes of the selected recipe, source
-transport, sync and apply modules. Those selected modules were unchanged across
-those builds; this is not an attestation of the complete deployed graph. A hold on
-other builders was not introduced. Initial nesting, driver and save-wait failures
-are disclosed under setup. A disk-floor pause removed only owned regenerable
-fixture copies before resuming; it discarded no timed operation.
-
-All following times are **seconds**, medians over ten observations, except the first
-4k clean client apply is absent (N=9). Columns overlap and do not add to total.
-CLI-to-first-fetch is process-origin wall, not CPU; the dataset also retains CPU
-and the small spawn-to-process-origin difference. Source wait includes boot; boot
-must not be added again. Resolve's source columns describe the resolve job alone,
-while its total also includes the nested save.
-
-| Shape / operation | Total CLI | CLI to first fetch | Source wait (includes boot) | Source run | R2 read in flight | R2 write in flight | Nested RPC in flight | Apply / guidance |
+| Shape / operation | CLI total | Process to first fetch | Source submit / save phase | Local apply | Source run | R2 read in flight | R2 write in flight | Nested calls in flight |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 4k clean sync | 5.98 | 0.31 | 0.46 | 1.74 | 0.42 | 0.73 | 0.40 | 0.39 |
-| 4k conflict sync | 8.56 | 0.26 | 0.44 | 3.35 | 0.68 | 1.36 | 0.67 | 1.57 |
-| 4k resolve | 9.38 | 0.28 | 0.45 | 2.18 | 0.73 | 0.71 | 0.59 | 1.40 |
-| 29k clean sync | 14.89 | 0.41 | 0.45 | 8.39 | 2.19 | 1.96 | 2.59 | 1.66 |
-| 29k conflict sync | 28.02 | 0.46 | 0.88 | 19.24 | 4.16 | 2.44 | 4.90 | 2.44 |
-| 29k resolve | 23.40 | 0.51 | 0.84 | 8.53 | 1.70 | 1.83 | 1.45 | 2.88 |
+| 4k conflict sync | 7.031 | .149 | 4.911 | 1.192 | 2.896 | .868 | 1.151 | .600 |
+| 4k source-only resolve | 8.094 | .139 | 7.321 | .229 | 3.392 | 1.207 | 1.394 | .740 |
+| 29k conflict sync | 14.531 | .319 | 10.510 | 1.848 | 8.344 | 2.705 | 1.739 | 1.210 |
+| 29k source-only resolve | 13.778 | .310 | 11.479 | .877 | 6.811 | 2.336 | 2.254 | .779 |
 
-The large host bootstrap is a **legacy recipe-backed State**, unlike the raw-State
-local fixture below. The source writer's new large States remain flat. Resolving
-that legacy recipe's page and leaves explains the extra descriptor rounds, and
-conflict recomputation reads it in a second action. The current source readers
-also retain the flat parse/build/hash and full-tree local validation work.
+The dominant elapsed path is **source submission and serial save/resolve control,
+R2 transfer and flat-State processing**, rather than CLI startup. The dataset
+retains every client HTTP call's function, method, status and wall to headers,
+and every attributed provider execution's function and wall. Internal action and
+nested-call spans overlap. Header spans exclude response-body consumption and
+WebSocket observation. Receipts retain the full server/client phase split; resolves
+retain their save split separately. No exclusive provider CPU is inferred.
 
-| Shape / source job | Timed read / write opens | Nested calls | Attempted PUT body MB | Wall outside measured I/O, bounds |
-| --- | ---: | ---: | ---: | ---: |
-| 4k clean sync | 3 / 2 | 2 | 0.649 | 0.09–1.09 |
-| 4k conflict sync | 6 / 4 | 3 | 0.650 | 0.72–1.97 |
-| 4k resolve | 4 / 2 | 3 | 0.649 | 0.13–1.40 |
-| 29k clean sync | 10 / 2 | 11 | 4.699 | 1.67–5.92 |
-| 29k conflict sync | 23 / 4 | 23 | 4.705 | 7.51–14.19 |
-| 29k resolve | 7 / 2 | 7 | 4.702 | 3.40–5.41 |
+The paired 29k-minus-4k CLI difference is **7.678 s [7.050, 10.112]** for sync and
+**5.784 s [5.214, 7.099]** for resolve (median difference, 95% bootstrap interval,
+10,000 resamples, seed 1). Both intervals exclude zero. They establish the size
+penalty in this cohort, not a causal engine change. Network, load, GC and fixture
+layout differences remain outside the interval's coverage.
 
-Read opens are the source transport's streaming reads; writes are its timed output
-stores. Direct durable-cursor I/O and retries are not all in these clocks. The raw
-receipt also retains action-local signed class A/B counters: descriptor-signed GETs
-run in separate mutations, so its B count is **not** the complete R2 GET count.
-Step-marker read-work bytes can count logical reconstruction and cached work, so
-they are not asserted to be physical GET bodies. PUT body counters include cursor
-and result bodies and are not provider egress. Pure compute cannot be recovered by
-subtracting read, write and call clocks: they overlap and include consumer work.
-The bounds above are `max(0, run−read−write−call)` to
-`run−max(read,write,call)`, summed per step; they describe unattributed wall,
-not an exclusive CPU measurement. The earlier local handler CPU is a separate
-measurement. This is a material remaining qualification on the full decomposition.
+### Separate native State work
 
-The dominant live path is the sequence of source descriptor/R2 operations and
-flat-State processing, rather than CLI spawn or a per-file RPC inventory scan.
-At 29k the descriptor waits alone account for seconds, and conflict adds an action
-and repeated manifests. At 4k those waits are smaller, but source startup, input
-upload and output publication still sit on the critical path. These measurements
-name the current cost; they cannot allocate the historical zoo's 4.3-second gap
-arithmetically because that 4.9/0.6-second cohort has different shapes, network and
-cache conditions. Source-only resolve must also stay separate from the zoo's
-83.6-second resolve-to-main row.
+The existing real-handler fixture now optionally measures synchronous
+`MemoryMergeSource` parse, metadata merge and State encode/hash work. An outer call
+owns nested work once; asynchronous network waits are excluded. This is a **local
+replay**, not exclusive deployed CPU or the whole action's compute. Text calculation,
+transport hashing, recipe work and other processing outside those methods remain
+outside this narrow clock.
 
-The paired 29k-minus-4k wall differences below use seed 1 and 10,000 bootstrap
-resamples. Pair values and intervals are retained with the raw data. They compare
-repository shapes, **not a new performance gain**; their intervals do not cover
-load, swapping, network conditions or the disclosed version drift.
+| Shape / operation | Native synchronous wall, ms | Process CPU in those spans, ms | Handler CPU, ms |
+| --- | ---: | ---: | ---: |
+| 4k sync | 24.7 | 42.4 | 109 |
+| 4k resolve | 14.1 | 26.6 | 76 |
+| 29k sync | 151.4 | 187.3 | 397 |
+| 29k resolve | 81.2 | 107.0 | 260 |
 
-| Operation | Median shape difference, s | 95% bootstrap interval, s |
-| --- | ---: | --- |
-| clean | 8.84 | [6.01, 11.28] |
-| conflict | 18.97 | [16.82, 20.68] |
-| resolve | 13.86 | [12.80, 15.33] |
+Eleven alternating measurement-off/on pairs per shape preload identical modules;
+every sync and resolved State hash matches. Instrumentation wall/CPU differences
+are not distinguishable from no change in every final interval. Earlier probes
+front-loaded different lazy imports; they are exploratory, retained privately and
+excluded from these comparisons. Process CPU can exceed wall through runtime
+threads. These numbers cannot be substituted for provider compute seconds.
 
-### Live usage and placement
+### Calls, bytes, idle and placement
 
-The following medians cover project-attributed completion events within each CLI
-operation window, including the CLI and resolve's save. Background overlap work
-for the same project can be in that window; the raw data separately identifies the
-merge-step execution subtree. Function walls nest and are not summed into elapsed
-time. These are provider billed-usage metadata, **not an invoice** or measured
-post-fix savings.
+Provider medians count project-attributed, uncached completions during each CLI
+window; they include wrappers and controls, unlike the narrower source guard.
+DB I/O is provider usage metadata, not a cumulative invoice. Source PUT bodies are
+attempted State/progress/result/other bodies, not total egress. R2 signed requests
+include unused descriptors and are **not complete executed physical GET/HEAD/PUT
+counts**. No billed-saving claim is made.
 
-| Shape / operation | Provider executions | DB read / write B | Network egress MB | Action GB-s |
-| --- | ---: | ---: | ---: | ---: |
-| 4k clean sync | 13 | 185,360 / 50,877 | 0.693 | 1.393 |
-| 4k conflict sync | 20 | 211,876 / 54,932 | 0.701 | 2.139 |
-| 4k resolve | 21 | 372,732 / 109,908 | 1.341 | 1.602 |
-| 29k clean sync | 22 | 300,736 / 50,876 | 4.810 | 4.950 |
-| 29k conflict sync | 45 | 532,450 / 60,915 | 4.915 | 10.652 |
-| 29k resolve | 42 | 644,697 / 124,553 | 9.555 | 7.006 |
+| Shape / operation | Provider executions | DB read / write bytes | Source read / write opens | Attempted source PUT bytes | Signed R2 A / B |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 4k sync | 16 | 209,276 / 52,507 | 8 / 4 | 669,646 | 5 / 14 |
+| 4k resolve | 16 | 386,210 / 106,186 | 7 / 4 | 1,337,527 | 6 / 13 |
+| 29k sync | 19 | 275,185 / 68,267 | 16 / 10 | 3,200 | 8 / 47 |
+| 29k resolve | 17 | 401,930 / 122,277 | 18 / 14 | 4,891 | 14 / 74 |
 
-All sampled Convex storage read/write byte counters were zero. Bounded unsigned
-descriptor reads separately confirmed raw State and recipe-metadata placement in
-R2, with no Convex locations; the 29k root recipe had no trusted closure projection.
-The placement sample and its coverage are retained in the dataset. Client process
-RSS is retained per sample; source allocation used for action billing was 512 MiB,
-which is not a measured isolate heap. No cache or memory bound is raised.
+The 29k writer reuses byte-range recipe chunks; 4k remains below that writer band,
+so physical PUT bodies need not increase with logical manifest size. All sampled
+saved-tip rows (four) point to R2; none uses Convex file storage. Every provider
+window reports zero Convex storage read/write bytes. An **82.2-second quiet window**
+after the cohort recorded **zero fixture executions and zero DB read/write bytes**.
+All 363,000 physical file reads across the 22 resolved checkouts match the expected
+contents, with an identical file/mode vector per shape.
 
-## Local reference method
+The cross-size guard compares one and eight changed paths directly: growing from
+4k to 29k adds **zero control calls, descriptor windows or body requests**; GET
+increase is bounded by three flat manifests plus 4 KiB of encoding, PUT increase by
+two manifests plus 4 KiB, with bounded metadata I/O and zero idle calls. Existing
+per-shape, legacy-recipe, recovery, access and exact-State guards stay in place.
+No runtime, State identity, routing bound, service, policy or user step changed.
+The report replaces the older full-path observation section and extends the
+existing measurer rather than adding another source engine.
+
+### Remaining evidence and cleanup
+
+Done-when 1 remains qualified: exclusive provider compute and complete physical
+R2 request/body attribution are still unavailable from the current clocks. The
+separate native replay narrows the question without claiming that attribution.
+The existing [S5 placement finding](placement-review.md) remains the design-review
+route; no new engine work or tree-root identity is proposed. The full ten-second
+and Git-parity targets are not established by this source-only cohort.
+
+The accepted zoo reporter already emits sync and resolve Forge/Git medians
+(`scripts/bench-zoo/suite-lib.mjs`). Zoo resolve includes landing to main and must
+remain distinct from source-only resolve here. Its concurrent rerun stopped before
+provision because its 15k–30k execution forecast exceeds its brief's few-thousand
+budget (Issue `70a9bd2f`); **no fresh zoo comparison is supplied**. The compound
+Done-when 3 stays open for that owner/lead budget decision and run.
+
+All 46 synthetic Lanes are abandoned and both active lists are empty. Two dev
+synthetic projects remain: permanent deletion was refused to device credentials
+with `PROJECT_UNAVAILABLE`, requiring an owner-person session. Exact cleanup
+identities are in the private handoff; no access boundary was bypassed. Save-wait
+and cleanup-addressing friction are linked on existing Issues `75b4d062`,
+`31392506` and `470ef29b`. No production operation, manual deployment, setting
+change, backup or export was performed.
+
+## Earlier local reference method
 
 [Raw synthetic observations](../../tests/fixtures/sync-resolve-costs.json) retain all
 three repeats, clocks, CPU, calls, bytes, load and swap. Node was 24.22.1. The built runtime and
@@ -531,5 +522,5 @@ modules, below the unchanged 220-module guard. The unchanged 512 MiB guard passe
 also has a larger-source guard. Byte, query and R2 ceilings are unchanged or tighter.
 
 The pure kernel comparison separately measures metadata merge reuse; it does not include
-save-to-resolve sharing or prove complete-operation latency. The full ten-second and Git-parity
-targets still require live evidence and the Issue's repeat/noise and next-zoo qualifications.
+save-to-resolve sharing or prove complete-operation latency. The current repeated live cohort above retains the full ten-second and Git-parity
+qualifications; exclusive provider attribution and the next zoo remain open.

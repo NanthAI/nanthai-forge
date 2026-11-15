@@ -32,6 +32,7 @@ process.on('message', async message => {
   const started = performance.now(),
     cpuStarted = process.cpuUsage(),
     sourceSteps = [];
+  let stateWork;
   const warn = console.warn;
   console.warn = (...args) => {
     if (args.length === 1 && typeof args[0] === 'string') {
@@ -98,6 +99,37 @@ process.on('message', async message => {
         return value;
       };
     }
+    if (message.measureStateWork) {
+      const { MemoryMergeSource } = await import('../dist/hosted-source-memory.js');
+      const rows = new Map();
+      let active = 0;
+      // Synchronous native parse, metadata merge and State encoding/hash only. Nested
+      // calls are charged to their outer operation once; no network or async wait.
+      for (const name of message.measureStateWork === 'control'
+        ? []
+        : ['verifiedState', 'mergeFiles', 'storeState']) {
+        const original = MemoryMergeSource.prototype[name];
+        MemoryMergeSource.prototype[name] = function (...args) {
+          const outer = active++ === 0;
+          const start = outer ? performance.now() : 0;
+          const cpu = outer ? process.cpuUsage() : null;
+          try {
+            return original.apply(this, args);
+          } finally {
+            active--;
+            if (outer) {
+              const row = rows.get(name) ?? { name, calls: 0, wallMs: 0, cpuMicros: 0 };
+              row.calls++;
+              row.wallMs += performance.now() - start;
+              const used = process.cpuUsage(cpu);
+              row.cpuMicros += used.user + used.system;
+              rows.set(name, row);
+            }
+          }
+        };
+      }
+      stateWork = () => [...rows.values()];
+    }
     const module = await import(message.url);
     const workCpuStarted = process.cpuUsage();
     const value = await module[message.method]._handler(ctx, message.args);
@@ -106,6 +138,7 @@ process.on('message', async message => {
       value,
       metrics: {
         sourceSteps,
+        ...(stateWork ? { stateWork: stateWork() } : {}),
         elapsedMs: performance.now() - started,
         maxRssBytes: process.resourceUsage().maxRSS * 1024,
         cpuMicros: Object.values(process.cpuUsage(cpuStarted)).reduce((n, v) => n + v, 0),
@@ -118,6 +151,7 @@ process.on('message', async message => {
       error: { message: error.message, code: error.code, stack: error.stack },
       metrics: {
         sourceSteps,
+        ...(stateWork ? { stateWork: stateWork() } : {}),
         elapsedMs: performance.now() - started,
         maxRssBytes: process.resourceUsage().maxRSS * 1024,
         cpuMicros: Object.values(process.cpuUsage(cpuStarted)).reduce((n, v) => n + v, 0),

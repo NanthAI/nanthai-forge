@@ -146,3 +146,34 @@ test('multi-MB recovery writes byte-range recipes within the approved call, reco
   assert.equal(run.idleCalls, 0);
   t.diagnostic(JSON.stringify(run));
 });
+
+// A per-shape ceiling alone misses a regression that stays below both ceilings but
+// adds a repository-sized control scan. Compare identical changed-path work directly.
+test('growing a small sync from 4k to 29k paths adds only flat-State bytes and no control calls', async t => {
+  for (const changed of [1, 8]) {
+    const small = await measureSync({ files: 4000, changed, distance: 1, conflict: false });
+    const large = await measureSync({ files: 29000, changed, distance: 1, conflict: false });
+    assert(large.sync.functionCalls <= small.sync.functionCalls, 'repository growth adds no control RPC');
+    assert(
+      large.sync.descriptorCalls <= small.sync.descriptorCalls,
+      'descriptor windows follow changed paths',
+    );
+    assert(large.sync.readObjects <= small.sync.readObjects, 'unchanged paths add no body requests');
+    const floor = 3 * (large.manifestBytes - small.manifestBytes);
+    assert(
+      large.sync.readBytes - small.sync.readBytes <= floor + 4096,
+      'GET growth is at most three flat States plus bounded header encoding',
+    );
+    assert(
+      large.sync.putBytes - small.sync.putBytes <= 2 * (large.manifestBytes - small.manifestBytes) + 4096,
+      'PUT growth stays within the flat-State floor',
+    );
+    assert(
+      large.sync.dbReadBytes <= small.sync.dbReadBytes + 32 * 1024,
+      'DB metadata reads add no repository inventory',
+    );
+    assert(large.sync.dbWriteBytes <= small.sync.dbWriteBytes + 16 * 1024, 'DB metadata writes stay bounded');
+    assert.equal(small.idleCalls + large.idleCalls, 0, 'neither settled source schedules idle calls');
+    t.diagnostic(JSON.stringify({ changed, small: small.sync, large: large.sync, floor }));
+  }
+});

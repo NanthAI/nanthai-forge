@@ -37,6 +37,7 @@ export async function scaleFixture({
   guardRss = false,
   afterAction,
   nodeStepUrl,
+  measureStateWork = false,
 } = {}) {
   const f = recordsFixture(),
     { projectId } = await f.setup(),
@@ -339,6 +340,7 @@ export async function scaleFixture({
           method: m,
           args: item.args,
           guardRss,
+          measureStateWork,
         });
       });
     } finally {
@@ -401,6 +403,7 @@ export async function scaleFixture({
       maxFailedStepMs: Math.max(0, ...jobMetrics.filter(m => m.failed).map(m => m.elapsedMs)),
       workCpuMicros: jobMetrics.reduce((n, m) => n + (m.workCpuMicros ?? 0), 0),
       cpuMicros: jobMetrics.reduce((n, m) => n + m.cpuMicros, 0),
+      ...(measureStateWork ? { stateWork: jobMetrics.flatMap(m => m.stateWork ?? []) } : {}),
       actionMs: jobMetrics.reduce((n, m) => n + m.elapsedMs, 0),
       peakActive,
       peakWork,

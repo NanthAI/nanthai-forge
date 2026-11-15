@@ -134,8 +134,9 @@ export async function measureSync({
   resolve = conflict,
   recipeBase = false,
   saveResolve = false,
+  measureStateWork = false,
 }) {
-  const s = await scaleFixture();
+  const s = await scaleFixture({ measureStateWork });
   try {
     const h = await syncHistory(s, { files, changed, distance, conflict, recipeBase });
     const eventStart = s.events.length,
@@ -239,6 +240,7 @@ function summary(s, jobId, r, eventStart, countStart) {
     wallMs: Math.round(r.wallMs),
     actionMs: Math.round(r.actionMs),
     workCpuMs: Math.round(r.workCpuMicros / 1000),
+    ...(r.stateWork?.length ? { stateWork: r.stateWork } : {}),
     steps: r.steps,
     functionCalls: r.functionCalls,
     documentsRead: r.documentsRead,
