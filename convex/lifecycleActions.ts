@@ -109,6 +109,7 @@ export const downloadPart = action({
     try {
       invariant(Number.isSafeInteger(offset) && offset >= 0, 'BAD_ARGUMENT', 'Invalid download offset.');
       const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'GITHUB_UNAVAILABLE', 'Sign in to download this source archive.');
       const { job } = await currentAccess(ctx, id, user?.subject);
       invariant(job.artifactKey && job.head, 'INDEX_MISSING', 'This repository has no indexed snapshot yet.');
       const file: { size: number; sha256: string; contentType?: string } | null = await ctx.runQuery(

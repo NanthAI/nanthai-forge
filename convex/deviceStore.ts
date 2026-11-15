@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
+import { publicAbuseBudgets } from './publicAbuseBudgets';
 import { internalMutation, internalQuery } from './server';
 import { deviceDocument, deviceFields, credentialDocument, credentialFields } from './deviceFields';
 import { invariant } from '../src/errors';
 /** New device logins per minute for the whole deployment, and expired login rows
  * removed by each new start. Retries of an existing start are not counted. */
-export const deviceStartLimit = { perMinute: 30, cleanup: 4 };
+export const deviceStartLimit = { perMinute: 120, cleanup: 4 };
 /** Returns null when the start limit is reached. */
 export const start = internalMutation({
   args: deviceFields,
@@ -24,11 +25,15 @@ export const start = internalMutation({
       return old;
     }
     const now = Date.now();
+    const limit = publicAbuseBudgets()?.deviceStartsPerMinute ?? deviceStartLimit.perMinute;
+    // Reuse the bounded attempt-counter table: one point read, independent of the start rate.
+    const scope = 'system:device-start';
     const recent = await ctx.db
-      .query('deviceCodes')
-      .withIndex('by_creation_time', q => q.gt('_creationTime', now - 60_000))
-      .take(deviceStartLimit.perMinute);
-    if (recent.length >= deviceStartLimit.perMinute) return null;
+      .query('deviceAttempts')
+      .withIndex('by_owner', q => q.eq('owner', scope))
+      .unique();
+    const fresh = !recent || now < recent.windowAt || now - recent.windowAt >= 60_000;
+    if (!fresh && recent.count >= limit) return null;
     // Expired login rows are removed a few at a time by later starts; no scheduled job runs.
     const expired = await ctx.db
       .query('deviceCodes')
@@ -40,6 +45,13 @@ export const start = internalMutation({
       .withIndex('by_userHash', q => q.eq('userHash', args.userHash))
       .unique();
     invariant(!collision, 'AUTH_CODE_COLLISION', 'Retry login with a new operation.');
+    const budget = {
+      owner: scope,
+      windowAt: fresh ? now : recent.windowAt,
+      count: fresh ? 1 : recent.count + 1,
+    };
+    if (recent) await ctx.db.patch(recent._id, budget);
+    else await ctx.db.insert('deviceAttempts', budget);
     const id = await ctx.db.insert('deviceCodes', args);
     return (await ctx.db.get(id))!;
   },

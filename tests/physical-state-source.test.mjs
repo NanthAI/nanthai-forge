@@ -106,7 +106,7 @@ test('Actions whole-State reader keeps all5001 members in complete physical runs
     assert.equal(readFileSync(join(root, 'candidate', file.path), 'utf8'), `source ${index}`);
 });
 
-test('clone reader checks current State authority and uses the same complete-run verifier', async t => {
+test('signed-in public reader clones through current State authority and the complete-run verifier', async t => {
   const { HostedCheckoutDownloads } = await import('../dist/hosted-checkout-downloads.js'),
     { HostedCheckoutCache } = await import('../dist/hosted-checkout-cache.js'),
     { temporaryDirectory } = await import('../scripts/test-temp.mjs'),
@@ -114,23 +114,34 @@ test('clone reader checks current State authority and uses the same complete-run
     { readFileSync } = await import('node:fs');
   const api = await import(moduleUrl('../convex/projectStateSourceApi.ts')),
     objectDownloads = await import(moduleUrl('../convex/projectObjectDownloads.ts'));
-  const f = await physicalStateSourceFixture(t, 1001),
+  const f = await physicalStateSourceFixture(t, 1001, { clientActor: 'public-reader' }),
     root = temporaryDirectory(t, 'forge-state-clone-');
+  f.s.patch('hostedProjects', f.s.projectId, { visibility: 'public' });
   const stateRow = [...f.s.tables.projectObjects.values()].find(row => row.digest === f.s.state.sha256);
   f.s.patch('projectObjects', stateRow._id, { r2Key: `v1/p/${f.s.projectId}/o/${f.s.state.sha256}` });
   for (const method of ['describe', 'lanePage']) {
-    const legacy = await f.s.transaction('legacy-bootstrap-' + method, objectDownloads[method], {
-      projectId: f.s.projectId,
-      digests: [f.s.state.sha256],
-      signed: true,
-    });
+    const legacy = await f.s.transaction(
+      'legacy-bootstrap-' + method,
+      objectDownloads[method],
+      {
+        projectId: f.s.projectId,
+        digests: [f.s.state.sha256],
+        signed: true,
+      },
+      'public-reader',
+    );
     assert.equal(legacy[0].statePhysical, undefined, 'old clients receive the original descriptor shape');
-    const negotiated = await f.s.transaction('state-bootstrap-' + method, objectDownloads[method], {
-      projectId: f.s.projectId,
-      digests: [f.s.state.sha256],
-      signed: true,
-      stateSource: true,
-    });
+    const negotiated = await f.s.transaction(
+      'state-bootstrap-' + method,
+      objectDownloads[method],
+      {
+        projectId: f.s.projectId,
+        digests: [f.s.state.sha256],
+        signed: true,
+        stateSource: true,
+      },
+      'public-reader',
+    );
     assert.deepEqual(negotiated[0].statePhysical, f.root.pin);
   }
   const downloads = new HostedCheckoutDownloads({
@@ -140,7 +151,7 @@ test('clone reader checks current State authority and uses the same complete-run
       action: async (_ref, args) => api.read._handler(f.ctx, args),
       mutation: async (_ref, args) => {
         assert.deepEqual(args.digests, [f.s.state.sha256], 'only the State bootstrap uses legacy metadata');
-        return f.s.transaction('clone-real-bootstrap', objectDownloads.describe, args);
+        return f.s.transaction('clone-real-bootstrap', objectDownloads.describe, args, 'public-reader');
       },
     },
   });

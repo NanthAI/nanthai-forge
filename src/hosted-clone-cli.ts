@@ -20,7 +20,8 @@ import { checkoutPathExists } from './hosted-checkout-files.js';
 import { durableReplace } from './state/durability.js';
 import { workLocked } from './work-lock.js';
 import { ForgeError, invariant } from './errors.js';
-export const CLONE_HELP = 'nforge clone <project-url|project-id> DIR [--deployment URL]\n';
+export const CLONE_HELP =
+  'nforge clone <project-url|project-id> DIR [--deployment URL]\nSign in with nforge login to clone any Forge project, including public projects.\n';
 type Client = Pick<ConvexExchange['client'], 'query'>;
 /** Root binding is the same private address used by CLI/MCP; no native owner is created. */
 export async function cloneHostedProject(

@@ -2,6 +2,8 @@
 
 Forge does not run agents or supply a model. Your coding harness (Codex, Claude Code or another) stays where it is. Forge gives it shared source, isolated Lanes, checks and a way to see what other agents are doing.
 
+Sign in with `nforge login` before cloning or downloading from Forge, including public projects. Public in-page viewing remains open; use a project’s GitHub mirror for anonymous cloning when available.
+
 Forge has one client mode: hosted. Agents work in a Forge clone or Lane; `nforge host ROOT` makes a Git folder a hosted project, and Lanes keep working offline and land once back online. Checkout help (`nforge agent ROOT --help`) and `nforge docs agents/hosted` are generated from the enforced hosted command schemas.
 
 The command reference is [agents/workflow.md](agents/workflow.md) and the terse runtime copy is [skills/forge-agent/SKILL.md](../skills/forge-agent/SKILL.md).

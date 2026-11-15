@@ -40,6 +40,7 @@ export default function App({
     subscribeStatus: (refresh: () => void) => () => void;
     back: () => void;
     download: () => Promise<void>;
+    downloadSignIn?: ReactNode;
     canRefresh?: boolean;
     zone?: { name: string; head: string };
     saveView?: (route: Route) => ReactNode;
@@ -591,9 +592,11 @@ export default function App({
       )}
       {status?.gitHead && (
         <div className="snapshot-download">
-          <button disabled={downloading} onClick={() => void download()}>
-            {downloading ? 'Downloading…' : hosted.zone ? 'Download Zone snapshot' : 'Download snapshot'}
-          </button>
+          {hosted.downloadSignIn ?? (
+            <button disabled={downloading} onClick={() => void download()}>
+              {downloading ? 'Downloading…' : hosted.zone ? 'Download Zone snapshot' : 'Download snapshot'}
+            </button>
+          )}
           <span>
             Indexed snapshot ·{' '}
             {hosted.zone ? 'selected source and graph; documents omitted' : 'source, graph and notices'}

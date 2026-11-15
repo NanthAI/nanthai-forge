@@ -30,7 +30,13 @@ export type SettingRule =
   | 'no-gate-change'
   /** An agent's change, held for the owner person. */
   | 'held';
-export type SettingOrigin = 'policy' | 'check-definition' | 'check-import' | 'runner' | 'main-audit';
+export type SettingOrigin =
+  | 'policy'
+  | 'check-definition'
+  | 'check-import'
+  | 'runner'
+  | 'main-audit'
+  | 'membership';
 
 /** Settings requests share the approvals table under a `setting:` key, one row per setting. Like fork
  * PR requests they are never `live` (they hold no landing, so the landing gate's read never sees

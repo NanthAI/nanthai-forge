@@ -16,7 +16,7 @@ import {
 } from './schema';
 import { invariant } from '../src/errors';
 import { report } from './errors';
-import { accessibleProject, activeOwnedProject } from './projectAuthority';
+import { memberProject, activeOwnedProject } from './projectAuthority';
 export { ownedProject } from './projectAuthority';
 
 export const item = (backup: Doc<'projectBackups'>, project: Doc<'hostedProjects'>) => ({
@@ -141,7 +141,7 @@ export const history = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read your Forge project.');
-      const project = await accessibleProject(ctx, projectId, user.subject);
+      const project = await memberProject(ctx, projectId, user.subject);
       const result = await ctx.db
         .query('projectBackups')
         .withIndex('by_project', q => q.eq('projectId', projectId))
@@ -160,7 +160,7 @@ export const get = internalQuery({
     try {
       const backup = await ctx.db.get(id);
       invariant(backup, 'PROJECT_UNAVAILABLE', 'This Forge backup is unavailable with the current account.');
-      const project = await accessibleProject(ctx, backup.projectId, owner);
+      const project = await memberProject(ctx, backup.projectId, owner);
       return { backup, project, item: item(backup, project) };
     } catch (error) {
       return report(error);

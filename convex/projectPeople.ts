@@ -5,7 +5,8 @@ import { invariant } from '../src/errors';
 type Person = {
   id: string;
   username?: string | null;
-  email_addresses?: { email_address: string }[];
+  primary_email_address_id?: string | null;
+  email_addresses?: { id?: string; email_address: string; verification?: { status?: string } | null }[];
   external_accounts?: { provider?: string; username?: string | null }[];
 };
 /** Handle seeds: the chosen username and the GitHub login, never real names or emails. */
@@ -38,7 +39,11 @@ export async function findPersonByEmail(value: string): Promise<Person | null> {
   invariant(Array.isArray(result), 'GITHUB_RESPONSE', 'Forge could not read the account lookup.');
   const matches = (result as Person[]).filter(
     person =>
-      person.id && person.email_addresses?.some(address => address.email_address.toLowerCase() === email),
+      person.id &&
+      person.email_addresses?.some(
+        address =>
+          address.email_address.toLowerCase() === email && address.verification?.status === 'verified',
+      ),
   );
   invariant(
     matches.length <= 1,

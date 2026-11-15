@@ -4,14 +4,7 @@ import assert from 'node:assert/strict';
 import { overlappingPaths, parseNativeStateValue } from '../dist/state/format.js';
 import { safeRelative } from '../dist/safe-relative.js';
 
-// Reference implementations: the straightforward segment-splitting forms the fast paths replaced.
-const referenceSafe = path =>
-  path.length > 0 &&
-  !path.startsWith('/') &&
-  !path.includes('\\') &&
-  !path.includes('\0') &&
-  !/[\r\n]/.test(path) &&
-  path.split('/').every(part => part !== '..' && part !== '.' && part.length > 0);
+// Straightforward per-level overlap reference for the optimized path set.
 const referenceOverlap = files => {
   const paths = new Set(files.map(file => file.path)),
     conflicts = new Set();
@@ -51,10 +44,10 @@ const next = limit => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) % limit;
 const generated = () =>
   Array.from({ length: next(6) }, () => pieces[next(pieces.length)]).join(next(3) ? '/' : '');
 
-test('safeRelative matches its segment-splitting definition on dot, empty and separator shapes', () => {
+test('portable relative paths preserve Unicode and internal spaces while rejecting separators and aliases', () => {
+  for (const path of ['a', 'a/b', 'a/.x', 'a/..x', '.a', 'a/x.y', 'İ/ı/ſ', 'a b/c'])
+    assert.equal(safeRelative(path), true, JSON.stringify(path));
   for (const path of [
-    'a',
-    'a/b',
     'a//b',
     '/a',
     'a/',
@@ -62,17 +55,17 @@ test('safeRelative matches its segment-splitting definition on dot, empty and se
     '..',
     'a/./b',
     'a/../b',
-    'a/.x',
-    'a/..x',
     'a/...',
-    '.a',
     '',
+    'a.',
+    'a /file',
+    'dir/CON.txt',
+    'x:stream',
+    'x\\y',
+    'x\n',
+    'x\0',
   ])
-    assert.equal(safeRelative(path), referenceSafe(path), JSON.stringify(path));
-  for (let i = 0; i < 50_000; i++) {
-    const path = generated();
-    assert.equal(safeRelative(path), referenceSafe(path), JSON.stringify(path));
-  }
+    assert.equal(safeRelative(path), false, JSON.stringify(path));
 });
 
 test('overlappingPaths matches the per-level definition including empty and trailing segments', () => {

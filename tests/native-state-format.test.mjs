@@ -126,3 +126,35 @@ test('approved multi-MB recipe routing preserves exact bytes at 8 MiB and keeps 
     null,
   );
 });
+
+test('portable source paths cannot alias Windows metadata directories, streams or device names', () => {
+  for (const path of [
+    'GIT~1/config',
+    'forge~2/hosted-lane.json',
+    '.git./config',
+    '.forge /hosted-lane.json',
+    '.forge::$INDEX_ALLOCATION/hosted-lane.json',
+    'src/file:stream',
+    'src/file.',
+    'src/file ',
+    'CON',
+    'NUL.txt',
+    'aux',
+    'prn.log',
+    'src/COM1.txt',
+    'lpt9',
+    'CONIN$',
+    'com¹.log',
+  ]) {
+    assert.throws(
+      () => parseNativeStateValue({ ...state, files: [{ ...state.files[0], path }] }),
+      error => error.code === 'INVALID_NATIVE_SOURCE',
+      path,
+    );
+  }
+  for (const path of ['src/normal.ts', 'src/console.ts', 'company.md', 'data/file.name'])
+    assert.equal(
+      parseNativeStateValue({ ...state, files: [{ ...state.files[0], path }] }).files[0].path,
+      path,
+    );
+});

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+import { downloadProject } from './projectDownloadAccess';
 import { requireSourceProtocol } from './projectSourceProtocol';
 import { v } from 'convex/values';
 import { mutation, type MutationCtx } from './cliServer';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { blobStore } from './blobStore';
 import { storageDigest } from './projectStorage';
 import { isStored } from './projectObjectFields';
@@ -41,8 +42,8 @@ export async function readableProject(ctx: MutationCtx, projectId: Id<'hostedPro
  * that is a committed R2 object of this project, after a fresh access check on every call. Anything
  * else (unknown, pending, another project's, or stored in Convex) is simply absent from the result,
  * so the caller learns nothing beyond what it can already list. A mutation so that results are never
- * cached across calls and a URL is always freshly signed. It writes nothing. Public projects sign
- * without sign-in, within the signed-out budget in convex/abuseLimits.ts. Without the R2 settings
+ * cached across calls and a URL is always freshly signed. It writes nothing. Downloads require
+ * sign-in even for public projects; signed-out views receive rendered pages instead. Without the R2 settings
  * this fails closed. */
 export const signDownloads = mutation({
   args: { projectId: v.id('hostedProjects'), digests: v.array(v.string()), recipes: v.optional(v.boolean()) },
@@ -59,7 +60,7 @@ export const signDownloads = mutation({
   handler: async (ctx, { projectId, digests, recipes }) => {
     try {
       invariant(digests.length <= 100, 'BAD_ARGUMENT', 'Sign downloads in pages of at most 100.');
-      await readableProject(ctx, projectId);
+      await downloadProject(ctx, projectId);
       const found = [];
       const closures = [];
       for (const digest of new Set(digests)) {
@@ -169,10 +170,9 @@ export async function describeObjects(
     runs?: boolean;
   },
   maximum = runs ? hostedDownloadPageSize : 100,
-  charge = true,
 ) {
   try {
-    const project = await readableProject(ctx, projectId, charge);
+    const project = await downloadProject(ctx, projectId);
     if (stateSource) requireSourceProtocol(project, stateSource);
     invariant(
       digests.length <= maximum && digests.every(id => /^[a-f0-9]{64}$/.test(id)) && (!runs || signed),
@@ -253,6 +253,32 @@ export async function describeObjects(
   }
 }
 
+/** Exact initial source pins, shared by signed-in byte transport and the public renderer. */
+export async function sourcePins(
+  ctx: MutationCtx,
+  project: Doc<'hostedProjects'>,
+  backupId: Id<'projectBackups'>,
+  digests: string[],
+) {
+  const generation = await selectedGeneration(ctx, await workProject(ctx, project));
+  const pins =
+    generation?.backupId === backupId
+      ? await Promise.all(
+          digests.map(async id => {
+            const row = await readRecord(ctx, recordPartition(generation), 'sourceBlobs', id);
+            if (!row) return null;
+            try {
+              const pin = JSON.parse(row.value) as { sha256: string; size: number };
+              return pin.sha256 === id && Number.isSafeInteger(pin.size) && pin.size >= 0 ? pin : null;
+            } catch {
+              return null;
+            }
+          }),
+        )
+      : null;
+  return pins?.every((pin): pin is { sha256: string; size: number } => pin !== null) ? pins : null;
+}
+
 /** Exact checkpoint and optional disposable source pins; never reads source/file bytes. */
 export const source = mutation({
   args: {
@@ -263,7 +289,7 @@ export const source = mutation({
   returns: v.string(),
   handler: async (ctx, { projectId, backupId, digests = [] }) => {
     try {
-      const project = await readableProject(ctx, projectId),
+      const project = await downloadProject(ctx, projectId),
         backup = await ctx.db.get(backupId);
       invariant(
         backup && backup.projectId === projectId && backup.status === 'stored',
@@ -275,22 +301,7 @@ export const source = mutation({
         'BAD_ARGUMENT',
         'Read exact source identities in pages of at most 100.',
       );
-      const generation = await selectedGeneration(ctx, await workProject(ctx, project));
-      const pins =
-        generation?.backupId === backupId
-          ? await Promise.all(
-              digests.map(async id => {
-                const row = await readRecord(ctx, recordPartition(generation), 'sourceBlobs', id);
-                if (!row) return null;
-                try {
-                  const pin = JSON.parse(row.value) as { sha256: string; size: number };
-                  return pin.sha256 === id && Number.isSafeInteger(pin.size) && pin.size >= 0 ? pin : null;
-                } catch {
-                  return null;
-                }
-              }),
-            )
-          : null;
+      const pins = await sourcePins(ctx, project, backupId, digests);
       return JSON.stringify({
         backupId,
         backupDigest: backup.digest,
@@ -302,7 +313,7 @@ export const source = mutation({
           sha256: backup.objectManifest?.digest ?? backup.digest,
           size: backup.objectManifest?.size ?? backup.size,
         },
-        pins: pins?.every(Boolean) ? pins : null,
+        pins,
       });
     } catch (error) {
       return report(error);

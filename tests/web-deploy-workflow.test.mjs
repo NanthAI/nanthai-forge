@@ -22,7 +22,7 @@ test('the deploy builds, guards, smoke-loads, then deploys the same build, and n
     'npm run build:web',
     'tests/web-bundle-node-free.test.mjs',
     'scripts/web-smoke-load.mjs hosted-web-dist VITE_CONVEX_URL',
-    'netlify-cli@',
+    'npx --no-install netlify deploy',
   ].map(step);
   assert(order.every(index => index > 0) && order.every((index, i) => i === 0 || index > order[i - 1]));
   assert.match(workflow, /deploy --prod --no-build --dir hosted-web-dist --site "\$NETLIFY_SITE_ID"/);
@@ -92,4 +92,17 @@ test('the dev web build receives the GitHub App slug through its public Vite env
   const build = workflow.slice(step('Build the web app'), step('Guard the browser bundle'));
   assert.match(build, /^          VITE_GITHUB_APP_SLUG: \$\{\{ vars\.VITE_GITHUB_APP_SLUG \}\}$/m);
   assert.doesNotMatch(build, /^\s+GITHUB_APP_SLUG:/m, 'GitHub reserves the GITHUB_ variable prefix');
+});
+
+test('workflow executables come from the lockfile rather than unlocked npx installs', async () => {
+  const { readdirSync } = await import('node:fs');
+  for (const name of readdirSync('.github/workflows').filter(name => /\.ya?ml$/.test(name))) {
+    const source = readFileSync(`.github/workflows/${name}`, 'utf8');
+    assert.doesNotMatch(source, /\bnpx\s+(?:--yes\b|[^\n]*?\b[\w/.-]+@[\w*.^~><=+-]+)/, name);
+  }
+  const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+  const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+  assert.match(pkg.devDependencies['netlify-cli'] ?? '', /^\d+\.\d+\.\d+$/);
+  assert.equal(lock.packages['node_modules/netlify-cli'].version, pkg.devDependencies['netlify-cli']);
+  assert.match(workflow, /npx --no-install netlify deploy/);
 });

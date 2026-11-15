@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useReadRetry } from '../ui/read-retry';
 import { useEffect, useMemo, useState } from 'react';
-import { useConvex, useQuery as useHostedQuery } from 'convex/react';
+import { useConvexAuth, useConvex, useQuery as useHostedQuery } from 'convex/react';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type { CockpitWork } from '../cockpit/model';
 import { useWorkRecords, workIndex, type WorkIndexWorkspace } from '../hosted-work-index';
@@ -78,6 +78,7 @@ function HostedSearch({
     channels.records.find(channel => channel.name === 'main')?.head ??
     workspace?.sourceHead;
   const client = useConvex();
+  const { isAuthenticated } = useConvexAuth();
   const [files, setFiles] = useState<SearchItem[]>([]),
     [error, setError] = useState(''),
     [loading, setLoading] = useState(true);
@@ -90,12 +91,16 @@ function HostedSearch({
     // Loaded on demand: the source reader pulls in the language parsers, which first paint never needs.
     void import('../browser-source')
       .then(({ readBrowserSource }) =>
-        readBrowserSource(client, {
-          projectId,
-          backupId: workspace.backupId,
-          base: sourceHead,
-          head: sourceHead,
-        }),
+        readBrowserSource(
+          client,
+          {
+            projectId,
+            backupId: workspace.backupId,
+            base: sourceHead,
+            head: sourceHead,
+          },
+          !isAuthenticated,
+        ),
       )
       .then(raw => {
         if (!active) return;
@@ -120,6 +125,7 @@ function HostedSearch({
     };
   }, [
     client,
+    isAuthenticated,
     projectId,
     workspace?.backupId,
     sourceHead,

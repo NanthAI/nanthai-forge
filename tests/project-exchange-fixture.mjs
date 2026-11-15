@@ -28,6 +28,8 @@ const names = [
   'projectObjects',
   'projectObjectCommit',
   'projectObjectDownloads',
+  'projectSourceReviewStore',
+  'projectSourceReview',
   'projectObjectRecipes',
   'projectObjectRecipeStore',
   'projectMain',

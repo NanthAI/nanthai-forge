@@ -47,6 +47,25 @@ export function scanSourcePaths(root: string, options: SourcePathOptions = {}): 
   for (const file of retainedFiles)
     for (let index = file.indexOf('/'); index !== -1; index = file.indexOf('/', index + 1))
       retainedDirectories.add(file.slice(0, index));
+  function excludeIgnored(patterns: ReturnType<typeof readIgnoreLayer>, path: string, directory: boolean) {
+    const match = ignoredBy(patterns, path, directory);
+    // Explicit Forge exclusions also apply to retained paths; Git exclusions preserve them.
+    if (
+      !match ||
+      !(
+        (match.source === '.forgeignore' && !preserveRetained) ||
+        (!retainedFiles.has(path) && !retainedDirectories.has(path))
+      )
+    )
+      return false;
+    const item: NativeExcludedPath = {
+      path,
+      reason: match.source === '.forgeignore' ? 'forgeignored' : 'gitignored',
+    };
+    excluded?.push(item);
+    onExcluded?.({ ...item, ignore: match });
+    return true;
+  }
   function walk(dir: string, patterns: ReturnType<typeof readIgnoreLayer>) {
     visitDirectory?.(dir);
     const names = readdirSync(join(root, dir)).sort();
@@ -60,6 +79,8 @@ export function scanSourcePaths(root: string, options: SourcePathOptions = {}): 
       )
         continue;
       if (!safeRelative(path)) {
+        // Excluded entries never become source; their names must not prevent capturing valid files.
+        if (excludeIgnored(next, path, lstatSync(join(root, path)).isDirectory())) continue;
         invariant(!validate, 'UNSAFE_PATH', 'Native source paths must be portable relative paths.');
         continue;
       }
@@ -99,18 +120,7 @@ export function scanSourcePaths(root: string, options: SourcePathOptions = {}): 
           continue;
         }
       }
-      const match = ignoredBy(next, path, stat.isDirectory());
-      // Preserve imported/tracked Git paths, while explicit Forge exclusions
-      // apply to subsequent captures too. Historical States stay immutable.
-      if (match && ((match.source === '.forgeignore' && !preserveRetained) || (!selected && !descendant))) {
-        const item: NativeExcludedPath = {
-          path,
-          reason: match.source === '.forgeignore' ? 'forgeignored' : 'gitignored',
-        };
-        excluded?.push(item);
-        onExcluded?.({ ...item, ignore: match });
-        continue;
-      }
+      if (excludeIgnored(next, path, stat.isDirectory())) continue;
       // Package managers hard-link installed files from a shared store. Below a dependency folder
       // that no ignore rule names, an untracked hard-linked file is an install: leave it out and
       // say so, instead of refusing the whole save. Tracked paths and other folders still fail.

@@ -116,12 +116,14 @@ test('signing re-checks current access on every call: strangers, removed members
   await assert.rejects(sign(s, ['guarded']), code('PROJECT_UNAVAILABLE'));
 });
 
-test('public projects sign without sign-in; private ones do not', async t => {
+test('raw object downloads require sign-in on public and private projects', async t => {
   const { s } = await setup(t);
   await client(s).uploadBatch(content(['open source']));
   s.caller(undefined);
   await assert.rejects(sign(s, ['open source']), code('PROJECT_UNAVAILABLE'));
   s.tables.hostedProjects.get('project').visibility = 'public';
+  await assert.rejects(sign(s, ['open source']), code('PROJECT_UNAVAILABLE'));
+  s.caller('public-reader');
   assert.equal((await sign(s, ['open source'])).length, 1);
   s.tables.hostedProjects.get('project').removal = 'deleting';
   await assert.rejects(sign(s, ['open source']), code('PROJECT_UNAVAILABLE'));

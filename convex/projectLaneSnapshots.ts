@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
+import { chargeStorage } from './abuseLimits';
 import { makeFunctionReference } from 'convex/server';
 import { mutation, query } from './cliServer';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { accessibleProject, activeProject } from './projectAuthority';
+import { activeProject } from './projectAuthority';
 import { saveLane } from './projectHostedSaveStore';
 import { requireMemberAuthorityById } from './projectLaneAuthority';
 import { presignGet, presignPut, putExpiry, r2Config } from './r2';
@@ -199,6 +200,11 @@ export const prepare = mutation({
           'QUOTA_EXCEEDED',
           `A snapshot may upload at most ${LANE_SNAPSHOT.snapshotBytes} bytes and a Lane may hold ${LANE_SNAPSHOT.laneBytes} snapshot bytes; this one is ${bytes} bytes. Save explicitly to keep this work. Nothing was stored.`,
         );
+      await chargeStorage(
+        ctx,
+        project,
+        request.pack ? [request.pack.size] : request.uploads.map(pin => pin.size),
+      );
       const { seq, store } = await append(ctx, input.projectId, request.laneId, row, {
         kind: 'snapshot',
         actor,
@@ -237,6 +243,7 @@ export const commit = mutation({
   handler: async (ctx, input) => {
     try {
       const actor = await signedIn(ctx);
+      await activeProject(ctx, input.projectId, actor);
       const row = await byOperation(ctx, input.projectId, input.operationId);
       invariant(
         row && row.laneId === input.laneId && row.actor === actor && row.kind === 'snapshot',
@@ -328,6 +335,7 @@ export const restore = mutation({
   handler: async (ctx, input) => {
     try {
       const { actor } = await laneFor(ctx, input.projectId, input.laneId);
+      await activeProject(ctx, input.projectId, actor);
       invariant(/^[0-9a-f]{64}$/.test(input.head), 'BAD_ARGUMENT', 'Name the checkout head.');
       const retried = await byOperation(ctx, input.projectId, input.operationId);
       if (retried) {
@@ -382,7 +390,7 @@ export const purge = mutation({
   handler: async (ctx, input) => {
     try {
       const actor = await signedIn(ctx);
-      await accessibleProject(ctx, input.projectId, actor);
+      await activeProject(ctx, input.projectId, actor);
       await laneFor(ctx, input.projectId, input.laneId);
       const row = await laneRow(ctx, input.projectId, input.laneId);
       if (!row) return canonicalPayload({ laneId: input.laneId, state: 'none', entries: 0 });

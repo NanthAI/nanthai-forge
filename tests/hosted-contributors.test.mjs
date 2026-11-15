@@ -629,7 +629,12 @@ test('email contributor lookup is exact, owner-bound and preserves the existing 
     calls.push(url);
     assert.equal(url.hostname, 'api.clerk.com');
     assert.equal(url.searchParams.get('email_address'), 'person@example.test');
-    return Response.json([{ id: 'third', email_addresses: [{ email_address: 'Person@example.test' }] }]);
+    return Response.json([
+      {
+        id: 'third',
+        email_addresses: [{ email_address: 'Person@example.test', verification: { status: 'verified' } }],
+      },
+    ]);
   };
   s.caller('contributor');
   await assert.rejects(
@@ -641,7 +646,14 @@ test('email contributor lookup is exact, owner-bound and preserves the existing 
   await grants.addByEmail._handler(s.ctx, { projectId: 'project', email: ' Person@example.test ' });
   assert.ok([...s.tables.projectContributors.values()].some(row => row.contributor === 'third'));
   globalThis.fetch = async () =>
-    Response.json([{ id: 'wrong', email_addresses: [{ email_address: 'prefix-person@example.test' }] }]);
+    Response.json([
+      {
+        id: 'wrong',
+        email_addresses: [
+          { email_address: 'prefix-person@example.test', verification: { status: 'verified' } },
+        ],
+      },
+    ]);
   await assert.rejects(
     grants.addByEmail._handler(s.ctx, { projectId: 'project', email: 'person@example.test' }),
     e => e.data.code === 'BAD_ARGUMENT',
@@ -649,7 +661,12 @@ test('email contributor lookup is exact, owner-bound and preserves the existing 
   assert.ok(![...s.tables.projectContributors.values()].some(row => row.contributor === 'wrong'));
   globalThis.fetch = async () => {
     s.tables.hostedProjects.get('project').removal = 'trash';
-    return Response.json([{ id: 'fourth', email_addresses: [{ email_address: 'person@example.test' }] }]);
+    return Response.json([
+      {
+        id: 'fourth',
+        email_addresses: [{ email_address: 'person@example.test', verification: { status: 'verified' } }],
+      },
+    ]);
   };
   await assert.rejects(
     grants.addByEmail._handler(s.ctx, { projectId: 'project', email: 'person@example.test' }),

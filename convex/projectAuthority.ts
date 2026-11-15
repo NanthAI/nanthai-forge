@@ -92,3 +92,24 @@ export async function activeProject(ctx: QueryCtx | MutationCtx, id: Id<'hostedP
   );
   return project;
 }
+
+/** Full Work archives belong to project members, independently of public source visibility. */
+export async function memberProject(ctx: QueryCtx | MutationCtx, id: Id<'hostedProjects'>, actor: string) {
+  const project = await ctx.db.get(id);
+  invariant(
+    project && !project.removal,
+    'PROJECT_UNAVAILABLE',
+    'This Forge project is unavailable with the current account.',
+  );
+  const contributor =
+    project.owner === actor
+      ? true
+      : await ctx.db
+          .query('projectContributors')
+          .withIndex('by_project_and_contributor', q => q.eq('projectId', id).eq('contributor', actor))
+          .unique();
+  invariant(contributor, 'PROJECT_UNAVAILABLE', 'Project membership is required to read full Work archives.');
+  journalProject(ctx, project);
+  projectExecution(ctx, id, project.name, project.key);
+  return project;
+}

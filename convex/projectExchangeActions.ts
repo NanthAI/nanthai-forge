@@ -57,6 +57,7 @@ export const downloadBatch = action({
       const rows: ObjectView[] = await ctx.runQuery(internal.projectObjects.resolve, {
         projectId,
         actor,
+        memberOnly: true,
         digests,
       });
       invariant(
@@ -75,7 +76,7 @@ export const downloadBatch = action({
           };
         }),
       );
-      await ctx.runQuery(internal.projectObjects.resolve, { projectId, actor, digests });
+      await ctx.runQuery(internal.projectObjects.resolve, { projectId, actor, memberOnly: true, digests });
       return result;
     } catch (error) {
       return report(error);
@@ -177,7 +178,8 @@ export const checkpoint = action({
     { backupId },
   ): Promise<{ json: string; digest: string; size: number; sourceDigest: string }> => {
     try {
-      const { backup, bytes } = await checkpointBytes(ctx, backupId);
+      const { actor, backup, bytes } = await checkpointBytes(ctx, backupId);
+      await ctx.runQuery(internal.projectBackups.get, { id: backupId, owner: actor });
       return {
         json: bytes.toString('utf8'),
         digest: digest(bytes),
@@ -235,6 +237,7 @@ export const downloadPart = action({
         rows: ObjectView[] = await ctx.runQuery(internal.projectObjects.resolve, {
           projectId,
           actor,
+          memberOnly: true,
           digests: [digest],
         });
       const row = rows[0]!;
@@ -252,9 +255,19 @@ export const downloadPart = action({
         row.size === 0
           ? new ArrayBuffer(0)
           : await projectArchivePart(ctx, row.storageId, row.size, digest, offset, () =>
-              ctx.runQuery(internal.projectObjects.resolve, { projectId, actor, digests: [digest] }),
+              ctx.runQuery(internal.projectObjects.resolve, {
+                projectId,
+                actor,
+                memberOnly: true,
+                digests: [digest],
+              }),
             );
-      await ctx.runQuery(internal.projectObjects.resolve, { projectId, actor, digests: [digest] });
+      await ctx.runQuery(internal.projectObjects.resolve, {
+        projectId,
+        actor,
+        memberOnly: true,
+        digests: [digest],
+      });
       return { data, digest, size: row.size };
     } catch (error) {
       return report(error);

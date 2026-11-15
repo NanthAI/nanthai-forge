@@ -7,6 +7,7 @@ import { loadHistory, mirrorMapping } from './projectHistoryStore';
 import { hostedStartMain } from './projectHostedChannels';
 import { ForgeError } from '../src/errors';
 import { isMember, laneRefs } from './gitServeLaneStore';
+import { downloadSignInMessage } from './projectDownloadAccess';
 import { workerUsage } from './gitServeWorkerStore';
 
 /** Everything one Git smart-HTTP request needs, in one query: the presented Forge
@@ -56,6 +57,7 @@ export const load = internalQuery({
         return { status: 'not-found', signedIn: !!actor };
       throw error;
     }
+    if (!actor) return { status: 'sign-in', message: await downloadSignInMessage(ctx, id, project) };
     let mainHead: string | null = null;
     try {
       mainHead = (await hostedStartMain(ctx, id)).head;

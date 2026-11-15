@@ -48,6 +48,58 @@ export function validateActionsClaims(
   );
   return c;
 }
+type SigningJwk = JsonWebKey & { kid?: string };
+type KeyCache = {
+  keys: SigningJwk[];
+  fetchedAt: number;
+  attemptedAt: number;
+  pending?: Promise<void>;
+  error?: unknown;
+};
+// One fixed-issuer cache per transport. Injected test transports never share provider keys.
+const keyCaches = new WeakMap<typeof networkFetch, KeyCache>();
+async function signingJwk(kid: string, request: typeof networkFetch, now: number) {
+  let cache = keyCaches.get(request);
+  if (!cache) {
+    cache = { keys: [], fetchedAt: -Infinity, attemptedAt: -Infinity };
+    keyCaches.set(request, cache);
+  }
+  const matching = () =>
+    cache.keys.find(key => key.kid === kid && key.kty === 'RSA' && key.alg === 'RS256' && key.use === 'sig');
+  if (now >= cache.fetchedAt && now - cache.fetchedAt < 600_000 && matching()) return matching()!;
+  if (!cache.pending && (now < cache.attemptedAt || now - cache.attemptedAt >= 60_000)) {
+    cache.attemptedAt = now;
+    cache.pending = (async () => {
+      const response = await request(`${actionsIssuer}/.well-known/jwks`, {
+        redirect: 'error',
+        signal: networkTimeout(10_000),
+      });
+      invariant(
+        response.ok,
+        response.status === 429 || response.status >= 500 ? 'RUNNER_UNAVAILABLE' : 'EVIDENCE_CHANGED',
+        'GitHub OIDC keys unavailable.',
+      );
+      const value = (await response.json()) as { keys: SigningJwk[] };
+      invariant(Array.isArray(value.keys), 'EVIDENCE_CHANGED', 'GitHub OIDC keys unavailable.');
+      cache.keys = value.keys;
+      cache.fetchedAt = now;
+      cache.error = undefined;
+    })()
+      .catch(error => {
+        cache.error = error;
+        throw error;
+      })
+      .finally(() => {
+        delete cache.pending;
+      });
+  }
+  if (cache.pending) await cache.pending;
+  if (cache.error) throw cache.error;
+  const key = now >= cache.fetchedAt && now - cache.fetchedAt < 600_000 ? matching() : undefined;
+  invariant(key, 'EVIDENCE_CHANGED', 'GitHub OIDC signing key unavailable.');
+  return key;
+}
+
 /** Fixed issuer/key URL only; an untrusted JWT never chooses a network target. */
 export async function verifyActionsOidc(
   token: string,
@@ -68,20 +120,7 @@ export async function verifyActionsOidc(
     { audience },
     now,
   );
-  const response = await request(`${actionsIssuer}/.well-known/jwks`, {
-    redirect: 'error',
-    signal: networkTimeout(10_000),
-  });
-  invariant(
-    response.ok,
-    response.status === 429 || response.status >= 500 ? 'RUNNER_UNAVAILABLE' : 'EVIDENCE_CHANGED',
-    'GitHub OIDC keys unavailable.',
-  );
-  const keys = (await response.json()) as { keys: (JsonWebKey & { kid?: string })[] };
-  const jwk = keys.keys.find(
-    key => key.kid === header.kid && key.kty === 'RSA' && key.alg === 'RS256' && key.use === 'sig',
-  );
-  invariant(jwk, 'EVIDENCE_CHANGED', 'GitHub OIDC signing key unavailable.');
+  const jwk = await signingJwk(header.kid, request, now);
   const key = await crypto.subtle.importKey(
     'jwk',
     jwk,

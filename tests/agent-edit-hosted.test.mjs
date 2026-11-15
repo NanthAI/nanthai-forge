@@ -49,6 +49,7 @@ test('hosted first writes carry no overlap notices: no call before the board, th
   process.env.XDG_CONFIG_HOME = join(root, 'config');
   process.env.XDG_STATE_HOME = join(root, 'state');
   testDeploymentOrigin(server.url);
+  testDeploymentOrigin('https://example.test');
   const a = join(root, 'a'),
     b = join(root, 'b');
   hostedMarker(a, server.url, laneA);

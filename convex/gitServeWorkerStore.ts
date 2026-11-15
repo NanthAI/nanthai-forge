@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
+import { invariant } from '../src/errors';
 import { internalMutation, type QueryCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { historyChunk } from './projectHistoryFields';
@@ -49,14 +50,27 @@ export function overCap(usage: { project: Usage; all: Usage }, bytes: number) {
 /** Counts one served pack before its bytes flow; refuses past a cap. A retried unknown
  * outcome can count a pack twice, which errs toward the cap. */
 export const reserve = internalMutation({
-  args: { projectId: v.id('hostedProjects'), bytes: v.number() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    bytes: v.number(),
+  },
   returns: v.union(v.null(), v.object({ code: v.string(), message: v.string() })),
   handler: async (ctx, { projectId, bytes }) => {
+    invariant(
+      Number.isSafeInteger(bytes) && bytes >= 0,
+      'BAD_ARGUMENT',
+      'Reserve the exact pack byte count.',
+    );
     const day = usageDay();
-    const refused = overCap(await workerUsage(ctx, projectId), bytes);
+    const scopes = [projectId as string, '*'];
+    const rows = new Map(
+      await Promise.all(scopes.map(async scope => [scope, await usageRow(ctx, scope, day)] as const)),
+    );
+    const usage = (scope: string) => rows.get(scope) ?? { packs: 0, bytes: 0 };
+    const refused = overCap({ project: usage(projectId), all: usage('*') }, bytes);
     if (refused) return refused;
-    for (const scope of [projectId as string, '*']) {
-      const row = await usageRow(ctx, scope, day);
+    for (const scope of scopes) {
+      const row = rows.get(scope);
       if (row) await ctx.db.patch(row._id, { packs: row.packs + 1, bytes: row.bytes + bytes });
       else {
         await ctx.db.insert('gitWorkerUsage', { scope, day, packs: 1, bytes });

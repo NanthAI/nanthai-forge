@@ -404,11 +404,12 @@ test('issuer reconfiguration cannot widen a device scope or bypass revocation/br
   );
 });
 
-test('device-login starts are limited per minute and a limited start writes nothing', async t => {
+test('device-login defaults to 120 starts per minute and a limited start writes nothing', async t => {
   const s = fixture(t),
     { perMinute } = store.deviceStartLimit;
+  assert.equal(perMinute, 120);
   const first = await start(s);
-  for (let i = 1; i < perMinute; i++) await start(s);
+  for (let i = 1; i < 120; i++) await start(s);
   assert.equal(s.tables.deviceCodes.size, perMinute);
   const limited = await actions.start._handler(s.ctx, {
     operationId: randomUUID(),
@@ -435,7 +436,8 @@ test('device-login starts are limited per minute and a limited start writes noth
   assert.equal(response.headers.get('Cache-Control'), 'no-store');
   assert.equal((await response.json()).error, 'slow_down');
   // Starts older than a minute no longer count.
-  for (const row of s.tables.deviceCodes.values()) row._creationTime -= 61_000;
+  const nextMinute = Date.now() + 61_000;
+  t.mock.method(Date, 'now', () => nextMinute);
   assert.match((await start(s)).flow.user_code, /^[A-Z2-9]{5}-[A-Z2-9]{5}$/);
 });
 
@@ -462,4 +464,21 @@ test('device-login start rejects device names longer than 80 characters', async 
   await assert.rejects(start(s, { name: '   ' }), rejected('BAD_ARGUMENT'));
   assert.equal(s.tables.deviceCodes.size, 0);
   assert.equal((await start(s, { name: 'n'.repeat(80) })).row.name.length, 80);
+});
+
+test('device starts honor the shared configured budget while retries keep the original flow', async t => {
+  const previous = process.env.FORGE_PUBLIC_ABUSE_BUDGETS;
+  process.env.FORGE_PUBLIC_ABUSE_BUDGETS = JSON.stringify({
+    deviceStartsPerMinute: 2,
+  });
+  t.after(() => {
+    if (previous === undefined) delete process.env.FORGE_PUBLIC_ABUSE_BUDGETS;
+    else process.env.FORGE_PUBLIC_ABUSE_BUDGETS = previous;
+  });
+  const s = fixture(t),
+    first = await start(s);
+  await start(s);
+  assert.equal((await start(s)).flow.error, 'slow_down');
+  assert.equal(s.tables.deviceCodes.size, 2);
+  assert.equal((await actions.start._handler(s.ctx, first.input)).device_code, first.flow.device_code);
 });

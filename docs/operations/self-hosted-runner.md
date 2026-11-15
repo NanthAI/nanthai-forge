@@ -23,17 +23,16 @@ with `npm ci --ignore-scripts`, then `npm run build:core`. No fixed Node path,
 GitHub account, launchd, systemd, Keychain, Xcode or macOS sandbox is needed.
 The check's declared command and tools must be available on the runner's PATH, and `git` too when the project has submodules ([submodules in checks](github-actions-checks.md#submodules-in-checks)); the container image includes it. This runner fetches public submodules only: private and relative-URL submodules refuse with a message naming the alternatives.
 
-Use the existing owner sign-in (`nforge login "$DEPLOYMENT_URL"`) or inject
-`FORGE_AUTH_TOKEN` through your service's secret facility. No collector key file
-is needed: registration authenticates the project owner, verifies the exact
-configured machine/runtime/environment and returns this machine's own signing key,
-derived on the backend from the deployment key (`FORGE_HOSTED_CHECK_KEY_<ID>`) for
-this one project and machine. Nothing new is stored; the worker keeps the derived
-key in memory only, and it is refused for any other project or machine. Output,
-heartbeat and result calls must also come from the signed-in project owner who
-registered the machine. The deployment key itself never leaves the backend. An
-older deployment that does not issue machine keys still reads the legacy
-`FORGE_HOSTED_CHECK_KEY_FILE` (owner-only mode 600) or `FORGE_HOSTED_CHECK_KEY_<ID>`.
+Registration and signing-key issuance require the owner person’s browser identity;
+a device credential from `nforge login` cannot register a machine or reconcile a registration
+to retrieve its key. The registration API verifies the exact configured machine/runtime/
+environment and returns only that machine’s derived signing key. Existing registered runner
+operation (work, control, heartbeat and callbacks) retains its account and signature checks.
+The current terminal worker registers at startup, so it requires person registration
+provisioning before it can start with a device credential. Deployment operators must account
+for this release boundary before restarting machine runners. The deployment signing key
+never leaves the backend.
+
 Project children receive neither collector key nor account token.
 
 Choose a stable machine UUID (for example `node -p 'crypto.randomUUID()'`) and

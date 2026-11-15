@@ -17,7 +17,7 @@ const { runnerStateSource } = await import(moduleUrl('../convex/projectStateSour
 export async function physicalStateSourceFixture(
   t,
   count,
-  { rawTail = 0, fragmented = false, protocol } = {},
+  { rawTail = 0, fragmented = false, protocol, clientActor = 'owner' } = {},
 ) {
   const files = [],
     entries = [],
@@ -140,7 +140,7 @@ export async function physicalStateSourceFixture(
   }
   const calls = [],
     ctx = {
-      auth: { getUserIdentity: async () => ({ subject: 'owner' }) },
+      auth: { getUserIdentity: async () => ({ subject: clientActor }) },
       runMutation: async (ref, args) => {
         const name = getFunctionName(ref);
         calls.push({ name, args });
@@ -152,7 +152,7 @@ export async function physicalStateSourceFixture(
           projectSourcePacks: packs,
         }[module];
         assert(owner, name);
-        return s.transaction('physical-' + name, owner[method], args);
+        return s.transaction('physical-' + name, owner[method], args, clientActor);
       },
     };
   // Reference construction is shared with production rather than relying on a fixture object's shape.

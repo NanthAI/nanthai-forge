@@ -494,7 +494,7 @@ audit, including docs-only pushes that may supersede an unfinished code audit.
 Pull requests and manual runs each
 keep their own group. Eight test shards keep one full audit well inside the org's concurrent-job
 allowance while preserving the full suite and every static stage.
-Separately, `.github/workflows/web-deploy.yml` builds the web app and deploys it to the dev Netlify site on pushes to main that touch web, source, docs or package files.
+Separately, `.github/workflows/web-deploy.yml` builds the web app and deploys it to the dev Netlify site on pushes to main that touch web, source, docs or package files. The Netlify CLI is an exact development dependency pinned with its full dependency tree in `package-lock.json`; the workflow installs with `npm ci --ignore-scripts` and invokes `npx --no-install netlify`. The deploy token is present only for the deploy step.
 
 ## Code map
 

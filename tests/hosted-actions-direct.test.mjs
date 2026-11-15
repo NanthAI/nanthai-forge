@@ -2614,14 +2614,17 @@ test('transient OIDC key lookup and service failures return safe infrastructure 
         body: JSON.stringify({ ...s.id, command: { kind: 'session' } }),
       }),
     );
+  let clock = Date.now() + 600001;
+  t.mock.method(Date, 'now', () => clock);
+  const mockedFetch = t.mock.method(globalThis, 'fetch', async () => jwks());
   for (const status of [429, 503]) {
-    t.mock.method(globalThis, 'fetch', async () => new Response('private-provider-body', { status }));
+    mockedFetch.mock.mockImplementation(async () => new Response('private-provider-body', { status }));
     const response = await send({ runMutation: () => assert.fail('unavailable keys cannot authorize') });
     assert.equal(response.status, 503);
     assert.doesNotMatch(await response.text(), /private-provider-body/);
-    t.mock.restoreAll();
+    clock += 60001;
   }
-  t.mock.method(globalThis, 'fetch', async () => jwks());
+  mockedFetch.mock.mockImplementation(async () => jwks());
   const response = await send({
     runMutation: () => {
       throw new Error('private-service-error');
@@ -3494,4 +3497,27 @@ test('provider cancellation in the jobs fallback keeps ordinary cancellation sem
   const run = await s.status(s.run.id);
   assert.equal(run.status, 'cancelled');
   assert.match(run.failureReason, /provider cancelled/);
+});
+
+test('OIDC key refresh is shared, expires after ten minutes and unknown keys cannot force repeated fetches', async () => {
+  const now = Date.now(),
+    requestCalls = [];
+  const request = async url => {
+    requestCalls.push(url);
+    return jwks();
+  };
+  const token = oidc(claims({ exp: now / 1000 + 7200 }));
+  await Promise.all([
+    verifyActionsOidc(token, audience, request, now),
+    verifyActionsOidc(token, audience, request, now),
+  ]);
+  assert.equal(requestCalls.length, 1);
+  const [header, payload, signature] = token.split('.');
+  const unknown = `${Buffer.from(JSON.stringify({ alg: 'RS256', kid: 'unknown' })).toString('base64url')}.${payload}.${signature}`;
+  await assert.rejects(verifyActionsOidc(unknown, audience, request, now + 1000), code('EVIDENCE_CHANGED'));
+  assert.equal(requestCalls.length, 1);
+  await assert.rejects(verifyActionsOidc(unknown, audience, request, now + 60001), code('EVIDENCE_CHANGED'));
+  assert.equal(requestCalls.length, 2);
+  await verifyActionsOidc(token, audience, request, now + 60001 + 600001);
+  assert.equal(requestCalls.length, 3);
 });

@@ -185,3 +185,17 @@ test('Git analysis shares Forge rules, re-includes Git-ignored source and preser
   );
   assert.deepEqual([...snapshot.content.keys()], ['keep.tmp.ts', 'public.ts']);
 });
+
+test(
+  'ignored nonportable entries do not block capture, while including them still refuses',
+  { skip: process.platform === 'win32' ? 'POSIX can create the retained nonportable fixture name' : false },
+  t => {
+    const root = fixture(t);
+    put(root, 'source.ts', 'export const value = 1;');
+    put(root, 'trailing.', 'excluded');
+    put(root, '.forgeignore', 'trailing.\n');
+    assert.deepEqual(nativePaths(root), ['.forgeignore', 'source.ts']);
+    put(root, '.forgeignore', '');
+    assert.throws(() => nativePaths(root), { code: 'UNSAFE_PATH' });
+  },
+);

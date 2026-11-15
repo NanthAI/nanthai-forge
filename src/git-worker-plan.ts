@@ -32,7 +32,7 @@ const unb64url = (text: string) =>
 export const workerTokenKey = (secret: string) =>
   hmac(sha256, utf8ToBytes(secret), utf8ToBytes('forge-git-worker-token-v1'));
 
-/** `p` project id, `c` Forge CLI credential id ('' anonymous), `e` expiry (ms). */
+/** `p` project id, `c` Forge CLI credential id ('' only in legacy anonymous sessions), `e` expiry (ms). */
 export type WorkerSession = { p: string; c: string; e: number };
 export function signWorkerToken(session: WorkerSession, key: Uint8Array) {
   const body = b64url(utf8ToBytes(JSON.stringify(session)));

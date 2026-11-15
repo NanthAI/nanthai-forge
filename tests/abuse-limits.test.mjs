@@ -20,11 +20,14 @@ function firstShard(t) {
 function publicProject(s) {
   s.tables.hostedProjects.get('project').visibility = 'public';
 }
-const sign = (s, digests = []) =>
-  s.transaction(() => downloads.signDownloads._handler(s.ctx, { projectId: 'project', digests }));
+const view = s =>
+  s.transaction(async () => {
+    await downloads.readableProject(s.ctx, 'project');
+    return [];
+  });
 const budgetRows = s => [...s.tables.projectReadBudgets.values()];
 
-test('signed-out signing on a public project stops at its budget with a clear error and signs nothing', async t => {
+test('signed-out viewing of a public project stops at its budget with a clear error and no object IO', async t => {
   const { s } = await setup(t);
   publicProject(s);
   firstShard(t);
@@ -32,7 +35,7 @@ test('signed-out signing on a public project stops at its budget with a clear er
   t.mock.method(Date, 'now', () => at);
   s.caller(undefined);
   const limit = perShard(ANONYMOUS_READ_BUDGET.calls, ANONYMOUS_READ_BUDGET.shards);
-  for (let i = 0; i < limit; i++) assert.deepEqual(await sign(s), []);
+  for (let i = 0; i < limit; i++) assert.deepEqual(await view(s), []);
   s.caller('owner');
   const [stored] = await objects.prepareBatch._handler(s.ctx, {
     projectId: 'project',
@@ -40,7 +43,7 @@ test('signed-out signing on a public project stops at its budget with a clear er
   });
   assert.equal(stored.created, true);
   s.caller(undefined);
-  await assert.rejects(sign(s, [pinOf('kept').digest]), error => {
+  await assert.rejects(view(s), error => {
     assert.ok(code('RATE_LIMITED')(error));
     const message = error.data?.message ?? error.message;
     assert.match(message, /Sign in \(nforge login\) or retry after 55 s\./);
@@ -51,7 +54,7 @@ test('signed-out signing on a public project stops at its budget with a clear er
   assert.equal(budgetRows(s)[0].count, limit);
   // Signed-in readers of the same public project are never counted or refused.
   s.caller('stranger');
-  assert.deepEqual(await sign(s), []);
+  assert.deepEqual(await view(s), []);
   assert.equal(budgetRows(s)[0].count, limit);
 });
 
@@ -63,10 +66,10 @@ test('the signed-out budget resets when its window ends, in place', async t => {
   t.mock.method(Date, 'now', () => now);
   s.caller(undefined);
   const limit = perShard(ANONYMOUS_READ_BUDGET.calls, ANONYMOUS_READ_BUDGET.shards);
-  for (let i = 0; i < limit; i++) await sign(s);
-  await assert.rejects(sign(s), code('RATE_LIMITED'));
+  for (let i = 0; i < limit; i++) await view(s);
+  await assert.rejects(view(s), code('RATE_LIMITED'));
   now += ANONYMOUS_READ_BUDGET.windowMs;
-  assert.deepEqual(await sign(s), []);
+  assert.deepEqual(await view(s), []);
   assert.equal(budgetRows(s).length, 1);
   assert.deepEqual(
     { windowStart: budgetRows(s)[0].windowStart, count: budgetRows(s)[0].count },
@@ -74,50 +77,16 @@ test('the signed-out budget resets when its window ends, in place', async t => {
   );
 });
 
-test('every signed-out read path of a public project shares the budget; private projects write nothing', async t => {
+test('public viewing shares its budget while private view refusals write nothing', async t => {
   const { s } = await setup(t);
   firstShard(t);
   s.caller(undefined);
-  await assert.rejects(sign(s), code('PROJECT_UNAVAILABLE'));
+  await assert.rejects(view(s), code('PROJECT_UNAVAILABLE'));
   assert.equal(budgetRows(s).length, 0);
   publicProject(s);
-  await s.transaction(() => downloads.describe._handler(s.ctx, { projectId: 'project', digests: [] }));
-  await sign(s);
+  await view(s);
+  await view(s);
   assert.equal(budgetRows(s)[0].count, 2);
-});
-
-test('a pack-less signed-out checkout of a 29k-file public project needs three windows', async t => {
-  const { s } = await setup(t);
-  publicProject(s);
-  s.caller(undefined);
-  // Spread calls evenly over the counter shards, so a full window admits exactly `calls`.
-  let call = 0,
-    now = 7 * ANONYMOUS_READ_BUDGET.windowMs;
-  t.mock.method(
-    Math,
-    'random',
-    () => ((call++ % ANONYMOUS_READ_BUDGET.shards) + 0.5) / ANONYMOUS_READ_BUDGET.shards,
-  );
-  t.mock.method(Date, 'now', () => now);
-  // 29,000 files in 100-pin describe pages; a refused page waits for the next window.
-  const pages = 290;
-  let windows = 1;
-  for (let page = 0; page < pages;) {
-    try {
-      await s.transaction(() => downloads.describe._handler(s.ctx, { projectId: 'project', digests: [] }));
-      page++;
-    } catch (error) {
-      assert.ok(code('RATE_LIMITED')(error));
-      now += ANONYMOUS_READ_BUDGET.windowMs;
-      windows++;
-    }
-  }
-  assert.equal(windows, Math.ceil(pages / ANONYMOUS_READ_BUDGET.calls));
-  assert.ok(budgetRows(s).length <= ANONYMOUS_READ_BUDGET.shards);
-  assert.equal(
-    budgetRows(s).reduce((sum, row) => sum + row.count, 0),
-    pages - (windows - 1) * ANONYMOUS_READ_BUDGET.calls,
-  );
 });
 
 const prepare = (s, list, projectId = 'project') =>

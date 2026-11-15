@@ -34,9 +34,7 @@ const planType = 'application/x-forge-git-byte-plan';
 /** Workers Free allows 1,000 reads of Cloudflare services per request. */
 const maxParts = 900;
 const storedKey = /^v1\/p\/[A-Za-z0-9_-]{1,64}\/o\/[0-9a-f]{64}$/;
-/** Request headers passed to the backend. `authorization` is the login git sends after a
- * listing that names a Lane answers 401 on an anonymous session (public projects); the backend
- * checks it like the direct route. */
+/** Request headers passed to the backend; every ref or pack response requires its current login. */
 const forwarded = [
   'content-type',
   'content-encoding',
@@ -51,6 +49,20 @@ export const v2Advertisement = ['version 2', 'agent=forge/1', 'ls-refs', 'fetch'
   .map(line => `${(line.length + 5).toString(16).padStart(4, '0')}${line}\n`)
   .join('')
   .concat('0000');
+/** A hint only for the data-free capability reply, never authority for refs or packs.
+ * The backend validates the session signature and credential on every repository read. */
+function sessionNamesLogin(path: string) {
+  const encoded = /^\/gitw\/([^/.]+)\./.exec(path)?.[1];
+  if (!encoded || encoded.length > 1024) return false;
+  try {
+    const value = JSON.parse(
+      atob(encoded.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - (encoded.length % 4)) % 4)),
+    );
+    return typeof value.c === 'string' && value.c.length > 0;
+  } catch {
+    return false;
+  }
+}
 const v2Request = /(^|[:\s])version=2($|[:\s])/;
 /** Equal to workerViaHeader in src/git-worker-plan.ts (tests/hosted-history.test.mjs). It only
  * lets the direct route answer a large fetch with a byte plan; it grants no access. */
@@ -105,6 +117,7 @@ export default {
     if (!direct && !url.pathname.startsWith('/gitw/')) return plain(404, 'Repository not found.');
     if (request.method !== 'GET' && request.method !== 'POST') return plain(405, 'Method not allowed.');
     if (
+      (request.headers.has('authorization') || (!direct && sessionNamesLogin(url.pathname))) &&
       request.method === 'GET' &&
       url.pathname.endsWith('/info/refs') &&
       url.searchParams.get('service') === 'git-upload-pack' &&
@@ -128,7 +141,10 @@ export default {
       redirect: 'manual',
       // A fetch whose joined trailer is not cached yet hashes the pack first (seconds).
       signal: AbortSignal.timeout(5 * 60_000),
-      ...(request.method === 'POST' ? { body: await request.arrayBuffer() } : {}),
+      ...(request.method === 'POST' &&
+      (headers.has('authorization') || (!direct && sessionNamesLogin(url.pathname)))
+        ? { body: await request.arrayBuffer() }
+        : {}),
     });
     if (!(upstream.headers.get('content-type') ?? '').toLowerCase().startsWith(planType)) return upstream;
     const plan = checkedPlan(await upstream.json());

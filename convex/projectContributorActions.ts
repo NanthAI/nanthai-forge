@@ -8,6 +8,7 @@ import { caller } from './projectWorkActions';
 import { personByEmail, findPersonByEmail } from './projectPeople';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { requestMemberApproval } from './projectMemberRequest';
 export const add = action({
   args: { projectId: v.id('hostedProjects'), contributor: v.string() },
   returns: v.null(),
@@ -16,6 +17,7 @@ export const add = action({
       const owner = await caller(ctx);
       await ctx.runQuery(internal.projectWork.owner, { projectId, owner });
       contributor = await checkForgeUser(contributor);
+      if (await requestMemberApproval(ctx, projectId, { kind: 'contributor', contributor })) return null;
       return await ctx.runMutation(internal.projectContributors.add, { projectId, owner, contributor });
     } catch (error) {
       return report(error);
@@ -32,6 +34,8 @@ export const addByEmail = action({
       const owner = await caller(ctx);
       await ctx.runQuery(internal.projectWork.owner, { projectId, owner });
       const person = await personByEmail(email);
+      if (await requestMemberApproval(ctx, projectId, { kind: 'contributor', contributor: person.id }))
+        return null;
       return await ctx.runMutation(internal.projectContributors.add, {
         projectId,
         owner,
@@ -79,17 +83,45 @@ export const invitePerson = action({
           handle: person.trim().slice(1).toLowerCase(),
         });
         invariant(account, 'BAD_ARGUMENT', 'No Forge account has that handle.');
+        if (
+          await requestMemberApproval(
+            ctx,
+            projectId,
+            { kind: 'invite', person, operationId, contributor: account.owner },
+            operationId,
+          )
+        )
+          return null;
         return await ctx.runMutation(internal.projectContributors.invite, {
           ...request,
           contributor: account.owner,
         });
       }
       const account = await findPersonByEmail(person);
-      if (account)
+      if (account) {
+        if (
+          await requestMemberApproval(
+            ctx,
+            projectId,
+            { kind: 'invite', person, operationId, contributor: account.id },
+            operationId,
+          )
+        )
+          return null;
         return await ctx.runMutation(internal.projectContributors.invite, {
           ...request,
           contributor: account.id,
         });
+      }
+      if (
+        await requestMemberApproval(
+          ctx,
+          projectId,
+          { kind: 'invite', person, operationId, email: person },
+          operationId,
+        )
+      )
+        return null;
       return await ctx.runMutation(internal.projectContributors.invite, {
         ...request,
         email: person.trim().toLowerCase(),

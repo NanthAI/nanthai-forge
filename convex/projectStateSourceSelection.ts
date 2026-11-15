@@ -8,7 +8,8 @@ import { scopedRecheckBase, scopedRecheckPairs } from '../src/scoped-recheck-pol
 import { selectedSourcePacks } from './projectSourcePackStore';
 import { findStoredObject as findObject } from './projectObjectFind';
 import { isStored } from './projectObjectFields';
-import { readableProject, describeObjects } from './projectObjectDownloads';
+import { describeObjects } from './projectObjectDownloads';
+import { downloadProject } from './projectDownloadAccess';
 import { blobStore } from './blobStore';
 import { sourceObjectLocation } from './projectSourceBeginReads';
 import { invariant } from '../src/errors';
@@ -75,7 +76,7 @@ export const client = internalMutation({
   },
   returns: v.string(),
   handler: async (ctx, input) => {
-    const project = await readableProject(ctx, input.projectId, !input.recheck);
+    const project = await downloadProject(ctx, input.projectId);
     requireSourceProtocol(project, input.version);
     return selection(ctx, input.projectId, input.state, true);
   },
@@ -84,5 +85,5 @@ export const client = internalMutation({
 export const catalog = internalMutation({
   args: { projectId: v.id('hostedProjects'), digests: v.array(v.string()), runs: v.optional(v.boolean()) },
   returns: v.any(),
-  handler: (ctx, input) => describeObjects(ctx, { ...input, signed: true }, 500, false),
+  handler: (ctx, input) => describeObjects(ctx, { ...input, signed: true }, 500),
 });

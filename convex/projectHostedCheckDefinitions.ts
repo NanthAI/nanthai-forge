@@ -144,6 +144,7 @@ export async function saveCheckSetting(
   return canonicalPayload(result);
 }
 const settingLabel: Record<SettingOrigin, string> = {
+  membership: 'Project membership',
   policy: 'Policy',
   'check-definition': 'Check definition',
   'check-import': 'Check definition import',

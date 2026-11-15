@@ -5,7 +5,7 @@ import { action, mutation } from './cliServer';
 import { internalMutation, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { latestSourcePack } from './projectSourcePackStore';
-import { readableProject } from './projectObjectDownloads';
+import { downloadProject } from './projectDownloadAccess';
 import { activeProject } from './projectAuthority';
 import { hostedStartMain } from './projectHostedChannels';
 import { reserveSourcePack, promoteSourcePack, sourcePackFlow } from './projectSourcePacks';
@@ -20,7 +20,7 @@ export const latest = mutation({
   returns: v.any(),
   handler: async (ctx, { projectId }) => {
     try {
-      await readableProject(ctx, projectId);
+      await downloadProject(ctx, projectId);
       return await latestSourcePack(ctx, projectId);
     } catch (error) {
       return report(error);

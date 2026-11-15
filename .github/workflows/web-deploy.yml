@@ -59,7 +59,7 @@ jobs:
           VITE_CONVEX_SITE_URL: ${{ vars.VITE_CONVEX_SITE_URL }}
           VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.VITE_CLERK_PUBLISHABLE_KEY }}
       - name: Deploy to the dev site
-        run: npx --yes netlify-cli@27.16.1 deploy --prod --no-build --dir hosted-web-dist --site "$NETLIFY_SITE_ID"
+        run: npx --no-install netlify deploy --prod --no-build --dir hosted-web-dist --site "$NETLIFY_SITE_ID"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ vars.NETLIFY_SITE_ID }}

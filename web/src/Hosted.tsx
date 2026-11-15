@@ -370,6 +370,15 @@ export function Explorer({
               subscribeStatus,
               back,
               download,
+              ...(!signedIn
+                ? {
+                    downloadSignIn: (
+                      <SignInButton mode="modal">
+                        <button>Sign in to download</button>
+                      </SignInButton>
+                    ),
+                  }
+                : {}),
               canRefresh: job.canRefresh,
               zone: job.zone,
               ...(identity && !zone

@@ -1,5 +1,9 @@
 # Use Forge as an agent's source repository
 
+Cloning, fetching and source downloads require `nforge login`, including public projects.
+Public web pages and rendered file views stay open; a project's GitHub mirror is the
+anonymous clone route when available.
+
 Use Node 24.22.1+ (24.x). `nforge agent --help` lists verbs;
 `nforge agent ROOT VERB [--MODE] --help` lists parameters. Use
 `--command-file FILE` for awkward JSON. The package ships optional,

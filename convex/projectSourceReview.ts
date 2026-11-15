@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
 import { action, type ActionCtx } from './cliServer';
 import { internal, api } from './_generated/api';
@@ -19,7 +20,17 @@ async function checkpoint(
   projectId: Id<'hostedProjects'>,
   backupId: Id<'projectBackups'>,
   actor: string,
-) {
+  view?: { recheck: boolean; digests: string[] },
+): Promise<Doc<'projectBackups'> & { viewPins?: { sha256: string; size: number }[] | null }> {
+  if (view) {
+    const result: { backup: Doc<'projectBackups'>; pins: { sha256: string; size: number }[] | null } =
+      await ctx.runMutation(makeFunctionReference<'mutation'>('projectSourceReviewStore:checkpoint'), {
+        projectId,
+        backupId,
+        ...view,
+      });
+    return { ...result.backup, viewPins: result.pins };
+  }
   const value: { backup: Doc<'projectBackups'>; project: Doc<'hostedProjects'> } = await ctx.runQuery(
     internal.projectBackups.get,
     { id: backupId, owner: actor },
@@ -40,14 +51,21 @@ type ReviewInput = {
   head: string;
   file?: string;
   map?: boolean;
+  submodules?: boolean;
   beforeOffset?: number;
   afterOffset?: number;
   line?: number;
   anchor?: SourceAnchor;
 };
-export async function readSourceReview(ctx: ActionCtx, input: ReviewInput, actor: string) {
+export async function readSourceReview(ctx: ActionCtx, input: ReviewInput, actor: string, viewOnly = false) {
   const started = performance.now();
-  const backup = await checkpoint(ctx, input.projectId, input.backupId, actor);
+  const backup = await checkpoint(
+    ctx,
+    input.projectId,
+    input.backupId,
+    actor,
+    viewOnly ? { recheck: false, digests: [input.base, input.head] } : undefined,
+  );
   if (backup.transport !== 'objects' || backup.preview.format !== 'native') {
     invariant(
       !input.anchor,
@@ -60,18 +78,25 @@ export async function readSourceReview(ctx: ActionCtx, input: ReviewInput, actor
         'This checkpoint uses a source archive. Its existing download contains source and Work for local review.',
     };
   }
-  const indexed = await indexedReviewBytes(ctx, backup, actor);
+  const indexed = await indexedReviewBytes(ctx, backup, actor, backup.viewPins);
   if (indexed) {
     try {
       const result = await readNativeSourceReviewBytes(input.base, input.head, indexed, {
         file: input.file,
         map: input.map,
+        submodules: input.submodules,
         beforeOffset: input.beforeOffset,
         afterOffset: input.afterOffset,
         line: input.line,
         anchor: input.anchor,
       });
-      const final = await checkpoint(ctx, input.projectId, input.backupId, actor);
+      const final = await checkpoint(
+        ctx,
+        input.projectId,
+        input.backupId,
+        actor,
+        viewOnly ? { recheck: true, digests: [] } : undefined,
+      );
       invariant(
         final.digest === backup.digest && final.preview.manifestDigest === backup.preview.manifestDigest,
         'SOURCE_CHANGED',
@@ -120,18 +145,25 @@ export async function readSourceReview(ctx: ActionCtx, input: ReviewInput, actor
     input.base,
     input.head,
     read,
-    input.file === undefined && !input.map
+    input.file === undefined && !input.map && !input.submodules
       ? undefined
       : {
           ...(input.file === undefined ? {} : { file: input.file }),
           ...(input.map ? { map: true } : {}),
+          ...(input.submodules ? { submodules: true } : {}),
           beforeOffset: input.beforeOffset,
           afterOffset: input.afterOffset,
           line: input.line,
           anchor: input.anchor,
         },
   );
-  const final = await checkpoint(ctx, input.projectId, input.backupId, actor);
+  const final = await checkpoint(
+    ctx,
+    input.projectId,
+    input.backupId,
+    actor,
+    viewOnly ? { recheck: true, digests: [] } : undefined,
+  );
   invariant(
     final.digest === backup.digest && final.preview.manifestDigest === backup.preview.manifestDigest,
     'SOURCE_CHANGED',
@@ -153,6 +185,8 @@ export const read = action({
     head: v.string(),
     file: v.optional(v.string()),
     map: v.optional(v.boolean()),
+    submodules: v.optional(v.boolean()),
+    render: v.optional(v.boolean()),
     beforeOffset: v.optional(v.number()),
     afterOffset: v.optional(v.number()),
     line: v.optional(v.number()),
@@ -160,7 +194,16 @@ export const read = action({
   returns: v.string(),
   handler: async (ctx, input): Promise<string> => {
     try {
-      // Browser callers receive only a checkpoint plan. They verify/download objects directly,
+      if (input.render) {
+        invariant(
+          [input.base, input.head].every(id => /^[a-f0-9]{64}$/.test(id)),
+          'BAD_ARGUMENT',
+          'Select exact source State identities.',
+        );
+        const user = await ctx.auth.getUserIdentity();
+        return JSON.stringify(await readSourceReview(ctx, input, user?.subject ?? '', true));
+      }
+      // Signed-in browser callers receive a checkpoint plan. They verify objects directly,
       // including Convex rows; server-only anchor validation still uses readSourceReview above.
       return await ctx.runMutation(api.projectObjectDownloads.source, {
         projectId: input.projectId,

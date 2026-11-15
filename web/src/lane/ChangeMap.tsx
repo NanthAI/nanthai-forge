@@ -3,7 +3,7 @@ import { readBrowserSource } from '../browser-source';
 import { useReadRetry } from '../ui/read-retry';
 import { ErrorToast } from '../ui/Toast';
 import { useEffect, useState, useRef } from 'react';
-import { useConvex } from 'convex/react';
+import { useConvexAuth, useConvex } from 'convex/react';
 import type { ChangeMapData } from '../../../src/change-map';
 import { hostedError } from '../snapshot';
 import { createPortal } from 'react-dom';
@@ -23,19 +23,24 @@ type Props = {
 type Read = (base: string, head: string, id: string, map: boolean) => Promise<ChangeMapData | string[]>;
 export default function ChangeMap(props: Props) {
   const client = useConvex();
+  const { isAuthenticated } = useConvexAuth();
   return (
     <MapPanel
       {...props}
       read={async (base, head, _id, map) => {
         let raw: string;
         try {
-          raw = await readBrowserSource(client, {
-            projectId: props.source.projectId!,
-            backupId: props.source.backupId!,
-            base,
-            head,
-            ...(map ? { map: true } : {}),
-          });
+          raw = await readBrowserSource(
+            client,
+            {
+              projectId: props.source.projectId!,
+              backupId: props.source.backupId!,
+              base,
+              head,
+              ...(map ? { map: true } : {}),
+            },
+            !isAuthenticated,
+          );
         } catch (error) {
           if (map && /extra field [`']?map|map.*not.*validator/i.test((error as Error).message))
             throw new Error('Map reader is not available on this server yet.');
@@ -200,18 +205,23 @@ function MapPanel({ source, selected, select, read, showDiff, toolbar }: Props &
 
 function MapDiff({ source, node }: { source: MapSource; node: ChangeMapData['nodes'][number] }) {
   const client = useConvex();
+  const { isAuthenticated } = useConvexAuth();
   return (
     <SelectedDiff
       node={node}
       load={async () => {
         const value = JSON.parse(
-          await readBrowserSource(client, {
-            projectId: source.projectId!,
-            backupId: source.backupId!,
-            base: source.base,
-            head: source.head,
-            file: node.id,
-          }),
+          await readBrowserSource(
+            client,
+            {
+              projectId: source.projectId!,
+              backupId: source.backupId!,
+              base: source.base,
+              head: source.head,
+              file: node.id,
+            },
+            !isAuthenticated,
+          ),
         );
         if (!value.available) throw new Error(value.reason);
         return value.comparison;

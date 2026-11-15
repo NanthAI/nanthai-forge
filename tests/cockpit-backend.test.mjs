@@ -474,6 +474,6 @@ test('unavailable derived ancestry leaves retained Work readable and cannot bypa
   s.caller('outsider');
   await assert.rejects(
     sourceParents(s.ctx, snapshot.backup, snapshot.manifest, snapshot.data, 'outsider'),
-    /unavailable/,
+    error => error.data?.code === 'PROJECT_UNAVAILABLE',
   );
 });

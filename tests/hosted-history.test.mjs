@@ -655,6 +655,23 @@ const run = promisify(execFile);
 const gitEnv = { ...env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS: '' };
 const client = (args, cwd) =>
   run('git', ['-c', 'credential.helper=', ...args], { env: gitEnv, cwd, maxBuffer: 64 << 20 });
+function readerClient(s) {
+  const token = credentialFor(s, 'public-reader-control', 'public-reader');
+  const headers = { authorization: `Bearer ${token}` };
+  const signed = (args, cwd) =>
+    client(['-c', `http.extraHeader=Authorization: Bearer ${token}`, ...args], cwd);
+  return {
+    client: signed,
+    headers,
+    refused: async (args, pattern) => {
+      const error = await signed(args).then(
+        () => assert.fail('Git must refuse this request'),
+        error => error,
+      );
+      assert.match(String(error.stderr), pattern);
+    },
+  };
+}
 const refused = async (args, pattern) => {
   const error = await client(args).then(
     () => assert.fail(`git ${args[0]} should fail`),
@@ -743,12 +760,13 @@ test('stock git clones and fetches a public project from Forge with GitHub commi
   publish(s, projectId);
   await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
   const host = await gitHost(t, s);
+  const { client, refused } = readerClient(s);
   const url = `${host.base}/git/${projectId}.git`;
   const work = scratch(t, 'forge-git-clone-');
   let before = host.snapshot();
   await client(['clone', '-q', url, join(work, 'one')]);
   assert.equal(log(join(work, 'one')), log(source.repo), 'same commits, same ids as the source');
-  // Anonymous clone: info/refs, ls-refs, fetch; one query each, no mutation or action.
+  // Signed-in public reader clone: info/refs, ls-refs, fetch; one query each, no mutation or action.
   assert.deepEqual(host.since(before), { http: 3, query: 3, mutation: 0, action: 0 });
   before = host.snapshot();
   const noop = await client(['fetch', '-v'], join(work, 'one'));
@@ -882,6 +900,7 @@ test('a mirrored project without imported history seeds it once from the mirror;
     sourceAuthority: { mode: 'server', epoch: 1 },
   });
   const host = await gitHost(t, s);
+  const { client, refused } = readerClient(s);
   const work = scratch(t, 'forge-git-seed-');
   const url = `${host.base}/git/${projectId}.git`;
   await refused(['clone', url, join(work, 'none')], /GIT_HISTORY_UNAVAILABLE/);
@@ -976,6 +995,7 @@ test('pack selection, joining, gzip requests and the main gap are explicit', asy
   publish(s, projectId);
   await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
   const host = await gitHost(t, s);
+  const { headers: readerHeaders } = readerClient(s);
   const haves = Array.from({ length: 40 }, (_, i) =>
     protocol.pkt(`have ${i.toString(16).padStart(40, '0')}\n`),
   );
@@ -991,7 +1011,7 @@ test('pack selection, joining, gzip requests and the main gap are explicit', asy
   const before = host.snapshot();
   const reply = await host.handle(`/git/${projectId}.git/git-upload-pack`, {
     method: 'POST',
-    headers: { 'git-protocol': 'version=2', 'content-encoding': 'gzip' },
+    headers: { ...readerHeaders, 'git-protocol': 'version=2', 'content-encoding': 'gzip' },
     body: gzipSync(body),
   });
   const bytes = Buffer.from(await reply.arrayBuffer());
@@ -1057,6 +1077,7 @@ test('clones over the response limit go through the Worker: v2 framed once, v0 r
   const projectId = await importedProject(f, source.head);
   publish(s, projectId);
   const host = await gitHost(t, s);
+  const { client, refused, headers: readerHeaders } = readerClient(s);
   // The Worker reaches the local Convex host; the fixture's fetch refuses other hosts.
   const fixtureFetch = globalThis.fetch;
   globalThis.fetch = (url, init) =>
@@ -1153,7 +1174,7 @@ test('clones over the response limit go through the Worker: v2 framed once, v0 r
   // Without the Worker's header the direct route streams the pack itself, as before.
   const streamed = await host.handle(`/git/${projectId}.git/git-upload-pack`, {
     method: 'POST',
-    headers: { 'git-protocol': 'version=2' },
+    headers: { ...readerHeaders, 'git-protocol': 'version=2' },
     body: protocol.concatBytes([
       protocol.pkt('command=fetch\n'),
       protocol.delimPkt,
@@ -1260,7 +1281,7 @@ test('a Worker session rechecks the credential and current access on every reque
   const advertised = Buffer.from(await ok.arrayBuffer()).toString('latin1');
   assert.match(advertised, new RegExp(`${source.head} HEAD`));
   assert.doesNotMatch(advertised, /side-band/, 'raw pack: the Worker never frames bytes');
-  assert.equal((await host.handle(refs(sign('')))).status, 404, 'anonymous session on a private project');
+  assert.equal((await host.handle(refs(sign('')))).status, 401, 'anonymous session on a private project');
   assert.equal((await host.handle(refs(sign('cred-owner', Date.now() - 1)))).status, 403, 'expired');
   const other = plan.signWorkerToken({ p: 'another', c: 'cred-owner', e: Date.now() + 60_000 }, key);
   assert.equal((await host.handle(refs(other))).status, 403, 'a session names one project');
@@ -1273,7 +1294,7 @@ test('a Worker session rechecks the credential and current access on every reque
     });
   const listed = await lsRefs(sign('cred-owner'));
   assert.match(Buffer.from(await listed.arrayBuffer()).toString('latin1'), new RegExp(`${source.head} HEAD`));
-  assert.equal((await lsRefs(sign(''))).status, 404, 'v2 anonymous session on a private project');
+  assert.equal((await lsRefs(sign(''))).status, 401, 'v2 anonymous session on a private project');
   // Git cloned the Worker's own address (Issue ae7ceb1b): the header the Worker adds only picks
   // byte plans; access is the direct route's, from the presented login, on every request.
   const viaWorker = authorization =>
@@ -1448,7 +1469,7 @@ test('members fetch Lane refs as built commits; git diff main...lane equals the 
   await client(['clone', '-q', url(owner), repo]);
   let before = host.snapshot();
   await client(['fetch', '-q', 'origin', `${ref}:refs/remotes/origin/lane`], repo);
-  // info/refs, ls-refs (401: git then sends the token), ls-refs with the build, fetch.
+  // info/refs challenges once, then the authenticated advertisement, listing and fetch.
   const first = host.since(before);
   assert.equal(first.http, 4);
   assert.equal(first.action, 1, 'one build');
@@ -1488,7 +1509,7 @@ test('members fetch Lane refs as built commits; git diff main...lane equals the 
   assert.equal(built[0].pack.objects, 1 + 5 + 5, 'commit, root/art/docs/src/scripts trees, five new blobs');
 
   // Cached: the same head is listed and fetched with no build; a strict fresh clone needs no duplicates.
-  // Anonymous reads of a public project send no token: a listing sends it when told to.
+  // Present the member login up front when measuring the cached listing.
   const member = ['-c', `http.extraHeader=Authorization: Bearer ${owner}`];
   const remote = `${host.base}/git/${projectId}.git`;
   before = host.snapshot();
@@ -1496,9 +1517,9 @@ test('members fetch Lane refs as built commits; git diff main...lane equals the 
   assert.match(listed, new RegExp(`^${commit}\t${ref}$`, 'm'));
   await client(['fetch', '-q', 'origin', ref], repo);
   const cached = host.since(before);
-  // At most one query per request (the 401 that asks git for the token costs none), no build.
-  assert.ok(cached.query <= cached.http && cached.query >= cached.http - 1);
-  assert.deepEqual([cached.mutation, cached.action], [0, 0]);
+  // Every request checks access before its body. Each of the two member listings then
+  // loads its selected Lane refs; the anonymous challenge also checks project access.
+  assert.deepEqual(cached, { http: 5, query: 7, mutation: 0, action: 0 });
   const strict = join(work, 'strict');
   await client(['-c', 'transfer.fsckObjects=true', 'clone', '-q', url(owner), strict]);
   await client(['-c', 'transfer.fsckObjects=true', 'fetch', '-q', 'origin', ref], strict);
@@ -1508,10 +1529,11 @@ test('members fetch Lane refs as built commits; git diff main...lane equals the 
   assert.equal(git(empty, ['rev-parse', 'lane']).toString().trim(), commit, 'history and Lane in one pack');
   await client(['fsck', '--full'], empty);
 
-  // Strangers and anonymous readers of this public project get main only, never the Lane.
+  // Signed-in public readers get main; anonymous callers are refused before refs.
   for (const token of [stranger, null]) {
     const remote = token ? url(token) : `${host.base}/git/${projectId}.git`;
-    assert.doesNotMatch((await client(['ls-remote', remote])).stdout, /refs\/forge|lanes/);
+    if (token) assert.doesNotMatch((await client(['ls-remote', remote])).stdout, /refs\/forge|lanes/);
+    else await refused(['ls-remote', remote], /Username|Authentication/);
     // A stranger signs in and finds no such ref; an anonymous reader is asked to sign in.
     await refused(
       ['-C', repo, 'fetch', remote, ref],
@@ -1536,8 +1558,8 @@ test('members fetch Lane refs as built commits; git diff main...lane equals the 
   assert.match(Buffer.from(await direct.arrayBuffer()).toString('latin1'), /ERR GIT_NOT_OUR_REF/);
 
   // The large-pack Worker route (Issue 3bd4a8e9 line 2): members list and fetch the same Lane
-  // refs, signed in up front (session login) or after the 401 a Lane-naming listing answers on
-  // an anonymous session; strangers and anonymous readers get main only.
+  // refs under the signed session login. Signed-in public readers get main only;
+  // anonymous callers are refused before repository data.
   const fixtureFetch = globalThis.fetch;
   globalThis.fetch = (target, init) =>
     new URL(target).hostname === '127.0.0.1' ? f.previousFetch(target, init) : fixtureFetch(target, init);
@@ -1577,15 +1599,15 @@ test('members fetch Lane refs as built commits; git diff main...lane equals the 
       );
     }
     assert.deepEqual(history().joined, joined, "a set with a Lane pack never replaces the clone's trailer");
-    // Anonymous session: the Lane-naming listing answers 401; git sends the login, the Worker
-    // forwards it and the backend checks it as on the direct route. Only the Lane pack comes.
+    // The redirected session keeps its original login. Only the newly requested Lane pack comes.
     worker.reads.length = 0;
     await client(['fetch', '-q', 'origin', `${ref}:refs/remotes/origin/lane`], viaWorker);
     assert.equal(git(viaWorker, ['rev-parse', 'origin/lane']).toString().trim(), commit);
     assert.equal(git(viaWorker, ['show', 'origin/lane:src/app.go']).toString(), edits['src/app.go']);
     for (const token of [stranger, null]) {
       const target = token ? url(token) : `${host.base}/git/${projectId}.git`;
-      assert.doesNotMatch((await client(['ls-remote', target])).stdout, /refs\/forge|lanes/);
+      if (token) assert.doesNotMatch((await client(['ls-remote', target])).stdout, /refs\/forge|lanes/);
+      else await refused(['ls-remote', target], /Username|Authentication/);
       await refused(
         ['-C', viaWorker, 'fetch', target, ref],
         token ? /couldn't find remote ref/ : /Username|Authentication/,
@@ -2153,6 +2175,7 @@ test('an unmirrored project serves its landings as Git commits on the imported h
   s.ctx.db.insert('forgeAccounts', { owner: 'owner', handle: 'synthetic-owner' });
   setMain(s, projectId, imported);
   const host = await gitHost(t, s);
+  const { client } = readerClient(s);
   const remote = `${host.base}/git/${projectId}.git`;
   const work = scratch(t, 'forge-git-main-');
 
@@ -2329,9 +2352,9 @@ test('an unmirrored project lists and serves Lane refs on the imported and Forge
     ],
     repo,
   );
-  // Naming three refs makes git gzip the listing: it is decoded (one action), asks for the login
-  // (401) and is decoded again as the member's, then main and each Lane are built.
-  assert.equal(host.since(before).action, 2 + 1 + 2, 'two decodes, one main build, one build per Lane');
+  // The advertisement requests login before the body; the authenticated gzip listing is decoded
+  // once, then main and each Lane are built.
+  assert.equal(host.since(before).action, 1 + 1 + 2, 'one decode, one main build, one build per Lane');
   assert.equal(rev('origin/main~2'), source.head);
   assert.equal(rev('origin/b^'), rev('origin/main'), 'built on the newest Forge commit');
   assert.equal(rev('origin/c^'), rev('origin/main~1'), 'built on the Forge commit of its older base');
@@ -2341,7 +2364,7 @@ test('an unmirrored project lists and serves Lane refs on the imported and Forge
   await client(['fsck', '--full', '--strict'], repo);
 
   // Members list every built Lane; a stranger lists none and cannot fetch one.
-  // (A plain ls-remote of a public project stays anonymous; the login goes in a header.)
+  // Present the login in a header so the listing needs no authentication challenge.
   const list = async token =>
     (await client(['-c', `http.extraHeader=Authorization: Bearer ${token}`, 'ls-remote', remote(token)]))
       .stdout;
@@ -2361,3 +2384,42 @@ function lastState(s, projectId) {
 }
 
 // J18-4: the metadata reader keeps current access checks and never falls back to another revision.
+
+test('direct Git access refuses a private project before reading an anonymous body', async () => {
+  let reads = 0;
+  const request = {
+    url: 'https://forge.example/git/private.git/git-upload-pack',
+    method: 'POST',
+    headers: new Headers(),
+    arrayBuffer: () => {
+      reads++;
+      throw Error('body must not be read');
+    },
+  };
+  const response = await gitServe.serve._handler(
+    { runQuery: async () => ({ status: 'not-found', signedIn: false }) },
+    request,
+  );
+  assert.equal(response.status, 401);
+  assert.equal(reads, 0);
+});
+
+test('unverified Git credentials and inaccessible projects are refused before their bodies are read', async () => {
+  const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const token = `${encode({ alg: 'RS256' })}.${encode({ sub: 'owner', forgeCredential: 'synthetic-unverified' })}.sig`;
+  for (const status of [{ status: 'bad-credential' }, { status: 'not-found', signedIn: true }]) {
+    let reads = 0;
+    const request = {
+      url: 'https://forge.example/git/private.git/git-upload-pack',
+      method: 'POST',
+      headers: new Headers({ authorization: `Bearer ${token}` }),
+      arrayBuffer: () => {
+        reads++;
+        throw Error('body must not be read');
+      },
+    };
+    const response = await gitServe.serve._handler({ runQuery: async () => status }, request);
+    assert.equal(response.status, status.status === 'bad-credential' ? 401 : 404);
+    assert.equal(reads, 0);
+  }
+});

@@ -8,6 +8,7 @@ import type { Id } from './_generated/dataModel';
 import { checkForgeUser } from './sharingActions';
 import { caller } from './projectWorkActions';
 import { report } from './errors';
+import { requestMemberApproval } from './projectMemberRequest';
 const save = makeFunctionReference<
   'mutation',
   {
@@ -33,6 +34,16 @@ export const set = action({
       const owner = await caller(ctx);
       await ctx.runQuery(internal.projectWork.owner, { projectId: input.projectId, owner });
       const reader = input.present ? await checkForgeUser(input.reader) : input.reader.trim();
+      if (
+        input.present &&
+        (await requestMemberApproval(
+          ctx,
+          input.projectId,
+          { kind: 'reader', reader, present: true, operationId: input.operationId },
+          input.operationId,
+        ))
+      )
+        return null;
       // Rechecks owner, project state and existing write grants after the provider round-trip.
       return await ctx.runMutation(save, { ...input, reader, owner });
     } catch (error) {

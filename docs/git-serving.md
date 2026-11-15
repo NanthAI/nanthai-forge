@@ -20,16 +20,18 @@ git clone https://<worker-origin>/git/<handle>/<slug>.git
 
 ## Access
 
-- **Public project:** anyone can clone and fetch, without signing in.
-- **Private project:** use a Forge login token (from `nforge login`, scope `cli`) as
+- **Every project:** sign in to clone, fetch or list refs, including public projects.
+- Use a Forge login token (from `nforge login`, scope `cli`) as
   the HTTP password with any username, for example through a Git credential helper,
   or send it as `Authorization: Bearer`. Every request checks the token's stored hash,
   expiry and revocation, then current project access (owner, contributor or reader).
   Past access never grants new access.
-- No credentials on a private or unknown project: `401` with a Basic challenge, so Git
+- No credentials on any project: `401` with a Basic challenge, so Git
   asks for credentials. A signed-in account without access: `404 Repository not found`,
   the same answer as a project that does not exist. A bad, revoked, expired or
-  coordination-only token: `401`.
+  coordination-only token: `401`. The refusal reads no history, packs or objects; when a
+  public project has a GitHub mirror, the message names its anonymous clone URL.
+  Public in-page web viewing stays available; downloads require sign-in.
 
 ## Refs
 
@@ -70,10 +72,9 @@ A save writes no Git objects. A ref moves only when it is fetched again after a 
 moved Lane is not listed until a fetch names it. Closed Lanes are not listed. Listings
 show the Lanes already built (newest 50) plus the ones named; a fetch names at most 8.
 
-Git sends no credentials while anonymous reads work, as on a public project. A listing
-that names a Lane ref answers `401`, so Git retries with the member's token. A plain
-`git ls-remote` of a public project stays anonymous; add the token to see Lane refs, for
-example `git -c "http.extraHeader=Authorization: Bearer <token>" ls-remote <url>`.
+Git asks for a login at the initial advertisement. Presenting it up front avoids that
+challenge, for example `git -c "http.extraHeader=Authorization: Bearer <token>" ls-remote <url>`.
+Signed-in readers of a public project get main; project members also get Lane refs.
 
 ## What is served
 
@@ -123,11 +124,11 @@ are refused (`GIT_UNSUPPORTED`).
 
 ## Cost and limits
 
-Each HTTP request is one Convex HTTP action and one query that reads the credential,
-project, history row, at most 256 pack rows and two small pins; for members also at most
-50 built Lane rows with their Lane rows (a listing) or the rows of the wanted commits (a
-fetch). A clone is three requests
-(six calls), whatever the file or commit count; a fetch with nothing new is two requests
+Each HTTP request uses one Convex HTTP action and one access query that reads the
+credential, project, history row, at most 256 pack rows and two small pins. A member
+POST that selects Lane refs adds one metadata query after parsing: at most 50 built
+Lane rows with their Lane rows (a listing), or rows of the wanted commits (a fetch).
+A main-only clone is three requests (six calls), whatever the file or commit count; a fetch with nothing new is two requests
 (four calls) and reads nothing from R2. Through the Worker's own address the v2 advertisement
 costs no backend call: a clone is two requests, a fetch with nothing new one. Pack bytes are one presigned R2 GET per 32 MiB
 chunk and leave through the HTTP action (Convex data egress). Gzipped request bodies
@@ -171,8 +172,8 @@ prints `warning: redirecting to https://…/gitw/<session>/…` and sends the re
 session there. Nothing changes for the user: no extra step, setting or credential.
 
 - **Session.** The redirect carries a signed session (HMAC-SHA256 with a key derived from
-  the backend's R2 secret) naming the project, the Forge login's credential id (empty when
-  anonymous) and an expiry 5 minutes ahead. It holds no password or token. The Worker
+  the backend's R2 secret) naming the project, the Forge login's credential id and an expiry
+  5 minutes ahead. It holds no password or token. The Worker
   forwards every request back to the backend's `gitw/` route, which checks the signature and
   then, on every request, the credential row (revoked, expired, scope) and current project
   access, exactly like the direct route. The one exception is the protocol v2 capability
@@ -187,14 +188,12 @@ session there. Nothing changes for the user: no extra step, setting or credentia
   No redirect and no session: a no-op fetch is one backend request instead of two, a clone two
   instead of three. The Worker marks what it forwards (`x-forge-git-worker`); the mark only
   lets the backend answer a fetch of a project whose clones the Worker serves with a byte plan
-  instead of streaming the pack, and grants no access. A private project's first ls-refs
-  answers `401`, so git sends its login. v0 clients get the backend's ref advertisement
-  through the Worker, which for a large project is the session redirect above.
+  instead of streaming the pack, and grants no access. Without a login the first
+  advertisement reaches the backend and answers `401`. v0 clients get the backend's ref
+  advertisement through the Worker, which for a large project is the session redirect above.
 - **Lane refs.** Members get the same Lane refs here, under the same rules: a session signed
-  for a member's login lists and serves them. On a public project git's first request sends
-  no login, so the session is anonymous; a listing that names a Lane then answers `401`, git
-  sends the login, the Worker forwards it and the backend checks it like the direct route. A
-  session signed for a login never takes another one from the request. A fetch with a Lane
+  for a member's login lists and serves them. Legacy anonymous sessions require a login
+  before they can list refs or fetch bytes. A session signed for a login never takes another one from the request. A fetch with a Lane
   pack streams its framed copy (v2) or raw chunks (v0); its joined trailer is computed for
   that fetch and not cached, so the clone's cached trailer stays.
 - **Bytes.** For the final fetch the backend returns a byte plan instead of the pack: the
@@ -243,3 +242,12 @@ a Worker with binding `FORGE_R2` (the bucket, read only in practice) and the pla
 `workers.dev` route. Then set `FORGE_GIT_WORKER_URL` on the backend to the Worker's origin.
 `FORGE_GIT_WORKER_MIN_BYTES` (optional) routes clones at or over that size through the
 Worker instead of the 100 MiB default. Unset `FORGE_GIT_WORKER_URL` to turn the path off.
+
+Anonymous clone and fetch are refused before history, pack or object IO; there are no
+anonymous-clone switches or usage counters. Signed-in fetches retain the existing Worker
+caps. Public web pages can still be viewed without signing in; archive downloads require
+sign-in. Device-login starts default to 120/minute ([security](security.md#downloads-and-public-viewing)).
+
+All Git requests check current credential and project access before reading a POST body.
+Main-only clones retain one metadata query per HTTP request. A member request that needs
+Lane refs adds one authorized reload after parsing its bounded Lane selection.

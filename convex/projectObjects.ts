@@ -3,7 +3,7 @@ import { v, type Infer } from 'convex/values';
 import type { Id } from './_generated/dataModel';
 import type { MutationCtx } from './_generated/server';
 import { query, mutation, internalQuery } from './cliServer';
-import { activeProject, accessibleProject } from './projectAuthority';
+import { activeProject, accessibleProject, memberProject } from './projectAuthority';
 import { objectDocument, isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
 import { report } from './errors';
@@ -292,11 +292,12 @@ export const resolve = internalQuery({
     actor: v.string(),
     digests: v.array(v.string()),
     pageSize: v.optional(v.literal(1000)),
+    memberOnly: v.optional(v.boolean()),
   },
   returns: v.array(objectDocument),
-  handler: async (ctx, { projectId, actor, digests, pageSize }) => {
+  handler: async (ctx, { projectId, actor, digests, pageSize, memberOnly }) => {
     try {
-      await accessibleProject(ctx, projectId, actor);
+      await (memberOnly ? memberProject : accessibleProject)(ctx, projectId, actor);
       invariant(
         digests.length <= (pageSize ?? 100),
         'BAD_ARGUMENT',

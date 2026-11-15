@@ -93,7 +93,15 @@ export async function browserManifest(client: Client, projectId: Id<'hostedProje
   const manifest = sourceManifestSchema.parse(JSON.parse(new TextDecoder().decode(manifestBytes)));
   return { manifest, manifestBytes, exchange: exchange.success ? exchange.data : null };
 }
-export async function readBrowserSource(client: Client, input: SourceInput): Promise<string> {
+export async function readBrowserSource(
+  client: Client & Partial<Pick<ConvexReactClient, 'action'>>,
+  input: SourceInput,
+  viewOnly = false,
+): Promise<string> {
+  if (viewOnly) {
+    invariant(client.action, 'SOURCE_UNAVAILABLE', 'The public file viewer is unavailable.');
+    return client.action(api.projectSourceReview.read, { ...input, render: true });
+  }
   const selection = { projectId: input.projectId, backupId: input.backupId },
     plan = await sourcePlan(client, selection, [input.base, input.head]);
   if (plan.transport !== 'objects' || plan.format !== 'native')

@@ -186,6 +186,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@typescript/native": "npm:typescript@7.0.2",
+    "netlify-cli": "27.16.1",
     "oxfmt": "0.74.0",
     "oxlint": "1.89.0",
     "playwright": "1.64.1",

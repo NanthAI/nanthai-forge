@@ -14,6 +14,7 @@ import type { nativeManifestSchema } from './work-archive-metadata.js';
 type ReviewSelection = {
   file?: string;
   map?: boolean;
+  submodules?: boolean;
   beforeOffset?: number;
   afterOffset?: number;
   line?: number;
@@ -67,6 +68,7 @@ export async function readNativeSourceReviewBytes(
     state = parseNativeState(selected!),
     paths = reviewPaths(parseNativeState(original!).files, state.files);
   const pins = { base, head, ...(state.conversation ? { conversation: state.conversation } : {}) };
+  if (selection?.submodules) return { ...pins, pointers: await readSubmodulePointers(state.files, bytes) };
   if (selection?.map) return { ...pins, map: await readChangeMap(base, head, paths, bytes) };
   if (!selection || selection.file === undefined) return { ...pins, paths };
   const file = paths.find(path => path.path === selection.file);

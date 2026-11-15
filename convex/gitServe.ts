@@ -41,7 +41,8 @@ import { workerViaHeader } from '../src/git-worker-plan';
 
 /** Read-only Git smart HTTP (Issue 09367fb2): /git/<handle>/<slug>.git or /git/<projectId>.git.
  * Serves the stored history packs (GitHub's own bytes in R2, same commit ids). Pushes go
- * through Lanes. Per request: this HTTP action and one query; bytes stream from R2. */
+ * through Lanes. Main-only requests use this HTTP action and one query; member Lane
+ * selections add one query after the access check and body parse. Bytes stream from R2. */
 export { gitResponseLimitBytes } from './gitServeWorker';
 const pushRefused =
   'Forge does not accept git push. Pushes go through Lanes: nforge agent ROOT start, then land.';
@@ -348,7 +349,7 @@ async function largeRedirect(
   loaded: Loaded,
   reload: () => Promise<Loaded>,
   worker: WorkerConfig,
-  credentialId: string | null,
+  credentialId: string,
   v2: boolean,
 ) {
   let prepared: ReturnType<typeof servedRefs>;
@@ -385,57 +386,59 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
   if (service === 'git-receive-pack') return text(403, pushRefused);
   if (service !== 'git-upload-pack') return text(403, 'Use Git 1.6.6 or later (smart HTTP).');
   if ((route.service === 'info/refs') !== (request.method === 'GET')) return text(405, 'Method not allowed.');
-  // A Worker session signed for a login uses that login. An anonymous one (a public project's
-  // listing sends no credentials) takes the login git sends once a listing names a Lane, checked
-  // exactly as on the direct route; the Worker forwards it (Issue 3bd4a8e9).
+  // A signed session retains its login; legacy unsigned sessions must present a current login.
   const credential = session?.c ? null : presentedCredential(request.headers.get('authorization'));
   if (credential === 'invalid')
     return unauthorized('Use a Forge login token (nforge login) as the password.');
   const v2 = /(^|[:\s])version=2($|[:\s])/.test(request.headers.get('git-protocol') ?? '');
   const kind = route.service === 'info/refs' ? 'advertisement' : 'result';
   const gzipped = /gzip/i.test(request.headers.get('content-encoding') ?? '');
-  let body = route.service === 'info/refs' ? new Uint8Array(0) : new Uint8Array(await request.arrayBuffer());
-  // Signed-in requests read Lane refs in the same query: the built page for a listing (plus the
-  // Lanes it names), or a fetch's wanted commits. Bodies that do not parse answer after access.
+  let body = new Uint8Array(0);
+  // Access is checked before any request body is read. Member requests hydrate Lane refs only
+  // when their parsed prefixes or wanted commits need them; main-only fetches reuse this query.
   // A Worker session carries its member's credential id (session.c; checked again in load).
-  const laneArgs = (): LaneArgs | undefined => {
+  const laneArgs = (mainTips?: Set<string>): LaneArgs | undefined => {
     if (!credential && !session?.c) return undefined;
     if (route.service === 'info/refs') return v2 ? undefined : { list: true, named: [], commits: [] };
     try {
-      if (!v2) return { list: false, named: [], commits: parseV0Request(body).wants };
+      if (!v2) {
+        const commits = parseV0Request(body).wants.filter(want => !mainTips?.has(want));
+        return commits.length ? { list: false, named: [], commits } : undefined;
+      }
       const command = parseV2Request(body);
-      if (command.command === 'ls-refs') return { list: true, named: namedLanes(command.args), commits: [] };
-      if (command.command === 'fetch')
-        return { list: false, named: [], commits: parseFetchArgs(command.args).wants };
+      if (command.command === 'ls-refs') {
+        const prefixes = command.args.filter(arg => arg.startsWith('ref-prefix ')).map(arg => arg.slice(11));
+        if (
+          prefixes.length &&
+          !prefixes.some(
+            prefix => 'refs/forge/lanes/'.startsWith(prefix) || prefix.startsWith('refs/forge/lanes/'),
+          )
+        )
+          return undefined;
+        return { list: true, named: namedLanes(command.args), commits: [] };
+      }
+      if (command.command === 'fetch') {
+        const commits = parseFetchArgs(command.args).wants.filter(want => !mainTips?.has(want));
+        return commits.length ? { list: false, named: [], commits } : undefined;
+      }
     } catch {}
     return undefined;
   };
-  let lanes = gzipped ? undefined : laneArgs();
-  // Git sends no credentials while anonymous reads work (public projects). A listing that names
-  // a Lane ref asks for them, whatever the Lane id, so git retries as the member it is; a gzipped
-  // listing (git compresses bodies over 1 KiB, as when a fetch names several refs) asks once decoded.
-  const asksLogin = (bytes: Uint8Array) => {
-    if (credential || session?.c || !v2 || route.service !== 'git-upload-pack') return false;
-    try {
-      const command = parseV2Request(bytes);
-      return command.command === 'ls-refs' && namedLanes(command.args).length > 0;
-    } catch {
-      return false;
-    }
-  };
-  const laneLogin = () =>
-    unauthorized(
-      'Lane refs are for project members: sign in with a Forge login token (nforge login) as the password.',
-    );
-  if (!gzipped && asksLogin(body)) return laneLogin();
+  let lanes = route.service === 'info/refs' && !gzipped ? laneArgs() : undefined;
   const reload = async () =>
     (await ctx.runQuery(internal.gitServeStore.load, {
       ...route.project,
       ...(credential ? { credential } : {}),
       ...(lanes ? { lanes } : {}),
       ...(session?.c ? { sessionCredentialId: session.c } : {}),
-    })) as Loaded | { status: 'bad-credential' } | { status: 'not-found'; signedIn: boolean };
+    })) as
+      | Loaded
+      | { status: 'sign-in'; message: string }
+      | { status: 'bad-credential' }
+      | { status: 'not-found'; signedIn: boolean };
   let loaded = await reload();
+  if (loaded.status === 'sign-in') return unauthorized(loaded.message);
+  if (session && !session.c && !credential && loaded.status === 'not-found') return unauthorized();
   if (session && !credential && loaded.status !== 'ok')
     return loaded.status === 'not-found' ? text(404, 'Repository not found.') : sessionEnded();
   if (loaded.status === 'bad-credential')
@@ -443,6 +446,9 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
   // Signed-in readers without access learn nothing more than a missing repository.
   if (loaded.status === 'not-found')
     return loaded.signedIn ? text(404, 'Repository not found.') : unauthorized();
+  if (route.service !== 'info/refs') {
+    body = new Uint8Array(await request.arrayBuffer());
+  }
   const again = reload as () => Promise<Loaded>;
   try {
     if (route.service === 'info/refs') {
@@ -452,7 +458,7 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
       if (session) return gitReply(kind, advertiseV0((await preparedRefs(ctx, loaded, again)).refs, false));
       let prepared: ReturnType<typeof servedRefs> | null = null;
       if (worker) {
-        const large = await largeRedirect(ctx, loaded, again, worker, credential?.credentialId ?? null, v2);
+        const large = await largeRedirect(ctx, loaded, again, worker, credential!.credentialId, v2);
         if (large.redirect) return large.redirect;
         prepared = large.prepared;
       }
@@ -463,10 +469,16 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
       body = new Uint8Array(
         await ctx.runAction(internal.gitServeInflate.gunzip, { body: body.slice().buffer }),
       );
-      if (asksLogin(body)) return laneLogin();
-      // Members only: a gzipped body names its Lanes after decoding, so they cost one more query.
-      lanes = loaded.member ? laneArgs() : undefined;
-      if (lanes) loaded = (await reload()) as Loaded;
+    }
+    lanes = loaded.member ? laneArgs(new Set(loaded.history?.packs.map(pack => pack.tip))) : undefined;
+    if (lanes) {
+      const refreshed = await reload();
+      if (refreshed.status === 'sign-in') return unauthorized(refreshed.message);
+      if (refreshed.status === 'bad-credential')
+        return unauthorized('This Forge login expired or was revoked. Run nforge login.');
+      if (refreshed.status === 'not-found')
+        return refreshed.signedIn ? text(404, 'Repository not found.') : unauthorized();
+      loaded = refreshed;
     }
     const ready = loaded as Loaded;
     const served = (args: FetchArgs, version: 2 | 0) => {

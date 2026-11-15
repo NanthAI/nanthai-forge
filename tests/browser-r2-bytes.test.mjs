@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { setup, client, legacyObject } from './r2-harness.mjs';
 import { modules } from './project-exchange-fixture.mjs';
+import { backupRow } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { ObjectDownloadReader } from '../dist/blob-download.js';
 import { digest } from '../dist/hash.js';
@@ -21,6 +22,11 @@ function browser(s) {
   const calls = [];
   return {
     calls,
+    async action(ref, args) {
+      const [name, method] = getFunctionName(ref).split(':');
+      calls.push({ name, method, args });
+      return modules[name][method]._handler(s.ctx, args);
+    },
     async mutation(ref, args) {
       const [name, method] = getFunctionName(ref).split(':');
       calls.push({ name, method, args });
@@ -35,16 +41,25 @@ async function upload(s, bytes, r2 = true) {
   else await legacyObject(s, value);
   return pin(value);
 }
-async function sourceFixture(t, locations = [true, false]) {
+async function sourceFixture(
+  t,
+  locations = [true, false],
+  contents = ['export const value = 1;\n', 'export const value = 2;\n'],
+  fileCount = 1,
+) {
   const { s, fake } = await setup(t);
-  const before = await upload(s, 'export const value = 1;\n', locations[0]),
-    after = await upload(s, 'export const value = 2;\n', locations[1]);
+  const before = await upload(s, contents[0], locations[0]),
+    after = await upload(s, contents[1], locations[1]);
   const state = blob =>
     Buffer.from(
       JSON.stringify({
         schema: 1,
         kind: 'forge-source-state',
-        files: [{ path: 'a.ts', blob: blob.sha256, mode: 'file' }],
+        files: Array.from({ length: fileCount }, (_, i) => ({
+          path: i === 0 ? 'a.ts' : `src/${String(i).padStart(6, '0')}.ts`,
+          blob: blob.sha256,
+          mode: 'file',
+        })),
         parents: [],
         message: 'synthetic',
         at: '2026-01-01T00:00:00.000Z',
@@ -68,16 +83,19 @@ async function sourceFixture(t, locations = [true, false]) {
   };
   const manifestBytes = Buffer.from(JSON.stringify(manifest)),
     root = await upload(s, manifestBytes);
-  s.tables.projectBackups.set('backup', {
-    _id: 'backup',
-    projectId: 'project',
-    status: 'stored',
-    transport: 'objects',
-    digest: root.sha256,
-    size: root.size,
-    operationId: manifest.id,
-    preview: { format: 'native', manifestDigest: root.sha256, head: head.sha256 },
-  });
+  s.tables.projectBackups.set(
+    'backup',
+    backupRow({
+      _id: 'backup',
+      projectId: 'project',
+      status: 'stored',
+      transport: 'objects',
+      digest: root.sha256,
+      size: root.size,
+      operationId: manifest.id,
+      preview: { format: 'native', manifestDigest: root.sha256, head: head.sha256 },
+    }),
+  );
   return {
     s,
     fake,
@@ -177,7 +195,7 @@ test('expired URLs refresh once, including CORS-masked network errors, then fail
   assert.equal(signs, 2);
 });
 
-test('revoked members are denied on cache hits and during a GET; public anonymous reads work', async t => {
+test('raw object reads recheck access on cache hits and during a GET, including public download sign-in', async t => {
   const { s } = await setup(t),
     p = await upload(s, 'guarded'),
     b = browser(s),
@@ -203,6 +221,8 @@ test('revoked members are denied on cache hits and during a GET; public anonymou
   s.caller(null);
   await assert.rejects(reader.read([p]), code('PROJECT_UNAVAILABLE'));
   s.tables.hostedProjects.get('project').visibility = 'public';
+  await assert.rejects(reader.read([p]), code('PROJECT_UNAVAILABLE'));
+  s.caller('public-reader');
   assert.equal(new TextDecoder().decode((await reader.read([p]))[0]), 'guarded');
 });
 
@@ -211,7 +231,7 @@ test('public anonymous Code reads retain exact checkpoint selection', async t =>
   f.s.caller(null);
   f.s.tables.hostedProjects.get('project').visibility = 'public';
   assert.equal(
-    JSON.parse(await readBrowserSource(f.browser, { ...f.input, file: 'a.ts' })).after.text,
+    JSON.parse(await readBrowserSource(f.browser, { ...f.input, file: 'a.ts' }, true)).after.text,
     'export const value = 2;\n',
   );
 });
@@ -499,3 +519,96 @@ test('verifiedBytes returns matching bytes and rejects a mismatch with BLOB_DIGE
     code: 'BLOB_DIGEST_MISMATCH',
   });
 });
+
+test('signed-out people can view a public file but cannot download its object archive, even after a view warmed the cache', async t => {
+  const f = await sourceFixture(t);
+  f.s.caller(null);
+  f.s.tables.hostedProjects.get('project').visibility = 'public';
+  const view = JSON.parse(await readBrowserSource(f.browser, { ...f.input, file: 'a.ts' }, true));
+  assert(!JSON.stringify(view).includes('X-Amz-'), 'public rendering returns no object URLs');
+  assert.equal(view.after.text, 'export const value = 2;\n');
+  const before = f.fake.requests.length;
+  await assert.rejects(downloadObjectArchive(f.browser, 'project', 'backup'), code('PROJECT_UNAVAILABLE'));
+  assert.equal(f.fake.requests.length, before, 'refusal performs no object IO');
+  f.s.caller('public-reader');
+  const archive = await downloadObjectArchive(f.browser, 'project', 'backup');
+  assert(archive.blob.size > 0, 'a signed-in public reader can still download source');
+});
+
+test('public rendered views return file pages and paths, while binary bodies and archive plans stay private', async t => {
+  const f = await sourceFixture(t, [true, true], [Buffer.from([0, 1, 2]), Buffer.from([0, 3, 4])]);
+  f.s.tables.hostedProjects.get('project').visibility = 'public';
+  f.s.caller(null);
+  const file = JSON.parse(await readBrowserSource(f.browser, { ...f.input, file: 'a.ts' }, true));
+  assert.equal(file.after.kind, 'binary');
+  assert.equal(file.after.text, undefined);
+  assert.equal(file.root, undefined);
+  assert.equal(file.url, undefined);
+  assert(!JSON.stringify(file).includes('X-Amz-'));
+  const tree = JSON.parse(await readBrowserSource(f.browser, f.input, true));
+  assert.equal(tree.paths[0].path, 'a.ts');
+  for (const method of ['source', 'describe', 'signDownloads'])
+    await assert.rejects(
+      modules.projectObjectDownloads[method]._handler(
+        f.s.ctx,
+        method === 'source'
+          ? { projectId: 'project', backupId: 'backup' }
+          : { projectId: 'project', digests: [f.after.sha256] },
+      ),
+      code('PROJECT_UNAVAILABLE'),
+    );
+});
+
+test('public rendering refuses private projects before source IO and rechecks a public project after IO', async t => {
+  const f = await sourceFixture(t, [true, true]);
+  f.s.caller(null);
+  const before = f.fake.requests.length;
+  await assert.rejects(
+    readBrowserSource(f.browser, { ...f.input, file: 'a.ts' }, true),
+    code('PROJECT_UNAVAILABLE'),
+  );
+  assert.equal(f.fake.requests.length, before);
+  f.s.tables.hostedProjects.get('project').visibility = 'public';
+  const fetch = globalThis.fetch;
+  globalThis.fetch = async (...args) => {
+    const response = await fetch(...args);
+    f.s.tables.hostedProjects.get('project').visibility = 'private';
+    return response;
+  };
+  t.after(() => {
+    globalThis.fetch = fetch;
+  });
+  await assert.rejects(
+    readBrowserSource(f.browser, { ...f.input, file: 'a.ts' }, true),
+    code('PROJECT_UNAVAILABLE'),
+  );
+});
+
+for (const files of [4000, 29000])
+  test(`public rendered file viewing of ${files} paths preserves the direct reader call budget and zero idle calls`, async t => {
+    const f = await sourceFixture(t, [true, true], undefined, files);
+    f.s.tables.hostedProjects.get('project').visibility = 'public';
+    let internal = 0;
+    for (const key of ['runQuery', 'runMutation', 'runAction']) {
+      const run = f.s.ctx[key];
+      f.s.ctx[key] = (...args) => {
+        internal++;
+        return run(...args);
+      };
+    }
+    const selection = { ...f.input, file: 'a.ts' };
+    const baseline = JSON.parse(await readBrowserSource(f.browser, selection));
+    const directCalls = f.browser.calls.length + internal;
+    internal = 0;
+    f.browser.calls.length = 0;
+    f.s.caller(null);
+    const rendered = JSON.parse(await readBrowserSource(f.browser, selection, true));
+    const renderCalls = f.browser.calls.length + internal;
+    assert.equal(rendered.after.text, baseline.after.text);
+    assert(renderCalls <= directCalls, `${renderCalls} rendered calls exceed ${directCalls} direct calls`);
+    const stable = internal;
+    assert.equal(f.browser.calls.length, 1, 'one rendered page response, with no raw download client');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(internal, stable, 'rendering installs no idle observer');
+    t.diagnostic(JSON.stringify({ files, directCalls, renderCalls }));
+  });

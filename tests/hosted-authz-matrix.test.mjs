@@ -192,7 +192,25 @@ test('revoked readers, removed contributors, other accounts and signed-out calle
   const s = setup();
   t.after(providers());
   // Current grants get past the access check before revocation; readers still cannot write.
-  await allowed(s, 'reader', reads);
+  const archives = new Set([
+    'projectBackups.history',
+    'projectBackupActions.downloadPart',
+    'projectExchangeActions.downloadBatch',
+    'projectExchangeActions.downloadPart',
+    'projectWorkIndexActions.checksum',
+    'projectExchangeActions.checkpoint',
+    'projectWorkActions.exportJournal',
+  ]);
+  await allowed(
+    s,
+    'reader',
+    reads.filter(([module, name]) => !archives.has(`${module}.${name}`)),
+  );
+  s.caller('reader');
+  for (const [module, name, args, scoped] of reads.filter(([module, name]) =>
+    archives.has(`${module}.${name}`),
+  ))
+    await assert.rejects(call(s, module, name, withProject(args, scoped)), denied, `${module}.${name}`);
   await allowed(s, 'former', [...reads, ...writes]);
   s.caller('reader');
   for (const [module, name, args, scoped] of writes)
@@ -336,6 +354,16 @@ test('browser review and object metadata return real plans and URLs only while a
     assert.equal(signed[0].digest, digest);
     assert.equal(new URL(signed[0].url).pathname, `/${fakeR2Config.bucket}/v1/p/project/o/${digest}`);
     for (const name of ['downloadBatch', 'downloadPart']) {
+      if (caller === 'reader') {
+        await assert.rejects(
+          call(s, 'projectExchangeActions', name, {
+            projectId: 'project',
+            ...(name === 'downloadBatch' ? { digests: [digest] } : { digest, offset: 0 }),
+          }),
+          denied,
+        );
+        continue;
+      }
       const result = await call(s, 'projectExchangeActions', name, {
         projectId: 'project',
         ...(name === 'downloadBatch' ? { digests: [digest] } : { digest, offset: 0 }),
@@ -356,28 +384,16 @@ test('browser review and object metadata return real plans and URLs only while a
         `${caller} ${module}.${name}`,
       );
   }
-  // Existing public reads remain available without signing in.
+  // Public source downloads require sign-in too; rendered public file pages are tested separately.
   s.tables.hostedProjects.get('project').visibility = 'public';
   s.caller(undefined);
-  assert.equal(JSON.parse(await call(s, 'projectSourceReview', 'read', input)).backupId, 'backup');
-  assert.equal(
-    (
-      await call(s, 'projectObjectDownloads', 'describe', {
-        projectId: 'project',
-        digests: [digest],
-      })
-    ).length,
-    1,
-  );
-  assert.equal(
-    (
-      await call(s, 'projectObjectDownloads', 'signDownloads', {
-        projectId: 'project',
-        digests: [digest],
-      })
-    ).length,
-    1,
-  );
+  for (const [module, name, args] of [
+    ['projectSourceReview', 'read', input],
+    ['projectObjectDownloads', 'source', { projectId: 'project', backupId: 'backup' }],
+    ['projectObjectDownloads', 'describe', { projectId: 'project', digests: [digest] }],
+    ['projectObjectDownloads', 'signDownloads', { projectId: 'project', digests: [digest] }],
+  ])
+    await assert.rejects(call(s, module, name, args), denied);
   s.caller('owner');
   s.tables.hostedProjects.get('other').owner = 'owner';
   // Even access to both projects does not permit mixing their checkpoint ids.

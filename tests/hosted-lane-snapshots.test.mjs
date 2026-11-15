@@ -164,10 +164,10 @@ test('unchanged files cost no call; a changed snapshot is two calls and only cha
   // Snapshots never move the Lane head or touch the save path.
   assert.equal((await x.f.read(x.f.laneId)).head, x.f.expected.head);
   assert.equal(x.f.tables.projectHostedSaves.size, 0);
-  // The prepare transaction stays small: at most two inserts and one patch.
+  // The prepare transaction adds at most one shared storage reservation write.
   const prepare = x.f.counts.filter(c => c.name === 'projectLaneSnapshots:prepare');
   assert(
-    prepare.every(c => c.writes <= 3 && c.documents <= 20),
+    prepare.every(c => c.writes <= 4 && c.documents <= 22),
     JSON.stringify(prepare.map(c => c.writes)),
   );
 });
@@ -714,4 +714,62 @@ test('a builder landing costs one call and one object per snapshot, and far fewe
   assert(after.calls * 4 <= before.calls, JSON.stringify({ before, after }));
   assert(after.puts * 5 <= before.puts, JSON.stringify({ before, after }));
   console.log('landing loop', JSON.stringify({ before, after }));
+});
+
+test('snapshot writes recheck contributor access after revocation or demotion on public projects', async () => {
+  for (const demoted of [false, true]) {
+    const f = await lifecycleFixture();
+    f.patch('hostedProjects', f.projectId, { visibility: 'public' });
+    const grant = f.insert('projectContributors', { projectId: f.projectId, contributor: 'writer' });
+    const lane = await f.addLane({ actor: 'writer' });
+    const operationId = randomUUID();
+    f.insert('projectLaneSnapshots', {
+      projectId: f.projectId,
+      laneId: lane.id,
+      seq: 1,
+      kind: 'snapshot',
+      actor: 'writer',
+      operationId,
+      at: Date.now(),
+      state: 'live',
+      head: 'a'.repeat(64),
+      tree: 'b'.repeat(64),
+      uploadBytes: 0,
+    });
+    f.tables.projectContributors.delete(typeof grant === 'string' ? grant : grant._id);
+    // Fixture insert returns a row id in some stores; remove the exact synthetic grant by identity too.
+    for (const [id, row] of f.tables.projectContributors)
+      if (row.contributor === 'writer') f.tables.projectContributors.delete(id);
+    if (demoted) f.insert('projectReaders', { projectId: f.projectId, reader: 'writer' });
+    const common = { projectId: f.projectId, laneId: lane.id };
+    for (const [name, input] of [
+      ['commit', { ...common, operationId }],
+      ['restore', { ...common, operationId: randomUUID(), target: 1, head: 'a'.repeat(64), move: 'restore' }],
+      ['purge', common],
+    ])
+      await assert.rejects(
+        f.transaction(name, snapshots[name], input, 'writer'),
+        code('PROJECT_UNAVAILABLE'),
+        name,
+      );
+  }
+});
+
+test('new snapshot reservations share the project storage quota and refuse before signing or uploading', async t => {
+  const x = await fixture(t);
+  const { STORAGE_QUOTA } = await import(moduleUrl('../convex/abuseLimits.ts'));
+  for (let shard = 0; shard < STORAGE_QUOTA.shards; shard++)
+    x.f.insert('projectStorageUsage', {
+      projectId: x.f.projectId,
+      shard,
+      bytes: Math.ceil(STORAGE_QUOTA.project.bytes / STORAGE_QUOTA.shards),
+      objects: 0,
+      pendingBytes: 0,
+      pendingObjects: 0,
+    });
+  writeFileSync(join(x.root, 'a.txt'), 'snapshot at shared quota');
+  const reply = await x.snap();
+  assert.equal(reply.code, 'QUOTA_EXCEEDED');
+  assert.equal(x.rows().length, 0);
+  assert.equal(x.stored().length, 0);
 });

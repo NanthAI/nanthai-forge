@@ -256,7 +256,11 @@ test('team email entry and handle labels preserve owner authorization and rechec
     const address = new URL(String(url));
     assert(address.searchParams.has('email_address'), 'labels never look up the identity provider');
     return Response.json([
-      { id: 'reader', email_addresses: [{ email_address: 'reader@example.com' }], first_name: 'Reader' },
+      {
+        id: 'reader',
+        email_addresses: [{ email_address: 'reader@example.com', verification: { status: 'verified' } }],
+        first_name: 'Reader',
+      },
     ]);
   };
   try {

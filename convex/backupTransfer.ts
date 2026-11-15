@@ -5,7 +5,7 @@ import { mutation, action } from './cliServer';
 import { internal } from './_generated/api';
 import { backupItem, item, registerBackup } from './projectBackups';
 import { backupTransferArgs, backupTransferRequest } from './backupTransferRequest';
-import { accessibleProject, activeOwnedProject } from './projectAuthority';
+import { memberProject, activeOwnedProject } from './projectAuthority';
 import { archivePut, archiveTarget, reserveArchive, verifyArchiveUpload } from './archiveUpload';
 import { presignGet, r2Config } from './r2';
 import { invariant } from '../src/errors';
@@ -102,7 +102,7 @@ export const sign = mutation({
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read your Forge project.');
       const backup = await ctx.db.get(id);
       invariant(backup, 'PROJECT_UNAVAILABLE', 'This Forge backup is unavailable.');
-      await accessibleProject(ctx, backup.projectId, user.subject);
+      await memberProject(ctx, backup.projectId, user.subject);
       invariant(
         backup.transport !== 'objects' && backup.status === 'stored' && backup.digest === digest,
         'PROJECT_CHANGED',
