@@ -44,9 +44,12 @@ export async function scheduleAcceptanceCompletion(
   ctx: MutationCtx,
   planId: Id<'projectHostedAcceptancePlans'>,
   input: CompletionInput,
+  alarm?: Id<'_scheduled_functions'>,
 ) {
   const tick = await ctx.scheduler.runAfter(0, COMPLETE, input);
-  await ctx.db.patch(planId, { completion: { tick, guard: await armGuard(ctx, input) } });
+  await ctx.db.patch(planId, {
+    completion: { tick, guard: await armGuard(ctx, input), ...(alarm ? { alarm } : {}) },
+  });
 }
 /** The plan's completion ended: cancel its pending guard and drop the retained
  * tick. A plan with nothing retained (legacy or already complete) writes nothing. */
@@ -79,7 +82,7 @@ export async function guardAcceptanceCompletion(ctx: MutationCtx, input: Receipt
     };
     const tick = await ctx.scheduler.runAfter(0, COMPLETE, args);
     await ctx.db.patch(plan._id, {
-      completion: { tick, guard: await armGuard(ctx, input), replayed: at },
+      completion: { ...retained, tick, guard: await armGuard(ctx, input), replayed: at },
     });
     return null;
   }
@@ -116,6 +119,10 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
     'SOURCE_UNAVAILABLE',
     'The accepted completion ledger differs.',
   );
+  // Publication transfers its pending deadline to this existing durable tick.
+  // Cancelling it here keeps scheduler cleanup outside the main CAS. A failed
+  // tick rolls back the cancellation and the guard retains the same alarm.
+  if (plan.completion?.alarm) await ctx.scheduler.cancel(plan.completion.alarm);
   // Reuse the already scheduled post-publication tick. No queue query or new
   // scheduling write belongs in the acceptance CAS, including an empty queue.
   if (input.precompose && plan.appliedPage === 0 && plan.appliedEntry === 0) {
@@ -244,7 +251,7 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
   });
   await ctx.db.patch(plan._id, {
     ...position,
-    ...(plan.completion ? { completion: { ...plan.completion, tick } } : {}),
+    ...(plan.completion ? { completion: { ...plan.completion, alarm: undefined, tick } } : {}),
   });
   return { complete: false };
 }

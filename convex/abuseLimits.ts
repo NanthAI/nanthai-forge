@@ -125,3 +125,32 @@ export async function chargeStorage(
   if (row) await ctx.db.patch(row._id, next);
   else await ctx.db.insert('projectStorageUsage', { projectId: project._id, shard, ...next });
 }
+
+/** Work limits use the existing 300/member/day write envelope and 50 GiB / 100 MiB =
+ * 512 object slots: min(300, 512) = 300 fresh requests of each kind per UTC day.
+ * At the $0.002/landing serving target that is $0.60 per class/day in target units,
+ * not a provider billing cap. CI runtime remains subject to its configured watchdog. */
+export const MEMBER_WORK_BUDGET = {
+  windowMs: 24 * 60 * minute,
+  checks: 300,
+  composes: 300,
+  submissions: 300,
+} as const;
+type MemberWork = NonNullable<Doc<'projectContributors'>['workBudget']>;
+/** Read old (absent) and current counters. Replays never call this allocator. */
+export function nextMemberWorkBudget(
+  current: MemberWork | undefined,
+  kind: 'checks' | 'composes' | 'submissions',
+  now = Date.now(),
+): MemberWork {
+  const day = now - (now % MEMBER_WORK_BUDGET.windowMs);
+  const next = current?.day === day ? { ...current } : { day, checks: 0, composes: 0, submissions: 0 };
+  if (next[kind] >= MEMBER_WORK_BUDGET[kind])
+    throw new ForgeError(
+      'RATE_LIMITED',
+      `Member ${kind} are at their daily limit. Retry after the next UTC day.`,
+      day + MEMBER_WORK_BUDGET.windowMs,
+    );
+  next[kind]++;
+  return next;
+}

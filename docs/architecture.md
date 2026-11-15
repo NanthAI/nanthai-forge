@@ -2078,7 +2078,10 @@ publication remain active. Intent/sibling completion, source cleanup and deletio
 are not performed. The receipt and its input pages are authoritative acceptance
 and completion evidence while Lane status materialization is pending. Failed
 materialization can resume from the retained receipt; completed work schedules
-nothing. Recovery/export folding of these snapshot deltas remains H21 work.
+nothing. Publication transfers a pending landing deadline to the existing guarded
+completion tick, which cancels it before materializing the first page. The plan
+retains that cleanup ownership across a lost tick and its guard replay; no separate
+cleanup job runs. Recovery/export folding of these snapshot deltas remains H21 work.
 
 Owners can explicitly accept clean unchecked Candidates. Agents and public-project
 contributors need an exact passing run and current autonomy permission. Trusted

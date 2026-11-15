@@ -33,18 +33,18 @@ export function definedCheckEntryPaths(checks: DefinedChecks) {
 /** Paths that need owner approval by default: the listed ones plus the files every
  * defined check and setup action of the project runs, so any project's check entries
  * are protected, not only Forge's. An explicit `ownerApprovalPaths` list replaces the
- * defaults. */
+ * built-in list; derived check entries remain protected. */
 export function ownerApprovalMatcher(policy: AutonomyPolicy, checks?: DefinedChecks) {
   const explicit = policy.acceptance.ownerApprovalPaths;
   const patterns = (explicit ?? DEFAULT_OWNER_APPROVAL_PATHS).map(globPattern);
-  const entries = explicit ? [] : definedCheckEntryPaths(checks);
+  const entries = definedCheckEntryPaths(checks);
   const matches = (path: string) => entries.includes(path) || patterns.some(pattern => pattern.test(path));
   return Object.assign(matches, { any: patterns.length + entries.length > 0 });
 }
 /** Why a landing waits for the owner person, or null. Issue 470ef29b: the owner-approval list holds
  * every agent on every project, the owner's own agents included (an agent signed in with the owner's
- * account is still an agent); only the owner person keeps the fast path. On a public project it also
- * holds contributor persons, who then follow automatic policy like agents. */
+ * account is still an agent); only the owner person keeps the fast path. Contributor persons
+ * follow automatic policy on private and public projects. */
 export function governanceReason(
   project: { owner: string; visibility?: string },
   policy: AutonomyPolicy,
@@ -53,18 +53,15 @@ export function governanceReason(
   checks?: DefinedChecks,
 ): string | null {
   if (actor.id === project.owner && actor.kind === 'person') return null;
-  const isPublic = project.visibility === 'public';
-  if (isPublic || actor.kind === 'agent') {
-    const protectedPath = ownerApprovalMatcher(policy, checks);
-    if (paths === null && protectedPath.any)
-      return 'needs owner approval: protected-path coverage is unavailable';
-    const matched = (paths ?? []).filter(path => protectedPath(path));
-    if (matched.length) return `needs owner approval: protected paths ${matched.join(', ')}`;
-  }
-  // Account authentication is not owner approval. Public contributors follow automatic policy.
-  return reviewReason(policy, isPublic ? { ...actor, kind: 'agent' } : actor, paths);
+  const protectedPath = ownerApprovalMatcher(policy, checks);
+  if (paths === null && protectedPath.any)
+    return 'needs owner approval: protected-path coverage is unavailable';
+  const matched = (paths ?? []).filter(path => protectedPath(path));
+  if (matched.length) return `needs owner approval: protected paths ${matched.join(', ')}`;
+  // Account authentication is not owner approval. Contributors follow automatic policy.
+  return reviewReason(policy, actor.id !== project.owner ? { ...actor, kind: 'agent' } : actor, paths);
 }
 export const requiresGovernedCheck = (
   project: { owner: string; visibility?: string },
   actor: AcceptanceActor,
-) => actor.kind === 'agent' || (project.visibility === 'public' && actor.id !== project.owner);
+) => actor.kind === 'agent' || actor.id !== project.owner;

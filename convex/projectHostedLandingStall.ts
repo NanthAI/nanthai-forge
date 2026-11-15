@@ -41,12 +41,9 @@ export const LANDING_REPAIR_FAILURES = 2;
 export const LANDING_EXHAUST_RETRIES = 2;
 const supervised = (phase: LandingRow['phase']) =>
   phase === 'queued' || phase === 'checking' || phase === 'ready';
-/** Entries a supervisor round follows. A Ready entry counts only while a hosted
- * finish driver owns it; without one it waits for its requester (an explicit
- * person acceptance, H14), which is not a stall to end. */
-async function supervises(ctx: MutationCtx, row: LandingRow) {
-  if (row.phase !== 'ready') return supervised(row.phase);
-  return Boolean(await finishRow(ctx, row));
+/** Pending entries use the same finite supervisor ladder, including manual acceptance. */
+async function supervises(_ctx: MutationCtx, row: LandingRow) {
+  return supervised(row.phase);
 }
 const repairMode = v.union(v.literal('alarm'), v.literal('resolve'), v.literal('drop'), v.literal('exhaust'));
 type RepairMode = 'alarm' | 'resolve' | 'drop' | 'exhaust';
@@ -220,6 +217,21 @@ export async function repairStalledLanding(
     hostedLandingProgressAt(state) !== input.lastProgressAt
   )
     return null;
+  if (input.mode === 'drop' && canonical.phase === 'ready' && !state.request.finish) {
+    await cancelHostedLanding(ctx, {
+      projectId: input.projectId,
+      actor: state.actor,
+      drop: true,
+      request: {
+        operationId: crypto.randomUUID(),
+        authorityEpoch: state.request.authorityEpoch,
+        submissionId: state.id,
+      },
+      reason:
+        'No acceptance progress before the landing deadline. Nothing landed; submit the same Lane again to retry.',
+    });
+    return null;
+  }
   if (input.mode === 'exhaust') {
     await exhaustLanding(ctx, state, input.reason ?? exhaustedReason('The landing supervisor gave up.'));
     return null;
@@ -268,6 +280,14 @@ export async function resolveStalledLanding(ctx: MutationCtx, input: Round, now 
     if (!crashed || failures > LANDING_EXHAUST_RETRIES) return null;
     const repair = await scheduleRepair(ctx, token, 'exhaust', input.reason);
     await scheduleDeadline(ctx, row._id, { ...input, repair, failures }, now + LANDING_STALL_MS);
+    return null;
+  }
+  // Manual requests own no finish step to repair. Their existing alarm drives a
+  // single drop at the regular deadline, and cancellation fences every peer pin.
+  if (row.phase === 'ready' && !state.request.finish) {
+    const dropAt = Date.parse(input.lastProgressAt) + LANDING_DROP_MS;
+    if (now < dropAt) await scheduleDeadline(ctx, row._id, { ...token, attempt: 0 }, dropAt);
+    else await repairStalledLanding(ctx, { ...token, mode: 'drop' }, now);
     return null;
   }
   // Read-only: which drivers are lost now (a failed task, or a finish step that

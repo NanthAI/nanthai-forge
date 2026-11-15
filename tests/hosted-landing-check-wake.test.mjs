@@ -193,8 +193,19 @@ test('a queued bound generation is still woken, and rebinding fences its old eve
   await f.rawChecks.callback(terminal);
   await f.drain();
   assert.equal((await f.status(state.id)).request.phase, 'ready');
+  const deadlines = f.pendingTasks().map(task => task._id);
+  assert.deepEqual(
+    f.pendingTasks().map(task => task.name),
+    ['projectHostedLandingStall:deadline'],
+  );
+  const scheduled = f.metrics.scheduled;
   await f.rawChecks.callback(terminal);
-  assert.equal(f.pendingTasks().length, 0, 'duplicate terminal event schedules nothing');
+  assert.deepEqual(
+    f.pendingTasks().map(task => task._id),
+    deadlines,
+    'duplicate event retains only the existing finite deadline',
+  );
+  assert.equal(f.metrics.scheduled, scheduled, 'duplicate terminal event schedules nothing');
 });
 
 test('575 queued bindings consume progress and terminal events in bounded pages, including an event between pages', async t => {

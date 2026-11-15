@@ -386,6 +386,8 @@ const projectFields = {
   autonomyPolicy: v.optional(autonomyPolicy),
   /** Entry files of every check definition and setup action (src/public-governance.ts); kept current by the definition save. Absent until the first save after this field existed. */
   checkEntries: v.optional(v.array(v.string())),
+  /** Server-selected verify (or sole) definition; null means the definition set is ambiguous. */
+  landingCheckId: v.optional(v.union(v.string(), v.null())),
   /** Declared `globalRiskPaths` globs of every check definition, refreshed with `checkEntries`; global-risk only, never owner-protected. */
   globalRiskPaths: v.optional(v.array(v.string())),
   agentGuidance: v.optional(v.string()),
@@ -464,6 +466,10 @@ export const projectContributorFields = {
   projectId: v.id('hostedProjects'),
   contributor: v.string(),
   agentGuidanceMaintainer: v.optional(v.boolean()),
+  /** Fixed-size fresh-operation counters; absent for memberships created before work budgets. */
+  workBudget: v.optional(
+    v.object({ day: v.number(), checks: v.number(), composes: v.number(), submissions: v.number() }),
+  ),
 };
 export const projectProposalFields = {
   ...backfillFields,

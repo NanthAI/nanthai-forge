@@ -12,6 +12,8 @@ export const batchStore = await import(moduleUrl('../convex/projectHostedLanding
 export const checkStore = await import(moduleUrl('../convex/projectHostedCheckStore.ts'));
 const checkWorker = await import(moduleUrl('../convex/projectHostedCheckWorker.ts'));
 const mainAudit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
+const ownerGrant = await import(moduleUrl('../convex/projectHostedOwnerGrant.ts'));
+const acceptanceStore = await import(moduleUrl('../convex/projectHostedAcceptanceStore.ts'));
 export const states = f => [...f.tables.projectHostedLandingRequests.values()].map(r => ticketState(f, r));
 export async function batchesFixture(
   t,
@@ -279,6 +281,17 @@ export async function batchesFixture(
     }
     return ticks;
   };
+  // Queue proofs may start with exact source already reviewed by the synthetic owner.
+  // Seed the real fenced grant, rather than disabling protection on check/setup entries.
+  const reviewProofSource = state =>
+    f.runAcceptance(
+      'proofOwnerGrant',
+      async (ctx, input) => {
+        const { row, attempt } = await acceptanceStore.acceptanceSelection(ctx, input);
+        await ownerGrant.grantOwnerApproval(ctx, row, { kind: 'person', id: 'owner' }, attempt);
+      },
+      f.select(state),
+    );
   const runs = () => [...f.tables.projectHostedCheckRuns.values()].map(r => JSON.parse(r.value));
   const fail = async (runId, file = 'tests/member-1.test.mjs') => {
     const activated = await f.rawChecks.activate(runId);
@@ -291,7 +304,7 @@ export async function batchesFixture(
       }),
     );
   };
-  return { ...f, entries, add, execute, drain, runs, fail, publications, auditWakes };
+  return { ...f, entries, add, execute, drain, runs, fail, publications, auditWakes, reviewProofSource };
 }
 export const synthetic = {
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',

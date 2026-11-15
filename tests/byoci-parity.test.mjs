@@ -76,16 +76,26 @@ async function wave(t, check, options) {
     count: 0,
   });
   f.rawChecks.setPlanSelection(options.selection ?? fullSelection(check));
-  // Rechecks, not governance: an owner agent changing a check entry holds for the owner person
-  // (Issue 470ef29b, tests/public-governance.test.mjs), so these waves opt out of that hold.
-  if (options.noOwnerApproval) {
+  if (options.ownerReview) {
+    // Preserve this proof's explicit owner list. Check/setup entries remain protected
+    // by their definitions and receive exact synthetic owner consent.
     const policy = f.tables.hostedProjects.get(f.projectId).autonomyPolicy;
     f.patch('hostedProjects', f.projectId, {
       autonomyPolicy: { ...policy, acceptance: { ...policy.acceptance, ownerApprovalPaths: [] } },
     });
   }
+  // Protected changes use explicit synthetic owner approval; policy stays active.
   for (let i = 0; i < 2; i++) await f.add(i);
+  const reviewed = new Set();
   for (let tick = 0; ; tick++) {
+    if (options.ownerReview)
+      for (const state of states(f).filter(s => !['landed', 'terminal-failed'].includes(s.phase)))
+        if (!reviewed.has(state.attemptId)) {
+          const before = f.currentMain().receipt.id;
+          await f.reviewProofSource(state);
+          reviewed.add(state.attemptId);
+          assert.equal(f.currentMain().receipt.id, before, 'source review never skips the pending check');
+        }
     assert(tick < 900, JSON.stringify(states(f).map(s => s.phase)));
     for (const run of f.runs().filter(run => run.status === 'queued' && run.gate?.mode !== 'audit'))
       await f.rawChecks.pass(await f.rawChecks.activate(run.id));
@@ -144,7 +154,7 @@ const scenarios = [
     check => ({
       memberPaths: [entry(check), 'packages/b/src/b.ts'],
       fileCount: 2,
-      noOwnerApproval: true,
+      ownerReview: true,
     }),
   ],
   [
@@ -209,12 +219,15 @@ test('parity: speculative slots check the changed entry and follower together fo
       concurrency: 2,
       memberPaths: [entry(check), 'packages/b/src/b.ts'],
       fileCount: 2,
-      noOwnerApproval: true,
+      ownerReview: true,
     });
     assert.deepEqual(outcomes[arm].phases, [
       ['landed', null],
       ['landed', null],
     ]);
+  }
+  t.diagnostic(JSON.stringify(outcomes));
+  for (const arm of Object.keys(arms)) {
     assert.equal(outcomes[arm].runs, 2, 'one predecessor check and one exact combined check');
     assert.deepEqual(outcomes[arm].decisions, [], 'no admission check was reused across the entry change');
     assert(outcomes[arm].ranCommand, 'both runs use the configured command');
@@ -226,7 +239,7 @@ test('parity: the setup action entry is global-risk like the check entry', async
   const outcome = await wave(t, project, {
     memberPaths: ['ci/setup.sh', 'packages/b/src/b.ts'],
     fileCount: 2,
-    noOwnerApproval: true,
+    ownerReview: true,
   });
   assert.deepEqual(outcome.decisions, ['order-sensitive']);
   assert.deepEqual(outcome.firstCheck[1], { landedOn: 'recheck', reason: 'order-sensitive' });

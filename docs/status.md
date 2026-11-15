@@ -6,6 +6,11 @@ apply at landing. Stalled-landing help follows exact receipt repair commands,
 and current web command guides use hosted clone, configure-check and checkpoint
 recovery paths instead of retired native CLI commands.
 
+Landing acceptance applies check and review policy to contributors on private and
+public projects. Direct Ready requests have bounded order and recovery deadlines;
+reservations require a finish driver and stop on stalls.
+
+
 Exact speculative-predecessor conflicts expose pinned early sync/resolve recovery.
 Save-time exact peer notices offer that sync as soon as the peer has a fixed check;
 resolved peer deltas no longer create false notices, and acceptance clears old notices.

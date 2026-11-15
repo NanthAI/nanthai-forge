@@ -162,7 +162,7 @@ test('entry files of every defined check and setup action select the full gate, 
   );
   const explicit = input();
   explicit.policy.acceptance.ownerApprovalPaths = ['deploy/**'];
-  assert.equal(gateFor({ ...explicit, paths: ['.bench/ci.sh'], checks }).mode, 'contract');
+  assert.equal(gateFor({ ...explicit, paths: ['.bench/ci.sh'], checks }).mode, 'full');
   assert.equal(
     gateFor({ ...input(), paths: ['scripts/forge-check.mjs'] }).mode,
     'full',

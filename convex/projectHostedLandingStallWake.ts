@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import type { HostedLandingState } from '../src/hosted-landing';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { LANDING_STALL_MS } from '../src/landing-stall';
@@ -17,16 +17,25 @@ export async function landingAlarmPatch(
   ctx: MutationCtx,
   state: HostedLandingState,
   consumedAlarm?: Id<'_scheduled_functions'>,
+  canonicalRow?: Doc<'projectHostedLandingRequests'>,
 ) {
   const projectId = state.projectId as Id<'hostedProjects'>;
-  const canonical = await ctx.db
-    .query('projectHostedLandingRequests')
-    .withIndex('by_project_and_submission', q => q.eq('projectId', projectId).eq('submissionId', state.id))
-    .unique();
-  const desired = await ctx.db
-    .query('projectHostedLandingDesired')
-    .withIndex('by_project_and_submission', q => q.eq('projectId', projectId).eq('submissionId', state.id))
-    .unique();
+  const canonical =
+    canonicalRow ??
+    (await ctx.db
+      .query('projectHostedLandingRequests')
+      .withIndex('by_project_and_submission', q => q.eq('projectId', projectId).eq('submissionId', state.id))
+      .unique());
+  // Admission already transferred the preparation alarm. Progress writes reuse
+  // their canonical row instead of re-reading both publications.
+  const desired = canonicalRow
+    ? null
+    : await ctx.db
+        .query('projectHostedLandingDesired')
+        .withIndex('by_project_and_submission', q =>
+          q.eq('projectId', projectId).eq('submissionId', state.id),
+        )
+        .unique();
   if (canonical && desired?.alarm) {
     await ctx.scheduler.cancel(desired.alarm.taskId);
     await ctx.db.patch(desired._id, { alarm: null });

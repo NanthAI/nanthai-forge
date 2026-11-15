@@ -7,6 +7,7 @@ import { checksFixture, code } from './hosted-checks-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { legacyPolicy } from '../dist/autonomy-policy.js';
+import { ticketState } from './landing-ticket-fixture.mjs';
 export const api = await import(moduleUrl('../convex/projectHostedLanding.ts'));
 export const driver = await import(moduleUrl('../convex/projectHostedLandingDriver.ts'));
 export const control = await import(moduleUrl('../convex/projectHostedLandingControl.ts'));
@@ -36,6 +37,7 @@ export async function landingFixture(source = null) {
         agentDefaults: { stallAlerts: { enabled: false }, preflight: 'advise' },
       },
     });
+  let manualDeadlineAdvanced = false;
   let now = Date.now(),
     schedulerFailure = false;
   const metrics = {
@@ -75,6 +77,9 @@ export async function landingFixture(source = null) {
     ctx.db.system = { get: ctx.db.get };
     ctx.scheduler = {
       runAfter: async (delay, ref, args) => {
+        // Production schedules relative to the current clock. Keep a stale fixture clock
+        // from firing an absolute-progress alarm before the requested instant.
+        now = Math.max(now, Date.now());
         if (schedulerFailure) throw new Error('synthetic scheduler unavailable');
         metrics.scheduled++;
         return ctx.db.insert('_scheduled_functions', {
@@ -277,8 +282,20 @@ export async function landingFixture(source = null) {
   const drain = async () => {
     let ticks = 0;
     while (nextTask()) {
+      // A direct request waits for its caller to accept. Tests advance its new
+      // drop deadline explicitly; draining controller work must leave time for review.
+      const task = pendingTasks()
+        .sort((a, b) => a.scheduledTime - b.scheduledTime)
+        .find(t => {
+          if (t.name !== 'projectHostedLandingStall:deadline' || manualDeadlineAdvanced) return true;
+          const row = [...f.tables.projectHostedLandingRequests.values()].find(
+            r => r.submissionId === t.args[0].submissionId,
+          );
+          return !row || row.phase !== 'ready' || ticketState(f, row).request.finish;
+        });
+      if (!task) break;
       assert(++ticks <= 1000, 'finite pending work');
-      await execute();
+      await execute(task);
     }
     return ticks;
   };
@@ -315,6 +332,7 @@ export async function landingFixture(source = null) {
     rawChecks: f,
     now: () => now,
     elapse: ms => {
+      manualDeadlineAdvanced = true;
       now += ms;
     },
     schedulerFailure: value => {

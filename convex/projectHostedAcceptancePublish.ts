@@ -276,13 +276,6 @@ export async function publishAcceptance(
     return { status: 'pending' as const, reason, request: next };
   }
   invariant(gate === 'pass', 'CHECK_NOT_PASSED', 'This Candidate requires an exact full check.');
-  const protectedReason =
-    policy.acceptance.gate === 'contract' &&
-    !(actor.kind === 'person' && actor.id === project.owner) &&
-    // Issue 470ef29b: owner-only inputs never excuse an agent, the owner's own included.
-    protectedGatePaths(policy, candidate.governance?.paths ?? null, checks)
-      ? 'needs owner approval: protected or unknown paths'
-      : null;
   // Issue 93e14bb0: from the run plan and changed paths already loaded; no extra read.
   const secretAllowAdded = secretAllowMark(run?.plan?.secretAllow, candidate.governance?.paths ?? null);
   // Issue fe5bea80: a builder's approval request on a landed Lane holds it until the owner grants
@@ -293,7 +286,6 @@ export async function publishAcceptance(
   const reason =
     [
       governanceReason(project, policy, actor, candidate.governance?.paths ?? null, checks) ??
-        protectedReason ??
         secretAllowReview(policy, actor, secretAllowAdded),
       approvalReason,
     ]
@@ -431,7 +423,11 @@ export async function publishAcceptance(
     error: null,
   };
   // Exact evidence above already proved this run terminal. A different retained run still releases.
-  await writeLanding(ctx, row, next, false, row.runId !== run?.id);
+  // The existing guarded completion owns deadline cleanup when it has input
+  // pages. Publication clears the ticket alarm in its normal write; no second
+  // cleanup job or scheduler cancellation belongs in the main CAS.
+  const completionAlarm = plan.inputPages ? row.alarm?.taskId : undefined;
+  await writeLanding(ctx, row, next, false, row.runId !== run?.id, completionAlarm);
   await endLandedApprovals(ctx, approvals);
   await settleLandingOperation(ctx, next);
   await releaseLandingQueue(ctx, queue, now);
@@ -448,7 +444,8 @@ export async function publishAcceptance(
   await alertSecretAllowAdded(ctx, project, receipt);
   // The completion tick also retires landed work from overlap, so it runs even when keepOpen or policy skips completion.
   const precompose = { receiptIds: [receipt.id] };
-  if (plan.inputPages) await scheduleAcceptanceCompletion(ctx, plan._id, { ...identity, precompose });
+  if (plan.inputPages)
+    await scheduleAcceptanceCompletion(ctx, plan._id, { ...identity, precompose }, completionAlarm);
   else {
     await cancelStaleLandingChecks(ctx, {
       projectId: claim.projectId,

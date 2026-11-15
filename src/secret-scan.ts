@@ -64,11 +64,16 @@ const patterns: { kind: string; pattern: RegExp }[] = [
     pattern: /\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{20,}T3BlbkFJ[A-Za-z0-9_-]{20,}\b/g,
   },
   { kind: 'openai-api-key', pattern: /\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{40,}\b/g },
+  {
+    kind: 'convex-deploy-key',
+    pattern: /\b(?:prod|dev|preview):[A-Za-z0-9_-]{1,128}\|[A-Za-z0-9_-]{24,}\b/g,
+  },
+  { kind: 'sendgrid-token', pattern: /\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\b/g },
   { kind: 'npm-token', pattern: /\bnpm_[A-Za-z0-9]{36}\b/g },
 ];
 // A secret-named assignment whose value looks random: `API_KEY=…`, `token: "…"`.
 const assignment =
-  /(?:secret|token|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|credential)[A-Za-z0-9_-]*['"]?\s*[:=]\s*['"`]?([A-Za-z0-9+/_=-]{24,})/gi;
+  /(?:secret|token|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|credential)[A-Za-z0-9_-]{0,64}['"]?[ \t]{0,64}[:=][ \t]{0,64}['"`]?([A-Za-z0-9+/_=.:|-]{24,})/gi;
 
 /** Shannon entropy in bits per character. */
 export function entropy(text: string) {
@@ -84,9 +89,15 @@ export function entropy(text: string) {
 // Placeholders (`ghp_xxxx…`, `AKIA0000…`) repeat a few characters and documented
 // examples say so (`…EXAMPLE`); real bodies do neither.
 const placeholder = (value: string) => entropy(value) < 3 || value.includes('EXAMPLE');
-// Hex digests top out at 4 bits/char, so 4.3 keeps hashes and ids out.
-const randomLooking = (value: string) =>
-  entropy(value) >= 4.3 && /[0-9]/.test(value) && /[a-z]/.test(value) && /[A-Z]/.test(value);
+// Assignment names provide context: hashes outside secret assignments stay unmarked.
+const randomLooking = (value: string) => {
+  const bits = entropy(value);
+  if (value.length >= 32 && /^[a-f0-9]+$/i.test(value)) return bits >= 3;
+  if (value.length >= 32 && /^[a-z0-9]+$/.test(value)) return bits >= 3.5;
+  return (
+    bits >= (value.length < 32 ? 4 : 4.3) && /[0-9]/.test(value) && /[a-z]/.test(value) && /[A-Z]/.test(value)
+  );
+};
 
 export function secretFingerprint(path: string, kind: string, value: string) {
   return createHash('sha256')
@@ -138,7 +149,7 @@ function lineAt(starts: number[], index: number) {
 }
 
 /** Findings for one file's text, in line order. */
-export function scanSecretText(path: string, text: string) {
+export function scanSecretText(path: string, text: string, work?: { assignmentCharacters: number }) {
   const found: (SecretFinding & { index: number })[] = [];
   const seen = new Set<string>();
   const add = (kind: string, value: string, index: number) => {
@@ -154,16 +165,29 @@ export function scanSecretText(path: string, text: string) {
       add(kind, match[0], match.index);
       known.add(match.index);
     }
-  for (const match of text.matchAll(assignment)) {
-    const value = match[1]!,
-      index = match.index + match[0].length - value.length;
-    if (
-      !randomLooking(value) ||
-      placeholder(value) ||
-      [...known].some(start => start >= match.index && start <= index + value.length)
-    )
-      continue;
-    add('high-entropy-secret', value, index);
+  // Process each line once. A bounded name and horizontal whitespace keep attempts
+  // linear; overlong lines never enter the assignment matcher. Known shapes still scan.
+  const knownStarts = [...known].sort((a, b) => a - b);
+  let knownIndex = 0;
+  for (let start = 0; start < text.length;) {
+    const newline = text.indexOf('\n', start);
+    const end = newline === -1 ? text.length : newline;
+    if (work) work.assignmentCharacters += end - start + (newline === -1 ? 0 : 1);
+    if (end - start <= 8192)
+      for (const match of text.slice(start, end).matchAll(assignment)) {
+        const value = match[1]!,
+          from = start + match.index,
+          index = from + match[0].length - value.length;
+        while (knownIndex < knownStarts.length && knownStarts[knownIndex]! < from) knownIndex++;
+        if (
+          !randomLooking(value) ||
+          placeholder(value) ||
+          (knownStarts[knownIndex] !== undefined && knownStarts[knownIndex]! <= index + value.length)
+        )
+          continue;
+        add('high-entropy-secret', value, index);
+      }
+    start = end + 1;
   }
   if (!found.length) return [];
   const starts = [0];
@@ -202,8 +226,8 @@ export function scanSecretPaths(
     }
     const bytes = read(path);
     if (!bytes) continue;
-    // Large and binary files are skipped: NUL in the first 8 KiB marks binary.
-    if (bytes.length > SECRET_SCAN_MAX_FILE_BYTES || bytes.subarray(0, 8192).includes(0)) {
+    // Small files are scanned even when they contain NUL bytes.
+    if (bytes.length > SECRET_SCAN_MAX_FILE_BYTES) {
       skippedFiles++;
       continue;
     }

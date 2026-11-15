@@ -77,7 +77,7 @@ test('placeholders, documented examples, hashes and bare headers are not finding
   const text = [
     join('gh', 'p_', 'x'.repeat(36)),
     join('AK', 'IA', 'IOSFODNN7', 'EXAMPLE'),
-    `token: '${'a1b2c3d4e5f6'.repeat(6)}'`,
+    `token: '${'0'.repeat(64)}'`,
     `sha256 = "${'0123456789abcdef'.repeat(4)}"`,
     `apiKey = process.env.FORGE_API_KEY`,
     join('-----BEGIN ', 'RSA PRIVATE KEY-----'),
@@ -85,7 +85,7 @@ test('placeholders, documented examples, hashes and bare headers are not finding
   assert.deepEqual(scanSecretText('docs/example.md', text), []);
 });
 
-test('only changed paths are read; binary, large, deleted and link paths are skipped', () => {
+test('only changed paths are read; small NUL files scan and large, deleted and link paths are skipped', () => {
   const reads = [];
   const read = path => {
     reads.push(path);
@@ -98,10 +98,10 @@ test('only changed paths are read; binary, large, deleted and link paths are ski
   const result = scanSecretPaths(['a.txt', 'b.bin', 'c.txt', 'gone.txt'], read, { baseAllow: undefined });
   assert.deepEqual(
     result.findings.map(item => item.path),
-    ['a.txt'],
+    ['a.txt', 'b.bin'],
   );
-  assert.equal(result.scannedFiles, 1);
-  assert.equal(result.skippedFiles, 2);
+  assert.equal(result.scannedFiles, 2);
+  assert.equal(result.skippedFiles, 1);
   // The change's own allow file is not read unless it changed: entries count from main only (R-01).
   assert.deepEqual(reads.sort(), ['a.txt', 'b.bin', 'c.txt', 'gone.txt'].sort());
 });
@@ -369,4 +369,23 @@ test('machine runner R-01: allow entries come from the base State; the self-allo
   assert.equal(onMain.allowChanges, undefined);
   assert(!requested.includes(readme.blob), 'unchanged files are not fetched before the plan');
   assert(!JSON.stringify([self, onMain]).includes(fake.github));
+});
+
+test('secret assignments cover hex, lowercase, short mixed values and deployment or dotted shapes', () => {
+  const values = [
+    'e387b64c902fa15d78ac43b1d69fe025c18abd093ecf64725db103869cf3a804',
+    'p7q2kf9wm4xv8rb3ny6lc1hd5gs0ja8te2uz9',
+    'Fq7Zt2Kp9Wm4Xv8Rb3Ny6Lc1',
+    join('prod:synthetic|', fake.random),
+    join('SG.', fake.random, '.', fake.random),
+  ];
+  for (const value of values) assert(scanSecretText('config.env', `API_SECRET=${value}`).length > 0);
+});
+
+test('one MiB repeated secret names consumes bounded assignment scanning work', () => {
+  const text = 'tokentoken'.repeat(104_858);
+  const work = { assignmentCharacters: 0 };
+  assert.deepEqual(scanSecretText('large.txt', text, work), []);
+  assert(work.assignmentCharacters <= text.length * 2);
+  assert(work.assignmentCharacters > 0, 'the scanner reports its bounded work');
 });

@@ -51,6 +51,7 @@ export const hostedAcceptanceTables = {
     completion: v.optional(
       v.object({
         tick: v.id('_scheduled_functions'),
+        alarm: v.optional(v.id('_scheduled_functions')),
         guard: v.union(v.id('_scheduled_functions'), v.null()),
         replayed: v.optional(v.object({ page: v.number(), entry: v.number() })),
         stalled: v.optional(

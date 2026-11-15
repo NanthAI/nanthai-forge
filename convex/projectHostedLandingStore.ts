@@ -248,7 +248,7 @@ export async function writeLanding(
   )
     delete state.observation.stall;
   // Folded into this row's single write below (c329d191 kept waiter alarms).
-  const alarm = await landingAlarmPatch(ctx, state, consumedAlarm);
+  const alarm = await landingAlarmPatch(ctx, state, consumedAlarm, row);
   if (alarm && alarm.id !== row._id) await ctx.db.patch(alarm.id, { alarm: alarm.alarm });
   await retainLandingProgress(ctx, state);
   const advice = row.wouldConflict ? JSON.parse(row.wouldConflict) : undefined;
@@ -277,6 +277,8 @@ export async function writeLanding(
     row.reservedUntil !== undefined &&
     state.phase !== 'landed' &&
     state.phase !== 'terminal-failed' &&
+    Boolean(state.request.finish) &&
+    !state.observation.stall &&
     state.observation.pendingReason !== 'waiting-for-review';
   // Graph-sealed order (c6b81429): a main-race attempt whose pass cannot be carried across a moved
   // main (a scoped re-check, or a proof no dependent change refused) stops independent entries

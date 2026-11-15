@@ -316,7 +316,11 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
   const secretAllowAdded = secretAllowMark(run.plan?.secretAllow, candidate.governance?.paths ?? null);
   let previousSnapshot = main.snapshotId;
   const receipts = [];
-  const completions: { identity: ReceiptIdentity; planId: Id<'projectHostedAcceptancePlans'> }[] = [];
+  const completions: {
+    identity: ReceiptIdentity;
+    planId: Id<'projectHostedAcceptancePlans'>;
+    alarm?: Id<'_scheduled_functions'>;
+  }[] = [];
   const messages = [];
   for (const member of members) messages.push(await acceptedLandingMessage(ctx, member.state));
   for (const [index, member] of members.entries()) {
@@ -425,9 +429,11 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
     const currentRow = await landingRow(ctx, { projectId: claim.projectId, submissionId: member.state.id });
     invariant(currentRow, 'SOURCE_UNAVAILABLE', 'The batch member disappeared.');
     // The shared run was just proved passed; preserve cleanup for any different retained run.
-    await writeLanding(ctx, currentRow, next, false, currentRow.runId !== run.id);
+    const completionAlarm = member.plan.inputPages ? currentRow.alarm?.taskId : undefined;
+    await writeLanding(ctx, currentRow, next, false, currentRow.runId !== run.id, completionAlarm);
     await settleLandingOperation(ctx, next);
-    if (member.plan.inputPages) completions.push({ identity, planId: member.plan._id });
+    if (member.plan.inputPages)
+      completions.push({ identity, planId: member.plan._id, alarm: completionAlarm });
     receipts.push(receipt);
   }
   const last = receipts.at(-1)!;
@@ -446,8 +452,13 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
   const precompose = {
     receiptIds: receipts.map(receipt => receipt.id),
   };
-  for (const [index, { identity, planId }] of completions.entries())
-    await scheduleAcceptanceCompletion(ctx, planId, { ...identity, ...(index === 0 ? { precompose } : {}) });
+  for (const [index, { identity, planId, alarm }] of completions.entries())
+    await scheduleAcceptanceCompletion(
+      ctx,
+      planId,
+      { ...identity, ...(index === 0 ? { precompose } : {}) },
+      alarm,
+    );
   if (!completions.length) {
     await cancelStaleLandingChecks(ctx, {
       projectId: claim.projectId,

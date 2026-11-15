@@ -154,7 +154,10 @@ test('a conflicted head retains its terminal receipt and never hides later runna
     .find(op => op.operationId === badRequest.operationId);
   assert.equal(op.terminal.outcome.status, 'failed');
   assert.equal((await f.enqueue(badRequest)).observation.cause, 'conflict');
-  assert.equal(f.pendingTasks().length, 0);
+  assert.deepEqual(
+    f.pendingTasks().map(task => task.name),
+    ['projectHostedLandingStall:deadline'],
+  );
   assert.equal(f.tables.projectHostedChannels.get(f.mainId).selection, mainBefore);
 });
 
@@ -167,7 +170,11 @@ test('running checks sleep without polling while independent ready work advances
   await f.drain();
   assert.equal((await f.status(waiting.id)).request.phase, 'checking');
   assert.equal((await f.status(ready.id)).request.phase, 'ready');
-  assert.equal(f.pendingTasks().length, 0);
+  assert.deepEqual(
+    f.pendingTasks().map(t => t.name),
+    ['projectHostedLandingStall:deadline'],
+    'only the finite manual acceptance deadline remains',
+  );
   const scheduled = f.metrics.scheduled;
   assert.equal(await f.recover(), false);
   assert.equal(f.metrics.scheduled, scheduled);
@@ -179,7 +186,11 @@ test('running checks sleep without polling while independent ready work advances
   assert.equal(result.phase, 'ready');
   assert.equal(result.observation.state, 'pending');
   assert.equal(result.observation.pendingReason, 'queued');
-  assert.equal(f.pendingTasks().length, 0);
+  assert.deepEqual(
+    f.pendingTasks().map(t => t.name),
+    ['projectHostedLandingStall:deadline', 'projectHostedLandingStall:deadline'],
+    'only the finite manual acceptance deadline remains',
+  );
 });
 
 test('failed exact checks settle only their own request and retain later ready work', async () => {
@@ -388,7 +399,11 @@ test('lost check-completion wake reconciles on original submission replay withou
   await f.drain();
   assert.equal((await f.status(saved.id)).request.phase, 'ready');
   assert.equal(f.tables.projectHostedCheckRuns.size, 1);
-  assert.equal(f.pendingTasks().length, 0);
+  assert.deepEqual(
+    f.pendingTasks().map(t => t.name),
+    ['projectHostedLandingStall:deadline'],
+    'only the finite manual acceptance deadline remains',
+  );
 });
 
 test('an unexpected step failure rolls back progress and preserves the original recovery wake', async () => {
@@ -407,7 +422,11 @@ test('an unexpected step failure rolls back progress and preserves the original 
   assert.equal((await f.status(first.id)).request.phase, 'ready');
   assert.equal((await f.status(second.id)).request.phase, 'ready');
   assert.equal(f.tables.projectHostedLandingAttempts.size, 2);
-  assert.equal(f.pendingTasks().length, 0);
+  assert.deepEqual(
+    f.pendingTasks().map(t => t.name),
+    ['projectHostedLandingStall:deadline', 'projectHostedLandingStall:deadline'],
+    'only the finite manual acceptance deadline remains',
+  );
 });
 
 test('check result and its notification commit together; failed scheduling replays the same signed event', async () => {
@@ -491,5 +510,9 @@ test('a standalone check passes after its infrastructure retry with the exact Ca
   assert.equal(status.attempt.parentAttemptId, first.id);
   assert.equal(status.attempt.platformRetries, 1);
   assert.equal(f.tables.projectHostedCheckRuns.size, 2);
-  assert.equal(f.pendingTasks().length, 0);
+  assert.deepEqual(
+    f.pendingTasks().map(t => t.name),
+    ['projectHostedLandingStall:deadline'],
+    'only the finite manual acceptance deadline remains',
+  );
 });

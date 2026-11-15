@@ -13,7 +13,7 @@ import { landingReservation, reservationHolds } from '../src/landing-reservation
  * row: no extra write. */
 export async function submissionReservation(
   ctx: MutationCtx,
-  input: { projectId: Id<'hostedProjects'>; intentId: string | undefined },
+  input: { projectId: Id<'hostedProjects'>; intentId: string | undefined; driven?: boolean },
   now: number,
 ) {
   const { intentId } = input;
@@ -38,7 +38,7 @@ export async function submissionReservation(
   return {
     intentId,
     ...(granted.superseded ? { superseded: granted.superseded } : {}),
-    ...(granted.until !== null ? { reservedUntil: granted.until } : {}),
+    ...(input.driven && granted.until !== null ? { reservedUntil: granted.until } : {}),
   };
 }
 
@@ -97,7 +97,12 @@ export async function reservationAhead(
   let mine: string[] | null | undefined;
   for (const holder of holders) {
     const value = hostedLandingStateSchema.parse(JSON.parse(holder.value));
-    if (value.observation.pendingReason === 'waiting-for-review') continue;
+    if (
+      !value.request.finish ||
+      value.observation.stall ||
+      value.observation.pendingReason === 'waiting-for-review'
+    )
+      continue;
     const grantedAt = holder._creationTime,
       reservedAt = row.reservedUntil !== undefined ? row._creationTime : undefined;
     // Cheap rules first: a later grant, an expired one or the same group never holds.
@@ -139,7 +144,12 @@ export async function heldBackByReservation(
   value: HostedLandingState,
   now: number,
 ) {
-  if (holder.row.reservedUntil === undefined) return false;
+  if (
+    holder.row.reservedUntil === undefined ||
+    !holder.state.request.finish ||
+    holder.state.observation.stall
+  )
+    return false;
   return reservationHolds(
     {
       until: holder.row.reservedUntil,

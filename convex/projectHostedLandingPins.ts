@@ -54,6 +54,11 @@ export async function pinLandingAttempt(
     'A person request retains the exact reviewed Candidate; a different selection uses a new request.',
   );
   const r = input.request;
+  invariant(
+    !r.revertOf || r.finish?.composeOperationId,
+    'BAD_ARGUMENT',
+    'A revert requires its retained reverse composition.',
+  );
   const project = await hostedWriteProject(ctx, input.projectId, input.actor.id, r.authorityEpoch);
   const main = await hostedStartMain(ctx, input.projectId);
   invariant(

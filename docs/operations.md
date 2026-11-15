@@ -1175,7 +1175,10 @@ receipt explicitly directs a retry, fix its cause and land the same Lane again.
 Without a repair command, read `queue {}` and `landing {operationId}` first. While a live owner
 (the queue, its own finish attempt, a batch or a batch peer) still drives the entry,
 Forge never ends it: the deadline re-arms at 2, 4, 8 and 16 hours and then stops.
-Entries waiting for review or a dependency are not ended. Settled and idle queues
+Direct Ready requests without a finish driver also end through the cancellation
+path at the 60-minute progress deadline. Their unchecked requests hold no queue
+order; checked requests hold order for at most 60 seconds from settlement. Driven
+Ready entries retain their normal order. Entries waiting for review or a dependency are not ended. Settled and idle queues
 schedule no recurring wake. See [agent workflow](agents/workflow.md) for the receipt fields.
 
 ## Cost budgets

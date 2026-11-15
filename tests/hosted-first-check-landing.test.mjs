@@ -47,8 +47,17 @@ const receipts = f =>
     .sort((a, b) => a.snapshot.revision - b.snapshot.revision);
 // Runners report the selection they ran; a full check reports scope "full".
 const full = JSON.stringify({ scope: 'full', tests: [] });
-async function drive(f, { until = () => false, skip = /MainAudit:start/ } = {}) {
+async function drive(f, { until = () => false, skip = /MainAudit:start/, ownerReview = false } = {}) {
+  const reviewed = new Set();
   for (let tick = 0; !until(f); tick++) {
+    if (ownerReview)
+      for (const state of states(f).filter(s => !['landed', 'terminal-failed'].includes(s.phase)))
+        if (!reviewed.has(state.attemptId)) {
+          const before = f.currentMain().receipt.id;
+          await f.reviewProofSource(state);
+          reviewed.add(state.attemptId);
+          assert.equal(f.currentMain().receipt.id, before, 'source review never skips the pending check');
+        }
     assert(tick < 900, JSON.stringify(states(f).map(s => s.phase)));
     for (const run of f.runs().filter(run => run.status === 'queued' && run.gate?.mode !== 'audit'))
       await f.rawChecks.pass(await f.rawChecks.activate(run.id));
@@ -57,14 +66,7 @@ async function drive(f, { until = () => false, skip = /MainAudit:start/ } = {}) 
     await f.execute(task);
   }
 }
-/** These waves measure rechecks, not governance: an owner agent changing a check entry or `.github/**`
- * holds for the owner person (Issue 470ef29b, tests/public-governance.test.mjs), so they opt out. */
-function noOwnerApproval(f) {
-  const policy = f.tables.hostedProjects.get(f.projectId).autonomyPolicy;
-  f.patch('hostedProjects', f.projectId, {
-    autonomyPolicy: { ...policy, acceptance: { ...policy.acceptance, ownerApprovalPaths: [] } },
-  });
-}
+// Proof waves keep governance active and explicitly approve protected changes as the synthetic owner.
 async function wave(t, options = {}) {
   // One execution slot keeps these proof/refusal cases on the main-race path;
   // the admission-pipeline tests separately cover speculative combined checks.
@@ -97,10 +99,17 @@ async function wave(t, options = {}) {
       autonomyPolicy: { ...policy, acceptance: { ...policy.acceptance, hostedCrossHeadReuse: false } },
     });
   }
-  if (options.noOwnerApproval) noOwnerApproval(f);
+  if (options.ownerReview) {
+    // Preserve this proof's explicit owner list. Check/setup entries remain protected
+    // by their definitions and receive exact synthetic owner consent.
+    const policy = f.tables.hostedProjects.get(f.projectId).autonomyPolicy;
+    f.patch('hostedProjects', f.projectId, {
+      autonomyPolicy: { ...policy, acceptance: { ...policy.acceptance, ownerApprovalPaths: [] } },
+    });
+  }
   if (options.landing) options.landing(f);
   for (let i = 0; i < (options.count ?? 2); i++) await f.add(i);
-  await drive(f, { until: options.until });
+  await drive(f, { until: options.until, ownerReview: options.ownerReview });
   return f;
 }
 const runCount = f => f.runs().length;
@@ -318,7 +327,7 @@ for (const [path, reason] of [
       ],
       memberContents: ['same', 'same'],
       fileCount: 2,
-      noOwnerApproval: true,
+      ownerReview: true,
     });
     assert.deepEqual(
       states(f).map(s => s.phase),
@@ -341,7 +350,7 @@ for (const [name, memberPaths, reason] of [
   ['the change (a package manifest)', ['src/a.ts', 'package.json'], 'global-risk'],
 ])
   test(`a global-risk file in ${name} rechecks as ${reason}`, async t => {
-    const f = await wave(t, { memberPaths, fileCount: 2, noOwnerApproval: true });
+    const f = await wave(t, { memberPaths, fileCount: 2, ownerReview: true });
     assert.deepEqual(
       states(f).map(s => s.phase),
       ['landed', 'landed'],
@@ -454,7 +463,7 @@ for (const [name, memberPaths] of [
   ['a migration folder both sides add to', ['app/migrations/0005_a.py', 'app/migrations/0005_b.py']],
 ])
   test(`fast mode never relaxes order-sensitive risk: ${name}`, async t => {
-    const f = await wave(t, { memberPaths, fileCount: 2, noOwnerApproval: true, landing: fastMode() });
+    const f = await wave(t, { memberPaths, fileCount: 2, ownerReview: true, landing: fastMode() });
     assert.deepEqual(f.reuseDecisions, [ORDERED]);
     assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason: ORDERED });
     assert.equal(runCount(f), 3);
@@ -675,7 +684,7 @@ test('own check command: the file the command names is global-risk and rechecks'
     ...ownCheck,
     memberPaths: ['ci/check.sh', 'src/b.ts'],
     fileCount: 2,
-    noOwnerApproval: true,
+    ownerReview: true,
   });
   assert.deepEqual(
     states(f).map(s => s.phase),
@@ -699,7 +708,7 @@ test('own check command: the file its Actions setup command names is global-risk
     ...withSetup,
     memberPaths: ['ci/setup.sh', 'src/b.ts'],
     fileCount: 2,
-    noOwnerApproval: true,
+    ownerReview: true,
   });
   assert.deepEqual(
     states(f).map(s => s.phase),

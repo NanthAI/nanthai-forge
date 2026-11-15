@@ -48,7 +48,7 @@ Handing a secret to arbitrary code lets that code leak it.
 
 Every hosted landing check scans the paths its composed Candidate changes from the composition base, before project code runs. Forge's own executors do it (the GitHub Actions planning job and self-hosted machine runners), so it works with any configured check command. Paths already on main are not rescanned.
 
-It looks for known credential shapes (private key blocks with a key body, AWS access key ids, GitHub, GitLab, Slack, npm, Google, Anthropic and OpenAI tokens, live `sk_`/`rk_` keys) and for a random-looking value assigned to a secret-named key (`token`, `secret`, `password`, `api_key`, …; at least 24 characters, mixed case and digits, entropy of at least 4.3 bits per character, so hex hashes and ids pass). Repeated-character placeholders and documented `…EXAMPLE` values are not findings. Binary files, files over 1 MiB and links are skipped.
+It looks for known credential shapes (private key blocks with a key body, AWS access key ids, GitHub, GitLab, Slack, npm, Google, Anthropic, OpenAI, Convex deployment and SendGrid tokens, live `sk_`/`rk_` keys) and for a random-looking value assigned to a secret-named key (`token`, `secret`, `password`, `api_key`, …; mixed values of at least 24 characters, or random hex/lowercase values of at least 32; non-secret hash assignments still pass). Repeated-character placeholders and documented `…EXAMPLE` values are not findings. Files over 1 MiB and links are skipped; smaller files scan even with NUL bytes. Assignment names and whitespace are bounded, and assignment lines over 8 KiB are skipped.
 
 A finding fails the check like a failing test: the landing stops with `CHECK_FAILED`, and the notice names the file, line, kind and a 16-character fingerprint, never the value. The fingerprint is a salted SHA-256 of path, kind and value. At most 20 findings are listed, with a count of the rest.
 
@@ -178,3 +178,9 @@ changes. Format 18 preserves landing entries and batches. Native and Git exchang
 carry unified Intents, including those without a Lane, without down-projecting
 them to legacy execution records. Deploy these hosted readers before upgrading
 exchange writers or requesting hosted Intent migration.
+
+Private and public contributors follow the same check, review and protected-path rules.
+Only the owner person is exempt from the automatic check requirement; explicit owner
+approval still reviews a contributor's exact attempt. Receipts mark contributor
+self-acceptance as automatic. An explicit owner-approval glob list replaces built-in
+globs while retaining every defined check and setup entry file.

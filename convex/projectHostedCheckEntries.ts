@@ -35,3 +35,9 @@ export async function refreshCheckEntries(ctx: MutationCtx, projectId: Id<'hoste
   await ctx.db.patch(projectId, { checkEntries: entries, globalRiskPaths });
   return entries;
 }
+
+/** The canonical landing check is verify, or the sole definition; never a client selection. */
+export function landingCheckSelection(checks: { id: string; name: string }[]) {
+  const verify = checks.filter(check => check.name === 'verify').sort((a, b) => a.id.localeCompare(b.id));
+  return verify[0]?.id ?? (checks.length === 1 ? checks[0]!.id : null);
+}

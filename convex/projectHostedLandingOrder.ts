@@ -67,7 +67,19 @@ export function orderHostedLandingRows<T extends Pick<LandingRow, 'sequence' | '
  * An entry holds its place while it is still live; one that failed, stalled, is
  * held for red main, is a named suspect of a combined failure or waits for review
  * or a dependency gives its place up. */
-export function holdsLandingOrder(row: Pick<LandingRow, 'phase' | 'hold'>, state: HostedLandingState) {
+export function holdsLandingOrder(
+  row: Pick<LandingRow, 'phase' | 'hold'>,
+  state: HostedLandingState,
+  now = Date.now(),
+) {
+  // A direct request has no finish controller to take main. Unchecked requests give up
+  // order immediately; checked manual acceptance has one minute to use its prepared head.
+  if (
+    row.phase === 'ready' &&
+    !state.request.finish &&
+    (!state.request.check || now >= Date.parse(state.timing?.settlementStartedAt ?? state.at) + 60_000)
+  )
+    return false;
   return (
     (row.phase === 'queued' || row.phase === 'checking' || row.phase === 'ready') &&
     !row.hold &&
@@ -140,7 +152,7 @@ export async function olderLandingAhead(
     if (
       ahead?.admitting &&
       ahead.admission?.full &&
-      holdsLandingOrder(ahead, hostedLandingStateSchema.parse(JSON.parse(ahead.value)))
+      holdsLandingOrder(ahead, hostedLandingStateSchema.parse(JSON.parse(ahead.value)), now)
     )
       return { row: ahead, until: null, held: 'combined' as const, footprints: 'unknown' as const };
   }
@@ -169,7 +181,7 @@ export async function olderLandingAhead(
     if (row.priority === 'urgent' && other.priority !== 'urgent') continue;
     const value = hostedLandingStateSchema.parse(JSON.parse(other.value));
     if (state.batchId && value.batchId === state.batchId) continue;
-    if (!holdsLandingOrder(other, value)) continue;
+    if (!holdsLandingOrder(other, value, now)) continue;
     // A live reservation holder goes ahead of an older entry it holds back (10d253c6).
     if (row.reservedUntil !== undefined && (await heldBackByReservation(ctx, holder, other, value, now)))
       continue;
@@ -236,6 +248,8 @@ export async function olderLandingAhead(
           ? await footprintsOf(ctx, other, value, side)
           : footprintLabel(independent),
     });
+    if (other.phase === 'ready' && !value.request.finish)
+      return { ...(await wait()), until: Date.parse(value.timing?.settlementStartedAt ?? value.at) + 60_000 };
     if (other.phase !== 'queued' || other.runnable) return { ...(await wait()), until: null };
     const until =
       Math.max(

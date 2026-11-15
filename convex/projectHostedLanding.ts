@@ -389,7 +389,11 @@ export async function enqueueHostedLanding(
     ? null
     : await startLandingAdmission(ctx, { projectId: input.projectId, attempt, request });
   // Issue 10d253c6: the same work superseded after a passed check reserves its files now.
-  const reservation = await submissionReservation(ctx, { projectId: input.projectId, intentId }, Date.now());
+  const reservation = await submissionReservation(
+    ctx,
+    { projectId: input.projectId, intentId, driven: Boolean(request.finish) },
+    Date.now(),
+  );
   const sequence = queue.sequence + 1;
   const state = hostedLandingStateSchema.parse({
     schema: 1,

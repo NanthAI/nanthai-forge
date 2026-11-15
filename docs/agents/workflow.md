@@ -722,6 +722,13 @@ check. The original run identity and evidence are retained. Prioritization follo
 
 ### Landing queue
 
+Direct submissions without a finish driver hold queue order only when checked, for
+at most 60 seconds after settlement begins. If they are not accepted, the existing
+60-minute progress deadline ends them with `LANDING_STALLED`; submit the same Lane
+again to retry. Reservations require a finish driver and end on a recorded stall.
+Revert metadata requires the retained reverse composition so its lineage is checked.
+
+
 The existing Now, Lane and Intent views share the saved submission projection. Waiting
 for a machine stays separate from a failed code check. Only review stops and current
 code failures enter Needs you; current repair notices link to their recorded run and,

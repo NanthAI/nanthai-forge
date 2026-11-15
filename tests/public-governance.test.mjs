@@ -430,7 +430,7 @@ test('a contributor change to the project check entry needs owner approval; Forg
   assert.equal(held.reason, 'needs owner approval: protected paths .bench/ci.sh');
 });
 
-test('check entry protection is a default: unrelated project files, path-free checks and explicit lists are unaffected', () => {
+test('check entry protection keeps unrelated project files and path-free checks unaffected', () => {
   const project = { owner: 'owner', visibility: 'public' },
     actor = { id: 'contributor', kind: 'agent' },
     policy = policyPreset('trusted'),
@@ -442,14 +442,18 @@ test('check entry protection is a default: unrelated project files, path-free ch
   assert.equal(reason(['package.json'], { executable: 'npm', args: ['test'] }), null);
   assert.match(reason(['scripts/forge-check.mjs'], check), /protected paths/);
   const explicit = { ...policy, acceptance: { ...policy.acceptance, ownerApprovalPaths: ['deploy/**'] } };
-  assert.equal(reason(['.bench/ci.sh'], check, explicit), null, 'an explicit list replaces the defaults');
+  assert.match(
+    reason(['.bench/ci.sh'], check, explicit),
+    /protected paths/,
+    'explicit globs keep derived check entries',
+  );
   assert.equal(protectedGatePaths(policy, ['.bench/ci.sh']), false);
   assert.equal(protectedGatePaths(policy, ['.bench/ci.sh'], check), true);
   assert.equal(protectedGatePaths(policy, ['src/a.ts'], check), false);
 });
 
 // Issue 8eccbea9: every defined check and setup action, not only the gating check, is protected.
-test('entry files of every defined check and setup action need owner approval; explicit lists and Forge paths unchanged', async () => {
+test('entry files of every defined check and setup action need owner approval with explicit lists too', async () => {
   const gating = {
     executable: 'bash',
     args: ['.bench/ci.sh'],
@@ -465,7 +469,10 @@ test('entry files of every defined check and setup action need owner approval; e
   assert.equal(reason(['tools/lint-check.mjs'], gating), null, 'a check not passed in is not known');
   assert.equal(reason(['src/a.ts', 'tools/other.mjs'], [gating, other]), null);
   const explicit = { ...policy, acceptance: { ...policy.acceptance, ownerApprovalPaths: ['deploy/**'] } };
-  assert.equal(reason(['.bench/setup.sh', 'tools/lint-check.mjs'], [gating, other], explicit), null);
+  assert.match(
+    reason(['.bench/setup.sh', 'tools/lint-check.mjs'], [gating, other], explicit),
+    /protected paths/,
+  );
   assert.equal(protectedGatePaths(policy, ['.bench/setup.sh'], gating), true);
   assert.equal(protectedGatePaths(policy, ['tools/lint-check.mjs'], [gating, other]), true);
   assert.equal(protectedGatePaths(policy, ['tools/lint-check.mjs'], [gating]), false);
@@ -1158,4 +1165,31 @@ test('optional landing proof adds evidence without changing oversight or invalid
   assert.equal(ownerGated(base, enabled), false);
   assert.equal(ownerGated(enabled, base), false);
   assert.equal(acceptancePolicyDigest(enabled), acceptancePolicyDigest(base));
+});
+
+test('explicit owner paths retain every defined check entry on private projects', () => {
+  const policy = {
+    ...policyPreset('trusted'),
+    acceptance: { ...policyPreset('trusted').acceptance, ownerApprovalPaths: ['infra/**'] },
+  };
+  assert.match(
+    governanceReason(
+      { owner: 'owner', visibility: 'private' },
+      policy,
+      { id: 'contributor', kind: 'person' },
+      ['ci/verify.sh'],
+      ['ci/verify.sh'],
+    ),
+    /needs owner approval/,
+  );
+  assert.equal(
+    governanceReason(
+      { owner: 'owner', visibility: 'private' },
+      policy,
+      { id: 'owner', kind: 'person' },
+      ['ci/verify.sh'],
+      ['ci/verify.sh'],
+    ),
+    null,
+  );
 });

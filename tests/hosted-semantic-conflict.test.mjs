@@ -75,7 +75,11 @@ for (const failed of [false, true])
     await f.enqueue(f.request);
     await f.drain();
     assert.equal(f.tables.projectHostedCheckRuns.size, count, 'replay never creates another check');
-    assert.equal(f.pendingTasks().length, 0, 'terminal and ready queues are idle');
+    assert.deepEqual(
+      f.pendingTasks().map(task => task.name),
+      failed ? [] : ['projectHostedLandingStall:deadline'],
+      'terminal queues are idle; a manual Ready request retains only its finite deadline',
+    );
   });
 
 test('contract-less hosted pair retains generic failure; unrelated failures do not become conflicts', async () => {
