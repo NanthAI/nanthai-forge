@@ -329,6 +329,7 @@ export async function main({ benchRoot, filesystemProbe = probeFilesystemEvents,
       // `metrics` always reads the project (capabilities may answer from the CLI cache).
       const ready = await meter.ready(async () => {
         forgeAgent('metrics', {
+          contextDays: 0,
           from: new Date(Date.now() - 60_000).toISOString(),
           to: new Date().toISOString(),
         });

@@ -27,6 +27,9 @@ export async function hydrateMetricInputs(
   lanes: MetricLane[],
   saves: MetricSave[],
   objects?: MetricObjects,
+  lookup?: (
+    references: { laneId: string; version: number; head: string }[],
+  ) => Promise<{ lanes: MetricLane[]; saves: MetricSave[] }>,
 ) {
   const pages = new Map<string, ReturnType<typeof composePageSchema.parse>>();
   const pending = new Map([...pins.values()].map(pin => [pin.sha256, pin]));
@@ -61,6 +64,18 @@ export async function hydrateMetricInputs(
       });
       for (const pin of batch) pending.delete(pin.sha256);
     }
+  if (lookup) {
+    const references = new Map<string, { laneId: string; version: number; head: string }>();
+    for (const page of pages.values())
+      for (const entry of page.entries)
+        if ('laneId' in entry)
+          references.set(`${entry.laneId}:${entry.version}`, {
+            laneId: entry.laneId,
+            version: entry.version,
+            head: entry.head,
+          });
+    ({ lanes, saves } = await lookup([...references.values()]));
+  }
   const laneIndex = new Map(lanes.map(lane => [`${lane.id}:${lane.version}`, lane]));
   const saved = new Map<string, string>();
   for (const save of saves) {

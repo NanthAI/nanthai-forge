@@ -217,8 +217,14 @@ A read that cannot finish returns `METRICS_TIMEOUT` with its existing narrower-w
 
 Receipt counters need only in-window rows, plus the first receipt of each kind for collection
 coverage; their context is zero. Lane/save streams are read only when immutable input pins
-and their object reader are present. Other streams retain the requested context. Streams run
-side by side, with Lane/save history fetched after the input pins are known.
+and their object reader are present. On a compatible server, verified compose pages select
+only exact immutable Lane versions in batches of 100 references, memoized for one report.
+Save context uses each selected Lane's existing parent index once; absent a Lane/head index,
+that Lane's context saves are still scanned. Other streams retain the requested context for
+unlinked/legacy/combined classifications, bill-period evidence and output parity; P6 Issue
+`d824900c` tracks the remaining exact-lookup design. Older servers retain their existing
+Lane/save pagination. Streams run side by side, with input history fetched after its pins
+are verified. Missing/out-of-horizon versions keep the same explicit unknowns and coverage.
 
 Full metrics reads negotiate compact check-run rows. Those rows retain exactly the fields
 used by the report, including runner/audit seconds, flakes, reuse keys, gates, fallbacks and

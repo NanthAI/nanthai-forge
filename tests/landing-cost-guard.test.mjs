@@ -244,6 +244,45 @@ function meter(f, { extraShard = false, extraSetupSeconds = 0 } = {}) {
       const exports = allCounts.filter(c => c.name === 'fixtureIndexExportClaim');
       const counts = allCounts.filter(c => c.name !== 'fixtureIndexExportClaim');
       const observers = counts.filter(c => c.name === 'observerBudgetPage');
+      const reuseCapture = {};
+      for (const count of counts) {
+        const family =
+          count.name === 'projectConvexSourceStore:commit'
+            ? 'sourceCommit'
+            : count.name === 'observerBudgetPage'
+              ? 'observer'
+              : ['finishStep', 'finishResume', 'finishDependents', 'batch-step', 'batch-resume'].includes(
+                    count.name,
+                  )
+                ? 'finishController'
+                : /^finish(?!Source)/.test(count.name)
+                  ? 'finishOther'
+                  : null;
+        if (!family) continue;
+        const capture = (reuseCapture[family] ??= {
+          calls: 0,
+          reads: 0,
+          bytes: 0,
+          writes: 0,
+          writeBytes: 0,
+          duplicateReads: 0,
+          duplicateBytes: 0,
+          tables: {},
+        });
+        capture.calls++;
+        capture.reads += count.documents;
+        capture.bytes += count.readBytes;
+        capture.writes += count.writes;
+        capture.writeBytes += count.writeBytes;
+        capture.duplicateReads += Object.values(count.duplicateReadDocumentsByTable).reduce(
+          (n, v) => n + v,
+          0,
+        );
+        capture.duplicateBytes += Object.values(count.duplicateReadBytesByTable).reduce((n, v) => n + v, 0);
+        for (const [table, value] of Object.entries(count.duplicateReadBytesByTable))
+          capture.tables[table] = (capture.tables[table] ?? 0) + value;
+      }
+
       const sum = key => counts.reduce((total, c) => total + c[key], 0);
       // Source tasks record themselves in convexSourceCalls with their nested actions.
       const actions = [
@@ -252,6 +291,8 @@ function meter(f, { extraShard = false, extraSetupSeconds = 0 } = {}) {
       ];
       const runtimes = await Promise.all(actions.map(kind));
       return {
+        reuseCapture,
+        readDocuments: sum('documents'),
         dataRecordCalls: counts.filter(c => c.touched.includes('projectWorkDataRecords')).length,
         queries: counts.filter(c => c.query && c.name !== 'observerBudgetPage').length,
         observerQueries: observers.length,
@@ -470,6 +511,16 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   for (const line of lines) t.diagnostic(line);
   if (verdicts.some(v => v.status !== 'pass')) console.warn(lines.join('\n'));
   t.diagnostic(`scenarios ${JSON.stringify(baseline.scenarios)}`);
+  for (const scenario of Object.values(baseline.scenarios)) {
+    const commits = scenario.reuseCapture.sourceCommit;
+    if (commits)
+      assert.equal(
+        commits.tables.hostedProjects ?? 0,
+        0,
+        'reads per landing: a source commit must reuse its unchanged project snapshot',
+      );
+  }
+
   // Retain the current six-landing cost mix; extend it by one real batch to
   // measure the brief's ten-landing index workload without changing its ledger.
   const ten = [...Object.values(baseline.scenarios), await batch(t, { indexExports: true })];

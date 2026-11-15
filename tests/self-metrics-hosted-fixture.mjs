@@ -100,17 +100,27 @@ export function fixture() {
             const predicates = [];
             const bounds = {
               eq(key, value) {
-                assert.equal(key, spec.fields[equality++]);
+                assert.equal(key, [...spec.fields, '_creationTime', '_id'][equality++]);
                 predicates.push(row => field(row, key) === value);
                 return bounds;
               },
               gte(key, value) {
-                assert.equal(key, [...spec.fields, '_creationTime'][equality]);
+                assert.equal(key, [...spec.fields, '_creationTime', '_id'][equality]);
                 predicates.push(row => field(row, key) >= value);
                 return bounds;
               },
+              gt(key, value) {
+                assert.equal(key, [...spec.fields, '_creationTime', '_id'][equality]);
+                predicates.push(row => field(row, key) > value);
+                return bounds;
+              },
+              lte(key, value) {
+                assert.equal(key, [...spec.fields, '_creationTime', '_id'][equality]);
+                predicates.push(row => field(row, key) <= value);
+                return bounds;
+              },
               lt(key, value) {
-                assert.equal(key, [...spec.fields, '_creationTime'][equality]);
+                assert.equal(key, [...spec.fields, '_creationTime', '_id'][equality]);
                 predicates.push(row => field(row, key) < value);
                 return bounds;
               },
@@ -134,6 +144,12 @@ export function fixture() {
           order(direction) {
             descending = direction === 'desc';
             return q;
+          },
+          async *[Symbol.asyncIterator]() {
+            assert(selected);
+            const rows = descending ? selected.toReversed() : selected;
+            if (!rows.length) read([]);
+            for (const row of rows) yield read([row])[0];
           },
           async first() {
             assert(selected);

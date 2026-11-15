@@ -31,6 +31,8 @@ Reproduce with `node scripts/bench-t3code/stats.mjs --series tuned=TUNED_DIRECTO
 
 ## Caveats
 
+- Cells measured after the readiness probe began sending `contextDays: 0` exclude its pre-window history read. Earlier v2 and final-build validation cells retain the original probe; do not infer a serving-workload saving from this measurement change.
+
 - Scored tuned cells have three reps per arm/N in the supplied baseline. Convoy N=4/8/16 and overlap N=8 have one valid rep per arm/setting; their extrema, mean and median coincide. Counts in the generated tables are authoritative if more cells are later supplied. There are too few repeats to claim population effects or stable floor/ceiling gains.
 
 - Retained taskVoids include quota/capacity and contamination flags, sometimes for every task despite recorded landings. The generator preserves them without adjudicating their cause. Timing tables show all-landed observations alongside the view excluding those flags, and counts expose missing coverage. The raw oracle strict/lenient counts are retained observations, not regraded clean-task correctness claims.

@@ -52,7 +52,8 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         view = table => written[table] ?? baseline[table],
         writable = table => (written[table] ??= new Map(baseline[table])),
         reads = [],
-        writes = [];
+        writes = [],
+        observedRows = new WeakSet();
       // A Convex query function may run one paginate(); a second fails in production only (mutations are exempt).
       let paginations = 0;
       const meter = {
@@ -67,6 +68,8 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         readDocumentsByTable: {},
         readRangesByTable: {},
         readBytesByTable: {},
+        duplicateReadDocumentsByTable: {},
+        duplicateReadBytesByTable: {},
         writes: 0,
         indexEntriesWritten: 0,
         indexEntriesRemoved: 0,
@@ -87,6 +90,17 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         meter.documents += Math.max(1, rows.length);
         meter.readDocumentsByTable[table] =
           (meter.readDocumentsByTable[table] ?? 0) + Math.max(1, rows.length);
+        // The immutable snapshot object changes after a write. Only identical versions
+        // read again in this transaction count as potentially reusable snapshots.
+        for (const row of rows.filter(Boolean)) {
+          if (observedRows.has(row)) {
+            meter.duplicateReadDocumentsByTable[table] =
+              (meter.duplicateReadDocumentsByTable[table] ?? 0) + 1;
+            meter.duplicateReadBytesByTable[table] =
+              (meter.duplicateReadBytesByTable[table] ?? 0) + bytes(row);
+          }
+          observedRows.add(row);
+        }
         const readBytes = rows.reduce((n, row) => n + bytes(row), 0);
         meter.readBytes += readBytes;
         meter.readBytesByTable[table] = (meter.readBytesByTable[table] ?? 0) + readBytes;

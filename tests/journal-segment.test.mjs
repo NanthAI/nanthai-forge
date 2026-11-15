@@ -461,6 +461,18 @@ test('Lane metrics retain superseded version facts without R2 or full old bodies
   );
   assert.equal(h.gets.length, 0);
   assert.equal(page.isDone, true);
+  const { metricInputReferences } = await import(moduleUrl('../convex/projectMetricInputReferences.ts'));
+  const exact = await metricInputReferences(
+    h.ctx,
+    h.auth.projectId,
+    'lanes',
+    [{ laneId: h.old.id, version: 0, head: h.old.head }],
+    0,
+    Date.now() + 1000,
+    null,
+  );
+  assert.deepEqual(exact.page, [page.page.find(row => row.version === 0)]);
+  assert.equal(h.gets.length, 0, 'exact metric context uses archived scalar facts without R2');
 });
 
 test('archived Work receipts reconcile the original command in a mutation without R2 and reject changed content', async t => {
@@ -605,6 +617,18 @@ test('compact version receipts preserve exact reads, source pins and complete me
     page.page.map(row => row.version),
     [1, 0],
   );
+  assert.equal(h.gets.length, gets);
+  const { metricInputReferences } = await import(moduleUrl('../convex/projectMetricInputReferences.ts'));
+  const exact = await metricInputReferences(
+    h.ctx,
+    h.auth.projectId,
+    'lanes',
+    [{ laneId: h.old.id, version: 0, head: h.old.head }],
+    0,
+    Date.now() + 1000,
+    null,
+  );
+  assert.deepEqual(exact.page, [page.page.find(row => row.version === 0)]);
   assert.equal(h.gets.length, gets);
   const { journalSourceRow } = await import(moduleUrl('../convex/projectJournalCanonical.ts'));
   assert(!('journalLane' in journalSourceRow(row)));

@@ -537,3 +537,173 @@ test('multi-Lane input with an unavailable immutable version stays entirely uncl
   );
   assert.deepEqual(records.moves[0].inputs, []);
 });
+
+test('P6 exact Lane context preserves the entire legacy report and stays flat with 10x unrelated Lane/save history', async () => {
+  const f = fixture(),
+    e = evidence(f);
+  const lane = randomUUID(),
+    intent = randomUUID();
+  const pin = e.input(lane, intent, head('a'), at(-20));
+  e.fail('prior-failed', at(-15), at(-10), pin);
+  e.landing('current-landed', at(6), at(10), pin);
+  f.run('current-landed', at(6), at(10), 180);
+  e.landing('bill-history', at(-25), at(-23), e.input(randomUUID(), randomUUID(), head('c'), at(-30)));
+  f.run('bill-history', at(-25), at(-23), 120);
+  await f.recordBill({
+    operationId: randomUUID(),
+    provider: 'github-actions',
+    periodFrom: at(-60),
+    periodTo: period.to,
+    billedUsd: 2,
+    listUsd: 2,
+    usage: { 'runner-minute': 5 },
+    rates: { 'runner-minute': 0.008 },
+    basis: 'Synthetic bill parity',
+  });
+  const addHistory = (from, to) => {
+    for (let i = from; i < to; i++) e.input(randomUUID(), randomUUID(), head('b'), at(-30));
+  };
+  addHistory(0, 100);
+  const measured = async () => {
+    const before = { ...f.meter };
+    const { records } = await readHostedMetricPages(f.query, period);
+    return {
+      surface: metricsSurface(records, period),
+      reads: f.meter.documents - before.documents,
+      bytes: f.meter.bytes - before.bytes,
+      calls: f.meter.calls - before.calls,
+    };
+  };
+  const modern = await measured();
+  const legacy = async (name, args) => {
+    const value = await f.query(name, args);
+    if (name !== 'projectSelfMetrics:page') return value;
+    const page = JSON.parse(value);
+    delete page.inputReferencesVersion;
+    return JSON.stringify(page);
+  };
+  legacy.objects = f.query.objects;
+  assert.deepEqual(
+    modern.surface,
+    metricsSurface((await readHostedMetricPages(legacy, period)).records, period),
+  );
+  addHistory(100, 1000);
+  const grown = await measured();
+  assert.deepEqual(
+    grown.surface,
+    modern.surface,
+    'unrelated context must not alter classifications, billing, unknowns or coverage',
+  );
+  assert.equal(grown.reads, modern.reads, 'unrelated Lane/save history adds zero document reads');
+  assert.equal(grown.bytes, modern.bytes, 'unrelated Lane/save history adds zero byte reads');
+  assert.equal(grown.calls, modern.calls, 'unrelated Lane/save history adds zero RPCs');
+});
+
+test('P6 selected-Lane save pagination preserves tied timestamps and memoizes Lane context across reference batches', async () => {
+  const f = fixture(),
+    e = evidence(f);
+  const lane = randomUUID(),
+    intent = randomUUID();
+  for (let version = 0; version < 150; version++) {
+    const pin = e.input(lane, intent, head(version % 2 ? 'a' : 'b'), at(-30), version);
+    e.landing(`version-${version}`, at(1), at(2), pin);
+  }
+  const calls = [];
+  const query = async (name, args) => {
+    calls.push({ name, args });
+    return f.query(name, args);
+  };
+  query.objects = f.query.objects;
+  const modern = (await readHostedMetricPages(query, period)).records;
+  const laneSelections = calls.filter(call => call.args.inputReferences && call.args.stream === 'lanes');
+  assert.equal(laneSelections.flatMap(call => call.args.inputReferences).length, 150);
+  const saveSelections = calls.filter(call => call.args.inputReferences && call.args.stream === 'saves');
+  assert(saveSelections.length > 1, 'one Lane with many saves continues bounded pages');
+  assert(saveSelections.every(call => call.args.inputReferences.length === 1));
+  const legacy = async (name, args) => {
+    const raw = await f.query(name, args);
+    if (name !== 'projectSelfMetrics:page') return raw;
+    const page = JSON.parse(raw);
+    delete page.inputReferencesVersion;
+    return JSON.stringify(page);
+  };
+  legacy.objects = f.query.objects;
+  assert.deepEqual(
+    metricsSurface(modern, period),
+    metricsSurface((await readHostedMetricPages(legacy, period)).records, period),
+  );
+  const continuation = saveSelections.find(call => call.args.cursor);
+  const corrupt = JSON.parse(continuation.args.cursor);
+  corrupt.key[0] = 'another-project';
+  await assert.rejects(
+    f.query('projectSelfMetrics:page', { ...continuation.args, cursor: JSON.stringify(corrupt) }),
+    error => error.data?.code === 'EVIDENCE_CHANGED',
+  );
+  for (const cursor of ['null', '{'])
+    await assert.rejects(
+      f.query('projectSelfMetrics:page', { ...saveSelections[0].args, cursor }),
+      error => error.data?.code === 'EVIDENCE_CHANGED',
+    );
+  f.actor('stranger');
+  await assert.rejects(
+    f.query('projectSelfMetrics:page', saveSelections[0].args),
+    error => error.data?.code === 'PROJECT_UNAVAILABLE',
+  );
+});
+
+test('P6 exact Lane context includes lifecycle-backed versions inside the original horizon', async () => {
+  const f = fixture(),
+    e = evidence(f);
+  const lane = randomUUID(),
+    intent = randomUUID();
+  const pin = e.input(lane, intent, head('a'), at(-3 * 1440));
+  const original = f.tables.projectHostedRecords.find(row => row.kind === 'lane');
+  const { _id, _creationTime, ...version } = original;
+  f.put(
+    'projectHostedRecords',
+    { ...version, lifecyclePlanId: 'projectHostedLifecyclePlans-synthetic' },
+    at(-10),
+  );
+  e.landing('lifecycle', at(1), at(2), pin);
+  const modern = (await readHostedMetricPages(f.query, period)).records;
+  const legacy = async (name, args) => {
+    const raw = await f.query(name, args);
+    if (name !== 'projectSelfMetrics:page') return raw;
+    const page = JSON.parse(raw);
+    delete page.inputReferencesVersion;
+    return JSON.stringify(page);
+  };
+  legacy.objects = f.query.objects;
+  assert.deepEqual(
+    metricsSurface(modern, period),
+    metricsSurface((await readHostedMetricPages(legacy, period)).records, period),
+  );
+  assert.equal(calculateSelfMetrics(modern, period).metric1.rows[0].path, 'first-try');
+});
+
+test('P6 context fallback preserves an unlinked pre-window request that settles inside the report', async () => {
+  const f = fixture();
+  f.landing('old-unlinked', at(-30), at(2));
+  f.tables.projectHostedAcceptances.pop();
+  f.tables.projectHostedLandingAttempts.pop();
+  const request = f.tables.projectHostedLandingRequests[0];
+  request.phase = 'terminal-failed';
+  request.value = JSON.stringify({
+    id: 'old-unlinked',
+    at: at(-30),
+    phase: 'terminal-failed',
+    timing: { submittedAt: at(-30), settledAt: at(2) },
+    error: { code: 'CHECK_FAILED' },
+  });
+  const records = (await readHostedMetricPages(f.query, period)).records;
+  assert.deepEqual(
+    calculateWaste(records, period).rows.map(row => [row.id, row.cause, row.elapsedMinutes]),
+    [['old-unlinked', 'check-failed', 2]],
+  );
+  const truncated = (await readHostedMetricPages(f.query, period, false, false, 0)).records;
+  assert.deepEqual(
+    calculateWaste(truncated, period).rows,
+    [],
+    'the request has no referenced identity in the window; zero context changes the required report',
+  );
+});

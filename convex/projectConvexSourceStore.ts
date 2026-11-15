@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { sourceCommitReads } from './projectSourceCommitReads';
 import { qualifySourceProtocol } from './projectSourceProtocol';
 import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
@@ -324,7 +325,8 @@ export const commit = sourceMutation({
   },
   /** With a small result, the publication this commit made (`InlinePublication`); otherwise null. */
   returns: v.union(v.string(), v.null()),
-  handler: async (ctx, args) => {
+  handler: async (originalCtx, args) => {
+    const ctx = sourceCommitReads(originalCtx, args.projectId);
     const active = await activeStep(ctx, { ...args, generation: args.generation ?? 0 });
     if (!active) return null;
     const terminal = !!args.output || !!args.failure;

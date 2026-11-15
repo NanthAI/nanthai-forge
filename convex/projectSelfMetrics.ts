@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { metricInputReferences } from './projectMetricInputReferences';
 import { journalLaneMetricsPage } from './projectJournalLaneMetrics';
 import { capsuleMetricsPage } from './projectLandingCapsuleMetrics';
 import { capsuleAttempt } from './projectLandingCapsuleStore';
@@ -98,6 +99,9 @@ export const page = query({
     cursor: v.union(v.string(), v.null()),
     contextDays: v.optional(v.number()),
     compactRuns: v.optional(v.boolean()),
+    inputReferences: v.optional(
+      v.array(v.object({ laneId: v.string(), version: v.number(), head: v.string() })),
+    ),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -116,10 +120,33 @@ export const page = query({
         Math.max(0, Number.isFinite(input.contextDays) ? input.contextDays! : 30),
       );
       const context = from - contextDays * 86400000;
+      if (input.inputReferences) {
+        invariant(
+          input.stream === 'lanes' || input.stream === 'saves',
+          'BAD_ARGUMENT',
+          'Select Lane or save input context.',
+        );
+        return canonicalPayload({
+          ...(await metricInputReferences(
+            ctx,
+            input.projectId,
+            input.stream,
+            input.inputReferences,
+            context,
+            to,
+            input.cursor,
+          )),
+          inputReferencesVersion: 1,
+          contextFrom: new Date(context).toISOString(),
+          cutover: project.sourceCutover?.at ?? null,
+          authority: project.sourceAuthority ?? { mode: 'native-owner', epoch: 0 },
+        });
+      }
       if (input.stream === 'runs' && input.compactRuns)
         return canonicalPayload({
           ...(await metricRunsPage(ctx, input.projectId, context, to, input.cursor)),
           contextFrom: new Date(context).toISOString(),
+          inputReferencesVersion: 1,
           runProjectionVersion: 1,
           cutover: project.sourceCutover?.at ?? null,
           authority: project.sourceAuthority ?? { mode: 'native-owner', epoch: 0 },
@@ -129,6 +156,7 @@ export const page = query({
         if (page)
           return canonicalPayload({
             ...page,
+            inputReferencesVersion: 1,
             runProjectionVersion: 1,
             contextFrom: new Date(context).toISOString(),
             cutover: project.sourceCutover?.at ?? null,
@@ -147,6 +175,7 @@ export const page = query({
         if (page)
           return canonicalPayload({
             ...page,
+            inputReferencesVersion: 1,
             runProjectionVersion: 1,
             contextFrom: new Date(context).toISOString(),
             cutover: project.sourceCutover?.at ?? null,
@@ -368,6 +397,7 @@ export const page = query({
       );
       return canonicalPayload({
         page: values,
+        inputReferencesVersion: 1,
         runProjectionVersion: 1,
         ...(input.stream === 'acceptances' && input.cursor === null
           ? { audits: await mainAuditEvents(ctx, input.projectId, from, to) }

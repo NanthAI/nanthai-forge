@@ -160,6 +160,7 @@ const pageSchema = (stream: keyof typeof rowSchemas) =>
     audits: audits.optional(),
     contextFrom: stamp.optional(),
     runProjectionVersion: z.literal(1).optional(),
+    inputReferencesVersion: z.literal(1).optional(),
   });
 type StreamPage = z.infer<ReturnType<typeof pageSchema>>;
 const metricPage = async (
@@ -242,6 +243,7 @@ export async function readHostedMetricPages(
   let cutover: string | null = null,
     reuseKeysProjected = true,
     flakesProjected = true;
+  let inputReferences = false;
   const pins = new Map<string, MetricPin>();
   const attempts: MetricAttempt[] = [],
     lanes: MetricLane[] = [],
@@ -260,6 +262,7 @@ export async function readHostedMetricPages(
     // after one call, not eight. The streams then run side by side (same calls, wall time of the
     // slowest stream) and are folded in the fixed order above, whatever order they arrive in.
     const probe = await metricPage(query, streams[0]!, period, contextDays, null);
+    inputReferences = probe.inputReferencesVersion === 1;
     const fetched = await Promise.all(
       streams.map((stream, index) =>
         readStream(
@@ -278,6 +281,7 @@ export async function readHostedMetricPages(
       !summary &&
       !runsOnly &&
       query.objects &&
+      !inputReferences &&
       fetched.some(pages => pages.some(page => page.page.some(row => 'inputPin' in row && row.inputPin)))
     ) {
       streams.push('lanes', 'saves');
@@ -460,7 +464,70 @@ export async function readHostedMetricPages(
     await readPlacement(query, period, records);
     const requests = records.submissions;
     joinMetricAttempts(records, attempts, pins);
-    await hydrateMetricInputs(records, pins, lanes, saves, query.objects);
+    await hydrateMetricInputs(
+      records,
+      pins,
+      lanes,
+      saves,
+      query.objects,
+      inputReferences
+        ? async references => {
+            const selected = { lanes: [] as MetricLane[], saves: [] as MetricSave[] };
+            const savedLanes = new Set<string>();
+            const wanted = new Set(references.map(reference => `${reference.laneId}:${reference.head}`));
+            for (let offset = 0; offset < references.length; offset += 100) {
+              const batch = references.slice(offset, offset + 100);
+              for (const stream of ['lanes', 'saves'] as const) {
+                const inputReferences =
+                  stream === 'lanes'
+                    ? batch
+                    : batch.filter(reference => {
+                        if (savedLanes.has(reference.laneId)) return false;
+                        savedLanes.add(reference.laneId);
+                        return true;
+                      });
+                if (!inputReferences.length) continue;
+                let cursor: string | null = null;
+                const seen = new Set<string>();
+                do {
+                  const raw = await query('projectSelfMetrics:page', {
+                    stream,
+                    from: period.from,
+                    to: period.to,
+                    contextDays,
+                    cursor,
+                    inputReferences,
+                  });
+                  const page = pageSchema(stream).parse(typeof raw === 'string' ? JSON.parse(raw) : raw);
+                  invariant(
+                    page.authority.mode === 'server' &&
+                      page.authority.epoch === records.source?.revision &&
+                      page.cutover === cutover,
+                    'SOURCE_AUTHORITY_CHANGED',
+                    'Authority changed during metric input hydration.',
+                  );
+                  for (const row of page.page) {
+                    if (stream === 'lanes') selected.lanes.push(rowSchemas.lanes.parse(row));
+                    else {
+                      const save = rowSchemas.saves.parse(row);
+                      if (wanted.has(`${save.laneId}:${save.head}`)) selected.saves.push(save);
+                    }
+                  }
+                  if (page.isDone) break;
+                  invariant(
+                    page.continueCursor && !seen.has(page.continueCursor),
+                    'EVIDENCE_CHANGED',
+                    'Hosted metric cursor did not advance.',
+                  );
+                  cursor = page.continueCursor;
+                  seen.add(cursor);
+                } while (true);
+              }
+            }
+            return selected;
+          }
+        : undefined,
+    );
     const selectedByEntry = new Map<string, Set<string>>();
     for (const row of records.submissions) {
       const ids = selectedByEntry.get(row.entryId) ?? new Set<string>();

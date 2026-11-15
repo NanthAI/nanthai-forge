@@ -351,6 +351,7 @@ if (forge) {
       forge.nf(join(ws, '.anchor'), 'metrics', {
         url: config.forge.url,
         projectId: config.forge.projectId,
+        contextDays: 0,
         from: new Date(Date.now() - 60_000).toISOString(),
         to: new Date().toISOString(),
       }),

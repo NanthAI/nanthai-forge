@@ -51,6 +51,114 @@ Multiply the first four terms by 1.1 for published Starter; search already uses
 Starter's published rate. Storage is added separately. R2 uploads from a Convex
 action incur Convex egress even though subsequent R2 downloads have free egress.
 
+## P6 final cost baseline
+
+The retained v2 N=10 series has **30 accepted landings in three cells**. Its
+serving proxy, excluding harness metrics/placement queries, is **$1.6826 per
+1,000 landings on Professional** when calls and action compute remain inside
+shared included allowances. The same quantities cost **$4.2013 per 1,000 at
+full Professional list rates**. Both exclude retained storage, R2 operations,
+deferred maintenance and plan fees. These are measured usage priced at the
+retained tariff, not invoices or an all-in customer price. The
+[exit report](../research/p6-exit-bench-results.md) retains the cell evidence.
+
+| Serving resource | Per landing | Professional $/1,000, before allowances |
+| --- | ---: | ---: |
+| DB reads | 6.501098 MB; 3,159.7 documents | 1.300220 |
+| DB writes | 0.597520 MB | 0.119504 |
+| Convex egress | 2.190658 MB | 0.262879 |
+| **Serving I/O and egress** | | **1.682603** |
+| Calls, if allowance exhausted | 209.833 executions | 0.419667 |
+| Action compute, if allowance exhausted | 25.1884 GB-seconds | 2.099034 |
+| **Full-list serving subtotal** | | **4.201304** |
+
+The original mixed-rate meter totals $4.7544/1,000, including $0.3429 of
+harness metrics/placement work. Its readiness probe is inside the meter; its
+cell-end metrics report is after meter stop and must not be subtracted again.
+After validation, the probe sends `contextDays: 0`; later cells exclude that
+pre-window history read. This is a reporting correction, with **no measured
+saving to the serving subtotal**. Exact Lane-version hydration and selected-Lane
+save scans remove unrelated input history from product reports. Other context
+fallbacks remain on P6 Issue `d824900c`: a pre-window request can settle inside
+the report with no attempt/run/parent reference, while its end time is only
+in JSON; existing Intent indexes cannot discover that settlement. Unlinked/legacy/combined submissions and
+standalone failed checks lack a complete indexed input reverse lookup; saves
+lack an exact Lane/head index. Requested bill-period evidence and existing
+context source-record counts are retained for whole-report parity. No new
+index or landing-path write is added.
+
+A synthetic six-landing capture (solo, main moved and a four-member batch)
+isolates source commit, finish controller and observer function families. The
+finish controller includes both ordinary and batch execution of `step`, `resume`
+and `dependents`; enqueue, status and other finish operations are separate.
+
+| Function family | Calls (unchanged) | Read documents before → after | Read bytes before → after | Writes (unchanged) | Write bytes before |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Source commit | 4 | 236 → 192 | 170,999 → 128,363 | 89 | 59,647 |
+| Finish controller (rejected) | 63 | 1,849 → 1,849 | 2,248,313 → 2,248,313 | 662 | 641,126 |
+| Observer (rejected) | 53 | 641 → 641 | 467,272 → 467,272 | 0 | 0 |
+
+Source reuse removes **18.64% of documents and 24.93% of read bytes**;
+including writes, it removes **18.49% of I/O**, or **15.75%** after pricing
+calls at full list. This clears the owner's about-10% threshold. The complete
+finish-controller sample has 222 duplicate project reads / 215,118 bytes:
+**12.01% of documents, 9.57% of read bytes, 7.44% of read/write I/O, or 6.11%**
+after full-list call pricing. It is **rejected, little duplication** on the
+included-use I/O basis; no finish production code changes remain. Observer
+duplication is zero: **rejected, little duplication**. The old mixed-family
+7.15% and the ordinary-only controller sample both omit the proper denominator
+and are not used for either decision. Full-list percentages use $0.20/GB
+read/write and $2/million calls, excluding compute, egress and unmeasured overhead.
+
+On the post-sync fixture, source reuse alone reduces the whole six-landing mix
+from **4,622 to 4,578 read documents** (770.3333 → 763 per landing) and
+4,288,825 → 4,246,189 serving read bytes. Calls, write counts, scheduler actions
+and wake dependencies remain unchanged. The disjoint trio's read-only ratchet
+is 2,924 after preserving main's independent 34-read reduction; its 154 calls,
+1,002 writes, three checks, 180,000 modeled milliseconds and zero idle calls
+are unchanged at both 0 and 1,150 retained receipts. Every actor, contributor
+and epoch check still runs; project writes invalidate the transaction-local
+snapshot before and after IO. No mutable request, attempt, queue or cross-request
+cache is introduced. These are deterministic fixture observations, not
+provider-billed savings or a latency result. The serving baseline above stays
+the last measured value until accepted code has comparable live evidence.
+
+### Retained storage and weekly maintenance allocation
+
+The dogfood project's accepted-receipt count for **1 November through
+15 November 09:45 UTC is 861** (29 bounded history pages, 14,766,080 reported
+read bytes). This is month-to-date volume, not a forecast. The allocations below
+charge a full retained month at that observed volume; they are explicit
+allocation scenarios, not this partial month's bill. Inventory diagnostics add
+no idle calls and do not export the database.
+
+| Component | Current evidence | Professional/R2 list allocation per 1,000 at L=861 |
+| --- | --- | ---: |
+| Convex physical DB/index GB, D | **Unknown currently.** Serialized row samples exclude physical index overhead and cannot establish billed GB or a project share. | `0.232288 × D` |
+| R2 retained GB, R | **Unknown currently.** Prior shared deployment/bucket gauge: 10.99 GB; not a new dogfood-project inventory. | `0.0174216 × R`; prior gauge scenario **0.19146** |
+| Latest completed backup ZIP | **319,275,420 bytes (0.31927542 GB)**, whole-dev file-inclusive export, successful [backup run](https://github.com/NanthAI/nanthai-forge/actions/runs/43176033907), 12 November. Receipt: 782,588 documents, 17 stored files. | Four copies of this size: **0.02225**, a subset of R2 storage, not an extra charge on top of R. Actual retained copies may differ. |
+| Weekly whole-database backup reads, B GB/export | **Current B unknown.** ZIP bytes are compressed export size, not billed database reads. The older three-export 3.94-GB observation is not a current P6 measurement. | `1.006581 × B` at 52/12 exports/month; old 1.313333-GB/export scenario **1.32198** |
+| Deferred expiry/capsule/journal work and executed R2 requests | No whole-v2-cell allocation in the retained meter. | **Unknown; not zero** |
+| **All-in serving + storage + maintenance** | Missing current physical inventories and usage attribution. | **Unknown** |
+
+In general, with monthly landing count L, retained storage allocation is
+`(0.20*D + 0.015*R)*1000/L`, before shared allowances. Weekly backup reads allocate
+`0.20*B*(52/12)*1000/L`; use the actual export count for an actual calendar bill.
+The latest ZIP proves a retained artifact, not current DB size or a backup I/O
+charge. All storage/backup evidence above is deployment-wide; assigning every
+byte to dogfood is an explicit upper-bound allocation, not measured project
+attribution. Do not add a backup ZIP subset twice to bucket storage.
+
+**Owner-only readings still needed:** current Convex development-deployment
+physical database/index storage GB (search/file storage separately), with time
+and scope; current R2 bucket stored bytes and any existing project-prefix
+allocation; the latest backup's billed database read GB from the matching Usage
+window; actual monthly shared allowance consumption and invoice totals. Read
+those existing dashboards/receipts, without running an export or changing
+settings. The documented [bounded inventory](storage-inventory.md) supplies
+logical row estimates only. No owner-only dashboard, billing access, fresh
+export, bucket-wide object listing, deployment or setting change was performed.
+
 <a id="pre-bench-smoke-and-subsequent-fixes-2026-11-10"></a>
 
 ## Pre-bench smoke and subsequent fixes
