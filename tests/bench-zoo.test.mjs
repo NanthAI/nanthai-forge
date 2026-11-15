@@ -286,6 +286,7 @@ import { readFileSync } from 'node:fs';
 import { compareTrees, platformLimits, walkTree } from '../scripts/bench-zoo/fidelity.mjs';
 import { buildRepository, recipes } from '../scripts/bench-zoo/shapes.mjs';
 import { latestResults, main as suiteMain } from '../scripts/bench-zoo/suite.mjs';
+import { provisionOne } from '../scripts/bench-zoo/provision.mjs';
 import {
   PATHS,
   baselineOf,
@@ -305,7 +306,7 @@ const catalog = JSON.parse(
   readFileSync(new URL('../scripts/bench-zoo/catalog.json', import.meta.url), 'utf8'),
 );
 
-test('provisioning a new fork preserves a declared non-default branch and publishes its check there', async () => {
+test('fixture provisioning and Git comparisons keep the declared branch and selected branch history', async () => {
   const root = mkdtempSync(join(tmpdir(), 'zoo-declared-branch-'));
   const upstream = join(root, 'upstream'),
     fork = join(root, 'fork.git');
@@ -327,6 +328,8 @@ test('provisioning a new fork preserves a declared non-default branch and publis
     writeFileSync(join(upstream, 'source.txt'), 'declared branch\n');
     await git(['-C', upstream, 'commit', '-qam', 'declared']);
     await git(['-C', upstream, 'checkout', '-q', 'main']);
+    writeFileSync(join(upstream, 'source.txt'), 'unrelated default branch\n');
+    await git(['-C', upstream, 'commit', '-qam', 'unrelated default history']);
     mkdirSync(join(root, 'dist'));
     writeFileSync(join(root, 'dist/actions-toolchains.js'), 'export const declaredSetupSteps = () => "";\n');
     writeFileSync(
@@ -385,11 +388,156 @@ test('provisioning a new fork preserves a declared non-default branch and publis
       (await git(['--git-dir', fork, 'show', `${entry.ref}:.forge-zoo/ci.sh`])).stdout,
       /set -euo pipefail/,
     );
-    assert.equal((await git(['--git-dir', fork, 'show', 'main:source.txt'])).stdout, 'default branch\n');
+    assert.equal(
+      (await git(['--git-dir', fork, 'show', 'main:source.txt'])).stdout,
+      'unrelated default branch\n',
+    );
+
+    const selectedCount = Number((await git(['--git-dir', fork, 'rev-list', '--count', entry.ref])).stdout);
+    assert.ok(
+      Number((await git(['--git-dir', fork, 'rev-list', '--all', '--count'])).stdout) > selectedCount,
+      'the fixture has history outside the declared branch',
+    );
+    // Defend source selection even if an existing fixture's default has drifted.
+    await git(['--git-dir', fork, 'symbolic-ref', 'HEAD', 'refs/heads/main']);
+    const comparisonRoot = join(root, 'comparison');
+    const selectedHead = (await git(['--git-dir', fork, 'rev-parse', entry.ref])).stdout.trim();
+    const compared = await runRepo(
+      { deployment: 'https://example.invalid', prepareOnly: true, check: { name: 'verify' }, runner: {} },
+      runEntry(entry),
+      { repos: { [entry.id]: { projectId: 'synthetic-project', commit: selectedHead } } },
+      comparisonRoot,
+      {
+        cli: async args => {
+          if (args[0] === 'clone')
+            return exec('git', ['clone', '--quiet', '--single-branch', '--branch', entry.ref, fork, args[2]]);
+          if (args[0] === 'agent' && args[2] === 'check-settings')
+            return {
+              code: 0,
+              seconds: 0,
+              json: {
+                result: {
+                  definitions: [{ name: 'verify' }],
+                  policy: { acceptance: { mode: 'auto-on-pass' } },
+                  runner: {},
+                },
+              },
+            };
+          throw Error('Unexpected CLI command in local Git scope fixture');
+        },
+        git: args =>
+          exec(
+            'git',
+            args.map(a => (a === 'https://github.com/' + entry.fork ? fork : a)),
+          ),
+        receipt: () => {},
+      },
+    );
+    assert.equal(compared.fidelity.ok, true, 'Git and Forge select the same declared source');
+    const comparedBase = join(comparisonRoot, entry.id);
+    assert.deepEqual(
+      (
+        await git([
+          '--git-dir',
+          join(comparedBase, 'git-bare'),
+          'for-each-ref',
+          '--format=%(refname:short)',
+          'refs/heads',
+        ])
+      ).stdout
+        .trim()
+        .split('\n'),
+      [entry.ref],
+    );
+    assert.equal(
+      Number(
+        (await git(['--git-dir', join(comparedBase, 'git-bare'), 'rev-list', '--all', '--count'])).stdout,
+      ),
+      selectedCount,
+      'bare import comparison excludes unrelated branch history',
+    );
+    assert.equal(
+      Number((await git(['-C', join(comparedBase, 'git-a'), 'rev-list', '--all', '--count'])).stdout),
+      selectedCount,
+      'working clone comparison excludes unrelated branch history',
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+for (const mode of ['healthy', 'missing inventory', 'inventory error', 'disable denied', 'pause denied'])
+  test('fixture workflow isolation keeps inherited jobs off and selected CI available: ' + mode, async () => {
+    const entry = catalog.repos.find(r => r.id === 'shapes-posix');
+    const state = { actions: true, inherited: true, selected: true, unintendedRuns: 0 };
+    const ok = stdout => ({ code: 0, stdout: stdout ?? '', stderr: '', seconds: 0 });
+    const denied = () => ({ code: 1, stdout: '', stderr: 'provider denied operation', seconds: 0 });
+    const run = async (cmd, args) => {
+      if (cmd === 'git') {
+        if (args.includes('ls-tree'))
+          return ok('.github/workflows/inherited.yml\0.github/workflows/zoo-ci.yml\0');
+        if (args.includes('push')) {
+          if (state.actions && state.inherited) state.unintendedRuns++;
+          return ok();
+        }
+        throw Error('Unexpected fixture Git operation');
+      }
+      assert.equal(cmd, 'gh');
+      if (args[0] === 'repo' && args[1] === 'view') return { ...ok(), code: 1 };
+      if (args[0] === 'repo' && args[1] === 'create') return ok();
+      if (args.includes('enabled=false')) {
+        if (mode === 'pause denied') return denied();
+        state.actions = false;
+        return ok();
+      }
+      if (args.includes('enabled=true')) {
+        state.actions = true;
+        return ok();
+      }
+      const endpoint = args.find(a => a.startsWith('repos/'));
+      if (endpoint?.includes('/actions/workflows?')) {
+        // Fresh forks expose no registered workflows until repository Actions is enabled.
+        if (!state.actions) return ok('');
+        if (mode === 'inventory error') return denied();
+        const workflows = [
+          { id: 2, path: '.github/workflows/zoo-ci.yml', state: 'active' },
+          ...(mode === 'missing inventory'
+            ? []
+            : [{ id: 1, path: '.github/workflows/inherited.yml', state: 'active' }]),
+        ];
+        return ok(workflows.map(w => JSON.stringify(w)).join('\n'));
+      }
+      if (endpoint?.endsWith('/1/disable')) {
+        if (mode === 'disable denied') return denied();
+        state.inherited = false;
+        return ok();
+      }
+      if (endpoint?.endsWith('/2/disable')) {
+        state.selected = false;
+        return ok();
+      }
+      throw Error('Unexpected fixture provider operation');
+    };
+    const preparation = provisionOne({}, entry, recipes(), run);
+    if (mode === 'healthy') {
+      await preparation;
+      assert.deepEqual(state, {
+        actions: true,
+        inherited: false,
+        selected: true,
+        unintendedRuns: 0,
+      });
+    } else {
+      await assert.rejects(preparation, /workflow inventory incomplete|provider denied operation/);
+      assert.equal(
+        state.actions,
+        mode === 'pause denied',
+        'failed preparation never enables unknown workflows',
+      );
+      assert.equal(state.selected, true);
+      assert.equal(state.unintendedRuns, 0);
+    }
+  });
 
 test('the catalog holds 20-30 repositories and covers every required shape', () => {
   assert.deepEqual(validateCatalog(catalog), []);

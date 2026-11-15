@@ -9,30 +9,20 @@
 // ZOO_ROOT/zoo.json holds the machine-local keys (deployment, deploymentName, forgeCheckout, meterCwd); the
 // repositories, checks and runner come from the catalog. `run` is run.mjs followed by `report`; with
 // --baseline it exits 1 when a path that passed there fails now, or a Forge operation is much slower.
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-  mkdtempSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { exec } from './exec.mjs';
-import { buildRepository, recipes } from './shapes.mjs';
+import { recipes } from './shapes.mjs';
+import { provisionOne } from './provision.mjs';
 import { teardown } from './teardown.mjs';
 import {
   baselineOf,
-  ciScript,
   compareToBaseline,
   runEntry,
   suiteMarkdown,
   summarize,
   validateCatalog,
-  zooWorkflow,
 } from './suite-lib.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -48,123 +38,6 @@ function loadCatalog(argv) {
   const unknown = (only ?? []).filter(id => !catalog.repos.some(r => r.id === id));
   if (unknown.length) throw Error(`unknown repositories: ${unknown.join(', ')}`);
   return { catalog, repos: catalog.repos.filter(r => !only || only.includes(r.id)) };
-}
-
-/** Declared toolchain steps for the plain-GitHub workflow, from the same module Forge's own
- * generated workflow uses (a built checkout's dist/). */
-async function setupSteps(cfg, entry) {
-  if (!entry.toolchains && !entry.cache) return '';
-  const { declaredSetupSteps } = await import(
-    pathToFileURL(join(cfg.forgeCheckout, 'dist/actions-toolchains.js')).href
-  );
-  return declaredSetupSteps({
-    ...(entry.toolchains ? { toolchains: entry.toolchains } : {}),
-    ...(entry.cache ? { cache: entry.cache } : {}),
-  });
-}
-
-async function provisionOne(cfg, entry, shapes, run) {
-  const ok = async (cmd, args, options) => {
-    const r = await run(cmd, args, options);
-    if (r.code) throw Error(`${cmd} ${args.slice(0, 3).join(' ')}: ${r.stderr.slice(-300)}`);
-    return r.stdout;
-  };
-  const exists = async fork => (await run('gh', ['repo', 'view', fork, '--json', 'name'])).code === 0;
-  const files = {
-    '.forge-zoo/ci.sh': { data: Buffer.from(ciScript(entry, shapes)), mode: '100755' },
-    '.github/workflows/zoo-ci.yml': {
-      data: Buffer.from(zooWorkflow(await setupSteps(cfg, entry))),
-      mode: '100644',
-    },
-  };
-  const work = mkdtempSync(join(tmpdir(), 'zoo-provision-'));
-  try {
-    if (entry.synthetic) {
-      if (!(await exists(entry.fork))) {
-        await ok('gh', [
-          'repo',
-          'create',
-          entry.fork,
-          '--public',
-          '--description',
-          `bench-zoo synthetic fixture (${entry.synthetic}); temporary`,
-        ]);
-      }
-      const extra = Object.entries(files).map(([path, f]) => ({ path, ...f }));
-      const built = buildRepository(shapes[entry.synthetic], extra);
-      try {
-        await ok('git', [
-          '-C',
-          built.dir,
-          'push',
-          '--force',
-          `https://github.com/${entry.fork}.git`,
-          'refs/heads/main:refs/heads/main',
-        ]);
-      } finally {
-        rmSync(built.dir, { recursive: true, force: true });
-      }
-    } else {
-      if (!(await exists(entry.fork))) {
-        const name = entry.fork.split('/')[1];
-        await ok('gh', [
-          'repo',
-          'fork',
-          entry.upstream,
-          '--org',
-          'NanthAI',
-          '--fork-name',
-          name,
-          '--clone=false',
-        ]);
-        for (let i = 0; i < 30 && !(await exists(entry.fork)); i++)
-          await new Promise(r => setTimeout(r, 2000));
-      }
-      // Plain clones and workflow discovery use the fixture default; match the import's declared ref.
-      await ok('gh', ['repo', 'edit', entry.fork, '--default-branch', entry.ref]);
-      const env = { ...process.env, GIT_LFS_SKIP_SMUDGE: '1' };
-      const dir = join(work, 'fork');
-      await ok(
-        'git',
-        [
-          'clone',
-          '--quiet',
-          '--depth',
-          '1',
-          '--branch',
-          entry.ref,
-          `https://github.com/${entry.fork}.git`,
-          dir,
-        ],
-        { env },
-      );
-      for (const [path, f] of Object.entries(files)) {
-        mkdirSync(dirname(join(dir, path)), { recursive: true });
-        writeFileSync(join(dir, path), f.data, { mode: f.mode === '100755' ? 0o755 : 0o644 });
-      }
-      await ok('git', ['-C', dir, 'add', '-A', '.forge-zoo', '.github/workflows/zoo-ci.yml']);
-      const dirty = await run('git', ['-C', dir, 'status', '--porcelain']);
-      if (dirty.stdout.trim()) {
-        await ok('git', [
-          '-C',
-          dir,
-          '-c',
-          'user.name=zoo',
-          '-c',
-          'user.email=zoo@example.invalid',
-          'commit',
-          '--quiet',
-          '-m',
-          'zoo: check script and workflow',
-        ]);
-        await ok('git', ['-C', dir, 'push', '--quiet', 'origin', `HEAD:refs/heads/${entry.ref}`]);
-      }
-    }
-    // Forks start with Actions disabled; the plain-GitHub full run needs them on.
-    await run('gh', ['api', '-X', 'PUT', `repos/${entry.fork}/actions/permissions`, '-F', 'enabled=true']);
-  } finally {
-    rmSync(work, { recursive: true, force: true });
-  }
 }
 
 function writeZooJson(root, catalog, repos) {

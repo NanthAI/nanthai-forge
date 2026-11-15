@@ -136,6 +136,19 @@ export async function runRepo(cfg, repo, state, runDir, io) {
   const base = join(runDir, repo.id);
   mkdirSync(base, { recursive: true });
   const since = new Date().toISOString();
+  // Match the import's selected branch and full reachable history, excluding unrelated refs.
+  const gitClone = (ref, directory, bare = false) =>
+    io.git([
+      'clone',
+      ...(bare ? ['--bare'] : []),
+      '--quiet',
+      ...(!bare ? ['--recurse-submodules'] : []),
+      '--single-branch',
+      '--branch',
+      ref,
+      'https://github.com/' + repo.fork,
+      directory,
+    ]);
 
   // 1. Import (born hosted). Plain git's nearest operation: a full bare clone of the fork.
   let s = state.repos[repo.id] ?? {};
@@ -190,13 +203,7 @@ export async function runRepo(cfg, repo, state, runDir, io) {
     io.saveState();
   } else r.notes.push(`import reused: project ${s.projectId}`);
   r.sourceCommit = s.commit ?? null;
-  const bare = await io.git([
-    'clone',
-    '--bare',
-    '--quiet',
-    `https://github.com/${repo.fork}`,
-    join(base, 'git-bare'),
-  ]);
+  const bare = await gitClone(repo.ref, join(base, 'git-bare'), true);
   step('import', 'git', { ok: bare.code === 0, seconds: bare.seconds, op: 'git clone --bare' });
   r.projectId = s.projectId;
 
@@ -207,13 +214,7 @@ export async function runRepo(cfg, repo, state, runDir, io) {
   if (fc.code !== 0) return (refuse('clone', errorCode(fc.json) ?? `exit ${fc.code}`, fc.stderr), r);
   const gA = join(base, 'git-a');
   // Submodules are materialized in the Forge clone, so the plain-git side checks them out too.
-  const gc = await io.git([
-    'clone',
-    '--quiet',
-    '--recurse-submodules',
-    `https://github.com/${repo.fork}`,
-    gA,
-  ]);
+  const gc = await gitClone(repo.ref, gA);
   step('clone', 'git', { ok: gc.code === 0, seconds: gc.seconds });
 
   // 2b. Tree fidelity: the Forge clone against plain git's checkout of the same fork on this machine
@@ -333,16 +334,7 @@ export async function runRepo(cfg, repo, state, runDir, io) {
   const gB = join(base, 'git-b'),
     gC = join(base, 'git-c'),
     gD = join(base, 'git-d');
-  for (const d of [gB, gC, gD])
-    await io.git([
-      'clone',
-      '--quiet',
-      '--recurse-submodules',
-      '--branch',
-      branch,
-      `https://github.com/${repo.fork}`,
-      d,
-    ]);
+  for (const d of [gB, gC, gD]) await gitClone(branch, d);
   const commit = async (dir, tag) =>
     g(
       dir,

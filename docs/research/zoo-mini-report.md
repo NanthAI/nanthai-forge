@@ -4,7 +4,7 @@ Issue `70a9bd2f-f741-4d26-8ae5-7bb11148a17c` tracks this dev-only run. 26/26 row
 
 The [targeted admission-pipeline verification](#targeted-admission-pipeline-verification) now passes the Rust overtake timing line. The full-matrix numbers below remain the retained comparison; imports and the other recorded follow-ups keep the overall gate open.
 
-The harness is [scripts/bench-zoo](../../scripts/bench-zoo/suite.mjs). Fixtures are public upstream forks or synthetic recipes from [catalog.json](../../scripts/bench-zoo/catalog.json). Source bytes go to R2; the DB meter covers metadata I/O, calls, egress and action compute. It does not measure R2 storage/requests. Checks use free GitHub-hosted runners.
+The harness is [scripts/bench-zoo](../../scripts/bench-zoo/suite.mjs). Fixtures are public upstream forks or synthetic recipes from [catalog.json](../../scripts/bench-zoo/catalog.json). Source bytes go to R2; the DB meter covers metadata I/O, calls, egress and action compute. It does not measure R2 storage/requests. Checks use free GitHub-hosted runners. Disposable fixture provisioning pauses Actions before pushing source, disables inherited workflows, and enables only the declared `zoo-ci.yml` comparison. The plain-Git arm selects the same declared branch as Forge and retains that branch’s full reachable history; unrelated fork branches are excluded. Earlier all-ref Git observations remain retained but are superseded for comparison.
 
 26 of 26 repositories pass every path. ✓ pass, ✗ fail, ⊘ refused by name (expected for a hazard), · not reached.
 
