@@ -16,7 +16,12 @@ import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agen
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { landingRedriver } from './hosted-landing-redrive.js';
 import { rememberLandedOperations } from './landed-operations.js';
-import { boardWaker, type BoardDelivery, type BoardWaitOption } from './hosted-board-wait.js';
+import {
+  boardConflictEnvelope,
+  boardWaker,
+  type BoardDelivery,
+  type BoardWaitOption,
+} from './hosted-board-wait.js';
 import {
   parseHostedOutcome,
   replyIssuePaths,
@@ -486,6 +491,7 @@ async function observeHostedSubmissionsOnce(
     delivery?: BoardDelivery,
   ) => ({
     ...discovery,
+    ...boardConflictEnvelope(boardWait?.laneId, latestBoard),
     action: 'observe' as const,
     result: {
       status,
@@ -498,6 +504,7 @@ async function observeHostedSubmissionsOnce(
     },
   });
   let waker: ReturnType<typeof boardWaker> | undefined;
+  let latestBoard: unknown;
   let stop: (() => void) | undefined;
   try {
     for (const operation of operations) await drain(operation);
@@ -553,7 +560,8 @@ async function observeHostedSubmissionsOnce(
         const decoded = waker ? decode(value) : undefined;
         if (waker && decoded && typeof decoded === 'object') {
           const { board: note, ...page } = decoded as { board?: unknown };
-          waker.offer({ board: note });
+          latestBoard = { board: note };
+          waker.offer(latestBoard);
           const key = JSON.stringify(page);
           if (key === pageKey) return;
           pageKey = key;

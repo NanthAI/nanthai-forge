@@ -383,6 +383,9 @@ export function registerHostedAgentWorkflow(
               action: 'observe' as const,
               operationId: null,
               resolved: null,
+              ...(outcome.status === 'terminal' && outcome.conflictNotice
+                ? { conflictNotice: outcome.conflictNotice, notice: outcome.notice }
+                : {}),
               ...(notes?.conflictNotice
                 ? { conflictNotice: notes.conflictNotice, notice: notes.notice }
                 : {}),

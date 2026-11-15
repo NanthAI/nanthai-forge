@@ -20,7 +20,7 @@ import { learnFromLanding } from './preflight-learned.js';
 import { operationLine } from './hosted-land-wait.js';
 import { AGENT_WAIT_SECONDS, operationWait } from './agent-operation-wait.js';
 import { recordTurnWait, settleTurnWork } from './agent-turn-work.js';
-import { HostedAgentTransport } from './hosted-agent-transport.js';
+import { HostedAgentTransport, type HostedAgentResponse } from './hosted-agent-transport.js';
 import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { networkTimeout } from './network-fetch.js';
 import type { BoardWaitOption } from './hosted-board-wait.js';
@@ -159,7 +159,18 @@ async function dispatchHostedAgentCli(
             );
             const delivered = sourceMessage(response, progress);
             if (delivered) return delivered;
-            response = await transport.dispatch(operation.action, replay);
+            const notice = progress as {
+              conflictNotice?: HostedAgentResponse['conflictNotice'];
+              notice?: string;
+            };
+            const replayed = await transport.dispatch(operation.action, replay);
+            response = notice.conflictNotice
+              ? {
+                  ...replayed,
+                  conflictNotice: notice.conflictNotice,
+                  ...(notice.notice ? { notice: notice.notice } : {}),
+                }
+              : replayed;
           }
           if (isNetworkPending(response) || sourcePending(response)) {
             process.exitCode = 3;
@@ -246,6 +257,9 @@ async function dispatchHostedAgentCli(
           action: 'observe' as const,
           operationId: null,
           resolved: null,
+          ...(outcome.status === 'terminal' && outcome.conflictNotice
+            ? { conflictNotice: outcome.conflictNotice, notice: outcome.notice }
+            : {}),
           ...(notes?.conflictNotice ? { conflictNotice: notes.conflictNotice, notice: notes.notice } : {}),
           result:
             outcome.status === 'terminal'

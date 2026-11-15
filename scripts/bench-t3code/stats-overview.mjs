@@ -5,7 +5,7 @@ const improvement = g => `${fmt(g.improvement)} (${fmt(g.percent)}%)`;
 
 export function headlineRows(series, history = []) {
   const byN = new Map();
-  for (const source of [series, ...history])
+  for (const source of [series, ...history].filter(s => !s.validationOnly))
     for (const group of source.groups.filter(g => g.kind === 'scored'))
       if (!byN.has(group.N))
         byN.set(group.N, {
@@ -44,10 +44,10 @@ export function wallContext(report) {
           'GitHub reference series',
           'Comparison',
           'GitHub median wall s',
-          'Current Forge median wall s',
+          'Published Forge median wall s',
           'Gain s (%)',
         ],
-        [primary, ...report.series.filter(s => s !== primary)].flatMap(series => {
+        [primary, ...report.series.filter(s => s !== primary && !s.validationOnly)].flatMap(series => {
           const reference = series.groups.find(g => g.kind === 'scored' && g.N === 10 && g.arm === 'github');
           return reference
             ? [

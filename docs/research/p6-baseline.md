@@ -5,6 +5,10 @@ Later smoke, fixture and cross-repository results cover different workloads;
 they do not replace it. Measurement dates below belong to the data. The
 [exit-bench plan](p6-exit-bench-plan.md) and its owner decisions govern scoring.
 
+The later [release validation](p6-release-validation.md) retains the published v2
+headline and historical flags. Its N10 pair is validation only; both overlap
+attempts are void, with the rerun assigned to Phase 7 Item `0a9df3cd`.
+
 ## Best real-agent result: B1.5d (Phase 5, 2026-11-04)
 
 The [B1.5d report](b15d-report.md) compares Forge with Git + GitHub on t3code:

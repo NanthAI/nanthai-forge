@@ -300,7 +300,15 @@ export class HostedAgentTransport {
   }
   private readonly operationContext = new AsyncLocalStorage<{
     id: string | null;
+    sourceNotice?: ExactConflictNotice | undefined;
   }>();
+  private get sourceNotice() {
+    return this.operationContext.getStore()?.sourceNotice;
+  }
+  private set sourceNotice(notice: ExactConflictNotice | undefined) {
+    const current = this.operationContext.getStore();
+    if (current) current.sourceNotice = notice;
+  }
   private get callerOperationId() {
     return this.operationContext.getStore()?.id ?? null;
   }
@@ -441,15 +449,18 @@ export class HostedAgentTransport {
         ...(conflictNotice ? { conflictNotice, notice } : {}),
       };
     }
-    if (requestedAction === 'peers')
+    if (requestedAction === 'peers') {
+      const result = await peersHostedSource(this, input);
       return {
         schema: 1,
         transport: 'hosted',
         action: 'peers',
         operationId: null,
         resolved: null,
-        result: await peersHostedSource(this, input),
+        result,
+        ...(result.conflictNotice ? { conflictNotice: result.conflictNotice, notice: result.notice } : {}),
       };
+    }
     const response = await this.operationContext.run(
       { id: typeof input.operationId === 'string' ? input.operationId : null },
       () => this.dispatchScoped(requestedAction, input, signal),
@@ -1060,8 +1071,8 @@ export class HostedAgentTransport {
           );
           return main;
         },
-        waitSource: (operationId, initial, kind, timeoutSeconds, observe, settle) =>
-          waitHostedAgentSource(
+        waitSource: async (operationId, initial, kind, timeoutSeconds, observe, settle) => {
+          const result = await waitHostedAgentSource(
             this.address,
             operationId,
             initial,
@@ -1072,7 +1083,10 @@ export class HostedAgentTransport {
             observe,
             settle,
             this.serverFeatures?.includes('source-board-wait') ? this.waitBoard : undefined,
-          ),
+          );
+          this.sourceNotice = (result as { conflictNotice?: ExactConflictNotice } | null)?.conflictNotice;
+          return result;
+        },
         waitUntil: this.waitUntil ?? dispatchedAt + AGENT_WAIT_SECONDS * 1000,
         finishGates: async (laneId: string, head: string, tree?: string) => {
           const read = await this.overlapAdvice(laneId, capabilities.agentDefaults?.preflight !== 'off');
@@ -1536,7 +1550,10 @@ export class HostedAgentTransport {
     const presence =
       advice?.presence && overlapLaneId ? presenceDelivery(overlapLaneId, advice.presence) : undefined;
     const conflictNotice =
-      advice?.conflicts && overlapLaneId ? exactConflictNotice(overlapLaneId, advice.conflicts) : undefined;
+      advice && overlapLaneId
+        ? exactConflictNotice(overlapLaneId, advice.conflicts ?? [])
+        : this.sourceNotice;
+    this.sourceNotice = undefined;
     const board =
       advice?.board && overlapLaneId ? boardEnvelope(this.root, overlapLaneId, advice.board) : undefined;
     // Conflict advice first, so the continuation never offers wait beside a recovery.

@@ -19,6 +19,7 @@ import { hostedWaitSchema } from './hosted-wait-schema.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { memberDataNotice } from './member-data-notice.js';
+import { exactConflictEnvelope, exactConflictsSchema } from './hosted-conflict-notice.js';
 import { QUEUE_VIEW_LIMIT } from './hosted-queue-view.js';
 import { hostedLandingsSchema } from './hosted-agent-landings.js';
 import { hostedLaneHistorySchema } from './hosted-agent-lane-history.js';
@@ -65,10 +66,13 @@ export async function peersHostedSource(transport: HostedAgentTransport, input: 
     detail: true,
     items: command.detail ? 50 : 5,
   });
-  // Peer intents and overlap notes are member-written: one marker per read (S-17).
-  return result && typeof result === 'object' && result.peerEvidence
-    ? { ...result, notice: memberDataNotice }
-    : result;
+  // The exact trial verdict already rides this query. Range evidence alone is not a conflict.
+  const conflicts = exactConflictsSchema.parse(result.conflicts ?? []);
+  return {
+    ...result,
+    ...(result.peerEvidence ? { notice: memberDataNotice } : {}),
+    ...exactConflictEnvelope(laneId, conflicts),
+  };
 }
 export const hostedQueueSchema = z
   .object({

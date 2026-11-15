@@ -13,7 +13,12 @@ import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { replyIssuePaths, safeParseHostedResponse } from './hosted-response.js';
 import { replySkewError } from './hosted-reply-skew.js';
 import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
-import { boardWaker, type BoardDelivery, type BoardWaitOption } from './hosted-board-wait.js';
+import {
+  boardConflictEnvelope,
+  boardWaker,
+  type BoardDelivery,
+  type BoardWaitOption,
+} from './hosted-board-wait.js';
 import { boardDeliverySchema } from './hosted-board.js';
 
 export const hostedRunWaitSchema = z
@@ -149,6 +154,7 @@ async function observeHostedRunOnce(
   let terminal = run(latest).terminal;
   const result = (status: 'terminal' | 'timeout' | 'cancelled' | 'message', delivery?: BoardDelivery) => ({
     ...initial,
+    ...boardConflictEnvelope(boardWait?.laneId, latest),
     result: { status, run: latest, ...(delivery ? { board: delivery } : {}) },
   });
   emit(latest);

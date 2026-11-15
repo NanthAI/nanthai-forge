@@ -1773,7 +1773,7 @@ test('drift nudge: log entries written before the fix, with an account id, are n
   assertNoAccountIds(assert, nudge, 'legacy nudge');
 });
 
-for (const action of ['status', 'board', 'save']) {
+for (const action of ['status', 'board', 'save', 'peers']) {
   test(`83e6d0d3: a retained exact conflict reaches the next ${action} reply, including same-run Lanes`, async t => {
     const { s, lane, peer, transport } = await setup(t);
     const first = transport(lane),
@@ -1799,7 +1799,8 @@ for (const action of ['status', 'board', 'save']) {
         reply: measure(s.counts.slice(before)),
       }),
     );
-    if (action === 'board') assert.equal(s.counts.length - before, 1, 'board remains one query');
+    if (action === 'board' || action === 'peers')
+      assert.equal(s.counts.length - before, 1, `${action} remains one query`);
     // A board switch only disables member notes, never a retained source conflict.
     if (action === 'board') {
       s.insert('boardSwitches', { key: 'global', off: true, at: Date.now() });

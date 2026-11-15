@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
-import { exactConflictNotice } from './hosted-conflict-notice.js';
+import { exactConflictEnvelope, exactConflictNotice } from './hosted-conflict-notice.js';
 import { boardDeliverySchema } from './hosted-board.js';
 import { boardEnvelope, readBoardCursor, readBoardWokeAt, writeBoardWokeAt } from './board-local.js';
 import { ForgeError } from './errors.js';
@@ -17,6 +17,12 @@ export const peerWaitHooks: {
   subscribe?: (address: HostedAgentTransport['address']) => HostedRunSubscription;
 } = {};
 export type BoardDelivery = z.infer<typeof boardDeliverySchema>;
+/** A terminal outcome may beat the batching timer. Deliver its current source notice
+ * beside that outcome, without consuming member notes or changing the wait's result. */
+export function boardConflictEnvelope(laneId: string | undefined, value: unknown) {
+  const parsed = boardDeliverySchema.safeParse((value as { board?: unknown } | null)?.board);
+  return laneId && parsed.success ? exactConflictEnvelope(laneId, parsed.data.conflicts ?? []) : {};
+}
 /** At most one early wait return per Lane per this window; later notes wait for the next return. */
 export const BOARD_WAKE_WINDOW_MS = 60_000;
 /** Notes arriving together are returned together. Replaceable in tests. */
@@ -109,7 +115,9 @@ const peerSchema = z.object({
   board: z.unknown().optional(),
 });
 type PeerOutcome =
-  | { status: 'terminal'; peer: z.infer<typeof peerSchema>['peer'] }
+  | ({ status: 'terminal'; peer: z.infer<typeof peerSchema>['peer'] } & ReturnType<
+      typeof boardConflictEnvelope
+    >)
   | {
       status: 'message';
       peer: z.infer<typeof peerSchema>['peer'] | null;
@@ -174,7 +182,12 @@ export async function observePeerLane(
               typeof value === 'string' ? JSON.parse(value) : value,
             );
             latest = parsed.peer;
-            if (parsed.peer.terminal) settle({ status: 'terminal', peer: parsed.peer });
+            if (parsed.peer.terminal)
+              settle({
+                status: 'terminal',
+                peer: parsed.peer,
+                ...boardConflictEnvelope(board?.laneId, parsed),
+              });
             else waker?.offer(parsed);
           } catch (error) {
             release();

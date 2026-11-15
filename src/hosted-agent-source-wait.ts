@@ -4,7 +4,7 @@ import { makeFunctionReference } from 'convex/server';
 import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agent-observe.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
 import { hostedActionError } from './hosted-action-error.js';
-import { boardWaker, type BoardWaitOption } from './hosted-board-wait.js';
+import { boardConflictEnvelope, boardWaker, type BoardWaitOption } from './hosted-board-wait.js';
 /** Compact the public observation without retaining source inputs in a pending reply.
  * A live query does not tick when wall time alone crosses a lease deadline. */
 export function sourceWaitSnapshot(value: unknown, now = Date.now()): unknown {
@@ -95,12 +95,16 @@ async function waitHostedAgentSourceOnce(
   board?: BoardWaitOption,
 ) {
   const raw = initial;
+  const withNotice = (value: unknown, progress: unknown) => {
+    const envelope = boardConflictEnvelope(board?.laneId, progress);
+    return envelope.conflictNotice && value && typeof value === 'object' ? { ...value, ...envelope } : value;
+  };
   initial = sourceWaitSnapshot(initial);
   if (stopped(initial)) {
     // A submit that published its outcome (source-run-publish) replies `{terminal, state}`: the
     // receipt still reads its server timing from that one reply.
     if (raw !== initial && (raw as { terminal?: unknown }).terminal) observe?.(raw);
-    return initial;
+    return withNotice(initial, raw);
   }
   if (signal?.aborted) return initial;
   let latest = initial;
@@ -132,13 +136,16 @@ async function waitHostedAgentSourceOnce(
             observe?.(progress);
             waker?.offer(progress);
             const settled = settle?.(progress);
-            if (settled && 'value' in settled) return resolve(settled.value);
+            if (settled && 'value' in settled) return resolve(withNotice(settled.value, progress));
             if (settled) {
-              timer ??= setTimeout(() => resolve(sourceWaitSnapshot(progress)), settled.waitMs);
+              timer ??= setTimeout(
+                () => resolve(withNotice(sourceWaitSnapshot(progress), progress)),
+                settled.waitMs,
+              );
               return;
             }
             const observed = sourceWaitSnapshot(progress);
-            if (stopped(observed)) resolve(observed);
+            if (stopped(observed)) resolve(withNotice(observed, progress));
             else if (progress?.jobId) {
               latest = observed;
               remember(observed);

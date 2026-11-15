@@ -51,6 +51,7 @@ export function buildReport(inputs, { primary = inputs[0]?.name, classifier = {}
   });
   const selected = series.find(s => s.name === primary);
   if (!selected) throw Error('Primary series not found');
+  if (selected.validationOnly) throw Error('Validation-only observations cannot be the primary series');
   return {
     schema: 1,
     primary,
@@ -62,8 +63,19 @@ export function buildReport(inputs, { primary = inputs[0]?.name, classifier = {}
       ]),
     ),
     series,
+    ...(series.some(s => s.validationOnly)
+      ? {
+          validation: series
+            .filter(s => s.validationOnly)
+            .map(s => ({
+              name: s.name,
+              reference: selected.name,
+              comparisons: compareGroups(s.groups, selected.groups, false),
+            })),
+        }
+      : {}),
     history: series
-      .filter(s => s !== selected)
+      .filter(s => s !== selected && !s.validationOnly)
       .map(s => ({
         reference: s.name,
         comparisons: compareGroups(selected.groups, s.groups, false),
@@ -75,6 +87,7 @@ export function buildReport(inputs, { primary = inputs[0]?.name, classifier = {}
 function options(args) {
   const out = {
     series: new Map(),
+    validation: new Set(),
     out: 'docs/research/p6-exit-bench-results',
     reworkModule: new URL('./rework.mjs', import.meta.url).pathname,
   };
@@ -82,7 +95,7 @@ function options(args) {
     const flag = args[i],
       value = args[++i];
     if (!value) throw Error(`Missing value for ${flag}`);
-    if (flag === '--series') {
+    if (flag === '--series' || flag === '--validation-series') {
       const at = value.indexOf('='),
         name = value.slice(0, at),
         path = value.slice(at + 1);
@@ -91,6 +104,7 @@ function options(args) {
       const roots = out.series.get(name) ?? [];
       roots.push(resolve(path));
       out.series.set(name, roots);
+      if (flag === '--validation-series') out.validation.add(name);
     } else if (flag === '--out') out.out = value;
     else if (flag === '--primary') out.primary = value;
     else if (flag === '--rework-module') out.reworkModule = resolve(value);
@@ -102,7 +116,7 @@ function options(args) {
   }
   if (!out.series.size)
     throw Error(
-      'Usage: stats.mjs --series NAME=DIRECTORY [--series NAME=DIRECTORY] [--primary NAME] [--rework-module MODULE] [--classifier-state STATE] [--b15d-report REPORT] [--out PREFIX]',
+      'Usage: stats.mjs --series NAME=DIRECTORY [--series NAME=DIRECTORY] [--validation-series NAME=DIRECTORY] [--primary NAME] [--rework-module MODULE] [--classifier-state STATE] [--b15d-report REPORT] [--out PREFIX]',
     );
   return out;
 }
@@ -110,7 +124,11 @@ function options(args) {
 export async function main(args) {
   const o = options(args);
   const { runRework } = await import(pathToFileURL(o.reworkModule).href);
-  const inputs = [...o.series].map(([name, roots]) => ({ name, ...readSeries(roots, runRework) }));
+  const inputs = [...o.series].map(([name, roots]) => ({
+    name,
+    ...readSeries(roots, runRework),
+    ...(o.validation.has(name) ? { validationOnly: true } : {}),
+  }));
   if (o.b15dReport) {
     if (o.series.has('b15d')) throw Error('Supply raw B1.5d inputs or its report, not both');
     inputs.push({ name: 'b15d', ...readB15dReport(o.b15dReport) });

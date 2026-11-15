@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { wouldConflictSchema, syncRequiredContinuation } from './hosted-would-conflict.js';
+import { memberDataNotice } from './member-data-notice.js';
 
 /** Exact conflicts at save (flip 4, Issue 853fcde3): what the overlap read returns when a trial merge of
  * this Lane's saved files against main or another open Lane really conflicts. */
@@ -67,6 +68,12 @@ export function exactConflictNotice(laneId: string, conflicts: ExactConflicts) {
   };
 }
 export type ExactConflictNotice = NonNullable<ReturnType<typeof exactConflictNotice>>;
+
+/** The same top-level source notice on command replies and terminal wait replies. */
+export function exactConflictEnvelope(laneId: string, conflicts: ExactConflicts) {
+  const conflictNotice = exactConflictNotice(laneId, conflicts);
+  return conflictNotice ? { conflictNotice, notice: memberDataNotice } : {};
+}
 
 /** Human banner for stderr. */
 export function exactConflictBanner(notice: ExactConflictNotice) {

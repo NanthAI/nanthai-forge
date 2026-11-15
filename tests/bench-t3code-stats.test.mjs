@@ -333,3 +333,56 @@ test('voided replay failures retain public codes without inventing valid tail ti
   assert.match(text, /void-replay \| forge \| replay-conflict \| GH006/);
   assert.doesNotMatch(JSON.stringify(report), /notification-secret|private\/fixture/);
 });
+
+test('validation cells cannot replace a headline or fill a missing N and remain separate from history', t => {
+  const f = fixture(t);
+  f.cell('v2', { N: 10, wallSecondsToAllLanded: 763 });
+  f.cell('history', { N: 3 });
+  f.cell('validation', { N: 10, wallSecondsToAllLanded: 500 });
+  f.cell('validation-new-n', { N: 8 });
+  f.batch(['v2', 'history', 'validation', 'validation-new-n']);
+  const all = readSeries([f.root], runRework);
+  const input = (name, prefix, validationOnly = false) => ({
+    name,
+    ...all,
+    cells: all.cells.filter(c => c.cellId.startsWith(prefix)),
+    ...(validationOnly ? { validationOnly: true } : {}),
+  });
+  const inputs = [input('rerun', 'v2'), input('before', 'history')];
+  const baseline = buildReport(inputs, { primary: 'rerun' });
+  const report = buildReport([...inputs, input('final', 'validation', true)], { primary: 'rerun' });
+  assert.deepEqual(
+    headlineRows(report.series[0], report.series.slice(1)),
+    headlineRows(baseline.series[0], baseline.series.slice(1)),
+  );
+  assert.deepEqual(report.history, baseline.history);
+  assert.equal(report.validation[0].reference, 'rerun');
+  assert.equal(report.validation[0].comparisons[0].perCell.wallSeconds.median.reference, 763);
+  assert.equal(report.validation[0].comparisons[0].perCell.wallSeconds.median.treatment, 500);
+  const text = render(report);
+  assert.match(text, /Validation only: final/);
+  assert.doesNotMatch(text, /final \| Historical reference/);
+  assert.throws(() => buildReport(report.series, { primary: 'final' }), /cannot be the primary/);
+});
+
+test('CLI records validation-only series without changing the selected primary', async t => {
+  const f = fixture(t);
+  f.cell('cell');
+  f.batch(['cell']);
+  const out = join(f.root, 'validation/results');
+  await main([
+    '--series',
+    `rerun=${f.root}`,
+    '--validation-series',
+    `final=${f.root}`,
+    '--primary',
+    'rerun',
+    '--out',
+    out,
+  ]);
+  const report = JSON.parse(readFileSync(`${out}.json`, 'utf8'));
+  assert.equal(report.primary, 'rerun');
+  assert.equal(report.series.find(s => s.name === 'final').validationOnly, true);
+  assert.equal(report.history.length, 0);
+  assert.equal(report.validation.length, 1);
+});
