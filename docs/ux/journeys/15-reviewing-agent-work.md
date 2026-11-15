@@ -1,0 +1,72 @@
+# Journey 15: a person reviewing agent work
+
+Reading a Candidate and its diff, commenting, asking for changes and deciding. This is the equivalent of a pull request review. [Journey 7](07-people-access.md) covers who may decide and the approval pages for held landings; this file covers the reading and the conversation.
+
+Walked: the review, Lane, diff and conversation sources, `help review`, the `diff` summary of this mapping's parent Lane, the workflows doc (browser review, reviewing a Candidate, feedback, check output). **Not walked:** a rendered review page, a line comment, **Ask for changes**, **Approve** and **Revert** (each writes).
+
+## Steps today
+
+| # | Step | Person (web) | Agent (CLI or MCP) |
+| --- | --- | --- | --- |
+| 1 | Learn there is something to review | Needs you: "Ready to accept" on a supervised project, or "Approval request" for a held landing. On a project that lands automatically, nothing asks: the change is already on main. (source; journey 7) | `REVIEW_REQUIRED` on its own landing; `wait '{"approval":"LANE_ID"}'`. |
+| 2 | Open the Candidate | Review page. Top: **Your decision**. Then "What this does and why" (the outcome and its notes), then "Changes, in the order they were built": "Each group is a recorded Lane save. The diff shows this Candidate's final changes to that save's files." Groups are titled "Save 1", "Save 2". | `diff '{"laneId":"…","summary":true}'` returns each path with `status` and `main:"equal" or "absent" or "different"`. (ran) |
+| 3 | Read the diff | "Changed files" with a filter ("Change type", "All files", "Modified", "Deleted"), a **Files / Map** toggle, and a diff in Unified, Split or Inline mode with "viewed files and cached syntax highlighting". "The file text is unchanged. File mode changes are shown above." | `diff '{"laneId":"…","paths":[…],"byteBudget":N}'` pages hunks with `nextCursor`; `show '{"laneId":"…","path":"FILE"}'` returns exact saved bytes. "show and diff never substitute another revision." (ran: help) |
+| 4 | Check the evidence | "Check passed on exactly this Candidate" (or failed), a log reader with stdout and stderr, **First failure** and line links. "No check recorded for this Candidate." "Exact record: Candidate, pins, receipts" is folded. | `status`, `log '{"runId":"…"}'`. |
+| 5 | Comment on a line | "Line comments": "Comment on old or new line N". | No action found for commenting on a Candidate line. Board notes (240 characters) and Item comments are the agent's channels. |
+| 6 | Ask for changes | **Ask for changes** "opens inline, keeps a draft per Candidate during the browser session" ("Draft kept"), then "Send to AGENT". Result: "Review feedback recorded · sent to Lane conversation." The message starts "Changes requested for Candidate:" with a link to it. "It is advisory and adds no acceptance gate." | The Lane conversation shows the message; "Lane and Review conversations show sent messages and explicit acknowledgements; a heartbeat alone is not evidence that a message was seen." How a running agent receives it depends on its next command (open Issues 11ba7bb9, f65d8024). |
+| 7 | Decide | **Accept into main** "submits the exact reviewed Candidate to the hosted landing queue as a person". The page then shows Queued, Checking, Landing, Landed "or the retained failure". "People retain their existing ability to accept an unchecked Candidate." **Cancel landing** is separate. | `LANDED`, or `REVIEW_DECLINED` with the reason. |
+| 8 | A conflict in the Candidate | "Unresolved composition" and "Open the Lane to resolve conflicts." | [Journey 3](03-conflict.md). |
+| 9 | After it landed | The same review page, with the disposition in place of the decision. **Revert…**: "Creates a new Candidate: the reverse of this change on current main", "Checked (verify) and landed through the queue, like any Candidate". | `x revert`. [Journey 10](10-mistakes-recovery.md). |
+| 10 | Hand the review to an agent | **Hand to an agent** "opens the review briefing sheet". | Reads the briefing. |
+
+Speed, measured on the dogfood project: the Lane changes view made "13 serialized Convex round trips and whole-State transfer before a tiny diff (3.5 s, 85% waiting on RPCs)" (open Issue 4bc460aa).
+
+## Findings
+
+| Id | Severity | Finding | Evidence |
+| --- | --- | --- | --- |
+| J15-1 | S1 | **On a project that lands automatically, nothing invites a review.** The default for an established project is that agent work lands on a passing check. Needs you lists decisions, not "these twelve changes landed while you were away; read them". The review page exists for every landed Candidate, but a person has to go and find each one. Review after the fact is the normal case with agents and has no entry point. | source, docs |
+| J15-2 | S2 | **"Ask for changes" changes nothing a person can see.** It records feedback and sends a message. The Candidate can still be approved, by the same person or another. Nothing shows "changes asked, not yet answered" on the Candidate, in Needs you or on the Lane (journey 7, J7-6). | docs, source |
+| J15-3 | S2 | **A person cannot tell whether the agent got the message.** Delivery depends on the agent's next command; acknowledgement is explicit and optional. An agent that has already stopped never answers, and the page shows a sent message with no reply. | docs |
+| J15-4 | S2 | **Line comments belong to one Candidate.** A comment is anchored to a Candidate snapshot. When the agent saves again and a new Candidate is composed, the earlier comments stay on the old one. Comments that survive later edits are frozen work (Issue 82e8ddb8). A reviewer cannot see "my three comments, two addressed". | docs |
+| J15-5 | S2 | **The story is organised by save, with titles "Save 1", "Save 2".** Agents save often and for their own reasons (every 30 minutes, before a preflight). The grouping is honest and rarely matches how a person would read the change. Save messages, when present, are not shown as the group title. | source |
+| J15-6 | S2 | **An unchecked Candidate can be approved from the same button.** "People retain their existing ability to accept an unchecked Candidate." The button label does not change when no check has run; the only signal is the line "No check recorded for this Candidate." further down. | docs, source |
+| J15-7 | S2 | **The diff is slow.** 3.5 seconds for a small change is measured (4bc460aa). A reviewer moving through ten agent changes waits more than they read. | docs |
+| J15-8 | S2 | **An agent cannot review as a person can.** It can read the diff and the bytes. It cannot leave a line comment or ask for changes on a Candidate; its findings go to a 240-character board note or an Item comment. A reviewing agent's output has no home (open Issue 5dda91bc proposes review findings as records). | ran |
+| J15-9 | S2 | **Three words for the reviewed thing on one page.** Candidate (titles), View (routes and source names such as `reviewView`), "Accepted versions" (the list). The owner's decision is Candidate. | source |
+| J15-10 | S3 | **The decision words are in flux.** The button says **Accept into main**; the owner's decision is that a person approves and the system accepts (tracked on a4c5394c). "A project owner or maintainer accepts" still names a role that does not exist. | source |
+| J15-11 | S3 | **Who wrote what is partly unknown.** "Groups come from retained provenance; missing save authors remain unknown." With several agents under one handle, the author shown is the person, and the run name is the only hint. | docs |
+| J15-12 | S3 | **A review cannot be split or shared.** There are no requested reviewers, no "reviewed by", no approval count. One owner decides. Open Issue 517523cf covers approvals bound to what lands and path owners. | docs |
+
+## Dead ends
+
+- "What landed that I have not looked at?": no list.
+- A comment thread across two Candidates of the same Lane.
+- An agent asked to review: it can read and has nowhere structured to write.
+
+## Naming and tone
+
+- "Your decision" above everything is the right order.
+- "Exact record: Candidate, pins, receipts" keeps hashes out of the way, as PRODUCT.md asks.
+- "Unresolved composition" is an internal phrase for "these changes conflict".
+
+## What each persona needs
+
+- **Agent, not person:** review feedback delivered into its session with the file and line; a structured way to answer ("addressed in save N") and to post findings when it is the reviewer.
+- **Person, not agent:** a queue of what to read, including work that already landed; a diff that opens at once; comments that follow the change; a visible state for "I asked for changes".
+
+## Approved direction (group I)
+
+These owner decisions guide the P7 spec; the steps and findings above describe the implementation observed.
+
+- **I41:** Needs you holds approvals, questions, handoffs and reviews; failures appear only when no agent is on them. Order the longest-blocked agent first.
+- **I42:** Read state is kept per account so web, phone and CLI agree.
+
+## Questions for the owner
+
+1. **Answered in group I:** Read state is per account (I42); whether to offer the landed-not-yet-read list remains open (question 45).
+2. Should **Ask for changes** hold the Candidate until the agent answers or the person lifts it (journey 7, question 4)?
+3. Should the **Approve** button change, or ask once more, when no check has run on the Candidate?
+4. Are review comments from agents first-class (line comments by an agent reviewer), and do they count for anything?
+5. Is the change story grouped by save, by file, or by the agent's own summary of what it did?
+6. Do comments have to survive a new save before the beta (unfreezing 82e8ddb8), or is "comments on this Candidate only" acceptable if it is stated?

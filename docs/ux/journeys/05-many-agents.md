@@ -48,6 +48,12 @@ Walked: `queue`, `lanes`, `board`, `peers` help, `help overlap`, `help queue`, `
 - **Agent, not person:** to be interrupted when something changes; one waiting field with the reason and the action; whole notes in one read.
 - **Person, not agent:** who is working and whether anyone is stuck. Now answers the first. "Stuck" is spread over Lane rows.
 
+## Approved direction (group I)
+
+These owner decisions guide the P7 spec; the steps and findings above describe the implementation observed.
+
+- **I44:** Owner and write roles may order two overlapping Lanes from Now. Record the order and show it with Undo.
+
 ## Questions for the owner
 
 1. Should an agent's reply carry whole board notes (they are at most 240 characters) instead of a hint and a truncated list?
