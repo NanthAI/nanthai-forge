@@ -7,10 +7,12 @@ and current web command guides use hosted clone, configure-check and checkpoint
 recovery paths instead of retired native CLI commands.
 
 Exact speculative-predecessor conflicts expose pinned early sync/resolve recovery.
+Save-time exact peer notices offer that sync as soon as the peer has a fixed check;
+resolved peer deltas no longer create false notices, and acceptance clears old notices.
 An internal cohort conflict names the checked survivor prefix containing the
 conflicting peer; an outer-base conflict keeps its exact outer predecessor.
-`acceptance.earlyResolve` defaults to Automatic, comparing the project's observed
-failure fraction with measured resolution/wait break-even; explicit on/off wins.
+Early resolution is on unless `acceptance.earlyResolve` is `"off"`; legacy
+Automatic/on values remain readable. No sample window or rate decision is maintained.
 Resolved work checks on the fixed train tail, preserving its check across later
 mergeable groups; a clean pinned sync changes no Lane or landing. Lineage
 supersession covers conflicting own-main sync, source preparation, ownerless

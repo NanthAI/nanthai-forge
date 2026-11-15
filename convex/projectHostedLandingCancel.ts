@@ -103,10 +103,12 @@ export async function cancelHostedLanding(
   }
   const identity = { projectId, submissionId: request.submissionId };
   const canonical = await landingRow(ctx, identity);
-  if (!canonical && input.supersede) {
+  if (!canonical) {
     const desired = await desiredLanding(ctx, identity);
     invariant(desired, 'NOT_FOUND', 'Hosted landing request not found.');
     const previous = hostedLandingStateSchema.parse(JSON.parse(desired.value));
+    if (!input.drop && !input.abandonOperationId && !input.supersede)
+      await requireMemberAuthorityById(ctx, projectId, previous.actor, actor, 'landing');
     const state =
       previous.phase === 'terminal-failed'
         ? previous
@@ -114,10 +116,20 @@ export async function cancelHostedLanding(
             ...previous,
             version: previous.version + 1,
             phase: 'terminal-failed',
-            observation: { state: 'superseded', pendingReason: null, cause: null },
+            observation: input.supersede
+              ? { state: 'superseded', pendingReason: null, cause: null }
+              : landingObservation('cancelled'),
             error: {
-              code: 'LANDING_SUPERSEDED',
-              message: input.reason ?? 'The source preparation was superseded.',
+              code: input.supersede
+                ? 'LANDING_SUPERSEDED'
+                : input.drop
+                  ? (input.code ?? 'LANDING_STALLED')
+                  : 'LANDING_CANCELLED',
+              message:
+                input.reason ??
+                (input.supersede
+                  ? 'The source preparation was superseded.'
+                  : 'The source preparation was cancelled.'),
             },
             timing: { ...previous.timing, submittedAt: previous.at, settledAt: new Date().toISOString() },
           });
@@ -129,7 +141,7 @@ export async function cancelHostedLanding(
       actor: state.actor,
       composeOperationId: state.request.finish?.composeOperationId,
       operationId: state.operationId,
-      code: 'LANDING_SUPERSEDED',
+      code: state.error!.code,
     });
     await finishHostedOperation(ctx, {
       projectId,

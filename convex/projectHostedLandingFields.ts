@@ -120,6 +120,7 @@ export const hostedLandingTables = {
     ),
     lease: v.union(lease, v.null()),
     /** Recent cohort outcomes for sizing (`1` passed, `0` a test failed), newest last. */
+    /** Retired sample window: tolerated for stored rows; no reader or writer uses it. */
     earlyResolveSamples: v.optional(v.string()),
     checkHistory: v.optional(
       v.object({

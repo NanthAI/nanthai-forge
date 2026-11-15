@@ -9,8 +9,6 @@ import type { HostedLandingState, HostedLandingAttempt } from '../src/hosted-lan
 import { invalidatePipeline } from './projectHostedLandingPipeline';
 import { readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { hostedRecordSchema } from '../src/hosted-records';
-import { predecessorPinSchema } from '../src/early-resolution';
-import { stageEarlyResolutionSample } from './projectHostedEarlyResolutionSamples';
 import { postSystemLaneNote } from './projectBoardSystem';
 import { STACK_NOTICE_FANOUT } from '../src/hosted-stack-notice';
 
@@ -58,7 +56,6 @@ export async function recoverEarlyResolutions(
       { projectId: row.projectId, batchId: state.id },
       { members: [{ submissionId: state.id }] },
     );
-  const costs: [number | null, number | null][] = [];
   for (const dependent of dependents) {
     const same =
       dependent.parentHead === attempt.candidate.head &&
@@ -74,12 +71,6 @@ export async function recoverEarlyResolutions(
       !accepted
     )
       continue;
-    const started = Date.parse(dependent.resolutionStartedAt ?? ''),
-      ended = Date.parse(dependent.resolutionEndedAt ?? '');
-    costs.push([
-      Number.isFinite(ended - started) ? Math.max(0, ended - started) : null,
-      Number.isFinite(started) ? Math.max(0, Date.now() - started) : null,
-    ]);
     if (accepted) {
       await ctx.db.patch(dependent._id, { predecessorId: undefined });
       continue;
@@ -129,24 +120,6 @@ export async function recoverEarlyResolutions(
       makeFunctionReference<'mutation'>('projectHostedEarlyResolutionRecovery:advance'),
       { projectId: row.projectId, submissionId: state.id, cursor: page.continueCursor },
     );
-  // Observe every exact conflicting predecessor, including while Automatic waits or is off.
-  // Otherwise a high failure window would stop sampling and could never recover.
-  const watch = predecessorPinSchema.parse(JSON.parse(row.earlyResolveWatch!));
-  const accepted =
-    state.phase === 'landed' &&
-    state.acceptance?.head === watch.head &&
-    state.acceptance.receiptId === watch.receiptId;
-  const retired =
-    state.phase === 'terminal-failed' ||
-    state.observation.pendingReason === 'waiting-for-review' ||
-    attempt.candidate.head !== watch.head ||
-    attempt.operations.accept !== watch.receiptId;
-  if (!cursor && row.earlyResolveObserved !== watch.receiptId && (accepted || retired)) {
-    const known = costs.filter((cost): cost is [number, number] => cost[0] !== null && cost[1] !== null);
-    const mean = (index: 0 | 1) =>
-      known.length ? known.reduce((n, cost) => n + cost[index], 0) / known.length : null;
-    stageEarlyResolutionSample(ctx, row.projectId, [watch.receiptId, Boolean(accepted), mean(0), mean(1)]);
-  }
 }
 
 /** One event-owned continuation per dependent page. No timer remains after it drains. */

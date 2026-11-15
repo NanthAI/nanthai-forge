@@ -312,19 +312,16 @@ export async function writeLanding(
     phase: state.phase as LandingRow['phase'],
     runnable,
     wouldConflict,
-    earlyResolveObserved:
-      row.earlyResolveWatch &&
-      (state.phase === 'landed' ||
-        state.phase === 'terminal-failed' ||
-        entersReview ||
-        previous.attemptId !== state.attemptId)
-        ? JSON.parse(row.earlyResolveWatch).receiptId
-        : row.earlyResolveObserved,
     orderLive: orderLive ? true : undefined,
     reservedUntil: reserving ? row.reservedUntil : undefined,
     // Queued advisory conflicts also depend on an existing settlement event.
     // A same-attempt diagnostic write must not silently discard that owner.
-    orderWait: state.phase === 'ready' || (speculative && !retireAdvice) ? row.orderWait : undefined,
+    orderWait:
+      state.phase === 'ready' ||
+      (state.phase === 'queued' && attempt.earlyResolutions?.length) ||
+      (speculative && !retireAdvice)
+        ? row.orderWait
+        : undefined,
     orderWaited: orderLive || reserving || admitting ? row.orderWaited : undefined,
     value: semanticPayload(state),
   });

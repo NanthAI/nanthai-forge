@@ -6,6 +6,7 @@ import { composeLaneSchema, validateComposePage } from '../src/hosted-compose';
 import { overlapLandingLabel, recordOverlapLanding } from '../src/hosted-overlap';
 import { labelOverlapMainLog } from './projectHostedOverlapMainLog';
 import { publicActorLabel } from './publicPeople';
+import { closeConflictNotices } from './projectHostedConflicts';
 import { readHostedRecord } from './projectHostedRecords';
 
 /** One immutable input page is at most 100 entries; later pages are reached through the completion ledger. */
@@ -70,6 +71,7 @@ export async function retireLandedOverlapLanes(
       ? { receiptId: identity.receiptId, commit: landed.commit, laneHead: row.head, at: landed.at }
       : undefined;
     const stamped = !stamp || row.landed?.receiptId === stamp.receiptId;
+    if (row.conflicted) await closeConflictNotices(ctx, identity.projectId, row.laneId, 'landed');
     if (!row.open && stamped) continue;
     await ctx.db.patch(row._id, { open: false, ...(stamped ? {} : { landed: stamp }) });
     retired++;

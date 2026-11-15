@@ -126,3 +126,32 @@ export function syncRequiredContinuation(
       'the new landing supersedes this queued entry. Resolve any sync conflict it reports first.',
   };
 }
+
+/** One exact target and action for both cohort advice and save-time conflict notices. */
+export function predecessorConflictAdvice(input: {
+  predecessor: { submissionId: string; head: string; receiptId: string; groupId: string };
+  laneId?: string;
+  paths: string[];
+  more: number;
+  at: string;
+  early: boolean;
+}) {
+  const { groupId: _group, ...pin } = input.predecessor;
+  void _group;
+  const target = input.laneId
+    ? `Lane ${input.laneId} (submission ${pin.submissionId})`
+    : `submission ${pin.submissionId}`;
+  return wouldConflictSchema.parse({
+    code: 'COMPOSITION_CONFLICT',
+    predecessor: input.predecessor,
+    resolution: {
+      early: input.early,
+      mode: input.early ? 'on' : 'off',
+      reason: input.early ? 'enabled' : 'owner-off',
+    },
+    paths: input.paths,
+    more: input.more,
+    at: input.at,
+    next: `Exact COMPOSITION_CONFLICT in ${input.paths.length ? input.paths.join(', ') : 'the retained conflict files'}${input.more ? ` (and ${input.more} more files)` : ''} against predecessor ${target}, saved State ${pin.head}, receipt ${pin.receiptId}. ${input.early ? 'Resolve now against this exact predecessor with' : 'Early resolution is off; choose'} sync {"predecessor":${JSON.stringify(pin)}}${input.early ? '.' : ' to resolve now, or wait for this predecessor to settle.'}`,
+  });
+}

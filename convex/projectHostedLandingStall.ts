@@ -113,6 +113,22 @@ export async function raiseLandingAlarm(ctx: MutationCtx, input: Stalled, now = 
     }
   }
   const stall = hostedLandingStall(state, now, queue);
+  if (
+    !stall &&
+    state.observation.state === 'pending' &&
+    now < Date.parse(input.lastProgressAt) + LANDING_STALL_MS &&
+    !(queue?.predecessor && queue.owner)
+  ) {
+    // The five-minute compose-recovery alarm can outlive composing. It still owes
+    // the entry its ordinary stall probe, rather than jumping to the hour deadline.
+    const taskId = await ctx.scheduler.runAfter(
+      Date.parse(input.lastProgressAt) + LANDING_STALL_MS - now,
+      makeFunctionReference<'mutation'>('projectHostedLandingStall:alarm'),
+      input,
+    );
+    await ctx.db.patch(row._id, { alarm: { taskId, lastProgressAt: input.lastProgressAt } });
+    return null;
+  }
   if (!stall && queue && state.observation.state === 'pending') {
     // Keep the existing orphan-recovery deadline even when a healthy train owns
     // the wait. No follower alarm, alert or controller redrive is warranted.

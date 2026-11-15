@@ -65,7 +65,7 @@ export const autonomyPolicySchema = z.object({
      * configured check on any runner before the queue (docs/pre-queue-checks.md); `true` checks
      * each member's own affected set (GitHub Actions) before it joins a cohort. */
     admissionCheck: z.union([z.boolean(), z.literal('full')]).optional(),
-    /** Resolve an exact predicted-predecessor conflict while its check runs; absent is Automatic. */
+    /** Resolve an exact predicted-predecessor conflict while its check runs; on unless off; legacy automatic/on remain readable. */
     earlyResolve: z.enum(['automatic', 'on', 'off']).optional(),
     /** Hosted batches: fixed cohort size; absent picks it from the recent failure rate. */
     batchMaxSize: z.number().int().min(1).max(8).optional(),
@@ -195,7 +195,16 @@ export const policyWriteObject = z
     /** Compare-and-swap prevents a concurrent settings edit from being overwritten. */
     expectedPolicy: autonomyPolicySchema.optional(),
     preset: autonomyPolicySchema.shape.preset.optional(),
-    acceptance: autonomyPolicySchema.shape.acceptance.partial().optional(),
+    acceptance: autonomyPolicySchema.shape.acceptance
+      .partial()
+      .extend({
+        // Stored automatic policies remain readable above; edits expose only enabled/off.
+        earlyResolve: z
+          .enum(['on', 'off'])
+          .describe('Early resolution is on by default; set off to wait.')
+          .optional(),
+      })
+      .optional(),
     checks: autonomyPolicySchema.shape.checks.unwrap().partial().optional(),
     integrationPreview: autonomyPolicySchema.shape.integrationPreview,
     ownerRootUpdates: autonomyPolicySchema.shape.ownerRootUpdates,

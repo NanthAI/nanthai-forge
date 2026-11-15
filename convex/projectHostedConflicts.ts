@@ -3,6 +3,9 @@ import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internalMutation, internalQuery, type MutationCtx, type QueryCtx } from './server';
+import { effectivePolicy } from '../src/autonomy-policy';
+import { conflictPredecessor } from './projectHostedConflictPredecessor';
+import { readHostedRecord } from './projectHostedRecords';
 import { findObject } from './projectObjectFind';
 import { query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
@@ -242,7 +245,21 @@ export async function planTrialMerge(
   for (const source of [row, ...peerRows.filter(peer => peers.has(peer.laneId))]) {
     const base = await sourceState(source.baseHead),
       head = await sourceState(source.head);
-    if (base && head) sources.push({ laneId: source.laneId, base, head });
+    if (base && head) {
+      // Only a resolution pays this read. The authoritative right State, not its draft
+      // delta, proves which exact peer edits the author has already reconciled.
+      const record = source.resolutionLeft
+        ? await readHostedRecord(ctx, {
+            projectId,
+            actor: source.actor,
+            kind: 'lane',
+            key: source.laneId,
+          })
+        : null;
+      const right = record ? JSON.parse(record.value).resolution?.right : undefined;
+      const resolved = right ? await sourceState(right) : undefined;
+      sources.push({ laneId: source.laneId, base, head, ...(resolved ? { resolved } : {}) });
+    }
   }
   const plan: TrialPlan = {
     laneId: row.laneId,
@@ -365,24 +382,38 @@ export const record = internalMutation({
         theirs: swap ? item.mine : item.theirs,
         reason: item.reason,
       }));
+      const early =
+        peer !== MAIN
+          ? await conflictPredecessor(ctx, input.projectId, [
+              {
+                peer,
+                peerHead,
+                paths,
+                flaggedAt: existing?.flaggedAt ?? now,
+              },
+            ]).catch(() => undefined)
+          : undefined;
+      const earlyResolution = early ? canonicalPayload(early.advice) : undefined;
       // A retried result never rewakes the agent for the same saved pair and ranges.
       if (
         existing &&
         existing.laneHead === owner.head &&
         existing.peerHead === peerHead &&
-        canonicalPayload(existing.paths) === canonicalPayload(paths)
+        canonicalPayload(existing.paths) === canonicalPayload(paths) &&
+        existing.earlyResolution === earlyResolution
       )
         return;
       const updatedAt = await wakeConflictLane(ctx, input.projectId, owner.laneId, now);
       const value = {
         paths,
+        ...(earlyResolution ? { earlyResolution } : {}),
         laneHead: owner.head,
         peerHead,
         peerGoal: goal.slice(0, 160),
         updatedAt,
       };
       if (!owner.conflicted) await ctx.db.patch(owner._id, { conflicted: true });
-      if (existing) await ctx.db.patch(existing._id, value);
+      if (existing) await ctx.db.patch(existing._id, { ...value, earlyResolution });
       else
         await ctx.db.insert('projectHostedConflictNotices', {
           projectId: input.projectId,
@@ -445,18 +476,27 @@ export async function laneConflicts(
     after !== undefined && rows.some(row => row.updatedAt > after)
       ? (await laneRow(ctx, projectId, laneId))?.head
       : head;
-  return rows
-    .filter(
-      row =>
-        (currentHead === undefined || row.laneHead === currentHead) &&
-        (after === undefined || row.updatedAt > after),
-    )
-    .map(row => ({
-      with: row.peer,
-      goal: row.peerGoal,
-      flaggedAt: new Date(row.flaggedAt).toISOString(),
-      files: row.paths,
-    }));
+  const current = rows.filter(
+    row =>
+      (currentHead === undefined || row.laneHead === currentHead) &&
+      (after === undefined || row.updatedAt > after),
+  );
+  const project = current.some(row => row.earlyResolution) ? await ctx.db.get(projectId) : null;
+  const enabled = project && effectivePolicy(project).acceptance.earlyResolve !== 'off';
+  return Promise.all(
+    current.map(async row => {
+      const peer = enabled && row.earlyResolution ? await laneRow(ctx, projectId, row.peer) : null;
+      return {
+        with: row.peer,
+        goal: row.peerGoal,
+        flaggedAt: new Date(row.flaggedAt).toISOString(),
+        files: row.paths,
+        ...(peer?.open && peer.head === row.peerHead && row.earlyResolution
+          ? { earlyResolution: JSON.parse(row.earlyResolution) }
+          : {}),
+      };
+    }),
+  );
 }
 
 /** Notices read per summary: a week of dogfood is well under this. */

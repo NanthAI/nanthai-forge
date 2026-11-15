@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
+import { wakeLandingQueue } from './projectHostedLandingEvents';
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { hostedLandingStateSchema, type HostedLandingState } from '../src/hosted-landing';
+import {
+  hostedLandingAttemptSchema,
+  hostedLandingStateSchema,
+  type HostedLandingState,
+} from '../src/hosted-landing';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { armLandingAlarm } from './projectHostedLandingStallWake';
 import {
@@ -122,10 +127,17 @@ export async function wakeLandingOrderWaiters(
     for (const waiter of waiters) {
       after = waiter.sequence;
       // A re-pin retires speculative source generations, but this predecessor
-      // still owns its ordinary place in acceptance order. Only its parked
-      // conflict cohorts need a new main-based compose before settlement.
+      // still owns its ordinary place in acceptance order. Only parked conflict
+      // cohorts and exact early resolutions need another compose before settlement.
+      const early = Boolean(
+        waiter.phase === 'queued' &&
+        waiter.batchSelection &&
+        hostedLandingAttemptSchema.parse(JSON.parse(waiter.batchSelection)).earlyResolutions?.length &&
+        !hostedLandingStateSchema.parse(JSON.parse(waiter.value)).batchId,
+      );
       if (
         speculativeOnly &&
+        !early &&
         (!waiter.wouldConflict ||
           JSON.parse(waiter.wouldConflict).predecessor?.submissionId !== row.submissionId)
       )
@@ -148,7 +160,12 @@ export async function wakeLandingOrderWaiters(
               hostedLandingProgressAt(hostedLandingStateSchema.parse(JSON.parse(waiter.value))),
             )
           : undefined;
-      await ctx.db.patch(waiter._id, { orderWait: undefined, ...(alarm ? { alarm } : {}) });
+      await ctx.db.patch(waiter._id, {
+        orderWait: undefined,
+        ...(early ? { runnable: true } : {}),
+        ...(alarm ? { alarm } : {}),
+      });
+      if (early) await wakeLandingQueue(ctx, { projectId: row.projectId, channel: 'main' });
       // The order ended early: replace its reservation/hold expiry timer.
       // Coalescing with that pending future task strands an already passed
       // cohort until the obsolete bound (stucktrain). A parked finish has no

@@ -5,7 +5,6 @@ import { conflictTrio, resolveEarly, drainReady, totals } from './early-resoluti
 import { synthetic, states } from './hosted-landing-batches-fixture.mjs';
 import { syncRequiredAdvice, syncRequiredContinuation } from '../dist/hosted-would-conflict.js';
 import { randomUUID } from 'node:crypto';
-import { earlyResolutionChoice } from '../dist/early-resolution.js';
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -15,30 +14,6 @@ test.after(() => {
   }
 });
 
-test('Automatic compares measured predecessor failure with project resolution/wait break-even, cold start resolves early', () => {
-  assert.equal(earlyResolutionChoice(undefined).early, true);
-  assert.equal(earlyResolutionChoice('off').early, false);
-  assert.equal(earlyResolutionChoice('on', [[randomUUID(), false, 1, 100]]).early, true);
-  // 75 ms of resolution saves 225 ms of waiting: early work pays until three of four prefixes fail.
-  const samples = [false, false, false, true].map(passed => [randomUUID(), passed, 75, 225]);
-  assert.equal(earlyResolutionChoice('automatic', samples).breakEven, 0.75);
-  assert.equal(
-    earlyResolutionChoice('automatic', samples).early,
-    false,
-    'equality does not favor early work',
-  );
-  assert.equal(earlyResolutionChoice('automatic', [...samples, [randomUUID(), true, 75, 225]]).early, true);
-  // Incident 8c9b84fc review: the rule was inverted, so a long saved wait turned early work off.
-  const oneInFour = [true, true, true, false].map(passed => [randomUUID(), passed, 75, 225]);
-  assert.equal(earlyResolutionChoice('automatic', oneInFour).early, true);
-  const slowResolution = [true, true, true, false].map(passed => [randomUUID(), passed, 225, 75]);
-  assert.equal(earlyResolutionChoice('automatic', slowResolution).breakEven, 0.25);
-  assert.equal(
-    earlyResolutionChoice('automatic', slowResolution).early,
-    false,
-    'a resolution three times its saved wait is not worth a one-in-four failure',
-  );
-});
 test('conflict trio resolves once on the last exact predecessor, checks before it lands, accepts only its exact receipt', async t => {
   const trio = await conflictTrio(t);
   const { f, advice, current } = trio;
@@ -165,11 +140,11 @@ for (const outcome of ['failed', 'withdrawn', 'head-change', 'receipt-change'])
     assert.equal(f.currentMain().head, f.c.baseline.sha256, 'no unaccepted predecessor content reached main');
   });
 
-test('setting off reports exact conflict, measured facts and an optional resolve without changing the canonical wait', async t => {
+test('setting off reports exact conflict and optional pinned sync and an optional resolve without changing the canonical wait', async t => {
   const { f, advice } = await conflictTrio(t, { earlyResolve: 'off' });
   assert.equal(advice.resolution.early, false);
   assert.equal(syncRequiredAdvice(advice), undefined);
-  assert.match(advice.next, /failure rate.*wait saved.*off.*choose sync/s);
+  assert.match(advice.next, /off.*choose sync/s);
   assert(advice.next.includes(`predecessor Lane ${f.entries[1].lane.laneId}`), 'name the conflicting Lane');
   assert(!/No agent action/i.test(advice.next));
   for (const run of f.runs().filter(r => r.status === 'queued')) {
@@ -189,25 +164,6 @@ test('a clean overlap keeps the existing predicted-head checks and exact accepta
   assert(states(f).every(state => state.phase === 'landed'));
   assert.equal(f.runs().length, 3);
   assert.equal(f.pending().length, 0);
-});
-
-test('Automatic waits when measured failures exceed break-even, and continues observing healthy predecessors', async t => {
-  const samples = [false, false, false, true].map(passed => [randomUUID(), passed, 75000, 225000]);
-  const { f, advice } = await conflictTrio(t, { samples });
-  assert.equal(advice.resolution.early, false);
-  assert.equal(advice.resolution.failureRate, 0.75);
-  assert.equal(advice.resolution.breakEven, 0.75);
-  assert.match(advice.next, /3.75 minutes/);
-  for (const run of f.runs().filter(r => r.status === 'queued')) {
-    await f.rawChecks.pass(await f.rawChecks.activate(run.id));
-    await drainReady(f);
-  }
-  const observed = JSON.parse([...f.tables.projectHostedLandingQueues.values()][0].earlyResolveSamples);
-  assert(observed.length > samples.length, 'waiting does not freeze the measured outcome window');
-  assert(
-    observed.slice(samples.length).every(sample => sample[1]),
-    'healthy predecessors enter the same window',
-  );
 });
 
 test('a saved early resolution without its own submission still loses rejected predecessor bytes', async t => {
@@ -230,7 +186,7 @@ test('a saved early resolution without its own submission still loses rejected p
   assert(trio.f.c.objects.has(resolved.lane.head));
 });
 
-test('a predecessor that settles before resolution finishes still supplies measured resolution/wait receipts', async t => {
+test('a predecessor that settles before resolution finishes does not regain a dependent event link', async t => {
   const trio = await conflictTrio(t);
   const resolved = await resolveEarly(trio, {
     beforeResolve: async () => {
@@ -240,11 +196,11 @@ test('a predecessor that settles before resolution finishes still supplies measu
       }
     },
   });
-  const samples = JSON.parse([...trio.f.tables.projectHostedLandingQueues.values()][0].earlyResolveSamples);
-  const measured = samples.find(sample => sample[0] === resolved.predecessor.receiptId);
-  assert.equal(measured[1], true);
-  assert(measured[2] >= 75000, 'completed author resolution fills the previously unknown cost');
-  assert(measured[3] >= 0);
+  const dependent = [...trio.f.tables.projectHostedStackDependents.values()].find(
+    r => r.laneId === resolved.lane.laneId,
+  );
+  assert.equal(dependent?.predecessorId, undefined);
+  assert.equal([...trio.f.tables.projectHostedLandingQueues.values()][0].earlyResolveSamples, undefined);
 });
 
 test('three checking predecessors yield one resolution against the final exact prefix', async t => {

@@ -9,11 +9,10 @@ Landing documentation calls the accepted destination Channel `main`; a receipt's
 
 ## Resolve an exact predecessor conflict early
 
-`acceptance.earlyResolve` sits beside `admissionCheck`. Its values are
-`"automatic"` (also the absent default), `"on"` and `"off"`. Owners can change it
-with `nforge x ROOT set-policy '{"acceptance":{"earlyResolve":"off"}}'`;
-use `"automatic"` to restore the measured choice. It changes scheduling advice,
-not the strict/fast promise, review policy, runner or acceptance strength.
+Early resolution is on unless `acceptance.earlyResolve` is `"off"`. Owners can
+turn it off with `nforge x ROOT set-policy '{"acceptance":{"earlyResolve":"off"}}'`.
+An absent override enables it. Stored `"automatic"` and `"on"` remain readable as on. This changes scheduling advice, not the strict/fast
+promise, review policy, runner or acceptance strength.
 
 When a signed trial merge proves a conflict with an unaccepted predecessor,
 `wouldConflict.predecessor` names its exact State and reserved acceptance receipt.
@@ -23,16 +22,21 @@ for the surviving members to install their check, then names that survivor
 State and its reserved receipt. The outer predecessor may be disjoint and is
 used only for conflicts the worker proved against that outer base. Rejected
 and still-composing members never supply the resolution target.
+An exact saved-peer notice also offers the pinned sync immediately when that
+peer already has a fixed checking prefix. It validates the peer head and uses
+the same fixed-tail rule, with no extra Convex call or background work.
 With early resolution selected, `land`, `wait` and `observe` return a `sync`
 continuation carrying those pins instead of another wait. Run it from the Lane
 checkout, edit the returned conflict, `resolve`, then `land --save`. The existing
 sync worker creates the draft; the existing predicted-head pipeline checks the
 resolved change while the predecessor checks. The resolved landing composes on
 the current fixed train tail; its early pins remain exact acceptance preconditions.
-An unfixed tail waits for its next event. A third overlapping group either stays
+An unfixed tail parks on its predecessor settlement/re-pin event, retaining its recovery alarm. A third overlapping group either stays
 in that checked prefix or yields another compose conflict before a check starts.
 Advice is best effort: unavailable optional metadata leaves the ordinary cohort
-wait in place and never discards the survivors' installed check.
+wait in place and never discards the survivors' installed check. All optional
+reads precede parking; the predecessor is marked first, and failures during
+writes roll the transaction back.
 
 A pinned sync that merges cleanly proves the target did not expose the advised
 conflict. It returns the unchanged Lane selection, preserves its head and live
@@ -43,13 +47,15 @@ A conflicting own-Lane sync against main supersedes every live finish from that
 head, including source preparation, through the cancellation path. Resolution
 acceptance retires any remaining origin finish as a backstop. A peer's sync does
 not supersede the Lane actor's work. Joining an existing landing probes its
-driver; a queued ownerless submission is superseded before the new request is
-admitted. Replays retain their original operation identity.
+driver in every live phase; a queued ownerless submission is superseded before
+the new request is admitted, and a lost Ready finish is re-driven in place. Replays retain their original operation identity.
 
 A composing cohort keeps recovery within the existing five-minute train hold.
 Dropping its train replays the leader once, then splits a repeated loss through
 normal recovery. Retry and split entries arm the existing alarm at that bound;
-queue progress defers supervision only behind a live predecessor. Optional
+queue progress defers supervision only behind a live predecessor. If the early
+alarm fires after composing ended, it re-arms at the ordinary fifteen-minute
+progress bound. Optional
 `drive` metadata names the cohort's last step, and `observation.stall.owner`
 records the observed finish wake, compose and cohort step in observations, queue
 status and repaired receipts. Its retained progress token distinguishes a past
@@ -57,24 +63,9 @@ recovery from a current stall. Every immutable attempt fork takes its parent and
 ordinal from the current attempt; a reserved finish retains its source identity
 and refreshes those fields at installation.
 
-Automatic compares the measured predecessor failure fraction with
-`mean waiting milliseconds / (mean resolution milliseconds + mean waiting
-milliseconds)`: early work wastes one resolution when the prefix fails and
-saves the wait when it lands, so a longer saved wait tolerates more failures.
-The source is the project's last fifty observed exact conflicting
-predecessor receipts, following the Automatic CI outcome-window design. Failed,
-withdrawn, review-held and replaced generations count as failures of the selected
-prefix. Healthy receipts keep entering the window when early resolution is off
-or Automatic chooses to wait, so a high-failure window can recover. Resolution
-cost runs from the pinned sync start to completed `resolve`; waiting time runs
-from that start to predecessor settlement. Unknown timings remain unknown; a
-resolution finishing after settlement fills that same receipt's cost once.
-Without measured costs, Automatic uses the approved cold-start choice: resolve
-early. There are no fixed red-rate or timing thresholds. Explicit on/off wins.
-Every exact-conflict reply includes the choice, reason, measured failure fraction
-and waiting minutes (or their unknown coverage). With early resolution off or
-not favored, it gives both the optional exact `sync` and the choice to wait;
-it never says no action is needed for a proven conflict.
+Advice names the exact conflict, predecessor and pinned `sync` action. With early
+resolution off it offers the same sync as an optional action, or waiting for the
+predecessor to settle. No sampling window or rate decision is maintained.
 
 A Lane records its original author State and exact predecessor pins. If that
 predecessor fails, is withdrawn, enters review or changes head **or receipt**,

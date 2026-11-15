@@ -138,7 +138,7 @@ export async function submitDesiredLanding(
     .order('desc')
     .take(1);
   let queuedState = queued && hostedLandingStateSchema.parse(JSON.parse(queued.value));
-  const replaced = queued && queuedState?.phase === 'queued' && (await replaceOwnerlessLanding(ctx, queued));
+  const replaced = queued && (await replaceOwnerlessLanding(ctx, queued));
   if (replaced)
     queuedState = hostedLandingStateSchema.parse(JSON.parse((await landingRow(ctx, queued))!.value));
   if (queued && queuedState?.phase !== 'terminal-failed') {

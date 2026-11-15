@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { consumeEarlyResolutionSamples } from './projectHostedEarlyResolutionSamples';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { hostedLandingStateSchema, type HostedLandingState } from '../src/hosted-landing';
@@ -122,7 +121,6 @@ async function updateQueueStatus(ctx: MutationCtx, states: HostedLandingState[],
   const queue = memo.queue ?? (await landingQueue(ctx, projectId));
   if (!queue) return;
   memo.queue = queue;
-  const earlySamples = consumeEarlyResolutionSamples(ctx, projectId, queue.earlyResolveSamples);
   if (states.length > 1) await loadPages(ctx, projectId, memo);
   const changes = [];
   let clock = queue.status?.lastProgressAt;
@@ -149,14 +147,10 @@ async function updateQueueStatus(ctx: MutationCtx, states: HostedLandingState[],
   }
   clock ??= hostedLandingProgressAt(states[0]!);
   if (queue.status && changes.every(change => sameOrder(change.previous, change.next))) {
-    if (
-      clock !== queue.status.lastProgressAt ||
-      serviceMs !== queue.status.serviceMs ||
-      'earlyResolveSamples' in earlySamples
-    ) {
+    if (clock !== queue.status.lastProgressAt || serviceMs !== queue.status.serviceMs) {
       const status = { ...queue.status, lastProgressAt: clock, ...(serviceMs ? { serviceMs } : {}) };
-      await ctx.db.patch(queue._id, { status, ...earlySamples });
-      memo.queue = { ...queue, status, ...earlySamples };
+      await ctx.db.patch(queue._id, { status });
+      memo.queue = { ...queue, status };
     }
     return;
   }
@@ -222,6 +216,6 @@ async function updateQueueStatus(ctx: MutationCtx, states: HostedLandingState[],
     lastProgressAt: clock,
     ...(serviceMs ? { serviceMs } : {}),
   };
-  await ctx.db.patch(queue._id, { status, ...earlySamples });
-  memo.queue = { ...queue, status, ...earlySamples };
+  await ctx.db.patch(queue._id, { status });
+  memo.queue = { ...queue, status };
 }

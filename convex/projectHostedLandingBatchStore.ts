@@ -122,20 +122,36 @@ export async function formLandingBatch(
     limit = cohortSize(own.policy, queue?.checkHistory, admission);
   const early = own.earlyResolutions?.length;
   const pending = [];
+  let waitingFor: Awaited<ReturnType<typeof loadLanding>>['row'] | undefined;
   for (const resolution of own.earlyResolutions ?? []) {
     const pinned = await earlyPredecessor(ctx, input.projectId, resolution.predecessor);
-    if (!pinned.landed) pending.push(resolution.predecessor);
+    if (!pinned.landed) {
+      pending.push(resolution.predecessor);
+      waitingFor = pinned.row;
+    }
   }
   const predecessor = await pipelinePredecessor(
     ctx,
     { projectId: input.projectId, channel: 'main' },
     undefined,
     undefined,
-    early ? { queue, pins: pending } : {},
+    early
+      ? {
+          queue,
+          pins: pending,
+          onBlocked: row => {
+            waitingFor ??= row;
+          },
+        }
+      : {},
   );
-  // An unfixed tail is not a selectable base. Keep the entry runnable for the tail's
-  // next event; never fall through to a solo check on an early pin as a side branch.
-  if (early && !predecessor && (pending.length || queue?.train?.length)) return true;
+  // A pin is never a side-branch compose base. Park on an existing settlement/re-pin
+  // event, retaining the ordinary recovery alarm until the train can include the pin.
+  if (early && !predecessor && waitingFor) {
+    if (!waitingFor.orderWaited) await ctx.db.patch(waitingFor._id, { orderWaited: true });
+    await ctx.db.patch(selected.row._id, { runnable: false, orderWait: waitingFor.submissionId });
+    return true;
+  }
   const windows = [selected.row];
   // Bounded indexed heads exclude already-selected groups. Never enumerate the
   // queue just to fill one cohort, even with thousands of retained submissions.

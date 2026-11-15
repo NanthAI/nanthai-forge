@@ -2382,5 +2382,5 @@ fragments without changing their original row bytes or record limits.
 Early-resolution record readers accept optional exact predecessor pins, Lane resolution metadata,
 Candidate/attempt dependency pins and bounded receipt samples. Legacy records remain readable.
 Exact conflicting predicted predecessors can be synced and resolved while their checks run.
-Automatic guidance uses recorded predecessor outcomes and resolution/wait costs; acceptance
-still requires each exact predecessor receipt. Rejected generations restore retained author source.
+Guidance offers early resolution unless the owner selects off; acceptance
+still requires each exact predecessor receipt. Legacy sample records remain readable but are no longer written. Rejected generations restore retained author source.

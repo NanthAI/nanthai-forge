@@ -83,6 +83,26 @@ test('activated reader keeps exact predecessor recovery pins and legacy advisory
   assert.deepEqual(syncRequiredAdvice(expanded), expanded);
 });
 
+test('8c9b84fc D6: retained Automatic policies read as enabled while policy edits remove Automatic', async () => {
+  const { policyPreset, autonomyPolicySchema, policyWriteSchema } =
+    await import('../dist/autonomy-policy.js');
+  const stored = policyPreset('trusted');
+  stored.acceptance.earlyResolve = 'automatic';
+  assert.equal(autonomyPolicySchema.parse(stored).acceptance.earlyResolve, 'automatic');
+  const command = {
+    action: 'set-policy',
+    operationId: randomUUID(),
+    acceptance: { earlyResolve: 'off' },
+    expectedPolicy: stored,
+  };
+  assert.equal(policyWriteSchema.safeParse(command).success, true);
+  assert.equal(
+    policyWriteSchema.safeParse({ ...command, acceptance: { earlyResolve: 'automatic' } }).success,
+    false,
+  );
+  assert.equal(policyWriteSchema.safeParse({ ...command, acceptance: { earlyResolve: 'on' } }).success, true);
+});
+
 test('compact save advice preserves exact pins and legacy notices retain their continuation', async () => {
   const { exactConflictsSchema, exactConflictNotice } = await import('../dist/hosted-conflict-notice.js');
   const advice = {

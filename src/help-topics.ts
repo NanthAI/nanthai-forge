@@ -52,6 +52,7 @@ More: help wait, help conflict, help check, help overlap.`,
     text: `COMPOSITION_CONFLICT: your Lane and main changed the same lines. The receipt names the files and the exact sync or resolve command; run it.
 - The folder it names (workIn on stderr) holds main's lines under <<<<<<< main, yours after =======, closed by >>>>>>> lane (a sync is the other way round); the lines under ||||||| base are what both started from. A label ending 'Suggested resolution: keep the lane side' means your Lane removed the region the other side edited.
 - Edit every listed file free of markers, keeping both intents, then land --save from that folder: it saves the resolution and lands it. Forge completes the original Lane.
+- Exact predecessor conflicts offer pinned sync while checks run. Early resolution defaults on; acceptance.earlyResolve:"off" waits instead.
 - RESOLUTION_REQUIRED: a direct finish of the original Lane was refused; run the one resolve command it prints.
 - CONFLICT_MARKERS: a saved file still has markers; remove them and save again.
 - CONFLICT_SIDE_REQUIRED: a binary or one-sided file is unchanged; edit it, or keep it with resolve '{"laneId":"LANE_ID","keep":["PATH"]}'.
@@ -61,6 +62,7 @@ More: help wait, help conflict, help check, help overlap.`,
   overlap: {
     title: 'Overlaps and conflict notices',
     text: `Each save trial-merges your saved files with main and with other open Lanes that saved the same files. A real conflict shows as conflictNotice on save, status and land, on both Lanes: file, lines and the other Lane's goal. Nothing needs an answer: sync or coordinate, save again, and the notice clears once the merge is clean.
+- A notice against an already checking peer offers exact pinned sync immediately, unless acceptance.earlyResolve is off. The sync rechecks its head and receipt.
 - Save after each meaningful step; unsaved edits are not checked.
 - peers {laneId?,path?,detail?} reads which open Lanes saved the same files, in one query. Coverage excludes unsaved peer edits and never proves independence.
 - start/save/status receipts carry behindMain.

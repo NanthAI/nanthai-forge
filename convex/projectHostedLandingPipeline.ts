@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Doc } from './_generated/dataModel';
-import type { MutationCtx } from './_generated/server';
+import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { LandingChannel, LandingRow } from './projectHostedLandingStore';
 import {
   landingQueue,
@@ -31,7 +31,7 @@ const liveAdmission = (row: LandingRow) =>
 /** Read only the bounded retained train, never the active queue or history. A
  * tail becomes a base only after its exact head and acceptance IDs are fixed. */
 export async function pipelinePredecessor(
-  ctx: MutationCtx,
+  ctx: QueryCtx | MutationCtx,
   input: LandingChannel,
   selected?: LandingRow[],
   onSelected?: (row: LandingRow, attempt: HostedLandingAttempt) => void,
@@ -40,6 +40,7 @@ export async function pipelinePredecessor(
     excludeIds?: string[];
     pins?: { submissionId: string; head: string; receiptId: string }[];
     requireSlot?: boolean;
+    onBlocked?: (row: LandingRow) => void;
   } = {},
 ) {
   const live =
@@ -51,6 +52,11 @@ export async function pipelinePredecessor(
           .map(submissionId => landingRow(ctx, { projectId: input.projectId, submissionId })) ?? [],
       )
     ).filter(livePipelineRow);
+  const blocked = () => {
+    const tail = live.at(-1);
+    if (tail) options.onBlocked?.(tail);
+    return undefined;
+  };
   const states = live.map(row => hostedLandingStateSchema.parse(JSON.parse(row.value)));
   // A suspect (51bbbd00) still checks, but nothing stacks on its unproven head.
   // Its descendants retired when it became suspect, so the rest of the train
@@ -69,9 +75,9 @@ export async function pipelinePredecessor(
           !(row.phase === 'queued' && liveAdmission(row))),
     )
   )
-    return undefined;
+    return blocked();
   const tail = rows.at(-1)!;
-  if (tail.pipelineRetiredAttemptId === tail.attemptId) return undefined;
+  if (tail.pipelineRetiredAttemptId === tail.attemptId) return blocked();
   const attempt = await loadLandingAttempt(ctx, { projectId: input.projectId, attemptId: tail.attemptId });
   const groups = new Set(states.map(state => state.batchId ?? state.id));
   if (
@@ -80,7 +86,7 @@ export async function pipelinePredecessor(
     (!attempt.check && !liveAdmission(tail)) ||
     !attempt.candidate.head
   )
-    return undefined;
+    return blocked();
   // A pin is an acceptance precondition, never a side-branch compose base. Both advice
   // and composition use this same fixed tail and its exact predecessor chain.
   const pending = new Map((options.pins ?? []).map(pin => [pin.submissionId, pin]));
@@ -95,7 +101,7 @@ export async function pipelinePredecessor(
     if (required?.head === current.head && required.receiptId === current.receiptId)
       pending.delete(current.submissionId);
     if (!pending.size) break;
-    if (!state.batchId) return undefined;
+    if (!state.batchId) return blocked();
     const group = (await loadBatch(ctx, { projectId: input.projectId, batchId: state.batchId })).batch;
     // Every included cohort member owns its own acceptance receipt for the same checked State.
     // Its exact pin is contained even when another member is the train tail.
@@ -124,7 +130,7 @@ export async function pipelinePredecessor(
     }
     if (!pending.size) break;
     const previous = group.predecessor;
-    if (!previous) return undefined;
+    if (!previous) return blocked();
     const pin = pending.get(previous.submissionId);
     if (pin?.head === previous.head && pin.receiptId === previous.receiptId)
       pending.delete(previous.submissionId);
@@ -138,11 +144,11 @@ export async function pipelinePredecessor(
       attemptId: parent.state.attemptId,
     });
     if (exact.candidate.head !== previous.head || exact.operations.accept !== previous.receiptId)
-      return undefined;
+      return blocked();
     current = previous;
     state = parent.state;
   }
-  if (pending.size) return undefined;
+  if (pending.size) return blocked();
   onSelected?.(tail, attempt);
   return {
     submissionId: tail.submissionId,

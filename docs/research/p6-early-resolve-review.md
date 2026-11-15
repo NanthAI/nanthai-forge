@@ -1,7 +1,7 @@
 # Early resolution review: verdict, invariants and build order
 
 Status: **review and decision for Issue 8c9b84fc.** Early resolution stays. Slices 1 to 5 of the build
-order are on main and were measured live; the Automatic rule and its sampling are to be removed (D6), and
+order are on main and were measured live; the Automatic rule and its sampling are removed (D6), and
 the review of the landed build left the follow-ups listed under [After landing](#after-landing). Labels:
 **M** measured, **R** read from source, **U** unproven, **E** estimated. Evidence stays private; this page
 holds derived numbers and synthetic roles only.
@@ -67,24 +67,21 @@ selected like any other entry and composes on the tail; acceptance still require
 predecessor's exact head and receipt. A predecessor that lands is then the predicted base, so the
 stale-check rule keeps the check.
 
-**D4. Automatic uses expected waste against expected saving.** Resolve early while
-`failure × resolution < (1 − failure) × wait`, that is `failure < wait / (resolution + wait)`. The
-previous rule compared against `resolution / (resolution + wait)`, which turned early work off as
-the saved wait grew. Explicit on and off still win.
+**D4. Superseded by D6.** The expected-waste rule was corrected before the live
+review; the measured runs showed no useful wait branch, so no rate rule remains.
 
 **D5. Advice never fails the survivors.** Emitting advice is best effort. An error while naming a
 Lane or reading a pin leaves the rejected member on the ordinary wait; it never returns a checked
 cohort to individual checks.
 
-**D6. Remove Automatic and its sampling; only off remains.** Decided; the removal is slice 6 and is
-not on main yet, so main still runs the D4 rule. The registered runs settled the condition this
+**D6. Remove Automatic and its sampling; only off remains.** Implemented; only the owner-off override remains. The registered runs settled the condition this
 decision waited on. Automatic never chose to wait: it measured an 8 to 9% predecessor
 failure rate against a break-even of 69 to 70% (resolution 44 to 45 s, wait saved 100 to 101 s, M).
 By D4 it waits only when more than about two thirds of watched predecessors fail, or when the wait
 left is a few seconds; the first is a broken train and the second saves nothing. A project that does
 wait stops measuring and returns to cold start, so the choice cannot hold either (R). The sample
 window is a write to the queue row and three clauses of advice text for a branch that does not fire.
-After the removal, early resolution is on unless `acceptance.earlyResolve` is `"off"`; stored
+Early resolution is on unless `acceptance.earlyResolve` is `"off"`; stored
 `"automatic"` and `"on"` read as on.
 
 ## Two invariants
@@ -153,7 +150,7 @@ A landing that needed repair then names the driver it lost in `observe`, `queue`
 | 3 | Target and guard: survivor target, clean early sync refused, total advice | internal conflict with a disjoint outer predecessor; clean pinned sync | on main |
 | 4 | Linear train for resolved landings | scripted conflict trio: the resolved landing's first check must be the one accepted | on main |
 | 5 | One attempt fork helper with a lint guard; the retained conflict forks the current attempt | conflict retention after an installed check | on main |
-| 6 | Automatic rule corrected (D4), then removed with its sampling (D6) | rule table | D4 on main; removal open |
+| 6 | Automatic rule corrected (D4), then removed with its sampling (D6) | rule table | removed |
 
 Each slice keeps the disjoint path at its current modelled cost per landing, keeps idle at zero
 calls, and adds no table, public error code, agent action or setting.
@@ -173,24 +170,29 @@ N=8). Both invariants held: every cell settled with an empty queue, no landing w
 alarm or repair ran, and the only superseded submissions were the advised originals, one per early
 episode (M). Strict acceptance is unchanged: every early pin is still an exact acceptance
 precondition (R). Convex cost per landing did not rise once the meter's own metrics read, which grows
-with retained history, is set aside (M). Four follow-ups remain:
+with retained history, is set aside (M). The post-review fixes now cover these four findings; live requalification is still separate:
 
-1. **A waiting early entry needs an owner and one rule (R, not reproduced).** A resolved landing
-   that cannot yet compose on the tail is left runnable, and the queue offers it again by the tail
-   rule without pins. Where the two rules disagree (a solo tail left by a cohort that fell back, a
-   split half, a held row), the queue claims and releases the entry with no delay until the train
-   changes. All three follow a failed shared check or an owner hold, which the runs did not produce.
-   The entry should park on the tail's settlement event, as rejected cohort members do.
+1. **A waiting early entry has an event owner.** The failed shared-check/solo-tail
+   fixture reproduced an ownerless queued wait. The current claim already clears
+   runnable, so the proposed tight loop was not reproduced. The resolution now
+   parks on a predecessor settlement/re-pin event and retains its recovery alarm.
+   The new fixture guards the event-owned wait through acceptance and zero idle tasks.
+
 2. **No conflict notice against what a Lane already resolved (M).** When the predecessor's Lane is
    still open, the save that completes an early resolution flags an exact conflict between the
    resolution Lane and that predecessor, and later replies tell the agent to change its edit. The
-   compose is clean. The notices also stay open after both Lanes land.
-3. **Advice must not leave partial state (R).** Advice is best effort (D5), but its error handling
-   also covers its writes: a failure after one member is parked can leave that member without an
-   alarm or a wake. Read first, mark the predecessor before parking, let write errors propagate.
-4. **The recovery alarm outside composing (R).** The five-minute alarm can fire before the
-   fifteen-minute stall bound; an entry that is then no longer composing falls to the sixty-minute
-   deadline instead of the ordinary alarm.
+   compose is clean. Trial merging now proves peer deltas already contained in
+   the recorded resolution target and omits them; a later peer edit still gets
+   checked. Acceptance closes old notices, including for Lanes left open.
+3. **Advice cannot leave partial state.** Optional reads precede parking. The
+   predecessor's settlement owner is marked first; failures during member writes
+   propagate and roll the mutation back. The injected partial-write failure leaves
+   every rejected member unchanged.
+4. **The recovery alarm outside composing keeps the ordinary probe.** A five-minute
+   recovery alarm that fires after composing ended re-arms the fifteen-minute
+   alarm at the original progress bound, rather than falling to the hour deadline.
+   Same-selection retries probe every live phase, and withdrawing a preparing goal
+   returns terminal cancellation while fencing late source completion.
 
 ## Limits
 
@@ -201,6 +203,7 @@ with retained history, is set aside (M). Four follow-ups remain:
 - Live cells did not produce an overlapping third group accepted while a resolved landing checked;
   only the fake-clock trio covers that shape.
 - Advice still follows cohort compose. The save-time conflict notice named the conflicting peer 40 s
-  and 76 s before the advice reached the agent in the two early episodes (M). Offering the pinned
-  sync from that notice, when the peer is already checking, is the next latency lever and is not
-  built.
+  and 76 s before the advice reached the agent in the two early episodes (M). Saved-peer
+  notices now offer pinned sync when the peer is already checking. The fake-clock delivery
+  schedules improve 295 to 255 s and 331 to 255 s with three checks and zero idle tasks;
+  those are synthetic results, not new live measurements.
