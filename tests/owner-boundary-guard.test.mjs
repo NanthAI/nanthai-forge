@@ -11,6 +11,8 @@ const allowed = {
   agentGuidance: ['setMaintainer'],
   backupTransfer: ['prepare'],
   clientErrors: ['recent'],
+  projectUncheckedLandingSettings: ['teams', 'history'], // Owner-only metadata, no source authority.
+  projectUncheckedLanding: ['pickPerson'], // Read-only current-writer picker; grants no authority.
   projectAutonomy: ['set'], // Existing exact-change settings approvals.
   projectBackups: ['deletionStatus'],
   projectCheckLogCleanupStore: ['archive', 'review'],

@@ -1151,8 +1151,13 @@ is claimed by this replay.
 Fast-path does not grant acceptance authority. Under supervised settings an agent
 still returns a checked Candidate for person review. Under trusted settings an agent
 can land with current passing evidence; protected paths and actor selection still
-require person review. A person can accept a clean current Candidate without a check,
-but reusing evidence across a main move still requires the full fast-path proof.
+require person review. Explicit person acceptance without a check follows
+`acceptance.withoutCheck`: `owner` (the default), `selected` people/teams, or all
+current `writers`. Selected people and members of selected teams need current
+project write access at publication; read-only or revoked members and agent
+credentials get no bypass. `check-settings` reports the setting; the owner edits
+it with `set-policy` ([landing policy](../workflows.md#who-can-land-without-a-check)).
+Reusing evidence across a main move still requires the full fast-path proof.
 
 New projects and presets keep fast-path off. The dogfooding owner's approved
 option is enabled by its owner after installing the current CLI:

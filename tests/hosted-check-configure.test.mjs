@@ -354,6 +354,7 @@ test('CLI configures verify, a self-hosted runner and reports settings with boun
     ),
   );
   const before = await run('check-settings');
+  assert.deepEqual(before.policy.acceptance.withoutCheck, { mode: 'owner', people: [], teams: [] });
   assert.deepEqual(before.definitions, []);
   assert.equal(before.runner, null);
   assert.equal(before.agentLandsOnPass, false);
@@ -1070,4 +1071,20 @@ test('CLI self-hosted labels remain pinned on replay and explicit empty labels c
     run('configure-runner', { provider: 'github-actions', labels: ['build'] }),
     code('BAD_ARGUMENT'),
   );
+});
+
+test('check-settings exposes the owner-selected unchecked policy through its existing policy read', async t => {
+  const fixture = project();
+  const policy = policyPreset('trusted');
+  policy.acceptance.withoutCheck = { mode: 'selected', people: ['peer'], teams: [] };
+  fixture.s.patch('hostedProjects', fixture.projectId, { autonomyPolicy: policy });
+  const { state, run } = cli(t, fixture);
+  const shown = await run('check-settings');
+  assert.deepEqual(shown.policy.acceptance.withoutCheck, policy.acceptance.withoutCheck);
+  assert.deepEqual(state.calls, [
+    'projectHostedAgent:capabilities',
+    'projectHostedCheckDefinitions:list',
+    'projectHostedCheckDefinitions:current',
+    'projectAutonomy:read',
+  ]);
 });

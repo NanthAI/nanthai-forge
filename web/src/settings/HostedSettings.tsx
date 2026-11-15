@@ -71,7 +71,7 @@ export default function HostedSettings({
     { id: 'agents', label: 'How agents work', group: 'Project' },
     { id: 'autonomy', label: 'Autonomy', group: 'Project' },
     ...(contributions ? [{ id: 'contributions', label: 'Contributions', group: 'Project' as const }] : []),
-    { id: 'checks', label: 'Checks', group: 'Project' },
+    { id: 'checks', label: 'Landing & checks', group: 'Project' },
     { id: 'github', label: 'GitHub', group: 'Project' },
     ...(owner ? [{ id: 'access', label: 'Access', group: 'Admin' as const }] : []),
     ...(transfer || (owner && backups)

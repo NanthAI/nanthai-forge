@@ -21,6 +21,7 @@ const emailAllowed = new Set([
   'projectContributors.ts:pending',
   // The owner's own stall-alert addresses; publicPeople removes them for everyone else.
   'projectAutonomy.ts:read',
+  'projectUncheckedLandingSettings.ts:read', // Same policy read; owner-entered alert recipients.
   'projectAutonomy.ts:set',
   'projectBriefings.ts:brief',
   'projectWork.ts:state',

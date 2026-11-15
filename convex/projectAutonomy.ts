@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { resolveUncheckedSelection } from './projectUncheckedLanding';
 import { requireStoredRepositoryBinding } from './githubBindingAccess';
 import { ensureMirrorRow } from './projectGithubMirrorRows';
 import { v } from 'convex/values';
@@ -79,7 +80,11 @@ const POLICY_KEY = settingKey('policy');
  * defaults or notifications does not void the owner's pending grant. */
 const policyBase = (policy: AutonomyPolicy) =>
   digest(
-    canonicalPayload({ acceptance: acceptancePolicyDigest(policy), mirror: policy.githubMirror ?? null }),
+    canonicalPayload({
+      acceptance: acceptancePolicyDigest(policy),
+      unchecked: policy.acceptance.withoutCheck ?? null,
+      mirror: policy.githubMirror ?? null,
+    }),
   );
 function parsePolicyCommand(text: string) {
   let value: unknown;
@@ -240,12 +245,27 @@ export const set = mutation({
         ? await heldReplay(ctx, input.projectId, POLICY_KEY, command.operationId, request)
         : null;
       if (pending) return heldPolicyReply(pending, previous, command.operationId);
+      if (command.expectedPolicy?.acceptance.withoutCheck)
+        command.expectedPolicy.acceptance.withoutCheck = await resolveUncheckedSelection(
+          ctx,
+          project,
+          command.expectedPolicy.acceptance.withoutCheck,
+          undefined,
+          false,
+        );
       invariant(
         !command.expectedPolicy || samePolicy(command.expectedPolicy, previous),
         'POLICY_CHANGED',
         'Project policy changed. Refresh it before editing.',
       );
       const policy = editedPolicy(previous, command);
+      if (command.acceptance?.withoutCheck)
+        policy.acceptance.withoutCheck = await resolveUncheckedSelection(
+          ctx,
+          project,
+          command.acceptance.withoutCheck,
+          previous.acceptance.withoutCheck,
+        );
       if (command.githubMirror && policy.githubMirror?.autoPush)
         await requireStoredRepositoryBinding(ctx, input.projectId, policy.githubMirror.repo);
       const rule: SettingRule = !device
@@ -303,6 +323,13 @@ export async function applyApprovedPolicy(
     'Project policy changed since this request; decline it and ask the builder to request the change again.',
   );
   const policy = editedPolicy(previous, command);
+  if (command.acceptance?.withoutCheck)
+    policy.acceptance.withoutCheck = await resolveUncheckedSelection(
+      ctx,
+      project,
+      command.acceptance.withoutCheck,
+      previous.acceptance.withoutCheck,
+    );
   if (command.githubMirror && policy.githubMirror?.autoPush)
     await requireStoredRepositoryBinding(ctx, projectId, policy.githubMirror.repo);
   return writePolicy(ctx, project, {

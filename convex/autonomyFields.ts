@@ -157,5 +157,8 @@ export const autonomyTables = {
         v.literal('held'),
       ),
     ),
-  }).index('by_project_and_operation', ['projectId', 'operationId']),
+  })
+    .index('by_project_and_operation', ['projectId', 'operationId'])
+    // index-order: caller: convex/projectUncheckedLandingSettings.ts#history; order: policy history paginates newest-first by creation time; operation UUID order cannot preserve that timeline.
+    .index('by_project', ['projectId']),
 };

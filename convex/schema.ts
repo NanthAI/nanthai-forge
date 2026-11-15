@@ -786,7 +786,9 @@ export default defineSchema({
     removal: v.optional(v.union(v.literal('deleting'), v.literal('deleted'))),
     removalOperation: v.optional(v.string()),
     task: v.optional(v.id('_scheduled_functions')),
-  }).index('by_owner_and_operationId', ['owner', 'operationId']),
+  })
+    .index('by_owner_and_operationId', ['owner', 'operationId'])
+    .index('by_owner_and_name', ['owner', 'name']),
   teamMembers: defineTable({ teamId: v.id('teams'), member: v.string() })
     .index('by_teamId_and_member', ['teamId', 'member'])
     .index('by_member_and_teamId', ['member', 'teamId']),

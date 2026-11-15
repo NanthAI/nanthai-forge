@@ -51,6 +51,7 @@ export function governanceReason(
   actor: AcceptanceActor,
   paths: string[] | null,
   checks?: DefinedChecks,
+  uncheckedPerson = false,
 ): string | null {
   if (actor.id === project.owner && actor.kind === 'person') return null;
   const protectedPath = ownerApprovalMatcher(policy, checks);
@@ -58,10 +59,10 @@ export function governanceReason(
     return 'needs owner approval: protected-path coverage is unavailable';
   const matched = (paths ?? []).filter(path => protectedPath(path));
   if (matched.length) return `needs owner approval: protected paths ${matched.join(', ')}`;
-  // Account authentication is not owner approval. Contributors follow automatic policy.
-  return reviewReason(policy, actor.id !== project.owner ? { ...actor, kind: 'agent' } : actor, paths);
+  // Only explicitly permitted unchecked people skip automatic review; protected paths still apply.
+  return reviewReason(
+    policy,
+    actor.id !== project.owner && !uncheckedPerson ? { ...actor, kind: 'agent' } : actor,
+    paths,
+  );
 }
-export const requiresGovernedCheck = (
-  project: { owner: string; visibility?: string },
-  actor: AcceptanceActor,
-) => actor.kind === 'agent' || actor.id !== project.owner;

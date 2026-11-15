@@ -275,7 +275,10 @@ export async function hostedCheckSettings(query: HostedQuery, capabilities: Host
     checkCallbackConfigured: capabilities.checkCallbackConfigured,
     policy: {
       preset: policy.preset,
-      acceptance: policy.acceptance,
+      acceptance: {
+        ...policy.acceptance,
+        withoutCheck: policy.acceptance.withoutCheck ?? { mode: 'owner', people: [], teams: [] },
+      },
       // Unsaved-work snapshots (Issue 7ac4e32f): on or off, and minutes between timed snapshots
       // of one Lane (the turn-end and pre-rewrite snapshots are not held back by it).
       snapshots: {

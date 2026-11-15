@@ -9,7 +9,8 @@ import { effectiveAgentDefaults } from './agent-parallel-defaults.js';
  * `custom`). Agent defaults, notifications, the GitHub mirror (read
  * live after acceptance) and trust in shadow mode (`enabled:false` records history, changes no gate) do
  * not change an attempt, so editing them never invalidates a pinned landing. Neither does the landing
- * mode: it is read live when a first-check proof is decided and again when it is published. Optional
+ * mode: it is read live when a first-check proof is decided and again when it is published. Unchecked
+ * person authority is also read live at final publication, so its edits never restart checked landings. Optional
  * proof on landing adds evidence only, so it also never invalidates an attempt. */
 function landingPolicy(policy: AutonomyPolicy) {
   const kept: Partial<AutonomyPolicy> = { ...policy, acceptance: withoutLandingMode(policy) };
@@ -25,11 +26,13 @@ function withoutLandingMode(policy: AutonomyPolicy) {
     landingMode: _mode,
     proofOnLanding: _proof,
     earlyResolve: _earlyResolve,
+    withoutCheck: _withoutCheck,
     ...acceptance
   } = policy.acceptance;
   void _mode;
   void _proof;
   void _earlyResolve;
+  void _withoutCheck;
   return acceptance;
 }
 /** The policy a landing is pinned to. */

@@ -282,7 +282,7 @@ Hosted compose parses every text-merged JS/TS, Python, Java, Rust and JSON file 
   the canonical checkout. Sync/resolve preserve verified legacy misplaced caches;
   blocked local applies expose executable preservation recovery through CLI/MCP.
 
-Home combines projects and imported/shared source with filters; existing source bookmarks are stars. Settings has a grouped sidebar (mobile page selector), General default, policy-backed Autonomy, recorded Checks, owner contributor controls and supported personal preferences. Hosted-project stars are browser-local; imported-source stars use the account's saved locations. Hosted check definitions are edited locally and returned with Work.
+Home combines projects and imported/shared source with filters; existing source bookmarks are stars. Settings has a grouped sidebar (mobile page selector), General default, policy-backed Autonomy, Landing & checks with owner-selected unchecked acceptance (owner only, chosen people/teams, or current write members) and policy history with Undo, recorded checks, owner contributor controls and supported personal preferences. Hosted-project stars are browser-local; imported-source stars use the account's saved locations. Hosted check definitions are edited locally and returned with Work.
 
 | Area | What you can do |
 | --- | --- |

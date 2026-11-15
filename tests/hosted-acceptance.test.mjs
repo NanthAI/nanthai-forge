@@ -645,6 +645,12 @@ test('expired publication lease is fenced and a recovered original attempt can l
 
 test('revoked contributor authority is checked again at final publication and completed replay', async () => {
   const f = await acceptanceFixture();
+  // This test isolates revocation; the owner explicitly allows current writers to land unchecked.
+  const policy = policyPreset('trusted');
+  delete policy.acceptance.gate; // Retain this legacy fixture's unknown-path behavior.
+  policy.agentDefaults = { preflight: 'advise' };
+  policy.acceptance.withoutCheck = { mode: 'writers', people: [], teams: [] };
+  f.patch('hostedProjects', f.projectId, { autonomyPolicy: policy });
   const contributor = f.insert('projectContributors', { projectId: f.projectId, contributor: 'contributor' });
   const item = await f.makeCandidate(
     [],

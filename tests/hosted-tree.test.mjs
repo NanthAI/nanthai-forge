@@ -136,7 +136,13 @@ test('Settings defaults to General with controls and grouped navigation', async 
   assert.match(html, /Visibility/);
   assert.doesNotMatch(html, /Host a folder/);
   assert.match(html, /Settings page/);
-  for (const label of ['Checks', 'GitHub', 'Transfer &amp; backups', 'Signed-in devices', 'Profile'])
+  for (const label of [
+    'Landing &amp; checks',
+    'GitHub',
+    'Transfer &amp; backups',
+    'Signed-in devices',
+    'Profile',
+  ])
     assert.ok(html.includes(label), `Settings navigation retains ${label}`);
   assert.doesNotMatch(html, />Appearance</);
   assert.doesNotMatch(html, /managed by the owner/);

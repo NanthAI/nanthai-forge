@@ -21,8 +21,12 @@ that Candidate's submission and shows Queued, Checking, Landing, Landed or the
 retained failure. Reading progress starts no work and uses no polling timer.
 A main race recomposes the immutable reviewed input/dependency roots through the
 ordinary hosted finish driver; later Lane saves are not substituted. An existing
-exact passing check is selected when available. People retain their existing
-ability to accept an unchecked Candidate.
+exact passing check is selected when available. Unchecked acceptance follows **Who can land without a check** in
+**Settings → Landing & checks**. The default is Owner only; the owner may instead
+choose named people or existing teams, or all current write members. A selected
+person must still have write access at landing time; team selection grants no
+project access. Revocation takes effect immediately. Agent credentials always need
+a passing check. Protected-path and review rules continue to apply.
 
 **Cancel landing** cancels the submission separately from its Lane or shared check.
 A hosted landing with no progress for 15 minutes gets a stall alarm naming the
@@ -48,6 +52,28 @@ Candidate. Main is never rewound. The original Candidate retains its Accepted
 outcome and links to its reverse submission. Source preparation/composition use
 finite job subscriptions; the landing queue continues independently once submitted.
 The Hand to an agent prompt remains available as a secondary route.
+
+## Who can land without a check
+
+The web setting and CLI edit the same `acceptance.withoutCheck` policy. Omission
+means `owner`. Modes are `owner`, `selected` and `writers`; every mode includes the
+owner person. For selected people, use Forge handles (`@handle` or `handle`),
+which are stored by account. For teams, use an existing team name or team id.
+A team member also needs current project write access; this setting never grants it.
+
+```sh
+nforge agent ROOT check-settings '{}'
+nforge x ROOT set-policy '{"acceptance":{"withoutCheck":{"mode":"selected","people":["@release-person"],"teams":["Release team"]}}}'
+nforge x ROOT set-policy '{"acceptance":{"withoutCheck":{"mode":"writers","people":[],"teams":[]}}}'
+nforge x ROOT set-policy '{"acceptance":{"withoutCheck":{"mode":"owner","people":[],"teams":[]}}}'
+```
+
+`check-settings` includes the effective setting. Policy changes retain their old
+and new values in project history; **Landing policy history → Undo** restores the
+previous selection through the same retry-safe policy writer. An agent sign-in's
+setting edit follows the existing owner-approval policy; changing this setting
+does not let an agent land without a check. The stored-field rollout is reader
+compatibility first, writer second.
 
 ## Hosted acceptance gate
 

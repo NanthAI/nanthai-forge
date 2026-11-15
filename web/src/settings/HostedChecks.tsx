@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { UncheckedLanding } from './UncheckedLanding';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type { WorkData } from '../../../src/work-types';
 import type { HostedRunSummary } from '../../../src/work-hosted-summary';
@@ -23,7 +24,8 @@ export default function HostedChecks({
   const required = acceptanceChecks([...moves.records, ...hosted.records], runs.records);
   return (
     <>
-      <h1>Checks</h1>
+      <h1>Landing &amp; checks</h1>
+      <UncheckedLanding projectId={projectId} owner={owner} />
       <ChecksList
         checks={checks.records}
         runs={runs.records}

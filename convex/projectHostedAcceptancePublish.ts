@@ -35,7 +35,8 @@ import { effectivePolicy, type AcceptanceActor } from '../src/autonomy-policy';
 import { landingObservation } from '../src/hosted-landing';
 import { policyDigestCurrent } from '../src/policy-digest';
 import { scheduleWouldConflict } from './projectHostedLandingWouldConflict';
-import { governanceReason, requiresGovernedCheck } from '../src/public-governance';
+import { governanceReason } from '../src/public-governance';
+import { mayLandUnchecked } from './projectUncheckedLanding';
 import { landingDocsUndo } from '../src/docs-resolution';
 import { invariant } from '../src/errors';
 import { validCrossHeadProof, fastProof } from '../src/hosted-cross-head-proof';
@@ -242,13 +243,12 @@ export async function publishAcceptance(
       ...(run.actions?.isolation ? { isolation: run.actions.isolation } : {}),
     };
   }
+  // Checked landings never consult this setting or read its membership/team rows.
+  const uncheckedPerson = !check && (await mayLandUnchecked(ctx, project, policy, actor));
   invariant(
-    !(
-      requiresGovernedCheck(project, actor) ||
-      (policy.acceptance.gate === 'contract' && attempt.actor.id !== project.owner)
-    ) || check,
+    check || uncheckedPerson,
     'CHECK_NOT_PASSED',
-    'Agent acceptance requires an exact passing check.',
+    'This actor requires an exact passing check under the current unchecked landing policy.',
   );
   if (check) await requireLandingCheck(ctx, project, actor, check.checkId);
   // Entry files of every defined check and setup action are protected by default: the project
@@ -287,8 +287,14 @@ export async function publishAcceptance(
     actor.kind === 'person' && actor.id === project.owner ? null : approvalHoldReason(approvals);
   const reason =
     [
-      governanceReason(project, policy, actor, candidate.governance?.paths ?? null, checks) ??
-        secretAllowReview(policy, actor, secretAllowAdded),
+      governanceReason(
+        project,
+        policy,
+        actor,
+        candidate.governance?.paths ?? null,
+        checks,
+        uncheckedPerson,
+      ) ?? secretAllowReview(policy, actor, secretAllowAdded),
       approvalReason,
     ]
       .filter(Boolean)
@@ -354,7 +360,7 @@ export async function publishAcceptance(
       lanes: plan.lanes,
       ...landingCompletion(policy.lifecycle, state.request),
     },
-    automatic: requiresGovernedCheck(project, actor),
+    automatic: actor.kind === 'agent' || (Boolean(check) && actor.id !== project.owner),
     ...(secretAllowAdded ? { secretAllowAdded } : {}),
     undo: { kind: 'revert', receiptId: identity.receiptId },
     ...(candidate.docs

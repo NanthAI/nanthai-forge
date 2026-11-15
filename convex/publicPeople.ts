@@ -33,6 +33,7 @@ export const personKeys = new Set([
   'creatorAccountId',
   'displayName',
   'autoActors',
+  'people',
   'assigneeAccountIds',
 ]);
 /** Provider display names (first and last name) are never returned. */

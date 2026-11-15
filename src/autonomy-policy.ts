@@ -41,7 +41,7 @@ export const autonomyPolicySchema = z.object({
   agentDefaults: agentDefaultsSchema.optional(),
   preset: z.enum(['supervised', 'trusted', 'autonomous', 'custom']),
   acceptance: z.object({
-    /** Unchecked person acceptance; absent means owner only. Reader-first rollout. */
+    /** Unchecked person acceptance; absent means owner only.  */
     withoutCheck: z
       .object({
         mode: z.enum(['owner', 'selected', 'writers']),
@@ -204,9 +204,15 @@ export const policyWriteObject = z
     expectedPolicy: autonomyPolicySchema.optional(),
     preset: autonomyPolicySchema.shape.preset.optional(),
     acceptance: autonomyPolicySchema.shape.acceptance
-      .omit({ withoutCheck: true })
       .partial()
       .extend({
+        withoutCheck: autonomyPolicySchema.shape.acceptance.shape.withoutCheck
+          .unwrap()
+          .extend({
+            people: z.array(z.string().min(1)).default([]),
+            teams: z.array(z.string().min(1)).default([]),
+          })
+          .optional(),
         // Stored automatic policies remain readable above; edits expose only enabled/off.
         earlyResolve: z
           .enum(['on', 'off'])
@@ -284,7 +290,11 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
     ...((command.checkLogs ?? previous.checkLogs)
       ? { checkLogs: command.checkLogs ?? previous.checkLogs }
       : {}),
-    acceptance: { ...base.acceptance, ...command.acceptance },
+    acceptance: {
+      ...base.acceptance,
+      ...(previous.acceptance.withoutCheck ? { withoutCheck: previous.acceptance.withoutCheck } : {}),
+      ...command.acceptance,
+    },
     integrationPreview: command.integrationPreview ?? base.integrationPreview ?? { auto: false },
     ownerRootUpdates: command.ownerRootUpdates ?? base.ownerRootUpdates,
     ...((command.autoSnapshot ?? previous.autoSnapshot) !== undefined
