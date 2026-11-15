@@ -1,8 +1,10 @@
 # Early resolution review: verdict, invariants and build order
 
-Status: **review and decision for Issue 8c9b84fc.** Early resolution stays. Its targeting, its place in
-the train, its Automatic rule and two lifecycle rules change. Labels: **M** measured, **R** read from
-source, **U** unproven. Evidence stays private; this page holds derived numbers and synthetic roles only.
+Status: **review and decision for Issue 8c9b84fc.** Early resolution stays. Slices 1 to 5 of the build
+order are on main and were measured live; the Automatic rule and its sampling are to be removed (D6), and
+the review of the landed build left the follow-ups listed under [After landing](#after-landing). Labels:
+**M** measured, **R** read from source, **U** unproven, **E** estimated. Evidence stays private; this page
+holds derived numbers and synthetic roles only.
 
 ## What was reviewed
 
@@ -11,16 +13,18 @@ predecessor as soon as the trial merge proves it, and lets the agent resolve aga
 State while the predecessor still checks ([pre-queue checks](../pre-queue-checks.md)). The earlier
 [N=10 diagnosis](p6-n10-diagnosis.md) measured the problem it removes.
 
-Three live N=10 pairs on the first build with it (M):
+Three live N=10 pairs on each build (M):
 
-| Measure | Before | With early resolution |
-| --- | --- | --- |
-| Forge wall to all landed, seconds | 932 / 1024 / 1002 | 810 / 759 / 831 |
-| Forge median task time to main, seconds | 402 / 374 / 360 | 417 / 402 / 403 |
-| Conflict resolutions per cell | 2 / 2 / 2 | 1 / 0 / 1 |
+| Measure | Before | First build | Build with slices 1 to 5 |
+| --- | --- | --- | --- |
+| Forge wall to all landed, seconds | 932 / 1024 / 1002 | 810 / 759 / 831 | 819 / 763 / 690 |
+| Forge median task time to main, seconds | 402 / 374 / 360 | 417 / 402 / 403 | 359 / 364 / 360 |
+| Slowest task time to main, seconds | 918 / 988 / 963 | 786 / 732 / 808 | 790 / 748 / 661 |
+| Conflict episodes per cell | 2 / 3 / 2 | 1 / 0 / 1 | 1 / 2 / 1 |
+| Check runs per cell (discarded) | 8 / 9 / 9 (0) | 9 / 8 / 8 (1) | 9 / 8 / 7 (0) |
 
-One further cell voided: the late task landed, but an older submission of the same work stayed queued
-for an hour. That cell is the subject of most of this page.
+One further cell of the first build voided: the late task landed, but an older submission of the same
+work stayed queued for an hour. That cell is the subject of most of this page.
 
 ## Verdict
 
@@ -35,11 +39,15 @@ for an hour. That cell is the subject of most of this page.
    - the Automatic rule was inverted;
    - nothing ended an older live submission when its work continued in a resolution Lane, and
      nothing owned a cohort that re-entered composing.
-3. **The saving so far is one avoided resolution, not a parallel check.** Early resolution ran in two
-   valid cells. In one the predecessors had landed before the resolved landing came back. In the
-   other the resolved landing started a check on the predicted prefix, lost it when the third
-   overlapping task landed, and checked again after every predecessor (M). Its time to main was
-   786 s; with a surviving check the same schedule gives about 610 s (E).
+3. **The saving is resolution time, not a parallel check.** On the first build, early resolution ran
+   in two valid cells. In one the predecessors had landed before the resolved landing came back. In
+   the other the resolved landing started a check on the predicted prefix, lost it when the third
+   overlapping task landed, and checked again after every predecessor (M); its time to main was 786 s.
+   On the build with slices 1 to 5 it ran in two of three cells: each resolved landing was checked
+   once and that check was accepted (575 s and 661 s to main), including one where another group was
+   accepted while it checked (M). In both, the predecessor had landed, or landed within seconds,
+   before the resolved landing's check started. The agent resolved while the predecessor was still
+   checking, which is worth 75 to 100 s per episode (E, and the product's own samples say 100 s, M).
 
 ## Decisions
 
@@ -68,8 +76,16 @@ the saved wait grew. Explicit on and off still win.
 Lane or reading a pin leaves the rejected member on the ordinary wait; it never returns a checked
 cohort to individual checks.
 
-**D6. The setting is temporary.** If the registered runs show Automatic never chooses to wait, the
-sampling and the Automatic value are removed and only off remains.
+**D6. Remove Automatic and its sampling; only off remains.** Decided; the removal is slice 6 and is
+not on main yet, so main still runs the D4 rule. The registered runs settled the condition this
+decision waited on. Automatic never chose to wait: it measured an 8 to 9% predecessor
+failure rate against a break-even of 69 to 70% (resolution 44 to 45 s, wait saved 100 to 101 s, M).
+By D4 it waits only when more than about two thirds of watched predecessors fail, or when the wait
+left is a few seconds; the first is a broken train and the second saves nothing. A project that does
+wait stops measuring and returns to cold start, so the choice cannot hold either (R). The sample
+window is a write to the queue row and three clauses of advice text for a branch that does not fire.
+After the removal, early resolution is on unless `acceptance.earlyResolve` is `"off"`; stored
+`"automatic"` and `"on"` read as on.
 
 ## Two invariants
 
@@ -130,14 +146,14 @@ A landing that needed repair then names the driver it lost in `observe`, `queue`
 
 ## Build order
 
-| # | Slice | Fails first on |
-| --- | --- | --- |
-| 1 | Lineage invariant: supersede on conflicting sync, on resolution landing, on ownerless retry | replay of the voided cell: successor lands, older submission still live |
-| 2 | Owner invariant: recovery on entering composing, repair on train drop, alarm and probe rules, observability | same replay with the leader drive failed, cancelled and dropped: no entry may wait past the compose bound |
-| 3 | Target and guard: survivor target (draft), clean early sync refused, total advice | internal conflict with a disjoint outer predecessor; clean pinned sync |
-| 4 | Linear train for resolved landings | scripted conflict trio: the resolved landing's first check must be the one accepted |
-| 5 | One attempt fork helper with a lint guard; the retained conflict forks the current attempt (draft) | conflict retention after an installed check |
-| 6 | Automatic rule (draft) and the D6 removal decision | rule table |
+| # | Slice | Fails first on | State |
+| --- | --- | --- | --- |
+| 1 | Lineage invariant: supersede on conflicting sync, on resolution landing, on ownerless retry | replay of the voided cell: successor lands, older submission still live | on main |
+| 2 | Owner invariant: recovery on entering composing, repair on train drop, alarm and probe rules, observability | same replay with the leader drive failed, cancelled and dropped: no entry may wait past the compose bound | on main |
+| 3 | Target and guard: survivor target, clean early sync refused, total advice | internal conflict with a disjoint outer predecessor; clean pinned sync | on main |
+| 4 | Linear train for resolved landings | scripted conflict trio: the resolved landing's first check must be the one accepted | on main |
+| 5 | One attempt fork helper with a lint guard; the retained conflict forks the current attempt | conflict retention after an installed check | on main |
+| 6 | Automatic rule corrected (D4), then removed with its sampling (D6) | rule table | D4 on main; removal open |
 
 Each slice keeps the disjoint path at its current modelled cost per landing, keeps idle at zero
 calls, and adds no table, public error code, agent action or setting.
@@ -150,14 +166,41 @@ live N=10 pairs. The bar: no operation pending at grading in any cell, the late 
 post-resolution check is the accepted one, clean cells within noise of the previous build on
 submit-to-check and control calls, and wall to all landed no worse than the three cells above.
 
+## After landing
+
+The landed build was read against this page and measured in five live cells (three N=10, two overlap
+N=8). Both invariants held: every cell settled with an empty queue, no landing was dropped, no stall
+alarm or repair ran, and the only superseded submissions were the advised originals, one per early
+episode (M). Strict acceptance is unchanged: every early pin is still an exact acceptance
+precondition (R). Convex cost per landing did not rise once the meter's own metrics read, which grows
+with retained history, is set aside (M). Four follow-ups remain:
+
+1. **A waiting early entry needs an owner and one rule (R, not reproduced).** A resolved landing
+   that cannot yet compose on the tail is left runnable, and the queue offers it again by the tail
+   rule without pins. Where the two rules disagree (a solo tail left by a cohort that fell back, a
+   split half, a held row), the queue claims and releases the entry with no delay until the train
+   changes. All three follow a failed shared check or an owner hold, which the runs did not produce.
+   The entry should park on the tail's settlement event, as rejected cohort members do.
+2. **No conflict notice against what a Lane already resolved (M).** When the predecessor's Lane is
+   still open, the save that completes an early resolution flags an exact conflict between the
+   resolution Lane and that predecessor, and later replies tell the agent to change its edit. The
+   compose is clean. The notices also stay open after both Lanes land.
+3. **Advice must not leave partial state (R).** Advice is best effort (D5), but its error handling
+   also covers its writes: a failure after one member is parked can leave that member without an
+   alarm or a wake. Read first, mark the predecessor before parking, let write errors propagate.
+4. **The recovery alarm outside composing (R).** The five-minute alarm can fire before the
+   fifteen-minute stall bound; an entry that is then no longer composing falls to the sixty-minute
+   deadline instead of the ordinary alarm.
+
 ## Limits
 
-- The median time to main is 29 s higher across the three new cells. The GitHub arm's comparable
-  tasks drifted 10 s in the same sessions, check duration rose 7 s and submit-to-check 8 s, each
-  inside its spread (M). In two of the three cells the median task had landed before early
-  resolution first ran, and one cell never used it; all three show the same median. This is not
-  attributed to the design; the scripted clean cell settles it (U).
-- The exact lost link in the stranded submission is U until the observability above exists.
-- Advice still follows cohort compose, about a minute after submission at this load (M). Offering
-  the pinned sync from the save-time conflict notice, when the peer is already checking, is the next
-  latency lever and is not built.
+- The higher median time to main on the first build did not persist: 359 to 364 s on the build with
+  slices 1 to 5, against 402 to 417 s (M). It was session noise, not design cost.
+- The exact lost link in the stranded submission is still U. No live cell lost a driver, so the
+  retained owner diagnosis has not yet named one.
+- Live cells did not produce an overlapping third group accepted while a resolved landing checked;
+  only the fake-clock trio covers that shape.
+- Advice still follows cohort compose. The save-time conflict notice named the conflicting peer 40 s
+  and 76 s before the advice reached the agent in the two early episodes (M). Offering the pinned
+  sync from that notice, when the peer is already checking, is the next latency lever and is not
+  built.
