@@ -1,8 +1,8 @@
 # Zoo conformance report
 
-Issue `70a9bd2f-f741-4d26-8ae5-7bb11148a17c` tracks this dev-only post-flip run. All **26 fixtures pass their required functional outcomes**: 23 complete all nine paths; three hazards return their named expected refusals. The strict timing gate compares with the unchanged numeric baseline at 1.5×. Five singleton misses and their five-repeat qualification appear below. The strict timing gate remains open: two five-repeat checked-resolution medians exceed their unchanged bars.
+Issue `70a9bd2f-f741-4d26-8ae5-7bb11148a17c` tracks this dev-only post-flip run. All **26 fixtures pass their required functional outcomes**: 23 complete all nine paths; three hazards return their named expected refusals. The strict timing gate compares with the unchanged numeric baseline at 1.5×. Five singleton misses and their five-repeat qualification appear below. The strict timing gate remains open: both binary checked-resolution medians still exceed their unchanged bars after the runner object-fetch follow-up below.
 
-All 26 fixture forks are deleted. The 40 dev projects remain active pending owner-person purge; the user assigns that owner step to the lead.
+All 26 original fixture forks are deleted. The follow-up recreated two forks, then deleted both and verified its ten new projects in Trash. The earlier 40 dev projects remain assigned to the lead for owner-person purge.
 
 The [harness](../../scripts/bench-zoo/suite.mjs) uses public upstream forks and [synthetic recipes](../../scripts/bench-zoo/shapes.mjs). Source bytes stay in R2 and metadata in Convex. This report consolidates the superseded full-matrix narrative; original observations and failed setup proofs remain retained in execution evidence.
 
@@ -91,6 +91,54 @@ Qualified sample landing classes (no order filter):
 | shapes-bigbin | 5 | no / 1 | no / 1 |
 
 These observations compare against a historical singleton baseline. Initial inherited workflow load was removed before qualification. The fixture-fix full verification overlaps qualification and remains in source-work CI accounting; no sample is omitted for that overlap; changing provider load and CLI control-code heads prevents isolated causal attribution. Checked landing wall time includes queue/runner preparation and reconciliation, not just command execution. Timing Issue `5d689e6e` retains qualified findings and remaining work; source-only sync/resolve work stays on `6fbba986`.
+
+## Runner object-fetch follow-up
+
+The runner scheduling/cache fix is accepted in State `5df95aeac668559274ead5599657d9fb34cc2d0c3a9c2ffb9ec861acad403db5` (receipt `c156ada6-9996-46f8-85e6-f9a57f25de82`). It removes the serial drain between catalog prefixes for ordinary downloads, adds bounded disk prefetch for legacy recipe leaves, and shares in-flight leaf reads. Complete signed runs, exact hashes, ordered reconstruction, failure draining and the serial source-worker default remain. No queue, admission, logical State identity or source-byte placement changes were made.
+
+Five fresh-project repeats per binary row used the unchanged harness, fixture source commits, original commands and clocks, concurrency two, and the same strict bars. CLI and runner control were pinned to the accepted fix; all 29 qualification check runs used control commit `a52a962b9e2584c4f45af6047311aa9fb245eaf0`. Runtime `9ede50f626dbaed5cae577f11c19a221cadb8541041201651bf6eb3af8ffc478` and all harness hashes match the prior qualification. Every sample completed and is retained; none was voided or filtered by landing order. The baseline SHA-256 above is unchanged. **Both five-repeat medians still miss.**
+
+| Repository / checked resolve | Repeat seconds (sample order) | Median seconds | Unchanged 1.5× bar | Verdict |
+| --- | --- | --- | --- | --- |
+| binaries | 136.298, 136.059, 147.762, 150.540, 152.315 | 147.762 | 137.123 | miss |
+| shapes-bigbin | 111.823, 102.957, 110.464, 100.746, 108.647 | 108.647 | 106.678 | miss |
+
+Realized A/C classes (B resolution had no main movement and zero recompositions in every sample):
+
+| Repository | Sample | A main moved / recompositions | C main moved / recompositions |
+| --- | --- | --- | --- |
+| binaries | 1 | no / 0 | yes / 1 |
+| shapes-bigbin | 1 | no / 0 | yes / 1 |
+| binaries | 2 | no / 0 | yes / 1 |
+| shapes-bigbin | 2 | no / 0 | yes / 1 |
+| binaries | 3 | no / 0 | yes / 1 |
+| shapes-bigbin | 3 | no / 0 | yes / 1 |
+| binaries | 4 | no / 0 | yes / 1 |
+| shapes-bigbin | 4 | no / 1 | no / 1 |
+| binaries | 5 | no / 0 | yes / 1 |
+| shapes-bigbin | 5 | no / 0 | yes / 1 |
+
+These are N = 5 observations against a historical singleton baseline, not interleaved causal speedup evidence. The preceding qualification and all its failures remain above. Source-work push workflows overlap the first follow-up samples; their compute is accounted separately. No timing threshold or sample clock was adjusted.
+
+### Counted cause and guard evidence
+
+A synthetic 1,382-object / 1,387-path raw binary source fetched exactly 1,382 objects and 33,964,032 bytes in four descriptor prefixes before and after the patch. The exact historical materializer's worker loop reached 48 concurrent GETs on the current fake transport; accepted pre-fix source reached only 16 because each prefix drained before the next. The patch restores 48 without another metadata request. The four pre-fix windows fetched 400 / 400 / 400 / 182 objects, respectively 9,830,400 / 9,830,400 / 9,830,400 / 4,472,832 bytes; their observed local wall times were 91.505 / 83.128 / 66.466 / 41.145 ms. Baseline/candidate windows overlap instead. These simulated-response disk timings prove scheduling and counts, not a hosted latency gain.
+
+On the same legacy-recipe fixture, the old reader issued five metadata calls and 72 leaf GETs (18,874,368 bytes), peaking at two GETs. The new reader issued the same five metadata calls and 70 leaf GETs (18,350,080 bytes), peaking at 16; two duplicate reads of a shared in-flight leaf disappeared. Recipe prefetch is bounded to 16 consecutive leaves or 4 MiB per logical file, with no whole-file memory cache. Guards also cover corruption, whole-file verification, identical raw/recipe identity, and draining active writers after a later descriptor failure. Direct affected tests passed 140 tests; the full hosted check reported 1,084 test-file results with zero failed/flaky files. The broad transitive local preflight was stopped, not reported as passing; full verification ran on the landing runner.
+
+### Remaining source-grant finding
+
+The first follow-up binaries resolution spent 59.870 s in object fetch / 62.307 s materializing source; the preceding matched row's first observation was 71.822 / 74.100 s. Shapes-bigbin spent 36.619 / 38.713 s, versus the preceding observation's 52.052 / 54.750 s. These unpaired phase observations do not isolate the patch's effect.
+
+In shapes-bigbin follow-up sample 1, 32.260 s elapsed from catalog fallback to the eight-object prepared window. During that window, project-attributed provider records contain 11 source HTTP requests, 53 internal descriptor resolves and 22 State-selection mutations. After it, about 4.36 s of the object-fetch phase remained. An authorized descriptor audit found no inline closure on any of the three large imported recipes (24 / 24 / 6 MiB); their recipe metadata is in R2. The three largest recipes in binaries also lack inline closures and have R2 metadata. The State-bound catalog path re-proves State/recipe membership on successive recipe, tree and leaf descriptor rounds; complete-run preparation also precedes the file-page workers. The landed patch does not eliminate those preparation rounds.
+
+The next source-materialization slice should prove and reduce that repeated preparation while preserving fresh current-access checks and exact State/recipe membership. An initial planning target is to remove half that preparation window (about 16.1 s); its full 32.260 s is an upper bound, not an isolated removable component. Neither number is a measured saving; the removable fraction must be established before a further performance claim. No authorization relaxation, repair, backfill, backend deployment or additional qualification round was initiated for this finding. A fresh matching ten-sample round exceeds the remaining approved task budget on both executions and DB I/O before another fix/landing. Issue `5d689e6e` remains open; the lead owns the remaining implementation/qualification slice.
+
+### Follow-up cleanup and compute
+
+All ten new dev projects are verified in Trash and both recreated fixture forks are deleted. Permanent project purge is owner-only; exact project IDs are retained in the private handoff. The earlier 40-project owner purge remains a separate lead-owned task, not silently claimed here.
+
+The qualification used 29 successful hosted checks / 51.650 assigned job minutes, with no missing run IDs or control-code drift. The implementation's full check used 105.750 assigned job minutes; its five automatic source-push workflows used 73.750 minutes. This includes development workflows and their verification, not just timed checks. Two fixture setup adapter failures were corrected before timing; no scored/qualification sample was dropped. Source bytes continue to use R2; no new Convex byte-storage path was introduced. Provider usage is retained separately from invoices and excludes any unobserved initial read-only overhead.
 
 ## Concurrent landing order
 
