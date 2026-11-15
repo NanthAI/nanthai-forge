@@ -39,11 +39,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const catalogPath = join(HERE, 'catalog.json');
 
 const flag = (argv, name) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : null);
-const ok = async (cmd, args, options) => {
-  const r = await exec(cmd, args, options);
-  if (r.code) throw Error(`${cmd} ${args.slice(0, 3).join(' ')}: ${r.stderr.slice(-300)}`);
-  return r.stdout;
-};
 
 function loadCatalog(argv) {
   const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
@@ -68,9 +63,13 @@ async function setupSteps(cfg, entry) {
   });
 }
 
-const exists = async fork => (await exec('gh', ['repo', 'view', fork, '--json', 'name'])).code === 0;
-
-async function provisionOne(cfg, entry, shapes) {
+async function provisionOne(cfg, entry, shapes, run) {
+  const ok = async (cmd, args, options) => {
+    const r = await run(cmd, args, options);
+    if (r.code) throw Error(`${cmd} ${args.slice(0, 3).join(' ')}: ${r.stderr.slice(-300)}`);
+    return r.stdout;
+  };
+  const exists = async fork => (await run('gh', ['repo', 'view', fork, '--json', 'name'])).code === 0;
   const files = {
     '.forge-zoo/ci.sh': { data: Buffer.from(ciScript(entry, shapes)), mode: '100755' },
     '.github/workflows/zoo-ci.yml': {
@@ -116,12 +115,13 @@ async function provisionOne(cfg, entry, shapes) {
           'NanthAI',
           '--fork-name',
           name,
-          '--default-branch-only',
           '--clone=false',
         ]);
         for (let i = 0; i < 30 && !(await exists(entry.fork)); i++)
           await new Promise(r => setTimeout(r, 2000));
       }
+      // Plain clones and workflow discovery use the fixture default; match the import's declared ref.
+      await ok('gh', ['repo', 'edit', entry.fork, '--default-branch', entry.ref]);
       const env = { ...process.env, GIT_LFS_SKIP_SMUDGE: '1' };
       const dir = join(work, 'fork');
       await ok(
@@ -143,7 +143,7 @@ async function provisionOne(cfg, entry, shapes) {
         writeFileSync(join(dir, path), f.data, { mode: f.mode === '100755' ? 0o755 : 0o644 });
       }
       await ok('git', ['-C', dir, 'add', '-A', '.forge-zoo', '.github/workflows/zoo-ci.yml']);
-      const dirty = await exec('git', ['-C', dir, 'status', '--porcelain']);
+      const dirty = await run('git', ['-C', dir, 'status', '--porcelain']);
       if (dirty.stdout.trim()) {
         await ok('git', [
           '-C',
@@ -161,7 +161,7 @@ async function provisionOne(cfg, entry, shapes) {
       }
     }
     // Forks start with Actions disabled; the plain-GitHub full run needs them on.
-    await exec('gh', ['api', '-X', 'PUT', `repos/${entry.fork}/actions/permissions`, '-F', 'enabled=true']);
+    await run('gh', ['api', '-X', 'PUT', `repos/${entry.fork}/actions/permissions`, '-F', 'enabled=true']);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -267,7 +267,7 @@ export async function main(argv, { run = exec } = {}) {
   if (verb === 'provision') {
     const cfg = JSON.parse(readFileSync(join(root, 'zoo.json'), 'utf8'));
     for (const entry of repos) {
-      await provisionOne(cfg, entry, shapes);
+      await provisionOne(cfg, entry, shapes, run);
       console.log(`provisioned ${entry.id} (${entry.fork})`);
     }
     writeZooJson(root, catalog, repos);

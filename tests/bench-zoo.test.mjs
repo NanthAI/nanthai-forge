@@ -18,7 +18,7 @@ import {
   tagLastLine,
   thrownRefusal,
 } from '../scripts/bench-zoo/lib.mjs';
-import { lastJson } from '../scripts/bench-zoo/exec.mjs';
+import { exec, lastJson } from '../scripts/bench-zoo/exec.mjs';
 import { resolutionFolder, runRepo, sourceCommand } from '../scripts/bench-zoo/run.mjs';
 import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -304,6 +304,92 @@ import {
 const catalog = JSON.parse(
   readFileSync(new URL('../scripts/bench-zoo/catalog.json', import.meta.url), 'utf8'),
 );
+
+test('provisioning a new fork preserves a declared non-default branch and publishes its check there', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'zoo-declared-branch-'));
+  const upstream = join(root, 'upstream'),
+    fork = join(root, 'fork.git');
+  const entry = catalog.repos.find(r => r.id === 'php');
+  const git = async args => {
+    const result = await exec('git', args);
+    assert.equal(result.code, 0, result.stderr);
+    return result;
+  };
+  try {
+    mkdirSync(upstream);
+    await git(['init', '-q', '-b', 'main', upstream]);
+    await git(['-C', upstream, 'config', 'user.name', 'Fixture']);
+    await git(['-C', upstream, 'config', 'user.email', 'fixture@example.invalid']);
+    writeFileSync(join(upstream, 'source.txt'), 'default branch\n');
+    await git(['-C', upstream, 'add', '.']);
+    await git(['-C', upstream, 'commit', '-qm', 'default']);
+    await git(['-C', upstream, 'checkout', '-qb', entry.ref]);
+    writeFileSync(join(upstream, 'source.txt'), 'declared branch\n');
+    await git(['-C', upstream, 'commit', '-qam', 'declared']);
+    await git(['-C', upstream, 'checkout', '-q', 'main']);
+    mkdirSync(join(root, 'dist'));
+    writeFileSync(join(root, 'dist/actions-toolchains.js'), 'export const declaredSetupSteps = () => "";\n');
+    writeFileSync(
+      join(root, 'zoo.json'),
+      JSON.stringify({
+        deployment: 'https://example.invalid',
+        deploymentName: 'fixture',
+        forgeCheckout: root,
+        meterCwd: root,
+      }),
+    );
+    let created = false;
+    const code = await suiteMain(['provision', root, '--repos', entry.id], {
+      run: async (cmd, args, options) => {
+        if (cmd === 'gh') {
+          if (args[0] === 'repo' && args[1] === 'view')
+            return { code: created ? 0 : 1, stdout: '', stderr: '' };
+          if (args[0] === 'repo' && args[1] === 'fork') {
+            const result = await git([
+              'clone',
+              '--bare',
+              ...(args.includes('--default-branch-only') ? ['--single-branch'] : []),
+              upstream,
+              fork,
+            ]);
+            created = true;
+            return result;
+          }
+          if (args[0] === 'repo' && args[1] === 'edit')
+            return git([
+              '--git-dir',
+              fork,
+              'symbolic-ref',
+              'HEAD',
+              `refs/heads/${args[args.indexOf('--default-branch') + 1]}`,
+            ]);
+          return { code: 0, stdout: '', stderr: '' };
+        }
+        return exec(
+          cmd,
+          args.map(a => (a === `https://github.com/${entry.fork}.git` ? fork : a)),
+          options,
+        );
+      },
+    });
+    assert.equal(code, 0);
+    assert.equal(
+      (await git(['--git-dir', fork, 'symbolic-ref', '--short', 'HEAD'])).stdout.trim(),
+      entry.ref,
+    );
+    assert.equal(
+      (await git(['--git-dir', fork, 'show', `${entry.ref}:source.txt`])).stdout,
+      'declared branch\n',
+    );
+    assert.match(
+      (await git(['--git-dir', fork, 'show', `${entry.ref}:.forge-zoo/ci.sh`])).stdout,
+      /set -euo pipefail/,
+    );
+    assert.equal((await git(['--git-dir', fork, 'show', 'main:source.txt'])).stdout, 'default branch\n');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('the catalog holds 20-30 repositories and covers every required shape', () => {
   assert.deepEqual(validateCatalog(catalog), []);
