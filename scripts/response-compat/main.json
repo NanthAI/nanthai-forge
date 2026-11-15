@@ -3927,6 +3927,180 @@
               "flaggedAt": {
                 "type": "string"
               },
+              "earlyResolution": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "laneId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "paths": {
+                        "maxItems": 10,
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "more": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                      },
+                      "next": {
+                        "type": "string"
+                      },
+                      "landedSubmissionId": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "paths",
+                      "more",
+                      "at",
+                      "next",
+                      "landedSubmissionId"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "laneId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "paths": {
+                        "maxItems": 10,
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "more": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                      },
+                      "next": {
+                        "type": "string"
+                      },
+                      "code": {
+                        "type": "string",
+                        "const": "COMPOSITION_CONFLICT"
+                      },
+                      "resolution": {
+                        "type": "object",
+                        "properties": {
+                          "early": {
+                            "type": "boolean"
+                          },
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "automatic",
+                              "on",
+                              "off"
+                            ]
+                          },
+                          "failureRate": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "resolveMs": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "waitSavedMs": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "breakEven": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "samples": {
+                            "type": "number"
+                          },
+                          "measuredCosts": {
+                            "type": "number"
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "early",
+                          "mode",
+                          "reason"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "predecessor": {
+                        "type": "object",
+                        "properties": {
+                          "groupId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "submissionId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "head": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          },
+                          "receiptId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          }
+                        },
+                        "required": [
+                          "groupId",
+                          "submissionId",
+                          "head",
+                          "receiptId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "paths",
+                      "more",
+                      "at",
+                      "next",
+                      "code",
+                      "predecessor"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
               "files": {
                 "type": "array",
                 "items": {

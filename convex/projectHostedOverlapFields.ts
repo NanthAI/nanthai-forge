@@ -132,6 +132,8 @@ export const hostedOverlapTables = {
         reason: v.string(),
       }),
     ),
+    /** Exact save-time pinned sync, computed only by conflict recording. Legacy rows omit it. */
+    earlyResolution: v.optional(v.string()),
     laneHead: v.string(),
     peerHead: v.string(),
     flaggedAt: v.number(),

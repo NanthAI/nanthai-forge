@@ -10,10 +10,10 @@ import type { DeclaredMergePaths } from './project-config.js';
  * the compose syntax gate, and compose's conflict rules (Markdown docs and main's forge.json
  * `merge` lists), so a notice never names a conflict the landing would merge on its own. Pure: the caller supplies the bytes; nothing is written anywhere. */
 export type TrialFile = { blob: string; mode: string } | null;
-export type TrialPeer = { laneId: string; before: TrialFile; after: TrialFile };
+export type TrialPeer = { laneId: string; before: TrialFile; after: TrialFile; resolved?: TrialFile };
 export type TrialTask = {
   path: string;
-  mine: { before: TrialFile; after: TrialFile };
+  mine: { before: TrialFile; after: TrialFile; resolved?: TrialFile };
   /** Main's file, only when main changed the path after this Lane's base; absent means unchanged. */
   main?: TrialFile;
   peers: TrialPeer[];
@@ -131,9 +131,29 @@ export async function trialMerge(
           });
         }
       }
+      // A resolved right State already contains these edits when replaying the peer's
+      // exact delta leaves that State byte-for-byte unchanged. A later peer edit still
+      // goes through the ordinary trial; sharing a resolution target is no exemption.
+      const contained = async (base: TrialFile, target: TrialFile, saved: TrialFile) => {
+        const result = await entry(task.path, base, target, saved, bytes, mergePaths);
+        if (!result.ok) return false;
+        if (same(result.file, target)) return true;
+        return Boolean(
+          result.file &&
+          target &&
+          result.file.mode === target.mode &&
+          bytes(result.file).equals(bytes(target)),
+        );
+      };
       // Main's file as far as this plan knows: unchanged since this Lane's base unless named.
       const mainFile = task.main !== undefined ? task.main : before;
       for (const peer of task.peers) {
+        if (
+          task.mine.resolved !== undefined &&
+          (await contained(peer.before, task.mine.resolved, peer.after))
+        )
+          continue;
+        if (peer.resolved !== undefined && (await contained(before, peer.resolved, after))) continue;
         if (same(peer.after, current)) continue;
         // The peer composes after this Lane, from the peer's own base (as compose does). When this
         // Lane conflicts with main, only a peer on this Lane's base can still be compared exactly.

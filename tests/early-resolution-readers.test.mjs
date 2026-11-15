@@ -82,3 +82,40 @@ test('activated reader keeps exact predecessor recovery pins and legacy advisory
   assert.equal(syncRequiredAdvice(advice), undefined);
   assert.deepEqual(syncRequiredAdvice(expanded), expanded);
 });
+
+test('compact save advice preserves exact pins and legacy notices retain their continuation', async () => {
+  const { exactConflictsSchema, exactConflictNotice } = await import('../dist/hosted-conflict-notice.js');
+  const advice = {
+    code: 'COMPOSITION_CONFLICT',
+    predecessor: { ...predecessor, groupId: randomUUID() },
+    resolution: { early: true, mode: 'on', reason: 'enabled' },
+    paths: ['shared.txt'],
+    more: 0,
+    at,
+    next: 'Resolve the exact saved predecessor.',
+  };
+  assert.deepEqual(syncRequiredAdvice(advice), advice);
+  const legacy = {
+    with: randomUUID(),
+    goal: 'synthetic',
+    flaggedAt: at,
+    files: [{ path: 'shared.txt', mine: [[1, 1]], theirs: [[1, 1]], reason: 'overlap' }],
+  };
+  const laneId = randomUUID();
+  const oldNotice = exactConflictNotice(laneId, exactConflictsSchema.parse([legacy]));
+  assert.equal(oldNotice.continuation, undefined);
+  assert.match(oldNotice.next, /Agree an order/);
+  const notice = exactConflictNotice(
+    laneId,
+    exactConflictsSchema.parse([{ ...legacy, earlyResolution: advice }]),
+  );
+  assert.deepEqual(notice.continuation.next.predecessor, predecessor);
+  assert.equal(notice.continuation.next.laneId, laneId);
+  assert.equal(notice.continuation.next.action, 'sync');
+  assert.equal(
+    exactConflictsSchema.safeParse([
+      { ...legacy, earlyResolution: { ...advice, predecessor: { ...advice.predecessor, head: 'unbound' } } },
+    ]).success,
+    false,
+  );
+});

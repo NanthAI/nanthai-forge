@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { wouldConflictSchema, syncRequiredContinuation } from './hosted-would-conflict.js';
 
 /** Exact conflicts at save (flip 4, Issue 853fcde3): what the overlap read returns when a trial merge of
  * this Lane's saved files against main or another open Lane really conflicts. */
@@ -8,6 +9,7 @@ export const exactConflictsSchema = z.array(
     with: z.string(),
     goal: z.string(),
     flaggedAt: z.string(),
+    earlyResolution: wouldConflictSchema.optional(),
     files: z.array(
       z.object({
         path: z.string(),
@@ -46,9 +48,12 @@ export function exactConflictNotice(laneId: string, conflicts: ExactConflicts) {
   );
   const main = conflicts.some(conflict => conflict.with === 'main');
   const peers = conflicts.filter(conflict => conflict.with !== 'main').map(conflict => conflict.with);
+  const early = conflicts.find(conflict => conflict.earlyResolution)?.earlyResolution;
+  const continuation = early ? syncRequiredContinuation('.', early, { laneId }) : undefined;
   const next = [
     main ? `Sync now; your saved files conflict with main: nforge agent . sync '{"laneId":"${laneId}"}'` : '',
-    peers.length
+    continuation ? `${continuation.instruction} Run: ${continuation.command}` : '',
+    peers.length && !continuation
       ? `Your saved files conflict with Lane ${peers.join(', ')}. Agree an order or split with that Lane (board note), or change your edit, then save.`
       : '',
   ]
@@ -58,6 +63,7 @@ export function exactConflictNotice(laneId: string, conflicts: ExactConflicts) {
     summary: `${items.length} exact conflict(s): a trial merge of saved files really conflicts. No answer needed; it clears when a save no longer conflicts.`,
     items: items.slice(0, 10),
     next,
+    ...(continuation ? { continuation } : {}),
   };
 }
 export type ExactConflictNotice = NonNullable<ReturnType<typeof exactConflictNotice>>;

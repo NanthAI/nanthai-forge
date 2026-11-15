@@ -27,7 +27,7 @@ export type TrialPlan = {
   tasks: TrialTask[];
   objects: TrialObject[];
   /** Source is authoritative: a sync or resolution delta can describe a draft, not the Lane base. */
-  sources?: { laneId: string; base: TrialObject; head: TrialObject }[];
+  sources?: { laneId: string; base: TrialObject; head: TrialObject; resolved?: TrialObject }[];
   /** Main's head State and the Lane's paths main changed after the Lane's base. */
   main?: { head: string; state: TrialObject; paths: string[] };
 };

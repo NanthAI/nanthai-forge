@@ -217,7 +217,11 @@ try {
     await new Promise(done => setTimeout(done, 1000));
   }
   assert.equal(job.head, ref);
-  const before = await snapshot(primary.anon, id);
+  await assert.rejects(
+    primary.anon.action(api.lifecycleActions.downloadPart, { id, offset: 0 }),
+    error => error.data?.code === 'GITHUB_UNAVAILABLE',
+  );
+  const before = await snapshot(primary.admin, id);
   assert.equal(before.gitHead, ref);
   const file = Object.keys(before.content).sort()[0];
   assert(file);
@@ -274,7 +278,11 @@ try {
       'analysisVersion',
     ])
       assert.deepEqual(after[field], job[field], field);
-    assert.deepEqual(await snapshot(clients.anon, id), before);
+    await assert.rejects(
+      clients.anon.action(api.lifecycleActions.downloadPart, { id, offset: 0 }),
+      error => error.data?.code === 'GITHUB_UNAVAILABLE',
+    );
+    assert.deepEqual(await snapshot(clients.admin, id), before);
     assert.deepEqual(
       JSON.parse(
         await clients.anon.action(api.hosted.read, {

@@ -28,12 +28,12 @@ export const wouldConflictSchema = z.union([
         .object({
           early: z.boolean(),
           mode: z.enum(['automatic', 'on', 'off']),
-          failureRate: z.number().nullable(),
-          resolveMs: z.number().nullable(),
-          waitSavedMs: z.number().nullable(),
-          breakEven: z.number().nullable(),
-          samples: z.number(),
-          measuredCosts: z.number(),
+          failureRate: z.number().nullable().optional(),
+          resolveMs: z.number().nullable().optional(),
+          waitSavedMs: z.number().nullable().optional(),
+          breakEven: z.number().nullable().optional(),
+          samples: z.number().optional(),
+          measuredCosts: z.number().optional(),
           reason: z.string(),
         })
         .strict()

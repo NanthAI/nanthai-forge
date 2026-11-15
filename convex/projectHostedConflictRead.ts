@@ -104,12 +104,14 @@ export function trialReader(ctx: ActionCtx, projectId: Id<'hostedProjects'>, pla
       for (const source of plan.sources ?? []) {
         const base = await state(source.base),
           head = await state(source.head);
+        const resolved = source.resolved ? await state(source.resolved) : undefined;
         for (const task of plan.tasks) {
           const side =
             source.laneId === plan.laneId ? task.mine : task.peers.find(p => p.laneId === source.laneId);
           if (side) {
             side.before = base.get(task.path) ?? null;
             side.after = head.get(task.path) ?? null;
+            if (resolved) side.resolved = resolved.get(task.path) ?? null;
           }
         }
       }
@@ -120,8 +122,9 @@ export function trialReader(ctx: ActionCtx, projectId: Id<'hostedProjects'>, pla
           .flatMap(task => [
             task.mine.before,
             task.mine.after,
+            task.mine.resolved,
             task.main,
-            ...task.peers.flatMap(peer => [peer.before, peer.after]),
+            ...task.peers.flatMap(peer => [peer.before, peer.after, peer.resolved]),
           ])
           .flatMap(file => (file && file.mode !== 'symlink' && file.mode !== 'gitlink' ? [file.blob] : [])),
       );

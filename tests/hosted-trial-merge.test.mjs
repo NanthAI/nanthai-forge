@@ -591,3 +591,17 @@ test('83e6d0d3: Markdown heading suffix appends are clean composition, while rep
     b = Buffer.from('# Proof B\n\nText.\n');
   assert.equal((await trialMerge([task(a, b)], store(base, a, b))).conflicts.length, 1);
 });
+
+test('8c9b84fc: a resolution target suppresses contained peer edits but a later peer edit still conflicts', async () => {
+  const peer = text(['a', 'peer', 'c', 'd', 'e', 'f', 'g', 'h']);
+  const prefix = text(['a', 'peer', 'c', 'd', 'e', 'f', 'prefix', 'h']);
+  const resolved = text(['a', 'resolved', 'c', 'd', 'e', 'f', 'prefix', 'h']);
+  const newer = text(['a', 'new peer edit', 'c', 'd', 'e', 'f', 'g', 'h']);
+  const read = store(BASE, peer, prefix, resolved, newer);
+  const saved = task(resolved, [['peer', peer]]);
+  saved.mine.resolved = file(prefix);
+  assert.deepEqual((await trialMerge([saved], read)).conflicts, []);
+  const changed = task(resolved, [['peer', newer]]);
+  changed.mine.resolved = file(prefix);
+  assert.equal((await trialMerge([changed], read)).conflicts[0].peer, 'peer');
+});

@@ -44,7 +44,17 @@ export function Autonomy({
   async function submit() {
     pending.current ??=
       draft.preset === 'custom'
-        ? { action: 'set-policy', operationId: crypto.randomUUID(), expectedPolicy: base, ...draft }
+        ? {
+            action: 'set-policy',
+            operationId: crypto.randomUUID(),
+            expectedPolicy: base,
+            ...draft,
+            acceptance: {
+              ...draft.acceptance,
+              earlyResolve:
+                draft.acceptance.earlyResolve === 'automatic' ? 'on' : draft.acceptance.earlyResolve,
+            },
+          }
         : {
             action: 'set-policy',
             operationId: crypto.randomUUID(),
