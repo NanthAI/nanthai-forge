@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
-import { packageDocuments } from '../scripts/package-documents.mjs';
+import { packageDocuments, packageDocumentData } from '../scripts/package-documents.mjs';
 import {
   llmDocuments,
   llmsFullPaths,
@@ -91,6 +91,7 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
     assert.ok(llms.includes(`](/${path}): `), path);
     assert.equal(readFileSync(join(output, path), 'utf8'), read(path));
   }
+  for (const path of packageDocumentData) assert.equal(readFileSync(join(output, path), 'utf8'), read(path));
   let previous = -1;
   for (const path of llmsFullPaths) {
     const marker = `Source: ${path === 'README.md' ? `${githubBlob}README.md` : `/${path}`}\n\n`;
@@ -158,6 +159,7 @@ test('generation uses only the explicit inventory and reflects source edits dete
     writeFileSync(join(fixture, path), text);
   };
   for (const path of packageDocuments) put(path, `# ${path}\n\nPublic text for ${path}.\n`);
+  for (const path of packageDocumentData) put(path, '{"publicCompanion":true}\n');
   for (const path of ['README.md', 'skills/forge-agent/SKILL.md'])
     put(path, `# ${path}\n\nPublic text for ${path}.\n`);
   for (const path of ['docs/internal-only.md', 'docs/vendor-notices/private.md', 'private-output.md'])
@@ -165,7 +167,8 @@ test('generation uses only the explicit inventory and reflects source edits dete
   const first = llmDocuments(fixture);
   assert.deepEqual(llmDocuments(fixture), first);
   assert.ok(!JSON.stringify(first).includes('EXCLUDED_INTERNAL_CONTENT'));
-  assert.equal(first.length, packageDocuments.length + 2);
+  assert.equal(first.length, packageDocuments.length + packageDocumentData.length + 2);
+  assert.doesNotMatch(first[1].source, /publicCompanion/);
   for (const path of llmsFullPaths) assert.ok(first[1].source.includes(`Public text for ${path}.`), path);
   for (const path of ['docs/status.md', 'docs/backlog.md', 'docs/roadmap.md', 'docs/phase5-plan.md'])
     assert.ok(!first[1].source.includes(`Public text for ${path}.`), `${path} is linked, not concatenated`);
@@ -174,7 +177,7 @@ test('generation uses only the explicit inventory and reflects source edits dete
   assert.match(next[0].source, /\[Why Forge now\?\]\(\/docs\/why-forge.md\): Changed public documentation\./);
   assert.match(next[1].source, /Changed public documentation\./);
   // A listed source that is missing fails the build instead of shipping a partial file.
-  for (const path of [packageDocuments[0], llmsFullPaths[0], 'docs/security.md']) {
+  for (const path of [packageDocuments[0], llmsFullPaths[0], 'docs/security.md', ...packageDocumentData]) {
     const copy = readFileSync(join(fixture, path), 'utf8');
     rmSync(join(fixture, path));
     assert.throws(() => llmDocuments(fixture), { code: 'ENOENT' }, path);
@@ -200,7 +203,12 @@ test('llms-full size is a report with a non-failing warning above the line, neve
 test('five Lanes each adding 2 KB of docs on the real files still generate llms-full', t => {
   const fixture = mkdtempSync(join(tmpdir(), 'forge-llm-lanes-'));
   t.after(() => rmSync(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  for (const path of [...packageDocuments, 'README.md', 'skills/forge-agent/SKILL.md']) {
+  for (const path of [
+    ...packageDocuments,
+    ...packageDocumentData,
+    'README.md',
+    'skills/forge-agent/SKILL.md',
+  ]) {
     mkdirSync(dirname(join(fixture, path)), { recursive: true });
     writeFileSync(join(fixture, path), read(path));
   }

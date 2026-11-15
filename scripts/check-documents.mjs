@@ -3,10 +3,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { packageDocuments } from './package-documents.mjs';
+import { packageDocuments, packageDocumentData } from './package-documents.mjs';
 import { componentManifestSha256, backendLicenseSha256 } from './selfhost-notices.mjs';
 const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
-for (const path of packageDocuments) {
+for (const path of [...packageDocuments, ...packageDocumentData]) {
   assert.ok(existsSync(path), `Missing packaged document: ${path}`);
   assert.ok(
     manifest.files.some(entry => path === entry || path.startsWith(`${entry}/`)),
@@ -22,6 +22,7 @@ assert.equal(hash(readFileSync('docs/vendor-notices/convex-backend-LICENSE.md'))
 assert.equal(hash(readFileSync(`${root}/PARTIAL.md`)), components.disclosure.sha256);
 const expected = new Set([
   ...packageDocuments,
+  ...packageDocumentData,
   'docs/vendor-notices/convex-backend-LICENSE.md',
   `${root}/manifest.json`,
   `${root}/PARTIAL.md`,

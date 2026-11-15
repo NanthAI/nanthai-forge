@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 export function readPackageDocuments(
   directory = fileURLToPath(new URL('./package-documents/', import.meta.url)),
+  { data = false } = {},
 ) {
   const entries = [];
   function walk(path) {
@@ -21,6 +22,10 @@ export function readPackageDocuments(
           .replace(/\.json$/, '.md')}`;
         assert.equal(manifest.path, expected, `Document manifest path must match its filename: ${file}`);
         assert.ok(
+          manifest.data === undefined || manifest.data === true,
+          `Invalid companion data flag: ${file}`,
+        );
+        assert.ok(
           Number.isSafeInteger(manifest.order) && manifest.order >= 0,
           `Invalid document order: ${file}`,
         );
@@ -31,7 +36,10 @@ export function readPackageDocuments(
   walk(directory);
   return entries
     .sort((a, b) => a.order - b.order || a.path.localeCompare(b.path, 'en'))
-    .map(entry => entry.path);
+    .filter(entry => !data || entry.data)
+    .map(entry => (data ? entry.path.replace(/\.md$/, '.json') : entry.path));
 }
 
 export const packageDocuments = readPackageDocuments();
+// A data companion is opt-in and must share its public document's exact stem.
+export const packageDocumentData = readPackageDocuments(undefined, { data: true });

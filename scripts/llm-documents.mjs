@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { packageDocuments } from './package-documents.mjs';
+import { packageDocuments, packageDocumentData } from './package-documents.mjs';
 import { AGENT_DEFAULTS, agentDefaultLines } from './agent-default-lines.mjs';
 
 const repository = 'https://github.com/NanthAI/nanthai-forge/blob/main';
@@ -145,5 +145,6 @@ export function llmDocuments(root) {
     { fileName: 'llms.txt', source: llms },
     { fileName: 'llms-full.txt', source: text },
     ...documents.map(doc => ({ fileName: doc.path, source: doc.source })),
+    ...packageDocumentData.map(path => ({ fileName: path, source: readFileSync(join(root, path), 'utf8') })),
   ];
 }

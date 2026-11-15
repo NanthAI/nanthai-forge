@@ -40,3 +40,13 @@ test('a document manifest cannot redirect its filename to private or different s
   put('public.json', { path: 'docs/public.md', order: -1 });
   assert.throws(() => readPackageDocuments(directory), /Invalid document order/);
 });
+
+test('public data companions require an explicit flag and the document stem', t => {
+  const { directory, put } = fixture(t);
+  put('research/results.json', { path: 'docs/research/results.md', order: 0, data: true });
+  put('other.json', { path: 'docs/other.md', order: 1 });
+  assert.deepEqual(readPackageDocuments(directory, { data: true }), ['docs/research/results.json']);
+  assert.deepEqual(readPackageDocuments(directory), ['docs/research/results.md', 'docs/other.md']);
+  put('research/results.json', { path: 'docs/research/results.md', order: 0, data: '../private.json' });
+  assert.throws(() => readPackageDocuments(directory, { data: true }), /Invalid companion data flag/);
+});
