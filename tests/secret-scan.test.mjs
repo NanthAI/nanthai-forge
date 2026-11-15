@@ -383,9 +383,26 @@ test('secret assignments cover hex, lowercase, short mixed values and deployment
 });
 
 test('one MiB repeated secret names consumes bounded assignment scanning work', () => {
-  const text = 'tokentoken'.repeat(104_858);
-  const work = { assignmentCharacters: 0 };
-  assert.deepEqual(scanSecretText('large.txt', text, work), []);
-  assert(work.assignmentCharacters <= text.length * 2);
-  assert(work.assignmentCharacters > 0, 'the scanner reports its bounded work');
+  for (const text of ['tokentoken'.repeat(104_858), `${'token'.repeat(1638)}\n`.repeat(128)]) {
+    const work = { assignmentCharacters: 0 };
+    assert.deepEqual(scanSecretText('large.txt', text, work), []);
+    assert(work.assignmentCharacters <= text.length * 512);
+    assert(work.assignmentCharacters > 0, 'every assignment probe has a bounded work charge');
+  }
+});
+
+test('Convex deployment, preview-project and project-key prefixes are scanned outside secret assignments', () => {
+  for (const prefix of [
+    'prod:synthetic',
+    'dev:synthetic',
+    'preview:synthetic',
+    'preview:team:project',
+    'project:synthetic',
+  ]) {
+    const value = `${prefix}|${fake.random}`;
+    assert.deepEqual(
+      scanSecretText('config.env', `CONVEX_DEPLOY_KEY=${value}`).map(f => f.kind),
+      ['convex-deploy-key'],
+    );
+  }
 });

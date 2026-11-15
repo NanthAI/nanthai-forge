@@ -66,14 +66,15 @@ const patterns: { kind: string; pattern: RegExp }[] = [
   { kind: 'openai-api-key', pattern: /\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{40,}\b/g },
   {
     kind: 'convex-deploy-key',
-    pattern: /\b(?:prod|dev|preview):[A-Za-z0-9_-]{1,128}\|[A-Za-z0-9_-]{24,}\b/g,
+    pattern:
+      /\b(?:prod|dev|preview|project|team):[A-Za-z0-9_-]{1,128}(?::[A-Za-z0-9_-]{1,128})?\|[A-Za-z0-9_-]{24,}\b/g,
   },
   { kind: 'sendgrid-token', pattern: /\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\b/g },
   { kind: 'npm-token', pattern: /\bnpm_[A-Za-z0-9]{36}\b/g },
 ];
 // A secret-named assignment whose value looks random: `API_KEY=…`, `token: "…"`.
 const assignment =
-  /(?:secret|token|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|credential)[A-Za-z0-9_-]{0,64}['"]?[ \t]{0,64}[:=][ \t]{0,64}['"`]?([A-Za-z0-9+/_=.:|-]{24,})/gi;
+  /(?:secret|token|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|credential)[A-Za-z0-9_-]{0,64}['"]?[ \t]{0,64}[:=][ \t]{0,64}['"`]?([A-Za-z0-9+/_=.:|-]{24,})/iy;
 
 /** Shannon entropy in bits per character. */
 export function entropy(text: string) {
@@ -172,9 +173,23 @@ export function scanSecretText(path: string, text: string, work?: { assignmentCh
   for (let start = 0; start < text.length;) {
     const newline = text.indexOf('\n', start);
     const end = newline === -1 ? text.length : newline;
-    if (work) work.assignmentCharacters += end - start + (newline === -1 ? 0 : 1);
-    if (end - start <= 8192)
-      for (const match of text.slice(start, end).matchAll(assignment)) {
+    if (end - start > 8192) {
+      if (work) work.assignmentCharacters += end - start;
+    } else {
+      const line = text.slice(start, end);
+      for (let cursor = 0; cursor < line.length;) {
+        assignment.lastIndex = cursor;
+        const match = assignment.exec(line);
+        // Sticky matching attempts only this position: a failed name/spacing/value
+        // prefix has a 512-character conservative work bound, including fixed alternatives,
+        // the 64-character name/spacing bounds and at most 23 value characters.
+        // A success consumes its whole value once, then the cursor skips it.
+        if (work) work.assignmentCharacters += match ? match[0].length : 512;
+        if (!match) {
+          cursor++;
+          continue;
+        }
+        cursor = assignment.lastIndex;
         const value = match[1]!,
           from = start + match.index,
           index = from + match[0].length - value.length;
@@ -187,6 +202,7 @@ export function scanSecretText(path: string, text: string, work?: { assignmentCh
           continue;
         add('high-entropy-secret', value, index);
       }
+    }
     start = end + 1;
   }
   if (!found.length) return [];

@@ -126,7 +126,7 @@ export async function chargeStorage(
   else await ctx.db.insert('projectStorageUsage', { projectId: project._id, shard, ...next });
 }
 
-/** Work limits use the existing 300/member/day write envelope and 50 GiB / 100 MiB =
+/** Work limits use the existing 300 board posts/member/day envelope and 50 GiB / 100 MiB =
  * 512 object slots: min(300, 512) = 300 fresh requests of each kind per UTC day.
  * At the $0.002/landing serving target that is $0.60 per class/day in target units,
  * not a provider billing cap. CI runtime remains subject to its configured watchdog. */
@@ -153,4 +153,21 @@ export function nextMemberWorkBudget(
     );
   next[kind]++;
   return next;
+}
+
+/** One membership lookup and one fixed-size patch per fresh member operation, in its
+ * existing mutation. Owner work adds no calls, reads or writes. No rows or timers accrue. */
+export async function chargeMemberWork(
+  ctx: MutationCtx,
+  project: Pick<Doc<'hostedProjects'>, '_id' | 'owner'>,
+  actor: string,
+  kind: 'checks' | 'composes' | 'submissions',
+) {
+  if (actor === project.owner) return;
+  const member = await ctx.db
+    .query('projectContributors')
+    .withIndex('by_project_and_contributor', q => q.eq('projectId', project._id).eq('contributor', actor))
+    .unique();
+  if (!member) throw new ForgeError('PROJECT_UNAVAILABLE', 'Current contributor membership is required.');
+  await ctx.db.patch(member._id, { workBudget: nextMemberWorkBudget(member.workBudget, kind) });
 }

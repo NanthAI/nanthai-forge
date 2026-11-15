@@ -310,7 +310,13 @@ export async function enqueueHostedLanding(
   },
 ) {
   const project = await activeProject(ctx, input.projectId, actor.id);
-  const reused = await reuseHostedLanding(ctx, { projectId: input.projectId, actor: actor.id, request });
+  const reused = await reuseHostedLanding(ctx, {
+    projectId: input.projectId,
+    actor: actor.id,
+    request,
+    project,
+    workCharged: Boolean(reserved),
+  });
   if (reused.state) return reused.state;
   const expected = {
     authorityEpoch: request.authorityEpoch,
@@ -319,6 +325,7 @@ export async function enqueueHostedLanding(
   };
   const payload = { kind: 'hosted-landing', request, actorKind: actor.kind };
   const prepared = await beginHostedOperation(ctx, {
+    ...(reserved ? {} : { workKind: 'submissions' as const }),
     projectId: input.projectId,
     actor: actor.id,
     payload,

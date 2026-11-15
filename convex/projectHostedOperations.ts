@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { chargeMemberWork } from './abuseLimits';
 import { expandOperationReceipt } from '../src/compact-operation-receipt';
 import { digest } from '../src/state/hash';
 import { wakeJournal, journalGraceMs } from './projectJournalWake';
@@ -107,6 +108,7 @@ export async function beginHostedOperation(
     expectedAuthority?: SourceAuthority;
     /** Owner command counted as an intervention once it completes. */
     metricAction?: MetricMutationAction;
+    workKind?: 'checks' | 'composes' | 'submissions';
   },
 ) {
   const project = await activeProject(ctx, input.projectId, input.actor);
@@ -132,6 +134,7 @@ export async function beginHostedOperation(
     },
   );
   if (!old) {
+    if (input.workKind) await chargeMemberWork(ctx, project, input.actor, input.workKind);
     const metricAction =
       input.metricAction ??
       ((input.payload as { kind?: string }).kind === 'hosted-landing-cancel'

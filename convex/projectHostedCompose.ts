@@ -62,6 +62,7 @@ export const prepare = mutation({
         receiptId: request.expectedMain.receiptId,
       };
       const prepared = await beginHostedOperation(ctx, {
+        workKind: 'composes',
         ...auth,
         payload: request,
         request: { schema: 1, ...auth, expected, payloadHash: hostedPayloadHash(request, expected) },

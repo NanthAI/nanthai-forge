@@ -130,6 +130,7 @@ export async function enqueueHostedCheck(
       head: request.expectedHead,
     },
     payload: request,
+    workKind: 'checks',
   });
   if (prepared.replayed)
     return (
@@ -207,7 +208,7 @@ export async function enqueueHostedCheck(
   const loaded = prepared.project;
   // A project that predates the derived entry list gets it here once, before the gate reads it.
   const project =
-    loaded.checkEntries === undefined
+    loaded.checkEntries === undefined || loaded.landingCheckId === undefined
       ? { ...loaded, checkEntries: await refreshCheckEntries(ctx, input.projectId) }
       : loaded;
   // Older controller/provider clients strictly parse run documents. Only the

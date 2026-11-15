@@ -63,12 +63,14 @@ export async function beginCheckOperation(
     operationId: string;
     expected: HostedExpectedPins;
     payload: unknown;
+    workKind?: 'checks';
   },
 ) {
   return beginHostedOperation(ctx, {
     projectId: input.projectId,
     actor: input.actor,
     payload: input.payload,
+    ...(input.workKind ? { workKind: input.workKind } : {}),
     request: {
       schema: 1,
       projectId: input.projectId,

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { chargeMemberWork } from './abuseLimits';
 import { landingPriority } from './projectHostedLandingOrder';
 import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
 import { desiredWatchdogMs } from '../src/hosted-landing-stall';
@@ -103,6 +104,8 @@ export async function submitDesiredLanding(
     invariant(canonical || desired, 'SOURCE_UNAVAILABLE', 'Original desired landing is unavailable.');
     return canonical?.value ?? desired!.value;
   }
+  // Fresh goals and fresh aliases charge once; canonical admission retains this reservation.
+  await chargeMemberWork(ctx, project, actor.id, 'submissions');
   const source = await loadCompose(ctx, {
     projectId: input.projectId,
     actor: actor.id,

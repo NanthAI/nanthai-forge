@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { requireLandingCheck } from './projectHostedCheckEntries';
 import { earlyPredecessor } from './projectHostedEarlyResolution';
 import { candidateOwnerInputs } from './projectHostedProvenance';
 import { fixGate } from '../src/culprit-bisect';
@@ -187,6 +188,8 @@ export async function pinLandingAttempt(
       };
     }
   }
+  const selectedCheck = check?.checkId ?? (r.check?.kind === 'request' ? r.check.checkId : undefined);
+  if (selectedCheck) await requireLandingCheck(ctx, project, input.actor, selectedCheck);
   input.intent?.(candidate.intentId);
   const policy = effectivePolicy(project);
   const { parentAttemptId, number } = input;

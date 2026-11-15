@@ -6,6 +6,10 @@ apply at landing. Stalled-landing help follows exact receipt repair commands,
 and current web command guides use hosted clone, configure-check and checkpoint
 recovery paths instead of retired native CLI commands.
 
+Solo and shared-batch publication use the server-selected `verify` or sole check.
+Contributor check, compose and submission counters reset on demand per UTC day;
+owner operations and idle projects add no budget I/O.
+
 Landing acceptance applies check and review policy to contributors on private and
 public projects. Direct Ready requests have bounded order and recovery deadlines;
 reservations require a finish driver and stop on stalls.

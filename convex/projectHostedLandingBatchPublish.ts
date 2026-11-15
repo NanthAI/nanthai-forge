@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { requireLandingCheck } from './projectHostedCheckEntries';
 import { earlyPredecessor } from './projectHostedEarlyResolution';
 import { cancelStaleLandingChecks } from './projectHostedLandingStaleChecks';
 import { settleBatchConflicts } from './projectHostedLandingCohortConflicts';
@@ -287,6 +288,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
     authorityEpoch: attempt.authorityEpoch,
     ...attempt.check,
   });
+  await requireLandingCheck(ctx, project, attempt.actor, run.check.id);
   const scoped = scopedRecheckPairs(run.gate) !== null;
   invariant(
     run.candidate.digest === candidateRow.digest && (run.gate?.mode === 'full' || scoped),

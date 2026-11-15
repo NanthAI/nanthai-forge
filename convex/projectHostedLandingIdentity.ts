@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx, QueryCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
+import { chargeMemberWork } from './abuseLimits';
 import { replaceOwnerlessLanding } from './projectHostedLaneFinish';
 import { readHostedRecord } from './projectHostedRecords';
 import { loadLanding } from './projectHostedLandingStore';
@@ -25,7 +26,14 @@ export const landingAlias = (
  * only canonical metadata roots, never source pages or the owner's writer lock. */
 export async function reuseHostedLanding(
   ctx: MutationCtx,
-  input: { projectId: Id<'hostedProjects'>; actor: string; request: HostedLandingRequest },
+  input: {
+    projectId: Id<'hostedProjects'>;
+    actor: string;
+    request: HostedLandingRequest;
+    project: Doc<'hostedProjects'>;
+    /** Preparing goals already charged their submission before source completion. */
+    workCharged?: boolean;
+  },
 ) {
   const identity = { projectId: input.projectId, actor: input.actor, operationId: input.request.operationId };
   const requestHash = digest(canonicalPayload(input.request));
@@ -97,6 +105,7 @@ export async function reuseHostedLanding(
       supersedes: state.id,
       retryReason: input.request.retryReason ?? ('other' as const),
     };
+  if (!input.workCharged) await chargeMemberWork(ctx, input.project, input.actor, 'submissions');
   await ctx.db.insert('projectHostedLandingAliases', {
     ...identity,
     requestHash,

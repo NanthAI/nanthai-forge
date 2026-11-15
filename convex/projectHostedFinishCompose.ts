@@ -184,6 +184,7 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
   const request = { ...value.source, operationId: auth.operationId, expectedMain: pending.main };
   const expected = { authorityEpoch: request.authorityEpoch, ...request.expectedMain };
   const prepared = await beginHostedOperation(ctx, {
+    workKind: 'composes',
     ...auth,
     payload: request,
     request: { schema: 1, ...auth, expected, payloadHash: hostedPayloadHash(request, expected) },

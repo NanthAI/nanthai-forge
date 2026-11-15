@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { MutationCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { MutationCtx, QueryCtx } from './_generated/server';
+import { invariant } from '../src/errors';
+import type { AcceptanceActor } from '../src/autonomy-policy';
+import type { Doc, Id } from './_generated/dataModel';
 import { definedCheckEntryPaths } from '../src/public-governance';
 import { checkSchema } from '../src/work-types';
 import { ciStatusEntryPaths } from '../src/ci-status';
@@ -32,7 +34,11 @@ export async function refreshCheckEntries(ctx: MutationCtx, projectId: Id<'hoste
   // Declared global-risk globs stay apart from the entries: they are risk for landing order, not
   // paths that need owner approval.
   const globalRiskPaths = [...new Set(checks.flatMap(check => check.globalRiskPaths ?? []))].sort();
-  await ctx.db.patch(projectId, { checkEntries: entries, globalRiskPaths });
+  await ctx.db.patch(projectId, {
+    checkEntries: entries,
+    globalRiskPaths,
+    landingCheckId: landingCheckSelection(checks),
+  });
   return entries;
 }
 
@@ -40,4 +46,28 @@ export async function refreshCheckEntries(ctx: MutationCtx, projectId: Id<'hoste
 export function landingCheckSelection(checks: { id: string; name: string }[]) {
   const verify = checks.filter(check => check.name === 'verify').sort((a, b) => a.id.localeCompare(b.id));
   return verify[0]?.id ?? (checks.length === 1 ? checks[0]!.id : null);
+}
+
+/** Final publication rechecks the selection from the current project row, already loaded.
+ * Legacy rows alone need a bounded indexed definition window until the next definition/check save. */
+export async function requireLandingCheck(
+  ctx: MutationCtx | QueryCtx,
+  project: Pick<Doc<'hostedProjects'>, '_id' | 'owner' | 'landingCheckId'>,
+  actor: AcceptanceActor,
+  checkId: string,
+) {
+  if (actor.kind === 'person' && actor.id === project.owner) return;
+  let selected = project.landingCheckId;
+  if (selected === undefined) {
+    const rows = await ctx.db
+      .query('projectHostedCheckSettings')
+      .withIndex('by_project_and_kind', q => q.eq('projectId', project._id).eq('kind', 'definition'))
+      .take(maxDefinitions);
+    selected = landingCheckSelection(rows.map(row => checkSchema.parse(JSON.parse(row.value))));
+  }
+  invariant(
+    selected !== null && selected === checkId,
+    'CHECK_NOT_PASSED',
+    'Landing requires the project verify check, or its sole defined check.',
+  );
 }

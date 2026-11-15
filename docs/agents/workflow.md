@@ -722,6 +722,11 @@ check. The original run identity and evidence are retained. Prioritization follo
 
 ### Landing queue
 
+The server gates publication on `verify`, or the only definition, regardless of
+the check selected by a submitter. The owner person may explicitly review another
+defined check. Contributor fresh checks, composes and submissions each have a
+300-operation UTC-day budget; operation-id replays do not consume another unit.
+
 Direct submissions without a finish driver hold queue order only when checked, for
 at most 60 seconds after settlement begins. If they are not accepted, the existing
 60-minute progress deadline ends them with `LANDING_STALLED`; submit the same Lane
