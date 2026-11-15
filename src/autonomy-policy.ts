@@ -41,6 +41,14 @@ export const autonomyPolicySchema = z.object({
   agentDefaults: agentDefaultsSchema.optional(),
   preset: z.enum(['supervised', 'trusted', 'autonomous', 'custom']),
   acceptance: z.object({
+    /** Unchecked person acceptance; absent means owner only. Reader-first rollout. */
+    withoutCheck: z
+      .object({
+        mode: z.enum(['owner', 'selected', 'writers']),
+        people: z.array(z.string().min(1)),
+        teams: z.array(z.string().min(1)),
+      })
+      .optional(),
     /** Optional evidence only; absent is off. */
     proofOnLanding: z.boolean().optional(),
     mode: z.enum(['review', 'auto-on-pass']),
@@ -196,6 +204,7 @@ export const policyWriteObject = z
     expectedPolicy: autonomyPolicySchema.optional(),
     preset: autonomyPolicySchema.shape.preset.optional(),
     acceptance: autonomyPolicySchema.shape.acceptance
+      .omit({ withoutCheck: true })
       .partial()
       .extend({
         // Stored automatic policies remain readable above; edits expose only enabled/off.

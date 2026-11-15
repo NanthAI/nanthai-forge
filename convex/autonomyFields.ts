@@ -60,6 +60,13 @@ export const autonomyPolicy = v.object({
     v.literal('custom'),
   ),
   acceptance: v.object({
+    withoutCheck: v.optional(
+      v.object({
+        mode: v.union(v.literal('owner'), v.literal('selected'), v.literal('writers')),
+        people: v.array(v.string()),
+        teams: v.array(v.string()),
+      }),
+    ),
     proofOnLanding: v.optional(v.boolean()),
     mode: v.union(v.literal('review'), v.literal('auto-on-pass')),
     gate: v.optional(v.union(v.literal('full'), v.literal('contract'))),
