@@ -293,3 +293,19 @@ test('every generated hosted action reaches dispatch validation instead of an un
   }
   assert.equal(s.calls.length, 0, 'invalid advertised commands must not start work');
 });
+
+// c24edcb2: a stalled live operation must retain its repair identity; generic advice cannot replace it.
+test('stalled landing guidance follows exact recovery, and otherwise reads the queue without resubmitting', () => {
+  const root = '/synthetic/project';
+  const operationId = randomUUID();
+  const repair = `nforge agent ${root} landing '{"operationId":"${operationId}"}'`;
+  for (const surface of ['cli', 'mcp'])
+    assert.equal(teach('LANDING_STALLED', { root, surface }, { command: repair }).next, repair);
+  assert.equal(teach('LANDING_STALLED', { root }).next, `nforge agent ${root} queue '{}'`);
+  for (const topic of ['wait', 'queue']) {
+    const stalled = helpTopicText(topic).split('LANDING_STALLED:')[1].split('\n')[0];
+    assert.match(stalled, /repair command/);
+    assert.match(stalled, /do not resubmit/i);
+    assert.doesNotMatch(stalled, /land --save again/);
+  }
+});

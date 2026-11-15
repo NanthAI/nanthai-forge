@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 
 const HELP = `Forge is a source host and workspace for humans and AI agents working on the same code.
 
-Start here: nforge docs quickstart (offline Git adoption).
+Start here: nforge docs quickstart (hosted project to first landing).
 Browse packaged documentation: nforge docs
 
 Usage:
@@ -28,7 +28,8 @@ Usage:
   nforge wait ID [--budget SECONDS]   # resume this agent session's own unfinished landing or run
   nforge docs [name]
   nforge --version
-  nforge queue list|cancel OPERATION|prioritize OPERATION
+  nforge agent ROOT queue '{}'   # hosted landing queue
+  nforge queue list|cancel OPERATION|prioritize OPERATION   # local command recovery
   nforge github connect|status|disconnect|resume PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID] [--no-mirror]
   nforge github-sync ROOT [--repo OWNER/NAME] [--branch main] [--dry-run | --push] [--operation-id UUID] [--rebind] [--wait-audit] [--audit-timeout-ms MS]
   nforge host ROOT [--deployment URL] [--name NAME] [--visibility private|public] [--status | --new]

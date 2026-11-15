@@ -237,7 +237,9 @@ export async function hostedCheckSettings(query: HostedQuery, capabilities: Host
     query('projectAutonomy:read', {}),
   ]);
   const policy = autonomyPolicySchema.parse(read);
-  const review = reviewReason(policy, { kind: 'agent', id: capabilities.actor }, null);
+  // This is a project-settings read, not an assessment of a particular Candidate.
+  // Unknown paths must not turn conditional protection into a project-wide hold.
+  const review = reviewReason(policy, { kind: 'agent', id: capabilities.actor }, []);
   const selected =
     definitions.find(d => d.check.name === 'verify') ??
     (definitions.length === 1 ? definitions[0] : undefined);

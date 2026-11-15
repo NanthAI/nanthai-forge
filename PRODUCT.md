@@ -8,7 +8,7 @@ web
 Practitioner developers who run several coding agents (Claude Code, Codex CLI, others) and a few people against one codebase at the same time, including Forge developing Forge. They open Forge between other work to answer three questions: who is working, what is changing, and what needs me. They are experts in their code and their tools; they do not need Forge explained to them twice.
 
 ## Product Purpose
-NanthAi Forge is the workspace where people and coding agents change the same source safely in parallel. Each person or agent works in an isolated Lane; saves are combined into exact Views; a check runs on exactly that code; accepted work lands on `main`. Success: the owner delegates more to agents because the work feels in good hands, and comes back to Forge because it tells them, in seconds, the one or two things that need them.
+NanthAi Forge is the workspace where people and coding agents change the same source safely in parallel. Each person or agent works in an isolated Lane; saves are combined into exact Candidates; a check runs on exactly that code; checked work lands on `main`. Success: the owner delegates more to agents because the work feels in good hands, and comes back to Forge because it tells them, in seconds, the one or two things that need them.
 
 Owner goal: "a useful/usable website with a nice design, without clutter and AI-isms. Something people are drawn back to."
 
@@ -18,15 +18,19 @@ Forge never surprises you and never loses anything. It is a calm shift lead, not
 ## Operating Context
 - Execution stays on the user's machines (`nforge host .`); hosted projects store source and Work. No managed runtime or agent-efficiency gain is claimed.
 - Coding agents receive briefings/prompts copied from Forge ("Hand to an agent") and report back through presence and saves.
-- GitHub import and publication are compatibility boundaries, not the core.
-- Surfaces (signed in): Home (projects across the account), then per project Now (with Now › Activity), Work (Intents · Lanes · Views · Planning), Code (files, graph secondary), Settings (left nav: Project / Admin / You). Public: landing with a dry-run preview of a public repo.
+- GitHub import and the GitHub mirror are compatibility boundaries, not the core.
+- Surfaces (signed in): Home (projects across the account), then per project Now (with Now › Activity), Work (Items · Lanes · Candidates · Planning), Code (files, graph secondary), Settings (left nav: Project / Admin / You). Public: landing with a dry-run preview of a public repo.
 
 ## Capabilities and Constraints
-- Vocabulary is fixed and must be used verbatim: **Intent** (an outcome), **Lane** (an isolated line of work by one person or agent), **save**, **View** (an exact combination of Lane saves), **Check**, **main**, **accept**, **hand to**, **stopped**, **needs you**, **seen**. Owner decision: keep "Intent" and "View".
-- Banned words in product UI: approve, merge request, pipeline, job, bot, assistant, AI (say "agent" and name it), sync (say "update from main"), successfully, seamlessly, effortlessly, powerful. Hash, receipt, operation and View ids appear only inside "Exact record".
-- Journey rail has four fixed stops: edited · saved · checked · accepted. It is a position, never a percentage.
-- Autonomy presets on a "You decide ↔ Agents decide" scale; every automatic action is shown with an `auto` tag and Undo.
-- Lane/Intent loading must avoid layout shift with reserved space.
+- Vocabulary is fixed: **Item** is planned work everywhere people look. **Intent** is internal only. **Issue** survives only as a search alias in help ("Items, like GitHub issues"), not as a product name. Other terms: **Lane** (one person's or agent's isolated line of work), **save**, **Candidate** (an exact combination of Lane saves), **Check**, **main**, **hand to**, **stopped**, **needs you**, **seen**. Use Candidate, not View.
+- **Approve** is a person's decision on something held. **Accept** is the system's result when a change passes. Retire "grant" and "apply" as names for the owner's yes. **Land** is the event people see in the CLI, web and tagline; **Accepted** appears only as a state inside a receipt.
+- Item statuses are **Proposed, Planned, In motion, Done, Abandoned**. Abandoned carries a reason: **won't do**, **duplicate** or **superseded**, matching the Lane's existing abandon verb.
+- Settings has two areas: **People & access** (who decides) and **Landing & checks** (how landings are checked). **Automatic** has one meaning: Forge picks from the project's own data.
+- Roles are **owner / write / read**, matching GitHub. Do not add Maintainer. The GitHub link is the **mirror**.
+- Banned words in product UI: merge request, pipeline, job, bot, assistant, AI (say "agent" and name it), sync (say "update from main"), successfully, seamlessly, effortlessly, powerful. Hash, receipt, operation and Candidate ids appear only inside "Exact record".
+- Journey rail has four fixed stops: edited · saved · checked · landed. It is a position, never a percentage.
+- Autonomy presets on a "You decide ↔ Agents decide" scale; actions Forge takes are shown with an `auto` tag and Undo.
+- Lane/Item loading must avoid layout shift with reserved space.
 
 ## Brand Commitments
 - Parent brand NanthAi: keep the NanthAi monogram as the company mark; inside the product the Forge F mark is used (stem = main, two arms = landed Lanes, crossings warm `#ffb347` and teal `#23cbff`). Top-left lockup "NANTHAI / Forge".
@@ -37,7 +41,7 @@ Forge never surprises you and never loses anything. It is a calm shift lead, not
 - Design direction: `DESIGN.md` records the personality, tokens and component rules; `web/src/style.css` contains the shared implementation.
 
 ## Evidence on Hand
-- Real dogfooding data: the NanthAi Forge hosted project (Forge building itself), with real Lanes, Views, checks and agent presence.
+- Real dogfooding data: the NanthAi Forge hosted project (Forge building itself), with real Lanes, Candidates, checks and agent presence.
 - No customers, testimonials, benchmarks or pricing exist. Do not fabricate them. A public benchmark arm is planned and must be published honestly when it exists.
 
 ## Product Principles

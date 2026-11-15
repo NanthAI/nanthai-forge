@@ -504,23 +504,16 @@ export default function HostedWork({
       )}
       <details>
         <summary>Restore instructions</summary>
-        {handoffObjects ? (
-          <p>
-            Download the matching Work journal and pull request, then run{' '}
-            <code>nforge exchange NEW_DIRECTORY pull --command-file forge-pull.json</code>.
-          </p>
-        ) : (
-          <p>
-            Restore both into a new local folder:{' '}
-            <code>
-              nforge {snapshot.sourceKind === 'native' ? 'restore-native' : 'restore-work'} ARCHIVE.tar.gz
-              NEW_DIRECTORY --journal HOSTED_WORK.json
-            </code>
-            . Edit and run checks locally, then export{' '}
-            {owner ? 'and return the new checkpoint' : 'a proposal archive'}. No automatic synchronization
-            runs.
-          </p>
-        )}
+        <p>
+          For current work, run{' '}
+          <code>
+            nforge clone {projectId} NEW_DIRECTORY --deployment {client.url}
+          </code>
+          , then start a Lane with{' '}
+          <code>{`nforge agent ROOT start '{"outcome":"Describe the change"}'`}</code>. For this retained
+          checkpoint, download its recovery request and matching Work journal below, then run{' '}
+          <code>nforge exchange NEW_DIRECTORY restore --command-file forge-restore.json</code>.
+        </p>
         {matchingPair && (
           <div className="item-provenance">
             <p>Matching pair · Work revision {matchingPair.revision}</p>

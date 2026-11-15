@@ -285,7 +285,7 @@ clone/fetch suites and the three contribution wire cases retain protocol coverag
 `workGit` gives Git inputs over 32 KiB through a private temporary file descriptor, preserving the exact bytes and removing the file afterwards. This avoids synchronous child-process pipe stalls for large inputs. History fixtures use the same file-descriptor approach for multi-megabyte synthetic commits.
 
 ```sh
-nforge x ROOT define-check '{"name":"verify","executable":"/abs/node","args":["scripts/forge-check.mjs"]}'
+nforge x ROOT configure-check '{"command":{"name":"verify","executable":"/abs/node","args":["scripts/forge-check.mjs"],"environmentLabel":"clean"}}'
 ```
 
 The large Work-records round-trip test uses a 300-second hang guard so concurrent full checks can complete its unchanged size and restoration assertions. This is not a performance target.

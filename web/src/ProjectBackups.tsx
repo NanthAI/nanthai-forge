@@ -95,18 +95,12 @@ function History({
                 </details>
                 <div className="import-actions">
                   {backup.status === 'stored' ? (
-                    backup.transport === 'objects' ? (
-                      <>
-                        <ExchangeHandoff projectId={projectId} backupId={backup.id} transport="objects" />
-                        <button disabled={busy} onClick={() => operate(backup, 'download')}>
-                          Download source and Work
-                        </button>
-                      </>
-                    ) : (
+                    <>
+                      <ExchangeHandoff projectId={projectId} backupId={backup.id} />
                       <button disabled={busy} onClick={() => operate(backup, 'download')}>
                         Download source and Work
                       </button>
-                    )
+                    </>
                   ) : (
                     !readOnly && (
                       <>
@@ -427,22 +421,15 @@ export default function ProjectBackups({ explore }: { explore?: () => void }) {
         </>
       )}
       <details className="archive-guide">
-        <summary>Archive contents &amp; export</summary>
+        <summary>Archive contents &amp; recovery</summary>
         <p>
-          Export in local Work, or run{' '}
-          <code>{'nforge work ROOT \'{"action":"export-work","archive":true}\' WORK_REVISION'}</code>. Select
-          the resulting <code>.tar.gz</code> file.
+          For current hosted source, run <code>nforge clone PROJECT_ID NEW_DIRECTORY</code>. Existing
+          checkpoints can be downloaded under Stored checkpoints.
         </p>
         <p>
-          Uncommitted files and ignored credentials are excluded; tracked history and retained logs may
-          contain private data. Source pins and counts are archive-supplied metadata; local restore validates
-          source and evidence.
-        </p>
-        <p>
-          Restore a downloaded archive into a new folder:{' '}
-          <code>nforge restore-work ARCHIVE.tar.gz NEW_DIRECTORY</code> for Git, or{' '}
-          <code>nforge restore-native ARCHIVE.tar.gz NEW_DIRECTORY</code> for native source. Existing folders
-          remain unchanged; recorded commands do not restart.
+          An archive contains its recorded source and Work. Its source pins and counts describe that
+          checkpoint, which may differ from current main. Download its recovery request below to open the
+          retained checkpoint in a new folder.
         </p>
       </details>
       {projectId && (
@@ -522,10 +509,8 @@ export default function ProjectBackups({ explore }: { explore?: () => void }) {
           }}
           importSource={() => {
             setCreatedProject(null);
-            const url = routeUrlState();
-            url.searchParams.set('projectTab', 'backups');
-            history.pushState(null, '', url);
-            dispatchEvent(new PopStateEvent('popstate'));
+            chooseProject('');
+            showNewProject(true);
           }}
         />
       )}

@@ -281,7 +281,7 @@ Checks run the exact Candidate in a fresh workspace with a **clean environment**
 Use per-check declarations for required parent settings:
 
 ```sh
-nforge x ROOT define-check '{"name":"integration","executable":"node","args":["tests/integration.mjs"],"env":["SERVICE_URL"],"credentials":["SERVICE_TOKEN"]}'
+nforge x ROOT configure-check '{"command":{"name":"integration","executable":"node","args":["tests/integration.mjs"],"env":["SERVICE_URL"],"credentials":["SERVICE_TOKEN"],"environmentLabel":"clean"}}'
 ```
 
 `env` and `credentials` contain environment variable names, never values. Both are explicit passthrough; the latter identifies credentials separately. They change the definition digest and appear in check definitions and receipts. They do not inject Secret Objects. Omitted variables are absent; failed runs suggest omitted names that may need passthrough. Values are not retained by the runner, but commands can print them into logs. See [security](security.md#clean-check-environments) for the complete allowlist and filesystem limitations. A clean environment is not an OS sandbox.
@@ -289,7 +289,7 @@ nforge x ROOT define-check '{"name":"integration","executable":"node","args":["t
 ### Check command scope
 
 Forge's own recipe (`node scripts/forge-check.mjs`) selects and shards test files itself. Any other
-configured command (`define-check` locally, `configure-check` hosted) runs in full, in one job, unless
+configured command (`x configure-check {command}`) runs in full, in one job, unless
 its check declares more. Either way it receives the changed paths:
 
 - `FORGE_CHECK_CHANGES`: path of a JSON file outside the checkout, removed after the command:
@@ -335,7 +335,7 @@ its check declares more. Either way it receives the changed paths:
 Declare the contract with `selection` in the check definition; it changes the definition digest:
 
 ```sh
-nforge x ROOT define-check '{"name":"ci","executable":"bash","args":["ci/check.sh"],"selection":{"scope":"changed-paths","shards":4}}'
+nforge x ROOT configure-check '{"command":{"name":"ci","executable":"bash","args":["ci/check.sh"],"selection":{"scope":"changed-paths","shards":4},"environmentLabel":"clean"}}'
 ```
 
 - `"scope":"changed-paths"`: the command reads the file and may scope. Forge sets `mode: "scoped"` only
@@ -505,9 +505,19 @@ and save hosted Lanes; they do not reconcile a separate owner's metadata before 
 
 ## Contributor proposals
 
-The project owner adds a contributor by account ID or email. The contributor opens the project from "Shared with you", creates an Intent, downloads the matching journal and source archive as a pair, and restores them locally. They edit, compose a clean Candidate, export the archive and upload it as a proposal from the Proposals tab.
+Project members with write access contribute through hosted clones and Lanes,
+checks and landing. Stored contributor proposals retain their source, original
+actor and supplied check claims; those claims are provenance, not owner check evidence.
+A proposal is visible to everyone who can read the project and moves no Channel.
 
-A proposal is visible, including its contents, to everyone who can read the project, like a pull request. It moves nothing. The owner downloads it and runs `import-native-contribution` with the archive path, hash and candidate State. This creates a separate Lane. The owner composes, checks and accepts it normally. The contributor's checks and reviews stay as provenance. Under native-owner authority, contributors cannot write accepted source or Channels directly. Under server authority they can work in hosted Lanes and submit landings; public projects enforce [owner approval for protected paths](operations/governance.md), including when a contributor selects person authority.
+For a stored object proposal, download its receive request and run
+`nforge exchange ROOT receive-proposal --command-file forge-proposal-receive.json`
+in an independent recovery owner. The command validates source closure and creates
+a separate Lane. Older stored archive proposals retain their Download proposal
+path for their recorded source and Work. Current hosted edits go through hosted
+Lanes rather than native export and source return. Public projects retain
+[owner approval for protected paths](operations/governance.md), including when
+a contributor selects person authority.
 
 ## GitHub
 

@@ -34,9 +34,9 @@ export default function HostedChecks({
       {!owner && <p className="fx-muted fx-owner-note">Only owners can change this</p>}
       {owner && (
         <details className="fx-check-command">
-          <summary>Define a check locally</summary>
+          <summary>Configure a hosted check</summary>
           <CopyCommand
-            command={`nforge agent /path/to/project define-check '{"name":"verify","executable":"npm","args":["run","verify"]}'`}
+            command={`nforge x ROOT configure-check '{"command":{"name":"verify","executable":"npm","args":["run","verify"],"environmentLabel":"clean"}}'`}
           />
         </details>
       )}

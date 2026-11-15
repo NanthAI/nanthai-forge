@@ -31,24 +31,13 @@ export function ProposalProvenance({
   projectKey: string;
   pair?: HostedHandoffPair;
 }) {
-  const command = {
-    action: 'import-native-contribution',
-    operationId: proposal.operationId,
-    intentId: proposal.intentId,
-    expectedBase: proposal.baseState,
-    expectedHead: proposal.head,
-    archivePath:
-      proposal.transport === 'objects'
-        ? '/absolute/path/to/pulled-proposal'
-        : '/absolute/path/to/proposal.tar.gz',
-    archiveSha256: proposal.digest,
-    name: 'Contributor proposal',
-    claim: { actor: proposal.actor, projectKey, proposalId: proposal._id, viewId: proposal.viewId },
-  };
   return (
     <DetailPanel className="item-provenance" title={<>Source, actor & local import</>}>
       <p>
         Signed-in server actor <code>{proposal.actor}</code>
+      </p>
+      <p>
+        Project <code>{projectKey}</code> · original operation <code>{proposal.operationId}</code>
       </p>
       <p>
         Original base <code>{proposal.baseState}</code> · candidate <code>{proposal.head}</code>
@@ -59,18 +48,18 @@ export function ProposalProvenance({
       </p>
       <p>
         Local checks and authorship inside this proposal are contributor-supplied claims. Import creates a
-        separate Lane; compose, check and accept through your existing local Work flow.
+        separate Lane. Current contributions use hosted clones and Lanes.
       </p>
-      <p>
-        Continue locally with a restored source and Work pair containing this Intent, then import the
-        downloaded proposal into that owner.
-      </p>
-      <p>
-        Import the downloaded proposal (the pulled directory for object proposals):{' '}
-        <code>nforge work ROOT '{JSON.stringify(command)}' WORK_REVISION</code>. Use the updated local Work
-        revision and proposal archive path. The local importer verifies source closure and retains the
-        original proposal claim.
-      </p>
+      {proposal.transport === 'objects' && proposal.status === 'stored' ? (
+        <p>
+          Download this proposal's receive request, then run{' '}
+          <code>nforge exchange ROOT receive-proposal --command-file forge-proposal-receive.json</code>. The
+          importer downloads and verifies the proposal and retains its original claim in a separate Lane in
+          your independent recovery owner.
+        </p>
+      ) : (
+        <p>Use Download proposal for a stored archive's retained source and Work.</p>
+      )}
     </DetailPanel>
   );
 }
@@ -350,13 +339,12 @@ export default function ProjectProposals({
       {pin && (
         <DetailPanel className="collection-guide" title={<>Send changes from your computer</>}>
           <p>
-            Return a clean local Candidate for an Intent you created on Forge. Upload stores a proposal; the
-            project owner integrates it in a separate Lane.
+            Upload a retained proposal archive for an Intent you created on Forge. The project owner
+            integrates an object proposal in a separate Lane.
           </p>
           <p>
-            Download source and the current Work journal, restore them in a new folder, edit a Lane for your
-            hosted Intent, compose a clean Candidate and export the full native source and Work archive.
-            Checks run on your computer.
+            For current work, use a hosted clone and Lane. This upload keeps an existing archive's source and
+            Work as a proposal; its local checks remain supplied evidence.
           </p>
         </DetailPanel>
       )}

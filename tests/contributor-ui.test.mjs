@@ -62,11 +62,14 @@ test('actual proposal provenance renderer keeps exact pins and literal actor tex
   assert.doesNotMatch(html, /<script>/);
   assert.match(html, /contributor-supplied claims/);
   assert.match(html, /separate Lane/);
-  assert.match(html, /import-native-contribution/);
+  assert.match(html, /Download proposal/);
+  assert.doesNotMatch(html, /nforge work|restore-native|restore-work/);
 });
 
-test('proposal handoff uses restored hosted Work and offers isolated source import', () => {
+test('stored object proposal handoff offers the supported isolated receive command', () => {
   const proposal = {
+    transport: 'objects',
+    status: 'stored',
     operationId: randomUUID(),
     intentId: randomUUID(),
     baseState: 'a'.repeat(64),
@@ -79,8 +82,9 @@ test('proposal handoff uses restored hosted Work and offers isolated source impo
   const html = renderToStaticMarkup(
     createElement(ProposalProvenance, { proposal, projectKey: randomUUID() }),
   );
-  assert.match(html, /restored source and Work pair containing this Intent/);
-  assert.match(html, /import-native-contribution/);
+  assert.match(html, /independent recovery owner/);
+  assert.match(html, /nforge exchange ROOT receive-proposal --command-file forge-proposal-receive.json/);
+  assert.match(html, /separate Lane/);
   assert.ok(html.includes(proposal.digest));
   assert.doesNotMatch(html, /reconcile-hosted-work|Work reconciliation request/);
 });

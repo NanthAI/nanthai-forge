@@ -45,7 +45,7 @@ More: help wait, help conflict, help check, help overlap.`,
 - Terminal failure follows its recovery command; LANDED is acceptance, CHECK PASSED alone is not.
 - wait takes exactly one of runId, operationIds, peer or approval. wait {approval:LANE_ID} blocks until the owner grants or declines request-approval. wait {peer:LANE_ID} blocks until that Lane lands, its latest landing fails or is cancelled, or the Lane closes (exit 0), or a note reaches your Lane (reason message, exit 3).
 - status accepts laneId; observe/landing select operationId (the original landing UUID), submissionId or runId.
-- LANDING_STALLED: no progress for 15 minutes and nothing left to drive it. Read queue '{}', then land --save again from the same Lane.`,
+- LANDING_STALLED: follow the receipt's exact repair command for the original operation; do not resubmit. Without a repair command, read queue '{}' and landing {operationId} first.`,
   },
   conflict: {
     title: 'Resolving a conflict',
@@ -89,7 +89,8 @@ CHECK_NOT_PASSED: acceptance needs a passed check for this exact head; land --sa
     text: `Hosted actions run from a hosted checkout: a clone root (nforge clone) or a Lane folder that start printed.
 - HOSTED_CHECKOUT_REQUIRED: run the command from the folder the message names (a resolution runs in its resolution Lane folder). save, sync, preflight, ack and land with a laneId of a Lane open on this machine run in its folder by themselves.
 - HOSTED_ACTION_UNSUPPORTED: this CLI or deployment has no such action. The message names the supported alternative; nforge agent . help (no topic) lists every action with its parameters.
-- An action new on the deployment needs a matching CLI: nforge status shows versions; the CLI updates itself to main.
+- check-settings reports project-wide agent eligibility, not a Candidate's path review. Protected-path changes may still need approval under the policy.
+- New actions need a matching CLI: nforge status shows versions; the CLI updates to main.
 - pull {} refreshes a clean clone root to main; a repeat resumes an interruption. Root status {} reports clone freshness.
 - First successful CLI command installs advisory Claude Code/Codex first-write hooks. nforge x ROOT install-hooks|uninstall-hooks {scope?:"user"|"project"} controls them; nforge settings firstWriteHooks false disables them. Hooks never deny edits.`,
   },
@@ -115,7 +116,7 @@ CHECK_NOT_PASSED: acceptance needs a passed check for this exact head; land --sa
     text: `queue {limit?,laneId?} lists the landing queue in dispatch order: Lane, Intent title, phase, suspect, last failing test files and recompose count. yourLane names your position when it is in the page. Held entries (waiting for a person or a dependency) follow with position null and hold {kind,reason,paths,next}. One bounded read, no idle cost.
 - SYNC_REQUIRED while queued: main landed a file your entry changes; run the one land --save it names instead of waiting.
 - LANDING_CANCELLED: the landing was withdrawn or cancelled; the Lane and its saves stay. Fix if needed and land --save again.
-- LANDING_STALLED: nothing could drive the entry; land --save again from the same Lane.
+- LANDING_STALLED: run the receipt's exact repair command; do not resubmit a live landing. If none is present, read queue '{}' and landing {operationId}. A terminal-failed receipt may explicitly direct a retry in the same Lane.
 - REVIEW_REQUIRED: acceptance needs a person under the project policy; wait {approval:LANE_ID} after request-approval, or ask the owner.
 - landings {from,to,limit?,cursor?} lists accepted landings in a UTC window, oldest first (30 per page): receipt, Lane, times, bases, checks, waits and who accepted. Follow nextCursor until null.`,
   },

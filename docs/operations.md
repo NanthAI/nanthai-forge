@@ -622,7 +622,19 @@ For whole-deployment Convex snapshots, fresh-target restore and offline/live
 comparison tooling, see [hosted deployment durability](operations/hosted-durability.md).
 This complements project archives; the [restore drill](#restore-drill) runs it end to end.
 
-Hosted projects store the same archives. In the browser, "Stored checkpoints" lists them: upload a source and Work archive exported from Forge, "Download source and Work" to fetch one, or "Reconcile original upload" after an unknown reply. To work on hosted Intents locally, download the pinned archive and the current journal together, then run `nforge restore-native ARCHIVE NEW_DIR --journal HOSTED_WORK.json`. There is no way to return that local copy to the hosted project: push and source return were removed, and their old RPC addresses only answer `CLI_UPGRADE_REQUIRED`. Hosted work continues through hosted Lanes and landing.
+Hosted projects retain checkpoints in "Stored checkpoints". Existing archives and
+object checkpoints can be downloaded; "Reconcile original upload" follows an
+unknown reply. For current work, use `nforge clone PROJECT_ID NEW_DIRECTORY`, then
+start a hosted Lane. The empty-project welcome opens GitHub project import rather
+than an archive transfer route.
+
+For a retained checkpoint, download its recovery request and matching Work journal.
+Run `nforge exchange NEW_DIRECTORY restore --command-file forge-restore.json`;
+the request contains `{url,projectId,backupId}` and can include `journalPath` for
+that journal. This creates an independent recovery copy, not a live hosted Lane.
+Source and Work downloads stay available; full project export is separate planned
+work. Exchange push and source return remain retired; hosted edits use Lanes and
+landing.
 
 ### Work format and recovery
 
@@ -1064,7 +1076,7 @@ The dedicated shared npm content cache remains under the runner's home, so its
 path is visible; this is environment hygiene, not home-path secrecy or an OS sandbox.
 
 For an existing check, include `env: ["NAME"]` or `credentials: ["TOKEN_NAME"]`
-in its local `define-check` command. Each list names exact parent-process variables;
+inside the `command` object of `nforge x ROOT configure-check`. Each list names exact parent-process variables;
 there is no prefix expansion. Missing values remain absent. The lists are pinned
 in the check definition and receipts; their transient values are not recorded there.
 For example, `credentials: ["AWS_SHARED_CREDENTIALS_FILE"]` exposes only that
@@ -1157,7 +1169,10 @@ alarm (`stall` in its observation). For a queued entry, a second deadline 60 min
 after its last progress re-drives it; if nothing is left to drive it, Forge ends it
 as `terminal-failed` with `LANDING_STALLED` and a stated reason, through the
 cancellation path, so the requester gets an outcome and batch peers are re-selected.
-Nothing lands in that case; finish the same Lane again to retry. While a live owner
+Nothing lands in that case. Follow the receipt's exact repair command, preserving
+the original operation id; do not resubmit a live landing. If the terminal-failed
+receipt explicitly directs a retry, fix its cause and land the same Lane again.
+Without a repair command, read `queue {}` and `landing {operationId}` first. While a live owner
 (the queue, its own finish attempt, a batch or a batch peer) still drives the entry,
 Forge never ends it: the deadline re-arms at 2, 4, 8 and 16 hours and then stops.
 Entries waiting for review or a dependency are not ended. Settled and idle queues

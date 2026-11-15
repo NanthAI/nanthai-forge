@@ -114,7 +114,8 @@ export const retiredActions: Readonly<Record<string, string>> = {
   'pre-edit': 'the first-write hook (x install-hooks) reports board claims and notes on first write',
   'peer-ack':
     'save, which trial-merges saved files and reports a real conflict as conflictNotice (nothing to answer)',
-  'define-check': 'x configure-check defines a check',
+  'define-check':
+    'x configure-check {command:{name,executable,args,environmentLabel}} defines a hosted check',
   'pending-status': 'status reads pending work in a hosted checkout',
 };
 const retiredModes: Readonly<Record<string, string>> = {

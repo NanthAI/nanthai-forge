@@ -178,7 +178,7 @@ Zero bytes uploaded does not mean zero work. Validation and hashing still happen
 
 ## Object proposals and browser imports
 
-The Backups and Proposals pages accept local export files and upload logical objects rather than compressed archives. Identical content is reused. New backup imports use the finite paged hosted seed; original operation IDs resume the same project and seed after an interrupted response. Existing archive uploads remain resumable. Local recovery/release archive export remains available.
+The Backups and Proposals pages accept local export files and upload logical objects rather than compressed archives. Identical content is reused. New backup imports use the finite paged hosted seed; original operation IDs resume the same project and seed after an interrupted response. Existing archive uploads remain resumable. Existing archive downloads and independent checkpoint recovery remain available; current hosted edits use clones and Lanes.
 
 For an object proposal, download its receive request (`{url,projectId,proposalId,operationId}`), then run:
 
@@ -186,7 +186,7 @@ For an object proposal, download its receive request (`{url,projectId,proposalId
 nforge exchange ROOT receive-proposal --command-file forge-proposal-receive.json
 ```
 
-This downloads and validates the proposal, then imports it into a separate Lane in the existing owner using the original operation ID. `pull-proposal` with `{url,projectId,proposalId,cacheRoot?}` is also available to retain an unpacked export in a fresh directory. Use that directory as `archivePath` in the existing `import-native-contribution` request and its manifest SHA-256 as `archiveSha256`. These compatibility field names also accept local archives with their original compressed digest. The importer validates complete source closure and creates a separate Lane; contributor Work and check claims never become owner evidence.
+This downloads and validates the proposal, then imports it into a separate Lane in the existing owner using the original operation ID. `pull-proposal` with `{url,projectId,proposalId,cacheRoot?}` is also available to retain an unpacked export in a fresh directory. The receive command supplies the pulled directory, manifest SHA-256 and original source pins to the retained contribution importer. Its compatibility fields also accept local archives with their original compressed digest. The importer validates complete source closure and creates a separate Lane; contributor Work and check claims never become owner evidence.
 
 ## Hosted main client checkout
 

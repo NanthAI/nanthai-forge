@@ -82,13 +82,13 @@ export function HostedProjectWelcome({
   return (
     <section className="fx-project-welcome" aria-label="Empty project">
       <h2>Your project is ready</h2>
-      <p>main is empty. Add an agent to start work, or import an existing project archive.</p>
+      <p>main is empty. Add an agent to start work, or import a GitHub repository as a new project.</p>
       <div className="import-actions">
         <button className="fx-btn fx-btn-primary" onClick={addAgent}>
           Add an agent
         </button>
         <button className="fx-btn" onClick={importSource}>
-          Import archive
+          Import from GitHub
         </button>
         <button className="fx-btn fx-btn-ghost" onClick={dismiss}>
           Dismiss

@@ -14,7 +14,6 @@ function download(value: unknown, filename: string) {
 export default function ExchangeHandoff({
   projectId,
   backupId,
-  transport,
   inline = false,
 }: {
   projectId: Id<'hostedProjects'>;
@@ -34,21 +33,21 @@ export default function ExchangeHandoff({
         Run <code>nforge login {client.url}</code> and approve the device in Forge. Request files contain
         source pins, never credentials.
       </p>
-      {transport === 'objects' && !inline && (
-        <>
-          <button onClick={() => download({ url: client.url, projectId, backupId }, 'forge-pull.json')}>
-            Download incremental pull request
-          </button>
-          <p>
-            <code>nforge exchange NEW_DIRECTORY pull --command-file forge-pull.json</code>. Add{' '}
-            <code>cacheRoot</code> to reuse verified source from an existing owner and{' '}
-            <code>journalPath</code> to include its matching hosted Work journal.
-          </p>
-        </>
-      )}
+      <button onClick={() => download({ url: client.url, projectId, backupId }, 'forge-restore.json')}>
+        Download checkpoint recovery request
+      </button>
+      <p>
+        <code>nforge exchange NEW_DIRECTORY restore --command-file forge-restore.json</code>. Add{' '}
+        <code>cacheRoot</code> to reuse verified source from an existing owner and <code>journalPath</code> to
+        include its matching hosted Work journal.
+      </p>
 
       <p>
-        Full recovery archives remain available through the local <code>export-work</code> command.
+        Current work uses{' '}
+        <code>
+          nforge clone {projectId} NEW_DIRECTORY --deployment {client.url}
+        </code>{' '}
+        and hosted Lanes. Recovery opens the retained checkpoint separately.
       </p>
     </>
   );

@@ -1,5 +1,11 @@
 # Status
 
+Hosted `check-settings` reports project-wide agent eligibility without treating an
+unknown Candidate file list as a review hold. Candidate path protections still
+apply at landing. Stalled-landing help follows exact receipt repair commands,
+and current web command guides use hosted clone, configure-check and checkpoint
+recovery paths instead of retired native CLI commands.
+
 Exact speculative-predecessor conflicts expose pinned early sync/resolve recovery.
 An internal cohort conflict names the checked survivor prefix containing the
 conflicting peer; an outer-base conflict keeps its exact outer predecessor.

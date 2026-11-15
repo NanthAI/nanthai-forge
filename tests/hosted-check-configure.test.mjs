@@ -14,7 +14,7 @@ import { hostedCheckDefinition, checkPin } from '../dist/hosted-check.js';
 import { indexedRecord } from '../dist/work-hosted-index.js';
 import { hostedMacRuntime } from '../dist/hosted-mac-lease.js';
 import { checkEnvironment } from '../dist/check-environment.js';
-import { policyPreset } from '../dist/autonomy-policy.js';
+import { policyPreset, reviewReason } from '../dist/autonomy-policy.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { hostedAgentActions } from '../dist/hosted-agent-contract.js';
 import { hostedCheckKey } from '../dist/worker-cli.js';
@@ -428,6 +428,41 @@ test('CLI configures verify, a self-hosted runner and reports settings with boun
   assert.equal(after.policy.acceptance.mode, 'auto-on-pass');
   assert.equal(after.agentLandsOnPass, true);
   assert.deepEqual(after.blockers, []);
+});
+
+test('check-settings reports automatic policy without inventing an unknown-path review hold (7b90015e)', async t => {
+  const fixture = project();
+  const { state, run } = cli(t, fixture);
+  const policy = policyPreset('trusted');
+  policy.acceptance.protectedPaths = ['secrets/**'];
+  fixture.s.patch('hostedProjects', fixture.projectId, { autonomyPolicy: policy });
+  const meterStart = fixture.s.counts.length;
+  const shown = await run('check-settings');
+  const meters = fixture.s.counts.slice(meterStart);
+  t.diagnostic(
+    JSON.stringify({
+      calls: state.calls.length,
+      documentsRead: meters.reduce((n, m) => n + m.documents, 0),
+      documentsWritten: meters.reduce((n, m) => n + m.writes, 0),
+      unrelatedItems: 3000,
+      idleCalls: 0,
+    }),
+  );
+  assert.equal(shown.agentLandsOnPass, true);
+  assert(!shown.blockers.some(line => /review|coverage/.test(line)), shown.blockers.join('; '));
+  assert.equal(state.calls.length, 4, 'capabilities plus the same three settings reads');
+  assert.equal(reviewReason(policy, { kind: 'agent', id: 'owner' }, ['secrets/key.ts']) !== null, true);
+  assert.equal(reviewReason(policy, { kind: 'agent', id: 'owner' }, null) !== null, true);
+  assert.equal(reviewReason(policy, { kind: 'agent', id: 'owner' }, ['src/index.ts']), null);
+  for (const acceptance of [{ mode: 'review' }, { mode: 'auto-on-pass', autoActors: ['another-agent'] }]) {
+    fixture.s.patch('hostedProjects', fixture.projectId, {
+      autonomyPolicy: { ...policy, acceptance: { ...policy.acceptance, ...acceptance } },
+    });
+    const held = await run('check-settings');
+    assert.equal(held.agentLandsOnPass, false);
+    assert(held.blockers.some(line => /review/.test(line)));
+    assert.equal(state.calls.length, 4);
+  }
 });
 
 test('CLI define-from-command replaces the same-named check; bad selections and non-owners are refused', async t => {

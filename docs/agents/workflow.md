@@ -215,6 +215,16 @@ MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
   `HOSTED_ACTION_UNSUPPORTED` and name the hosted command that does the job. The
   [hosted parity table](hosted-parity.md) records each migration, fold and removal.
 
+`check-settings` describes project-wide agent eligibility under the current policy.
+`agentLandsOnPass:true` means the policy allows agents to land after a passing check;
+it does not assess a Candidate's changed paths. Protected paths may still require
+approval for that Candidate. Missing check definitions, runners and callbacks stay
+in `blockers`; an unknown file list is not a project-wide review blocker.
+
+The top-level `nforge queue` manages local command recovery. Use
+`nforge agent ROOT queue '{}'` for hosted landings; a local empty queue says
+nothing about the hosted landing queue.
+
 ### Agent board (hosted)
 
 Agents in one hosted project can leave short notes for each other. A note goes to
@@ -800,7 +810,7 @@ Lifecycle. When the project policy has `lifecycle.completeOnAccept:true`, accept
 
 `records` returns the same page as `status` sections (`items`, `total`, `more`, `nextOffset`, plus the older `records`). Filters: `state` or `status` (for example `{"collection":"lanes","state":"active"}`) and `merged:false|true` for Lanes; filtered offsets index the filtered list. `observe`, `log` and `cancel` take the nested check run operation ID, not the finish ID. Resume an admitted finish with the receipt's `waitCommand` on the original parent operation id. Before admission, replay its original request plus `resolved` pins. A failed `run`, `observe` or `finish` receipt carries `failureSummary`, and `log` accepts `tail:BYTES` (up to 65536) to read the end of a stream. On a hosted project, `log {runId,tail?,stream?,shard?,attempt?,json?}` prints the retained, redacted tail of a hosted check run (default 8192 bytes, at most 64 KiB, which is all Forge keeps per job; the full log stays with the provider, whose link `log` prints) with the run's own access rules, so no `gh run view --log` or runner-repository login is needed. `runId` comes from `status`, `observe` or `wait`. `run` accepts `{"laneId"}` instead of `viewId` (the Lane's latest clean Candidate) and defaults the check as `finish` does, so repeating a flaky check is one short command.
 
-Select a check from `status`, or `define-check` with the local executable and args. Checks run in a fresh exact-Candidate directory, so the command must prepare its dependencies. `run` takes `viewId` or `laneId` (and optional pins) and waits by default; `observe`, `log` and `cancel` address that run. For the standard Forge check, `run {"laneId":"…","tests":["tests/a.test.mjs"]}` (or `viewId`) replaces only the selected test files; static checks still run. For any other check, the list names the [project test runner's](../parallel-work-defaults.md) files at that head (for example `packages/a/src/sum.test.ts`), and the local runner runs exactly those with the runner command instead of the check command; a project that checks on a remote runner, a file the runner does not match, or a project without a runner is refused with `BAD_ARGUMENT`. An explicit list, including `[]`, is retained as `checkSelection.scope:"partial"` and uses at least Work format 15 so readers without selection evidence refuse it. It cannot satisfy an automatic acceptance gate, an Invariant check requirement or check reuse; use ordinary `finish` for landing evidence. Retry with the same operation ID and the original list to observe the existing execution.
+Select a check from `check-settings`, or use `nforge x ROOT configure-check` with `{"command":{"name":"verify","executable":"npm","args":["run","verify"],"environmentLabel":"clean"}}`. Checks run in a fresh exact-Candidate directory, so the command must prepare its dependencies. `run` takes `viewId` or `laneId` (and optional pins) and waits by default; `observe`, `log` and `cancel` address that run. For the standard Forge check, `run {"laneId":"…","tests":["tests/a.test.mjs"]}` (or `viewId`) replaces only the selected test files; static checks still run. For any other check, the list names the [project test runner's](../parallel-work-defaults.md) files at that head (for example `packages/a/src/sum.test.ts`), and the local runner runs exactly those with the runner command instead of the check command; a project that checks on a remote runner, a file the runner does not match, or a project without a runner is refused with `BAD_ARGUMENT`. An explicit list, including `[]`, is retained as `checkSelection.scope:"partial"` and uses at least Work format 15 so readers without selection evidence refuse it. It cannot satisfy an automatic acceptance gate, an Invariant check requirement or check reuse; use ordinary `finish` for landing evidence. Retry with the same operation ID and the original list to observe the existing execution.
 
 `accept` takes `viewId`; `channel` defaults to `main` and `expectedPrevious` to its current head. Invariants, releases, Playbooks, human reviews and GitHub publication keep their existing owners.
 
@@ -1642,6 +1652,12 @@ receipts, `status --pending` and landing observations. A missing wait reason is
 reported as `unrecorded-wait`, with the landing controller named. Hosted queued
 entries count queue-head progress too: a live predecessor or queue owner suppresses
 the follower alarm, and an ownerless wait names the predecessor it waits behind.
+A `LANDING_STALLED` observation follows its receipt's exact repair command for the
+original operation. Do not resubmit a live landing: a replay resumes its retained
+operation and cannot restart a running check. When no repair command is available,
+read `queue {}` and `landing {operationId}` first. If the receipt explicitly records
+`terminal-failed` and directs a retry, fix the cause and retry in the same Lane.
+
 Queued receipts show position, entries ahead, live predecessor and an approximate
 ETA based on shared-check groups and observed parallel service waves. Native workers
 own one deadline while unalarmed work is pending. Hosted entries retain one alarm

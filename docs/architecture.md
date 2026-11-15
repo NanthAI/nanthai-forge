@@ -453,8 +453,9 @@ lost reply preserves the original response. No action history or result is aged
 out or deleted by this change. Git-backed owners retain their existing inline
 representation.
 
-`nforge work ROOT '{"action":"migrate-record-details"}' REVISION` migrates a native
-owner in finite record pages, atomically publishing each cursor with its records.
+The retained native record-detail migration used during recovery advances in
+finite record pages, atomically publishing each cursor with its records. It is not
+a hosted CLI command; current project work uses hosted Lanes.
 The representation change preserves the Work revision, identities, old pages and
 receipt digests. A retry resumes the saved page; a completed retry writes nothing.
 Ordinary native writers externalize new or changed detailed records too. Upgrade
@@ -538,7 +539,7 @@ bytes. Source files are added through the existing source-transfer boundaries.
 
 **Exchange.** Exchange push and source return are retired (Bet 1, B1.6 to B1.8): the push client and the `FORGE_SOURCE_RETURN_*` budgets no longer exist, and the delta planner no longer runs. Old `nforge exchange … push` commands and the former publication RPC addresses (for example `projectSourceReturn:returnSource`) return `CLI_UPGRADE_REQUIRED` before any transfer. `nforge exchange` now pulls hosted main into a client directory, opens a Lane, restores a retained checkpoint, receives or pulls contributor proposals and migrates older archives. Transfers ask which content hashes the other side is missing and move only those. Large files are split into content-defined chunks; manifest and Work metadata travel as chunk trees under a small versioned root. Whole-file hashes stay the identity, and the backend verifies them before binding. The remaining readers keep exact digests and recheck current project access. Saves and landings use the hosted Lane APIs below. See [source exchange](operations/source-exchange.md).
 
-**Archives.** `export-work` writes the full retained closure: source States, Work and recorded run files. It can pack this as a `.tar.gz`. Source-only release archives are narrower and contain empty Work. Browser backup and contributor-proposal imports unpack local exports and upload reusable logical objects. New hosted archive registrations are retired; historical stored archives and pending uploads retain read/resume support. Object proposals pull as validated unpacked exports for direct native contribution import. Older hosted archives are still readable and can be converted explicitly. See [operations](operations.md).
+**Archives.** Retained recovery archives contain the full recorded closure: source States, Work and recorded run files, packed as a `.tar.gz`. The internal exporter is not a current hosted CLI command. Source-only release archives are narrower and contain empty Work. Browser backup and contributor-proposal imports unpack local exports and upload reusable logical objects. New hosted archive registrations are retired; historical stored archives and pending uploads retain read/resume support. Object proposals pull as validated unpacked exports for direct native contribution import. Older hosted archives are still readable and can be converted explicitly. See [operations](operations.md).
 
 **Collection.** Object collection removes only verified, unreferenced objects. Referenced source history and Lanes are preserved. CI-provider logs stay with the provider; local logs use the explicit opt-in and finite retention described in [operations](operations.md#check-logs-and-retention).
 
@@ -1186,7 +1187,7 @@ are advisory local status; the checkpoint reply never waits for checks. Disable
 future work with `set-policy {integrationPreview:{auto:false}}`; saved source and
 notices are retained. `peers` and pending status include one compact observation.
 
-Checks marked `static:true` through `define-check` are the configured fast commands.
+Checks marked `static:true` in `configure-check` command definitions are the configured fast commands.
 Without marked checks, the existing `package.json` scripts `typecheck` and `lint`
 are selected when present, with npm lifecycle hooks disabled. Missing configuration
 is reported as `not-configured`, never as a passing check. When `convex/schema.ts`
