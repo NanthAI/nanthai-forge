@@ -6,6 +6,8 @@ import { safeRelative } from './safe-relative.js';
 import { SHOW_MAX_BYTES } from './agent-source-read.js';
 import {
   cachedPacks,
+  cachedHistoryMetadata,
+  retainHistoryMetadata,
   ensureHistoryRepository,
   historyBlame,
   historyCacheDirectory,
@@ -14,6 +16,8 @@ import {
   indexPack,
   resolveCommit,
 } from './history-git.js';
+import { PackTrees } from './git-pack-trees.js';
+import { historyLogPage, loadHistoryMetadata } from './history-log-page.js';
 import type { HostedAgentAddress } from './hosted-address.js';
 
 export const hostedHistorySchema = z
@@ -52,6 +56,10 @@ type Opened = {
   bytes: number;
   limitBytes: number;
   error?: { code: string; message: string };
+  metadata?: { pack: string; data: string }[];
+  metadataPacks?: string[];
+  readBytes?: number;
+  logFallback?: string;
   packs: {
     tip: string;
     packSha1: string;
@@ -61,6 +69,7 @@ type Opened = {
   }[];
 };
 export type HistoryTransport = {
+  readonly advertisedFeatures?: readonly string[] | undefined;
   action<T>(name: string, args: Record<string, unknown>): Promise<T>;
   mutation<T>(name: string, args: Record<string, unknown>): Promise<T>;
 };
@@ -85,7 +94,8 @@ async function* download(chunks: Opened['packs'][number]['chunks'], request: typ
 
 /** `history` for hosted projects: log, blame and file-at-commit over the project's
  * imported Git history. One server action per read checks current access and lists
- * packs; R2 downloads happen only for packs this machine has not indexed yet. */
+ * metadata (or explicit legacy pack links). Verified metadata is reused after current access
+ * checks, without downloading file bodies or rereading cached packs on R2. */
 export async function hostedHistory(
   address: HostedAgentAddress,
   input: unknown,
@@ -98,7 +108,44 @@ export async function hostedHistory(
   if (command.op === 'retry') return transport.mutation('projectHistoryStore:retry', {});
   const repo = historyCacheDirectory(address);
   const cached = cachedPacks(repo);
-  const opened = await transport.action<Opened>('projectHistoryRead:open', { cached });
+  const metadata = command.op === 'log' ? cachedHistoryMetadata(repo) : new Map<string, Buffer>();
+  const metadataReader = transport.advertisedFeatures?.includes('history-log') ?? true;
+  let opened: Opened;
+  try {
+    opened = await transport.action<Opened>(
+      'projectHistoryRead:open',
+      command.op === 'log' && metadataReader
+        ? {
+            cached,
+            cachedMetadata: [...metadata.keys()],
+            log: {
+              ...(command.commit ? { commit: command.commit } : {}),
+              ...(command.path ? { path: command.path } : {}),
+              limit: command.limit,
+              skip: command.skip,
+            },
+          }
+        : { cached },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if (
+      command.op !== 'log' ||
+      !/log|cachedMetadata/.test(message) ||
+      !/ArgumentValidationError|extra field/.test(message)
+    )
+      throw error;
+    // Older strict servers do not accept the optional reader yet. Preserve the
+    // existing exact-source read, explicitly labelled, instead of adding an upgrade step.
+    opened = {
+      ...(await transport.action<Opened>('projectHistoryRead:open', { cached })),
+      logFallback:
+        'This server predates metadata-only history logs (history-log); this log uses the existing local pack cache.',
+    };
+  }
+  if (command.op === 'log' && !metadataReader)
+    opened.logFallback =
+      'This server predates metadata-only history logs (history-log); this log uses the existing local pack cache.';
   const summary = {
     status: opened.status,
     repository: opened.repository,
@@ -109,7 +156,7 @@ export async function hostedHistory(
     main: opened.main ?? null,
     bytes: opened.bytes,
     limitBytes: opened.limitBytes,
-    packs: opened.packs.length,
+    packs: opened.metadataPacks?.length ?? opened.packs.length,
     ...(opened.error ? { error: opened.error } : {}),
     ...(opened.catchUp ? { catchUp: opened.catchUp } : {}),
   };
@@ -125,6 +172,48 @@ export async function hostedHistory(
         ? 'History is still being imported; retry shortly.'
         : `${opened.error?.message ?? 'History is unavailable.'} Stored ${opened.bytes} of a ${opened.limitBytes}-byte limit; the owner can raise it (history {"op":"limit","bytes":N}) and retry (history {"op":"retry"}).`,
     );
+  const selectedCommit = command.commit ?? opened.head!;
+  if (command.op === 'log' && opened.metadata && opened.metadataPacks) {
+    try {
+      const scan = new PackTrees(128 * 1024 * 1024, { commits: true });
+      for (const item of opened.metadata) {
+        invariant(
+          /^[0-9a-f]{40}$/.test(item.pack),
+          'HOSTED_PROTOCOL_INVALID',
+          'Invalid history metadata pack.',
+        );
+        const bytes = Buffer.from(item.data, 'base64');
+        metadata.set(item.pack, bytes);
+      }
+      for (const pack of opened.metadataPacks) {
+        const bytes = metadata.get(pack);
+        invariant(bytes, 'HOSTED_PROTOCOL_INVALID', 'History metadata cache is incomplete.');
+        loadHistoryMetadata(scan, bytes);
+      }
+      const log = historyLogPage(scan, selectedCommit, command);
+      for (const item of opened.metadata) retainHistoryMetadata(repo, item.pack, metadata.get(item.pack)!);
+      return {
+        ...summary,
+        ...log,
+        downloadedBytes: 0,
+        readBytes: opened.readBytes ?? 0,
+        readMode: 'metadata',
+      };
+    } catch {
+      // A Git layout/encoding not represented by the metadata reader keeps the original reader.
+      // This explicit compatibility continuation is used only for such a selection.
+      const fallback = await transport.action<Opened>('projectHistoryRead:open', { cached });
+      // Retain the first read's immutable anchor even if main moves between these calls.
+      opened = {
+        ...fallback,
+        logFallback:
+          'The cached metadata scanner cannot answer this selection; this log uses the existing local pack cache.',
+      };
+    }
+  }
+  if (command.op === 'log' && !opened.logFallback)
+    opened.logFallback =
+      'This server returned the original history format; this log uses the existing local pack cache.';
   ensureHistoryRepository(repo);
   let downloaded = 0;
   for (const pack of opened.packs) {
@@ -133,12 +222,14 @@ export async function hostedHistory(
     await indexPack(repo, pack.packSha1, download(pack.chunks, request));
     downloaded += pack.bytes;
   }
-  const commit = resolveCommit(repo, command.commit ?? opened.head!);
+  const commit = resolveCommit(repo, selectedCommit);
   const read = { ...summary, commit, downloadedBytes: downloaded };
   if (command.op === 'log')
     return {
       ...read,
       ...historyLog(repo, commit, { path: command.path, limit: command.limit, skip: command.skip }),
+      readMode: 'pack-cache',
+      note: opened.logFallback,
     };
   if (command.op === 'blame')
     return {

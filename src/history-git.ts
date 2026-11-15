@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFileSync, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  lstatSync,
+  unlinkSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { ForgeError, invariant } from './errors.js';
@@ -222,4 +231,40 @@ export function historyFile(repo: string, commit: string, path: string, maxBytes
     'File exceeds 1 MiB; use force:true to read exact bytes.',
   );
   return { mode: mode!, blob, bytes: git(repo, ['cat-file', 'blob', blob], Math.max(size + 1, 4096)) };
+}
+
+/** Hash-verified, project/deployment-scoped metadata cache. Listing verifies bytes before telling
+ * the server they are cached, so corruption requests fresh metadata in the same normal call. */
+export function cachedHistoryMetadata(repo: string): Map<string, Buffer> {
+  const directory = join(repo, 'metadata'),
+    found = new Map<string, Buffer>();
+  if (!existsSync(directory)) return found;
+  let total = 0;
+  for (const name of readdirSync(directory)) {
+    const match = /^v1-([0-9a-f]{40})-([0-9a-f]{64})\.gz$/.exec(name);
+    if (!match) continue;
+    const file = join(directory, name),
+      stat = lstatSync(file);
+    if (!stat.isFile() || stat.size > 2 * 1024 * 1024) continue;
+    const bytes = readFileSync(file);
+    if (createHash('sha256').update(bytes).digest('hex') === match[2]) {
+      total += bytes.length - (found.get(match[1]!)?.length ?? 0);
+      if (total > 2 * 1024 * 1024) return new Map();
+      found.set(match[1]!, bytes);
+    }
+  }
+  return found;
+}
+export function retainHistoryMetadata(repo: string, pack: string, bytes: Buffer) {
+  const directory = join(repo, 'metadata');
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const sha = createHash('sha256').update(bytes).digest('hex');
+  const path = join(directory, `v1-${pack}-${sha}.gz`),
+    temporary = `${path}.${randomUUID()}.tmp`;
+  writeFileSync(temporary, bytes, { mode: 0o600 });
+  try {
+    renameSync(temporary, path);
+  } finally {
+    if (existsSync(temporary)) unlinkSync(temporary);
+  }
 }

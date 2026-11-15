@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import { inflateSync } from 'node:zlib';
+import { gzipSync, gunzipSync, inflateSync } from 'node:zlib';
 import { applyGitDelta } from './git-pack-delta.js';
 import { gitHash } from './hosted-github-git.js';
 
 /** Tree objects from stored Git packs (Issue 3bd4a8e9): a Lane build lists its parent commit's
  * tree from the history packs instead of reading every file to hash it. Packs are fed in order
  * as byte parts (R2 chunks); every object is inflated once to find the next, and only trees
- * (whole, or deltas against a tree) are kept. Commits and blobs are skipped. */
+ * (whole, or deltas against a tree) are kept by default. Metadata readers also retain commits;
+ * file bodies are discarded. */
 export type TreeListing = Map<string, { mode: string; sha: string }>;
 
 const indexMagic = 'FTI1',
@@ -29,6 +30,9 @@ export class PackTrees {
   private at = 0; // pack offset of buffer[0]
   private left = -1; // objects still to read in this pack; -1 before its header
   private treeAt = new Map<number, string>(); // pack offset -> tree id, this pack only
+  private commitAt = new Map<number, string>();
+  /** Opt-in retained commit metadata; file bodies are still discarded. */
+  readonly commits = new Map<string, Buffer>();
   /** With `objects`, every tree id and every id a tree names (blobs, subtrees, gitlinks): the
    * objects stored history holds, so a new pack never repeats one. With `commit`, that commit's
    * bytes when the scan meets it whole. */
@@ -36,12 +40,14 @@ export class PackTrees {
   commit: Buffer | null = null;
   constructor(
     private readonly budget: number,
-    options: { objects?: boolean; commit?: string; cacheBytes?: number } = {},
+    options: { objects?: boolean; commit?: string; commits?: boolean; cacheBytes?: number } = {},
   ) {
     this.objects = options.objects ? new Set() : null;
     this.wanted = options.commit ?? null;
+    this.keepCommits = options.commits === true;
     this.cacheBytes = options.cacheBytes ?? 16 * 1024 * 1024;
   }
+  private readonly keepCommits: boolean;
   private readonly wanted: string | null;
   private readonly cacheBytes: number;
 
@@ -65,7 +71,7 @@ export class PackTrees {
       at = entry.base;
     }
     for (let i = chain.length - 1; i >= 0; i--) {
-      bytes = applyGitDelta(bytes!, chain[i]!.data);
+      bytes = applyGitDelta(bytes!, chain[i]!.data, this.keepCommits ? this.budget : Number.MAX_SAFE_INTEGER);
       this.remember(chain[i]!.id, bytes);
     }
     return bytes;
@@ -84,8 +90,9 @@ export class PackTrees {
 
   /** The trees kept, as one tree index a later listing loads instead of scanning the pack
    * (Issue 3bd4a8e9): "FTI1", then per tree its id, its base tree id (zeros: whole tree), the
-   * data length and the data (the tree, or its delta). Bases come before their deltas. */
-  treeIndex() {
+   * data length and the data (the tree, or its delta). Bases come before their deltas.
+   * An optional compressed commit extension uses the same framing and stays unused by older tree readers. */
+  treeIndex(options: { commits?: boolean } = {}) {
     const parts: Buffer[] = [Buffer.from(indexMagic, 'latin1')];
     for (const [id, entry] of this.entries) {
       const head = Buffer.alloc(44);
@@ -93,6 +100,22 @@ export class PackTrees {
       if (entry.base) head.write(entry.base, 20, 'hex');
       head.writeUInt32BE(entry.data.length, 40);
       parts.push(head, entry.data);
+    }
+    if (options.commits && this.commits.size) {
+      const commits: Buffer[] = [];
+      for (const [id, bytes] of this.commits) {
+        const head = Buffer.alloc(24);
+        head.write(id, 0, 'hex');
+        head.writeUInt32BE(bytes.length, 20);
+        commits.push(head, bytes);
+      }
+      // One compressed extension record avoids repeating author/parent headers. Older
+      // FTI1 readers retain it under a commit id they never use for a tree listing.
+      const data = Buffer.concat([Buffer.from('FHC1'), gzipSync(Buffer.concat(commits))]);
+      const head = Buffer.alloc(44);
+      head.write(this.commits.keys().next().value!, 0, 'hex');
+      head.writeUInt32BE(data.length, 40);
+      parts.push(head, data);
     }
     return Buffer.concat(parts);
   }
@@ -107,8 +130,30 @@ export class PackTrees {
         length = bytes.readUInt32BE(at + 40);
       at += 44;
       if (at + length > bytes.length) return false;
-      if (!this.entries.has(id)) {
-        this.entries.set(id, { data: bytes.subarray(at, at + length), base: base === noBase ? null : base });
+      const data = bytes.subarray(at, at + length);
+      // Git trees start with an octal mode, never this extension magic.
+      if (this.keepCommits && base === noBase && data.toString('latin1', 0, 4) === 'FHC1') {
+        try {
+          const commits = gunzipSync(data.subarray(4), { maxOutputLength: this.budget });
+          for (let offset = 0; offset < commits.length;) {
+            if (offset + 24 > commits.length) return false;
+            const commitId = commits.toString('hex', offset, offset + 20);
+            const size = commits.readUInt32BE(offset + 20);
+            offset += 24;
+            if (offset + size > commits.length) return false;
+            const value = commits.subarray(offset, offset + size);
+            if (gitHash('commit', value) !== commitId) return false;
+            if (!this.commits.has(commitId)) {
+              this.commits.set(commitId, value);
+              this.kept += size;
+            }
+            offset += size;
+          }
+        } catch {
+          return false;
+        }
+      } else if (!this.entries.has(id)) {
+        this.entries.set(id, { data, base: base === noBase ? null : base });
         this.kept += length;
       }
       at += length;
@@ -123,6 +168,7 @@ export class PackTrees {
     this.at = 0;
     this.left = -1;
     this.treeAt = new Map();
+    this.commitAt = new Map();
   }
   /** Feeds the next bytes of the current pack. Returns false once over budget or malformed:
    * the result is then unusable and the caller stops. `last` marks the pack's final part. */
@@ -166,7 +212,7 @@ export class PackTrees {
       size += (byte & 127) * 2 ** shift;
       shift += 7;
     }
-    let base: string | undefined;
+    let base: string | undefined, commitBase: string | undefined;
     if (type === ofsDelta) {
       if (i >= bytes.length) return last ? 'bad' : 'more';
       byte = bytes[i++]!;
@@ -177,12 +223,20 @@ export class PackTrees {
         back = (back + 1) * 128 + (byte & 127);
       }
       base = this.treeAt.get(offset - back);
+      commitBase = this.commitAt.get(offset - back);
     } else if (type === refDelta) {
       if (i + 20 > bytes.length) return last ? 'bad' : 'more';
       const id = bytes.toString('hex', i, i + 20);
       i += 20;
       if (this.entries.has(id)) base = id;
+      if (this.commits.has(id)) commitBase = id;
     } else if (type < 1 || type > 4) return 'bad';
+    // Metadata-only reads must not inflate a source blob larger than their working budget.
+    // The caller can keep its existing disk-backed Git reader instead of denying the read.
+    if (this.keepCommits && size > this.budget) {
+      this.kept = this.budget + 1;
+      return 'bad';
+    }
     let inflated: { buffer: Buffer; engine: { bytesWritten: number } };
     try {
       inflated = inflateSync(bytes.subarray(i), {
@@ -194,10 +248,28 @@ export class PackTrees {
     }
     if (inflated.buffer.length !== size || inflated.engine.bytesWritten <= 0) return 'bad';
     const next = i + inflated.engine.bytesWritten;
-    if (type === tree || base !== undefined) {
+    if (this.keepCommits && (type === commit || commitBase !== undefined)) {
+      let data = inflated.buffer;
+      try {
+        if (commitBase !== undefined) data = applyGitDelta(this.commits.get(commitBase)!, data, this.budget);
+      } catch {
+        return 'bad';
+      }
+      const id = gitHash('commit', data);
+      if (!this.commits.has(id)) {
+        this.commits.set(id, data);
+        this.kept += data.length;
+      }
+      this.commitAt.set(offset, id);
+    } else if (type === tree || base !== undefined) {
       let bytes = inflated.buffer;
       try {
-        if (base !== undefined) bytes = applyGitDelta(this.get(base)!, bytes);
+        if (base !== undefined)
+          bytes = applyGitDelta(
+            this.get(base)!,
+            bytes,
+            this.keepCommits ? this.budget : Number.MAX_SAFE_INTEGER,
+          );
       } catch {
         return 'bad';
       }

@@ -56,6 +56,7 @@ test('hosted help and packaged docs are generated from every enforced schema', a
       'board-post',
       'board-reply',
       'board-resolve',
+      'history',
     ],
   );
   for (const entry of hostedAgentHelpEntries)
@@ -281,7 +282,8 @@ test('every generated hosted action reaches dispatch validation instead of an un
   for (const { action } of hostedAgentHelpEntries) {
     // CLI-owned adapters (source/board/wait) are tested at their entry points; transport
     // actions must recognise their names before rejecting this deliberately invalid body.
-    if (['show', 'wait', 'board', 'board-post', 'board-reply', 'board-resolve'].includes(action)) continue;
+    if (['show', 'history', 'wait', 'board', 'board-post', 'board-reply', 'board-resolve'].includes(action))
+      continue;
     await assert.rejects(
       transport.dispatch(action, { unsupportedGuard: true }),
       error => {
@@ -308,4 +310,15 @@ test('stalled landing guidance follows exact recovery, and otherwise reads the q
     assert.match(stalled, /do not resubmit/i);
     assert.doesNotMatch(stalled, /land --save again/);
   }
+});
+
+// J18-3: the CLI adapter must be discoverable without advertising an unsupported transport action.
+test('history help exposes the enforced log/blame/show selectors without a server call', async t => {
+  const s = agentFixture(t);
+  const before = s.calls.length;
+  const text = await output(() => agentCli([s.root, 'history', '--help']));
+  for (const word of ['log', 'blame', 'show', 'commit', 'path', 'skip']) assert(text.includes(word));
+  assert.match(hostedAgentHelp(), /history:/);
+  assert.equal(hostedHelpFor('history'), text);
+  assert.equal(s.calls.length, before);
 });

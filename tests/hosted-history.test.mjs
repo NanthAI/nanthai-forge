@@ -9,7 +9,16 @@ import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { promisify } from 'node:util';
 import { gzipSync } from 'node:zlib';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import {
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+  mkdirSync,
+  readdirSync,
+  existsSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
@@ -26,7 +35,12 @@ import {
 } from '../dist/git-upload-pack.js';
 import { hostedHistory } from '../dist/hosted-history-cli.js';
 import { hostedHistoryCli } from '../dist/hosted-history-output.js';
-import { cachedPacks, ensureHistoryRepository, indexPack } from '../dist/history-git.js';
+import {
+  cachedPacks,
+  historyCacheDirectory,
+  ensureHistoryRepository,
+  indexPack,
+} from '../dist/history-git.js';
 
 const modules = {};
 for (const name of [
@@ -136,10 +150,14 @@ function fixture(t, source, { visibility = 'public' } = {}) {
         return value;
       };
   const previous = globalThis.fetch;
-  const fetches = [];
+  const fetches = [],
+    r2Reads = { count: 0 };
   globalThis.fetch = async (url, options) => {
     const parsed = new URL(url);
-    if (parsed.hostname.endsWith('.r2.cloudflarestorage.com')) return previous(url, options);
+    if (parsed.hostname.endsWith('.r2.cloudflarestorage.com')) {
+      if (!options?.method || options.method === 'GET') r2Reads.count++;
+      return previous(url, options);
+    }
     if (parsed.hostname === 'api.github.com' && parsed.pathname === '/repos/example/repo')
       return Response.json({
         id: 7,
@@ -166,7 +184,7 @@ function fixture(t, source, { visibility = 'public' } = {}) {
       ? delete process.env.FORGE_HISTORY_CACHE
       : (process.env.FORGE_HISTORY_CACHE = previousCache),
   );
-  return { s, fetches, visibility, previousFetch: previous };
+  return { s, fetches, r2Reads, visibility, previousFetch: previous };
 }
 async function importedProject(f, commit) {
   const projectId = await f.s.ctx.db.insert('hostedProjects', {
@@ -317,7 +335,11 @@ test('import stores GitHub history in R2 once and Lane log, blame and file-at-co
 
   const io = transport(s, projectId);
   const read = command => hostedHistory(address(projectId), command, io, f.previousFetch);
-  const log = await read({ op: 'log', limit: 100 });
+  const beforeLog = io.calls.length;
+  const log = await hostedHistory(address(projectId), { op: 'log', limit: 100 }, io, () =>
+    assert.fail('A history log must not fetch source packs to the client'),
+  );
+  assert.equal(io.calls.length - beforeLog, 1, 'one client action for a log page');
   const expected = git(source.repo, ['log', '--format=%H %P|%an|%aI|%s', source.head])
     .toString()
     .trim()
@@ -331,7 +353,26 @@ test('import stores GitHub history in R2 once and Lane log, blame and file-at-co
     expected,
   );
   assert.equal(log.commit, source.head);
-  assert.ok(log.downloadedBytes > 0);
+  assert.equal(log.downloadedBytes, 0, 'J18-4: log never downloads source packs');
+  assert.equal(cachedPacks(historyCacheDirectory(address(projectId))).length, 0);
+  assert.equal(
+    existsSync(join(historyCacheDirectory(address(projectId)), 'HEAD')),
+    false,
+    'a metadata log does not initialise Git',
+  );
+  const readsAfterColdLog = f.r2Reads.count;
+  assert(readsAfterColdLog > 0);
+  const secondPage = await read({ op: 'log', limit: 2, skip: 2 });
+  assert.equal(
+    f.r2Reads.count,
+    readsAfterColdLog,
+    'another page reuses verified metadata with zero R2 reads',
+  );
+  assert.equal(secondPage.readBytes, 0);
+  assert.deepEqual(secondPage.entries, log.entries.slice(2, 4));
+  assert.equal(secondPage.more, log.entries.length > 4);
+  const prefixed = await read({ op: 'log', commit: source.head.slice(0, 12) });
+  assert.equal(prefixed.commit, source.head);
   const old = git(source.repo, ['rev-list', '--reverse', source.head]).toString().split('\n')[1];
   const fileLog = await read({ op: 'log', path: 'src/app.go' });
   assert.deepEqual(
@@ -1830,12 +1871,15 @@ test('a first Lane build lists the parent tree from the history packs and reads 
   assert.equal(s.tables.projectGitLaneCommits.size, 1);
 
   // Recording the import scheduled its tree index; once built, a first build reads the index
-  // (trees only) instead of scanning the pack, and makes the same commit.
+  // (no file bodies) instead of scanning the pack, and makes the same commit.
   const index = s.scheduled.filter(task => getFunctionName(task.fn) === 'gitServeTrees:indexPacks');
   assert.equal(index.length, 1, 'one index run per recorded pack');
   await modules.gitServeTrees.indexPacks._handler(s.ctx, index[0].args);
   const [row] = historyPacks(s, projectId);
-  assert.ok(row.trees && row.trees.size < row.bytes, 'the index holds trees only');
+  assert.ok(
+    row.trees && row.trees.size < row.bytes,
+    'the index excludes file bodies and stays smaller than the source pack',
+  );
   const cold = { ...plan, aliases: null, packs: [{ chunks: row.chunks, trees: row.trees }] };
   assert.equal(await modules.gitServeLane.buildLane(s.ctx, projectId, laneId, cold), fast);
   assert.deepEqual(
@@ -1846,6 +1890,153 @@ test('a first Lane build lists the parent tree from the history packs and reads 
   const before = s.tables.projectHistoryPacks.get(row._id).trees;
   await modules.gitServeTrees.indexPacks._handler(s.ctx, index[0].args);
   assert.deepEqual(s.tables.projectHistoryPacks.get(row._id).trees, before);
+});
+
+test('history metadata log checks current membership before returning a cold or warm page', async t => {
+  const source = sourceRepository(t),
+    f = fixture(t, source),
+    { s } = f;
+  const projectId = await importedProject(f, source.head);
+  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
+  const io = transport(s, projectId);
+  const read = () =>
+    hostedHistory(address(projectId), { op: 'log', limit: 2 }, io, () =>
+      assert.fail('a metadata log cannot download client packs'),
+    );
+  assert.equal((await read()).readMode, 'metadata');
+  s.caller('stranger');
+  await assert.rejects(read(), error => error.data?.code === 'PROJECT_UNAVAILABLE');
+  s.caller('owner');
+  assert.equal((await read()).downloadedBytes, 0);
+  assert.equal(s.tables.projectHistoryPacks.size, 1);
+});
+
+test('history log preserves the existing Git reader for commit encodings the metadata scanner cannot decode', async t => {
+  const source = sourceRepository(t);
+  const tree = git(source.repo, ['rev-parse', 'HEAD^{tree}']).toString().trim();
+  const raw = Buffer.concat([
+    Buffer.from(`tree ${tree}\nparent ${source.head}\nauthor Ren`),
+    Buffer.from([0xe9]),
+    Buffer.from(
+      ` <author@example.invalid> ${clock + 3600} +0000\ncommitter Synthetic <committer@example.invalid> ${clock + 3600} +0000\nencoding ISO-8859-1\n\nEncoded author\n`,
+    ),
+  ]);
+  const head = git(source.repo, ['hash-object', '-t', 'commit', '-w', '--stdin'], raw).toString().trim();
+  const f = fixture(t, { ...source, head }),
+    { s } = f;
+  const projectId = await importedProject(f, head);
+  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
+  const read = command =>
+    hostedHistory(address(projectId), command, transport(s, projectId), f.previousFetch);
+  const result = await read({ op: 'log', limit: 1 });
+  assert.equal(result.commit, head);
+  assert.equal(result.readMode, 'pack-cache');
+  assert.match(result.note, /metadata scanner/);
+  assert.equal(result.entries[0].author, 'René');
+  assert.equal(result.entries[0].subject, 'Encoded author');
+});
+
+test('an older strict history server preserves the exact log through an explicit compatibility fallback', async t => {
+  const source = sourceRepository(t),
+    f = fixture(t, source),
+    { s } = f;
+  const projectId = await importedProject(f, source.head);
+  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
+  const io = transport(s, projectId),
+    calls = [];
+  const legacy = {
+    ...io,
+    action: async (name, args) => {
+      calls.push(args);
+      if (args.log) throw new Error('ArgumentValidationError: extra field log');
+      return io.action(name, args);
+    },
+  };
+  const result = await hostedHistory(address(projectId), { op: 'log', limit: 2 }, legacy, f.previousFetch);
+  assert.equal(result.commit, source.head);
+  assert.equal(result.readMode, 'pack-cache');
+  assert.match(result.note, /server predates/);
+  assert.equal(calls.length, 2);
+  assert.equal(result.entries.length, 2);
+});
+
+test('history metadata cache corruption is repaired in the normal call without a client source-pack download', async t => {
+  const source = sourceRepository(t),
+    f = fixture(t, source),
+    { s } = f;
+  const projectId = await importedProject(f, source.head);
+  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
+  const io = transport(s, projectId);
+  const read = () =>
+    hostedHistory(address(projectId), { op: 'log', limit: 2 }, io, () =>
+      assert.fail('metadata cache repair must not download source packs'),
+    );
+  const expected = await read();
+  const folder = join(historyCacheDirectory(address(projectId)), 'metadata');
+  const cached = readdirSync(folder).find(name => name.endsWith('.gz'));
+  assert(cached);
+  writeFileSync(join(folder, cached), 'corrupt synthetic cache');
+  const calls = io.calls.length;
+  assert.deepEqual((await read()).entries, expected.entries);
+  assert.equal(io.calls.length - calls, 1);
+  assert.equal(cachedPacks(historyCacheDirectory(address(projectId))).length, 0);
+});
+
+test('metadata scanning opts out before inflating a source blob beyond its working budget; normal tree scans keep their contract', async () => {
+  const { PackTrees } = await import('../dist/git-pack-trees.js');
+  const { writePack } = await import('../dist/git-lane-objects.js');
+  const pack = writePack([{ type: 'blob', bytes: Buffer.alloc(1024) }]);
+  const metadata = new PackTrees(128, { commits: true });
+  assert.equal(metadata.push(pack, true), false);
+  assert(metadata.kept > 128);
+  assert.equal(new PackTrees(128).push(pack, true), true, 'existing blob-skipping tree scans are unchanged');
+});
+
+test('history commit metadata extensions preserve legacy tree-reader results', async t => {
+  const source = sourceRepository(t);
+  const { PackTrees, listTree } = await import('../dist/git-pack-trees.js');
+  const scan = new PackTrees(8 << 20, { commits: true });
+  scan.startPack();
+  assert.equal(
+    scan.push(git(source.repo, ['pack-objects', '--revs', '--stdout', '-q'], source.head + '\n'), true),
+    true,
+  );
+  const bytes = scan.treeIndex({ commits: true });
+  const legacy = new PackTrees(8 << 20);
+  const current = new PackTrees(8 << 20, { commits: true });
+  assert.equal(legacy.loadIndex(bytes), true);
+  assert.equal(current.loadIndex(bytes), true);
+  assert(current.commits.has(source.head));
+  const tree = git(source.repo, ['rev-parse', `${source.head}^{tree}`])
+    .toString()
+    .trim();
+  assert.deepEqual(listTree(legacy, tree), listTree(current, tree));
+});
+
+test('metadata logs match Git for merge paths, directories and executable-bit changes', async t => {
+  const source = sourceRepository(t);
+  git(source.repo, ['update-index', '--chmod=+x', 'src/app.go']);
+  source.head = commit(source.repo, {}, 'Make app executable');
+  const { PackTrees } = await import('../dist/git-pack-trees.js');
+  const { historyLogPage } = await import('../dist/history-log-page.js');
+  const { historyLog } = await import('../dist/history-git.js');
+  const scan = new PackTrees(8 << 20, { commits: true });
+  scan.startPack();
+  assert.equal(
+    scan.push(git(source.repo, ['pack-objects', '--revs', '--stdout', '-q'], source.head + '\n'), true),
+    true,
+  );
+  for (const path of [undefined, 'src/app.go', 'src', 'docs/guide.md', 'docs', 'absent']) {
+    for (const skip of [0, 1, 3]) {
+      const options = { path, limit: 2, skip };
+      const actual = historyLogPage(scan, source.head, options);
+      assert.deepEqual(
+        { entries: actual.entries, more: actual.more },
+        historyLog(source.repo, source.head, options),
+        `${path ?? 'all'} skip ${skip}`,
+      );
+    }
+  }
 });
 
 // Forge-built main commits (Issue 3bd4a8e9 line 3): an imported project without a mirror serves
@@ -2136,3 +2327,5 @@ function lastState(s, projectId) {
   const rows = [...s.tables.projectHostedAcceptances.values()].filter(row => row.projectId === projectId);
   return JSON.parse(rows.at(-1).value).candidate.head;
 }
+
+// J18-4: the metadata reader keeps current access checks and never falls back to another revision.

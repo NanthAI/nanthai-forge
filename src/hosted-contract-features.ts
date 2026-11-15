@@ -148,6 +148,8 @@ export const hostedContractFeatures = [
   'capabilities-main',
   /** Indexed planning filters and bounded state counts on the existing records read. */
   'planning-filtered-reads',
+  /** History logs accept a client metadata-cache inventory and return commit/tree indexes. */
+  'history-log',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

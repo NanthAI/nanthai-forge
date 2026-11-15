@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { hostedHistorySchema } from './hosted-history-cli.js';
 import { hostedClientReadSchemas } from './hosted-agent-reads.js';
 import { z } from 'zod';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
@@ -11,6 +12,7 @@ import { type HelpTopicId, helpTopicIndex, helpTopics, helpTopicText, isHelpTopi
 export const hostedAgentHelpEntries = [
   ...Object.entries(hostedAgentCommandSchemas),
   ...Object.entries(hostedClientReadSchemas),
+  ['history', hostedHistorySchema] as const,
 ].map(([action, schema]) => {
   const json = z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' });
   // Client envelope fields are accepted outside the action schema by dispatch.
@@ -20,7 +22,11 @@ export const hostedAgentHelpEntries = [
     json.properties.open = { type: 'boolean' };
     json.properties.installScripts = { type: 'boolean' };
   }
-  if (!['status', 'observe', 'friction-list', ...Object.keys(hostedClientReadSchemas)].includes(action))
+  if (
+    !['history', 'status', 'observe', 'friction-list', ...Object.keys(hostedClientReadSchemas)].includes(
+      action,
+    )
+  )
     json.properties.operationId = { type: 'string', format: 'uuid' };
   const required = new Set(json.required ?? []);
   const parameters = Object.keys(json.properties ?? {}).map(
@@ -57,6 +63,7 @@ const actionTopic: Record<string, HelpTopicId> = {
   start: 'lanes',
   lanes: 'lanes',
   'lane-history': 'lanes',
+  history: 'review',
   abandon: 'lanes',
   'abandon-dormant': 'lanes',
   pull: 'hosted',

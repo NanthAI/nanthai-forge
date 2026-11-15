@@ -65,6 +65,8 @@ export const historyTables = {
     /** The pack's trees only (whole or as deltas), built once after the pack is recorded: a Lane
      * build lists its parent commit's tree from it instead of scanning the pack (Issue 3bd4a8e9). */
     trees: v.optional(historyChunk),
+    /** The existing FTI1 tree index also carries full commit metadata records. */
+    metadataVersion: v.optional(v.literal(1)),
     bytes: v.number(),
     objects: v.number(),
     packSha1: v.string(),

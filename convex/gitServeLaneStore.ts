@@ -317,17 +317,20 @@ export const unindexed = internalQuery({
 export const setTreeIndex = internalMutation({
   args: {
     projectId: v.id('hostedProjects'),
-    packs: v.array(v.object({ tip: v.string(), trees: historyChunk })),
+    packs: v.array(
+      v.object({ tip: v.string(), trees: historyChunk, metadataVersion: v.optional(v.literal(1)) }),
+    ),
   },
   returns: v.array(v.string()),
   handler: async (ctx, { projectId, packs }) => {
     const unused: string[] = [];
-    for (const { tip, trees } of packs) {
+    for (const { tip, trees, metadataVersion } of packs) {
       const [row] = await ctx.db
         .query('projectHistoryPacks')
         .withIndex('by_project_and_tip', q => q.eq('projectId', projectId).eq('tip', tip))
         .take(1);
-      if (row && !row.trees) await ctx.db.patch(row._id, { trees });
+      if (row && !row.trees)
+        await ctx.db.patch(row._id, { trees, ...(metadataVersion ? { metadataVersion } : {}) });
       else if (row?.trees?.sha256 !== trees.sha256) unused.push(trees.sha256);
     }
     return unused;
