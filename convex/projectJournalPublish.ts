@@ -13,6 +13,7 @@ import {
   pageKey,
   receiptRow,
   putControl,
+  pendingJournal,
   loadCaptured,
   logicalSegments,
   type Control,
@@ -58,6 +59,10 @@ export const page = internalMutation({
     const row = await receiptRow(ctx, input.projectId, phaseKey(input));
     const control: Control = row ? JSON.parse(row.envelope) : {};
     if (control.last?.pageId === pageKey(input)) return control.last.result;
+    const claimRow = await pendingJournal(ctx, input.projectId);
+    const active = claimRow ? JSON.parse(claimRow.envelope) : null;
+    if (active && (active.control !== phaseKey(input) || active.claim !== input.claim))
+      return canonicalPayload({ deferred: 'claimed', retryAt: active.until });
     const pending = control.pending;
     invariant(pending && pending.claim === input.claim, 'WORK_STALE', 'Archive capture claim changed.');
     const rows = await loadCaptured(ctx, pending);
@@ -166,7 +171,7 @@ export const page = internalMutation({
       pending.pointers.push(...input.pointers);
       pending.fragment++;
       pending.until = 0;
-      await putControl(ctx, pending.input, { ...control, pending });
+      await putControl(ctx, pending.input, { ...control, pending }, row, claimRow);
     } else {
       await applyJournal(
         ctx,
@@ -181,13 +186,19 @@ export const page = internalMutation({
           journalRevision: (project.journalRevision ?? 0) + 1,
           journalRecordReceipts: true,
         });
-      if (pending.input.laneId && pending.done) await ctx.db.delete(row!._id);
+      if (pending.input.laneId && pending.done) await putControl(ctx, pending.input, null, row, claimRow);
       else
-        await putControl(ctx, pending.input, {
-          ...(control.runId ? { runId: control.runId } : {}),
-          cursor: pending.cursor,
-          last: { pageId: pending.pageId, result },
-        });
+        await putControl(
+          ctx,
+          pending.input,
+          {
+            ...(control.runId ? { runId: control.runId } : {}),
+            cursor: pending.cursor,
+            last: { pageId: pending.pageId, result },
+          },
+          row,
+          claimRow,
+        );
     }
     return result;
   },

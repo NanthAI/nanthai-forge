@@ -49,7 +49,10 @@ export async function journalMaintenanceFixture(t, { f: provided, advance = true
     calls = [],
     transcript = [],
     io = [],
-    queue = [];
+    queue = [],
+    delays = [],
+    due = new WeakMap(),
+    conflicts = new Map();
   let corrupt = false,
     losePublish = false,
     losePut = false;
@@ -79,16 +82,34 @@ export async function journalMaintenanceFixture(t, { f: provided, advance = true
       const name = getFunctionName(ref),
         [file, method] = name.split(':');
       calls.push(name);
-      const value = await f.c.transaction('journalWriterPage', modules[file][method], args);
-      const meter = f.c.counts.at(-1);
-      io.push({
-        name,
-        documents: meter.documents,
-        reads: meter.ranges,
-        readBytes: meter.readBytes,
-        writes: meter.writes,
-        writeBytes: meter.writeBytes,
-      });
+      const original = modules[file][method];
+      const remaining = conflicts.get(name) ?? 0;
+      if (remaining) conflicts.set(name, remaining - 1);
+      const handler = remaining
+        ? {
+            _handler: async (ctx, input) => {
+              await original._handler(ctx, input);
+              throw new Error(
+                'Documents read from or written to projectJournalReceipts changed while this mutation was being run (write conflict)',
+              );
+            },
+          }
+        : original;
+      let value;
+      try {
+        value = await f.c.transaction('journalWriterPage', handler, args);
+      } finally {
+        const meter = f.c.counts.at(-1);
+        io.push({
+          name,
+          documents: meter.documents,
+          reads: meter.ranges,
+          readBytes: meter.readBytes,
+          writes: meter.writes,
+          writeBytes: meter.writeBytes,
+          controlWrites: meter.written.filter(table => table === 'projectJournalReceipts').length,
+        });
+      }
       transcript.push({ name, args: structuredClone(args), value });
       if (losePublish && file === 'projectJournalPublish') {
         losePublish = false;
@@ -97,9 +118,11 @@ export async function journalMaintenanceFixture(t, { f: provided, advance = true
       return value;
     },
     scheduler: {
-      runAfter: async (_delay, ref, input) => {
+      runAfter: async (delay, ref, input) => {
         assert.equal(getFunctionName(ref), 'projectJournalRun:pack');
         queue.push(input);
+        delays.push(delay);
+        due.set(input, Date.now() + delay);
       },
     },
   };
@@ -109,7 +132,9 @@ export async function journalMaintenanceFixture(t, { f: provided, advance = true
     const results = [await pack(request)];
     for (let n = 0; queue.length; n++) {
       assert(n < 1000, 'finite fixture frontier drains');
-      results.push(await pack(queue.shift()));
+      const next = queue.shift();
+      f.advanceClock(Math.max(0, (due.get(next) ?? Date.now()) - Date.now()));
+      results.push(await pack(next));
     }
     return results;
   };
@@ -131,6 +156,8 @@ export async function journalMaintenanceFixture(t, { f: provided, advance = true
     calls,
     transcript,
     io,
+    delays,
+    conflict: (name, count = 1) => conflicts.set(name, count),
     corrupt: () => {
       corrupt = true;
     },

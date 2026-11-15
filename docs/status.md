@@ -98,7 +98,10 @@ terminal-event continuations and one operator-started existing-history run move
 verified superseded payloads, terminal transports, closed-save pages and coordination
 detail older than fourteen days. Messages, handoffs and acknowledgements remain live.
 Retry readers accept complete terminal results, Work command facts and closed-save
-digest ledgers. Fixture relocation, fault recovery and exact original-row export
+digest ledgers. Journal pages resume write conflicts through at most four scheduled
+backoffs with the same page/claim; one existing-table claim defers concurrent
+project phases before capture writes. Healthy page calls and idle behavior stay
+unchanged, with no periodic retry job. Fixture relocation, fault recovery and exact original-row export
 are covered; live enablement, billed usage and two dev exports remain open. Recovery also preserves a terminal operation’s
 mutable recovery ledger and selects its latest archived physical row; restored
 expired operation UUIDs reconcile against their newest retained receipt.

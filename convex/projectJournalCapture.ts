@@ -13,6 +13,7 @@ import {
   pageKey,
   receiptRow,
   putControl,
+  pendingJournal,
   loadCaptured,
   logicalSegments,
   type Control,
@@ -23,15 +24,28 @@ export const page = internalMutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     if (!journalEnabled()) return canonicalPayload({ kept: 'disabled' });
+    const project = await ctx.db.get(input.projectId);
+    if (!project || project.removal) return canonicalPayload({ kept: 'unavailable' });
+    const claimRow = await pendingJournal(ctx, input.projectId);
+    const active = claimRow ? JSON.parse(claimRow.envelope) : null;
+    if (
+      active &&
+      active.until > Date.now() &&
+      (active.control !== phaseKey(input) || active.claim !== input.claim)
+    )
+      return canonicalPayload({ deferred: 'claimed', retryAt: active.until });
+    const controlRow = await receiptRow(ctx, input.projectId, phaseKey(input));
+    const control: Control = controlRow ? JSON.parse(controlRow.envelope) : {};
+    // A legacy control can predate the project pointer. Its original claim still
+    // owns this frontier until expiry; recapture publishes the same pointer.
+    let pending = control.pending;
+    if (pending && pending.claim !== input.claim && pending.until > Date.now())
+      return canonicalPayload({ deferred: 'claimed', retryAt: pending.until });
     const wakeKey = journalEligibilityKey(input.operationId);
     if (wakeKey) {
       const wake = await receiptRow(ctx, input.projectId, wakeKey);
       if (wake) await ctx.db.delete(wake._id);
     }
-    const project = await ctx.db.get(input.projectId);
-    if (!project || project.removal) return canonicalPayload({ kept: 'unavailable' });
-    const controlRow = await receiptRow(ctx, input.projectId, phaseKey(input));
-    const control: Control = controlRow ? JSON.parse(controlRow.envelope) : {};
     const pageId = pageKey(input);
     if (input.existing && (input.phase ?? 0) < 3 && control.runId !== input.operationId && !control.pending) {
       delete control.cursor;
@@ -53,9 +67,6 @@ export const page = internalMutation({
         ...(saved.length > 2 ? { next: { ...request, phase: saved[2], part: saved[3] } } : { done: true }),
       });
     }
-    let pending = control.pending;
-    if (pending && pending.claim !== input.claim && pending.until > Date.now())
-      return canonicalPayload({ deferred: 'claimed' });
     let future: { input: JournalRunInput; dueAt: number }[] = [];
     if (!pending) {
       // Expired scheduling dedup facts are derived metadata, not logical history.
@@ -92,7 +103,7 @@ export const page = internalMutation({
     if (!rows) {
       // No source has been removed; retry selection at the same durable frontier.
       delete control.pending;
-      await putControl(ctx, input, control);
+      await putControl(ctx, input, control, controlRow, claimRow);
       const { claim: ignoredClaim, ...request } = input;
       void ignoredClaim;
       return canonicalPayload({ stale: true, next: request });
@@ -114,7 +125,7 @@ export const page = internalMutation({
       } else texts.push(journalSegmentText(segment));
     }
     control.pending = pending;
-    await putControl(ctx, input, control);
+    await putControl(ctx, input, control, controlRow, claimRow);
     for (const wake of future) await wakeJournal(ctx, wake.input, wake.dueAt);
     return canonicalPayload({ pending, texts, fragmented });
   },

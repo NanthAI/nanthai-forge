@@ -69,13 +69,43 @@ export const receiptRow = (ctx: MutationCtx, projectId: Id<'hostedProjects'>, op
     .query('projectJournalReceipts')
     .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
     .unique();
-export async function putControl(ctx: MutationCtx, input: JournalRunInput, value: Control) {
-  const operationId = phaseKey(input),
-    envelope = canonicalPayload(value),
-    old = await receiptRow(ctx, input.projectId, operationId);
-  const fields = { projectId: input.projectId, operationId, hash: digest(envelope), envelope };
-  if (old) await ctx.db.replace(old._id, fields);
-  else await ctx.db.insert('projectJournalReceipts', fields);
+/** One small project pointer to the existing pending claim, using the existing
+ * receipt index. Its absent-key read and the control write share the transaction. */
+export const pendingJournal = (ctx: MutationCtx, projectId: Id<'hostedProjects'>) =>
+  receiptRow(ctx, projectId, 'journal-pending');
+export async function putControl(
+  ctx: MutationCtx,
+  input: JournalRunInput,
+  value: Control | null,
+  old: Doc<'projectJournalReceipts'> | null,
+  claimRow: Doc<'projectJournalReceipts'> | null,
+) {
+  const operationId = phaseKey(input);
+  if (value) {
+    const envelope = canonicalPayload(value);
+    const fields = { projectId: input.projectId, operationId, hash: digest(envelope), envelope };
+    if (old) await ctx.db.replace(old._id, fields);
+    else await ctx.db.insert('projectJournalReceipts', fields);
+  } else if (old) await ctx.db.delete(old._id);
+  // Control publication is the only cleanup path, including stale captures,
+  // fragment handoff and completed Lane controls. No cleanup task is scheduled.
+  if (value?.pending && value.pending.until > Date.now()) {
+    const envelope = canonicalPayload({
+      control: operationId,
+      claim: value.pending.claim,
+      until: value.pending.until,
+    });
+    const fields = {
+      projectId: input.projectId,
+      operationId: 'journal-pending',
+      hash: digest(envelope),
+      envelope,
+    };
+    if (claimRow) await ctx.db.replace(claimRow._id, fields);
+    else await ctx.db.insert('projectJournalReceipts', fields);
+  } else if (claimRow && JSON.parse(claimRow.envelope).control === operationId) {
+    await ctx.db.delete(claimRow._id);
+  }
 }
 export const sourceText = async (row: JournalRow, table?: JournalTable) => {
   const source = journalSourceRow(row);

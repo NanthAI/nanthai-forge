@@ -601,3 +601,31 @@ is required.
 
 Work projection replay uses the same verified compact command facts as ordinary
 retries and remains query-readable when the full original provenance is archived.
+
+Journal page actions retain the original page identity and pending claim across
+write-conflict retries. At most four scheduled resumptions use exponential
+250–2,000 ms backoff plus less than 250 ms jitter; an exhausted conflict remains
+visible as a failed job, and the original cursor stays resumable. Other failures
+remain explicit. A successful page resets the retry count for its successor.
+
+One small project pointer in the existing receipt table names the pending claim
+across every phase and Lane scope. Captures read its existing point index before
+writing eligibility markers or control state, so concurrent wakes defer until the
+current claim expires. Publication checks the same ownership before applying rows.
+The deferred request has one finite scheduled continuation; there is no polling,
+periodic job or idle wake. Older controls remain readable and republish the project
+pointer when their own frontier is captured again. Claims use the existing ten-minute
+expiry. The shared control writer clears the pointer on stale selection, fragment
+handoff and completion; no second cleanup path, table or index is added.
+
+Healthy pages keep one action and at most two mutations. Point reads of the claim
+replace redundant control-row lookups; its capture/publication adds two small
+metadata writes per page. The project pointer exists only while a page is pending,
+so retained JSON and stored-index ceilings stay unchanged. No segment payload or
+source bytes move into Convex. A single injected capture conflict adds one action
+and one mutation; an injected publication conflict adds one action, two mutations
+and one reconciliatory R2 GET, with the same segments and no duplicate PUT. Tests
+retain the original storage ceilings and verify a finite drain after concurrent
+wakes in distinct phases, including an actual indexed OCC race. Retention and
+logical history are unchanged. Provider billing and live byte-placement deltas
+remain separate rollout evidence.
