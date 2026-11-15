@@ -138,7 +138,14 @@ export async function reserveFinishRetry(
     );
   if (retiringSolo && landing.orderWaited) await wakeLandingOrderWaiters(ctx, landing, true);
   const current = (await ctx.db.get(row._id))!;
-  await scheduleFinish(ctx, current, precompose ? 0 : hostedFinishBackoff(pending.number));
+  // Solo fallback owns a new generation after the cohort retires. Replace its
+  // old compose watch, while ordinary advisory work keeps its coalesced wake.
+  await scheduleFinish(
+    ctx,
+    current,
+    precompose ? 0 : hostedFinishBackoff(pending.number),
+    cause === 'BATCH_FALLBACK',
+  );
 }
 /** Why this re-check happens: the landings that moved main since the stale
  * attempt was composed, and whether each was submitted before this one. One

@@ -205,6 +205,18 @@
       "what": "Twelve passing shards but run and eleven jobs stay in_progress after every step completed",
       "file": "tests/hosted-actions-direct.test.mjs",
       "test": "incident 238b3573 replay: signed passes and completed provider steps settle at thirty minutes despite in-progress jobs"
+    },
+    {
+      "incident": "c01d5457",
+      "what": "A composing cohort retry/split retains an obsolete finish timer; late retired callbacks can displace successor work. Synthetic failed-source handoff replay; the historical long-running source action remains separately unqualified.",
+      "file": "tests/hosted-cohort-finish-wake.test.mjs",
+      "test": "incident c01d5457: failed shared compose splits ${count} saved Lanes without a watchdog or changed member pins"
+    },
+    {
+      "incident": "c01d5457",
+      "what": "A singleton cohort split leaves a newly reserved solo source generation waiting on the retired compose timer.",
+      "file": "tests/hosted-cohort-finish-wake.test.mjs",
+      "test": "c01d5457: a singleton split replaces its compose watch with the solo generation backoff"
     }
   ]
 }

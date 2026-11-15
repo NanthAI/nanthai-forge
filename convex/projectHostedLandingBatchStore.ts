@@ -86,7 +86,10 @@ export async function wakeBatch(ctx: MutationCtx, input: BatchIdentity, recovery
   const { batch } = await loadBatch(ctx, input);
   if (['landed', 'superseded', 'split', 'failed'].includes(batch.phase)) return;
   const row = await finishRow(ctx, { projectId: input.projectId, submissionId: batch.leaderId ?? batch.id });
-  if (row) await scheduleFinish(ctx, row);
+  // Retry/split hands this leader a new compose generation. A pending timer
+  // belongs to its retired work, not to this generation's immediate progress.
+  // Keep the callback fence, but atomically replace that obsolete task.
+  if (row) await scheduleFinish(ctx, row, 0, recovery);
   if (recovery && batch.phase === 'composing') {
     const leader = await loadLanding(ctx, {
       projectId: input.projectId,

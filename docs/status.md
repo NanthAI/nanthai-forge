@@ -26,7 +26,11 @@ Resolved work checks on the fixed train tail, preserving its check across later
 mergeable groups; a clean pinned sync changes no Lane or landing. Lineage
 supersession covers conflicting own-main sync, source preparation, ownerless
 retry and resolution completion. Composing cohorts recover within the existing
-five-minute train hold and retain lost-owner diagnostics. One attempt allocator
+five-minute train hold and retain lost-owner diagnostics. A retry or split replaces
+the retired compose timer immediately, including the solo source backoff after
+a singleton split; a retired cohort's late compose callback
+cannot replace its successor's finish wake. The long-running source action from
+incident `c01d5457` still needs live qualification. One attempt allocator
 refreshes reserved finish ordinals at installation, guarded by foundation checks.
 A failed,
 withdrawn or changed predecessor restores author source and retires its check.

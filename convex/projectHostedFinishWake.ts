@@ -196,7 +196,10 @@ export async function notifyFinishCompose(
       q.eq('projectId', projectId).eq('composeOperationId', operationId),
     )
     .unique();
-  if (batch && !['superseded', 'landed'].includes(JSON.parse(batch.value).phase)) {
+  // The index pins the current compose generation. Once it split or entered
+  // fallback/checking, its old publication no longer owns the leader's wake:
+  // that finish may now be uploading a child cohort or a solo selection.
+  if (batch && JSON.parse(batch.value).phase === 'composing') {
     const leader = await finishRow(ctx, {
       projectId,
       submissionId: JSON.parse(batch.value).leaderId ?? batch.batchId,
