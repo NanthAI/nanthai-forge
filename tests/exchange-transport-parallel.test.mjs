@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import { captureNativeArchive } from './native-archive-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -215,7 +216,13 @@ test('legacy and record exchange failures drain the other metadata traversal bef
 });
 
 test('ranged downloads overlap at four requests, assemble in offset order and drain auth failure', async () => {
-  const client = new ConvexExchange('https://fixture.convex.cloud', 'fixture', 'project', 'operation', null),
+  const client = new ConvexExchange(
+      testDeploymentOrigin('https://fixture.convex.cloud'),
+      'fixture',
+      'project',
+      'operation',
+      null,
+    ),
     chunk = 2 * 1024 * 1024,
     bytes = Buffer.alloc(chunk * 6 + 31);
   for (let i = 0; i < bytes.length; i += chunk) bytes.fill(i / chunk, i, Math.min(i + chunk, bytes.length));

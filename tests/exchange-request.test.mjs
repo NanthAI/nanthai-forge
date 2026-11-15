@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -412,7 +413,7 @@ test('metadata-tree manifest resolution reports logical work.json bytes through 
   const built = buildExchangeRoot(manifest, work),
     progress = [];
   const exchange = new ConvexExchange(
-    'https://example.convex.cloud',
+    testDeploymentOrigin('https://example.convex.cloud'),
     'synthetic',
     'project',
     'operation',

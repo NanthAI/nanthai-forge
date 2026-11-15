@@ -68,7 +68,11 @@ export function approvalView(row: ApprovalRow | null, laneId: string) {
       : {}),
     ...(row.ended ? { ended: { kind: row.ended.kind, at: new Date(row.ended.at).toISOString() } } : {}),
     // Issue 470ef29b: a held settings change; its content is for the owner (settingChange).
-    ...(row.setting ? { setting: { origin: row.setting.origin } } : {}),
+    ...(row.setting?.origin === 'membership'
+      ? { membership: true }
+      : row.setting
+        ? { setting: { origin: row.setting.origin } }
+        : {}),
     version: row.version,
   };
 }

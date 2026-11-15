@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import { captureNativeArchive } from './native-archive-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -346,7 +347,13 @@ test('small legacy Convex batches verify all bytes and current access while larg
   s.files.get(row.storageId).blob = new Blob(['bad']);
   await assert.rejects(actions.downloadBatch._handler(s.ctx, args));
   const { ConvexExchange } = await import('../dist/exchange-client.js'),
-    client = new ConvexExchange('https://fixture.convex.cloud', 'fixture', 'project', 'op', null),
+    client = new ConvexExchange(
+      testDeploymentOrigin('https://fixture.convex.cloud'),
+      'fixture',
+      'project',
+      'op',
+      null,
+    ),
     large = Buffer.alloc(2 * 1024 * 1024 + 1, 42),
     largePin = { sha256: digest(large), size: large.length };
   let batches = 0,
@@ -370,7 +377,13 @@ test('small legacy Convex batches verify all bytes and current access while larg
   client.client.action = async () => [
     { data: Buffer.from('bad'), digest: pins[0].sha256, size: pins[0].size },
   ];
-  const cold = new ConvexExchange('https://fixture.convex.cloud', 'fixture', 'project', 'other', null);
+  const cold = new ConvexExchange(
+    testDeploymentOrigin('https://fixture.convex.cloud'),
+    'fixture',
+    'project',
+    'other',
+    null,
+  );
   cold.client.mutation = async () => []; // no R2 objects
   cold.client.action = client.client.action;
   await assert.rejects(cold.downloadBatch([pins[0]]));

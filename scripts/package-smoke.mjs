@@ -259,6 +259,7 @@ try {
   });
   writeFileSync(join(installation, 'source.json'), JSON.stringify({ url: releaseUrl, projectId }));
   env.FORGE_AUTH_TOKEN = 'synthetic-package-release-token';
+  env.FORGE_DEPLOYMENT_URL = releaseUrl;
 
   // In-process public SDK calls receive the same unavailable Git boundary as CLI/MCP.
   process.env.PATH = bin;

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -30,6 +31,7 @@ function agentSession(t, id) {
 }
 function http(t, s) {
   const previous = process.env.FORGE_AUTH_TOKEN;
+  testDeploymentOrigin(s.address.url);
   process.env.FORGE_AUTH_TOKEN = 'synthetic-test-credential';
   t.after(() => {
     if (previous === undefined) delete process.env.FORGE_AUTH_TOKEN;

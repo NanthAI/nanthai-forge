@@ -910,3 +910,28 @@ test('W7: the Lane, fork and setting pages decide in the same order and word eve
   assert.match(render(fork('granted', false, 'settled')), /Granted/);
   assert.match(render(fork('requested', false, 'withdrawn')), /was withdrawn/);
 });
+
+test('membership approval uses exact-change review without settings or landing instructions', () => {
+  const approval = {
+    laneId: 'setting:membership:synthetic',
+    status: 'requested',
+    live: true,
+    membership: true,
+    requester: 'owner',
+    change: { kind: 'contributor', contributor: 'target' },
+  };
+  const state = deriveApproval(approval);
+  assert.equal(state.kind, 'setting', 'existing reply kind is preserved');
+  assert.match(state.label, /membership/);
+  assert.match(state.nextStep, /membership change/);
+  const html = renderToStaticMarkup(
+    createElement(LaneApproval, {
+      phase: { kind: 'read', approval },
+      review: { accept() {}, decline() {} },
+      signIn: null,
+    }),
+  );
+  assert.match(html, /Apply this project membership change/);
+  assert.match(html, /target/);
+  assert.doesNotMatch(html, /decide what every landing must pass/);
+});

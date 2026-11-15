@@ -53,7 +53,7 @@ test('generated plugin selects the checkout, copies no token and links installed
   assert.equal(resolve(directory, catalog.plugins[0].source.path), plugin);
   const config = JSON.parse(raw).mcpServers.forge;
   assert.equal(config.command, process.execPath);
-  assert.deepEqual(config.env_vars, ['FORGE_AUTH_TOKEN']);
+  assert.deepEqual(config.env_vars, ['FORGE_AUTH_TOKEN', 'FORGE_DEPLOYMENT_URL']);
   const skill = readFileSync(join(plugin, 'skills/forge-agent/SKILL.md'), 'utf8');
   const doc = skill.match(/\[hosted parity\]\(([^)]+)\)/)[1];
   assert.ok(doc.startsWith('file:'), doc);

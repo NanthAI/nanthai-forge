@@ -57,7 +57,7 @@ export function wakeGithubPush(store: StoreAccess) {
             data.checks.length === 1,
         ),
         effectivePolicy(data),
-        ['FORGE_AUTH_TOKEN'],
+        ['FORGE_AUTH_TOKEN', 'FORGE_DEPLOYMENT_URL'],
       ),
     });
     child.on('error', () => {

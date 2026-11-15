@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
@@ -66,7 +67,7 @@ test('concurrent chunk clients share bindings and reconcile a lost recipe reply 
   t.after(restore);
   const clients = [0, 1].map(index => {
     const client = new ConvexExchange(
-      'https://fixture.convex.cloud',
+      testDeploymentOrigin('https://fixture.convex.cloud'),
       'private-fixture',
       'project',
       randomUUID(),

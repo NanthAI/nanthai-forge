@@ -21,6 +21,7 @@ import { hostedAgentDirectory } from '../dist/hosted-agent-journal.js';
 import { moduleUrl } from './convex-module.mjs';
 import { state, projectRow } from './hosted-fixture.mjs';
 import { settleR2Purge } from './default-r2.mjs';
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 const backups = await import(moduleUrl('../convex/projectBackups.ts'));
 const lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
 const { purgeSettleMs } = await import(moduleUrl('../convex/projectRetention.ts'));
@@ -250,18 +251,10 @@ test('an explicit retry refreshes stale pins only when newer active metadata pro
   assert.equal(requests[1].expectedRevision, 8);
 });
 
-test('real public handlers accept a CLI owner identity and scheduled purge reaches the tombstone', async t => {
+test('real public handlers accept an owner person and scheduled purge reaches the tombstone', async t => {
   const f = setup(t),
-    s = state([]),
-    credentialId = randomUUID();
-  s.tables.cliCredentials.set('device', {
-    owner: 'owner',
-    credentialId,
-    scope: 'cli',
-    revoked: false,
-    expiresAt: Date.now() + 60_000,
-  });
-  s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner', forgeCredential: credentialId });
+    s = state([]);
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
   s.tables.hostedProjects.set('project', {
     _id: 'project',
     _creationTime: 1,
@@ -320,7 +313,14 @@ test('real public handlers accept a CLI owner identity and scheduled purge reach
   assert.equal(result.project.currentBackup, null);
   assert.ok(s.tables.hostedProjects.get('project').removedAt);
   // A valid device credential for another account cannot discover or delete it.
-  s.tables.cliCredentials.get('device').owner = 'stranger';
+  const credentialId = randomUUID();
+  s.tables.cliCredentials.set('device', {
+    owner: 'stranger',
+    credentialId,
+    scope: 'cli',
+    revoked: false,
+    expiresAt: Date.now() + 60_000,
+  });
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'stranger', forgeCredential: credentialId });
   await assert.rejects(deleteHostedProject(f.root, f.options, { client }), code('PROJECT_UNAVAILABLE'));
 });
@@ -422,7 +422,7 @@ test('delete parser accepts explicit bound override and rejects unrelated host a
 });
 
 test('hosted client forwards the bounded observation abort signal to its HTTP transport', async () => {
-  const client = coordinationClient('http://127.0.0.1:1', 'synthetic-device-token', {
+  const client = coordinationClient(testDeploymentOrigin('http://127.0.0.1:1'), 'synthetic-device-token', {
     signal: AbortSignal.abort(),
   });
   await assert.rejects(

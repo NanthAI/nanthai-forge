@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ConvexExchange } from '../dist/exchange-client.js';
@@ -8,7 +9,13 @@ import { getFunctionName } from 'convex/server';
 import { fixture, upload, modules } from './project-exchange-fixture.mjs';
 
 test('exchange downloads ask only for missing hashes and authorize every cache hit', async () => {
-  const client = new ConvexExchange('https://fixture.convex.cloud', 'fixture', 'project', 'op', null);
+  const client = new ConvexExchange(
+    testDeploymentOrigin('https://fixture.convex.cloud'),
+    'fixture',
+    'project',
+    'op',
+    null,
+  );
   const bytes = [Buffer.from('first'), Buffer.from('second')];
   const pins = bytes.map(value => ({ sha256: digest(value), size: value.length }));
   let downloaded = 0,
@@ -56,7 +63,13 @@ test('byte cache evicts by bytes, isolates returned buffers and does not reuse a
 });
 
 test('mixed batch rechecks cached authority after fetching missing bytes', async () => {
-  const client = new ConvexExchange('https://fixture.convex.cloud', 'fixture', 'project', 'op', null);
+  const client = new ConvexExchange(
+    testDeploymentOrigin('https://fixture.convex.cloud'),
+    'fixture',
+    'project',
+    'op',
+    null,
+  );
   const values = [Buffer.from('cached'), Buffer.from('missing')];
   const pins = values.map(bytes => ({ sha256: digest(bytes), size: bytes.length }));
   let revoked = false;
@@ -91,7 +104,13 @@ test('small cached downloads use real current reader authority and exact project
   const s = fixture(),
     bytes = Buffer.from('small cached source'),
     pin = await upload(s, bytes);
-  const client = new ConvexExchange('https://fixture.convex.cloud', 'fixture', 'project', 'op', null);
+  const client = new ConvexExchange(
+    testDeploymentOrigin('https://fixture.convex.cloud'),
+    'fixture',
+    'project',
+    'op',
+    null,
+  );
   client.client = {
     query: (ref, args) => {
       const [name, method] = getFunctionName(ref).split(':');

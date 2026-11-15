@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import { captureNativeArchive } from './native-archive-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -518,6 +519,7 @@ test('CLI saves the original UUID before IO, resumes dry-run pages, and surfaces
   process.env.FORGE_AUTH_TOKEN = 'synthetic-cleanup-device';
   const store = new WorkStore(root),
     deployment = `http://127.0.0.1:${server.address().port}`;
+  testDeploymentOrigin(deployment);
   updateHostState(store, state => {
     state.binding = {
       projectId: 'project',

@@ -31,7 +31,7 @@ export async function waitPushAudit(
       env: checkServiceEnv(
         store.page('checks', 0, Number.MAX_SAFE_INTEGER).records,
         childPolicy(store.readRecords()?.data() ?? store.load()),
-        ['FORGE_AUTH_TOKEN'],
+        ['FORGE_AUTH_TOKEN', 'FORGE_DEPLOYMENT_URL'],
       ),
     },
   );

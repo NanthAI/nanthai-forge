@@ -42,7 +42,11 @@ export function launchSnapshotWorker(root: string, address: HostedAgentAddress):
     const child = (snapshotWorkerTestHooks.launch ?? spawn)(
       process.execPath,
       [workerPath(import.meta.url), root, address.url, address.projectId],
-      { detached: true, stdio: 'ignore', env: childEnv({ allow: ['FORGE_AUTH_TOKEN'] }) },
+      {
+        detached: true,
+        stdio: 'ignore',
+        env: childEnv({ allow: ['FORGE_AUTH_TOKEN', 'FORGE_DEPLOYMENT_URL'] }),
+      },
     );
     child.on('error', () => {
       /* The next command or the turn end snapshots instead. */

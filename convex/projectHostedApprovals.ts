@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
+import { applyApprovedMember } from './projectMemberApprovals';
 import { mutation, query, type MutationCtx } from './cliServer';
 import { configureCheckSetting } from './projectHostedCheckDefinitions';
 import { importCheckFromWork } from './projectHostedCheckImport';
@@ -252,6 +253,8 @@ function applySetting(ctx: MutationCtx, row: ApprovalRow) {
   const setting = row.setting!;
   const request = setting.request;
   switch (setting.origin) {
+    case 'membership':
+      return applyApprovedMember(ctx, row);
     case 'policy':
       return applyApprovedPolicy(ctx, row.projectId, request, setting.base);
     case 'check-import':

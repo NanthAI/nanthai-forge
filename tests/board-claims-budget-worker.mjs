@@ -65,6 +65,7 @@ export default async function claimBudget() {
     const env = {
       ...process.env,
       FORGE_AUTH_TOKEN: 'synthetic-only',
+      FORGE_DEPLOYMENT_URL: server.url,
       XDG_STATE_HOME: state,
     };
     const hook = fileURLToPath(new URL('../dist/agent-edit-hook.js', import.meta.url));

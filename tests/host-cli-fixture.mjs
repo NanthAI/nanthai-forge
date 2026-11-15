@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -105,7 +106,7 @@ export function setup(t, git = false, empty = false) {
     exchange: (projectId, operationId) => {
       exchanges.push({ projectId, operationId });
       const transport = new ConvexExchange(
-        'https://fixture.convex.cloud',
+        testDeploymentOrigin('https://fixture.convex.cloud'),
         'fixture',
         projectId,
         operationId,

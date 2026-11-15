@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -132,6 +133,7 @@ test('forge_wait replyDetail returns the complete terminal run receipt and relea
 
 function syntheticAuth(t) {
   const previous = process.env.FORGE_AUTH_TOKEN;
+  testDeploymentOrigin('https://fixture.invalid');
   process.env.FORGE_AUTH_TOKEN = 'synthetic-account-credential';
   t.after(() => {
     if (previous === undefined) delete process.env.FORGE_AUTH_TOKEN;
@@ -403,7 +405,11 @@ test('the existing stdio CLI accepts explicit hosted addressing and discovers to
       s.address.projectId,
     ],
     stderr: 'pipe',
-    env: { ...mcpTestEnvironment(t), FORGE_AUTH_TOKEN: 'synthetic-only' },
+    env: {
+      ...mcpTestEnvironment(t),
+      FORGE_AUTH_TOKEN: 'synthetic-only',
+      FORGE_DEPLOYMENT_URL: s.address.url,
+    },
   });
   t.after(() => client.close());
   await client.connect(transport, requestOptions('connect'));

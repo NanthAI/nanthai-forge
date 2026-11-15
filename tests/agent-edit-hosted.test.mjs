@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -23,6 +24,7 @@ import { hostedEditServer, hostedMarker, laneA, laneB } from './hosted-edit-fixt
 function boardState(t, root, project) {
   const previous = process.env.XDG_STATE_HOME;
   process.env.XDG_STATE_HOME = join(root, 'state');
+  testDeploymentOrigin('https://example.test');
   t.after(() => {
     if (previous === undefined) delete process.env.XDG_STATE_HOME;
     else process.env.XDG_STATE_HOME = previous;
@@ -46,6 +48,7 @@ test('hosted first writes carry no overlap notices: no call before the board, th
   process.env.FORGE_AUTH_TOKEN = 'synthetic-only';
   process.env.XDG_CONFIG_HOME = join(root, 'config');
   process.env.XDG_STATE_HOME = join(root, 'state');
+  testDeploymentOrigin(server.url);
   const a = join(root, 'a'),
     b = join(root, 'b');
   hostedMarker(a, server.url, laneA);

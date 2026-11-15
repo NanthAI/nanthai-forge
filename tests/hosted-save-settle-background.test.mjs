@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 // Split save (fea47345 C): a save returns once its upload is in and it is submitted; the server
 // settles it on a scheduled step, peers see its paths at once, and the checkout's next command
 // applies the outcome or reports a failed settle.
@@ -87,7 +88,7 @@ async function setup(t, { fromBase = false } = {}) {
   const c = controls(t, s);
   s.patch('hostedProjects', s.projectId, { r2Writes: true });
   const exchange = new ConvexExchange(
-    'https://fixture.invalid',
+    testDeploymentOrigin('https://fixture.invalid'),
     'synthetic',
     s.projectId,
     randomUUID(),

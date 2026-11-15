@@ -14,6 +14,8 @@ import { randomUUID } from 'node:crypto';
 import { ForgeError, invariant } from './errors.js';
 import { refuseRealUserState } from './test-isolation.js';
 import { ownerOnly } from './file-mode.js';
+import { deploymentUrl } from './deployment-origin.js';
+export { deploymentUrl } from './deployment-origin.js';
 export type SavedCredential = {
   token: string;
   credentialId: string;
@@ -26,26 +28,6 @@ export type SavedCredential = {
 type Store = { defaultDeployment?: string; deployments: Record<string, SavedCredential> };
 export function authFile() {
   return join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'forge', 'auth.json');
-}
-export function deploymentUrl(value: string) {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new ForgeError('BAD_ARGUMENT', 'Use a Forge deployment origin.');
-  }
-  invariant(
-    (url.protocol === 'https:' ||
-      (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) &&
-      !url.username &&
-      !url.password &&
-      url.pathname === '/' &&
-      !url.search &&
-      !url.hash,
-    'BAD_ARGUMENT',
-    'Use a Forge deployment origin over HTTPS or HTTP loopback.',
-  );
-  return url.origin;
 }
 export function readAuth(): Store {
   const file = authFile();
@@ -104,8 +86,25 @@ export function authState(
   deployment: string,
   override: string | undefined = process.env.FORGE_AUTH_TOKEN,
 ): AuthState {
-  if (override) return { kind: 'envToken', token: override };
-  const saved = savedCredential(deployment);
+  const origin = deploymentUrl(deployment);
+  const configured = override ? process.env.FORGE_DEPLOYMENT_URL : undefined;
+  const store = configured ? ({ deployments: {} } as Store) : readAuth();
+  if (override) {
+    const bound = configured
+      ? deploymentUrl(configured)
+      : store.defaultDeployment
+        ? deploymentUrl(store.defaultDeployment)
+        : undefined;
+    invariant(
+      configured ? origin === bound : origin === bound || Object.hasOwn(store.deployments, origin),
+      'AUTH_REQUIRED',
+      bound
+        ? `FORGE_AUTH_TOKEN is bound to ${bound}; this checkout names ${origin}.`
+        : 'Bind FORGE_AUTH_TOKEN with FORGE_DEPLOYMENT_URL or run nforge login for this deployment.',
+    );
+    return { kind: 'envToken', token: override };
+  }
+  const saved = store.deployments[origin];
   if (!saved) return { kind: 'none' };
   return saved.expiresAt > Date.now()
     ? { kind: 'saved', token: saved.token, expiresAt: saved.expiresAt }

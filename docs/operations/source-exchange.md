@@ -2,7 +2,7 @@
 
 `nforge exchange` checks out hosted source, restores retained checkpoints and migrates older archives. Saves and landings use the hosted Lane APIs. Exchange push and automatic exchange are retired.
 
-Run `nforge login DEPLOYMENT_URL` and approve the device in Forge. Saved credentials are used automatically; `FORGE_AUTH_TOKEN` remains an environment override for CI. Never put credentials in request files. Owners can migrate retained archives. Contributors can read accessible checkpoints and upload immutable proposal objects. A scoped source grant cannot upload.
+Run `nforge login DEPLOYMENT_URL` and approve the device in Forge. Saved credentials are used automatically; `FORGE_AUTH_TOKEN` remains an environment override for CI, bound by `FORGE_DEPLOYMENT_URL` (or a saved default/login origin). Never put credentials in request files. Owners can migrate retained archives. Contributors can read accessible checkpoints and upload immutable proposal objects. A scoped source grant cannot upload.
 
 `nforge host ROOT` creates a project through a one-time paged hosted seed. A plain
 directory is first captured into local Forge-native source without invoking Git;

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -119,7 +120,7 @@ test('streamed recipe validation rejects corruption, absent content, bad order a
 
 function clientFixture() {
   const client = new ConvexExchange(
-      'https://fixture.convex.cloud',
+      testDeploymentOrigin('https://fixture.convex.cloud'),
       'private-fixture',
       'project',
       'operation',
@@ -300,7 +301,13 @@ test('Convex streaming transport retains logical response pins and propagates cu
   );
   const bytes = noise(5 * exchangeRangeBytes + 1),
     expected = pin(bytes),
-    client = new ConvexExchange('https://fixture.convex.cloud', 'fixture', 'project', 'operation', null);
+    client = new ConvexExchange(
+      testDeploymentOrigin('https://fixture.convex.cloud'),
+      'fixture',
+      'project',
+      'operation',
+      null,
+    );
   let active = 0,
     peak = 0;
   client.client.mutation = async () => []; // no R2 objects

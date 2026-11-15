@@ -7,11 +7,15 @@ import { getFunctionName } from 'convex/server';
 import { runnerRecoveryTransport } from '../dist/recovery-runner-transport.js';
 
 test('Route B uses authority-selected hosted reads and only ordinary runner registration', async t => {
-  const old = process.env.FORGE_AUTH_TOKEN;
+  const old = process.env.FORGE_AUTH_TOKEN,
+    oldOrigin = process.env.FORGE_DEPLOYMENT_URL;
   process.env.FORGE_AUTH_TOKEN = 'synthetic-route-b-token';
+  process.env.FORGE_DEPLOYMENT_URL = 'https://synthetic.convex.cloud';
   t.after(() => {
     if (old === undefined) delete process.env.FORGE_AUTH_TOKEN;
     else process.env.FORGE_AUTH_TOKEN = old;
+    if (oldOrigin === undefined) delete process.env.FORGE_DEPLOYMENT_URL;
+    else process.env.FORGE_DEPLOYMENT_URL = oldOrigin;
   });
   const calls = [],
     operationId = randomUUID(),

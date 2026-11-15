@@ -675,6 +675,7 @@ function launcherEnv(f) {
       XDG_CONFIG_HOME: join(f.home, '.config'),
       FORGE_TEST_MODE: '1',
       FORGE_AUTH_TOKEN: 'synthetic-launcher-token',
+      FORGE_DEPLOYMENT_URL: JSON.parse(readFileSync(join(f.installation, 'source.json'), 'utf8')).url,
     },
   });
 }
@@ -703,11 +704,15 @@ async function releaseFixture(t, f, head) {
     worker.once('error', reject);
   });
   writeFileSync(join(f.installation, 'source.json'), JSON.stringify({ url, projectId: address.projectId }));
-  const previous = process.env.FORGE_AUTH_TOKEN;
+  const previous = process.env.FORGE_AUTH_TOKEN,
+    previousOrigin = process.env.FORGE_DEPLOYMENT_URL;
   process.env.FORGE_AUTH_TOKEN = 'synthetic-cli-test-token';
+  process.env.FORGE_DEPLOYMENT_URL = url;
   t.after(() => {
     if (previous === undefined) delete process.env.FORGE_AUTH_TOKEN;
     else process.env.FORGE_AUTH_TOKEN = previous;
+    if (previousOrigin === undefined) delete process.env.FORGE_DEPLOYMENT_URL;
+    else process.env.FORGE_DEPLOYMENT_URL = previousOrigin;
   });
   return counter;
 }

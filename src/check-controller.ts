@@ -105,6 +105,7 @@ export async function launchDetachedCheck(store: StoreAccess, run: CheckRun): Pr
         [
           // Completed checks may wake the configured mirror and hosted metadata sync.
           'FORGE_AUTH_TOKEN',
+          'FORGE_DEPLOYMENT_URL',
           ...(policy.githubMirror?.autoPush
             ? syncEnvNames
             : run.backend?.actual === 'github-actions'

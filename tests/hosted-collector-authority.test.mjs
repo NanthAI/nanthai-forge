@@ -197,6 +197,25 @@ test('registration issues a machine key derived per project and machine, never s
   );
   // Only the project owner is issued a key.
   await assert.rejects(f.register('builder'), code('PROJECT_UNAVAILABLE'));
+  f.insert('cliCredentials', {
+    credentialId: 'synthetic-registration-device',
+    owner: 'owner',
+    name: 'test',
+    tokenHash: 'synthetic',
+    issuedAt: Date.now(),
+    expiresAt: Date.now() + 600000,
+    scope: 'cli',
+    revoked: false,
+  });
+  await assert.rejects(
+    f.register({ subject: 'owner', forgeCredential: 'synthetic-registration-device' }),
+    code('PROJECT_UNAVAILABLE'),
+  );
+  assert.equal(
+    (await f.register()).collectorKey,
+    key,
+    'the owner person may reconcile the original registration',
+  );
 });
 
 test('owner collector path: signed-in owner with the machine key commits output end to end', async t => {

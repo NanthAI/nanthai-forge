@@ -8,6 +8,7 @@ import { macHeartbeatSchema, verifyMacHeartbeat } from '../src/hosted-mac-lease'
 import { watchMacLease, macLeaseMs } from './projectHostedCheckLease';
 import { writableHostedCheck, writeHostedCheck } from './projectHostedCheckStore';
 import { v } from 'convex/values';
+import { requireOwnerPerson } from './ownerPerson';
 import { z } from 'zod';
 import { mutation, query, type QueryCtx, type MutationCtx } from './cliServer';
 import {
@@ -57,6 +58,7 @@ export const register = mutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
+      await requireOwnerPerson(ctx, 'register a machine runner and receive its signing key');
       const request = z
         .object({
           operationId: z.uuid(),

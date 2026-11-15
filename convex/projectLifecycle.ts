@@ -5,6 +5,7 @@ import { blobStore } from './blobStore';
 import { invariant as check } from '../src/errors';
 import { purgeExchangeObjects } from './projectObjectLifecycle';
 import { v } from 'convex/values';
+import { requireOwnerPerson } from './ownerPerson';
 import { mutation } from './cliServer';
 import { internalMutation, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -43,6 +44,7 @@ export async function transition(
     user && project?.owner === user.subject ? project.key : undefined,
   );
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to manage your Forge project.');
+  if (action === 'delete') await requireOwnerPerson(ctx, 'permanently delete projects');
   // Delete reconciliation has no existence oracle.
   if (action === 'delete' && (!project || project.owner !== user.subject)) return null;
   invariant(

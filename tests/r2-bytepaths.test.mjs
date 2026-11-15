@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -488,6 +489,7 @@ test('2800-file import index decodes the original once across different endpoint
 
 test('native recovery signs once and streams a verified R2 archive without a range action', async t => {
   const priorToken = process.env.FORGE_AUTH_TOKEN;
+  testDeploymentOrigin('https://example.convex.cloud');
   process.env.FORGE_AUTH_TOKEN = 'synthetic-r2-recovery';
   t.after(() => {
     if (priorToken === undefined) delete process.env.FORGE_AUTH_TOKEN;

@@ -53,6 +53,7 @@ export async function measureRootBudget(t, f, { nodeArgs = [] } = {}) {
             HOME: privateHome,
             XDG_CONFIG_HOME: join(privateHome, '.config'),
             FORGE_AUTH_TOKEN: 'synthetic-fixture-only',
+            FORGE_DEPLOYMENT_URL: origin,
             FORGE_TEST_CHECKOUT_PROXY: origin,
           },
         }),

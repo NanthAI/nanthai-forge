@@ -131,7 +131,7 @@ test('actual CLI and MCP share authenticated scoped Work reads and never expose 
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const deployment = `http://127.0.0.1:${server.address().port}`,
-    env = { ...process.env, FORGE_AUTH_TOKEN: 'synthetic-test-jwt' },
+    env = { ...process.env, FORGE_AUTH_TOKEN: 'synthetic-test-jwt', FORGE_DEPLOYMENT_URL: deployment },
     cli = resolve('dist/cli.js');
   const result = await promisify(execFile)(
     process.execPath,

@@ -10,6 +10,8 @@ Do not put secrets, private source or exploit details in public issues. Use GitH
 
 - Repository source, comments, Markdown and provider metadata are untrusted data. Indexing never runs repository code.
 - Private source and derived graphs need current authorization. Old artifacts, downloads, grants and login do not replace it.
+- Device credentials cannot reveal stored secret values, permanently delete projects (including account cleanup), or obtain machine runner signing keys.
+- Environment CLI tokens stay bound to a configured or previously authenticated deployment origin.
 - Local Lanes, MCP tools, checks and agent harnesses are not sandboxes.
 - Arbitrary code that receives a secret can leak it. The Secret Object broker performs one fixed operation and never injects secrets into checks.
 - Downloaded source, exports and credentials cannot be recalled. Full-history archives can contain committed secrets and private logs.

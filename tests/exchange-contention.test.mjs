@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import { commitValidatedCheckpoint } from './project-exchange-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,7 +17,7 @@ const { report } = await import(moduleUrl('../convex/errors.ts'));
 for (const method of ['journal'])
   test(`${method} retries an unknown hosted reply with identical operation and payload`, async t => {
     const exchange = new ConvexExchange(
-        'https://fixture.invalid',
+        testDeploymentOrigin('https://fixture.invalid'),
         'synthetic',
         'project',
         randomUUID(),

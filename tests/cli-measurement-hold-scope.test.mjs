@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 // A measurement hold that names the measured project lets that project's own landings run on the
 // held build; every other project's landings still wait, and CLI updates stay refused (8c9b84fc:
 // the exit bench smoke cell hung in `land --save` behind its own hold). Every other command runs
@@ -63,6 +64,7 @@ async function release(t, f, head) {
   });
   writeFileSync(join(f.installation, 'source.json'), JSON.stringify({ url, projectId: source.projectId }));
   const previous = process.env.FORGE_AUTH_TOKEN;
+  testDeploymentOrigin(url);
   process.env.FORGE_AUTH_TOKEN = 'synthetic-cli-test-token';
   t.after(() => {
     if (previous === undefined) delete process.env.FORGE_AUTH_TOKEN;

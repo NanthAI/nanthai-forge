@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { temporaryDirectory } from '../scripts/test-temp.mjs';
@@ -244,6 +245,7 @@ test('mode flags are validated before any Work or network access', async () => {
 /** Old and new spellings reach the hosted transport with the same action and command. */
 test('old and new spellings send the same hosted request; only the old one prints its new form', async t => {
   const previous = process.env.FORGE_AUTH_TOKEN;
+  testDeploymentOrigin('https://synthetic.convex.cloud');
   process.env.FORGE_AUTH_TOKEN = 'synthetic-test-credential';
   t.after(() => {
     if (previous === undefined) delete process.env.FORGE_AUTH_TOKEN;

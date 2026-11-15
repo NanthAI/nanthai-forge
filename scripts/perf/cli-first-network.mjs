@@ -35,6 +35,7 @@ export function firstNetworkSamples(
     const env = childEnv({
       extra: {
         FORGE_AUTH_TOKEN: 'probe-not-a-token',
+        FORGE_DEPLOYMENT_URL: PROBE,
         HOME: state,
         XDG_STATE_HOME: state,
         XDG_CONFIG_HOME: state,

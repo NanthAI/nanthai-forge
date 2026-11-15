@@ -149,14 +149,15 @@ export function approvalNext(outcome: ApprovalOutcome, laneId: string) {
 
 /** Issue 470ef29b: a held settings change (policy, check definition or runner) from an agent sign-in. */
 function settingNext(outcome: ApprovalOutcome) {
+  const change = outcome.approval?.membership === true ? 'membership change' : 'settings change';
   if (outcome.status === 'none')
     return outcome.approval?.status === 'requested'
       ? 'The settings request was withdrawn or replaced by a newer one; nothing changed.'
       : 'No held settings change with that id.';
   if (outcome.status !== 'decided') return null;
   return outcome.approval?.status === 'granted'
-    ? 'The owner granted the settings change and it is applied. Rerun your original command (same operationId) to read its receipt.'
-    : 'The owner declined the settings change; nothing changed. Read their reason before asking again.';
+    ? `The owner granted the ${change} and it is applied. Rerun your original command (same operationId) to read its receipt.`
+    : `The owner declined the ${change}; nothing changed. Read their reason before asking again.`;
 }
 
 const openRequestSchema = z.looseObject({

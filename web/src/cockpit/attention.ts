@@ -382,6 +382,7 @@ export type OpenApproval = {
   agent?: string;
   pullRequest?: number;
   setting?: { origin: string };
+  membership?: boolean;
   at?: string;
 };
 
@@ -399,7 +400,9 @@ export function approvalDecisions(projectId: string, requests: readonly OpenAppr
         kind: 'approval' as const,
         title:
           request.kind === 'setting'
-            ? `Settings change waits for you (${request.setting?.origin ?? 'settings'})`
+            ? request.membership
+              ? 'Project membership waits for you'
+              : `Settings change waits for you (${request.setting?.origin ?? 'settings'})`
             : request.kind === 'fork'
               ? `Check run for pull request #${request.pullRequest ?? '?'} waits for you`
               : `Approval for Lane ${request.laneId.slice(0, 8)} waits for you`,

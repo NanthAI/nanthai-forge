@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -148,7 +149,7 @@ test('full/sparse checkout uses bounded indexed membership/signing with no Work 
     }
   };
   const exchange = new ConvexExchange(
-    'https://fixture.invalid',
+    testDeploymentOrigin('https://fixture.invalid'),
     'synthetic-token',
     projectId,
     randomUUID(),

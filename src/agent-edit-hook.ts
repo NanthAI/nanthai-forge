@@ -12,7 +12,13 @@ import { randomUUID } from 'node:crypto';
 
 /** XDG_STATE_HOME: the board feature marker lives there (written by Lane actions); without it a
  * hook under a custom state directory would read the wrong marker and send no board argument. */
-const hookEnvNames = ['FORGE_AUTH_TOKEN', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'FORGE_CLIENT_SETTINGS'];
+const hookEnvNames = [
+  'FORGE_AUTH_TOKEN',
+  'FORGE_DEPLOYMENT_URL',
+  'XDG_CONFIG_HOME',
+  'XDG_STATE_HOME',
+  'FORGE_CLIENT_SETTINGS',
+];
 let runtimeAvailable = true;
 if (isMainThread) {
   try {

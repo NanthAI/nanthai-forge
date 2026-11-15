@@ -25,6 +25,7 @@ export type ApprovalRecord = {
   live: boolean;
   pullRequest?: number | undefined;
   setting?: unknown;
+  membership?: boolean;
   ended?: { kind: string } | undefined;
 };
 
@@ -59,8 +60,14 @@ const statusPhases = {
 const has = <T extends object>(table: T, key: string): key is Extract<keyof T, string> =>
   Object.prototype.hasOwnProperty.call(table, key);
 
-export const approvalKind = (record: Pick<ApprovalRecord, 'pullRequest' | 'setting'>): ApprovalKind =>
-  record.setting !== undefined ? 'setting' : record.pullRequest !== undefined ? 'fork' : 'lane';
+export const approvalKind = (
+  record: Pick<ApprovalRecord, 'pullRequest' | 'setting' | 'membership'>,
+): ApprovalKind =>
+  record.setting !== undefined || record.membership
+    ? 'setting'
+    : record.pullRequest !== undefined
+      ? 'fork'
+      : 'lane';
 
 const words = {
   requested: (kind: ApprovalKind) => ({
@@ -142,12 +149,17 @@ export function deriveApproval(record: ApprovalRecord): ApprovalState {
           : statusPhases[record.status]
         : 'unknown';
   const open = !record.ended && state !== 'unknown';
+  const wording = words[state](kind);
+  if (record.membership) {
+    wording.label = wording.label.replace('Held settings change', 'Project membership');
+    wording.nextStep = wording.nextStep.replace('settings change', 'membership change');
+  }
   return {
     kind,
     state,
     open,
     needsOwner: open && state === 'requested',
-    ...words[state](kind),
+    ...wording,
   };
 }
 

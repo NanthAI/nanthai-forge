@@ -22,6 +22,7 @@ export type LaneApprovalRead = {
   ended?: { kind: 'landed' | 'withdrawn' | 'settled' | 'applied' };
   landing: { submissionId: string; held: boolean } | null;
   /** Issue 470ef29b: a held settings change from an agent sign-in, not a Lane. */
+  membership?: boolean;
   setting?: { origin: 'policy' | 'check-definition' | 'check-import' | 'runner' | 'main-audit' };
   /** The change as the agent sent it (the owner's read only). */
   change?: unknown;
@@ -103,7 +104,7 @@ export function LaneApproval({
       'This Lane has no approval request, or you cannot read this project.',
       'plain',
     );
-  else if (phase.approval.setting) body = settingBody(phase.approval);
+  else if (phase.approval.setting || phase.approval.membership) body = settingBody(phase.approval);
   else {
     const { approval } = phase;
     const who = approval.requester
@@ -158,7 +159,7 @@ export function LaneApproval({
       );
   }
   function settingBody(approval: LaneApprovalRead) {
-    const what = SETTING_LABEL[approval.setting!.origin];
+    const what = approval.membership ? 'project membership' : SETTING_LABEL[approval.setting!.origin];
     const who = approval.requester
       ? `@${approval.requester}${approval.agent ? `/${approval.agent}` : ''}`
       : 'an agent';
@@ -178,7 +179,9 @@ export function LaneApproval({
       <>
         {head(
           `Apply this ${what} change?`,
-          `Requested by ${who}, signed in as an agent. ${what[0]!.toUpperCase()}${what.slice(1)} changes decide what every landing must pass, so they need you.`,
+          approval.membership
+            ? `Requested by ${who}, signed in as an agent. Grant access to the account shown below.`
+            : `Requested by ${who}, signed in as an agent. ${what[0]!.toUpperCase()}${what.slice(1)} changes decide what every landing must pass, so they need you.`,
         )}
         <dl className="fx-dv-facts">
           <div>

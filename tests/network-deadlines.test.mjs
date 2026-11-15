@@ -9,6 +9,7 @@ import { coordinationClient } from '../dist/coordination-client.js';
 import { networkContinuation } from '../dist/network-continuation.js';
 import { networkBoundaryFindings } from '../scripts/check-network-boundaries.mjs';
 import { makeFunctionReference } from 'convex/server';
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 
 const options = { headerTimeoutMs: 40, idleTimeoutMs: 40, totalTimeoutMs: 120, retries: 0, delayMs: 1 };
 async function fixture(t, handler) {
@@ -134,7 +135,7 @@ test('coordination retains its existing redirect rejection without changing gene
     res.writeHead(307, { location: '/must-not-forward' });
     res.end();
   });
-  const client = coordinationClient(f.url, 'synthetic-owner-token');
+  const client = coordinationClient(testDeploymentOrigin(f.url), 'synthetic-owner-token');
   client.setFetchOptions({ redirect: 'follow' });
   await assert.rejects(client.query(makeFunctionReference('test:redirect'), {}), {
     code: 'EXCHANGE_REQUEST_FAILED',

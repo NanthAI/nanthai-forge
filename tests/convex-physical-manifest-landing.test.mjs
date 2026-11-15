@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -98,7 +99,7 @@ test('29k dogfood landing keeps save, real disjoint sync and compose descriptor 
   }
   dogfood(f.s);
   const exchange = new ConvexExchange(
-    'https://fixture.invalid',
+    testDeploymentOrigin('https://fixture.invalid'),
     'synthetic',
     f.s.projectId,
     randomUUID(),

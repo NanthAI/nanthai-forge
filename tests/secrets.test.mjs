@@ -776,3 +776,42 @@ test('native scheduled grant expiry invalidates metadata, records service attrib
     qa.cleanup();
   }
 });
+
+test('device identity cannot reveal an owned secret while names, broker use, rotation and grants remain available', async () => {
+  const s = state([]),
+    qa = setup();
+  const browser = s.ctx.auth.getUserIdentity;
+  try {
+    const id = await create(s);
+    const identity = { subject: 'owner', forgeCredential: 'synthetic-secret-device' };
+    s.tables.cliCredentials.set('secret-device', {
+      _id: 'secret-device',
+      credentialId: identity.forgeCredential,
+      owner: 'owner',
+      name: 'test',
+      tokenHash: 'synthetic',
+      scope: 'cli',
+      issuedAt: Date.now(),
+      expiresAt: Date.now() + 600000,
+      revoked: false,
+    });
+    s.ctx.auth.getUserIdentity = async () => identity;
+    await assert.rejects(
+      actions.reveal._handler(s.ctx, { id, operationId: randomUUID() }),
+      e => e.data?.code === 'PROJECT_UNAVAILABLE',
+    );
+    assert.equal((await actions.names._handler(s.ctx, { id })).name.includes('Deployment ref'), true);
+    assert.equal((await use(s, id)).sha, head);
+    await actions.rotate._handler(s.ctx, {
+      id,
+      value: credential,
+      expectedVersion: 1,
+      operationId: randomUUID(),
+    });
+    await grant(s, id, 'delegate', ['names']);
+    s.ctx.auth.getUserIdentity = browser;
+    assert.equal((await actions.reveal._handler(s.ctx, { id, operationId: randomUUID() })).value, credential);
+  } finally {
+    qa.cleanup();
+  }
+});

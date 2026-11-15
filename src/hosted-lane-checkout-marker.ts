@@ -2,6 +2,7 @@
 import { lstatSync, realpathSync } from 'node:fs';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { z } from 'zod';
+import { deploymentOriginSchema } from './hosted-address.js';
 import { readSource, safeRelative } from './files.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { parseNativeStateValue, stateSchema } from './state/format.js';
@@ -13,7 +14,7 @@ export const hostedLaneExpectationSchema = hostedLaneSelectionSchema.pick({
 });
 export const hostedLaneCheckoutSchema = z
   .object({
-    url: z.url(),
+    url: deploymentOriginSchema,
     projectId: z.string().min(1),
     laneId: z.uuid(),
     operationId: z.uuid(),
@@ -27,7 +28,7 @@ export const hostedLaneCheckoutMarkerSchema = z
   .object({
     schema: z.literal(1),
     kind: z.literal('forge-hosted-lane-checkout'),
-    url: z.url(),
+    url: deploymentOriginSchema,
     operationId: z.uuid(),
     selection: hostedLaneSelectionSchema,
     state: stateSchema,

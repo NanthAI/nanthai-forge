@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 // Isolated synthetic object store: a separate process generates State bytes
 // on disk, rather than preloading a GiB fixture into the measured process.
 // Hardware flushes are faked; existing recovery tests exercise real durability.
@@ -93,7 +94,7 @@ try {
     downloads = 0,
     largestBatch = 0;
   const exchange = new ConvexExchange(
-    'https://synthetic.convex.cloud',
+    testDeploymentOrigin('https://synthetic.convex.cloud'),
     'synthetic-token',
     'project',
     'operation',

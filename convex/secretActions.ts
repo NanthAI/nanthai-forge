@@ -2,6 +2,7 @@
 'use node';
 import { convexFetch } from './networkFetch';
 import { v } from 'convex/values';
+import { requireOwnerPerson } from './ownerPerson';
 import { parseEnv } from 'node:util';
 import { action, type ActionCtx } from './cliServer';
 import { api, internal } from './_generated/api';
@@ -338,6 +339,7 @@ export const reveal = action({
   handler: async (ctx, { id, operationId }): Promise<{ value: string; version: number }> => {
     try {
       const caller = await actor(ctx);
+      await requireOwnerPerson(ctx, 'reveal Secret Object values');
       operation(operationId);
       const snapshot: Snapshot = await ctx.runMutation(internal.secrets.authorize, {
         id,

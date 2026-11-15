@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 // Shared setup for the R2 write and read path tests: a Convex fixture with R2 enabled, a fake R2
 // bucket on the fetch path, and a CLI exchange client wired straight to the fixture's functions.
 import { randomUUID } from 'node:crypto';
@@ -71,7 +72,7 @@ export function pendingConvexRow(s, text, projectId = 'project') {
 export { legacyObject } from './project-exchange-fixture.mjs';
 export function client(s) {
   const exchange = new ConvexExchange(
-      'https://example.convex.cloud',
+      testDeploymentOrigin('https://example.convex.cloud'),
       'test-only',
       'project',
       randomUUID(),

@@ -212,7 +212,7 @@ test('real CLI and MCP processes coordinate separate sessions over authenticated
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   const endpoint = `http://127.0.0.1:${server.address().port}`,
-    env = { ...process.env, FORGE_AUTH_TOKEN: 'synthetic-test-jwt' };
+    env = { ...process.env, FORGE_AUTH_TOKEN: 'synthetic-test-jwt', FORGE_DEPLOYMENT_URL: endpoint };
   const cli = async input =>
     JSON.parse(
       (

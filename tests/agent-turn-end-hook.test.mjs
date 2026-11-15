@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -420,6 +421,7 @@ test('agent CLI --budget sets the wait deadline and is refused on other actions'
     f = agentFixture(t),
     operationId = randomUUID();
   const previous = process.env.FORGE_AUTH_TOKEN;
+  testDeploymentOrigin(f.address.url);
   process.env.FORGE_AUTH_TOKEN = 'synthetic-test-credential';
   t.after(() => {
     if (previous === undefined) delete process.env.FORGE_AUTH_TOKEN;

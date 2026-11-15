@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
@@ -80,7 +81,7 @@ test('separate simultaneous clients reduce duplicate cold bytes by doing differe
         started = performance.now();
       const clients = [0, 1].map(() => {
         const c = new ConvexExchange(
-          'https://fixture.convex.cloud',
+          testDeploymentOrigin('https://fixture.convex.cloud'),
           'fixture',
           'project',
           randomUUID(),

@@ -49,7 +49,9 @@ export function pluginConfig(root: string, directory: string): object {
       mcpServers: './.mcp.json',
     }),
     [`${plugin}/.mcp.json`]: json({
-      mcpServers: { forge: { ...config.mcpServers.forge, env_vars: ['FORGE_AUTH_TOKEN'] } },
+      mcpServers: {
+        forge: { ...config.mcpServers.forge, env_vars: ['FORGE_AUTH_TOKEN', 'FORGE_DEPLOYMENT_URL'] },
+      },
     }),
     [`${plugin}/skills/forge-agent/SKILL.md`]: skill,
     'README.md': `# Forge local agent plugin\n\nThis package connects the selected hosted Forge checkout through the installed Forge runtime. It contains configuration and the Forge workflow skill, without source files or credentials. Forge runs hosted projects only: a folder without a hosted marker is refused (\`nforge host ROOT\` makes one).\n\nAdd this directory as a local marketplace with \`codex plugin marketplace add PATH\`, then install **nanthai-forge** from **Forge local workflow** in the desktop Plugins directory. Restart the client after installing or updating its cached plugin.\n\nThe checkout, Node executable and Forge CLI use absolute paths in \`plugins/nanthai-forge/.mcp.json\`. Keep that runtime installed; generate a new package after moving it or changing the selected checkout. The skill's documentation links point at the same installed package.\n\nHosted access uses saved \`nforge login\` credentials or the \`FORGE_AUTH_TOKEN\` process environment; no credential is embedded here. Tools run under the local OS account.\n\nRemove this marketplace or disable the plugin in the client to disconnect it. Removing this generated directory does not delete Forge source or Work.\n`,

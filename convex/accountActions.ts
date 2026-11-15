@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import { v } from 'convex/values';
+import { requireOwnerPerson } from './ownerPerson';
 import { makeFunctionReference, paginationOptsValidator } from 'convex/server';
 import { action, type ActionCtx } from './cliServer';
 import { internal } from './_generated/api';
@@ -79,6 +80,8 @@ export const begin = action({
   returns: v.any(),
   handler: async (ctx, input): Promise<Receipt> => {
     try {
+      if (input.selection.some(item => item.kind === 'project'))
+        await requireOwnerPerson(ctx, 'permanently delete projects through account cleanup');
       invariant(
         /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(input.operationId),
         'BAD_ARGUMENT',
@@ -199,6 +202,13 @@ export const advance = action({
         operationId,
         paginationOpts: { cursor, numItems: 40 },
       });
+      if (
+        page.page.some(
+          item =>
+            item.kind === 'project' && !item.hidden && item.state !== 'completed' && item.state !== 'changed',
+        )
+      )
+        await requireOwnerPerson(ctx, 'permanently delete projects through account cleanup');
       for (const item of page.page as Doc<'accountItems'>[]) {
         if (item.state === 'completed' || item.state === 'changed') continue;
         const current = item.hidden

@@ -101,7 +101,9 @@ export const spawnSender: SpawnSender = target => {
     {
       detached: true,
       stdio: 'ignore',
-      env: childEnv({ allow: ['FORGE_AUTH_TOKEN', 'XDG_CONFIG_HOME', 'FORGE_CLIENT_SETTINGS'] }),
+      env: childEnv({
+        allow: ['FORGE_AUTH_TOKEN', 'FORGE_DEPLOYMENT_URL', 'XDG_CONFIG_HOME', 'FORGE_CLIENT_SETTINGS'],
+      }),
     },
   );
   child.on('error', () => {

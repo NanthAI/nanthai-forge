@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import { historicalArchiveActions } from './historical-archive-fixture.mjs';
 import test from 'node:test';
 import { setup as r2Setup } from './r2-harness.mjs';
@@ -718,7 +719,7 @@ test('new contributor proposals transfer objects, preserve old archives, pull di
 
   assert.equal(s.tables.projectBackups.get('backup').transport, undefined, 'legacy source remains readable');
   const transport = new ConvexExchange(
-    'https://fixture.convex.cloud',
+    testDeploymentOrigin('https://fixture.convex.cloud'),
     'synthetic',
     'project',
     '',

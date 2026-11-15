@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -135,7 +136,7 @@ async function changedSave(
   const c = controls(t, s);
   s.patch('hostedProjects', s.projectId, { r2Writes: true });
   const exchange = new ConvexExchange(
-    'https://fixture.invalid',
+    testDeploymentOrigin('https://fixture.invalid'),
     'synthetic',
     s.projectId,
     randomUUID(),
@@ -294,7 +295,13 @@ test('unchanged save has no object or worker calls', async t => {
   const entry = await s.lane(baseline);
   const root = checkout(t, s, entry, JSON.parse(s.objects.get(baseline.sha256)), false);
   const c = controls(t, s),
-    exchange = new ConvexExchange('https://fixture.invalid', 'synthetic', s.projectId, randomUUID(), null);
+    exchange = new ConvexExchange(
+      testDeploymentOrigin('https://fixture.invalid'),
+      'synthetic',
+      s.projectId,
+      randomUUID(),
+      null,
+    );
   exchange.client = c.client;
   s.counts.length = 0;
   const terminal = await saveHostedLane(root, { operationId: randomUUID(), message: 'unchanged' }, exchange);
@@ -358,7 +365,13 @@ test('a save refused for a live finish drops its retained capture and forwards t
     entry = await s.lane(s.baseline);
   const root = checkout(t, s, entry, JSON.parse(s.objects.get(s.baseline.sha256)));
   const c = controls(t, s),
-    exchange = new ConvexExchange('https://fixture.invalid', 'synthetic', s.projectId, randomUUID(), null);
+    exchange = new ConvexExchange(
+      testDeploymentOrigin('https://fixture.invalid'),
+      'synthetic',
+      s.projectId,
+      randomUUID(),
+      null,
+    );
   const prepared = [];
   exchange.client = {
     ...c.client,

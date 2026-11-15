@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 // Issue c29d0780: each agent session shows as handle/word-word; a person shows as plain @handle.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -461,6 +462,7 @@ test('end to end: two agent sessions on one root post to each other through the 
     ].map(k => [k, process.env[k]]),
   );
   process.env.XDG_STATE_HOME = state;
+  testDeploymentOrigin('https://fixture.invalid');
   process.env.FORGE_AUTH_TOKEN = 'synthetic-test-credential';
   delete process.env.CODEX_THREAD_ID;
   delete process.env.FORGE_HUMAN;

@@ -106,7 +106,9 @@ function publishAuditWake(store: StoreAccess, data: import('./work-types.js').Wo
   const child = spawn(process.execPath, [workerPath(import.meta.url), store.root], {
     detached: true,
     stdio: 'ignore',
-    env: checkServiceEnv(data.checks, childPolicy(data), ['FORGE_AUTH_TOKEN'], { FORGE_CHECK_FULL: '1' }),
+    env: checkServiceEnv(data.checks, childPolicy(data), ['FORGE_AUTH_TOKEN', 'FORGE_DEPLOYMENT_URL'], {
+      FORGE_CHECK_FULL: '1',
+    }),
   });
   child.on('error', () => {
     /* Durable acceptance remains queued for the next owner observation. */

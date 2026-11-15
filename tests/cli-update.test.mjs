@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -389,6 +390,7 @@ async function releaseFixture(t, f, head, status) {
   });
   writeFileSync(join(f.installation, 'source.json'), JSON.stringify({ url, projectId: address.projectId }));
   const previous = process.env.FORGE_AUTH_TOKEN;
+  testDeploymentOrigin(url);
   process.env.FORGE_AUTH_TOKEN = 'synthetic-cli-test-token';
   t.after(() => {
     if (previous === undefined) delete process.env.FORGE_AUTH_TOKEN;
@@ -575,6 +577,8 @@ writeFileSync(${JSON.stringify(output)}, readFileSync(0));`,
         XDG_CONFIG_HOME: join(f.home, '.config'),
         FORGE_CLIENT_SETTINGS: process.env.FORGE_CLIENT_SETTINGS,
         FORGE_AUTH_TOKEN: 'synthetic-cli-test-token',
+        FORGE_DEPLOYMENT_URL: JSON.parse(readFileSync(join(f.installation, 'source.json'), 'utf8')).url,
+        FORGE_DEPLOYMENT_URL: JSON.parse(readFileSync(join(f.installation, 'source.json'), 'utf8')).url,
       },
     }),
   });

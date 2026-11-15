@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -97,7 +98,13 @@ function fixture(t) {
       throw Error('unexpected nested RPC');
     },
   };
-  const exchange = new ConvexExchange('https://fixture.invalid', 'fixture', 'project', 'op', null);
+  const exchange = new ConvexExchange(
+    testDeploymentOrigin('https://fixture.invalid'),
+    'fixture',
+    'project',
+    'op',
+    null,
+  );
   exchange.client = {
     mutation: async (ref, args) => {
       assert.equal(getFunctionName(ref), 'projectObjectDownloads:lanePage');

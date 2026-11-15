@@ -15,8 +15,10 @@ export default async function firstWriteBudget() {
   const root = mkdtempSync(join(tmpdir(), 'forge-first-write-budget-'));
   const server = await hostedEditServer();
   const previous = process.env.FORGE_AUTH_TOKEN,
+    previousOrigin = process.env.FORGE_DEPLOYMENT_URL,
     previousState = process.env.XDG_STATE_HOME;
   process.env.FORGE_AUTH_TOKEN = 'synthetic-only';
+  process.env.FORGE_DEPLOYMENT_URL = server.url;
   // The hosted first write reads only the board (Issue 853fcde3): advertise it so the read runs.
   process.env.XDG_STATE_HOME = join(root, 'state');
   rememberBoardServerFeatures('synthetic-project', ['agent-board']);
@@ -130,6 +132,8 @@ export default async function firstWriteBudget() {
   } finally {
     if (previous === undefined) delete process.env.FORGE_AUTH_TOKEN;
     else process.env.FORGE_AUTH_TOKEN = previous;
+    if (previousOrigin === undefined) delete process.env.FORGE_DEPLOYMENT_URL;
+    else process.env.FORGE_DEPLOYMENT_URL = previousOrigin;
     if (previousState === undefined) delete process.env.XDG_STATE_HOME;
     else process.env.XDG_STATE_HOME = previousState;
     await server.close();

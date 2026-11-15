@@ -16,6 +16,16 @@ export function coordinationCredentials(
   deployment: string,
   token: string | undefined,
 ): { url: string; token: string } {
+  invariant(
+    !token?.startsWith('fga_'),
+    'PROJECT_UNAVAILABLE',
+    'Source-read grants do not grant coordination writes.',
+  );
+  invariant(
+    !token?.startsWith('fga_'),
+    'PROJECT_UNAVAILABLE',
+    'Source-read grants do not grant coordination writes.',
+  );
   token = resolveAuthToken(deployment, token);
   let url: URL;
   try {

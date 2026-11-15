@@ -25,8 +25,10 @@ const until = async ready => {
 function environment(t) {
   const s = agentFixture(t);
   s.caps.features = ['board-wait'];
-  const previous = process.env.FORGE_AUTH_TOKEN;
+  const previous = process.env.FORGE_AUTH_TOKEN,
+    previousOrigin = process.env.FORGE_DEPLOYMENT_URL;
   process.env.FORGE_AUTH_TOKEN = 'synthetic-test-credential';
+  process.env.FORGE_DEPLOYMENT_URL = s.address.url;
   const exitCode = process.exitCode;
   const subs = [];
   peerWaitHooks.subscribe = () => ({
@@ -43,6 +45,8 @@ function environment(t) {
     process.exitCode = exitCode;
     if (previous === undefined) delete process.env.FORGE_AUTH_TOKEN;
     else process.env.FORGE_AUTH_TOKEN = previous;
+    if (previousOrigin === undefined) delete process.env.FORGE_DEPLOYMENT_URL;
+    else process.env.FORGE_DEPLOYMENT_URL = previousOrigin;
   });
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     assert(String(url).startsWith(s.address.url), 'No real HTTP calls');

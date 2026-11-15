@@ -51,22 +51,7 @@ export async function intentAuthority(
 export const add = internalMutation({
   args: { projectId: v.id('hostedProjects'), owner: v.string(), contributor: v.string() },
   returns: v.null(),
-  handler: async (ctx, { projectId, owner, contributor }) => {
-    try {
-      await activeOwnedProject(ctx, projectId, owner);
-      if (contributor === owner) return null;
-      const old = await ctx.db
-        .query('projectContributors')
-        .withIndex('by_project_and_contributor', q =>
-          q.eq('projectId', projectId).eq('contributor', contributor),
-        )
-        .unique();
-      if (!old) await ctx.db.insert('projectContributors', { projectId, contributor });
-      return null;
-    } catch (error) {
-      return report(error);
-    }
-  },
+  handler: addContributor,
 });
 export const remove = mutation({
   args: { projectId: v.id('hostedProjects'), contributor: v.string() },
@@ -263,33 +248,7 @@ export const invite = internalMutation({
     contributor: v.optional(v.string()),
   },
   returns: v.null(),
-  handler: async (ctx, input) => {
-    try {
-      const { projectId, owner, email, contributor, operationId, person } = input;
-      await activeOwnedProject(ctx, projectId, owner);
-      invariant(operationId.trim(), 'BAD_ARGUMENT', 'Retain the invitation operation id.');
-      if (await invitationSeen(ctx, { projectId, owner, operationId, person })) return null;
-      if (contributor && contributor !== owner) {
-        const old = await ctx.db
-          .query('projectContributors')
-          .withIndex('by_project_and_contributor', q =>
-            q.eq('projectId', projectId).eq('contributor', contributor),
-          )
-          .unique();
-        if (!old) await ctx.db.insert('projectContributors', { projectId, contributor });
-      } else if (email) {
-        const old = await ctx.db
-          .query('projectInvites')
-          .withIndex('by_project_and_email', q => q.eq('projectId', projectId).eq('email', email))
-          .unique();
-        if (!old) await ctx.db.insert('projectInvites', { projectId, email });
-      }
-      await ctx.db.insert('projectAccessOperations', { projectId, owner, operationId, person });
-      return null;
-    } catch (error) {
-      return report(error);
-    }
-  },
+  handler: inviteContributor,
 });
 export const cancelInvite = mutation({
   args: { projectId: v.id('hostedProjects'), id: v.id('projectInvites') },
@@ -331,5 +290,63 @@ export async function redeemInvites(
     if (!old && project.owner !== user.subject)
       await ctx.db.insert('projectContributors', { projectId: row.projectId, contributor: user.subject });
     await ctx.db.delete(row._id);
+  }
+}
+
+export async function addContributor(
+  ctx: MutationCtx,
+  { projectId, owner, contributor }: { projectId: Id<'hostedProjects'>; owner: string; contributor: string },
+): Promise<null> {
+  try {
+    await activeOwnedProject(ctx, projectId, owner);
+    if (contributor === owner) return null;
+    const old = await ctx.db
+      .query('projectContributors')
+      .withIndex('by_project_and_contributor', q =>
+        q.eq('projectId', projectId).eq('contributor', contributor),
+      )
+      .unique();
+    if (!old) await ctx.db.insert('projectContributors', { projectId, contributor });
+    return null;
+  } catch (error) {
+    return report(error);
+  }
+}
+
+export async function inviteContributor(
+  ctx: MutationCtx,
+  input: {
+    projectId: Id<'hostedProjects'>;
+    owner: string;
+    operationId: string;
+    person: string;
+    email?: string;
+    contributor?: string;
+  },
+): Promise<null> {
+  try {
+    const { projectId, owner, email, contributor, operationId, person } = input;
+    await activeOwnedProject(ctx, projectId, owner);
+    invariant(operationId.trim(), 'BAD_ARGUMENT', 'Retain the invitation operation id.');
+    if (await invitationSeen(ctx, { projectId, owner, operationId, person })) return null;
+    if (contributor && contributor !== owner) {
+      const old = await ctx.db
+        .query('projectContributors')
+        .withIndex('by_project_and_contributor', q =>
+          q.eq('projectId', projectId).eq('contributor', contributor),
+        )
+        .unique();
+      if (!old) await ctx.db.insert('projectContributors', { projectId, contributor });
+    } else if (email) {
+      const old = await ctx.db
+        .query('projectInvites')
+        .withIndex('by_project_and_email', q => q.eq('projectId', projectId).eq('email', email))
+        .unique();
+      if (!old) await ctx.db.insert('projectInvites', { projectId, email });
+    }
+    await ctx.db.insert('projectAccessOperations', { projectId, owner, operationId, person });
+    return null;
+  } catch (error) {
+    return report(error);
   }
 }
