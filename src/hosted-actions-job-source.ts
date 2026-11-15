@@ -161,23 +161,45 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
       return;
     }
     if (runReads) {
-      // Keep a complete signed window together: slicing it into the old 400-object
-      // workers would split runs and force every member back to a singleton GET.
+      // Prepare complete signed runs before splitting download pages. Keep the
+      // same three page workers busy across catalog prefixes: a large-file prefix
+      // can contain only one page, but must not drain the other workers.
       const objects = sourceWindowOrder(selected.map(file => file.blob));
-      for (let at = 0; at < objects.length;) {
-        const count = await resolveWindow(objects.slice(at, at + client.sourceWindow));
-        const hashes = objects.slice(at, at + count);
-        await prepareRecipes(hashes);
-        await connection.prepareRuns(hashes);
-        const windows = Array.from({ length: Math.ceil(hashes.length / directSourceWindow) }, (_, index) =>
-          hashes.slice(index * directSourceWindow, (index + 1) * directSourceWindow),
-        );
-        await mapExchange(windows, 3, page => reader.resolveMany(page));
-        at += count;
-        console.log(
-          `Actions source: ${at}/${objects.length} objects, ${reader.metrics.downloadedBytes} bytes`,
-        );
+      const active = new Set<Promise<void>>();
+      let failed = false,
+        failure: unknown;
+      try {
+        for (let at = 0; at < objects.length && !failed;) {
+          const count = await resolveWindow(objects.slice(at, at + client.sourceWindow));
+          const hashes = objects.slice(at, at + count);
+          await prepareRecipes(hashes);
+          await connection.prepareRuns(hashes);
+          for (let start = 0; start < hashes.length && !failed; start += directSourceWindow) {
+            while (active.size >= 3) await Promise.race(active);
+            if (failed) break;
+            const page = hashes.slice(start, start + directSourceWindow);
+            const pending = reader
+              .resolveMany(page)
+              .catch(error => {
+                if (!failed) {
+                  failed = true;
+                  failure = error;
+                }
+              })
+              .finally(() => active.delete(pending));
+            active.add(pending);
+          }
+          at += count;
+          console.log(
+            `Actions source: ${at}/${objects.length} objects prepared, ${reader.metrics.downloadedBytes} bytes`,
+          );
+        }
+      } finally {
+        // No failed download or descriptor request may leave a writer running
+        // after the caller starts discarding its private cache.
+        await Promise.all(active);
       }
+      if (failed) throw failure;
       return;
     }
     // Each object once, in digest order: a window then reads a few neighbouring object catalog rows

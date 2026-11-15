@@ -188,7 +188,23 @@ export class SourceWorkerReader {
       prepared = new Set(pins.map(pin => pin.sha256));
     };
   }
+  private readonly inFlight = new Map<string, { size: number; read: Promise<string> }>();
   async file(input: WorkerObject, read?: () => Promise<AsyncIterable<Uint8Array>>): Promise<string> {
+    const pin = jobObject.parse(input.object),
+      key = `${pin.sha256}:${Boolean(input.recipe)}`,
+      pending = this.inFlight.get(key);
+    if (pending) {
+      invariant(pending.size === pin.size, 'SOURCE_HASH_MISMATCH', 'Object size changed.');
+      return pending.read;
+    }
+    const result = this.downloadFile(input, read).finally(() => this.inFlight.delete(key));
+    this.inFlight.set(key, { size: pin.size, read: result });
+    return result;
+  }
+  private async downloadFile(
+    input: WorkerObject,
+    read?: () => Promise<AsyncIterable<Uint8Array>>,
+  ): Promise<string> {
     const pin = jobObject.parse(input.object),
       prior = this.saved.get(pin.sha256);
     if (prior) {
@@ -210,6 +226,12 @@ export class SourceWorkerReader {
         recipe,
         async ref => readFile(await this.file({ object: ref, recipe: null })),
         this.recipePreparation(),
+        this.concurrency > 1
+          ? {
+              concurrency: this.concurrency,
+              read: pins => this.files(pins.map(object => ({ object, recipe: null }))),
+            }
+          : undefined,
       );
     } else {
       bytes = await (read ? read() : this.transport.read(pin));

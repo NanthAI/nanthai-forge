@@ -130,6 +130,7 @@ export async function* readObjectRecipe(
   input: ObjectRecipe,
   read: (pin: ChunkPin) => Promise<Buffer>,
   prepare?: (pins: ChunkPin[]) => Promise<void>,
+  prefetch?: { concurrency: number; read: (pins: ChunkPin[]) => Promise<void> },
 ): AsyncGenerator<Buffer> {
   const recipe = objectRecipeSchema.parse(input),
     pending = [recipe.tree],
@@ -141,6 +142,7 @@ export async function* readObjectRecipe(
     'Chunk recipe length differs from its original content.',
   );
   let length = 0;
+  let warmed = new Set<string>();
   while (pending.length) {
     const ref = pending.pop()!,
       prior = refs.get(ref.sha256);
@@ -158,6 +160,26 @@ export async function* readObjectRecipe(
       'Chunk recipe entry exceeds its bounded encoding; logical content has no size cap.',
     );
     await prepare?.([ref, ...pending.slice(-99).reverse()]);
+    if (prefetch && prefetch.concurrency > 1 && ref.height === 0 && !warmed.has(ref.sha256)) {
+      const leaves: ChunkPin[] = [];
+      let bytes = 0;
+      for (const leaf of [ref, ...pending.slice(-Math.max(0, prefetch.concurrency - 1)).reverse()]) {
+        // Do not speculate through an index page or malformed entry. The ordered
+        // reader retains its normal validation and failure for that entry.
+        if (
+          leaf.height !== 0 ||
+          leaf.size > objectChunkBytes ||
+          leaf.length !== leaf.size ||
+          (refs.has(leaf.sha256) && refs.get(leaf.sha256) !== leaf.size) ||
+          (leaves.length && bytes + leaf.size > 4 * 1024 * 1024)
+        )
+          break;
+        leaves.push({ sha256: leaf.sha256, size: leaf.size });
+        bytes += leaf.size;
+      }
+      await prefetch.read([...new Map(leaves.map(leaf => [leaf.sha256, leaf])).values()]);
+      warmed = new Set(leaves.map(leaf => leaf.sha256));
+    }
     const bytes = await read({ sha256: ref.sha256, size: ref.size });
     invariant(
       bytes.length === ref.size && digest(bytes) === ref.sha256,

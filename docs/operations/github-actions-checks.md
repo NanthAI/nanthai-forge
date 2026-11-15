@@ -68,6 +68,18 @@ hash-verified logical object. Signed replies continue through the existing bound
 prefix protocol; older servers and recipes retain their tree traversal. Raw file
 descriptors still read their object rows or catalog pages from Convex.
 
+Catalog fallback keeps three 400-object download pages progressing across signed
+metadata prefixes, with up to 16 raw reads per page. A short large-file prefix
+starts downloading while the next prefix is described; it does not drain all
+workers between metadata calls. Complete signed pack runs are prepared before
+pages split, preserving one ranged GET per run. Object aliases share verified
+bytes, and a failed metadata or download request drains active writers before
+cache cleanup. Recipes without an inline closure also prefetch consecutive raw leaves into the
+verified disk cache: at most 16 leaves or 4 MiB per logical object, then ordered
+reconstruction verifies the whole-file hash. Concurrent files share in-flight
+leaf reads. The serial source-worker default is unchanged. Metadata request
+counts, the source State and publication rules are unchanged.
+
 A hosted check job runs the Candidate's own code (its tests and scripts) on the same runner as
 Forge's supervisor. So Forge takes the verdict, the outputs later steps read and every cache entry
 only from places that code cannot write (Issue 432164bf). For every CI adapter:

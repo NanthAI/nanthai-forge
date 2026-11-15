@@ -263,3 +263,16 @@ test('transport failures and lost output acknowledgements never send completed c
   await assert.rejects(buildHostedSourceState(input, x.transport));
   assert.equal(x.uploads.length, 0);
 });
+
+test('Issue 5d689e6e: recipe and raw identity can coincide without waiting on their own in-flight read', async t => {
+  const x = fixture(),
+    bytes = Buffer.from('single-leaf recipe'),
+    built = buildObjectRecipe(bytes);
+  for (const [id, value] of built.objects) x.objects.set(id, value);
+  const recipe = x.put(built.bytes),
+    directory = mkdtempSync(join(tmpdir(), 'forge-single-leaf-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const reader = new SourceWorkerReader(directory, x.transport, undefined, 16);
+  assert.deepEqual(await reader.bytes({ object: pin(bytes), recipe }), bytes);
+  assert.equal(x.reads.filter(ref => ref.sha256 === digest(bytes)).length, 1);
+});

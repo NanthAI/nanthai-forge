@@ -1695,11 +1695,8 @@ test('Actions State recipe closures retain the legacy five-call traversal after 
   }
   assert.equal(measurements[1].calls, 2, 'States and files use their original two descriptor windows');
   assert.equal(measurements[0].calls, 5, 'legacy recipes retain the tree traversal');
-  assert.equal(
-    measurements[1].gets,
-    measurements[0].gets - 9,
-    'recipe/tree metadata is skipped and shared leaves download once',
-  );
+  assert.equal(measurements[0].gets, 15, 'legacy recipe metadata and shared leaves are fetched once');
+  assert.equal(measurements[1].gets, 7, 'inline closures skip recipe/tree metadata and reuse shared leaves');
 });
 
 for (const failure of ['leaf hash', 'whole hash', 'size', 'missing'])
@@ -3586,4 +3583,215 @@ test('cost 298f9675: cold Actions closure leaves share one request wave before o
   assert.equal(started, 4, 'duplicate leaves share their verified disk entry');
   assert.deepEqual(readFileSync(join(cache, object.sha256)), Buffer.concat([...parts, parts[0]]));
   assert.equal(s.calls.filter(call => call.kind === 'source').length, 1);
+});
+
+test('Issue 5d689e6e: large-binary catalog prefixes retain bounded overlapping downloads without duplicate requests', async t => {
+  const s = fixture(t);
+  const files = Array.from({ length: 1382 }, (_, index) => {
+    const bytes = Buffer.alloc(24 * 1024, index % 256);
+    bytes.writeUInt32BE(index);
+    return s.entry(`binary/file-${index}.bin`, bytes);
+  });
+  const state = s.state([
+    ...files,
+    ...files.slice(0, 5).map((file, index) => ({ ...file, path: `alias-${index}` })),
+  ]);
+  s.run.request.expectedHead = state.sha256;
+  s.run.candidate.base.head = state.sha256;
+  s.run.check.submodules = false;
+  await s.client.session();
+  const call = s.client.call.bind(s.client),
+    request = s.client.request;
+  const windows = [],
+    fetched = new Map();
+  let active = 0,
+    peak = 0,
+    bytes = 0;
+  const members = new Set(files.map(file => file.blob));
+  s.client.call = async command => {
+    const result = await call(command);
+    if (command.kind !== 'source' || !command.digests.some(id => members.has(id))) return result;
+    const rows = result.slice(0, 400);
+    windows.push({ requested: command.digests.length, returned: rows.length, at: performance.now() });
+    return rows;
+  };
+  s.client.request = async (url, init) => {
+    const id = String(url).split('/').at(-1);
+    if (!members.has(id)) return request(url, init);
+    fetched.set(id, (fetched.get(id) ?? 0) + 1);
+    active++;
+    peak = Math.max(peak, active);
+    try {
+      await new Promise(resolve => setImmediate(resolve));
+      const response = await request(url, init);
+      bytes += s.objects.get(id).length;
+      return response;
+    } finally {
+      active--;
+    }
+  };
+  const cache = join(s.directory, 'cache');
+  mkdirSync(cache);
+  const started = performance.now();
+  await materializeActionsSource(s.client, join(s.directory, 'candidate'), cache);
+  console.log(
+    'BINARY_PREFIX_COUNTS',
+    JSON.stringify({
+      windows,
+      requests: [...fetched.values()].reduce((a, b) => a + b, 0),
+      bytes,
+      peak,
+      wallMs: performance.now() - started,
+    }),
+  );
+  assert.equal(windows.length, 4, 'one catalog prefix per 400 objects, with no eager unused remainder');
+  assert.equal(fetched.size, 1382);
+  assert(
+    [...fetched.values()].every(count => count === 1),
+    'aliases must reuse verified bytes',
+  );
+  assert.equal(bytes, 1382 * 24 * 1024);
+  assert(peak >= 32 && peak <= 48, `three download workers must overlap prefixes, peak was ${peak}`);
+});
+
+test('Issue 5d689e6e: a later catalog failure drains earlier prefix writers before rejecting', async t => {
+  const s = fixture(t);
+  const files = Array.from({ length: 800 }, (_, i) => s.entry(`file-${i}`, `drain-${i}`));
+  const state = s.state(files);
+  s.run.request.expectedHead = state.sha256;
+  s.run.candidate.base.head = state.sha256;
+  await s.client.session();
+  const members = new Set(files.map(file => file.blob)),
+    call = s.client.call.bind(s.client),
+    request = s.client.request;
+  let release,
+    markStarted,
+    markFailure,
+    windows = 0,
+    active = 0,
+    settled = false;
+  const held = new Promise(resolve => {
+    release = resolve;
+  });
+  const started = new Promise(resolve => {
+    markStarted = resolve;
+  });
+  const failed = new Promise(resolve => {
+    markFailure = resolve;
+  });
+  const error = new Error('synthetic descriptor failure');
+  s.client.call = async command => {
+    if (command.kind !== 'source' || !command.digests.some(id => members.has(id))) return call(command);
+    if (++windows === 2) {
+      await started;
+      markFailure();
+      throw error;
+    }
+    return (await call(command)).slice(0, 400);
+  };
+  s.client.request = async (url, init) => {
+    if (!members.has(String(url).split('/').at(-1))) return request(url, init);
+    active++;
+    markStarted();
+    try {
+      await held;
+      return await request(url, init);
+    } finally {
+      active--;
+    }
+  };
+  const cache = join(s.directory, 'cache');
+  mkdirSync(cache);
+  const result = materializeActionsSource(s.client, join(s.directory, 'candidate'), cache).then(
+    () => {
+      settled = true;
+      return null;
+    },
+    error => {
+      settled = true;
+      return error;
+    },
+  );
+  await failed;
+  assert(active > 0);
+  assert.equal(settled, false, 'the caller must not discard a cache with active writers');
+  release();
+  assert.equal(await result, error);
+  assert.equal(active, 0);
+  assert.equal(windows, 2, 'no later catalog window is scheduled after failure');
+});
+
+test('Issue 5d689e6e: legacy large-binary recipes overlap bounded leaf reads without extra metadata or bytes', async t => {
+  const s = fixture(t),
+    files = [],
+    leaves = new Set();
+  for (let file = 0; file < 3; file++) {
+    const parts = Array.from({ length: 24 }, (_, index) => {
+      const bytes = Buffer.alloc(256 * 1024, index === 0 ? 1 : 1 + index + file * 24);
+      const pin = s.put(bytes);
+      leaves.add(pin.sha256);
+      return { pin, bytes };
+    });
+    const object = s.put(Buffer.concat(parts.map(part => part.bytes)));
+    const tree = s.put(
+      JSON.stringify({
+        kind: 'forge-byte-tree',
+        schema: 1,
+        children: parts.map(({ pin }) => ({ ...pin, height: 0, length: pin.size })),
+      }),
+    );
+    s.recipes.set(
+      object.sha256,
+      s.put(
+        JSON.stringify({
+          kind: 'forge-object-recipe',
+          schema: 1,
+          object,
+          tree: { ...tree, height: 1, length: object.size },
+        }),
+      ),
+    );
+    files.push({ path: `asset-${file}.bin`, blob: object.sha256, mode: 'file' });
+  }
+  const state = s.state(files);
+  s.run.request.expectedHead = state.sha256;
+  s.run.candidate.base.head = state.sha256;
+  s.run.check.submodules = false;
+  await s.client.session();
+  let active = 0,
+    peak = 0,
+    bytes = 0;
+  const fetched = new Map(),
+    request = s.client.request;
+  s.client.request = async (url, init) => {
+    const id = String(url).split('/').at(-1);
+    if (!leaves.has(id)) return request(url, init);
+    active++;
+    peak = Math.max(peak, active);
+    fetched.set(id, (fetched.get(id) ?? 0) + 1);
+    try {
+      await new Promise(resolve => setImmediate(resolve));
+      bytes += s.objects.get(id).length;
+      return await request(url, init);
+    } finally {
+      active--;
+    }
+  };
+  const cache = join(s.directory, 'cache');
+  mkdirSync(cache);
+  await materializeActionsSource(s.client, join(s.directory, 'candidate'), cache);
+  console.log(
+    'BINARY_RECIPE_COUNTS',
+    JSON.stringify({
+      metadataRequests: s.calls.filter(c => c.kind === 'source').length,
+      leafRequests: [...fetched.values()].reduce((a, b) => a + b, 0),
+      bytes,
+      peak,
+    }),
+  );
+  assert.equal(s.calls.filter(c => c.kind === 'source').length, 5);
+  assert.equal(fetched.size, 70);
+  assert([...fetched.values()].every(count => count === 1));
+  assert.equal(bytes, 70 * 256 * 1024);
+  assert(peak >= 16 && peak <= 48, `large recipes must overlap leaf reads; peak was ${peak}`);
 });

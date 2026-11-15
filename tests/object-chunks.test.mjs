@@ -411,3 +411,40 @@ test('large source upload reads bounded source chunks, preserves recipes and rej
   await assert.rejects(f.client.uploadFile(next, directory, 'source'), /unknown completed/);
   assert.equal((await f.client.uploadFile(next, directory, 'source')).uploadedBytes, 0);
 });
+
+test('Issue 5d689e6e: recipe prefetch stays within four MiB and preserves ordered whole-file verification', async () => {
+  const parts = Array.from({ length: 12 }, (_, i) => Buffer.alloc(1024 * 1024, i + 1));
+  const children = parts.map(bytes => ({ ...pin(bytes), height: 0, length: bytes.length }));
+  const page = Buffer.from(JSON.stringify({ kind: 'forge-byte-tree', schema: 1, children }));
+  const all = Buffer.concat(parts);
+  const recipe = {
+    kind: 'forge-object-recipe',
+    schema: 1,
+    object: pin(all),
+    tree: { ...pin(page), height: 1, length: all.length },
+  };
+  for (const corrupt of [false, true]) {
+    const objects = new Map(parts.map(bytes => [digest(bytes), bytes]));
+    objects.set(digest(page), page);
+    if (corrupt) objects.set(digest(parts.at(-1)), Buffer.alloc(parts.at(-1).length));
+    const waves = [],
+      output = [];
+    const read = async () => {
+      for await (const bytes of readObjectRecipe(recipe, async ref => objects.get(ref.sha256), undefined, {
+        concurrency: 16,
+        read: async pins => {
+          assert(pins.length <= 16);
+          assert(pins.reduce((total, pin) => total + pin.size, 0) <= 4 * 1024 * 1024);
+          waves.push(pins);
+        },
+      }))
+        output.push(bytes);
+    };
+    if (corrupt) await assert.rejects(read, error => error.code === 'INVALID_WORK_BACKUP');
+    else {
+      await read();
+      assert.deepEqual(Buffer.concat(output), all);
+    }
+    assert.equal(waves.length, 3, 'each cold consecutive leaf wave is prepared once');
+  }
+});
