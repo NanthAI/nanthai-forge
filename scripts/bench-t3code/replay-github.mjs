@@ -84,7 +84,10 @@ export async function landReplayGithub({
     }
     if (status.state !== 'OPEN') throw Error('Diagnostic divergence: PR closed without merging');
     if (queueError && status.mergeStateStatus !== 'DIRTY') throw queueError;
-    if (status.mergeStateStatus === 'DIRTY' || !status.autoMergeRequest) {
+    // Queue membership and auto-merge are distinct: a queued PR can have no
+    // autoMergeRequest. Only a real source conflict needs a branch update;
+    // merging newer main into a queued head is refused by GitHub (GH006).
+    if (status.mergeStateStatus === 'DIRTY') {
       await run(root, ['fetch', '-q', 'origin']);
       try {
         await run(root, ['merge', '-q', '--no-edit', 'origin/main']);
@@ -104,7 +107,7 @@ export async function landReplayGithub({
         await gate('second-peer-accepted', second.promise);
       await run(root, ['push', '-q', 'origin', ctx.branch]);
       await queue();
-    }
+    } else if (!status.autoMergeRequest) await queue();
     await sleep(15_000);
   }
   if (!merged) throw Error('Diagnostic divergence: existing GitHub observation budget exhausted');

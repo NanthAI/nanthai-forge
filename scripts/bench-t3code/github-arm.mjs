@@ -532,13 +532,15 @@ for i in $(seq 1 160); do
   read -r state merge auto < <(gh pr view --json state,mergeStateStatus,autoMergeRequest --jq '[.state, .mergeStateStatus, (.autoMergeRequest != null)] | @tsv')
   [ "$state" = MERGED ] && { echo merged; exit 0; }
   [ "$state" = CLOSED ] && { echo closed; exit 1; }
-  if [ "$merge" = DIRTY ] || [ "$auto" = false ]; then
+  if [ "$merge" = DIRTY ]; then
     git fetch -q origin
     if ! git merge -q --no-edit origin/main; then
       git checkout origin/main -- ".bench/dry/group-$group.md" && echo "$task" >> ".bench/dry/group-$group.md"
       git add .bench/dry && git commit -qm "bench dry run: merge main ($task)" && echo 'bench: conflict resolved'
     fi
     git push -q origin "$branch"; gh pr merge --squash --auto >/dev/null
+  elif [ "$auto" = false ]; then
+    gh pr merge --squash --auto >/dev/null
   fi
   sleep 15
 done

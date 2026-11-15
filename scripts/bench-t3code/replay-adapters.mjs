@@ -57,7 +57,7 @@ export function replayAdapters({
   const adapter = {
     async prepare(task) {
       const root = join(ws, task.id),
-        branch = `agent-replay/${task.id}`,
+        branch = `agent-${plan.tasks.findIndex(t => t.id === task.id) + 1}/${task.id}`,
         prep = {},
         started = now();
       const identity = { ...env, ...taskIdentity() };

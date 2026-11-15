@@ -213,6 +213,14 @@ keeps one distinct identity from preparation through relayed recovery. Every bat
 and exact version pins. Every cell is marked diagnostic/unscored and records
 `modelTokens: 0`; no agent provider is launched or its usage window queried.
 
+Replay GitHub workspaces use the ordinary `agent-N/task` branch names and normal
+non-force pushes. Only `DIRTY` PRs merge main and publish source recovery; a null
+`autoMergeRequest` alone re-requests queue admission without updating the branch,
+because queued PRs can have that value and GitHub refuses updates to queued heads.
+The ordinary scripted dry agent follows the same rule. Forge continuations compare
+structured `save:true` with the advertised `land --save` flag; a real mismatch in
+the flag, Lane or operation remains an error.
+
 All ten workspaces are pinned and staged before the release clock. Each writes
 a distinct `.txt` contribution; conflict cells also have two shared pairs and a
 shared triple. In the late-third variant s10 releases at +200 s; the other nine

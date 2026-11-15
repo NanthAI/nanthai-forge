@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, access, readdir } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { driveForge, printedCommand, keepBoth, callForge } from './forge-protocol.mjs';
+import { driveForge, printedCommand, continuation, keepBoth, callForge } from './forge-protocol.mjs';
 import { archiveThenRemove, removeWorkspace } from './evidence.mjs';
 import { forgeArm, diffFromBase } from './forge-arm.mjs';
 import { captureChanges } from './hunks.mjs';
@@ -515,6 +515,53 @@ test('printed command retains quoting, root, flags and complete parameters', () 
     flags: [],
     body,
   });
+});
+
+test('SYNC_REQUIRED land save advice executes its advertised flag and preserves recovery parameters', async () => {
+  const body = { laneId: 'resolution-lane', message: 'keep both contributions' };
+  const advice = {
+    code: 'SYNC_REQUIRED',
+    next: { action: 'land', save: true, ...body },
+    command: `nforge agent '${root}' land --save '${JSON.stringify(body)}'`,
+    submission: { phase: 'queued' },
+  };
+  const f = await fixture([response(advice), conflict, resolved, landed]);
+  assert.deepEqual(
+    f.calls.map(c => c.action),
+    ['land', 'land', 'resolve', 'finish'],
+  );
+  assert.deepEqual(f.calls[1], { root, action: 'land', flags: ['--save'], body });
+  assert.equal(f.edits.length, 1);
+  assert.equal(f.result.root, draft);
+});
+
+test('structured-only land save continuation encodes the CLI flag without leaking save into JSON', () => {
+  assert.deepEqual(continuation({ next: { action: 'land', save: true, laneId: 'lane' } }, root), {
+    root,
+    action: 'land',
+    flags: ['--save'],
+    body: { laneId: 'lane' },
+  });
+});
+
+test('flag-aware continuation still refuses missing save flags, wrong lanes and wrong operations', () => {
+  for (const [body, flags, key] of [
+    [{ laneId: 'lane', operationId: 'op' }, '', 'save'],
+    [{ laneId: 'other', operationId: 'op' }, '--save', 'laneId'],
+    [{ laneId: 'lane', operationId: 'other' }, '--save', 'operationId'],
+  ]) {
+    assert.throws(
+      () =>
+        continuation(
+          {
+            next: { action: 'land', save: true, laneId: 'lane', operationId: 'op' },
+            command: `nforge agent '${root}' land ${flags} '${JSON.stringify(body)}'`,
+          },
+          root,
+        ),
+      new RegExp(`disagree on ${key}`),
+    );
+  }
 });
 
 async function local(t) {

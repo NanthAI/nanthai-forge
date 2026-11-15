@@ -60,7 +60,12 @@ export function continuation(value, root) {
     const command = printedCommand(advertised, root);
     if (expected && typeof expected === 'object') {
       for (const [key, wanted] of Object.entries(expected)) {
-        const actual = key === 'action' ? command.action : command.body[key];
+        const actual =
+          key === 'action'
+            ? command.action
+            : key === 'save' && command.action === 'land'
+              ? command.flags.includes('--save')
+              : command.body[key];
         if (JSON.stringify(actual) !== JSON.stringify(wanted))
           friction(`Advertised next and command disagree on ${key}`);
       }
@@ -69,7 +74,12 @@ export function continuation(value, root) {
   }
   if (expected?.action) {
     const { action, ...body } = expected;
-    return { root, action, body, flags: [] };
+    const flags = [];
+    if (action === 'land' && 'save' in body) {
+      if (body.save) flags.push('--save');
+      delete body.save;
+    }
+    return { root, action, body, flags };
   }
   return null;
 }
