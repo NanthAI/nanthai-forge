@@ -635,7 +635,6 @@ export default function HostedWork({
             key={projectId}
             projectId={projectId}
             workspace={workspace}
-            owner={workspace?.capabilities?.owner === true}
             initial={section}
             backups={backups}
             general={settings}

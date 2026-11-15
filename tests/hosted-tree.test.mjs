@@ -162,6 +162,7 @@ for (const section of ['autonomy', 'checks'])
       tree => {
         const workspace = JSON.parse(tree.queries['projectWorkIndex:workspace']());
         workspace.capabilities.owner = false;
+        tree.queries['urlAccounts:current'] = () => ({ handle: 'project-reader' });
         tree.queries['projectWorkIndex:workspace'] = () => JSON.stringify(workspace);
       },
     );
@@ -211,12 +212,51 @@ test('Home shows the working count while its window is open and unknown after ne
   assert.match(expired, /fx-muted">—</);
 });
 
+test('owner Settings shows Delete project and the summary without a Work generation', async () => {
+  const html = await render(
+    `?surface=projects&project=${PROJECT}&projectTab=settings&settingsSection=general`,
+    tree => {
+      const project = { ...tree.queries['projectWork:state'](), owner: 'test-viewer', work: undefined };
+      tree.queries['projectWork:state'] = () => project;
+      tree.queries['projectWorkIndex:workspace'] = () => null;
+      tree.pages['projectBackups:list'] = () => [
+        { ...project, id: PROJECT, revision: 1, slug: 'nanthai-forge' },
+      ];
+    },
+  );
+  assert.match(html, /fx-settings-summary/);
+  assert.match(html, /Delete project/);
+});
+
+test('non-owner Settings never shows Delete project with or without a Work generation', async () => {
+  for (const hasWork of [false, true]) {
+    const html = await render(
+      `?surface=projects&project=${PROJECT}&projectTab=settings&settingsSection=general`,
+      tree => {
+        const project = { ...tree.queries['projectWork:state'](), owner: 'project-owner' };
+        if (!hasWork) {
+          project.work = undefined;
+          tree.queries['projectWorkIndex:workspace'] = () => null;
+        }
+        tree.queries['projectWork:state'] = () => project;
+        // Include the existing lifecycle slot to prove Settings gates it by current ownership,
+        // even when an older Work projection still says owner.
+        tree.pages['projectBackups:list'] = () => [
+          { ...project, id: PROJECT, revision: 1, slug: 'nanthai-forge' },
+        ];
+      },
+    );
+    assert.doesNotMatch(html, /Delete project|fx-settings-summary/);
+  }
+});
+
 test('reader General presents facts once in its table without the owner summary', async () => {
   const html = await render(
     `?surface=projects&project=${PROJECT}&projectTab=settings&settingsSection=general`,
     tree => {
       const workspace = JSON.parse(tree.queries['projectWorkIndex:workspace']());
       workspace.capabilities.owner = false;
+      tree.queries['urlAccounts:current'] = () => ({ handle: 'project-reader' });
       tree.queries['projectWorkIndex:workspace'] = () => JSON.stringify(workspace);
     },
   );

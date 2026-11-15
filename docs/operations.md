@@ -711,8 +711,19 @@ including credential expiry and restart, before claiming a live-host speedup.
 
 ### Permanently delete a hosted project
 
-An owner signed in with `nforge login DEPLOYMENT_URL` (CLI scope) can use the same
-public `projectLifecycle:permanentlyDelete` mutation as the browser:
+The owner person uses **Settings → General → Delete project** in the browser,
+then **Delete permanently now** to purge immediately. These controls are available
+before a project has any Work data.
+
+Credentials issued by `nforge login DEPLOYMENT_URL`, including CLI scope, cannot
+permanently delete projects. The mutation returns `PROJECT_UNAVAILABLE` and directs
+the owner to the browser. Reversible trash and restore remain available to devices.
+
+The existing CLI command below calls the same public
+`projectLifecycle:permanentlyDelete` mutation. It requires owner-person authentication
+through an existing browser account JWT override (`FORGE_AUTH_TOKEN`, bound to the
+trusted deployment as described in [security](security.md#cli-device-credentials));
+a device credential cannot substitute for it:
 
 ```sh
 nforge host ROOT --delete-project PROJECT_ID --confirm PROJECT_SLUG

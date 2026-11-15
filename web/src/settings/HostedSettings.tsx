@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { AccountHandle } from './AccountHandle';
+import { useViewerHandle } from '../shell/viewer';
 import type { GithubSyncBinding, GithubAutoPush } from '../../../src/github-sync-types';
 import { useWorkRecords } from '../hosted-work-index';
 import { GithubStatus } from './GithubStatus';
@@ -25,7 +26,6 @@ import { SettingsLayout, type SettingsItem } from './SettingsLayout';
 export default function HostedSettings({
   projectId,
   workspace,
-  owner,
   initial,
   backups,
   general,
@@ -34,7 +34,6 @@ export default function HostedSettings({
 }: {
   projectId: Id<'hostedProjects'>;
   workspace: WorkIndexWorkspace | null;
-  owner: boolean;
   initial: string;
   backups?: ReactNode;
   general?: ReactNode;
@@ -66,6 +65,10 @@ export default function HostedSettings({
     ] as const,
     fallback as 'general',
   );
+  const project = useQuery(api.projectWork.state, { projectId });
+  const viewer = useViewerHandle();
+  // Project ownership exists before Work; public reads identify people by Forge handle.
+  const owner = !!viewer && project?.owner === viewer;
   const items: SettingsItem[] = [
     { id: 'general', label: 'General', group: 'Project' },
     { id: 'agents', label: 'How agents work', group: 'Project' },
@@ -88,7 +91,6 @@ export default function HostedSettings({
     workspace,
     'githubRepositories',
   );
-  const project = useQuery(api.projectWork.state, { projectId });
   const labels = useAction(api.projectPeopleActions.labels);
   const [ownerName, setOwnerName] = useState('');
   useEffect(() => {

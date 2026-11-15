@@ -32,7 +32,7 @@ export function hostedTree() {
       'projectWork:state': () => ({
         id: PROJECT,
         name: 'NanthAi Forge',
-        owner: 'viewer',
+        owner: 'test-viewer',
         _creationTime: 1,
         visibility: 'private',
         work: { backupId: 'backup-1', revision: 1 },
