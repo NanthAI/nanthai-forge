@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { lifecycleVerbs, landSaveForm } from '../scripts/agent-verb-forms.mjs';
+export { lifecycleVerbs };
 import { invariant } from './errors.js';
 
 /**
@@ -7,7 +9,6 @@ import { invariant } from './errors.js';
  * replay journals, metrics and hosted schema-1 names stay unchanged. Old spellings keep working and
  * print their new form to stderr once per invocation; stdout never changes.
  */
-export const lifecycleVerbs = ['start', 'save', 'land'] as const;
 type Verb = (typeof lifecycleVerbs)[number];
 
 /** Mode flag → native wire action. Hosted lowering differs only where noted in `lowerVerb`. */
@@ -230,7 +231,7 @@ export function newForm(
 ): string | undefined {
   if (action === 'finish') {
     const checkOnly = hosted ? selected.accept === false : selected.accept === undefined;
-    return checkOnly ? 'land --save --check-only' : 'land --save';
+    return checkOnly ? `${landSaveForm} --check-only` : landSaveForm;
   }
   if (Object.hasOwn(lifecycleAliases, action)) return lifecycleAliases[action];
   if ((operatorActions as readonly string[]).includes(action)) return `x ${action}`;

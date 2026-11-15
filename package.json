@@ -233,6 +233,8 @@
     "scripts/check-contract.d.mts",
     "scripts/selection-guard.mjs",
     "scripts/selection-guard.d.mts",
+    "scripts/agent-verb-forms.mjs",
+    "scripts/agent-verb-forms.d.mts",
     "scripts/agent-default-lines.mjs",
     "scripts/agent-default-lines.d.mts",
     "scripts/test-import-graph.mjs",

@@ -1992,6 +1992,38 @@ test('metadata scanning opts out before inflating a source blob beyond its worki
   assert.equal(new PackTrees(128).push(pack, true), true, 'existing blob-skipping tree scans are unchanged');
 });
 
+test('history logs reuse the existing background tree index with commit metadata; ordinary tree readers remain compatible', async t => {
+  const source = sourceRepository(t),
+    f = fixture(t, source),
+    { s } = f;
+  const projectId = await importedProject(f, source.head);
+  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
+  await modules.gitServeTrees.indexPacks._handler(s.ctx, { projectId });
+  const [pack] = historyPacks(s, projectId);
+  assert.equal(pack.metadataVersion, 1);
+  const bytes = defaultR2Objects.get(`forge-test-blobs/v1/p/${projectId}/o/${pack.trees.sha256}`);
+  const { PackTrees, listTree } = await import('../dist/git-pack-trees.js');
+  const oldReader = new PackTrees(1 << 20),
+    metadataReader = new PackTrees(1 << 20, { commits: true });
+  assert.equal(oldReader.loadIndex(bytes), true);
+  assert.equal(metadataReader.loadIndex(bytes), true);
+  assert(metadataReader.commits.has(source.head));
+  const root = git(source.repo, ['rev-parse', `${source.head}^{tree}`])
+    .toString()
+    .trim();
+  assert.deepEqual(listTree(oldReader, root), listTree(metadataReader, root));
+  const before = f.r2Reads.count,
+    io = transport(s, projectId);
+  const result = await hostedHistory(address(projectId), { op: 'log', limit: 2 }, io, () =>
+    assert.fail('the indexed log must not download source packs'),
+  );
+  assert.equal(io.calls.length, 1);
+  assert.equal(f.r2Reads.count - before, 1, 'one existing index GET, no source-pack GET');
+  assert.equal(result.readBytes, pack.trees.size);
+  assert.equal(result.downloadedBytes, 0);
+  assert.equal(result.commit, source.head);
+});
+
 test('history commit metadata extensions preserve legacy tree-reader results', async t => {
   const source = sourceRepository(t);
   const { PackTrees, listTree } = await import('../dist/git-pack-trees.js');

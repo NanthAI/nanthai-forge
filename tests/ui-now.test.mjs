@@ -1186,7 +1186,7 @@ test('browser bootstrap can show its next steps once without the persistent work
   assert.match(renderToStaticMarkup(h(HostedNowView, props)), /Hand it to an agent/);
   assert.doesNotMatch(
     renderToStaticMarkup(h(HostedNowView, { ...props, showFirstRun: false })),
-    /Hand it to an agent|Accept when it’s green/,
+    /Hand it to an agent|Watch it land/,
   );
 });
 

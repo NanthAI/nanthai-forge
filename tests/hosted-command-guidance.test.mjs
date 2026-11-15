@@ -198,3 +198,13 @@ test('proposal provenance recommends receive only for supported stored object pr
     if (!transport) assert(text.includes('Download proposal'));
   }
 });
+
+// J16-2: no current CLI can create the native archive this form once required.
+test('new proposals use hosted Lanes while existing archive recovery and downloads remain', () => {
+  const text = readFileSync(new URL('../web/src/ProjectProposals.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(text, /Send changes from your computer|Send proposal|<form/);
+  assert.match(text, /hosted clone and start a Lane/);
+  assert.match(text, /Original archive for a pending upload/);
+  assert.match(text, /Download proposal/);
+  assert.match(text, /Reconcile original upload/);
+});

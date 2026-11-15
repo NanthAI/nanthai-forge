@@ -109,3 +109,33 @@ test('the hero remains composed on a narrow screen with people, agents and an or
   assert.ok(world.threads.some(t => t.kind === 'agent' && t.nodes.length));
   assert.ok(world.threads.some(t => t.kind === 'person'));
 });
+
+// J34-4/J34-7/J34-8: links lead to the mirror, and the first-run guide covers either landing policy.
+test('public navigation links to the current mirror and names the development status page', async () => {
+  const { createElement } = await import('react');
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { PublicFrame } = await import(moduleUrl('../web/src/landing/PublicFrame.tsx'));
+  const html = renderToStaticMarkup(createElement(PublicFrame, { children: 'Example' }));
+  assert.match(html, /href="https:\/\/github.com\/NanthAI\/nanthai-forge#readme"/);
+  assert.match(
+    html,
+    /href="https:\/\/github.com\/NanthAI\/nanthai-forge\/blob\/main\/docs\/status.md">Development status/,
+  );
+  assert.doesNotMatch(html, /github.com\/nanthai\/forge/);
+  const { Landing } = await import(moduleUrl('../web/src/landing/Landing.tsx'));
+  const landing = renderToStaticMarkup(createElement(Landing, { open: () => {}, busy: false, error: '' }));
+  const targets = [...landing.matchAll(/href="(https:\/\/github.com[^"]+)"/g)].map(match => match[1]);
+  assert(targets.length >= 3);
+  assert(targets.every(target => target.startsWith('https://github.com/NanthAI/nanthai-forge')));
+});
+
+test('first-run step three explains automatic landings and approvals only when required', async () => {
+  const { createElement } = await import('react');
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { FirstRun } = await import(moduleUrl('../web/src/cockpit/FirstRun.tsx'));
+  const html = renderToStaticMarkup(createElement(FirstRun, { newIntent: () => {} }));
+  assert.match(html, /Watch it land/);
+  assert.match(html, /lands automatically if the project allows it/);
+  assert.match(html, /If approval is required/);
+  assert.doesNotMatch(html, /When the check passes, Needs you asks for one decision/);
+});

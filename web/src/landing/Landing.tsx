@@ -56,7 +56,7 @@ export function Landing({
                 id={`${id}-url`}
                 value={url}
                 onChange={event => setUrl(event.target.value)}
-                placeholder="github.com/nanthai/forge"
+                placeholder="github.com/NanthAI/nanthai-forge"
                 autoComplete="off"
                 spellCheck={false}
                 required
@@ -93,7 +93,7 @@ export function Landing({
         <h2>Delegate as much as you like.</h2>
         <p>
           Autonomy is a per-project dial, from Supervised to Autonomous.{' '}
-          <a href="https://github.com/nanthai/forge/blob/main/docs/concepts.md#autonomy">
+          <a href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/concepts.md#autonomy">
             How the guardrails work →
           </a>
         </p>
@@ -103,8 +103,8 @@ export function Landing({
         <span>© 2026 NanthAi</span>
         <span>Open development · Forge builds itself</span>
         <div className="fx-landing-footer-links">
-          <a href="https://github.com/nanthai/forge#readme">Docs</a>
-          <a href="https://github.com/nanthai/forge/blob/main/docs/security.md">Security</a>
+          <a href="https://github.com/NanthAI/nanthai-forge#readme">Docs</a>
+          <a href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/security.md">Security</a>
           <a href="?surface=contact">Contact</a>
         </div>
       </footer>

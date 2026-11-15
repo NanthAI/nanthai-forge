@@ -7,20 +7,13 @@ import { useConvex, usePaginatedQuery, useQuery } from 'convex/react';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { WorkArchivePreview } from './work-archive';
 import { hostedError, snapshotDownload } from './snapshot';
-import {
-  proposals,
-  proposalCandidates,
-  type IntentPin,
-  type Proposal,
-  type ProposalInput,
-} from './proposal-api';
+import { proposals, type IntentPin, type Proposal, type ProposalInput } from './proposal-api';
 import { type HostedHandoffPair } from './hosted-handoff';
 
 type Selection = {
   file: File;
   digest: string;
   preview: WorkArchivePreview;
-  candidates: { id: string; head: string }[];
 };
 type Attempt = { file: File; input: ProposalInput; id?: string };
 export function ProposalProvenance({
@@ -91,14 +84,12 @@ export default function ProjectProposals({
     inline && accessManager && !pin ? { projectId } : 'skip',
   );
   const [selection, setSelection] = useState<Selection | null>(null),
-    [viewId, setViewId] = useState(''),
     [attempt, setAttempt] = useState<Attempt | null>(null);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [message, setMessage] = useState('');
   async function select(file?: File) {
     setSelection(null);
-    setViewId('');
     setError('');
     if (!file || !pin) return;
     setBusy(true);
@@ -109,15 +100,7 @@ export default function ProjectProposals({
         throw new Error(
           'Select a full native source and Work archive. Git bundle contributions remain available locally.',
         );
-      const { workArchiveMetadata } = await import('../../src/work-archive-metadata');
-      const { work } = await workArchiveMetadata(file),
-        candidates = proposalCandidates(JSON.parse(new TextDecoder().decode(work)), pin);
-      if (!candidates.length)
-        throw new Error(
-          'This archive has no clean Candidate for the selected Intent and its original base. Compose a Candidate locally, then export again.',
-        );
-      setSelection({ file, preview, digest: await archiveDigest(file), candidates });
-      setViewId(candidates.at(-1)!.id);
+      setSelection({ file, preview, digest: await archiveDigest(file) });
     } catch (e) {
       setError(hostedError(e));
     } finally {
@@ -275,78 +258,19 @@ export default function ProjectProposals({
   const shown = scopeIntentId ? results.filter(proposal => proposal.intentId === scopeIntentId) : results;
   const contents = (
     <>
-      {pin && (
-        <form
-          onSubmit={event => {
-            event.preventDefault();
-            const view = selection?.candidates.find(item => item.id === viewId);
-            if (selection && view)
-              void upload({
-                file: selection.file,
-                input: {
-                  ...pin,
-                  projectId,
-                  operationId: crypto.randomUUID(),
-                  head: view.head,
-                  viewId: view.id,
-                  digest: selection.digest,
-                  size: selection.file.size,
-                  preview: selection.preview,
-                },
-              });
-          }}
-        >
-          <label>
-            Local source and Work archive
-            <input
-              type="file"
-              accept=".tar.gz,application/gzip"
-              disabled={busy || !!attempt}
-              onChange={event => void select(event.target.files?.[0])}
-            />
-          </label>
-          {selection && (
-            <>
-              <label>
-                Proposal Candidate
-                <select
-                  value={viewId}
-                  disabled={busy || !!attempt}
-                  onChange={event => setViewId(event.target.value)}
-                >
-                  {selection.candidates.map(view => (
-                    <option key={view.id} value={view.id}>
-                      {view.id.slice(0, 8)} · {view.head.slice(0, 12)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <DetailPanel title={<>Selected archive provenance</>}>
-                <p>
-                  {(selection.file.size / 1024 / 1024).toFixed(2)} MiB · SHA-256{' '}
-                  <code>{selection.digest}</code>
-                </p>
-                <p>
-                  Original base <code>{pin.baseState}</code> · original archive{' '}
-                  <code>{pin.baseArchiveSha256}</code>
-                </p>
-              </DetailPanel>
-            </>
-          )}
-          <button disabled={busy || !selection || !!attempt}>Send proposal</button>
-        </form>
+      {pin && shown.some(proposal => proposal.status === 'uploading' && proposal.actor === actor) && (
+        <label>
+          Original archive for a pending upload
+          <input
+            type="file"
+            accept=".tar.gz,application/gzip"
+            disabled={busy || !!attempt}
+            onChange={event => void select(event.target.files?.[0])}
+          />
+        </label>
       )}
       {pin && (
-        <DetailPanel className="collection-guide" title={<>Send changes from your computer</>}>
-          <p>
-            Upload a retained proposal archive for an Intent you created on Forge. The project owner
-            integrates an object proposal in a separate Lane.
-          </p>
-          <p>
-            For current work, use a hosted clone and Lane. This upload keeps an existing archive's source and
-            Work as a proposal; its local checks remain supplied evidence.
-          </p>
-        </DetailPanel>
+        <p>For a new change, use a hosted clone and start a Lane. Stored proposals remain available below.</p>
       )}
       {attempt && (
         <div className="import-actions">
@@ -354,7 +278,7 @@ export default function ProjectProposals({
             Reconcile / resume original proposal
           </button>
           <button disabled={busy} onClick={() => setAttempt(null)}>
-            Start another proposal
+            Clear selected archive
           </button>
         </div>
       )}

@@ -42,12 +42,15 @@ export function FirstRun({
         </div>
         <div className="fx-run-step" role="listitem">
           <h3>
-            <span className="fx-run-step-n">3</span> Accept when it’s green
+            <span className="fx-run-step-n">3</span> Watch it land
           </h3>
-          <p>When the check passes, Needs you asks for one decision.</p>
+          <p>
+            When checks pass, Forge lands automatically if the project allows it. If approval is required,
+            Needs you asks you to approve.
+          </p>
           <div className="fx-run-step-foot">
             <Rail lane={{ tone: 'plain', checkpoints: 1, accepted: true }} />
-            <span className="fx-faint">edited · saved · checked · accepted</span>
+            <span className="fx-faint">edited · saved · checked · landed</span>
           </div>
         </div>
       </div>

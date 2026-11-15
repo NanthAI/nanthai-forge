@@ -322,3 +322,8 @@ test('history help exposes the enforced log/blame/show selectors without a serve
   assert.equal(hostedHelpFor('history'), text);
   assert.equal(s.calls.length, before);
 });
+
+test('limits help identifies the service rather than promising owner control of service quotas', () => {
+  assert.match(helpTopicText('limits'), /service[^.\n]*(?:set|defined)|(?:set|defined)[^.\n]*service/i);
+  assert.doesNotMatch(helpTopicText('limits'), /Limits are set by the project owner/);
+});

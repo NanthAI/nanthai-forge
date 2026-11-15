@@ -171,3 +171,42 @@ test('SM-C M23: an expired saved login answers authenticated:false with its own 
   assert.equal(authState(deployment, '').kind, 'saved');
   assert.equal(authState('http://127.0.0.1:10', '').kind, 'none');
 });
+
+// J20-2/J22-6: a last login on another service must not select that service inside a project.
+test('auth status selects the folder service before last login, with explicit URL and hostname precedence', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'forge-auth-project-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const project = join(directory, 'project');
+  mkdirSync(join(project, '.forge'), { recursive: true });
+  mkdirSync(join(directory, 'forge'));
+  const folderService = 'http://127.0.0.1:9101',
+    lastService = 'http://127.0.0.1:9102';
+  writeFileSync(
+    join(project, '.forge', 'hosted-main.json'),
+    JSON.stringify({ selection: { projectId: 'synthetic-project' } }),
+  );
+  mkdirSync(join(project + '.forge-client', 'agent'), { recursive: true });
+  writeFileSync(
+    join(project + '.forge-client', 'agent', 'address.json'),
+    JSON.stringify({ url: folderService, projectId: 'synthetic-project' }),
+  );
+  writeFileSync(
+    join(directory, 'forge', 'auth.json'),
+    JSON.stringify({ defaultDeployment: lastService, deployments: {} }),
+    { mode: 0o600 },
+  );
+  const extra = { XDG_CONFIG_HOME: directory };
+  const folder = await run(['auth', 'status', '--json'], project, extra);
+  assert.equal(folder.code, 1);
+  assert.equal(folder.json.deployment, folderService);
+  assert.equal(folder.json.host, new URL(folderService).host);
+  mkdirSync(join(project, 'src'));
+  const nested = await run(['auth', 'status', '--json'], join(project, 'src'), extra);
+  assert.equal(nested.json.deployment, folderService);
+  const explicit = await run(['auth', 'status', lastService, '--json'], project, extra);
+  assert.equal(explicit.json.deployment, lastService);
+  const hostname = await run(['auth', 'status', '--hostname', folderService, '--json'], project, extra);
+  assert.equal(hostname.json.deployment, folderService);
+  const outside = await run(['auth', 'status', '--json'], directory, extra);
+  assert.equal(outside.json.deployment, lastService);
+});

@@ -161,8 +161,9 @@ export async function packListing(projectId: string, packs: IndexedPack[], root:
 
 /** Builds the tree index of every imported and catch-up pack without one (scheduled when a
  * pack is recorded, so no Git request waits): one scan of each such pack, one R2 PUT of its
- * trees (about 1.4 MiB for this repository's 25 MB import pack) and one mutation. A pack over
- * the tree budget gets none; listings then scan it. */
+ * trees and commit headers, plus one mutation. The commit records use the existing FTI1
+ * framing, so older tree readers still work; the row flag distinguishes older tree-only
+ * indexes. A pack over the working budget gets none; listings then scan it. */
 export const indexPacks = internalAction({
   args: { projectId: v.id('hostedProjects') },
   returns: v.null(),
@@ -172,17 +173,17 @@ export const indexPacks = internalAction({
       internal.gitServeLaneStore.unindexed,
       { projectId },
     );
-    const built: { tip: string; trees: Chunk }[] = [];
+    const built: { tip: string; trees: Chunk; metadataVersion: 1 }[] = [];
     let scanned = 0;
     for (const pack of packs) {
-      const one = new PackTrees(treeBudget);
+      const one = new PackTrees(treeBudget, { commits: true });
       const ok = await scanPacks(projectId, [pack.chunks], one);
       scanned += one.scanned;
       if (!ok) continue;
-      const bytes = one.treeIndex();
+      const bytes = one.treeIndex({ commits: true });
       const pin = { sha256: digest(bytes), size: bytes.length };
       await storeSourceBytes(ctx, projectId, bytes, pin);
-      built.push({ tip: pack.tip, trees: pin });
+      built.push({ tip: pack.tip, trees: pin, metadataVersion: 1 });
     }
     if (!built.length) return null;
     const unused: string[] = await ctx.runMutation(internal.gitServeLaneStore.setTreeIndex, {

@@ -14,7 +14,7 @@ nforge logout [DEPLOYMENT_URL]
 nforge auth rename NAME [DEPLOYMENT_URL]
 nforge auth status [DEPLOYMENT_URL] [--hostname HOST] [--json [fields]]
 nforge auth handle (NAME | --keep) [DEPLOYMENT_URL]
-Deployment defaults to FORGE_DEPLOYMENT_URL or your most recent login. A device is named device-xxxx unless you pass --name; auth rename changes it later. Login uses a signed-in Forge browser approval and stores a revocable 30-day credential. Collaborators and agents see you by your Forge handle; \`auth handle\` picks it (or keeps the current one). FORGE_AUTH_TOKEN overrides stored credentials for hosted commands.\n`;
+auth status defaults to the hosted project in the current folder and reports its deployment/host; an explicit URL or --hostname wins. Outside a project it uses FORGE_DEPLOYMENT_URL or your most recent login. Other auth commands use that environment/login default. A device is named device-xxxx unless you pass --name; auth rename changes it later. Login uses a signed-in Forge browser approval and stores a revocable 30-day credential. Collaborators and agents see you by your Forge handle; \`auth handle\` picks it (or keeps the current one). FORGE_AUTH_TOKEN overrides stored credentials for hosted commands.\n`;
 export function httpOrigin(deployment: string) {
   if (process.env.FORGE_HTTP_URL) return deploymentUrl(process.env.FORGE_HTTP_URL);
   const url = new URL(deployment);

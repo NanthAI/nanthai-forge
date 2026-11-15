@@ -19,9 +19,9 @@ export function PublicFrame({ account, children }: { account?: ReactNode; childr
           </span>
         </a>
         <nav aria-label="Public navigation">
-          <a href="https://github.com/nanthai/forge#readme">Docs</a>
-          <a href="https://github.com/nanthai/forge/blob/main/docs/status.md">Status</a>
-          <a href="https://github.com/nanthai/forge">
+          <a href="https://github.com/NanthAI/nanthai-forge#readme">Docs</a>
+          <a href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/status.md">Development status</a>
+          <a href="https://github.com/NanthAI/nanthai-forge">
             <GitHubGlyph /> GitHub
           </a>
           <ThemeToggle />

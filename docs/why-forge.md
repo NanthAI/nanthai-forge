@@ -4,11 +4,21 @@ Forge gives people and agents isolated Lanes, combines their changes, checks the
 
 ## What changes from GitHub?
 
-Start a Lane for an Intent, edit its returned path, run affected tests and finish. With a configured native runner, concurrent changes share a landing check on their combined Candidate. See the [agent workflow](agents/workflow.md) and [landing batches](operations/landing-batches.md).
+Start a Lane for an Intent, edit its returned path, run affected tests and land. With a configured hosted runner, concurrent changes share a landing check on their combined Candidate. See the [agent workflow](agents/workflow.md) and [landing batches](operations/landing-batches.md).
 
-Forge updates from main and schedules composition/checks. Failed batches are isolated by checking prefixes: the longest passing prefix lands and remaining Lanes are requeued. Conflicts stay explicit; failed Candidates are never accepted. Supervised review and protected-path policies apply; Git and docs-only changes retain their ordinary finish path.
+Forge updates from main and schedules composition/checks. Failed batches are isolated by checking prefixes: the longest passing prefix lands and remaining Lanes are requeued. Conflicts stay explicit; failed Candidates are never accepted. Supervised review and protected-path policies apply; Git and docs-only changes retain their ordinary landing path.
 
 Peers and presence let agents see announced work, exchange messages and hand work off. These observations can be incomplete. Alert delivery has been measured below; whether alerts improve agents' work has not.
+
+## Current agent benchmark evidence
+
+<!-- agent-measurements:start -->
+B1.5d (2026-11-04), ten real-agent tasks: the published summary reports time to main per task of 324 / 496 s at N=1, 386 / 597 s at N=3, 352 / 512 s at N=5, and 350 / 460 s at N=10 (Forge / Git + GitHub). The leads were 35%, 35%, 31% and 24%. CI billed minutes were 331 / 910. Wall-to-all-landed favored GitHub at N=3 and N=10; the N=5 unpaired time ranges overlap. Strict correctness totals matched. This is not a universal speed or token-saving promise.
+
+P6 exit: the descriptive real-agent report retains three reps per arm/N, using tuned results for N=1/3/5 and the early-resolve v2 rerun for N=10. Observed median task time to main is 338.472 / 500.097 s, 377.131 / 538.131 s, 353.583 / 527.077 s and 359.633 / 565.508 s respectively (Forge / GitHub). V2 N=10 median wall is 762.705 / 1181.678 s and billed CI is 24 / 69 min. GitHub ran slower in v2; earlier GitHub medians and every supplied void remain visible. Task flags, incomplete cost coverage, raw N=10 strict medians of 6 / 7 and recovery turns of 13 / 7 prevent an exit-bar pass. These are descriptive observations, not a completed Phase 6 qualification. The older E3 failing-burst result favored GitHub (189 s versus Forge 989 s); its G8 rerun is not published.
+<!-- agent-measurements:end -->
+
+Sources and limitations: [B1.5d report](research/b15d-report.md), [P6 descriptive results](research/p6-exit-bench-results.md), [baseline and partial P6 evidence](research/p6-baseline.md), [registered P6 exit plan](research/p6-exit-bench-plan.md).
 
 ## Measured landing throughput
 
@@ -54,7 +64,7 @@ had been as fast as a GitHub PR check, GitHub would still be about 2.4× faster.
 Neither side landed the bad change or turned main red, and Forge used fewer check
 jobs (20–25 against 48–54). Forge isolates a failure by checking prefixes one
 after another, and that serial recovery is what lost. The Phase 5 plan covers the
-fix ([landing without an operator](phase5-plan.md#landing-without-an-operator-q)); the E3 re-run (G8) is not started.
+fix ([landing without an operator](phase5-plan.md#landing-without-an-operator-q)); the E3 re-run (G8) is not published.
 
 ### Overlap alerts between live agents
 

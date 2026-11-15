@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { lifecycleVerbs } from '../scripts/agent-verb-forms.mjs';
 import {
   KINDS,
   agentActionNames,
@@ -78,6 +79,12 @@ export const namedReads = ['status', 'board', 'friction'] as const;
     'status',
     'sync',
   ]);
+});
+
+test('agentActions: shared lifecycle forms stay in the real CLI growth inventory', () => {
+  const source = readFileSync(new URL('../src/agent-verbs.ts', import.meta.url), 'utf8');
+  const counted = agentActionNames(source, lifecycleVerbs);
+  for (const verb of lifecycleVerbs) assert(counted.has(verb), `${verb} must remain counted`);
 });
 
 test('cliCommands: args[0] tests, includes lists and switch cases count; typeof tests do not', () => {

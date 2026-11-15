@@ -221,7 +221,7 @@ Details: docs/data-placement.md.`,
 - *_LIMIT, *_TOO_LARGE, *_TOO_LONG, OUTPUT_LIMIT: shrink the input (fewer paths, a smaller page, shorter text) or follow the cursor the receipt gives.
 - LANDING_MESSAGE_TOO_LARGE: the landing message is the GitHub commit message, at most 1024 UTF-8 bytes; shorten it.
 - BOARD_FULL: the board holds its maximum of notes; resolve old ones with board --resolve.
-Limits are set by the project owner; Forge never raises one on its own.`,
+Service limits are set by Forge. Some settings, such as the stored-history budget, are configurable by the project owner; the refusal names the applicable limit.`,
   },
 } as const satisfies Record<string, { title: string; text: string }>;
 

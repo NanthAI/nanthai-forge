@@ -7,9 +7,13 @@ Forge runs hosted projects only: work in a Forge clone or Lane (`nforge host ROO
 
 Use ordinary search/read/edit tools on the selected source. For recorded delivery use the installed `nforge` command; `nforge agent ROOT VERB [--MODE] --help` gives parameters (`--command-file FILE` avoids JSON quoting). `nforge agent ROOT help TOPIC` prints one short how-to section (`help` lists the topics). Every refusal prints `{code,message,next,learn}`: run `next`, and run `learn` once for its topic. The first CLI run installs advisory first-write hooks that never deny edits; `help hosted` says how to turn them off.
 
-Three verbs: `start`, `save` and `land`; reads keep their names; operator actions run as `nforge x ROOT ACTION`. Old names (`finish`, `checkpoint`, `sync`, `run`, …) still work and print their new form on stderr.
+<!-- agent-workflow:start -->
+Lifecycle verbs: `start`, `save`, `land`. Use `land --save` to save, update from main, check and land under project policy. Run `preflight {laneId}` for affected checks of a saved Lane; `tests {candidateId}` reads a Candidate's test selection.
+<!-- agent-workflow:end -->
 
-`land --save` / `finish` blocks by default. Keep this turn active while your work is
+Reads keep their names; operator actions run as `nforge x ROOT ACTION`. Old aliases still work and print their current form on stderr.
+
+`land --save` blocks by default. Keep this turn active while your work is
 unfinished. After a killed shell or deadline, run the receipt's `command` / `waitCommand`:
 `nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance"}'`
 (check-only: `{"runId":"RUN_ID"}`). It blocks up to 540 s
@@ -31,9 +35,9 @@ For work on Forge itself, read [AGENTS.md](../../AGENTS.md), the [lead playbook]
   `show {laneId?,channel?:"main",state?,candidateId?,path}` reads exact bytes
   (unsaved edits excluded). Paging and limits: `help review`.
 - Save, then use `preflight {"laneId":"LANE_ID"}` for local affected checks.
-  Hosted `tests` requires `candidateId`, not `laneId`.
+  Hosted `tests {candidateId}` reads a Candidate's test selection, not a Lane's local affected checks.
 - Removed with native mode: `brief`, `review`, `candidate`/`candidates`,
-  `provenance`, `records`, `link`, `handoff`, `report`, `making-of`, `improve`,
+  `link`, `handoff`, `report`, `making-of`, `improve`,
   `save --preview` and `x undo-sync`. Each refuses with `HOSTED_ACTION_UNSUPPORTED`
   and names its hosted replacement ([hosted parity](../../docs/agents/hosted-parity.md)).
 
@@ -41,10 +45,20 @@ For work on Forge itself, read [AGENTS.md](../../AGENTS.md), the [lead playbook]
 
 - Save, then run `preflight {"laneId":"…"}` (plus typecheck/lint/Oxfmt): it selects the saved head's affected tests with the landing check's selector and runs them here. Never run the full suite locally: `land --save` runs the project's check on the project's runner for the combined work of concurrent Lanes.
 - Let `land --save` compose concurrent Lanes into one check. If a Lane fails, Forge drops it from the batch and the others still land after passing; a failed candidate never turns main red. Do not rebase, babysit a merge queue or rerun CI per PR.
-- Read peers and presence before editing to see who is working on which files. Announce your paths, hand off related work and resolve overlap before it becomes a conflict. Missing observations do not prove independence.
-- Governance: contributors propose and cannot write source or Channels directly; the owner accepts. Protected paths and review-required policy stop at `awaiting-review` for a person; never change policy to bypass review.
+- Read saved peers and current board notes before editing to see who is working on which files. Announce your paths, hand off related work and resolve overlap before it becomes a conflict. Missing observations do not prove independence.
+- Governance: hosted landing checks and lands under current project policy; automatic projects land after passing evidence. Protected paths and review-required policy stop at `awaiting-review` for a person; never change policy to bypass review.
 
 - The backlog is Forge planning: read `planning`, start from an Issue (`start {"planningItemId":"ISSUE_ID"}`), comment decisions on it (`comment-planning-item`).
+
+## Current agent benchmark evidence
+
+<!-- agent-measurements:start -->
+B1.5d (2026-11-04), ten real-agent tasks: the published summary reports time to main per task of 324 / 496 s at N=1, 386 / 597 s at N=3, 352 / 512 s at N=5, and 350 / 460 s at N=10 (Forge / Git + GitHub). The leads were 35%, 35%, 31% and 24%. CI billed minutes were 331 / 910. Wall-to-all-landed favored GitHub at N=3 and N=10; the N=5 unpaired time ranges overlap. Strict correctness totals matched. This is not a universal speed or token-saving promise.
+
+P6 exit: the descriptive real-agent report retains three reps per arm/N, using tuned results for N=1/3/5 and the early-resolve v2 rerun for N=10. Observed median task time to main is 338.472 / 500.097 s, 377.131 / 538.131 s, 353.583 / 527.077 s and 359.633 / 565.508 s respectively (Forge / GitHub). V2 N=10 median wall is 762.705 / 1181.678 s and billed CI is 24 / 69 min. GitHub ran slower in v2; earlier GitHub medians and every supplied void remain visible. Task flags, incomplete cost coverage, raw N=10 strict medians of 6 / 7 and recovery turns of 13 / 7 prevent an exit-bar pass. These are descriptive observations, not a completed Phase 6 qualification. The older E3 failing-burst result favored GitHub (189 s versus Forge 989 s); its G8 rerun is not published.
+<!-- agent-measurements:end -->
+
+Sources and limits: [B1.5d](../../docs/research/b15d-report.md), [P6 descriptive results](../../docs/research/p6-exit-bench-results.md), [baseline/P6 evidence](../../docs/research/p6-baseline.md), [exit plan](../../docs/research/p6-exit-bench-plan.md). Figures describe the recorded workloads, not a guarantee for another project.
 
 ## Project rules
 

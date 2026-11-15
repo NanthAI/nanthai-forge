@@ -13,6 +13,7 @@ import {
   llmsFullWarnBytes,
   llmsFullSizeReport,
 } from '../scripts/llm-documents.mjs';
+import { retiredActions } from '../dist/agent-verbs.js';
 import { cleanUrl } from '../dist/project-routes.js';
 import { moduleUrl } from './convex-module.mjs';
 
@@ -128,27 +129,34 @@ test('llms-full is curated: listed in the package inventory and without internal
   assert.deepEqual(llmDocuments(root), first);
 });
 
-test('llms.txt quotes only dated figures that why-forge.md states, and reports the failed bar', () => {
+test('agent discovery teaches current contract verbs and shares measured B1.5d/P6 evidence', () => {
   const llms = llmDocuments(root)[0].source;
+  const skill = read('skills/forge-agent/SKILL.md');
   const why = read('docs/why-forge.md');
-  const measured = llms.slice(llms.indexOf('## Measured results'), llms.indexOf('## Reference'));
-  const figures = measured
-    .match(/\d[\d,.]*(?: \/ \d+|\s?s\b|×)?/g)
-    .map(figure => figure.replace(/[.,]$/, ''));
-  assert.ok(figures.length > 12);
-  for (const figure of figures) assert.ok(why.includes(figure), `${figure} appears in docs/why-forge.md`);
-  assert.match(measured, /GitHub was faster[^\n]*189 s[^\n]*989 s/);
-  assert.match(measured, /2026-10-24 \(E3\)/);
-  assert.match(measured, /Not established: a token or time advantage/);
-  assert.doesNotMatch(measured, /\b(?:fastest|best|revolutionary|blazing|seamless|powerful|game-chang)/i);
-  for (const rule of [
-    /affects/,
-    /full suite locally/,
-    /`finish`/,
-    /peers and presence/,
-    /contributors propose/,
-  ])
-    assert.match(llms, rule);
+  const block = /<!-- agent-measurements:start -->\n([\s\S]*?)\n<!-- agent-measurements:end -->/;
+  const matched = block.exec(why);
+  assert(matched, 'agent benchmark summaries must come from current Why Forge evidence');
+  const measured = matched[1];
+  assert(llms.includes(measured));
+  const skillBlock = block.exec(skill);
+  assert(skillBlock, 'the agent skill must carry the same current benchmark evidence');
+  assert.equal(skillBlock[1], measured);
+  for (const text of [llms, skill]) {
+    assert.match(text, /B1\.5d[\s\S]*324 \/ 496 s/);
+    assert.match(text, /331 \/ 910/);
+    assert.match(text, /P6 exit:[\s\S]*descriptive real-agent report/);
+    assert.match(text, /762\.705 \/ 1181\.678 s/);
+    assert.match(text, /24 \/ 69 min/);
+    assert.match(text, /prevent an exit-bar pass/);
+    assert.doesNotMatch(text, /Let `finish`|contributors propose and cannot write|R3\) is pending/);
+  }
+  assert.match(llms, /Lifecycle verbs: `start`, `save`, `land`/);
+  assert.match(llms, /preflight \{laneId\}/);
+  assert.match(llms, /tests \{candidateId\}/);
+  assert.doesNotMatch(llms, /nforge agent ROOT tests`/);
+  const retired = skill.split('- Removed with native mode:')[1].split('## Working')[0];
+  for (const [, action] of retired.matchAll(/`([a-z][a-z-]*)`/g))
+    assert(Object.hasOwn(retiredActions, action), `${action} is supported and must not be called retired`);
 });
 
 test('generation uses only the explicit inventory and reflects source edits deterministically', t => {
@@ -162,6 +170,8 @@ test('generation uses only the explicit inventory and reflects source edits dete
   for (const path of packageDocumentData) put(path, '{"publicCompanion":true}\n');
   for (const path of ['README.md', 'skills/forge-agent/SKILL.md'])
     put(path, `# ${path}\n\nPublic text for ${path}.\n`);
+  put('docs/why-forge.md', read('docs/why-forge.md'));
+  put('skills/forge-agent/SKILL.md', read('skills/forge-agent/SKILL.md'));
   for (const path of ['docs/internal-only.md', 'docs/vendor-notices/private.md', 'private-output.md'])
     put(path, 'EXCLUDED_INTERNAL_CONTENT');
   const first = llmDocuments(fixture);
@@ -169,10 +179,19 @@ test('generation uses only the explicit inventory and reflects source edits dete
   assert.ok(!JSON.stringify(first).includes('EXCLUDED_INTERNAL_CONTENT'));
   assert.equal(first.length, packageDocuments.length + packageDocumentData.length + 2);
   assert.doesNotMatch(first[1].source, /publicCompanion/);
-  for (const path of llmsFullPaths) assert.ok(first[1].source.includes(`Public text for ${path}.`), path);
+  for (const path of llmsFullPaths.filter(path => path !== 'docs/why-forge.md'))
+    assert.ok(first[1].source.includes(`Public text for ${path}.`), path);
   for (const path of ['docs/status.md', 'docs/backlog.md', 'docs/roadmap.md', 'docs/phase5-plan.md'])
     assert.ok(!first[1].source.includes(`Public text for ${path}.`), `${path} is linked, not concatenated`);
-  put('docs/why-forge.md', '# Why Forge now?\n\nChanged public documentation.\n');
+  put(
+    'docs/why-forge.md',
+    read('docs/why-forge.md')
+      .replace('# Why Forge for agentic development?', '# Why Forge now?')
+      .replace(
+        'Forge gives people and agents isolated Lanes, combines their changes, checks the result and moves accepted source to main. Agents keep their normal editors and tools. Our [principles](principles.md) guide continuous improvement.',
+        'Changed public documentation.',
+      ),
+  );
   const next = llmDocuments(fixture);
   assert.match(next[0].source, /\[Why Forge now\?\]\(\/docs\/why-forge.md\): Changed public documentation\./);
   assert.match(next[1].source, /Changed public documentation\./);

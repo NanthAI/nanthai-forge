@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { makeFunctionReference } from 'convex/server';
 import { coordinationClient } from './coordination-client.js';
 import { AUTH_STATE_NEXT_STEP, authState, deploymentUrl, readAuth, writeAuth } from './auth-store.js';
+import { hostedAgentAddress } from './hosted-agent-address.js';
 import { ForgeError, invariant } from './errors.js';
 import { parseGhOptions, projectGh } from './gh-cli-options.js';
 
@@ -15,7 +18,10 @@ export async function authStatus(args: string[]): Promise<unknown> {
     'BAD_ARGUMENT',
     'Select one deployment URL or --hostname HOST.',
   );
-  let selected = options.positional[0] ?? process.env.FORGE_DEPLOYMENT_URL ?? store.defaultDeployment;
+  // The folder's service is authoritative for this read; explicit selectors still win.
+  const project = !options.positional.length && !requested ? folderAddress() : null;
+  let selected =
+    options.positional[0] ?? project?.url ?? process.env.FORGE_DEPLOYMENT_URL ?? store.defaultDeployment;
   if (requested) {
     if (requested.includes('://')) selected = deploymentUrl(requested);
     else
@@ -112,5 +118,21 @@ function hintLegacyDeviceName(deployment: string) {
     writeAuth(store);
   } catch {
     /* The hint is advice only. */
+  }
+}
+
+/** Walk only local checkout markers, stopping at a repository boundary. No discovery/network call. */
+function folderAddress() {
+  let root = process.cwd();
+  for (;;) {
+    if (
+      ['.forge/hosted-lane.json', '.forge/hosted-main.json', '.git', '.forge/native.json'].some(path =>
+        existsSync(join(root, path)),
+      )
+    )
+      return hostedAgentAddress(root, {});
+    const parent = dirname(root);
+    if (parent === root) return null;
+    root = parent;
   }
 }

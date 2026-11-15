@@ -804,6 +804,8 @@ test('publicLogs: owner-only opt-in lets a private project use a public runner, 
     publicLogs: true,
     operationId: randomUUID(),
   });
+  assert.match(accepted.checkLogs, /Check logs are public: this runner runs in NanthAI\/nanthai-forge/);
+  assert.match(accepted.checkLogs, /paths and printed output/);
   assert.equal(accepted.value.publicLogs, true);
   assert.equal(accepted.value.repository, 'NanthAI/nanthai-forge');
   assert.equal(accepted.digest, checkPin(accepted.value));
@@ -820,6 +822,7 @@ test('publicLogs: owner-only opt-in lets a private project use a public runner, 
     operationId: randomUUID(),
   });
   assert.equal(budgeted.value.publicLogs, true);
+  assert.equal(budgeted.checkLogs, accepted.checkLogs);
   // ...and publicLogs:false withdraws it, so the public runner is refused again.
   const versions = settings(fixture.s).length;
   await assert.rejects(
@@ -835,6 +838,7 @@ test('publicLogs: owner-only opt-in lets a private project use a public runner, 
   });
   assert.equal(moved.value.repository, 'NanthAI/other-runner');
   assert.equal(moved.value.publicLogs, undefined);
+  assert.equal(moved.checkLogs, undefined);
   assert.match((await run('check-settings')).actions.logs, /^as visible as NanthAI\/other-runner/);
   // Connect mints metadata-only tokens: never Actions write to opt in.
   assert(granted.length && granted.every(p => JSON.stringify(p) === JSON.stringify({ metadata: 'read' })));

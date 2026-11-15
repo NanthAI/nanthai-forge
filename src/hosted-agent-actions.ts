@@ -505,9 +505,20 @@ export async function executeHostedAgent(
         projectId: session.address.projectId,
         request: canonicalPayload(selected.request),
       });
-      return typeof result === 'string' ? JSON.parse(result) : result;
+      const reply = typeof result === 'string' ? JSON.parse(result) : result;
+      return reply && typeof reply === 'object' ? { ...reply, ...checkLogsField(selected.request) } : reply;
     }
-    return session.mutation(selected.name, { request: canonicalPayload(selected.request) });
+    const result = await session.mutation(selected.name, { request: canonicalPayload(selected.request) });
+    return result && typeof result === 'object'
+      ? {
+          ...result,
+          ...checkLogsField(
+            selected.request.change.configuration.provider === 'github-actions'
+              ? selected.request.change.configuration
+              : null,
+          ),
+        }
+      : result;
   }
   if (action === 'start') {
     const command = hostedAgentCommandSchemas.start.parse(input);

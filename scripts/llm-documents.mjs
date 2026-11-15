@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { packageDocuments, packageDocumentData } from './package-documents.mjs';
 import { AGENT_DEFAULTS, agentDefaultLines } from './agent-default-lines.mjs';
 
+import { lifecycleVerbs, landSaveForm } from './agent-verb-forms.mjs';
+
 const repository = 'https://github.com/NanthAI/nanthai-forge/blob/main';
 
 // Explicit inventory of what `llms-full.txt` carries: the README and the guides a user or agent
@@ -32,23 +34,19 @@ export const llmsFullPaths = [
 // hard limit fails combined landings that each pass alone (2026-11-05). Trim when you see the warning.
 export const llmsFullWarnBytes = 400 * 1024;
 
-// Dated numbers repeated from docs/why-forge.md; tests/llm-discoverability.test.mjs requires every
-// quoted figure to appear in that page, so this summary cannot drift from the measurement it cites.
-const measured = [
-  '2026-10-20 (P1c), landing four already-finished changes: Forge 296.9 s, GitHub merge queue 701.6 s (2.36×). Eight changes: 372.9 s against 1192.9 s (3.20×), an early sample.',
-  '2026-10-24 (E3), one of four changes fails a test, against a tuned GitHub merge queue: GitHub was faster. It landed the three good changes in a median 189 s; Forge took 989 s. Forge checks prefixes one after another and that serial recovery lost. No later re-run is recorded.',
-  '2026-10-24 and 2026-10-25 (E1), four agents editing the same paragraphs: 0 / 40 finishes dropped; 90 / 90 overlapping pairs and files raised an alert at save time; 2 / 5 replays delivered the first alert to both agents before the second save.',
-  'Not established: a token or time advantage over plain Git for a single agent; the coordination evaluation (R3) is pending.',
-];
+// The measured-results block comes from Why Forge, also retained verbatim in the skill.
+// Commands derive from the same verb contract as CLI dispatch.
+const workflow = `Lifecycle verbs: ${lifecycleVerbs.map(verb => `\`${verb}\``).join(', ')}. Use \`${landSaveForm}\` to save, update from main, check and land under project policy. Run \`preflight {laneId}\` for affected checks of a saved Lane; \`tests {candidateId}\` reads a Candidate's test selection.`;
 
 const agentRules = [
+  workflow,
   'Hosted CLI actions and parameters come from the enforced contract: run `nforge agent ROOT --help` in the hosted checkout or `nforge docs agents/hosted`. Keep this turn active on unfinished work. After admission use the receipt command: `wait {operationIds:[ORIGINAL_UUID],until:"acceptance"}`; it blocks up to its budget (540 s agent mode, --budget/maxWaitMs); repeat on IN PROGRESS. Before admission replay the full original request including message.',
 
   'Hosted automatic-accept projects group landings by default and pipeline up to six exact-source groups (checks.concurrency overrides, 1–16); acceptance.landing: serial opts out. Pre-queue admission (acceptance.admissionCheck, default "full") checks each change before it joins a group; a failed shared check splits the group to isolate the failing changes.',
-  'Run only the tests your change affects (`nforge agent ROOT tests`), plus typecheck, lint and format checks on touched files. Do not run the full suite locally.',
-  'Let `finish` compose concurrent Lanes into one check on the project runner. A failing Lane is dropped from the batch and the others still land after passing. Do not rebase or babysit a merge queue.',
-  'For hosted Lanes, read start/save/status behindMain and any save conflictNotice (a real trial-merge conflict; nothing to answer); saved-path windows exclude unsaved peer edits and never prove independence. Hosted `peers {laneId,path?,detail?}` reads the same saved overlap evidence in one query and `diff {laneId,paths?}` compares the pinned base to the saved head (MCP `forge_review`); show {channel:"main",path} or show {laneId,path} reads exact accepted or saved bytes. Native owners can also read peers and presence. Announce paths and resolve overlap early.',
-  'Governance: contributors propose and cannot write source or Channels directly; the owner accepts. Protected paths and review-required policy stop at `awaiting-review` for a person.',
+  'Run the affected checks selected by `preflight {laneId}`, plus typecheck, lint and format. Do not run the full suite locally.',
+  'Let `land --save` compose concurrent Lanes into one check on the project runner. A failing Lane is dropped from the batch and the others still land after passing. Do not rebase or babysit a merge queue.',
+  'For hosted Lanes, read start/save/status behindMain and any save conflictNotice (a real trial-merge conflict; nothing to answer); saved-path windows exclude unsaved peer edits and never prove independence. Hosted `peers {laneId,path?,detail?}` reads the same saved overlap evidence in one query and `diff {laneId,paths?}` compares the pinned base to the saved head (MCP `forge_review`); show {channel:"main",path} or show {laneId,path} reads exact accepted or saved bytes. Announce paths and resolve overlap early.',
+  'Governance: hosted landing checks and lands under current project policy. Automatic projects land after passing evidence; protected paths or review-required policy may hold for a person. Never change policy to bypass a hold.',
   // Default project rules (docs/parallel-work-defaults.md); a project's `policy` read shows its own.
   ...agentDefaultLines(AGENT_DEFAULTS),
 ];
@@ -114,7 +112,17 @@ export function llmDocuments(root) {
       throw new Error(`llms-full source is not in packageDocuments: ${path}`);
     return describe(path, readFileSync(join(root, path), 'utf8'));
   });
+  const measuredSource = full.find(doc => doc.path === 'docs/why-forge.md').source;
+  const measured = /<!-- agent-measurements:start -->\n([\s\S]*?)\n<!-- agent-measurements:end -->/.exec(
+    measuredSource,
+  )?.[1];
+  if (!measured) throw new Error('Why Forge is missing the shared agent measurements block.');
   const skill = readFileSync(join(root, 'skills/forge-agent/SKILL.md'), 'utf8');
+  if (!skill.includes(`<!-- agent-workflow:start -->\n${workflow}\n<!-- agent-workflow:end -->`))
+    throw new Error('Regenerate the forge-agent workflow block from the CLI verb contract.');
+  if (!skill.includes(`<!-- agent-measurements:start -->\n${measured}\n<!-- agent-measurements:end -->`))
+    throw new Error('Copy the current Why Forge measurement block to forge-agent before building.');
+
   const links = selected => selected.map(doc => `- [${doc.title}](/${doc.path}): ${doc.note}`).join('\n');
   const summary =
     'Forge is a source host and workspace for people and AI agents changing the same code at the same time. Isolated Lanes, recorded checks and accepted Channels coordinate concurrent work.';
@@ -129,7 +137,7 @@ export function llmDocuments(root) {
     `## For agents\n\n${agentRules.map(rule => `- ${rule}`).join('\n')}\n\n` +
     `${links(documents.filter(doc => agentDocs.has(doc.path)))}\n` +
     `- [forge-agent skill](${repository}/skills/forge-agent/SKILL.md): ${describe('skills/forge-agent/SKILL.md', skill).note}\n\n` +
-    `## Measured results\n\n${measured.map(line => `- ${line}`).join('\n')}\n\nMethod, sources and caveats: [Why Forge](/docs/why-forge.md).\n\n` +
+    `## Measured results\n\n${measured}\n\nMethod, sources and caveats: [Why Forge](/docs/why-forge.md).\n\n` +
     `## Reference\n\n${links(reference)}\n\n` +
     `## Optional\n\n${links(rest)}\n\n` +
     `## Full text\n\n- [Curated documentation](/llms-full.txt): The README and ${llmsFullPaths.length - 1} user and agent guides, concatenated. Plans, status, research, license disclosures and the other documents are linked above, not included.\n`;

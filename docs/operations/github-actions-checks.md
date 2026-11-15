@@ -1509,3 +1509,5 @@ smaller report/timing payload with live run shapes and event counts. Payload
 shape, retained timing history, provider-verdict work and rechecks are known
 coverage differences; their individual contributions to that gap remain
 unmeasured. No live capture, export, import or load test is run by this guard.
+
+`configure-runner` receipts include the public-log consequence when `publicLogs:true` is selected or retained for that repository, including a held settings proposal. It uses the existing `checkLogs` notice; no extra confirmation is added.

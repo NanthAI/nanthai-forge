@@ -306,7 +306,7 @@ test('an empty hosted project keeps the first-run handoff after local UI retirem
   const html = renderNow({ ...f, records: { intents: [], lanes: [], views: [], runs: [] } });
   assert.match(html, /Create an Intent/);
   assert.match(html, /Hand it to an agent/);
-  assert.match(html, /Accept when it’s green/);
+  assert.match(html, /Watch it land/);
 });
 
 test('hosted Now retains GitHub divergence and its hosted settings handoff', () => {
