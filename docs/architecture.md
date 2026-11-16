@@ -162,6 +162,15 @@ Small saves can consume a projected recipe baseline
 within their existing byte bound. Legacy recipes without the projection retain
 their original readers. State identity and recipe bytes are unchanged.
 
+State-bound catalog grants also prepare legacy recipe projections within one
+request. Verified recipe/tree frontiers share sorted descriptor pages and a
+request-local metadata cache; leaf grants follow the exact State and recipe proof.
+The existing selector rechecks current access after this I/O. No projection or
+authorization cache survives the request, and no source body is prefetched.
+The existing closure reader consumes the bounded reply; larger representations
+retain the ordinary tree reader. This removes repeated State and recipe proofs
+on each file's metadata rounds without changing storage or membership authority.
+
 Within the bounded 1–8 MiB State window, fixed source writers select path-anchored
 file-list chunks (256 KiB to 1 MiB), isolating parents and the suffix. Verified raw
 State reads supply reusable ranges in their existing R2 body; projected baselines

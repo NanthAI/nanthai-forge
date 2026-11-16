@@ -17,7 +17,7 @@ const { runnerStateSource } = await import(moduleUrl('../convex/projectStateSour
 export async function physicalStateSourceFixture(
   t,
   count,
-  { rawTail = 0, fragmented = false, protocol, clientActor = 'owner' } = {},
+  { rawTail = 0, fragmented = false, protocol, clientActor = 'owner', recipes = [] } = {},
 ) {
   const files = [],
     entries = [],
@@ -46,6 +46,11 @@ export async function physicalStateSourceFixture(
       if (start + index >= count - rawTail) bodies.set(pin.sha256, bytes);
       offset += bytes.length;
     }
+  }
+  for (const [index, recipe] of recipes.entries()) {
+    files.push({ path: `assets/${index}.bin`, blob: recipe.entry.sha256, mode: 'file' });
+    entries.push(recipe.entry, ...recipe.catalog);
+    for (const [id, bytes] of recipe.bodies) bodies.set(id, bytes);
   }
   const variables = {
     CONVEX_SITE_URL: 'https://forge.example',
@@ -121,12 +126,13 @@ export async function physicalStateSourceFixture(
       digest: entry.sha256,
       size: entry.size,
       ...(entry.pack ? { pack: entry.pack } : {}),
+      ...(entry.recipe ? { recipe: { digest: entry.recipe.sha256, size: entry.recipe.size } } : {}),
     })),
   ))
     s.insert('projectObjectCatalog', { projectId: s.projectId, origin: 'synthetic source import', ...page });
   const root = await writePhysicalManifest({
     state: s.state.sha256,
-    members: [...byId.keys()],
+    members: files.map(file => file.blob),
     parent: null,
     describe: async ids => ids.map(id => byId.get(id)),
     put,

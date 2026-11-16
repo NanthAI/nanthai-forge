@@ -7,6 +7,7 @@ import type { PhysicalEntry } from '../src/physical-manifest-codec';
 import { physicalRuns } from '../src/physical-manifest-runs';
 import { stateCatalogReader, catalogSourceRow } from './projectStateSourceCatalog';
 import { stateRecipePins } from './projectStateSourceRecipe';
+import { prepareStateRecipes } from './projectStateSourcePreparation';
 import { directSourceBatch, sourceWindowOrder } from '../src/hosted-actions-direct';
 import { stateSourceReader, readSignedPhysical } from './projectStateSourceReader';
 import type { ObjectLocation } from './projectConvexSourceTransport';
@@ -21,9 +22,10 @@ async function buildStateSourceGrants(
     all?: boolean | undefined;
     object?: string | undefined;
     runs?: boolean | undefined;
+    closures?: boolean | undefined;
     fallback?: boolean | undefined;
     select: () => Promise<ObjectLocation>;
-    catalog: (ids: string[]) => Promise<unknown[]>;
+    catalog: (ids: string[], raw?: boolean) => Promise<unknown[]>;
     log: (message: string) => void;
   },
   retryInvalid = false,
@@ -245,14 +247,22 @@ async function buildStateSourceGrants(
 export async function stateSourceGrants(options: Parameters<typeof buildStateSourceGrants>[0]) {
   let selected = await options.select();
   let value: Awaited<ReturnType<typeof buildStateSourceGrants>> | undefined;
-  const build = (retryInvalid = false) =>
-    buildStateSourceGrants(
+  const build = async (retryInvalid = false) => {
+    const value = await buildStateSourceGrants(
       {
         ...options,
         select: async () => selected,
       },
       retryInvalid,
     );
+    if (value.mode === 'catalog' && !options.object && options.closures)
+      value.rows = await prepareStateRecipes(
+        value.rows,
+        ids => options.catalog(ids, true),
+        stateSourceReader(options.projectId).read,
+      );
+    return value;
+  };
   const sameState = (current: ObjectLocation) =>
     current.descriptor.object.sha256 === selected.descriptor.object.sha256 &&
     current.descriptor.object.size === selected.descriptor.object.size;

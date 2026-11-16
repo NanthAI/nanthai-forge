@@ -20,6 +20,7 @@ export async function runnerStateSource(
     all?: boolean | undefined;
     object?: string | undefined;
     runs?: boolean | undefined;
+    closures?: boolean | undefined;
     fallback?: boolean | undefined;
   },
 ) {
@@ -35,7 +36,7 @@ export async function runnerStateSource(
             ...(command.version ? { version: command.version } : {}),
           }),
         ),
-      catalog: async digests =>
+      catalog: async (digests, raw) =>
         JSON.parse(
           await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsSource:resolve'), {
             ...input,
@@ -44,7 +45,7 @@ export async function runnerStateSource(
             ...(command.version ? { version: command.version } : {}),
             closures: true,
             stateProof: true,
-            ...(command.runs ? { runs: true } : {}),
+            ...(command.runs && !raw ? { runs: true } : {}),
           }),
         ),
       log: message => console.log('FORGE_SOURCE_BINDINGS ' + JSON.stringify({ message })),
@@ -84,7 +85,7 @@ export const read = action({
               ...(selections++ ? { recheck: true } : {}),
             }),
           ),
-        catalog: async digests => {
+        catalog: async (digests, raw) => {
           const rows: unknown[] = [];
           for (let at = 0; at < digests.length; at += 500)
             rows.push(
@@ -93,7 +94,7 @@ export const read = action({
                 {
                   projectId: input.projectId,
                   digests: digests.slice(at, at + 500),
-                  ...(input.runs ? { runs: true } : {}),
+                  ...(input.runs && !raw ? { runs: true } : {}),
                 },
               )),
             );

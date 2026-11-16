@@ -290,6 +290,39 @@ export class ActionsJobClient {
     let sourcePage = 0;
     const runFiles = new Map<string, string>();
     const signedLeaves = new Map<string, NonNullable<ReturnType<typeof rows.get>>>();
+    const registerClosure = (row: StateSourceRow) => {
+      if (!row.closure || !cache) return;
+      invariant(
+        row.descriptor.recipe &&
+          row.closure.length > 0 &&
+          row.closure.length <= 100 &&
+          row.closure.every(
+            leaf =>
+              /^[a-f0-9]{64}$/.test(leaf.digest) &&
+              Number.isSafeInteger(leaf.size) &&
+              leaf.size >= 0 &&
+              leaf.size <= 1024 * 1024,
+          ) &&
+          row.closure.reduce((n, leaf) => n + leaf.size, 0) === row.descriptor.object.size,
+        'SOURCE_HASH_MISMATCH',
+        'Recipe closure differs from its logical content.',
+      );
+      for (const leaf of row.closure) {
+        const prior = rows.get(leaf.digest);
+        invariant(
+          !prior || prior.descriptor.object.size === leaf.size,
+          'SOURCE_HASH_MISMATCH',
+          'Recipe leaf size changed.',
+        );
+        const signed = {
+          descriptor: { object: { sha256: leaf.digest, size: leaf.size }, recipe: null },
+          url: leaf.url,
+          ...(leaf.range ? { range: leaf.range } : {}),
+        };
+        signedLeaves.set(leaf.digest, signed);
+        if (!prior) rows.set(leaf.digest, signed);
+      }
+    };
     const pending = new Map<string, Promise<void>>();
     const resolve = async (
       digests: string[],
@@ -358,38 +391,7 @@ export class ActionsJobClient {
               authorizedStates.add(row.descriptor.object.sha256);
               if (row.statePhysical) bound.set(row.descriptor.object.sha256, row.statePhysical);
             }
-            if (row.closure && cache) {
-              invariant(
-                row.descriptor.recipe &&
-                  row.closure.length > 0 &&
-                  row.closure.length <= 100 &&
-                  row.closure.every(
-                    leaf =>
-                      /^[a-f0-9]{64}$/.test(leaf.digest) &&
-                      Number.isSafeInteger(leaf.size) &&
-                      leaf.size >= 0 &&
-                      leaf.size <= 1024 * 1024,
-                  ) &&
-                  row.closure.reduce((n, leaf) => n + leaf.size, 0) === row.descriptor.object.size,
-                'SOURCE_HASH_MISMATCH',
-                'Recipe closure differs from its logical content.',
-              );
-              for (const leaf of row.closure) {
-                const prior = rows.get(leaf.digest);
-                invariant(
-                  !prior || prior.descriptor.object.size === leaf.size,
-                  'SOURCE_HASH_MISMATCH',
-                  'Recipe leaf size changed.',
-                );
-                const signed = {
-                  descriptor: { object: { sha256: leaf.digest, size: leaf.size }, recipe: null },
-                  url: leaf.url,
-                  ...(leaf.range ? { range: leaf.range } : {}),
-                };
-                signedLeaves.set(leaf.digest, signed);
-                if (!prior) rows.set(leaf.digest, signed);
-              }
-            }
+            registerClosure(row);
           });
           start += values.length;
           if (oneWindow) break;
@@ -640,6 +642,17 @@ export class ActionsJobClient {
     };
     const clientCall = (command: z.infer<typeof directCommandSchema>) =>
       this.call(command) as Promise<StateSourceReply>;
+    const requestClosures = !!cache && this.capabilities.includes(actionsSourceClosureCapability);
+    const stateWindow = (state: string, fallback = false) =>
+      clientCall({
+        kind: 'source',
+        digests: [state],
+        state,
+        all: true,
+        batch: true,
+        ...(requestClosures ? { closures: true } : {}),
+        ...(fallback ? { fallback: true } : {}),
+      });
     const clientRequest = this.request;
     return {
       transport,
@@ -667,21 +680,14 @@ export class ActionsJobClient {
         }
         selectedState = state;
         if (!all) return false;
-        let reply = await clientCall({ kind: 'source', digests: [state], state, all: true, batch: true });
+        let reply = await stateWindow(state);
         if (reply.mode === 'runs') {
           try {
             let retried = false;
             await refreshPhysicalManifest(
               bound.get(state)!,
               async pin => {
-                if (retried)
-                  reply = await clientCall({
-                    kind: 'source',
-                    digests: [state],
-                    state,
-                    all: true,
-                    batch: true,
-                  });
+                if (retried) reply = await stateWindow(state);
                 retried = true;
                 invariant(
                   reply.mode === 'runs',
@@ -730,14 +736,7 @@ export class ActionsJobClient {
             return true;
           } catch {
             console.log('source: catalog fallback (physical manifest transfer invalid or unavailable)');
-            reply = await clientCall({
-              kind: 'source',
-              digests: [state],
-              state,
-              all: true,
-              batch: true,
-              fallback: true,
-            });
+            reply = await stateWindow(state, true);
           }
         }
         invariant(reply.mode !== 'runs', 'SOURCE_HASH_MISMATCH', 'Catalog fallback reply changed.');
@@ -751,6 +750,7 @@ export class ActionsJobClient {
           );
           if (row.run) row.run = { ...row.run, key: `fallback-${sourcePage}:${row.run.id}` };
           rows.set(row.descriptor.object.sha256, row);
+          registerClosure(row);
         });
         sourcePage++;
         return false;
