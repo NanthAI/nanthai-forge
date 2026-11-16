@@ -74,6 +74,23 @@ manifest memory failure or authorize a State identity change. Issue 6fbba986 ext
 the routing band with owner-approved extra object-binding work; exact call, byte,
 record and memory guards retain the existing source envelopes.
 
+## Proposed
+
+### Proposed 2026-11-16: React Aria Components as the headless behaviour layer
+
+If the web app stays on React 19 (framework spike, Issue 348436e5), use React Aria
+Components, with its English-only locale plugin, as the one behaviour layer for
+menus, dialogs, the command palette and reorderable lists. It goes in
+`devDependencies` and loads after first paint, because one menu already costs
+about 48 KB gzip against 24 KB of eager-budget headroom. Why: it is the only
+candidate that covers sortable lists with keyboard and screen-reader support
+built in, it needed no API corrections, it has been stable since 2023, and with
+the plugin its bytes match the alternatives (about 76 KB gzip for both pieces).
+Not yet decided: the verdict is a design-direction call made after review, and
+VoiceOver is still to be checked by a person. Evidence and what would flip it:
+[headless layer comparison](research/headless-layer.md). Source: Issue
+[f97fb89d](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=f97fb89d-bb1e-4b6c-b482-6f5e079d7bca).
+
 ## Decisions from 11 November
 
 ### Advisory windows
