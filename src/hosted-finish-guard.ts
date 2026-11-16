@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readFileSync } from 'node:fs';
+import { pathsAgainstBase } from './hosted-changed-paths.js';
 import { join } from 'node:path';
-import { digest } from './hash.js';
 import { ForgeError } from './errors.js';
-import { clientCacheRoot } from './root-paths.js';
-import { machineObjectsDirectory } from './machine-object-store.js';
-import { parseNativeState } from './state/format.js';
-import { reviewPaths } from './source-review-format.js';
 import { readLaneEntry } from './lane-registry.js';
 import { readHostedLaneCheckout, type HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 import { scanCheckout } from './hosted-agent-finish-identity.js';
@@ -14,24 +9,8 @@ import { shellQuote } from './shell-quote.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
 
-/** Paths the Lane's saved head changes against its base, from the base State manifest already on this
- * machine (the checkout's own cache or the machine object store). No server call. `null` when that
- * manifest is not cached: a missing observation never becomes "no changes" or a count. */
 export function changedPathsAgainstBase(root: string, marker: HostedLaneCheckoutMarker): number | null {
-  const base = marker.selection.base.head;
-  for (const directory of [join(clientCacheRoot(root), 'objects'), machineObjectsDirectory()]) {
-    if (!directory) continue;
-    try {
-      const bytes = readFileSync(join(directory, base));
-      if (digest(bytes) !== base) continue;
-      return reviewPaths(parseNativeState(bytes).files, marker.state.files).filter(
-        item => item.status !== 'unchanged',
-      ).length;
-    } catch {
-      /* Not cached here: try the next place. */
-    }
-  }
-  return null;
+  return pathsAgainstBase(root, marker)?.length ?? null;
 }
 
 /** land by Lane id from a folder that is not that Lane's checkout lands the server-recorded head and

@@ -6,6 +6,157 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "protectedPathPolicy": {
+          "type": "object",
+          "properties": {
+            "acceptance": {
+              "type": "object",
+              "properties": {
+                "withoutCheck": {
+                  "type": "object",
+                  "properties": {
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "owner",
+                        "selected",
+                        "writers"
+                      ]
+                    },
+                    "people": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "teams": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "mode",
+                    "people",
+                    "teams"
+                  ]
+                },
+                "proofOnLanding": {
+                  "type": "boolean"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "review",
+                    "auto-on-pass"
+                  ]
+                },
+                "gate": {
+                  "type": "string",
+                  "enum": [
+                    "full",
+                    "contract"
+                  ]
+                },
+                "disjointFastPath": {
+                  "type": "boolean"
+                },
+                "autoRevert": {
+                  "type": "boolean"
+                },
+                "hostedCrossHeadReuse": {
+                  "type": "boolean"
+                },
+                "landingMode": {
+                  "type": "string",
+                  "enum": [
+                    "strict",
+                    "fast"
+                  ]
+                },
+                "scopedRecheck": {
+                  "type": "boolean"
+                },
+                "landing": {
+                  "type": "string",
+                  "enum": [
+                    "batched",
+                    "optimistic",
+                    "serial"
+                  ]
+                },
+                "admissionCheck": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "full"
+                    }
+                  ]
+                },
+                "earlyResolve": {
+                  "type": "string",
+                  "enum": [
+                    "automatic",
+                    "on",
+                    "off"
+                  ]
+                },
+                "batchMaxSize": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                },
+                "batchWindowMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 60000
+                },
+                "autoActors": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "protectedPaths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "ownerApprovalPaths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "required": [
+                "mode",
+                "protectedPaths"
+              ]
+            },
+            "checkEntries": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "acceptance",
+            "checkEntries"
+          ],
+          "additionalProperties": false
+        },
         "landingMessageVersion": {
           "type": "number",
           "const": 1

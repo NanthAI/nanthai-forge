@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { globPattern, type AcceptanceActor, type AutonomyPolicy } from './autonomy-policy.js';
-import { ownerApprovalMatcher, type DefinedChecks } from './public-governance.js';
+import { type AcceptanceActor, type AutonomyPolicy } from './autonomy-policy.js';
+import { protectedPathMatches, type DefinedChecks } from './public-governance.js';
 import type { CheckGate, MainGate } from './bet2-gate.js';
 
 export type GateInput = {
@@ -16,14 +16,7 @@ export type GateInput = {
   /** The project's defined checks (and their setup actions), already loaded by the caller; their entry files are protected like the default paths. */
   checks?: DefinedChecks;
 };
-/** The changed paths that are protected: owner-approval paths (with check entry files) and
- * `acceptance.protectedPaths`. Null when path coverage is unavailable. */
-export function protectedPathMatches(policy: AutonomyPolicy, paths: string[] | null, checks?: DefinedChecks) {
-  if (paths === null) return null;
-  const approval = ownerApprovalMatcher(policy, checks);
-  const patterns = policy.acceptance.protectedPaths.map(globPattern);
-  return paths.filter(path => approval(path) || patterns.some(pattern => pattern.test(path)));
-}
+export { protectedPathMatches };
 export function protectedGatePaths(policy: AutonomyPolicy, paths: string[] | null, checks?: DefinedChecks) {
   const matched = protectedPathMatches(policy, paths, checks);
   return matched === null || matched.length > 0;

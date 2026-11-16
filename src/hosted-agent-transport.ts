@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { protectedPathNotice, type ProtectedPathPolicy } from './public-governance.js';
+import type { SaveContract } from './hosted-save-client.js';
 import { capsuleHistoryQueries, hydrateLandingHistory, hasJournalHistory } from './landing-capsule-client.js';
 import { agentClient } from './agent-turn-work.js';
 import { landingMessage } from './landing-message.js';
@@ -124,7 +126,7 @@ import {
 } from './hosted-agent-contract.js';
 import { executeHostedAgent, hostedCheckSettings } from './hosted-agent-actions.js';
 import { executeHostedApproval, openApprovalsReply, type ApprovalCommand } from './hosted-agent-approval.js';
-import { savedChangedPaths } from './hosted-changed-paths.js';
+import { savedChangedPaths, checkoutProtectedPathNotice } from './hosted-changed-paths.js';
 import { publishClientSourcePack } from './source-pack-client.js';
 import { missingRequiredFeatures } from './hosted-contract-features.js';
 import { capabilityOptions, takeEarlyCapabilities } from './hosted-capabilities-early.js';
@@ -294,6 +296,7 @@ export class HostedAgentTransport {
   private callerActor: string | null = null;
   /** Contract features the server advertised on this process's latest capability read (a83b6fd5);
    * undefined before discovery. The CLI keeps the old safe behaviour for any feature not listed. */
+  private protectedPolicy: ProtectedPathPolicy | undefined;
   private serverFeatures: readonly string[] | undefined;
   get advertisedFeatures() {
     return this.serverFeatures;
@@ -301,6 +304,7 @@ export class HostedAgentTransport {
   private readonly operationContext = new AsyncLocalStorage<{
     id: string | null;
     sourceNotice?: ExactConflictNotice | undefined;
+    protectedPathNotice?: ReturnType<typeof protectedPathNotice>;
   }>();
   private get sourceNotice() {
     return this.operationContext.getStore()?.sourceNotice;
@@ -808,6 +812,7 @@ export class HostedAgentTransport {
         hostedAgentCapabilitiesSchema,
         knownCapabilities(hostedAgentRoot(this.root), discovery),
       );
+      this.protectedPolicy = capabilities.protectedPathPolicy;
       this.callerActor = capabilities.actor;
       this.serverFeatures = capabilities.features ?? [];
       this.exchange.sourceStateReads = this.serverFeatures.includes('source-state');
@@ -1088,7 +1093,22 @@ export class HostedAgentTransport {
           return result;
         },
         waitUntil: this.waitUntil ?? dispatchedAt + AGENT_WAIT_SECONDS * 1000,
+        pathNotice: this.protectedPaths.bind(this),
+        saveNotice: async capture => {
+          if (!this.protectedPolicy) return;
+          const files = new Map(capture.marker.state.files.map(file => [file.path, file]));
+          for (const change of capture.changes) {
+            if (change.after)
+              files.set(change.path, { path: change.path, blob: change.after.blob, mode: change.after.mode });
+            else files.delete(change.path);
+          }
+          await this.protectedNotice({
+            ...capture.marker,
+            state: { ...capture.marker.state, files: [...files.values()] },
+          });
+        },
         finishGates: async (laneId: string, head: string, tree?: string) => {
+          await this.protectedNotice(readHostedLaneCheckout(root));
           const read = await this.overlapAdvice(laneId, capabilities.agentDefaults?.preflight !== 'off');
           const selected = readHostedLaneCheckout(root)?.selection;
           const advice =
@@ -1102,6 +1122,7 @@ export class HostedAgentTransport {
                   ),
                 }
               : read;
+          if (advice.changedPaths?.complete) this.protectedPaths(advice.changedPaths.paths);
           // The paths this landing carries, so its check failure can teach the next preflight.
           if (advice.changedPaths?.complete) rememberLandingPaths(root, laneId, advice.changedPaths.paths);
           // The gates read the preflight planner and the test-selection graph; only a finish loads them.
@@ -1532,6 +1553,23 @@ export class HostedAgentTransport {
       return undefined;
     }
   }
+  private async protectedNotice(marker: ReturnType<typeof readHostedLaneCheckout>) {
+    if (!marker || !this.protectedPolicy) return;
+    const notice = checkoutProtectedPathNotice(this.root, marker, this.protectedPolicy);
+    this.reportProtectedNotice(notice);
+  }
+  private protectedPaths(paths: string[] | null) {
+    if (this.protectedPolicy) this.reportProtectedNotice(protectedPathNotice(this.protectedPolicy, paths));
+  }
+  private reportProtectedNotice(notice: ReturnType<typeof protectedPathNotice>) {
+    const context = this.operationContext.getStore();
+    if (context?.protectedPathNotice?.coverage === 'complete' && notice?.coverage === 'unavailable') return;
+    if (context && notice && JSON.stringify(notice) !== JSON.stringify(context.protectedPathNotice))
+      process.stderr.write(
+        `${notice.message} ${notice.paths.join(', ')}${notice.more ? ` (+${notice.more} more)` : ''}\n`,
+      );
+    if (context) context.protectedPathNotice = notice;
+  }
   private async response(
     action: HostedAgentAction,
     operationId: string | null,
@@ -1539,6 +1577,8 @@ export class HostedAgentTransport {
     overlapLaneId?: string,
   ): Promise<HostedAgentResponse> {
     const advice = overlapLaneId ? await this.overlapAdvice(overlapLaneId) : undefined;
+    if (advice?.changedPaths?.complete && ['save', 'finish'].includes(action))
+      this.protectedPaths(advice.changedPaths.paths);
     this.cachedAdvice = undefined;
     // D2: a stack offer is never shown while this checkout's own landing is live (no sync then),
     // and the last offer is kept for stacking:auto.
@@ -1574,7 +1614,10 @@ export class HostedAgentTransport {
       action,
       operationId,
       resolved: operationId ? { operationId } : null,
-      result,
+      result:
+        this.operationContext.getStore()?.protectedPathNotice && result && typeof result === 'object'
+          ? { ...result, protectedPathNotice: this.operationContext.getStore()!.protectedPathNotice }
+          : result,
       ...(advice ? { behindMain: advice.behindMain } : {}),
       ...(advice?.stack ? { stack: advice.stack } : {}),
       ...(offer
@@ -1698,6 +1741,7 @@ export class HostedAgentTransport {
       'HOSTED_CHECKOUT_REQUIRED',
       'Run preflight with the Lane folder printed by start as ROOT (not the project folder): it tests the saved files there.',
     );
+    await this.protectedNotice(marker);
     const { preflightPlan, readPreflightReceipt, runPreflight } = await import('./agent-preflight.js');
     const stopped = command.retry ? readPreflightReceipt(root, laneId)?.stopped : undefined;
     invariant(
@@ -1706,13 +1750,15 @@ export class HostedAgentTransport {
       'The last preflight of this Lane stopped no file for time; run preflight without "retry".',
     );
     const advice = await readHostedOverlapAdvice(this, laneId, true);
+    const changed = await savedChangedPaths(
+      this,
+      { base: marker.selection.base.head, head: marker.selection.head },
+      advice.changedPaths,
+    );
+    if (changed?.complete) this.protectedPaths(changed.paths);
     const plan = preflightPlan(
       root,
-      await savedChangedPaths(
-        this,
-        { base: marker.selection.base.head, head: marker.selection.head },
-        advice.changedPaths,
-      ),
+      changed,
       { laneId, files: marker.state.files, base: marker.selection.base.head },
       { budgetSeconds: command.budgetSeconds, trim: command.trim, only: stopped },
     );
@@ -1959,6 +2005,8 @@ export type HostedAgentSession = {
   main: () => Promise<z.infer<typeof hostedMainV2Schema>>;
   marker: () => ReturnType<typeof readHostedLaneCheckout>;
   /** Agent-default finish gates (preflight); refusals throw, advisories return. */
+  pathNotice?: (paths: string[] | null) => void;
+  saveNotice?: SaveContract['onCapture'];
   finishGates?: (laneId: string, head: string, tree?: string) => Promise<Record<string, unknown>>;
   /** The `gates` argument for this finish's landing (feature land-gates); undefined when not sent. */
   landGates?: (composeOperationId: string) => string | undefined;

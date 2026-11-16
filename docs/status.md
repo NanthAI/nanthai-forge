@@ -259,6 +259,11 @@ path for signed-in readers. Clone, fetch and web archive downloads require sign-
 public projects too; public file views return rendered pages without object URLs. Device starts default to 120/minute;
 anonymous clone budgets and counters have been removed. Details and call budgets: [security](security.md).
 
+CLI/MCP save, preflight and `land --save` report current protected-path approval
+before checks, including owner-approval defaults and derived check entries.
+Notices reuse capability discovery and local manifests, with no extra calls or
+idle work. First-local-write warnings and merging the two path lists remain open.
+
 ## Works
 
 Exact saved-file conflict trials use verified physical object bindings and pinned Lane source

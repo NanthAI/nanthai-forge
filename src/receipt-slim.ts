@@ -319,7 +319,10 @@ function brief(out: Json): Json {
             : action === 'observe'
               ? briefObserved(result, out.operationId)
               : undefined;
-  out.result = compactReplyDetail(action, slim ?? result);
+  out.result = compactReplyDetail(action, {
+    ...(slim ?? result),
+    ...(result.protectedPathNotice !== undefined ? { protectedPathNotice: result.protectedPathNotice } : {}),
+  });
   // Board lists keep one rendering per note; a read-more by id keeps full notes and replies.
   if (action === 'board' && Array.isArray(result.messages) && Array.isArray(result.notices))
     out.result = omit(out.result as Json, 'messages');

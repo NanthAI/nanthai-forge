@@ -170,3 +170,34 @@ test('a failed inline land keeps its original operation and complete replay, wit
   );
   assert(!s.calls.some(c => /Compose|Landing/.test(c.name)), 'a failed local run starts no remote check');
 });
+
+test('protected-path approval is printed before required inline preflight spends a check', async t => {
+  const s = await fixture(t);
+  const { policyPreset } = await import('../dist/autonomy-policy.js');
+  s.caps.protectedPathPolicy = {
+    acceptance: {
+      ...policyPreset('trusted').acceptance,
+      ownerApprovalPaths: [],
+      protectedPaths: ['README.md'],
+    },
+    checkEntries: [],
+  };
+  s.caps.features.push('protected-path-notice');
+  const output = [];
+  const write = process.stderr.write.bind(process.stderr);
+  t.mock.method(process.stderr, 'write', (chunk, ...args) => {
+    output.push(String(chunk));
+    return write(chunk, ...args);
+  });
+  const result = await submitHostedLand(
+    s.root,
+    { operationId: randomUUID(), message: 'Protected document' },
+    s.address,
+    s.transport(),
+  );
+  assert.equal(result.result.submission.phase, 'landed');
+  assert.match(result.result.protectedPathNotice.message, /a person allowed to accept/);
+  const notice = output.findIndex(line => line.includes('Landing will need approval'));
+  const check = output.findIndex(line => line.includes('preflight plan:'));
+  assert(notice >= 0 && check > notice, 'approval is explained before the preflight run starts');
+});

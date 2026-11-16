@@ -117,6 +117,14 @@ export const capabilities = query({
           ...(features?.includes('capabilities-main')
             ? carriedMain(channel?.selection, projectId, authority)
             : {}),
+          ...(features?.includes('protected-path-notice')
+            ? {
+                protectedPathPolicy: {
+                  acceptance: effectivePolicy(project).acceptance,
+                  checkEntries: project.checkEntries ?? [],
+                },
+              }
+            : {}),
           ...(landingMessageVersion === 1 ? { landingMessageVersion: 1 } : {}),
           ...(features ? { features: advertisedFeatures(features) } : {}),
           // Lane snapshots (7ac4e32f): the policy rides on the read every command already makes.

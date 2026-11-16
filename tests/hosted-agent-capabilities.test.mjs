@@ -210,3 +210,18 @@ test('capabilities-main: the release check takes main only from this command’s
   );
   assert.equal(await carriedMain('https://carried.invalid', 'carried-project'), null);
 });
+
+test('protected-path policy discovery is negotiated and uses the already-read project row without extra I/O', async () => {
+  const s = setup();
+  const read = async features =>
+    s.call('capabilities', capabilities, { projectId: s.projectId, features }, 'owner').then(JSON.parse);
+  assert.equal((await read([])).protectedPathPolicy, undefined);
+  const before = s.counts.at(-1);
+  const result = await read(['protected-path-notice']);
+  assert.deepEqual(result.protectedPathPolicy.checkEntries, []);
+  assert.deepEqual(s.counts.at(-1), before);
+  s.patch('hostedProjects', s.projectId, { checkEntries: ['tools/check.mjs'] });
+  assert.deepEqual((await read(['protected-path-notice'])).protectedPathPolicy.checkEntries, [
+    'tools/check.mjs',
+  ]);
+});

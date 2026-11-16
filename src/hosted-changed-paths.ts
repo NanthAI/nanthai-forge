@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import { protectedPathNotice, type ProtectedPathPolicy } from './public-governance.js';
+import { digest } from './hash.js';
+import { machineObjectsDirectory } from './machine-object-store.js';
+import type { HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { clientCacheRoot } from './root-paths.js';
@@ -52,4 +56,33 @@ export async function savedChangedPaths(
   } catch {
     return projected;
   }
+}
+
+/** Paths the Lane's saved head changes against its base, from the base State manifest already on this
+ * machine (the checkout's own cache or the machine object store). No server call. `null` when that
+ * manifest is not cached: a missing observation never becomes "no changes" or a count. */
+export function pathsAgainstBase(root: string, marker: HostedLaneCheckoutMarker): string[] | null {
+  const base = marker.selection.base.head;
+  for (const directory of [join(clientCacheRoot(root), 'objects'), machineObjectsDirectory()]) {
+    if (!directory) continue;
+    try {
+      const bytes = readFileSync(join(directory, base));
+      if (digest(bytes) !== base) continue;
+      return reviewPaths(parseNativeState(bytes).files, marker.state.files)
+        .filter(item => item.status !== 'unchanged')
+        .map(item => item.path);
+    } catch {
+      /* Not cached here: try the next place. */
+    }
+  }
+  return null;
+}
+
+/** Local manifests only; missing coverage stays explicit and never adds a server call. */
+export function checkoutProtectedPathNotice(
+  root: string,
+  marker: HostedLaneCheckoutMarker,
+  policy: ProtectedPathPolicy,
+) {
+  return protectedPathNotice(policy, pathsAgainstBase(root, marker));
 }

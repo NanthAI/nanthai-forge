@@ -479,3 +479,24 @@ test('a timed save keeps its total and drops the split, as sync does (friction f
   assert.equal(slim.result.outcome.result.head, sha);
   assert.equal(slimReceipt(save()).result.totalMs, undefined, 'an untimed save prints no total');
 });
+
+test('CLI and MCP compact saves and landings keep early protected-path approval visible without detail', () => {
+  const notice = {
+    message: 'Landing will need approval from the project owner.',
+    paths: ['netlify.toml'],
+    more: 0,
+    coverage: 'complete',
+  };
+  for (const [action, result] of [
+    ['save', { outcome: { status: 'completed', result: { head: sha } } }],
+    ['save', { status: 'settling' }],
+    ['finish', { submission: { phase: 'landed', acceptance: { receiptId: opId, head: sha } } }],
+  ]) {
+    const compact = slimReceipt({
+      transport: 'hosted',
+      action,
+      result: { ...result, protectedPathNotice: notice },
+    });
+    assert.deepEqual(compact.result.protectedPathNotice, notice);
+  }
+});

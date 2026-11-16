@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { checkEntryPaths } from './first-check-risk.js';
-import { globPattern, reviewReason, type AutonomyPolicy, type AcceptanceActor } from './autonomy-policy.js';
+import {
+  globPattern,
+  reviewReason,
+  protectedMatches,
+  type AutonomyPolicy,
+  type AcceptanceActor,
+} from './autonomy-policy.js';
 
 export const DEFAULT_OWNER_APPROVAL_PATHS = [
   '.github/**',
@@ -34,12 +40,23 @@ export function definedCheckEntryPaths(checks: DefinedChecks) {
  * defined check and setup action of the project runs, so any project's check entries
  * are protected, not only Forge's. An explicit `ownerApprovalPaths` list replaces the
  * built-in list; derived check entries remain protected. */
-export function ownerApprovalMatcher(policy: AutonomyPolicy, checks?: DefinedChecks) {
+export function ownerApprovalMatcher(policy: Pick<AutonomyPolicy, 'acceptance'>, checks?: DefinedChecks) {
   const explicit = policy.acceptance.ownerApprovalPaths;
   const patterns = (explicit ?? DEFAULT_OWNER_APPROVAL_PATHS).map(globPattern);
   const entries = definedCheckEntryPaths(checks);
   const matches = (path: string) => entries.includes(path) || patterns.some(pattern => pattern.test(path));
   return Object.assign(matches, { any: patterns.length + entries.length > 0 });
+}
+/** Paths held by either existing protection list, including derived check entries. */
+export function protectedPathMatches(
+  policy: Pick<AutonomyPolicy, 'acceptance'>,
+  paths: string[] | null,
+  checks?: DefinedChecks,
+) {
+  if (paths === null) return null;
+  const owner = ownerApprovalMatcher(policy, checks);
+  const protectedPaths = new Set(protectedMatches(policy, paths));
+  return paths.filter(path => owner(path) || protectedPaths.has(path));
 }
 /** Why a landing waits for the owner person, or null. Issue 470ef29b: the owner-approval list holds
  * every agent on every project, the owner's own agents included (an agent signed in with the owner's
@@ -47,7 +64,7 @@ export function ownerApprovalMatcher(policy: AutonomyPolicy, checks?: DefinedChe
  * follow automatic policy on private and public projects. */
 export function governanceReason(
   project: { owner: string; visibility?: string },
-  policy: AutonomyPolicy,
+  policy: Pick<AutonomyPolicy, 'acceptance'>,
   actor: AcceptanceActor,
   paths: string[] | null,
   checks?: DefinedChecks,
@@ -65,4 +82,42 @@ export function governanceReason(
     actor.id !== project.owner && !uncheckedPerson ? { ...actor, kind: 'agent' } : actor,
     paths,
   );
+}
+
+export type ProtectedPathPolicy = Pick<AutonomyPolicy, 'acceptance'> & { checkEntries: string[] };
+
+/** The acceptance rule owns matching and the hold; this is only its early explanation for agents.
+ * Bound the reply, not the operation: every path still receives the existing policy at acceptance. */
+export function protectedPathNotice(policy: ProtectedPathPolicy, paths: string[] | null) {
+  const matched = protectedPathMatches(policy, paths, policy.checkEntries);
+  const owner = ownerApprovalMatcher(policy, policy.checkEntries);
+  if (matched === null && !owner.any && !policy.acceptance.protectedPaths.length) return undefined;
+  if (matched?.length === 0) return undefined;
+  const reason = governanceReason(
+    { owner: '' },
+    policy,
+    { id: '', kind: 'agent' },
+    paths,
+    policy.checkEntries,
+  );
+  if (!reason) return undefined;
+  const approver = matched?.some(path => owner(path))
+    ? 'project owner (a person)'
+    : 'a person allowed to accept';
+  let bytes = 0;
+  const shown = (matched ?? [])
+    .filter(path => {
+      bytes += path.length;
+      return bytes <= 1200;
+    })
+    .slice(0, 10);
+  return {
+    message:
+      matched === null
+        ? 'Landing may need protected-path approval; path coverage is unavailable. Read policy for the configured approver.'
+        : `Landing will need approval from ${approver} under the current protected-path policy.`,
+    paths: shown,
+    more: (matched?.length ?? 0) - shown.length,
+    coverage: matched === null ? ('unavailable' as const) : ('complete' as const),
+  };
 }

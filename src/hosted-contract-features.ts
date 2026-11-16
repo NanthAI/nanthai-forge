@@ -17,6 +17,7 @@ export const sourceStateFeature = 'source-state';
 export const sourceStateV2Feature = 'source-state-v2';
 export const hostedContractFeatures = [
   /** State-bound physical run and recipe grants; bootstrap replies carry the trusted root pin. */
+  'protected-path-notice',
   sourceStateFeature,
   sourceStateV2Feature,
   /** Candidate files read from exact R2 States without a legacy Work generation. */

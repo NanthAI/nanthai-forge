@@ -17,7 +17,7 @@ import { safeRelative } from './safe-relative.js';
 import { planningCommentCommandSchema, planningPutSchema } from './work-planning-types.js';
 import { invariant } from './errors.js';
 import { planningIssueFields } from './planning-issue-arguments.js';
-import { policyWriteObject } from './autonomy-policy.js';
+import { autonomyPolicySchema, policyWriteObject } from './autonomy-policy.js';
 import { hostedCheckCommandSchema, hostedCheckRunnerSchema } from './hosted-check.js';
 import { submoduleAllowChangesSchema } from './submodule-allowlist.js';
 import { metricContextField, metricPagingFields } from './self-metrics-page.js';
@@ -87,6 +87,10 @@ export const hostedAgentClientActions = [
 export { hostedAgentAddressSchema, type HostedAgentAddress } from './hosted-address.js';
 export const hostedAgentCapabilitiesSchema = z
   .object({
+    protectedPathPolicy: z
+      .object({ acceptance: autonomyPolicySchema.shape.acceptance, checkEntries: z.array(z.string()) })
+      .strict()
+      .optional(),
     landingMessageVersion: z.literal(1).optional(),
     /** Contract features the server implements, from the ones the client named (a83b6fd5). */
     features: z.array(z.string()).optional(),

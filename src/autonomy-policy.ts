@@ -353,11 +353,12 @@ export function globPattern(glob: string): RegExp {
     invariant(false, 'BAD_ARGUMENT', 'Protected-path glob is invalid.');
   }
 }
-export function protectedMatches(policy: AutonomyPolicy, paths: string[]) {
-  return paths.filter(path => policy.acceptance.protectedPaths.some(glob => globPattern(glob).test(path)));
+export function protectedMatches(policy: Pick<AutonomyPolicy, 'acceptance'>, paths: string[]) {
+  const patterns = policy.acceptance.protectedPaths.map(globPattern);
+  return paths.filter(path => patterns.some(pattern => pattern.test(path)));
 }
 export function reviewReason(
-  policy: AutonomyPolicy,
+  policy: Pick<AutonomyPolicy, 'acceptance'>,
   actor: AcceptanceActor,
   paths: string[] | null,
 ): string | null {

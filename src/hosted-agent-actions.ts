@@ -608,7 +608,7 @@ export async function executeHostedAgent(
         ...(command.supersedeFinish ? { supersedeFinish: true } : {}),
       },
       session.exchange,
-      { ...saveContract(session.capabilities), settleBackground },
+      { ...saveContract(session.capabilities), settleBackground, onCapture: session.saveNotice },
       false,
       { action: 'save', parameters: { ...command, operationId: session.journal.operationId } },
       (id, pending) => waitSaveUntil(session, id, pending),

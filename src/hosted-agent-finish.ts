@@ -428,7 +428,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         session.root,
         { operationId: saveOperationId, message: command.message ?? 'Agent change' },
         session.exchange,
-        saveContract(session.capabilities),
+        { ...saveContract(session.capabilities), onCapture: session.saveNotice },
         false,
         {
           action: 'finish',
@@ -503,6 +503,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         if (completed?.status === 'failed') await session.journal.retain('finish-source-failed', () => true);
         return { phase: 'compose', composeOperationId, progress };
       }
+      session.pathNotice?.(null);
       const desired = await session.journal.retain('desired-landing', async () =>
         hostedLandingDesiredSchema.parse({
           governanceVersion: 1,
@@ -556,6 +557,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
     const candidate = hostedRecordSchema.options[3].parse(
       await session.query('projectHostedCompose:candidate', { candidateId }),
     );
+    session.pathNotice?.(candidate.governance?.paths ?? null);
     if (command.accept === false) {
       invariant(candidate.result.status === 'clean', 'VIEW_CONFLICT', 'Check a clean hosted Candidate.');
       const check = await checkSelection(session, command.check);

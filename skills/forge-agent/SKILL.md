@@ -27,6 +27,7 @@ For work on Forge itself, read [AGENTS.md](../../AGENTS.md), the [lead playbook]
 
 ## Hosted checkouts
 
+- Read save/preflight/land `result.protectedPathNotice`: current protected paths and who can approve, before checks. `paths` is capped; `more` and `coverage` name omissions. Read `policy` for the full lists. This notice changes no approval rule.
 - Use start/save/status `behindMain` and a save's `conflictNotice` to coordinate.
   Each save trial-merges your saved files with peers' saved files; a real conflict
   comes back as `conflictNotice`, with nothing to answer. `behindMain` shows ten

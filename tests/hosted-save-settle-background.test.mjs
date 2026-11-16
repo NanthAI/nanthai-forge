@@ -17,6 +17,7 @@ import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 import { saveHostedLane, settleBackgroundSave } from '../dist/hosted-save-client.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
 import { digest } from '../dist/hash.js';
+import { policyPreset } from '../dist/autonomy-policy.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 
 const contract = {
@@ -29,12 +30,12 @@ const contract = {
   durations: true,
 };
 
-async function setup(t, { fromBase = false } = {}) {
+async function setup(t, { fromBase = false, protectedPath = false } = {}) {
   environment(t);
   process.env.FORGE_SOURCE_PROVIDER = 'convex';
   const s = await composeFixture();
   const files = Array.from({ length: 20 }, (_, i) =>
-    s.file(`f${String(i).padStart(2, '0')}`, `original-${i}\n`),
+    s.file(protectedPath && i === 0 ? 'netlify.toml' : `f${String(i).padStart(2, '0')}`, `original-${i}\n`),
   );
   const baseline = fromBase ? s.baseline : s.state(files),
     entry = await s.lane(baseline),
@@ -60,7 +61,7 @@ async function setup(t, { fromBase = false } = {}) {
         sourceVersion: 0,
         lifecycleVersion: 0,
         state: 'active',
-        base: { head: s.baseline.sha256, receiptId: 'main-0' },
+        base: { head: protectedPath ? baseline.sha256 : s.baseline.sha256, receiptId: 'main-0' },
         authority: { mode: 'server', epoch: 1 },
       },
       state,
@@ -69,8 +70,16 @@ async function setup(t, { fromBase = false } = {}) {
     }),
   );
   for (const file of state.files) writeFileSync(join(root, file.path), s.objects.get(file.blob));
-  const changed = state.files.slice(0, 2).map(file => file.path);
+  const changed = protectedPath ? ['netlify.toml'] : state.files.slice(0, 2).map(file => file.path);
   for (const path of changed) writeFileSync(join(root, path), `changed-${path}\n`);
+  if (protectedPath) {
+    const objects = join(clientCacheRoot(root), 'objects');
+    mkdirSync(objects, { recursive: true });
+    writeFileSync(join(objects, baseline.sha256), s.objects.get(baseline.sha256));
+    const policy = policyPreset('trusted');
+    policy.agentDefaults = { preflight: 'off' };
+    s.patch('hostedProjects', s.projectId, { autonomyPolicy: policy });
+  }
   // The submit's scheduled work, recorded instead of run: the test runs it when it chooses.
   const scheduled = [];
   const decorate = s.decorateContext.bind(s);
@@ -251,4 +260,27 @@ test('a save whose server outlives the request window waits on its original oper
   assert.equal(saved.outcome.status, 'completed');
   assert.notEqual(readHostedLaneCheckout(f.root).selection.head, f.entry.head);
   assert.equal(submits, 1, 'the retained source work is never submitted again');
+});
+
+test('netlify incident: the first changed split save names approval before a step runs; a reverted edit removes the notice', async t => {
+  const f = await setup(t, { protectedPath: true });
+  const agent = new HostedAgentTransport(
+    f.root,
+    { url: 'https://fixture.invalid', projectId: f.s.projectId },
+    f.exchange,
+  );
+  const returned = await agent.dispatch('save', { message: 'Save protected configuration' });
+  assert.equal(returned.result.status, 'settling');
+  assert.deepEqual(returned.result.protectedPathNotice.paths, ['netlify.toml']);
+  assert.match(returned.result.protectedPathNotice.message, /project owner/);
+  assert(
+    !f.c.calls.includes('projectConvexSourceStore:commit'),
+    'approval is explained before source steps or checks',
+  );
+  const dispatch = f.scheduled.find(item => item.name === 'projectConvexSource:dispatch');
+  await f.settle(dispatch.args.jobId);
+  await agent.dispatch('status', {});
+  writeFileSync(join(f.root, 'netlify.toml'), 'original-0\n');
+  const reverted = await agent.dispatch('save', { message: 'Revert protected configuration' });
+  assert.equal(reverted.result.protectedPathNotice, undefined);
 });

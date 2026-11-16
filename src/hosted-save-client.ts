@@ -73,6 +73,7 @@ export const overlapEvidenceLevel = (capabilities: {
       : true;
 /** What the server's save calls accept, from the capability read the session already made. */
 export type SaveContract = {
+  onCapture?: ((capture: Awaited<ReturnType<typeof captureHostedSave>>) => void | Promise<void>) | undefined;
   overlapEvidence: OverlapEvidenceLevel;
   submitPage: boolean;
   durations?: boolean;
@@ -236,6 +237,7 @@ async function saveOnce(
   const capture: Awaited<ReturnType<typeof captureHostedSave>> = checkoutPathExists(capturePath)
     ? JSON.parse(readFileSync(capturePath, 'utf8'))
     : await captureHostedSave(root, directory, preserveConflicts, continuation);
+  await contract.onCapture?.(capture);
   markLandStep('captured');
   timing?.mark('capture');
   invariant(
