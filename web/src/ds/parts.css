@@ -1,0 +1,30 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Design system: the parts core.css leaves to the components: a fold's key, the table and its own sideways scroll, the
+   wrapper that swaps a first-paint shape for the behaviour layer's. Scoped to [data-ds]; every value is a token. */
+
+[data-ds] {
+  .ds-swap { display: contents; }
+  .ph h2 > .fold, .ph h3 > .fold { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: var(--s-2); }
+  .ph h2 > .fold::after, .ph h3 > .fold::after { content: ""; width: 6px; height: 6px; border-right: 1.5px solid var(--text-3); border-bottom: 1.5px solid var(--text-3); transform: rotate(45deg) translateY(-2px); }
+  .ph h2 > .fold[aria-expanded="false"]::after, .ph h3 > .fold[aria-expanded="false"]::after { transform: rotate(-45deg); }
+  .ph h2 > .fold:focus-visible, .ph h3 > .fold:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .ph .tools { margin-left: auto; display: inline-flex; gap: var(--s-2); }
+
+  .scroll { overflow-x: auto; overscroll-behavior-x: contain; }
+  .scroll:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .tbl { width: 100%; border-collapse: collapse; font-size: var(--t-small); }
+  .tbl th, .tbl td { text-align: left; padding: var(--s-2) var(--s-3); border-top: var(--rule) solid var(--line); vertical-align: top; }
+  .tbl th:first-child, .tbl td:first-child { padding-left: var(--gut); }
+  .tbl th:last-child, .tbl td:last-child { padding-right: var(--gut); }
+  .tbl th { color: var(--text-3); font-size: var(--t-meta); font-weight: var(--w-strong); white-space: nowrap; }
+  .tbl td { color: var(--text-2); }
+  .tbl td:first-child { color: var(--text); }
+  .tbl .r { text-align: right; }
+
+  /* A phone keeps the name readable: a row wraps, the name takes the room, the facts follow on the next line. An
+     ordered row keeps its columns (handle, position, name), since its name is cut, not hidden. */
+  @media (max-width: 860px) {
+    .row:not(.ds-row) { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--s-3); row-gap: var(--s-1); }
+    .row:not(.ds-row) > .ttl { flex: 1 1 55%; }
+  }
+}

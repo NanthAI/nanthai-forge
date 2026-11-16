@@ -1,0 +1,46 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* The behaviour layer's own rules: the states the headless parts report (focused, dragging, drop target), on top of the
+   shapes in core.css. Loaded with the layer, never at first paint. Every value is a token from tokens.css. */
+
+[data-ds] {
+  .ds-pop { outline: 0; }
+  .ds-pop[data-entering] { animation: ds-pop-in var(--d-state) var(--ease-out); }
+  .menu { outline: 0; }
+  .menu [role="menuitem"] { display: flex; width: 100%; align-items: center; gap: var(--s-3); justify-content: space-between; height: 32px; padding: 0 var(--s-3); font-size: var(--t-small); color: var(--text); cursor: default; outline: 0; }
+  .menu [role="menuitem"][data-focused] { background: var(--accent-bg); }
+  .menu [role="menuitem"][data-disabled] { color: var(--text-3); }
+  .menu [role="menuitem"].danger { color: var(--failed); }
+  .menu [role="separator"] { border-top: var(--rule) solid var(--line); margin: var(--s-1) 0; }
+  @media (max-width: 860px) { .menu [role="menuitem"] { height: 42px; } }
+
+  .ds-dialog { outline: 0; }
+  .ds-dialog > .ph h2 { margin: 0; }
+
+  .pal-scrim { place-items: start center; padding-top: 12vh; }
+  .pal .pal-in { width: 100%; height: 46px; border: 0; border-bottom: var(--rule) solid var(--line); background: transparent; color: var(--text); padding: 0 var(--gut); font: inherit; font-size: var(--t-body); outline: 0; }
+  .pal .pal-in::-webkit-search-cancel-button { display: none; }
+  .pal .pal-list { max-height: min(60dvh, 480px); overflow: auto; padding-bottom: var(--s-2); outline: 0; }
+  .pal header { padding: var(--s-3) var(--gut) 3px; color: var(--text-3); font-size: var(--t-meta); font-weight: var(--w-strong); }
+  .pal .opt { display: flex; gap: var(--s-3); align-items: center; padding: var(--s-2) var(--gut); color: var(--text-2); cursor: default; outline: 0; }
+  .pal .opt kbd { margin-left: auto; }
+  .pal .opt[data-focused] { background: var(--accent-bg); color: var(--text); }
+  .pal .pal-none { padding: var(--s-4) var(--gut); color: var(--text-2); }
+  @media (max-width: 860px) { .pal-scrim { place-items: end center; padding-top: 0; } }
+
+  .ds-list, .zone { outline: 0; }
+  .ds-row { position: relative; }
+  .ds-row[data-focus-visible], .ds-region[data-focus-visible] { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .ds-row[data-dragging], .ds-region[data-dragging] { opacity: 0.5; }
+  .ds-region { min-width: 0; outline: 0; }
+  .dropline { display: block; }
+  .dropline:not([data-drop-target]) { border-top-color: transparent; }
+  .zone[data-drop-target] { box-shadow: inset 0 0 0 2px var(--brand); }
+  .zone-empty { padding: var(--s-4) var(--gut); color: var(--text-3); font-size: var(--t-small); border-bottom: var(--rule) dashed var(--line-strong); }
+  .grip[data-pressed] { cursor: grabbing; }
+
+  /* A pointer drags the handle; a phone gets the handle's menu instead (DESIGN.md rule 4). */
+  .ds-move { display: none; }
+  @media (max-width: 860px), (pointer: coarse) { .ds-drag { display: none; } .ds-move { display: grid; } }
+}
+
+@keyframes ds-pop-in { from { opacity: 0; transform: translateY(-2px); } }

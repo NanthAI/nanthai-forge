@@ -1,6 +1,6 @@
 # Pinned npm dependency license inventory
 
-Generated from package-lock.json with node scripts/render-dependency-licenses.mjs. All 1335 locked dependency instances are listed, including platform-specific optional packages. These are upstream manifest declarations, not a review of every bundled third-party source or trademark permission. Preserve upstream package notices.
+Generated from package-lock.json with node scripts/render-dependency-licenses.mjs. All 1354 locked dependency instances are listed, including platform-specific optional packages. These are upstream manifest declarations, not a review of every bundled third-party source or trademark permission. Preserve upstream package notices.
 
 The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Apache-2.0 license](https://github.com/get-convex/convex-backend/blob/precompiled-2026-09-28-5c7cb5b/LICENSE.md), not the npm client license. Its bundled native dependencies are outside this npm inventory; [native license coverage](native-dependency-licenses.md) records the inspected pins and remaining gaps. Forge's own boundaries are in [the licensing map](../LICENSE.md).
 
@@ -119,8 +119,15 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/@inquirer/search | 4.4.0 | MIT | development |
 | node_modules/@inquirer/select | 5.3.0 | MIT | development |
 | node_modules/@inquirer/type | 4.3.0 | MIT | development |
+| node_modules/@internationalized/date | 3.12.4 | Apache-2.0 | development |
+| node_modules/@internationalized/number | 3.6.9 | Apache-2.0 | development |
+| node_modules/@internationalized/string | 3.2.10 | Apache-2.0 | development |
 | node_modules/@isaacs/fs-minipass | 4.0.1 | ISC | development |
 | node_modules/@isaacs/nonrecursive-glob-match | 1.1.0 | BlueOak-1.0.0 | development |
+| node_modules/@jridgewell/gen-mapping | 0.3.13 | MIT | development |
+| node_modules/@jridgewell/gen-mapping/node_modules/@jridgewell/trace-mapping | 0.3.31 | MIT | development |
+| node_modules/@jridgewell/remapping | 2.3.5 | MIT | development |
+| node_modules/@jridgewell/remapping/node_modules/@jridgewell/trace-mapping | 0.3.31 | MIT | development |
 | node_modules/@jridgewell/resolve-uri | 3.1.3 | MIT | development |
 | node_modules/@jridgewell/sourcemap-codec | 1.6.0 | MIT | development |
 | node_modules/@jridgewell/trace-mapping | 0.3.9 | MIT | development |
@@ -406,6 +413,8 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/@pnpm/network.ca-file/node_modules/graceful-fs | 4.2.10 | ISC | development |
 | node_modules/@pnpm/npm-conf | 3.0.3 | MIT | development |
 | node_modules/@pnpm/tabtab | 0.5.4 | MIT | development |
+| node_modules/@react-aria/optimize-locales-plugin | 2.1.0 | Undeclared | development |
+| node_modules/@react-types/shared | 3.37.0 | Apache-2.0 | development |
 | node_modules/@rolldown/binding-android-arm-eabi | 1.2.9 | MIT | development, optional |
 | node_modules/@rolldown/binding-android-arm64 | 1.2.9 | MIT | development, optional |
 | node_modules/@rolldown/binding-darwin-arm64 | 1.2.9 | MIT | development, optional |
@@ -428,6 +437,7 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/@sindresorhus/slugify | 2.2.1 | MIT | development |
 | node_modules/@sindresorhus/transliterate | 1.6.0 | MIT | development |
 | node_modules/@so-ric/colorspace | 1.1.6 | MIT | development |
+| node_modules/@swc/helpers | 0.5.24 | Apache-2.0 | development |
 | node_modules/@tanstack/query-core | 5.104.0 | MIT | runtime |
 | node_modules/@tsconfig/node10 | 1.0.14 | MIT | development |
 | node_modules/@tsconfig/node12 | 1.0.11 | MIT | development |
@@ -513,6 +523,7 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/ansis | 4.5.0 | ISC | development |
 | node_modules/archiver | 8.0.0 | MIT | development |
 | node_modules/arg | 4.1.3 | MIT | development |
+| node_modules/aria-hidden | 1.2.6 | MIT | development |
 | node_modules/array-buffer-byte-length | 1.0.2 | MIT | development |
 | node_modules/array-timsort | 1.0.3 | MIT | development |
 | node_modules/array.prototype.flatmap | 1.3.3 | MIT | development |
@@ -577,12 +588,14 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/cli-boxes | 4.0.1 | MIT | development |
 | node_modules/cli-cursor | 5.0.0 | MIT | development |
 | node_modules/cli-width | 4.1.0 | ISC | development |
+| node_modules/client-only | 0.0.1 | MIT | development |
 | node_modules/cliui | 8.0.1 | ISC | development |
 | node_modules/cliui/node_modules/ansi-styles | 4.3.0 | MIT | development |
 | node_modules/cliui/node_modules/color-convert | 2.0.1 | MIT | development |
 | node_modules/cliui/node_modules/is-fullwidth-code-point | 3.0.0 | MIT | development |
 | node_modules/cliui/node_modules/string-width | 4.2.3 | MIT | development |
 | node_modules/cliui/node_modules/wrap-ansi | 7.0.0 | MIT | development |
+| node_modules/clsx | 2.1.1 | MIT | development |
 | node_modules/color | 5.0.3 | MIT | development |
 | node_modules/color-convert | 3.1.3 | MIT | development |
 | node_modules/color-convert/node_modules/color-name | 2.1.1 | MIT | development |
@@ -1108,8 +1121,11 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/raw-body | 3.0.2 | MIT | runtime |
 | node_modules/rc | 1.2.8 | (BSD-2-Clause OR MIT OR Apache-2.0) | development |
 | node_modules/react | 19.3.0 | MIT | runtime |
+| node_modules/react-aria | 3.53.1 | Apache-2.0 | development |
+| node_modules/react-aria-components | 1.22.1 | Apache-2.0 | development |
 | node_modules/react-dom | 19.3.0 | MIT | runtime |
 | node_modules/react-markdown | 10.1.0 | MIT | development |
+| node_modules/react-stately | 3.51.0 | Apache-2.0 | development |
 | node_modules/read-package-up | 12.0.0 | MIT | development |
 | node_modules/read-package-up/node_modules/hosted-git-info | 9.0.3 | ISC | development |
 | node_modules/read-package-up/node_modules/lru-cache | 11.5.3 | BlueOak-1.0.0 | development |
@@ -1275,6 +1291,7 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/unixify | 1.0.0 | MIT | development |
 | node_modules/unixify/node_modules/normalize-path | 2.1.1 | MIT | development |
 | node_modules/unpipe | 1.0.0 | MIT | runtime |
+| node_modules/unplugin | 2.3.11 | MIT | development |
 | node_modules/untildify | 4.0.0 | MIT | development |
 | node_modules/update-notifier | 7.3.1 | BSD-2-Clause | development |
 | node_modules/update-notifier/node_modules/ansi-regex | 6.6.0 | MIT | development |
@@ -1288,6 +1305,7 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/update-notifier/node_modules/widest-line | 5.0.0 | MIT | development |
 | node_modules/update-notifier/node_modules/wrap-ansi | 9.0.2 | MIT | development |
 | node_modules/urlpattern-polyfill | 8.0.2 | MIT | development |
+| node_modules/use-sync-external-store | 1.7.0 | MIT | development |
 | node_modules/util-deprecate | 1.0.2 | MIT | development |
 | node_modules/v8-compile-cache-lib | 3.0.1 | MIT | development |
 | node_modules/validate-npm-package-license | 3.0.4 | Apache-2.0 | development |
@@ -1298,6 +1316,7 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/vite | 8.3.0 | MIT | development |
 | node_modules/web-streams-polyfill | 3.3.3 | MIT | development |
 | node_modules/webidl-conversions | 3.0.1 | BSD-2-Clause | development |
+| node_modules/webpack-virtual-modules | 0.6.2 | MIT | development |
 | node_modules/whatwg-url | 5.0.0 | MIT | development |
 | node_modules/when-exit | 2.1.5 | MIT | development |
 | node_modules/which | 2.0.2 | ISC | runtime |

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import optimizeLocales from '@react-aria/optimize-locales-plugin';
 import { builtinModules } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { llmDocuments, llmsFullSizeReport } from '../scripts/llm-documents.mjs';
+import { LAYER_GZIP_BUDGET, layerBundleReport, layerImportViolation } from '../scripts/ds-build-guard.mjs';
 // Two pages: index.html is the static public page (no app code), app.html the signed-in app. On the dev and preview
 // servers every other page route serves app.html, as netlify.toml does in production.
 type Middlewares = { middlewares: { use: (fn: AppRoute) => unknown } };
@@ -35,6 +37,27 @@ export default defineConfig({
   plugins: [
     // React Fast Refresh: an edit updates the component in place and keeps its state (Item 6ebb58ab measured the loop).
     react(),
+    // The design system's behaviour layer keeps only its en-US messages (Item 6ebb58ab).
+    { ...optimizeLocales.vite({ locales: ['en-US'] }), enforce: 'pre' },
+    {
+      // One behaviour layer: imported only by web/src/ds/behaviour, no second behaviour or drag library, never in the
+      // first-paint chunks, and inside its byte budget (scripts/ds-build-guard.mjs).
+      name: 'forge-ds-layer',
+      enforce: 'pre',
+      resolveId(id: string, importer?: string) {
+        const problem = layerImportViolation(id, importer);
+        if (problem) this.error(problem);
+        return null;
+      },
+      generateBundle(_options: unknown, bundle: Record<string, unknown>) {
+        const { problems, layer } = layerBundleReport(bundle, LAYER_GZIP_BUDGET);
+        for (const problem of problems) this.error(problem);
+        if (layer)
+          this.info(
+            `design-system behaviour layer: ${layer.gzipBytes} of ${LAYER_GZIP_BUDGET} gzip bytes in ${layer.files.length} chunks`,
+          );
+      },
+    },
     appRoutes,
     {
       // Vite silently swaps a Node builtin for an empty stub in the browser; a chunk that then calls

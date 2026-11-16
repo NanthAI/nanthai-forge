@@ -155,9 +155,14 @@ This document is the design authority: the look, the tokens and the rules for ch
 
 The implementation lives in `web/src/ds/`. `tokens.css` is the one token source for the public page and the app; `base.css` and the component sheets build on it; screens import components from `web/src/ds` and never copy CSS or write a literal colour, font, radius, duration or curve.
 
-Everything is scoped to the `data-ds` attribute. The public page sets it on `<html>`. An app screen built on the system renders inside an element that has it (the shell frame sets it once). Screens not yet rebuilt keep the older styles (`web/src/style.css`, `web/src/ui/tokens.css` and the screen sheets) until their route is rebuilt; nothing new is added to those.
+Everything is scoped to the `data-ds` attribute. The public page sets it on `<html>`. An app screen built on the system renders inside an element that has it (the shell frame sets it once). Screens not yet rebuilt keep the older styles (`web/src/legacy.css`, `web/src/ui/tokens.css` and the screen sheets) until their route is rebuilt; nothing new is added to those.
 
 Interactive components (menus, dialogs and sheets, the palette, reorderable lists, moving a region) are built on React Aria Components behind the system's own components. Screens never import the library ([decisions](docs/decisions.md#2026-11-16-rules-for-the-phase-7-shared-base)).
+
+- `parts.tsx`: keys, regions with folds that remember, bands, rows, chips, the phone tabs, tables, the Markdown and diff containers and the standing line. They need no library and draw at first paint.
+- `interactive.tsx`: Menu, Sheet, Palette, ReorderList and Dock. Each draws its resting shape at first paint, then swaps in the behaviour layer (`behaviour/`, the only folder that imports the library) on the first press or focus, or after one idle fetch, with focus kept on the same control.
+- The build fails if anything outside `behaviour/` imports the library, if a second behaviour, drag or motion library appears, or if the layer reaches the first-paint chunks or outgrows its budget (`scripts/ds-build-guard.mjs`). The layer keeps only its English messages.
+- `web/ds.html` is the reference surface, on the dev server only: one screen built from the parts, in both themes.
 
 ## Overview
 

@@ -282,6 +282,17 @@
       "reason": "Measured size plus about 10%. Needs no browser, so it is the first-paint guard that always runs with --bundle."
     },
     {
+      "id": "web-ds-layer-gzip",
+      "area": "web: the design system's behaviour layer, loaded after first paint",
+      "measuredBy": "build-guard",
+      "metric": "dsLayerGzipBytes",
+      "unit": "bytes",
+      "max": 80000,
+      "source": "tests/ds-layer-bundle.test.mjs on 2026-11-16 (app plus web/ds.html, which uses every interactive part): 72,908 gzip bytes with the en-US locale plugin.",
+      "reason": "Measured size plus about 10%. web/vite.config.ts (forge-ds-layer) fails the build when the layer is over it, for example when other languages come back, or when a first-paint chunk carries it.",
+      "issue": "6ebb58ab"
+    },
+    {
       "id": "landing-attempts-mean",
       "area": "landing attempts: compose and check or reuse, per landing",
       "measuredBy": "landing-record",
