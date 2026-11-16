@@ -7,7 +7,7 @@ import { build } from 'esbuild';
 
 // Convex's loader gives imported definitions their paths before running app.use.
 // Bundle the real pinned definitions with that same metadata, without deploying.
-async function application() {
+async function application(env = {}) {
   const result = await build({
     entryPoints: ['convex/convex.config.ts'],
     bundle: true,
@@ -32,7 +32,7 @@ async function application() {
     ],
   });
   const module = { exports: {} };
-  runInNewContext(result.outputFiles[0].text, { module, exports: module.exports });
+  runInNewContext(result.outputFiles[0].text, { module, exports: module.exports, process: { env } });
   return module.exports.default;
 }
 function validateEnvironmentBindings(parent) {
@@ -53,14 +53,30 @@ function validateEnvironmentBindings(parent) {
     validateEnvironmentBindings(child);
   }
 }
-test('dev deployment incident: required component credentials cannot bind optional parent variables', async () => {
-  const app = await application();
-  validateEnvironmentBindings(app);
-  // Reproduce the rejected deployment contract without credentials or network I/O.
-  const declaration = app._env.AUTH_GITHUB_CLIENT_ID;
-  app._env.AUTH_GITHUB_CLIENT_ID = { ...declaration, isOptional: 'optional' };
-  assert.throws(
-    () => validateEnvironmentBindings(app),
-    /authGithub.CLIENT_ID needs a required parent binding/,
-  );
+test('OAuth credentials are optional for deployment while required child inputs remain valid', async () => {
+  for (const env of [
+    {},
+    { AUTH_GITHUB_CLIENT_ID: 'synthetic-id' },
+    {
+      AUTH_GITHUB_CLIENT_ID: 'synthetic-id',
+      AUTH_GITHUB_CLIENT_SECRET: 'synthetic-secret',
+    },
+  ]) {
+    const app = await application(env);
+    for (const name of ['AUTH_GITHUB_CLIENT_ID', 'AUTH_GITHUB_CLIENT_SECRET'])
+      assert.equal(app._env[name].isOptional, 'optional');
+    validateEnvironmentBindings(app);
+    const [, , bindings] = app._childComponents.find(
+      ([alias, child]) => (alias ?? child.defaultName) === 'authGithub',
+    );
+    assert.equal(bindings.CLIENT_ID, env.AUTH_GITHUB_CLIENT_ID ?? '');
+    assert.equal(bindings.CLIENT_SECRET, env.AUTH_GITHUB_CLIENT_SECRET ?? '');
+    // Preserve the original incident guard: an optional reference still cannot
+    // satisfy the real pinned library's required child declaration.
+    bindings.CLIENT_ID = app.env.AUTH_GITHUB_CLIENT_ID;
+    assert.throws(
+      () => validateEnvironmentBindings(app),
+      /authGithub.CLIENT_ID needs a required parent binding/,
+    );
+  }
 });

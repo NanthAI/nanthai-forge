@@ -583,9 +583,11 @@ checks and the pre-removal security review.
 New deployment settings (names only; values stay in the deployment):
 
 - `AUTH_GITHUB_CLIENT_ID` and `AUTH_GITHUB_CLIENT_SECRET`: the owner sets the
-  GitHub OAuth credentials on dev after landing. The component requires both
-  deployment variables before its first successful dev deploy; setting them is
-  the owner setup step, then rerun the failed dev deployment. Callback:
+  GitHub OAuth credentials for GitHub sign-in, then redeploys to refresh the
+  component bindings. They are optional for deploying (including self-host and
+  bench); without either setting, GitHub sign-in returns `AUTH_CONFIGURATION`
+  naming the missing setting, with no credential values. Passkeys and CLI
+  credentials do not depend on them. Callback:
   `https://<dev-deployment>.convex.site/oauth/github/callback`. This differs from
   the existing GitHub App repository-connection callback at
   `https://<dev-deployment>.convex.site/github/oauth/callback`.

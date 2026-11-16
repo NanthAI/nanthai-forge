@@ -524,3 +524,8 @@ Lane/save history guard cover this narrowing; legacy/unlinked classification and
 context remain explicit fallbacks (P6 Issue `d824900c`). Source commits reuse only their own
 project snapshot, invalidate it on project writes, and retain authority checks and RPC/wake
 boundaries. Provider-billed savings and the full storage/maintenance total remain unmeasured.
+
+GitHub OAuth sign-in settings are optional for backend deployment, including
+self-host and bench. Missing settings return `AUTH_CONFIGURATION` at GitHub
+sign-in; passkey sign-in and CLI credentials remain independent. See
+[Convex Auth core settings](development.md#convex-auth-core-beside-clerk).

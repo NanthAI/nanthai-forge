@@ -347,3 +347,53 @@ test('GitHub App credentials are encrypted, owner-bound, and unavailable to a ch
     refused('GITHUB_OAUTH_STATE'),
   );
 });
+
+test('GitHub sign-in names missing OAuth settings with a typed error before component I/O', async t => {
+  fixture(t);
+  const names = ['AUTH_GITHUB_CLIENT_ID', 'AUTH_GITHUB_CLIENT_SECRET'];
+  const old = names.map(name => process.env[name]);
+  t.after(() =>
+    names.forEach((name, i) =>
+      old[i] === undefined ? delete process.env[name] : (process.env[name] = old[i]),
+    ),
+  );
+  const auth = await import(moduleUrl('../convex/auth.ts') + '?github-settings-test');
+  const ctx = {
+    auth: { getUserIdentity: async () => null },
+    runMutation: async () => {
+      throw new Error('Unexpected component I/O');
+    },
+  };
+  for (const missing of names) {
+    for (const name of names) process.env[name] = 'synthetic-oauth-value';
+    delete process.env[missing];
+    await assert.rejects(
+      auth.startSignInWithGithub._handler(ctx, { redirectTo: 'https://forge.example' }),
+      error => {
+        assert.deepEqual(error.data, {
+          code: 'AUTH_CONFIGURATION',
+          setting: missing,
+          message: `GitHub sign-in requires ${missing}. Configure it and redeploy.`,
+        });
+        return true;
+      },
+    );
+  }
+  for (const name of names) process.env[name] = 'synthetic-oauth-value';
+  const result = await auth.startSignInWithGithub._handler(
+    {
+      auth: { getUserIdentity: async () => null },
+      runMutation: async () => ({
+        clientId: 'synthetic-oauth-value',
+        callbackUrl: 'https://auth-fixture.convex.site/oauth/github/callback',
+      }),
+    },
+    { redirectTo: 'https://forge.example' },
+  );
+  assert.equal(new URL(result.redirect).searchParams.get('client_id'), 'synthetic-oauth-value');
+  assert.equal(typeof result.state, 'string');
+  await assert.rejects(
+    auth.startSignInWithGithub._handler(ctx, { redirectTo: 'https://untrusted.example' }),
+    /not in allowedRedirectOrigins/,
+  );
+});
