@@ -1,0 +1,245 @@
+// SPDX-License-Identifier: Apache-2.0
+// The rebuilt app (Item 84125787): the four frames under ROOT, signed in with Convex Auth. The Convex client sleeps
+// with the tab (live-reads.ts) and holds token refresh while asleep (auth-hold.ts), so an idle or hidden tab makes no
+// calls. Each page sends one bounded read for its frame: the project frame resolves its address and then reads the
+// line; the account and public frames read only the viewer.
+import { useEffect, useRef, useState } from 'react';
+import { ConvexAuthProvider, useAuthActions } from '@convex-dev/auth/react';
+import { ConvexReactClient, useConvex, useConvexAuth, useMutation, useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
+import type { Id } from '../../../convex/_generated/dataModel';
+import { prefetchLayerWhenIdle } from '../ds';
+import { captureConvexFailures } from '../error-capture';
+import { liveReads } from '../live-reads';
+import { useLiveLine } from '../shell/use-live-line';
+import { withRefreshHold } from './auth-hold';
+import { Device } from './Device';
+import { AccountFrame, BareFrame, ProjectFrame, PublicFrame, type FrameControls } from './frames';
+import { Keys, useFrameKeys, type Go } from './keys';
+import { hrefFor, type AppRoute } from './paths';
+import { Head, Placeholder } from './Place';
+import { followLink, navigate, useRoute, useSearch } from './router';
+import { forget, recall, safeNext } from './session';
+import { FirstPasskey, SignIn } from './SignIn';
+import './app.css';
+
+document.documentElement.dataset.ds = '';
+// Safe areas (phone tabs, notch): only the rebuilt frames draw into them, so only they ask for the full screen.
+document
+  .querySelector('meta[name="viewport"]')
+  ?.setAttribute('content', 'width=device-width, initial-scale=1.0, viewport-fit=cover');
+
+function makeClient() {
+  const url = import.meta.env.VITE_CONVEX_URL as string | undefined;
+  if (!url) return null;
+  const real = captureConvexFailures(new ConvexReactClient(url, { unsavedChangesWarning: false }));
+  return withRefreshHold(liveReads.client(real), liveReads);
+}
+
+export default function App() {
+  const [client] = useState(makeClient);
+  useEffect(() => liveReads.watchActivity(), []);
+  useEffect(() => prefetchLayerWhenIdle(), []);
+  if (!client)
+    return (
+      <PublicFrame>
+        <div className="intro">
+          <h1>Forge backend is not configured</h1>
+          <p>Set VITE_CONVEX_URL for this development build.</p>
+        </div>
+      </PublicFrame>
+    );
+  return (
+    <ConvexAuthProvider
+      client={client}
+      api={{
+        refreshSession: api.auth.refreshSession,
+        signOut: api.auth.signOut,
+        isAuthenticated: api.auth.isAuthenticated,
+      }}
+    >
+      <Pages />
+    </ConvexAuthProvider>
+  );
+}
+
+function finishPasskeyStep(next: string) {
+  forget();
+  navigate(next, { replace: true });
+}
+const signInHref = (next: string) =>
+  `${hrefFor({ frame: 'public', page: 'signin' })}?next=${encodeURIComponent(next)}`;
+
+function Pages() {
+  const route = useRoute();
+  const { isLoading, isAuthenticated } = useConvexAuth();
+  const viewer = useQuery(api.urlAccounts.current, isAuthenticated ? {} : 'skip');
+  const needsSignIn =
+    !isLoading && !isAuthenticated && !(route.frame === 'public' && route.page === 'signin');
+  useEffect(() => {
+    if (needsSignIn) navigate(signInHref(location.pathname + location.search), { replace: true });
+  }, [needsSignIn]);
+  if (isLoading || needsSignIn) return null;
+  if (route.frame === 'public') {
+    if (route.page === 'signin') return isAuthenticated ? <AfterSignIn /> : <SignIn />;
+    if (route.page === 'passkey') return <FirstPasskey onDone={finishPasskeyStep} />;
+    return <Device viewerHandle={viewer?.handle} />;
+  }
+  return <SignedIn route={route} viewerHandle={viewer?.handle} />;
+}
+
+/** Signed in on the sign-in page: name the account once, then go on (or offer a first passkey after GitHub). */
+function AfterSignIn() {
+  const search = useSearch();
+  const ensure = useMutation(api.urlAccounts.ensure);
+  const pending = useRef(recall());
+  const github = pending.current?.method === 'github';
+  const passkeys = useQuery(api.auth.listPasskeys, github ? {} : 'skip');
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current || (github && passkeys === undefined)) return;
+    started.current = true;
+    const seed =
+      pending.current?.method === 'passkey' && pending.current.handle
+        ? { username: pending.current.handle }
+        : {};
+    const next = pending.current?.next ?? safeNext(search.get('next'));
+    const firstPasskey = github && 'passkeys' in passkeys! && passkeys.passkeys.length === 0;
+    void ensure(seed)
+      .catch(() => undefined)
+      .then(() => {
+        if (firstPasskey) return navigate(hrefFor({ frame: 'public', page: 'passkey' }), { replace: true });
+        forget();
+        navigate(next, { replace: true });
+      });
+  }, [github, passkeys]);
+  return (
+    <PublicFrame>
+      <div className="intro" aria-busy="true">
+        <h1>Signing you in…</h1>
+      </div>
+    </PublicFrame>
+  );
+}
+
+let lastProject: { href: string; name: string } | null = null;
+
+function SignedIn({
+  route,
+  viewerHandle,
+}: {
+  route: Exclude<AppRoute, { frame: 'public' }>;
+  viewerHandle: string | undefined;
+}) {
+  const { signOut } = useAuthActions();
+  const [palette, setPalette] = useState(false);
+  const [keys, setKeys] = useState(false);
+  const leave = () =>
+    void signOut().then(() => navigate(hrefFor({ frame: 'public', page: 'signin' }), { replace: true }));
+  const go: Go = {
+    route,
+    openPalette: () => setPalette(true),
+    openKeys: () => setKeys(true),
+    signOut: leave,
+  };
+  useFrameKeys(go);
+  const controls: FrameControls = { onPalette: go.openPalette, onKeys: go.openKeys, viewerHandle };
+  const overlays = <Keys go={go} palette={palette} setPalette={setPalette} keys={keys} setKeys={setKeys} />;
+  if (route.frame === 'project') return <ProjectView route={route} controls={controls} overlays={overlays} />;
+  if (route.frame === 'account')
+    return (
+      <AccountFrame place={route.place} back={lastProject} controls={controls}>
+        <Placeholder route={route} projectName="" />
+        {route.place === 'devices' ? (
+          <div className="pad">
+            <button type="button" className="btn" onClick={leave}>
+              Sign out of this browser
+            </button>
+          </div>
+        ) : null}
+        {overlays}
+      </AccountFrame>
+    );
+  if (route.frame === 'bare')
+    return (
+      <BareFrame controls={controls}>
+        <Head
+          trail={[{ label: 'Start your first project' }]}
+          sentence="A project holds your code, its Lanes and its plan."
+        >
+          <a className="btn sm" href="/projects">
+            Open the current projects screen
+          </a>
+        </Head>
+        {overlays}
+      </BareFrame>
+    );
+  return (
+    <BareFrame controls={controls}>
+      <Head
+        trail={[{ label: 'No page at this address' }]}
+        sentence="The address may be mistyped, or the page has moved."
+      >
+        <a className="btn sm" href={hrefFor({ frame: 'account', place: 'projects' })} onClick={followLink}>
+          Your projects
+        </a>
+      </Head>
+      {overlays}
+    </BareFrame>
+  );
+}
+
+type ProjectRoute = Extract<AppRoute, { frame: 'project' }>;
+type PickerEntry = { handle: string; slug: string; name: string };
+
+function ProjectView({
+  route,
+  controls,
+  overlays,
+}: {
+  route: ProjectRoute;
+  controls: FrameControls;
+  overlays: React.ReactNode;
+}) {
+  const client = useConvex();
+  const project = useQuery(api.urlProjects.resolve, { handle: route.handle, slug: route.project });
+  const feed = useLiveLine((project?.id ?? null) as Id<'hostedProjects'> | null);
+  const [picker, setPicker] = useState<readonly PickerEntry[] | null>(null);
+  const asked = useRef(false);
+  const name = project?.name ?? route.project;
+  if (project) lastProject = { href: hrefFor({ ...route, place: 'needs', section: '', rest: '' }), name };
+  // The picker's entries: one page of the viewer's projects, read once on the first intent to open it.
+  const onPicker = () => {
+    if (asked.current) return;
+    asked.current = true;
+    void client
+      .query(api.projectBackups.list, { paginationOpts: { numItems: 20, cursor: null } })
+      .then(page =>
+        setPicker(
+          page.page.flatMap(item =>
+            item.handle && item.slug ? [{ handle: item.handle, slug: item.slug, name: item.name }] : [],
+          ),
+        ),
+      )
+      .catch(() => (asked.current = false));
+  };
+  if (project === null)
+    return (
+      <BareFrame controls={controls}>
+        <Head trail={[{ label: 'Project not found' }]} sentence="It may be private, renamed or removed." />
+        {overlays}
+      </BareFrame>
+    );
+  return (
+    <ProjectFrame
+      route={route}
+      name={name}
+      feed={feed}
+      projects={picker}
+      controls={{ ...controls, onPicker }}
+    >
+      <Placeholder route={route} projectName={name} />
+      {overlays}
+    </ProjectFrame>
+  );
+}

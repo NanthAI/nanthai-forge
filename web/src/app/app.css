@@ -1,0 +1,28 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* The rebuilt app's own few rules on top of the design system (web/src/ds): the sign-in column, breadcrumbs, a place's
+   head and the keys list. Every value is a design-system token; scoped to [data-ds] like the system itself. */
+[data-ds] {
+  .pubcol .signin { display: grid; gap: var(--s-3); }
+  .pubcol .signin .err { margin: 0; color: var(--failed); }
+  .wide-btn { width: 100%; justify-content: center; }
+  .pubcol .after { display: grid; gap: var(--s-2); padding: var(--s-5) var(--s-6); border-top: var(--rule) solid var(--line); color: var(--text-3); font-size: var(--t-meta); }
+  .pubcol .facts { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: var(--s-2) var(--s-4); margin: 0; }
+  .pubcol .facts dt { color: var(--text-2); }
+  .pubcol .facts dd { margin: 0; min-width: 0; }
+  .head .crumb-step { display: inline-flex; align-items: center; gap: var(--s-2); min-width: 0; }
+  .head .crumb a { color: var(--text-2); }
+  .head .crumb [aria-current] { color: var(--text); }
+  .keylist { display: grid; gap: var(--s-2); margin: 0; }
+  .keylist > div { display: grid; grid-template-columns: 12ch minmax(0, 1fr); gap: var(--s-3); }
+  .keylist dd { margin: 0; color: var(--text-2); }
+  @media (max-width: 860px) {
+    .shell > .top .hide-ph { display: none; }
+    /* Safe areas: the top bar clears the notch and the rounded corners; the tabs already clear the home indicator. */
+    .shell > .top, .pubbar { height: calc(var(--top-h) + env(safe-area-inset-top, 0px)); padding-top: env(safe-area-inset-top, 0px); }
+    .shell > .top { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+    .pubbar { padding-left: max(var(--gut), env(safe-area-inset-left, 0px)); padding-right: max(var(--gut), env(safe-area-inset-right, 0px)); }
+    .pubcol .after { padding: var(--s-4) var(--gut); }
+    .pubcol .facts { grid-template-columns: minmax(0, 1fr); gap: var(--s-1); }
+    .pubcol .facts dd + dt { margin-top: var(--s-2); }
+  }
+}

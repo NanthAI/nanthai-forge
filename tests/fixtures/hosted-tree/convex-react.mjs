@@ -24,6 +24,8 @@ const client = {
   mutation: async (reference, args) => tree().mutations?.[name(reference)]?.(args) ?? null,
 };
 export const ConvexProvider = ({ children }) => createElement(Fragment, null, children);
+// The rebuilt app (/-) reaches it through the auth library; the dependency scan needs the name.
+export const ConvexProviderWithAuth = ({ children }) => createElement(Fragment, null, children);
 export const useConvex = () => client;
 export const useConvexAuth = () => ({ isAuthenticated: true, isLoading: false });
 export const useConvexConnectionState = () => ({ isWebSocketConnected: true, hasEverConnected: true });

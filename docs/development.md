@@ -572,11 +572,39 @@ Configuration is written to the ignored `.env.local`.
 
 Imports store gzip JSON in R2 (`r2blob:` references, see [data placement](data-placement.md)) with a 128 MiB artifact budget. Functions never execute target repository code. After setup, `npm run smoke:hosted -- https://github.com/sindresorhus/is-plain-obj` checks live anonymous import.
 
+### Rebuilt app under `/-`
+
+The redesigned app (DESIGN.md frames) is served at `/-/…` by the same
+`app.html`; `web/src/main.tsx` sends those paths to `web/src/app/App.tsx` and
+every other path to the current screens, which stay unchanged until their
+rebuilt place lands. The two apps share no eager code: the current screens'
+CSS loads with `Hosted.tsx`, and the bundle report (`scripts/perf/report.mjs`)
+gives eager JS per app (`eagerJsGzipBytesByApp`; `eagerJsGzipBytes` is the
+heavier one). `scripts/ds-build-guard.mjs` keeps the design-system behaviour
+layer out of both first paints.
+
+- Addresses: `web/src/app/paths.ts` is the one codec (`hrefFor` and
+  `parseAppPath` are inverses). Project places are
+  `/-/{handle}/{project}/{needs|lanes|plan|code|stats|settings}/{section}/…`,
+  account places `/-/account/{projects|billing|people|devices|data}`, public
+  pages `/-/signin`, `/-/signin/passkey` and `/-/device`. Until a place is
+  rebuilt it links to the screen that serves it today (`currentScreenHref`).
+- Sign-in: one handle field (passkey sign-in or sign-up, browser autofill) and
+  GitHub. After a first GitHub sign-in with no passkey, `/-/signin/passkey`
+  offers one (`authFirstPasskey`), skippable. The return address is kept in
+  session storage and only same-origin `/-` paths are followed. The client is
+  wrapped by `withRefreshHold` (rule 1) and the passkey hook is mounted only
+  inside `WhileAwake` (rule 2).
+- `/-/device` approves a terminal sign-in with the same `deviceActions` as
+  `/device`; a code that arrived in a link must be retyped before Approve.
+- Keys: `Mod+K` palette, `?` all keys, `1`–`6` project places; never inside
+  fields or dialogs.
+
 ### Convex Auth core beside Clerk
 
 The backend mounts Convex Auth 2.0.0 on Convex 1.50.0 as `auth`, `authGithub`,
-`authPasskey` and `authUsername`. The current browser UI still uses Clerk; the
-shell and sign-in screens integrate these functions in their own slices. There
+`authPasskey` and `authUsername`. The current browser screens still use Clerk.
+The rebuilt app under `/-` (below) signs in with these functions only. There
 is no provider switch flag. Clerk removal follows the live GitHub and phone
 checks and the pre-removal security review.
 

@@ -110,4 +110,16 @@ test('the bundle report fails a first-paint chunk that carries the layer and mea
     layerBundleReport(leaked, 10_000).problems.join(),
     /first-paint chunk shared\.js carries the behaviour layer/,
   );
+  // The rebuilt app under /- (Item 84125787) paints first too: its module may not carry the layer either.
+  const rebuilt = {
+    ...clean,
+    'rebuilt.js': chunk('rebuilt.js', ['/r/web/src/app/App.tsx'], {
+      facadeModuleId: '/r/web/src/app/App.tsx',
+      imports: ['shared.js'],
+    }),
+  };
+  assert.match(
+    layerBundleReport(rebuilt, 10_000).problems.join(),
+    /first-paint chunk shared\.js carries the behaviour layer/,
+  );
 });

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import './legacy-styles';
 import { countLabel } from './ui/count';
 import { useViewerHandle } from './shell/viewer';
 import { ReadableRoute } from './shell/ReadableRoute';

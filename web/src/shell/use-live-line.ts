@@ -10,7 +10,7 @@ const liveLine = makeFunctionReference<
   { projectId: Id<'hostedProjects'> },
   Infer<typeof liveLineResult>
 >('projectLiveLine:read');
-/** Uses the app's sleeping client: hidden/dormant tabs unsubscribe and wake once. */
-export function useLiveLine(projectId: Id<'hostedProjects'>) {
-  return useQuery(liveLine, { projectId });
+/** Uses the app's sleeping client: hidden/dormant tabs unsubscribe and wake once. Null waits for the project id. */
+export function useLiveLine(projectId: Id<'hostedProjects'> | null) {
+  return useQuery(liveLine, projectId ? { projectId } : 'skip');
 }

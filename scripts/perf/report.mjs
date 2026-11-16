@@ -73,15 +73,26 @@ export async function bundleSummary(directory) {
     const bytes = await readFile(join(directory, 'assets', name));
     files.push({ file: `assets/${name}`, bytes: bytes.length, gzipBytes: gzipSync(bytes).length });
   }
-  const roots = [
-    manifest['app.html'] ? 'app.html' : 'index.html',
+  const entry = manifest['app.html'] ? 'app.html' : 'index.html';
+  // Each app's first paint: the old app (Hosted) and, when built, the rebuilt app under /- (src/app/App.tsx). The
+  // budget holds for the heavier of the two.
+  const apps = [
     manifest['src/Hosted.tsx'] ? 'src/Hosted.tsx' : 'src/shell/LocalApp.tsx',
-  ];
-  const eager = new Set(eagerFiles(manifest, roots));
+    'src/app/App.tsx',
+  ].filter(root => manifest[root]);
   const sum = (selected, key) => selected.reduce((total, file) => total + file[key], 0);
   const js = files.filter(f => f.file.endsWith('.js'));
-  const eagerJs = js.filter(f => eager.has(f.file));
+  const perApp = apps.map(root => {
+    const files = new Set(eagerFiles(manifest, [entry, root]));
+    return { root, files, eagerJs: js.filter(f => files.has(f.file)) };
+  });
+  const heaviest = perApp.reduce((a, b) =>
+    sum(b.eagerJs, 'gzipBytes') > sum(a.eagerJs, 'gzipBytes') ? b : a,
+  );
+  const eager = heaviest.files;
+  const eagerJs = heaviest.eagerJs;
   return {
+    eagerJsGzipBytesByApp: Object.fromEntries(perApp.map(app => [app.root, sum(app.eagerJs, 'gzipBytes')])),
     buildHash: createHash('sha256').update(JSON.stringify(files)).digest('hex'),
     jsBytes: sum(js, 'bytes'),
     jsGzipBytes: sum(js, 'gzipBytes'),
