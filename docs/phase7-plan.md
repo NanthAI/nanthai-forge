@@ -57,11 +57,11 @@ The shell Lane owns the routing and security-header changes the new screens need
 3. One consistent mark and colour for each kind of object (Lane, Item, check, session, person).
 4. New accounts land with deep sections folded to one-line summaries that open in place and remember their state; no tours or permanent explainers.
 
-**Stage B exit (checked before stage C starts):** the five-second test passes on Lanes, Needs me and Backlog. Fresh reviewers with no context see each screen at its busiest and at a new account's first landing, and each says what needs them; every reviewer must name the act-now items correctly. A screenshot review against the approved design confirms that the look and the detail are unchanged. The shell, line and mark meet their live latency and idle-zero lines.
+**Stage B exit (checked before stage C starts):** the five-second test passes on Lanes, Needs me and Backlog. Fresh reviewers with no context see each screen at its busiest and at a new account's first landing, and answers two questions: what needs them, and what is done, in progress and left. Every reviewer must name the act-now items correctly and give the three figures. The test ran first on the attention-pass design (16 of 16 readers passed, 2026-11-16; results on `6ebb58ab`) and runs again on the built screens. A screenshot review against the approved design confirms that the look and the detail are unchanged. The shell, line and mark meet their live latency and idle-zero lines.
 
 ## Stage C: fan-out
 
-Screens and paths are built at once as independent Lanes, in runs of about 12 to 15 builders. Public discovery follows the owner decisions of 2026-11-16 on `8947a779`: anyone can browse; clone, fork and star need sign-in; one star per person and never by an agent; GitHub star counts are not used. Each Lane owns one screen or path and the Items that serve it; shared data contracts have one owner (planning `d3357f40`, access `df06081d` and `b987e608`, billing stubs `d4d410e6`, failure causes `2c420916`, Stats estimates `a61d3c91`). A screen whose contract owner has not landed builds against that owner's recorded interface, not a copy.
+Screens and paths are built at once as independent Lanes, in runs of about 12 to 15 builders. Public discovery follows the owner decisions of 2026-11-16 on `8947a779`: anyone can browse; clone, fork and star need sign-in; one star per person and never by an agent; GitHub star counts are not used; open Lane titles show to visitors only when the project opts in. Each Lane owns one screen or path and the Items that serve it; shared data contracts have one owner (planning `d3357f40`, access `df06081d` and `b987e608`, billing stubs `d4d410e6`, failure causes `2c420916`, Stats estimates `a61d3c91`). A screen whose contract owner has not landed builds against that owner's recorded interface, not a copy.
 
 ### Run C1
 
@@ -75,7 +75,7 @@ Screens and paths are built at once as independent Lanes, in runs of about 12 to
 | Plan: model, list, Item and capture | `d3357f40`, `b7a0dff1` | stage B |
 | Discussions | `9a3d6f5f` | stage B, `d3357f40` interface |
 | People, access and teams | `b987e608`, `1e474c35`, `517523cf`, `c6629fda` (invitation email) | stage B |
-| Public discovery | `8947a779`, `6a60e89a` (public reads, dev only), `d1303286` (fork), `875a4b60` (share cards and sitemap), `0650b8cb` (agent lookup) | stage B, `de67c77d` |
+| Public discovery | `8947a779`, `6a60e89a` (public reads, dev only), `76be0714` (public plan visibility: public by default, members-only setting, hide an Item or an Initiative), `d1303286` (fork), `875a4b60` (share cards and sitemap), `0650b8cb` (agent lookup) | stage B, `de67c77d` |
 | Sign-in, devices and sessions | `df06081d`, `76e3ae31`, `a9f4654f` (terms and consent line) | stage B, `de67c77d` |
 | Secrets | `41a0df87`, `f3663cbb` | stage B, its own security gates |
 | Billing home and contract | `d4d410e6`, `93907d28` | stage B |
@@ -94,6 +94,7 @@ Screens and paths are built at once as independent Lanes, in runs of about 12 to
 | Stats | `a61d3c91`, `2cf30e0a`, `80540753` | stage B |
 | Loose ends and bulk requests | `fc1831eb`, `7456856f`, `16093ed1` | stage B |
 | CLI reply lines | `235878aa`, `f15f1f1e` | `92dbde9d` |
+| Public code and history | `4c164732` (signed-out read-only browsing on public projects, reusing the C1 Code and history screens) | C1 Code, history and public reads |
 | Journeys and agent scorecard | `a0cf8c22`, `581bd373` | C1 screens it walks |
 
 Each screen is reviewed against the approved design from real signed-in screenshots before acceptance. Old screens and styles are removed as their routes are covered; the growth guard records what each Lane removes.
