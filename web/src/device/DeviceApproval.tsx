@@ -3,7 +3,8 @@ import { ErrorToast } from '../ui/Toast';
 import type { ReactNode } from 'react';
 import { Glyph } from '../ui/Glyph';
 import { Button, Callout } from '../ui/primitives';
-import { CODE_LENGTH, codeComplete, expiresIn, formatCode, scopeWords, shownDeviceName } from './code';
+import { CODE_LENGTH, codeComplete, expiresIn, formatCode, scopeWords } from './code';
+import { UntrustedName } from './DeviceName';
 
 export type DeviceRequest = { name: string; scope: string; expiresAt: number; state: string };
 export type DevicePhase =
@@ -70,7 +71,8 @@ export function DeviceApproval({
       {lead && <p className="fx-dv-lead">{lead}</p>}
     </header>
   );
-  const codeChip = code && (
+  // A code that came in a link is never shown before it is typed: the person copies it from their terminal.
+  const codeChip = code && !requireTyped && (
     <p className="fx-dv-codeline">
       Code <code className="fx-dv-chip">{formatCode(code)}</code>
     </p>
@@ -103,6 +105,18 @@ export function DeviceApproval({
       break;
     case 'enter':
     case 'checking':
+      // The code from a link is being checked; it is not shown.
+      if (requireTyped) {
+        body = (
+          <>
+            {head('Approve a terminal sign-in')}
+            <p className="fx-dv-status" role="status">
+              Checking the code from your link…
+            </p>
+          </>
+        );
+        break;
+      }
       body = (
         <>
           {head('Approve a terminal sign-in', 'Enter the code your terminal printed.')}
@@ -162,15 +176,18 @@ export function DeviceApproval({
             <div>
               <dt>Code</dt>
               <dd>
-                <code className="fx-dv-chip">{formatCode(code)}</code>{' '}
+                {requireTyped ? null : (
+                  <>
+                    <code className="fx-dv-chip">{formatCode(code)}</code>{' '}
+                  </>
+                )}
                 <span className="fx-faint">expires {expiresIn(request.expiresAt, now)}</span>
               </dd>
             </div>
             <div>
               <dt>Name</dt>
               <dd className="fx-dv-untrusted" data-untrusted="true">
-                <q>{shownDeviceName(request.name)}</q>{' '}
-                <span className="fx-faint">chosen by the terminal, not verified</span>
+                <UntrustedName name={request.name} noteClass="fx-faint" />
               </dd>
             </div>
           </dl>
@@ -221,7 +238,7 @@ export function DeviceApproval({
           {head(
             'Approved',
             <>
-              The terminal named <q>{shownDeviceName(phase.name)}</q> is signed in. You can return to your
+              The terminal named <UntrustedName name={phase.name} /> is signed in. You can return to your
               terminal.
             </>,
             'passed',
@@ -238,7 +255,7 @@ export function DeviceApproval({
           {head(
             'Denied',
             <>
-              The terminal named <q>{shownDeviceName(phase.name)}</q> will not be signed in.
+              The terminal named <UntrustedName name={phase.name} /> will not be signed in.
             </>,
             'plain',
           )}

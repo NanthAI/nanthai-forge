@@ -9,6 +9,7 @@ import { ConvexReactClient, useConvex, useConvexAuth, useMutation, useQuery } fr
 import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
 import { prefetchLayerWhenIdle } from '../ds';
+import { takeLinkCode } from '../device/link-code';
 import { captureConvexFailures } from '../error-capture';
 import { liveReads } from '../live-reads';
 import { useLiveLine } from '../shell/use-live-line';
@@ -16,7 +17,7 @@ import { withRefreshHold } from './auth-hold';
 import { Device } from './Device';
 import { AccountFrame, BareFrame, ProjectFrame, PublicFrame, type FrameControls } from './frames';
 import { Keys, useFrameKeys, type Go } from './keys';
-import { hrefFor, type AppRoute } from './paths';
+import { hrefFor, parseAppPath, type AppRoute } from './paths';
 import { Head, Placeholder } from './Place';
 import { followLink, navigate, useRoute, useSearch } from './router';
 import { forget, recall, safeNext } from './session';
@@ -28,6 +29,10 @@ document.documentElement.dataset.ds = '';
 document
   .querySelector('meta[name="viewport"]')
   ?.setAttribute('content', 'width=device-width, initial-scale=1.0, viewport-fit=cover');
+// A device code in a link leaves the address before anything renders, so the sign-in return address never carries it;
+// the device page reads it back from this tab (link-code.ts).
+const arrived = parseAppPath(location.pathname);
+if (arrived.frame === 'public' && arrived.page === 'device') takeLinkCode();
 
 function makeClient() {
   const url = import.meta.env.VITE_CONVEX_URL as string | undefined;

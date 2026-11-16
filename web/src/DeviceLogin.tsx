@@ -8,13 +8,14 @@ import { Shell } from './shell/Shell';
 import { handleSeed } from './shell/viewer';
 import { useNow } from './shell/StatusBar';
 import { hostedError, hostedErrorCode } from './snapshot';
-import { codeComplete, codeProblem, formatCode } from './device/code';
+import { codeComplete, codeProblem } from './device/code';
 import { DeviceApproval, type DevicePhase } from './device/DeviceApproval';
+import { forgetLinkCode, takeLinkCode } from './device/link-code';
 export { DeviceCredentials } from './device/DeviceList';
 
 /**
- * /device: approve or deny a terminal sign-in. The code comes from ?code= and is checked as soon as
- * the viewer is signed in. A decision keeps its operation id until it succeeds, so a retry after a
+ * /device: approve or deny a terminal sign-in. A code from ?code= leaves the address on arrival (link-code.ts) and
+ * is checked as soon as the viewer is signed in. A decision keeps its operation id until it succeeds, so a retry after a
  * network error never records two decisions.
  */
 export default function DeviceLogin() {
@@ -22,7 +23,7 @@ export default function DeviceLogin() {
   const { isAuthenticated, isLoading } = useConvexAuth(),
     client = useConvex(),
     now = useNow(5_000);
-  const [code, setCode] = useState(() => formatCode(new URLSearchParams(location.search).get('code') ?? ''));
+  const [code, setCode] = useState(takeLinkCode);
   // A code that came in a link must be typed again before Approve unlocks; a typed code already was.
   const fromLink = useRef(codeComplete(code)),
     [typed, setTyped] = useState('');
@@ -36,9 +37,16 @@ export default function DeviceLogin() {
     const message = hostedError(e);
     const problem = codeProblem(hostedErrorCode(e));
     if (problem) {
+      forgetLinkCode();
       setPhase({ kind: 'problem', problem });
       setError('');
     } else {
+      // Back to the code field: a code from a link is typed from the terminal, never shown prefilled.
+      if (fallback.kind === 'enter' && fromLink.current) {
+        fromLink.current = false;
+        forgetLinkCode();
+        setCode('');
+      }
       setPhase(fallback);
       setError(message);
     }
@@ -73,6 +81,7 @@ export default function DeviceLogin() {
     try {
       if (approve) await client.mutation(api.urlAccounts.ensure, handleSeed(user));
       await client.action(api.deviceActions.decide, { code, ...decision.current });
+      forgetLinkCode();
       setPhase(approve ? { kind: 'approved', name } : { kind: 'denied', name });
     } catch (e) {
       fail(e, phase);
@@ -85,6 +94,7 @@ export default function DeviceLogin() {
     setCode('');
     setTyped('');
     fromLink.current = false;
+    forgetLinkCode();
     setError('');
     setPhase({ kind: 'enter' });
     history.replaceState(null, '', '/device');

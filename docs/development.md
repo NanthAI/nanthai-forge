@@ -595,8 +595,11 @@ layer out of both first paints.
   session storage and only same-origin `/-` paths are followed. The client is
   wrapped by `withRefreshHold` (rule 1) and the passkey hook is mounted only
   inside `WhileAwake` (rule 2).
-- `/-/device` approves a terminal sign-in with the same `deviceActions` as
-  `/device`; a code that arrived in a link must be retyped before Approve.
+- `/-/device` approves a terminal sign-in with the same `deviceActions` and
+  the same page rules as `/device` (docs/security.md, "CLI device
+  credentials"). `nforge login` still links to `/device`: most existing
+  accounts cannot sign in under `/-` before the account backfill and linking
+  work, so the link moves with Clerk removal.
 - Keys: `Mod+K` palette, `?` all keys, `1`–`6` project places; never inside
   fields or dialogs.
 - The top-bar mark (`web/src/app/mark.ts`) follows the line feed the project
@@ -784,7 +787,10 @@ dev billed-usage measurement.
 
 The removal slice deletes Clerk's web provider/dependency, issuer entry and
 distinctness checks, `CLERK_*` setup/bot helpers, and retained provider lookups in
-GitHub access, linked identities, recipient checks and project people. Integrate
+GitHub access, linked identities, recipient checks and project people. It
+points the CLI approval link (`verification` in `convex/deviceActions.ts`, today
+`/device`) at `/-/device` in the same landing that removes `web/src/DeviceLogin.tsx`
+(`tests/ui-device.test.mjs` fails while the link names a page nobody serves). Integrate
 recipient/account lookup with `users` and the unified devices UI first, then
 remove the old path. Live GitHub, real phones/cross-device sign-in, refresh/autofill
 UI behavior, backfill and security review remain open on Item de67c77d.
