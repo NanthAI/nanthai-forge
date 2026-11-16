@@ -91,6 +91,21 @@ VoiceOver is still to be checked by a person. Evidence and what would flip it:
 [headless layer comparison](research/headless-layer.md). Source: Issue
 [f97fb89d](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=f97fb89d-bb1e-4b6c-b482-6f5e079d7bca).
 
+### Proposed 2026-11-16: the web app stays on React; Exact re-checked later
+
+The framework spike recommends no-go on Exact for the signed-in app rebuild,
+and keeps React 19 with the headless layer above as the fallback. Exact met
+every technical line of the spike. It closes the socket when idle or hidden,
+with one catch-up on return. It paints Lanes in 809 ms against 3,345 ms today,
+ships 317 KB against 511 KB gzip, and runs the line glide as browser
+transitions. Why no-go: live data rests on a pre-1.0 re-implementation of the
+Convex protocol with a reconnect bug; there is no packaged toolchain (a Rust
+source build of about 10 GB); and the agent edit loop is 2.3 s against 1.7 s
+today. Not yet decided: the verdict is a design-review call. Evidence, pivot
+cost and the re-check trigger: [Exact spike](research/exact-spike.md). Source:
+Issue
+[348436e5](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=348436e5-00df-403d-bbf7-caa29b57bf73).
+
 ## Decisions from 11 November
 
 ### Advisory windows
