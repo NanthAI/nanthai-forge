@@ -1,8 +1,8 @@
 # Zoo conformance report
 
-Issue `70a9bd2f-f741-4d26-8ae5-7bb11148a17c` tracks this dev-only post-flip run. All **26 fixtures pass their required functional outcomes**: 23 complete all nine paths; three hazards return their named expected refusals. The strict timing gate compares with the unchanged numeric baseline at 1.5×. Five singleton misses and their five-repeat qualification appear below. The strict timing gate remains open: both binary checked-resolution medians still exceed their unchanged bars after the runner object-fetch follow-up below.
+Issue `70a9bd2f-f741-4d26-8ae5-7bb11148a17c` tracks this dev-only post-flip run. All **26 fixtures pass their required functional outcomes**: 23 complete all nine paths; three hazards return their named expected refusals. The strict timing gate compares with the unchanged numeric baseline at 1.5×. Five singleton misses and their five-repeat qualification appear below. The strict timing gate now qualifies: both binary checked-resolution medians are within their unchanged bars in the State-bound preparation follow-up below. Earlier misses remain retained.
 
-All 26 original fixture forks are deleted. The follow-up recreated two forks, then deleted both and verified its ten new projects in Trash. The earlier 40 dev projects remain assigned to the lead for owner-person purge.
+All 26 original fixture forks are deleted. The follow-up recreated two forks, then deleted both and verified its ten new projects in Trash. The preparation follow-up also verified its ten new projects in Trash and deleted its two recreated fixtures. The earlier 40 dev projects remain assigned to the lead for owner-person purge.
 
 The [harness](../../scripts/bench-zoo/suite.mjs) uses public upstream forks and [synthetic recipes](../../scripts/bench-zoo/shapes.mjs). Source bytes stay in R2 and metadata in Convex. This report consolidates the superseded full-matrix narrative; original observations and failed setup proofs remain retained in execution evidence.
 
@@ -139,6 +139,74 @@ The next source-materialization slice should prove and reduce that repeated prep
 All ten new dev projects are verified in Trash and both recreated fixture forks are deleted. Permanent project purge is owner-only; exact project IDs are retained in the private handoff. The earlier 40-project owner purge remains a separate lead-owned task, not silently claimed here.
 
 The qualification used 29 successful hosted checks / 51.650 assigned job minutes, with no missing run IDs or control-code drift. The implementation's full check used 105.750 assigned job minutes; its five automatic source-push workflows used 73.750 minutes. This includes development workflows and their verification, not just timed checks. Two fixture setup adapter failures were corrected before timing; no scored/qualification sample was dropped. Source bytes continue to use R2; no new Convex byte-storage path was introduced. Provider usage is retained separately from invoices and excludes any unobserved initial read-only overhead.
+
+## State-bound preparation follow-up
+
+**Both strict binary checked-resolution medians now qualify.** The generic preparation fix landed through receipts `e0543dbb-ba68-411a-9138-c94986ad3659` and `7d01dba1-0e0a-4571-9ee3-552ef431bfe6`; the final implementation State is `bfa44e03c6dd06cdad1e4ddafe6b0dd089871a2f346c76b473e1e551c4d6ceb1`.
+
+The [State grant preparer](../../convex/projectStateSourcePreparation.ts) verifies recipe/tree metadata in shared frontiers and resolves exact descendant descriptors in sorted pages. The existing connection consumes an inline leaf closure where possible, or reuses the verified descriptors in the ordinary recipe reader beyond the inline closure bound. This removes per-file State/recipe proof rounds. A request-local cache never survives the check connection; the server still checks current access before and after I/O and retains exact State/recipe membership. An optional preparation request uses the existing source.closures negotiation; older clients omit it and older servers retain their ordinary reader. No new stored projection, access rule, source-byte placement, queue, admission or State identity change was made.
+
+Five fresh-project samples per row used the same exact fixture commits, original commands/clocks, concurrency two and the unchanged numeric baseline. CLI before and after every sample was State `bfa44e03c6dd06cdad1e4ddafe6b0dd089871a2f346c76b473e1e551c4d6ceb1`; all 27 qualification workflows used runner control commit `2e318e79c349c2481493abbc37c517a42c9fbd71`. Runtime `9ede50f626dbaed5cae577f11c19a221cadb8541041201651bf6eb3af8ffc478` and every harness hash are unchanged. No sample was voided, omitted or selected by landing order. The source pin includes the separately accepted cohort-finish fix; the engine was not changed by this slice.
+
+| Repository / checked resolve | Repeat seconds (sample order) | Median seconds | Unchanged 1.5× bar | Verdict |
+| --- | --- | --- | --- | --- |
+| binaries | 94.531, 101.424, 94.207, 101.229, 102.529 | 101.229 | 137.123 | within bar |
+| shapes-bigbin | 89.482, 86.112, 76.534, 73.482, 80.725 | 80.725 | 106.678 | within bar |
+
+Realized A/C classes are retained below. B resolution had no main movement and zero recompositions in every sample.
+
+| Repository | Sample | A main moved / recompositions | C main moved / recompositions |
+| --- | --- | --- | --- |
+| binaries | 1 | no / 1 | no / 1 |
+| shapes-bigbin | 1 | no / 1 | no / 1 |
+| binaries | 2 | no / 1 | no / 1 |
+| shapes-bigbin | 2 | no / 1 | no / 1 |
+| binaries | 3 | no / 0 | yes / 1 |
+| shapes-bigbin | 3 | no / 0 | yes / 1 |
+| binaries | 4 | no / 0 | yes / 1 |
+| shapes-bigbin | 4 | no / 2 | no / 2 |
+| binaries | 5 | no / 0 | yes / 1 |
+| shapes-bigbin | 5 | no / 0 | yes / 1 |
+
+These are N = 5 observations against the retained historical singleton baseline, not interleaved causal speedup evidence. The original baseline SHA-256 `2aa67a991113f947e41c22bab06680d779fd56f41fff489fa89a52149ebd5026`, all earlier misses, setup failures and preceding qualifications remain unchanged. Git's resolve clock excludes CI, so this does not establish an overall Forge-over-Git speed advantage.
+
+### Preparation measurement and guards
+
+Before runtime edits, the cold synthetic three-recipe preparation took 31.059 ms locally: 11 source HTTP rounds and 58 internal mutations. Per-owner rounds occupied 28.471 ms (91.7% of that local window, an upper bound on removable wall time). The pre-change model was to reduce 58 internal calls to eight (86.2% removable calls); the flat-tree implementation uses seven. The identical flat fixtures at 1, 3 and 24 recipes have the following deterministic counts:
+
+| Large recipes | Source HTTP rounds before → after | Internal mutations before → after | DB read bytes before → after |
+| --- | --- | --- | --- |
+| 1 | 5 → 2 | 22 → 7 | 93099 → 29541 |
+| 3 | 11 → 2 | 58 → 7 | 296107 → 34933 |
+| 24 | 74 → 2 | 436 → 7 | 6351250 → 91786 |
+
+The complete pre-change three-recipe control trace follows. R2 columns count backend requests made inside the State grants; the client separately fetched six recipe/tree metadata bodies (1,677 bytes) after those grants. Complete preparation therefore made 52 R2 requests / 11,368 bytes before, versus seven / 2,143 bytes after. The retained per-round records also include reply bytes. No binary file body is prefetched by preparation.
+
+| Control round | Digests | Internal mutations | Backend R2 requests | Backend R2 bytes | DB read bytes | Local wall ms |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 1 | 1 | 0 | 0 | 4019 | 0.647 |
+| 2 | 1 | 3 | 1 | 466 | 13862 | 1.331 |
+| 3 | 1 | 6 | 5 | 1025 | 30914 | 3.065 |
+| 4 | 1 | 6 | 5 | 1025 | 30914 | 2.966 |
+| 5 | 1 | 6 | 5 | 1025 | 30914 | 2.843 |
+| 6 | 1 | 6 | 5 | 1025 | 30914 | 6.760 |
+| 7 | 1 | 6 | 5 | 1025 | 30914 | 2.501 |
+| 8 | 1 | 6 | 5 | 1025 | 30914 | 2.390 |
+| 9 | 1 | 6 | 5 | 1025 | 30914 | 2.480 |
+| 10 | 1 | 6 | 5 | 1025 | 30914 | 2.767 |
+| 11 | 2 | 6 | 5 | 1025 | 30914 | 2.700 |
+
+These fake-transport N = 1 wall times establish the counted work and scheduling, not a hosted latency gain. The flat three-recipe after observation was 6.556 ms. The [build-failing guards](../../tests/state-source-preparation.test.mjs) fail on accepted pre-fix code at 5 / 11 / 74 HTTP rounds. Final guards retain at most two HTTP rounds and seven internal mutations for the flat 1 / 3 / 24-recipe cases; multi-level metadata adds one shared frontier, giving eight mutations, including real 24 / 24 / 6 MiB packed files and recipes with 101 leaves. They reconstruct exact file hashes and cover current-access withdrawal, unrelated catalog history, metadata corruption and old-server fallback. Replies retain the existing 4 MiB envelope; preparation above eight MiB of metadata retains the ordinary reader.
+
+In the first new shapes-bigbin resolved check, the State-bound preparation used one source HTTP action taking 2.257 s, five descriptor resolves and two State selections. The preceding slice's post-fallback window had 11 source requests, 53 descriptor resolves and 22 selections. These spans have different boundaries and are not a latency ratio; the request trace proves that repeated owner rounds disappeared. The authorized large-object audit still finds no persisted inline closure and confirms that all recipe metadata remains in R2.
+
+Direct verification passed 133 tests plus five protocol tests. The final affected preflight covered 105 test-file results including reused evidence, and each implementation landing's full hosted check reported 1,086 test-file results with zero failed/flaky files. A protocol fixture that forwarded the new optional flag unlike the real HTTP adapter was corrected without weakening its authorization/byte assertions. Local preflight peak was 2,430 MB, above the two-GiB forecast; no memory gain is claimed. Full verification was not repeated locally.
+
+### Preparation follow-up cleanup and compute
+
+All ten new dev projects are verified in Trash, and both recreated public fixture repositories are deleted. Exact identities are retained in the private handoff. Permanent purge remains owner-only; the earlier 40-project owner cleanup is separate.
+
+The qualification used 27 public hosted workflows / 28.900 assigned job minutes: 26 passed and one cohort-superseded workflow was cancelled. All required landings passed, including the retained recomposition class. There are no missing run IDs or control-code drift. The two implementation checks used 193.150 assigned minutes; their ten automatic push workflows used 93.150 minutes, including one superseded Verify Forge audit cancellation. Report-landing compute is accounted separately in the handoff. These are observed assigned durations, not an invoice. Project-tagged qualification usage was 6,037 executions / 152,786,102 DB I/O bytes. Shared deployment usage and initial coverage gaps are recorded privately; no isolated billed-cost saving is claimed.
 
 ## Concurrent landing order
 
