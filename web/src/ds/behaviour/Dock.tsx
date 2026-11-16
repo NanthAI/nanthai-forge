@@ -15,6 +15,7 @@ import {
 } from 'react-aria-components';
 import { ActionMenu, type MenuAction } from './Menu';
 import { Announcer, useAnnounce } from './announce';
+import { dropIndex } from './ReorderList';
 import { EnglishOnly, GripIcon, ordinal } from './shared';
 
 export type DockZone = 'top' | 'a' | 'b';
@@ -50,12 +51,8 @@ export function moveRegion(layout: DockLayout, id: string, zone: DockZone, index
 
 export const zoneOf = (layout: DockLayout, id: string) => ZONES.find(z => layout[z].includes(id)) ?? 'a';
 
-function targetIndex(layout: DockLayout, zone: DockZone, moving: string, target: DropTarget) {
-  const rest = layout[zone].filter(id => id !== moving);
-  if (target.type !== 'item') return rest.length;
-  const at = rest.indexOf(String(target.key));
-  return target.dropPosition === 'after' ? at + 1 : at;
-}
+const targetIndex = (layout: DockLayout, zone: DockZone, moving: string, target: DropTarget) =>
+  dropIndex(layout[zone], moving, target);
 
 export function Dock({ label, regions, layout, onLayout, onReset }: DockProps) {
   const byId = new Map(regions.map(region => [region.id, region]));
@@ -176,6 +173,9 @@ function Zone({ zone, layout, byId, place, menu, moving, setMoving }: ZoneProps)
       className="zone"
       data-zone={zone}
       items={items}
+      // A region's handle menu depends on the whole layout (up, down, the other column), so the layout invalidates the
+      // library's cached rows, as do new region objects from the screen.
+      dependencies={[layout, items]}
       dragAndDropHooks={dragAndDropHooks}
       keyboardNavigationBehavior="tab"
       renderEmptyState={() => <div className="zone-empty">Drop a region here</div>}

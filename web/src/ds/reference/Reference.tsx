@@ -15,6 +15,7 @@ import {
   type DockLayout,
   type ReorderItem,
 } from '../interactive';
+import { Figures } from './Figures';
 
 type Planned = ReorderItem & { state: 'planned' | 'proposed'; by: string };
 
@@ -205,11 +206,16 @@ export function Reference() {
             </p>
           </Prose>
           <CodeBox label="Change to the upload step">
-            <pre>
-              <del>- send(all)</del>
-              {'\n'}
-              <ins>+ send(rest(from))</ins>
-            </pre>
+            <div className="l del">
+              <span className="n">12</span>
+              <span className="n" />
+              <span className="c">send(all)</span>
+            </div>
+            <div className="l add">
+              <span className="n" />
+              <span className="n">12</span>
+              <span className="c">send(rest(from))</span>
+            </div>
           </CodeBox>
         </Region>
       ),
@@ -261,6 +267,7 @@ export function Reference() {
         onLayout={setLayout}
         onReset={resetLayout}
       />
+      <Figures />
       <section aria-label="Public standing" className="region">
         <div className="ph plain">
           <h2>On the public page</h2>

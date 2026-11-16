@@ -7,6 +7,7 @@ import { useFirstStop } from './first-stop';
 import { Count, Glyph, type StateKind } from './marks';
 import './review.css';
 import './public.css';
+import './figures.css';
 
 type Weight = 'act' | 'watch' | 'ref';
 const cx = (...names: (string | false | null | undefined)[]) => names.filter(Boolean).join(' ');
@@ -104,7 +105,7 @@ export function Region({
       data-weight={weight}
       aria-label={title}
     >
-      <div className="ph">
+      <div className={cx('ph', !handle && 'plain')}>
         {handle}
         <H>
           {fold ? (

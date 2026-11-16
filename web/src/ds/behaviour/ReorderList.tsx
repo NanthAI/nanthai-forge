@@ -30,12 +30,14 @@ export type ReorderListProps<T extends ReorderItem> = {
   cols?: string;
 };
 
-/** Index the moved row takes when dropped on `target` (positions counted without the row itself). */
+/** Index the moved row takes when dropped on `target`, counted without the row itself. `order` may hold the row
+ * (a move inside one list) or not (a move in from another dock zone). A target next to the row itself is its own
+ * place. */
 export function dropIndex(order: readonly string[], moving: string, target: DropTarget) {
-  if (target.type !== 'item') return order.length - 1;
-  const rest = order.filter(id => id !== moving);
-  const at = rest.indexOf(String(target.key));
-  return target.dropPosition === 'after' ? at + 1 : at;
+  if (target.type !== 'item') return order.filter(id => id !== moving).length;
+  const at = order.indexOf(String(target.key)) + (target.dropPosition === 'after' ? 1 : 0);
+  const from = order.indexOf(moving);
+  return from >= 0 && from < at ? at - 1 : at;
 }
 
 /** Default columns of an ordered row after its handle: position, the name taking the room, a fact. */
@@ -91,6 +93,9 @@ export function ReorderList<T extends ReorderItem>({
       <GridList
         aria-label={label}
         items={items}
+        // The library caches a row by its item; a row's number and its menu depend on the order, so the order (and the
+        // caller's render function) invalidate it. Without this the numbers on screen stayed stale after a move.
+        dependencies={[order.join('\n'), children, disabled, cols]}
         dragAndDropHooks={dragAndDropHooks}
         keyboardNavigationBehavior="tab"
         className="ds-list"

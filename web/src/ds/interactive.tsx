@@ -30,9 +30,20 @@ export type {
 
 const ask = () => void loadLayer().catch(() => undefined);
 
+/** Marks a press made before the layer arrived on the nearest swapping wrapper, with which of the same-named
+ * controls it was, so the wrapper can press the same control once the layer's tree replaces the first-paint one (a
+ * menu inside a dock region is remounted then, and its own state is lost). */
+function markPress(control: HTMLElement, key: string) {
+  const wrapper = control.closest<HTMLElement>('.ds-swap');
+  if (!wrapper) return;
+  wrapper.dataset.pressedKey = key;
+  const same = [...wrapper.querySelectorAll(`[data-focus-key="${CSS.escape(key)}"]`)];
+  wrapper.dataset.pressedIndex = String(Math.max(0, same.indexOf(control)));
+}
+
 /** Keeps focus on the matching control (same data-focus-key) when the first-paint shape is swapped for the layer's,
- * and carries out a press made before the layer arrived (the static grip marks it on the wrapper). On a phone the
- * visible match is the handle's menu, so the first visible one wins. */
+ * and carries out a press made before the layer arrived (markPress). A press names which of the same-named controls
+ * it was; otherwise the first visible match wins (on a phone that is the handle's menu). */
 function useSwapFocus(swapped: boolean) {
   const box = useRef<HTMLDivElement>(null);
   const focused = useRef<string | null>(null);
@@ -43,16 +54,31 @@ function useSwapFocus(swapped: boolean) {
   useLayoutEffect(() => {
     const root = box.current;
     const pressed = root?.dataset.pressedKey ?? null;
+    const index = root?.dataset.pressedIndex;
     const key = pressed ?? focused.current;
     if (!swapped || !root || !key) return;
     delete root.dataset.pressedKey;
-    const lost = !document.activeElement || document.activeElement === document.body;
-    const target = [...root.querySelectorAll<HTMLElement>(`[data-focus-key="${CSS.escape(key)}"]`)].find(
-      element => element.getClientRects().length > 0,
-    );
-    if (!target) return;
-    if (lost || pressed) target.focus();
-    if (pressed) target.click();
+    delete root.dataset.pressedIndex;
+    // The layer's lists build their rows in a second render, so the control may not be there yet: look again on the
+    // next few frames. This runs once, after a press or focus that asked for the layer; an idle page never gets here.
+    let frame = 0;
+    let tries = 0;
+    const apply = () => {
+      const matches = [...root.querySelectorAll<HTMLElement>(`[data-focus-key="${CSS.escape(key)}"]`)];
+      const target =
+        pressed && index !== undefined && matches.length > 1 && !key.startsWith('drag-')
+          ? matches[Number(index)]
+          : matches.find(element => element.getClientRects().length > 0);
+      if (!target) {
+        if (++tries < 10) frame = requestAnimationFrame(apply);
+        return;
+      }
+      const lost = !document.activeElement || document.activeElement === document.body;
+      if (lost || pressed) target.focus();
+      if (pressed) target.click();
+    };
+    apply();
+    return () => cancelAnimationFrame(frame);
   }, [swapped]);
   return { box, onFocus };
 }
@@ -61,7 +87,9 @@ function useSwapFocus(swapped: boolean) {
 export function Menu(props: ActionMenuProps) {
   const layer = useLayer();
   const [pressed, setPressed] = useState(false);
-  if (layer) return <layer.ActionMenu {...props} defaultOpen={pressed} autoFocus={pressed} />;
+  const focusKey = props.focusKey ?? `menu-${props.label}`;
+  if (layer)
+    return <layer.ActionMenu {...props} focusKey={focusKey} defaultOpen={pressed} autoFocus={pressed} />;
   return (
     <button
       type="button"
@@ -69,10 +97,13 @@ export function Menu(props: ActionMenuProps) {
       aria-haspopup="menu"
       aria-expanded="false"
       aria-label={props.children ? props.label : undefined}
+      data-focus-key={focusKey}
       onFocus={ask}
       onPointerEnter={ask}
-      onClick={() => {
+      onClick={event => {
+        // Kept here when this key outlives the swap; inside a list or a dock the wrapper carries it (markPress).
         setPressed(true);
+        markPress(event.currentTarget, focusKey);
         ask();
       }}
     >
@@ -106,8 +137,7 @@ function Grip({ label, focusKey }: { label: string; focusKey: string }) {
       onPointerDown={ask}
       onClick={event => {
         // Kept until the layer arrives, then carried out on the same handle (useSwapFocus).
-        const wrapper = event.currentTarget.closest<HTMLElement>('.ds-swap');
-        if (wrapper) wrapper.dataset.pressedKey = focusKey;
+        markPress(event.currentTarget, focusKey);
         ask();
       }}
     >
