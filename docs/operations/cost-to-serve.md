@@ -2082,3 +2082,20 @@ observations and explicit gaps. The temporary patch writer and three schema
 definitions are removed after row cleanup. The retained numeric evidence and
 deployment guard add no product runtime calls, memory, byte placement, idle work
 or retention changes.
+
+## Desired landing wake and preparation visibility
+
+The isolated synthetic completed-compose preparation replay retains 25 server calls and
+210 writes per landing. Pending-only wake cancellation changes 469 reads to 470;
+read bytes 411,593 to 412,092 and write bytes 194,617 to 194,820. The preparation
+index adds six index-entry writes in that replay. At the indexed-patch fit of
+128 bytes per index-entry write and the Professional $0.20/GB I/O rate, the
+increment is $0.000294 per 1,000 landings (serving reference plus this delta:
+$1.682897). This is a synthetic marginal estimate, not billed usage or the
+combined cost of other slices. Retained index storage is separate.
+
+`queue` uses one additional bounded sparse-index range inside its existing query,
+plus one input-selection range per listed preparing entry (at most 20). It does
+not scan terminal history. These explicit diagnostic reads are outside the
+landing replay. No new RPC, action, timer, R2 operation, source byte or idle work
+is added. Live billing and the combined allowance still need the phase capture.

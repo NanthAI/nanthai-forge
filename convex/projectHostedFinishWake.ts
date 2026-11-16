@@ -28,7 +28,7 @@ export const finishRow = (
  * Retire only pending timers; running owners finish under their existing IO fences. */
 export async function cancelPendingFinishWake(
   ctx: MutationCtx,
-  row: Pick<Doc<'projectHostedFinishes'>, 'wake'>,
+  row: { wake: { taskId: Id<'_scheduled_functions'> } | null },
   knownTask?: { state: { kind: string } } | null,
 ) {
   if (!row.wake) return;

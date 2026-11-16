@@ -55,6 +55,7 @@ export const hostedLandingTables = {
     .index('by_project_and_compose', ['projectId', 'composeOperationId']),
   projectHostedLandingDesired: defineTable({
     alarm,
+    preparing: v.optional(v.boolean()),
     projectId: v.id('hostedProjects'),
     actor: v.string(),
     operationId: v.string(),
@@ -72,6 +73,7 @@ export const hostedLandingTables = {
     .index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId'])
     .index('by_project_and_submission', ['projectId', 'submissionId'])
     .index('by_project_and_selection', ['projectId', 'selectionKey'])
+    .index('by_project_and_preparing', ['projectId', 'preparing'])
     .index('by_project_and_compose', ['projectId', 'composeOperationId']),
   projectHostedLandingAliases: defineTable({
     projectId: v.id('hostedProjects'),

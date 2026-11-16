@@ -133,6 +133,37 @@ export const read = query({
           ...(hold ? { hold } : {}),
         });
       }
+      // Preparation precedes admission: no dispatch rank or peer can block it.
+      // The sparse index excludes retained terminal history; no timer or writes.
+      const preparing = await ctx.db
+        .query('projectHostedLandingDesired')
+        .withIndex('by_project_and_preparing', q => q.eq('projectId', projectId).eq('preparing', true))
+        .take(take + 1);
+      const preparationEntries = [];
+      for (const row of preparing.slice(0, Math.max(0, take - entries.length))) {
+        const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+        const inputs = await ctx.db
+          .query('projectHostedComposeSelections')
+          .withIndex('by_project_and_actor_and_operation_and_kind_and_key', q =>
+            q
+              .eq('projectId', projectId)
+              .eq('actor', row.actor)
+              .eq('operationId', row.composeOperationId)
+              .eq('kind', 'inputs'),
+          )
+          .take(2);
+        preparationEntries.push({
+          position: null,
+          landingState: landingStateField(state),
+          submissionId: state.id,
+          operationId: state.operationId,
+          laneId: inputs.length === 1 ? inputs[0]!.key : null,
+          phase: state.phase,
+          waitingOn: { kind: 'source-preparation', composeOperationId: row.composeOperationId },
+          submittedAt: state.at,
+          lastProgressAt: state.at,
+        });
+      }
       // The gate parks main-red entries without rewriting the directory, so the listed rows say so (B3).
       const parked = entries.filter(entry => entry.hold?.kind === 'main-red').length;
       const held = (queue?.status ? (queue.status.held ?? 0) : keys.filter(key => key.held).length) + parked;
@@ -140,11 +171,16 @@ export const read = query({
       return JSON.stringify({
         total,
         ...(held ? { held } : {}),
-        listed: entries.length,
-        more: total + held > entries.length,
+        listed: entries.length + preparationEntries.length,
+        preparing: preparing.length,
+        more: total + held > entries.length || preparing.length > preparationEntries.length,
         train: queue?.train?.length ?? 0,
         // Dispatch order first, then held entries.
-        entries: [...entries.filter(entry => !entry.hold), ...entries.filter(entry => entry.hold)],
+        entries: [
+          ...entries.filter(entry => !entry.hold),
+          ...entries.filter(entry => entry.hold),
+          ...preparationEntries,
+        ],
       });
     } catch (error) {
       return report(error);

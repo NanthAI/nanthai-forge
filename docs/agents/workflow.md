@@ -2257,3 +2257,9 @@ passes durations in its settling mutation, paging above 768 KiB with replay stam
 cancelled provider conclusions never feed timings. The report object follows the
 existing check-log retention and cleanup. Legacy row removal is tracked by Issue
 589601f7-9593-42ee-b89b-01954d438251.
+
+Preparing landings appear in `queue` after admitted entries, with `position:null` and
+`waitingOn.kind:"source-preparation"`. They wait for their server source/landing
+controller, not another queue entry; dispatch rank is assigned at admission.
+Replaying the original land request repairs a failed preparation wake under the same
+submission and operation identity. A running wake is fenced, never cancelled.

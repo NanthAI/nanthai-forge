@@ -202,6 +202,13 @@ test('a member at the submission cap cannot create a preparing goal or wake', as
 test('preparing member goals charge once per operation while aliases share the same goal', async () => {
   const f = await composeFixture(),
     id = member(f);
+  // composeFixture reserves a synthetic pending task named task without executing it.
+  // Original-goal replay now reads its scheduler state to repair only a lost wake.
+  f.extendContext(ctx => {
+    ctx.db.system = {
+      get: async taskId => (taskId === 'task' ? { state: { kind: 'pending' } } : ctx.db.get(taskId)),
+    };
+  });
   const { policyPreset } = await import('../dist/autonomy-policy.js');
   f.patch('hostedProjects', f.projectId, {
     autonomyPolicy: { ...policyPreset('trusted'), agentDefaults: { preflight: 'advise' } },

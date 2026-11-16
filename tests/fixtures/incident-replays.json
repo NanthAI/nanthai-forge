@@ -217,6 +217,12 @@
       "what": "A singleton cohort split leaves a newly reserved solo source generation waiting on the retired compose timer.",
       "file": "tests/hosted-cohort-finish-wake.test.mjs",
       "test": "c01d5457: a singleton split replaces its compose watch with the solo generation backoff"
+    },
+    {
+      "incident": "08169467",
+      "what": "Completed source compose stranded before admission when its desired controller cancelled a running wake; later submissions overtook it.",
+      "file": "tests/hosted-landing-desired.test.mjs",
+      "test": "incident replay 08169467: completed compose replaces a running desired wake without cancellation and lands after client exit"
     }
   ]
 }

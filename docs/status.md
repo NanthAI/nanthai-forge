@@ -529,3 +529,7 @@ GitHub OAuth sign-in settings are optional for backend deployment, including
 self-host and bench. Missing settings return `AUTH_CONFIGURATION` at GitHub
 sign-in; passkey sign-in and CLI credentials remain independent. See
 [Convex Auth core settings](development.md#convex-auth-core-beside-clerk).
+
+Preparing landings are listed separately by `queue` before admission, without a
+dispatch position. The source/controller wait is explicit; replaying the original
+request repairs a failed desired wake without another submission.

@@ -135,7 +135,12 @@ export async function cancelHostedLanding(
           });
     if (desired.wake) await ctx.scheduler.cancel(desired.wake.taskId);
     if (desired.alarm) await ctx.scheduler.cancel(desired.alarm.taskId);
-    await ctx.db.patch(desired._id, { value: canonicalPayload(state), wake: null, alarm: null });
+    await ctx.db.patch(desired._id, {
+      value: canonicalPayload(state),
+      wake: null,
+      alarm: null,
+      preparing: undefined,
+    });
     await notifyStackedLandingEnded(ctx, {
       projectId,
       actor: state.actor,

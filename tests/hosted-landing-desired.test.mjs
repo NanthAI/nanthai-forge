@@ -479,3 +479,104 @@ for (const preflight of ['off', 'advise']) {
     assert.equal(state.timing.ms, undefined, 'unknown timing stays unknown; policy is unchanged');
   });
 }
+
+test('incident replay 08169467: completed compose replaces a running desired wake without cancellation and lands after client exit', async t => {
+  const f = await finishFixture(t),
+    command = request(f),
+    resume = pauseSource(f);
+  const state = await submit(f, command);
+  const row = [...f.tables.projectHostedLandingDesired.values()][0];
+  const old = row.wake;
+  f.patch('_scheduled_functions', old.taskId, { state: { kind: 'inProgress' } });
+  const wake = await import(moduleUrl('../convex/projectHostedLandingDesiredWake.ts'));
+  let cancelled = 0;
+  f.extendContext(ctx => {
+    const cancel = ctx.scheduler.cancel;
+    ctx.scheduler.cancel = async id => {
+      if (id === old.taskId) {
+        cancelled++;
+        throw new Error('A mutation cannot cancel itself');
+      }
+      return cancel(id);
+    };
+  });
+  resume();
+  await f.tx(
+    'sourceCompletion',
+    { _handler: ctx => wake.notifyDesiredCompose(ctx, f.projectId, command.composeOperationId) },
+    {},
+  );
+  assert.equal(cancelled, 0, 'a running source/desired ancestor is never cancelled');
+  assert.notEqual([...f.tables.projectHostedLandingDesired.values()][0].wake.id, old.id);
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  assert.equal((await read(f, command.operationId)).submission.phase, 'landed');
+  assert.equal(f.tables.projectHostedAcceptances.size, 1);
+  assert.equal(f.pending().length, 0);
+  assert.equal((await read(f, command.operationId)).submission.id, state.id);
+});
+
+test('08169467: replaying the original desired request repairs its failed wake without another submission', async t => {
+  const f = await finishFixture(t),
+    command = request(f);
+  const state = await submit(f, command);
+  const row = [...f.tables.projectHostedLandingDesired.values()][0];
+  f.patch('_scheduled_functions', row.wake.taskId, { state: { kind: 'failed' } });
+  assert.equal((await submit(f, command)).id, state.id);
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  assert.equal((await read(f, command.operationId)).submission.phase, 'landed');
+  assert.equal(f.tables.projectHostedLandingDesired.size, 1);
+  assert.equal(f.tables.projectHostedAcceptances.size, 1);
+});
+
+test('08169467: queue lists preparation without inventing a dispatch position or a review blocker', async t => {
+  const f = await finishFixture(t),
+    command = request(f),
+    resume = pauseSource(f);
+  const state = await submit(f, command);
+  const view = await import(moduleUrl('../convex/projectHostedQueueView.ts'));
+  const snapshot = JSON.stringify([...f.tables.projectHostedLandingDesired]);
+  const queue = JSON.parse(await f.tx('preparingQueue', view.read, { projectId: f.projectId }));
+  assert.equal(queue.total, 0);
+  assert.equal(queue.preparing, 1);
+  assert.equal(queue.entries[0].submissionId, state.id);
+  assert.equal(queue.entries[0].position, null);
+  assert.equal(queue.entries[0].laneId, f.lane.laneId);
+  assert.equal(queue.entries[0].waitingOn.kind, 'source-preparation');
+  assert.equal(queue.entries[0].waitingOn.composeOperationId, command.composeOperationId);
+  assert.match(queue.entries[0].landingState.nextStep, /before queue admission/);
+  assert.equal(JSON.stringify([...f.tables.projectHostedLandingDesired]), snapshot);
+  resume();
+  await f.drain();
+  assert.equal([...f.tables.projectHostedLandingDesired.values()][0].preparing, undefined);
+});
+
+test('desired preparation budget: one server goal lands with no idle tasks or replacement calls', async t => {
+  const f = await finishFixture(t),
+    command = request(f);
+  const before = f.counts.length;
+  await submit(f, command);
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  const counts = f.counts.slice(before);
+  const sum = key => counts.reduce((total, count) => total + (count[key] ?? 0), 0);
+  assert.equal(counts.length, 25, 'preparation retains the original server-call budget');
+  assert.equal(f.pending().length, 0);
+  assert.equal(f.tables.projectHostedAcceptances.size, 1);
+  t.diagnostic(
+    JSON.stringify({
+      desiredPreparation: {
+        calls: counts.length,
+        readBytes: sum('readBytes'),
+        writeBytes: sum('writeBytes'),
+        indexes: sum('indexEntriesWritten'),
+        reads: sum('documents'),
+        writes: sum('writes'),
+      },
+    }),
+  );
+});

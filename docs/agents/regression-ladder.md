@@ -65,6 +65,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 
 | Incident | Replayed failure |
 | --- | --- |
+| `08169467` | Completed compose stranded before admission by cancellation of a running desired wake |
 | `n3-r3-a1` | B1.5d n3-r3 attempt 1: a stalled land, help hunting after resolve from the wrong folder, and a 3x slower cell that raised no alert |
 | `t27456` | B1.5d conflict recovery: re-land with markers, resolve from a subdirectory, overtaken during its check |
 | `a930de4c` | Core claim: an empty Lane reported LANDED |

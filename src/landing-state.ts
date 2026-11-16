@@ -188,7 +188,9 @@ export function landingStateOf(record: LandingRecord | null | undefined, laneId?
   const nextStep =
     record?.error?.code === 'SOURCE_STATE_TOO_LARGE'
       ? `Split the repository. ${sourceSizeDocs}`
-      : (hold?.next ?? view.nextStep);
+      : record?.phase === 'composing' && record.observation?.state === 'pending'
+        ? 'Preparing source before queue admission; waiting for the server source/landing controller. No queue position is assigned yet.'
+        : (hold?.next ?? view.nextStep);
   return { state, ...view, nextStep, hold };
 }
 

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingFinishWake } from './projectHostedFinishWake';
 import { chargeMemberWork } from './abuseLimits';
 import { landingPriority } from './projectHostedLandingOrder';
 import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
@@ -86,6 +87,10 @@ export async function submitDesiredLanding(
   if (old) {
     invariant(old.request === request, 'WORK_OPERATION_CHANGED', 'Replay the original desired landing.');
     const canonical = await landingRow(ctx, old);
+    if (!canonical && old.wake) {
+      const task = await ctx.db.system.get(old.wake.taskId);
+      if (!task || task.state.kind === 'failed') await schedule(ctx, old, 0);
+    }
     return canonical?.value ?? old.value;
   }
   const alias = await landingAlias(ctx, {
@@ -236,6 +241,7 @@ export async function submitDesiredLanding(
     },
   });
   const key = await ctx.db.insert('projectHostedLandingDesired', {
+    preparing: true,
     projectId: input.projectId,
     actor: actor.id,
     operationId: command.operationId,
@@ -314,8 +320,8 @@ export const advance = internalMutation({
           retryReason: state.retryReason,
         },
       );
-      if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
-      await ctx.db.patch(row._id, { value: canonicalPayload(result), wake: null });
+      await cancelPendingFinishWake(ctx, row);
+      await ctx.db.patch(row._id, { value: canonicalPayload(result), wake: null, preparing: undefined });
       return canonicalPayload(result);
     } catch (error) {
       return report(error);
@@ -339,9 +345,9 @@ export const fail = internalMutation({
       observation: landingObservation('failed', input.code),
       error: { code: input.code, message: input.message },
     };
-    await ctx.scheduler.cancel(row.wake.taskId);
+    await cancelPendingFinishWake(ctx, row);
     await scheduleLandingAlarm(ctx, failed);
-    await ctx.db.patch(row._id, { value: canonicalPayload(failed), wake: null });
+    await ctx.db.patch(row._id, { value: canonicalPayload(failed), wake: null, preparing: undefined });
     // This failure never reaches writeLanding: Lanes stacked on the Lanes it carried are told here (dc62b120).
     await notifyStackedLandingEnded(ctx, {
       projectId: row.projectId,

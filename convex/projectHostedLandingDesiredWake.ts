@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingFinishWake } from './projectHostedFinishWake';
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -14,7 +15,7 @@ export const desiredLanding = (
     )
     .unique();
 export async function scheduleDesired(ctx: MutationCtx, row: Row, delay: number) {
-  if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
+  await cancelPendingFinishWake(ctx, row);
   const id = crypto.randomUUID();
   const taskId = await ctx.scheduler.runAfter(
     delay,
