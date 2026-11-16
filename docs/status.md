@@ -342,9 +342,11 @@ GitHub analysis owners can remove public or private analyses from Projects with 
   methods beside Clerk, with session-to-account guards, verified-email callbacks,
   first-passkey glue and the existing Forge CLI credential issuer. GitHub App user
   tokens are encrypted in the new account row with a separate service keyring.
-  First dev deployment awaits the owner-provided GitHub OAuth environment
-  variables required by the component. The web UI still uses Clerk.
-  Live GitHub, real phones, account mapping, browser
+  An operator backfill preserves existing Forge keys using verified numeric
+  GitHub ids, with bounded pages, dry runs, safe resume and typed conflict refusal.
+  GitHub settings are optional for deployment and required when starting that
+  sign-in method. The web UI still uses Clerk.
+  Live GitHub, real phones, deployed account-mapping evidence, browser
   dormancy integration and the pre-removal security review remain open. See
   [setup and browser lifecycle rules](development.md#convex-auth-core-beside-clerk).
 

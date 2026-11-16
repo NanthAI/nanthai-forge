@@ -18,6 +18,7 @@ const keyring = () => secretKeyring(process.env.FORGE_GITHUB_TOKEN_KEYRING);
 export async function githubUserToken(ctx: ActionCtx, owner: string) {
   const row = await ctx.runQuery(internal.githubUserTokens.read, { owner });
   if (!row) return null; // The existing Clerk account path remains during this slice.
+  if (!row.token && row.legacy) return null; // Seeding must preserve that same path.
   invariant(row.token, 'GITHUB_UNAVAILABLE', 'Connect your GitHub account and selected repositories.');
   return openSecret(keyring(), binding(owner), row.token);
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { v } from 'convex/values';
+import { ConvexError, v } from 'convex/values';
 import { vGithubProfile } from '@convex-dev/auth/methods/github/server';
 import { internalMutation, internalQuery, type MutationCtx } from './server';
 import { invariant } from '../src/errors';
@@ -25,10 +25,16 @@ export const createGithub = internalMutation({
       'GITHUB_RESPONSE',
       'GitHub returned an invalid account id.',
     );
-    const existing = await ctx.db
+    const matches = await ctx.db
       .query('users')
       .withIndex('by_githubId', q => q.eq('githubId', profile.id))
-      .unique();
+      .take(2);
+    if (matches.length > 1 || matches[0]?.githubConflict)
+      throw new ConvexError({
+        code: 'GITHUB_ACCOUNT_MISMATCH',
+        message: 'GitHub identity matches multiple Forge accounts.',
+      });
+    const existing = matches[0];
     if (existing) return existing._id;
     return insertUser(ctx, {
       githubId: profile.id,
@@ -43,11 +49,22 @@ export const signedInGithub = internalMutation({
   returns: v.null(),
   handler: async (ctx, { method: { profile }, userId }) => {
     const user = await ctx.db.get(userId);
-    invariant(
-      user?.githubId === profile.id,
-      'GITHUB_ACCOUNT_MISMATCH',
-      'GitHub account does not match this user.',
-    );
+    const matches = await ctx.db
+      .query('users')
+      .withIndex('by_githubId', q => q.eq('githubId', profile.id))
+      .take(2);
+    if (
+      !(
+        user?.githubId === profile.id &&
+        !user.githubConflict &&
+        matches.length === 1 &&
+        matches[0]!._id === userId
+      )
+    )
+      throw new ConvexError({
+        code: 'GITHUB_ACCOUNT_MISMATCH',
+        message: 'GitHub account does not match this user.',
+      });
     await ctx.db.patch(userId, {
       githubLogin: profile.login,
       ...(profile.emailVerified && profile.email ? { email: profile.email, emailVerified: true } : {}),

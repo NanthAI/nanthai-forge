@@ -582,8 +582,10 @@ checks and the pre-removal security review.
 
 New deployment settings (names only; values stay in the deployment):
 
-- `AUTH_GITHUB_CLIENT_ID` and `AUTH_GITHUB_CLIENT_SECRET`: the owner sets the
-  GitHub OAuth credentials for GitHub sign-in, then redeploys to refresh the
+- `AUTH_GITHUB_CLIENT_ID` and `AUTH_GITHUB_CLIENT_SECRET`: reuse the existing
+  Forge GitHub App's client credentials for GitHub sign-in; a separate OAuth App
+  is unnecessary. The owner adds the auth callback to that App's callback URLs
+  and enables read access to account email addresses. Set the credentials, then redeploy to refresh the
   component bindings. They are optional for deploying (including self-host and
   bench); without either setting, GitHub sign-in returns `AUTH_CONFIGURATION`
   naming the missing setting, with no credential values. Passkeys and CLI
@@ -601,6 +603,13 @@ New deployment settings (names only; values stay in the deployment):
   using the existing `{active, keys}` format. Configure before the new account's
   GitHub App connection. It is separate from `FORGE_SECRET_KEYS`, sign-in keys,
   and the device/passkey envelope protocol. Ciphertext is bound to its Forge owner.
+  Generate 32 random bytes locally, encode them as base64 and use JSON of the
+  form `{"active":"github-v1","keys":{"github-v1":"BASE64_32_RANDOM_BYTES"}}`.
+  Pipe that JSON into `npx convex env set FORGE_GITHUB_TOKEN_KEYRING`; capture
+  output and never echo the keyring. Read it into a private process for validation:
+  `active` names a key, whose base64 decodes to exactly 32 bytes. Print only a
+  boolean. Keep an existing valid keyring: replacing it discards access to
+  existing encrypted credentials. Retain old key ids when rotating separately.
 
 `auth.ts` exports GitHub sign-in, identifier-first passkey sign-in and library
 passkey management. `authFirstPasskey:start/finish` adds the first passkey from a
@@ -626,6 +635,88 @@ following the [spike mapping](research/convex-auth-spike.md#id-mapping-dry-run-c
 Project owners are not rewritten. The existing GitHub App connection seals its
 user token in the account row for private-repository checks; the OAuth sign-in
 token itself is not retained.
+
+#### Existing-account backfill
+
+Deploy the accepted backend before running the operator script, while the old
+sign-in remains available. It needs deployment-admin CLI access and the current
+provider's `CLERK_SECRET_KEY` on the target deployment. No provider or GitHub
+account settings are changed. Use a checkout configured for the intended dev or
+self-host deployment; there is no production selection option in the script.
+
+```sh
+node scripts/auth-backfill.mjs --convex-cwd /path/to/configured/checkout
+node scripts/auth-backfill.mjs --convex-cwd /path/to/configured/checkout --apply
+node scripts/auth-backfill.mjs --convex-cwd /path/to/configured/checkout
+```
+
+The first and last commands are read-only dry runs. `--apply` also runs a full
+dry run before writing. Output contains account/matched/unmatched/conflict
+counts, planned or applied user/account writes, page continuations and handles
+only for unmatched or ambiguous accounts. It never prints provider ids, account
+keys, email, profiles or credentials. Each discovery page reads 25 Forge
+accounts and fetches their provider identities in one filtered request using
+the provider's [user-id list filter](https://clerk.com/docs/reference/backend/user/get-user-list).
+Only `oauth_github` links with verified status and a positive numeric string id
+are candidates. Email is never a matching key or copied by the backfill.
+
+Discovery makes two page passes: the first keeps numeric-id claim counts to
+find duplicates across page boundaries; the second inspects or applies pages.
+Accounts with no verified numeric id are unchanged and listed by handle for
+passkey or later linking. Multiple ids on one account are reported as ambiguous
+for later linking. A verified id claimed by two accounts retains both claims in
+`users`, without creating or reassigning its GitHub component binding. Both
+create-user and existing-account sign-in callbacks then refuse the ambiguous id
+with `GITHUB_ACCOUNT_MISMATCH`. An optional conflict marker also refuses a
+partial-page claim before its competing row has been seeded. Existing incompatible user rows or component
+bindings are reported as conflicts and never overwritten. Conflict resolution
+is a separate, explicit linking decision; the script does not merge accounts.
+
+A unique match gets a `users` row retaining its exact `accountKey`, plus an
+`authGithub` component account binding to that row. No project, permission,
+handle or CLI credential owner is rewritten. A new GitHub identity still gets
+the usual `user_` key when signing in. Repeating apply creates no duplicate rows;
+the final dry run should report zero planned writes. Inspect the conflict count
+as well: an unchanged conflicting run is not a successful mapping.
+
+Seeded accounts retain the existing provider-token lookup until a Forge-owned
+encrypted GitHub App token exists. The seed records that provenance on `users`;
+new Convex Auth accounts keep their existing connection flow. Creating a mapping
+therefore does not force existing people to reconnect repositories. The provider
+removal slice must replace these retained token lookups before deleting Clerk.
+
+On interruption, repeat apply from the beginning or pass
+`--apply --cursor 'LAST_COMPLETED_PAGE_CURSOR'`. The script repeats discovery
+from the beginning to retain cross-page duplicate detection, then resumes
+writes at that page boundary. A lost reply can safely replay its page. Nothing
+is scheduled in the background, and no identity export is saved locally.
+Page digests detect identity changes between discovery passes and stop that page
+before writes; repeating discovery uses the current provider identities.
+`authBackfillStore:seeded {"handle":"HANDLE"}` is an internal read-only check
+that returns just `true` or `false` for a consistent user/component seed.
+
+For `N` accounts, `P=ceil(N/25)` pages and `M` mapped accounts, a standalone
+dry run uses `5P+M` Convex executions: two page actions and their queries, one
+inspection mutation per page, and one component query per mapped account.
+Apply adds at most `M` component mutations for missing bindings; its automatic
+preview adds another dry run. At 7 accounts/2 matches this is 7 executions per
+dry run, 16 for preview plus apply; at 14/4 it is 9 and 22. Page reads are `2N`
+small account rows, with at most six indexed row reads per match and one extra
+component uniqueness read on insert. Apply writes at most `M` users and `M`
+component accounts, a few KB at this scale. Peak server mapping data is one
+25-account page (estimated under 25 KiB); the operator retains only an
+O(distinct GitHub ids) count map plus one page, under 1 KiB for 7/14 ids excluding
+process/library overhead. Runtime is provider/CLI latency per page (seconds,
+estimate); no project-count work occurs. These are one-time migration costs,
+not per-landing costs or measured billing. Landing and idle paths add zero
+calls or bytes; source and artifact bytes remain in R2.
+
+Self-hosters starting fresh need no backfill or old-provider account. Existing
+instances run it against their configured deployment before replacing sign-in,
+keep the original account keys and include the auth component data in backups.
+They set their own HTTPS `FORGE_WEB_URL`, GitHub App credentials/callback and
+independent service-token keyring. Never copy another deployment's credentials
+or infer account ownership from an email address.
 
 Access tokens last one hour; session/refresh lifetimes retain library defaults.
 Browser builders must apply both lifecycle rules:
