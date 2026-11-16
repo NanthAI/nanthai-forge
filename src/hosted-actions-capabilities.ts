@@ -65,6 +65,7 @@ export const actionsCapabilityFields: Readonly<Record<string, string>> = {
   'source.version': actionsSourceStateV2Capability,
   'source.batch': actionsSourceBatchCapability,
   'source.closures': actionsSourceClosureCapability,
+  'source.preparation': actionsSourceClosureCapability,
   'source.runs': actionsSourceRunsCapability,
   'source.bound': actionsSourceStateCapability,
   'source.state': actionsSourceStateCapability,

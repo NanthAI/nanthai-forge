@@ -49,7 +49,13 @@ test('prepared legacy recipes recheck current run access after metadata IO', asy
     return response;
   });
   await assert.rejects(
-    f.source({ state: f.s.state.sha256, closures: true, digests: [f.s.state.sha256], all: true }),
+    f.source({
+      state: f.s.state.sha256,
+      closures: true,
+      preparation: true,
+      digests: [f.s.state.sha256],
+      all: true,
+    }),
     error => (error.data?.code ?? error.code) === 'PROJECT_UNAVAILABLE',
   );
   assert(withdrew);
@@ -59,13 +65,14 @@ test('prepared legacy recipes never authorize catalog history outside the select
   const f = await stateSourceRecipeFixture(t, 1),
     outside = f.s.put('unselected history');
   await assert.rejects(
-    f.source({ state: f.s.state.sha256, closures: true, digests: [outside.sha256] }),
+    f.source({ state: f.s.state.sha256, closures: true, preparation: true, digests: [outside.sha256] }),
     error => error.code === 'SOURCE_UNAVAILABLE',
   );
   const result = expandSourceGrants(
     await f.source({
       state: f.s.state.sha256,
       closures: true,
+      preparation: true,
       digests: [f.files[0].blob],
     }),
   );
@@ -85,7 +92,7 @@ test('prepared legacy recipe metadata corruption never becomes a leaf grant', as
     return new Response(bytes, { status: response.status, headers: response.headers });
   });
   await assert.rejects(
-    f.source({ state: f.s.state.sha256, closures: true, digests: [f.files[0].blob] }),
+    f.source({ state: f.s.state.sha256, closures: true, preparation: true, digests: [f.files[0].blob] }),
     error => error.code === 'SOURCE_HASH_MISMATCH',
   );
 });
@@ -103,7 +110,9 @@ test('legacy State windows without closure negotiation retain ordinary recipe tr
   assert.equal(f.calls.length, 3, 'no speculative preparation for an older reader');
   // An older server ignores the existing optional flag; the new client must still reconstruct bytes.
   t.mock.method(f.client, 'call', async command =>
-    command.bound ? f.heads() : expandSourceGrants(await f.source({ ...command, closures: undefined })),
+    command.bound
+      ? f.heads()
+      : expandSourceGrants(await f.source({ ...command, closures: undefined, preparation: undefined })),
   );
   const root = temporaryDirectory(t, 'forge-old-recipe-reader-'),
     cache = join(root, 'objects');
@@ -123,12 +132,24 @@ test('24/24/6 MiB imported binaries prepare 216 exact packed leaves in one share
   mkdirSync(cache);
   await materializeActionsSource(f.client, join(root, 'candidate'), cache);
   assert.equal(f.rounds.length, 2);
-  assert.equal(f.calls.length, 7);
+  assert.equal(f.calls.length, 8, 'one additional shared frontier for the second metadata level');
   assert(f.rounds.reduce((sum, row) => sum + row.dbReadBytes, 0) < 512 * 1024);
   assert(
     f.rounds.reduce((sum, row) => sum + row.r2Bytes, 0) < 128 * 1024,
     'preparation reads metadata, not file bodies',
   );
+  for (const file of f.files)
+    assert.equal(digest(readFileSync(join(root, 'candidate', file.path))), file.blob);
+});
+
+test('recipes beyond the inline closure bound reuse verified descriptors without per-owner rounds', async t => {
+  const f = await stateSourceRecipeFixture(t, 3, { leaves: 101, leafBytes: 64 * 1024, packedLeaves: true });
+  const root = temporaryDirectory(t, 'forge-large-recipe-descriptors-'),
+    cache = join(root, 'objects');
+  mkdirSync(cache);
+  await materializeActionsSource(f.client, join(root, 'candidate'), cache);
+  assert.equal(f.rounds.length, 2);
+  assert.equal(f.calls.length, 8, 'metadata depth adds a shared frontier, never a round per owner');
   for (const file of f.files)
     assert.equal(digest(readFileSync(join(root, 'candidate', file.path))), file.blob);
 });

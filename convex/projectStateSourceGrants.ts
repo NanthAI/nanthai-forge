@@ -23,6 +23,7 @@ async function buildStateSourceGrants(
     object?: string | undefined;
     runs?: boolean | undefined;
     closures?: boolean | undefined;
+    preparation?: boolean | undefined;
     fallback?: boolean | undefined;
     select: () => Promise<ObjectLocation>;
     catalog: (ids: string[], raw?: boolean) => Promise<unknown[]>;
@@ -255,7 +256,7 @@ export async function stateSourceGrants(options: Parameters<typeof buildStateSou
       },
       retryInvalid,
     );
-    if (value.mode === 'catalog' && !options.object && options.closures)
+    if (value.mode === 'catalog' && !options.object && options.preparation)
       value.rows = await prepareStateRecipes(
         value.rows,
         ids => options.catalog(ids, true),

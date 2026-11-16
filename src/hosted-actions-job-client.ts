@@ -291,6 +291,22 @@ export class ActionsJobClient {
     const runFiles = new Map<string, string>();
     const signedLeaves = new Map<string, NonNullable<ReturnType<typeof rows.get>>>();
     const registerClosure = (row: StateSourceRow) => {
+      for (const prepared of row.prepared ?? []) {
+        const pin = prepared.descriptor.object;
+        invariant(
+          /^[a-f0-9]{64}$/.test(pin.sha256) && Number.isSafeInteger(pin.size) && pin.size >= 0,
+          'SOURCE_HASH_MISMATCH',
+          'Prepared recipe descriptor changed.',
+        );
+        const prior = rows.get(pin.sha256);
+        invariant(
+          !prior || prior.descriptor.object.size === pin.size,
+          'SOURCE_HASH_MISMATCH',
+          'Recipe physical size changed.',
+        );
+        if (!prior) rows.set(pin.sha256, prepared);
+        registerClosure(prepared);
+      }
       if (!row.closure || !cache) return;
       invariant(
         row.descriptor.recipe &&
@@ -358,7 +374,7 @@ export class ActionsJobClient {
               ? { runs: true }
               : {}),
             ...(batch && cache && this.capabilities.includes(actionsSourceClosureCapability)
-              ? { closures: true }
+              ? { closures: true, preparation: true }
               : {}),
           })) as
             | StateSourceRow[]
@@ -650,7 +666,7 @@ export class ActionsJobClient {
         state,
         all: true,
         batch: true,
-        ...(requestClosures ? { closures: true } : {}),
+        ...(requestClosures ? { closures: true, preparation: true } : {}),
         ...(fallback ? { fallback: true } : {}),
       });
     const clientRequest = this.request;

@@ -21,6 +21,7 @@ export async function runnerStateSource(
     object?: string | undefined;
     runs?: boolean | undefined;
     closures?: boolean | undefined;
+    preparation?: boolean | undefined;
     fallback?: boolean | undefined;
   },
 ) {

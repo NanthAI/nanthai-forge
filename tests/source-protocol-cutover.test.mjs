@@ -152,7 +152,8 @@ test('qualified rootless Actions materialization stays State-bound and verifies 
     commands.push(command);
     if (command.state) return expandSourceGrants(await f.source(command));
     assert(command.bound, 'every non-State command is a bound State bootstrap');
-    const { kind: _kind, ...args } = command;
+    // As in the HTTP adapter: preparation applies to a State grant, not bootstrap mutation args.
+    const { kind: _kind, preparation: _preparation, ...args } = command;
     return JSON.parse(
       await f.ctx.runMutation(makeFunctionReference('projectHostedActionsSource:resolve'), {
         ...f.input,

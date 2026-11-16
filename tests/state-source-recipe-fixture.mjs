@@ -29,11 +29,31 @@ export async function stateSourceRecipeFixture(
     const leafPack = packedLeaves
       ? put(Buffer.concat([...parts, Buffer.from('unselected neighbour')]))
       : null;
-    const treeBytes = Buffer.from(JSON.stringify({ kind: 'forge-byte-tree', schema: 1, children }));
-    const tree = { ...put(treeBytes), height: 1, length: object.size };
+    const pages = [];
+    const treePage = children => {
+      const bytes = Buffer.from(JSON.stringify({ kind: 'forge-byte-tree', schema: 1, children }));
+      const pin = put(bytes);
+      pages.push({ pin, bytes });
+      return {
+        ...pin,
+        height: children[0].height + 1,
+        length: children.reduce((sum, child) => sum + child.length, 0),
+      };
+    };
+    let refs = children;
+    while (refs.length > 64) {
+      const groups = Math.ceil(refs.length / 64),
+        width = Math.ceil(refs.length / groups);
+      refs = Array.from({ length: groups }, (_, index) =>
+        treePage(refs.slice(index * width, (index + 1) * width)),
+      );
+    }
+    const tree = treePage(refs);
     const recipeBytes = Buffer.from(JSON.stringify({ kind: 'forge-object-recipe', schema: 1, object, tree }));
     const recipe = put(recipeBytes);
-    const pack = put(Buffer.concat([recipeBytes, treeBytes]));
+    const metadata = [{ pin: recipe, bytes: recipeBytes }, ...pages];
+    const pack = put(Buffer.concat(metadata.map(value => value.bytes)));
+    let offset = 0;
     return {
       entry: { ...object, recipe },
       bodies,
@@ -44,10 +64,13 @@ export async function stateSourceRecipeFixture(
             ? { pack: { digest: leafPack.sha256, size: leafPack.size, offset: index * leafBytes } }
             : {}),
         })),
-        { ...recipe, pack: { digest: pack.sha256, size: pack.size, offset: 0 } },
-        { ...tree, pack: { digest: pack.sha256, size: pack.size, offset: recipe.size } },
+        ...metadata.map(({ pin, bytes }) => {
+          const value = { ...pin, pack: { digest: pack.sha256, size: pack.size, offset } };
+          offset += bytes.length;
+          return value;
+        }),
       ],
-      metadata: [recipe.sha256, tree.sha256],
+      metadata: metadata.map(value => value.pin.sha256),
     };
   });
   const f = await physicalStateSourceFixture(t, 0, { protocol: 2, recipes });

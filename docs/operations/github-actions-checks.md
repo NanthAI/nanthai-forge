@@ -70,8 +70,12 @@ catalog reads can also build that projection for imported recipes within the cur
 request: recipe and tree metadata are hash/size verified in shared frontiers, then
 leaf descriptors are resolved in sorted pages. One State proof covers the window;
 current access and the exact selected State are rechecked after preparation.
-The projection is not persisted and requires the existing `closures` request flag;
-older all-State readers keep their original traversal. The existing 100-leaf and 4 MiB reply bounds apply;
+Preparation is opt-in through the `preparation` request flag under the existing
+`source.closures` capability. A prepared reply can carry exact verified recipe
+descendants even when the recipe exceeds the 100-leaf inline closure bound.
+The connection reuses these descriptors for ordinary tree traversal, including
+packed ranges. Older clients omit the flag; older servers ignore it and retain
+ordinary readers. Nothing is persisted. The existing 4 MiB reply bound applies;
 preparation exceeding 8 MiB of metadata keeps the ordinary recipe reader. Raw file
 descriptors still read their object rows or catalog pages from Convex.
 
@@ -87,7 +91,8 @@ reconstruction verifies the whole-file hash. Concurrent files share in-flight
 leaf reads. The serial source-worker default, source State and publication rules
 are unchanged. `tests/state-source-preparation.test.mjs` guards two HTTP rounds
 and seven internal mutations for a cold check preparation window with 1, 3 or 24
-large imported recipes, plus exact reconstruction, corruption and current access.
+large imported recipes, 24/24/6 MiB packed files and recipes beyond the inline
+closure bound, plus exact reconstruction, corruption and current access.
 Larger descriptor inventories continue through the existing bounded page protocol.
 
 A hosted check job runs the Candidate's own code (its tests and scripts) on the same runner as

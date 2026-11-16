@@ -15,9 +15,7 @@ export async function prepareStateRecipes(
   read: (pin: PhysicalPin) => Promise<Uint8Array>,
 ) {
   const members = rows.map(catalogSourceRow),
-    selected = members.filter(
-      value => value.recipe && !value.row.closure && value.pin.size <= 100 * 1024 * 1024,
-    );
+    selected = members.filter(value => value.recipe && !value.row.closure);
   if (!selected.length) return rows;
   const held = new Map(members.map(value => [value.pin.sha256, value]));
   const load = async (ids: string[]) => {
@@ -76,7 +74,7 @@ export async function prepareStateRecipes(
       ? [{ value: selected[index]!, proof }]
       : [],
   );
-  await load(eligible.flatMap(({ proof }) => proof.leaves.map(pin => pin.sha256)));
+  await load(proofs.flatMap(proof => proof.leaves.map(pin => pin.sha256)));
   const closures = new Map<string, NonNullable<(typeof members)[number]['row']['closure']>>();
   for (const { value, proof } of eligible) {
     const closure = proof.leaves.map(pin => {
@@ -93,14 +91,37 @@ export async function prepareStateRecipes(
     });
     if (closure.every(leaf => leaf !== null)) closures.set(value.pin.sha256, closure);
   }
-  // Stay within the existing descriptor reply envelope. Omitted projections remain readable.
+  const prepared = new Map(
+    selected.map((value, index) => [
+      value.pin.sha256,
+      [...proofs[index]!.pins.values()].map(pin => {
+        const descriptor = held.get(pin.sha256)!;
+        invariant(descriptor.pin.size === pin.size, 'SOURCE_HASH_MISMATCH', 'Recipe physical size changed.');
+        return descriptor.row;
+      }),
+    ]),
+  );
+  // The same bounded reply can carry verified descriptors when an inline closure
+  // cannot represent the recipe. Larger inventories retain ordinary windowing.
   let bytes = new TextEncoder().encode(JSON.stringify(rows)).length;
   return members.map(value => {
     const closure = closures.get(value.pin.sha256);
-    if (!closure) return value.row;
-    const size = new TextEncoder().encode(JSON.stringify(closure)).length + 16;
-    if (bytes + size > 4 * 1024 * 1024) return value.row;
-    bytes += size;
-    return { ...value.row, closure };
+    if (closure) {
+      const size = new TextEncoder().encode(JSON.stringify(closure)).length + 16;
+      if (bytes + size <= 4 * 1024 * 1024) {
+        bytes += size;
+        return { ...value.row, closure };
+      }
+    }
+    const descriptors = [];
+    for (const row of prepared.get(value.pin.sha256) ?? []) {
+      const size = new TextEncoder().encode(JSON.stringify(row)).length + 1;
+      if (bytes + size + 16 > 4 * 1024 * 1024) break;
+      descriptors.push(row);
+      bytes += size;
+    }
+    if (!descriptors.length) return value.row;
+    bytes += 16;
+    return { ...value.row, prepared: descriptors };
   });
 }

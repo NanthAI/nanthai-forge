@@ -16,6 +16,8 @@ export type StateSourceRow = {
   range?: { offset: number; total: number };
   run?: PackRunBinding & { id: number };
   closure?: SignedDownload[];
+  /** Exact recipe descendants verified in this State grant, scoped to this connection. */
+  prepared?: StateSourceRow[];
 };
 /** Reconstruct per-member rows locally: the server returns only exact physical run grants. */
 export async function rowsFromPhysicalRuns(

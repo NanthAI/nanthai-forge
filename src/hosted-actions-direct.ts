@@ -104,6 +104,7 @@ export const directCommandSchema = z.discriminatedUnion('kind', [
       digests: z.array(checkHash).min(1).max(directSourceBatch),
       batch: z.literal(true).optional(),
       closures: z.literal(true).optional(),
+      preparation: z.literal(true).optional(),
       runs: z.literal(true).optional(),
       bound: z.literal(true).optional(),
       state: checkHash.optional(),
