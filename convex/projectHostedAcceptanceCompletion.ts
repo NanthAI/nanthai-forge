@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { cancelStaleLandingChecks } from './projectHostedLandingStaleChecks';
 import { wakeLandingCapsule } from './projectLandingCapsuleWake';
 import { makeFunctionReference } from 'convex/server';
@@ -54,7 +55,7 @@ export async function scheduleAcceptanceCompletion(
 /** The plan's completion ended: cancel its pending guard and drop the retained
  * tick. A plan with nothing retained (legacy or already complete) writes nothing. */
 async function settleCompletion(ctx: MutationCtx, plan: Plan, patch: Partial<Plan> = {}) {
-  if (plan.completion?.guard) await ctx.scheduler.cancel(plan.completion.guard);
+  if (plan.completion?.guard) await cancelPendingTask(ctx, plan.completion.guard);
   if (plan.capsuleWake) await wakeLandingCapsule(ctx, { projectId: plan.projectId, ...plan.capsuleWake });
   if (plan.completion || plan.capsuleWake || Object.keys(patch).length)
     await ctx.db.patch(plan._id, { ...patch, completion: undefined, capsuleWake: undefined });
@@ -122,7 +123,7 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
   // Publication transfers its pending deadline to this existing durable tick.
   // Cancelling it here keeps scheduler cleanup outside the main CAS. A failed
   // tick rolls back the cancellation and the guard retains the same alarm.
-  if (plan.completion?.alarm) await ctx.scheduler.cancel(plan.completion.alarm);
+  if (plan.completion?.alarm) await cancelPendingTask(ctx, plan.completion.alarm);
   // Reuse the already scheduled post-publication tick. No queue query or new
   // scheduling write belongs in the acceptance CAS, including an empty queue.
   if (input.precompose && plan.appliedPage === 0 && plan.appliedEntry === 0) {

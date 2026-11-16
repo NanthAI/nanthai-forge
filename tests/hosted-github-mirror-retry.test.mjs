@@ -522,24 +522,25 @@ test('dogfood-size retained mirror history costs only selected status rows and n
   );
 });
 
-test('resume replaces a failed job stale inProgress task and fences its late failure and commit', async t => {
-  const f = await fixture(t, () => true);
-  f.patch('projectGithubMirrorJobs', f.input.jobId, { status: 'failed', error: 'GITHUB_SYNC_API' });
-  const task = f.tasks.get(f.job().scheduledId);
-  task.state = { kind: 'inProgress' };
-  const resumed = await f.run(store.resume, { jobId: f.input.jobId });
-  assert.equal(resumed.status, 'scheduled');
-  assert.equal(task.state.kind, 'canceled');
-  assert.equal(f.job().cursor, f.cursor);
-  assert.equal(f.job().step, f.input.step + 1);
-  await f.run(store.failed, { ...f.input, code: 'GITHUB_SYNC_API', detail: 'late', httpStatus: 500 });
-  await f.run(store.commit, { ...f.input, cursor: 'late-cursor', mapping: null });
-  assert.equal(f.job().status, 'running');
-  assert.equal(f.job().cursor, f.cursor);
-  assert.equal(f.scheduled.length, 2);
-  assert.equal((await f.run(store.resume, { jobId: f.input.jobId })).status, 'already-running');
-  assert.equal(f.scheduled.length, 2, 'fresh pending worker is not duplicated');
-});
+for (const kind of ['pending', 'inProgress'])
+  test(`resume replaces a failed job ${kind} task, cancels only pending work and fences late failure and commit`, async t => {
+    const f = await fixture(t, () => true);
+    f.patch('projectGithubMirrorJobs', f.input.jobId, { status: 'failed', error: 'GITHUB_SYNC_API' });
+    const task = f.tasks.get(f.job().scheduledId);
+    task.state = { kind };
+    const resumed = await f.run(store.resume, { jobId: f.input.jobId });
+    assert.equal(resumed.status, 'scheduled');
+    assert.equal(task.state.kind, kind === 'pending' ? 'canceled' : 'inProgress');
+    assert.equal(f.job().cursor, f.cursor);
+    assert.equal(f.job().step, f.input.step + 1);
+    await f.run(store.failed, { ...f.input, code: 'GITHUB_SYNC_API', detail: 'late', httpStatus: 500 });
+    await f.run(store.commit, { ...f.input, cursor: 'late-cursor', mapping: null });
+    assert.equal(f.job().status, 'running');
+    assert.equal(f.job().cursor, f.cursor);
+    assert.equal(f.scheduled.length, 2);
+    assert.equal((await f.run(store.resume, { jobId: f.input.jobId })).status, 'already-running');
+    assert.equal(f.scheduled.length, 2, 'fresh pending worker is not duplicated');
+  });
 
 test('explicit resume recovers an overdue task or a missing scheduled record without losing its cursor', async t => {
   const f = await fixture(t, () => true);
@@ -547,7 +548,7 @@ test('explicit resume recovers an overdue task or a missing scheduled record wit
   task.state = { kind: 'inProgress' };
   task.scheduledTime = Date.now() - 12 * 60_000;
   await f.run(store.resume, { jobId: f.input.jobId });
-  assert.equal(task.state.kind, 'canceled');
+  assert.equal(task.state.kind, 'inProgress', 'the old running action retires through its generation fence');
   f.tasks.delete(f.job().scheduledId);
   await f.run(store.resume, { jobId: f.input.jobId });
   assert.equal(f.scheduled.length, 3);

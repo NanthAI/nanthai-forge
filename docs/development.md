@@ -602,6 +602,8 @@ layer out of both first paints.
 
 ### Convex Auth core beside Clerk
 
+Convex upgrades must replay scheduler self-cancellation: use `cancelPendingTask` with request `scheduledFunctionId` and a pending-only check (running mutations still appear pending); pass an already-read task to avoid a second read.
+
 The backend mounts Convex Auth 2.0.0 on Convex 1.50.0 as `auth`, `authGithub`,
 `authPasskey` and `authUsername`. The current browser screens still use Clerk.
 The rebuilt app under `/-` (below) signs in with these functions only. There

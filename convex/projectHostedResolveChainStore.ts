@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { v } from 'convex/values';
 import { internalMutation } from './server';
 import { loadSave, writeSaveState } from './projectHostedSaveStore';
@@ -24,10 +25,9 @@ export const prepare = internalMutation({
     try {
       const { state, operation } = await loadSave(ctx, args);
       // The publication's delayed fallback of this chain is not needed once the chain runs here;
-      // when this IS that fallback, its own run is in progress, not pending, and stays.
+      // Request ownership also protects a mutation fallback whose row is still pending.
       if (state.chainFallbackId) {
-        const fallback = await ctx.db.system.get(state.chainFallbackId as Id<'_scheduled_functions'>);
-        if (fallback?.state.kind === 'pending') await ctx.scheduler.cancel(fallback._id);
+        await cancelPendingTask(ctx, state.chainFallbackId as Id<'_scheduled_functions'>);
       }
       const then = state.request.then;
       if (!then || operation.terminal?.outcome.status !== 'completed') return null;

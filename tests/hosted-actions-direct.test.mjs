@@ -114,6 +114,12 @@ async function fixture(t, shards = 2, runsOn = 'ubuntu-latest', opaque = null, r
       },
       cancel: async id => cancelled.push(id),
     };
+    ctx.db.system = {
+      get: async id =>
+        scheduled.some(task => task.id === id)
+          ? { _id: id, state: { kind: cancelled.includes(id) ? 'canceled' : 'pending' } }
+          : null,
+    };
     ctx.storage = { getMetadata: async id => storage.get(id) ?? null };
   });
   const runner = {
@@ -943,8 +949,8 @@ test('source metadata batches yield before read exhaustion and retain session an
   await s.bind();
   const pins = Array.from({ length: 600 }, (_, i) => s.put(`bounded prefix ${i}`));
   const metrics = { databaseQueries: { remaining: 4096 }, bytesRead: { remaining: 3 * 1024 * 1024 } };
-  s.decorateContext(ctx => {
-    ctx.meta = { getTransactionMetrics: async () => metrics };
+  s.extendContext(ctx => {
+    ctx.meta = { ...ctx.meta, getTransactionMetrics: async () => metrics };
   });
   const input = { ...s.input(), batch: true, digests: pins.map(pin => pin.sha256) };
   const prefix = await s.call(source, 'resolve', input);

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { cancelPendingFinishWake } from './projectHostedFinishWake';
+import { cancelPendingTask } from './schedulerCancel';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
@@ -164,7 +164,7 @@ export async function cancelStaleLandingChecks(
       // Publication of the replacement's durable wake and cancellation share
       // this transaction. A throw rolls both back; no process owns rescheduling.
       if (finish.row.wake) {
-        await cancelPendingFinishWake(ctx, finish.row);
+        await cancelPendingTask(ctx, finish.row.wake?.taskId);
         await ctx.db.patch(finish.row._id, { wake: null });
       }
       await reserveFinishRetry(ctx, finish.row, finish.value, 'CHECK_EVIDENCE_REFRESH', undefined, main);

@@ -118,8 +118,8 @@ test('600 Intents, 575 receipts and 3k files: a 30-landing day runs three bounde
   const measured = f.counts.slice(start);
   const landings = measured.filter(row => row.name === 'auditLanding');
   assert(
-    landings.every(row => row.documents <= 3 && row.writes <= 5),
-    'existing row: two indexed reads plus cancellation acknowledgement at cadence threshold',
+    landings.every(row => row.documents <= 4 && row.writes <= 5),
+    '1122c9c9: existing row retains two indexed reads, cancellation acknowledgement and one pending-only scheduler probe at cadence threshold',
   );
   const auditCalls = measured.filter(row => !['auditSeedCandidate', 'auditLanding'].includes(row.name));
   assert(auditCalls.length <= audits * 85 && auditCalls.length <= 500);

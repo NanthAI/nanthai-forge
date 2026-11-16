@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { wakeCiMirrorWaiters } from './projectCiStatusMirror';
 import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';
@@ -281,7 +282,7 @@ export async function resumeMirrorJob(ctx: MutationCtx, jobId: Id<'projectGithub
   // an overdue task beyond that window is recoverable by explicit resume.
   if (live && job.status !== 'failed' && task.scheduledTime + 11 * 60_000 > Date.now())
     return { status: 'already-running' as const, step: job.step };
-  if (live) await ctx.scheduler.cancel(task._id);
+  if (live) await cancelPendingTask(ctx, task._id, task);
   const step = job.step + 1;
   await ctx.db.patch(job._id, {
     status: 'running',

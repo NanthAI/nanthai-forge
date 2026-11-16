@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { armLandingAlarm } from './projectHostedLandingStallWake';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
@@ -95,7 +96,7 @@ export async function wakeBatch(ctx: MutationCtx, input: BatchIdentity, recovery
       projectId: input.projectId,
       submissionId: batch.leaderId ?? batch.id,
     });
-    if (leader.row.alarm) await ctx.scheduler.cancel(leader.row.alarm.taskId);
+    if (leader.row.alarm) await cancelPendingTask(ctx, leader.row.alarm.taskId);
     await ctx.db.patch(leader.row._id, {
       alarm: await armLandingAlarm(
         ctx,

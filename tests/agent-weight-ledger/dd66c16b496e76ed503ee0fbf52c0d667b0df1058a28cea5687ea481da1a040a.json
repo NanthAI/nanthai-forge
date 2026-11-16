@@ -1,0 +1,4 @@
+{
+  "issue": "1122c9c9",
+  "reason": "Lead approved the measured pending-only scheduler safety delta: solo reads 492 -> 494 (+2); six-landing mean read bytes 715683.5 -> 716591.5 (+908), modeled +$0.0001816 per 1,000 landings at $0.20/GB. The completion alarm and guard have no previously read system record; retain their status checks rather than cancelling running work. Calls, writes, startup, modules and installed-byte ceilings are unchanged. Inherits the live-line assessment in 5fc8fc40 without changing its approved scope."
+}

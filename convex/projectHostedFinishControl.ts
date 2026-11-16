@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { exhaustFinishCompose } from './projectHostedComposeExhaustion';
 import { loadBatch, writeBatch, wakeBatch } from './projectHostedLandingBatchStore';
 import { batchFinishStep, resumeBatchIO } from './projectHostedLandingBatchFinish';
@@ -7,7 +8,7 @@ import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
 import { loadFinish, failFinish } from './projectHostedFinishStore';
 import { loadLanding, writeLanding, type LandingIdentity } from './projectHostedLandingStore';
-import { cancelPendingFinishWake, scheduleFinish, watchFinishCompose } from './projectHostedFinishWake';
+import { scheduleFinish, watchFinishCompose } from './projectHostedFinishWake';
 import { prepareFinishCompose, installFinishCompose, reserveFinishRetry } from './projectHostedFinishCompose';
 import { hostedComposeInput } from './projectHostedComposeStore';
 import { submitHostedCompose } from './projectHostedComposeJobs';
@@ -351,7 +352,7 @@ async function resumeFinishIOOnce(
       operationId: value.pending.operations.compose,
     });
   }
-  await cancelPendingFinishWake(ctx, row);
+  await cancelPendingTask(ctx, row.wake?.taskId);
   await ctx.db.patch(row._id, { wake: null });
   if (input.command.kind === 'page') await scheduleFinish(ctx, (await ctx.db.get(row._id))!);
   else

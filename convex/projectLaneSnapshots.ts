@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { v } from 'convex/values';
 import { chargeStorage } from './abuseLimits';
 import { makeFunctionReference } from 'convex/server';
@@ -395,7 +396,7 @@ export const purge = mutation({
       const row = await laneRow(ctx, input.projectId, input.laneId);
       if (!row) return canonicalPayload({ laneId: input.laneId, state: 'none', entries: 0 });
       if (row.state !== 'purging') {
-        if (row.job) await ctx.scheduler.cancel(row.job);
+        if (row.job) await cancelPendingTask(ctx, row.job);
         const job = await ctx.scheduler.runAfter(0, drop, {
           projectId: input.projectId,
           laneId: input.laneId,

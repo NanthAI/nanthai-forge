@@ -44,6 +44,18 @@ const convexSourceModules = Object.fromEntries(
 const sourceJobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
 const reuseStore = await import(moduleUrl('../convex/projectHostedReuseStore.ts'));
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
+// Resolve each registered task once; mutations remain pending until they commit.
+const taskMutations = new Map();
+function isTaskMutation(name) {
+  if (!taskMutations.has(name)) {
+    const [file, method] = name.split(':');
+    taskMutations.set(
+      name,
+      import(moduleUrl(`../convex/${file}.ts`)).then(module => module[method].isMutation === true),
+    );
+  }
+  return taskMutations.get(name);
+}
 export const maxima = {};
 export const code = value => error => (error.data?.code ?? error.code) === value;
 export async function compose(c, selection) {
@@ -165,6 +177,9 @@ export async function finishFixture(
   };
   const executingTasks = new AsyncLocalStorage();
   f.decorateContext(ctx => {
+    ctx.meta = {
+      getRequestMetadata: async () => ({ scheduledFunctionId: executingTasks.getStore()?.at(-1) ?? null }),
+    };
     ctx.db.system = { get: ctx.db.get };
     ctx.storage = sourceStorage;
     ctx.scheduler = {
@@ -319,7 +334,8 @@ export async function finishFixture(
     assert(task, 'pending task');
     now = Math.max(now, task.scheduledTime);
     f.patch('_scheduled_functions', task._id, {
-      state: { kind: 'inProgress' },
+      // Convex mutations execute atomically while their row is still pending.
+      state: { kind: (await isTaskMutation(task.name)) ? 'pending' : 'inProgress' },
     });
     const input = task.args[0];
     metrics.ticks++;

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
 import { z } from 'zod';
@@ -109,7 +110,7 @@ export async function configureMainAudit(
   if (heldSettingReply(saved)) return saved;
   const row = await auditRow(ctx, input.projectId);
   if (!replay && row?.unaudited?.count && (!row.audit || hostedCheckTerminal(row.audit))) {
-    if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
+    if (row.wake) await cancelPendingTask(ctx, row.wake.taskId);
     await armAudit(
       ctx,
       { ...row, wake: undefined },
@@ -221,7 +222,7 @@ export const start = internalMutation({
       if (hostedCheckTerminal(run)) await onGateRunTerminal(ctx, run);
       return null;
     }
-    if (row.wake && input.wakeAt === undefined) await ctx.scheduler.cancel(row.wake.taskId);
+    if (row.wake && input.wakeAt === undefined) await cancelPendingTask(ctx, row.wake.taskId);
     if (row.wake) await ctx.db.patch(row._id, { wake: undefined });
     if (!row.unaudited?.count || (row.audit && !hostedCheckTerminal(row.audit))) return null;
     // A start that cannot run must commit, not throw: a rollback would restore the

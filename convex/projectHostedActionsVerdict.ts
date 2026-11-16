@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { prepareReportCollection } from './projectHostedReportCollection';
 import { objectReportTransport } from './projectHostedCheckReports';
 import { collectResultBatch } from './projectHostedActionsBatch';
@@ -98,7 +99,7 @@ export async function completeFromResults(
 export async function holdForConclusion(ctx: MutationCtx, loaded: LoadedHostedCheck, deferWrite = false) {
   const { row, run } = loaded;
   if (run.actions!.confirm) {
-    await ctx.scheduler.cancel(run.actions!.confirm as never);
+    await cancelPendingTask(ctx, run.actions!.confirm as never);
     run.actions!.confirm = null;
   }
   run.actions!.verdictPending = true;
@@ -122,7 +123,7 @@ export async function applyConclusion(
 ): Promise<HostedCheckRun> {
   const { run } = selected;
   if (run.actions?.confirm) {
-    await ctx.scheduler.cancel(run.actions.confirm as never);
+    await cancelPendingTask(ctx, run.actions.confirm as never);
     run.actions.confirm = null;
   }
   const verdict = run.cancelRequested ? ({ status: 'cancelled' } as const) : providerVerdict(conclusion);

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { repairComposingBatch } from './projectHostedLandingBatchOwner';
 import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
 import { readQueueStatus } from './projectHostedQueueStatus';
@@ -405,8 +406,7 @@ async function scheduleDeadline(
 ) {
   const row = await ctx.db.get(rowId);
   // Never cancel the round that is running now; only a still-pending older one.
-  const old = row?.alarm ? await ctx.db.system.get(row.alarm.taskId) : null;
-  if (old?.state.kind === 'pending') await ctx.scheduler.cancel(old._id);
+  await cancelPendingTask(ctx, row?.alarm?.taskId);
   const taskId = await ctx.scheduler.runAfter(
     Math.max(0, at - Date.now()),
     makeFunctionReference<'mutation'>('projectHostedLandingStall:deadline'),

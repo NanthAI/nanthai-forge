@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import type { MutationCtx } from './_generated/server';
 import type { BatchIdentity, LandingBatch } from './projectHostedLandingBatchState';
 import { loadLanding, writeLanding } from './projectHostedLandingStore';
@@ -79,7 +80,7 @@ export async function repairComposingBatch(ctx: MutationCtx, input: BatchIdentit
   await scheduleFinish(ctx, finish, 0, true);
   // A train wake can repair before the alarm at this same bound is consumed. Replace
   // that retained alarm too; overwriting its pointer would leave a terminal idle task.
-  if (loaded.row.alarm) await ctx.scheduler.cancel(loaded.row.alarm.taskId);
+  if (loaded.row.alarm) await cancelPendingTask(ctx, loaded.row.alarm.taskId);
   await ctx.db.patch(loaded.row._id, {
     alarm: await armLandingAlarm(
       ctx,

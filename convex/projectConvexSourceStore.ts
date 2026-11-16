@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { sourceCommitReads } from './projectSourceCommitReads';
 import { qualifySourceProtocol } from './projectSourceProtocol';
 import { makeFunctionReference } from 'convex/server';
@@ -344,8 +345,7 @@ export const commit = sourceMutation({
     // The submitting action ran this step itself: its delayed fallback is no longer needed. One that
     // already started (it is running this commit, or raced it) is left alone.
     if (active.row.inlineFallback && active.row.scheduledId) {
-      const fallback = await ctx.db.system.get(active.row.scheduledId);
-      if (fallback?.state.kind === 'pending') await ctx.scheduler.cancel(active.row.scheduledId);
+      await cancelPendingTask(ctx, active.row.scheduledId);
     }
     const callback = {
       ...JSON.parse(active.row.dispatch),
@@ -382,8 +382,7 @@ export const commit = sourceMutation({
     });
     if (active.row.physicalSeed) {
       if (active.row.seedWatchId) {
-        const watched = await ctx.db.system.get(active.row.seedWatchId);
-        if (watched?.state.kind === 'pending') await ctx.scheduler.cancel(active.row.seedWatchId);
+        await cancelPendingTask(ctx, active.row.seedWatchId);
       }
       const seedWatchId = terminal
         ? undefined
@@ -531,8 +530,7 @@ export const failed = sourceMutation({
     if (update.failedAttempts >= SOURCE_MAX_FAILED_ATTEMPTS || sourceRetryExpired(active)) {
       await exhaustSourceExecution(ctx, args, update.lastFailure);
       if (active.row.seedWatchId) {
-        const watched = await ctx.db.system.get(active.row.seedWatchId);
-        if (watched?.state.kind === 'pending') await ctx.scheduler.cancel(active.row.seedWatchId);
+        await cancelPendingTask(ctx, active.row.seedWatchId);
         await ctx.db.patch(active.row._id, { seedWatchId: undefined });
       }
       await drainSourcePool(ctx, async batch => {
@@ -541,8 +539,7 @@ export const failed = sourceMutation({
       });
     } else if (active.row.physicalSeed) {
       if (active.row.seedWatchId) {
-        const watched = await ctx.db.system.get(active.row.seedWatchId);
-        if (watched?.state.kind === 'pending') await ctx.scheduler.cancel(active.row.seedWatchId);
+        await cancelPendingTask(ctx, active.row.seedWatchId);
       }
       const generation = args.generation + 1;
       const scheduledId = await ctx.scheduler.runAfter(
@@ -560,7 +557,7 @@ export const failed = sourceMutation({
       // The submitting action's inline step failed: retry on the normal schedule, not the fallback's.
       const fallback = await ctx.db.system.get(active.row.scheduledId);
       if (fallback?.state.kind === 'pending') {
-        await ctx.scheduler.cancel(active.row.scheduledId);
+        await cancelPendingTask(ctx, active.row.scheduledId, fallback);
         const generation = args.generation + 1;
         const scheduledId = await ctx.scheduler.runAfter(
           Math.max(0, (update.retryAt ?? 0) - Date.now()),

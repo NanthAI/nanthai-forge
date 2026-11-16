@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import {
@@ -46,7 +47,7 @@ async function removeOwned(
   }
   if (job.task) {
     const task = await ctx.db.system.get(job.task);
-    if (task?.state.kind === 'pending') await ctx.scheduler.cancel(job.task);
+    await cancelPendingTask(ctx, job.task, task);
   }
   await trackArtifact(ctx, job._id, job.artifactKey);
   const task = await ctx.scheduler.runAfter(0, internal.lifecycle.purge, { id: job._id });

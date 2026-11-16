@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { v } from 'convex/values';
 import { internalMutation, internalQuery, type QueryCtx } from './server';
 import type { Id } from './_generated/dataModel';
@@ -39,7 +40,7 @@ export const project = internalQuery({
  * Ten rows also bound identity reads when legacy jobs contain near-1 MiB cursors.
  * System rows have no project index: scan one creation-time page, then resolve
  * only import/index identities. Never cancel project deletion or foreign work.
- * cancel(inProgress) allows the action to finish but cancels its descendants. */
+ * Pending tasks retire through the shared helper; running owners retain descendants. */
 export const cancelScheduled = internalMutation({
   args: {
     ...target,
@@ -80,8 +81,7 @@ export const cancelScheduled = internalMutation({
           args.projectId ??
           (args.generationId ? (await ctx.db.get(args.generationId))?.projectId : undefined);
       if (projectId !== input.projectId) continue;
-      await ctx.scheduler.cancel(task._id);
-      canceled++;
+      if (await cancelPendingTask(ctx, task._id, task)) canceled++;
     }
     return { scanned: page.page.length, canceled, isDone: page.isDone, cursor: page.continueCursor };
   },

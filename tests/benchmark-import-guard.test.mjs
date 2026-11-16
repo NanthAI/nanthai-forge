@@ -185,7 +185,7 @@ function fixture() {
   };
 }
 
-test('synthetic runaway reaches 5000 including failures, cancels running/pending identities, deletes, then executes zero jobs', async t => {
+test('synthetic runaway reaches 5000 including failures, fences its running owner, deletes, then reaches zero jobs', async t => {
   const s = fixture();
   let now = 1,
     stopped = 0,
@@ -230,10 +230,12 @@ test('synthetic runaway reaches 5000 including failures, cancels running/pending
   assert.equal(guard.monitor.reason, 'total');
   assert.equal(guard.monitor.failures, 1000);
   assert.equal(stopped, 1);
-  assert.equal(s.tasks.get(current).state.kind, 'canceled');
-  // A currently running action can finish, but its future scheduling is canceled.
+  assert.equal(s.tasks.get(current).state.kind, 'inProgress');
+  // Pending-only cleanup preserves an already running owner. Any late child
+  // still has to pass the project's deletion fence before advancing the import.
   const late = await s.ctx.scheduler.runAfter(0, fn, { id: 'job', actor: 'owner' });
-  assert.equal(s.tasks.get(late).state.kind, 'canceled');
+  assert.equal(s.tasks.get(late).state.kind, 'pending');
+  s.tasks.set(current, { state: { kind: 'success' } });
   s.setActive(undefined);
   await assert.rejects(
     imports.advance._handler(s.ctx, {
@@ -249,6 +251,8 @@ test('synthetic runaway reaches 5000 including failures, cancels running/pending
     }),
     error => error.code === 'PROJECT_UNAVAILABLE',
   );
+  s.tasks.set(late, { state: { kind: 'failed' } });
+  guard.observe(event('late-fenced', now++, 'PROJECT_UNAVAILABLE'));
   // The synthetic clock skips the post-delete settle wait for late signed uploads.
   s.tables.hostedProjects.get('project').removedAt -= purgeSettleMs;
   for (let page = 0; s.tables.hostedProjects.get('project').removal !== 'deleted'; page++) {
@@ -270,7 +274,8 @@ test('synthetic runaway reaches 5000 including failures, cancels running/pending
   await guard.tick();
   assert.deepEqual(guard.receipts, calls, 'quiet window makes zero function calls');
   assert.equal(guard.monitor.quiet(), true);
-  assert.equal(guard.monitor.postDelete, 0);
+  assert.equal(guard.monitor.total, 5001, 'the fenced late invocation remains in measured usage');
+  assert.equal(guard.monitor.postDelete, 0, 'the fenced invocation drained before deletion confirmation');
   assert.equal(
     [...s.scheduled].filter(
       entry =>

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalMutation, internalQuery, type MutationCtx } from './server';
@@ -27,15 +28,10 @@ const revokePageRows = 100;
 const measurePageRows = 1000;
 const fn = (name: string) => makeFunctionReference<'mutation'>(`projectRetention:${name}`);
 
-async function stopTask(ctx: MutationCtx, id: Id<'_scheduled_functions'> | undefined) {
-  if (!id) return;
-  const task = await ctx.db.system.get(id);
-  if (task?.state.kind === 'pending') await ctx.scheduler.cancel(id);
-}
 /** Cancel a project's expiry and measurement before restore or permanent deletion. */
 export async function stopRetention(ctx: MutationCtx, project: Doc<'hostedProjects'>) {
-  await stopTask(ctx, project.retention?.task);
-  await stopTask(ctx, project.retention?.measure?.task);
+  await cancelPendingTask(ctx, project.retention?.task);
+  await cancelPendingTask(ctx, project.retention?.measure?.task);
 }
 /** One page of grant/runner removals per table; true when none remain. */
 async function revokePage(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
@@ -136,7 +132,7 @@ export const expire = internalMutation({
       Date.now() < project.retention.purgeAt
     )
       return null;
-    await stopTask(ctx, project.retention.measure?.task);
+    await cancelPendingTask(ctx, project.retention.measure?.task);
     const task = await ctx.scheduler.runAfter(
       0,
       makeFunctionReference<'mutation'>('projectLifecycle:purge'),

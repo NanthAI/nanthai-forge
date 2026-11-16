@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import type { MutationCtx } from './_generated/server';
 import type { BatchIdentity, LandingBatch } from './projectHostedLandingBatchState';
 import type { BatchDropped } from '../src/hosted-landing-batch';
@@ -120,7 +121,7 @@ export async function deferSpeculativeConflict(
     }
     // The predecessor owns rejected-member progress. Relinquish their alarms
     // so a stale compose alarm cannot split independently checking survivors.
-    if (current.alarm) await ctx.scheduler.cancel(current.alarm.taskId);
+    if (current.alarm) await cancelPendingTask(ctx, current.alarm.taskId);
     if (current.alarm || current.orderWait !== predecessor.state.id)
       await ctx.db.patch(current._id, {
         alarm: null,

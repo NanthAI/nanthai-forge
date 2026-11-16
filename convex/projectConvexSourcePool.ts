@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -109,7 +110,7 @@ export async function drainSourcePool(ctx: MutationCtx, check: SourceBatchValida
     const batch = await ctx.db.get(task.batchId),
       scheduled = task.scheduledId ? await ctx.db.system.get(task.scheduledId) : null;
     if (!batch || batch.status === 'fenced') {
-      if (scheduled?.state.kind === 'pending') await ctx.scheduler.cancel(task.scheduledId!);
+      await cancelPendingTask(ctx, task.scheduledId!, scheduled);
       if (scheduled?.state.kind === 'inProgress') active.push(slot(task, task.scheduledId!));
       else await ctx.db.patch(id, { status: 'done', failure: 'SOURCE_JOB_FENCED' });
       continue;
@@ -220,7 +221,7 @@ export async function requeueSourceBatch(ctx: MutationCtx, batch: Doc<'projectSo
     const running = task.status === 'running' && scheduled?.state.kind === 'inProgress';
     if (running) held.push(slot(task, task.scheduledId!));
     else {
-      if (scheduled?.state.kind === 'pending') await ctx.scheduler.cancel(task.scheduledId!);
+      await cancelPendingTask(ctx, task.scheduledId!, scheduled);
       retryIndices.push(task.index);
     }
     const failed =

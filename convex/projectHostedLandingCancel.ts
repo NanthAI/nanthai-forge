@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { loadBatch, writeBatch } from './projectHostedLandingBatchStore';
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
 import type { MutationCtx } from './_generated/server';
@@ -18,7 +19,7 @@ import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { notifyStackedLandingEnded } from './projectHostedStackNotice';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
-import { cancelPendingFinishWake, finishRow } from './projectHostedFinishWake';
+import { finishRow } from './projectHostedFinishWake';
 import { releaseLandingQueue } from './projectHostedLandingWake';
 import {
   hostedLandingCancelSchema,
@@ -133,8 +134,8 @@ export async function cancelHostedLanding(
             },
             timing: { ...previous.timing, submittedAt: previous.at, settledAt: new Date().toISOString() },
           });
-    if (desired.wake) await ctx.scheduler.cancel(desired.wake.taskId);
-    if (desired.alarm) await ctx.scheduler.cancel(desired.alarm.taskId);
+    if (desired.wake) await cancelPendingTask(ctx, desired.wake.taskId);
+    if (desired.alarm) await cancelPendingTask(ctx, desired.alarm.taskId);
     await ctx.db.patch(desired._id, {
       value: canonicalPayload(state),
       wake: null,
@@ -228,7 +229,7 @@ export async function cancelHostedLanding(
     // Invalidate cancelled member IO after release has scheduled its peers.
     const finish = await finishRow(ctx, identity);
     if (finish) {
-      await cancelPendingFinishWake(ctx, finish);
+      await cancelPendingTask(ctx, finish.wake?.taskId);
       await ctx.db.patch(finish._id, { wake: null, waiting: false });
     }
     const queue = await landingQueue(ctx, { projectId, channel: state.request.channel });

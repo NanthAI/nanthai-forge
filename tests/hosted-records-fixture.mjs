@@ -80,6 +80,7 @@ export function recordsFixture() {
     updateIndexes(table, old, tables[table].get(id));
   };
   const ctx = validateContext({
+    meta: { getRequestMetadata: async () => ({ scheduledFunctionId: null }) },
     scheduler: {
       runAfter: async (delay, ref, args) => {
         const name = getFunctionName(ref);

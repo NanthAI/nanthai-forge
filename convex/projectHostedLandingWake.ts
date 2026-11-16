@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { repairComposingBatch } from './projectHostedLandingBatchOwner';
 import { retainCheckProgress } from './projectHostedLandingCheckProgress';
 import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
@@ -220,7 +221,7 @@ export async function releaseLandingQueue(
   queue: Doc<'projectHostedLandingQueues'>,
   now = Date.now(),
 ) {
-  if (queue.wake) await ctx.scheduler.cancel(queue.wake.taskId);
+  if (queue.wake) await cancelPendingTask(ctx, queue.wake.taskId);
   await ctx.db.patch(queue._id, { lease: null, wake: null });
   // Publication only needs a presence probe; the next claim applies priority.
   const held = { until: null as number | null };

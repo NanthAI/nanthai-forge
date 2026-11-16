@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { retainQueueStatus } from './projectHostedQueueStatus';
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -32,11 +33,12 @@ export async function scheduleLandingWake(
   at: number,
   now = Date.now(),
 ) {
+  let task;
   if (queue.wake && queue.wake.at <= at) {
-    const task = await ctx.db.system.get(queue.wake.taskId);
+    task = await ctx.db.system.get(queue.wake.taskId);
     if (task?.state.kind === 'pending' || task?.state.kind === 'inProgress') return;
   }
-  if (queue.wake) await ctx.scheduler.cancel(queue.wake.taskId);
+  if (queue.wake) await cancelPendingTask(ctx, queue.wake.taskId, task);
   const id = crypto.randomUUID();
   const taskId = await ctx.scheduler.runAfter(
     Math.max(0, at - now),

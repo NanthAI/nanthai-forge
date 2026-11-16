@@ -254,6 +254,7 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
   };
   for (const table of Object.keys(schema.tables)) tables[table] ??= new Map();
   const ctx = validateContext({
+    meta: { getRequestMetadata: async () => ({ scheduledFunctionId: null }) },
     auth: { getUserIdentity: async () => (caller ? { subject: caller } : null) },
     db: {
       normalizeId: (table, id) => (find(id) && !tables[table]?.has(id) ? null : id),

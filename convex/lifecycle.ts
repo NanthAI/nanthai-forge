@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { artifactMetadata } from './artifactStorage';
 import { removeDerived } from './derivedArtifacts';
 import { blobStore } from './blobStore';
@@ -54,8 +55,7 @@ export const list = query({
 
 async function stop(ctx: MutationCtx, job: Doc<'imports'>) {
   if (job.task) {
-    const task = await ctx.db.system.get(job.task);
-    if (task?.state.kind === 'pending') await ctx.scheduler.cancel(job.task);
+    await cancelPendingTask(ctx, job.task);
   }
   await trackArtifact(ctx, job._id, job.artifactKey);
 }

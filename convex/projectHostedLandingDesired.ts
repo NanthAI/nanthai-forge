@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { cancelPendingFinishWake } from './projectHostedFinishWake';
+import { cancelPendingTask } from './schedulerCancel';
 import { chargeMemberWork } from './abuseLimits';
 import { landingPriority } from './projectHostedLandingOrder';
 import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
@@ -320,7 +320,7 @@ export const advance = internalMutation({
           retryReason: state.retryReason,
         },
       );
-      await cancelPendingFinishWake(ctx, row);
+      await cancelPendingTask(ctx, row.wake?.taskId);
       await ctx.db.patch(row._id, { value: canonicalPayload(result), wake: null, preparing: undefined });
       return canonicalPayload(result);
     } catch (error) {
@@ -345,7 +345,7 @@ export const fail = internalMutation({
       observation: landingObservation('failed', input.code),
       error: { code: input.code, message: input.message },
     };
-    await cancelPendingFinishWake(ctx, row);
+    await cancelPendingTask(ctx, row.wake?.taskId);
     await scheduleLandingAlarm(ctx, failed);
     await ctx.db.patch(row._id, { value: canonicalPayload(failed), wake: null, preparing: undefined });
     // This failure never reaches writeLanding: Lanes stacked on the Lanes it carried are told here (dc62b120).

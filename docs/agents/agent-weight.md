@@ -82,9 +82,9 @@ scenario, not a promise for every repository size or compatibility path:
 | Planning filtered open Issues, two matches on a 1,500-item board | 3 | 10 returned documents | `hosted-agent-planning.test.mjs`, real indexed reader |
 | Planning counts, 397-item Initiative on a 1,500-item board | 1 | 399 returned documents | `hosted-agent-planning.test.mjs`, real indexed reader |
 | Save, unchanged 3,000-file Lane | 2 | 38 conservative document probes | `hosted-save-sync-efficiency.test.mjs` |
-| Save, ten changed files on a 3,000-file Lane, direct protocol | 7 including nested executions | 283 conservative document probes | Same real source fixture, including publication |
+| Save, ten changed files on a 3,000-file Lane, direct protocol | 7 including nested executions | 285 conservative document probes | Same real source fixture, including publication; live Lane line ownership |
 | Land with save and required inline preflight, one document | 16 client calls | Server below, save separately above | `agent-inline-preflight.test.mjs` |
-| Solo server landing from enqueue through check and acceptance | 35 including nested executions and observer | 482 conservative document probes | `landing-cost-guard.test.mjs`; existing six-landing cost ledger also applies |
+| Solo server landing from enqueue through check and acceptance | 35 including nested executions and observer | 494 conservative document probes | `landing-cost-guard.test.mjs`; live Lane line 482 → 492, lead-approved pending-only scheduler safety 492 → 494 (`1122c9c9`); existing six-landing cost ledger also applies |
 
 The Lane fixture counts an empty lookup as one conservative probe, while the
 planning meter counts returned whole documents. Neither is billed usage. The

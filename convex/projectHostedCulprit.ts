@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { retainJournalRecovery } from './projectJournalWake';
 import { auditWindowFlake } from '../src/landing-mode';
 import { convexFetch, networkTimeout } from './networkFetch';
@@ -682,7 +683,7 @@ async function classify(
       const count = Math.max(0, (auditRow.unaudited?.count ?? covered) - covered);
       const firstAt = count ? (auditRow.unaudited?.firstAt ?? null) : null;
       const settings = count ? await auditSettings(ctx, input.projectId) : undefined;
-      if (!count && auditRow.wake) await ctx.scheduler.cancel(auditRow.wake.taskId);
+      if (!count && auditRow.wake) await cancelPendingTask(ctx, auditRow.wake.taskId);
       // A drill whose red was a flake ends without counting (fe7d67a8).
       const drill = await closeDrill(ctx, auditRow, null);
       await ctx.db.patch(auditRow._id, {

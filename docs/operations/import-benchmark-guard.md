@@ -76,8 +76,9 @@ Index builds themselves are currently caller-driven; stopping the callback and
 project deletion fence further index writes.
 
 [Convex scheduler cancellation](https://docs.convex.dev/scheduling/scheduled-functions#canceling-scheduled-functions)
-prevents pending work from starting. An in-progress action may finish, but its
-future scheduled descendants are canceled. The guard therefore waits for
+prevents pending work from starting. Forge cancels only pending jobs through its
+owner-safe helper; a running action may finish and schedule a late child, whose
+import/index writes are fenced by project deletion. The guard therefore waits for
 cleanup and draining calls before proving five uninterrupted minutes without a
 project-attributed execution. A late completion, including a failure, resets that
 window. Progress and parent execution IDs retain outstanding actions until their
@@ -106,8 +107,9 @@ deletion uses the existing paged cleanup path and its storage-dependent cost.
 No timer, cron, server poller or per-source-file guard execution is installed.
 
 The synthetic runaway check observes 5,000 executions with 1,000 failures and
-1,000 scheduler rows, cancels the running chain in 100 bounded calls, runs the
-real deletion handlers, and checks no pending jobs and no idle function calls.
+1,000 scheduler rows, retires pending work in 100 bounded calls, runs the
+real deletion handlers, and verifies that a running owner's late write is fenced.
+After that invocation drains, it checks no pending jobs and no idle function calls.
 A separate fixture covers 1,500 scheduled index jobs, foreign-work isolation,
 rate breach, unknown replies and blocked deletion. Run these without live
 accounts:

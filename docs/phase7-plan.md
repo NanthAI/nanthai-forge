@@ -18,6 +18,10 @@ Every brief carries these lines, a Scale line ([brief template](agents/brief-tem
 
 Builders start, finish and fix their own Lanes, run targeted tests only and leave full verification to the landing check ([builder rules](agents/briefings.md#building-forge)). Decisions and findings go to the Items and to repo docs.
 
+Lead-approved scheduler safety delta (`1122c9c9`): solo reads 492 → 494; six-landing synthetic mean read bytes 715683.5 → 716591.5 (+908 B/landing), modeled +$0.0001816 per 1,000 at $0.20/decimal GB, with calls and writes unchanged; the read-byte ledger rises exactly 713500 → 714408 and the solo read guard 492 → 494 to preserve pending-only cancellation of the completion alarm and guard. This is a synthetic marginal model, not a new billed Phase 6 baseline.
+
+The same scheduler safety adjustment adds exactly 15 status probes in each arm of the three-Lane disjoint early-resolution fixture (2968 → 2983 reads), preserving its zero extra calls/reads/writes comparison, and one pending-task probe at the main-audit cadence threshold (3 → 4 maximum landing reads); their guards record those exact increments, with writes and idle calls unchanged.
+
 ## Stage A: spikes and guards (in parallel)
 
 All of stage A starts at once. Nothing in it waits for another stage A Item, except that screen-facing results feed the stage B go decision.

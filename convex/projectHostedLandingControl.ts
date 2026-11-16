@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { passedAlone } from '../src/hosted-landing-suspect';
 import { describeCheckFailure } from './projectHostedCheckFailure';
 import { CHECK_FAILED_NEXT } from '../src/check-failure-detail';
@@ -394,7 +395,7 @@ export async function claimReadyLanding(
   const ahead =
     (await reservationAhead(ctx, row, state, now)) ?? (await olderLandingAhead(ctx, row, state, now, spent));
   if (ahead) {
-    if (row.alarm) await ctx.scheduler.cancel(row.alarm.taskId);
+    if (row.alarm) await cancelPendingTask(ctx, row.alarm.taskId);
     const parked = row.orderWait !== ahead.row.submissionId;
     if (parked || row.alarm)
       await ctx.db.patch(row._id, {
@@ -430,7 +431,7 @@ export async function claimReadyLanding(
         return null;
     }
   }
-  if (queue.wake) await ctx.scheduler.cancel(queue.wake.taskId);
+  if (queue.wake) await cancelPendingTask(ctx, queue.wake.taskId);
   const lease = {
     owner: input.owner,
     token: queue.fence + 1,

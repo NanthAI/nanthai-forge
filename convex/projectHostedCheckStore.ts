@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import {
   reportsDetached,
   reportCollectionBusy,
@@ -181,11 +182,11 @@ export async function writeHostedCheck(
     (hostedCheckTerminal(run) ||
       (!run.actions.verdictPending && (run.actions.workflowSha || run.counts.completed > 0)))
   ) {
-    await ctx.scheduler.cancel(run.actions.confirm as Id<'_scheduled_functions'>);
+    await cancelPendingTask(ctx, run.actions.confirm as Id<'_scheduled_functions'>);
     run.actions.confirm = null;
   }
   if (run.actions?.watchdog && hostedCheckTerminal(run)) {
-    await ctx.scheduler.cancel(run.actions.watchdog as Id<'_scheduled_functions'>);
+    await cancelPendingTask(ctx, run.actions.watchdog as Id<'_scheduled_functions'>);
     run.actions.watchdog = null;
   }
   checkReportHeader(run, objectReportTransport(run) ? 7 * 1024 : 8 * 1024);

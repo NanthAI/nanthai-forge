@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -37,7 +38,7 @@ export async function landingAlarmPatch(
         )
         .unique();
   if (canonical && desired?.alarm) {
-    await ctx.scheduler.cancel(desired.alarm.taskId);
+    await cancelPendingTask(ctx, desired.alarm.taskId);
     await ctx.db.patch(desired._id, { alarm: null });
   }
   const row = canonical ?? desired;
@@ -50,7 +51,7 @@ export async function landingAlarmPatch(
   // raised stall (19328518); writes that make no progress must not cancel it.
   const consumed = row.alarm?.taskId === consumedAlarm && consumedAlarm !== undefined;
   if (live && row.alarm?.lastProgressAt === at) return consumed ? { id: row._id, alarm: null } : null;
-  if (row.alarm && !consumed) await ctx.scheduler.cancel(row.alarm.taskId);
+  if (row.alarm && !consumed) await cancelPendingTask(ctx, row.alarm.taskId);
   if (!pending) return row.alarm ? { id: row._id, alarm: null } : null;
   const taskId = await ctx.scheduler.runAfter(
     Math.max(0, Date.parse(at) + LANDING_STALL_MS - Date.now()),

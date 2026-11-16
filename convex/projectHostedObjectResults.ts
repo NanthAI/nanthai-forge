@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { z } from 'zod';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import type { MutationCtx } from './_generated/server';
@@ -108,7 +109,7 @@ export async function settleObjectBatch(
   else delete run.poolPending;
   transport.flakes = header.flakes;
   if (input.conclusion !== undefined && run.actions?.confirm) {
-    await ctx.scheduler.cancel(run.actions.confirm as never);
+    await cancelPendingTask(ctx, run.actions.confirm as never);
     run.actions.confirm = null;
   }
   if (!hostedCheckTerminal(run)) {

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -54,7 +55,7 @@ export async function fenceSourceSlots(
     const scheduled = scheduledId ? await ctx.db.system.get(scheduledId) : null;
     const id = typeof entry === 'string' ? entry : entry.task;
     if (scheduled?.state.kind === 'inProgress' && id !== finishedTask) active.push(entry);
-    else if (scheduled?.state.kind === 'pending') await ctx.scheduler.cancel(scheduledId!);
+    else await cancelPendingTask(ctx, scheduledId!, scheduled);
   }
   await ctx.db.patch(pool._id, { active });
 }

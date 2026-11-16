@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { makeFunctionReference } from 'convex/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './server';
@@ -120,25 +121,19 @@ export async function fastLanding(
 export async function mainRed(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
   return Boolean((await auditRow(ctx, projectId))?.red);
 }
-/**
- * A wake whose task already ran (a start that threw rolls back its own wake
- * clear) must not look pending forever. Only a wake overdue by a minute is
- * looked up, so the normal path reads nothing extra.
- */
-async function wakeFinished(ctx: MutationCtx, wake: { taskId: Id<'_scheduled_functions'>; at: number }) {
-  if (wake.at > Date.now() - 60_000) return false;
-  const task = await ctx.db.system.get(wake.taskId);
-  return !task || (task.state.kind !== 'pending' && task.state.kind !== 'inProgress');
-}
 export async function armAudit(
   ctx: MutationCtx,
   row: Doc<'projectHostedMainAudits'>,
   at: number,
   extra: { retry?: boolean } = {},
 ) {
-  const finished = row.wake ? await wakeFinished(ctx, row.wake) : false;
+  // Recover a start that rolled back its wake clear, while coalescing live wakes.
+  // Reuse the overdue lookup for cancellation rather than reading the task twice.
+  const task =
+    row.wake && row.wake.at <= Date.now() - 60_000 ? await ctx.db.system.get(row.wake.taskId) : undefined;
+  const finished = task !== undefined && (!task || !['pending', 'inProgress'].includes(task.state.kind));
   if (row.wake && row.wake.at <= at && !finished) return;
-  if (row.wake && !finished) await ctx.scheduler.cancel(row.wake.taskId);
+  if (row.wake && !finished) await cancelPendingTask(ctx, row.wake.taskId, task);
   const taskId = await ctx.scheduler.runAfter(
     Math.max(0, at - Date.now()),
     makeFunctionReference<'mutation'>('projectHostedMainAudit:start'),
@@ -148,7 +143,7 @@ export async function armAudit(
 }
 export async function clearAuditWake(ctx: MutationCtx, row: Doc<'projectHostedMainAudits'>) {
   if (row.wake) {
-    await ctx.scheduler.cancel(row.wake.taskId);
+    await cancelPendingTask(ctx, row.wake.taskId);
     await ctx.db.patch(row._id, { wake: undefined });
   }
 }
@@ -277,7 +272,7 @@ export async function noteMainLanding(
   if ((row.lastGreen?.sequence ?? -1) >= receipt.snapshot.revision) return;
   const baseline = receipt.crossHeadProof?.audit;
   if (baseline?.source === 'main-receipt' && (row.lastGreen?.sequence ?? -1) < baseline.sequence) {
-    if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
+    if (row.wake) await cancelPendingTask(ctx, row.wake.taskId);
     // The proof action read this predecessor's immutable full selection; H14
     // revalidated its exact run. Bootstrap legacy full-gated projects without
     // falsely stamping the newly recomposed head as full-audited.
@@ -292,7 +287,7 @@ export async function noteMainLanding(
     row = { ...row, ...patch };
   }
   if (!receipt.crossHeadProof && fullGate(run) && !docsGate(run)) {
-    if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
+    if (row.wake) await cancelPendingTask(ctx, row.wake.taskId);
     const ended = await recovery(
       ctx,
       row,

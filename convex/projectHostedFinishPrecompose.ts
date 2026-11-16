@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { cancelPendingFinishWake } from './projectHostedFinishWake';
+import { cancelPendingTask } from './schedulerCancel';
 import type { MutationCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { hostedFinishSchema } from '../src/hosted-finish';
@@ -13,7 +13,7 @@ export async function claimFinishPrecompose(ctx: MutationCtx, row: Doc<'projectH
   const value = hostedFinishSchema.parse(JSON.parse(row.value));
   const pending = value.pending;
   if (!pending?.precompose) return;
-  await cancelPendingFinishWake(ctx, row);
+  await cancelPendingTask(ctx, row.wake?.taskId);
   const claimed = {
     ...value,
     pending: null,

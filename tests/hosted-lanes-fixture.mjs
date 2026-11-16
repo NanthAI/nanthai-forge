@@ -201,6 +201,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
       const locate = id => Object.keys(baseline).find(table => view(table).has(id));
       const ctx = validateContext({
         meta: {
+          getRequestMetadata: async () => ({ scheduledFunctionId: null }),
           getTransactionMetrics: async () => ({
             databaseQueries: { used: meter.ranges, remaining: 4096 - meter.ranges },
             bytesRead: { used: meter.readBytes, remaining: 16 * 1024 * 1024 - meter.readBytes },
@@ -408,6 +409,9 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
           },
         },
       });
+      // System task reads use the same metered transaction snapshot as ordinary rows.
+      // Scheduler decorators with a separate task store override this alongside scheduling.
+      ctx.db.system = { get: ctx.db.get };
       const unchanged = () => {
         // A retained read set can be checked again after later transactions.
         // Rebuild each live-table equality index once for this validation.

@@ -34,7 +34,7 @@
       "unit": "bytes",
       "max": 1048576,
       "source": "Issue 6fbba986: tests/sync-resolve-cost-guard.test.mjs executes legacy recipe conflict sync then real save and resolve jobs. The former 4 MiB writer uploaded about 9.4 MB for the recovery pair.",
-      "reason": "The approved 1\u20138 MiB byte-range writer reuses verified spans, with unchanged State identity, call windows, source envelopes and zero idle work. New bodies fit one chunk plus bounded metadata.",
+      "reason": "The approved 1–8 MiB byte-range writer reuses verified spans, with unchanged State identity, call windows, source envelopes and zero idle work. New bodies fit one chunk plus bounded metadata.",
       "issue": "6fbba986"
     },
     {
@@ -739,11 +739,11 @@
       "measuredBy": "landing-fixture",
       "metric": "readBytes",
       "unit": "bytes",
-      "value": 713500,
+      "value": 714408,
       "floor": 2048,
       "source": "tests/landing-cost-guard.test.mjs, unchanged six-landing mix; Issue 71dbe458: manifest-only V8 composition and shared per-action descriptors/read cache. Synthetic counts, not billed usage. Merged metrics projection 1441a9bf plus CI batch 65534f20 qualification; includes compact metric-row metadata I/O. Remeasured with CI batch resolution on accepted proof/driver main 94bd1b20; all ledger ids retained (65534f20). CI batch qualification on refreshed merged code 020cc310: retained every ledger id and recorded measured combined reads (65534f20). S3 324f1d97 ticket/body split: unchanged six-landing fixture reads 713393 and writes 223370 B per landing; synthetic document I/O, not billed usage.",
       "issue": "71dbe458",
-      "reason": "Database bandwidth was the largest Convex part in capture #1 ($0.0037 of $0.0086 per landing). The last-shard CI result read cut is the latest decision. Source-step cut (71dbe458) ratchets 806895 to 803701; total calls 38 to 37.5 per landing, Node actions 4/6 to 3/6, V8 unchanged at 59/6. Starter modeled Convex subtotal includes $2.20/M calls, $0.22/GB DB I/O, $0.33/GB-h actions and $0.132/GB R2 upload egress; see hosted-source-worker.md for scope and arithmetic. Remeasured after syncing accepted main: 801924 bytes per landing (includes intervening accepted changes); every existing entry and reason is retained. CI batch merged qualification: 799340 B, reusing transaction-authorized project snapshots instead of duplicate reads (65534f20). Unindexed request/selection bodies remove cold bytes from phase writes without changing function calls or the observer ceiling."
+      "reason": "Database bandwidth was the largest Convex part in capture #1 ($0.0037 of $0.0086 per landing). The last-shard CI result read cut is the latest decision. Source-step cut (71dbe458) ratchets 806895 to 803701; total calls 38 to 37.5 per landing, Node actions 4/6 to 3/6, V8 unchanged at 59/6. Starter modeled Convex subtotal includes $2.20/M calls, $0.22/GB DB I/O, $0.33/GB-h actions and $0.132/GB R2 upload egress; see hosted-source-worker.md for scope and arithmetic. Remeasured after syncing accepted main: 801924 bytes per landing (includes intervening accepted changes); every existing entry and reason is retained. CI batch merged qualification: 799340 B, reusing transaction-authorized project snapshots instead of duplicate reads (65534f20). Unindexed request/selection bodies remove cold bytes from phase writes without changing function calls or the observer ceiling. Lead-approved scheduler safety (1122c9c9): +908 measured B/landing (715683.5 -> 716591.5), modeled +$0.0001816/1,000; ledger 713500 -> 714408, calls/writes unchanged."
     },
     {
       "id": "landing-write-bytes",

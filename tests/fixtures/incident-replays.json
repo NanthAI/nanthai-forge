@@ -223,6 +223,12 @@
       "what": "Completed source compose stranded before admission when its desired controller cancelled a running wake; later submissions overtook it.",
       "file": "tests/hosted-landing-desired.test.mjs",
       "test": "incident replay 08169467: completed compose replaces a running desired wake without cancellation and lands after client exit"
+    },
+    {
+      "incident": "ad80e037",
+      "what": "Convex 1.50 throws when a running scheduled mutation cancels its own task, even though its system row remains pending.",
+      "file": "tests/scheduler-cancel.test.mjs",
+      "test": "incident ad80e037: scheduled mutation self-cancel is skipped even while its system row is pending, without DB I/O"
     }
   ]
 }

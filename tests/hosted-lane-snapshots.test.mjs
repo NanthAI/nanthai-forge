@@ -55,6 +55,7 @@ async function fixture(t, { policy = true, packs = false } = {}) {
   const r2 = fakeSourceR2(t);
   const f = await lifecycleFixture();
   const jobs = new Map();
+  let runningJob = null;
   const schedule = (at, ref, args) => {
     const id = `job-${jobs.size + 1}`;
     jobs.set(id, { id, at, name: getFunctionName(ref), args, state: 'pending' });
@@ -70,6 +71,13 @@ async function fixture(t, { policy = true, packs = false } = {}) {
   };
   f.decorateContext(ctx => {
     ctx.scheduler = scheduler;
+    ctx.meta.getRequestMetadata = async () => ({ scheduledFunctionId: runningJob });
+    ctx.db.system = {
+      get: async id => {
+        const job = jobs.get(id);
+        return job ? { _id: id, state: { kind: job.state } } : null;
+      },
+    };
   });
   const project = f.tables.hostedProjects.get(f.projectId);
   if (policy)
@@ -128,12 +136,18 @@ async function fixture(t, { policy = true, packs = false } = {}) {
   const runJobs = async (now = Date.now()) => {
     for (const job of jobs.values())
       if (job.state === 'pending' && job.at <= now) {
-        job.state = 'success';
+        job.state = 'inProgress';
+        runningJob = job.id;
         // An action: no transaction of its own; each runMutation is one.
-        await handlers[job.name]._handler(
-          { scheduler, runMutation: (ref, args) => invoke(getFunctionName(ref), args, null) },
-          job.args,
-        );
+        try {
+          await handlers[job.name]._handler(
+            { scheduler, runMutation: (ref, args) => invoke(getFunctionName(ref), args, null) },
+            job.args,
+          );
+        } finally {
+          job.state = 'success';
+          runningJob = null;
+        }
       }
   };
   /** Packed snapshots are what a CLI takes against a server that advertises lane-snapshot-packs. */

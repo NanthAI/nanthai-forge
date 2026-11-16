@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { v, getDocumentSize, type Value } from 'convex/values';
 import { internalQuery, internalMutation, type QueryCtx } from './server';
 import { deleteLandingRequestBodies } from './projectLandingRequestBody';
@@ -121,8 +122,7 @@ export const purgeOrphans = internalMutation({
     for (const row of rows) {
       for (const path of references.tasks)
         for (const id of valuesAt(row, path)) {
-          const task = await ctx.db.system.get(id as Id<'_scheduled_functions'>);
-          if (task?.state.kind === 'pending') await ctx.scheduler.cancel(id as Id<'_scheduled_functions'>);
+          await cancelPendingTask(ctx, id as Id<'_scheduled_functions'>);
         }
       if (input.table === 'projectHostedLandingRequests')
         for (const body of await deleteLandingRequestBodies(ctx.db, row)) bodyBytes += getDocumentSize(body);

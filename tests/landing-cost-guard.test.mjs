@@ -507,11 +507,13 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   const started = performance.now();
   baseline = await measureLandingCosts(t, { indexExports: true });
   t.diagnostic(`liveLinePairedMix ${JSON.stringify(baseline.measured)}`);
+  t.diagnostic(`scenarios ${JSON.stringify(baseline.scenarios)}`);
   const solo = baseline.scenarios.solo;
   const landServer = {
     calls: solo.queries + solo.observerQueries + solo.mutations + solo.v8Actions + solo.nodeActions,
     reads: solo.readDocuments,
   };
+  // 1122c9c9: lead approved solo 492 -> 494 reads; measured +908 B/landing = +$0.0001816/1,000 for pending-only scheduler safety.
   assertCommandWeight('landServerSolo', landServer);
   t.diagnostic(JSON.stringify({ landServerSolo: landServer }));
   const verdicts = judgeCosts(costs, costGuard, 'landing-fixture', baseline.measured);
@@ -519,7 +521,6 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   // Warnings and ratchet notices go to the check log; only a fail stops the landing.
   for (const line of lines) t.diagnostic(line);
   if (verdicts.some(v => v.status !== 'pass')) console.warn(lines.join('\n'));
-  t.diagnostic(`scenarios ${JSON.stringify(baseline.scenarios)}`);
   for (const scenario of Object.values(baseline.scenarios)) {
     const commits = scenario.reuseCapture.sourceCommit;
     if (commits)

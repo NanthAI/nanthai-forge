@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { scheduleR2Purge } from './projectPurgeScheduling';
 import { ensureProjectSlug, slugTaken } from './urlIdentity';
 import { blobStore } from './blobStore';
@@ -344,8 +345,7 @@ export const purge = internalMutation({
       .take(50);
     for (const job of imports) {
       if (job.task) {
-        const task = await ctx.db.system.get(job.task);
-        if (task && task.state.kind === 'pending') await ctx.scheduler.cancel(job.task);
+        await cancelPendingTask(ctx, job.task);
       }
       if (job.protocol === undefined) await blobStore(ctx).delete(job.cursor);
       await ctx.db.delete(job._id);

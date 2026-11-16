@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelPendingTask } from './schedulerCancel';
 import { fixGate } from '../src/culprit-bisect';
 import { v } from 'convex/values';
 import { internalMutation, internalQuery } from './server';
@@ -235,17 +236,17 @@ import {
   recordLandingObservation,
   type LandingRow,
 } from './projectHostedLandingStore';
-import { cancelPendingFinishWake, finishRow, wakeLandingOrderWaiters } from './projectHostedFinishWake';
+import { finishRow, wakeLandingOrderWaiters } from './projectHostedFinishWake';
 import { semanticPayload } from '../src/semantic-payload';
 import type { HostedLandingState } from '../src/hosted-landing';
 
 /** Publication already validated the exact attempt. A main-red hold is an event
  * wait: retain ordinary observations without the generic ready/finish wakes. */
 export async function holdMainRed(ctx: MutationCtx, row: LandingRow, next: HostedLandingState) {
-  if (row.alarm) await ctx.scheduler.cancel(row.alarm.taskId);
+  if (row.alarm) await cancelPendingTask(ctx, row.alarm.taskId);
   const finish = await finishRow(ctx, { projectId: row.projectId, submissionId: row.submissionId });
   if (finish?.wake) {
-    await cancelPendingFinishWake(ctx, finish);
+    await cancelPendingTask(ctx, finish.wake?.taskId);
     await ctx.db.patch(finish._id, { wake: null });
   }
   await retainLandingProgress(ctx, next);
