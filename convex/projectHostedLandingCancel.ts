@@ -18,7 +18,7 @@ import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { notifyStackedLandingEnded } from './projectHostedStackNotice';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
-import { finishRow } from './projectHostedFinishWake';
+import { cancelPendingFinishWake, finishRow } from './projectHostedFinishWake';
 import { releaseLandingQueue } from './projectHostedLandingWake';
 import {
   hostedLandingCancelSchema,
@@ -223,7 +223,7 @@ export async function cancelHostedLanding(
     // Invalidate cancelled member IO after release has scheduled its peers.
     const finish = await finishRow(ctx, identity);
     if (finish) {
-      if (finish.wake) await ctx.scheduler.cancel(finish.wake.taskId);
+      await cancelPendingFinishWake(ctx, finish);
       await ctx.db.patch(finish._id, { wake: null, waiting: false });
     }
     const queue = await landingQueue(ctx, { projectId, channel: state.request.channel });

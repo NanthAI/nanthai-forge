@@ -10,7 +10,7 @@ import { installFinishCompose } from './projectHostedFinishCompose';
 import { crossHeadProofSchema } from '../src/hosted-cross-head-proof';
 import { invariant } from '../src/errors';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { scheduleFinish } from './projectHostedFinishWake';
+import { cancelPendingFinishWake, scheduleFinish } from './projectHostedFinishWake';
 import { reuseDecision, type ReuseReads } from './projectHostedReuseDecision';
 export { reuseDecision, type ReuseIneligible } from './projectHostedReuseDecision';
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() };
@@ -98,7 +98,7 @@ export const complete = internalMutation({
         'EVIDENCE_CHANGED',
         'Complete only the original current proof analysis.',
       );
-    if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
+    await cancelPendingFinishWake(ctx, row);
     await ctx.db.patch(row._id, { wake: null });
     await installFinishCompose(
       ctx,

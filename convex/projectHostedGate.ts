@@ -235,7 +235,7 @@ import {
   recordLandingObservation,
   type LandingRow,
 } from './projectHostedLandingStore';
-import { finishRow, wakeLandingOrderWaiters } from './projectHostedFinishWake';
+import { cancelPendingFinishWake, finishRow, wakeLandingOrderWaiters } from './projectHostedFinishWake';
 import { semanticPayload } from '../src/semantic-payload';
 import type { HostedLandingState } from '../src/hosted-landing';
 
@@ -245,7 +245,7 @@ export async function holdMainRed(ctx: MutationCtx, row: LandingRow, next: Hoste
   if (row.alarm) await ctx.scheduler.cancel(row.alarm.taskId);
   const finish = await finishRow(ctx, { projectId: row.projectId, submissionId: row.submissionId });
   if (finish?.wake) {
-    await ctx.scheduler.cancel(finish.wake.taskId);
+    await cancelPendingFinishWake(ctx, finish);
     await ctx.db.patch(finish._id, { wake: null });
   }
   await retainLandingProgress(ctx, next);

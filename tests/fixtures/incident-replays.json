@@ -208,7 +208,7 @@
     },
     {
       "incident": "c01d5457",
-      "what": "A composing cohort retry/split retains an obsolete finish timer; late retired callbacks can displace successor work. Synthetic failed-source handoff replay; the historical long-running source action remains separately unqualified.",
+      "what": "A composing cohort retry/split retains an obsolete finish timer; late retired callbacks can displace successor work. Failed-source handoff replay with a fresh solo plan and causal running-action cancellation; the historical long-running source action remains separately unqualified.",
       "file": "tests/hosted-cohort-finish-wake.test.mjs",
       "test": "incident c01d5457: failed shared compose splits ${count} saved Lanes without a watchdog or changed member pins"
     },

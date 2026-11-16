@@ -74,7 +74,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `62033ba2` | Core claim: an owner-held predicted predecessor stranded a passed follower; followers now recompose and land while the owner decides |
 | `stucktrain` | Core claim: a passed three-Lane cohort retained a future reservation-expiry wake after its holder failed; order release now replaces that obsolete timer |
 | `10d253c6` | Core claim: a 130-path Lane on hot files starved in a composition-conflict loop (10 land operations, about 2.5 h; 2026-11-10) |
-| `c01d5457` | Cohort retry/split and singleton-to-solo handoffs replace the retired finish timer; late retired compose callbacks cannot displace successor work. Synthetic failure/split progression is replayed without watchdog execution; the historical long-running source action still needs live qualification |
+| `c01d5457` | Cohort retry/split and singleton-to-solo handoffs replace the retired finish timer; late retired compose callbacks cannot displace successor work. Running owners retain their descendants; the replay models Convex action cancellation and a fresh solo plan. Synthetic failure/split progression is replayed without watchdog execution; the historical long-running source action still needs live qualification |
 | `5d690345` | Core claim: a docs-only main advance changed the full audit's source pin, causing a false audit-baseline refusal and discarding a passed check |
 
 | `27865bc4` | Red main: a new failing test has no predecessor report; later failed audits must retain one recovery and complete its automatic reverse |

@@ -29,7 +29,9 @@ retry and resolution completion. Composing cohorts recover within the existing
 five-minute train hold and retain lost-owner diagnostics. A retry or split replaces
 the retired compose timer immediately, including the solo source backoff after
 a singleton split; a retired cohort's late compose callback
-cannot replace its successor's finish wake. The long-running source action from
+cannot replace its successor's finish wake. Finish timer retirement cancels only
+pending tasks: running actions drain under their existing IO fences, preserving
+their later source dispatch and recovery wakes. The long-running source action from
 incident `c01d5457` still needs live qualification. One attempt allocator
 refreshes reserved finish ordinals at installation, guarded by foundation checks.
 A failed,

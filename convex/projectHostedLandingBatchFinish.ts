@@ -29,7 +29,7 @@ import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import type { FinishCommand } from '../src/hosted-finish';
 import { r2Key } from './r2';
-import { scheduleFinish, watchFinishCompose } from './projectHostedFinishWake';
+import { cancelPendingFinishWake, scheduleFinish, watchFinishCompose } from './projectHostedFinishWake';
 import { isStored } from './projectObjectFields';
 import { hostedStartMain } from './projectHostedChannels';
 import { invariant } from '../src/errors';
@@ -351,7 +351,7 @@ export async function resumeBatchIO(
   await ctx.db.patch((await objectRow(ctx, object))._id, { r2Committed: true });
   await writeBatch(ctx, key, { ...batch, uploadIndex: batch.uploadIndex + 1 });
   const { row } = await loadFinish(ctx, input);
-  if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
+  await cancelPendingFinishWake(ctx, row);
   await ctx.db.patch(row._id, { wake: null });
   await wakeBatch(ctx, key);
 }

@@ -7,7 +7,7 @@ import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
 import { loadFinish, failFinish } from './projectHostedFinishStore';
 import { loadLanding, writeLanding, type LandingIdentity } from './projectHostedLandingStore';
-import { scheduleFinish, watchFinishCompose } from './projectHostedFinishWake';
+import { cancelPendingFinishWake, scheduleFinish, watchFinishCompose } from './projectHostedFinishWake';
 import { prepareFinishCompose, installFinishCompose, reserveFinishRetry } from './projectHostedFinishCompose';
 import { hostedComposeInput } from './projectHostedComposeStore';
 import { submitHostedCompose } from './projectHostedComposeJobs';
@@ -351,7 +351,7 @@ async function resumeFinishIOOnce(
       operationId: value.pending.operations.compose,
     });
   }
-  if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
+  await cancelPendingFinishWake(ctx, row);
   await ctx.db.patch(row._id, { wake: null });
   if (input.command.kind === 'page') await scheduleFinish(ctx, (await ctx.db.get(row._id))!);
   else

@@ -18,6 +18,40 @@ test.after(() => {
 const batches = f => [...f.tables.projectHostedLandingBatches.values()].map(r => JSON.parse(r.value));
 const finish = (f, id) => [...f.tables.projectHostedFinishes.values()].find(r => r.submissionId === id);
 const tx = (f, name, fn) => f.transaction(name, { _handler: fn }, {});
+// Convex lets a canceled running action continue, but cancels its newly
+// scheduled descendants. A fake that only marks the old timer misses this loss.
+function causalCancellation(f) {
+  const parents = new Map(),
+    canceled = new Set();
+  let parent = null;
+  const retired = id => !!id && (canceled.has(id) || retired(parents.get(id)));
+  f.extendContext(ctx => {
+    const scheduler = ctx.scheduler;
+    ctx.scheduler = {
+      ...scheduler,
+      cancel: async id => {
+        if (f.tables._scheduled_functions.get(id)?.state.kind === 'inProgress') canceled.add(id);
+        return scheduler.cancel(id);
+      },
+      runAfter: async (...args) => {
+        const id = await scheduler.runAfter(...args);
+        parents.set(id, parent);
+        if (retired(parent)) await ctx.db.patch(id, { state: { kind: 'canceled' } });
+        return id;
+      },
+    };
+  });
+  const execute = f.execute;
+  f.execute = async (...args) => {
+    const previous = parent;
+    parent = args[0]._id;
+    try {
+      return await execute(...args);
+    } finally {
+      parent = previous;
+    }
+  };
+}
 async function sourcePending(f) {
   for (let n = 0; n < 100; n++) {
     if (f.pending().some(t => t.name === 'projectConvexSource:step')) return batches(f)[0];
@@ -126,6 +160,7 @@ async function settle(f) {
 for (const count of [2, 8])
   test(`incident c01d5457: failed shared compose splits ${count} saved Lanes without a watchdog or changed member pins`, async t => {
     const f = await batchesFixture(t, { count, fileCount: count === 8 ? 4000 : 3 });
+    causalCancellation(f);
     const batch = await sourcePending(f);
     const pins = await Promise.all(
       f.entries.map(async e => ({
@@ -143,6 +178,8 @@ for (const count of [2, 8])
       operationId: batch.composeOperationId,
     };
     const source = await tx(f, 'read-cohort-compose', ctx => composeStore.loadCompose(ctx, auth, false));
+    // The worker completion is a later event, so solo fallback needs a fresh plan.
+    f.advanceClock(1);
     // The source worker reports a deterministic failed composition; no test ran.
     await tx(f, 'fail-cohort-source', async ctx => {
       const job = await jobs.loadSourceJob(ctx, f.projectId, source.row.jobId);

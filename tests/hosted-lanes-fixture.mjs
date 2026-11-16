@@ -434,6 +434,13 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
     decorateContext(fn) {
       decorate = fn;
     },
+    extendContext(fn) {
+      const previous = decorate;
+      decorate = async (...args) => {
+        await previous?.(...args);
+        return fn(...args);
+      };
+    },
     patch(table, id, value) {
       const row = checkDocument(schema, table, updatedDocument(tables[table].get(id), value));
       tables[table].set(id, row);

@@ -24,6 +24,17 @@ export const finishRow = (
       q.eq('projectId', input.projectId).eq('submissionId', input.submissionId),
     )
     .unique();
+/** Canceling a running Convex action also cancels functions it schedules later.
+ * Retire only pending timers; running owners finish under their existing IO fences. */
+export async function cancelPendingFinishWake(
+  ctx: MutationCtx,
+  row: Pick<Doc<'projectHostedFinishes'>, 'wake'>,
+  knownTask?: { state: { kind: string } } | null,
+) {
+  if (!row.wake) return;
+  const task = knownTask === undefined ? await ctx.db.system.get(row.wake.taskId) : knownTask;
+  if (task?.state.kind === 'pending') await ctx.scheduler.cancel(row.wake.taskId);
+}
 /** Only pending work has a timer. Failed scheduling receipts can be repaired by
  * the original enqueue/resume; a running step retains its exact IO generation. */
 export async function scheduleFinish(
@@ -32,11 +43,11 @@ export async function scheduleFinish(
   delay = 0,
   retainId = false,
 ) {
+  const task = row.wake ? await ctx.db.system.get(row.wake.taskId) : null;
   if (row.wake && !retainId) {
-    const task = await ctx.db.system.get(row.wake.taskId);
     if (task?.state.kind === 'pending' || task?.state.kind === 'inProgress') return;
   }
-  if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
+  await cancelPendingFinishWake(ctx, row, task);
   const id = retainId && row.wake ? row.wake.id : crypto.randomUUID();
   const taskId = await ctx.scheduler.runAfter(
     delay,
