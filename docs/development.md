@@ -23,7 +23,7 @@ npm run format               # oxfmt --write; run before committing
 | `npm run format:check` | Oxfmt checks the existing JS/TS-only formatting scope |
 | `npm run verify:sequential` | The same steps one after another (slower; use to read one step's output in order) |
 | `npm test` | Builds, then runs `node --test tests/*.test.mjs` |
-| `npm run build:web` | Hosted browser build into `hosted-web-dist`, then evaluate every non-worker JavaScript chunk with the deploy smoke harness (no deployment); `build:hosted` is an alias |
+| `npm run build:web` | Hosted build into `hosted-web-dist`, then deploy smoke on every non-worker chunk; `build:hosted` aliases it |
 | `npm run smoke:package` | Packs and installs the tarball offline, then checks its file list and notice hashes |
 
 Tests use synthetic repositories and real Git, Node and MCP subprocesses. Pass-or-fail is the only result that counts: a skipped test is not a pass. Automatic cleanup tests control the working-directory probes through `tests/cleanup-process-fixture.mjs`, including the concurrent finish child, so unrelated host processes and unavailable `/proc` or `lsof` coverage cannot change lifecycle assertions. `tests/clean-processes.test.mjs` separately exercises both OS scanner branches, missing probes, unreadable processes and process-exit races with synthetic inputs; unknown coverage continues to retain local copies.
@@ -268,7 +268,7 @@ For new prose under `docs/`, add a matching JSON manifest under `scripts/package
 
 `convex/_generated/api.d.ts` is disposable and ignored by source control. Core builds, typechecks and verification regenerate its exact module inventory locally with `node scripts/prepare-convex-api.mjs`, using filenames without loading or executing modules. Public verification test shards also run this preparation when reusing build artifacts, which omit the ignored declaration. Convex codegen can also regenerate it. Adding or deleting a Convex module requires no shared generated-file edit; direct compiler invocations should run the preparation script first.
 
-`node scripts/web-bundle-report.mjs` uses Vite's manifest to report entry and immediate Hosted import bytes/gzip. Extra manifest entries after the output directory select screens. Optional screens and fonts (chosen by Unicode range) stay separate. These build measurements exclude provider scripts, API responses and browser-selected icons; they are not a network trace.
+`node scripts/web-bundle-report.mjs` uses Vite's manifest to report entry and immediate Hosted import bytes/gzip. Extra manifest entries after the output directory select screens. Optional screens and fonts (chosen by Unicode range) stay separate. Measurements exclude provider scripts, API responses and browser-selected icons; they are not a network trace. The browser-bundle test reuses its configured build for smoke.
 
 ### The standard check
 

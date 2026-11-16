@@ -15,6 +15,19 @@ const loose = base =>
     apply: () => loose({}),
   });
 const storage = { getItem: () => null, setItem() {}, removeItem() {} };
+const classList = () => {
+  const tokens = new Set();
+  return {
+    add: (...names) => names.forEach(name => tokens.add(name)),
+    remove: (...names) => names.forEach(name => tokens.delete(name)),
+    contains: name => tokens.has(name),
+    toggle(name, force = !tokens.has(name)) {
+      if (force) tokens.add(name);
+      else tokens.delete(name);
+      return Boolean(force);
+    },
+  };
+};
 Object.assign(globalThis, {
   self: globalThis,
   window: globalThis,
@@ -33,7 +46,7 @@ Object.assign(globalThis, {
   },
 });
 globalThis.ResizeObserver = globalThis.IntersectionObserver = globalThis.MutationObserver;
-const element = () => ({ style: {}, setAttribute() {}, addEventListener() {} });
+const element = () => ({ style: {}, classList: classList(), setAttribute() {}, addEventListener() {} });
 globalThis.document = loose({
   getElementById: () => loose({ nodeType: 1, style: {}, appendChild() {}, addEventListener() {} }),
   createElement: element,
@@ -41,7 +54,7 @@ globalThis.document = loose({
   createTextNode: () => ({}),
   createComment: () => ({}),
   addEventListener() {},
-  documentElement: { style: {}, dataset: {} },
+  documentElement: { style: {}, dataset: {}, classList: classList() },
   querySelector: () => null,
   querySelectorAll: () => [],
   getElementsByTagName: () => [],

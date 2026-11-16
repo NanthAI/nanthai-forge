@@ -12,8 +12,9 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 
 /** 2026-10-28: web/src reached src/native-import-merge.ts through landing-waiting, the built Shell chunk called
  * createRequire() and the whole app showed "Could not load Forge.". Build the real web app and refuse any chunk
- * that carries Node-only code. The build itself also fails on a first-party Node builtin import. */
-test('the browser bundle contains no Node-only code', () => {
+ * that carries Node-only code or fails module evaluation. Synthetic public config exercises the configured app,
+ * and this fixed smoke test participates in every code selection. */
+test('the configured browser bundle contains no Node-only code and evaluates every chunk', () => {
   const out = mkdtempSync(join(tmpdir(), 'forge-web-bundle-'));
   try {
     const build = spawnSync(
@@ -32,7 +33,18 @@ test('the browser bundle contains no Node-only code', () => {
         '--logLevel',
         'warn',
       ],
-      { cwd: root, encoding: 'utf8' },
+      {
+        cwd: root,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          VITE_CONVEX_URL: 'https://forge-smoke.convex.cloud',
+          VITE_CONVEX_SITE_URL: 'https://forge-smoke.convex.site',
+          VITE_CLERK_PUBLISHABLE_KEY: `pk_test_${Buffer.from('smoke.clerk.accounts.dev$').toString('base64')}`,
+          VITE_GITHUB_APP_SLUG: 'forge-smoke',
+          VITE_FORGE_DEMO_REPOSITORY: 'synthetic/demo',
+        },
+      },
     );
     assert.equal(build.status, 0, `web build failed:\n${build.stdout}\n${build.stderr}`);
     const assets = join(out, 'assets');
@@ -47,6 +59,11 @@ test('the browser bundle contains no Node-only code', () => {
         if (names.includes(match[1].slice(5))) offenders.push(`${file}: ${match[1]}`);
     }
     assert.deepEqual([...new Set(offenders)], [], 'Node-only code reached the browser bundle');
+    const smoke = spawnSync(process.execPath, ['scripts/web-smoke-load.mjs', out], {
+      cwd: root,
+      encoding: 'utf8',
+    });
+    assert.equal(smoke.status, 0, `configured web smoke failed:\n${smoke.stdout}\n${smoke.stderr}`);
   } finally {
     rmSync(out, { recursive: true, force: true });
   }

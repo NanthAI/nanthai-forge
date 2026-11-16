@@ -114,6 +114,31 @@ test('React Aria keyboard setup loads with Screen but without the optional orien
   assert.match(result.stdout, /keyboard setup loaded/);
 });
 
+test('the smoke DOM supports module-level motion preferences through the root class list', () => {
+  const motion = pathToFileURL(resolve('web/src/motion-pref.ts')).href;
+  const result = spawnSync(
+    process.execPath,
+    [
+      '--import',
+      './scripts/web-smoke-stub.mjs',
+      '--input-type=module',
+      '-e',
+      `import assert from 'node:assert/strict';
+    try {
+      const { applyMotion } = await import(${JSON.stringify(motion)});
+      applyMotion(true);
+      assert.equal(document.documentElement.classList.contains('mk-motion-full'), true);
+      applyMotion(false);
+      assert.equal(document.documentElement.classList.contains('mk-motion-full'), false);
+      console.log('motion preference loaded'); process.exit(0);
+    } catch (error) { console.error(error); process.exit(1); }`,
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /motion preference loaded/);
+});
+
 test('the landing web build fails on an unevaluated lazy chunk without rebuilding for smoke', () => {
   const dir = mkdtempSync(join(tmpdir(), 'web-build-smoke-'));
   try {
