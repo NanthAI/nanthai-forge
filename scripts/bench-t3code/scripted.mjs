@@ -11,6 +11,7 @@ export const dryGroup = task =>
     : overlapClass(task.overlap).replace(/[^a-z0-9]+/gi, '-');
 
 export function scriptedForge(binDir) {
+  const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
   copyFileSync(new URL('./forge-protocol.mjs', import.meta.url), join(binDir, 'forge-protocol.mjs'));
   const driver = join(binDir, 'scripted-forge.mjs');
   writeFileSync(
@@ -23,7 +24,8 @@ mkdirSync('.bench/dry', { recursive: true });
 writeFileSync('.bench/dry/' + task + '.md', 'dry run ' + task + ' ' + new Date().toISOString() + '\\n');
 if (group) appendFileSync('.bench/dry/group-' + group + '.md', task + '\\n');
 try {
-  await driveForge({ root: process.cwd(), laneId, message: 'bench dry run: ' + task });
+  const result = await driveForge({ root: process.cwd(), laneId, message: 'bench dry run: ' + task });
+  if (process.env.BENCH_SCRIPTED_RESULT) writeFileSync(process.env.BENCH_SCRIPTED_RESULT, JSON.stringify(result));
 } catch (error) {
   console.error(JSON.stringify({ event: 'product-friction', detail: error.message }));
   process.exitCode = 1;
@@ -31,7 +33,7 @@ try {
 `,
   );
   const file = join(binDir, 'scripted-forge.sh');
-  writeFileSync(file, `#!/bin/bash\nexec /usr/local/bin/node ${JSON.stringify(driver)} "$@"\n`);
+  writeFileSync(file, `#!/bin/bash\nexec ${quote(process.execPath)} ${quote(driver)} "$@"\n`);
   chmodSync(file, 0o755);
   return file;
 }

@@ -185,7 +185,7 @@ export function startBroker(cli, callLog, { now = () => new Date().toISOString()
       res.setHeader('Content-Type', 'application/x-ndjson');
       res.flushHeaders();
       const child = execFile(
-        '/usr/local/bin/node',
+        process.execPath,
         [cli, ...args],
         { cwd, env, maxBuffer: 64 << 20 },
         (error, stdout, stderr) => {

@@ -1,0 +1,132 @@
+name: Landing-loop dry micro-bench
+# Accepted mirror pushes only; never a required landing check and never a cron.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'convex/projectHostedLanding*'
+      - 'convex/projectHostedFinish*'
+      - 'convex/projectHostedCompose*'
+      - 'convex/projectHostedAccept*'
+      - 'convex/projectHostedOverlap*'
+      - 'convex/projectHostedLane*'
+      - 'convex/projectHostedStart*'
+      - 'convex/projectHostedQueue*'
+      - 'src/hosted-agent-finish*'
+      - 'src/hosted-finish*'
+      - 'src/hosted-conflict*'
+      - 'src/hosted-observed-conflict*'
+      - 'src/hosted-would-conflict*'
+      - 'src/hosted-start-continuation*'
+      - 'src/hosted-agent-actions.ts'
+      - 'src/hosted-agent-contract.ts'
+      - 'src/hosted-agent-transport.ts'
+      - 'src/hosted-lane.ts'
+      - 'src/hosted-lane-checkout*'
+      - 'src/hosted-lane-location*'
+      - 'src/hosted-lane-transport*'
+      - 'src/hosted-lane-adopt*'
+      - 'src/hosted-root-checkout*'
+      - 'src/hosted-main-checkout*'
+      - 'src/hosted-checkout*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+# E3 can reuse this group when using the same benchmark project.
+concurrency:
+  group: forge-shared-benchmark
+  cancel-in-progress: false
+
+jobs:
+  bench:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: convex-bench
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.22.1'
+      - name: Validate benchmark setup
+        id: setup
+        run: |
+          node --input-type=module <<'JS'
+          import { appendFileSync } from 'node:fs';
+          import { setupProblems } from './scripts/bench-t3code/micro-setup.mjs';
+          const setup = process.env.FORGE_MICRO_SETUP;
+          let config, problems = [];
+          if (setup) {
+            try { config = JSON.parse(setup); }
+            catch { console.error('FORGE_MICRO_SETUP must contain valid JSON.'); process.exit(1); }
+            problems = setupProblems(config, { FORGE_AUTH_TOKEN: true, CONVEX_DEPLOY_KEY: true });
+          }
+          if (problems.length) { console.error(problems.join('\n')); process.exit(1); }
+          if (!setup || process.env.HAS_FORGE_BENCH_TOKEN !== 'true') {
+            console.log('::notice::micro-bench not set up: skipped');
+            process.exit(0);
+          }
+          problems = setupProblems(config, {
+            FORGE_AUTH_TOKEN: true,
+            CONVEX_DEPLOY_KEY: process.env.HAS_CONVEX_DEPLOY_KEY === 'true',
+          });
+          if (problems.length) { console.error(problems.join('\n')); process.exit(1); }
+          appendFileSync(process.env.GITHUB_OUTPUT, 'ready=true\n');
+          JS
+        env:
+          FORGE_MICRO_SETUP: ${{ vars.FORGE_MICRO_SETUP }}
+          HAS_FORGE_BENCH_TOKEN: ${{ secrets.FORGE_BENCH_TOKEN != '' }}
+          HAS_CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY != '' }}
+      - id: admission
+        if: steps.setup.outputs.ready == 'true'
+        run: node scripts/bench-t3code/micro-gate.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - if: steps.admission.outputs.admitted == 'true'
+        run: npm ci --ignore-scripts
+      - if: steps.admission.outputs.admitted == 'true'
+        run: npm run build:core
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        if: steps.admission.outputs.admitted == 'true'
+        id: baseline
+        with:
+          path: .micro-baseline/baseline.json
+          key: landing-micro-baseline-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: landing-micro-baseline-
+      - name: Run measured scenario
+        if: steps.admission.outputs.admitted == 'true'
+        run: |
+          mkdir -p .micro-baseline
+          if ! test -f .micro-baseline/baseline.json; then
+            cp scripts/bench-t3code/micro-baseline.json .micro-baseline/baseline.json
+          fi
+          node scripts/bench-t3code/micro-run.mjs .micro-baseline/baseline.json
+          cp "$BENCH_ROOT/baseline.json" .micro-baseline/baseline.json
+        env:
+          BENCH_ROOT: ${{ runner.temp }}/forge-micro
+          FORGE_MICRO_SETUP: ${{ vars.FORGE_MICRO_SETUP }}
+          FORGE_AUTH_TOKEN: ${{ secrets.FORGE_BENCH_TOKEN }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          GH_TOKEN: ${{ github.token }}
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        if: success() && steps.admission.outputs.admitted == 'true'
+        with:
+          path: .micro-baseline/baseline.json
+          key: landing-micro-baseline-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Report measurements
+        if: always() && steps.admission.outputs.admitted == 'true'
+        run: |
+          if test -f "$BENCH_ROOT/summary.json"; then
+            echo '### Landing-loop micro-bench' >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat "$BENCH_ROOT/summary.json" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Rung 2 unrun: complete the setup in docs/agents/regression-ladder.md. No baseline established.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+        env:
+          BENCH_ROOT: ${{ runner.temp }}/forge-micro

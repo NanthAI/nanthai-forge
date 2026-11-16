@@ -103,7 +103,7 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
   const X = { url, projectId };
   const nf = async (root, verb, body, extra = [], taskEnv) => {
     const { stdout } = await run(
-      '/usr/local/bin/node',
+      process.execPath,
       [cli, 'agent', root, verb, ...extra, JSON.stringify(body)],
       {
         maxBuffer: 64 << 20,
@@ -286,7 +286,7 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
     /** Start the relay process and write the agents' `nforge` client into bin. */
     async binDir(bin) {
       mkdirSync(bin, { recursive: true });
-      const child = spawn('/usr/local/bin/node', [join(import.meta.dirname, 'broker.mjs'), cli, callLog], {
+      const child = spawn(process.execPath, [join(import.meta.dirname, 'broker.mjs'), cli, callLog], {
         stdio: ['pipe', 'pipe', 'inherit'],
       });
       const first = await new Promise((done, fail) => {
@@ -297,7 +297,8 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
       const client = join(bin, 'nforge-client.mjs');
       writeFileSync(client, readFileSync(new URL('./relay-client.mjs', import.meta.url), 'utf8'));
       const file = join(bin, 'nforge');
-      writeFileSync(file, `#!/bin/bash\nexec /usr/local/bin/node ${JSON.stringify(client)} "$@"\n`);
+      const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
+      writeFileSync(file, `#!/bin/bash\nexec ${quote(process.execPath)} ${quote(client)} "$@"\n`);
       chmodSync(file, 0o755);
       return broker;
     },

@@ -37,25 +37,25 @@ data and the break, recovery and Issue rules are in [speed budgets](speed-budget
 - **Cost on change.** The landing check judges a scripted landing mix against the per-landing cost
   ledger (`tests/landing-cost-guard.test.mjs`): a rise over 15% fails before it lands.
 
-## Rung 2: path-triggered dry micro-bench (planned)
+## Rung 2: path-triggered dry micro-bench
 
-Not built. Design and cost estimate for the lead:
+Built; live qualification open. The committed baseline is `unmeasured`.
+Unqualified for bd0f850e/e7e35328.
 
-- **Trigger.** An accepted change to the landing-loop paths: `convex/projectHostedLanding*`,
-  `convex/projectHostedFinish*`, `convex/projectHostedCompose*`, `convex/projectHostedAcceptance*`,
-  `convex/projectHostedOverlap*`, `src/hosted-agent-finish*`, `src/hosted-conflict*` and Lane
-  start/open. It runs after the landing, never blocks it, coalesces to at most one run per 6 hours
-  and never runs when nothing changed.
-- **Scenario.** The B1.5d no-model driver (`scripts/bench-t3code/scripted.mjs`), Forge arm only,
-  N = 3, on the two hot-file clusters: the preview triple (t19456, t22302, t27456) and the pair
-  (t23938, t23766), 5 tasks.
-- **Baseline.** The stored result of the last passing run; report wall time, time to main per task,
-  check runs per task and Convex dollars, flagging any over x 1.5.
-- **Estimated cost per run.** About 15-25 min wall time (5 tasks across 3 workers, about 1.5
-  checks of 2-3 min per task, plus about 5 min setup). About 34 GitHub Actions minutes (1.5 runs x
-  4.5 min per task), $0 on public repositories. Convex about $0.03 (5 x $0.0056 per dry task from
-  the B1.5d dry batch), $0.06 with a 2x margin. At most 4 runs a day: about $0.24 a day at the cap,
-  $0 on days without landing-loop changes.
+- Accepted main pushes match `landing-micro-bench.yml` paths; no landing gate/cron,
+  idle zero. Failed starts/reruns count: one/6h, four/24h. Cooldown pushes are skipped;
+  automatic trailing execution remains open.
+- Existing no-model `scripted.mjs`, Forge only, N=3: t19456/t22302/t27456 then
+  t23938/t23766. E3 (39942bfe) can reuse `micro-setup.mjs` and concurrency group
+  `forge-shared-benchmark`.
+- Compare last passing baseline: wall, each task's time to main, checks/task, Convex $.
+  Strictly >1.5x alerts existing `stallAlerts`: inspect run/latest diff, fix in the same
+  slice, repeat. Missing coverage/drift/failure never refreshes baseline.
+- Owner setup: `FORGE_BENCH_TOKEN`, nonsecret `FORGE_MICRO_SETUP`, matching bench deploy.
+  Run once, prove alerts, commit measured baseline. Approved $0.06/run, free runners.
+  Forecast only: 15–25 min, ~34 check-minutes plus setup, ~$0.03; R2/storage unmetered.
+- [CLI/MCP weight guard](agent-weight.md) 92dbde9d applies to every screen/agent-contract slice. Full close:
+  0a9df3cd. Actor metrics: seven days after metrics works; comparable load: 24h ~2.4/h.
 
 ## Rung 3: incident replays
 
