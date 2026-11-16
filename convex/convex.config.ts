@@ -8,8 +8,8 @@ import username from '@convex-dev/auth/components/username/convex.config.js';
 
 const app = defineApp({
   env: {
-    AUTH_GITHUB_CLIENT_ID: v.optional(v.string()),
-    AUTH_GITHUB_CLIENT_SECRET: v.optional(v.string()),
+    AUTH_GITHUB_CLIENT_ID: v.string(),
+    AUTH_GITHUB_CLIENT_SECRET: v.string(),
   },
 });
 app.use(auth);
