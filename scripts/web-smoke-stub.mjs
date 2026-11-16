@@ -18,6 +18,9 @@ const storage = { getItem: () => null, setItem() {}, removeItem() {} };
 Object.assign(globalThis, {
   self: globalThis,
   window: globalThis,
+  // Browsers always expose Screen; orientation is optional (including older Safari).
+  // Leave it absent so React Aria's module-level keyboard setup exercises that fallback.
+  screen: {},
   localStorage: storage,
   sessionStorage: storage,
   location: new URL('https://forge.invalid/device'),

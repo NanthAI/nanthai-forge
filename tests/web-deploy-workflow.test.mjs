@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 const workflow = readFileSync('.github/workflows/web-deploy.yml', 'utf8');
@@ -45,11 +49,7 @@ test('the deploy builds, guards, smoke-loads, then deploys the same build, and n
   assert(demo && workflow.includes(`VITE_FORGE_DEMO_REPOSITORY: ${demo}`));
 });
 
-test('the headless smoke fails on a module-evaluation error or unbaked build config', async () => {
-  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
-  const { tmpdir } = await import('node:os');
-  const { join } = await import('node:path');
-  const { spawnSync } = await import('node:child_process');
+test('the headless smoke fails on a module-evaluation error or unbaked build config', () => {
   const dir = mkdtempSync(join(tmpdir(), 'web-smoke-'));
   try {
     mkdirSync(join(dir, 'assets'));
@@ -83,6 +83,73 @@ test('the headless smoke fails on a module-evaluation error or unbaked build con
       /not baked/,
     );
     assert.equal(config({ PATH: process.env.PATH, VITE_CONVEX_URL: 'https://baked.example' }).status, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('React Aria keyboard setup loads with Screen but without the optional orientation API', () => {
+  const keyboard = pathToFileURL(resolve('node_modules/react-aria/dist/private/utils/keyboard.mjs')).href;
+  const result = spawnSync(
+    process.execPath,
+    [
+      '--import',
+      './scripts/web-smoke-stub.mjs',
+      '--input-type=module',
+      '-e',
+      `import assert from 'node:assert/strict';
+      // Catch explicitly: the smoke stub ignores asynchronous render errors, not import failures.
+      try {
+        assert.equal(typeof window.screen, 'object');
+        assert.equal(window.screen.orientation, undefined);
+        await import(${JSON.stringify(keyboard)});
+        console.log('keyboard setup loaded');
+        process.exit(0);
+      }
+      catch (error) { console.error(error); process.exit(1); }`,
+    ],
+    { encoding: 'utf8', env: { ...process.env, NODE_ENV: 'production' } },
+  );
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /keyboard setup loaded/);
+});
+
+test('the landing web build fails on an unevaluated lazy chunk without rebuilding for smoke', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'web-build-smoke-'));
+  try {
+    for (const path of ['scripts', 'node_modules/.bin', 'hosted-web-dist/assets', 'hosted-web-dist/.vite'])
+      mkdirSync(join(dir, path), { recursive: true });
+    for (const name of ['web-smoke-load.mjs', 'web-smoke-stub.mjs'])
+      writeFileSync(join(dir, 'scripts', name), readFileSync(join('scripts', name)));
+    const { scripts } = JSON.parse(readFileSync('package.json', 'utf8'));
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ type: 'module', scripts: { 'build:web': scripts['build:web'] } }),
+    );
+    // Vite's output is synthetic here; exercise the real build recipe and real chunk loader.
+    writeFileSync(
+      join(dir, 'node_modules/.bin/vite'),
+      `#!${process.execPath}
+      import { appendFileSync } from 'node:fs'; appendFileSync('builds', 'built\\n');`,
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      join(dir, 'hosted-web-dist/.vite/manifest.json'),
+      JSON.stringify({ 'src/Hosted.tsx': { file: 'assets/Hosted-x.js' } }),
+    );
+    writeFileSync(join(dir, 'hosted-web-dist/assets/Hosted-x.js'), 'export const ok = 1;');
+    const lazy = join(dir, 'hosted-web-dist/assets/behaviour-x.js');
+    writeFileSync(lazy, 'throw new TypeError("lazy chunk broke");');
+    const run = () => spawnSync('npm', ['run', '--silent', 'build:web'], { cwd: dir, encoding: 'utf8' });
+    const bad = run();
+    assert.equal(bad.status, 1, bad.stdout + bad.stderr);
+    assert.match(bad.stderr, /behaviour-x\.js: TypeError: lazy chunk broke/);
+    assert.equal(readFileSync(join(dir, 'builds'), 'utf8'), 'built\n');
+    writeFileSync(lazy, 'export const ok = 1;');
+    const good = run();
+    assert.equal(good.status, 0, good.stdout + good.stderr);
+    assert.match(good.stdout, /web smoke: 2\/2 chunks evaluated/);
+    assert.equal(readFileSync(join(dir, 'builds'), 'utf8'), 'built\nbuilt\n');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

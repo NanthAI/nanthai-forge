@@ -139,7 +139,7 @@
     "verify": "node scripts/verify.mjs",
     "verify:sequential": "node scripts/prepare-convex-api.mjs && npm run check && npm run check:schema && npm run format:check && npm run typecheck && npm run lint && npm test",
     "build:core": "node scripts/prepare-convex-api.mjs && node node_modules/@typescript/native/bin/tsc --types \"*\" --noUncheckedSideEffectImports false && node scripts/build-edit-hook.mjs && node scripts/build-cli-bundle.mjs",
-    "build:web": "vite build web --mode hosted --config web/vite.config.ts",
+    "build:web": "vite build web --mode hosted --config web/vite.config.ts && node scripts/web-smoke-load.mjs hosted-web-dist",
     "build:hosted": "npm run build:web",
     "dev:hosted": "vite web --mode hosted --config web/vite.config.ts",
     "smoke:hosted": "node --env-file=.env.local scripts/smoke-hosted.mjs",
