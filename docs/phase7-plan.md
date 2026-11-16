@@ -37,7 +37,7 @@ All of stage A starts at once. Nothing in it waits for another stage A Item, exc
 
 ## Stage B: shared base
 
-Stage B builds once what every screen uses. It starts when the framework verdict is recorded; the design-system tokens and contracts can begin during stage A.
+Stage B builds once what every screen uses. It starts when the framework verdict is recorded; the design-system tokens and contracts can begin during stage A. The verdict is recorded: React 19 with React Aria Components, and stage B builds to the [shared-base rules](decisions.md#2026-11-16-rules-for-the-phase-7-shared-base).
 
 | Item | Outcome | Depends on |
 | --- | --- | --- |

@@ -1,6 +1,6 @@
 # Exact as the web app framework: spike
 
-Status: **prototype built and measured; recommendation no-go for the signed-in app rebuild, with a re-check trigger.** The final verdict is a design-review call on Issue 348436e5. The spike asks whether Exact (`expo/exact`, MIT, pre-1.0) should replace React for the signed-in web app. It builds the hardest screen, Lanes with the live top-bar Lane line, against the development deployment, and measures it against today's web. Labels: **M** = measured, **E** = estimated, **R** = read from Exact's source or docs, **U** = unrun.
+Status: **decided: no-go. The signed-in app stays on React 19** ([decision](../decisions.md#2026-11-16-the-web-app-stays-on-react-19)). The review kept the recommendation below, weighed the measurements differently and replaced the re-run trigger. The spike asks whether Exact (`expo/exact`, MIT, pre-1.0) should replace React for the signed-in web app. It builds the hardest screen, Lanes with the live top-bar Lane line, against the development deployment, and measures it against today's web. Labels: **M** = measured, **E** = estimated, **R** = read from Exact's source or docs, **U** = unrun.
 
 The prototype lives outside this repository and is not kept. Forge gains no dependency, file or package from this spike. Exact's template repository has no licence, so the spike only reads it and copies nothing.
 
@@ -16,14 +16,19 @@ The pivot cost is a rewrite of every signed-in screen in Contract. On top of tha
 
 ### What would flip it to go
 
-Re-run this spike, as a measurement only and with the same probes, when **all** of these hold:
+The [decision](../decisions.md#2026-11-16-the-web-app-stays-on-react-19) sets the trigger. Re-run this spike, as a measurement only, with the same probes and with the same screen on the rebuilt React shell as the control, when **all** of these hold:
 
 - Exact ships a packaged CLI or prebuilt toolchain, so setup needs no Rust build.
 - Its Convex binding reopens a stream after a pause without a local patch, and it carries a compatibility promise (a 1.0 release, or maintenance by Convex).
-- A transition's new delay and its new position apply together in one commit. Today they need two commits (see [Motion](#the-lane-line-motion)).
-- One edit shows in under 1 s on the dev loop.
+- Sign-in with Forge's provider, and accessible menu, dialog, palette and reorder behaviour, exist in Exact and are shown working end to end.
 
-If only the first and last hold, Exact is a candidate for a new standalone surface that never touches live data, not for the main app.
+The edit loop and the two-commit transition workaround (see [Motion](#the-lane-line-motion)) are measured again in that re-run. They are costs, not gates.
+
+Once the rebuilt screens exist on React, a re-run can justify Exact for a new surface, such as a native app from one source. Replacing the web app again needs the control to show a gap that React cannot close.
+
+### What the review took from the numbers
+
+The prototype's lead in time to rows, socket frames and catch-up comes mostly from one screen reading one bounded feed, not from the framework: the same screen was never built in React. The rebuild therefore takes the prototype's column below as its bar for how a screen reads its data ([shared-base rules](../decisions.md#2026-11-16-rules-for-the-phase-7-shared-base), rules 4 to 6).
 
 ## Criteria
 

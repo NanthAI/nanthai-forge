@@ -1,6 +1,6 @@
 # Headless behaviour layer for the React app
 
-Status: **proposed; the verdict is a design-direction call made after this comparison.** It applies only if the web app stays on React 19 (the fallback named in the framework spike, Issue 348436e5). Issue f97fb89d owns the choice; the design-system Lane (6ebb58ab) binds it. Labels: **M** measured, **R** read from release history, docs or issues, **U** unrun.
+Status: **decided: React Aria Components**, with conditions ([decision](../decisions.md#2026-11-16-react-aria-components-is-the-headless-layer)). The web app stays on React 19 (framework spike, Issue 348436e5). Issue f97fb89d owns the choice; the design-system Lane (6ebb58ab) binds it. Labels: **M** measured, **R** read from release history, docs or issues, **U** unrun.
 
 ## Recommendation
 
@@ -72,10 +72,15 @@ Items 3 and 4 passed every automated check and showed only in screenshots. A des
 - **Touch drag and Firefox or Safari engines (U).** The checks ran in Chromium only.
 - **Long lists (U).** Reorder was checked on 6 rows, not on hundreds.
 
-## What would flip it
+## What the decision settled
 
-- **Exact is a go (Issue 348436e5).** Then none of these applies, and behaviour comes from Exact.
-- **The palette rule.** If RAC's Autocomplete is still a release candidate when the palette is bound, and the release-candidate risk is not accepted, the palette is built from RAC's stable Menu and SearchField parts without Autocomplete. That does not change the library.
-- **The locale plugin.** If it cannot run in our Vite build, RAC costs about 26 KB more than Base UI plus dnd-kit. That favours Base UI plus dnd-kit, if two libraries and hand-written announcements are accepted.
-- **Rows that shift instead of a drop line.** If the design wants rows to move aside instead of a drop line, dnd-kit or vercel-labs/ui match it more closely.
-- **vercel-labs/ui matures.** If it reaches a stable release with issue 619 fixed and a shipped sortable list, it becomes the strongest option: the best reorder announcements, an agent-first API and the smallest bytes for both pieces.
+The [decision](../decisions.md#2026-11-16-react-aria-components-is-the-headless-layer) answered each open point of this comparison:
+
+- **Exact.** Rejected for Phase 7, so the layer is needed.
+- **The palette rule.** The release-candidate Autocomplete is accepted, inside the one shared palette component at a pinned version. Enter on an empty search runs nothing.
+- **The locale plugin.** Required, and guarded by a byte budget on the layer's chunk. If it breaks it is fixed; the layer loads after first paint, so about 27 KB of translations is not a reason to change library.
+- **Drop line or shifting rows.** The design keeps the drop line.
+- **Keyboard reorder.** RAC's built-in model stands: Enter picks up, arrows choose the place, Enter drops, Escape cancels, with the handle's menu as the direct way.
+- **vercel-labs/ui.** Looked at again after Phase 7. If it reaches a stable release with issue 619 fixed and a shipped sortable list, it has the best reorder announcements, an agent-first API and the smallest bytes. The shared components keep that change away from the screens.
+
+One gap the comparison did not cover: moving a region between a full-width row and two columns (the dock). It is proven on RAC in stage B before any screen binds to it.

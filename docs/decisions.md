@@ -74,37 +74,143 @@ manifest memory failure or authorize a State identity change. Issue 6fbba986 ext
 the routing band with owner-approved extra object-binding work; exact call, byte,
 record and memory guards retain the existing source envelopes.
 
-## Proposed
+## Decisions from 16 November
 
-### Proposed 2026-11-16: React Aria Components as the headless behaviour layer
+The design and architecture review of the two Phase 7 stage A proposals. All
+three entries bind stage B: the design system (`6ebb58ab`), the app shell
+(`84125787`) and the live line (`18af654d`).
 
-If the web app stays on React 19 (framework spike, Issue 348436e5), use React Aria
-Components, with its English-only locale plugin, as the one behaviour layer for
-menus, dialogs, the command palette and reorderable lists. It goes in
-`devDependencies` and loads after first paint, because one menu already costs
-about 48 KB gzip against 24 KB of eager-budget headroom. Why: it is the only
-candidate that covers sortable lists with keyboard and screen-reader support
-built in, it needed no API corrections, it has been stable since 2023, and with
-the plugin its bytes match the alternatives (about 76 KB gzip for both pieces).
-Not yet decided: the verdict is a design-direction call made after review, and
-VoiceOver is still to be checked by a person. Evidence and what would flip it:
-[headless layer comparison](research/headless-layer.md). Source: Issue
+### 2026-11-16: the web app stays on React 19
+
+The signed-in app is rebuilt on today's stack: React 19, Vite and the Convex
+client. Exact is rejected for Phase 7. It met every technical line of the
+[spike](research/exact-spike.md); three things rule it out, and none is speed:
+
+- Every Forge screen is a live Convex read. Exact reaches Convex through a
+  pre-1.0 re-implementation of the sync protocol that neither Convex nor Forge
+  maintains, and one screen was enough to find a reconnect bug in it.
+- None of the web app's foundations carry over. The Convex client, the sign-in
+  SDK and any React headless layer would all be replaced at once, while the
+  sign-in move (`de67c77d`) is itself unproven.
+- The toolchain is a Rust source build of about 10 GB on every builder machine
+  and CI image, and upstream changes daily.
+
+The spike's lead is mostly not the framework's. Rows in 809 ms against 3,345 ms,
+4 socket frames sent against 80 to 94 and a 3-frame catch-up against 106 compare
+one purpose-built screen on one bounded feed with the whole current app. The
+same screen was never built in React, so the framework's own share is unmeasured.
+Bytes prove nothing either: the one screen loads about 270 KB with the highlighter
+lazy, 119 KB of it a motion engine. The rebuild takes the prototype as its bar
+instead ([rule 5](#2026-11-16-rules-for-the-phase-7-shared-base)).
+
+Pivot cost is lowest now, with no redesigned screen built, and is still a new data
+module, client, sign-in path and test drivers under every screen. After stage C
+it is every screen. Re-run the spike, as a measurement with the same probes and
+the same screen on the stage B React shell as its control, when all three hold:
+
+1. Exact installs as a packaged toolchain, with no source build.
+2. Its Convex binding carries a compatibility promise (an Exact 1.0, or
+   maintenance by Convex) and reopens a stream after a pause unpatched.
+3. Sign-in with Forge's provider, and accessible menu, dialog, palette and
+   reorder behaviour, exist in Exact and are shown working end to end.
+
+The edit loop (2.3 s against 1.7 s) and the two-commit transition workaround are
+measured again then; they are costs, not gates. The lead looks at upstream at each
+phase close and when a native app is planned, on no timer. Once stage C screens
+exist, a re-run can justify Exact for a new surface, such as a native app from
+one source. Replacing the web app again needs the control to show a gap that
+React cannot close. Source: Issue [348436e5](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=348436e5-00df-403d-bbf7-caa29b57bf73).
+
+### 2026-11-16: React Aria Components is the headless layer
+
+React Aria Components (RAC) is the one behaviour layer for menus, dialogs and
+sheets, the command palette and reordering. Base UI with dnd-kit, and
+vercel-labs/ui, are rejected for Phase 7. RAC is the only candidate whose reorder
+has keyboard and screen-reader support built in and whose pointer drag draws the
+design's drop line; it needed no API corrections and has been stable since 2023.
+Base UI with dnd-kit is two libraries with hand-written announcements, and
+dnd-kit's core has had no release since 2024. vercel-labs/ui was days old, has an
+open focus-return bug, and needed five corrections, two of which no test saw.
+Bytes (75 to 78 KB gzip for both pieces) and axe (0 violations each) do not
+separate the three, so more comparison buys nothing. Rule 1 below keeps the
+library behind shared components, so a later change costs those components, not
+the screens. Evidence: [headless layer comparison](research/headless-layer.md).
+
+Conditions:
+
+- **Loading.** The layer never loads for first paint, whatever room the eager
+  budget has ([rule 3](#2026-11-16-rules-for-the-phase-7-shared-base)). Nothing
+  drawn at first paint needs behaviour, and the budget is not raised.
+- **Locale plugin.** `@react-aria/optimize-locales-plugin` is required, English
+  only, because the product's own text is English only. A byte budget on the
+  layer's chunk fails the build if the translations come back. A plugin failure
+  is fixed; it does not change the library, since about 27 KB after first paint
+  is cheaper than a second library. Stage B checks, in a browser set to another
+  language, that the layer's messages are English and numbers still follow the
+  person's locale.
+- **Palette.** Built on RAC's Autocomplete while it is a release candidate. Only
+  the one shared palette component imports it, at an exact pinned version, so an
+  API change costs one file. Enter on an empty search runs nothing; that stays.
+- **One keyboard model for reordering.** Enter on the handle picks up, arrows
+  choose the place, Enter drops, Escape cancels. The handle's menu (move to top,
+  up, down, bottom) is the direct way and the way on a phone. This is RAC's
+  built-in model; a hand-written one would give up the reason RAC was chosen.
+- **The dock is unproven.** The comparison reordered one column. Moving a region
+  between a full-width row and two columns was not built on any candidate. Stage
+  B proves it on RAC before any screen binds to it. If RAC's own drag and drop
+  cannot do it, the question comes back to design review; a second drag library
+  is not the answer.
+- **Drag states are checked by eye and by test.** A behaviour test asserts what is
+  drawn: the drop line sits between the two rows it names, and the order on
+  screen after every keyboard move equals the order announced. The stage B
+  screenshot review adds mid-drag states in both themes. The image under the
+  pointer is drawn by the browser and no automated screenshot shows it, so a
+  person looks at it once in Chromium, Safari and Firefox.
+
+Still unrun and owned by `6ebb58ab`: VoiceOver with Safari by a person, touch on a
+real phone, Firefox and Safari engines, and reorder at the largest page of rows.
+vercel-labs/ui is looked at again after Phase 7, not during it. Source: Issue
 [f97fb89d](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=f97fb89d-bb1e-4b6c-b482-6f5e079d7bca).
 
-### Proposed 2026-11-16: the web app stays on React; Exact re-checked later
+### 2026-11-16: rules for the Phase 7 shared base
 
-The framework spike recommends no-go on Exact for the signed-in app rebuild,
-and keeps React 19 with the headless layer above as the fallback. Exact met
-every technical line of the spike. It closes the socket when idle or hidden,
-with one catch-up on return. It paints Lanes in 809 ms against 3,345 ms today,
-ships 317 KB against 511 KB gzip, and runs the line glide as browser
-transitions. Why no-go: live data rests on a pre-1.0 re-implementation of the
-Convex protocol with a reconnect bug; there is no packaged toolchain (a Rust
-source build of about 10 GB); and the agent edit loop is 2.3 s against 1.7 s
-today. Not yet decided: the verdict is a design-review call. Evidence, pivot
-cost and the re-check trigger: [Exact spike](research/exact-spike.md). Source:
-Issue
-[348436e5](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=348436e5-00df-403d-bbf7-caa29b57bf73).
+Stage B builds to these; stage C inherits them.
+
+1. **One shared implementation.** Only the design system's own components (menu,
+   dialog and sheet, palette, reorderable list, region move) import RAC. Screens
+   import those components and never the library, and no rebuilt screen
+   hand-builds a menu, dialog or drag. A build check fails on a RAC import
+   anywhere else and on a second behaviour or drag library. Hand-built menus and
+   dialogs are removed as their routes are rebuilt.
+2. **Web only.** Exact pinned versions in `devDependencies`. CLI and MCP code never
+   reaches the layer ([agent weight guard](agents/agent-weight.md)).
+3. **Never on first paint.** The layer, the diff highlighter and the Markdown
+   renderer stay out of the eager chunk. Bytes freed by the sign-in move or by
+   removed screens go to first paint, not to the layer. The layer loads with a
+   route whose main content needs it, otherwise on first intent (pointer or focus
+   on a trigger, the palette key), plus one fetch when the browser is idle after
+   first paint in a visible tab. First paint draws plain buttons and handles. A
+   press before the layer arrives opens when it does and is never lost; attaching
+   the layer moves nothing and keeps focus. Stage B sets the chunk's byte budget
+   in `src/speed-budgets.json` from measurement.
+4. **Hidden and idle tabs.** A hidden tab drops its live reads after 30 s and an
+   idle visible tab after 5 min, as today. While hidden, nothing is drawn and
+   only the newest version is kept. Coming back to the tab counts as attention,
+   even when the idle sleep had already begun: exactly one catch-up to the
+   current state, nothing replayed. The spike's first hidden run missed that
+   case, so one test names it.
+5. **The prototype is the bar for data shape.** A screen sends its reads together,
+   and no read waits for another unless it must. Stage B measures the rebuilt
+   Lanes screen with the spike's probes, sets the first-paint budgets from that,
+   and reports frames sent to show the screen and on return beside both columns
+   of the [spike](research/exact-spike.md#measurements). A result near today's
+   column is fixed before stage C, not budgeted.
+6. **Motion needs no library.** The line and every state change are CSS
+   transitions on transform and opacity, with no script per frame. A mark's delay
+   and new position are set in the same commit. Checked with the spike's burst
+   (29 moves at 50 Lanes: staggered starts, all done within 900 ms, no long
+   frames) and with reduced motion (zero animations). How a mark leaves, landed
+   or set aside, comes from the line feed and is never guessed.
 
 ## Decisions from 11 November
 
