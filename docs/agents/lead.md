@@ -1,7 +1,7 @@
 # Leading work on Forge
 
 Read [AGENTS.md](../../AGENTS.md), [principles](../principles.md),
-[status](../status.md), [roadmap](../roadmap.md), the [Phase 6 plan](../phase6-plan.md) and its
+[status](../status.md), [roadmap](../roadmap.md), the [Phase 7 plan](../phase7-plan.md) and its
 Forge planning Issues before leading a new stage or resuming after a context reset.
 Read [architecture](../architecture.md) before changing internals. Fetch current
 hosted main; a local Git mirror can lag.
@@ -52,7 +52,7 @@ agent reads. Memory alone does not carry it to another harness or lead.
 
 ## Current Forge project builder profile
 
-For this project's current work, builders and independent reviewers use GPT through Codex, model `gpt-6.1-sol`, reasoning effort `high`. There is no Claude fallback. This is the current project instruction, not a generic Forge product default; capacity does not authorize a silent provider switch.
+For Phase 7 (owner, 2026-11-16), UI and web builders use Claude through Claude Code: Opus 5.5 or Sonnet 5.5. Fable 5.2 gives design direction and helps when a builder is stuck. Mythos 5.2 runs read-only security reviews. GPT through Codex (`gpt-6.1-sol`, reasoning effort `high`, service tier `default`) builds non-UI engineering slices and reviews every few landings; it gives no architecture or placement verdicts. This is the current project instruction, not a generic Forge product default; capacity does not authorize a silent provider switch.
 
 The approval design on Issue 7f085ec9 treats AI and human approvals equally, binds approval to exact heads and classifies the change rather than its author. Mandatory human or multiple-human approval is not the selected design. Implementation/enablement remains tracked there; this instruction does not change an existing gate.
 

@@ -102,7 +102,7 @@ Every preceding P6 Issue is closed or abandoned. The [carried-work table](phase6
 
 ## Phase 7: product and design (current)
 
-Goal: the product people see is fast, coherent and designed; the site is redone from scratch with Fable art direction. Start from Phase 7 Initiative `28591eeb-b74b-413a-ac41-1fef018b3dc1` and its current build-index comment; the [Phase 6 close](phase6-close.md) names the carried verification and implementation work.
+Goal: the product people see is fast, coherent and designed; the site is redone from scratch with Fable art direction. The [Phase 7 plan](phase7-plan.md) gives the stages (A spikes and guards, B shared base, C fan-out, D close) and their Items. Start from Phase 7 Initiative `28591eeb-b74b-413a-ac41-1fef018b3dc1` and its current build-index comment; the [Phase 6 close](phase6-close.md) names the carried verification and implementation work.
 
 **Exit:** the redesigned site and product views ship on dev, the marketing story is ready for the Phase 8 beta, and nothing is published that the owner has not approved.
 
