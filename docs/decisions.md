@@ -212,6 +212,18 @@ Stage B builds to these; stage C inherits them.
    frames) and with reduced motion (zero animations). How a mark leaves, landed
    or set aside, comes from the line feed and is never guessed.
 
+## Decisions from 16 November
+
+### 2026-11-16: sign-in spike verdict, Convex Auth v2 (Item de67c77d)
+
+The owner's two-day gate ran on a throwaway local deployment ([spike findings](research/convex-auth-spike.md)). Cases 1, 2 and 4 pass without patching the library, so the gate's fallback (keep the current provider's free tier) does not trigger, and the move to Convex Auth v2 goes ahead.
+
+Case 1 passed on the library's code path with recorded GitHub responses; its live exchange against GitHub is still open. Case 2 needs app-level glue for the first passkey on a GitHub account. Case 4 runs Forge's own CLI issuer unchanged.
+
+Two checks still need the owner: case 3 on real phones, and that live GitHub leg. They gate removing the current provider, not starting the implementation.
+
+The implementation is a fresh slice. It keeps the Forge account key as the owner everywhere, never a session id. Every browser guard resolves the session. Dormant tabs hold token refresh (0 calls; 1 refresh per hour while awake at a 1 hour token lifetime), and passkey autofill runs only while the tab is visible and active. Forge gets its own GitHub user-token store. Constraint 12 changes from "Clerk identity" when the current provider is removed. A security review covers the decisions listed in the findings before that removal.
+
 ## Decisions from 11 November
 
 ### Advisory windows
