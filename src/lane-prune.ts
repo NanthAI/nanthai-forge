@@ -471,5 +471,9 @@ export async function pruneCli(args: string[], readStates: LaneStateReader) {
     },
     ...(scan ? { scan } : {}),
   });
-  return { ...result, olderThanHours: hours };
+  const { pruneDependencyCache } = (await import(
+    /* @vite-ignore */ new URL('./dependency-cache.js', import.meta.url).href
+  )) as typeof import('./dependency-cache.js');
+  const dependencies = pruneDependencyCache({ apply, remeasure: true });
+  return { ...result, olderThanHours: hours, dependencies };
 }

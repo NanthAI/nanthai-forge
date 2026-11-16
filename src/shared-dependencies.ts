@@ -16,7 +16,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { readInstallScriptAllowlist, type InstallScriptAllowlist } from './install-script-allowlist.js';
 import { linkInstall } from './dependency-link.js';
 import { removeInstall, sealInstall } from './dependency-seal.js';
-import { recordLink, relinkIfStale, type Relinked } from './dependency-relink.js';
+import { readLink, recordLink, relinkIfStale, type Relinked } from './dependency-relink.js';
 import { allowedRebuilds, npmInstaller, scriptedPackages } from './npm-install.js';
 import {
   detectPackageManager,
@@ -38,6 +38,13 @@ import { heavySlots, readClientSettings } from './client-settings.js';
 import { installRegistryHosts, type RegistryHosts } from './install-registry-hosts.js';
 import { sharedDownloadCache } from './install-download-cache.js';
 import { linkDirectory } from './source-links.js';
+
+// Keep cold cache maintenance out of the CLI bundle's startup chunks. The emitted sibling
+// is packaged with core; import.meta keeps its original dist location in the CLI bundle.
+const cacheMaintenance = () =>
+  import(/* @vite-ignore */ new URL('./dependency-cache.js', import.meta.url).href) as Promise<
+    typeof import('./dependency-cache.js')
+  >;
 
 export { npmInstaller };
 export type DependencyInstaller = (
@@ -302,11 +309,38 @@ export async function shareDependencies(
   if (exists(join(root, 'node_modules'))) {
     const current = dependencyKey(root);
     if (!current) return { status: 'none' };
-    const relinked = await relinkIfStale(root, current, () =>
-      shareDependencies(root, { ...options, refresh: false }),
-    );
-    return relinked ?? { status: 'present' };
+    const link = readLink(root);
+    if (!link) return { status: 'present' };
+    const maintenance = await cacheMaintenance();
+    const lock = await acquireHeavySlot(`${link.entry}.lock`, 1);
+    if (link.fingerprint !== current) {
+      // Retain rollback bytes without holding one exclusive install lock while acquiring another.
+      let release: () => void;
+      try {
+        release = maintenance.retainDependencyEntry(link.entry);
+      } finally {
+        rmSync(lock, { recursive: true, force: true });
+      }
+      try {
+        return (
+          (await relinkIfStale(root, current, () =>
+            shareDependencies(root, { ...options, refresh: false }),
+          )) ?? { status: 'present' }
+        );
+      } finally {
+        release();
+        maintenance.sweepDependencyCache(options.cache ?? dependencyCacheDirectory(), root);
+      }
+    }
+    try {
+      maintenance.touchDependencyEntry(link.entry, root, link.folders);
+      maintenance.sweepDependencyCache(options.cache ?? dependencyCacheDirectory(), root);
+      return { status: 'present' };
+    } finally {
+      rmSync(lock, { recursive: true, force: true });
+    }
   }
+
   if (options.refresh) return { status: 'none' };
   let runner: ManagerRunner | undefined,
     folders: string[] = [];
@@ -335,103 +369,101 @@ export async function shareDependencies(
   const registryHosts = installRegistryHosts(root, pm),
     hosts = registryHosts ? { registryHosts } : {};
   let installed = false;
-  if (!complete(entry, key)) {
-    if (registryHosts) options.announce?.(registryHosts);
-    mkdirSync(cache, { recursive: true });
-    // The per-lockfile lock reuses the heavy-slot primitive with one slot; a dead holder is reclaimed.
-    const locks = join(cache, `${prefix}-${key}.lock`);
-    const lock = await acquireHeavySlot(locks, 1);
-    try {
-      if (!complete(entry, key)) {
-        for (const name of readdirSync(cache))
-          if (name.startsWith(`${prefix}-${key}.tmp-`)) removeInstall(join(cache, name));
-        removeInstall(entry);
-        // npm installs in a temporary stage renamed into place; other managers install in place
-        // (their shims and links record absolute paths) and the completion marker makes it atomic.
-        const stage = other ? entry : mkdtempSync(join(cache, `${prefix}-${key}.tmp-`));
-        mkdirSync(stage, { recursive: true });
-        const stageFolders = other ? folders : workspaceDirectories(readFileSync(join(root, pm.lockfile)));
-        const unusable = stageFolders
-          ? writeStage(root, stage, pm, stageFolders)
-          : 'package-lock.json names a workspace folder outside the repository.';
-        if (unusable) {
-          rmSync(stage, { recursive: true, force: true });
-          return { status: 'none', reason: unusable };
-        }
-        // Script-less installs of one project share a content-addressed download cache; an install
-        // that runs package scripts keeps a private one (code that could write the shared directory).
-        const downloads =
-          other && !runScripts && !rebuild.length
-            ? sharedDownloadCache(cache, pm, hostedProject(root))
-            : null;
-        const settings = readClientSettings(),
-          slots = options.heavy === false ? 0 : heavySlots(settings.localHeavySlots);
-        const slot = slots ? await acquireHeavySlot(heavySlotDirectory(), slots) : null;
-        try {
-          await (
-            options.install ??
-            (other
-              ? (directory, installOptions) => managerInstall(directory, pm, runner!, installOptions)
-              : npmInstaller)
-          )(stage, { runScripts, rebuild, manager: pm, runner, ...(downloads ? { downloads } : {}) });
-        } catch (error) {
-          rmSync(stage, { recursive: true, force: true });
-          return {
-            status: 'failed',
-            key,
-            message: error instanceof Error ? error.message : String(error),
-            ...hosts,
-          };
-        } finally {
-          if (slot) rmSync(slot, { recursive: true, force: true });
-        }
-        // Read-only before the marker: an entry that carries the marker is always sealed.
-        sealInstall(
-          stage,
-          ['', ...(stageFolders ?? [])].map(folder => join(stage, folder, 'node_modules')),
-        );
-        writeFileSync(join(stage, '.forge-complete'), key);
-        if (!other) renameSync(stage, entry);
-        installed = true;
+  mkdirSync(cache, { recursive: true });
+  const lock = await acquireHeavySlot(`${entry}.lock`, 1);
+  try {
+    if (!complete(entry, key)) {
+      if (registryHosts) options.announce?.(registryHosts);
+      for (const name of readdirSync(cache))
+        if (name.startsWith(`${prefix}-${key}.tmp-`)) removeInstall(join(cache, name));
+      removeInstall(entry);
+      // npm installs in a temporary stage renamed into place; other managers install in place
+      // (their shims and links record absolute paths) and the completion marker makes it atomic.
+      const stage = other ? entry : mkdtempSync(join(cache, `${prefix}-${key}.tmp-`));
+      mkdirSync(stage, { recursive: true });
+      const stageFolders = other ? folders : workspaceDirectories(readFileSync(join(root, pm.lockfile)));
+      const unusable = stageFolders
+        ? writeStage(root, stage, pm, stageFolders)
+        : 'package-lock.json names a workspace folder outside the repository.';
+      if (unusable) {
+        rmSync(stage, { recursive: true, force: true });
+        return { status: 'none', reason: unusable };
       }
-    } finally {
-      rmSync(lock, { recursive: true, force: true });
+      // Script-less installs of one project share a content-addressed download cache; an install
+      // that runs package scripts keeps a private one (code that could write the shared directory).
+      const downloads =
+        other && !runScripts && !rebuild.length ? sharedDownloadCache(cache, pm, hostedProject(root)) : null;
+      const settings = readClientSettings(),
+        slots = options.heavy === false ? 0 : heavySlots(settings.localHeavySlots);
+      const slot = slots ? await acquireHeavySlot(heavySlotDirectory(), slots) : null;
+      try {
+        await (
+          options.install ??
+          (other
+            ? (directory, installOptions) => managerInstall(directory, pm, runner!, installOptions)
+            : npmInstaller)
+        )(stage, { runScripts, rebuild, manager: pm, runner, ...(downloads ? { downloads } : {}) });
+      } catch (error) {
+        rmSync(stage, { recursive: true, force: true });
+        return {
+          status: 'failed',
+          key,
+          message: error instanceof Error ? error.message : String(error),
+          ...hosts,
+        };
+      } finally {
+        if (slot) rmSync(slot, { recursive: true, force: true });
+      }
+      // Read-only before the marker: an entry that carries the marker is always sealed.
+      sealInstall(
+        stage,
+        ['', ...(stageFolders ?? [])].map(folder => join(stage, folder, 'node_modules')),
+      );
+      writeFileSync(join(stage, '.forge-complete'), key);
+      if (!other) renameSync(stage, entry);
+      installed = true;
     }
+    const path = join(entry, 'node_modules');
+    if (!exists(path))
+      return other
+        ? { status: 'none', reason: `${pm.name} install produced no node_modules.` }
+        : { status: 'none' };
+    // npm workspaces link siblings inside the root node_modules; they must reach the Lane's source too.
+    const npmFolders = other ? [] : (workspaceDirectories(readFileSync(join(root, pm.lockfile))) ?? []);
+    if (other || npmFolders.length) linkInstall(entry, root, other ? folders : npmFolders);
+    else linkDirectory(path, join(root, 'node_modules'));
+    const fingerprint = dependencyKey(root);
+    if (fingerprint) recordLink(root, { fingerprint, entry, folders: other ? folders : npmFolders });
+    const { touchDependencyEntry } = await cacheMaintenance();
+    touchDependencyEntry(entry, root, other ? folders : npmFolders);
+    const skippedScripts = runScripts ? undefined : skippedInstallScripts(root, rebuild);
+    const ran: RanScripts | undefined =
+      policy.because && (runScripts || rebuild.length)
+        ? {
+            ran: runScripts ? 'all' : rebuild,
+            because: policy.because,
+            ...(policy.because === 'machine' && policy.requested ? { source: policy.requested.source } : {}),
+          }
+        : undefined;
+    const requested =
+      policy.requested && skippedScripts
+        ? {
+            source: policy.requested.source,
+            packages: policy.requested.all ? ('all' as const) : policy.requested.packages,
+          }
+        : undefined;
+    return {
+      status: installed ? 'installed' : 'linked',
+      key,
+      path,
+      ...(skippedScripts ? { skippedScripts } : {}),
+      ...(requested ? { requestedScripts: requested } : {}),
+      ...(ran ? { scripts: ran } : {}),
+      ...hosts,
+    };
+  } finally {
+    rmSync(lock, { recursive: true, force: true });
+    const { sweepDependencyCache } = await cacheMaintenance();
+    sweepDependencyCache(cache, root);
   }
-  const path = join(entry, 'node_modules');
-  if (!exists(path))
-    return other
-      ? { status: 'none', reason: `${pm.name} install produced no node_modules.` }
-      : { status: 'none' };
-  // npm workspaces link siblings inside the root node_modules; they must reach the Lane's source too.
-  const npmFolders = other ? [] : (workspaceDirectories(readFileSync(join(root, pm.lockfile))) ?? []);
-  if (other || npmFolders.length) linkInstall(entry, root, other ? folders : npmFolders);
-  else linkDirectory(path, join(root, 'node_modules'));
-  const fingerprint = dependencyKey(root);
-  if (fingerprint) recordLink(root, { fingerprint, entry, folders: other ? folders : npmFolders });
-  const skippedScripts = runScripts ? undefined : skippedInstallScripts(root, rebuild);
-  const ran: RanScripts | undefined =
-    policy.because && (runScripts || rebuild.length)
-      ? {
-          ran: runScripts ? 'all' : rebuild,
-          because: policy.because,
-          ...(policy.because === 'machine' && policy.requested ? { source: policy.requested.source } : {}),
-        }
-      : undefined;
-  const requested =
-    policy.requested && skippedScripts
-      ? {
-          source: policy.requested.source,
-          packages: policy.requested.all ? ('all' as const) : policy.requested.packages,
-        }
-      : undefined;
-  return {
-    status: installed ? 'installed' : 'linked',
-    key,
-    path,
-    ...(skippedScripts ? { skippedScripts } : {}),
-    ...(requested ? { requestedScripts: requested } : {}),
-    ...(ran ? { scripts: ran } : {}),
-    ...hosts,
-  };
 }

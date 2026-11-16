@@ -199,14 +199,33 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   fails the previous link is put back. If the directory holds packages Forge did not link, it is kept
   and reported (`dependencies.status` `stale`, or a stderr line); delete it to relink. A Lane with no
   `node_modules` is not given one by these commands.
-- The cache is `$XDG_CACHE_HOME/forge/deps` (default `~/.cache/forge/deps`) and is safe to delete. A finished
-  install is read-only (the folder, each `node_modules` root and its tool-cache folders such as `.cache` and
-  `.vite` stay writable), so a tool in one Lane cannot change the packages other Lanes run; `rm -rf` needs
-  `chmod -R u+w` first. A hosted Lane's install is keyed by its project as well as its lockfile, so a fork
-  never shares one. To change packages, replace the link first (next item).
-- If your Lane changes the lockfile, replace the link before installing:
-  `rm -r node_modules && npm ci` (or the same with your manager's frozen install). Removing the links does not
-  touch the shared install; for a workspace repository remove each workspace `node_modules` the same way.
+- The cache is `$XDG_CACHE_HOME/forge/deps` (default `~/.cache/forge/deps`). Its installed trees
+  have a **4 GiB** soft budget. Set `FORGE_DEPS_CACHE_MAX_GB` to a positive number of GiB to override it.
+  Existing start/open/install/refresh work sweeps unused entries least-recently-used first; no daemon,
+  polling, network or idle work is added. `nforge prune` previews the same eviction and
+  `nforge prune --apply` applies it after ordinary Lane-root cleanup.
+- Existing checkout links (including main, workspace overlays and retained CLI runtimes) and running
+  install/link locks always win over the budget. If they alone need more than the budget, the cache
+  stays larger until those references disappear. Cache aliases are compared by their canonical
+  filesystem paths, so a link through a different symlink spelling stays protected. An installer and eviction hold the same per-entry
+  lock through link publication or removal; a failed relink keeps its old entry available through a process-identity rollback lease.
+  Relinks never hold two exclusive install locks, so two Lanes can swap hashes without deadlocking.
+  Abandoned partial installs can be reclaimed once their installer is gone. Unrecognised cache folders,
+  including the separate manager download caches, are left alone.
+- Completed sealed-package sizes are memoised locally; writable tool output is counted on every sweep.
+  Explicit prune remeasures the whole install.
+  Automatic runs read entry metadata and registered/root references, measuring new or legacy sealed installs
+  once. They remove read-only trees by restoring directory permissions without following symlinks.
+  The receipt lists removed or retained entries; automatic removals print the reclaimed size. Opening
+  a Lane again reinstalls an evicted dependency tree when needed.
+- A finished install's packages are read-only; its root, each `node_modules` root and tool-cache folders
+  stay writable. A hosted Lane's install is keyed by its project too, so a fork never shares one.
+  Cross-lockfile installed-file deduplication is not performed: hardlinks would share mutable inode
+  permissions, and clonefile reuse needs verified file matching beyond the frozen install path.
+- If your Lane changes its lockfile, run its normal `preflight` (or reopen it). Forge materialises the
+  matching install and relinks automatically, including `npm-skipped` and `npm-rebuild` installs.
+  For a separate private install instead, remove the Lane links and run your manager's frozen install;
+  removing links never changes the shared tree.
 
 ### landWait
 

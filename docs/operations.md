@@ -1553,3 +1553,12 @@ of 0.5 GiB action compute adds $0.0025; the lead must measure runtime rather tha
 assuming a 5–15 minute pass from header bytes.
 No current invoice, live migration wall time or deployed byte-placement delta is
 claimed. The lead owns deployment, the dev pass and billed-usage qualification.
+
+### Local Lane dependency installs
+
+The shared installed-tree cache uses a 4 GiB soft budget. Override it with a
+positive `FORGE_DEPS_CACHE_MAX_GB` value (GiB). `nforge prune` previews the local
+LRU eviction; `nforge prune --apply` removes unused read-only installs. Existing
+checkout references and running install/link locks are kept even above budget.
+See [dependency sharing](parallel-work-defaults.md#sharedependencies) for scope,
+size accounting, automatic eviction and changed-lockfile relinking.

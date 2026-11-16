@@ -9,7 +9,7 @@ import { linkDirectory } from './source-links.js';
 export type ForgeLink = { fingerprint: string; entry: string; folders: string[] };
 export type Relinked = { from: string };
 
-const ENTRY_NAME = /^(npm|pnpm|yarn|bun)(?:-scripts)?-([0-9a-f]{24})$/;
+const ENTRY_NAME = /^(npm|pnpm|yarn|bun)(?:-scripts|-rebuild|-skipped)?-([0-9a-f]{24})$/;
 /** Written inside a Lane-owned (real directory) `node_modules` so a later sync knows Forge built it. */
 const MARKER = '.forge-linked.json';
 /** Beside `.forge-complete` in a cache entry: the manager-version-free key its Lane links compare against.

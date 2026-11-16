@@ -50,6 +50,20 @@ Interaction finish fixtures isolate the outer `FORGE_CHECK_FULL` override so the
 
 `npm run check` fails if `docs/dependency-licenses.md` is out of date. After changing dependencies, run `node scripts/render-dependency-licenses.mjs`.
 
+### Lane dependency cache
+
+Lane start/open and dependency refresh reuse sealed installs under
+`$XDG_CACHE_HOME/forge/deps` (default `~/.cache/forge/deps`). The install cache has a
+4 GiB soft budget, overridden by a positive `FORGE_DEPS_CACHE_MAX_GB` value in GiB.
+Unused installs are evicted by last use during existing dependency work;
+`nforge prune` previews eviction and `nforge prune --apply` removes eligible entries.
+Live checkout links and running install/link locks are always retained, even above
+the budget. Prune remeasures sizes; ordinary sweeps reuse sealed-package size metadata and count
+writable tool output.
+There are no new calls, DB I/O, background workers or idle timers. Changed lockfiles
+relink at preflight/open automatically. See [dependency sharing](parallel-work-defaults.md#sharedependencies)
+for concurrency, read-only removal, download-cache scope and private-install details.
+
 ### Shared schema compatibility
 
 `npm run check:schema` runs in both verification paths, independently of builds.
