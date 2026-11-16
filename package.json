@@ -168,7 +168,7 @@
     "@modelcontextprotocol/sdk": "1.30.0",
     "@noble/curves": "2.0.1",
     "@noble/hashes": "2.0.1",
-    "convex": "1.46.0",
+    "convex": "1.50.0",
     "convex-helpers": "0.1.126",
     "ignore": "7.0.9",
     "typescript": "5.9.3",

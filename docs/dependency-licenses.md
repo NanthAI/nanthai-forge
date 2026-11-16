@@ -573,7 +573,7 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/consola | 3.4.2 | MIT | development |
 | node_modules/content-disposition | 1.1.0 | MIT | runtime |
 | node_modules/content-type | 1.0.5 | MIT | runtime |
-| node_modules/convex | 1.46.0 | Apache-2.0 | runtime |
+| node_modules/convex | 1.50.0 | Apache-2.0 | runtime |
 | node_modules/convex-helpers | 0.1.126 | Apache-2.0 | runtime |
 | node_modules/cookie | 0.7.2 | MIT | runtime |
 | node_modules/cookie-signature | 1.2.2 | MIT | runtime |
