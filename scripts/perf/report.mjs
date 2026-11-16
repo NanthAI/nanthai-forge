@@ -73,7 +73,10 @@ export async function bundleSummary(directory) {
     const bytes = await readFile(join(directory, 'assets', name));
     files.push({ file: `assets/${name}`, bytes: bytes.length, gzipBytes: gzipSync(bytes).length });
   }
-  const roots = ['index.html', manifest['src/Hosted.tsx'] ? 'src/Hosted.tsx' : 'src/shell/LocalApp.tsx'];
+  const roots = [
+    manifest['app.html'] ? 'app.html' : 'index.html',
+    manifest['src/Hosted.tsx'] ? 'src/Hosted.tsx' : 'src/shell/LocalApp.tsx',
+  ];
   const eager = new Set(eagerFiles(manifest, roots));
   const sum = (selected, key) => selected.reduce((total, file) => total + file[key], 0);
   const js = files.filter(f => f.file.endsWith('.js'));

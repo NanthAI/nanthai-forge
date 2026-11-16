@@ -1,4 +1,5 @@
-# Only static public pages are crawlable: app/project traffic would consume Convex reads.
+# Only static public pages are crawlable: "/" (web/index.html), the discovery files, docs and assets. App routes
+# (/projects, /app.html and every project path) would consume Convex reads.
 User-agent: *
 User-agent: GPTBot
 User-agent: ClaudeBot

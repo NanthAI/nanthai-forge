@@ -79,7 +79,7 @@ while (pending.length) {
 }
 const chunks = [
   Buffer.from(
-    `NanthAi:Forge third-party npm notices\n\nExact upstream license/notice files for installed locked production dependencies.\nLockfile SHA-256: ${hash(lockBytes)}\nDependencies retain their own licenses; this document does not relicense them.\nThe separately launched native Convex backend is not included in this package.\nNanthAi brand rights are described separately in web/src/assets/NOTICE.md.\n\n`,
+    `NanthAi:Forge third-party npm notices\n\nExact upstream license/notice files for installed locked production dependencies.\nLockfile SHA-256: ${hash(lockBytes)}\nDependencies retain their own licenses; this document does not relicense them.\nThe separately launched native Convex backend is not included in this package.\nNanthAi brand rights and the self-hosted web fonts (SIL Open Font License 1.1) are described separately in web/src/assets/NOTICE.md.\n\n`,
   ),
 ];
 const missing = [],

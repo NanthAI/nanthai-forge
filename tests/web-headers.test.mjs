@@ -63,18 +63,51 @@ test('the web entry turns off Zod string evaluation before anything else runs', 
   assert.deepEqual(JSON.parse(out), { jitless: true, evaluated: 0 });
 });
 
-test('the inline theme script in index.html is allowed by its hash in the policy', () => {
-  const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
-  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
-  assert.equal(scripts.length, 1, 'index.html has exactly one inline script');
-  const hash = createHash('sha256').update(scripts[0]).digest('base64');
-  assert.ok(
-    (header('Content-Security-Policy') ?? '').includes(`'sha256-${hash}'`),
-    'update the sha256 in netlify.toml after editing the inline script',
+for (const page of ['index.html', 'app.html'])
+  test(`the inline script in ${page} is allowed by its hash in the policy`, () => {
+    const html = readFileSync(new URL(`../web/${page}`, import.meta.url), 'utf8');
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
+    assert.equal(scripts.length, 1, `${page} has exactly one inline script`);
+    const hash = createHash('sha256').update(scripts[0]).digest('base64');
+    assert.ok(
+      (header('Content-Security-Policy') ?? '').includes(`'sha256-${hash}'`),
+      'update the sha256 in netlify.toml after editing the inline script',
+    );
+  });
+
+test('the policy allows no inline script hash that neither page uses', () => {
+  const used = ['index.html', 'app.html'].flatMap(page =>
+    [
+      ...readFileSync(new URL(`../web/${page}`, import.meta.url), 'utf8').matchAll(
+        /<script>([\s\S]*?)<\/script>/g,
+      ),
+    ].map(match => `sha256-${createHash('sha256').update(match[1]).digest('base64')}`),
   );
+  const allowed = [...(header('Content-Security-Policy') ?? '').matchAll(/'(sha256-[^']+)'/g)].map(
+    match => match[1],
+  );
+  assert.deepEqual(allowed.sort(), used.sort());
+});
+
+test('the public page loads no app code and no third-party origin', () => {
+  const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
+  const sources = [...html.matchAll(/\s(?:src|href)="([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(
+    [...html.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)].map(match => match[1]),
+    ['/src/landing/page.ts'],
+  );
+  for (const url of sources.filter(url => /^(?:https?:)?\/\//.test(url)))
+    assert.match(
+      url,
+      /^https:\/\/github\.com\/NanthAI\/nanthai-forge(?:\/|$)/,
+      `${url} is a link, never a loaded resource`,
+    );
+  assert.ok(!/<link[^>]+href="https?:/.test(html), 'stylesheets, fonts and icons are self-hosted');
 });
 
 test('the redirects that serve the app still follow the headers block', () => {
   assert.ok(toml.indexOf('[[headers]]') < toml.indexOf('[[redirects]]'));
-  assert.match(toml, /from = "\/\*"[\s\S]*to = "\/index.html"/);
+  assert.match(toml, /from = "\/\*"[\s\S]*to = "\/app.html"/);
+  assert.match(toml, /from = "\/device"\s+to = "\/app.html"/);
+  assert.ok(!toml.includes('to = "/index.html"'), 'app routes serve app.html; "/" is the static public page');
 });

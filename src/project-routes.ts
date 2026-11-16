@@ -208,7 +208,8 @@ export function cleanUrl(
     if (projectRouteIdentity(raw.href)) return raw.pathname + raw.search + raw.hash;
     const surface = p.get('surface');
     if (surface === 'contact') return raw.href;
-    url.pathname = surface === 'account' ? '/settings' : '/';
+    // The app's home; / is the static public page (web/index.html).
+    url.pathname = surface === 'account' ? '/settings' : '/projects';
     for (const key of projectKeys) p.delete(key);
     return url.pathname + url.search + url.hash;
   }

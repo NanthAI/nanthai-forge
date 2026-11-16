@@ -1,20 +1,262 @@
 <!doctype html>
-<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="color-scheme" content="light dark"/>
-<script>
-(function () {
-  var theme = 'system';
-  try { theme = localStorage.getItem('forge-theme') || 'system'; } catch (_) {}
-  document.documentElement.dataset.theme = theme === 'dark' || theme === 'light' ? theme :
-    (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-})();
-</script>
-<style>
-html { background: #f4f6f9; color-scheme: light; }
-html[data-theme="dark"] { background: #0b0e13; color-scheme: dark; }
-body { margin: 0; background: inherit; }
-</style>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml"/>
-<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png"/>
-<link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png"/>
-<link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
-<link rel="manifest" href="/site.webmanifest"/><title>NanthAi:Forge · Source explorer</title></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0b0e13" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)">
+<title>Forge: source control built for coding agents</title>
+<meta name="description" content="Forge is source control for many coding agents on one codebase. In its published benchmark, ten agents reached main 36% sooner on 65% fewer CI minutes than through a GitHub flow. Open development; not yet a public service.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Forge by NanthAi">
+<meta property="og:title" content="Forge: source control built for coding agents">
+<meta property="og:description" content="Many coding agents, one codebase. Overlaps reported while agents work, one check on the exact result, a landing queue instead of a pile of pull requests.">
+<meta name="twitter:card" content="summary">
+<script>(function(){var d=document.documentElement,q=location.search;d.className='js';if(/[?&](project|codescape|zone|surface|tab|projectTab|collection|lane|intent|viewId|decision|review|planningItem)=/.test(q))return location.replace('/projects'+q+location.hash);try{if(localStorage.getItem('forge-signed-in')==='1')return location.replace('/projects');var t=localStorage.getItem('forge-theme');if(t==='dark'||t==='light')d.setAttribute('data-theme',t)}catch(e){}})();</script>
+<link rel="preload" href="/src/assets/fonts/AtkinsonHyperlegibleNext-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/src/landing/landing.css">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<script type="module" src="/src/landing/page.ts"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<!--
+  Every figure on this page is from the published P6 exit benchmark, docs/research/p6-exit-bench-results.md
+  (medians of three runs per arm; N=10 from the "rerun" series, N=1, 3 and 5 from the "tuned" series), and the
+  release run in docs/research/p6-release-validation.md. tests/landing-page.test.mjs checks them against those files.
+  The terminal lines and Lane titles are illustrations: command names are real, result wording is shortened.
+-->
+<main id="main">
+  <section class="hero sig" data-sig="yard" data-live aria-labelledby="h1">
+    <canvas aria-hidden="true"></canvas>
+    <header class="top w" data-crisp="36">
+      <a class="brand" href="/" aria-label="Forge home"><svg viewBox="0 0 64 64" aria-hidden="true"><path class="stem" d="M8 6H20V40.5H8Z"/><path class="stem" d="M8 40H20V58H14L8 52Z"/><path class="arm" d="M8 6H34.6V18H8ZM34 6H58L52 18H34Z"/><rect class="xT" x="8" y="6" width="12" height="12"/><path class="arm" d="M8 28H30.6V40H8ZM30 28H48L42 40H30Z"/><rect class="xL" x="8" y="28" width="12" height="12"/><circle class="sp" cx="54" cy="12" r="2.6"/></svg><span translate="no">Forge</span></a>
+      <nav aria-label="Site"><a class="wide" href="#speed">Benchmark</a><a class="wide" href="#why">How it works</a><a class="wide" href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/README.md">Docs</a></nav>
+      <a class="in" href="/projects">Sign in</a>
+    </header>
+
+    <div class="w lead" data-crisp>
+      <h1 class="disp" id="h1"><span>Git was built for people.</span> <span>Forge is built for agents.</span></h1>
+      <div class="row">
+        <p class="sub">Source control for many coding agents on one codebase. In our benchmark ten agents reached main <b>36% sooner</b>, on <b>65% fewer CI minutes</b>, than through a GitHub flow.</p>
+        <div class="go">
+          <button class="key" type="button" data-copy><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><rect x="7" y="7" width="10" height="10"/><path d="M13 7V3H3v10h4"/></svg><span data-label>Give this to your agent</span></button>
+          <p class="fine">Copies a short prompt. Your agent reads one public file and tells you what would change in your repository before it sets anything up. <a class="lk" href="/projects">Or import a repository yourself</a>.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="w yardwrap">
+      <div class="yard" dir="rtl" aria-hidden="true">
+        <div class="stops" data-crisp="22"><span>Editing</span><span>Saved</span><span>In queue</span><span>Checking</span><b>main</b></div>
+        <div class="rows" data-track><i></i><i></i><i></i><i></i></div>
+        <div class="tags"></div>
+      </div>
+      <p class="cap" data-cap data-crisp>Three agents start work on the same codebase, each in its own Lane.</p>
+      <p class="sr">An animation: three agents work in separate Lanes that flow toward main, a vertical line. Two of them overlap for a moment and both are told at once. Forge checks each result on top of main on your CI. The three land one after another, and main grows with each landing.</p>
+    </div>
+  </section>
+
+  <section class="sec" id="idea" data-live>
+    <div class="w gr">
+      <div class="claim">
+        <h2 class="disp">An agent needs three commands and no dashboard.</h2>
+        <p>Start a Lane, sync, land. Each answer comes back as one line of text an agent can act on, so nothing waits for a person to open a page and click.</p>
+        <p>People still get the page. It shows what only a person can decide.</p>
+      </div>
+      <div class="proof">
+        <div class="term" data-term role="img" aria-label="Illustration: an agent starts a Lane, syncs and is told another Lane is changing the same file, then lands: queued behind that Lane, checked on top of main on your CI, landed.">
+          <span class="cmd">nforge agent . start</span>
+          <div data-st="active"><span class="fr">┣━━━</span><span class="wd">working</span><span class="tx">Lane “Fetch retry budget”, yours</span></div>
+          <span class="cmd">nforge agent . sync</span>
+          <div data-st="waiting"><span class="fr">┣══</span><span class="wd">overlap</span><span class="tx">src/fetch/adapter.ts is also changing in Lane “Cache headers”</span></div>
+          <span class="cmd">nforge agent . land --save</span>
+          <div data-st="waiting"><span class="fr">┣━ ╸</span><span class="wd">queued</span><span class="tx">position 2, behind “Cache headers”</span></div>
+          <div data-st="active"><span class="fr">┣━╹</span><span class="wd">checks</span><span class="tx">running on your CI, on top of main and 1 Lane</span></div>
+          <div data-st="passed"><span class="fr">┣━━ ✓</span><span class="wd">landed</span><span class="tx">main moved, receipt kept</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" aria-label="The problem">
+    <div class="w">
+      <p class="disp" data-reveal>Writing the code is no longer the slow part. Landing it is.</p>
+      <p class="after">Forge is built for the part after the code is written: checking each change on top of everything else that is landing, and moving main.</p>
+    </div>
+  </section>
+
+  <section class="sec" id="speed" data-live>
+    <div class="w gr">
+      <div class="claim">
+        <h2 class="disp">Same agents, same tasks. Done seven minutes sooner.</h2>
+        <p>Ten agents took ten real tasks on one repository, once through Forge and once through a GitHub flow. The median task reached main in <b>6 min 0 s</b> instead of 9 min 26 s, and the last one landed while the other run still had work open.</p>
+        <p class="note">Medians of three runs each way. <a class="lk" href="#limits">What this does not show</a></p>
+      </div>
+      <div class="proof">
+        <div class="race" data-race>
+          <div class="clock"><span class="num" data-clock>19:42</span><small>since the ten tasks were handed out, replayed at 120 times speed</small></div>
+          <div class="rl">
+            <b>Forge <em data-fs>all ten on main</em></b>
+            <div class="trk"><i class="run" data-run="f"></i><i class="mk on" style="--x:30.43%" data-at="359.633"></i><i class="mk last on" style="--x:64.54%" data-at="762.705"></i></div>
+            <div class="mkl"><span class="on" style="--x:30.43%" data-at="359.633"><b>6:00</b>median<u> task on main</u></span><span class="on" style="--x:64.54%" data-at="762.705"><b>12:43</b>all ten<u> on main</u></span></div>
+          </div>
+          <div class="rl gh">
+            <b>GitHub flow <em data-gs>all ten on main</em></b>
+            <div class="trk"><i class="run" data-run="g"></i><i class="mk on" style="--x:47.86%" data-at="565.508"></i><i class="mk last on" style="--x:100%" data-at="1181.678"></i></div>
+            <div class="mkl"><span class="on" style="--x:47.86%" data-at="565.508"><b>9:26</b>median<u> task on main</u></span><span class="r on" style="--x:100%" data-at="1181.678"><b>19:42</b>all ten<u> on main</u></span></div>
+          </div>
+          <p class="readout" data-readout aria-hidden="true">Forge finished 6 min 59 s earlier. <span>The same ten tasks, the same agents, the same CI.</span></p>
+          <p class="sr">Forge: median task on main at 6 minutes 0 seconds, all ten on main at 12 minutes 43 seconds. GitHub flow: median at 9 minutes 26 seconds, all ten at 19 minutes 42 seconds.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec wide" id="cost" data-live>
+    <div class="w gr">
+      <div class="claim">
+        <h2 class="disp">About a third of the CI minutes. Half the cached input.</h2>
+        <p>The same ten tasks billed <b>24 CI minutes</b> on Forge and 69 through the GitHub flow. The agents read 19.1 million cached input tokens instead of 37.6 million.</p>
+      </div>
+      <div class="proof">
+        <div class="legend"><span><i></i>Forge</span><span><i class="g"></i>GitHub flow</span><span>Ten agents at once. Shorter is better.</span></div>
+        <div class="bars">
+          <div class="r"><div class="nm">CI minutes<small>billed for the run</small></div><div><div class="bb"><span>Forge</span><i class="f" style="--v:34.8%"></i><span>24 min</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>69 min</span></div></div><div class="pct">65%<small>lower</small></div></div>
+          <div class="r"><div class="nm">Cached input tokens<small>read by the agents</small></div><div><div class="bb"><span>Forge</span><i class="f" style="--v:51%"></i><span>19.1 M</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>37.6 M</span></div></div><div class="pct">49%<small>lower</small></div></div>
+          <div class="r"><div class="nm">Time to main<small>median task, handed out to landed</small></div><div><div class="bb"><span>Forge</span><i class="f" style="--v:63.6%"></i><span>6:00</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>9:26</span></div></div><div class="pct">36%<small>lower</small></div></div>
+          <div class="r"><div class="nm">Wall time<small>until all ten had landed</small></div><div><div class="bb"><span>Forge</span><i class="f" style="--v:64.5%"></i><span>12:43</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>19:42</span></div></div><div class="pct">35%<small>lower</small></div></div>
+        </div>
+
+        <div class="sizes">
+          <h3 class="h3">The gap is there with one agent, and it holds at ten.</h3>
+          <div class="multi">
+            <div class="chart"><h4>CI minutes</h4><small>billed for the ten tasks</small>
+              <div class="cols">
+                <div class="grp" tabindex="0" style="--top:90.1%"><i class="c f" style="--v:37%"></i><i class="c g" style="--v:90.1%"></i><span class="d">59% lower</span><span class="tip">1 agent: 30 min against 73</span></div>
+                <div class="grp" tabindex="0" style="--top:100%"><i class="c f" style="--v:37%"></i><i class="c g" style="--v:100%"></i><span class="d">63%</span><span class="tip">3 agents: 30 min against 81</span></div>
+                <div class="grp" tabindex="0" style="--top:98.8%"><i class="c f" style="--v:37%"></i><i class="c g" style="--v:98.8%"></i><span class="d">63%</span><span class="tip">5 agents: 30 min against 80</span></div>
+                <div class="grp" tabindex="0" style="--top:85.2%"><i class="c f" style="--v:29.6%"></i><i class="c g" style="--v:85.2%"></i><span class="d">65%</span><span class="tip">10 agents: 24 min against 69</span></div>
+              </div>
+              <div class="xs"><span>1 agent</span><span>3</span><span>5</span><span>10</span></div>
+            </div>
+            <div class="chart"><h4>Time to main</h4><small>median task, in seconds</small>
+              <div class="cols">
+                <div class="grp" tabindex="0" style="--top:88.4%"><i class="c f" style="--v:59.9%"></i><i class="c g" style="--v:88.4%"></i><span class="d">32% lower</span><span class="tip">1 agent: 338 s against 500 s</span></div>
+                <div class="grp" tabindex="0" style="--top:95.2%"><i class="c f" style="--v:66.7%"></i><i class="c g" style="--v:95.2%"></i><span class="d">30%</span><span class="tip">3 agents: 377 s against 538 s</span></div>
+                <div class="grp" tabindex="0" style="--top:93.2%"><i class="c f" style="--v:62.5%"></i><i class="c g" style="--v:93.2%"></i><span class="d">33%</span><span class="tip">5 agents: 354 s against 527 s</span></div>
+                <div class="grp" tabindex="0" style="--top:100%"><i class="c f" style="--v:63.6%"></i><i class="c g" style="--v:100%"></i><span class="d">36%</span><span class="tip">10 agents: 360 s against 566 s</span></div>
+              </div>
+              <div class="xs"><span>1 agent</span><span>3</span><span>5</span><span>10</span></div>
+            </div>
+            <div class="chart"><h4>Cached input tokens</h4><small>read by the agents, in millions</small>
+              <div class="cols">
+                <div class="grp" tabindex="0" style="--top:81.9%"><i class="c f" style="--v:43.3%"></i><i class="c g" style="--v:81.9%"></i><span class="d">47% lower</span><span class="tip">1 agent: 16.5 M against 31.3 M</span></div>
+                <div class="grp" tabindex="0" style="--top:92.3%"><i class="c f" style="--v:48.2%"></i><i class="c g" style="--v:92.3%"></i><span class="d">48%</span><span class="tip">3 agents: 18.4 M against 35.3 M</span></div>
+                <div class="grp" tabindex="0" style="--top:100%"><i class="c f" style="--v:49.6%"></i><i class="c g" style="--v:100%"></i><span class="d">50%</span><span class="tip">5 agents: 19.0 M against 38.3 M</span></div>
+                <div class="grp" tabindex="0" style="--top:98.1%"><i class="c f" style="--v:50%"></i><i class="c g" style="--v:98.1%"></i><span class="d">49%</span><span class="tip">10 agents: 19.1 M against 37.6 M</span></div>
+              </div>
+              <div class="xs"><span>1 agent</span><span>3</span><span>5</span><span>10</span></div>
+            </div>
+          </div>
+          <details class="tbl"><summary>The same numbers as a table</summary>
+            <div class="scrollx"><table data-figures>
+              <thead><tr><th scope="col">Agents at once</th><th scope="col">CI min, Forge</th><th scope="col">GitHub flow</th><th scope="col">Time to main, Forge</th><th scope="col">GitHub flow</th><th scope="col">Cached input, Forge</th><th scope="col">GitHub flow</th></tr></thead>
+              <tbody><tr><td>1</td><td>30</td><td>73</td><td>338 s</td><td>500 s</td><td>16.5 M</td><td>31.3 M</td></tr><tr><td>3</td><td>30</td><td>81</td><td>377 s</td><td>538 s</td><td>18.4 M</td><td>35.3 M</td></tr><tr><td>5</td><td>30</td><td>80</td><td>354 s</td><td>527 s</td><td>19.0 M</td><td>38.3 M</td></tr><tr><td>10</td><td>24</td><td>69</td><td>360 s</td><td>566 s</td><td>19.1 M</td><td>37.6 M</td></tr></tbody>
+            </table></div>
+          </details>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec wide" id="why" data-live>
+    <div class="w gr">
+      <div class="claim">
+        <h2 class="disp">Three choices make it fast.</h2>
+        <p>A check that runs twice is paid for twice. Forge is arranged so that a collision is found before the check, and the check runs once.</p>
+      </div>
+      <div class="proof">
+        <div class="routes" role="group" aria-label="The same change, two routes to main, when two agents overlap">
+          <div class="route gh" style="--n:7"><b>GitHub flow, when two agents overlap</b><ol><li><b>Branch</b>the agent works</li><li><b>Pull request</b>opened</li><li><b>CI</b>runs</li><li class="again"><b>Conflict</b>found after CI</li><li class="again"><b>Rebase</b>the agent redoes its part</li><li class="again"><b>CI again</b>on the new base</li><li class="fin"><b>main</b></li></ol><span class="tok" aria-hidden="true"></span></div>
+          <div class="route fg" style="--n:5"><b>Forge, same overlap</b><ol><li><b>Lane</b>the agent works</li><li><b>Sync</b>overlap reported here</li><li><b>Land</b>joins the queue</li><li><b>One check</b>on the exact result</li><li class="fin"><b>main</b></li></ol><span class="tok" aria-hidden="true"></span></div>
+        </div>
+        <ol class="why">
+          <li><h3 class="h3">Overlap is reported while the agents are still working.</h3><p>Every save is compared with the other Lanes. Two agents that touch the same lines both hear it then, not after CI has run.</p></li>
+          <li><h3 class="h3">One check, on the exact result.</h3><p>Forge runs your CI on the change as it will sit on main, on top of everything landing before it. What passed is what main becomes.</p><p class="fig">9 CI jobs against 29 on the release run.</p></li>
+          <li><h3 class="h3">A queue, not a pile of pull requests.</h3><p>Finished work lands in order. The next Lane is checked on top of the one before it, so nobody rebases to find out where main is.</p></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" id="fits" data-live>
+    <div class="w gr">
+      <div class="claim">
+        <h2 class="disp">Keep your agents, your CI and your GitHub.</h2>
+        <p>Forge sits between the agents you already run and the repository you already have. It never asks you to run agents from Forge, and you can take a full copy of your project with you at any time.</p>
+      </div>
+      <div class="proof">
+        <div class="fit">
+          <div class="n"><h3 class="h3">Your agent apps</h3><p>Anything that can run a command or speak MCP.</p><ul><li>Claude Code</li><li>Codex</li><li>your own scripts</li></ul></div>
+          <div class="wire" aria-hidden="true"><span class="pulse"></span></div>
+          <div class="n core"><h3 class="h3">Forge</h3><p>Lanes, the landing queue and main. It decides what is checked together and what moves main.</p></div>
+          <div class="wire b" aria-hidden="true"><span class="pulse"></span></div>
+          <div class="n"><h3 class="h3">Your GitHub repository</h3><p>History comes across on import. main is mirrored back after every landing, so it stays a full Git repository.</p></div>
+          <div class="ci"><h3 class="h3">Your CI</h3><p>Checks run on the CI you already pay for, with your secrets, on your account. Any CI that can run a command and report back.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" id="questions">
+    <div class="w gr">
+      <div class="claim">
+        <h2 class="disp">Fair questions.</h2>
+        <div id="limits">
+          <h3 class="h3">What the benchmark does not show</h3>
+          <ul class="limits">
+            <li><b>One repository, three runs per setting.</b> Too few to claim the same result on yours.</li>
+            <li><b>Two series.</b> The ten-agent figures come from a later series than those for 1, 3 and 5 agents.</li>
+            <li><b>Forge was worse on one measure.</b> With ten agents its agents took 13 recovery turns against 7.</li>
+            <li><b>The release build was closer.</b> One later run: 375 s against 474 s to main, and 6 of ten tasks strictly right against 7.</li>
+            <li><b>Outcomes, not causes.</b> The report describes what happened. It does not measure how much each design choice contributes, and it is not a pass of the exit bar it was run for.</li>
+          </ul>
+          <p class="note"><a class="lk" href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/research/p6-exit-bench-results.md">Method, raw runs and every table</a></p>
+        </div>
+      </div>
+      <div class="proof">
+        <div class="faq">
+          <details open><summary>Do I have to leave GitHub?</summary><p>No. Import copies your repository and Forge mirrors main back after every landing. Issues, releases and Actions stay where they are.</p></details>
+          <details><summary>Does Forge run my agents or my tests?</summary><p>Neither. Agents run where they run today. Tests run on your CI, with your secrets, on your bill. Forge decides what is checked together and what moves main.</p></details>
+          <details><summary>Who approves a landing?</summary><p>You choose per project. Checked work can land on its own, or wait for a person in Needs you. Paths you protect always wait for a person.</p></details>
+          <details><summary>What if an agent lands something wrong?</summary><p>Take it out of main with one action. That is a new landing that removes exactly that change and leaves everything after it alone.</p></details>
+          <details><summary>Will the benchmark hold for my repository?</summary><p>It may not. Forge records time to main and check minutes for every landing, so you can compare on your own work.</p></details>
+          <details><summary>Can I use it today?</summary><p>Forge is in open development and builds itself. There is no public service, package or price yet. <a class="lk" href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/status.md">Development status</a></p></details>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="end sig" data-sig="ambient" data-live aria-labelledby="endh">
+    <canvas aria-hidden="true"></canvas>
+    <div class="w lead">
+      <h2 class="disp" id="endh" data-crisp>Ask your agent what Forge would change.</h2>
+      <div class="go" data-crisp>
+        <button class="key" type="button" data-copy><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><rect x="7" y="7" width="10" height="10"/><path d="M13 7V3H3v10h4"/></svg><span data-label>Give this to your agent</span></button>
+        <p class="fine">It explains first and installs nothing. <a class="lk" href="/projects">Or import a repository yourself</a>.</p>
+        <details class="peek"><summary>See the prompt it copies</summary><pre id="prompt" data-prompt>Read /llms.txt on the site this prompt came from.
+
+Then tell me, in five lines: what Forge would change about how you and other agents land work in this repository, what it would cost us in CI minutes compared with our current flow, and what you need from me to try it on one small change. Do not install anything yet.</pre></details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="ft"><div class="w"><span translate="no">Forge by NanthAi</span><a href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/README.md">Docs</a><a href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/research/p6-exit-bench-results.md">Benchmark method</a><a href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/status.md">Development status</a><a href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/security.md">Security</a><a href="https://github.com/NanthAI/nanthai-forge">Source</a><a href="/llms.txt" translate="no">/llms.txt</a></div></footer>
+</body>
+</html>

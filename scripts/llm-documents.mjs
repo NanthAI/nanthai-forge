@@ -52,6 +52,12 @@ const agentRules = [
   'Sign in with nforge login before cloning or downloading any Forge project, including public projects. Public web viewing remains open. Use a project’s GitHub mirror for anonymous cloning when available.',
 ];
 
+// The public page's "Give this to your agent" prompt sends agents here and asks them to explain before acting
+// (web/index.html, tests/landing-page.test.mjs). Keep both in step: no install, sign-in or import before the person says so.
+export const sentHere =
+  'If a person sent you here with the prompt from the Forge public page, explain before you act. Tell them, in a few plain lines: what Forge would change about how they and their agents land work in this repository; what it could cost or save in CI minutes against their current flow, quoting the measured results below as one published benchmark on one repository, not a promise; and what you need from them to try it on one small change. Do not install, sign in, import a repository or change any file until they say so.\n\n' +
+  'Forge is in open development. It is not published to npm and there is no public production service or price yet; trying it today means building from source ([quickstart](/docs/quickstart.md)). Current state: [status](/docs/status.md).';
+
 const startHere = new Set([
   'docs/README.md',
   'docs/why-forge.md',
@@ -133,7 +139,7 @@ export function llmDocuments(root) {
     doc => !startHere.has(doc.path) && !agentDocs.has(doc.path) && !referenceDocs.has(doc.path),
   );
   const llms =
-    `${introduction}## Start here\n\n${links(documents.filter(doc => startHere.has(doc.path)))}\n` +
+    `${introduction}## If someone sent you here\n\n${sentHere}\n\n## Start here\n\n${links(documents.filter(doc => startHere.has(doc.path)))}\n` +
     `- [README](${repository}/README.md): ${describe('README.md', full[0].source).note}\n\n` +
     `## For agents\n\n${agentRules.map(rule => `- ${rule}`).join('\n')}\n\n` +
     `${links(documents.filter(doc => agentDocs.has(doc.path)))}\n` +

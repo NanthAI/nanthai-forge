@@ -4,7 +4,7 @@ Exact upstream license/notice files for installed locked production dependencies
 Lockfile SHA-256: 442a483e1bed39bfaaaaa28bf7fd8a82965a0d6c3ef03a6d307bb727bcabca4c
 Dependencies retain their own licenses; this document does not relicense them.
 The separately launched native Convex backend is not included in this package.
-NanthAi brand rights are described separately in web/src/assets/NOTICE.md.
+NanthAi brand rights and the self-hosted web fonts (SIL Open Font License 1.1) are described separately in web/src/assets/NOTICE.md.
 
 ===== @clerk/react@6.17.3: node_modules/@clerk/react/LICENSE =====
 Original bytes: 1068; SHA-256: 629611a2fad128e60cc850d64b8770fcb251b0b55016a60802d70eeb32ee1b04

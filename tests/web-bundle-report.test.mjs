@@ -6,14 +6,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { webBundleReport } from '../scripts/web-bundle-report.mjs';
 
-test('bundle measurement follows static closure once, including immediately loaded Hosted, and separates conditional fonts', t => {
+test('bundle measurement follows static closure once, including immediately loaded Hosted, keeps the public page separate, and separates conditional fonts', t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-web-bundle-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, '.vite'));
   writeFileSync(
     join(root, '.vite/manifest.json'),
     JSON.stringify({
-      'index.html': {
+      'index.html': { file: 'landing.js', css: ['landing.css'] },
+      'app.html': {
         file: 'entry.js',
         imports: ['shared'],
         dynamicImports: ['src/Hosted.tsx'],
@@ -21,11 +22,21 @@ test('bundle measurement follows static closure once, including immediately load
         assets: ['latin.woff2'],
       },
       'src/Hosted.tsx': { file: 'hosted.js', imports: ['shared'], dynamicImports: ['optional'] },
-      shared: { file: 'shared.js', imports: ['index.html'] },
+      shared: { file: 'shared.js', imports: ['app.html'] },
       optional: { file: 'unopened.js' },
     }),
   );
-  for (const name of ['index.html', 'entry.js', 'entry.css', 'hosted.js', 'shared.js', 'latin.woff2'])
+  for (const name of [
+    'index.html',
+    'app.html',
+    'landing.js',
+    'landing.css',
+    'entry.js',
+    'entry.css',
+    'hosted.js',
+    'shared.js',
+    'latin.woff2',
+  ])
     writeFileSync(join(root, name), '12345');
   const report = webBundleReport(root);
   assert.equal(report.total.bytes, 25);
@@ -35,5 +46,11 @@ test('bundle measurement follows static closure once, including immediately load
     ['latin.woff2'],
   );
   assert.ok(report.total.gzipBytes > 0);
+  // The public page is its own closure: none of the app's files load with it.
+  const landing = webBundleReport(root, ['index.html']);
+  assert.deepEqual(
+    landing.assets.map(asset => asset.path),
+    ['index.html', 'landing.css', 'landing.js'],
+  );
   assert.throws(() => webBundleReport(root, ['unknown']), /Missing bundle manifest entry/);
 });

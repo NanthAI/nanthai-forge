@@ -92,7 +92,7 @@ export function Shell<T extends string>({
         Skip to content
       </a>
       <header className="fx-top">
-        <a className="fx-brand" href="/" aria-label="NanthAi Forge home">
+        <a className="fx-brand" href="/projects" aria-label="NanthAi Forge home">
           <ForgeMark />
           <span>
             <small>NanthAi</small>Forge

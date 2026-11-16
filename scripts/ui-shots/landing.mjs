@@ -1,44 +1,44 @@
 // SPDX-License-Identifier: Apache-2.0
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { cpus, platform, release } from 'node:os';
+import { gzipSync } from 'node:zlib';
 import { chromium } from 'playwright';
 import { ShotError } from './options.mjs';
 import { hiddenHero } from './landing-hidden.mjs';
-import { checkHeroPixels } from './landing-pixels.mjs';
 
-/** Public-page evidence uses a fresh anonymous context, without loading bot credentials. */
+const heading = 'Git was built for people. Forge is built for agents.';
+const ticks = page => page.evaluate(() => window.__forgeHero?.ticks ?? 0);
+const metrics = async devtools =>
+  Object.fromEntries((await devtools.send('Performance.getMetrics')).metrics.map(m => [m.name, m.value]));
+
+/** Public-page evidence: still screenshots per width and theme, keyboard focus, no-JS, a hero strip, then the motion
+ * lifecycle (loop, calm-down, off screen, hidden tab, reduced motion, charts once) and the page's cost in a fresh
+ * anonymous context. Point --base at a built preview: dev-server modules distort bytes and frame time. */
 export async function captureLanding(config) {
-  const browser = await chromium.launch({
-    headless: false,
-    args: ['--disable-blink-features=AutomationControlled'],
-  });
+  const browser = await chromium.launch();
   try {
+    await mkdir(config.out, { recursive: true, mode: 0o700 });
+    const shots = [];
     const context = await browser.newContext({
       viewport: { width: 1500, height: config.height },
       deviceScaleFactor: 2,
     });
     const page = await context.newPage();
-    page.on('dialog', dialog => void dialog.accept());
-    const errors = [];
-    let navigations = 0;
-    page.on('framenavigated', frame => {
-      if (frame === page.mainFrame()) navigations++;
-    });
+    const errors = [],
+      foreign = [];
     page.on('pageerror', () => errors.push('runtime error'));
-    await mkdir(config.out, { recursive: true, mode: 0o700 });
-    const shots = [];
+    page.on('request', request => {
+      if (new URL(request.url()).origin !== new URL(config.base).origin)
+        foreign.push(new URL(request.url()).origin);
+    });
     for (const theme of config.themes)
       for (const width of config.widths) {
-        await page.setViewportSize({ width, height: config.height });
+        await page.setViewportSize({ width, height: width < 600 ? 844 : config.height });
         await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
-        await page.goto(config.base, { waitUntil: 'domcontentloaded' });
-        await page.evaluate(theme => localStorage.setItem('forge-theme', theme), theme);
-        await page.reload();
-        await page.getByRole('heading', { name: 'Hand it off. Watch it land.' }).waitFor();
+        await page.goto(config.base);
+        await page.getByRole('heading', { name: heading }).waitFor();
         await page.evaluate(() => document.fonts.ready);
-        if (await page.evaluate(() => Boolean(window.Clerk?.session)))
-          throw new ShotError('Landing capture must be signed out.');
+        await page.waitForTimeout(600);
         const name = `landing-${width}-${theme}`;
         await page.screenshot({ path: join(config.out, `${name}.png`), scale: 'css' });
         await page.screenshot({ path: join(config.out, `${name}-full.png`), fullPage: true, scale: 'css' });
@@ -46,136 +46,170 @@ export async function captureLanding(config) {
           viewport: innerWidth,
           content: document.documentElement.scrollWidth,
         }));
-        if (geometry.content > geometry.viewport) throw new ShotError('Landing overflows the viewport.');
+        if (geometry.content > geometry.viewport)
+          throw new ShotError(`Landing overflows the viewport at ${width}px.`);
         shots.push({ width, theme, viewport: `${name}.png`, fullPage: `${name}-full.png` });
         console.log(`Saved ${name}.png`);
       }
+
+    // Keyboard: the first stops are the skip link, the brand, the nav and the key, each with a visible focus ring.
     await page.setViewportSize({ width: 1500, height: config.height });
-    await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'no-preference' });
-    await page.evaluate(() => localStorage.setItem('forge-theme', 'dark'));
-    await page.reload();
-    await page.getByRole('heading', { name: 'Hand it off. Watch it land.' }).waitFor();
-    await page.evaluate(() => document.fonts.ready);
-    const started = Date.now(),
-      frames = [];
-    for (let index = 0; index < 4; index++) {
-      const due = started + index * (10_000 / 3);
-      await page.waitForTimeout(Math.max(0, due - Date.now()));
-      const file = `hero-frame-${index + 1}.png`;
-      await page.locator('.fx-hero').screenshot({ path: join(config.out, file), scale: 'css' });
-      frames.push({ file, elapsedMs: Date.now() - started });
+    await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+    await page.goto(config.base);
+    await page.getByRole('heading', { name: heading }).waitFor();
+    const order = [];
+    for (let i = 0; i < 7; i++) {
+      await page.keyboard.press('Tab');
+      order.push(await page.evaluate(() => document.activeElement?.textContent?.trim().slice(0, 40) ?? ''));
     }
-    // Compose real captured frames in-browser (no image editor dependency).
-    const strip = await context.newPage();
-    const { readFile } = await import('node:fs/promises');
-    const urls = await Promise.all(
-      frames.map(
-        async frame =>
-          `data:image/png;base64,${(await readFile(join(config.out, frame.file))).toString('base64')}`,
-      ),
-    );
-    await strip.setContent(
-      `<style>body{margin:0;background:#0b0e13;color:#a3adbb;font:12px system-ui}.frame{width:750px}img{display:block;width:750px}p{margin:0;padding:6px 12px}main{display:grid;grid-template-columns:repeat(4,750px)}</style><main>${urls.map((url, i) => `<div class="frame"><p>+${(frames[i].elapsedMs / 1000).toFixed(1)} s</p><img src="${url}"></div>`).join('')}</main>`,
-    );
-    await strip.setViewportSize({ width: 3000, height: 400 });
-    await strip.locator('main').screenshot({ path: join(config.out, 'hero-strip.png'), scale: 'css' });
-    await strip.close();
-    await page.bringToFront();
-    const system = await browser.newBrowserCDPSession();
-    const rendererTime = async () =>
-      (await system.send('SystemInfo.getProcessInfo')).processInfo
-        .filter(p => p.type === 'renderer')
-        .reduce((sum, p) => sum + p.cpuTime, 0);
-    const devtools = await context.newCDPSession(page);
-    await devtools.send('Performance.enable');
-    const taskTime = async () =>
-      (await devtools.send('Performance.getMetrics')).metrics.find(m => m.name === 'TaskDuration').value;
-    async function sample(label) {
-      const navigationStart = navigations;
-      const cpuStart = await rendererTime(),
-        taskStart = await taskTime(),
-        start = performance.now();
-      await page.waitForTimeout(30_000);
-      const seconds = (performance.now() - start) / 1000;
-      const cpuEnd = await rendererTime(),
-        taskEnd = await taskTime();
-      if (navigations !== navigationStart || taskEnd < taskStart || cpuEnd < cpuStart)
-        throw new ShotError('Page reloaded during CPU measurement; freeze source watching and retry.');
-      return {
-        label,
-        seconds,
-        rendererPercentOneCore: ((cpuEnd - cpuStart) / seconds) * 100,
-        mainThreadPercentOneCore: ((taskEnd - taskStart) / seconds) * 100,
-      };
-    }
-    await page.waitForTimeout(2000);
-    const animated = await sample('animated idle, 1500px, DPR 2, 40fps cap');
-    console.log(
-      `Animated idle CPU: ${animated.rendererPercentOneCore.toFixed(2)}% renderer / ${animated.mainThreadPercentOneCore.toFixed(2)}% main thread`,
-    );
-    await page.emulateMedia({ reducedMotion: 'reduce' });
-    await page.waitForTimeout(1000);
-    const still = await sample('reduced-motion still, same page');
-    const cpu = {
-      machine: cpus()[0]?.model,
-      platform: `${platform()} ${release()}`,
-      browser: browser.version(),
-      dpr: 2,
-      mode: 'headed Chromium on this Mac',
-      animated,
-      still,
-      heroIncrementalRendererPercentOneCore: animated.rendererPercentOneCore - still.rendererPercentOneCore,
-    };
-    await writeFile(join(config.out, 'cpu.json'), JSON.stringify(cpu, null, 2) + '\n');
-    const pixels = () => page.locator('.fx-alive').evaluate(canvas => canvas.toDataURL());
-    const checks = {};
-    let first = await pixels();
-    await page.waitForTimeout(350);
-    checks.reducedMotionStill = first === (await pixels());
-    await page.emulateMedia({ reducedMotion: 'no-preference' });
-    await page.waitForTimeout(350);
-    first = await pixels();
-    await page.waitForTimeout(350);
-    checks.motionResumes = first !== (await pixels());
-    await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
-    await page.waitForTimeout(350);
-    first = await pixels();
-    await page.waitForTimeout(350);
-    checks.offscreenStill = first === (await pixels());
-    await page.evaluate(() => scrollTo(0, 0));
-    await page.waitForTimeout(350);
-    Object.assign(checks, await hiddenHero(config.base));
-    await page.bringToFront();
-    await page.evaluate(() => {
-      window.__s5Paints = 0;
-      const original = CanvasRenderingContext2D.prototype.clearRect;
-      CanvasRenderingContext2D.prototype.clearRect = function (...args) {
-        if (this.canvas.matches('.fx-alive') && args[0] === 0 && args[3] === 10) window.__s5Paints++;
-        return original.apply(this, args);
-      };
+    await page.screenshot({ path: join(config.out, 'landing-keyboard-key.png'), scale: 'css' });
+    shots.push({ keyboard: order, file: 'landing-keyboard-key.png' });
+
+    // Without JavaScript every section, figure and link is still there.
+    const nojs = await browser.newContext({
+      javaScriptEnabled: false,
+      viewport: { width: 1500, height: config.height },
     });
-    const capStart = Date.now();
-    await page.waitForTimeout(1500);
-    checks.paintedFrames = await page.evaluate(() => window.__s5Paints);
-    checks.observedFps = checks.paintedFrames / ((Date.now() - capStart) / 1000);
-    checks.frameCap = checks.observedFps <= 41 && checks.observedFps > 0;
-    const development = await page.evaluate(() =>
-      Boolean(document.querySelector('script[src*="/@vite/client"]')),
+    const plain = await nojs.newPage();
+    await plain.goto(config.base);
+    await plain.screenshot({ path: join(config.out, 'landing-nojs-full.png'), fullPage: true, scale: 'css' });
+    const nojsRace = await plain.locator('[data-clock]').textContent();
+    await nojs.close();
+
+    // Cost: a cold load with network accounting, then frame time and memory while the hero animates.
+    const cold = await browser.newContext({ viewport: { width: 1500, height: config.height } });
+    const cp = await cold.newPage();
+    const devtools = await cold.newCDPSession(cp);
+    await devtools.send('Network.enable');
+    await devtools.send('Performance.enable');
+    const responses = new Map(),
+      bodies = [];
+    devtools.on('Network.responseReceived', e => responses.set(e.requestId, e.response));
+    devtools.on('Network.loadingFinished', e => {
+      const response = responses.get(e.requestId);
+      if (response)
+        bodies.push(
+          devtools
+            .send('Network.getResponseBody', { requestId: e.requestId })
+            .then(b => Buffer.from(b.body, b.base64Encoded ? 'base64' : 'utf8'))
+            .catch(() => Buffer.alloc(0))
+            .then(bytes => ({
+              url: new URL(response.url).pathname,
+              type: response.mimeType,
+              bytes: bytes.length,
+              gzipBytes: gzipSync(bytes).length,
+            })),
+        );
+    });
+    await cp.goto(config.base, { waitUntil: 'load' });
+    await cp.waitForFunction(() => window.__forgeHero?.running === true, null, { timeout: 10_000 });
+    const paint = await cp.evaluate(() =>
+      Object.fromEntries(performance.getEntriesByType('paint').map(e => [e.name, Math.round(e.startTime)])),
     );
-    checks.retainedPixels = development
-      ? await checkHeroPixels(page)
-      : { passed: null, reason: 'Pixel comparison needs the local dev source modules.' };
+    const loaded = await Promise.all(bodies);
+    const requestsBefore = loaded.length;
+    const sum = (rows, key) => rows.reduce((total, row) => total + row[key], 0);
+    const js = loaded.filter(r => /javascript/.test(r.type));
+    const startMetrics = await metrics(devtools),
+      startTicks = await ticks(cp);
+    await cp.waitForTimeout(10_000);
+    const endMetrics = await metrics(devtools),
+      endTicks = await ticks(cp);
+    const frames = endTicks - startTicks;
+    const animating = {
+      seconds: 10,
+      framesDrawn: frames,
+      fps: frames / 10,
+      mainThreadMsPerFrame: ((endMetrics.TaskDuration - startMetrics.TaskDuration) * 1000) / frames,
+      scriptMsPerFrame: ((endMetrics.ScriptDuration - startMetrics.ScriptDuration) * 1000) / frames,
+      layoutMsPerFrame: ((endMetrics.LayoutDuration - startMetrics.LayoutDuration) * 1000) / frames,
+      heapUsedBytes: endMetrics.JSHeapUsedSize,
+      heapGrowthBytes: endMetrics.JSHeapUsedSize - startMetrics.JSHeapUsedSize,
+      requestsWhileAnimating: (await Promise.all(bodies)).length - requestsBefore,
+    };
+    const cost = {
+      firstPaintMs: paint['first-paint'],
+      firstContentfulPaintMs: paint['first-contentful-paint'],
+      requests: loaded.length,
+      bytes: sum(loaded, 'bytes'),
+      gzipBytes: sum(loaded, 'gzipBytes'),
+      jsBytes: sum(js, 'bytes'),
+      jsGzipBytes: sum(js, 'gzipBytes'),
+      files: loaded,
+      animating,
+    };
+    console.log(
+      `Cold load: ${cost.gzipBytes} B gzip (${cost.jsGzipBytes} B JS), FCP ${cost.firstContentfulPaintMs} ms; ${animating.mainThreadMsPerFrame.toFixed(2)} ms main thread per frame`,
+    );
+
+    // Motion lifecycle, read from the page's own counters.
+    const checks = {};
+    const advancing = async () => {
+      const a = await ticks(cp);
+      await cp.waitForTimeout(700);
+      return (await ticks(cp)) > a;
+    };
+    checks.loops = await advancing();
+    await cp.evaluate(() => document.getElementById('cost')?.scrollIntoView());
+    await cp.waitForTimeout(700);
+    checks.offscreenStops = !(await advancing());
+    checks.chartsDrawn = await cp.evaluate(() => document.getElementById('cost')?.classList.contains('seen'));
+    await cp.evaluate(() => document.getElementById('speed')?.scrollIntoView());
+    await cp.waitForFunction(
+      () =>
+        window.__forgeLanding?.race === false &&
+        document.querySelector('[data-clock]')?.textContent === '19:42',
+      null,
+      { timeout: 20_000 },
+    );
+    await cp.evaluate(() => scrollTo(0, 0));
+    await cp.evaluate(() => document.getElementById('speed')?.scrollIntoView());
+    await cp.waitForTimeout(400);
+    checks.raceRestsAfterOnce = await cp.evaluate(
+      () =>
+        window.__forgeLanding?.race === false &&
+        document.querySelector('[data-clock]')?.textContent === '19:42',
+    );
+    await cp.evaluate(() => scrollTo(0, 0));
+    await cp.waitForTimeout(400);
+    checks.resumesOnScreen = await advancing();
+    // Calm-down: after 60 s without input it keeps drawing, at about 15 frames a second.
+    const calmStart = await ticks(cp);
+    await cp.waitForTimeout(62_000);
+    const calm = await cp.evaluate(() => window.__forgeHero?.calm);
+    const c0 = await ticks(cp);
+    await cp.waitForTimeout(4000);
+    checks.calmFps = ((await ticks(cp)) - c0) / 4;
+    checks.calmKeepsRunning = calm === 'slow' && checks.calmFps > 8 && checks.calmFps < 20 && c0 > calmStart;
+    await cp.mouse.move(400, 300);
+    await cp.waitForTimeout(1000);
+    checks.awakeAfterInput = (await cp.evaluate(() => window.__forgeHero?.calm)) === 'awake';
+    await cp.emulateMedia({ reducedMotion: 'reduce' });
+    await cp.waitForTimeout(600);
+    checks.reducedMotionStill = !(await advancing());
+    checks.reducedMotionDrawn = await cp.evaluate(() =>
+      document.querySelector('.hero')?.hasAttribute('data-on'),
+    );
+    await cp.screenshot({ path: join(config.out, 'landing-reduced-motion-hero.png'), scale: 'css' });
+    await cp.emulateMedia({ reducedMotion: 'no-preference' });
+    await cp.waitForTimeout(600);
+    checks.motionResumes = await advancing();
+    const strip = [];
+    for (let i = 0; i < 4; i++) {
+      const file = `hero-frame-${i + 1}.png`;
+      await cp.locator('.hero').screenshot({ path: join(config.out, file), scale: 'css' });
+      strip.push(file);
+      await cp.waitForTimeout(3200);
+    }
+    Object.assign(checks, await hiddenHero(config.base, heading));
+    checks.noForeignRequests = foreign.length === 0;
+    checks.nojsRaceEndState = nojsRace === '19:42';
+    await cold.close();
     await writeFile(join(config.out, 'motion-checks.json'), JSON.stringify(checks, null, 2) + '\n');
-    if (
-      !checks.reducedMotionStill ||
-      !checks.motionResumes ||
-      !checks.offscreenStill ||
-      !checks.backgroundTabHidden ||
-      !checks.backgroundTabStill ||
-      !checks.frameCap ||
-      checks.retainedPixels.passed === false
-    )
-      throw new ShotError('Landing motion lifecycle check failed.');
+    await writeFile(join(config.out, 'cost.json'), JSON.stringify(cost, null, 2) + '\n');
+    const failed = Object.entries(checks).filter(([k, v]) => v === false && k !== 'calmFps');
+    if (failed.length)
+      throw new ShotError(`Landing motion lifecycle check failed: ${failed.map(([k]) => k).join(', ')}`);
     if (errors.length) throw new ShotError('Landing raised a JavaScript runtime error.');
     await writeFile(
       join(config.out, 'manifest.json'),
@@ -185,15 +219,15 @@ export async function captureLanding(config) {
           signedIn: false,
           capturedAt: new Date().toISOString(),
           shots,
-          frames,
-          cpu,
+          strip,
+          cost,
           checks,
         },
         null,
         2,
       ) + '\n',
     );
-    console.log(`Still CPU: ${still.rendererPercentOneCore.toFixed(2)}%; saved hero-strip.png and cpu.json`);
+    console.log('Saved manifest.json, motion-checks.json and cost.json');
   } finally {
     await browser.close();
   }

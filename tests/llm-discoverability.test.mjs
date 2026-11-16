@@ -129,6 +129,32 @@ test('llms-full is curated: listed in the package inventory and without internal
   assert.deepEqual(llmDocuments(root), first);
 });
 
+// 00c3f715: the public page's copied prompt points here and asks the agent to explain first; llms.txt says the same.
+test('llms.txt answers the public page prompt explain-first and states the development status', () => {
+  const llms = llmDocuments(root)[0].source;
+  const page = read('web/index.html');
+  const section = llms.split('## If someone sent you here\n\n')[1]?.split('\n\n## Start here')[0] ?? '';
+  assert.ok(llms.indexOf('## If someone sent you here') < llms.indexOf('## Start here'));
+  assert.match(section, /explain before you act/);
+  assert.match(section, /CI minutes/);
+  assert.match(section, /one small change/);
+  assert.match(section, /Do not install, sign in, import a repository or change any file until they say so/);
+  assert.match(section, /not published to npm and there is no public production service or price yet/);
+  assert.match(section, /\(\/docs\/quickstart\.md\)[\s\S]*\(\/docs\/status\.md\)/);
+  // The prompt the page copies asks for the same three answers and forbids installing.
+  const prompt = /<pre id="prompt" data-prompt>([\s\S]*?)<\/pre>/.exec(page)?.[1] ?? '';
+  assert.match(prompt, /^Read \/llms\.txt/);
+  assert.match(prompt, /CI minutes/);
+  assert.match(prompt, /one small change/);
+  assert.match(prompt, /Do not install anything yet\./);
+  // Crawlers may read the public page and its files, never the app or legacy app links at /.
+  const robots = read('web/public/robots.txt');
+  for (const url of ['/', '/llms.txt', '/llms-full.txt', '/docs/status.md', '/assets/index-abc.js'])
+    assert.ok(crawlable(robots, url), url);
+  for (const url of ['/projects', '/app.html', '/device', '/?project=abc', '/settings', '/owner/repo'])
+    assert.ok(!crawlable(robots, url), url);
+});
+
 test('agent discovery teaches current contract verbs and shares measured B1.5d/P6 evidence', () => {
   const llms = llmDocuments(root)[0].source;
   const skill = read('skills/forge-agent/SKILL.md');

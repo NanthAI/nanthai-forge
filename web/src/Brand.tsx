@@ -4,7 +4,7 @@ import { ForgeMark } from './shell/brand';
 
 export function Wordmark() {
   return (
-    <a className="wordmark" href="/" aria-label="NanthAi Forge home">
+    <a className="wordmark" href="/projects" aria-label="NanthAi Forge home">
       <ForgeMark />
       <span className="brand-name">
         <span className="brand-parent">NanthAi</span>

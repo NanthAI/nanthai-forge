@@ -35,8 +35,10 @@ import { InterestControls } from './Interests';
 import PublicImports from './PublicImports';
 import UpstreamRequest from './UpstreamRequest';
 import { HostedFrame } from './shell/HostedFrame';
-import { DryRun } from './landing/DryRun';
-import { Importing, Landing } from './landing/Landing';
+import { DryRun } from './explore/DryRun';
+import { Importing } from './explore/Importing';
+import { SignedOut } from './explore/SignedOut';
+import { signedInHint } from './shell/signed-in-hint';
 import { AppLoader } from './ui/AppLoader';
 import { captureConvexFailures, errorReporter } from './error-capture';
 import { liveReads } from './live-reads';
@@ -334,19 +336,7 @@ export function Explorer({
               back={back}
             />
           ) : (
-            <Landing
-              open={repository => void open(repository, '')}
-              busy={busy}
-              error={error}
-              {...(import.meta.env.VITE_FORGE_DEMO_REPOSITORY
-                ? { demo: import.meta.env.VITE_FORGE_DEMO_REPOSITORY as string }
-                : {})}
-              more={
-                <div className="fx-legacy fx-landing-recent">
-                  <PublicImports />
-                </div>
-              }
-            />
+            <SignedOut {...(signIn ? { signIn } : {})} />
           )}
         </div>
       </HostedFrame>
@@ -647,6 +637,10 @@ function ConnectedExplorer() {
         : undefined,
     [convex, isAuthenticated],
   );
+  // The public page at / reads this flag before first paint and forwards a signed-in browser here.
+  useEffect(() => {
+    if (!isLoading && isLoaded) signedInHint(isAuthenticated);
+  }, [isLoading, isLoaded, isAuthenticated]);
   return isLoading || !isLoaded ? (
     <AppLoader />
   ) : isAuthenticated ? (

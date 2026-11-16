@@ -131,7 +131,7 @@ test('core config-named modules stay core; TypeScript/Vite config widens only to
     assert.ok(result.tests.includes('tests/core.test.mjs'));
     assert.ok(!result.tests.includes('tests/first.test.mjs'));
   }
-  for (const path of ['web/vite.config.ts', 'web/tsconfig.json']) {
+  for (const path of ['web/vite.config.ts', 'web/tsconfig.json', 'web/index.html', 'web/app.html']) {
     const result = select([path]);
     assert.equal(result.domain, 'web');
     assert.ok(result.tests.includes('tests/ui-flow.test.mjs'));

@@ -10,10 +10,14 @@ VITE_FORGE_DEMO_REPOSITORY = "thevarsek/nanthai-edge-oss"
 directory = "netlify/functions"
 node_bundler = "esbuild"
 
+# "/" is the static public page (web/index.html): Netlify serves the file before any redirect. Every other page route
+# is the signed-in app, web/app.html.
+
 # Security headers for every page (review S-13). Frame protection, MIME sniffing, referrer rules and the
 # full Content-Security-Policy are enforced. A signed-in smoke test of the dev site with this policy enforced
-# showed no violations once Zod runs jitless (web/src/zod-jitless.ts). The inline script hash must match
-# web/index.html (tests/web-headers.test.mjs checks it).
+# showed no violations once Zod runs jitless (web/src/zod-jitless.ts). The inline script hashes must match the one
+# inline script in web/app.html (the app's theme) and in web/index.html (the public page's theme and signed-in
+# redirect); tests/web-headers.test.mjs checks both.
 [[headers]]
 for = "/*"
 [headers.values]
@@ -22,14 +26,14 @@ X-Content-Type-Options = "nosniff"
 Referrer-Policy = "no-referrer"
 Strict-Transport-Security = "max-age=31536000"
 Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
-Content-Security-Policy = "default-src 'self'; script-src 'self' 'sha256-ex8kSqwf1WiPVL0BhnAXX54XDAjFXEHkC+qlMJg0x4Q=' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://*.clerk.accounts.dev; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; frame-src https://challenges.cloudflare.com https://*.clerk.accounts.dev; worker-src 'self' blob:; manifest-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
+Content-Security-Policy = "default-src 'self'; script-src 'self' 'sha256-ex8kSqwf1WiPVL0BhnAXX54XDAjFXEHkC+qlMJg0x4Q=' 'sha256-p2Joqh9y7vaFYpQIDQO6qeRWJS1NU+RqnHs4bxxN1+w=' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://*.clerk.accounts.dev; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; frame-src https://challenges.cloudflare.com https://*.clerk.accounts.dev; worker-src 'self' blob:; manifest-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
 
 [[redirects]]
 from = "/device"
-to = "/index.html"
+to = "/app.html"
 status = 200
 
 [[redirects]]
 from = "/*"
-to = "/index.html"
+to = "/app.html"
 status = 200

@@ -5,7 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { ToastProvider, ErrorToast, useToast } from '../../web/src/ui/Toast';
 import { PendingWrite } from '../../web/src/pending-write';
 import { HostedNowView } from '../../web/src/cockpit/HostedNow';
-import { exampleWork } from '../../web/src/landing/example';
+import { exampleWork } from '../../web/src/explore/example';
 import { Notes } from '../../web/src/intents/IntentParts';
 import { useTheme } from '../../web/src/ui/Theme';
 import '../../web/src/ui/tokens.css';

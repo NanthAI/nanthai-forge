@@ -4,13 +4,14 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
-/** Built first-load closure: entry plus immediately imported Hosted, never unopened screens.
+/** Built first-load closure: entry plus immediately imported Hosted, never unopened screens. The default is the
+ * signed-in app (app.html); pass ['index.html'] for the static public page.
  * Font subsets are reported separately because unicode-range selects them at runtime.
  * Excludes provider scripts/API responses and browser-selected icons, not measured network traffic. */
-export function webBundleReport(directory, entries = ['index.html', 'src/Hosted.tsx']) {
+export function webBundleReport(directory, entries = ['app.html', 'src/Hosted.tsx']) {
   const manifest = JSON.parse(readFileSync(join(directory, '.vite/manifest.json'), 'utf8'));
   const seen = new Set(),
-    files = new Set(['index.html']),
+    files = new Set(entries.filter(entry => entry.endsWith('.html'))),
     fonts = new Set();
   function visit(key) {
     if (seen.has(key)) return;

@@ -74,7 +74,7 @@ export function classifyCheckPath(path, files) {
   // Returning unknown selects full coverage, including for deleted files.
   if (!path.includes('/') || path.startsWith('docs/') || (path.startsWith('evals/') && !path.endsWith('.md')))
     return null;
-  if (['web/tsconfig.json', 'web/vite.config.ts', 'web/index.html'].includes(path))
+  if (['web/tsconfig.json', 'web/vite.config.ts', 'web/index.html', 'web/app.html'].includes(path))
     return domain('web', ['web/src/'], 'Web build configuration');
   if (path === 'convex/tsconfig.json')
     return domain('convex', ['convex/', 'web/src/'], 'Convex TypeScript configuration');

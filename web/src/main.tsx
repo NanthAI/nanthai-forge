@@ -25,7 +25,7 @@ import './lane/lane.css';
 import './lane/diff.css';
 import './lane/lane-fable.css';
 import './intents/intents.css';
-import './landing/landing.css';
+import './explore/explore.css';
 import './device/device.css';
 class AppBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };

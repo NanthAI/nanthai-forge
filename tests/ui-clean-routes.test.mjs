@@ -48,7 +48,7 @@ test('all hosted destinations have canonical homes and old names redirect after 
 test('legacy account surfaces have a single project-list home', () => {
   r.routeMode('hosted');
   for (const surface of ['projects', 'explore', 'agents'])
-    assert.equal(r.cleanUrl(`?surface=${surface}&collection=saved`, base), '/');
+    assert.equal(r.cleanUrl(`?surface=${surface}&collection=saved`, base), '/projects');
 });
 test('local deep links, source paths and pins survive canonical routing', () => {
   r.routeMode('local');
@@ -119,7 +119,7 @@ test('account Settings decodes and can navigate back to the project list', () =>
   const url = r.routeUrlState(new URL('/settings', base).href);
   assert.equal(url.searchParams.get('surface'), 'account');
   url.searchParams.set('surface', 'projects');
-  assert.equal(r.cleanUrl(url, base), '/');
+  assert.equal(r.cleanUrl(url, base), '/projects');
   assert.equal(r.cleanUrl('/settings', base), '/settings');
 });
 

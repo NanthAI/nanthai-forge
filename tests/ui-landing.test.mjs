@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 const { hubs, exampleWork, exampleBriefContext, exampleIds } = await import(
-  moduleUrl('../web/src/landing/example.ts')
+  moduleUrl('../web/src/explore/example.ts')
 );
 const { cockpitLanes } = await import(moduleUrl('../web/src/cockpit/model.ts'));
 const { renderBriefing } = await import('../dist/agent-brief-render.js');
@@ -72,49 +72,11 @@ test('the example briefing names detected instruction files and plain paths', ()
   assert.doesNotMatch(none.copyText, /Follow this repo/);
 });
 
-const { createRiver, aliveDefaults } = await import(moduleUrl('../web/src/landing/alive-world.ts'));
-const riverColors = {
-  trunk: '#777777',
-  agent: '#888888',
-  person: '#2fb8a9',
-  you: '#ff6b3d',
-  passed: '#5fd39a',
-  conflict: '#c79bff',
-};
-
-test('the seeded hero stays finite through handoff, conflict and landing, with bounded history', () => {
-  const options = { ...aliveDefaults, conflictChance: 1, acceptChance: 1 };
-  const world = createRiver(1500, 700, riverColors, options);
-  const replay = createRiver(1500, 700, riverColors, options);
-  const seen = new Set();
-  for (let frame = 0; frame < 120 * 60; frame++) {
-    world.step(1 / 60);
-    replay.step(1 / 60);
-    for (const effect of world.effects) seen.add(effect.kind);
-    for (const thread of world.threads) {
-      assert.ok(Number.isFinite(thread.x) && Number.isFinite(thread.y));
-      assert.ok(thread.trail.length <= 542, 'old trail samples are released');
-    }
-  }
-  assert.deepEqual([...seen].sort(), ['conflict', 'hand', 'land', 'pulse']);
-  assert.ok(world.threads.length < 30, 'completed threads are released');
-  assert.deepEqual(world.threads, replay.threads, 'same seed and steps give the same film');
-});
-
-test('the hero remains composed on a narrow screen with people, agents and an orange handoff', () => {
-  const world = createRiver(390, 460, riverColors);
-  for (let frame = 0; frame < 14 * 60; frame++) world.step(1 / 60);
-  assert.equal(world.trunkY, Math.round(460 * 0.58));
-  assert.ok(world.threads.some(t => t.kind === 'you'));
-  assert.ok(world.threads.some(t => t.kind === 'agent' && t.nodes.length));
-  assert.ok(world.threads.some(t => t.kind === 'person'));
-});
-
 // J34-4/J34-7/J34-8: links lead to the mirror, and the first-run guide covers either landing policy.
-test('public navigation links to the current mirror and names the development status page', async () => {
+test('public frame links to the current mirror and status; signed-out app routes point back to the public page', async () => {
   const { createElement } = await import('react');
   const { renderToStaticMarkup } = await import('react-dom/server');
-  const { PublicFrame } = await import(moduleUrl('../web/src/landing/PublicFrame.tsx'));
+  const { PublicFrame } = await import(moduleUrl('../web/src/shell/PublicFrame.tsx'));
   const html = renderToStaticMarkup(createElement(PublicFrame, { children: 'Example' }));
   assert.match(html, /href="https:\/\/github.com\/NanthAI\/nanthai-forge#readme"/);
   assert.match(
@@ -122,11 +84,11 @@ test('public navigation links to the current mirror and names the development st
     /href="https:\/\/github.com\/NanthAI\/nanthai-forge\/blob\/main\/docs\/status.md">Development status/,
   );
   assert.doesNotMatch(html, /github.com\/nanthai\/forge/);
-  const { Landing } = await import(moduleUrl('../web/src/landing/Landing.tsx'));
-  const landing = renderToStaticMarkup(createElement(Landing, { open: () => {}, busy: false, error: '' }));
-  const targets = [...landing.matchAll(/href="(https:\/\/github.com[^"]+)"/g)].map(match => match[1]);
-  assert(targets.length >= 3);
-  assert(targets.every(target => target.startsWith('https://github.com/NanthAI/nanthai-forge')));
+  // The public page itself is static HTML; tests/landing-page.test.mjs checks its links.
+  const { SignedOut } = await import(moduleUrl('../web/src/explore/SignedOut.tsx'));
+  const signedOut = renderToStaticMarkup(createElement(SignedOut, {}));
+  assert.match(signedOut, /Sign in to open your projects/);
+  assert.match(signedOut, /href="\/">What Forge is/);
 });
 
 test('first-run step three explains automatic landings and approvals only when required', async () => {

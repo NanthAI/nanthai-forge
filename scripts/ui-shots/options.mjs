@@ -11,8 +11,8 @@ node scripts/ui-shots.mjs --base URL --out DIR \\
 
 Optional: --intent-layout list|board (Intents layout), --diff-file PATH (select a Lane/Review diff), --project ID (defaults to credentials.projectId), --height 1000,
 --credentials FILE (defaults to ~/.config/forge-ui-bot/credentials.json).
---pages landing captures the signed-out front door, a four-frame hero strip,
-and a 30-second animated/still CPU comparison; no bot credentials are read.
+--pages landing captures the public page (stills per width and theme, keyboard, no-JS, a hero strip), its
+motion lifecycle and cold-load cost; point --base at a built preview. No bot credentials are read.
 --pages bootstrap captures synthetic New project and empty-project components,
 including a lost-response retry, without credentials or hosted writes.
 Lane/View variants: --variants unified,split,inline,side-closed,files-closed,map

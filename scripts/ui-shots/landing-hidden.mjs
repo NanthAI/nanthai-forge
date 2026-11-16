@@ -8,7 +8,7 @@ import { chromium } from 'playwright';
 
 /** Playwright forces focus in its normal contexts. Use a fresh native default context
  * without those overrides to exercise the actual document.hidden browser event. */
-export async function hiddenHero(base) {
+export async function hiddenHero(base, heading) {
   const directory = await mkdtemp(join(tmpdir(), 'forge-hero-visibility-'));
   const process = spawn(
     chromium.executablePath(),
@@ -38,8 +38,8 @@ export async function hiddenHero(base) {
       page = context.pages()[0];
     await page.setViewportSize({ width: 1500, height: 1000 });
     await page.goto(base);
-    await page.getByRole('heading', { name: 'Hand it off. Watch it land.' }).waitFor();
-    await page.waitForTimeout(350);
+    await page.getByRole('heading', { name: heading }).waitFor();
+    await page.waitForFunction(() => window.__forgeHero?.running === true);
     system = await browser.newBrowserCDPSession();
     const devtools = await context.newCDPSession(page);
     const { targetInfo } = await devtools.send('Target.getTargetInfo');
@@ -53,9 +53,9 @@ export async function hiddenHero(base) {
     await system.send('Target.activateTarget', { targetId });
     await page.waitForTimeout(350);
     const hidden = await page.evaluate(() => document.hidden);
-    const first = await page.locator('.fx-alive').evaluate(canvas => canvas.toDataURL());
-    await page.waitForTimeout(350);
-    const unchanged = first === (await page.locator('.fx-alive').evaluate(canvas => canvas.toDataURL()));
+    const first = await page.evaluate(() => window.__forgeHero.ticks);
+    await page.waitForTimeout(700);
+    const unchanged = first === (await page.evaluate(() => window.__forgeHero.ticks));
     return { backgroundTabHidden: hidden, backgroundTabStill: unchanged };
   } finally {
     await system?.send('Browser.close').catch(() => {});

@@ -9,7 +9,7 @@ import { api } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
 import { navigate } from '../ui/navigation';
 import { useDestination, useSection } from '../WorkspaceUI';
-import { PublicFrame } from '../landing/PublicFrame';
+import { PublicFrame } from './PublicFrame';
 import { WorkHeaderProvider, type WorkPage } from './WorkHeader';
 import { Glyph } from '../ui/Glyph';
 import { Shell, type ShellTab } from './Shell';

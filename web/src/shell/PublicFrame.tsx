@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { ReactNode } from 'react';
-import { ForgeMark } from '../shell/brand';
+import { ForgeMark } from './brand';
 import { ThemeToggle } from '../ui/Theme';
-import { GitHubGlyph } from './GitHubGlyph';
+import { GitHubGlyph } from '../ui/GitHubGlyph';
 
 /** The signed-out header shares the product mark and authentication control. */
 export function PublicFrame({ account, children }: { account?: ReactNode; children: ReactNode }) {
