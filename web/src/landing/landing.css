@@ -1,50 +1,8 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* The public page (web/index.html): static HTML, this sheet and two small scripts; no app code. */
 
-/* Page-scoped tokens, named as in the approved design system; Item 6ebb58ab moves them into the shared token source. */
-:root {
-  --bg: #0b0e13; --surface: #11151c; --surface-2: #161b24; --surface-3: #1c2230; --hover: #1a202b;
-  --line: #222a36; --line-strong: #2e3746;
-  --text: #e8ecf2; --text-2: #a3adbb; --text-3: #828d9d;
-  --brand: #ff6b3d; --brand-hover: #ff865f; --brand-edge: #c2441c; --on-brand: #17100b;
-  --accent: #ff936e; --focus: #ff936e; --series: #ff6b3d;
-  --mark-warm: #ffb347; --mark-teal: #23cbff;
-  --active: #6aaeff; --waiting: #f2b84b; --conflict: #c79bff; --passed: #5fd39a;
-  --band: #ff6b3d; --on-band: #17100b; --on-band-2: #4a2414; --hatch: #6f7a8a;
-
-  --font-sans: "Atkinson Hyperlegible Next", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "Atkinson Hyperlegible Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  --mono-scale: .93; --disp-track: -.035em; --w-display: 750; --lh-disp: 1;
-  --t-land: 17px; --t-land-lead: clamp(17px, 1.45vw, 21px); --t-h3: 19px;
-  --t-h2: clamp(28px, 3.3vw, 48px); --t-h1: clamp(34px, 5.5vw, 82px); --t-stmt: clamp(30px, 4.6vw, 70px);
-  --t-micro: 11.5px;
-  --gut-land: clamp(16px, 4vw, 48px); --wrap-land: 1280px; --sec-land: clamp(56px, 9vw, 128px);
-  --r: 3px; --r-key: 8px; --r-bar: 2px;
-  --ease-out: cubic-bezier(.23, 1, .32, 1); --ease-in-out: cubic-bezier(.77, 0, .175, 1);
-  --d-press: 100ms; --d-quick: 120ms; --d-state: 200ms; --d-travel: 600ms; --calm-after: 60s; /* hero.ts: 15 fps after this long without input */
-  color-scheme: dark;
-}
-:root[data-theme="light"] {
-  --bg: #f4f6f9; --surface: #ffffff; --surface-2: #f8f9fb; --surface-3: #eef1f5; --hover: #f1f4f8;
-  --line: #e3e7ed; --line-strong: #cfd6df;
-  --text: #141a24; --text-2: #4f5b6b; --text-3: #606c7c;
-  --accent: #b43a11; --focus: #b43a11; --series: #d4501c;
-  --active: #1a64c2; --waiting: #8a5800; --conflict: #7a3fc4; --passed: #1e7a4c; --hatch: #7b8696;
-  color-scheme: light;
-}
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme]) {
-    --bg: #f4f6f9; --surface: #ffffff; --surface-2: #f8f9fb; --surface-3: #eef1f5; --hover: #f1f4f8;
-    --line: #e3e7ed; --line-strong: #cfd6df;
-    --text: #141a24; --text-2: #4f5b6b; --text-3: #606c7c;
-    --accent: #b43a11; --focus: #b43a11; --series: #d4501c;
-    --active: #1a64c2; --waiting: #8a5800; --conflict: #7a3fc4; --passed: #1e7a4c; --hatch: #7b8696;
-    color-scheme: light;
-  }
-}
-
-@font-face { font-family: "Atkinson Hyperlegible Next"; src: url(../assets/fonts/AtkinsonHyperlegibleNext-latin.woff2) format("woff2"); font-weight: 400 800; font-display: swap; unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
-@font-face { font-family: "Atkinson Hyperlegible Mono"; src: url(../assets/fonts/AtkinsonHyperlegibleMono-latin.woff2) format("woff2"); font-weight: 400 700; font-display: swap; unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+/* Tokens and fonts come from the design system's one source; <html data-ds> applies them. */
+@import "../ds/tokens.css";
 
 *, *::before, *::after { box-sizing: border-box; }
 html { overflow-x: clip; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; scroll-behavior: smooth; background: var(--bg); }

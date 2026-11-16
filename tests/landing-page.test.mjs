@@ -9,6 +9,7 @@ import { gzipSync } from 'node:zlib';
 const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const html = read('web/index.html');
 const css = read('web/src/landing/landing.css');
+const tokens = read('web/src/ds/tokens.css');
 const scripts = ['page.ts', 'frames.ts', 'hero.ts'].map(name => [name, read(`web/src/landing/${name}`)]);
 const text = html
   .replace(/<script>[\s\S]*?<\/script>/g, '')
@@ -243,7 +244,10 @@ test('head, tokens, fonts and size budget', () => {
   for (const tag of ['og:title', 'og:description', 'og:type', 'og:site_name'])
     assert.match(html, new RegExp(`<meta property="${tag}" content="[^"]+">`));
   assert.match(html, /<meta name="twitter:card" content="summary">/);
-  assert.match(css, /Item 6ebb58ab/);
+  // One token source for the public page and the app (Item 6ebb58ab): the page imports it and sets data-ds.
+  assert.match(css, /^@import "\.\.\/ds\/tokens\.css";$/m);
+  assert.match(html, /^<html lang="en" data-ds>$/m);
+  assert.doesNotMatch(css, /^\s*--[a-z0-9-]+:/m, 'the page sheet declares no tokens of its own');
   for (const token of [
     '--font-sans',
     '--font-mono',
@@ -254,14 +258,15 @@ test('head, tokens, fonts and size budget', () => {
     '--calm-after',
     '--t-land',
   ])
-    assert.ok(css.includes(`${token}:`), token);
-  assert.match(css, /--font-sans: "Atkinson Hyperlegible Next"/);
-  assert.match(css, /--font-mono: "Atkinson Hyperlegible Mono"/);
+    assert.ok(tokens.includes(`${token}:`), token);
+  assert.match(tokens, /--font-sans: "Atkinson Hyperlegible Next"/);
+  assert.match(tokens, /--font-mono: "Atkinson Hyperlegible Mono"/);
   assert.match(read('web/src/assets/NOTICE.md'), /## Atkinson Hyperlegible Next and Mono/);
   assert.match(read('web/public/assets/AtkinsonHyperlegible-OFL.txt'), /SIL OPEN FONT LICENSE Version 1\.1/);
   const gz = source => gzipSync(source).length;
   assert.ok(gz(html) < 9_000, `index.html ${gz(html)} B gzip`);
   assert.ok(gz(css) < 8_000, `landing.css ${gz(css)} B gzip`);
+  assert.ok(gz(tokens) < 3_100, `ds/tokens.css ${gz(tokens)} B gzip`);
   // Source with comments; the built page script is about 2 KB gzip and the lazy hero about 5 KB (docs/development.md).
   assert.ok(gz(scripts.map(s => s[1]).join('\n')) < 12_000, 'landing scripts stay a few KB');
 });

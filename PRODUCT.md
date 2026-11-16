@@ -38,7 +38,7 @@ Forge never surprises you and never loses anything. It is a calm shift lead, not
 - Manrope for titles; system UI font for everything else. Dark-first, light and system themes.
 - Voice: plain, present tense, specific, numbers always, people and agents named. Fact, consequence, next step. No exclamation marks, no emoji.
 - Taglines: "Hand it off. Watch it land." (landing headline, "land." in orange); owner's "Many agents. One codebase. Nothing lost."
-- Design direction: `DESIGN.md` records the personality, tokens and component rules; `web/src/style.css` contains the shared implementation.
+- Design direction: `DESIGN.md` records the personality, tokens, components and the rules for choosing each pattern; `web/src/ds/` contains the shared implementation.
 
 ## Evidence on Hand
 - Real dogfooding data: the NanthAi Forge hosted project (Forge building itself), with real Lanes, Candidates, checks and agent presence.

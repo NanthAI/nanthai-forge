@@ -1,0 +1,130 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Design system base: element defaults, state, keys, who and counts, the three weights, the first stop and kind marks.
+   Everything is nested under [data-ds], so a frame built on the system is styled and a legacy screen is not; the
+   extra attribute also outranks the legacy element rules (button, p, h1) that are still loaded globally. */
+@import "./tokens.css";
+
+[data-ds] {
+  & { color: var(--text); background: var(--bg); font: var(--w-regular) var(--t-body)/var(--lh-body) var(--font-sans); -webkit-font-smoothing: antialiased; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
+  &, & *, & *::before, & *::after { box-sizing: border-box; }
+  & * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  ::selection { background: var(--accent-bg); color: var(--text); }
+  h1, h2, h3, h4, p, ul, ol, dl, dd, figure, pre { margin: 0; }
+  h1, h2, h3, h4 { text-wrap: balance; font-size: inherit; letter-spacing: 0; line-height: inherit; overflow-wrap: normal; }
+  p { color: inherit; }
+  ul, ol { padding: 0; list-style: none; }
+  a { color: inherit; text-decoration: none; }
+  a.lk { color: var(--accent); text-underline-offset: 3px; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  input, textarea { caret-color: var(--brand); }
+  button { cursor: pointer; touch-action: manipulation; }
+  button, .btn, .seg, summary, .grip { user-select: none; -webkit-user-select: none; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: var(--r); }
+  [hidden] { display: none !important; }
+  .mono, code, kbd, pre, .num { font-family: var(--font-mono); font-size: calc(1em * var(--mono-scale)); }
+  .num, .tnum { font-variant-numeric: tabular-nums; }
+  .t2 { color: var(--text-2); } .t3 { color: var(--text-3); }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .grow { flex: 1 1 auto; min-width: 0; } .right { margin-left: auto; }
+  .cut { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .wrap2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .any { overflow-wrap: anywhere; min-width: 0; }
+
+  /* state: a drawn shape and a word in the state colour */
+  [data-st="active"] { --st: var(--active); --st-bg: var(--active-bg); }
+  [data-st="waiting"] { --st: var(--waiting); --st-bg: var(--waiting-bg); }
+  [data-st="conflict"] { --st: var(--conflict); --st-bg: var(--conflict-bg); }
+  [data-st="passed"] { --st: var(--passed); --st-bg: var(--passed-bg); }
+  [data-st="failed"] { --st: var(--failed); --st-bg: var(--failed-bg); }
+  [data-st="stale"] { --st: var(--stale); --st-bg: var(--stale-bg); }
+  .st { display: inline-flex; align-items: center; gap: 5px; color: var(--st); font-weight: var(--w-strong); font-size: var(--t-meta); white-space: nowrap; flex: none; }
+  .st svg { width: 13px; height: 13px; flex: none; }
+
+  /* keys: a press moves them down by one pixel */
+  kbd { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 var(--s-1); border: var(--rule) solid var(--key-edge); border-bottom-width: 2px; border-radius: var(--r); background: var(--surface-2); color: var(--text-2); font-size: var(--t-micro); line-height: 1; font-weight: var(--w-medium); }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: var(--ctl-h); padding: 0 11px; min-width: 0; margin: 0; border: var(--rule) solid var(--line-strong); border-bottom: 2px solid var(--key-edge); border-radius: var(--r); background: var(--surface-2); color: var(--text); font-weight: var(--w-strong); font-size: 13px; line-height: 1; white-space: nowrap; transition: transform var(--d-press) var(--ease-out), background-color var(--d-quick); }
+  .btn > span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .btn:active { transform: translateY(1px); }
+  .btn.primary { background: var(--brand); color: var(--on-brand); border-color: var(--brand); border-bottom-color: var(--brand-edge); font-weight: var(--w-bold); }
+  .btn.rec { border-color: var(--text-2); border-bottom-color: var(--text-2); }
+  .btn.ghost { border-color: transparent; background: transparent; color: var(--text-2); }
+  .btn.danger { color: var(--failed); }
+  .btn.lg { height: var(--ctl-h-lg); padding: 0 var(--s-5); font-size: 15.5px; }
+  .btn.sm { height: var(--ctl-h-sm); padding: 0 9px; font-size: var(--t-meta); }
+  .btn.wrap { height: auto; min-height: var(--ctl-h); padding-block: var(--s-1); white-space: normal; text-align: left; max-width: 100%; line-height: var(--lh-head); }
+  .btn.wrap > span { overflow: visible; overflow-wrap: anywhere; }
+  .btn kbd { margin-right: -4px; background: transparent; border-color: color-mix(in srgb, currentColor 34%, transparent); color: inherit; opacity: .85; }
+  .btn[disabled], .btn[aria-disabled="true"] { background: transparent; color: var(--text-3); border-style: dashed; border-bottom-width: var(--rule); cursor: default; transform: none; }
+  .btns { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; min-width: 0; }
+  .seg { display: inline-flex; border: var(--rule) solid var(--line-strong); border-radius: var(--r); }
+  .seg button { border: 0; border-radius: 0; margin: 0; background: transparent; height: 28px; padding: 0 10px; color: var(--text-2); font-size: var(--t-meta); font-weight: var(--w-strong); white-space: nowrap; }
+  .seg button + button { border-left: var(--rule) solid var(--line-strong); }
+  .seg button[aria-pressed="true"] { background: var(--surface-3); color: var(--text); }
+  @media (hover: hover) and (pointer: fine) {
+    .btn:not([disabled]):hover { background: var(--hover); } .btn.primary:hover { background: var(--brand-hover); }
+    .btn.ghost:hover, .seg button:hover { color: var(--text); }
+    a.lk:hover { text-decoration: underline; }
+  }
+  @media (max-width: 860px) { .btn { min-height: var(--ctl-h-touch); } .btn.sm { min-height: var(--ctl-h-touch); } .btn kbd, .key-cap { display: none; } }
+
+  /* who: a person is a solid square, an agent (a session) a hollow one; a team, a device and nobody are marked apart */
+  .who { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; vertical-align: bottom; }
+  .who > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .av { display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: var(--r); background: var(--k-person); border: var(--rule) solid var(--k-person); color: var(--on-person); font: var(--w-strong) 10px/1 var(--font-mono); text-transform: lowercase; }
+  .av.ag { background: transparent; border-color: var(--k-session); color: var(--text-2); }
+  .av.tm { background: var(--surface-3); border-color: var(--text-3); color: var(--text-2); }
+  .av.si, .av.none { background: transparent; color: var(--text-2); }
+  .av.si { border-color: var(--line-strong); } .av.none { border: var(--rule) dashed var(--line-strong); }
+  .av.lg { width: 28px; height: 28px; font-size: var(--t-micro); }
+  .cnt { display: inline-grid; place-items: center; min-width: 20px; height: 18px; padding: 0 5px; border-radius: var(--r); background: var(--surface-3); color: var(--text-2); font: var(--w-strong) var(--t-micro)/1 var(--font-mono); font-variant-numeric: tabular-nums; flex: none; }
+  .cnt.hot { background: var(--brand); color: var(--on-brand); }
+  .prop { font: var(--w-medium) var(--t-micro)/1 var(--font-sans); color: var(--waiting); border: var(--rule) solid currentColor; border-radius: var(--r); padding: 1px var(--s-1); vertical-align: 1px; white-space: nowrap; }
+  .sample { color: var(--text-3); font-size: var(--t-meta); }
+
+  /* kind marks: one shape per kind, in ink */
+  .km { width: var(--km); height: var(--km); flex: none; color: var(--k, var(--text-2)); }
+  .km[data-k="lane"] { --k: var(--k-lane); } .km[data-k="item"] { --k: var(--k-item); } .km[data-k="check"] { --k: var(--k-check); }
+  .km[data-k="session"] { --k: var(--k-session); } .km[data-k="person"] { --k: var(--k-person); }
+  .kf { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+
+  /* a disclosure's turn mark */
+  .tw { flex: none; width: 16px; height: 16px; display: inline-grid; place-items: center; border: 0; margin: 0; padding: 0; border-radius: var(--r); background: transparent; color: var(--text-3); }
+  .tw:empty::before { content: ""; width: 7px; height: 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translate(-2px, 0) rotate(-45deg); transition: transform var(--d-quick) var(--ease-out); }
+  [aria-expanded="true"] > .tw:empty::before, .tw:empty[aria-expanded="true"]::before, details[open] > summary .tw:empty::before { transform: translate(0, -2px) rotate(45deg); }
+  @media (max-width: 860px) { .tw { width: 28px; height: 28px; } }
+
+  /* three weights, on a region, a group or a row; never one inside another */
+  [data-weight="act"] { --w-ink: var(--act-ink); --w-ink-2: var(--act-ink-2); --w-weight: var(--act-weight); }
+  [data-weight="watch"] { --w-ink: var(--watch-ink); --w-ink-2: var(--watch-ink-2); --w-weight: var(--watch-weight); }
+  [data-weight="ref"] { --w-ink: var(--ref-ink); --w-ink-2: var(--ref-ink-2); --w-weight: var(--ref-weight); }
+  [data-weight] .ttl { color: var(--w-ink); font-weight: var(--w-weight); }
+  [data-weight] .meta { color: var(--w-ink-2); }
+  [data-weight="ref"] .t3, [data-weight="ref"] .num.t3 { color: var(--ref-ink-2); }
+  [data-weight="ref"] .num.t2 { color: var(--ref-ink); font-weight: var(--w-regular); }
+  [data-weight="watch"] a.lk, [data-weight="ref"] a.lk { color: var(--w-ink-2); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+  [data-weight="watch"] a.lk:focus-visible, [data-weight="ref"] a.lk:focus-visible { color: var(--accent); }
+  [data-weight="ref"] .st { color: var(--ref-ink); font-weight: var(--w-medium); }
+  [data-weight="ref"] .st svg { color: var(--st); }
+  [data-weight="ref"] .km { color: var(--ref-ink-2); }
+  [data-weight="ref"] :is(.row, [data-row]):focus-within .ttl { color: var(--text); }
+  [data-weight="ref"] :is(.row, [data-row]):focus-within .st { color: var(--st); }
+  @media (hover: hover) and (pointer: fine) {
+    [data-weight="watch"] a.lk:hover, [data-weight="ref"] a.lk:hover { color: var(--accent); text-decoration-color: currentColor; }
+    [data-weight="ref"] :is(.row, [data-row]):hover .ttl, [data-weight="ref"] :is(.row, [data-row]):hover .num.t2 { color: var(--text); }
+    [data-weight="ref"] :is(.row, [data-row]):hover .meta { color: var(--text-2); }
+    [data-weight="ref"] :is(.row, [data-row]):hover .st { color: var(--st); }
+  }
+
+  /* the first stop: one edge in the act colour down the left of what waits on the reader */
+  [data-weight="act"] { position: relative; }
+  [data-weight="act"]::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: var(--act-edge); background: var(--act); z-index: 4; pointer-events: none; }
+  /* it beats --beats times when the thing arrives or the reader does (data-first is re-set by useFirstStop), then holds */
+  [data-weight="act"][data-first]::before { animation: ds-beat var(--d-beat) var(--ease-out) var(--beats); }
+}
+
+@keyframes ds-beat { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+
+/* Reduced motion: every change is instant; shape and word still carry the state. */
+@media (prefers-reduced-motion: reduce) {
+  [data-ds] *, [data-ds] *::before, [data-ds] *::after { transition: none !important; animation: none !important; }
+}

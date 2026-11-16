@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
 import { builtinModules } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { llmDocuments, llmsFullSizeReport } from '../scripts/llm-documents.mjs';
@@ -32,6 +33,8 @@ export default defineConfig({
   base: '/',
   envDir: '..',
   plugins: [
+    // React Fast Refresh: an edit updates the component in place and keeps its state (Item 6ebb58ab measured the loop).
+    react(),
     appRoutes,
     {
       // Vite silently swaps a Node builtin for an empty stub in the browser; a chunk that then calls
