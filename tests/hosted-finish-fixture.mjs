@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { composeFixture, jobApi as composeJobs } from './hosted-compose-fixture.mjs';
@@ -162,6 +163,7 @@ export async function finishFixture(
       return id;
     },
   };
+  const executingTasks = new AsyncLocalStorage();
   f.decorateContext(ctx => {
     ctx.db.system = { get: ctx.db.get };
     ctx.storage = sourceStorage;
@@ -174,6 +176,7 @@ export async function finishFixture(
           state: { kind: 'pending' },
         }),
       cancel: async id => {
+        if (executingTasks.getStore()?.includes(id)) throw new Error('A mutation cannot cancel itself');
         const old = await ctx.db.get(id);
         if (old && !['success', 'failed'].includes(old.state.kind))
           await ctx.db.patch(id, { state: { kind: 'canceled' } });
@@ -306,7 +309,13 @@ export async function finishFixture(
       ...(decision.reason ? { reason: decision.reason } : {}),
     });
   };
-  const execute = async (task = pending()[0], stop = null) => {
+  const execute = (task = pending()[0], stop = null) => {
+    assert(task, 'pending task');
+    return executingTasks.run([...(executingTasks.getStore() ?? []), task._id], () =>
+      executeTask(task, stop),
+    );
+  };
+  const executeTask = async (task, stop) => {
     assert(task, 'pending task');
     now = Math.max(now, task.scheduledTime);
     f.patch('_scheduled_functions', task._id, {

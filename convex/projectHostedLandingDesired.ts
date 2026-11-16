@@ -268,11 +268,12 @@ export const claim = internalMutation({
     if (row?.wake?.id !== input.wakeId) return null;
     const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
     if (state.observation.state !== 'pending') {
-      await ctx.scheduler.cancel(row.wake.taskId);
+      // This is the wake currently running; Convex refuses self/ancestor cancellation.
       await ctx.db.patch(row._id, { wake: null });
       return null;
     }
-    return schedule(ctx, row, desiredWatchdogMs(state));
+    // Replace the fence without canceling the action that called this mutation.
+    return schedule(ctx, { ...row, wake: null }, desiredWatchdogMs(state));
   },
 });
 export const advance = internalMutation({

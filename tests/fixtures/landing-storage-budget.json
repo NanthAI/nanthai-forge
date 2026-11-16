@@ -182,7 +182,8 @@
       "projectObjectReceipts": 0,
       "projectHostedLandingBodies": 1013,
       "projectJournalSegments": 0,
-      "projectJournalReceipts": 0
+      "projectJournalReceipts": 0,
+      "users": 0
     },
     "retained": {
       "projectJournalSegments": 1394,
@@ -366,7 +367,8 @@
       "imports": 0,
       "importArtifacts": 0,
       "importReaders": 0,
-      "githubDeliveries": 0
+      "githubDeliveries": 0,
+      "users": 0
     },
     "perProject": {
       "immediate": {
@@ -613,7 +615,8 @@
       "projectObjectReceipts": 0,
       "projectHostedLandingBodies": 1015,
       "projectJournalSegments": 0,
-      "projectJournalReceipts": 0
+      "projectJournalReceipts": 0,
+      "users": 0
     },
     "retained": {
       "projectJournalSegments": 3514,
@@ -797,7 +800,8 @@
       "imports": 0,
       "importArtifacts": 0,
       "importReaders": 0,
-      "githubDeliveries": 0
+      "githubDeliveries": 0,
+      "users": 0
     },
     "perProject": {
       "immediate": {

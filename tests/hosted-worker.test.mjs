@@ -11,6 +11,7 @@ import { validateArtifact } from '../dist/artifact-validation.js';
 
 const indexer = await import(moduleUrl('../convex/indexer.ts'));
 const imports = await import(moduleUrl('../convex/imports.ts'));
+const githubUserTokens = await import(moduleUrl('../convex/githubUserTokens.ts'));
 const remote = await import(moduleUrl('../convex/remote.ts'));
 const hosted = await import(moduleUrl('../convex/hosted.ts'));
 const { default: http } = await import(moduleUrl('../convex/http.ts'));
@@ -329,7 +330,10 @@ test('registered private status/read actions authorize the current importer befo
     providerReads = 0;
   const ctx = {
     auth: { getUserIdentity: async () => (caller ? { subject: caller } : null) },
-    runQuery: async () => privateJob,
+    runQuery: async ref => {
+      assert(['imports:get', 'githubUserTokens:read', 'sharing:allowed'].includes(getFunctionName(ref)));
+      return getFunctionName(ref) === 'imports:get' ? privateJob : null;
+    },
     storage: { get: () => assert.fail('Denied access must never open private storage.') },
   };
   try {
@@ -396,7 +400,7 @@ function syncContext(jobs) {
     deliveries = new Map(),
     scheduled = [],
     tasks = new Map();
-  const modules = { imports, sync, syncActions };
+  const modules = { imports, sync, syncActions, githubUserTokens };
   const ctx = {
     db: {
       normalizeId: (table, id) =>
@@ -432,8 +436,11 @@ function syncContext(jobs) {
             return query;
           },
           unique: async () =>
-            [...deliveries.values()].find(row => [...matches].every(([key, value]) => row[key] === value)) ??
-            null,
+            table === 'users'
+              ? null
+              : ([...deliveries.values()].find(row =>
+                  [...matches].every(([key, value]) => row[key] === value),
+                ) ?? null),
           first: async () => {
             assert.equal(table, 'imports');
             return (

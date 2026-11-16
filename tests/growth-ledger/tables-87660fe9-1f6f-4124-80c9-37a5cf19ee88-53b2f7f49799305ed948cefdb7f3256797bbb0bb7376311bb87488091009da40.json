@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "de67c77d auth core needs one users table mapping live component sessions to stable Forge account keys; GitHub service ciphertext shares that row; replaces token-only browser identity access, no duplicate session store",
+  "date": "2026-11-16"
+}

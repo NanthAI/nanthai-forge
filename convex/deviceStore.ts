@@ -4,6 +4,7 @@ import { publicAbuseBudgets } from './publicAbuseBudgets';
 import { internalMutation, internalQuery } from './server';
 import { deviceDocument, deviceFields, credentialDocument, credentialFields } from './deviceFields';
 import { invariant } from '../src/errors';
+import { isDeviceIdentity } from './cliServer';
 /** New device logins per minute for the whole deployment, and expired login rows
  * removed by each new start. Retries of an existing start are not counted. */
 export const deviceStartLimit = { perMinute: 120, cleanup: 4 };
@@ -104,6 +105,14 @@ export const decide = internalMutation({
       return null;
     }
     invariant(row.state === 'pending', 'AUTH_CODE_USED', 'This device code already has a decision.');
+    // An action's final session check cannot roll back this committed write.
+    // Resolve the live approver inside the transaction that grants the device.
+    const approver = await ctx.auth.getUserIdentity();
+    invariant(
+      approver && !isDeviceIdentity(approver) && approver.subject === args.owner,
+      'AUTH_REQUIRED',
+      'Sign in to Forge in your browser.',
+    );
     await ctx.db.patch(row._id, {
       state: args.approve ? 'approved' : 'denied',
       owner: args.owner,

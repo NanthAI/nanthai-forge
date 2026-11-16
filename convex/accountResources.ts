@@ -2,7 +2,7 @@
 import { report } from './errors';
 import { v } from 'convex/values';
 import { paginationOptsValidator } from 'convex/server';
-import { internalQuery, type QueryCtx, type MutationCtx } from './_generated/server';
+import { internalQuery, type QueryCtx, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { resourceKind, leaveKind } from './accountTypes';
 import { invariant } from '../src/errors';

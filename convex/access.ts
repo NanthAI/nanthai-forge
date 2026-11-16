@@ -5,14 +5,16 @@ import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { assertImporter, authorizeGithub } from '../src/github-access';
 import { invariant } from '../src/errors';
+import { githubUserToken } from './githubUserTokenActions';
 
-export function githubConfig() {
+export function githubConfig(ctx?: ActionCtx) {
   return {
     clerkSecret: process.env.CLERK_SECRET_KEY,
     appClientId: process.env.GITHUB_APP_CLIENT_ID,
     appClientSecret: process.env.GITHUB_APP_CLIENT_SECRET,
     publicToken: process.env.GITHUB_PUBLIC_TOKEN,
     appSlug: process.env.GITHUB_APP_SLUG,
+    ...(ctx ? { userToken: (owner: string) => githubUserToken(ctx, owner) } : {}),
   };
 }
 export async function currentAccess(
@@ -41,9 +43,9 @@ export async function currentAccess(
     (await ctx.runQuery(internal.sharing.allowed, { id, reader: caller })) === true,
   );
   if (!shared) assertImporter(job.visibility, job.owner, caller);
-  const access = await authorizeGithub(job.repository, caller, githubConfig());
+  const access = await authorizeGithub(job.repository, caller, githubConfig(ctx));
   if (shared) {
-    await authorizeGithub(job.repository, job.owner, githubConfig());
+    await authorizeGithub(job.repository, job.owner, githubConfig(ctx));
     // Recheck grants/lifecycle after provider calls; a removal during those reads must stop storage retrieval.
     invariant(
       (await ctx.runQuery(internal.sharing.allowed, { id, reader: caller! })) === true,

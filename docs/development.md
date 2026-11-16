@@ -572,6 +572,81 @@ Configuration is written to the ignored `.env.local`.
 
 Imports store gzip JSON in R2 (`r2blob:` references, see [data placement](data-placement.md)) with a 128 MiB artifact budget. Functions never execute target repository code. After setup, `npm run smoke:hosted -- https://github.com/sindresorhus/is-plain-obj` checks live anonymous import.
 
+### Convex Auth core beside Clerk
+
+The backend mounts Convex Auth 2.0.0 on Convex 1.50.0 as `auth`, `authGithub`,
+`authPasskey` and `authUsername`. The current browser UI still uses Clerk; the
+shell and sign-in screens integrate these functions in their own slices. There
+is no provider switch flag. Clerk removal follows the live GitHub and phone
+checks and the pre-removal security review.
+
+New deployment settings (names only; values stay in the deployment):
+
+- `AUTH_GITHUB_CLIENT_ID` and `AUTH_GITHUB_CLIENT_SECRET`: the owner sets the
+  GitHub OAuth credentials on dev after landing. Callback:
+  `https://<dev-deployment>.convex.site/oauth/github/callback`. This differs from
+  the existing GitHub App repository-connection callback at
+  `https://<dev-deployment>.convex.site/github/oauth/callback`.
+- `FORGE_WEB_URL`: exact HTTPS browser origin and allowed `redirectTo` origin.
+  Preserve the original invitation/task URL within that origin.
+- `FORGE_AUTH_RP_ID`: optional explicit relying-party domain; otherwise the host
+  of `FORGE_WEB_URL`. Native associated domains/origins await the native slice.
+- `CONVEX_CLOUD_URL`: supplied by Convex. Tokens use its ES256 issuer and JWKS,
+  audience `convex-auth`; no separate application signing key is needed.
+- `FORGE_GITHUB_TOKEN_KEYRING`: independent AES-256-GCM service-token keyring,
+  using the existing `{active, keys}` format. Configure before the new account's
+  GitHub App connection. It is separate from `FORGE_SECRET_KEYS`, sign-in keys,
+  and the device/passkey envelope protocol. Ciphertext is bound to its Forge owner.
+
+`auth.ts` exports GitHub sign-in, identifier-first passkey sign-in and library
+passkey management. `authFirstPasskey:start/finish` adds the first passkey from a
+live session minted within ten minutes, composing the pinned component functions
+without a library patch. Subsequent passkeys use the library flow. Sign-in
+ceremonies request no extensions; the secret-envelope PRF ceremony uses its own
+relying party/origin. Review first-passkey freshness and the pinned internal API
+before removing Clerk.
+
+The shared function builders apply `forgeIdentity.ts`: a live component session
+and its `users` row resolve to a Forge account key. Revoked sessions become signed
+out even with copied, unexpired tokens; actions recheck after external work.
+CLI subjects and credential checks retain their path with zero new session/user
+reads. Browser device approval issues the normal independent Forge CLI
+credential; a CLI credential cannot approve another device.
+The granting mutation checks the live browser account inside its transaction,
+so revocation between inspection and approval leaves the device pending.
+
+New account keys retain `user_` plus the Convex user id. Callbacks store numeric
+GitHub ids and verified email only; accounts never link by email. Before switching
+the UI, seed existing account keys and verified numeric GitHub ids into `users`
+following the [spike mapping](research/convex-auth-spike.md#id-mapping-dry-run-case-7).
+Project owners are not rewritten. The existing GitHub App connection seals its
+user token in the account row for private-repository checks; the OAuth sign-in
+token itself is not retained.
+
+Access tokens last one hour; session/refresh lifetimes retain library defaults.
+Browser builders must apply both lifecycle rules:
+
+1. Hold refresh while hidden **or dormant**, coalescing wake-up into exactly one
+   refresh before authenticated reads resume.
+2. Enable passkey autofill only while the sign-in tab is visible and active;
+   focus-triggered autofill follows the same rule. Continuous mounting renews challenges
+   about every eight minutes.
+
+With those rules, idle clients add zero calls. No cron is added. The library's
+finite challenge cleanup and sign-out token deletion drain, then stop: zero
+scheduled calls per day at fully idle. A browser identity reads one component
+session and one small user row per invocation; actions repeat this after external
+I/O. Cost is constant at 7/14 accounts and 312/624 projects. Sign-in records occupy
+a few KB; source/artifacts stay in R2. These are code-path budgets, not a new
+dev billed-usage measurement.
+
+The removal slice deletes Clerk's web provider/dependency, issuer entry and
+distinctness checks, `CLERK_*` setup/bot helpers, and retained provider lookups in
+GitHub access, linked identities, recipient checks and project people. Integrate
+recipient/account lookup with `users` and the unified devices UI first, then
+remove the old path. Live GitHub, real phones/cross-device sign-in, refresh/autofill
+UI behavior, backfill and security review remain open on Item de67c77d.
+
 ### Signed-out landing review
 
 `node scripts/ui-shots.mjs --base http://localhost:5295 --out /absolute/path/ui/s5 --pages landing --widths 1500,390 --themes dark,light` captures the public front door without reading bot credentials. It saves viewport/full-page shots, four live hero frames over roughly ten seconds, a composed strip, and `cpu.json`. CPU compares 30 seconds of animated idle with 30 seconds of the reduced-motion still, using headed Chromium renderer process CPU time and main-thread task time, expressed as percent of one core. Keep this manual measurement outside `verify`.

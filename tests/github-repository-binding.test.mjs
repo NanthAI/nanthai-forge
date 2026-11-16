@@ -16,6 +16,7 @@ const policies = await import(moduleUrl('../convex/projectAutonomy.ts'));
 const grants = await import(moduleUrl('../convex/githubRunnerGrants.ts'));
 const access = await import(moduleUrl('../convex/githubBindingAccess.ts'));
 const visibility = await import(moduleUrl('../convex/githubRepositoryVisibility.ts'));
+const authUsers = await import(moduleUrl('../convex/authUsers.ts'));
 const code = wanted => error => (error.data?.code ?? error.code) === wanted;
 const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
 function variables(t, values) {
@@ -56,6 +57,7 @@ function fixture(t) {
   const invoke = async (ref, input) => {
     const [module, name] = getFunctionName(ref).split(':');
     const functions = {
+      authUsers,
       githubBindingStore: store,
       githubBindingWebhook: webhook,
       githubRunnerGrants: grants,

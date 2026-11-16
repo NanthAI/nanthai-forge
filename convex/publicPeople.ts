@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { internalQuery, type ActionCtx, type MutationCtx, type QueryCtx } from './_generated/server';
+import { internalQuery, type ActionCtx, type MutationCtx, type QueryCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { makeFunctionReference } from 'convex/server';
 import { agentActor, splitAgentActor } from '../src/agent-slug';

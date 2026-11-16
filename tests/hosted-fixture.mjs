@@ -59,6 +59,8 @@ const projectWorkIndexBuildFailure = await import(moduleUrl('../convex/projectWo
 const projectWorkIndexBuildStore = await import(moduleUrl('../convex/projectWorkIndexBuildStore.ts'));
 const projectWorkIndexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 const publicPeople = await import(moduleUrl('../convex/publicPeople.ts'));
+const authUsers = await import(moduleUrl('../convex/authUsers.ts'));
+const githubUserTokens = await import(moduleUrl('../convex/githubUserTokens.ts'));
 const projectHistoryStore = await import(moduleUrl('../convex/projectHistoryStore.ts'));
 /** A hand-written row, checked against the schema when it is built: a seed no schema-validated
  * write can produce makes return checks fail far from its cause (Issue b7c8e4dd). */
@@ -502,6 +504,8 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
     },
   });
   const modules = {
+    authUsers,
+    githubUserTokens,
     ...checkLogModules,
     projectR2Backfill,
     r2ArchiveSource,

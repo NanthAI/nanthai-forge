@@ -19,7 +19,9 @@ export async function checkConvexBundles(root, { registeredOnly = false } = {}) 
         const path = join(directory, entry.name);
         return entry.isDirectory()
           ? walk(path)
-          : path.endsWith('.ts') && !path.endsWith('.d.ts')
+          : // Component configuration is interpreted by the Convex CLI's special config
+            // bundler (which installs component import metadata), never as a function.
+            path.endsWith('.ts') && !path.endsWith('.d.ts') && entry.name !== 'convex.config.ts'
             ? [path]
             : [];
       });

@@ -52,7 +52,7 @@ export async function runArchiveImport(
   const started = Date.now(),
     cursor = archiveCursorSchema.parse(JSON.parse(job.cursor));
   const github = meter.wrap(networkFetch);
-  const access = await authorizeImportGithub(job.repository, job.owner, github);
+  const access = await authorizeImportGithub(job.repository, job.owner, github, ctx);
   invariant(
     job.visibility === 'private' || !access.repository.private,
     'GITHUB_VISIBILITY_CHANGED',

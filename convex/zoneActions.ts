@@ -31,7 +31,7 @@ async function actor(ctx: ActionCtx) {
 async function access(ctx: ActionCtx, id: Id<'sourceZones'>, reader: string) {
   const zone: Doc<'sourceZones'> = await ctx.runQuery(internal.sourceZones.authorize, { id, actor: reader });
   const source = await currentAccess(ctx, zone.importId, zone.owner, false, true);
-  if (reader !== zone.owner) await authorizeGithub(source.job.repository, reader, githubConfig());
+  if (reader !== zone.owner) await authorizeGithub(source.job.repository, reader, githubConfig(ctx));
   await ctx.runQuery(internal.sourceZones.authorize, { id, actor: reader });
   return { zone, ...source };
 }

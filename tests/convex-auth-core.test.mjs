@@ -1,0 +1,349 @@
+// SPDX-License-Identifier: Apache-2.0
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { randomBytes, randomUUID, generateKeyPairSync } from 'node:crypto';
+import { getFunctionAddress } from 'convex/server';
+import { moduleUrl } from './convex-module.mjs';
+import { state } from './hosted-fixture.mjs';
+import { checkArgs } from './convex-args.mjs';
+
+const identity = await import(moduleUrl('../convex/forgeIdentity.ts'));
+const authIdentity = await import(moduleUrl('../convex/authIdentity.ts'));
+const users = await import(moduleUrl('../convex/authUsers.ts'));
+const firstPasskey = await import(moduleUrl('../convex/authFirstPasskey.ts'));
+const device = await import(moduleUrl('../convex/deviceActions.ts'));
+const deviceStore = await import(moduleUrl('../convex/deviceStore.ts'));
+const tokenStore = await import(moduleUrl('../convex/githubUserTokens.ts'));
+const tokenActions = await import(moduleUrl('../convex/githubUserTokenActions.ts'));
+const { action } = await import(moduleUrl('../convex/cliServer.ts'));
+const key = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({
+  type: 'pkcs8',
+  format: 'pem',
+});
+const refused = code => error => (error.data?.code ?? error.code) === code;
+
+function fixture(t) {
+  const env = {
+    CONVEX_CLOUD_URL: 'https://auth-fixture.convex.cloud',
+    FORGE_WEB_URL: 'https://forge.example',
+    FORGE_CLI_ISSUER: 'https://auth-fixture.convex.site',
+    FORGE_CLI_PRIVATE_KEY: key,
+    FORGE_GITHUB_TOKEN_KEYRING: JSON.stringify({
+      active: 'fixture',
+      keys: { fixture: randomBytes(32).toString('base64') },
+    }),
+  };
+  const old = new Map(Object.keys(env).map(name => [name, process.env[name]]));
+  Object.assign(process.env, env);
+  t.after(() => {
+    for (const [name, value] of old)
+      value === undefined ? delete process.env[name] : (process.env[name] = value);
+  });
+  const s = state();
+  for (const table of ['users', 'deviceCodes', 'deviceAttempts', 'cliCredentials', 'githubBindingOperations'])
+    s.tables[table] = new Map();
+  const user = {
+    _id: 'authuser',
+    _creationTime: 1,
+    accountKey: 'user_syntheticAccount',
+    githubId: '123456',
+    githubLogin: 'synthetic',
+    emailVerified: false,
+  };
+  s.tables.users.set(user._id, user);
+  s.tables.forgeAccounts.set('account', {
+    _id: 'account',
+    _creationTime: 1,
+    owner: user.accountKey,
+    handle: 'synthetic',
+  });
+  let rawIdentity = {
+    issuer: `${env.CONVEX_CLOUD_URL}/components/auth`,
+    subject: 'session',
+    tokenIdentifier: 'auth|session',
+  };
+  const sessions = new Map([['session', { userId: user._id, creationTime: Date.now() }]]);
+  const passkeys = [];
+  let componentReads = 0,
+    userReads = 0,
+    ceremonyOwner;
+  const baseGet = s.ctx.db.get;
+  const ctx = {
+    ...s.ctx,
+    db: new Proxy(s.ctx.db, {
+      get(target, name) {
+        if (name === 'get')
+          return async id => {
+            if (s.tables.users.has(id)) userReads++;
+            return baseGet(id);
+          };
+        const value = target[name];
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    }),
+    auth: { getUserIdentity: async () => rawIdentity },
+  };
+  const modules = { authIdentity, deviceStore, authUsers: users, githubUserTokens: tokenStore };
+  const dispatch = async (ref, args) => {
+    const address = getFunctionAddress(ref);
+    if (address.reference) {
+      const name = address.reference;
+      if (name.endsWith('/getSession')) {
+        componentReads++;
+        const value = sessions.get(args.sessionId);
+        return value ? { userId: value.userId } : null;
+      }
+      if (name.endsWith('/listSessions'))
+        return [...sessions]
+          .filter(([, value]) => value.userId === args.userId)
+          .map(([sessionId, value]) => ({
+            sessionId,
+            creationTime: value.creationTime,
+            lastRefreshedAt: value.creationTime,
+          }));
+      if (name.endsWith('/listPasskeys')) return passkeys.filter(value => value.userId === args.userId);
+      if (name.endsWith('/getUsername')) return null;
+      if (name.endsWith('/setUsername')) return { success: true };
+      if (name.endsWith('/startRegistrationForExistingUser')) {
+        ceremonyOwner = args.verifiedUserId;
+        return {
+          challenge: new Uint8Array([1, 2]).buffer,
+          userHandle: new Uint8Array([3, 4]).buffer,
+          excludeCredentials: [],
+        };
+      }
+      if (name.endsWith('/_internal_dangerous_finishRegistrationForExistingUser')) {
+        if (ceremonyOwner !== args.verifiedUserId || args.response.id !== 'credential')
+          return { success: false, userError: { error: 'PROTOCOL_ERROR' } };
+        passkeys.push({ userId: args.verifiedUserId, passkeyId: 'first' });
+        return { success: true, passkeyId: 'first' };
+      }
+      throw new Error(`Unhandled component function ${name}`);
+    }
+    const [module, name] = address.name.split(':');
+    const fn = modules[module]?.[name];
+    if (fn) {
+      checkArgs(fn, args);
+      return fn._handler(ctx, args);
+    }
+    return s.ctx.runQuery(ref, args);
+  };
+  ctx.runQuery = dispatch;
+  ctx.runMutation = dispatch;
+  return {
+    ...s,
+    ctx,
+    user,
+    sessions,
+    passkeys,
+    identity: value => {
+      rawIdentity = value;
+    },
+    browser: () => rawIdentity,
+    reads: () => ({ componentReads, userReads }),
+  };
+}
+
+test('browser identity resolves session to Forge account once per invocation, at constant record cost', async t => {
+  const s = fixture(t);
+  const ctx = identity.identityContext(s.ctx);
+  assert.equal((await ctx.auth.getUserIdentity()).subject, s.user.accountKey);
+  assert.equal((await ctx.auth.getUserIdentity()).forgeAuthSession, 'session');
+  assert.deepEqual(s.reads(), { componentReads: 1, userReads: 1 });
+  for (let n = 0; n < 14; n++)
+    s.tables.users.set(`other${n}`, { ...s.user, _id: `other${n}`, accountKey: `user_other${n}` });
+  await identity.identityContext(s.ctx).auth.getUserIdentity();
+  assert.deepEqual(s.reads(), { componentReads: 2, userReads: 2 });
+});
+
+test('a copied browser token loses reads and device approval after session revocation', async t => {
+  const s = fixture(t),
+    copied = s.browser();
+  const flow = await device.start._handler(s.ctx, {
+    operationId: randomUUID(),
+    clientNonce: randomBytes(32).toString('hex'),
+    name: 'Synthetic device',
+    scope: 'cli',
+  });
+  s.sessions.delete('session');
+  s.identity(copied);
+  assert.equal(await identity.identityContext(s.ctx).auth.getUserIdentity(), null);
+  await assert.rejects(
+    device.decide._handler(s.ctx, { code: flow.user_code, approve: true, operationId: randomUUID() }),
+    refused('AUTH_REQUIRED'),
+  );
+  assert.equal(s.tables.cliCredentials.size, 0);
+});
+
+test('CLI and retained Clerk identities add no session or users reads; missing user never becomes an owner', async t => {
+  const s = fixture(t);
+  for (const raw of [
+    null,
+    { subject: 'user_legacy', issuer: 'https://legacy.example' },
+    { subject: 'user_cli', issuer: process.env.FORGE_CLI_ISSUER, forgeCredential: 'credential' },
+  ]) {
+    s.identity(raw);
+    assert.deepEqual(await identity.identityContext(s.ctx).auth.getUserIdentity(), raw);
+  }
+  assert.deepEqual(s.reads(), { componentReads: 0, userReads: 0 });
+  s.identity({ issuer: `${process.env.CONVEX_CLOUD_URL}/components/auth`, subject: 'session' });
+  s.tables.users.delete(s.user._id);
+  assert.equal(await identity.identityContext(s.ctx).auth.getUserIdentity(), null);
+});
+
+test('revoking the browser between inspection and decision leaves the device pending', async t => {
+  const s = fixture(t);
+  const flow = await device.start._handler(s.ctx, {
+    operationId: randomUUID(),
+    clientNonce: randomBytes(32).toString('hex'),
+    name: 'Synthetic race',
+    scope: 'cli',
+  });
+  const query = s.ctx.runQuery;
+  s.ctx.runQuery = async (ref, args) => {
+    const value = await query(ref, args);
+    if (getFunctionAddress(ref).name === 'deviceStore:lookup') s.sessions.delete('session');
+    return value;
+  };
+  await assert.rejects(
+    device.decide._handler(s.ctx, { code: flow.user_code, approve: true, operationId: randomUUID() }),
+    refused('AUTH_REQUIRED'),
+  );
+  assert.equal([...s.tables.deviceCodes.values()][0].state, 'pending');
+  assert.equal(s.tables.cliCredentials.size, 0);
+});
+
+test('an action refuses its result when the browser session is revoked during external work', async t => {
+  const s = fixture(t);
+  const read = action({
+    args: {},
+    handler: async ctx => {
+      assert.equal((await ctx.auth.getUserIdentity()).subject, s.user.accountKey);
+      s.sessions.delete('session');
+      return 'private source';
+    },
+  });
+  await assert.rejects(read._handler(s.ctx, {}), refused('AUTH_REVOKED'));
+});
+
+test('a Convex Auth browser approval issues the normal Forge CLI credential; a CLI token cannot approve', async t => {
+  const s = fixture(t);
+  const flow = await device.start._handler(s.ctx, {
+    operationId: randomUUID(),
+    clientNonce: randomBytes(32).toString('hex'),
+    name: 'Synthetic CLI',
+    scope: 'cli',
+  });
+  await device.decide._handler(s.ctx, { code: flow.user_code, approve: true, operationId: randomUUID() });
+  const issued = await device.poll._handler(s.ctx, {
+    deviceCode: flow.device_code,
+    operationId: randomUUID(),
+  });
+  const token = JSON.parse(Buffer.from(issued.token.split('.')[1], 'base64url'));
+  assert.equal(token.sub, s.user.accountKey);
+  assert.equal(token.aud, 'forge-cli');
+  assert.equal(token.exp - token.iat, 30 * 24 * 3600);
+  s.identity({ subject: token.sub, issuer: token.iss, forgeCredential: issued.credentialId });
+  await assert.rejects(firstPasskey.start._handler(s.ctx, {}), refused('AUTH_REQUIRED'));
+  await assert.rejects(
+    device.decide._handler(s.ctx, { code: flow.user_code, approve: true, operationId: randomUUID() }),
+    refused('AUTH_REQUIRED'),
+  );
+});
+
+test('GitHub callbacks keep numeric identity and account key, store verified email only, and never link by email', async t => {
+  const s = fixture(t);
+  const method = {
+    name: 'github',
+    profile: { id: '654321', login: 'another', email: 'unverified@example.com', emailVerified: false },
+  };
+  const id = await users.createGithub._handler(s.ctx, { method });
+  const account = s.tables.users.get(id);
+  assert.equal(account.githubId, '654321');
+  assert.ok(account.accountKey.startsWith('user_'));
+  assert.equal(account.email, undefined);
+  await users.signedInGithub._handler(s.ctx, { userId: id, method });
+  assert.equal(account.email, undefined);
+  const verified = { ...method, profile: { ...method.profile, emailVerified: true } };
+  await users.signedInGithub._handler(s.ctx, { userId: id, method: verified });
+  assert.equal(account.email, 'unverified@example.com');
+  const same = await users.createGithub._handler(s.ctx, { method: verified });
+  assert.equal(same, id);
+  await users.signedInGithub._handler(s.ctx, { userId: id, method });
+  assert.equal(account.emailVerified, true);
+  const other = await users.createGithub._handler(s.ctx, {
+    method: { ...verified, profile: { ...verified.profile, id: '777777' } },
+  });
+  assert.notEqual(other, id);
+  await assert.rejects(
+    users.signedInGithub._handler(s.ctx, {
+      userId: id,
+      method: { ...verified, profile: { ...verified.profile, id: '777777' } },
+    }),
+    refused('GITHUB_ACCOUNT_MISMATCH'),
+  );
+});
+
+test('a GitHub-only account can add its first passkey; stale, revoked, wrong and repeat ceremonies fail', async t => {
+  const s = fixture(t);
+  const options = await firstPasskey.start._handler(s.ctx, {});
+  assert.equal(options.user.name, 'synthetic');
+  assert.deepEqual(options.extensions, {});
+  const response = {
+    id: 'credential',
+    rawId: 'credential',
+    type: 'public-key',
+    response: { clientDataJSON: '', attestationObject: '' },
+    clientExtensionResults: {},
+  };
+  assert.equal(
+    (await firstPasskey.finish._handler(s.ctx, { response: { ...response, id: 'wrong' } })).success,
+    false,
+  );
+  assert.deepEqual(await firstPasskey.finish._handler(s.ctx, { response }), {
+    success: true,
+    passkeyId: 'first',
+  });
+  await assert.rejects(firstPasskey.start._handler(s.ctx, {}), refused('BAD_ARGUMENT'));
+  s.passkeys.length = 0;
+  s.sessions.get('session').creationTime = Date.now() - 11 * 60 * 1000;
+  await assert.rejects(firstPasskey.finish._handler(s.ctx, { response }), refused('AUTH_EXPIRED'));
+  s.sessions.delete('session');
+  await assert.rejects(firstPasskey.finish._handler(s.ctx, { response }), refused('AUTH_REQUIRED'));
+});
+
+test('GitHub App credentials are encrypted, owner-bound, and unavailable to a changed callback', async t => {
+  const s = fixture(t);
+  s.tables.githubBindingOperations.set('connection', {
+    _id: 'connection',
+    _creationTime: 1,
+    state: 'state',
+    actor: s.user.accountKey,
+    status: 'processing',
+    githubAccounts: [s.user.githubId],
+  });
+  await tokenActions.storeConnection._handler(s.ctx, {
+    state: 'state',
+    owner: s.user.accountKey,
+    token: 'ghu_syntheticToken',
+  });
+  assert.equal(JSON.stringify([...s.tables.users.values()]).includes('ghu_syntheticToken'), false);
+  assert.equal(await tokenActions.githubUserToken(s.ctx, s.user.accountKey), 'ghu_syntheticToken');
+  const sealed = s.user.githubToken;
+  s.tables.users.set('other', {
+    ...s.user,
+    _id: 'other',
+    accountKey: 'user_otherAccount',
+    githubToken: sealed,
+  });
+  await assert.rejects(tokenActions.githubUserToken(s.ctx, 'user_otherAccount'), refused('SECRET_INVALID'));
+  s.tables.githubBindingOperations.get('connection').status = 'completed';
+  await assert.rejects(
+    tokenActions.storeConnection._handler(s.ctx, {
+      state: 'state',
+      owner: s.user.accountKey,
+      token: 'ghu_second',
+    }),
+    refused('GITHUB_OAUTH_STATE'),
+  );
+});

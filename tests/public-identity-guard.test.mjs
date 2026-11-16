@@ -10,7 +10,9 @@ import { moduleUrl } from './convex-module.mjs';
 
 const directory = new URL('../convex/', import.meta.url);
 const files = readdirSync(directory).filter(
-  file => file.endsWith('.ts') && !file.endsWith('.d.ts') && file !== 'schema.ts',
+  // Configuration modules run through Convex's bundler, not the function registry.
+  file =>
+    file.endsWith('.ts') && !file.endsWith('.d.ts') && !file.endsWith('.config.ts') && file !== 'schema.ts',
 );
 const people = await import(moduleUrl('../convex/publicPeople.ts'));
 const subject = 'user_builderBBBBBBBB';
@@ -290,7 +292,9 @@ test('every public function taking a collector signature refuses an anonymous ca
     for (const [name, fn] of Object.entries(module)) {
       if (!fn?.isPublic || !(fn.isMutation || fn.isAction)) continue;
       const args = JSON.parse(fn.exportArgs());
-      if (!/"signature":/.test(JSON.stringify(args))) continue;
+      // Collectors bind a project. WebAuthn assertions intentionally establish sign-in
+      // before any browser session exists and have no project authority.
+      if (!args.value?.projectId || !/"signature":/.test(JSON.stringify(args))) continue;
       const forged = releaseKeyVerified.get(`${file}:${name}`);
       const input = { projectId: 'hostedProjects-1', signature: '0'.repeat(64), ...forged };
       for (const key of Object.keys(args.value)) input[key] ??= key === 'entries' ? [] : '{}';

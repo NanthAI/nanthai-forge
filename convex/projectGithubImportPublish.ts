@@ -260,7 +260,7 @@ async function publishRows(
     }
   await flush();
   metric('projection');
-  const access = await authorizeImportGithub(job.repository, job.owner, meter.wrap(networkFetch));
+  const access = await authorizeImportGithub(job.repository, job.owner, meter.wrap(networkFetch), ctx);
   invariant(
     job.visibility === 'private' || !access.repository.private,
     'GITHUB_VISIBILITY_CHANGED',

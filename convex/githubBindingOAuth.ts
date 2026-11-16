@@ -8,6 +8,7 @@ import { appInstallation, assertRepositoryName } from './githubAppToken';
 import { githubRequest } from '../src/hosted-github-api';
 import { ForgeError, invariant } from '../src/errors';
 import { report } from './errors';
+import { internal } from './_generated/api';
 const mutation = (name: string) => makeFunctionReference<'mutation'>(`githubBindingStore:${name}`);
 const callbackUrl = () => {
   const site = process.env.CONVEX_SITE_URL;
@@ -31,7 +32,22 @@ async function challenge(verifier: string) {
 }
 /** Verified GitHub account ids linked to this Forge account (identity provider
  * lookup, one call per new connection). The callback binds only for one of them. */
-export async function linkedGithubAccounts(subject: string, request: typeof fetch = convexFetch) {
+export async function linkedGithubAccounts(
+  subject: string,
+  request: typeof fetch = convexFetch,
+  ctx?: import('./_generated/server').ActionCtx,
+) {
+  if (ctx) {
+    const ids = await ctx.runQuery(internal.authUsers.githubAccounts, { accountKey: subject });
+    if (ids !== null) {
+      invariant(
+        ids.length > 0,
+        'GITHUB_ACCOUNT_REQUIRED',
+        'Link a GitHub account to this Forge account, then connect again.',
+      );
+      return ids;
+    }
+  }
   const secret = process.env.CLERK_SECRET_KEY;
   invariant(secret, 'GITHUB_APP_CONFIG', 'Forge identity is not configured.');
   const response = await request(`https://api.clerk.com/v1/users/${encodeURIComponent(subject)}`, {
@@ -93,7 +109,7 @@ export const connect = action({
       // installation only after the authorizing user proves repository access.
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to connect GitHub.');
-      const githubAccounts = await linkedGithubAccounts(user.subject);
+      const githubAccounts = await linkedGithubAccounts(user.subject, convexFetch, ctx);
       const state = random(),
         verifier = random();
       const url = new URL('https://github.com/login/oauth/authorize');
@@ -118,8 +134,7 @@ export const connect = action({
     }
   },
 });
-/** This function's token exists only on the action stack. Only a numeric repo
- * identity and canonical name cross back into the database. The token must
+/** The token exists only on the callback/action stack or in the Forge-owned encrypted user row. The token must
  * belong to a GitHub account linked to the Forge account that started the
  * connection; `installation` runs only after repository access is proven. */
 export async function proveRepository(
@@ -218,6 +233,12 @@ export const callback = httpAction(async (ctx, request) => {
       await ctx.runMutation(mutation('pin'), { state, installationId: installation.id });
       return installation.id;
     });
+    if (op.authOwner)
+      await ctx.runAction(internal.githubUserTokenActions.storeConnection, {
+        state,
+        owner: op.authOwner,
+        token: value.access_token,
+      });
     const mirror = await ctx.runMutation(mutation('complete'), { state, ...proof });
     return new Response(
       `GitHub repository connected.${

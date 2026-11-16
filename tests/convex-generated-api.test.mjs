@@ -25,6 +25,7 @@ test('API inventory follows additions and deletions without importing source or 
     'javascript.js',
     'schema.ts',
     'auth.config.ts',
+    'convex.config.ts',
     'types.d.ts',
     '_generated/server.ts',
   ])

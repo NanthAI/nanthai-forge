@@ -19,8 +19,13 @@ import { githubSyncCommitSchema } from '../src/github-sync-types';
 
 /** Read credential for one github.com repository: the App's own read token when
  * installed, else the importer's authorized one (public: the server read token). */
-export async function historyReadToken(repository: string, owner: string, visibility: 'public' | 'private') {
-  const access = await authorizeImportGithub(repository, owner);
+export async function historyReadToken(
+  repository: string,
+  owner: string,
+  visibility: 'public' | 'private',
+  ctx?: ActionCtx,
+) {
+  const access = await authorizeImportGithub(repository, owner, undefined, ctx);
   invariant(
     visibility === 'private' || !access.repository.private,
     'GITHUB_VISIBILITY_CHANGED',
@@ -174,7 +179,7 @@ export const run = internalAction({
     if (!row || row.attempt !== input.attempt || row.status !== 'pending') return null;
     const started = Date.now();
     try {
-      const token = await historyReadToken(row.repository, row.owner, row.visibility);
+      const token = await historyReadToken(row.repository, row.owner, row.visibility, ctx);
       const stored = await storeHistoryPack(ctx, input.projectId, {
         repository: row.repository,
         want: row.importCommit,
@@ -245,7 +250,7 @@ export async function catchUpHistory(ctx: ActionCtx, projectId: Id<'hostedProjec
           repository: row.repository,
           want: mapping.commit,
           haves,
-          token: await historyReadToken(row.repository, row.owner, row.visibility),
+          token: await historyReadToken(row.repository, row.owner, row.visibility, ctx),
           limitBytes: historyLimit(row) - row.bytes,
         });
         const recorded = await recordHistoryPack(

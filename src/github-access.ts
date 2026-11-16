@@ -4,6 +4,8 @@ import { githubRepository, type GithubFetch, type GithubRepository } from './git
 import { ForgeError, invariant } from './errors.js';
 
 export interface GithubAccessConfig {
+  /** Forge's encrypted user-token store; null selects the retained provider path. */
+  userToken?: ((owner: string) => Promise<string | null>) | undefined;
   clerkSecret?: string | undefined;
   appClientId?: string | undefined;
   appClientSecret?: string | undefined;
@@ -95,26 +97,29 @@ async function githubUserToken(
     'GITHUB_UNAVAILABLE',
     'This repository is unavailable with the current access. Sign in with GitHub for private repositories.',
   );
+  let token = await config.userToken?.(userId);
   invariant(
-    config.clerkSecret && config.appClientId && config.appClientSecret,
+    (token || config.clerkSecret) && config.appClientId && config.appClientSecret,
     'GITHUB_SETUP_REQUIRED',
     'Forge’s GitHub connection is not configured yet.',
   );
-  const credentials = await request(
-    `https://api.clerk.com/v1/users/${encodeURIComponent(userId)}/oauth_access_tokens/oauth_github`,
-    {
-      headers: { Authorization: `Bearer ${config.clerkSecret}` },
-      signal: networkTimeout(30_000),
-      redirect: 'error',
-    },
-  );
-  invariant(
-    credentials.ok,
-    'GITHUB_UNAVAILABLE',
-    'GitHub access is unavailable. Connect your GitHub account and selected repositories.',
-  );
-  const tokens = (await credentials.json()) as { token?: string }[];
-  const token = tokens[0]?.token;
+  if (!token) {
+    const credentials = await request(
+      `https://api.clerk.com/v1/users/${encodeURIComponent(userId)}/oauth_access_tokens/oauth_github`,
+      {
+        headers: { Authorization: `Bearer ${config.clerkSecret}` },
+        signal: networkTimeout(30_000),
+        redirect: 'error',
+      },
+    );
+    invariant(
+      credentials.ok,
+      'GITHUB_UNAVAILABLE',
+      'GitHub access is unavailable. Connect your GitHub account and selected repositories.',
+    );
+    const tokens = (await credentials.json()) as { token?: string }[];
+    token = tokens[0]?.token;
+  }
   invariant(
     token && token.startsWith('ghu_'),
     'GITHUB_UNAVAILABLE',

@@ -5,6 +5,7 @@ import { ForgeError } from '../src/errors';
 import { networkFetch } from '../src/network-fetch';
 import { appInstallation, metadataProbeToken } from './githubAppToken';
 import { githubConfig } from './access';
+import type { ActionCtx } from './_generated/server';
 
 /** Healthy access uses its existing requests. A shared public metadata quota must
  * not prevent reaching the installed App's separate quota. The rescue token has
@@ -14,8 +15,9 @@ export async function authorizeImportGithub(
   repository: string,
   owner: string,
   request: typeof fetch = networkFetch,
+  ctx?: ActionCtx,
 ) {
-  const config = githubConfig();
+  const config = githubConfig(ctx);
   try {
     return await authorizeGithub(repository, owner, config, request);
   } catch (error) {

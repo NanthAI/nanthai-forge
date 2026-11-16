@@ -53,7 +53,13 @@ export const start = internalMutation({
         status: prior.status,
       });
     }
-    await ctx.db.insert('githubBindingOperations', { ...input, actor, status: 'waiting' });
+    const identity = await ctx.auth.getUserIdentity();
+    await ctx.db.insert('githubBindingOperations', {
+      ...input,
+      actor,
+      status: 'waiting',
+      ...(typeof identity?.forgeAuthSession === 'string' ? { authOwner: actor } : {}),
+    });
     return JSON.stringify({
       operationId: input.operationId,
       authorizeUrl: input.authorizeUrl,
@@ -86,6 +92,7 @@ export const consume = internalMutation({
       repository: op.repository,
       verifier: op.verifier,
       githubAccounts: op.githubAccounts,
+      authOwner: op.authOwner ?? null,
     });
   },
 });

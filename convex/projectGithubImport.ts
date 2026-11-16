@@ -68,7 +68,12 @@ export const start = action({
         return existing._id;
       }
       const meter = new ImportRequestMeter(undefined);
-      const access = await authorizeImportGithub(parsed.repository, user.subject, meter.wrap(networkFetch));
+      const access = await authorizeImportGithub(
+        parsed.repository,
+        user.subject,
+        meter.wrap(networkFetch),
+        ctx,
+      );
       // Reads go on the Forge App's own quota when it is installed on the
       // repository; the importer's credential then only proves their access.
       const token =

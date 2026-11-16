@@ -1,6 +1,6 @@
 # Pinned npm dependency license inventory
 
-Generated from package-lock.json with node scripts/render-dependency-licenses.mjs. All 1302 locked dependency instances are listed, including platform-specific optional packages. These are upstream manifest declarations, not a review of every bundled third-party source or trademark permission. Preserve upstream package notices.
+Generated from package-lock.json with node scripts/render-dependency-licenses.mjs. All 1334 locked dependency instances are listed, including platform-specific optional packages. These are upstream manifest declarations, not a review of every bundled third-party source or trademark permission. Preserve upstream package notices.
 
 The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Apache-2.0 license](https://github.com/get-convex/convex-backend/blob/precompiled-2026-09-28-5c7cb5b/LICENSE.md), not the npm client license. Its bundled native dependencies are outside this npm inventory; [native license coverage](native-dependency-licenses.md) records the inspected pins and remaining gaps. Forge's own boundaries are in [the licensing map](../LICENSE.md).
 
@@ -20,6 +20,12 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/@clerk/react | 6.17.3 | MIT | runtime |
 | node_modules/@clerk/shared | 4.40.0 | MIT | runtime |
 | node_modules/@colors/colors | 1.6.1 | MIT | development |
+| node_modules/@convex-dev/auth | 2.0.0 | Apache-2.0 | development |
+| node_modules/@convex-dev/auth/node_modules/cookie | 1.1.1 | MIT | development |
+| node_modules/@convex-dev/auth/node_modules/jose | 5.10.0 | MIT | development |
+| node_modules/@convex-dev/batch-worker | 0.3.6 | Apache-2.0 | development |
+| node_modules/@convex-dev/batch-worker/node_modules/convex-helpers | 0.1.135 | Apache-2.0 | development |
+| node_modules/@convex-dev/rate-limiter | 0.3.2 | Apache-2.0 | development |
 | node_modules/@cspotcode/source-map-support | 0.8.1 | MIT | development |
 | node_modules/@dabh/diagnostics | 2.0.9 | MIT | development |
 | node_modules/@dependents/detective-less | 5.0.3 | MIT | development |
@@ -66,6 +72,7 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/@fastify/send | 4.2.1 | MIT | development |
 | node_modules/@fastify/static | 10.1.11 | MIT | development |
 | node_modules/@fastify/static/node_modules/content-disposition | 3.0.0 | MIT | development |
+| node_modules/@hexagon/base64 | 1.1.28 | MIT | development |
 | node_modules/@hono/node-server | 2.1.1 | MIT | runtime |
 | node_modules/@humanwhocodes/momoa | 2.0.4 | Apache-2.0 | development |
 | node_modules/@img/colour | 1.1.0 | MIT | development |
@@ -117,6 +124,7 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/@jridgewell/resolve-uri | 3.1.3 | MIT | development |
 | node_modules/@jridgewell/sourcemap-codec | 1.6.0 | MIT | development |
 | node_modules/@jridgewell/trace-mapping | 0.3.9 | MIT | development |
+| node_modules/@levischuck/tiny-cbor | 0.2.11 | MIT | development |
 | node_modules/@lezer/common | 1.5.3 | MIT | runtime |
 | node_modules/@lezer/go | 1.0.1 | MIT | runtime |
 | node_modules/@lezer/highlight | 1.2.5 | MIT | runtime |
@@ -377,6 +385,21 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/@oxlint/binding-win32-arm64-msvc | 1.89.0 | MIT | development, optional |
 | node_modules/@oxlint/binding-win32-ia32-msvc | 1.89.0 | MIT | development, optional |
 | node_modules/@oxlint/binding-win32-x64-msvc | 1.89.0 | MIT | development, optional |
+| node_modules/@peculiar/asn1-android | 2.11.1 | MIT | development |
+| node_modules/@peculiar/asn1-asym-key | 2.11.1 | MIT | development |
+| node_modules/@peculiar/asn1-cms | 2.11.1 | MIT | development |
+| node_modules/@peculiar/asn1-csr | 2.11.1 | MIT | development |
+| node_modules/@peculiar/asn1-ecc | 2.11.1 | MIT | development |
+| node_modules/@peculiar/asn1-pfx | 2.11.1 | MIT | development |
+| node_modules/@peculiar/asn1-pkcs8 | 2.11.1 | MIT | development |
+| node_modules/@peculiar/asn1-pkcs9 | 2.11.1 | MIT | development |
+| node_modules/@peculiar/asn1-rsa | 2.11.1 | MIT | development |
+| node_modules/@peculiar/asn1-schema | 2.11.1 | MIT | development |
+| node_modules/@peculiar/asn1-x509 | 2.11.1 | MIT | development |
+| node_modules/@peculiar/asn1-x509-attr | 2.11.1 | MIT | development |
+| node_modules/@peculiar/asn1-x509-post-quantum | 2.11.1 | MIT | development |
+| node_modules/@peculiar/utils | 2.0.3 | MIT | development |
+| node_modules/@peculiar/x509 | 2.2.0 | MIT | development |
 | node_modules/@pinojs/redact | 0.4.0 | MIT | development |
 | node_modules/@pnpm/config.env-replace | 1.1.0 | MIT | development |
 | node_modules/@pnpm/network.ca-file | 1.0.2 | MIT | development |
@@ -400,6 +423,8 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/@rolldown/binding-win32-x64-msvc | 1.2.9 | MIT | development, optional |
 | node_modules/@rolldown/pluginutils | 1.0.1 | MIT | development |
 | node_modules/@rollup/pluginutils | 5.5.1 | MIT | development |
+| node_modules/@simplewebauthn/browser | 14.0.0 | MIT | development |
+| node_modules/@simplewebauthn/server | 14.1.0 | MIT | development |
 | node_modules/@sindresorhus/slugify | 2.2.1 | MIT | development |
 | node_modules/@sindresorhus/transliterate | 1.6.0 | MIT | development |
 | node_modules/@so-ric/colorspace | 1.1.6 | MIT | development |
@@ -492,6 +517,7 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/array.prototype.flatmap | 1.3.3 | MIT | development |
 | node_modules/arraybuffer.prototype.slice | 1.0.4 | MIT | development |
 | node_modules/ascii-table | 0.0.9 | MIT | development |
+| node_modules/asn1js | 3.1.0 | BSD-3-Clause | development |
 | node_modules/ast-module-types | 6.0.2 | MIT | development |
 | node_modules/async | 3.2.6 | MIT | development |
 | node_modules/async-function | 1.0.0 | MIT | development |
@@ -1021,6 +1047,7 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/parse-json/node_modules/type-fest | 4.41.0 | (MIT OR CC0-1.0) | development |
 | node_modules/parse-ms | 4.0.0 | MIT | development |
 | node_modules/parseurl | 1.3.3 | MIT | runtime |
+| node_modules/password-hash-wasm | 0.0.0 | Apache-2.0 | development |
 | node_modules/path-exists | 5.0.0 | MIT | development |
 | node_modules/path-key | 3.1.1 | MIT | runtime |
 | node_modules/path-parse | 1.0.7 | MIT | development |
@@ -1069,6 +1096,8 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/proxy-addr | 2.0.8 | MIT | runtime |
 | node_modules/pump | 3.0.4 | MIT | development |
 | node_modules/pupa | 3.3.0 | MIT | development |
+| node_modules/pvtsutils | 1.3.6 | MIT | development |
+| node_modules/pvutils | 1.2.0 | MIT | development |
 | node_modules/qs | 6.16.0 | BSD-3-Clause | runtime |
 | node_modules/queue-microtask | 1.2.3 | MIT | development |
 | node_modules/quick-format-unescaped | 4.0.4 | MIT | development |
@@ -1095,6 +1124,7 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/readdir-glob | 3.0.0 | Apache-2.0 | development |
 | node_modules/readdirp | 5.1.1 | MIT | development |
 | node_modules/real-require | 1.0.0 | MIT | development |
+| node_modules/reflect-metadata | 0.2.2 | Apache-2.0 | development |
 | node_modules/reflect.getprototypeof | 1.0.10 | MIT | development |
 | node_modules/regexp.prototype.flags | 1.5.4 | MIT | development |
 | node_modules/registry-auth-token | 5.1.1 | MIT | development |
@@ -1218,6 +1248,8 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/ts-api-utils | 2.5.0 | MIT | development |
 | node_modules/ts-node | 10.9.2 | MIT | development |
 | node_modules/tslib | 2.8.1 | 0BSD | runtime |
+| node_modules/tsyringe | 4.10.0 | MIT | development |
+| node_modules/tsyringe/node_modules/tslib | 1.14.1 | 0BSD | development |
 | node_modules/type-fest | 5.10.0 | (MIT OR CC0-1.0) | development |
 | node_modules/type-is | 2.1.0 | MIT | runtime |
 | node_modules/type-is/node_modules/content-type | 2.1.0 | MIT | runtime |

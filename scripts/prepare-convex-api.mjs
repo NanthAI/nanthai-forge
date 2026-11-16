@@ -15,7 +15,7 @@ export function convexApiModules(root, io = { readdirSync }) {
       const name = relative(directory, file)
         .replaceAll('\\', '/')
         .replace(/\.(?:ts|js)$/, '');
-      return ['schema', 'auth.config'].includes(name) ? [] : [name];
+      return ['schema', 'auth.config', 'convex.config'].includes(name) ? [] : [name];
     });
   }
   return walk(directory).sort();

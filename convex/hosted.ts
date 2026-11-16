@@ -22,7 +22,7 @@ export const start = action({
     try {
       const input = githubInput(url);
       const user = await ctx.auth.getUserIdentity();
-      const access = await authorizeGithub(input.repository, user?.subject, githubConfig());
+      const access = await authorizeGithub(input.repository, user?.subject, githubConfig(ctx));
       const result = await ctx.runMutation(internal.imports.begin, {
         repository: access.repository.full_name,
         ref: ref || input.ref || access.repository.default_branch,

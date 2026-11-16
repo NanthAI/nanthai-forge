@@ -79,7 +79,13 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
       delete env.FORGE_HTTP_URL;
       delete env.FORGE_DEPLOYMENT_URL;
       if (override) env.FORGE_AUTH_TOKEN = override;
-      const child = spawn(process.execPath, [cli, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+      // Exercise the saved-login default outside a hosted checkout; a Lane's
+      // project binding intentionally selects its own deployment for auth status.
+      const child = spawn(process.execPath, [cli, ...args], {
+        cwd: directory,
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
       let stdout = '',
         stderr = '';
       child.stdout.on('data', chunk => (stdout += chunk));

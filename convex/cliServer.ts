@@ -15,6 +15,7 @@ import {
 import { report } from './errors';
 import { finishReadReader } from './projectFinishReadReader';
 import { invariant } from '../src/errors';
+import { refreshIdentity } from './forgeIdentity';
 import { actionPublicPeople, actionSubjectArgs, publicPeople, subjectArgs, type Shape } from './publicPeople';
 export * from './server';
 type Mapper<C> = (ctx: C, args: unknown, value: unknown, shape?: Shape) => Promise<unknown>;
@@ -162,11 +163,19 @@ const guardedActionFor = (scope: 'cli' | 'coordination') =>
     args: {},
     input: async (ctx: ActionCtx) => {
       await guard(ctx, scope);
+      const session = (await ctx.auth.getUserIdentity())?.forgeAuthSession;
       return {
         ctx: {},
         args: {},
         onSuccess: async () => {
+          refreshIdentity(ctx);
           await guard(ctx, scope);
+          if (typeof session === 'string')
+            invariant(
+              (await ctx.auth.getUserIdentity())?.forgeAuthSession === session,
+              'AUTH_REVOKED',
+              'This browser session was revoked.',
+            );
         },
       };
     },

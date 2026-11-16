@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import ts from 'typescript';
+import { buildSync } from 'esbuild';
 import {
   assertSmokeImport,
   deploySmoke,
@@ -12,27 +11,34 @@ import {
   smokeFailure,
 } from '../scripts/selfhost-smoke-support.mjs';
 
-const authCode = ts.transpileModule(readFileSync('convex/auth.config.ts', 'utf8'), {
-  compilerOptions: { module: ts.ModuleKind.CommonJS },
-}).outputText;
+const authCode = buildSync({
+  entryPoints: ['convex/auth.config.ts'],
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  write: false,
+}).outputFiles[0].text;
 function auth(variables) {
-  const exports = {};
+  const module = { exports: {} };
   runInNewContext(authCode, {
-    exports,
+    module,
     URL,
     process: {
-      env: new Proxy(variables, {
-        get(target, name) {
-          if (!(name in target))
-            throw Error(
-              `Environment variable ${name} is used in auth config file but its value was not set.`,
-            );
-          return target[name];
+      env: new Proxy(
+        { CONVEX_CLOUD_URL: '', ...variables },
+        {
+          get(target, name) {
+            if (!(name in target))
+              throw Error(
+                `Environment variable ${name} is used in auth config file but its value was not set.`,
+              );
+            return target[name];
+          },
         },
-      }),
+      ),
     },
   });
-  return JSON.parse(JSON.stringify(exports.default));
+  return JSON.parse(JSON.stringify(module.exports.default));
 }
 
 test('fresh native auth reproduces the unset optional issuer failure; smoke defines it before deploy', async () => {

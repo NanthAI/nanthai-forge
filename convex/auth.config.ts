@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { AuthConfig } from 'convex/server';
+import { convexAuthProvider } from '@convex-dev/auth/server';
 
 if (
   process.env.FORGE_CLI_ISSUER &&
@@ -11,6 +12,7 @@ if (
 
 export default {
   providers: [
+    ...(process.env.CONVEX_CLOUD_URL ? [convexAuthProvider()] : []),
     ...(process.env.CLERK_JWT_ISSUER_DOMAIN
       ? [{ domain: process.env.CLERK_JWT_ISSUER_DOMAIN, applicationID: 'convex' }]
       : []),

@@ -81,7 +81,10 @@ export async function proveRunnerAccess(
 export async function grantRunner(ctx: ActionCtx, projectId: Id<'hostedProjects'>, repo: string) {
   const user = await ctx.auth.getUserIdentity();
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to configure a runner.');
-  const { token, ...proof } = await proveRunnerAccess(repo, await linkedGithubAccounts(user.subject));
+  const { token, ...proof } = await proveRunnerAccess(
+    repo,
+    await linkedGithubAccounts(user.subject, undefined, ctx),
+  );
   await ctx.runMutation(makeFunctionReference<'mutation'>('githubRunnerGrants:put'), { projectId, ...proof });
   return token;
 }

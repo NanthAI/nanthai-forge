@@ -49,7 +49,7 @@ export const run = internalAction({
       );
       const progress: ImportProgress = JSON.parse(job.cursor);
       invariant(progress.schema === 2, 'IMPORT_CURSOR_CHANGED', 'Import progress format differs.');
-      const access = await authorizeImportGithub(job.repository, job.owner, github);
+      const access = await authorizeImportGithub(job.repository, job.owner, github, ctx);
       invariant(
         job.visibility === 'private' || !access.repository.private,
         'GITHUB_VISIBILITY_CHANGED',

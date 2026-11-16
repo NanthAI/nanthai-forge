@@ -49,6 +49,7 @@ import { hostedAcceptanceTables } from './projectHostedAcceptanceFields';
 import { defineSchema, defineTable } from 'convex/server';
 import { accountFields, accountItemFields } from './accountTypes';
 import { v } from 'convex/values';
+import { authTables } from './authFields';
 import { AGENT_TOOLS } from '../src/types';
 
 export const syncResult = v.object({
@@ -497,6 +498,7 @@ export const projectProposalDocument = v.object({
   ...projectProposalFields,
 });
 export default defineSchema({
+  ...authTables,
   ...journalTables,
   ...journalReceiptTables,
   ...finishReadTables,

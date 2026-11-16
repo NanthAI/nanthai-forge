@@ -177,6 +177,7 @@
   },
   "devDependencies": {
     "@clerk/react": "6.17.3",
+    "@convex-dev/auth": "2.0.0",
     "@netlify/functions": "6.0.1",
     "@types/node": "22.20.0",
     "@types/react": "19.3.0",

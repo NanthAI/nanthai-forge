@@ -2,8 +2,12 @@
 import {
   mutation as baseMutation,
   internalMutation as baseInternalMutation,
+  action as baseAction,
+  internalAction as baseInternalAction,
   type MutationCtx,
+  type ActionCtx,
 } from './_generated/server';
+import { identityContext } from './forgeIdentity';
 import { landingRequestBodies } from './projectLandingRequestBody';
 import { query as baseQuery, internalQuery as baseInternalQuery, type QueryCtx } from './_generated/server';
 import { workRecordWriter } from './projectWorkRecordWriter';
@@ -18,7 +22,7 @@ function withFinishReads<B extends typeof baseMutation | typeof baseInternalMuta
         ? definition
         : (definition as { handler: (ctx: MutationCtx, args: unknown) => unknown }).handler;
     const wrapped = (ctx: MutationCtx, args: unknown) =>
-      handler(workRecordWriter(landingRequestBodies(finishReadWriter(ctx))), args);
+      handler(workRecordWriter(landingRequestBodies(finishReadWriter(identityContext(ctx)))), args);
     return (base as typeof baseMutation)(
       (typeof definition === 'function' ? wrapped : { ...(definition as object), handler: wrapped }) as never,
     );
@@ -40,7 +44,8 @@ function withLandingBodies<B extends typeof baseQuery | typeof baseInternalQuery
       typeof definition === 'function'
         ? definition
         : (definition as { handler: (ctx: QueryCtx, args: unknown) => unknown }).handler;
-    const wrapped = (ctx: QueryCtx, args: unknown) => handler(landingRequestBodies(ctx), args);
+    const wrapped = (ctx: QueryCtx, args: unknown) =>
+      handler(landingRequestBodies(identityContext(ctx)), args);
     return (base as typeof baseQuery)(
       (typeof definition === 'function' ? wrapped : { ...(definition as object), handler: wrapped }) as never,
     );
@@ -48,3 +53,18 @@ function withLandingBodies<B extends typeof baseQuery | typeof baseInternalQuery
 }
 export const query = withLandingBodies(baseQuery);
 export const internalQuery = withLandingBodies(baseInternalQuery);
+
+function withIdentity<B extends typeof baseAction | typeof baseInternalAction>(base: B): B {
+  return ((definition: unknown) => {
+    const handler =
+      typeof definition === 'function'
+        ? definition
+        : (definition as { handler: (ctx: ActionCtx, args: unknown) => unknown }).handler;
+    const wrapped = (ctx: ActionCtx, args: unknown) => handler(identityContext(ctx), args);
+    return (base as typeof baseAction)(
+      (typeof definition === 'function' ? wrapped : { ...(definition as object), handler: wrapped }) as never,
+    );
+  }) as B;
+}
+export const action = withIdentity(baseAction);
+export const internalAction = withIdentity(baseInternalAction);

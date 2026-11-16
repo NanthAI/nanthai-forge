@@ -30,6 +30,8 @@ export const githubBindingTables = {
     // GitHub account ids linked to the starting Forge account; the callback
     // completes only for one of them.
     githubAccounts: v.optional(v.array(v.string())),
+    /** Bound by the live browser session at start; callback does not reread account identity. */
+    authOwner: v.optional(v.string()),
     state: v.string(),
     verifier: v.string(),
     authorizeUrl: v.string(),
