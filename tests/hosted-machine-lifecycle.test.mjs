@@ -54,7 +54,8 @@ test('Q4 selected reconnect stays bounded with dogfood source and twice retained
   // range, for receipts older than 90 days to delete (the fixture counts an empty range as one document).
   // 62 -> 63 (10d253c6): the submission reads its Intent's previous landing (one indexed range, take 1) for the
   // landing reservation; the Intent comes from the Candidate the pin already read.
-  assert(result.sourceMaxDocumentsPerTransaction <= 63, 'bounded transaction window');
+  // 18af654d: one bounded input-selection page binds the live line; all physical I/O remains reported.
+  assert(result.sourceMaxDocumentsPerTransaction <= 64, 'bounded transaction window');
   assert(result.peakRssMiB <= 1024, 'synthetic provider snapshot harness memory budget');
 });
 test('Q4 hosted acceptance is recoverable on a clean root with no native acceptance owner', async t => {

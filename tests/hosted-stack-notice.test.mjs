@@ -439,10 +439,13 @@ test('budget: the calls one parent event costs, per table', async () => {
   f.calls.length = 0;
   await f.write(parent, { head: hash('3') });
   const withDependent = tally();
-  // A Lane nobody stacked on: the same four calls as before this change, no new table.
+  // A plain save also refreshes the line owner head: two small reads and one metadata write.
   assert.deepEqual(plain, {
     'read:projectHostedOverlapLanes': 1,
     'write:projectHostedOverlapLanes': 1,
+    'read:projectLiveLineLanes': 1,
+    'read:projectFinishReadRows': 1,
+    'write:projectFinishReadRows': 1,
   });
   // Stacking a child: its own dependents row (1 read, 1 write) and the parent's flag (1 overlap read and
   // patch).
@@ -453,6 +456,9 @@ test('budget: the calls one parent event costs, per table', async () => {
   assert.deepEqual(withDependent, {
     'read:projectHostedOverlapLanes': 2,
     'write:projectHostedOverlapLanes': 1,
+    'read:projectLiveLineLanes': 1,
+    'read:projectFinishReadRows': 1,
+    'write:projectFinishReadRows': 1,
     'read:projectHostedStackDependents': 1,
     'write:projectHostedStackDependents': 1,
     'read:projectBoardMessages': 1,

@@ -234,3 +234,56 @@ test('web code never polls Convex reads on an interval', () => {
   const statusBar = readFileSync(new URL('../web/src/shell/StatusBar.tsx', import.meta.url), 'utf8');
   assert.match(statusBar, /if \(asleep\) \{/);
 });
+
+// Exact spike's named regression: return after the tab was already idle/asleep.
+test('return-after-idle: a visible return wakes the live line exactly once with current state', async t => {
+  let latest = { lanes: [], more: 0, main: null, exit: null };
+  const fake = fakeConvex({ resolve: name => (name === 'projectLiveLine:read' ? latest : null) });
+  const reads = createLiveReads();
+  const { useLiveLine } = await import(moduleUrl('../web/src/shell/use-live-line.ts'));
+  let value;
+  function LineReader() {
+    value = useLiveLine('p');
+    return null;
+  }
+  const root = createRoot(host.container);
+  await React.act(async () =>
+    root.render(
+      React.createElement(
+        ConvexProvider,
+        { client: reads.client(fake.client) },
+        React.createElement(LineReader),
+      ),
+    ),
+  );
+  await settle();
+  assert.equal(fake.count(), 1);
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const window = new EventTarget();
+  const page = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+  const stop = reads.watchActivity(window, page);
+  t.mock.timers.tick(IDLE_MS);
+  assert.equal(fake.count(), 0);
+  page.visibilityState = 'hidden';
+  page.dispatchEvent(new Event('visibilitychange'));
+  t.mock.timers.tick(HIDDEN_GRACE_MS);
+  latest = {
+    lanes: [{ laneId: 'current', stage: 'checking', held: false, overlap: false, changedAt: 1 }],
+    more: 0,
+    main: null,
+    exit: null,
+  };
+  fake.reset();
+  page.visibilityState = 'visible';
+  await React.act(async () => page.dispatchEvent(new Event('visibilitychange')));
+  await settle();
+  assert.equal(fake.count(), 1);
+  assert.equal(fake.stats.adds, 1, 'one catch-up after idle sleep and a hidden interval');
+  assert.equal(fake.stats.executions, 1);
+  assert.deepEqual(value, latest, 'one catch-up shows the current version, without replay');
+  window.dispatchEvent(new Event('focus'));
+  assert.equal(fake.stats.adds, 1, 'focus after visibility never duplicates the catch-up');
+  stop();
+  await React.act(async () => root.unmount());
+  assert.equal(fake.count(), 0);
+});

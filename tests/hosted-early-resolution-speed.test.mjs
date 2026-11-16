@@ -36,10 +36,11 @@ for (const history of [0, 1150])
     assert.equal(after.resolutions, 0);
     // c01d5457: pending-only finish retirement reads 12 scheduler states and
     // removes 10 cancellation writes versus [154, 2924, 1002, 180000, 0].
-    // Keep the exact corrected baseline and the zero-overhead comparison above.
+    // 18af654d: the live line adds 32 reads and 33 slim projection writes;
+    // preserve exact physical I/O and the zero-overhead early-resolution comparison.
     assert.deepEqual(
       [after.calls, after.reads, after.writes, after.lateTaskMs, after.idle],
-      [154, 2936, 992, 180000, 0],
+      [154, 2968, 1025, 180000, 0],
       '8c9b84fc: disjoint baseline must not grow',
     );
     t.diagnostic(JSON.stringify({ history, before, after }));

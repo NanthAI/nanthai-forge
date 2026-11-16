@@ -70,7 +70,7 @@
       "projectHostedCheckSettings": 0,
       "projectHostedCheckSettingVersions": 0,
       "projectHostedCheckRuns": 3698,
-      "projectHostedCheckCallbacks": 1038,
+      "projectHostedCheckCallbacks": 1039,
       "projectHostedCheckShards": 720,
       "projectHostedMainAudits": 0,
       "projectHostedMainAuditEvents": 0,
@@ -85,7 +85,7 @@
       "projectHostedLandingBatches": 0,
       "projectHostedLandingDesired": 0,
       "projectHostedLandingAliases": 0,
-      "projectHostedLandingObservations": 7473,
+      "projectHostedLandingObservations": 7474,
       "projectHostedLandingCheckWakes": 163,
       "projectHostedLandingRequests": 2289,
       "projectHostedLandingAttempts": 3328,
@@ -183,10 +183,11 @@
       "projectHostedLandingBodies": 1013,
       "projectJournalSegments": 0,
       "projectJournalReceipts": 0,
-      "users": 0
+      "users": 0,
+      "projectLiveLineLanes": 0
     },
     "retained": {
-      "projectJournalSegments": 1394,
+      "projectJournalSegments": 1397,
       "projectJournalReceipts": 0,
       "projectFinishReadRows": 12675,
       "legacyStorageCleanupWindows": 0,
@@ -368,7 +369,8 @@
       "importArtifacts": 0,
       "importReaders": 0,
       "githubDeliveries": 0,
-      "users": 0
+      "users": 0,
+      "projectLiveLineLanes": 0
     },
     "perProject": {
       "immediate": {
@@ -391,6 +393,10 @@
         "projectJournalControls": {
           "rows": 0,
           "bytes": 0
+        },
+        "projectLiveLineSummary": {
+          "rows": 1,
+          "bytes": 550
         }
       },
       "retained": {
@@ -413,23 +419,27 @@
         "projectJournalControls": {
           "rows": 8,
           "bytes": 4771
+        },
+        "projectLiveLineSummary": {
+          "rows": 1,
+          "bytes": 550
         }
       }
     },
     "indexes": {
       "before": {
-        "entries": 204,
-        "keyBytes": 14213
+        "entries": 216,
+        "keyBytes": 15138
       },
       "immediate": {
-        "entries": 398,
-        "keyBytes": 30109
+        "entries": 407,
+        "keyBytes": 30821
       },
       "retained": {
-        "entries": 403,
-        "keyBytes": 30413
+        "entries": 412,
+        "keyBytes": 31122
       },
-      "written": 1498
+      "written": 1534
     }
   },
   "dogfood": {
@@ -616,7 +626,8 @@
       "projectHostedLandingBodies": 1015,
       "projectJournalSegments": 0,
       "projectJournalReceipts": 0,
-      "users": 0
+      "users": 0,
+      "projectLiveLineLanes": 0
     },
     "retained": {
       "projectJournalSegments": 3514,
@@ -801,7 +812,8 @@
       "importArtifacts": 0,
       "importReaders": 0,
       "githubDeliveries": 0,
-      "users": 0
+      "users": 0,
+      "projectLiveLineLanes": 0
     },
     "perProject": {
       "immediate": {
@@ -824,6 +836,10 @@
         "projectJournalControls": {
           "rows": 0,
           "bytes": 0
+        },
+        "projectLiveLineSummary": {
+          "rows": 1,
+          "bytes": 550
         }
       },
       "retained": {
@@ -846,23 +862,27 @@
         "projectJournalControls": {
           "rows": 8,
           "bytes": 4783
+        },
+        "projectLiveLineSummary": {
+          "rows": 1,
+          "bytes": 550
         }
       }
     },
     "indexes": {
       "before": {
-        "entries": 24768,
-        "keyBytes": 1678433
+        "entries": 24780,
+        "keyBytes": 1679384
       },
       "immediate": {
-        "entries": 25155,
-        "keyBytes": 1709817
+        "entries": 25164,
+        "keyBytes": 1710535
       },
       "retained": {
-        "entries": 25188,
-        "keyBytes": 1712564
+        "entries": 25197,
+        "keyBytes": 1713282
       },
-      "written": 2846
+      "written": 2871
     }
   },
   "journal": {
@@ -885,23 +905,23 @@
   },
   "tenLandingIndexes": {
     "landings": 10,
-    "written": 10596,
+    "written": 10740,
     "stored": [
       {
-        "entries": 399,
-        "keyBytes": 30204
+        "entries": 408,
+        "keyBytes": 30915
       },
       {
-        "entries": 593,
-        "keyBytes": 45168
+        "entries": 602,
+        "keyBytes": 45883
       },
       {
-        "entries": 1669,
-        "keyBytes": 128050
+        "entries": 1690,
+        "keyBytes": 129717
       },
       {
-        "entries": 1669,
-        "keyBytes": 128050
+        "entries": 1690,
+        "keyBytes": 129717
       }
     ]
   }

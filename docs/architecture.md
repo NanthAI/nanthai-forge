@@ -823,14 +823,11 @@ write or a wake, so it can read stale in an awake tab. `scripts/check-idle-queri
 fails `npm run check` on any live query argument derived from the clock or a
 `refreshKey`.
 
-Page readiness distinguishes the first summary page from complete retained
-history. Summary consumers can render available rows while continuation pages
-arrive; complete-history flags remain available for counts and editor writes.
-Updated backends advertise `recentSummaryPages`, allowing the browser to request
-newest summary pages first and restore positional order as history arrives. The
-default records API order stays ascending. Actor labels are resolved once per
-actor within a records query; that reuse ends with the query and never skips a
-fresh name or authority read on a later request.
+Summary consumers render the first page before retained history completes;
+complete-history flags still govern counts and editor writes. Backends advertising
+`recentSummaryPages` serve newest summary pages first, restoring position as
+history arrives; the default API remains ascending. Actor lookup reuse lasts
+only for the current authorized records query.
 
 Lane headers use the indexed header immediately while save payloads hydrate in
 the background. Selected Intent, Candidate and run summaries use the existing keyed
@@ -2106,33 +2103,40 @@ exercised with local metadata/provider/source-worker fakes.
 
 ### Finish observation read model
 
-`projectHostedFinishObserve:page` reads selected `projectFinishReadRows`
-projections maintained inside the source mutation. `server` wraps public
-and internal mutations; `cliServer` retains its existing authentication guard.
-The build rejects raw mutation registrations that could bypass projection upkeep.
-A projection is replaced only when its selected fields change. Work revisions,
-request bookkeeping, attempt progress, check output, finish restore bases and
-controller fence changes therefore do not invalidate a waiting observer.
+`projectHostedFinishObserve:page` reads transactional `projectFinishReadRows`.
+`server` wraps every mutation and `cliServer` retains current authentication and
+public identity mapping. The build rejects registrations bypassing the wrapper.
+Selected fields alone update projections: Work revisions, controller fences,
+check output and private finish ownership cannot wake a waiting observer.
+Request, pending-attempt, predecessor-owner and queue-ahead rows stay separate.
+The observer reads one selected request, at most twenty retained versions and
+one queue page with eight ahead entries. Older rows use their exact source until
+an ordinary write installs the projection; reads never repair or scan history.
+Current access, authority, advice, progress and acceptance remain dependencies.
+Source and logs stay in R2; upkeep shares existing mutations and adds no RPC,
+poll, server timer or delay. Synthetic guards measure dependency parity and
+bounded I/O; live billed savings need matched-load deployment evidence.
 
-The selected request is read once. Finish pending state and predecessor ownership
-use separate rows, so a selected finish's private wake is not progress. Queue-ahead
-reads select Candidate head/input pins, check status and the current main head.
-History remains an exact, at-most-twenty-version page, and the queue directory
-remains one bounded page with at most eight queue-ahead entries. Reads do not grow
-with retained landing history. Current access, authority changes, scheduled-owner
-state, queue advice, progress and acceptance retain their existing dependencies.
-New journal entries retain the public pending-attempt projection; private
-precompose metadata remains on the canonical finish only. Existing journal entries
-remain readable without a backfill.
+### Live Lane line
 
-Older untouched records use their original selected source row until an ordinary
-write installs the projection. Reads never backfill, schedule a repair or scan
-history. No timer, polling, delivery delay or controller wake rule is added.
-Projection maintenance adds bounded metadata reads/writes to existing transactions,
-not Convex calls; source and log bytes retain their R2 placement. Synthetic budgets
-cover executions and read bytes per landing plus invalidation/delivery parity.
-Live per-function usage, wall time and billed savings require separate deployment
-and matched-load measurement; the synthetic budgets do not establish them.
+`projectLiveLine:read` reads at most 101 slim rows and returns sixty held-first
+marks, main and an overflow count: exact through 100 initialized Lanes,
+`moreIsLowerBound` above. Each open Lane stores stage, held, overlap and stage
+time in `projectLiveLineLanes`. Saved-head ownership and hundred-mark transition
+pages stay outside the subscription in `projectFinishReadRows`.
+
+Existing writes update changed marks atomically, including main-red holds.
+Heartbeat/holder/name/device changes leave marks alone. Holds and overlaps keep
+stage time; resolving the last conflict clears both flags. Closed/landed marks
+are deleted; the summary keeps main and the latest explicit exit. Starts write
+no shared counter. Ordinary writes initialize legacy Lanes; untouched Lanes
+remain uncounted, and reads never backfill. Legacy main uses exact Channel/receipt
+lookups until publication installs its summary.
+
+`useLiveLine` sleeps after the existing hidden/idle grace and catches up once on
+return, including after idle sleep. HostedStrip replaces its Work-history hooks;
+Attention retains the shared reads, so no browser offset is credited. See the
+[cost model](operations/cost-to-serve.md#live-line-projection).
 
 ### Composed Intent contracts
 

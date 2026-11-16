@@ -29,7 +29,7 @@ for (const { cell, history } of [
       admissionQueueOnlyAudits: result.audits + result.deferredAudits,
       admissionQueueOnlyCalls: result.calls,
       admissionQueueOnlyDocumentsRead: result.documentsRead,
-      admissionQueueOnlyDocumentsWritten: result.documentsWritten,
+      admissionQueueOnlyDocumentsWritten: result.documentsWritten - result.liveLineWrites,
       admissionQueueOnlySubmitOverServiceMs:
         result.submitMaxMs - Math.max(...cell.entries.map(e => e.checkMs)),
     };
@@ -41,6 +41,12 @@ for (const { cell, history } of [
     assert.equal(result.idle, 0);
     assert.equal(result.landed.length, 10);
     t.diagnostic(
-      JSON.stringify({ N: cell.concurrency, metrics, peakRssBytes: process.resourceUsage().maxRSS * 1024 }),
+      JSON.stringify({
+        N: cell.concurrency,
+        metrics,
+        physicalWrites: result.documentsWritten,
+        liveLineWrites: result.liveLineWrites,
+        peakRssBytes: process.resourceUsage().maxRSS * 1024,
+      }),
     );
   });

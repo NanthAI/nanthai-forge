@@ -5,6 +5,8 @@ import type { Doc } from './_generated/dataModel';
 import { finishReadFields, type FinishReadKind } from './projectFinishReadProjection';
 const readers = new WeakSet<object>();
 const sourcePorts = new WeakMap<object, QueryCtx['db']>();
+/** Only legacy compatibility reads need the original project pointer until its next publication. */
+export const finishReadSourceDb = (ctx: QueryCtx) => sourcePorts.get(ctx.db) ?? ctx.db;
 export const isFinishReadReader = (ctx: QueryCtx) => readers.has(ctx);
 const unpack = (db: QueryCtx['db'], row: Doc<'projectFinishReadRows'>) => {
   const value = { ...JSON.parse(row.value), _id: row.sourceId };

@@ -2,7 +2,8 @@
 import { ShotError } from './options.mjs';
 
 export async function signIn(page, base, credentials) {
-  await page.goto(base, { waitUntil: 'domcontentloaded' });
+  // The public landing deliberately loads no auth client; sign-in lives in the app.
+  await page.goto(new URL('/projects', base).href, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => window.Clerk?.loaded);
   if (await page.evaluate(() => Boolean(window.Clerk.user)))
     throw new ShotError('Expected a fresh browser session.');

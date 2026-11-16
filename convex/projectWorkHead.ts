@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { publishLegacyLineMain } from './projectLiveLineLegacy';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 export const workHead = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) =>
@@ -30,4 +31,9 @@ export async function setWorkHead(
   const value = { projectId, backupId, revision, ...(metadata === undefined ? {} : { metadata }) };
   if (old) await ctx.db.replace(old._id, value);
   else await ctx.db.insert('projectWorkHeads', value);
+  if (metadata && JSON.parse(metadata).sourceKind === 'native') {
+    const project = await ctx.db.get(projectId);
+    if (project?.sourceAuthority?.mode !== 'server' && project?.work?.generationId)
+      await publishLegacyLineMain(ctx.db, projectId, project.work.generationId);
+  }
 }

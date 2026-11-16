@@ -1,42 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useViewerHandle } from './viewer';
 import { useAttention } from './attention-context';
-import { useMemo } from 'react';
-import { useConvexConnectionState, useQuery } from 'convex/react';
+import { useConvexConnectionState } from 'convex/react';
 import type { Id } from '../../../convex/_generated/dataModel';
-import type { HostedRunSummary } from '../../../src/work-hosted-summary';
-import { useWorkRecords, workIndex, type WorkIndexWorkspace } from '../hosted-work-index';
-import type { MoveRecord } from '../cockpit/now-model';
 import { ChannelStrip, LiveStatus } from './StatusBar';
-import { latestAcceptedMain, selectedMain } from './main-model';
-import { latestRun } from '../cockpit/model';
+import { useLiveLine } from './use-live-line';
 
 /**
- * The hosted project's Channel strip: where main is, who moved it and its check. Reads the Work index
- * the project pages already prepared; until then it shows only the connection state.
+ * The hosted project's Channel strip: where main is, who moved it and its check. Shares the bounded Lane line
+ * feed; it never subscribes to Work history or check progress.
  */
 export function HostedStrip({ projectId }: { projectId: Id<'hostedProjects'> }) {
   const attention = useAttention();
   const viewer = useViewerHandle();
-  const value = useQuery(workIndex.workspace, { projectId });
-  const workspace = useMemo(() => (value ? (JSON.parse(value) as WorkIndexWorkspace) : null), [value]);
-  const moves = useWorkRecords<MoveRecord & { head: string }>(projectId, workspace, 'hostedChannels');
-  const localMoves = useWorkRecords<MoveRecord & { head: string }>(projectId, workspace, 'channelMoves');
-  const channels = useWorkRecords<{ name: string; head: string }>(projectId, workspace, 'channels');
-  const runs = useWorkRecords<HostedRunSummary>(projectId, workspace, 'runs');
+  const line = useLiveLine(projectId);
   const connection = useConvexConnectionState();
-  const selected = selectedMain(channels.records, moves.records, workspace?.sourceKind);
-  const main =
-    selected &&
-    latestAcceptedMain(
-      workspace?.sourceKind === 'native'
-        ? [...moves.records, ...localMoves.records]
-        : [...localMoves.records, ...moves.records],
-      selected,
-    );
-  const run = main && latestRun(runs.records, main.viewId);
-  const by =
-    main?.actor && main.actor === viewer ? 'you' : main?.actor || main?.acceptedBy?.name || undefined;
+  const main = line?.main;
+  const by = main?.actor && main.actor === viewer ? 'you' : main?.actor;
   const live = (
     <LiveStatus
       {...(connection.isWebSocketConnected || !connection.hasEverConnected ? {} : { error: 'offline' })}
@@ -44,13 +24,13 @@ export function HostedStrip({ projectId }: { projectId: Id<'hostedProjects'> }) 
   );
   return (
     <ChannelStrip
-      queue={workspace?.landingWorker ? attention?.pending : undefined}
-      {...(selected ? { head: selected.head } : {})}
+      queue={attention?.pending}
+      {...(main ? { head: main.head } : {})}
       {...(main ? { at: main.at } : {})}
-      {...(run ? { check: run.status } : {})}
+      {...(main?.check ? { check: main.check } : {})}
       {...(by ? { by: { name: by } } : {})}
       {...(main?.automatic ? { automatic: true } : {})}
-      pending={!workspace || moves.initialLoading || localMoves.initialLoading || channels.initialLoading}
+      pending={!line}
       live={live}
     />
   );

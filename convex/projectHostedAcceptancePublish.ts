@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { writeLineMain } from './projectLiveLineStore';
 import { requireLandingCheck } from './projectHostedCheckEntries';
 import { earlyPredecessor } from './projectHostedEarlyResolution';
 import { cancelStaleLandingChecks } from './projectHostedLandingStaleChecks';
@@ -379,6 +380,13 @@ export async function publishAcceptance(
     ...identity,
     sequence: receipt.snapshot.revision,
     value,
+  });
+  await writeLineMain(ctx, claim.projectId, {
+    head,
+    at: receipt.at,
+    actor: receipt.actor.id,
+    automatic: receipt.automatic,
+    ...(receipt.check ? { check: 'passed' } : {}),
   });
   await ctx.db.insert('projectHostedAcceptanceSnapshots', {
     projectId: claim.projectId,

@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { publishLegacyLineMain } from './projectLiveLineLegacy';
+import { patchLineLane } from './projectLiveLineStore';
+import { transitionLineSubmission } from './projectLiveLineSubmission';
 import { landingRequestOriginalDb } from './projectLandingRequestBody';
 import { workRecordOriginalDb } from './projectWorkRecordWriter';
 import type { MutationCtx } from './_generated/server';
@@ -94,7 +97,18 @@ export function finishReadWriter(ctx: MutationCtx): MutationCtx {
             else if (key === 'replace') await db.replace(id as never, selected as never);
             else await db.patch(id as never, selected as never);
           };
-          if (!kind) return mutate();
+          if (!kind) {
+            if (key === 'patch' && db.normalizeId('projectHostedOverlapLanes', id))
+              return serial(async () => {
+                await patchLineLane(
+                  db,
+                  id as import('./_generated/dataModel').Id<'projectHostedOverlapLanes'>,
+                  value!,
+                );
+                return mutate();
+              });
+            return mutate();
+          }
           return serial(async () => {
             if (kind === 'projectHostedCheckRuns') selected = await metric().write(id, key, value);
             await mutate();
@@ -125,6 +139,39 @@ export function finishReadWriter(ctx: MutationCtx): MutationCtx {
               else {
                 legacy ??= await db.get(id as never);
                 source = legacy!;
+              }
+              const work = source.work as
+                | { generationId?: import('./_generated/dataModel').Id<'projectWorkGenerations'> }
+                | undefined;
+              if (
+                kind === 'hostedProjects' &&
+                work?.generationId &&
+                (source.sourceAuthority as { mode?: string } | undefined)?.mode !== 'server'
+              )
+                await publishLegacyLineMain(
+                  db,
+                  id as import('./_generated/dataModel').Id<'hostedProjects'>,
+                  work.generationId,
+                );
+              if (kind === 'projectHostedLandingRequests' && selection === kind && old) {
+                const before = JSON.parse(old.value);
+                await transitionLineSubmission(
+                  { db },
+                  {
+                    ...JSON.parse(before.value),
+                    id: before.submissionId,
+                    projectId: before.projectId,
+                    phase: before.phase,
+                    held: Boolean(before.hold),
+                  },
+                  {
+                    ...JSON.parse(source.value as string),
+                    id: source.submissionId,
+                    projectId: source.projectId,
+                    phase: source.phase,
+                    held: Boolean(source.hold),
+                  },
+                );
               }
               const next = project(kind, selection, { ...source, _id: id });
               if (!old) await db.insert('projectFinishReadRows', next);

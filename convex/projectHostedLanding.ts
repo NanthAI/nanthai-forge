@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { bindLineSubmission } from './projectLiveLineSubmission';
 import {
   capsuleHistoryContext,
   readCapsuleAttemptCursor,
@@ -470,6 +471,17 @@ export async function enqueueHostedLanding(
     attemptId: attempt.id,
     value: canonicalPayload(state),
   });
+  const lineCompose = request.finish?.composeOperationId
+    ? { actor: state.actor, operationId: request.finish.composeOperationId }
+    : request.finish
+      ? await ctx.db
+          .query('projectHostedComposes')
+          .withIndex('by_project_and_candidate', q =>
+            q.eq('projectId', input.projectId).eq('candidateId', request.candidateId),
+          )
+          .unique()
+      : null;
+  if (lineCompose && request.finish) await bindLineSubmission(ctx, state, lineCompose);
   await ctx.db.patch(queue._id, {
     sequence,
     ...(stacked && !queue.train?.length ? { train: [stacked] } : {}),

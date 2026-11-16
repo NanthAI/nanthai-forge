@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { bindLineInputs } from './projectLiveLineSubmission';
 import { journalLaneSourcePins } from './projectJournalStore';
 import { capsuleAcceptancePage } from './projectLandingCapsuleLedger';
 import { capsulePlan } from './projectLandingCapsuleStore';
@@ -171,6 +172,13 @@ export async function stageAcceptance(
       );
     }
   }
+  if (input.kind === 'inputs' && !state.request.finish?.composeOperationId)
+    await bindLineInputs(
+      ctx,
+      state,
+      page.entries.map(value => composeLaneSchema.parse(value)),
+      input.index,
+    );
   const root = completionPageRoot(plan.root, input.kind, input.index, page);
   await ctx.db.insert('projectHostedAcceptancePages', {
     ...key,

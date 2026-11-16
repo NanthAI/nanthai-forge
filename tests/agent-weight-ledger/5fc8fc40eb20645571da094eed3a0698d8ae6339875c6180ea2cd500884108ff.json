@@ -1,0 +1,4 @@
+{
+  "issue": "18af654d",
+  "reason": "Owner approved up to $0.01/1,000 extra CLI landing cost for the slim live Lane line. Measured changed-save reads are 285 versus 283 (mark and ownership lookups); solo landing read ceiling is 492 versus 482. Execution counts, startup, modules and installed-byte ceilings remain fixed. All physical I/O stays in the cost guard. The shared start counter was removed to preserve independent concurrent starts; overflow count is bounded and explicitly a lower bound above 100. Cost evidence and the revised baseline are recorded on the Issue."
+}

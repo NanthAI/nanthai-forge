@@ -75,14 +75,44 @@ export async function closeConflictNotices(
 ) {
   const { mine, about } = await openRows(ctx, projectId, laneId);
   const now = Date.now();
+  const endedPeers = new Set<string>();
   for (const row of mine)
-    if (!keep.has(row.peer)) await ctx.db.patch(row._id, { open: false, clearedAt: now, cleared });
+    if (!keep.has(row.peer)) {
+      await ctx.db.patch(row._id, { open: false, clearedAt: now, cleared });
+      if (row.peer !== MAIN) endedPeers.add(row.peer);
+    }
   for (const row of about)
-    if (!keep.has(row.laneId)) await ctx.db.patch(row._id, { open: false, clearedAt: now, cleared });
+    if (!keep.has(row.laneId)) {
+      await ctx.db.patch(row._id, { open: false, clearedAt: now, cleared });
+      endedPeers.add(row.laneId);
+    }
   // Nothing left open on either side of this Lane: its later writes skip these reads again.
   if (!keep.size) {
     const lane = await laneRow(ctx, projectId, laneId);
     if (lane?.conflicted) await ctx.db.patch(lane._id, { conflicted: undefined });
+  }
+  // Ending a pair also ends the other Lane's flag when it has no other notices.
+  // Otherwise a live mark (and future saves) would keep a stale overlap forever.
+  endedPeers.delete(laneId);
+  for (const peer of endedPeers) {
+    const [own, named] = await Promise.all([
+      ctx.db
+        .query('projectHostedConflictNotices')
+        .withIndex('by_project_and_lane_and_open', q =>
+          q.eq('projectId', projectId).eq('laneId', peer).eq('open', true),
+        )
+        .take(1),
+      ctx.db
+        .query('projectHostedConflictNotices')
+        .withIndex('by_project_and_peer_and_open', q =>
+          q.eq('projectId', projectId).eq('peer', peer).eq('open', true),
+        )
+        .take(1),
+    ]);
+    if (!own.length && !named.length) {
+      const other = await laneRow(ctx, projectId, peer);
+      if (other?.conflicted) await ctx.db.patch(other._id, { conflicted: undefined });
+    }
   }
 }
 const laneRow = (ctx: QueryCtx, projectId: Id<'hostedProjects'>, laneId: string) =>

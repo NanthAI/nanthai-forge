@@ -4,6 +4,7 @@ import type { Id } from './_generated/dataModel';
 import type { z } from 'zod';
 import type { hostedLaneSchema } from '../src/hosted-lane';
 import { mergeOverlapChanges, advanceOverlapMain, type OverlapChange } from '../src/hosted-overlap';
+import { trackLineLane } from './projectLiveLineStore';
 import { trackHostedPresence } from './projectHostedPresence';
 import { notifyStackDependents, trackStackDependent } from './projectHostedStackNotice';
 import { closeConflictNotices, planTrialMerge } from './projectHostedConflicts';
@@ -124,8 +125,9 @@ export async function trackHostedOverlapLane(
       : null,
   );
   const stored = { ...value, ...(presenceRow ? { presenceRow } : {}) };
+  const sourceId = old ? old._id : await ctx.db.insert('projectHostedOverlapLanes', stored);
   if (old) await ctx.db.replace(old._id, stored);
-  else await ctx.db.insert('projectHostedOverlapLanes', stored);
+  await trackLineLane(ctx, sourceId, stored, old, false);
   // Exact conflicts at save (flip 4): a moved head of an open Lane plans a trial merge; a Lane that
   // lands or is abandoned ends the notices on both sides.
   if (old?.open && !open && old.conflicted)

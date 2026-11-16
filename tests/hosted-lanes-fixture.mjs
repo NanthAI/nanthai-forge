@@ -77,11 +77,44 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         writeBytesByTable: {},
         touched: [],
         written: [],
+        liveLine: {
+          metaReads: 0,
+          metaRanges: 0,
+          metaReadBytes: 0,
+          metaWrites: 0,
+          metaWriteBytes: 0,
+          markReads: 0,
+          markRanges: 0,
+          markReadBytes: 0,
+          markWrites: 0,
+          markWriteBytes: 0,
+        },
       };
-      const read = (table, select) => {
+      const lineKind = (table, row, hint) =>
+        table === 'projectLiveLineLanes'
+          ? 'mark'
+          : table === 'projectFinishReadRows' && String(row?.kind ?? hint ?? '').startsWith('projectLiveLine')
+            ? 'meta'
+            : null;
+      const lineWrite = (table, row, size = 0) => {
+        const kind = lineKind(table, row);
+        if (kind) {
+          meter.liveLine[`${kind}Writes`]++;
+          meter.liveLine[`${kind}WriteBytes`] += size;
+        }
+      };
+      const read = (table, select, hint) => {
         meter.touched.push(table);
         const current = view(table),
           rows = select(current);
+        for (const kind of ['mark', 'meta']) {
+          const selected = rows.filter(row => row && lineKind(table, row) === kind);
+          if (selected.length || (!rows.filter(Boolean).length && lineKind(table, null, hint) === kind)) {
+            meter.liveLine[`${kind}Reads`] += Math.max(1, selected.length);
+            meter.liveLine[`${kind}Ranges`]++;
+            meter.liveLine[`${kind}ReadBytes`] += selected.reduce((n, row) => n + bytes(row), 0);
+          }
+        }
         const original = encoded(current === baseline[table] ? rows : select(baseline[table]));
         reads.push(() => encoded(select(tables[table])) === original);
         meter.ranges++;
@@ -155,6 +188,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         meter.indexEntriesWritten += indexEntriesPerWrite(schema, table);
         meter.writes++;
         meter.writeBytes += bytes(row);
+        lineWrite(table, row, bytes(row));
         // Keep real totals intact; controller-only guards account for delayed retention
         // allocations separately. The landing cost guard still prices all of these bytes.
         if (table === '_scheduled_functions' && row.name?.startsWith('projectOperationalExpiry:')) {
@@ -203,6 +237,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
           delete: async id => {
             const table = locate(id);
             if (!table) return;
+            lineWrite(table, view(table).get(id));
             equalityIndexes.delete(writable(table));
             writable(table).delete(id);
             meter.indexEntriesRemoved += indexEntriesPerWrite(schema, table);
@@ -236,7 +271,9 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
           query: table => {
             let match,
               indexFields,
+              kindHint,
               descending = false;
+            const queryRead = select => read(table, select, kindHint);
             const q = {
               withIndex: (name, build) => {
                 const index =
@@ -278,6 +315,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
                   },
                 };
                 build(bounds);
+                kindHint = terms.find(([field]) => field === 'kind')?.[1];
                 match = rows =>
                   equalRows(rows, terms)
                     .filter(
@@ -300,7 +338,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
               },
               take: async n => {
                 assert(match, 'indexed reads only');
-                return read(table, rows =>
+                return queryRead(rows =>
                   match(rows)
                     .sort((a, b) => {
                       for (const field of [...indexFields, '_creationTime']) {
@@ -315,7 +353,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
               first: async () => (await q.take(1))[0] ?? null,
               unique: async () => {
                 assert(match, 'indexed reads only');
-                const rows = read(table, match);
+                const rows = queryRead(match);
                 assert(rows.length <= 1, 'unique index');
                 return rows[0] ?? null;
               },
@@ -331,7 +369,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
                   }
                 } finally {
                   // Lazy like Convex: only the rows the loop consumed are read and metered.
-                  read(table, rows => {
+                  queryRead(rows => {
                     const all = match(rows);
                     if (descending) all.reverse();
                     return all.slice(0, consumed);
@@ -345,7 +383,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
                   'This query function ran multiple paginated queries. Convex only supports a single paginated query in each query function.',
                 );
                 const start = Number(cursor ?? 0);
-                const rows = read(table, all => {
+                const rows = queryRead(all => {
                   const result = [];
                   let total = 0;
                   for (const row of match(all).slice(

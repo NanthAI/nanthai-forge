@@ -53,22 +53,14 @@ action incur Convex egress even though subsequent R2 downloads have free egress.
 
 ## P6 final cost baseline
 
-**Current cost reference.** This is the Phase 6 close serving reference in
-`costGuard.reference` in `src/speed-budgets.json`. The owner accepted going to
-market at this measured cost on **2026-11-15**, replacing the earlier target as a
-Phase 6 close gate. The two price bases below describe the same usage: do not
-sum them. The prior a6 reference is retained as history below. Fixture `costs`,
-thresholds, ratchets, action models and active budgets are unchanged by this
-reference update.
-
-The retained v2 N=10 series has **30 accepted landings in three cells**. Its
-serving proxy, excluding harness metrics/placement queries, is **$1.6826 per
-1,000 landings on Professional** when calls and action compute remain inside
-shared included allowances. The same quantities cost **$4.2013 per 1,000 at
-full Professional list rates**. Both exclude retained storage, R2 operations,
-deferred maintenance and plan fees. These are measured usage priced at the
-retained tariff, not invoices or an all-in customer price. The
-[exit report](../research/p6-exit-bench-results.md) retains the cell evidence.
+The Phase 6 close reference is `costGuard.reference` in
+`src/speed-budgets.json`, from thirty accepted landings in three v2 N=10 cells.
+Its **$1.6826/1,000** serving proxy
+assumes calls and compute remain within included allowances; full Professional
+list pricing of the same usage is **$4.2013/1,000**. Do not sum the two. Both
+exclude retained storage, R2 operations, deferred maintenance and plan fees;
+these are priced usage, not invoices. The [exit report](../research/p6-exit-bench-results.md)
+retains cell evidence. Fixture budgets and action models remain separate.
 
 | Serving resource | Per landing | Professional $/1,000, before allowances |
 | --- | ---: | ---: |
@@ -80,20 +72,14 @@ retained tariff, not invoices or an all-in customer price. The
 | Action compute, if allowance exhausted | 25.1884 GB-seconds | 2.099034 |
 | **Full-list serving subtotal** | | **4.201304** |
 
-The original mixed-rate meter totals $4.7544/1,000, including $0.3429 of
-harness metrics/placement work. Its readiness probe is inside the meter; its
-cell-end metrics report is after meter stop and must not be subtracted again.
-After validation, the probe sends `contextDays: 0`; later cells exclude that
-pre-window history read. This is a reporting correction, with **no measured
-saving to the serving subtotal**. Exact Lane-version hydration and selected-Lane
-save scans remove unrelated input history from product reports. Other context
-fallbacks remain on P6 Issue `d824900c`: a pre-window request can settle inside
-the report with no attempt/run/parent reference, while its end time is only
-in JSON; existing Intent indexes cannot discover that settlement. Unlinked/legacy/combined submissions and
-standalone failed checks lack a complete indexed input reverse lookup; saves
-lack an exact Lane/head index. Requested bill-period evidence and existing
-context source-record counts are retained for whole-report parity. No new
-index or landing-path write is added.
+The original mixed-rate meter is $4.7544/1,000, including $0.3429 harness
+metrics/placement. Its readiness probe is inside the meter; the cell-end report
+is outside it. `contextDays: 0` excludes pre-window history after validation and
+establishes no serving saving. Exact Lane-version hydration and selected-Lane
+save scans avoid unrelated history. Issue `d824900c` still owns incomplete
+settlement/input reverse lookups for unlinked, legacy and combined submissions,
+standalone failed checks and saves. Requested bill periods and source counts
+remain available; no new index or landing write is credited here.
 
 A synthetic six-landing capture (solo, main moved and a four-member batch)
 isolates source commit, finish controller and observer function families. The
@@ -106,39 +92,47 @@ and `dependents`; enqueue, status and other finish operations are separate.
 | Finish controller (rejected) | 63 | 1,849 → 1,849 | 2,248,313 → 2,248,313 | 662 | 641,126 |
 | Observer (rejected) | 53 | 641 → 641 | 467,272 → 467,272 | 0 | 0 |
 
-Source reuse removes **18.64% of documents and 24.93% of read bytes**;
-including writes, it removes **18.49% of I/O**, or **15.75%** after pricing
-calls at full list. This clears the owner's about-10% threshold. The complete
-finish-controller sample has 222 duplicate project reads / 215,118 bytes:
-**12.01% of documents, 9.57% of read bytes, 7.44% of read/write I/O, or 6.11%**
-after full-list call pricing. It is **rejected, little duplication** on the
-included-use I/O basis; no finish production code changes remain. Observer
-duplication is zero: **rejected, little duplication**. The old mixed-family
-7.15% and the ordinary-only controller sample both omit the proper denominator
-and are not used for either decision. Full-list percentages use $0.20/GB
-read/write and $2/million calls, excluding compute, egress and unmeasured overhead.
+Source reuse removes 18.64% of documents, 24.93% of read bytes and 18.49%
+of I/O (15.75% with full-list calls), clearing the owner's about-10% bar.
+Controller duplication is 222 reads / 215,118 bytes: 12.01% of documents,
+9.57% of reads, 7.44% of I/O or 6.11% including calls. Controller and observer
+reuse were rejected; neither changed production code. Percentages price DB I/O
+at $0.20/GB and calls at $2/million, excluding compute and egress.
 
-On the post-sync fixture, source reuse alone reduces the whole six-landing mix
-from **4,622 to 4,578 read documents** (770.3333 → 763 per landing) and
-4,288,825 → 4,246,189 serving read bytes. Calls, write counts, scheduler actions
-and wake dependencies remain unchanged. The disjoint trio's read-only ratchet
-is 2,924 after preserving main's independent 34-read reduction; its 154 calls,
-1,002 writes, three checks, 180,000 modeled milliseconds and zero idle calls
-are unchanged at both 0 and 1,150 retained receipts. Every actor, contributor
-and epoch check still runs; project writes invalidate the transaction-local
-snapshot before and after IO. No mutable request, attempt, queue or cross-request
-cache is introduced. These are deterministic fixture observations, not
-provider-billed savings or a latency result. The serving baseline above stays
-the last measured value until accepted code has comparable live evidence.
+The post-sync six-landing fixture falls from 4,622 to 4,578 read documents and
+4,288,825 to 4,246,189 read bytes with unchanged calls, writes and wake dependencies.
+The disjoint trio's 2,924-read ratchet preserves 154 calls, 1,002 writes, three
+checks and 180,000 modeled milliseconds at both zero and 1,150 retained receipts.
+Authority is always rechecked; snapshot reuse ends with the transaction.
 
-The final Phase 6 wake and State/recipe-preparation fixes (`c01d5457`,
-`5d689e6e`) do not raise this recorded serving reference. Their evidence is
-fixture deltas, not a new comparable whole-serving capture: pending-only wake
-retirement keeps 154 calls, adds 12 scheduler reads (+3,552 read bytes) and removes
-10 cancellation writes (−2,969 write bytes); verified preparation takes flat
-1/3/24-recipe cases from 5/11/74 HTTP rounds and 22/58/436 internal mutations to
-two rounds and seven mutations each. These figures do not establish a new billed
-serving total, so the measured baseline above remains current.
+Phase 6's final wake/preparation fixes retain this measured serving reference.
+Pending-only retirement adds twelve reads / 3,552 bytes and removes ten writes /
+2,969 bytes at 154 calls. Verified preparation replaces the flat/3/24-recipe
+5/11/74 HTTP rounds and 22/58/436 mutations with two rounds and seven mutations.
+These synthetic deltas establish neither billed savings nor latency gains.
+
+### Live line projection
+
+Issue `18af654d` allows **$0.01/1,000 extra on the CLI mix**. The paired
+six-landing fixture adds zero executions; per landing it adds 1,873.33 DB read
+bytes, 1,327.33 written bytes, 23.17 observer-read bytes, 25.5 custom-index writes,
+21 removals and 7.5 read probes. Document I/O adds **$0.000645/1,000**.
+
+One Lane's projection setup writes 537 bytes, two rows and 12 indexes, with
+two empty probes. Conservatively charging 309 bytes per added written index
+(the retained 181 + 128 fit), 128 per removal and 181 per read probe, including
+one setup and a full bind per landing, models **$0.005492/1,000** extra at
+Professional rates. Binding adds 834 read / 762 written bytes, eighteen index
+writes and three probes; this reserve also covers binds already in the mix.
+The serving reference is **$1.688095/1,000**, modeled, not billed.
+
+At 50 initialized Lanes, query/reply bytes are 13,110/6,189; at 100,
+25,460/7,400, including access/main fallback. The query reads at most 101 rows,
+returns 60 marks and labels overflow above 100 as a lower bound. No shared start
+counter is written. Models round up to six decimals. Only changed marks are
+rewritten; main/exit has one small row. Attention retains the replaced strip's
+shared reads, so browser offsets are zero credited. Live browser cost, frames,
+latency and thirty-minute idle I/O remain unverified.
 
 ### Retained storage and weekly maintenance allocation
 

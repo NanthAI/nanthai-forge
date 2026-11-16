@@ -40,7 +40,8 @@ function storedBytes(f) {
         [...rows.values()].reduce(
           (n, row) =>
             n +
-            ((name === 'projectFinishReadRows' && row.kind === 'projectLandingCapsuleIndex') ||
+            ((name === 'projectFinishReadRows' &&
+              ['projectLandingCapsuleIndex', 'projectLiveLineSummary'].includes(row.kind)) ||
             (name === 'projectJournalReceipts' && fixedJournalControl(row))
               ? 0
               : Buffer.byteLength(JSON.stringify({ ...row, _creationTime: 0 }))),
@@ -72,6 +73,17 @@ export function fixedProjectStorage(f) {
       },
     ],
     ...[...fixedProjectTables].map(table => [table, { rows: f.tables[table].size, bytes: bytes[table] }]),
+    [
+      'projectLiveLineSummary',
+      {
+        rows: [...f.tables.projectFinishReadRows.values()].filter(
+          row => row.kind === 'projectLiveLineSummary',
+        ).length,
+        bytes: [...f.tables.projectFinishReadRows.values()]
+          .filter(row => row.kind === 'projectLiveLineSummary')
+          .reduce((n, row) => n + Buffer.byteLength(JSON.stringify({ ...row, _creationTime: 0 })), 0),
+      },
+    ],
     [
       'projectLandingCapsuleIndex',
       {

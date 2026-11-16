@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { liveLineProjectionCounts } from './observer-projection-budget.mjs';
 // Issue 78a97771 cohort regression: a withdrawn, known failing member stops supplying speculative
 // source to the cohort stacked on it. Survivors recompose without it and land; its cancelled check
 // evidence stays and late callbacks for its old shared run cannot publish it.
@@ -59,9 +60,10 @@ for (const count of [10, 20])
     // One metadata transaction, bounded by the live train (measured 281/154 at N=10, 409/226 at N=20).
     assert.equal(withdrawCalls.length, 1);
     const companions = landingBodyCounts(withdrawCalls[0]);
+    const line = liveLineProjectionCounts(withdrawCalls[0]);
     assert(
-      withdrawCalls[0].documents - companions.reads < 160 + 15 * count &&
-        withdrawCalls[0].writes - companions.writes < 90 + 9 * count,
+      withdrawCalls[0].documents - companions.reads - line.reads < 160 + 15 * count &&
+        withdrawCalls[0].writes - companions.writes - line.writes < 90 + 9 * count,
       JSON.stringify(withdrawCalls[0]),
     );
     assert(

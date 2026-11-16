@@ -128,7 +128,11 @@ export function createLiveReads() {
       };
       const visibility = () => {
         if (page.visibilityState === 'hidden') arm(HIDDEN_GRACE_MS);
-        else input();
+        else {
+          clearTimeout(timer);
+          timer = undefined;
+          input();
+        }
       };
       const events = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart', 'focus'] as const;
       for (const name of events) target.addEventListener(name, input, { capture: true, passive: true });

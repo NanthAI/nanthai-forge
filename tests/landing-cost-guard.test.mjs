@@ -506,6 +506,7 @@ let baseline;
 test('cost guard: the scripted landing mix stays within its per-landing cost ledger', async t => {
   const started = performance.now();
   baseline = await measureLandingCosts(t, { indexExports: true });
+  t.diagnostic(`liveLinePairedMix ${JSON.stringify(baseline.measured)}`);
   const solo = baseline.scenarios.solo;
   const landServer = {
     calls: solo.queries + solo.observerQueries + solo.mutations + solo.v8Actions + solo.nodeActions,

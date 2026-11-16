@@ -6,6 +6,7 @@ import schema from './schema';
  * fails the build when a schema table with a hosted-project id is missing here. */
 export const projectPurgeTables = {
   projectFinishReadRows: 'by_project',
+  projectLiveLineLanes: 'by_project_and_lane',
   projectGithubMirrors: 'by_project',
   projectGithubMirrorJobs: 'by_project_and_state',
   projectGithubBindings: 'by_project_and_name',

@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "18af654d: replace HostedStrip Work-history subscriptions with a bounded slim per-open-Lane projection. One new table removes broad strip dependencies; existing transition transactions maintain it without timers or added RPCs.",
+  "date": "2026-11-16"
+}
