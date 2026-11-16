@@ -18,9 +18,11 @@ import { errorCode, recall, remember, safeNext } from './session';
 import { createPasskey, type CeremonyFailure, type CreationOptions } from './webauthn';
 
 type PasskeyHook = ReturnType<typeof useSignInWithUsernamePasskey>;
-const HANDLE = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/i;
+const HANDLE = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])$/;
 
 const words: Record<string, string> = {
+  USERNAME_HAS_INVALID_CHARACTERS:
+    'Use 2–39 lowercase letters, numbers or hyphens, without a leading or trailing hyphen.',
   UNKNOWN_CREDENTIAL: 'This device has no passkey for that handle. Use a passkey from your phone, or GitHub.',
   CEREMONY_ABORTED: 'The passkey prompt closed before it finished. Nothing changed.',
   CHALLENGE_EXPIRED: 'That took longer than ten minutes. Try again.',
@@ -68,7 +70,7 @@ export function SignIn() {
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const username = handle.trim().replace(/^@/, '');
-    if (!HANDLE.test(username)) return setProblem('A handle is 1 to 39 letters, digits and hyphens.');
+    if (!HANDLE.test(username)) return setProblem('Use 2–39 lowercase letters, numbers or hyphens.');
     void run(username);
   };
   const withGithub = async () => {

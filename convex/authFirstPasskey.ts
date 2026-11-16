@@ -4,6 +4,7 @@ import { mutation } from './cliServer';
 import { authComponents as components } from './authComponents';
 import { passkeyConfig } from './auth';
 import { accountFor } from './urlIdentity';
+import { handleError } from '../src/readable-urls';
 import { invariant } from '../src/errors';
 import type { MutationCtx } from './_generated/server';
 import { isAuthSession } from './forgeIdentity';
@@ -86,16 +87,17 @@ export const start = mutation({
   returns: options,
   handler: async ctx => {
     const user = await firstPasskeyAccount(ctx);
-    const existing = await ctx.runQuery(components.authUsername.public.getUsername, { userId: user._id });
-    const handle =
-      existing ?? (await accountFor(ctx, user.accountKey))?.handle ?? user.githubLogin ?? user.accountKey;
-    if (existing === null) {
-      const set = await ctx.runMutation(components.authUsername.public.setUsername, {
-        userId: user._id,
-        username: handle,
-      });
-      invariant(set.success, 'BAD_ARGUMENT', 'Choose an available handle before adding a passkey.');
-    }
+    const handle = (await accountFor(ctx, user.accountKey))?.handle;
+    invariant(
+      handle && !handleError(handle),
+      'BAD_ARGUMENT',
+      'Choose a Forge handle before adding a passkey.',
+    );
+    const set = await ctx.runMutation(components.authUsername.public.setUsername, {
+      userId: user._id,
+      username: handle,
+    });
+    invariant(set.success, 'BAD_ARGUMENT', 'Choose an available handle before adding a passkey.');
     const start = await ctx.runMutation(
       components.authPasskey.registration.startRegistrationForExistingUser,
       { verifiedUserId: user._id },

@@ -3,6 +3,11 @@ import { setupConvexAuth } from '@convex-dev/auth/server';
 import { setupGithub } from '@convex-dev/auth/methods/github/server';
 import { setupUsernamePasskey } from '@convex-dev/auth/methods/username-passkey/server';
 import { internal } from './_generated/api';
+import { getFunctionAddress, type DefaultFunctionArgs, type RegisteredMutation } from 'convex/server';
+import type { Validator } from 'convex/values';
+import { accountFor, handleTaken } from './urlIdentity';
+import { handleError } from '../src/readable-urls';
+import { invariant } from '../src/errors';
 import { ConvexError, v } from 'convex/values';
 import { mutation, type MutationCtx } from './cliServer';
 import { authComponents as components } from './authComponents';
@@ -46,10 +51,13 @@ export const startSignInWithGithub = mutation({
     return start._handler(ctx, args);
   },
 });
+const passkeys = setupUsernamePasskey(core, {
+  component: components.authPasskey,
+  usernameComponent: components.authUsername,
+  ...passkeyConfig,
+}).attachUserCallbacks({ createUser: internal.authUsers.createPasskey });
 export const {
-  startSignInWithUsernamePasskey,
   startAutofillSignInWithUsernamePasskey,
-  finishSignUpWithUsernamePasskey,
   finishSignInWithUsernamePasskey,
   listPasskeys,
   renamePasskey,
@@ -58,8 +66,105 @@ export const {
   finishAddPasskey,
   startRemovePasskey,
   finishRemovePasskey,
-} = setupUsernamePasskey(core, {
-  component: components.authPasskey,
-  usernameComponent: components.authUsername,
-  ...passkeyConfig,
-}).attachUserCallbacks({ createUser: internal.authUsers.createPasskey });
+} = passkeys;
+
+/** Preserve the pinned library's argument/return validators and ceremony handler while
+ * running Forge policy in the same transaction through the standard public builder. */
+function protect<A extends DefaultFunctionArgs, R>(
+  fn: RegisteredMutation<'public', A, R>,
+  handler: (
+    ctx: MutationCtx,
+    args: A,
+    run: (ctx: MutationCtx, args: A) => Promise<Awaited<R>>,
+  ) => Promise<Awaited<R>>,
+) {
+  const registered = fn as typeof fn & {
+    exportArgs: () => string;
+    exportReturns: () => string;
+    _handler: (ctx: MutationCtx, args: A) => Promise<Awaited<R>>;
+  };
+  const fields = JSON.parse(registered.exportArgs()).value as Record<
+    string,
+    { fieldType: unknown; optional: boolean }
+  >;
+  const args = Object.fromEntries(
+    Object.entries(fields).map(([name, field]) => [
+      name,
+      {
+        isConvexValidator: true,
+        isOptional: field.optional ? 'optional' : 'required',
+        json: field.fieldType,
+      },
+    ]),
+  ) as unknown as { [K in keyof A]: Validator<A[K]> };
+  return mutation({
+    args,
+    returns: {
+      isConvexValidator: true,
+      json: JSON.parse(registered.exportReturns()),
+    } as unknown as Validator<unknown>,
+    handler: (ctx, input) => handler(ctx, input as A, registered._handler),
+  }) as unknown as RegisteredMutation<'public', A, R>;
+}
+const taken = () => ({ error: 'USERNAME_TAKEN' as const });
+const invalid = () => ({ error: 'USERNAME_HAS_INVALID_CHARACTERS' as const });
+export const startSignInWithUsernamePasskey = protect(
+  passkeys.startSignInWithUsernamePasskey,
+  async (ctx, args, run) => {
+    if (handleError(args.username)) return { success: false as const, userError: invalid() };
+    const alias = await ctx.db
+      .query('accountHandles')
+      .withIndex('by_handle', q => q.eq('handle', args.username))
+      .unique();
+    let userId: string | null = null;
+    if (alias) {
+      const account = await accountFor(ctx, alias.owner);
+      const user = await ctx.db
+        .query('users')
+        .withIndex('by_accountKey', q => q.eq('accountKey', alias.owner))
+        .unique();
+      if (account?.handle !== args.username || !user) return { success: false as const, userError: taken() };
+      userId = user._id;
+    } else {
+      // A retained component name alone never establishes a Forge account's handle.
+      const existing = await ctx.runQuery(components.authUsername.public.getUserIdByUsername, args);
+      if (existing !== null) return { success: false as const, userError: taken() };
+    }
+    // Route the library's identifier lookup through the canonical Forge handle. The
+    // passkey component still binds and verifies the challenge against that user.
+    const lookup = components.authUsername.public.getUserIdByUsername;
+    return run(
+      {
+        ...ctx,
+        runQuery: ((ref: unknown, input: unknown) =>
+          getFunctionAddress(ref as never).reference === getFunctionAddress(lookup).reference
+            ? Promise.resolve(userId)
+            : ctx.runQuery(ref as never, input as never)) as typeof ctx.runQuery,
+      },
+      args,
+    );
+  },
+);
+export const finishSignUpWithUsernamePasskey = protect(
+  passkeys.finishSignUpWithUsernamePasskey,
+  async (ctx, args, run) => {
+    if (handleError(args.username)) return { status: 'error' as const, userError: invalid() };
+    if (await handleTaken(ctx, args.username)) return { status: 'error' as const, userError: taken() };
+    const result = await run(ctx, args);
+    if (result.status === 'complete') {
+      const id = ctx.db.normalizeId('users', result.tokens.userId);
+      const user = id && (await ctx.db.get(id));
+      invariant(user, 'AUTH_REQUIRED', 'Sign in to Forge.');
+      const account = await accountFor(ctx, user.accountKey);
+      invariant(account, 'AUTH_REQUIRED', 'Sign in to Forge.');
+      const placeholder = await ctx.db
+        .query('accountHandles')
+        .withIndex('by_handle', q => q.eq('handle', account.handle))
+        .unique();
+      if (placeholder && account.handlePrompt) await ctx.db.delete(placeholder._id);
+      await ctx.db.insert('accountHandles', { owner: user.accountKey, handle: args.username });
+      await ctx.db.patch(account._id, { handle: args.username, handlePrompt: false });
+    }
+    return result;
+  },
+);

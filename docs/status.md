@@ -268,6 +268,7 @@ before checks, including owner-approval defaults and derived check entries.
 Notices reuse capability discovery and local manifests, with no extra calls or
 idle work. First-local-write warnings and merging the two path lists remain open.
 
+
 ## Works
 
 Exact saved-file conflict trials use verified physical object bindings and pinned Lane source
@@ -340,7 +341,9 @@ GitHub analysis owners can remove public or private analyses from Projects with 
 
 - **Convex Auth foundation.** The server offers Convex Auth 2.0.0 GitHub/passkey
   methods beside Clerk, with session-to-account guards, verified-email callbacks,
-  first-passkey glue and the existing Forge CLI credential issuer. GitHub App user
+  first-passkey glue and the existing Forge CLI credential issuer. Passkey
+  sign-in uses the current Forge handle, validates it on the server, claims it
+  transactionally at registration and follows later handle changes. GitHub App user
   tokens are encrypted in the new account row with a separate service keyring.
   An operator backfill preserves existing Forge keys using verified numeric
   GitHub ids, with bounded pages, dry runs, safe resume and typed conflict refusal.

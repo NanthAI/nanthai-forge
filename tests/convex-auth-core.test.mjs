@@ -10,6 +10,8 @@ import { checkArgs } from './convex-args.mjs';
 const identity = await import(moduleUrl('../convex/forgeIdentity.ts'));
 const authIdentity = await import(moduleUrl('../convex/authIdentity.ts'));
 const users = await import(moduleUrl('../convex/authUsers.ts'));
+const auth = await import(moduleUrl('../convex/auth.ts'));
+const handles = await import(moduleUrl('../convex/urlAccounts.ts'));
 const firstPasskey = await import(moduleUrl('../convex/authFirstPasskey.ts'));
 const device = await import(moduleUrl('../convex/deviceActions.ts'));
 const deviceStore = await import(moduleUrl('../convex/deviceStore.ts'));
@@ -64,6 +66,8 @@ function fixture(t) {
   };
   const sessions = new Map([['session', { userId: user._id, creationTime: Date.now() }]]);
   const passkeys = [];
+  const usernames = new Map();
+  const starts = [];
   let componentReads = 0,
     userReads = 0,
     ceremonyOwner;
@@ -102,8 +106,39 @@ function fixture(t) {
             lastRefreshedAt: value.creationTime,
           }));
       if (name.endsWith('/listPasskeys')) return passkeys.filter(value => value.userId === args.userId);
-      if (name.endsWith('/getUsername')) return null;
-      if (name.endsWith('/setUsername')) return { success: true };
+      if (name.endsWith('/getUsername')) return usernames.get(args.userId) ?? null;
+      if (name.endsWith('/getUserIdByUsername'))
+        return [...usernames].find(([, name]) => name === args.username)?.[0] ?? null;
+      if (name.endsWith('/setUsername')) {
+        if ([...usernames].some(([id, name]) => name === args.username && id !== args.userId))
+          return { success: false, userError: { error: 'USERNAME_TAKEN' } };
+        usernames.set(args.userId, args.username);
+        return { success: true, previousUsername: null };
+      }
+      if (name.endsWith('/startAuthentication')) {
+        starts.push(args);
+        return { challenge: new Uint8Array([1, 2]).buffer, allowCredentials: [] };
+      }
+      if (name.endsWith('/startRegistrationForNewUser')) {
+        starts.push(args);
+        return { challenge: new Uint8Array([1, 2]).buffer, userHandle: new Uint8Array([3, 4]).buffer };
+      }
+      if (name.endsWith('/checkRegistrationForNewUser')) return { success: true };
+      if (name.endsWith('/_internal_dangerous_signUp')) {
+        const userId = await users.createPasskey._handler(ctx, {
+          method: { name: 'usernamePasskey', profile: {} },
+        });
+        return {
+          userId,
+          accessToken: 'synthetic-access',
+          refreshToken: 'synthetic-refresh',
+          refreshTokenExpiresAt: 1000,
+        };
+      }
+      if (name.endsWith('/_internal_dangerous_finishRegistrationForNewUser')) {
+        passkeys.push({ userId: args.newUserId, passkeyId: 'registered' });
+        return { success: true, passkeyId: 'registered' };
+      }
       if (name.endsWith('/startRegistrationForExistingUser')) {
         ceremonyOwner = args.verifiedUserId;
         return {
@@ -136,6 +171,8 @@ function fixture(t) {
     user,
     sessions,
     passkeys,
+    usernames,
+    starts,
     identity: value => {
       rawIdentity = value;
     },
@@ -395,5 +432,113 @@ test('GitHub sign-in names missing OAuth settings with a typed error before comp
   await assert.rejects(
     auth.startSignInWithGithub._handler(ctx, { redirectTo: 'https://untrusted.example' }),
     /not in allowedRedirectOrigins/,
+  );
+});
+
+const registration = {
+  id: 'credential',
+  rawId: 'credential',
+  type: 'public-key',
+  response: { clientDataJSON: '', attestationObject: '' },
+  clientExtensionResults: {},
+};
+
+test('passkey entry uses only the current Forge handle and never registers an existing account again', async t => {
+  const s = fixture(t);
+  s.tables.accountHandles.set('handle', {
+    _id: 'handle',
+    _creationTime: 1,
+    owner: s.user.accountKey,
+    handle: 'synthetic',
+  });
+  s.identity(null);
+  const result = await auth.startSignInWithUsernamePasskey._handler(s.ctx, { username: 'synthetic' });
+  assert.equal(result.step, 'authenticate');
+  assert.equal(s.starts[0].userId, s.user._id);
+  assert.deepEqual(
+    await auth.finishSignUpWithUsernamePasskey._handler(s.ctx, {
+      username: 'synthetic',
+      response: registration,
+    }),
+    { status: 'error', userError: { error: 'USERNAME_TAKEN' } },
+  );
+  assert.equal(s.tables.users.size, 1);
+  s.identity({ issuer: `${process.env.CONVEX_CLOUD_URL}/components/auth`, subject: 'session' });
+  assert.equal((await firstPasskey.start._handler(s.ctx, {})).user.name, 'synthetic');
+  assert.equal(s.usernames.get(s.user._id), 'synthetic');
+  await handles.set._handler(s.ctx, { handle: 'new-handle', operationId: 'rename' });
+  assert.equal(s.usernames.get(s.user._id), 'new-handle');
+  s.identity(null);
+  assert.equal(
+    (await auth.startSignInWithUsernamePasskey._handler(s.ctx, { username: 'new-handle' })).step,
+    'authenticate',
+  );
+  assert.deepEqual(await auth.startSignInWithUsernamePasskey._handler(s.ctx, { username: 'synthetic' }), {
+    success: false,
+    userError: { error: 'USERNAME_TAKEN' },
+  });
+});
+
+test('direct passkey calls enforce Forge handle syntax and reserved destinations before creating a ceremony', async t => {
+  const s = fixture(t);
+  s.identity(null);
+  for (const username of ['a', 'settings', 'Mixed-Case', 'éclair', '-prefix', 'suffix-', 'x'.repeat(40)]) {
+    assert.equal((await auth.startSignInWithUsernamePasskey._handler(s.ctx, { username })).success, false);
+    assert.equal(
+      (await auth.finishSignUpWithUsernamePasskey._handler(s.ctx, { username, response: registration }))
+        .status,
+      'error',
+    );
+  }
+  assert.equal(s.starts.length, 0);
+  assert.equal(s.tables.users.size, 1);
+});
+
+test('a legacy Forge handle directs the person to their existing sign-in without creating an account', async t => {
+  const s = fixture(t);
+  s.tables.accountHandles.set('legacy', {
+    _id: 'legacy',
+    _creationTime: 1,
+    owner: 'user_legacy',
+    handle: 'legacy-handle',
+  });
+  s.identity(null);
+  assert.deepEqual(await auth.startSignInWithUsernamePasskey._handler(s.ctx, { username: 'legacy-handle' }), {
+    success: false,
+    userError: { error: 'USERNAME_TAKEN' },
+  });
+  assert.equal(s.starts.length, 0);
+});
+
+test('passkey registration commits the chosen Forge handle and no placeholder alias', async t => {
+  const s = fixture(t);
+  s.identity(null);
+  const old = globalThis.Convex;
+  globalThis.Convex = {
+    asyncSyscall: async (op, value) => {
+      assert.equal(op, '1.0/createFunctionHandle');
+      return JSON.stringify('function://' + JSON.parse(value).name);
+    },
+  };
+  t.after(() => {
+    globalThis.Convex = old;
+  });
+  assert.equal(
+    (await auth.startSignInWithUsernamePasskey._handler(s.ctx, { username: 'new-person' })).step,
+    'register',
+  );
+  const result = await auth.finishSignUpWithUsernamePasskey._handler(s.ctx, {
+    username: 'new-person',
+    response: registration,
+  });
+  assert.equal(result.status, 'complete');
+  const user = s.tables.users.get(result.tokens.userId);
+  const account = [...s.tables.forgeAccounts.values()].find(row => row.owner === user.accountKey);
+  assert.equal(account.handle, 'new-person');
+  assert.equal(account.handlePrompt, false);
+  assert.equal(s.usernames.get(user._id), 'new-person');
+  assert.deepEqual(
+    [...s.tables.accountHandles.values()].filter(row => row.owner === user.accountKey).map(row => row.handle),
+    ['new-person'],
   );
 });

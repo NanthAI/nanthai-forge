@@ -646,7 +646,13 @@ New deployment settings (names only; values stay in the deployment):
   existing encrypted credentials. Retain old key ids when rotating separately.
 
 `auth.ts` exports GitHub sign-in, identifier-first passkey sign-in and library
-passkey management. `authFirstPasskey:start/finish` adds the first passkey from a
+passkey management. The identifier is the current Forge handle, using the same
+2–39 lowercase ASCII letter/digit/hyphen rules and reserved destinations as
+account settings. Registration refuses every retained handle owned by another
+account and claims the chosen handle in the registration transaction. Existing
+accounts use their original sign-in until they attach a passkey; typing their
+handle cannot create another account. A handle change moves the passkey sign-in
+name in that transaction; retained URL aliases do not become sign-in names. `authFirstPasskey:start/finish` adds the first passkey from a
 live session minted within ten minutes, composing the pinned component functions
 without a library patch. Subsequent passkeys use the library flow. Sign-in
 ceremonies request no extensions; the secret-envelope PRF ceremony uses its own

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { authComponents as components } from './authComponents';
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
 import { accountFor, ensureAccount, handleTaken } from './urlIdentity';
@@ -95,6 +96,22 @@ export const set = mutation({
         )
           await ctx.db.insert('accountHandles', { owner: user.subject, handle: input.handle });
         await ctx.db.patch(account._id, { handle: input.handle });
+      }
+      const authUser = await ctx.db
+        .query('users')
+        .withIndex('by_accountKey', q => q.eq('accountKey', user.subject))
+        .unique();
+      if (authUser) {
+        const existing = await ctx.runQuery(components.authUsername.public.getUsername, {
+          userId: authUser._id,
+        });
+        if (existing !== null) {
+          const changed = await ctx.runMutation(components.authUsername.public.setUsername, {
+            userId: authUser._id,
+            username: input.handle,
+          });
+          invariant(changed.success, 'BAD_ARGUMENT', 'This handle is already taken.');
+        }
       }
       await ctx.db.insert('handleOperations', { owner: user.subject, ...input });
       // Picking or keeping a handle answers the one-time prompt.
