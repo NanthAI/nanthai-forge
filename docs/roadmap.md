@@ -1,8 +1,8 @@
 # Roadmap
 
-What we are doing, in what order, and why. Nine phases. Phases 1–5 are done (Phase 5 closed on 2026-11-04). Phase 6 makes Forge solid, Phase 7 is the product and design people see, Phase 8 is the public beta (onboarding, permissions and production), Phase 9 is growth (owner re-bucket, 2026-11-07). Open work items live in Forge planning (see the [backlog](backlog.md) page); what works today is in [status](status.md). Keep this page current: update the status lines when a stage changes.
+What we are doing, in what order, and why. Nine phases. Phases 1–6 are done (Phase 6 closed on 2026-11-16; see the [close](phase6-close.md)). Phase 7 is current: the product and design people see, Phase 8 is the public beta (onboarding, permissions and production), Phase 9 is growth (owner re-bucket, 2026-11-07). Open work items live in Forge planning (see the [backlog](backlog.md) page); what works today is in [status](status.md). Keep this page current: update the status lines when a stage changes.
 
-Last updated: 2026-11-04.
+Last updated: 2026-11-16.
 
 ## Direction
 
@@ -92,43 +92,17 @@ Where each item stands:
 
 **After the bets:** a trial with outside users, a polished first project through GitHub import, and newcomer docs. Not started.
 
-## Phase 6: make it solid (planned)
+## Phase 6: make it solid (done)
 
-Start with the [Phase 6 lead plan](phase6-plan.md) for the agreed order, exit criteria and planning handover.
+Closed on 2026-11-16. The [close](phase6-close.md) records delivery, each exit criterion and owner disposition, the final serving-cost reference and the idle capture. The [plan](phase6-plan.md) summarizes the completed stages; detailed evidence stays on the Forge Issues.
 
-Goal: fix known friction and bugs under the exit freeze rule below, and make the landing loop robust under contention before anyone outside the team uses Forge. Re-cut by the owner on 2026-11-04 after the [B1.5d benchmark](research/b15d-report.md).
+Delivered hosted conflict/finish recovery, shared checks and overtakes, verified State/recipe source preparation, R2 placement and cold-history reductions, a consolidated agent surface and mechanical regression guards. The [exit bench](research/p6-exit-bench-results.md) and [cross-repository suite](research/zoo-mini-report.md) retain all results and misses. The owner accepted the bench with caveats and accepted going to market at the measured serving cost on 15 November: Professional $1.682603/1,000 with calls/compute inside included use, $4.201304/1,000 full list. Storage and weekly backup maintenance remain unmeasured; this is not an all-in price.
 
-**Exit:** bugs and friction filed before the exit-bench plan (8c9b84fc) is frozen are fixed or dropped by the owner, none silently deferred. After that freeze, only core-claim or severe bugs block exit. A repeat of the B1.5d benchmark shows the conflict-recovery loss fixed and no regression; idle Convex stays at 0 calls. Billed Convex dollars per accepted landing over at least 200 dogfood landings are about $0.002 or less, with a $0.001 stretch target (9db58ca6); attribution comes before optimization.
+Every preceding P6 Issue is closed or abandoned. The [carried-work table](phase6-close.md#carried-work-and-caveats) names the owner-approved Phase 7 follow-ups, including the source-only sync gap, source-action diagnostics, flakes, workflow/import/preflight papercuts, regression ladder and close validation. No literal all-gates-passed or universal Forge-over-Git speed claim follows from phase close.
 
-Bench-harness fixes d8cf81b4, 02ee5788, 108a4883 and 97c7a123 land before the exit-bench plan (8c9b84fc) is frozen.
+## Phase 7: product and design (current)
 
-- **6.1 Close the Phase 5 tail**: the remaining B1.9 local snapshot disposition, the one-authority watch, the legacy Convex storage move and delete (Issue 40dad5e0), the stuck import cleanup, the R2 guard follow-up, idle polling, cache-path gaps and the benchmark harness findings (including the contamination rule that voided 34 tasks on false positives).
-- **6.2 The landing loop under contention.** B1.5d showed Forge 24-35% faster to `main` per task, but a few tasks in conflict or overtake loops set whole-batch wall time. The work:
-  - conflict recovery agents cannot fumble: landing refuses while conflict markers remain, resolve works from the Lane root, and every conflict ends with one clear next step;
-  - overtakes and CI bundling, a per-Lane local lock and faster Lane open (Forge prep is 15 s against 4.5 s for a local clone);
-  - overlap notices that fire only for real collisions (13 of 45 blocking notices were useful, and 22 test-file conflicts had none), then earlier detection, with push delivery to agent sessions after that;
-  - sync-apply recovery for ignored build outputs (1ad05526-bc33-4b17-a90d-7f31e94b7164), and no dead ends (d910db6b): every failed check names its cause and next step, a supervisor, and rollback notices;
-  - flake containment, failed-test lists, train qualification, shortest-check-first and queue reordering (after measuring), a symbol-level selector and declaration merge.
-- **Landing safety beyond text conflicts.** A clean text merge can still break: today's real cases are a database test that failed after another change moved columns, two release changes that merged cleanly and then looped, and two readers that needed a hand merge. The landing queue already checks the exact composed result on current `main` and re-checks when `main` moves; these make the failures earlier, rarer and cheaper. Phase 5 Bets 2 and 3 cover contract checks, flake-aware culprit finding and overlap at first write; this list is the rest.
-  - **Order-sensitive paths**: migrations, schema, lockfiles, generated files and configuration form classes. When an entry ahead touches the same class, the queue-ahead preview is actionable even without a text overlap.
-  - **Migration collisions**: two Lanes adding the same migration number, or a migration that uses a column another entry removes, are reported at compose time with the fix.
-  - **Symbol drift**: an entry ahead that renames or removes a declaration your Lane newly uses is reported from the existing declaration index, before the check.
-  - **Opt-in early check**: on request, run the affected tests on your Lane plus the entries ahead before submitting, within a stated budget. Off by default.
-  - **Flake quarantine**: done early, in Phase 5 (2026-10-27), on every check provider.
-  - **Selection blind spots**: tests that depend on data or configuration rather than imports get explicit mappings; while work is active, `main` runs a periodic combined full check, never while idle. Every miss is recorded as friction.
-  - **Release ordering**: a release refuses mixed installs and checks old-client/new-backend compatibility in both directions before switching.
-  - **Stacked Lanes**: when the Lane underneath changes, is abandoned or fails to land, dependents restack or get one clear notice.
-  - **Breakage after landing**: a failing `main` audit finds the culprit, reverts it while keeping its Lane, and tells queued entries.
-  - **Long-lived drift**: a Lane far behind `main` on paths others keep changing gets a nudge naming those landings.
-  - **Queue order**: priority and reordering, with fairness between agents.
-- **6.3 Every friction and bug.** Cluster triage sets the work, then builders fix it in parallel batches or the owner drops it, under the exit freeze rule above. It replaces the pending owner friction-triage session. Issues are measured or tested now, or dropped; none wait for an arbitrary count. 82e8ddb8 is reshaped on that basis.
-- **6.4 Cost and agent surface.** Attribute billed Convex cost before optimizing toward the agreed exit target above, in-Convex first; any hosted worker or vendor comes with a monthly cost estimate and owner approval first. The agent context budget, CLI verbs V2b and V3 (alias removal, CLI generated from the MCP surface), and enforced trust per path per actor. Clone refresh (73ed4d28) stays in Phase 6 as core source-host behaviour; Lane undo (e7812d8f) moved to Phase 7 (owner, 2026-11-07).
-- **6.5 Engineering health and regression guards**: a codebase health pass, mechanical guards for repeat bug classes (custom lint rules and check scripts for product-specific regressions), a regression ladder for landing-loop speed and cost, Convex preview deployments in landing checks (moved from Phase 7), and a TLA+ model of the landing queue. Owner 2026-11-07: finish Phase 6 fast; its gate is a core that is stable, reliable, fast and cheap, with enough checks that work built on top cannot badly regress it.
-- **In parallel, no product changes**: art direction, the design system and mockups for the Phase 7 design pass.
-
-## Phase 7: product and design (planned)
-
-Goal: the product people see is fast, coherent and designed; the site is redone from scratch with Fable art direction.
+Goal: the product people see is fast, coherent and designed; the site is redone from scratch with Fable art direction. Start from Phase 7 Initiative `28591eeb-b74b-413a-ac41-1fef018b3dc1` and its current build-index comment; the [Phase 6 close](phase6-close.md) names the carried verification and implementation work.
 
 **Exit:** the redesigned site and product views ship on dev, the marketing story is ready for the Phase 8 beta, and nothing is published that the owner has not approved.
 

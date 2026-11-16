@@ -53,6 +53,14 @@ action incur Convex egress even though subsequent R2 downloads have free egress.
 
 ## P6 final cost baseline
 
+**Current cost reference.** This is the Phase 6 close serving reference in
+`costGuard.reference` in `src/speed-budgets.json`. The owner accepted going to
+market at this measured cost on **2026-11-15**, replacing the earlier target as a
+Phase 6 close gate. The two price bases below describe the same usage: do not
+sum them. The prior a6 reference is retained as history below. Fixture `costs`,
+thresholds, ratchets, action models and active budgets are unchanged by this
+reference update.
+
 The retained v2 N=10 series has **30 accepted landings in three cells**. Its
 serving proxy, excluding harness metrics/placement queries, is **$1.6826 per
 1,000 landings on Professional** when calls and action compute remain inside
@@ -123,7 +131,21 @@ cache is introduced. These are deterministic fixture observations, not
 provider-billed savings or a latency result. The serving baseline above stays
 the last measured value until accepted code has comparable live evidence.
 
+The final Phase 6 wake and State/recipe-preparation fixes (`c01d5457`,
+`5d689e6e`) do not raise this recorded serving reference. Their evidence is
+fixture deltas, not a new comparable whole-serving capture: pending-only wake
+retirement keeps 154 calls, adds 12 scheduler reads (+3,552 read bytes) and removes
+10 cancellation writes (−2,969 write bytes); verified preparation takes flat
+1/3/24-recipe cases from 5/11/74 HTTP rounds and 22/58/436 internal mutations to
+two rounds and seven mutations each. These figures do not establish a new billed
+serving total, so the measured baseline above remains current.
+
 ### Retained storage and weekly maintenance allocation
+
+**Storage and weekly backup maintenance remain unmeasured as a current all-in
+allocation.** Completing it needs owner-only dashboard readings for physical
+DB/index storage, retained R2 stock and matching backup/export DB I/O; serialized
+rows, compressed ZIPs and old scenarios cannot substitute for those readings.
 
 The dogfood project's accepted-receipt count for **1 November through
 15 November 09:45 UTC is 861** (29 bounded history pages, 14,766,080 reported
@@ -756,16 +778,37 @@ to main and 28.6% on arm wall than GitHub. Against a3, Forge median task time ri
 4.1%, arm wall 1.4%, all-check wall 6.4% and CI minutes 7.3%; there is no
 identical-pin noise calibration or model/scored claim.
 
-**Current reference and retained ratchet.** `costGuard.reference` now records this
-valid a6 independent whole-batch Professional capture by function family, total
-**$6.942917/1,000**. Its source labels state the
-window and fixed setup/export coverage; it is not an isolated steady-state price.
-Historical capture references are removed from the current reference array and
-remain in this report/history. Fixture `costs`, thresholds, action model and
-active budgets are unchanged. The already-landed weighted R2 budget remains
-`landing-r2-request-usd-mean`, $0.000018 per landing, calibrated from the dev
-20-landing mean $0.000011835; its one-alert/one-P0 path still adds no call. It is
-not recalibrated from this large-repository smoke.
+**Historical a6 reference and retained ratchet.** This independent whole-batch
+Professional capture was the previous `costGuard.reference`, superseded by the
+[P6 final serving baseline](#p6-final-cost-baseline). It covered
+13 November 00:45:36.698–01:25:27.912 UTC, ten accepted task receipts, fixed reset
+verification, late CI and final-main export; harness `528aba6677c3`, CLI State
+`737b36bdedc0`. It was not an isolated steady-state price. Rates were $2/M calls,
+$0.20/GB DB I/O, $0.12/GB egress and $0.30/GB-hour actions; R2, storage and backup
+were excluded. Ordinary task-period subtotal was $6.801369939986374/1,000,
+excluding late CI.
+
+| Historical a6 function family | Professional $/1,000 |
+| --- | ---: |
+| all Convex | 6.942916814470751 |
+| source and objects | 4.570283924383853 |
+| CI results and ingest | 0.9918554523510417 |
+| check reuse | 0.42417701568750005 |
+| finish driver | 0.35993618031562497 |
+| landing controller | 0.2521851708359375 |
+| finish observer | 0.15764352 |
+| lane, queue and session | 0.06303114 |
+| other captured functions | 0.05502033999999999 |
+| GitHub integrations | 0.026337502091145833 |
+| auth and device | 0.02491354040364583 |
+| overlap notices | 0.01056428 |
+| work and planning | 0.006968748402000001 |
+
+The already-landed weighted R2 budget remains `landing-r2-request-usd-mean`,
+$0.000018 per landing, calibrated from the dev 20-landing mean $0.000011835;
+its one-alert/one-P0 path adds no call. It is not recalibrated by this reference
+update. Fixture `costs`, thresholds, action model and active budgets are unchanged.
+
 
 
 ## Evidence and the allocation we cannot yet measure

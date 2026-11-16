@@ -537,69 +537,19 @@
     },
     "reference": [
       {
-        "family": "all Convex, per 1,000 accepted task landings, a6 independent batch",
-        "usdPer1000": 6.942916814470751,
-        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. This covered batch reference is not an isolated steady-state operation price. Ordinary task-period subtotal: $6.801369939986374/1,000; it excludes late CI."
+        "family": "P6 serving, Professional included-use basis (calls and action compute included)",
+        "usdPer1000": 1.682603,
+        "source": "P6 final cost baseline, docs/operations/cost-to-serve.md#p6-final-cost-baseline, owner accepted 2026-11-15; retained v2 N=10 series, 30 accepted task landings in three cells. Serving proxy excludes harness metrics/placement queries, retained storage, executed R2 operations and weekly/deferred maintenance; not an invoice or all-in customer price. Alternative price bases below overlap and must not be summed. Final wake/source-preparation fixes supply fixture deltas only, not a new comparable whole-serving capture. Professional DB I/O $0.20/GB and egress $0.12/GB; calls and action compute stay inside shared included allowances."
       },
       {
-        "family": "source and objects, a6 independent batch",
-        "usdPer1000": 4.570283924383853,
-        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: projectConvexSource:dispatch, projectConvexSource:step, projectConvexSourceNode:step, projectConvexSourceObjects:resolve, projectConvexSourceStore:begin, projectConvexSourceStore:commit, projectHostedCompose:candidate, projectHostedCompose:prepare, projectHostedCompose:progress, projectHostedCompose:stage, projectHostedComposeSelection:page, projectHostedConflictMerge:run, projectHostedConflicts:mainState, projectHostedConflicts:record, projectHostedConflicts:summary, projectHostedResolveChain:run, projectHostedResolveChainStore:prepare, projectHostedResolveChainStore:submit, projectHostedSaves:prepare, projectHostedSync:prepare, projectHostedSync:progress, projectObjectCommit:commitBatch, projectObjectCommit:markCommitted, projectObjectCommit:pendingRows, projectObjectDownloads:lanePage, projectObjectDownloads:signDownloads, projectObjects:available, projectObjects:prepareBatch, projectObjects:resolve, projectSourceRun:submit, projectSourceRunStore:submit."
+        "family": "P6 serving, full Professional list basis (alternative total)",
+        "usdPer1000": 4.201304,
+        "source": "P6 final cost baseline, docs/operations/cost-to-serve.md#p6-final-cost-baseline, owner accepted 2026-11-15; retained v2 N=10 series, 30 accepted task landings in three cells. Serving proxy excludes harness metrics/placement queries, retained storage, executed R2 operations and weekly/deferred maintenance; not an invoice or all-in customer price. Alternative price bases below overlap and must not be summed. Final wake/source-preparation fixes supply fixture deltas only, not a new comparable whole-serving capture. Same usage at full Professional list: $2/M calls, $0.30/GB-hour actions, $0.20/GB DB I/O and $0.12/GB egress."
       },
       {
-        "family": "CI results and ingest, a6 independent batch",
-        "usdPer1000": 0.9918554523510417,
-        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: POST /checks/actions, projectHostedActionsBatchStore:output, projectHostedActionsBatchStore:prepare, projectHostedActionsDirect:dispatch, projectHostedActionsDirect:observe, projectHostedActionsDirect:reserve, projectHostedActionsPlan:prepare, projectHostedActionsPreflight:check, projectHostedActionsResults:batch, projectHostedActionsSession:session, projectHostedActionsSource:resolve, projectHostedActionsVerdict:confirm, projectHostedActionsVerdict:confirmed, projectHostedActionsWebhook:receive, projectHostedCheckDefinitions:current, projectHostedCheckDefinitions:list, projectHostedMainAudit:start, projectHostedTestTimings:argumentsPage, projectStateSourceSelection:runner."
-      },
-      {
-        "family": "check reuse, a6 independent batch",
-        "usdPer1000": 0.42417701568750005,
-        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: projectHostedReuse:prove, projectHostedReuseStore:claim, projectHostedReuseStore:complete, projectHostedReuseStore:context, projectHostedReuseStore:objects."
-      },
-      {
-        "family": "finish driver, a6 independent batch",
-        "usdPer1000": 0.35993618031562497,
-        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: projectHostedFinishDriver:drive, projectHostedFinishDriver:resume, projectHostedFinishDriver:step."
-      },
-      {
-        "family": "landing controller, a6 independent batch",
-        "usdPer1000": 0.2521851708359375,
-        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: projectBytePlacement:convexWritten, projectHostedAcceptance:complete, projectHostedLanding:status, projectHostedLandingDesired:advance, projectHostedLandingDesired:claim, projectHostedLandingDesired:drive, projectHostedLandingDesired:submit, projectHostedLandingDriver:advance, projectHostedLandingDriver:checkWake, projectHostedLandingDriver:claim, projectHostedLandingDriver:drive, projectHostedLandingStallAlert:deliver, projectHostedLandingWouldConflict:mark, projectLandingSpeedIssue:write."
-      },
-      {
-        "family": "finish observer, a6 independent batch",
-        "usdPer1000": 0.15764352,
-        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: projectHostedFinishObserve:page."
-      },
-      {
-        "family": "lane, queue and session, a6 independent batch",
-        "usdPer1000": 0.06303114,
-        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: projectHostedAgent:capabilities, projectHostedBatchAbandon:reselect, projectHostedChannels:current, projectHostedLanes:select, projectHostedLifecycle:transition, projectHostedStart:start."
-      },
-      {
-        "family": "other captured functions, a6 independent batch",
-        "usdPer1000": 0.05502033999999999,
-        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: projectSelfMetricBills:page, projectSelfMetrics:page."
-      },
-      {
-        "family": "GitHub integrations, a6 independent batch",
-        "usdPer1000": 0.026337502091145833,
-        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: POST /github/webhook."
-      },
-      {
-        "family": "auth and device, a6 independent batch",
-        "usdPer1000": 0.02491354040364583,
-        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: GET /auth/jwks, deviceActions:jwks, deviceStore:authorize."
-      },
-      {
-        "family": "overlap notices, a6 independent batch",
-        "usdPer1000": 0.01056428,
-        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: projectHostedOverlaps:read."
-      },
-      {
-        "family": "work and planning, a6 independent batch",
-        "usdPer1000": 0.006968748402000001,
-        "source": "n3-r1-dry-a6, 2026-11-13 00:45:36.698-01:25:27.912 UTC, independent whole-deployment batch journal; ten accepted task receipts per arm. Includes reset verification, late CI and final-main export. Professional captured-usage model ($2/M calls, $0.20/GB DB I/O, $0.12/GB egress, $0.30/GB-h actions), not an invoice; R2/storage/backup excluded. Harness 528aba6677c3, CLI State 737b36bdedc0. Functions: projectWorkCommand:commandFromAction, projectWorkIndexStore:current, projectWorkIndexStore:lookups, projectWorkIndexStore:retirePayload."
+        "family": "P6 retained storage, R2 operations and weekly/deferred maintenance (excluded)",
+        "usdPer1000": null,
+        "source": "docs/operations/cost-to-serve.md#retained-storage-and-weekly-maintenance-allocation: current physical DB/index GB, R2 retained stock/attribution and matching weekly backup DB reads need owner-only dashboard readings. Compressed backup size is not billed DB I/O. Unknown, not zero; excluded from both serving totals."
       }
     ]
   },
