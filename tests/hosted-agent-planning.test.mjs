@@ -2,6 +2,7 @@
 import { meterReads } from './hosted-read-set.mjs';
 import { indexedRecord } from '../dist/work-hosted-index.js';
 import { installPlanningSearch } from './planning-search-fixture.mjs';
+import { assertCommandWeight } from '../scripts/agent-weight.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
@@ -46,7 +47,7 @@ const code = expected => error => (error.data?.code ?? error.code) === expected;
 /** The agent's port over the real Convex handlers; Intent states are the one stub (tested with
  * the Convex lanes fixture). Counts every Convex call the agent makes. The real handlers keep
  * omitted put fields, so the port advertises that by default, as the transport does after discovery. */
-function port(s, states = new Map(), serverFeatures = [...hostedContractFeatures]) {
+function port(s, states = new Map(), serverFeatures = [...hostedContractFeatures], realIntentStates = false) {
   const searches = installPlanningSearch(s);
   const calls = [],
     frictions = new Map();
@@ -58,6 +59,8 @@ function port(s, states = new Map(), serverFeatures = [...hostedContractFeatures
       return JSON.stringify(
         frictions.has(args.id) ? { found: true, ...frictions.get(args.id) } : { found: false },
       );
+    if (name === 'projectHostedPlanning:intentStates' && realIntentStates)
+      return planningModule.intentStates._handler(s.ctx, args);
     if (name === 'projectHostedPlanning:intentStates')
       return JSON.stringify(
         Object.fromEntries(args.ids.filter(id => states.has(id)).map(id => [id, states.get(id)])),
@@ -1726,7 +1729,7 @@ test('a comment on a friction id names the Issue it was triaged to; other failur
 
 test('filtered planning and one-read Initiative counts charge only matching rows on a 1500-item board (5a85cb5f)', async t => {
   const s = await setup(t),
-    p = port(s);
+    p = port(s, new Map(), [...hostedContractFeatures], true);
   const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
   const initiativeId = randomUUID();
   const statuses = ['open', 'open', 'proposed', 'in-progress', 'abandoned'];
@@ -1777,14 +1780,26 @@ test('filtered planning and one-read Initiative counts charge only matching rows
     s,
     new Map(),
     p.serverFeatures.filter(f => f !== 'planning-filtered-reads'),
+    true,
   );
   let beforeRows;
   const before = await meter.cost(async () => {
     beforeRows = await allPages(beforeClient, filter);
   });
   let afterRows;
+  const filteredCallStart = p.calls.length;
   const after = await meter.cost(async () => {
     afterRows = await allPages(p, filter);
+  });
+  t.diagnostic(
+    JSON.stringify({
+      planningFilteredCalls: p.calls.slice(filteredCallStart),
+      planningFilteredReads: after.documents,
+    }),
+  );
+  assertCommandWeight('planningFiltered', {
+    calls: p.calls.length - filteredCallStart,
+    reads: after.documents,
   });
   assert.deepEqual(afterRows, beforeRows);
   assert.equal(afterRows.length, 2);
@@ -1802,6 +1817,7 @@ test('filtered planning and one-read Initiative counts charge only matching rows
   assert.equal(counted.coverage, 'complete');
   assert.equal(counted.nextCursor, null);
   assert.deepEqual(p.calls, ['projectWorkIndex:records'], 'counts make one read and no reconcile writes');
+  assertCommandWeight('planningCounts', { calls: p.calls.length, reads: count.documents });
   // Growth in closed items, including closed members of this Initiative, changes no filtered read bytes.
   for (let i = 0; i < 500; i++) await add({ ...items[100], id: randomUUID() }, 1500 + i);
   assert.deepEqual(await meter.cost(() => allPages(p, filter)), after);

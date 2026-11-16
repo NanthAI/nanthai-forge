@@ -1,0 +1,1392 @@
+{
+  "schema": 1,
+  "issue": "92dbde9d-c644-45dc-8ab6-4b3bfc6c57d1",
+  "sourceState": "b3c50a9f293d0d1b9e554f849e749c8b12f0e21d1b7371d87b60f88b9c7e0611",
+  "runtime": "Node v24.22.1; darwin arm64; warm compile cache; two unchanged-archive batches of five fresh processes per path",
+  "noise": "CPU allowance = max(10 ms, reference median * cpuNoiseRatio). cpuNoiseRatio is twice the largest relative full range among the unchanged path repeats, rounded up to 0.001. Shared-machine scheduling produced large CPU variation; exact module/byte/call counts remain strict. Existing speed-budgets CPU ceilings cap this allowance. Wall time is reported, not asserted.",
+  "mcpContextIssue": "47558a99-c1cc-4de8-96cd-b00c5c939483",
+  "ceilings": {
+    "installedBytes": 151289995,
+    "versionCpuMs": 103.884,
+    "versionModules": 19,
+    "helpCpuMs": 102.285,
+    "helpModules": 19,
+    "mcpCpuMs": 1437.977,
+    "mcpModules": 827,
+    "toolListBytes": 5723,
+    "cliAgentStatusCpuMs": 500,
+    "cliAgentStatusCpuModules": 170,
+    "cliAgentPlanningCpuMs": 500,
+    "cliAgentPlanningCpuModules": 170,
+    "cliAgentSaveCpuMs": 500,
+    "cliAgentSaveCpuModules": 170,
+    "cliAgentLandCpuMs": 500,
+    "cliAgentLandCpuModules": 177
+  },
+  "boundary": [
+    "@lezer/common",
+    "@lezer/go",
+    "@lezer/highlight",
+    "@lezer/java",
+    "@lezer/javascript",
+    "@lezer/python",
+    "@lezer/rust",
+    "@modelcontextprotocol/sdk",
+    "@noble/curves",
+    "@noble/hashes",
+    "convex",
+    "convex-helpers",
+    "ignore",
+    "typescript",
+    "undici",
+    "zod"
+  ],
+  "before": {
+    "actual": {
+      "installedBytes": 151289995,
+      "versionCpuMs": 29.553,
+      "versionModules": 19,
+      "helpCpuMs": 29.25,
+      "helpModules": 19,
+      "mcpCpuMs": 284.319,
+      "mcpModules": 827,
+      "toolListBytes": 5723,
+      "cliAgentStatusCpuMs": 171,
+      "cliAgentStatusCpuModules": 170,
+      "cliAgentPlanningCpuMs": 268,
+      "cliAgentPlanningCpuModules": 170,
+      "cliAgentSaveCpuMs": 335,
+      "cliAgentSaveCpuModules": 170,
+      "cliAgentLandCpuMs": 370,
+      "cliAgentLandCpuModules": 177
+    },
+    "samples": {
+      "version": [
+        {
+          "cpuMs": 29.165,
+          "modules": 19,
+          "maxRssKiB": 54048
+        },
+        {
+          "cpuMs": 29.886,
+          "modules": 19,
+          "maxRssKiB": 53936
+        },
+        {
+          "cpuMs": 29.553,
+          "modules": 19,
+          "maxRssKiB": 54032
+        },
+        {
+          "cpuMs": 30.897,
+          "modules": 19,
+          "maxRssKiB": 54048
+        },
+        {
+          "cpuMs": 29.216,
+          "modules": 19,
+          "maxRssKiB": 54112
+        }
+      ],
+      "help": [
+        {
+          "cpuMs": 29.25,
+          "modules": 19,
+          "maxRssKiB": 54112
+        },
+        {
+          "cpuMs": 29.426,
+          "modules": 19,
+          "maxRssKiB": 54192
+        },
+        {
+          "cpuMs": 28.614,
+          "modules": 19,
+          "maxRssKiB": 54016
+        },
+        {
+          "cpuMs": 28.001,
+          "modules": 19,
+          "maxRssKiB": 54064
+        },
+        {
+          "cpuMs": 30.024,
+          "modules": 19,
+          "maxRssKiB": 54016
+        }
+      ],
+      "mcp": [
+        {
+          "cpuMs": 283.892,
+          "modules": 827,
+          "maxRssKiB": 140928
+        },
+        {
+          "cpuMs": 282.519,
+          "modules": 827,
+          "maxRssKiB": 140976
+        },
+        {
+          "cpuMs": 284.319,
+          "modules": 827,
+          "maxRssKiB": 140416
+        },
+        {
+          "cpuMs": 296.867,
+          "modules": 827,
+          "maxRssKiB": 140944
+        },
+        {
+          "cpuMs": 286.745,
+          "modules": 827,
+          "maxRssKiB": 140816
+        }
+      ],
+      "cliAgentStatusCpu": [
+        {
+          "cpuMs": 166,
+          "modules": 170
+        },
+        {
+          "cpuMs": 174,
+          "modules": 170
+        },
+        {
+          "cpuMs": 174,
+          "modules": 170
+        },
+        {
+          "cpuMs": 162,
+          "modules": 170
+        },
+        {
+          "cpuMs": 171,
+          "modules": 170
+        }
+      ],
+      "cliAgentPlanningCpu": [
+        {
+          "cpuMs": 164,
+          "modules": 170
+        },
+        {
+          "cpuMs": 188,
+          "modules": 170
+        },
+        {
+          "cpuMs": 268,
+          "modules": 170
+        },
+        {
+          "cpuMs": 360,
+          "modules": 170
+        },
+        {
+          "cpuMs": 290,
+          "modules": 170
+        }
+      ],
+      "cliAgentSaveCpu": [
+        {
+          "cpuMs": 342,
+          "modules": 170
+        },
+        {
+          "cpuMs": 347,
+          "modules": 170
+        },
+        {
+          "cpuMs": 310,
+          "modules": 170
+        },
+        {
+          "cpuMs": 310,
+          "modules": 170
+        },
+        {
+          "cpuMs": 335,
+          "modules": 170
+        }
+      ],
+      "cliAgentLandCpu": [
+        {
+          "cpuMs": 370,
+          "modules": 177
+        },
+        {
+          "cpuMs": 372,
+          "modules": 177
+        },
+        {
+          "cpuMs": 405,
+          "modules": 177
+        },
+        {
+          "cpuMs": 347,
+          "modules": 177
+        },
+        {
+          "cpuMs": 316,
+          "modules": 177
+        }
+      ]
+    },
+    "boundary": [
+      "@clerk/react",
+      "@lezer/common",
+      "@lezer/go",
+      "@lezer/highlight",
+      "@lezer/java",
+      "@lezer/javascript",
+      "@lezer/python",
+      "@lezer/rust",
+      "@modelcontextprotocol/sdk",
+      "@noble/curves",
+      "@noble/hashes",
+      "convex",
+      "convex-helpers",
+      "ignore",
+      "react",
+      "react-dom",
+      "react-markdown",
+      "remark-gfm",
+      "typescript",
+      "undici",
+      "zod"
+    ],
+    "packages": [
+      "@clerk/react@6.17.3",
+      "@clerk/shared@4.40.0",
+      "@esbuild/darwin-arm64@0.27.0",
+      "@hono/node-server@2.1.1",
+      "@lezer/common@1.5.3",
+      "@lezer/go@1.0.1",
+      "@lezer/highlight@1.2.5",
+      "@lezer/java@1.1.5",
+      "@lezer/javascript@1.5.6",
+      "@lezer/lr@1.4.11",
+      "@lezer/python@1.1.19",
+      "@lezer/rust@1.0.3",
+      "@modelcontextprotocol/sdk@1.30.0",
+      "@nanthai/forge@0.3.1",
+      "@noble/curves@2.0.1",
+      "@noble/hashes@2.0.1",
+      "@tanstack/query-core@5.104.0",
+      "@types/debug@4.1.13",
+      "@types/estree-jsx@1.0.5",
+      "@types/estree@1.0.9",
+      "@types/hast@3.0.5",
+      "@types/mdast@4.0.4",
+      "@types/ms@2.1.0",
+      "@types/unist@2.0.11",
+      "@types/unist@3.0.3",
+      "@ungap/structured-clone@1.4.0",
+      "accepts@2.0.0",
+      "ajv-formats@3.0.1",
+      "ajv@8.20.0",
+      "bail@2.0.2",
+      "body-parser@2.3.0",
+      "bytes@3.1.2",
+      "call-bind-apply-helpers@1.0.2",
+      "call-bound@1.0.4",
+      "ccount@2.0.1",
+      "character-entities-html4@2.1.0",
+      "character-entities-legacy@3.0.0",
+      "character-entities@2.0.2",
+      "character-reference-invalid@2.0.1",
+      "comma-separated-tokens@2.0.3",
+      "content-disposition@1.1.0",
+      "content-type@1.0.5",
+      "content-type@2.1.0",
+      "convex-helpers@0.1.126",
+      "convex@1.46.0",
+      "cookie-signature@1.2.2",
+      "cookie@0.7.2",
+      "cors@2.8.6",
+      "cross-spawn@7.0.6",
+      "debug@4.4.3",
+      "decode-named-character-reference@1.3.0",
+      "depd@2.0.0",
+      "dequal@2.0.3",
+      "devlop@1.1.0",
+      "dunder-proto@1.0.1",
+      "ee-first@1.1.1",
+      "encodeurl@2.0.0",
+      "es-define-property@1.0.1",
+      "es-errors@1.3.0",
+      "es-object-atoms@1.1.2",
+      "esbuild@0.27.0",
+      "escape-html@1.0.3",
+      "escape-string-regexp@5.0.0",
+      "estree-util-is-identifier-name@3.0.0",
+      "etag@1.8.1",
+      "eventsource-parser@3.1.1",
+      "eventsource@3.0.7",
+      "express-rate-limit@8.7.0",
+      "express@5.2.1",
+      "extend@3.0.2",
+      "fast-deep-equal@3.1.3",
+      "fast-uri@3.1.8",
+      "finalhandler@2.1.1",
+      "forwarded@0.2.0",
+      "fresh@2.0.0",
+      "function-bind@1.1.2",
+      "get-intrinsic@1.3.0",
+      "get-proto@1.0.1",
+      "glob-to-regexp@0.4.1",
+      "gopd@1.2.0",
+      "has-symbols@1.1.0",
+      "hasown@2.0.4",
+      "hast-util-to-jsx-runtime@2.3.6",
+      "hast-util-whitespace@3.0.0",
+      "hono@4.13.8",
+      "html-url-attributes@3.0.1",
+      "http-errors@2.0.1",
+      "iconv-lite@0.7.3",
+      "ignore@7.0.9",
+      "inherits@2.0.4",
+      "inline-style-parser@0.2.7",
+      "ip-address@10.7.2",
+      "ipaddr.js@1.9.1",
+      "is-alphabetical@2.0.1",
+      "is-alphanumerical@2.0.1",
+      "is-decimal@2.0.1",
+      "is-hexadecimal@2.0.1",
+      "is-plain-obj@4.1.0",
+      "is-promise@4.0.0",
+      "isexe@2.0.0",
+      "jose@6.2.12",
+      "js-cookie@3.0.8",
+      "json-schema-traverse@1.0.0",
+      "json-schema-typed@8.0.2",
+      "longest-streak@3.1.0",
+      "markdown-table@3.0.4",
+      "math-intrinsics@1.1.0",
+      "mdast-util-find-and-replace@3.0.2",
+      "mdast-util-from-markdown@2.0.3",
+      "mdast-util-gfm-autolink-literal@2.0.1",
+      "mdast-util-gfm-footnote@2.1.0",
+      "mdast-util-gfm-strikethrough@2.0.1",
+      "mdast-util-gfm-table@2.0.0",
+      "mdast-util-gfm-task-list-item@2.0.0",
+      "mdast-util-gfm@3.1.0",
+      "mdast-util-mdx-expression@2.0.1",
+      "mdast-util-mdx-jsx@3.2.0",
+      "mdast-util-mdxjs-esm@2.0.1",
+      "mdast-util-phrasing@4.1.0",
+      "mdast-util-to-hast@13.2.1",
+      "mdast-util-to-markdown@2.1.2",
+      "mdast-util-to-string@4.0.0",
+      "media-typer@1.1.1",
+      "merge-descriptors@2.0.0",
+      "micromark-core-commonmark@2.0.3",
+      "micromark-extension-gfm-autolink-literal@2.1.0",
+      "micromark-extension-gfm-footnote@2.1.0",
+      "micromark-extension-gfm-strikethrough@2.1.0",
+      "micromark-extension-gfm-table@2.1.2",
+      "micromark-extension-gfm-tagfilter@2.0.0",
+      "micromark-extension-gfm-task-list-item@2.1.0",
+      "micromark-extension-gfm@3.0.0",
+      "micromark-factory-destination@2.0.1",
+      "micromark-factory-label@2.0.1",
+      "micromark-factory-space@2.0.1",
+      "micromark-factory-title@2.0.1",
+      "micromark-factory-whitespace@2.0.1",
+      "micromark-util-character@2.1.1",
+      "micromark-util-chunked@2.0.1",
+      "micromark-util-classify-character@2.0.1",
+      "micromark-util-combine-extensions@2.0.1",
+      "micromark-util-decode-numeric-character-reference@2.0.2",
+      "micromark-util-decode-string@2.0.1",
+      "micromark-util-encode@2.0.1",
+      "micromark-util-html-tag-name@2.0.1",
+      "micromark-util-normalize-identifier@2.0.1",
+      "micromark-util-resolve-all@2.0.1",
+      "micromark-util-sanitize-uri@2.0.1",
+      "micromark-util-subtokenize@2.1.0",
+      "micromark-util-symbol@2.0.1",
+      "micromark-util-types@2.0.2",
+      "micromark@4.0.2",
+      "mime-db@1.54.0",
+      "mime-types@3.0.2",
+      "ms@2.1.3",
+      "negotiator@1.1.0",
+      "object-assign@4.1.1",
+      "object-inspect@1.13.4",
+      "on-finished@2.4.1",
+      "once@1.4.0",
+      "parse-entities@4.0.2",
+      "parseurl@1.3.3",
+      "path-key@3.1.1",
+      "path-to-regexp@8.4.2",
+      "pkce-challenge@5.0.1",
+      "prettier@3.9.10",
+      "property-information@7.2.0",
+      "proxy-addr@2.0.8",
+      "qs@6.16.0",
+      "range-parser@1.3.0",
+      "raw-body@3.0.2",
+      "react-dom@19.3.0",
+      "react-markdown@10.1.0",
+      "react@19.3.0",
+      "remark-gfm@4.0.1",
+      "remark-parse@11.0.0",
+      "remark-rehype@11.1.2",
+      "remark-stringify@11.0.0",
+      "require-from-string@2.0.2",
+      "router@2.2.0",
+      "safer-buffer@2.1.2",
+      "scheduler@0.28.0",
+      "send@1.2.1",
+      "serve-static@2.2.1",
+      "setprototypeof@1.2.0",
+      "shebang-command@2.0.0",
+      "shebang-regex@3.0.0",
+      "side-channel-list@1.0.1",
+      "side-channel-map@1.0.1",
+      "side-channel-weakmap@1.0.2",
+      "side-channel@1.1.1",
+      "space-separated-tokens@2.0.2",
+      "statuses@2.0.2",
+      "stringify-entities@4.0.4",
+      "style-to-js@1.1.21",
+      "style-to-object@1.0.14",
+      "toidentifier@1.0.1",
+      "trim-lines@3.0.1",
+      "trough@2.2.0",
+      "tslib@2.8.1",
+      "type-is@2.1.0",
+      "typescript@5.9.3",
+      "undici@7.30.1",
+      "unified@11.0.5",
+      "unist-util-is@6.0.1",
+      "unist-util-position@5.0.0",
+      "unist-util-stringify-position@4.0.0",
+      "unist-util-visit-parents@6.0.2",
+      "unist-util-visit@5.1.0",
+      "unpipe@1.0.0",
+      "vary@1.1.2",
+      "vfile-message@4.0.3",
+      "vfile@6.0.3",
+      "which@2.0.2",
+      "wrappy@1.0.2",
+      "ws@8.21.0",
+      "zod-to-json-schema@3.25.2",
+      "zod@4.6.5",
+      "zwitch@2.0.4"
+    ],
+    "node": "v24.22.1",
+    "platform": "darwin",
+    "arch": "arm64",
+    "wallMs": 8262,
+    "maxRssKiB": 64672
+  },
+  "commands": {
+    "status": {
+      "calls": 3,
+      "reads": 11
+    },
+    "planningCounts": {
+      "calls": 1,
+      "reads": 399
+    },
+    "saveUnchanged": {
+      "calls": 2,
+      "reads": 38
+    },
+    "saveChanged": {
+      "calls": 7,
+      "reads": 283
+    },
+    "landSave": {
+      "calls": 16
+    },
+    "landServerSolo": {
+      "calls": 35,
+      "reads": 482
+    },
+    "planningFiltered": {
+      "calls": 3,
+      "reads": 10
+    }
+  },
+  "unchangedRepeat": {
+    "actual": {
+      "installedBytes": 151289995,
+      "versionCpuMs": 30.269,
+      "versionModules": 19,
+      "helpCpuMs": 29.748,
+      "helpModules": 19,
+      "mcpCpuMs": 431.802,
+      "mcpModules": 827,
+      "toolListBytes": 5723,
+      "cliAgentStatusCpuMs": 196,
+      "cliAgentStatusCpuModules": 170,
+      "cliAgentPlanningCpuMs": 158,
+      "cliAgentPlanningCpuModules": 170,
+      "cliAgentSaveCpuMs": 159,
+      "cliAgentSaveCpuModules": 170,
+      "cliAgentLandCpuMs": 180,
+      "cliAgentLandCpuModules": 177
+    },
+    "samples": {
+      "version": [
+        {
+          "cpuMs": 30.269,
+          "modules": 19,
+          "maxRssKiB": 54096
+        },
+        {
+          "cpuMs": 30.556,
+          "modules": 19,
+          "maxRssKiB": 54080
+        },
+        {
+          "cpuMs": 29.798,
+          "modules": 19,
+          "maxRssKiB": 54016
+        },
+        {
+          "cpuMs": 31.763,
+          "modules": 19,
+          "maxRssKiB": 54016
+        },
+        {
+          "cpuMs": 29.301,
+          "modules": 19,
+          "maxRssKiB": 53968
+        }
+      ],
+      "help": [
+        {
+          "cpuMs": 29.001,
+          "modules": 19,
+          "maxRssKiB": 54096
+        },
+        {
+          "cpuMs": 29.8,
+          "modules": 19,
+          "maxRssKiB": 53888
+        },
+        {
+          "cpuMs": 30.759,
+          "modules": 19,
+          "maxRssKiB": 54176
+        },
+        {
+          "cpuMs": 29.064,
+          "modules": 19,
+          "maxRssKiB": 54000
+        },
+        {
+          "cpuMs": 29.748,
+          "modules": 19,
+          "maxRssKiB": 54096
+        }
+      ],
+      "mcp": [
+        {
+          "cpuMs": 431.802,
+          "modules": 827,
+          "maxRssKiB": 141552
+        },
+        {
+          "cpuMs": 413.687,
+          "modules": 827,
+          "maxRssKiB": 151904
+        },
+        {
+          "cpuMs": 414.202,
+          "modules": 827,
+          "maxRssKiB": 151920
+        },
+        {
+          "cpuMs": 451.735,
+          "modules": 827,
+          "maxRssKiB": 141040
+        },
+        {
+          "cpuMs": 436.318,
+          "modules": 827,
+          "maxRssKiB": 140928
+        }
+      ],
+      "cliAgentStatusCpu": [
+        {
+          "cpuMs": 190,
+          "modules": 170
+        },
+        {
+          "cpuMs": 196,
+          "modules": 170
+        },
+        {
+          "cpuMs": 217,
+          "modules": 170
+        },
+        {
+          "cpuMs": 202,
+          "modules": 170
+        },
+        {
+          "cpuMs": 165,
+          "modules": 170
+        }
+      ],
+      "cliAgentPlanningCpu": [
+        {
+          "cpuMs": 158,
+          "modules": 170
+        },
+        {
+          "cpuMs": 159,
+          "modules": 170
+        },
+        {
+          "cpuMs": 157,
+          "modules": 170
+        },
+        {
+          "cpuMs": 157,
+          "modules": 170
+        },
+        {
+          "cpuMs": 158,
+          "modules": 170
+        }
+      ],
+      "cliAgentSaveCpu": [
+        {
+          "cpuMs": 159,
+          "modules": 170
+        },
+        {
+          "cpuMs": 155,
+          "modules": 170
+        },
+        {
+          "cpuMs": 159,
+          "modules": 170
+        },
+        {
+          "cpuMs": 160,
+          "modules": 170
+        },
+        {
+          "cpuMs": 168,
+          "modules": 170
+        }
+      ],
+      "cliAgentLandCpu": [
+        {
+          "cpuMs": 197,
+          "modules": 177
+        },
+        {
+          "cpuMs": 180,
+          "modules": 177
+        },
+        {
+          "cpuMs": 174,
+          "modules": 177
+        },
+        {
+          "cpuMs": 184,
+          "modules": 177
+        },
+        {
+          "cpuMs": 174,
+          "modules": 177
+        }
+      ]
+    },
+    "boundary": [
+      "@clerk/react",
+      "@lezer/common",
+      "@lezer/go",
+      "@lezer/highlight",
+      "@lezer/java",
+      "@lezer/javascript",
+      "@lezer/python",
+      "@lezer/rust",
+      "@modelcontextprotocol/sdk",
+      "@noble/curves",
+      "@noble/hashes",
+      "convex",
+      "convex-helpers",
+      "ignore",
+      "react",
+      "react-dom",
+      "react-markdown",
+      "remark-gfm",
+      "typescript",
+      "undici",
+      "zod"
+    ],
+    "packages": [
+      "@clerk/react@6.17.3",
+      "@clerk/shared@4.40.0",
+      "@esbuild/darwin-arm64@0.27.0",
+      "@hono/node-server@2.1.1",
+      "@lezer/common@1.5.3",
+      "@lezer/go@1.0.1",
+      "@lezer/highlight@1.2.5",
+      "@lezer/java@1.1.5",
+      "@lezer/javascript@1.5.6",
+      "@lezer/lr@1.4.11",
+      "@lezer/python@1.1.19",
+      "@lezer/rust@1.0.3",
+      "@modelcontextprotocol/sdk@1.30.0",
+      "@nanthai/forge@0.3.1",
+      "@noble/curves@2.0.1",
+      "@noble/hashes@2.0.1",
+      "@tanstack/query-core@5.104.0",
+      "@types/debug@4.1.13",
+      "@types/estree-jsx@1.0.5",
+      "@types/estree@1.0.9",
+      "@types/hast@3.0.5",
+      "@types/mdast@4.0.4",
+      "@types/ms@2.1.0",
+      "@types/unist@2.0.11",
+      "@types/unist@3.0.3",
+      "@ungap/structured-clone@1.4.0",
+      "accepts@2.0.0",
+      "ajv-formats@3.0.1",
+      "ajv@8.20.0",
+      "bail@2.0.2",
+      "body-parser@2.3.0",
+      "bytes@3.1.2",
+      "call-bind-apply-helpers@1.0.2",
+      "call-bound@1.0.4",
+      "ccount@2.0.1",
+      "character-entities-html4@2.1.0",
+      "character-entities-legacy@3.0.0",
+      "character-entities@2.0.2",
+      "character-reference-invalid@2.0.1",
+      "comma-separated-tokens@2.0.3",
+      "content-disposition@1.1.0",
+      "content-type@1.0.5",
+      "content-type@2.1.0",
+      "convex-helpers@0.1.126",
+      "convex@1.46.0",
+      "cookie-signature@1.2.2",
+      "cookie@0.7.2",
+      "cors@2.8.6",
+      "cross-spawn@7.0.6",
+      "debug@4.4.3",
+      "decode-named-character-reference@1.3.0",
+      "depd@2.0.0",
+      "dequal@2.0.3",
+      "devlop@1.1.0",
+      "dunder-proto@1.0.1",
+      "ee-first@1.1.1",
+      "encodeurl@2.0.0",
+      "es-define-property@1.0.1",
+      "es-errors@1.3.0",
+      "es-object-atoms@1.1.2",
+      "esbuild@0.27.0",
+      "escape-html@1.0.3",
+      "escape-string-regexp@5.0.0",
+      "estree-util-is-identifier-name@3.0.0",
+      "etag@1.8.1",
+      "eventsource-parser@3.1.1",
+      "eventsource@3.0.7",
+      "express-rate-limit@8.7.0",
+      "express@5.2.1",
+      "extend@3.0.2",
+      "fast-deep-equal@3.1.3",
+      "fast-uri@3.1.8",
+      "finalhandler@2.1.1",
+      "forwarded@0.2.0",
+      "fresh@2.0.0",
+      "function-bind@1.1.2",
+      "get-intrinsic@1.3.0",
+      "get-proto@1.0.1",
+      "glob-to-regexp@0.4.1",
+      "gopd@1.2.0",
+      "has-symbols@1.1.0",
+      "hasown@2.0.4",
+      "hast-util-to-jsx-runtime@2.3.6",
+      "hast-util-whitespace@3.0.0",
+      "hono@4.13.8",
+      "html-url-attributes@3.0.1",
+      "http-errors@2.0.1",
+      "iconv-lite@0.7.3",
+      "ignore@7.0.9",
+      "inherits@2.0.4",
+      "inline-style-parser@0.2.7",
+      "ip-address@10.7.2",
+      "ipaddr.js@1.9.1",
+      "is-alphabetical@2.0.1",
+      "is-alphanumerical@2.0.1",
+      "is-decimal@2.0.1",
+      "is-hexadecimal@2.0.1",
+      "is-plain-obj@4.1.0",
+      "is-promise@4.0.0",
+      "isexe@2.0.0",
+      "jose@6.2.12",
+      "js-cookie@3.0.8",
+      "json-schema-traverse@1.0.0",
+      "json-schema-typed@8.0.2",
+      "longest-streak@3.1.0",
+      "markdown-table@3.0.4",
+      "math-intrinsics@1.1.0",
+      "mdast-util-find-and-replace@3.0.2",
+      "mdast-util-from-markdown@2.0.3",
+      "mdast-util-gfm-autolink-literal@2.0.1",
+      "mdast-util-gfm-footnote@2.1.0",
+      "mdast-util-gfm-strikethrough@2.0.1",
+      "mdast-util-gfm-table@2.0.0",
+      "mdast-util-gfm-task-list-item@2.0.0",
+      "mdast-util-gfm@3.1.0",
+      "mdast-util-mdx-expression@2.0.1",
+      "mdast-util-mdx-jsx@3.2.0",
+      "mdast-util-mdxjs-esm@2.0.1",
+      "mdast-util-phrasing@4.1.0",
+      "mdast-util-to-hast@13.2.1",
+      "mdast-util-to-markdown@2.1.2",
+      "mdast-util-to-string@4.0.0",
+      "media-typer@1.1.1",
+      "merge-descriptors@2.0.0",
+      "micromark-core-commonmark@2.0.3",
+      "micromark-extension-gfm-autolink-literal@2.1.0",
+      "micromark-extension-gfm-footnote@2.1.0",
+      "micromark-extension-gfm-strikethrough@2.1.0",
+      "micromark-extension-gfm-table@2.1.2",
+      "micromark-extension-gfm-tagfilter@2.0.0",
+      "micromark-extension-gfm-task-list-item@2.1.0",
+      "micromark-extension-gfm@3.0.0",
+      "micromark-factory-destination@2.0.1",
+      "micromark-factory-label@2.0.1",
+      "micromark-factory-space@2.0.1",
+      "micromark-factory-title@2.0.1",
+      "micromark-factory-whitespace@2.0.1",
+      "micromark-util-character@2.1.1",
+      "micromark-util-chunked@2.0.1",
+      "micromark-util-classify-character@2.0.1",
+      "micromark-util-combine-extensions@2.0.1",
+      "micromark-util-decode-numeric-character-reference@2.0.2",
+      "micromark-util-decode-string@2.0.1",
+      "micromark-util-encode@2.0.1",
+      "micromark-util-html-tag-name@2.0.1",
+      "micromark-util-normalize-identifier@2.0.1",
+      "micromark-util-resolve-all@2.0.1",
+      "micromark-util-sanitize-uri@2.0.1",
+      "micromark-util-subtokenize@2.1.0",
+      "micromark-util-symbol@2.0.1",
+      "micromark-util-types@2.0.2",
+      "micromark@4.0.2",
+      "mime-db@1.54.0",
+      "mime-types@3.0.2",
+      "ms@2.1.3",
+      "negotiator@1.1.0",
+      "object-assign@4.1.1",
+      "object-inspect@1.13.4",
+      "on-finished@2.4.1",
+      "once@1.4.0",
+      "parse-entities@4.0.2",
+      "parseurl@1.3.3",
+      "path-key@3.1.1",
+      "path-to-regexp@8.4.2",
+      "pkce-challenge@5.0.1",
+      "prettier@3.9.10",
+      "property-information@7.2.0",
+      "proxy-addr@2.0.8",
+      "qs@6.16.0",
+      "range-parser@1.3.0",
+      "raw-body@3.0.2",
+      "react-dom@19.3.0",
+      "react-markdown@10.1.0",
+      "react@19.3.0",
+      "remark-gfm@4.0.1",
+      "remark-parse@11.0.0",
+      "remark-rehype@11.1.2",
+      "remark-stringify@11.0.0",
+      "require-from-string@2.0.2",
+      "router@2.2.0",
+      "safer-buffer@2.1.2",
+      "scheduler@0.28.0",
+      "send@1.2.1",
+      "serve-static@2.2.1",
+      "setprototypeof@1.2.0",
+      "shebang-command@2.0.0",
+      "shebang-regex@3.0.0",
+      "side-channel-list@1.0.1",
+      "side-channel-map@1.0.1",
+      "side-channel-weakmap@1.0.2",
+      "side-channel@1.1.1",
+      "space-separated-tokens@2.0.2",
+      "statuses@2.0.2",
+      "stringify-entities@4.0.4",
+      "style-to-js@1.1.21",
+      "style-to-object@1.0.14",
+      "toidentifier@1.0.1",
+      "trim-lines@3.0.1",
+      "trough@2.2.0",
+      "tslib@2.8.1",
+      "type-is@2.1.0",
+      "typescript@5.9.3",
+      "undici@7.30.1",
+      "unified@11.0.5",
+      "unist-util-is@6.0.1",
+      "unist-util-position@5.0.0",
+      "unist-util-stringify-position@4.0.0",
+      "unist-util-visit-parents@6.0.2",
+      "unist-util-visit@5.1.0",
+      "unpipe@1.0.0",
+      "vary@1.1.2",
+      "vfile-message@4.0.3",
+      "vfile@6.0.3",
+      "which@2.0.2",
+      "wrappy@1.0.2",
+      "ws@8.21.0",
+      "zod-to-json-schema@3.25.2",
+      "zod@4.6.5",
+      "zwitch@2.0.4"
+    ],
+    "node": "v24.22.1",
+    "platform": "darwin",
+    "arch": "arm64",
+    "wallMs": 5836,
+    "maxRssKiB": 64416
+  },
+  "after": {
+    "actual": {
+      "installedBytes": 129401722,
+      "versionCpuMs": 60.818,
+      "versionModules": 19,
+      "helpCpuMs": 58.931,
+      "helpModules": 19,
+      "mcpCpuMs": 605.918,
+      "mcpModules": 827,
+      "toolListBytes": 5723,
+      "cliAgentStatusCpuMs": 348,
+      "cliAgentStatusCpuModules": 170,
+      "cliAgentPlanningCpuMs": 350,
+      "cliAgentPlanningCpuModules": 170,
+      "cliAgentSaveCpuMs": 353,
+      "cliAgentSaveCpuModules": 170,
+      "cliAgentLandCpuMs": 328,
+      "cliAgentLandCpuModules": 177
+    },
+    "samples": {
+      "version": [
+        {
+          "cpuMs": 58.507,
+          "modules": 19,
+          "maxRssKiB": 54464
+        },
+        {
+          "cpuMs": 59.309,
+          "modules": 19,
+          "maxRssKiB": 54560
+        },
+        {
+          "cpuMs": 62.719,
+          "modules": 19,
+          "maxRssKiB": 54416
+        },
+        {
+          "cpuMs": 60.818,
+          "modules": 19,
+          "maxRssKiB": 54352
+        },
+        {
+          "cpuMs": 61.495,
+          "modules": 19,
+          "maxRssKiB": 54512
+        }
+      ],
+      "help": [
+        {
+          "cpuMs": 52.667,
+          "modules": 19,
+          "maxRssKiB": 54400
+        },
+        {
+          "cpuMs": 56.072,
+          "modules": 19,
+          "maxRssKiB": 54144
+        },
+        {
+          "cpuMs": 69.667,
+          "modules": 19,
+          "maxRssKiB": 54080
+        },
+        {
+          "cpuMs": 63.701,
+          "modules": 19,
+          "maxRssKiB": 54208
+        },
+        {
+          "cpuMs": 58.931,
+          "modules": 19,
+          "maxRssKiB": 54336
+        }
+      ],
+      "mcp": [
+        {
+          "cpuMs": 613.821,
+          "modules": 827,
+          "maxRssKiB": 152560
+        },
+        {
+          "cpuMs": 605.918,
+          "modules": 827,
+          "maxRssKiB": 141456
+        },
+        {
+          "cpuMs": 654.627,
+          "modules": 827,
+          "maxRssKiB": 141088
+        },
+        {
+          "cpuMs": 538.338,
+          "modules": 827,
+          "maxRssKiB": 141680
+        },
+        {
+          "cpuMs": 555.857,
+          "modules": 827,
+          "maxRssKiB": 153888
+        }
+      ],
+      "cliAgentStatusCpu": [
+        {
+          "cpuMs": 363,
+          "modules": 170
+        },
+        {
+          "cpuMs": 354,
+          "modules": 170
+        },
+        {
+          "cpuMs": 333,
+          "modules": 170
+        },
+        {
+          "cpuMs": 335,
+          "modules": 170
+        },
+        {
+          "cpuMs": 348,
+          "modules": 170
+        }
+      ],
+      "cliAgentPlanningCpu": [
+        {
+          "cpuMs": 341,
+          "modules": 170
+        },
+        {
+          "cpuMs": 350,
+          "modules": 170
+        },
+        {
+          "cpuMs": 370,
+          "modules": 170
+        },
+        {
+          "cpuMs": 373,
+          "modules": 170
+        },
+        {
+          "cpuMs": 337,
+          "modules": 170
+        }
+      ],
+      "cliAgentSaveCpu": [
+        {
+          "cpuMs": 358,
+          "modules": 170
+        },
+        {
+          "cpuMs": 344,
+          "modules": 170
+        },
+        {
+          "cpuMs": 353,
+          "modules": 170
+        },
+        {
+          "cpuMs": 376,
+          "modules": 170
+        },
+        {
+          "cpuMs": 333,
+          "modules": 170
+        }
+      ],
+      "cliAgentLandCpu": [
+        {
+          "cpuMs": 308,
+          "modules": 177
+        },
+        {
+          "cpuMs": 328,
+          "modules": 177
+        },
+        {
+          "cpuMs": 328,
+          "modules": 177
+        },
+        {
+          "cpuMs": 288,
+          "modules": 177
+        },
+        {
+          "cpuMs": 361,
+          "modules": 177
+        }
+      ]
+    },
+    "boundary": [
+      "@lezer/common",
+      "@lezer/go",
+      "@lezer/highlight",
+      "@lezer/java",
+      "@lezer/javascript",
+      "@lezer/python",
+      "@lezer/rust",
+      "@modelcontextprotocol/sdk",
+      "@noble/curves",
+      "@noble/hashes",
+      "convex",
+      "convex-helpers",
+      "ignore",
+      "typescript",
+      "undici",
+      "zod"
+    ],
+    "packages": [
+      "@esbuild/darwin-arm64@0.27.0",
+      "@hono/node-server@2.1.1",
+      "@lezer/common@1.5.3",
+      "@lezer/go@1.0.1",
+      "@lezer/highlight@1.2.5",
+      "@lezer/java@1.1.5",
+      "@lezer/javascript@1.5.6",
+      "@lezer/lr@1.4.11",
+      "@lezer/python@1.1.19",
+      "@lezer/rust@1.0.3",
+      "@modelcontextprotocol/sdk@1.30.0",
+      "@nanthai/forge@0.3.1",
+      "@noble/curves@2.0.1",
+      "@noble/hashes@2.0.1",
+      "accepts@2.0.0",
+      "ajv-formats@3.0.1",
+      "ajv@8.20.0",
+      "body-parser@2.3.0",
+      "bytes@3.1.2",
+      "call-bind-apply-helpers@1.0.2",
+      "call-bound@1.0.4",
+      "content-disposition@1.1.0",
+      "content-type@1.0.5",
+      "content-type@2.1.0",
+      "convex-helpers@0.1.126",
+      "convex@1.46.0",
+      "cookie-signature@1.2.2",
+      "cookie@0.7.2",
+      "cors@2.8.6",
+      "cross-spawn@7.0.6",
+      "debug@4.4.3",
+      "depd@2.0.0",
+      "dunder-proto@1.0.1",
+      "ee-first@1.1.1",
+      "encodeurl@2.0.0",
+      "es-define-property@1.0.1",
+      "es-errors@1.3.0",
+      "es-object-atoms@1.1.2",
+      "esbuild@0.27.0",
+      "escape-html@1.0.3",
+      "etag@1.8.1",
+      "eventsource-parser@3.1.1",
+      "eventsource@3.0.7",
+      "express-rate-limit@8.7.0",
+      "express@5.2.1",
+      "fast-deep-equal@3.1.3",
+      "fast-uri@3.1.8",
+      "finalhandler@2.1.1",
+      "forwarded@0.2.0",
+      "fresh@2.0.0",
+      "function-bind@1.1.2",
+      "get-intrinsic@1.3.0",
+      "get-proto@1.0.1",
+      "gopd@1.2.0",
+      "has-symbols@1.1.0",
+      "hasown@2.0.4",
+      "hono@4.13.8",
+      "http-errors@2.0.1",
+      "iconv-lite@0.7.3",
+      "ignore@7.0.9",
+      "inherits@2.0.4",
+      "ip-address@10.7.2",
+      "ipaddr.js@1.9.1",
+      "is-promise@4.0.0",
+      "isexe@2.0.0",
+      "jose@6.2.12",
+      "json-schema-traverse@1.0.0",
+      "json-schema-typed@8.0.2",
+      "math-intrinsics@1.1.0",
+      "media-typer@1.1.1",
+      "merge-descriptors@2.0.0",
+      "mime-db@1.54.0",
+      "mime-types@3.0.2",
+      "ms@2.1.3",
+      "negotiator@1.1.0",
+      "object-assign@4.1.1",
+      "object-inspect@1.13.4",
+      "on-finished@2.4.1",
+      "once@1.4.0",
+      "parseurl@1.3.3",
+      "path-key@3.1.1",
+      "path-to-regexp@8.4.2",
+      "pkce-challenge@5.0.1",
+      "prettier@3.9.10",
+      "proxy-addr@2.0.8",
+      "qs@6.16.0",
+      "range-parser@1.3.0",
+      "raw-body@3.0.2",
+      "require-from-string@2.0.2",
+      "router@2.2.0",
+      "safer-buffer@2.1.2",
+      "send@1.2.1",
+      "serve-static@2.2.1",
+      "setprototypeof@1.2.0",
+      "shebang-command@2.0.0",
+      "shebang-regex@3.0.0",
+      "side-channel-list@1.0.1",
+      "side-channel-map@1.0.1",
+      "side-channel-weakmap@1.0.2",
+      "side-channel@1.1.1",
+      "statuses@2.0.2",
+      "toidentifier@1.0.1",
+      "type-is@2.1.0",
+      "typescript@5.9.3",
+      "undici@7.30.1",
+      "unpipe@1.0.0",
+      "vary@1.1.2",
+      "which@2.0.2",
+      "wrappy@1.0.2",
+      "ws@8.21.0",
+      "zod-to-json-schema@3.25.2",
+      "zod@4.6.5"
+    ],
+    "node": "v24.22.1",
+    "platform": "darwin",
+    "arch": "arm64",
+    "wallMs": 11444,
+    "maxRssKiB": 64288
+  },
+  "cpuNoiseRatio": 2.476,
+  "finalInstallation": {
+    "actual": {
+      "installedBytes": 129409192,
+      "versionCpuMs": 30.83,
+      "versionModules": 19,
+      "helpCpuMs": 30.475,
+      "helpModules": 19,
+      "mcpCpuMs": 273.006,
+      "mcpModules": 827,
+      "toolListBytes": 5723,
+      "cliAgentStatusCpuMs": 159,
+      "cliAgentStatusCpuModules": 170,
+      "cliAgentPlanningCpuMs": 198,
+      "cliAgentPlanningCpuModules": 170,
+      "cliAgentSaveCpuMs": 286,
+      "cliAgentSaveCpuModules": 170,
+      "cliAgentLandCpuMs": 239,
+      "cliAgentLandCpuModules": 177
+    },
+    "boundary": [
+      "@lezer/common",
+      "@lezer/go",
+      "@lezer/highlight",
+      "@lezer/java",
+      "@lezer/javascript",
+      "@lezer/python",
+      "@lezer/rust",
+      "@modelcontextprotocol/sdk",
+      "@noble/curves",
+      "@noble/hashes",
+      "convex",
+      "convex-helpers",
+      "ignore",
+      "typescript",
+      "undici",
+      "zod"
+    ],
+    "node": "v24.22.1",
+    "platform": "darwin",
+    "arch": "arm64",
+    "peakChildRssKiB": 152192,
+    "wallMs": 5946,
+    "maxRssKiB": 67936
+  },
+  "agentActions": [
+    "abandon",
+    "abandon-dormant",
+    "approve-link",
+    "board",
+    "board-post",
+    "board-reply",
+    "board-resolve",
+    "cancel",
+    "capabilities",
+    "check-settings",
+    "comment-planning-item",
+    "complete",
+    "complete-merged",
+    "compose",
+    "configure-check",
+    "configure-runner",
+    "confirm-tests",
+    "decide",
+    "decisions",
+    "diff",
+    "finish",
+    "friction",
+    "friction-list",
+    "friction-triage",
+    "history",
+    "install-hooks",
+    "land",
+    "landing",
+    "landings",
+    "lane-history",
+    "lanes",
+    "log",
+    "metrics",
+    "observe",
+    "open",
+    "peers",
+    "pin",
+    "planning",
+    "policy",
+    "preflight",
+    "prioritize",
+    "provenance",
+    "pull",
+    "put-planning-item",
+    "queue",
+    "records",
+    "recover-apply",
+    "reopen",
+    "request-approval",
+    "resolve",
+    "revert",
+    "run",
+    "save",
+    "set-policy",
+    "show",
+    "snapshots",
+    "source-pack",
+    "start",
+    "status",
+    "sync",
+    "tests",
+    "uninstall-hooks",
+    "wait",
+    "withdraw"
+  ]
+}

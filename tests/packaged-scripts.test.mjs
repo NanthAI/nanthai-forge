@@ -14,6 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, posix } from 'node:path';
+import { isBuiltin } from 'node:module';
 import { tmpdir } from 'node:os';
 import ts from 'typescript';
 
@@ -42,7 +43,13 @@ function unbuiltEntries(entries) {
 function missingImports(files, unbuilt = unbuiltEntries(manifest.files)) {
   const missing = [];
   for (const path of files) {
-    if (!path.startsWith('scripts/') || !path.endsWith('.mjs')) continue;
+    if (
+      !(
+        (path.startsWith('scripts/') && path.endsWith('.mjs')) ||
+        (path.startsWith('dist/') && path.endsWith('.js'))
+      )
+    )
+      continue;
     const ast = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true);
     assert.equal(ast.parseDiagnostics.length, 0, `Cannot parse ${path}`);
     function visit(node) {
@@ -54,7 +61,25 @@ function missingImports(files, unbuilt = unbuiltEntries(manifest.files)) {
                 (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
             ? node.arguments[0]
             : undefined;
-      if (specifier && ts.isStringLiteralLike(specifier) && specifier.text.startsWith('.')) {
+      if (
+        specifier &&
+        ts.isStringLiteralLike(specifier) &&
+        !specifier.text.startsWith('.') &&
+        !isBuiltin(specifier.text)
+      ) {
+        const dependency = specifier.text
+          .split('/')
+          .slice(0, specifier.text.startsWith('@') ? 2 : 1)
+          .join('/');
+        if (!Object.hasOwn(manifest.dependencies, dependency))
+          missing.push(`${path} imports non-runtime dependency ${dependency}`);
+      }
+      if (
+        path.startsWith('scripts/') &&
+        specifier &&
+        ts.isStringLiteralLike(specifier) &&
+        specifier.text.startsWith('.')
+      ) {
         const target = posix.normalize(posix.join(posix.dirname(path), specifier.text));
         if (!files.has(target) && !unbuilt.some(entry => target.startsWith(`${entry}/`)))
           missing.push(`${path} imports unpackaged ${target}`);
@@ -89,7 +114,7 @@ test('packaged file enumeration excludes dangling, external and cyclic symlinks 
   }
 });
 
-test('every relative import of every packaged script is packaged, including Actions helpers', () => {
+test('packaged scripts retain relative helpers and every emitted runtime import belongs to production dependencies', () => {
   const files = packagedFiles(manifest.files);
   assert.ok(files.has('scripts/script-impact.mjs'));
   assert.deepEqual(missingImports(files), []);

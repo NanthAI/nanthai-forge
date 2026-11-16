@@ -65,7 +65,7 @@ export function firstNetworkSamples(
       const seen = line ? JSON.parse(line) : null;
       return {
         durationMs: seen && child.status === 0 ? seen.cpuMs : NaN,
-        ...(seen ? { reason: seen.reason } : {}),
+        ...(seen ? { reason: seen.reason, maxRssKiB: seen.maxRssKiB } : {}),
         ...(seen?.modules ? { modules: seen.modules.filter(url => url.startsWith('file:')) } : {}),
       };
     });

@@ -12,6 +12,7 @@ const exempt = new Map([
   ['scripts/benchmark-import-projection.mjs', 'intercept'],
   // Stops a CLI at its first request to measure the CPU before it (Issue 7b2ae8d8); nothing is sent.
   ['scripts/perf/first-network-preload.mjs', 'intercept'],
+  ['scripts/perf/startup-preload.mjs', 'intercept'],
   // Copied alone beside a benchmark agent's nforge shim (no repo imports). It
   // streams one local loopback command whose own wait is bounded (540 s).
   ['scripts/bench-t3code/relay-client.mjs', 'primitive'],

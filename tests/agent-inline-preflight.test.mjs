@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { assertCommandWeight } from '../scripts/agent-weight.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -68,6 +69,10 @@ test('incident e0cedfb5: one land --save lands a one-file docs change after inli
       assert.equal(receipt.budgetSeconds, PREFLIGHT_LOCAL_BUDGET_SECONDS);
     }
     calls.push(s.calls.slice(before).map(c => c.name));
+    if (policy === 'require') {
+      assertCommandWeight('landSave', { calls: calls.at(-1).length });
+      t.diagnostic(JSON.stringify({ landSaveCalls: calls.at(-1).length }));
+    }
   }
   // off omits path discovery by existing policy; compare require's inline run against a pre-satisfied run below.
   const s = await fixture(t),

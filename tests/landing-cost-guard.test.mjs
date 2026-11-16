@@ -3,6 +3,7 @@
 // in-process Convex fixture and judges each per-landing count against the ledger in
 // src/speed-budgets.json (`costs`). Deterministic counts, not live billing: a change that adds work
 // per landing fails here, a saving asks the author to ratchet the ledger down.
+import { assertCommandWeight } from '../scripts/agent-weight.mjs';
 import test from 'node:test';
 import { indexEntriesPerWrite, indexStorage, measureIndexExportClaims } from './convex-index-cost.mjs';
 const indexSchema = (await import(moduleUrl('../convex/schema.ts'))).default;
@@ -505,6 +506,13 @@ let baseline;
 test('cost guard: the scripted landing mix stays within its per-landing cost ledger', async t => {
   const started = performance.now();
   baseline = await measureLandingCosts(t, { indexExports: true });
+  const solo = baseline.scenarios.solo;
+  const landServer = {
+    calls: solo.queries + solo.observerQueries + solo.mutations + solo.v8Actions + solo.nodeActions,
+    reads: solo.readDocuments,
+  };
+  assertCommandWeight('landServerSolo', landServer);
+  t.diagnostic(JSON.stringify({ landServerSolo: landServer }));
   const verdicts = judgeCosts(costs, costGuard, 'landing-fixture', baseline.measured);
   const lines = formatCostVerdicts(verdicts);
   // Warnings and ratchet notices go to the check log; only a fail stops the landing.

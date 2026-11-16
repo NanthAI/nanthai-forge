@@ -1,0 +1,4 @@
+{
+  "issue": "92dbde9d",
+  "reason": "Establish accepted-main CLI/MCP startup, installation and synthetic command budgets. Reuse package smoke and existing cost fixtures, merge scattered module/byte ceilings, and remove five web-only runtime dependencies. CPU allowance derives from two unchanged-archive five-repeat batches on the shared runner; exact counts have no noise. Filtered planning includes all three real handlers (workspace, records and intentStates): three calls and ten returned documents; counts are one call and 399 documents. Reuse the growth guard action inventory so new agent actions cannot bypass the weight/call assessment."
+}

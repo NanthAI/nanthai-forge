@@ -7,6 +7,7 @@ Each alert or failure names its next step.
 | Rung | What runs | When | Cost |
 | --- | --- | --- | --- |
 | 1. Per-landing speed budgets | Each landing's own timing against the [speed budgets](speed-budgets.md) | Inside the mutation that lands | No new Convex call; one indexed read and one write of a row under 16 KB per landing; idle 0 |
+| CLI/MCP weight | [Installed bytes, startup CPU/modules and synthetic calls/DB reads](agent-weight.md) | Existing package smoke and command fixtures in each landing check | Under 60 s added locally; 0 production/idle calls |
 | 2. Path-triggered dry micro-bench | A fixed no-model scenario on the hot-file clusters | Planned, not built: a change to landing-loop paths | Estimate below |
 | 3. Incident replays | Normal-suite tests that replay each core-claim incident and B1.5d case study | Every check | Part of the suite; the registered replays take under 30 s together |
 | 4. Full bench | The B1.5d repeat (exit bench 8c9b84fc) | Phase gates only | Hours of agent time |

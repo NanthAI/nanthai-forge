@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, rmSync } from 'node:fs';
 import { basename, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
+import { agentBoundary } from './agent-weight.mjs';
 
 // The CLI entry as one tree-shaken bundle in dist/ (Issue 7b2ae8d8). Loading about 700 small modules
 // (and zod's 64 locale files) cost 0.5-1 s of CPU before the first network call; the bundle loads about
@@ -53,7 +54,7 @@ await build({
   configFile: false,
   publicDir: false,
   logLevel: 'error',
-  plugins: [originalLocation],
+  plugins: [agentBoundary(root), originalLocation],
   build: {
     ssr: join(root, 'src', 'cli-entry.ts'),
     outDir: dist,

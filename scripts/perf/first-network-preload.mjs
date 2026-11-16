@@ -2,6 +2,7 @@
 // Preload (node --import) for measuring a CLI command up to its first network call: the process stops at
 // the first Convex client call or fetch (or, for land, the hand-off to its detached submitter) and prints one JSON line with the CPU time (user+sys) and, when
 // FORGE_PROBE_MODULES is set, the modules loaded by then. Nothing leaves the machine.
+import { writeSync } from 'node:fs';
 import childProcess from 'node:child_process';
 import { registerHooks, syncBuiltinESMExports } from 'node:module';
 import { ConvexHttpClient } from 'convex/browser';
@@ -17,8 +18,9 @@ if (process.env.FORGE_PROBE_MODULES)
 const stop = reason => {
   const cpu = process.cpuUsage();
   const modules = [...seen];
-  process.stderr.write(
-    `\nFORGE_FIRST_NETWORK ${JSON.stringify({ reason, cpuMs: Math.round((cpu.user + cpu.system) / 1000), ...(process.env.FORGE_PROBE_MODULES ? { modules } : {}) })}\n`,
+  writeSync(
+    2,
+    `\nFORGE_FIRST_NETWORK ${JSON.stringify({ reason, cpuMs: Math.round((cpu.user + cpu.system) / 1000), maxRssKiB: process.resourceUsage().maxRSS, ...(process.env.FORGE_PROBE_MODULES ? { modules } : {}) })}\n`,
   );
   process.exit(0);
 };

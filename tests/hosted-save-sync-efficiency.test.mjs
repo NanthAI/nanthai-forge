@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { testDeploymentOrigin } from './trusted-origin.mjs';
+import { assertCommandWeight } from '../scripts/agent-weight.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -306,7 +307,8 @@ test('unchanged save has no object or worker calls', async t => {
   s.counts.length = 0;
   const terminal = await saveHostedLane(root, { operationId: randomUUID(), message: 'unchanged' }, exchange);
   assert.equal(terminal.outcome.result.unchanged, true);
-  assert.equal(c.calls.length, 2);
+  assertCommandWeight('saveUnchanged', { calls: c.calls.length, reads: c.stats().documents });
+  t.diagnostic(JSON.stringify({ saveUnchanged: c.stats() }));
   const marker = readHostedLaneCheckout(root);
   assert.equal(marker.tree, sourceTree(marker.state.files));
   // Simulate a metadata-only State before this saved head: same full 3,000-file source,
@@ -634,7 +636,7 @@ test('a direct small save: prepare returns every upload target, one PUT wave, an
   assert.equal(inputs.length, 1, 'one save input');
   assert(!run.c.r2Gets.includes(inputs[0]), 'the inline input was not downloaded back');
   // 14 -> 7 calls: prepare, the submit action, its commit's two rounds, its submit, begin and commit.
-  assert(run.stats.totalCalls <= 7, JSON.stringify({ stats: run.stats, functions: run.calls }));
+  assertCommandWeight('saveChanged', { calls: run.stats.totalCalls, reads: run.stats.documents });
   assert(run.stats.writes - run.stats.overlapWrites <= 100, JSON.stringify(run.stats));
   t.diagnostic(
     JSON.stringify({

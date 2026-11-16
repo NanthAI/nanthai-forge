@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Standard code verification: installs and exercises the actual local npm archive.
 import assert from 'node:assert/strict';
+import { checkAgentWeight } from './check-agent-weight.mjs';
 import { cleanupOwner } from '../tests/owner-cleanup.mjs';
 import { Worker } from 'node:worker_threads';
 import { spawnSync } from 'node:child_process';
@@ -134,6 +135,7 @@ try {
     '--no-fund',
     archive,
   ]);
+  const weight = checkAgentWeight(prefix);
   const installed = join(prefix, 'node_modules', '@nanthai', 'forge'),
     manifest = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8')),
     cli = join(installed, manifest.bin.nforge);
@@ -392,6 +394,7 @@ try {
     arch: process.arch,
     archive: packed.filename,
     bytes: statSync(archive).size,
+    agentWeight: weight.actual,
     sha256: hash(readFileSync(archive)),
     files: names,
     lifecycleScripts: 'disabled during pack/install',

@@ -11,6 +11,7 @@ it was set from and why. Change a number there, with the new data, and nowhere e
 | Check result to commit, p90 (`ciEndedAt` to `committedAt`) | every landing | 8.5 s live after fix caa934a7 (300 s before it); budget 30 s |
 | CLI cold start (CPU time of `--version`) | `perf-harness --cli-cold-start` | 90 ms median at load 35 (320 ms before 381c62df); budget 250 ms. `--version` and `--help` read no release and load 28 modules; the idle turn-end hook loads 16 |
 | Agent `status`, `planning`, `save`, `land --save`: CPU before the first network call (land: before the hand-off to its detached submitter) | `perf-harness --cli-cold-start` | Median 415 / 246 / 182 / 400 ms at load 8-13 (713 / 385 / 312 / 597 ms before the bundled CLI entry, Issue 7b2ae8d8); 151-158 modules instead of about 700; budget 500 ms each, p90 under 700 |
+| CLI/MCP installed weight and startup | [Agent weight guard](agent-weight.md), existing package smoke and synthetic command fixtures | Recorded accepted-main baseline; zero byte/module/call noise, CPU repeat allowance; no production/idle calls |
 | Web first paint: Now, Work, Lane first diff | `perf-harness --live` | unrun without the QA bot and a dev origin; budgets 1.5 s, 1.5 s, 1 s |
 | Web eager JavaScript (gzip) | `perf-harness --bundle` | 246 KB; budget 270 KB |
 | Unsaved-work snapshot added to a command: no changed file / one or fifty changed files (p90) | `perf-harness --snapshot-lane` | 5.9 ms / 16.2 ms (the walk and uploads run in a detached worker; before, in the command: 144 ms / 1,818 ms); budget 50 / 300 ms |

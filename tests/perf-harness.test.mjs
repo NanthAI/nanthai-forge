@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { budgets, measurement, eagerFiles, landingTiming } from '../scripts/perf/report.mjs';
 import { cliColdStartSamples, cpuMs, options } from '../scripts/perf-harness.mjs';
 import { agentCommands, firstNetworkSamples } from '../scripts/perf/cli-first-network.mjs';
+import { readWeightBaseline } from '../scripts/agent-weight.mjs';
 import { successfulSample } from '../scripts/perf/browser.mjs';
 
 test('budget medians include the boundary, and an empty or incomplete run never passes', () => {
@@ -58,8 +59,8 @@ test('381c62df: --version, --help and an idle turn-end hook stay on a minimal im
   const heavy =
     /\/node_modules\/|\/(?:cli-bundle-)?(agent-cli|agent-install-hooks|hosted-agent-transport|agent-turn-work)(?:-[\w-]+)?\.js$/;
   const cases = [
-    ['--version', ['dist/cli-entry.js', '--version'], '', 30],
-    ['--help', ['dist/cli-entry.js', '--help'], '', 30],
+    ['--version', ['dist/cli-entry.js', '--version'], '', readWeightBaseline('.').ceilings.versionModules],
+    ['--help', ['dist/cli-entry.js', '--help'], '', readWeightBaseline('.').ceilings.helpModules],
     [
       'idle turn-end hook',
       ['dist/agent-stop-hook.js', '--forge-turn-end'],
@@ -86,7 +87,10 @@ test('7b2ae8d8: agent status, planning, save and land reach their first network 
   for (const name of Object.keys(agentCommands)) {
     const [sample] = firstNetworkSamples(1, name, { modules: true });
     assert.ok(Number.isFinite(sample.durationMs), `${name} never reached its first network call`);
-    assert.ok(sample.modules.length <= 190, `${name} loaded ${sample.modules.length} modules (ceiling 190)`);
+    assert.ok(
+      sample.modules.length <= readWeightBaseline('.').ceilings[`${name}Modules`],
+      `${name} loaded ${sample.modules.length} modules`,
+    );
     assert.deepEqual(
       sample.modules.filter(url => /\/typescript\/|\/zod\/v4\/locales\//.test(url)),
       [],
