@@ -652,7 +652,14 @@ account settings. Registration refuses every retained handle owned by another
 account and claims the chosen handle in the registration transaction. Existing
 accounts use their original sign-in until they attach a passkey; typing their
 handle cannot create another account. A handle change moves the passkey sign-in
-name in that transaction; retained URL aliases do not become sign-in names. `authFirstPasskey:start/finish` adds the first passkey from a
+name in that transaction; retained URL aliases do not become sign-in names. Passkey challenge starts share a fixed-minute deployment budget of 120 and an
+exact per-handle budget of 6; sign-up finish attempts use 20 and 3 respectively.
+Autofill shares the global start budget. The two counter rows reset in place on
+use, retain at most 120/20 charged handle counters and schedule nothing. An
+exhausted budget returns `RATE_LIMITED` before a challenge or account is created.
+These interim defaults do not implement the phase 8 admission policy.
+
+`authFirstPasskey:start/finish` adds the first passkey from a
 live session minted within ten minutes, composing the pinned component functions
 without a library patch. Subsequent passkeys use the library flow. Sign-in
 ceremonies request no extensions; the secret-envelope PRF ceremony uses its own

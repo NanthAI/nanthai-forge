@@ -47,8 +47,11 @@ export const deviceTables = {
   cliCredentials: defineTable(credentialFields)
     .index('by_credentialId', ['credentialId'])
     .index('by_owner', ['owner']),
-  deviceAttempts: defineTable({ owner: v.string(), windowAt: v.number(), count: v.number() }).index(
-    'by_owner',
-    ['owner'],
-  ),
+  deviceAttempts: defineTable({
+    owner: v.string(),
+    windowAt: v.number(),
+    count: v.number(),
+    /** Passkey budgets retain only handles charged within their fixed global allowance. */
+    handles: v.optional(v.array(v.object({ handle: v.string(), count: v.number() }))),
+  }).index('by_owner', ['owner']),
 };

@@ -23,6 +23,7 @@ const HANDLE = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])$/;
 const words: Record<string, string> = {
   USERNAME_HAS_INVALID_CHARACTERS:
     'Use 2–39 lowercase letters, numbers or hyphens, without a leading or trailing hyphen.',
+  RATE_LIMITED: 'Too many passkey attempts. Try again in a minute.',
   UNKNOWN_CREDENTIAL: 'This device has no passkey for that handle. Use a passkey from your phone, or GitHub.',
   CEREMONY_ABORTED: 'The passkey prompt closed before it finished. Nothing changed.',
   CHALLENGE_EXPIRED: 'That took longer than ten minutes. Try again.',
@@ -57,9 +58,13 @@ export function SignIn() {
     setQueued(null);
     setProblem(null);
     remember({ next, method: 'passkey', handle: username });
-    const result = await hook.signIn({ username });
-    if (result.status === 'error' && result.userError.error !== 'ALREADY_PENDING')
-      setProblem(say(result.userError.error));
+    try {
+      const result = await hook.signIn({ username });
+      if (result.status === 'error' && result.userError.error !== 'ALREADY_PENDING')
+        setProblem(say(result.userError.error));
+    } catch (error) {
+      setProblem(say(errorCode(error)));
+    }
   };
   const onState = (hook: PasskeyHook) => {
     driver.current = hook;

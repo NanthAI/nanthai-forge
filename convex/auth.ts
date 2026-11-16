@@ -5,6 +5,7 @@ import { setupUsernamePasskey } from '@convex-dev/auth/methods/username-passkey/
 import { internal } from './_generated/api';
 import { getFunctionAddress, type DefaultFunctionArgs, type RegisteredMutation } from 'convex/server';
 import type { Validator } from 'convex/values';
+import { chargePasskey } from './authBudgets';
 import { accountFor, handleTaken } from './urlIdentity';
 import { handleError } from '../src/readable-urls';
 import { invariant } from '../src/errors';
@@ -57,7 +58,6 @@ const passkeys = setupUsernamePasskey(core, {
   ...passkeyConfig,
 }).attachUserCallbacks({ createUser: internal.authUsers.createPasskey });
 export const {
-  startAutofillSignInWithUsernamePasskey,
   finishSignInWithUsernamePasskey,
   listPasskeys,
   renamePasskey,
@@ -130,6 +130,7 @@ export const startSignInWithUsernamePasskey = protect(
       const existing = await ctx.runQuery(components.authUsername.public.getUserIdByUsername, args);
       if (existing !== null) return { success: false as const, userError: taken() };
     }
+    await chargePasskey(ctx, 'starts', args.username);
     // Route the library's identifier lookup through the canonical Forge handle. The
     // passkey component still binds and verifies the challenge against that user.
     const lookup = components.authUsername.public.getUserIdByUsername;
@@ -150,6 +151,7 @@ export const finishSignUpWithUsernamePasskey = protect(
   async (ctx, args, run) => {
     if (handleError(args.username)) return { status: 'error' as const, userError: invalid() };
     if (await handleTaken(ctx, args.username)) return { status: 'error' as const, userError: taken() };
+    await chargePasskey(ctx, 'signups', args.username);
     const result = await run(ctx, args);
     if (result.status === 'complete') {
       const id = ctx.db.normalizeId('users', result.tokens.userId);
@@ -166,5 +168,13 @@ export const finishSignUpWithUsernamePasskey = protect(
       await ctx.db.patch(account._id, { handle: args.username, handlePrompt: false });
     }
     return result;
+  },
+);
+
+export const startAutofillSignInWithUsernamePasskey = protect(
+  passkeys.startAutofillSignInWithUsernamePasskey,
+  async (ctx, args, run) => {
+    await chargePasskey(ctx, 'starts');
+    return run(ctx, args);
   },
 );
