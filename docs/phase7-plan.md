@@ -45,6 +45,10 @@ Stage B builds once what every screen uses. It starts when the framework verdict
 | `84125787` App shell | Project, account, bare and public frames; six places; navigation, deep links, phone tabs and rearrangeable regions | `6ebb58ab`, `de67c77d` |
 | `18af654d` Live top-bar Lane line | One bounded event-driven projection; a stage change shows within about 1 s; zero calls and DB I/O while idle; hidden tabs catch up once | `6ebb58ab`, shell |
 | `641d887b`, `593b1ef2` Mark and icons | The mark follows existing state through the shell; static icons from the locked mark | shell |
+| `8947a779` Discovery design | Fable designs the explore page, public project page, profiles, the star and the sign-in prompts for clone, fork and star, in the approved system | `6ebb58ab` |
+| `2ec78c62` Protected-path warning at save | The first save that touches a protected path says the landing will need its configured approval, before a check is spent; the list-consolidation questions stay open | none |
+
+The shell Lane owns the routing and security-header changes the new screens need, so stage C screens do not each touch protected configuration.
 
 **Attention hierarchy and calmer first landing (owner, 2026-11-16).** The design system adds, without changing the look or removing detail:
 
@@ -57,7 +61,7 @@ Stage B builds once what every screen uses. It starts when the framework verdict
 
 ## Stage C: fan-out
 
-Screens and paths are built at once as independent Lanes, in runs of about 12 to 15 builders. Each Lane owns one screen or path and the Items that serve it; shared data contracts have one owner (planning `d3357f40`, access `df06081d` and `b987e608`, billing stubs `d4d410e6`, failure causes `2c420916`, Stats estimates `a61d3c91`). A screen whose contract owner has not landed builds against that owner's recorded interface, not a copy.
+Screens and paths are built at once as independent Lanes, in runs of about 12 to 15 builders. Public discovery follows the owner decisions of 2026-11-16 on `8947a779`: anyone can browse; clone, fork and star need sign-in; one star per person and never by an agent; GitHub star counts are not used. Each Lane owns one screen or path and the Items that serve it; shared data contracts have one owner (planning `d3357f40`, access `df06081d` and `b987e608`, billing stubs `d4d410e6`, failure causes `2c420916`, Stats estimates `a61d3c91`). A screen whose contract owner has not landed builds against that owner's recorded interface, not a copy.
 
 ### Run C1
 
@@ -70,8 +74,9 @@ Screens and paths are built at once as independent Lanes, in runs of about 12 to
 | Needs me | `9e748e41` (Needs me), `12fde646`, `e88f503d`, `b54a14c0`, `2a5fa2e5` | stage B |
 | Plan: model, list, Item and capture | `d3357f40`, `b7a0dff1` | stage B |
 | Discussions | `9a3d6f5f` | stage B, `d3357f40` interface |
-| People, access and teams | `b987e608`, `1e474c35`, `517523cf` | stage B |
-| Sign-in, devices and sessions | `df06081d`, `76e3ae31` | stage B, `de67c77d` |
+| People, access and teams | `b987e608`, `1e474c35`, `517523cf`, `c6629fda` (invitation email) | stage B |
+| Public discovery | `8947a779`, `6a60e89a` (public reads, dev only), `d1303286` (fork), `875a4b60` (share cards and sitemap), `0650b8cb` (agent lookup) | stage B, `de67c77d` |
+| Sign-in, devices and sessions | `df06081d`, `76e3ae31`, `a9f4654f` (terms and consent line) | stage B, `de67c77d` |
 | Secrets | `41a0df87`, `f3663cbb` | stage B, its own security gates |
 | Billing home and contract | `d4d410e6`, `93907d28` | stage B |
 | Getting started | `6beca32b`, `c3e4a838`, `0c9207b8`, `871e9b73` | stage B |
@@ -88,7 +93,7 @@ Screens and paths are built at once as independent Lanes, in runs of about 12 to
 | Billing screens on stubs | `1fbf61b9`, `989c5695`, `7f9a23e8`, `176db9fb` | `d4d410e6` |
 | Stats | `a61d3c91`, `2cf30e0a`, `80540753` | stage B |
 | Loose ends and bulk requests | `fc1831eb`, `7456856f`, `16093ed1` | stage B |
-| CLI reply lines | `235878aa`, `f15f1f1e`, `2ec78c62` | `92dbde9d` |
+| CLI reply lines | `235878aa`, `f15f1f1e` | `92dbde9d` |
 | Journeys and agent scorecard | `a0cf8c22`, `581bd373` | C1 screens it walks |
 
 Each screen is reviewed against the approved design from real signed-in screenshots before acceptance. Old screens and styles are removed as their routes are covered; the growth guard records what each Lane removes.
