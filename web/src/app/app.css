@@ -12,6 +12,8 @@
   .head .crumb-step { display: inline-flex; align-items: center; gap: var(--s-2); min-width: 0; }
   .head .crumb a { color: var(--text-2); }
   .head .crumb [aria-current] { color: var(--text); }
+  .top .brand .st { letter-spacing: normal; }
+  .top .brand .st svg { width: 13px; height: 13px; }
   .keylist { display: grid; gap: var(--s-2); margin: 0; }
   .keylist > div { display: grid; grid-template-columns: 12ch minmax(0, 1fr); gap: var(--s-3); }
   .keylist dd { margin: 0; color: var(--text-2); }

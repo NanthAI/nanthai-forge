@@ -2,7 +2,6 @@
 // The line's slot in the top bar (Item 18af654d owns the marks, their motion and the feed). The frame draws the stops
 // and their counts from the feed's shared contract (convex/projectLiveLine.ts `liveLineResult`); until the feed
 // arrives it draws the stops with no counts, so nothing moves when it does. Each stop links to Lanes at that stop.
-import type { MarkState } from '../shell/brand';
 import { hrefFor } from './paths';
 import { followLink } from './router';
 
@@ -13,6 +12,8 @@ export type LineFeed = {
   more: number;
   moreIsLowerBound: boolean;
   main: { head: string; at?: string } | null;
+  /** The last Lane that left the line, and how. */
+  exit?: { laneId: string; kind: 'landed' | 'set-aside'; at: number } | null;
 };
 
 const stops: readonly { stage: LineStage; label: string; short: string }[] = [
@@ -25,16 +26,6 @@ const stops: readonly { stage: LineStage; label: string; short: string }[] = [
 /** What waits on a person: every held Lane in the feed. The count beside "Needs you" and on the rail. */
 export function heldCount(feed: LineFeed | undefined) {
   return feed ? feed.lanes.filter(lane => lane.held).length : undefined;
-}
-
-/** The mark follows the same feed (Item 641d887b): the strongest current fact wins. */
-export function markState(feed: LineFeed | undefined): MarkState {
-  if (!feed) return 'idle';
-  const open = feed.lanes.length + feed.more;
-  if (feed.lanes.some(lane => lane.held)) return 'waiting';
-  if (feed.lanes.some(lane => lane.overlap)) return 'overlap';
-  if (feed.lanes.some(lane => lane.stage === 'checking')) return 'checks';
-  return open === 0 ? 'idle' : open === 1 ? 'w1' : 'wN';
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;

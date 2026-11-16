@@ -21,16 +21,19 @@ export type MarkState =
 export function ForgeMark({
   arrive = false,
   state,
+  motion,
   size = 22,
 }: {
   /** Shorthand for the first-landing assembly (`data-state="first"`). */
   arrive?: boolean;
   state?: MarkState;
+  /** Calming down (mark.css): `calm` doubles every period, `still` holds the end pose. */
+  motion?: 'calm' | 'still';
   size?: number;
 }) {
   return (
     <svg
-      className="fx-mark mk c64"
+      className={motion ? `fx-mark mk c64 ${motion}` : 'fx-mark mk c64'}
       viewBox="0 0 64 64"
       width={size}
       height={size}

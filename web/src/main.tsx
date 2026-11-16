@@ -14,6 +14,7 @@ import { createRoot } from 'react-dom/client';
 import './ui/tokens.css';
 import './ui/components.css';
 import { isAppPath } from './app/paths';
+import { applyMotion } from './motion-pref';
 class AppBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() {
@@ -40,6 +41,7 @@ class AppBoundary extends Component<{ children: ReactNode }, { failed: boolean }
   }
 }
 installErrorCapture();
+applyMotion();
 const root = createRoot(document.getElementById('root')!);
 // The rebuilt app (Item 84125787) serves every address under /-; everything else is the old app until stage C.
 if (isAppPath(location.pathname)) {

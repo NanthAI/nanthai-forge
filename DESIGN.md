@@ -333,9 +333,10 @@ Loops: idle, working, checks, overlap, waiting, queued (slowest 8 s, fastest 2.4
 ### Motion rules
 - Tilt is allowed only for paused (the lie-down) and the raised waiting tip (−8°). No other state rotates the letter; nothing ever forms a cross, an X or a circle-with-cross.
 - No bounce, no overshoot, no shake, no pop, no glow. Settles are strong ease-outs to 100 %.
-- Calming down: after 60 s in a looping state every period doubles (the `--calm` multiplier); after 5 min the still pose holds and the glyph beside the mark carries the state alone. A state change resets the clock.
+- Calming down: after 60 s in a looping state every period doubles (the `--calm` multiplier); after 5 min, or once an idle tab's live reads sleep, the still pose holds and the glyph beside the mark carries the state alone. A state change, a return to the tab or the input that wakes the reads resets the clock.
 - Paused when the tab is hidden and when the mark is off screen. No JavaScript per frame; the state is a `data-state` attribute.
-- Reduced motion: every state is its end pose, still, and every change is instant. The base rule of each state is its still; animation only adds movement. Every still differs from idle in shape, not only colour (landed excepted, by rule 4). A user may opt in to full motion over the OS setting (`.mk-motion-full` on the root); the product never opts in for them.
+- In the app's top bar (`web/src/app/mark.ts`) the state comes from the live line feed the frame already reads. Failed is a Lane that leaves Checking held; landed and set aside are the feed's last exit; landing is a Lane ready to land. A first read or a repeated delivery never plays a one-shot. Paused and queued have no field in the feed yet and are not shown. While failed, landed, set aside or overlap is shown, its word takes the name's place beside the mark and is announced.
+- Reduced motion: every state is its end pose, still, and every change is instant. The base rule of each state is its still; animation only adds movement. Every still differs from idle in shape, not only colour (landed excepted, by rule 4). A user may opt in to full motion over the OS setting (`.mk-motion-full` on the root, Settings → You, kept in that browser); the product never opts in for them.
 
 ### Delight (plays once per event, never loops, never always-on)
 | Moment | Threshold | What happens |
@@ -351,7 +352,7 @@ Loops: idle, working, checks, overlap, waiting, queued (slowest 8 s, fastest 2.4
 Counters are per project and local to the browser. No server call, nothing stored about people.
 
 ### Favicon and app icon
-The favicon is the still 16 px cut and never follows state (a state-driven favicon is a notification by another name). The 16 px cut is a separate pixel-aligned drawing: stem 3 px, arms 3 px, crossings 3 × 3, the spark 1 px; in the app (top bar, loaders) every 16 px move is a whole-pixel step with stepped timing. The 32 px cut is the 64 geometry scaled. App and touch icons use the 64 geometry at rest.
+The favicon is the still 16 px cut and never follows state (a state-driven favicon is a notification by another name). The 16 px cut is a separate pixel-aligned drawing: stem 3 px, arms 3 px, crossings 3 × 3, the spark 1 px; in the app (top bar, loaders) every 16 px move is a whole-pixel step with stepped timing. The 32 px cut is the 64 geometry scaled. App and touch icons use the 64 geometry at rest on the brand tile, the F in dark ink with its warm and teal crossings; the maskable icon keeps the whole F inside the 40 % safe circle. `web/public/favicon.svg` is the 16 px cut with ink that follows the tab's light or dark setting.
 
 ### Terminal (nforge)
 On a TTY, nforge shows one frame per Lane row, cycled at 550 ms while the state is live; one-shots run their frames once and hold the still. Frames are plain Unicode box drawing and block elements; the glyph and word always follow the frame; colour is ANSI where supported. Logs, JSON and piped output get the ASCII still form.

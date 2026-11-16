@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { AccountHandle } from './AccountHandle';
+import { applyMotion, motionFull } from '../motion-pref';
 import { useViewerHandle } from '../shell/viewer';
 import type { GithubSyncBinding, GithubAutoPush } from '../../../src/github-sync-types';
 import { useWorkRecords } from '../hosted-work-index';
@@ -226,10 +227,28 @@ export default function HostedSettings({
         <>
           <h1>You</h1>
           <AccountHandle />
+          <MotionChoice />
         </>
       )}
       {section === 'devices' && <SignedInDevices />}
     </SettingsLayout>
+  );
+}
+/** Full motion of the Forge mark over this device's reduced-motion setting; this browser only. */
+function MotionChoice() {
+  const [full, setFull] = useState(motionFull);
+  return (
+    <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 24 }}>
+      <input
+        type="checkbox"
+        checked={full}
+        onChange={event => {
+          applyMotion(event.target.checked);
+          setFull(event.target.checked);
+        }}
+      />
+      Animate the Forge mark even when this device reduces motion
+    </label>
   );
 }
 function SignedInDevices() {

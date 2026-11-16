@@ -4,9 +4,10 @@
 // public bar and column. Every control at first paint is a plain link or button; menus and sheets attach with the
 // behaviour layer (decisions.md, shared-base rule 3). Each frame has a skip link, one main landmark and the phone tabs.
 import type { ReactNode } from 'react';
-import { Avatar, Count, Menu, type MenuAction } from '../ds';
-import { ForgeMark, type MarkState } from '../shell/brand';
-import { Line, heldCount, markState, type LineFeed } from './Line';
+import { Avatar, Count, Menu, State, type MenuAction } from '../ds';
+import { ForgeMark } from '../shell/brand';
+import { Line, heldCount, type LineFeed } from './Line';
+import { useMark } from './mark';
 import {
   accountPlaces,
   hrefFor,
@@ -48,12 +49,19 @@ function Skip() {
   );
 }
 
-function Brand({ href, state }: { href: string; state?: MarkState }) {
+/** The F follows the project (mark.ts). Its word takes the name's place while the state needs one, and is announced. */
+function Brand({ href, feed }: { href: string; feed?: LineFeed }) {
+  const { state, motion, word } = useMark(feed);
   return (
-    <A className="brand" href={href} translate="no" aria-label="Forge">
-      <ForgeMark state={state} size={20} />
-      <span>Forge</span>
-    </A>
+    <>
+      <A className="brand" href={href} translate="no" aria-label="Forge">
+        <ForgeMark state={state} motion={motion} size={20} />
+        {word ? <State word={word} /> : <span>Forge</span>}
+      </A>
+      <span className="sr" role="status">
+        {word}
+      </span>
+    </>
   );
 }
 
@@ -169,7 +177,7 @@ export function ProjectFrame({
     <div className="shell" data-frame="project">
       <Skip />
       <header className="top">
-        <Brand href={placeHref(route, 'needs')} state={markState(feed)} />
+        <Brand href={placeHref(route, 'needs')} feed={feed} />
         <span onPointerEnter={controls.onPicker} onFocus={controls.onPicker} style={{ display: 'contents' }}>
           <Menu label={`Project: ${name}. Switch project`} items={pickerItems} className="proj">
             <span className="cut" translate="no">

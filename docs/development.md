@@ -599,6 +599,10 @@ layer out of both first paints.
   `/device`; a code that arrived in a link must be retyped before Approve.
 - Keys: `Mod+K` palette, `?` all keys, `1`–`6` project places; never inside
   fields or dialogs.
+- The top-bar mark (`web/src/app/mark.ts`) follows the line feed the project
+  frame already reads: no other read, one `visibilitychange` listener (`.mk-hidden`)
+  and at most one timer, for the next hold end, calm (60 s) or still (5 min or
+  live reads asleep). DESIGN.md "Brand mark states" has the rules.
 
 ### Convex Auth core beside Clerk
 
