@@ -1,16 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 // The account's projects place (requests/route.ts). With ?request=ID it is the bulk delete request page (Item
-// 7456856f), loaded with its own chunk; without one it keeps the place's placeholder.
+// 7456856f); without one it is the projects list (projects/Projects.tsx, Item 3d5d8839). Each loads its own chunk.
 import { lazy, Suspense } from 'react';
-import { Head, Placeholder } from '../Place';
+import { Head } from '../Place';
 import { useSearch } from '../router';
 import type { AccountProps } from '../screen-route';
 
 const DeleteRequest = lazy(() => import('./DeleteRequest'));
+const Projects = lazy(() => import('../projects/Projects'));
 
-export default function AccountProjects(_: AccountProps) {
+export default function AccountProjects(props: AccountProps) {
   const request = useSearch().get('request');
-  if (!request) return <Placeholder route={{ frame: 'account', place: 'projects' }} projectName="" />;
+  if (!request)
+    return (
+      <Suspense fallback={<Head trail={[{ label: 'Projects' }]} sentence="Loading…" />}>
+        <Projects {...props} />
+      </Suspense>
+    );
   return (
     <Suspense fallback={<Head trail={[{ label: 'Delete request' }]} sentence="Loading the request…" />}>
       <DeleteRequest requestId={request} />

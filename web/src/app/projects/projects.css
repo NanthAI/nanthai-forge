@@ -1,0 +1,16 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Account > Projects only (loaded with its route): a project row is the name and its one line of context, then its
+ * facts, one unit per line; on a narrow region the facts drop under the name. */
+[data-ds] {
+  .account-projects .row.proj { align-items: start; padding-block: 10px; }
+  .account-projects .proj-name { display: grid; gap: 2px; min-width: 0; }
+  .account-projects .proj-name .meta { display: flex; flex-wrap: wrap; gap: 2px var(--s-3); }
+  .account-projects .proj-name .mono { overflow-wrap: anywhere; }
+  .account-projects .proj-facts { display: grid; justify-items: end; gap: 2px; font-size: var(--t-meta); color: var(--text-2); text-align: right; }
+  .account-projects .proj-more { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2) var(--s-3); }
+  .account-projects .empty .btns { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: center; }
+  @container (max-width: 560px) {
+    .account-projects .row.proj { grid-template-columns: minmax(0, 1fr) !important; row-gap: var(--s-2); }
+    .account-projects .proj-facts { justify-items: start; text-align: left; }
+  }
+}
