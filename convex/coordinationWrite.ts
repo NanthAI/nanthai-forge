@@ -6,6 +6,7 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { isDeviceIdentity } from './cliServer';
+import { hasWriteRole } from './projectRole';
 import { commandScope } from '../src/coordination-paths';
 import {
   COORDINATION_LIMITS,
@@ -60,12 +61,7 @@ export const claimById = (ctx: Ctx, projectId: Id<'hostedProjects'>, claimId: st
 export async function resolveRecipient(ctx: Ctx, project: Doc<'hostedProjects'>, to: string) {
   const target = await session(ctx, project._id, to);
   if (target) return { recipientActor: target.actor, recipientSession: target.sessionId };
-  const participant =
-    project.owner === to ||
-    !!(await ctx.db
-      .query('projectContributors')
-      .withIndex('by_project_and_contributor', q => q.eq('projectId', project._id).eq('contributor', to))
-      .unique());
+  const participant = await hasWriteRole(ctx, project, to);
   invariant(participant, 'BAD_ARGUMENT', 'Select a session or participant in this project.');
   return { recipientActor: to, recipientSession: undefined };
 }

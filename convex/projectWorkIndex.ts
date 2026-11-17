@@ -20,6 +20,7 @@ import { query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { invariant } from '../src/errors';
+import { hasWriteRole } from './projectRole';
 import { report } from './errors';
 import { actorSummary } from './projectActorNames';
 import { planningFilter, planningPage } from './projectPlanningList';
@@ -60,16 +61,7 @@ export const workspace = query({
       const backup = await ctx.db.get(generation.backupId);
       invariant(backup?.projectId === projectId, 'PROJECT_UNAVAILABLE', 'Select this project’s source.');
       const owner = project.owner === user.subject;
-      const contributor =
-        owner ||
-        Boolean(
-          await ctx.db
-            .query('projectContributors')
-            .withIndex('by_project_and_contributor', q =>
-              q.eq('projectId', projectId).eq('contributor', user.subject),
-            )
-            .unique(),
-        );
+      const contributor = owner || (await hasWriteRole(ctx, project, user.subject));
       return JSON.stringify({
         ...hostedPaths({ ...metadata, counts }),
         ...(planningDuplicateText === undefined

@@ -164,6 +164,7 @@ export async function chargeMemberWork(
   kind: 'checks' | 'composes' | 'submissions',
 ) {
   if (actor === project.owner) return;
+  // The grant row itself carries the budget, so this reads it directly (same read as projectRole's write check).
   const member = await ctx.db
     .query('projectContributors')
     .withIndex('by_project_and_contributor', q => q.eq('projectId', project._id).eq('contributor', actor))

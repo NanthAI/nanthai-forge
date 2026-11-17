@@ -4,6 +4,7 @@ import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { projectExecution } from './projectExecution';
+import { hasWriteRole, projectRole } from './projectRole';
 export async function ownedProject(ctx: QueryCtx | MutationCtx, id: Id<'hostedProjects'>, owner: string) {
   const project = await ctx.db.get(id);
   let authorized = false;
@@ -47,23 +48,13 @@ export async function accessibleProject(
       'PROJECT_UNAVAILABLE',
       'This Forge project is unavailable with the current account.',
     );
-    if (project.owner !== actor && project.visibility !== 'public') {
-      const grant = await ctx.db
-        .query('projectContributors')
-        .withIndex('by_project_and_contributor', q => q.eq('projectId', projectId).eq('contributor', actor))
-        .unique();
-      const reader = grant
-        ? null
-        : await ctx.db
-            .query('projectReaders')
-            .withIndex('by_project_and_reader', q => q.eq('projectId', projectId).eq('reader', actor))
-            .unique();
+    // A private project without a role answers exactly like a missing one (not found).
+    if (project.owner !== actor && project.visibility !== 'public')
       invariant(
-        grant || reader,
+        await projectRole(ctx, project, actor),
         'PROJECT_UNAVAILABLE',
         'This Forge project is unavailable with the current account.',
       );
-    }
     authorized = true;
     journalProject(ctx, project);
     return project;
@@ -78,13 +69,11 @@ export async function accessibleProject(
 }
 export async function activeProject(ctx: QueryCtx | MutationCtx, id: Id<'hostedProjects'>, actor: string) {
   const project = await accessibleProject(ctx, id, actor);
-  if (project.owner !== actor) {
-    const contributor = await ctx.db
-      .query('projectContributors')
-      .withIndex('by_project_and_contributor', q => q.eq('projectId', id).eq('contributor', actor))
-      .unique();
-    invariant(contributor, 'PROJECT_UNAVAILABLE', 'Contributor access is required to change project Work.');
-  }
+  invariant(
+    await hasWriteRole(ctx, project, actor),
+    'PROJECT_UNAVAILABLE',
+    'Contributor access is required to change project Work.',
+  );
   invariant(
     !project.removal,
     'PROJECT_UNAVAILABLE',
@@ -101,14 +90,11 @@ export async function memberProject(ctx: QueryCtx | MutationCtx, id: Id<'hostedP
     'PROJECT_UNAVAILABLE',
     'This Forge project is unavailable with the current account.',
   );
-  const contributor =
-    project.owner === actor
-      ? true
-      : await ctx.db
-          .query('projectContributors')
-          .withIndex('by_project_and_contributor', q => q.eq('projectId', id).eq('contributor', actor))
-          .unique();
-  invariant(contributor, 'PROJECT_UNAVAILABLE', 'Project membership is required to read full Work archives.');
+  invariant(
+    await hasWriteRole(ctx, project, actor),
+    'PROJECT_UNAVAILABLE',
+    'Project membership is required to read full Work archives.',
+  );
   journalProject(ctx, project);
   projectExecution(ctx, id, project.name, project.key);
   return project;

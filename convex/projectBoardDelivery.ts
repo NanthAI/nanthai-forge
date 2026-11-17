@@ -5,6 +5,7 @@ import { boardStopped } from './projectBoardLimits';
 import { boardPathVisible, claimDecision, readAutoClaims, type ClaimPeers } from './projectBoardClaims';
 import { agentActor } from '../src/agent-slug';
 import { laneConflicts } from './projectHostedConflicts';
+import { hasWriteRole } from './projectRole';
 
 type Ctx = QueryCtx | MutationCtx;
 /** A message as returned. `author` is an auth subject here (`subject/slug` for an agent session,
@@ -42,12 +43,7 @@ export async function boardWriter(ctx: Ctx, projectId: Id<'hostedProjects'>, vie
 export async function boardWriterProject(ctx: Ctx, projectId: Id<'hostedProjects'>, viewer: string) {
   const project = await ctx.db.get(projectId);
   if (!project || project.removal) return null;
-  if (project.owner === viewer) return project;
-  const contributor = await ctx.db
-    .query('projectContributors')
-    .withIndex('by_project_and_contributor', q => q.eq('projectId', projectId).eq('contributor', viewer))
-    .unique();
-  return contributor !== null ? project : null;
+  return (await hasWriteRole(ctx, project, viewer)) ? project : null;
 }
 
 /** Unread notes for one Lane: its own inbox, its Issue's and the project's. Three point reads;

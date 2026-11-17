@@ -62,6 +62,8 @@ The scan is a guard, not a guarantee: it does not see encoded or split values, t
 
 ## Access is checked before retrieval
 
+Project roles (owner, write, read), what each may do and where each check runs are in [project access](access.md); one resolver, `convex/projectRole.ts`, reads membership for every check.
+
 Durable source-worker and mirror continuation reads bind legacy Convex file IDs
 to a live `projectObjects` owner row before fetching bytes. Foreign, unknown,
 removed and unregistered references fail with `SOURCE_REF_UNOWNED`; a cursor

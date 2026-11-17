@@ -7,6 +7,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { selectedGeneration, recordPartition } from './projectWorkIndexStore';
 import { accessibleProject } from './projectAuthority';
 import { invariant } from '../src/errors';
+import { projectRole } from './projectRole';
 async function known(
   ctx: QueryCtx | MutationCtx,
   project: Doc<'hostedProjects'>,
@@ -168,16 +169,7 @@ export async function retainMembership(ctx: MutationCtx, projectId: Id<'hostedPr
 
 async function membership(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>, actor: string) {
   const project = await ctx.db.get(projectId);
-  if (project?.owner === actor) return 'current';
-  const contributor = await ctx.db
-    .query('projectContributors')
-    .withIndex('by_project_and_contributor', q => q.eq('projectId', projectId).eq('contributor', actor))
-    .unique();
-  const reader = await ctx.db
-    .query('projectReaders')
-    .withIndex('by_project_and_reader', q => q.eq('projectId', projectId).eq('reader', actor))
-    .unique();
-  if (contributor || reader) return 'current';
+  if (project && (await projectRole(ctx, project, actor))) return 'current';
   const retained = await ctx.db
     .query('projectActorNames')
     .withIndex('by_project_and_actor', q => q.eq('projectId', projectId).eq('actor', actor))

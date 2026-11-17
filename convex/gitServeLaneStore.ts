@@ -10,6 +10,7 @@ import { resolveObjects } from './projectGithubMirrorObjects';
 import { githubSyncCommitSchema } from '../src/github-sync-types';
 import { laneAuthor } from '../src/git-serve-lane-refs';
 import { ForgeError, invariant } from '../src/errors';
+import { hasWriteRole } from './projectRole';
 
 /** Lane refs over Git (Issue 09367fb2). Lane commits are built on the first Git fetch of a
  * saved head and cached here per Lane; saves never write Git objects. */
@@ -21,12 +22,7 @@ export const laneRefPage = 50;
  * granted), never an anonymous or signed-in stranger on a public project. */
 export async function isMember(ctx: Ctx, project: Doc<'hostedProjects'>, actor: string) {
   if (!actor) return false;
-  if (project.owner === actor) return true;
-  const contributor = await ctx.db
-    .query('projectContributors')
-    .withIndex('by_project_and_contributor', q => q.eq('projectId', project._id).eq('contributor', actor))
-    .unique();
-  if (contributor) return true;
+  if (await hasWriteRole(ctx, project, actor)) return true;
   return !!(await ctx.db
     .query('projectReaders')
     .withIndex('by_project_and_reader', q => q.eq('projectId', project._id).eq('reader', actor))

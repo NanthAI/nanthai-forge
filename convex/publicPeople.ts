@@ -4,6 +4,7 @@ import { internalQuery, type ActionCtx, type MutationCtx, type QueryCtx } from '
 import type { Id } from './_generated/dataModel';
 import { makeFunctionReference } from 'convex/server';
 import { agentActor, splitAgentActor } from '../src/agent-slug';
+import { hasWriteRole } from './projectRole';
 
 /** Public identity rule: a person is shown as a Forge handle, never as an auth
  * subject (account id), provider display name or email. Every public function
@@ -178,11 +179,7 @@ async function viewerRole(
   const project = id ? await ctx.db.get(id) : null;
   if (!project) return { writer: false, owner: false };
   if (project.owner === viewer) return { writer: true, owner: true };
-  const contributor = await ctx.db
-    .query('projectContributors')
-    .withIndex('by_project_and_contributor', q => q.eq('projectId', projectId).eq('contributor', viewer))
-    .unique();
-  return { writer: !!contributor, owner: false };
+  return { writer: await hasWriteRole(ctx, project, viewer), owner: false };
 }
 
 function databaseLookup(ctx: QueryCtx | MutationCtx, viewer: string | null): Lookup {
