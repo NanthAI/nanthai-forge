@@ -9,6 +9,9 @@ import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { landingCosts } from '../dist/hosted-landings-view.js';
 import { sharedCheckCounts } from '../dist/cost-budgets.js';
+import { carriedCostCounts, landingSpeedSample } from '../dist/landing-speed-alerts.js';
+import { moduleUrl } from './convex-module.mjs';
+const { statsLanding } = await import(moduleUrl('../convex/projectStats.ts'));
 
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
@@ -94,4 +97,23 @@ test('a failed shared check is discarded minutes on every member that later land
 test('a run with no execution report leaves the landing unknown instead of zero', () => {
   assert.equal(sharedCheckCounts(undefined, undefined, 4, true), undefined);
   assert.deepEqual(sharedCheckCounts({ runnerSeconds: 100 }, 400, 4, false), { discardedRunnerSeconds: 200 });
+});
+
+test('unreported superseded execution stays unknown after a pass, a shared check and recomposition', () => {
+  const unknown = 'superseded-check-execution-unreported';
+  let counts = { discardedRunnerSeconds: 120, discardedRunnerUnknown: unknown };
+  counts = sharedCheckCounts(counts, 1200, 4, true);
+  assert.equal(counts.discardedRunnerSeconds, 120, 'known usage remains a lower bound');
+  for (const reused of [true, false]) {
+    const carried = carriedCostCounts(counts, undefined, reused);
+    assert.equal(carried.discardedRunnerUnknown, unknown);
+    const state = {
+      at: '2026-11-16T12:00:00.000Z',
+      timing: { submittedAt: '2026-11-16T12:00:00.000Z', committedAt: '2026-11-16T12:10:00.000Z' },
+      counts: { ...carried, runnerSeconds: 300 },
+    };
+    assert.equal(landingCosts(state, 1).runnerDiscarded, null);
+    assert.equal(landingSpeedSample(state, 1).counts[4], null);
+    assert.equal(statsLanding({ id: 'receipt', at: state.at }, state).discardedRunnerSeconds, null);
+  }
 });

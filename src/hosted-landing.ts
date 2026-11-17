@@ -208,6 +208,8 @@ export const hostedLandingStateSchema = z
         r2: z.tuple([checkNumber, checkNumber, checkNumber]).optional(),
         runnerSeconds: z.number().min(0).optional(),
         discardedRunnerSeconds: z.number().min(0).optional(),
+        /** A superseded check had no execution report. Known seconds remain a lower bound. */
+        discardedRunnerUnknown: z.literal('superseded-check-execution-unreported').optional(),
       })
       .strict()
       .optional(),

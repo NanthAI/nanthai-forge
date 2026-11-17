@@ -155,6 +155,7 @@ export function formatCostVerdicts(verdicts: CostVerdict[]) {
 
 /** A discarded check is known independently of the accepted check's execution report. */
 export function discardedRunnerSeconds(state: Pick<HostedLandingState, 'counts'> | null) {
+  if (state?.counts?.discardedRunnerUnknown) return null;
   return state?.counts?.discardedRunnerSeconds ?? (state?.counts?.runnerSeconds === undefined ? null : 0);
 }
 

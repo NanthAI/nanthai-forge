@@ -5669,6 +5669,10 @@
             "discardedRunnerSeconds": {
               "type": "number",
               "minimum": 0
+            },
+            "discardedRunnerUnknown": {
+              "type": "string",
+              "const": "superseded-check-execution-unreported"
             }
           },
           "additionalProperties": false

@@ -481,6 +481,7 @@ export function carriedCostCounts(
     ...(r2.some(Boolean) ? { r2 } : {}),
     ...(reused && counts?.runnerSeconds !== undefined ? { runnerSeconds: counts.runnerSeconds } : {}),
     ...(discarded > 0 ? { discardedRunnerSeconds: discarded } : {}),
+    ...(counts?.discardedRunnerUnknown ? { discardedRunnerUnknown: counts.discardedRunnerUnknown } : {}),
   };
   return Object.keys(carried).length ? carried : undefined;
 }
