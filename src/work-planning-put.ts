@@ -2,6 +2,8 @@
 // Pure: also runs in the Convex non-Node runtime.
 import { invariant } from './errors.js';
 import { planningModelPutKeys, type PlanningItem, type PlanningWrite } from './work-planning-types.js';
+import { isAgentSlug } from './agent-slug.js';
+import { digest } from './state/hash.js';
 
 export type PlanningPut = Extract<PlanningWrite, { action: 'put-planning-item' }>;
 
@@ -60,4 +62,74 @@ function resolveModelFields(command: PlanningPut, current?: Partial<PlanningItem
   return Object.fromEntries(
     planningModelPutKeys.flatMap(key => (fields[key] === undefined ? [] : [[key, fields[key]]])),
   ) as Partial<Pick<PlanningItem, (typeof planningModelPutKeys)[number]>>;
+}
+
+// Discussion rules shared by the local Work and hosted journal reducers (Item 9a3d6f5f): a reply joins its thread's
+// root, the agent slug is kept only from the fixed lists, and a decision comment also appends one dated line to the
+// Item body's Decisions section in the same write, so the body and the comment never disagree.
+type Comment = { id: string; itemId: string; replyTo?: string | undefined };
+type Discussed = {
+  operationId: string;
+  replyTo?: string | undefined;
+  decision?: boolean | undefined;
+  agent?: string | undefined;
+};
+
+/** The optional fields a new comment stores. A reply must name a comment on the same Item. */
+export function discussionFields(comments: readonly Comment[], itemId: string, command: Discussed) {
+  let replyTo: string | undefined;
+  if (command.replyTo) {
+    const parent = comments.find(comment => comment.id === command.replyTo);
+    invariant(parent && parent.itemId === itemId, 'NOT_FOUND', 'Reply to a comment on the same Item.');
+    replyTo = parent.replyTo ?? parent.id;
+  }
+  return {
+    ...(replyTo ? { replyTo } : {}),
+    ...(isAgentSlug(command.agent) ? { agent: command.agent } : {}),
+    ...(command.decision ? { decision: true as const } : {}),
+  };
+}
+
+/** The decision's own body version gets a stable operation id derived from the comment's, so a retry of the comment
+ * finds its earlier write and the version and comment never share one id. */
+export function decisionOperationId(commentId: string) {
+  const hex = digest(`planning-decision:${commentId}`);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+/** A public label is a Forge handle (`@handle` or `handle`) or `handle/agent-slug`; anything else (a display name,
+ * a machine name) is never written into the body. */
+const publicLabel = /^@?[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?(?:\/[a-z]{2,10}-[a-z]{2,10})?$/;
+export function decisionActor(label: string) {
+  const value = label.trim().toLowerCase();
+  if (!publicLabel.test(value)) return '';
+  return value.includes('/') || value.startsWith('@') ? value : `@${value}`;
+}
+
+const MAX_DECISION = 500;
+/** The body with one more line in its `## Decisions` section (made at the end when there is none). The line keeps the
+ * date, the author label when it is a public identity, the first paragraph of the text, and the comment's short id. */
+export function bodyWithDecision(
+  body: string,
+  input: { at: string; label: string; text: string; commentId: string },
+) {
+  const first = input.text
+    .trim()
+    .split(/\n\s*\n/)[0]!
+    .replace(/\s+/g, ' ');
+  const said = first.length > MAX_DECISION ? `${first.slice(0, MAX_DECISION - 1)}…` : first;
+  const actor = decisionActor(input.label);
+  const line = `- ${input.at.slice(0, 10)}${actor ? ` ${actor}` : ''}: ${said} (comment ${input.commentId.slice(0, 8)})`;
+  const lines = body.replace(/\s+$/, '').split('\n');
+  const heading = lines.findIndex(text => /^##\s+Decisions\s*$/i.test(text));
+  if (heading < 0) return `${lines.join('\n')}${body.trim() ? '\n\n' : ''}## Decisions\n${line}\n`;
+  let end = lines.length;
+  for (let index = heading + 1; index < lines.length; index++)
+    if (/^#{1,2}\s/.test(lines[index]!)) {
+      end = index;
+      break;
+    }
+  while (end > heading + 1 && !lines[end - 1]!.trim()) end--;
+  lines.splice(end, 0, line);
+  return `${lines.join('\n')}\n`;
 }

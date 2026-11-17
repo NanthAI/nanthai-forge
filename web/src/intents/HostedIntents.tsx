@@ -126,7 +126,8 @@ export default function HostedIntents({
             operationId: crypto.randomUUID(),
             itemId: selectedPlanning?.id ?? id,
             text,
-            authorLabel: user?.fullName || user?.username || '',
+            // Public identity only: a display name is never written into the board (the server records the author).
+            authorLabel: user?.username || '',
           };
     commentWrite.current = command;
     try {

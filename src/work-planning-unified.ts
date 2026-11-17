@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { planningIntentStatus } from './work-planning-lifecycle.js';
 import { invariant, itemChanged } from './errors.js';
-import { resolvePlanningPut } from './work-planning-put.js';
+import { discussionFields, resolvePlanningPut } from './work-planning-put.js';
 import { resolveIntentId, type IntentAlias } from './work-intent-local.js';
 import { planningModelPutKeys, type PlanningItem, type PlanningWrite } from './work-planning-types.js';
 import type { WorkData } from './work-types.js';
@@ -80,6 +80,7 @@ export function applyUnifiedPlanning(
       text: command.text,
       at,
       provenance,
+      ...discussionFields(data.planningComments, target.historyId, command),
     };
     data.planningComments.push(comment);
     target.intent?.conversation.push({

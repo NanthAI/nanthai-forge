@@ -39,6 +39,9 @@ export function commandKeys(command: Command, input: { operationId: string }) {
     add('initiatives', command.itemId);
     add('planningVersions', command.operationId);
     add('planningComments', command.operationId);
+    // A reply's thread root comes from the comment it answers (src/work-planning-put.ts).
+    if (command.action === 'comment-planning-item' && command.replyTo)
+      add('planningComments', command.replyTo);
     if (command.action === 'put-planning-item') {
       for (const id of command.intentIds ?? []) {
         add('intents', id);

@@ -39,6 +39,7 @@ const allowed = {
   projectSelfMetricBills: ['record', 'page'],
   projectSourceAuthority: ['transition'],
   projectWorkIndex: ['workspace', 'detail'],
+  planningReactions: ['toggle'], // Reversible per-person reaction toggle, same owner gate as comments.
 };
 test('class guard: every public owner authority entry point has reviewed device permission or a person gate', () => {
   const unknown = [];

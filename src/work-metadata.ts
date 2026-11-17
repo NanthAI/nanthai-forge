@@ -229,9 +229,10 @@ export function applyHostedEvent(
       'INVALID_WORK_JOURNAL',
       'Planning identity differs from its original hosted operation.',
     );
-    const count = data.planningItems.length;
+    const count = data.planningItems.length,
+      comments = data.planningComments.length;
     applyPlanningMetadata(data, event.command, event.at);
-    stampPlanningAuthor(data, count, event.command, event.actor);
+    stampPlanningAuthor(data, count, event.command, event.actor, comments);
   } else applyIntentMetadata(data, event.command, { id: event.id, at: event.at, ...options });
   if (isUnifiedWork(data) && creatingId) {
     const created = data.intents.find(intent => intent.id === creatingId);

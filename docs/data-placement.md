@@ -86,6 +86,7 @@ only verified frozen-manifest files; the repair records a backfill time and move
 | `projectWorkGenerations`, `projectWorkHeads`, `projectWorkEvents`, `projectWorkDetailMigrations`, `projectReturnPages`, `projectReturnSupersessions` | Work projection generations, heads/events, migration and return pages; canonical history remains separately retained. | Activity |
 | `projectWorkRecords` | General Work projections, including activity/status readers; eight custom B-tree indexes. | Activity |
 | `projectPlanningRecords` | Planning roots, versions, comments and search fragments; thirteen custom B-tree indexes plus search, confined to planning rows. | Planning activity |
+| `planningReactions` | One row per person, comment and reaction kind (eight kinds); a toggle, not history. Reads return counts only, never who reacted. | Planning activity, at most 8 per person per comment |
 | `projectWorkDataRecords` | Source projections, `viewFiles`, non-planning `:payload` parts and `_workStore*` comparison rows; six custom B-tree indexes. | Source/Work projection size |
 | `projectCoordinationClaims`, `projectCoordinationEvents`, `projectCoordinationReceipts`, `projectCoordinationSessions` | Live coordination (advisory). | Activity |
 | `projectBackups`, `projectProposals`, `projectUploadCleanup`, `projectRecoveryConnections` | Backup and proposal archive rows (R2 key, legacy `storageId`) and upload cleanup. | Activity |

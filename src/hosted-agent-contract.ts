@@ -468,7 +468,7 @@ export const hostedAgentCommandSchemas = {
     .extend({ ...planningIssueFields, fields: planningPutAgentFields.optional() })
     .strict(),
   'comment-planning-item': planningCommentCommandSchema
-    .omit({ action: true, operationId: true })
+    .omit({ action: true, operationId: true, agent: true, decidedBy: true }) // Set by the session and server.
     .extend(planningIssueFields)
     .strict()
     .refine(

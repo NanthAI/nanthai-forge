@@ -41,6 +41,7 @@ import { hostedSaveTables } from './projectHostedSaveFields';
 import { hostedSnapshotTables } from './projectHostedSnapshotFields';
 import { checkTables } from './projectCheckFields';
 import { coordinationTables } from './coordinationFields';
+import { planningReactionTables } from './planningReactionFields';
 import { githubImportTables } from './projectGithubImportFields';
 import { historyTables } from './projectHistoryFields';
 import { publicationTables } from './projectPublicationFields';
@@ -610,6 +611,7 @@ export default defineSchema({
   ...clientErrorTables,
   ...checkTables,
   ...coordinationTables,
+  ...planningReactionTables,
   ...indexTables,
   ...hostedRecordTables,
   ...hostedSaveTables,

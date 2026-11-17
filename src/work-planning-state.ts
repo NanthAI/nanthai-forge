@@ -5,7 +5,12 @@ import type { PlanningWrite } from './work-planning-types.js';
 import type { WorkData } from './work-types.js';
 import { isUnifiedWork } from './work-unified-types.js';
 import { plannedLinkIds } from './work-planning-lifecycle.js';
-import { resolvePlanningPut } from './work-planning-put.js';
+import {
+  bodyWithDecision,
+  decisionOperationId,
+  discussionFields,
+  resolvePlanningPut,
+} from './work-planning-put.js';
 import { applyUnifiedPlanning, type UnifiedPlanningData } from './work-planning-unified.js';
 
 // ponytail: derive current versions from retained planning history; index here if measured reads warrant it.
@@ -32,10 +37,35 @@ export function retainedPlanning(data: WorkData, command: PlanningWrite) {
     );
   return retained;
 }
-/** Data-only reducer shared by local Work and the original hosted journal replay. */
+/** Data-only reducer shared by local Work and the original hosted journal replay. A decision comment also appends
+ * its line to the Item body as the next version, in the same write (src/work-planning-put.ts). */
 export function applyPlanningMetadata(data: WorkData, command: PlanningWrite, at: string) {
   const retained = retainedPlanning(data, command);
   if (retained) return retained;
+  const written = applyPlanningWrite(data, command, at);
+  if (command.action !== 'comment-planning-item' || !command.decision) return written;
+  const latest = data.planningItems
+    .filter(item => item.id === (written as { itemId: string }).itemId)
+    .at(-1)!;
+  applyPlanningMetadata(
+    data,
+    {
+      action: 'put-planning-item',
+      operationId: decisionOperationId(command.operationId),
+      itemId: command.itemId,
+      expectedVersion: latest.version,
+      body: bodyWithDecision(latest.body, {
+        at,
+        label: command.decidedBy ?? command.authorLabel,
+        text: command.text,
+        commentId: command.operationId,
+      }),
+    },
+    at,
+  );
+  return written;
+}
+function applyPlanningWrite(data: WorkData, command: PlanningWrite, at: string) {
   if (isUnifiedWork(data))
     return applyUnifiedPlanning(
       data as unknown as UnifiedPlanningData,
@@ -56,6 +86,7 @@ export function applyPlanningMetadata(data: WorkData, command: PlanningWrite, at
       text: command.text,
       at,
       provenance,
+      ...discussionFields(data.planningComments, current.id, command),
     };
     data.planningComments.push(comment);
     return comment;
@@ -107,8 +138,20 @@ export function applyPlanningMetadata(data: WorkData, command: PlanningWrite, at
 }
 /** Hosted replay only: the put that appended a version (`count` = planningItems.length before it) records the
  * server-observed `actor` as the body's author when it wrote the body (or created the item); a put that
- * keeps the body (status move, reason, reopen) carries the earlier author. */
-export function stampPlanningAuthor(data: WorkData, count: number, command: PlanningWrite, actor: string) {
+ * keeps the body (status move, reason, reopen) carries the earlier author. A new comment (`comments` =
+ * planningComments.length before it) records the actor as its author, and so does a decision's body version. */
+export function stampPlanningAuthor(
+  data: WorkData,
+  count: number,
+  command: PlanningWrite,
+  actor: string,
+  comments = data.planningComments.length,
+) {
+  if (command.action === 'comment-planning-item') {
+    if (data.planningComments.length === comments + 1) data.planningComments[comments]!.author = actor;
+    if (data.planningItems.length === count + 1) data.planningItems[count]!.author = actor;
+    return;
+  }
   if (command.action !== 'put-planning-item' || data.planningItems.length !== count + 1) return;
   const item = data.planningItems[count]!;
   let author: string | undefined = actor;

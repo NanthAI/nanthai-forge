@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "planningReactions (Item 9a3d6f5f): owner-decided reactions on comments are per-person toggles, not discussion history, so they cannot live in the append-only Work journal; nothing can merge it: no existing table holds per-person marks on a comment (stars are project-only)",
+  "date": "2026-11-17"
+}

@@ -11,6 +11,7 @@ import { metadataCommandSchema } from '../src/work-intent-types';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { metadataRequest, validateMetadataSource } from '../src/work-metadata';
 import { invariant } from '../src/errors';
+import { publicActorLabel } from './publicPeople';
 import { report } from './errors';
 import { activeProject } from './projectAuthority';
 import { intentAuthority } from './projectContributors';
@@ -58,6 +59,14 @@ export async function executeCommand(
       'BAD_ARGUMENT',
       'Use the planning command’s original operation UUID.',
     );
+    // A decision's body line names the writer by public identity (handle or handle/agent), never by the label the
+    // client typed; only a signed-in writer gets one (Item 9a3d6f5f).
+    if (command.action === 'comment-planning-item') {
+      delete command.decidedBy;
+      const label =
+        command.decision && !actor ? await publicActorLabel(ctx, user.subject, command.agent) : '';
+      if (label) command.decidedBy = label;
+    }
   } else if (project.owner !== user.subject && command.action !== 'intent' && 'intentId' in command) {
     await intentAuthority(ctx, input.projectId, user.subject, command.intentId);
   }

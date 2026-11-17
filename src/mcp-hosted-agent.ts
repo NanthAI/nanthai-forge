@@ -224,8 +224,7 @@ export function registerHostedAgentWorkflow(
   server.registerTool(
     'forge_planning',
     {
-      description:
-        'Search, read, update Items/Initiatives. status:all adds history. Start: forge_task planningItemId',
+      description: 'Search/edit Items/Initiatives. Start: forge_task planningItemId',
       inputSchema: { command: z.union([planning[0]!, planning[1]!, planning[2]!]) },
       annotations: { ...read, readOnlyHint: false },
     },

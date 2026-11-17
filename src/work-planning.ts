@@ -25,6 +25,7 @@ export function planningWork(store: StoreAccess, command: PlanningCommand, revis
     const comment = tx.find('planningComments', command.operationId)?.record;
     if (prior) data.planningItems.push(prior);
     if (comment) data.planningComments.push(comment);
+    loadThread(tx, data, command);
     const retained = retainedPlanning(data, command);
     if (retained) return { revision: data.revision, result: retained };
     invariant(
@@ -48,11 +49,26 @@ export function planningWork(store: StoreAccess, command: PlanningCommand, revis
         if (found) data.planningItems.push(found);
       }
     }
+    const versions = data.planningItems.length;
     const result = applyPlanningMetadata(data, command, new Date().toISOString());
-    if (command.action === 'put-planning-item') tx.append('planningItems', data.planningItems.at(-1)!);
-    else tx.append('planningComments', data.planningComments.at(-1)!);
+    appendPlanning(tx, data, command, versions);
     return { revision: store.commitRecords(tx), result };
   });
+}
+
+/** A reply names the comment it answers; load that one record so the reducer can find its thread. */
+function loadThread(tx: WorkRecordTransaction, data: WorkData, command: PlanningWrite) {
+  if (command.action !== 'comment-planning-item' || !command.replyTo) return;
+  const parent = tx.find('planningComments', command.replyTo)?.record;
+  if (parent) data.planningComments.push(parent);
+}
+/** A put appends its version; a comment appends itself and, for a decision, the body version it wrote. */
+function appendPlanning(tx: WorkRecordTransaction, data: WorkData, command: PlanningWrite, versions: number) {
+  if (command.action === 'put-planning-item') tx.append('planningItems', data.planningItems.at(-1)!);
+  else {
+    tx.append('planningComments', data.planningComments.at(-1)!);
+    if (data.planningItems.length > versions) tx.append('planningItems', data.planningItems.at(-1)!);
+  }
 }
 
 /** Schema 16: load only the addressed Intents, aliases, Initiatives and history head. */
@@ -111,9 +127,9 @@ function unifiedPlanningWork(
     current.intentIds.forEach(load);
     if (current.initiativeId) group(current.initiativeId);
   }
+  const versions = data.planningItems.length;
   const result = applyPlanningMetadata(data, command, new Date().toISOString());
-  if (command.action === 'put-planning-item') tx.append('planningItems', data.planningItems.at(-1)!);
-  else tx.append('planningComments', data.planningComments.at(-1)!);
+  appendPlanning(tx, data, command, versions);
   for (const [collection, records] of [
     ['intents', unified.intents],
     ['initiatives', unified.initiatives],

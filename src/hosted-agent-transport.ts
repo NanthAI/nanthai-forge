@@ -854,6 +854,7 @@ export class HostedAgentTransport {
             query: this.query.bind(this),
             mutation: this.mutation.bind(this),
             serverFeatures: this.serverFeatures,
+            agentSlug: () => this.agentSlug() ?? undefined,
             retainOperation: (id: string) => {
               this.callerOperationId ??= id;
             },

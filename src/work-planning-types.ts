@@ -3,6 +3,7 @@
 import { z } from 'zod';
 const id = z.string().uuid();
 const oid = z.string().regex(/^[0-9a-f]{40,64}$/);
+const agentSlugShape = /^[a-z]{2,10}-[a-z]{2,10}$/;
 const planningFields = {
   kind: z.enum(['issue', 'initiative']),
   title: z.string().trim().min(1),
@@ -78,6 +79,16 @@ export const planningItemSchema = z.object({
   at: z.string(),
   provenance: z.literal('user-declared-local'),
 });
+/** Discussion fields (Item 9a3d6f5f), all optional so older rows and readers stay valid. `author` is the account the
+ * hosted replay observed (public reads map it to a Forge handle); `agent` is the writing agent session's slug from the
+ * fixed lists, so it can name no person; `replyTo` is the root comment of its thread; `decision` marks a comment whose
+ * text was also written into the Item body's Decisions section. */
+const discussionFields = {
+  author: z.string().min(1).max(200).optional(),
+  agent: z.string().regex(agentSlugShape).optional(),
+  replyTo: id.optional(),
+  decision: z.literal(true).optional(),
+};
 export const planningCommentSchema = z.object({
   id,
   itemId: id,
@@ -86,6 +97,7 @@ export const planningCommentSchema = z.object({
   text: z.string(),
   at: z.string(),
   provenance: z.literal('user-declared-local'),
+  ...discussionFields,
 });
 export const planningPutSchema = z.object({
   action: z.literal('put-planning-item'),
@@ -100,6 +112,14 @@ export const planningCommentCommandSchema = z.object({
   itemId: id,
   authorLabel: z.string().trim().default(''),
   text: z.string().min(1),
+  /** Reply in the thread of this comment (a reply to a reply joins the same thread). */
+  replyTo: id.optional(),
+  /** Also write the text into the Item body's Decisions section, with the date and the author label. */
+  decision: z.boolean().optional(),
+  /** The writing agent session's slug; anything outside the fixed lists is dropped by the reducer. */
+  agent: z.string().max(40).optional(),
+  /** Set by the hosted server for a decision: the writer's public label for the body line. */
+  decidedBy: z.string().max(80).optional(),
 });
 export const planningWriteSchema = z.discriminatedUnion('action', [
   planningPutSchema,
