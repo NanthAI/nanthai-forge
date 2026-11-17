@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { hostedAgentActions, hostedAgentPlanningActions } from '../dist/hosted-agent-contract.js';
+import { policyPreset } from '../dist/autonomy-policy.js';
 import { hostedContractFeatures } from '../dist/hosted-contract-features.js';
 const { capabilities } = await import(moduleUrl('../convex/projectHostedAgent.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
@@ -136,7 +137,14 @@ test('contract features: the server names the asked features its code implements
     'planning-put-keeps-omitted',
   ]);
   assert.deepEqual((await ask([])).features, []);
-  // Every name this build's CLI may ask for is implemented by this build's server.
+  // Project-gated protocols are implemented but are advertised only after activation.
+  assert.deepEqual(
+    (await ask([...hostedContractFeatures])).features,
+    hostedContractFeatures.filter(feature => feature !== 'lane-holder-v1'),
+  );
+  s.patch('hostedProjects', s.projectId, {
+    autonomyPolicy: { ...policyPreset('trusted'), accessIdentities: { laneHolders: true } },
+  });
   assert.deepEqual((await ask([...hostedContractFeatures])).features, [...hostedContractFeatures]);
   await assert.rejects(ask(Array.from({ length: 65 }, (_, index) => `f${index}`)), code('BAD_ARGUMENT'));
   assert(s.counts.every(count => count.writes === 0));

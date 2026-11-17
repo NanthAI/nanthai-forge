@@ -17,3 +17,5 @@
     .access-device > .meta { grid-column: 2; text-align: left; }
   }
 }
+
+.panes.access-single { grid-template-columns: minmax(0, 1fr); }

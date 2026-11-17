@@ -3,6 +3,7 @@ import { JournalNeeded, journalReadReply } from './projectJournalStore';
 import { v } from 'convex/values';
 import { query, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
+import { projectRole } from './projectRole';
 import { accessibleProject } from './projectAuthority';
 import { hostedRecordPage, hostedRecordBody, readHostedRecord, recordHead } from './projectHostedRecords';
 import { effectiveLifecycleRecord } from './projectHostedLifecycleOverlay';
@@ -35,13 +36,22 @@ async function laneRecord(
   return { lane: hostedLaneSchema.parse(JSON.parse(row.value)), project };
 }
 export const head = query({
-  args: identity,
+  args: { ...identity, includeHolder: v.optional(v.literal(true)) },
   returns: v.object({
     head: v.string(),
     version: v.number(),
     sourceVersion: v.number(),
     lifecycleVersion: v.number(),
     /** When the Lane's record last changed (save, sync or lifecycle): no extra reads. */
+    holder: v.optional(
+      v.object({
+        sessionId: v.optional(v.string()),
+        name: v.union(v.string(), v.null()),
+        since: v.number(),
+        lastSeen: v.number(),
+        mine: v.boolean(),
+      }),
+    ),
     lastActivityAt: v.string(),
     /** Present once an accepted landing carried this Lane's saved head: receipt, accepted commit (State id), time,
      * and whether the Lane's current head is still that head. Absent while nothing has landed. */
@@ -59,7 +69,14 @@ export const head = query({
   }),
   handler: async (ctx, input) => {
     try {
-      const { lane } = await laneRecord(ctx, input);
+      const { lane, project } = await laneRecord(ctx, input);
+      const viewer = (await ctx.auth.getUserIdentity())!.subject;
+      const holderVisible =
+        input.includeHolder &&
+        lane.holder &&
+        (project.visibility !== 'public' ||
+          project.owner === viewer ||
+          Boolean(await projectRole(ctx, project, viewer)));
       // Same query, one indexed read: the overlap row carries the landing stamp.
       const landed = (
         await ctx.db
@@ -70,6 +87,17 @@ export const head = query({
           .unique()
       )?.landed;
       return {
+        ...(lane.holder && holderVisible
+          ? {
+              holder: {
+                ...(lane.holder.sessionId ? { sessionId: lane.holder.sessionId } : {}),
+                name: lane.holder.agent ?? null,
+                since: lane.holder.since,
+                lastSeen: lane.holder.lastSeen,
+                mine: lane.holder.actor === viewer,
+              },
+            }
+          : {}),
         lastActivityAt: lane.at,
         ...(landed
           ? {

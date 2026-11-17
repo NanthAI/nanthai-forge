@@ -314,6 +314,7 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
   // still builds both requests from the one `then` the saved request carries.
   const then = await session.journal.retain('resolve-then', async () => ({
     kind: 'resolve' as const,
+    ...(session.holderSessionId ? { holderSessionId: session.holderSessionId } : {}),
     operationId: session.journal.operationId,
     authorityEpoch: session.capabilities.authority.epoch,
     lifecycleVersion: marker.selection.lifecycleVersion,
@@ -328,7 +329,16 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
       session.root,
       { operationId: saveOperationId, message: command.message },
       session.exchange,
-      { ...saveContract(session.capabilities), ...(chain ? { then } : {}) },
+      {
+        ...saveContract(session.capabilities),
+        ...(session.holderSessionId
+          ? {
+              holderSessionId: session.holderSessionId,
+              ...(session.sessionClaim ? { session: session.sessionClaim } : {}),
+            }
+          : {}),
+        ...(chain ? { then } : {}),
+      },
       false,
       { action: 'resolve', parameters: { ...command, operationId: session.journal.operationId } },
       undefined,

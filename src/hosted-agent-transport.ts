@@ -110,7 +110,7 @@ import { gcNestedLanesHourly } from './client-cache-gc.js';
 import { hostedStartResultSchema } from './hosted-lane.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { HostedAgentJournal, agentSessionKey, hostedAgentRoot } from './hosted-agent-journal.js';
-import { sessionAgentSlug } from './agent-slug-session.js';
+import { sessionAgentSlug, sessionAgentIdentity } from './agent-slug-session.js';
 import { detectedClientProcess } from './agent-client-process.js';
 import {
   hostedAgentAction,
@@ -951,6 +951,32 @@ export class HostedAgentTransport {
         return await this.clientAction(action, command.data as Record<string, unknown>);
       if (action === 'check-settings')
         return this.response(action, null, await hostedCheckSettings(this.query.bind(this), capabilities));
+      if (observation && action === 'status' && (command.data as { whoami?: boolean }).whoami) {
+        const identity = { ...sessionAgentIdentity(this.agentSession), person: capabilities.actor };
+        const laneId =
+          (command.data as { laneId?: string }).laneId ?? readHostedLaneCheckout(this.root)?.selection.laneId;
+        const lane = laneId
+          ? ((await this.observe({ laneId, whoami: true })) as Record<string, unknown>)
+          : null;
+        const holder = lane?.holder as { sessionId?: string; mine?: boolean } | undefined;
+        return this.response(
+          action,
+          null,
+          {
+            identity: { ...identity, device: capabilities.device ?? null },
+            lane: lane ? { ...lane, laneId } : null,
+            holds: Boolean(holder?.mine && holder.sessionId === identity.sessionId),
+            whyNone: !lane
+              ? 'Outside a Lane checkout.'
+              : !holder
+                ? 'No session holder is recorded for this Lane.'
+                : holder.mine && holder.sessionId === identity.sessionId
+                  ? null
+                  : 'Another session holds this Lane.',
+          },
+          laneId,
+        );
+      }
       if (observation && action === 'status' && Object.keys(command.data).length === 0)
         return this.response(
           action,
@@ -1053,6 +1079,19 @@ export class HostedAgentTransport {
         capabilities,
         journal,
         ...(this.sentAgent() ? { agent: this.sentAgent()! } : {}),
+        ...(this.serverFeatures?.includes('lane-holder-v1')
+          ? {
+              holderSessionId: sessionAgentIdentity(this.agentSession).sessionId,
+              sessionClaim: {
+                ...(sessionAgentIdentity(this.agentSession).app
+                  ? { app: sessionAgentIdentity(this.agentSession).app! }
+                  : {}),
+                ...(sessionAgentIdentity(this.agentSession).derivation
+                  ? { identityFrom: sessionAgentIdentity(this.agentSession).derivation! }
+                  : {}),
+              },
+            }
+          : {}),
         ...(this.serverFeatures?.includes('landing-agent-run') && this.agentSlug()
           ? { landingAgent: this.agentSlug()! }
           : {}),
@@ -1293,7 +1332,7 @@ export class HostedAgentTransport {
           };
         }
       }
-      if (action === 'open') {
+      if (action === 'open' && (result as { kind?: string }).kind !== 'handoff-offered') {
         const opened = result as { root?: unknown; laneId?: unknown };
         const path = typeof opened.root === 'string' ? opened.root : resolve(root);
         recordLane({
@@ -1959,7 +1998,11 @@ export class HostedAgentTransport {
             }
           : {}),
       });
-    if (laneId) return this.query('projectHostedLanes:head', { laneId });
+    if (laneId)
+      return this.query('projectHostedLanes:head', {
+        laneId,
+        ...(command.whoami && this.serverFeatures?.includes('lane-holder-v1') ? { includeHolder: true } : {}),
+      });
     if (!kind)
       return this.query('projectHostedFinishObserve:page', {
         operationId,
@@ -2008,6 +2051,8 @@ export type HostedAgentSession = {
   /** Agent-default finish gates (preflight); refusals throw, advisories return. */
   pathNotice?: (paths: string[] | null) => void;
   saveNotice?: SaveContract['onCapture'];
+  holderSessionId?: string;
+  sessionClaim?: import('zod').infer<typeof import('./hosted-lane.js').sessionClaimSchema>;
   finishGates?: (laneId: string, head: string, tree?: string) => Promise<Record<string, unknown>>;
   /** The `gates` argument for this finish's landing (feature land-gates); undefined when not sent. */
   landGates?: (composeOperationId: string) => string | undefined;

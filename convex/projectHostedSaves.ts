@@ -4,6 +4,7 @@ import { sourceProgress } from './projectSourceProgress';
 import { boardWake } from './projectBoardDelivery';
 import { hostedSaveState } from '../src/hosted-save-state';
 import { boundOverlapChanges, type OverlapChange } from '../src/hosted-overlap';
+import { sessionIdentity } from './projectSessionIdentity';
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
 import { activeProject } from './projectAuthority';
@@ -21,9 +22,10 @@ import {
   type SaveIdentity,
 } from './projectHostedSaveStore';
 import { refuseLiveLaneFinish } from './projectHostedLaneFinish';
-import { requireMemberAuthorityById } from './projectLaneAuthority';
+import { requireLaneSourceAuthorityById } from './projectLaneAuthority';
 import { invariant } from '../src/errors';
 import { sanitizeOutside } from '../src/run-evidence';
+import { requireLaneHolder, laneSession } from './projectLaneHolder';
 import { report } from './errors';
 import { chainProgress } from './projectHostedResolveChainProgress';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -105,11 +107,13 @@ export const prepare = mutation({
           resourceVersion: request.expected.version,
           sourceRevision: request.expected.sourceVersion,
         };
+      const holderSessionId = await laneSession(ctx, request.holderSessionId);
       // Refuse before any operation exists so a later explicit save starts clean.
       // An empty delta never moves the head, so it keeps the live finish's proof.
       if (request.pages && !request.supersedeFinish) {
         const current = await saveLane(ctx, { ...auth, laneId: request.laneId });
-        await requireMemberAuthorityById(ctx, input.projectId, current.actor, auth.actor, 'Lane');
+        requireLaneHolder(current, auth.actor, holderSessionId);
+        await requireLaneSourceAuthorityById(ctx, input.projectId, current, auth.actor);
         if (current.state === 'active' && sameSaveLane(current, request.expected))
           await refuseLiveLaneFinish(ctx, {
             projectId: input.projectId,
@@ -161,8 +165,9 @@ export const prepare = mutation({
       // A refusal throws, and the whole transaction (this operation included) rolls back.
       if (input.uploads) await refuseRecipeUploads(ctx, input.projectId, input.uploads);
       const lane = await saveLane(ctx, { ...auth, laneId: request.laneId });
+      requireLaneHolder(lane, auth.actor, holderSessionId);
       // Only the Lane author or the project owner saves over a Lane (Issue 8809fba5).
-      await requireMemberAuthorityById(ctx, input.projectId, lane.actor, auth.actor, 'Lane');
+      await requireLaneSourceAuthorityById(ctx, input.projectId, lane, auth.actor);
       invariant(
         sameSaveLane(lane, request.expected),
         'WORK_STALE',
@@ -170,6 +175,11 @@ export const prepare = mutation({
       );
       const baseline = await saveObject(ctx, input.projectId, { sha256: lane.head }, 'save');
       const state = {
+        ...(holderSessionId && lane.holder
+          ? {
+              session: sessionIdentity(holderSessionId, request.session, lane.holder.since, ctx.forgeDevice),
+            }
+          : {}),
         request,
         baseline,
         next: request.pages,

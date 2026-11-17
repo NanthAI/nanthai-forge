@@ -128,7 +128,9 @@ export async function writeHostedRecord(
       complete?: boolean;
       baseSequence?: number;
       intent?: string;
-      agent?: string;
+      agent?: string | null;
+      holderChanged?: true;
+      session?: import('zod').infer<typeof import('../src/hosted-lane').sessionMetadataSchema>;
       /** A sync moved the Lane's base to a newer main: keep its saved-path evidence (4f167dfd). */
       rebased?: boolean;
     };

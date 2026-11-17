@@ -8,7 +8,8 @@ export const authTables = {
     userId: v.id('users'),
     operationId: v.string(),
     request: v.string(),
-    kind: v.union(v.literal('legacy-passkey'), v.literal('github')),
+    kind: v.union(v.literal('legacy-passkey'), v.literal('github'), v.literal('device')),
+    /** Browser session, or (kind device) the device sign-in operation reference. */
     sessionId: v.string(),
     identityId: v.string(),
     at: v.number(),

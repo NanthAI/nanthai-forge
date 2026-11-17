@@ -428,7 +428,11 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         session.root,
         { operationId: saveOperationId, message: command.message ?? 'Agent change' },
         session.exchange,
-        { ...saveContract(session.capabilities), onCapture: session.saveNotice },
+        {
+          ...saveContract(session.capabilities),
+          ...(session.holderSessionId ? { holderSessionId: session.holderSessionId } : {}),
+          onCapture: session.saveNotice,
+        },
         false,
         {
           action: 'finish',

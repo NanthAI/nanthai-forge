@@ -91,7 +91,7 @@ export function registerHostedAgentWorkflow(
     {
       name: 'forge_task',
       short:
-        'Lane writes and setup. After land, wait until terminal. Unknown reply: replay the same UUID. Rules: help forge_task.',
+        'Lane writes/setup. Land: wait until terminal. Unknown reply: replay same UUID. Help: forge_task.',
       actions: [
         'start',
         'open',
@@ -123,14 +123,14 @@ export function registerHostedAgentWorkflow(
     },
     {
       name: 'forge_check',
-      short: 'Check a Candidate, confirm tests, or read runs and retained log tails.',
+      short: 'Check a Candidate, confirm tests, read runs and retained logs.',
       actions: ['check', 'run', 'observe', 'tests', 'confirm-tests', 'log'],
       description:
         'save modes check|contract use check/confirm-tests fields; old names work, run=check. tests proposes proving tests; confirm-tests stores a <90s contract from complete exact-Candidate timings (runId,expectedHead,expectedVersion). Optional tests replaces that list; gates unchanged. Check a pinned Candidate or finitely read a run/source operation/submission. Reads start no compute/subscription; log: runId, tail/stream/shard/attempt reads retained redacted output; full logs remain at the provider. forge_wait observes live.',
     },
     {
       name: 'forge_work_overview',
-      short: 'Read paged records, status, metrics and board. help {topic}: exact schema and guidance.',
+      short: 'Paged records, status, metrics, board. help {topic}: schema and guidance.',
       actions: [
         'status',
         'capabilities',

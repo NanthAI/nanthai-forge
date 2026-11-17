@@ -14,7 +14,9 @@ import { requireOwnerPerson } from './ownerPerson';
 import { invariant } from '../src/errors';
 
 const memberChange = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('contributor'), contributor: z.string().min(1) }).strict(),
+  z
+    .object({ kind: z.literal('contributor'), contributor: z.string().min(1), email: z.string().optional() })
+    .strict(),
   z
     .object({
       kind: z.literal('invite'),

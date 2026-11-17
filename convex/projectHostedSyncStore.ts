@@ -45,14 +45,14 @@ export const syncForJob = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedPro
     .withIndex('by_project_and_job', q => q.eq('projectId', projectId).eq('jobId', jobId))
     .unique();
 export async function loadSync(ctx: QueryCtx | MutationCtx, input: SaveIdentity, writing = true) {
-  await activeProject(ctx, input.projectId, input.actor);
+  const project = await activeProject(ctx, input.projectId, input.actor);
   const row = await syncRow(ctx, input);
   invariant(row, 'NOT_FOUND', 'Prepare this original hosted sync first.');
   const state = syncStateSchema.parse(JSON.parse(row.value));
   if (writing) await hostedWriteProject(ctx, input.projectId, input.actor, state.request.authorityEpoch);
   const operation = await hostedOperationRow(ctx, input.projectId, input.actor, input.operationId);
   invariant(operation, 'SOURCE_UNAVAILABLE', 'The original sync operation is unavailable.');
-  return { row, state, operation: hostedOperationSchema.parse(JSON.parse(operation.value)) };
+  return { row, state, project, operation: hostedOperationSchema.parse(JSON.parse(operation.value)) };
 }
 export async function writeSyncState(ctx: MutationCtx, id: Id<'projectHostedSyncs'>, state: SyncState) {
   await ctx.db.patch(id, { value: canonicalPayload(syncStateSchema.parse(state)) });

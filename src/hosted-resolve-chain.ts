@@ -9,6 +9,7 @@ export function resolveSyncRequest(then: SaveThen, laneId: string, saved: unknow
   const lane = saveResultSchema.parse(saved);
   return syncRequestSchema.parse({
     kind: 'resolve',
+    ...(then.holderSessionId ? { holderSessionId: then.holderSessionId } : {}),
     operationId: then.operationId,
     authorityEpoch: then.authorityEpoch,
     laneId,

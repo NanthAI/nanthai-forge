@@ -1,0 +1,6 @@
+{
+  "kind": "unreferencedExports",
+  "delta": -1,
+  "reason": "df06081d: AgentPresence is now consumed by the Sessions screen; merges the contract-only unused export into its runtime consumer.",
+  "date": "2026-11-17"
+}

@@ -48,14 +48,14 @@ export const saveRow = (ctx: QueryCtx | MutationCtx, input: SaveIdentity) =>
     )
     .unique();
 export async function loadSave(ctx: QueryCtx | MutationCtx, input: SaveIdentity, writing = true) {
-  await activeProject(ctx, input.projectId, input.actor);
+  const project = await activeProject(ctx, input.projectId, input.actor);
   const row = await saveRow(ctx, input);
   invariant(row, 'NOT_FOUND', 'Prepare this original hosted save first.');
   const state = saveStateSchema.parse(JSON.parse(row.value));
   if (writing) await hostedWriteProject(ctx, input.projectId, input.actor, state.request.authorityEpoch);
   const opRow = await hostedOperationRow(ctx, input.projectId, input.actor, input.operationId);
   invariant(opRow, 'SOURCE_UNAVAILABLE', 'The original save operation is unavailable.');
-  return { row, state, operation: hostedOperationSchema.parse(JSON.parse(opRow.value)) };
+  return { row, state, project, operation: hostedOperationSchema.parse(JSON.parse(opRow.value)) };
 }
 export async function saveLaneRecord(
   ctx: QueryCtx | MutationCtx,

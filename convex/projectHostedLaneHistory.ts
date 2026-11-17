@@ -56,6 +56,7 @@ export async function journalLaneHistoryRead(
       head: lane.head,
       version: lane.version,
       lastActivityAt: lane.at,
+      holder: lane.holder ?? null,
       // Present once an accepted receipt carried one of this Lane's saved heads; null otherwise
       // (never landed, or landed before the landing stamp existed).
       landing: landed

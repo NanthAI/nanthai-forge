@@ -64,6 +64,7 @@ export const namedReads = [
   'records',
   'provenance',
   'status',
+  'whoami',
   'diff',
   'show',
   'history',
@@ -180,6 +181,7 @@ export function parseVerbForm(verb: string, rest: string[], operator = false): [
 
 /** The existing wire action for a form. Hosted keeps its schema-1 names (save, check). */
 export function lowerVerb(form: VerbForm, hosted: boolean): string {
+  if (form.verb === 'whoami') return 'status';
   const mode = form.flags.find(flag => flag !== '--check-only');
   if (form.verb === 'save' && !mode) return hosted ? 'save' : 'checkpoint';
   if (form.verb === 'save' && mode === '--check') return hosted ? 'check' : 'run';
@@ -198,6 +200,7 @@ export function landSaveCommand(
   selected: Record<string, unknown>,
   retained?: { accept?: unknown },
 ): Record<string, unknown> {
+  if (form.verb === 'whoami') return { ...selected, whoami: true };
   if (form.verb !== 'land' || !form.flags.includes('--save')) return selected;
   const checkOnly = form.flags.includes('--check-only');
   if (checkOnly) {

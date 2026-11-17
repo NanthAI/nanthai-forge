@@ -1,0 +1,4 @@
+{
+  "issue": "76e3ae31",
+  "reason": "Record the whoami read alias: it lowers to existing status and uses capability discovery plus the existing Lane head, with no identity RPC, dependency, timer or idle write. Synthetic lane-holder tests cover root and member/public reads. Existing tool summaries lose 42 bytes, paying for 35 bytes of fields (5716 <= 5723). All ceilings and prior measured report remain unchanged. Local installed CPU remains above the 500ms ceiling as recorded on 92dbde9d; hosted package retry previously failed only tool-list bytes. No existing public command can be removed compatibly."
+}

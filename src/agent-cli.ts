@@ -134,6 +134,17 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   const [form, rest] = requestedAction
     ? parseVerbForm(requestedAction, tail, options.operator)
     : [undefined, tail];
+  const whyAt = rest.indexOf('--why');
+  let why: string | undefined;
+  if (whyAt !== -1) {
+    invariant(
+      form && lowerVerb(form, true) === 'open' && rest[whyAt + 1]?.trim(),
+      'BAD_ARGUMENT',
+      'Use start --open --why REASON for an explicit Lane takeover.',
+    );
+    why = rest[whyAt + 1]!;
+    rest.splice(whyAt, 2);
+  }
   const [option, path] = rest;
   const canonical = (value: string) => (value === 'save' ? 'checkpoint' : value);
   let action = form ? canonical(lowerVerb(form, false)) : undefined;
@@ -170,6 +181,14 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
     'Command parameters must be a JSON object.',
   );
   let selected = parameters as Record<string, unknown>;
+  if (why !== undefined) {
+    invariant(
+      selected.reason === undefined || selected.reason === why,
+      'BAD_ARGUMENT',
+      'Use one takeover reason.',
+    );
+    selected = { ...selected, takeover: true, reason: why };
+  }
   if (client.budget !== undefined) {
     invariant(
       action === 'wait' || action === 'finish',

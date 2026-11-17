@@ -2,6 +2,7 @@
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
+import { mayTakeLane } from './accessPolicy';
 
 /**
  * Per-member authority on Lanes and landings (GitHub norm, owner 2026-11-07, Issue 8809fba5):
@@ -38,7 +39,32 @@ export async function requireMemberAuthorityById(
   actor: string,
   record: MemberRecord,
 ) {
+  // Keep the normal author's zero-read path, while every Lane uses the same named policy.
   if (actor === author) return;
   const project = await ctx.db.get(projectId);
   requireMemberAuthority({ owner: project?.owner ?? '' }, author, actor, record);
+}
+
+/** Taking over source never grants administrative ownership of the original person's Lane. */
+export function requireLaneSourceAuthority(
+  project: { owner: string },
+  lane: { actor: string; holder?: unknown },
+  actor: string,
+) {
+  if (!lane.holder) return requireMemberAuthority(project, lane.actor, actor, 'Lane');
+  invariant(
+    mayTakeLane(actor, lane.actor, project.owner),
+    'PROJECT_UNAVAILABLE',
+    'The current takeover policy does not allow this person to write this Lane.',
+  );
+}
+export async function requireLaneSourceAuthorityById(
+  ctx: QueryCtx | MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  lane: { actor: string; holder?: unknown },
+  actor: string,
+) {
+  if (lane.holder ? mayTakeLane(actor, lane.actor, '') : actor === lane.actor) return;
+  const project = await ctx.db.get(projectId);
+  requireLaneSourceAuthority({ owner: project?.owner ?? '' }, lane, actor);
 }

@@ -22,7 +22,9 @@ import { workerResultSchema } from '../src/hosted-source-worker-format';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 import { laneFinishes, laneFinishActiveMessage, supersedeLaneFinishes } from './projectHostedLaneFinish';
-import { invariant } from '../src/errors';
+import { ForgeError, invariant } from '../src/errors';
+import { requireLaneSourceAuthority } from './projectLaneAuthority';
+import { requireLaneHolder } from './projectLaneHolder';
 
 /** One small transaction: exact signed worker evidence, committed immutable State,
  * Lane CAS, one save record and original terminal receipt. No page/history walk. */
@@ -36,7 +38,7 @@ export async function publishHostedSave(
   chainInline = false,
 ) {
   const loaded = await loadSave(ctx, input, false),
-    { row, state, operation } = loaded;
+    { row, state, operation, project } = loaded;
   if (operation.terminal) return operation.terminal;
   // Recheck current epoch even after external work; completed replays above remain immutable.
   await loadSave(ctx, input);
@@ -81,15 +83,25 @@ export async function publishHostedSave(
     size = output.state.size;
   } else invariant(state.status === 'ready', 'SOURCE_JOB_INVALID', 'Complete save preparation first.');
   const lane = await saveLane(ctx, { ...input, laneId: state.request.laneId });
-  if (!sameSaveLane(lane, state.request.expected)) {
+  let holderRefusal: ForgeError | null = null;
+  try {
+    requireLaneHolder(lane, input.actor, state.session?.sessionId ?? state.request.holderSessionId);
+    requireLaneSourceAuthority(project, lane, input.actor);
+  } catch (error) {
+    if (!(error instanceof ForgeError)) throw error;
+    holderRefusal = error;
+  }
+  if (holderRefusal || !sameSaveLane(lane, state.request.expected)) {
     const terminal = {
       attemptId: operation.firstAttempt.id,
       at: operation.firstAttempt.at,
       outcome: {
         status: 'failed' as const,
         error: {
-          code: 'WORK_STALE',
-          message: 'Hosted Lane changed; the original delta is retained for sync or a new save.',
+          code: holderRefusal?.code ?? 'WORK_STALE',
+          message:
+            holderRefusal?.message ??
+            'Hosted Lane changed; the original delta is retained for sync or a new save.',
         },
       },
     };
@@ -142,10 +154,18 @@ export async function publishHostedSave(
       authorityEpoch,
       expectedVersion: lane.version,
       overlap: {
+        ...(state.session ? { session: state.session } : {}),
         ...(state.overlapChanges ? { changes: JSON.parse(state.overlapChanges) } : {}),
         complete: state.overlapComplete !== false,
       },
-      record: { ...lane, head, sourceVersion, version, at: first.at },
+      record: {
+        ...lane,
+        head,
+        sourceVersion,
+        version,
+        ...(lane.holder ? { holder: { ...lane.holder, lastSeen: Date.now() } } : {}),
+        at: first.at,
+      },
     });
   }
   // The same transaction ends this Lane's queued entries that needed a sync: the new head replaces

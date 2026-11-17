@@ -157,6 +157,8 @@ export const hostedContractFeatures = [
    * and hidden, and planning rows carry them. Without it the CLI refuses to send them, since an older server would
    * drop them silently. */
   'planning-model',
+  /** Optional session-bound Lane ownership; writers remain behind accessIdentities.laneHolders. */
+  'lane-holder-v1',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

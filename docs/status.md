@@ -580,5 +580,9 @@ in the viewing browser. Browser inactivity is one server setting, provisionally
 14 days pending owner confirmation. Current verified GitHub addresses replace
 previous values, including clearing an address the provider no longer reports.
 Draft Terms and Privacy pages are public under `/-`; account creation records
-the displayed draft version in its existing write. Final legal approval, stable
-device identities/settings and explicit Lane-holder changes remain open.
+the displayed draft version in its existing write. Explicit Lane holders, takeover
+and accepted handover preserve saved work and appear in Sessions and Lane history
+when the project rollout setting is enabled. CLI `whoami` reports its existing
+session identity without a new command. Final legal approval and stable device
+identities/settings remain open; the four access policies and browser inactivity
+still await owner confirmation.

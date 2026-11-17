@@ -41,6 +41,7 @@ export const personKeys = new Set([
 export const nameKeys = new Set(['actorDisplayName']);
 /** Email addresses are returned only to the project owner who entered them, or on account reads. */
 export const emailKeys = new Set(['email', 'emails']);
+const privateProvenance = new Set(['holder']);
 const keyPattern = new RegExp(`\\\\?"(?:${[...personKeys, ...nameKeys, ...emailKeys].join('|')})\\\\?"\\s*:`);
 /** Clerk account ids. Any other provider's subjects are recognised by their account row, which
  * every web sign-in and CLI device approval creates (urlAccounts.ensure). */
@@ -148,6 +149,10 @@ async function mapNode(view: View, node: unknown, person: boolean, shape?: Shape
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(record)) {
     const field = fieldOf(shape, key);
+    if (privateProvenance.has(key) && value && !(await view.role()).writer) {
+      if (field && !field.optional) out[key] = null;
+      continue;
+    }
     const mapped =
       nameKeys.has(key) || (emailKeys.has(key) && !(await view.role()).owner)
         ? REMOVE

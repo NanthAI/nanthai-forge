@@ -4,6 +4,8 @@ import { earlyPredecessor } from './projectHostedEarlyResolution';
 import { makeFunctionReference } from 'convex/server';
 import type { Id } from './_generated/dataModel';
 import { syncForJob } from './projectHostedSyncStore';
+import { requireLaneSourceAuthority } from './projectLaneAuthority';
+import { requireLaneHolder } from './projectLaneHolder';
 import type { MutationCtx } from './_generated/server';
 import { loadSync, hostedSyncInput, writeSyncState } from './projectHostedSyncStore';
 import { finishHostedOperation } from './projectHostedOperations';
@@ -22,7 +24,7 @@ import { syncLaneSelection } from './projectHostedSyncUpToDate';
 import { ForgeError, invariant } from '../src/errors';
 /** Constant-size final CAS: never reads other Lane heads, source pages or Channel history. */
 export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & { result: string }) {
-  const { row, state, operation } = await loadSync(ctx, input, false);
+  const { row, state, operation, project } = await loadSync(ctx, input, false);
   if (operation.terminal) return operation.terminal;
   await loadSync(ctx, input);
   const job = await loadSourceJob(ctx, input.projectId, row.jobId),
@@ -118,6 +120,13 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
   if (request.kind !== 'resolution' && request.kind !== 'revert') {
     const original = await saveLaneRecord(ctx, { ...input, laneId: request.laneId });
     lane = original.lane;
+    try {
+      requireLaneHolder(lane, input.actor, request.holderSessionId);
+      requireLaneSourceAuthority(project, lane, input.actor);
+    } catch (error) {
+      if (!(error instanceof ForgeError)) throw error;
+      return finish({ status: 'failed', error: { code: error.code, message: error.message } }, 'stale');
+    }
     clearOwnerProvenance = original.ownerOnly && !ownerInputs;
     if (!sameSaveLane(lane, request.expected))
       return finish(
@@ -198,6 +207,19 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
       at: first.at,
       intentId: state.intentId,
       actor: input.actor,
+      ...(request.holderSessionId
+        ? {
+            holder: {
+              actor: input.actor,
+              sessionId: request.holderSessionId,
+              ...(state.lane?.holder?.sessionId === request.holderSessionId && state.lane.holder.agent
+                ? { agent: state.lane.holder.agent }
+                : {}),
+              since: Date.parse(first.at),
+              lastSeen: Date.parse(first.at),
+            },
+          }
+        : {}),
       base: state.base,
       head: result.state.sha256,
       state: 'active',
@@ -234,6 +256,19 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
       at: first.at,
       intentId: state.intentId,
       actor: input.actor,
+      ...(request.holderSessionId
+        ? {
+            holder: {
+              actor: input.actor,
+              sessionId: request.holderSessionId,
+              ...(state.lane?.holder?.sessionId === request.holderSessionId && state.lane.holder.agent
+                ? { agent: state.lane.holder.agent }
+                : {}),
+              since: Date.parse(first.at),
+              lastSeen: Date.parse(first.at),
+            },
+          }
+        : {}),
       base: state.base,
       head: result.state.sha256,
       state: 'active',

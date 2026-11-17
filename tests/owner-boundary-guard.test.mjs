@@ -23,6 +23,7 @@ const allowed = {
   projectHostedAcceptance: ['approve'], // Existing acceptanceActor person gate.
   projectHostedApprovals: ['decide', 'observe'], // decide already requires a person.
   projectHostedBirth: ['makeEditable'],
+  projectHostedLanes: ['head'], // Read-only source pins and opt-in member-only holder metadata; grants no authority.
   projectHostedDecisions: ['decide', 'setMaintainer'],
   projectHostedDormant: ['abandon'],
   projectHostedLandingPriority: ['prioritize'],

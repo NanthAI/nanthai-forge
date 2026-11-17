@@ -205,6 +205,17 @@ export const hostedAgentCommandSchemas = {
   open: z
     .object({
       laneId: uuid,
+      takeover: z.literal(true).optional(),
+      acceptHandoff: z.uuid().optional(),
+      reason: z.string().trim().min(1).optional(),
+      handoff: z
+        .object({
+          sessionId: z.string().regex(/^[0-9a-f]{64}$/),
+          agent: z.string().optional(),
+          person: z.string().optional(),
+        })
+        .strict()
+        .optional(),
       expected: saveExpectedSchema.omit({ lifecycleVersion: true }).optional(),
       paths: z.array(z.string().refine(safeRelative)).optional(),
     })
@@ -358,6 +369,7 @@ export const hostedAgentCommandSchemas = {
   status: z
     .object({
       ...lane,
+      whoami: z.literal(true).optional(),
       kind: z.enum(['save', 'compose', 'sync', 'revert', 'lifecycle']).optional(),
       operationId: uuid.optional(),
       submissionId: uuid.optional(),

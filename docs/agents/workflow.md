@@ -82,7 +82,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `tests` | `candidateId, runId?, timingBasis?, tests?, expectedHead?, expectedVersion?, operationId?` |
 | `save --contract` | `candidateId, runId?, timingBasis?, tests?, expectedHead?, expectedVersion?, operationId?` |
 | `start` | `outcome?, constraints?, intentId?, initialHead?, stackOn?, stackEntry?, planningItemId?, id?, itemId?, scope?, path?, open?, installScripts?, operationId?` |
-| `start --open` | `laneId, expected?, paths?, operationId?` |
+| `start --open` | `laneId, takeover?, acceptHandoff?, reason?, handoff?, expected?, paths?, operationId?` |
 | `save` | `laneId?, message?, supersedeFinish?, operationId?` |
 | `save --candidate` | `laneId?, message?, intentId?, inputs?, dependencies?, operationId?` |
 | `save --sync` | `laneId?, message?, candidateId?, target?, ontoMain?, stackOn?, predecessor?, apply?, cleanOnly?, operationId?` |
@@ -103,7 +103,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `x complete-merged` | `operationId?` |
 | `x abandon-dormant` | `apply?, limit?, operationId?` |
 | `start --reopen` | `laneId?, target?, operationId?` |
-| `status` | `laneId?, kind?, operationId?, submissionId?, runId?, version?, summary?, reports?, cursor?` |
+| `status` | `laneId?, whoami?, kind?, operationId?, submissionId?, runId?, version?, summary?, reports?, cursor?` |
 | `observe` | `kind?, operationId?, submissionId?, runId?, version?` |
 | `metrics` | `from?, to?, limit?, cursor?, contextDays?, operationId?` |
 | `capabilities` | `operationId?` |

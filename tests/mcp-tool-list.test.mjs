@@ -63,7 +63,8 @@ test('the hosted tool list stays inside its context budget', async t => {
   // 675 -> 666 (d3357f40): forge_planning says Items and is 9 bytes shorter, paying for the one `fields` token.
   // 666 -> 632 (9a3d6f5f): forge_planning drops its status:all hint (the field line lists it, help explains it),
   // paying for the `replyTo decision:b` comment tokens.
-  assert.equal(descriptionBytes, 632, 'cost fixes preserve the per-session MCP description bytes');
+  // 632 -> 590 (76e3ae31): concise existing summaries pay for explicit holder/session fields.
+  assert.equal(descriptionBytes, 590, 'cost fixes preserve the per-session MCP description bytes');
   t.diagnostic(`tools/list ${chars} chars (~${Math.ceil(chars / 4)} tokens); descriptions ${descriptions}`);
   assert(chars <= LIST_CHARS, `tool list characters: ${chars}`);
   // Codex sends each tool as a function definition under a server-prefixed name: same budget.

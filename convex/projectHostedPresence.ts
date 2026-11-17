@@ -16,6 +16,7 @@ type PresenceValue = {
   intentId: string;
   actor: string;
   agent?: string;
+  session?: import('zod').infer<typeof import('../src/hosted-lane').sessionMetadataSchema>;
   goal: string;
   changes: string;
   at: number;
@@ -39,6 +40,7 @@ export async function trackHostedPresence(
     intentId: string;
     actor: string;
     agent?: string;
+    session?: import('zod').infer<typeof import('../src/hosted-lane').sessionMetadataSchema>;
     goal: string;
     changes: string;
   } | null,
@@ -55,6 +57,7 @@ export async function trackHostedPresence(
     intentId: value.intentId,
     actor: value.actor,
     ...(value.agent ? { agent: value.agent } : {}),
+    ...(value.session ? { session: value.session } : {}),
     goal: value.goal.slice(0, PRESENCE_GOAL_CHARS),
     ...presencePaths(value.changes),
     at: value.at,
@@ -65,6 +68,7 @@ export async function trackHostedPresence(
       old.intentId === row.intentId &&
       old.actor === row.actor &&
       old.agent === value.agent &&
+      JSON.stringify(old.session) === JSON.stringify(value.session) &&
       old.goal.slice(0, PRESENCE_GOAL_CHARS) === row.goal &&
       before.pathCount === row.pathCount &&
       same(before.paths, row.paths) &&

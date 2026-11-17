@@ -1387,6 +1387,7 @@
     "tests",
     "uninstall-hooks",
     "wait",
+    "whoami",
     "withdraw"
   ]
 }

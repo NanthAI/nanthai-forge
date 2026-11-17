@@ -74,6 +74,8 @@ export const overlapEvidenceLevel = (capabilities: {
 /** What the server's save calls accept, from the capability read the session already made. */
 export type SaveContract = {
   onCapture?: ((capture: Awaited<ReturnType<typeof captureHostedSave>>) => void | Promise<void>) | undefined;
+  holderSessionId?: string;
+  session?: import('zod').infer<typeof import('./hosted-lane.js').sessionClaimSchema>;
   overlapEvidence: OverlapEvidenceLevel;
   submitPage: boolean;
   durations?: boolean;
@@ -308,6 +310,12 @@ async function saveOnce(
     request = saveRequestSchema.parse({
       operationId: command.operationId,
       laneId: selection.laneId,
+      ...(contract.holderSessionId
+        ? {
+            holderSessionId: contract.holderSessionId,
+            ...(contract.session ? { session: contract.session } : {}),
+          }
+        : {}),
       authorityEpoch: selection.authority.epoch,
       expected: {
         head: selection.head,

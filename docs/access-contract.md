@@ -50,3 +50,35 @@ writers, and enabling either later uses the existing owner policy mechanism.
 Neither setting changes the four provisional decisions described above.
 
 The optional session provenance reader distinguishes client-reported app/thread labels from the server's credential-bound device snapshot. Legacy records keep unknown provenance unknown. Compose and sync readers accept a holder reference before their writers send it. Device renewal receipts reuse the account-owned credential; there is no new table, index, timer or idle write.
+
+
+## Explicit holders
+
+Projects with `accessIdentities.laneHolders` enabled bind a new Lane to the full
+session reference. `nforge agent . whoami` uses the existing status read to show
+the person, reported app, device and held Lane. `open` resumes that session;
+`open --why REASON` records an explicit takeover. A handover offers the saved
+Lane to the named recipient and leaves its current holder in place until the
+recipient accepts the offer. Offers and transitions reuse source-operation
+receipts; retries return the original result.
+
+Holder changes preserve the saved head and record the previous holder, successor,
+actor, time and reason. They neither cancel checks nor discard earlier saves.
+Save, sync and compose check the current holder at their existing source reads;
+publication checks it again, so a delayed former holder cannot publish over a
+successor. A refused save retains local files and captured source. If checkout
+fails after a takeover commits, the CLI reports that committed operation and its
+retry. Independent local directories preserve unsaved files; sharing one directory
+between processes remains an operating-system boundary, not an isolated workspace.
+
+The Sessions screen reads one presence page (25 returned rows, at most 100 rows
+or 64 KiB scanned) without a heartbeat. It groups the loaded observations by
+person and device and opens window details on demand. A session profile uses the
+same filtered read. The Holder screen uses one current-record read and the
+existing paginated activity feed, including archived history. No list invents
+unreported app, model, device or session provenance. Counts describe the loaded
+page, rather than an organisation total. Device labels are projected through the
+central owner-visibility policy; public source views omit holder provenance.
+The app reuses the existing design-system regions, rows, controls and activity
+feed. The source guards reuse existing reads; no ordinary save or landing RPC is
+added. Rollout remains off by default pending the owner decisions and cost review.

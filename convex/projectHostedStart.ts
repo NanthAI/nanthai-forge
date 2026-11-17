@@ -16,6 +16,9 @@ import {
 } from '../src/hosted-lane';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
+import { effectivePolicy } from '../src/autonomy-policy';
+import { sessionIdentity as provenance } from './projectSessionIdentity';
+import { digest } from '../src/state/hash';
 import { report } from './errors';
 import { isStored } from './projectObjectFields';
 import { findObject } from './projectObjectFind';
@@ -82,7 +85,11 @@ function startReply(value: unknown, noticeVersion?: 1, openLanesVersion?: 1) {
 }
 
 /** One mutation commits the Intent, Lane and original result, with no global revision write. */
-async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent') {
+async function execute(
+  ctx: MutationCtx & { forgeDevice?: import('./_generated/dataModel').Doc<'cliCredentials'> | null },
+  input: Input,
+  action: 'start' | 'intent',
+) {
   const user = await ctx.auth.getUserIdentity();
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to start hosted work.');
   const actor = user.subject,
@@ -96,16 +103,8 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
     'Send a hosted start with an operation UUID and exact main pins.',
   );
   // The agent slug only labels the Lane for other agents: a retry from another session is the same start.
-  const {
-    noticeVersion,
-    openLanesVersion,
-    agent,
-    session: _readerOnlyClaim,
-    holderSessionId: _readerOnlySession,
-    ...semanticRequest
-  } = validated.data;
-  void _readerOnlySession;
-  void _readerOnlyClaim;
+  const { noticeVersion, openLanesVersion, agent, session, holderSessionId, ...semanticRequest } =
+    validated.data;
   const payload = { action, ...semanticRequest };
   invariant(action === 'start' || payload.intent.kind === 'new', 'BAD_ARGUMENT', 'Create a new Intent.');
   let overlapIntent = payload.intent.kind === 'existing' ? payload.intent.intentId : payload.intent.outcome;
@@ -288,6 +287,26 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
         status: 'active',
       },
     });
+  const holderEnabled = effectivePolicy(project).accessIdentities?.laneHolders === true;
+  const sessionIdentity =
+    holderSessionId ??
+    (typeof user.forgeAuthSession === 'string'
+      ? digest(`forge-browser:${user.forgeAuthSession}`)
+      : undefined);
+  invariant(
+    !holderEnabled || sessionIdentity,
+    'CLI_UPGRADE_REQUIRED',
+    'Update Forge before starting a session-bound Lane.',
+  );
+  const holder = holderEnabled
+    ? {
+        actor,
+        ...(agent ? { agent } : {}),
+        sessionId: sessionIdentity!,
+        since: Date.parse(first.at),
+        lastSeen: Date.parse(first.at),
+      }
+    : undefined;
   const lane =
     action === 'start'
       ? hostedLaneSelectionSchema.parse({
@@ -302,6 +321,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
           sourceVersion: 0,
           lifecycleVersion: 0,
           state: 'active',
+          ...(holder ? { holder } : {}),
           authority: main.authority,
         })
       : null;
@@ -312,7 +332,14 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
       authorityEpoch: expected.authorityEpoch,
       expectedVersion: null,
       ownerOnly,
-      overlap: { baseSequence: main.sourceRevision, intent: overlapIntent, ...(agent ? { agent } : {}) },
+      overlap: {
+        baseSequence: main.sourceRevision,
+        intent: overlapIntent,
+        ...(agent ? { agent } : {}),
+        ...(holderEnabled && sessionIdentity
+          ? { session: provenance(sessionIdentity, session, Date.parse(first.at), ctx.forgeDevice) }
+          : {}),
+      },
       record: {
         kind: 'lane',
         id: laneId,
@@ -327,6 +354,7 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
         sourceVersion: 0,
         lifecycleVersion: 0,
         state: 'active',
+        ...(holder ? { holder } : {}),
         authorityEpoch: expected.authorityEpoch,
       },
     });

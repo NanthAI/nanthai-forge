@@ -16,7 +16,7 @@ import { z } from 'zod';
 import { githubActionsRunsOnSchema, githubActionsRunnerDescription } from './github-actions-runner-label.js';
 import { makeFunctionReference } from 'convex/server';
 import { hostedAgentCommandSchemas, type HostedAgentAction } from './hosted-agent-contract.js';
-import { hostedStartSchema, hostedStartResultSchema } from './hosted-lane.js';
+import { hostedStartSchema, hostedStartResultSchema, hostedLaneSelectionSchema } from './hosted-lane.js';
 import { checkoutHostedLane } from './hosted-lane-checkout.js';
 import { adoptNestedLaneCopy } from './hosted-lane-adopt.js';
 import { checkoutRequired, openLaneRoot, SELECT_LANE } from './hosted-lane-location.js';
@@ -52,7 +52,7 @@ import {
   selectAgentLane,
   SyncPinsStale,
 } from './hosted-agent-source.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import { plannedIntent } from './hosted-agent-planning.js';
 import { unadvertisedActionError } from './hosted-agent-version.js';
 import { hostedActionError } from './hosted-action-error.js';
@@ -545,6 +545,12 @@ export async function executeHostedAgent(
         ...(session.capabilities.needsFix !== undefined ? { noticeVersion: 1 } : {}),
         ...(session.capabilities.openLanesVersion === 1 ? { openLanesVersion: 1 } : {}),
         ...(session.agent ? { agent: session.agent } : {}),
+        ...(session.holderSessionId
+          ? {
+              holderSessionId: session.holderSessionId,
+              ...(session.sessionClaim ? { session: session.sessionClaim } : {}),
+            }
+          : {}),
         authorityEpoch: epoch,
         expectedMain: { head: main.head, receiptId: main.receipt.id },
         ...((parent?.head ?? command.initialHead)
@@ -576,22 +582,81 @@ export async function executeHostedAgent(
   }
   if (action === 'open') {
     const command = hostedAgentCommandSchemas.open.parse(input);
-    // Checkout authorizes before transfer and install. Journal hits skip it;
-    // adopting a nested copy also needs authorization before moving local files.
-    if (
-      session.journal.get('open-result') !== undefined ||
-      readLaneEntry(command.laneId)?.root.endsWith(`.forge-client${sep}lanes${sep}${command.laneId}`)
-    )
-      await session.query('projectHostedLanes:select', { laneId: command.laneId });
-    return session.journal.retain('open-result', async () => {
-      const movedFrom = adoptNestedLaneCopy(session.root, command.laneId, session.address);
-      const opened = await checkoutHostedLane(
-        session.root,
-        { ...command, ...session.address, operationId },
-        new ConvexLaneTransport(session.exchange),
+    const { takeover, reason, handoff, acceptHandoff, ...checkoutCommand } = command;
+    let prepared: { selection?: import('./hosted-lane.js').HostedLaneSelection } = {};
+    if (session.holderSessionId) {
+      const observed = await session.mutation<{
+        status: string;
+        result: { lane: unknown };
+        observedLane?: unknown;
+      }>('projectHostedHolders:take', {
+        request: canonicalPayload({
+          operationId,
+          laneId: command.laneId,
+          authorityEpoch: epoch,
+          sessionId: session.holderSessionId,
+          ...(session.sessionClaim ? { session: session.sessionClaim } : {}),
+          ...(session.agent ? { agent: session.agent } : {}),
+          ...(command.expected
+            ? { expected: { head: command.expected.head, version: command.expected.version } }
+            : {}),
+          ...(takeover ? { takeover } : {}),
+          ...(acceptHandoff ? { acceptHandoff } : {}),
+          ...(reason ? { reason } : {}),
+          ...(handoff ? { handoff } : {}),
+        }),
+      });
+      invariant(
+        observed.status === 'completed',
+        'WORK_STALE',
+        'The holder change did not complete. Your local work remains.',
       );
-      return movedFrom ? { ...opened, movedFrom } : opened;
-    });
+      prepared = {
+        selection: parseHostedResponse(
+          hostedLaneSelectionSchema,
+          observed.observedLane ?? observed.result.lane,
+        ),
+      };
+      // A handover gives the Lane away; it never opens or rewrites the recipient's local directory.
+      if (handoff) return observed.result;
+    } else {
+      invariant(
+        !takeover && !handoff && !acceptHandoff,
+        'CLI_UPGRADE_REQUIRED',
+        'Explicit Lane holders are not enabled by this server/project.',
+      );
+      if (
+        session.journal.get('open-result') !== undefined ||
+        readLaneEntry(command.laneId)?.root.endsWith(`.forge-client${sep}lanes${sep}${command.laneId}`)
+      )
+        await session.query('projectHostedLanes:select', { laneId: command.laneId });
+    }
+    return session.journal
+      .retain('open-result', async () => {
+        const movedFrom = adoptNestedLaneCopy(session.root, command.laneId, session.address);
+        const opened = await checkoutHostedLane(
+          session.root,
+          { ...checkoutCommand, ...session.address, operationId },
+          new ConvexLaneTransport(session.exchange),
+          undefined,
+          prepared,
+        );
+        return movedFrom ? { ...opened, movedFrom } : opened;
+      })
+      .catch(error => {
+        if (session.holderSessionId && prepared.selection) {
+          const safe = hostedActionError(error, 'Lane checkout');
+          // Only the sanitized failure and this locally known committed operation cross the
+          // transport boundary. Unknown checkout errors can contain source or credentials.
+          throw new ForgeError(
+            safe.code,
+            `${safe.message} The holder operation was recorded before checkout failed. Saved work remains on Forge. Retry this open with operationId ${operationId}; to return the Lane, open it explicitly from the former session.`,
+            safe.retryAt,
+            { ...safe.recovery, outcome: 'committed', operationId },
+          );
+        }
+        throw error;
+      });
   }
   if (action === 'save') {
     const command = hostedAgentCommandSchemas.save.parse(input);
@@ -608,7 +673,17 @@ export async function executeHostedAgent(
         ...(command.supersedeFinish ? { supersedeFinish: true } : {}),
       },
       session.exchange,
-      { ...saveContract(session.capabilities), settleBackground, onCapture: session.saveNotice },
+      {
+        ...saveContract(session.capabilities),
+        ...(session.holderSessionId
+          ? {
+              holderSessionId: session.holderSessionId,
+              ...(session.sessionClaim ? { session: session.sessionClaim } : {}),
+            }
+          : {}),
+        settleBackground,
+        onCapture: session.saveNotice,
+      },
       false,
       { action: 'save', parameters: { ...command, operationId: session.journal.operationId } },
       (id, pending) => waitSaveUntil(session, id, pending),
@@ -784,7 +859,13 @@ export async function executeHostedAgent(
   if (action === 'revert') {
     const command = hostedAgentCommandSchemas.revert.parse(input);
     const request = await session.journal.retain('revert-request', () =>
-      syncRequestSchema.parse({ kind: 'revert', operationId, authorityEpoch: epoch, ...command }),
+      syncRequestSchema.parse({
+        kind: 'revert',
+        operationId,
+        authorityEpoch: epoch,
+        ...command,
+        ...(session.holderSessionId ? { holderSessionId: session.holderSessionId } : {}),
+      }),
     );
     return driveAgentSource(session, 'Sync', operationId, request);
   }

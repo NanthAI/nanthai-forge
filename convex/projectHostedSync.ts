@@ -4,12 +4,13 @@ import { sourceProgress } from './projectSourceProgress';
 import { boardWake } from './projectBoardDelivery';
 import { loadLanding } from './projectHostedLandingStore';
 import { v } from 'convex/values';
+import { requireLaneHolder, laneSession } from './projectLaneHolder';
 import { receiptMutation, query, type QueryCtx, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
 import { beginHostedOperation } from './projectHostedOperations';
 import { candidateOwnerInputs } from './projectHostedProvenance';
-import { requireMemberAuthority } from './projectLaneAuthority';
+import { requireLaneSourceAuthority } from './projectLaneAuthority';
 import { readHostedRecord } from './projectHostedRecords';
 import { hostedStartMain } from './projectHostedChannels';
 import { saveLaneRecord, sameSaveLane, saveObject } from './projectHostedSaveStore';
@@ -125,6 +126,9 @@ export async function prepareHostedSync(
   const project = await activeProject(ctx, auth.projectId, auth.actor);
   let ownerInputs = false,
     upToDate = false;
+  // Execution-only browser binding; the operation above still hashes the original request.
+  const browserSession = request.holderSessionId ? undefined : await laneSession(ctx);
+  if (browserSession) request = { ...request, holderSessionId: browserSession };
   let work: SyncState['work'],
     lane: SyncState['lane'] = null,
     origin: SyncState['origin'],
@@ -168,8 +172,9 @@ export async function prepareHostedSync(
   } else {
     const original = await saveLaneRecord(ctx, { ...auth, laneId: request.laneId });
     lane = original.lane;
+    requireLaneHolder(lane, auth.actor, request.holderSessionId);
     // A clean sync or resolve rewrites this Lane: only its author or the project owner.
-    requireMemberAuthority(project, lane.actor, auth.actor, 'Lane');
+    requireLaneSourceAuthority(project, lane, auth.actor);
     ownerInputs = original.ownerOnly && lane.actor === project.owner;
     invariant(sameSaveLane(lane, request.expected), 'WORK_STALE', 'Select the exact saved Lane pins.');
     intentId = lane.intentId;

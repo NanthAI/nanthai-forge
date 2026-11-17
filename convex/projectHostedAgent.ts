@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { requireSourceProtocol } from './projectSourceProtocol';
+import { maySeeDeviceName } from './accessPolicy';
 import { needsFix } from '../src/culprit-bisect';
 import { githubMirrorStatus } from './projectGithubMirrorStatus';
 import { v } from 'convex/values';
@@ -114,6 +115,23 @@ export const capabilities = query({
       const channel = await channelRow(ctx, projectId);
       return canonicalPayload(
         hostedAgentCapabilitiesSchema.parse({
+          ...(features?.includes('lane-holder-v1') && ctx.forgeDevice
+            ? {
+                device: {
+                  id: ctx.forgeDevice.credentialId,
+                  code: ctx.forgeDevice.deviceCode ?? null,
+                  ...(maySeeDeviceName(user.subject, ctx.forgeDevice.owner)
+                    ? { name: ctx.forgeDevice.name }
+                    : {}),
+                  approvedAt: ctx.forgeDevice.deviceApprovedAt ?? null,
+                  expiresAt: ctx.forgeDevice.expiresAt,
+                  source:
+                    ctx.forgeDevice.settings?.source ??
+                    (ctx.forgeDevice.scope === 'coordination' ? 'coordination' : 'write'),
+                  ...(ctx.forgeDevice.settings ? { projects: ctx.forgeDevice.settings.projects } : {}),
+                },
+              }
+            : {}),
           ...(features?.includes('capabilities-main')
             ? carriedMain(channel?.selection, projectId, authority)
             : {}),
@@ -126,7 +144,15 @@ export const capabilities = query({
               }
             : {}),
           ...(landingMessageVersion === 1 ? { landingMessageVersion: 1 } : {}),
-          ...(features ? { features: advertisedFeatures(features) } : {}),
+          ...(features
+            ? {
+                features: advertisedFeatures(features).filter(
+                  feature =>
+                    feature !== 'lane-holder-v1' ||
+                    effectivePolicy(project).accessIdentities?.laneHolders === true,
+                ),
+              }
+            : {}),
           // Lane snapshots (7ac4e32f): the policy rides on the read every command already makes.
           ...(features?.includes('lane-snapshots')
             ? { laneSnapshots: effectivePolicy(project).autoSnapshot === true }

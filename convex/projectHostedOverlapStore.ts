@@ -20,7 +20,9 @@ export async function trackHostedOverlapLane(
     baseSequence?: number;
     intent?: string;
     /** The starting agent session's slug (c29d0780); later writes keep the stored one. */
-    agent?: string;
+    agent?: string | null;
+    holderChanged?: true;
+    session?: import('zod').infer<typeof import('../src/hosted-lane').sessionMetadataSchema>;
     /** A sync moved the base to a newer main; the Lane's saved paths still describe its own work. */
     rebased?: boolean;
     /** A save submitted to settle in the background (fea47345 C): its paths count before its head
@@ -77,7 +79,10 @@ export async function trackHostedOverlapLane(
       ? (parentRow.stackRoot ?? stack.laneId)
       : (old?.stackRoot ?? stack.laneId)
     : undefined;
-  const agent = metadata?.agent ?? old?.agent ?? (origin?.actor === lane.actor ? origin.agent : undefined);
+  const agent =
+    metadata?.agent === null
+      ? undefined
+      : (metadata?.agent ?? old?.agent ?? (origin?.actor === lane.actor ? origin.agent : undefined));
   const open = ['active', 'paused', 'ready'].includes(lane.state);
   // Superseded lasts while the Lane stays open at the head it was set on; a save or reopen ends it.
   const superseded = old?.open && open && old.superseded?.laneHead === lane.head ? old.superseded : undefined;
@@ -86,6 +91,15 @@ export async function trackHostedOverlapLane(
     laneId: lane.id,
     intentId: lane.intentId,
     actor: lane.actor,
+    ...(lane.holder?.sessionId
+      ? {
+          session: metadata?.session ??
+            (!metadata?.holderChanged ? old?.session : undefined) ?? {
+              sessionId: lane.holder.sessionId,
+              startedAt: lane.holder.since,
+            },
+        }
+      : {}),
     ...(agent ? { agent } : {}),
     intent: (metadata?.intent ?? old?.intent ?? lane.intentId).slice(0, 160),
     head: lane.head,
@@ -112,11 +126,21 @@ export async function trackHostedOverlapLane(
     ctx,
     projectId,
     lane.id,
-    old ? { ...old, pointer: old.presenceRow, goal: old.intent } : null,
+    old
+      ? {
+          ...old,
+          actor: metadata?.holderChanged
+            ? (lane.holder?.change?.previous?.actor ?? old.actor)
+            : (lane.holder?.actor ?? old.actor),
+          pointer: old.presenceRow,
+          goal: old.intent,
+        }
+      : null,
     value.open && !superseded
       ? {
           intentId: value.intentId,
-          actor: value.actor,
+          actor: lane.holder?.actor ?? value.actor,
+          ...(value.session ? { session: value.session } : {}),
           ...(value.agent ? { agent: value.agent } : {}),
           goal: value.intent,
           changes: value.changes,

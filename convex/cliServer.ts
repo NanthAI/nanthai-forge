@@ -97,9 +97,10 @@ export async function guard(ctx: QueryCtx | MutationCtx | ActionCtx, scope: 'cli
           'AUTH_SCOPE_DENIED',
           'This credential grants coordination only.',
         );
+        return { forgeDevice: row };
       } else await authorizeAction(ctx, args);
     }
-    return {};
+    return { forgeDevice: null as Doc<'cliCredentials'> | null };
   } catch (error) {
     return report(error);
   }

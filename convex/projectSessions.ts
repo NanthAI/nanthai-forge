@@ -1,0 +1,69 @@
+// SPDX-License-Identifier: Apache-2.0
+import { v } from 'convex/values';
+import { query } from './cliServer';
+import { memberProject } from './projectAuthority';
+import { maySeeDeviceName } from './accessPolicy';
+import { invariant } from '../src/errors';
+import { canonicalPayload } from '../src/hosted-source-operation';
+import { report } from './errors';
+/** One bounded presence page. A page count is never presented as the project's total. No heartbeat. */
+export const read = query({
+  args: {
+    projectId: v.id('hostedProjects'),
+    cursor: v.union(v.string(), v.null()),
+    person: v.optional(v.string()),
+    agent: v.optional(v.string()),
+  },
+  returns: v.string(),
+  handler: async (ctx, { projectId, cursor, person, agent }) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'AUTH_REQUIRED', 'Sign in to see project sessions.');
+      await memberProject(ctx, projectId, user.subject);
+      let selection = ctx.db
+        .query('projectHostedPresence')
+        .withIndex('by_project_and_at', q => q.eq('projectId', projectId))
+        .order('desc');
+      if (person) selection = selection.filter(q => q.eq(q.field('actor'), person));
+      if (agent) selection = selection.filter(q => q.eq(q.field('agent'), agent));
+      const page = await selection.paginate({
+        numItems: 25,
+        cursor,
+        maximumRowsRead: 100,
+        maximumBytesRead: 64 * 1024,
+      });
+      return canonicalPayload({
+        observedAt: Date.now(),
+        continueCursor: page.continueCursor,
+        isDone: page.isDone,
+        rows: page.page.map(row => {
+          const device = row.session?.device;
+          return {
+            laneId: row.laneId,
+            intentId: row.intentId,
+            person: row.actor,
+            name: row.agent ?? null,
+            title: row.goal,
+            lastSeen: row.at,
+            sessionId: row.session?.sessionId ?? null,
+            startedAt: row.session?.startedAt ?? null,
+            app: row.session?.app ?? null,
+            identityFrom: row.session?.identityFrom ?? null,
+            device: device
+              ? {
+                  id: device.id,
+                  code: device.code,
+                  approvedAt: device.approvedAt,
+                  ...(device.name && maySeeDeviceName(user.subject, device.owner)
+                    ? { name: device.name }
+                    : {}),
+                }
+              : null,
+          };
+        }),
+      });
+    } catch (error) {
+      return report(error);
+    }
+  },
+});

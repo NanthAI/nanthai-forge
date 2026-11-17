@@ -23,6 +23,8 @@ const ProofPage = lazy(() => import('./proof/ProofPage'));
 /** A Lane's landing check (/lanes/<laneId>/check) is its own screen, whichever screen the Lanes place has. */
 const CheckScreen = lazy(() => import('./check/CheckScreen'));
 
+const Sessions = lazy(() => import('./sessions/Sessions'));
+const Holder = lazy(() => import('./sessions/Holder'));
 const screens: Partial<
   Record<ProjectPlace | `${ProjectPlace}/${string}`, LazyExoticComponent<ComponentType<PlaceProps>>>
 > = {
@@ -60,9 +62,13 @@ export function PlaceScreen(
     );
   const { place, section, rest } = props.route;
   const Screen =
-    place === 'lanes' && rest && !section && !rest.includes('/')
-      ? laneScreen
-      : (screens[`${place}/${section}`] ?? screens[place]);
+    place === 'lanes' && section === 'sessions'
+      ? Sessions
+      : place === 'lanes' && rest.endsWith('/holder')
+        ? Holder
+        : place === 'lanes' && rest && !section && !rest.includes('/')
+          ? laneScreen
+          : (screens[`${place}/${section}`] ?? screens[place]);
   if (!Screen || !props.projectId) return <Placeholder route={props.route} projectName={props.projectName} />;
   return (
     <Suspense fallback={<Placeholder route={props.route} projectName={props.projectName} />}>

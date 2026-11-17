@@ -201,6 +201,7 @@ export async function composeAgentSource(
     const request = composeRequestSchema.parse({
       operationId,
       intentId,
+      ...(session.holderSessionId ? { holderSessionId: session.holderSessionId } : {}),
       authorityEpoch: session.capabilities.authority.epoch,
       expectedMain: { head: main.head, receiptId: main.receipt.id },
       inputs: a.manifest,
@@ -319,6 +320,7 @@ async function syncAgentSourceOnce(
       return syncRequestSchema.parse({
         kind: 'resolution',
         operationId,
+        ...(session.holderSessionId ? { holderSessionId: session.holderSessionId } : {}),
         authorityEpoch: session.capabilities.authority.epoch,
         candidateId: candidate.id,
         conflicts: candidate.result.conflicts,
@@ -343,6 +345,7 @@ async function syncAgentSourceOnce(
       ...(command.stackOn ? { stackOn: command.stackOn } : {}),
       ...(command.predecessor ? { predecessor: command.predecessor } : {}),
       operationId,
+      ...(session.holderSessionId ? { holderSessionId: session.holderSessionId } : {}),
       authorityEpoch: session.capabilities.authority.epoch,
       laneId: lane.laneId,
       expected: saveExpectedSchema.parse({
