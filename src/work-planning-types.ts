@@ -23,6 +23,18 @@ const rank = z.string().regex(rankPattern, 'order: a rank from rankBetween (1 to
 const label = z.string().trim().min(1).max(32);
 const owner = z.string().trim().min(1).max(200);
 const relations = z.array(z.object({ kind: z.enum(relationKinds), id })).max(20);
+/** Original backlog facts are attribution, never Forge acceptance evidence. Reader expansion precedes the importer. */
+const planningImportSchema = z.object({
+  source: z.string().trim().min(1),
+  key: z.string().trim().min(1),
+  createdAt: z.union([z.iso.date(), z.iso.datetime({ offset: true })]).optional(),
+  closedAt: z.union([z.iso.date(), z.iso.datetime({ offset: true })]).optional(),
+  originalHandle: z
+    .string()
+    .regex(/^@?[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?(?:\/[a-z0-9-]+)?$/i)
+    .optional(),
+  batchId: id,
+});
 const modelFields = {
   /** Hand order among siblings; absent = creation order (legacyRank). */
   order: rank.optional(),
@@ -65,18 +77,6 @@ const planningPutFields = {
 };
 /** Fields a server without `planning-model` drops; the CLI refuses to send them there. */
 export const planningModelPutKeys = ['order', 'type', 'parentId', 'owner', 'relations', 'hidden'] as const;
-/** Original backlog facts are attribution, never Forge acceptance evidence. Reader expansion precedes the importer. */
-const planningImportSchema = z.object({
-  source: z.string().trim().min(1),
-  key: z.string().trim().min(1),
-  createdAt: z.iso.datetime({ offset: true }),
-  closedAt: z.iso.datetime({ offset: true }).optional(),
-  originalHandle: z
-    .string()
-    .regex(/^@?[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?(?:\/[a-z0-9-]+)?$/)
-    .optional(),
-  batchId: id,
-});
 export const planningItemSchema = z.object({
   id,
   operationId: id,

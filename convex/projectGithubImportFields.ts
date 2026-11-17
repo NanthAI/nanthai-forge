@@ -15,6 +15,14 @@ export const githubImportError = v.object({
   message: v.string(),
   retryAt: v.optional(v.number()),
 });
+/** Optional origin counts; null means not reported, never zero. No account identities are retained. */
+export const migrationCounts = v.object({
+  notReportedReason: v.optional(v.string()),
+  issues: v.union(v.number(), v.null()),
+  pullRequests: v.union(v.number(), v.null()),
+  branches: v.union(v.number(), v.null()),
+  collaborators: v.union(v.number(), v.null()),
+});
 export const githubImportFields = {
   protocol: v.optional(v.union(v.literal(2), v.literal(3))),
   publication: v.optional(
@@ -49,6 +57,7 @@ export const githubImportFields = {
   submodules: v.optional(v.number()),
   error: v.optional(githubImportError),
   githubRequests: v.optional(githubRequests),
+  migration: v.optional(migrationCounts),
   task: v.optional(v.id('_scheduled_functions')),
 };
 export const githubImportDocument = v.object({

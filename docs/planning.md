@@ -114,7 +114,7 @@ up an Item's Initiative or parent treats it as hidden.
 ## Imported history attribution
 
 Retained planning readers accept optional `imported` attribution: `source` (a source note), `key` (the original
-record key), `createdAt`, optional `closedAt` and `originalHandle` (a public handle), and `batchId` (the import UUID).
+record key), optional `createdAt`, `closedAt` and `originalHandle` (a public handle), and `batchId` (the import UUID). Original dates retain a date-only value when that is all the source records, and stay absent when unknown; source handle case is preserved.
 Original dates use ISO 8601 with an offset. The normal `at` remains the time Forge recorded that version; it is
 never replaced with an original date. Search and compact agent rows retain the attribution. It makes no claim
 that original identities were authenticated or that imported work landed in Forge.

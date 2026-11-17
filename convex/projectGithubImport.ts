@@ -16,7 +16,7 @@ import { authorizeImportGithub } from './githubImportAccess';
 import { invariant } from '../src/errors';
 import { storeListing } from './projectGithubImportListing';
 import { report } from './errors';
-import { githubImportError, githubRequests } from './projectGithubImportFields';
+import { githubImportError, githubRequests, migrationCounts } from './projectGithubImportFields';
 
 export const start = action({
   args: {
@@ -146,6 +146,7 @@ export const status = action({
     error: v.union(githubImportError, v.null()),
     /** GitHub REST requests so far, by who paid; null for imports started before counting. */
     githubRequests: v.union(githubRequests, v.null()),
+    migration: v.optional(migrationCounts),
   }),
   handler: async (ctx, input) => {
     try {
@@ -168,6 +169,7 @@ export const status = action({
         report: `${job.submodules ?? 0} submodules kept as pointers`,
         error: job.error ?? null,
         githubRequests: job.githubRequests ?? null,
+        ...(job.migration ? { migration: job.migration } : {}),
       };
     } catch (error) {
       return report(error);

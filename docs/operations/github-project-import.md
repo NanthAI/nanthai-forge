@@ -19,6 +19,23 @@ another repository, ref or name reports `WORK_OPERATION_CHANGED`. Each resume is
 checked against the caller's current login and GitHub access. A small import costs
 the start action, one subscription and one final status action.
 
+## Migration scope
+
+The source import brings the selected commit's source into hosted main. Git history is
+acquired separately; source readiness does not mean that history catch-up has finished.
+Issues, milestones, pull requests, other branch heads, tags, CI configuration outside
+source files and collaborator accounts stay at the origin. Existing source files such
+as CI workflow files are ordinary imported source. Backlog recreation uses the separate
+[source-agnostic planning import](../planning.md#imported-history-attribution), not ongoing
+tracker synchronization or imported pull-request work.
+
+Readers retain an optional `migration` object with origin counts for `issues`,
+`pullRequests`, `branches` and `collaborators`. A `null` count means **not reported**;
+zero means the provider reported zero. Older jobs have no object. These fields are
+reader compatibility only: this release does not fetch or write origin counts yet.
+When present, the CLI keeps them alongside the same operation, ref and exact commit,
+including on failure and resume. No account identities are included in this ledger.
+
 ## Identity, access and publication
 
 `projectGithubImport.start` takes an original operation UUID, GitHub URL, optional

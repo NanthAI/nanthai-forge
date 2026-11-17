@@ -46,6 +46,15 @@ const statusSchema = z.object({
   report: z.string(),
   error: errorSchema.nullable(),
   githubRequests: requestsSchema.nullable().optional(),
+  migration: z
+    .object({
+      notReportedReason: z.string().optional(),
+      issues: z.number().int().nonnegative().nullable(),
+      pullRequests: z.number().int().nonnegative().nullable(),
+      branches: z.number().int().nonnegative().nullable(),
+      collaborators: z.number().int().nonnegative().nullable(),
+    })
+    .optional(),
 });
 const progressSchema = z.object({
   projectId: z.string(),
@@ -197,6 +206,7 @@ export function importReport(journal: ImportJournal, status: Status) {
     bytes: status.totalBytes,
     submodules: status.submodules,
     githubRequests: status.githubRequests ?? null,
+    ...(status.migration ? { migration: status.migration } : {}),
     error: status.error,
     next: ready
       ? `nforge clone ${status.projectId} DIR --deployment ${journal.deployment}`

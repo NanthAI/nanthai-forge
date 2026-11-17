@@ -234,6 +234,18 @@ function fixture(
   };
 }
 
+test('migration-count readers retain reported and unknown origin totals without changing import identity', async t => {
+  const s = fixture(t),
+    id = await s.start();
+  const job = s.tables.projectGithubImports.get(id);
+  const migration = { issues: 1000, pullRequests: 0, branches: 3, collaborators: null };
+  await s.ctx.db.patch(id, { migration });
+  const status = await modules.projectGithubImport.status._handler(s.ctx, { id });
+  assert.deepEqual(status.migration, migration);
+  assert.equal(status.commit, job.commit);
+  assert.equal(status.projectId, job.projectId);
+});
+
 test('retry-safe personal mirror publishes complete source/Work atomically and deduplicates across projects', async t => {
   const s = fixture(t),
     op = randomUUID(),

@@ -50,3 +50,21 @@ test('original attribution never invents a public identity or accepts an ambiguo
     );
   assert.equal(Object.hasOwn(planningItemSchema.parse(record()), 'imported'), false);
 });
+
+test('source dates retain their known precision and unknown dates stay absent', () => {
+  for (const dates of [{ createdAt: '2024-01-02', closedAt: '2024-02-03' }, {}]) {
+    const { createdAt, closedAt, ...source } = imported;
+    const expected = { ...source, ...dates, originalHandle: '@River' };
+    const item = planningItemSchema.parse({ ...record(), imported: expected });
+    assert.deepEqual(item.imported, expected);
+    assert.equal(item.at, record().at);
+    assert.deepEqual(planningSummary(item).imported, expected);
+    const exported = exportPlanning({
+      revision: 1,
+      planningItems: [item],
+      planningComments: [],
+      intents: [],
+    });
+    assert.deepEqual(planningItemSchema.parse(JSON.parse(exported.json).items[0]).imported, expected);
+  }
+});
