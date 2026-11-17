@@ -25,7 +25,7 @@ export const sectionLabels: Record<ProjectPlace, Record<string, string>> = {
   needs: { '': 'Needs me', held: 'Held, redone or refused', 'loose-ends': 'Loose ends' },
   lanes: { '': 'Lanes', sessions: 'Sessions', 'to-read': 'To read' },
   plan: { '': 'Backlog', initiatives: 'Initiatives' },
-  code: { '': 'Code' },
+  code: { '': 'What landed', files: 'Files' },
   stats: { '': 'Stats' },
   settings: {
     '': 'People and access',
@@ -43,7 +43,7 @@ export const placeSentence: Record<ProjectPlace, string> = {
   needs: 'What waits on you in this project.',
   lanes: 'Every open Lane and where it is.',
   plan: 'The backlog: Items and Initiatives in order.',
-  code: 'The files on main.',
+  code: 'What landed on main, and the files at any landing.',
   stats: 'How this project lands: time to main, checks and cost.',
   settings: 'Who can do what in this project.',
 };

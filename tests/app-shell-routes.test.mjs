@@ -28,7 +28,8 @@ const everyRoute = [
   ...projectPlaces.flatMap(place => placeSections[place].map(section => project(place, section))),
   project('lanes', '', 'l-AbCdEfGhIjKlMnOpQrStUv'),
   project('plan', '', 'i-AbCdEfGhIjKlMnOpQrStUv'),
-  project('code', '', 'src/a b/ünï.ts'),
+  project('code', 'files', 'src/a b/ünï.ts'),
+  project('code', '', '0f8d2c1e-5b7a-4c3d-9e21-6a4b8f0c7d35'),
   { frame: 'project', handle: 'a-b', project: 'x~y', place: 'settings', section: 'you', rest: '' },
 ];
 

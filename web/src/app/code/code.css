@@ -1,0 +1,51 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* The Code place (a fixed frame, DESIGN.md rule 3): what landed beside its receipt, and the tree, the file and what
+   touches it. Only the frame's grid and the tree's indent are its own; every part is the design system's. */
+[data-ds] {
+  .code-h, .code-f { height: max(440px, calc(100dvh - var(--top-h) - var(--code-head, 150px))); }
+  .code-h { grid-template: minmax(0, 1fr) / minmax(0, 1fr) 400px; }
+  .code-f { grid-template: minmax(0, 1fr) / 250px minmax(0, 1fr) 340px; }
+  .code-h > .pane, .code-f > .pane { display: flex; flex-direction: column; }
+  .code-h .body, .code-f .body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+  .hrow { grid-template-columns: 72px minmax(0, 1fr) 160px 92px; min-height: 44px; color: inherit; }
+  .hrow > .num { white-space: nowrap; }
+  .th.hrow { min-height: 30px; }
+  a.hrow:focus-visible { outline-offset: -2px; }
+  .hrow .ttl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hrow .ttl.none { color: var(--text-2); font-weight: var(--w-regular); }
+  .tree ul { list-style: none; margin: 0; padding: 0; }
+  .tree a, .tree button.dir { display: flex; align-items: center; gap: var(--s-2); width: 100%; height: var(--ctl-h); padding: 0 var(--s-3) 0 calc(14px + var(--d, 0) * 14px); color: var(--text-2); font-size: var(--t-small); min-width: 0; text-align: left; background: transparent; border: 0; border-radius: 0; }
+  .tree button.dir { color: var(--text); font-weight: var(--w-strong); }
+  .tree .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  /* Folders use the design system's twisty (.tw); a file keeps the same space so names line up. */
+  .tree .tsp { flex: none; width: 16px; }
+  .tree .n { margin-left: auto; color: var(--text-3); font-size: var(--t-meta); }
+  .tree .more { padding-left: calc(14px + var(--d, 0) * 14px); }
+  .codefile .l { scroll-margin-top: 80px; }
+  .codefile .l.sel { background: var(--accent-bg); }
+  .codefile a.n { color: var(--text-3); text-decoration: none; }
+  .codefile a.n:focus-visible { color: var(--text); }
+  .codefile { padding-block: var(--s-1); }
+  /* Every line number is a link (#L42), so a line is a full 24px target (WCAG 2.5.8). */
+  .codefile .l { grid-template-columns: 52px minmax(0, 1fr); line-height: 24px; }
+  .codefile a.n { display: block; min-height: 24px; }
+  .hide-dt { display: none; }
+  .path-cut { direction: rtl; text-align: left; unicode-bidi: plaintext; }
+  .changes { list-style: none; margin: 0; padding: 0 0 var(--s-2); }
+  .changes li { display: flex; align-items: center; gap: var(--s-2); padding: 3px var(--gut); font-size: var(--t-small); min-width: 0; }
+  .changes li a { min-width: 0; }
+  .src-pin { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; font-size: var(--t-meta); color: var(--text-2); }
+  @media (hover: hover) and (pointer: fine) { .tree a:hover, .tree button.dir:hover { background: var(--hover); color: var(--text); } }
+  @media (max-width: 1240px) { .code-f { grid-template-columns: 220px minmax(0, 1fr) 300px; } .hrow { grid-template-columns: 72px minmax(0, 1fr) 92px; } .hrow > .who { display: none; } }
+  @media (max-width: 860px) {
+    .code-h, .code-f { height: auto; grid-template: auto / minmax(0, 1fr); }
+    .code-h .body, .code-f .body { overflow: visible; }
+    .code-h > .pane.off, .code-f > .pane.off { display: none; }
+    .hide-dt { display: inline; }
+    .hrow { grid-template-columns: 64px minmax(0, 1fr) auto; }
+    .th.hrow { display: none; }
+    .tree a, .tree button.dir { height: 40px; }
+    .tree .tsp { width: 28px; }
+    .codefile .code { overflow-x: auto; }
+  }
+}

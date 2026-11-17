@@ -36,6 +36,17 @@ Walked: `history` (status and a two-entry log), `landings`, `lane-history`, `hel
 | J18-10 | S3 | **Agents cannot list files on the server.** Reading one file by path works; discovering paths in a project the agent has not checked out does not. `diff` with `summary:true` lists changed paths only. | ran: help |
 | J18-11 | S3 | **States, heads, checkpoints, Candidates and commits all appear in links and replies** as names for "a version". A person needs one word. | docs, ran |
 
+## Web history and Code, as specified (Items 3968a655, 90e5bc9c)
+
+The rebuilt Code place under `/-` answers J18-1 for history and leaves blame and compare open. Question 64 on 581bd373 stays open for the owner. The run brief settled its first half: history is a list of landings.
+
+- **History is landings, not commits.** Code → What landed lists main's receipts, newest first, 25 at a time. Each row has the title from the landing message, who landed it (a public handle and agent run), when, and the check. A row opens its receipt: why, who and with which app, how it was checked, time to main where saved evidence covers it, the files it changed, and links to the files as that landing left them and to the Lane. Only receipt fields are read. A missing message is said as "Landing" plus the short State, never invented. A landing with no saved evidence shows no time to main.
+- **Files at an exact State.** Code → Files reads main, or any landing's State through `?at=`. Folders arrive one page at a time and the file one page at a time, so a large repository never downloads whole. A deep link opens its folders. `#L` selects a line. Binary files, submodules, missing paths and unavailable sources are said in words. Another source is never substituted.
+- **A file's history** checks the newest 8 landings (or 8 from the pinned one) on a press, comparing each landing's two States, and links each match to its receipt. Beyond that, the CLI's `history` log is the answer for now.
+- **Visibility.** History and files read from the same project as the file reader. History needs sign-in today. Signed-out public reading arrives with 4c164732 and 6a60e89a without changing the views.
+- **Open: blame** (who wrote this line) and **compare any two States**. Both have exact readers on the server (`history` blame, the source reader's two-State compare). Their phase is question 64, and full-text search stays with 8dcd61fc. When they come, they link from the file pane next to "Landings that touched it" and keep the file's visibility.
+- **Not shown yet:** Lanes changing this file now, and graph coverage per file. No read gives per-Lane paths cheaply today.
+
 ## Dead ends
 
 - "Show me the history of this file" on the web beyond its recent landings.

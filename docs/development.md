@@ -614,6 +614,16 @@ layer out of both first paints.
   credentials"). `nforge login` still links to `/device`: most existing
   accounts cannot sign in under `/-` before the account backfill and linking
   work, so the link moves with Clerk removal.
+- Code (`web/src/app/code/`, lazy): `/-/{handle}/{project}/code` lists what
+  landed, newest first, one receipt per row (`projectCode:history`, 25
+  receipts a page, receipt fields only); `code/{receiptId}` opens one receipt.
+  `code/files/{path}` reads files at main, and `?at={64-hex State}` pins any
+  landing; `#L42` selects a line. `projectCodeBrowse:read` returns one folder
+  page (200 entries), one 16,000-character file page, a landing's changed
+  paths, or which of up to 8 landings touched a file. All of these reads go
+  through the existing source reader, so a whole State never reaches the
+  browser. The views take only a project id and a route, so signed-out public
+  reading is a routing change.
 - Keys: `Mod+K` palette, `?` all keys, `1`–`6` project places; never inside
   fields or dialogs.
 - The top-bar mark (`web/src/app/mark.ts`) follows the line feed the project

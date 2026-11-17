@@ -17,7 +17,7 @@ export const placeSections: Record<ProjectPlace, readonly string[]> = {
   needs: ['', 'held', 'loose-ends'],
   lanes: ['', 'sessions', 'to-read'],
   plan: ['', 'initiatives'],
-  code: [''],
+  code: ['', 'files'],
   stats: [''],
   settings: ['', 'checks', 'secrets', 'project', 'you'],
 };
@@ -33,7 +33,7 @@ export type AppRoute =
       place: ProjectPlace;
       /** A section of the place (a strip entry), or '' for the place itself. */
       section: string;
-      /** What the section shows: a Lane or Item id, or a file path for Code. */
+      /** What the section shows: a Lane or Item id; for Code a landing's receipt id, or under files a path. */
       rest: string;
     }
   | { frame: 'missing'; path: string };
@@ -54,6 +54,7 @@ const accountSegment: Record<AccountPlace, string> = {
   data: 'data',
 };
 const enc = (part: string) => encodeURIComponent(part);
+const receiptShape = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const dec = (part: string) => {
   try {
     return decodeURIComponent(part);
@@ -110,7 +111,12 @@ export function parseAppPath(pathname: string): AppRoute {
       : projectPlaces.find(name => placeSegment[name] === segment && name !== 'needs');
   if (segment && !place) return { frame: 'missing', path: pathname };
   const resolved: ProjectPlace = place ?? 'needs';
-  if (resolved === 'code') return project(first, second, 'code', '', tail.join('/'));
+  if (resolved === 'code') {
+    // What landed, or one landing's receipt; files/… is a folder or a file. A bare path (an older link) is a file.
+    if (tail[0] === 'files') return project(first, second, 'code', 'files', tail.slice(1).join('/'));
+    if (tail.length === 1 && receiptShape.test(tail[0]!)) return project(first, second, 'code', '', tail[0]!);
+    return project(first, second, 'code', tail.length ? 'files' : '', tail.join('/'));
+  }
   const [maybeSection = '', ...detail] = tail;
   if (placeSections[resolved].includes(maybeSection))
     return project(first, second, resolved, maybeSection, detail.join('/'));
@@ -143,7 +149,9 @@ export function currentScreenHref(route: AppRoute): string | null {
     case 'plan':
       return `${root}/planning`;
     case 'code':
-      return route.rest ? `${root}/code/${route.rest.split('/').map(enc).join('/')}` : `${root}/code`;
+      return route.section === 'files' && route.rest
+        ? `${root}/code/${route.rest.split('/').map(enc).join('/')}`
+        : `${root}/code`;
     case 'stats':
       return null;
     case 'settings':

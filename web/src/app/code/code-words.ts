@@ -1,0 +1,60 @@
+// SPDX-License-Identifier: Apache-2.0
+// The Code place's words for times, people, States and addresses. Pure, so the screens and their tests share them.
+import type { CodeHistoryRow } from '../../../../src/code-history';
+
+/** `?at=` pins an exact State (a landing's, a Lane's or a Candidate's); without it the files follow main. */
+export function pinnedState(search: string): string | null {
+  const at = new URLSearchParams(search).get('at');
+  return at && /^[a-f0-9]{64}$/.test(at) ? at : null;
+}
+
+/** The handle a landing shows: `@person`, `person/agent` for an agent run, or "an agent" when people are hidden. */
+export function landedBy(row: Pick<CodeHistoryRow, 'actor' | 'agent' | 'agentRun'>): string | null {
+  if (!row.actor) return row.agent ? 'an agent' : null;
+  return row.agent && row.agentRun ? `${row.actor}/${row.agentRun}` : `@${row.actor}`;
+}
+export const titleOf = (row: Pick<CodeHistoryRow, 'title' | 'head'>) =>
+  row.title ?? `Landing ${short(row.head)}`;
+
+export function selectedLine(hash: string): number | null {
+  const match = /^#L(\d{1,7})$/.exec(hash);
+  return match ? Number(match[1]) : null;
+}
+
+/** The landings-read window that holds one receipt: from just before its acceptance time to a minute after (the row
+ * is written in the same transaction). Derived from the receipt, never from the clock. */
+export function receiptWindow(iso: string): { from: string; to: string } | null {
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return null;
+  return { from: new Date(at - 1000).toISOString(), to: new Date(at + 60_000).toISOString() };
+}
+
+const minute = 60_000;
+/** "09:58" today, "9 Nov" this year, "9 Nov 2025" before; the exact time is the title. */
+export function landedAt(iso: string, now = Date.now()) {
+  const at = new Date(iso);
+  const today = new Date(now);
+  if (at.toDateString() === today.toDateString())
+    return at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return at.toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    ...(at.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' }),
+  });
+}
+export function ago(iso: string, now = Date.now()) {
+  const ms = Math.max(0, now - Date.parse(iso));
+  if (ms < minute) return 'just now';
+  if (ms < 60 * minute) return `${Math.round(ms / minute)} min ago`;
+  if (ms < 24 * 60 * minute) return `${Math.round(ms / (60 * minute))} h ago`;
+  return `${Math.round(ms / (24 * 60 * minute))} days ago`;
+}
+/** "5 min 12 s" between two times; null when either is missing. */
+export function between(from: string | null | undefined, to: string | null | undefined) {
+  const ms = Date.parse(to ?? '') - Date.parse(from ?? '');
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
+}
+export const short = (state: string) => state.slice(0, 8);
+export const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;

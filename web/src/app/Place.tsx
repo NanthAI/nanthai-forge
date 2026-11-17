@@ -30,7 +30,12 @@ export function crumbsFor(route: AppRoute, projectName: string): Crumb[] {
   if (route.section)
     trail.push({ label: sectionLabels[route.place][route.section] ?? route.section, href: at({ rest: '' }) });
   if (route.rest)
-    trail.push({ label: route.place === 'code' ? route.rest.split('/').at(-1)! : route.rest.slice(0, 8) });
+    trail.push({
+      label:
+        route.place === 'code' && route.section === 'files'
+          ? route.rest.split('/').at(-1)!
+          : route.rest.slice(0, 8),
+    });
   const last = trail.at(-1)!;
   delete last.href;
   return trail;
