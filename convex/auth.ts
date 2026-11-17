@@ -21,7 +21,7 @@ export const passkeyConfig = {
   origin,
   rpName: 'Forge',
 };
-const githubSignIn = setupGithub(core, {
+export const githubSignIn = setupGithub(core, {
   component: components.authGithub,
   allowedRedirectOrigins: origin ? [origin] : [],
 }).attachUserCallbacks({

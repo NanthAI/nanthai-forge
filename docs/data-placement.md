@@ -20,6 +20,16 @@ This page lists every byte store and every Convex table: what it holds, and whet
 
 **Placement rule** (`r2Config()` in `convex/r2.ts`): every deployment writes R2, self-host included, for every project. There is no opt-in, flag or Convex byte mode. If the `R2_*` settings are missing, writes fail with `R2_NOT_CONFIGURED`. A self-hosted instance can point `R2_ENDPOINT` at any S3-compatible bucket. Rows written earlier in Convex storage stay readable from it until backfilled.
 
+### Account identity-link audit
+
+`authLinkEvents` holds small, secret-free identity-grant receipts: user/session,
+method, operation/request digest, identity id and timestamp. The grant and audit
+commit in one transaction; the `(userId, operationId)` index reconciles retries.
+No provider profile, code, OAuth token or source bytes belong here. This is
+account metadata, independent of projects and landings: zero bytes written per
+landing, recorded in the landing storage ratchet. Normal auth component records
+remain in their component. Source and artifact bodies remain in R2.
+
 ## Guard allowlist
 
 Every entry has an owner reason and expires on 2027-01-31; an expired entry fails the guard. Kinds: **write** (`storage.store`, `generateUploadUrl`), **read** (`storage.get`, `storage.getUrl`), **handle** (a `ctx.storage` value passed on), **field** (`v.id('_storage')`).

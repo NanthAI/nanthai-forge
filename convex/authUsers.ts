@@ -86,6 +86,6 @@ export const githubAccounts = internalQuery({
       .query('users')
       .withIndex('by_accountKey', q => q.eq('accountKey', accountKey))
       .unique();
-    return user ? (user.githubId ? [user.githubId] : []) : null;
+    return user ? (user.githubId ? [user.githubId] : user.legacyGithubProvider ? null : []) : null;
   },
 });

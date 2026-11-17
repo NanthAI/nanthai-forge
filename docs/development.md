@@ -700,6 +700,71 @@ Project owners are not rewritten. The existing GitHub App connection seals its
 user token in the account row for private-repository checks; the OAuth sign-in
 token itself is not retained.
 
+#### Attach sign-in methods to an existing account
+
+Keep Clerk configured while accounts move. On `/-/signin`, choose **Add a
+passkey from your existing sign-in** (`?link=existing`). Sign in through the
+retained provider, then add a passkey. Forge verifies the active provider
+session server-to-server on every ceremony leg and checks the authenticated
+account and session again in the granting transaction. The existing Forge
+account key, handle, project ownership and CLI credentials stay intact. If
+that account already has a passkey, it must confirm the addition with one.
+No account is selected by a typed handle or email address.
+
+Sign in with the added passkey, open **Sign-in and devices → Manage sign-in
+methods**, then **Link GitHub to this account**. A passkey confirms the link
+when present. The pinned library completes GitHub's state/PKCE OAuth round
+trip and supplies the numeric identity. Forge checks both the app's `users`
+index and the component binding inside the same transaction. An identity
+belonging to another account returns `GITHUB_ACCOUNT_MISMATCH`; nothing is
+merged or reassigned. A person with several old-provider GitHub identities
+chooses the one they authorize in that round trip. A passkey-only account can
+then use the existing repository connection flow with its attached identity.
+Legacy accounts retain their old repository-token and identity lookup fallback
+until the removal slice replaces it.
+
+Successful links write an `authLinkEvents` audit receipt with the granting
+session, operation/request digest, method, identity and time, in the grant's
+transaction. It contains no OAuth ticket, token or provider profile. Legacy
+finish retries return the recorded passkey; changed requests cannot reuse its
+operation id. GitHub tickets stay single-use: a repeated completion makes no
+new binding, session or audit entry and returns the library's `INVALID_CODE`;
+the methods screen reconciles through its current linked state. Provider
+session verification precedes the Convex transaction; cross-service atomicity
+with a simultaneous provider-side revocation is not claimed.
+
+Non-provider agent and bot account keys are excluded from **browser identity
+migration**, because no provider session can prove ownership of those keys.
+Their existing Forge CLI credentials and owners are retained. The browser flow
+never assigns one to a person by handle/email or by presenting a CLI token.
+Before Clerk removal the owner must review which such accounts are retained,
+and arrange an owner-approved credential-renewal route where necessary; existing
+expiring credentials alone do not prove long-term access. This exclusion adds
+no runtime denial to their current CLI capability. Keep the removal checklist
+open until that review and the final dry run are complete. Current development
+audit counts: 7 accounts, 1 mapped, 6 unmapped, including 5 without a provider
+identity. Counts are an observation before using this linking flow, not proof
+that every account has migrated.
+
+At 7/14 accounts and 312/624 projects, linking reads only indexed account/user
+rows and component records, with no project scans. Each legacy leg is one public
+action, one provider session request and one internal mutation, plus bounded
+component ceremony calls. The first leg inserts at most one missing user and
+updates its pending proof; success adds one passkey and one small audit row.
+GitHub reuses the existing OAuth flow; confirmation/start/finish are explicit
+mutations, and success adds one component identity binding, one audit row and
+updates the existing user. State is O(1) per in-flight user plus one receipt per
+successful link (estimated under 1 KiB per receipt); normal auth component data
+is unchanged. Peak additional app data is a few KiB per operation, independent
+of project count; provider latency dominates wall time (seconds, not measured
+live). Small identity/audit records stay in Convex; source and artifacts stay
+in R2. Landing operations add **0 calls, 0 DB I/O and $0 per 1,000 landings**
+against the $1.682603 reference; the storage guard records zero link-audit bytes
+per landing. Open idle/hidden tabs add zero Convex calls and DB I/O: no polling,
+new timer or scheduled migration job. These are code-path budgets, not a billed
+usage measurement. Live enrollment/linking and owner review remain required
+before provider removal; deploying the flow does not migrate anyone.
+
 #### Existing-account backfill
 
 Deploy the accepted backend before running the operator script, while the old

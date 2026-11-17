@@ -80,3 +80,41 @@ export async function createPasskey(
     },
   };
 }
+
+type AssertionOptions = {
+  challenge: string;
+  timeout: number;
+  rpId: string;
+  allowCredentials: { id: string; type: 'public-key'; transports?: string[] }[];
+  userVerification: 'required';
+};
+export async function assertPasskey(
+  options: AssertionOptions,
+  credentials: Pick<CredentialsContainer, 'get'> = navigator.credentials,
+) {
+  const key = (await credentials.get({
+    publicKey: {
+      ...options,
+      challenge: toBytes(options.challenge),
+      allowCredentials: options.allowCredentials.map(value => ({
+        ...value,
+        id: toBytes(value.id),
+        transports: value.transports as AuthenticatorTransport[] | undefined,
+      })),
+    },
+  })) as PublicKeyCredential | null;
+  if (!key) throw new Error('Passkey confirmation closed.');
+  const response = key.response as AuthenticatorAssertionResponse;
+  return {
+    id: key.id,
+    rawId: toBase64url(key.rawId),
+    type: 'public-key' as const,
+    response: {
+      clientDataJSON: toBase64url(response.clientDataJSON),
+      authenticatorData: toBase64url(response.authenticatorData),
+      signature: toBase64url(response.signature),
+      ...(response.userHandle ? { userHandle: toBase64url(response.userHandle) } : {}),
+    },
+    clientExtensionResults: {},
+  };
+}

@@ -77,6 +77,7 @@ const signInHref = (next: string) =>
 
 function Pages() {
   const route = useRoute();
+  const search = useSearch();
   const { isLoading, isAuthenticated } = useConvexAuth();
   const viewer = useQuery(api.urlAccounts.current, isAuthenticated ? {} : 'skip');
   const needsSignIn =
@@ -86,7 +87,8 @@ function Pages() {
   }, [needsSignIn]);
   if (isLoading || needsSignIn) return null;
   if (route.frame === 'public') {
-    if (route.page === 'signin') return isAuthenticated ? <AfterSignIn /> : <SignIn />;
+    if (route.page === 'signin')
+      return isAuthenticated && search.get('link') !== 'existing' ? <AfterSignIn /> : <SignIn />;
     if (route.page === 'passkey') return <FirstPasskey onDone={finishPasskeyStep} />;
     return <Device viewerHandle={viewer?.handle} />;
   }
@@ -160,6 +162,9 @@ function SignedIn({
             <button type="button" className="btn" onClick={leave}>
               Sign out of this browser
             </button>
+            <a className="btn" href="/-/signin/passkey" onClick={followLink}>
+              Manage sign-in methods
+            </a>
           </div>
         ) : null}
         {overlays}

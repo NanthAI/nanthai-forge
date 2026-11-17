@@ -8,7 +8,7 @@ import { moduleUrl } from './convex-module.mjs';
 
 const paths = await import(moduleUrl('../web/src/app/paths.ts'));
 const { safeNext } = await import(moduleUrl('../web/src/app/session.ts'));
-const { createPasskey, toBase64url } = await import(moduleUrl('../web/src/app/webauthn.ts'));
+const { assertPasskey, createPasskey, toBase64url } = await import(moduleUrl('../web/src/app/webauthn.ts'));
 const { ROOT, hrefFor, parseAppPath, currentScreenHref, projectPlaces, placeSections, accountPlaces } = paths;
 
 const project = (place, section = '', rest = '') => ({
@@ -230,4 +230,34 @@ test('the first passkey sends exactly the wire fields the server accepts, and a 
     create: async () => Promise.reject(new DOMException('closed', 'NotAllowedError')),
   });
   assert.deepEqual(closed, { ok: false, failure: 'closed' });
+});
+
+test('link confirmation sends the browser assertion in the server wire contract and handles a closed prompt', async () => {
+  const bytes = new Uint8Array([1, 2, 3]).buffer;
+  const options = {
+    challenge: toBase64url(bytes),
+    timeout: 1000,
+    rpId: 'forge.example',
+    allowCredentials: [{ id: toBase64url(bytes), type: 'public-key' }],
+    userVerification: 'required',
+  };
+  const response = await assertPasskey(options, {
+    get: async ({ publicKey }) => {
+      assert.deepEqual(new Uint8Array(publicKey.challenge), new Uint8Array(bytes));
+      assert.equal(publicKey.userVerification, 'required');
+      return {
+        id: 'credential',
+        rawId: bytes,
+        response: { clientDataJSON: bytes, authenticatorData: bytes, signature: bytes, userHandle: bytes },
+      };
+    },
+  });
+  assert.deepEqual(response, {
+    id: 'credential',
+    rawId: 'AQID',
+    type: 'public-key',
+    response: { clientDataJSON: 'AQID', authenticatorData: 'AQID', signature: 'AQID', userHandle: 'AQID' },
+    clientExtensionResults: {},
+  });
+  await assert.rejects(assertPasskey(options, { get: async () => null }), /confirmation closed/);
 });

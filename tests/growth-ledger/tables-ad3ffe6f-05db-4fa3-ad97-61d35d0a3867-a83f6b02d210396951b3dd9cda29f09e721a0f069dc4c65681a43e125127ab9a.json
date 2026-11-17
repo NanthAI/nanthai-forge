@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "B-04 6abf8b3c needs durable atomic identity-link audit receipts; merge passkey wire and registration helpers, preserve Clerk until removal, no existing audit table covers account links.",
+  "date": "2026-11-16"
+}

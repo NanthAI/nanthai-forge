@@ -4,10 +4,10 @@
 // sign-in with no passkey yet, the next page offers one (FirstPasskey). The old Clerk screens stay until removal.
 //
 // Lifecycle rule 2: passkey autofill runs only while this tab is visible and active (awake.tsx).
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import { useOauth, useSignInWithGithub } from '@convex-dev/auth/methods/github/react';
 import { useSignInWithUsernamePasskey } from '@convex-dev/auth/methods/username-passkey/react';
-import { useMutation } from 'convex/react';
+import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import { Key, State } from '../ds';
 import { WhileAwake } from './awake';
@@ -15,7 +15,7 @@ import { PublicFrame } from './frames';
 import { hrefFor } from './paths';
 import { useSearch } from './router';
 import { errorCode, recall, remember, safeNext } from './session';
-import { createPasskey, type CeremonyFailure, type CreationOptions } from './webauthn';
+import { createPasskey, assertPasskey, type CeremonyFailure, type CreationOptions } from './webauthn';
 
 type PasskeyHook = ReturnType<typeof useSignInWithUsernamePasskey>;
 const HANDLE = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])$/;
@@ -23,7 +23,6 @@ const HANDLE = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])$/;
 const words: Record<string, string> = {
   USERNAME_HAS_INVALID_CHARACTERS:
     'Use 2–39 lowercase letters, numbers or hyphens, without a leading or trailing hyphen.',
-  RATE_LIMITED: 'Too many passkey attempts. Try again in a minute.',
   UNKNOWN_CREDENTIAL: 'This device has no passkey for that handle. Use a passkey from your phone, or GitHub.',
   CEREMONY_ABORTED: 'The passkey prompt closed before it finished. Nothing changed.',
   CHALLENGE_EXPIRED: 'That took longer than ten minutes. Try again.',
@@ -43,6 +42,24 @@ function PasskeyDriver({ onState }: { onState: (hook: PasskeyHook) => void }) {
 
 export function SignIn() {
   const search = useSearch();
+  return search.get('link') === 'existing' ? (
+    <Suspense
+      fallback={
+        <PublicFrame>
+          <div className="intro" aria-busy="true">
+            <h1>Opening your existing sign-in…</h1>
+          </div>
+        </PublicFrame>
+      }
+    >
+      <LegacyLink />
+    </Suspense>
+  ) : (
+    <HandleSignIn />
+  );
+}
+function HandleSignIn() {
+  const search = useSearch();
   const next = safeNext(search.get('next'));
   const { flowError } = useOauth();
   const { signIn: github } = useSignInWithGithub(api.auth);
@@ -58,13 +75,9 @@ export function SignIn() {
     setQueued(null);
     setProblem(null);
     remember({ next, method: 'passkey', handle: username });
-    try {
-      const result = await hook.signIn({ username });
-      if (result.status === 'error' && result.userError.error !== 'ALREADY_PENDING')
-        setProblem(say(result.userError.error));
-    } catch (error) {
-      setProblem(say(errorCode(error)));
-    }
+    const result = await hook.signIn({ username });
+    if (result.status === 'error' && result.userError.error !== 'ALREADY_PENDING')
+      setProblem(say(result.userError.error));
   };
   const onState = (hook: PasskeyHook) => {
     driver.current = hook;
@@ -138,6 +151,7 @@ export function SignIn() {
       </div>
       <p className="after">
         <span>New here? Type the handle you want.</span>
+        <a href="/-/signin?link=existing">Add a passkey from your existing sign-in</a>
         <span>
           From a terminal: <code>nforge login</code>
         </span>
@@ -156,6 +170,12 @@ const failureWords: Record<CeremonyFailure | 'expired', string> = {
 
 /** After a first GitHub sign-in: one passkey, so the next sign-in needs no GitHub round trip. Skippable. */
 export function FirstPasskey({ onDone }: { onDone: (next: string) => void }) {
+  const linkedGithub = useQuery(api.authLinks.current, {});
+  const passkeys = useQuery(api.auth.listPasskeys, {});
+  const confirmStart = useMutation(api.authLinks.startConfirmation);
+  const confirm = useMutation(api.authLinks.confirm);
+  const { signIn: github } = useSignInWithGithub(api.authLinks);
+  const { flowError } = useOauth();
   const start = useMutation(api.authFirstPasskey.start);
   const finish = useMutation(api.authFirstPasskey.finish);
   const [busy, setBusy] = useState(false);
@@ -179,24 +199,59 @@ export function FirstPasskey({ onDone }: { onDone: (next: string) => void }) {
       setBusy(false);
     }
   };
+  const linkGithub = async () => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      const options = await confirmStart({});
+      if (options) await confirm({ response: await assertPasskey(options) });
+      await github({ redirectTo: new URL('/-/signin/passkey', location.origin).href });
+    } catch (error) {
+      setProblem(
+        errorCode(error) === 'GITHUB_ACCOUNT_MISMATCH'
+          ? 'That GitHub identity is linked to another Forge account.'
+          : 'Forge could not link GitHub. Try again.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const hasPasskey = passkeys && 'passkeys' in passkeys && passkeys.passkeys.length > 0;
   return (
     <PublicFrame>
       <div className="intro">
-        <h1>Add a passkey</h1>
+        <h1>{hasPasskey ? 'Your sign-in methods' : 'Add a passkey'}</h1>
         <p>Next time, sign in with your fingerprint, face or device PIN. Forge stores no password.</p>
       </div>
       <div className="blk">
         <div className="pad signin">
-          {problem ? (
+          {problem || (flowError && !linkedGithub) ? (
             <p className="err" role="alert">
               <State word="Check failed" state="failed">
-                {problem}
+                {problem ?? 'Forge could not link GitHub. Try again.'}
               </State>
             </p>
           ) : null}
-          <Key kind="primary" size="lg" className="wide-btn" onClick={() => void add()} disabled={busy}>
-            {busy ? 'Waiting for your device…' : 'Create a passkey'}
-          </Key>
+          {!hasPasskey ? (
+            <Key
+              kind="primary"
+              size="lg"
+              className="wide-btn"
+              onClick={() => void add()}
+              disabled={busy || passkeys === undefined}
+            >
+              {busy ? 'Waiting for your device…' : 'Create a passkey'}
+            </Key>
+          ) : (
+            <p>Passkey added to this account.</p>
+          )}
+          {linkedGithub ? (
+            <p>GitHub is linked to this account.</p>
+          ) : (
+            <Key size="lg" className="wide-btn" onClick={() => void linkGithub()} disabled={busy}>
+              Link GitHub to this account
+            </Key>
+          )}
           <Key size="lg" kind="ghost" className="wide-btn" onClick={() => onDone(next)} disabled={busy}>
             Not now
           </Key>
@@ -205,3 +260,6 @@ export function FirstPasskey({ onDone }: { onDone: (next: string) => void }) {
     </PublicFrame>
   );
 }
+
+// The retained provider loads only for explicit existing-account linking.
+const LegacyLink = lazy(() => import('./LegacyLink'));

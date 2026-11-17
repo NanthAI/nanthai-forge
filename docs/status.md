@@ -339,6 +339,13 @@ GitHub analysis owners can remove public or private analyses from Projects with 
 
 ## Partial
 
+- **Existing-account sign-in linking.** A retained provider session can enroll
+  a passkey on its exact Forge account; the methods screen attaches GitHub by
+  its completed numeric-id OAuth proof, with passkey confirmation when present.
+  Identity conflicts fail atomically and successful links are audited. Non-provider
+  agent/bot keys retain CLI access and are excluded from browser migration;
+  owner review of unmatched accounts and long-term renewal remains open before
+  Clerk removal. No live account linking is implied by deployment.
 - **Convex Auth foundation.** The server offers Convex Auth 2.0.0 GitHub/passkey
   methods beside Clerk, with session-to-account guards, verified-email callbacks,
   first-passkey glue and the existing Forge CLI credential issuer. Passkey
