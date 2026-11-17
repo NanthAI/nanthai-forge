@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { reconcileSourceRequest } from './hosted-source-request.js';
-import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
+import { sourceWaitSnapshot, waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { z } from 'zod';
 import type { ConflictContinuation } from './hosted-conflict-precheck.js';
@@ -263,11 +263,29 @@ async function saveOnce(
     !!prepareTargets &&
     !!deferred &&
     !!exchange.uploadPrepared &&
+    // Acknowledged bytes were dropped locally; recovery replays metadata, never rebuilds their pack.
+    !checkoutPathExists(acknowledged) &&
     !checkoutPathExists(describeMarker) &&
     files.every(file => file.pin.size <= rawLimit);
   let request: SaveRequest;
   if (checkoutPathExists(requestPath)) {
     request = saveRequestSchema.parse(JSON.parse(readFileSync(requestPath, 'utf8')));
+    // A split save already acknowledged its submission. Observe that job instead of uploading
+    // metadata and submitting it again; retryable source work still follows the recovery below.
+    if (checkoutPathExists(acknowledged) && checkoutPathExists(join(directory, backgroundSaveName))) {
+      const progress = JSON.parse(
+        await exchange.client.query(makeFunctionReference<'query'>('projectHostedSaves:progress'), {
+          projectId: exchange.projectId,
+          operationId: command.operationId,
+        }),
+      );
+      if (progress.terminal) {
+        applyHostedSaveReceipt(root, capture, request, progress.terminal);
+        return progress.terminal;
+      }
+      const snapshot = sourceWaitSnapshot(progress) as { status?: string; jobId?: string } | null;
+      if (snapshot?.status === 'submitted' && typeof snapshot.jobId === 'string') return snapshot;
+    }
     direct &&=
       files.length + JSON.parse(readFileSync(join(directory, 'pages.json'), 'utf8')).length <= directUploads;
     // A retry before the commit below re-sends the staged bytes it still holds: stored members are

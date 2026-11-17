@@ -19,6 +19,7 @@ import { clientCacheRoot } from '../dist/root-paths.js';
 import { digest } from '../dist/hash.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
+import { hostedAgentCli, sourceWaitHooks } from '../dist/hosted-agent-cli.js';
 
 const contract = {
   overlapEvidence: false,
@@ -115,6 +116,70 @@ async function setup(t, { fromBase = false, protectedPath = false } = {}) {
   return { s, c, root, entry, exchange, scheduled, overlap, settle, changed, files: state.files.length };
 }
 const count = (calls, name) => calls.filter(value => value === name).length;
+
+// ad80e037: the save's printed wait must follow source work, including split saves.
+for (const budget of [0, 540])
+  test(`the printed wait for a split save ${budget ? 'applies its settled receipt' : 'keeps the original operation when its budget ends'}`, async t => {
+    const f = await setup(t),
+      address = { url: 'https://fixture.invalid', projectId: f.s.projectId },
+      transport = new HostedAgentTransport(f.root, address, f.exchange),
+      written = [],
+      oldExit = process.exitCode,
+      originalWait = sourceWaitHooks.wait;
+    t.after(() => {
+      process.exitCode = oldExit;
+      sourceWaitHooks.wait = originalWait;
+    });
+    t.mock.method(process.stderr, 'write', text => {
+      written.push(String(text));
+      return true;
+    });
+    const saved = await hostedAgentCli(f.root, 'save', { message: 'split wait' }, address, transport);
+    assert.equal(saved.result.status, 'settling', 'ordinary saves still return before settlement');
+    const recovery = /resume with: nforge agent '([^']+)' wait '([^']+)'/.exec(written.join(''));
+    assert(recovery, 'the initial operation announcement carries a recovery command');
+    const command = JSON.parse(recovery[2]);
+    assert.deepEqual(command.operationIds, [saved.operationId]);
+    let subscribed = false;
+    sourceWaitHooks.wait = async (_address, operationId, _initial, _signal, _subscribe, kind) => {
+      subscribed = true;
+      assert.equal(operationId, saved.operationId);
+      assert.equal(kind, 'Saves');
+      const dispatch = f.scheduled.find(item => item.name === 'projectConvexSource:dispatch');
+      await f.settle(dispatch.args.jobId);
+      return JSON.parse(
+        await f.c.client.query(makeFunctionReference('projectHostedSaves:progress'), {
+          projectId: f.s.projectId,
+          operationId,
+        }),
+      ).terminal;
+    };
+    const waited = await hostedAgentCli(
+      recovery[1],
+      'wait',
+      { ...command, timeoutSeconds: budget },
+      address,
+      transport,
+    );
+    assert.equal(subscribed, Boolean(budget));
+    if (budget) {
+      assert.notEqual(waited.result.status, 'settling');
+      assert.notEqual(readHostedLaneCheckout(f.root).selection.head, f.entry.head);
+      assert.equal(process.exitCode, oldExit);
+    } else {
+      assert.equal(waited.result.status, 'IN_PROGRESS');
+      assert.equal(process.exitCode, 3);
+      assert.deepEqual(waited.result.next.operationIds, [saved.operationId]);
+      assert.equal(readHostedLaneCheckout(f.root).selection.head, f.entry.head);
+      assert(!written.join('').includes(`${saved.operationId} finished`));
+    }
+    assert.equal(
+      f.scheduled.filter(item => item.name === 'projectConvexSource:dispatch').length,
+      1,
+      'exact replay retains one source job for the save',
+    );
+    assert(!f.c.calls.includes('projectHostedFinishObserve:page'), 'a source save is never a landing');
+  });
 
 for (const fromBase of [false, true])
   test(`a split save returns after its upload, peers see its paths at once, and the next command applies the settle with one read${fromBase ? ' (first save from the base)' : ''}`, async t => {

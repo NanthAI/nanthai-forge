@@ -28,9 +28,12 @@ import { canonicalOperationIds } from './operation-id-case.js';
 export { hostedAgentAddress } from './hosted-agent-address.js';
 /** The CLI sends a hosted save under its wire name `checkpoint`; both mean save. */
 const hostedSaveAction = (action: string) => action === 'save' || action === 'checkpoint';
-const sourcePending = (response: { result?: unknown } | undefined) => {
-  const result = response?.result as { status?: string; jobId?: string } | undefined;
-  return result?.status === 'submitted' && typeof result.jobId === 'string';
+const sourcePending = (response: { result?: unknown } | undefined, background = false) => {
+  const result = response?.result as { status?: string; jobId?: string; operationId?: string } | undefined;
+  return (
+    (result?.status === 'submitted' && typeof result.jobId === 'string') ||
+    (background && result?.status === 'settling' && typeof result.operationId === 'string')
+  );
 };
 /** Replaceable in tests; production waits on the source progress subscription. */
 export const sourceWaitHooks = { wait: waitHostedAgentSource };
@@ -143,9 +146,9 @@ async function dispatchHostedAgentCli(
           response = await transport.dispatch(operation.action, replay);
           const delivered = sourceMessage(response, response.result);
           if (delivered) return delivered;
-          // A replay of a still-running save returns `submitted`: wait on its source
+          // A still-running save returns `submitted` or split-save `settling`: wait on its source
           // progress subscription (event-driven, no polling), then replay once more.
-          while (sourcePending(response) && Date.now() < deadline) {
+          while (sourcePending(response, true) && Date.now() < deadline) {
             const progress = await waitSource(
               address,
               operation.id,
@@ -173,7 +176,7 @@ async function dispatchHostedAgentCli(
                 }
               : replayed;
           }
-          if (isNetworkPending(response) || sourcePending(response)) {
+          if (isNetworkPending(response) || sourcePending(response, true)) {
             process.exitCode = 3;
             const resume = operationWait(root, {
               operationIds: selectedWait.operationIds!,
