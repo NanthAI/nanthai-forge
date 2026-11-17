@@ -67,6 +67,7 @@ export function cliReplyLines(args: string[], output: unknown): string[] {
     return [
       `Import ${text(result.repository)}: ${result.ready ? 'ready for Lanes' : text(result.phase) || 'in progress'} · ${count(result.completed)} of ${count(result.files)} files · ${count(result.bytes)} bytes · commit ${short(result.commit) || 'unknown'}.`,
       `${count(result.submodules)} submodules kept as pointers.${next(result.next)}`,
+      ...(text(result.migrationSummary) ? [text(result.migrationSummary)] : []),
     ];
   if (args[0] === 'github') {
     if (args[1] === 'status') {

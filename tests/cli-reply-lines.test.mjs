@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { cliReplyLines } from '../dist/cli-reply-lines.js';
+import { migrationSummary } from '../dist/migration-ledger.js';
 const agent = (action, result) => cliReplyLines(['agent', '.', action], { action, result });
 
 test('terminal landing lines use retained titles, explicit units, human times and short source identities', () => {
@@ -111,6 +112,24 @@ test('repository titles cannot inject terminal control sequences or extra reply 
   const lines = agent('planning', { items: [{ id: 'id', title: 'One\nTwo\u001b[31m', status: 'open' }] });
   assert.equal(lines.length, 1);
   assert.doesNotMatch(lines[0], /[\n\u001b]/);
+});
+
+test('readable import replies distinguish reported zero from unavailable migration counts without changing machine evidence', () => {
+  const report = {
+    repository: 'example/repo',
+    ready: true,
+    migrationSummary: migrationSummary({ issues: 0, pullRequests: null, branches: 2, collaborators: null }),
+  };
+  const original = structuredClone(report);
+  const lines = cliReplyLines(['import'], report);
+  assert.match(
+    lines.join('\n'),
+    /Issues 0, pull requests not reported, branch heads 2, collaborators not reported/,
+  );
+  assert.match(lines.join('\n'), /Git history is acquired separately/);
+  assert.match(lines.join('\n'), /pull-request work, tags, CI run history and accounts are not imported/);
+  assert.deepEqual(report, original);
+  assert.equal(cliReplyLines(['import'], { repository: 'example/repo', ready: true }).length, 2);
 });
 
 test('field-projected authentication and planning counts never invent missing sign-in or list states', () => {

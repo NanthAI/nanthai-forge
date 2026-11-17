@@ -37,7 +37,7 @@ the existing job write; retries reuse them and never refetch per row. Missing cr
 provider failure keep the affected counts not reported, with `notReportedReason`; source import can continue.
 Counts describe the origin at import start, not ongoing tracker synchronization. The aggregate fields follow
 the [GitHub GraphQL repository schema](https://docs.github.com/en/graphql/reference/repos).
-The CLI includes the same migration scope in `migrationSummary`, even when counts are unavailable. When present,
+The CLI's readable terminal reply and machine report include the same migration scope in `migrationSummary`, even when counts are unavailable. When present,
 it keeps the totals alongside the same operation, ref and exact commit,
 including on failure and resume. No account identities are included in this ledger.
 
