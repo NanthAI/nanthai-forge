@@ -10,6 +10,9 @@ VITE_FORGE_DEMO_REPOSITORY = "thevarsek/nanthai-edge-oss"
 directory = "netlify/functions"
 node_bundler = "esbuild"
 
+[functions."public-read"]
+included_files = ["hosted-web-dist/app.html"]
+
 # "/" is the static public page (web/index.html): Netlify serves the file before any redirect. Every other page route
 # is the signed-in app, web/app.html.
 

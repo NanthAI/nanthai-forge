@@ -1282,6 +1282,20 @@ This delivery does not change docs-only preflight or admission: configured
 `docsPaths` keep their existing cheap path. The full suite belongs to the
 landing runner, and there is no new runtime dependency in the CLI or MCP.
 
+
+### Public discovery configuration
+
+Set `FORGE_PUBLIC_READ_SECRET` to the same private service key on Convex and the site function. The key is never a
+`VITE_` variable and never reaches a browser. Set `FORGE_WEB_URL` to the canonical HTTPS web origin on both; the
+site function can also use Netlify's configured `URL`. An unset key closes the backend discovery route before DB
+I/O. An unset web origin closes share-tag generation and the sitemap API. HTML front pages still serve the
+bundled SPA shell when settings or public reads are unavailable. The function bundle includes
+`hosted-web-dist/app.html`; its response security headers are set directly in the function.
+
+For local browser development, set `VITE_FORGE_WEB_URL` to the deployed web origin; public reads go through that
+site's cache and budget. A bare Vite server does not host the site function. The
+[public discovery security contract](security.md) states rate limits, cache freshness and partial weekly coverage.
+
 `nforge heavy --no-build node --test TEST` runs against the existing `dist/`
 for a failing-first regression check; the default still rebuilds stale core output.
 Nested heavy commands share the live outer slot. Commands declared in `forge.json`

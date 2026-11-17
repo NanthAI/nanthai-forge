@@ -28,6 +28,7 @@ export const publicDiscoveryTables = {
         landings: v.number(),
         days: v.array(v.number()),
         lastAt: v.optional(v.number()),
+        recordedSince: v.optional(v.number()),
         main: v.union(v.literal('passing'), v.literal('unchecked')),
       }),
     ),

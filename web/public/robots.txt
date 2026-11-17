@@ -1,5 +1,7 @@
-# Only static public pages are crawlable: "/" (web/index.html), the discovery files, docs and assets. App routes
-# (/projects, /app.html and every project path) would consume Convex reads.
+# Crawlable: static public pages ("/", the discovery files, docs and assets) and the public discovery pages under /-/
+# (explore, profiles, public project front pages, their cached reads and /sitemap.xml), served from the site's cache
+# (netlify/functions/public-read.mts). No Sitemap line: this file is the same on every site, the sitemap is not.
+# Old app routes (/projects, /app.html, project paths outside /-/), deeper places and signed-in places stay closed: they would consume Convex reads.
 User-agent: *
 User-agent: GPTBot
 User-agent: ClaudeBot
@@ -24,3 +26,11 @@ Allow: /apple-touch-icon.png$
 Allow: /forge-badge-256.png$
 Allow: /maskable-512.png$
 Allow: /site.webmanifest$
+Allow: /sitemap.xml$
+Allow: /-/
+Allow: /-/public/v1/
+Disallow: /-/*/*/
+Disallow: /-/account
+Disallow: /-/signin
+Disallow: /-/device
+Disallow: /-/new

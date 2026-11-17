@@ -91,6 +91,10 @@ const reads = {
   '/-/public/v1/project/ada/atlas.json': project(),
   '/-/public/v1/project/ada/members.json': project({ plan: 'members' }),
   '/-/public/v1/project/ada/titled.json': project({ titles: true }),
+  '/-/public/v1/project/ada/partial.json': {
+    ...project(),
+    activity: { ...project().activity, recordedSince: NOW - 2 * DAY },
+  },
 };
 
 async function fixture(out) {
@@ -241,6 +245,11 @@ test('public discovery screens signed out: explore, profile and a public project
   assert.match(membersText, /plan is for its members/);
   assert.doesNotMatch(membersText, /Items? (are|is) left|open Items|Index rebuild/);
   assert.equal(await members.locator('nav.pstate').count(), 0);
+
+  const partial = await open('/-/ada/partial');
+  assert.match(await partial.locator('.glance').textContent(), /42 changes recorded this week/);
+  assert.match(await partial.locator('nav.pstate').textContent(), /recorded since/);
+  assert.match(await partial.getByRole('region', { name: 'Open Lanes' }).textContent(), /Recorded/);
 
   // Missing and private look the same (the read answers 404 for both).
   const none = await open('/-/ada/private-one');

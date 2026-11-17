@@ -9,7 +9,7 @@ import { planQuery as query } from './cliServer';
 import { finishReadReader } from './projectFinishReadReader';
 import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
-import { accessibleProject } from './projectAuthority';
+import { accessibleProject, readProjectRole } from './projectAuthority';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { planningRecordTable } from './projectWorkRecordTables';
 import { report } from './errors';
@@ -51,7 +51,9 @@ export async function planView(ctx: QueryCtx, projectId: Id<'hostedProjects'>): 
   const generationId = recordPartition(generation);
   // Coverage belongs to the shared record partition, not a source generation's alias.
   const partition = generation.recordsGenerationId ? await ctx.db.get(generationId) : generation;
-  const compact = partition?.planRowsVersion === 1;
+  // Settled compact pages retain positions only, so they cannot enforce Item visibility.
+  // Role-less viewers use the existing exact-root fallback until those pages carry that metadata.
+  const compact = partition?.planRowsVersion === 1 && !!(await readProjectRole(ctx, project, user.subject));
   const table = await planningRecordTable(ctx, generationId);
   const rows = (kind: 'issue' | 'initiative', status: string, initiativeId?: string) =>
     compact

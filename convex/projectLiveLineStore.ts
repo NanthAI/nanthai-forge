@@ -142,10 +142,26 @@ export async function writeLineMain(
   ctx: Pick<MutationCtx, 'db'> & Partial<Pick<MutationCtx, 'scheduler'>>,
   projectId: Id<'hostedProjects'>,
   main: { head: string; at?: string; actor?: string; automatic?: boolean; check?: string },
+  countLanding = false,
 ) {
   const old = await lineSummary(ctx.db, projectId);
   const value = old ? JSON.parse(old.value) : {};
   if (JSON.stringify(value.main) === JSON.stringify(main)) return;
+  // Seven UTC day buckets share this existing read/write. Replays and check-display patches do not count twice.
+  if (countLanding && value.main?.head !== main.head && main.at) {
+    const at = Date.parse(main.at);
+    if (Number.isFinite(at)) {
+      const day = Math.floor(at / 86_400_000);
+      const week = value.publicWeek ?? { since: at, days: [] };
+      const days: Array<{ day: number; count: number }> = week.days.filter(
+        (row: { day: number }) => row.day >= day - 6 && row.day <= day,
+      );
+      const today = days.find(row => row.day === day);
+      if (today) today.count++;
+      else days.push({ day, count: 1 });
+      value.publicWeek = { since: week.since, lastAt: at, days };
+    }
+  }
   value.main = main;
   const at = main.at ? Date.parse(main.at) : NaN;
   const hour = ctx.scheduler && Number.isFinite(at) ? nextActivityHour(value, at) : null;

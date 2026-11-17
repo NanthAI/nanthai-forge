@@ -7,7 +7,7 @@
 export type PublicProjectPage = {
   project: { handle: string; slug: string; name: string };
   stars: number;
-  activity: { landings: number; main: 'passing' | 'unchecked' };
+  activity: { landings: number; main: 'passing' | 'unchecked'; recordedSince?: number };
   plan: { shown: boolean; left?: number };
   lanes: { open: number };
 };
@@ -26,7 +26,7 @@ export function projectMeta(origin: string, page: PublicProjectPage): PageMeta {
   const { handle, slug, name } = page.project;
   const facts = [
     page.activity.main === 'passing' ? 'Main is passing' : 'Main is not checked',
-    `${plural(page.activity.landings, 'change')} landed this week`,
+    `${plural(page.activity.landings, 'change')} ${page.activity.recordedSince ? 'recorded this week' : 'landed this week'}`,
     `${plural(page.lanes.open, 'Lane')} open`,
     ...(page.plan.shown && typeof page.plan.left === 'number'
       ? [`${plural(page.plan.left, 'Item')} left`]
@@ -87,5 +87,5 @@ export function withMeta(html: string, meta: PageMeta): string {
     `<meta name="twitter:image" content="${attr(meta.image)}"/>`,
   ].join('');
   const withoutTitle = html.replace(/<title>[^<]*<\/title>/, '');
-  return withoutTitle.includes('</head>') ? withoutTitle.replace('</head>', `${tags}</head>`) : html;
+  return withoutTitle.includes('</head>') ? withoutTitle.replace('</head>', () => `${tags}</head>`) : html;
 }

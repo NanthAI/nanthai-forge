@@ -5,6 +5,13 @@ import type { Doc } from './_generated/dataModel';
 import { finishReadFields, type FinishReadKind } from './projectFinishReadProjection';
 const readers = new WeakSet<object>();
 const sourcePorts = new WeakMap<object, QueryCtx['db']>();
+/** Decorate a read port without losing its source identity or applying projections twice. */
+export function mapFinishReadPort(db: QueryCtx['db'], map: (db: QueryCtx['db']) => QueryCtx['db']) {
+  const mapped = map(db);
+  const source = sourcePorts.get(db);
+  if (source) sourcePorts.set(mapped, map(source));
+  return mapped;
+}
 /** Only legacy compatibility reads need the original project pointer until its next publication. */
 export const finishReadSourceDb = (ctx: QueryCtx) => sourcePorts.get(ctx.db) ?? ctx.db;
 export const isFinishReadReader = (ctx: QueryCtx) => readers.has(ctx);

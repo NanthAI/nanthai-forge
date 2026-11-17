@@ -642,6 +642,15 @@ charging, package publication, the default login service and a public production
 service are not available yet. Independent agent scorecard and
 fresh-model getting-started validation remain open.
 
+
+Public discovery uses a service-key backend boundary and a per-IP/domain site function budget. JSON query strings
+and non-canonical public paths redirect before reads. HTML query state shares one cache identity; public-read failures
+serve the bundled plain app shell, and function security headers are enforced directly. Share addresses use configured origins and cached visibility changes expire after 30
+seconds without stale serving. Role-less signed-in readers follow the public plan and Lane-title rule at query
+registration. Public weekly counts read seven compact day totals instead of full landing receipts; initial
+coverage is labelled “recorded this week”. See [security](security.md) and
+[development configuration](development.md#public-discovery-configuration).
+
 Backlog transfer preparation and source-keyed apply pages use the existing planning reducer and operation receipts
 ([planning import](planning.md#backlog-import)). Apply is staged default off under `FORGE_PLANNING_IMPORTS`;
 synthetic tests cover original dates, closed history, source-key reruns, device authority and partial retry. Web

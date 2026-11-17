@@ -519,7 +519,7 @@ function Project({ handle, slug }: { handle: string; slug: string }) {
     <span key="main">
       {activity.main === 'passing' ? <b>Main is passing.</b> : <b>Main is not checked.</b>}
     </span>,
-    ` ${plural(activity.landings, 'change')} landed this week. `,
+    ` ${plural(activity.landings, 'change')} ${activity.recordedSince ? 'recorded this week' : 'landed this week'}. `,
     `${plural(lanes.open, 'Lane')} ${lanes.open === 1 ? 'is' : 'are'} open now`,
     plan.shown ? ` and ${plural(plan.left, 'Item')} ${plan.left === 1 ? 'is' : 'are'} left.` : '.',
   ];
@@ -575,7 +575,12 @@ function Project({ handle, slug }: { handle: string; slug: string }) {
       {plan.shown ? (
         <Standing
           of="public"
-          done={{ n: activity.landings }}
+          done={{
+            n: activity.landings,
+            ...(activity.recordedSince
+              ? { more: `recorded since ${day.format(activity.recordedSince)}` }
+              : {}),
+          }}
           inProgress={{ n: lanes.open, ...(lanes.held ? { more: `${nf.format(lanes.held)} held` } : {}) }}
           left={{
             n: plan.left,
@@ -600,8 +605,16 @@ function Project({ handle, slug }: { handle: string; slug: string }) {
                 </div>
               ))}
               <div className="mn">
-                Landed
-                <b>{nf.format(activity.landings)}</b>
+                {activity.recordedSince ? 'Recorded' : 'Landed'}
+                <b
+                  title={
+                    activity.recordedSince
+                      ? `Recorded since ${new Date(activity.recordedSince).toLocaleDateString()}`
+                      : undefined
+                  }
+                >
+                  {nf.format(activity.landings)}
+                </b>
               </div>
             </div>
             {lanes.titles.length ? (
@@ -636,7 +649,7 @@ function Project({ handle, slug }: { handle: string; slug: string }) {
               </dd>
               <dt>Since</dt>
               <dd>{day.format(project.since)}</dd>
-              <dt>This week</dt>
+              <dt>{activity.recordedSince ? 'Recorded this week' : 'This week'}</dt>
               <dd>
                 {plural(activity.landings, 'landing')} <Week days={activity.days} />
               </dd>

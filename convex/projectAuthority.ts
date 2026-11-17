@@ -7,7 +7,41 @@ import { deviceProjectRefusal } from './accessPolicy';
 import type { Doc } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { projectExecution } from './projectExecution';
-import { hasWriteRole, projectRole } from './projectRole';
+import { checkedProjectRole, hasWriteRole, projectRole } from './projectRole';
+const readProjects = new WeakMap<
+  object,
+  Map<string, import('./_generated/dataModel').Doc<'hostedProjects'>>
+>();
+/** A read's result projection reuses the exact project the handler already authorized. No cross-request cache. */
+export const authorizedReadProject = (ctx: QueryCtx, id: string) =>
+  readProjects.get(ctx.auth ?? ctx.db)?.get(id);
+function rememberReadProject(
+  ctx: QueryCtx | MutationCtx,
+  project: import('./_generated/dataModel').Doc<'hostedProjects'>,
+) {
+  let projects = readProjects.get(ctx.auth ?? ctx.db);
+  if (!projects) readProjects.set(ctx.auth ?? ctx.db, (projects = new Map()));
+  projects.set(project._id, project);
+}
+const readRoles = new WeakMap<object, Map<string, ReturnType<typeof projectRole>>>();
+/** Share a current transaction's role resolution with its read projection, never across invocations. */
+export function readProjectRole(
+  ctx: QueryCtx,
+  project: import('./_generated/dataModel').Doc<'hostedProjects'>,
+  actor: string,
+) {
+  if (project.owner === actor) return Promise.resolve('owner' as const);
+  const checked = checkedProjectRole(ctx, project, actor);
+  if (checked !== undefined) return Promise.resolve(checked);
+  const key = ctx.auth ?? ctx.db;
+  let roles = readRoles.get(key);
+  if (!roles) readRoles.set(key, (roles = new Map()));
+  const selection = `${project._id}:${actor}`;
+  let role = roles.get(selection);
+  if (!role) roles.set(selection, (role = projectRole(ctx, project, actor)));
+  return role;
+}
+
 const deviceReads = new WeakMap<object, Promise<Doc<'cliCredentials'> | null>>();
 /** Reuse the public guard's row; a nested caller checks once in its transaction.
  * Source workers carry trusted job authority and may have no auth surface. */
@@ -60,6 +94,7 @@ export async function ownedProject(ctx: QueryCtx | MutationCtx, id: Id<'hostedPr
     );
     authorized = true;
     journalProject(ctx, project);
+    rememberReadProject(ctx, project);
     return project;
   } finally {
     projectExecution(ctx, id, authorized ? project?.name : undefined, authorized ? project?.key : undefined);
@@ -102,6 +137,7 @@ export async function accessibleProject(
       );
     authorized = true;
     journalProject(ctx, project);
+    rememberReadProject(ctx, project);
     return project;
   } finally {
     projectExecution(
@@ -143,6 +179,7 @@ export async function memberProject(ctx: QueryCtx | MutationCtx, id: Id<'hostedP
     'Project membership is required to read full Work archives.',
   );
   journalProject(ctx, project);
+  rememberReadProject(ctx, project);
   projectExecution(ctx, id, project.name, project.key);
   return project;
 }

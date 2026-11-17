@@ -46,7 +46,7 @@ export type ProjectPage = {
     upstream?: { handle: string; slug: string };
   };
   stars: number;
-  activity: { landings: number; days: number[]; main: MainCheck; lastAt?: number };
+  activity: { landings: number; days: number[]; main: MainCheck; lastAt?: number; recordedSince?: number };
   lanes: {
     open: number;
     more: boolean;
@@ -60,13 +60,10 @@ export type ProjectPage = {
   plan: PlanView;
 };
 
-/** Where the cached read lives: the site itself, so the shared cache answers. A local development server has no
- * site function, so it asks the development backend's public route directly. */
+/** Local development can name the deployed site cache; browser builds never receive the service key. */
 export function publicReadUrl(path: string) {
-  const backend = import.meta.env.DEV
-    ? (import.meta.env.VITE_CONVEX_SITE_URL as string | undefined)
-    : undefined;
-  return `${backend ? `${backend.replace(/\/$/, '')}/public/v1` : '/-/public/v1'}/${path}`;
+  const site = import.meta.env.DEV ? (import.meta.env.VITE_FORGE_WEB_URL as string | undefined) : undefined;
+  return `${site ? site.replace(/\/$/, '') : ''}/-/public/v1/${path}`;
 }
 
 export type Read<T> =

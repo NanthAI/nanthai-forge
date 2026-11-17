@@ -159,6 +159,28 @@ test('llms.txt answers the public page prompt explain-first and states the devel
     assert.ok(crawlable(robots, url), url);
   for (const url of ['/projects', '/app.html', '/device', '/?project=abc', '/settings', '/owner/repo'])
     assert.ok(!crawlable(robots, url), url);
+  // Public discovery (Item 8947a779): explore, profiles, public project front pages and their cached reads are open;
+  // deeper project places and signed-in places of the rebuilt app stay closed.
+  for (const url of [
+    '/-/explore',
+    '/-/ada',
+    '/-/ada/atlas',
+    '/-/public/v1/project/ada/atlas.json',
+    '/-/public/v1/explore/active.json',
+    '/sitemap.xml',
+  ])
+    assert.ok(crawlable(robots, url), url);
+  for (const url of [
+    '/-/ada/atlas/lanes',
+    '/-/ada/atlas/plan/abc',
+    '/-/ada/atlas/needs-me/held',
+    '/-/account',
+    '/-/account/billing',
+    '/-/signin',
+    '/-/device',
+    '/-/new',
+  ])
+    assert.ok(!crawlable(robots, url), url);
 });
 
 test('agent discovery teaches current contract verbs and shares measured B1.5d/P6 evidence', () => {

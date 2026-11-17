@@ -18,6 +18,7 @@ import { report } from './errors';
 import { finishReadReader } from './projectFinishReadReader';
 import { invariant } from '../src/errors';
 import { refreshIdentity } from './forgeIdentity';
+import { withPublicWork } from './publicWorkReads';
 import { actionPublicPeople, actionSubjectArgs, publicPeople, subjectArgs, type Shape } from './publicPeople';
 export * from './server';
 type Mapper<C> = (ctx: C, args: unknown, value: unknown, shape?: Shape) => Promise<unknown>;
@@ -171,7 +172,7 @@ export async function guard(ctx: QueryCtx | MutationCtx | ActionCtx, scope: 'cli
     return report(error);
   }
 }
-export const query = people(
+export const query = readPeople(
   customQuery(
     baseQuery,
     customCtx((ctx: QueryCtx) => guard(ctx, 'cli')),
@@ -179,7 +180,7 @@ export const query = people(
 );
 /** The finite finish observer uses the same exact read projections at its public identity
  * boundary as inside its handler. Otherwise naming a peer rereads the whole project row. */
-export const finishQuery = people(
+export const finishQuery = readPeople(
   customQuery(
     baseQuery,
     customCtx(async (ctx: QueryCtx) => {
@@ -189,7 +190,7 @@ export const finishQuery = people(
   ),
 );
 /** Plan uses current authority, Work-pointer and generation headers in the same read boundary. */
-export const planQuery = people(
+export const planQuery = readPeople(
   customQuery(
     baseQuery,
     customCtx(async (ctx: QueryCtx) => {
@@ -201,7 +202,7 @@ export const planQuery = people(
 /** The overlap query needs the full current policy row in several authority checks. Reuse only
  * canonical project reads inside this one query, including public mapping; clone each result so a
  * caller's local object edits cannot alter later authority checks. No grants or cross-query cache. */
-export const projectQuery = people(
+export const projectQuery = readPeople(
   customQuery(
     baseQuery,
     customCtx(async (ctx: QueryCtx) => {
@@ -284,7 +285,7 @@ export function actionWithMappedResult(transform: (value: unknown, args: unknown
     }
   });
 }
-export const coordinationQuery = people(
+export const coordinationQuery = readPeople(
   customQuery(
     baseQuery,
     customCtx((ctx: QueryCtx) => guard(ctx, 'coordination')),
@@ -318,3 +319,8 @@ export const receiptMutation = people(
   undefined,
   true,
 );
+
+/** Public query composition, separate from the shared credential helpers. */
+function readPeople<B>(builder: B): B {
+  return withPeople<B, QueryCtx>(withPublicWork(builder), subjectArgs, publicPeople);
+}

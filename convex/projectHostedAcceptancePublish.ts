@@ -381,13 +381,18 @@ export async function publishAcceptance(
     sequence: receipt.snapshot.revision,
     value,
   });
-  await writeLineMain(ctx, claim.projectId, {
-    head,
-    at: receipt.at,
-    actor: receipt.actor.id,
-    automatic: receipt.automatic,
-    ...(receipt.check ? { check: 'passed' } : {}),
-  });
+  await writeLineMain(
+    ctx,
+    claim.projectId,
+    {
+      head,
+      at: receipt.at,
+      actor: receipt.actor.id,
+      automatic: receipt.automatic,
+      ...(receipt.check ? { check: 'passed' } : {}),
+    },
+    true,
+  );
   await ctx.db.insert('projectHostedAcceptanceSnapshots', {
     projectId: claim.projectId,
     snapshotId: receipt.snapshot.id,

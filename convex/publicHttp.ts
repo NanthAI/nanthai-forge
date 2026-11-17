@@ -12,11 +12,10 @@
 import { httpAction } from './_generated/server';
 import { internal } from './_generated/api';
 
-/** Shared-cache lifetime: browsers revalidate after a minute; the CDN keeps a page 5 minutes and serves the stale
- * copy while one refresh runs. */
+/** Shared-cache lifetime: browsers always revalidate; the CDN keeps a page 30 seconds, with no stale serving. */
 export const PUBLIC_CACHE = {
-  browser: 'public, max-age=60',
-  shared: 'public, durable, s-maxage=300, stale-while-revalidate=3600',
+  browser: 'public, max-age=0, must-revalidate',
+  shared: 'public, durable, s-maxage=30, must-revalidate',
 };
 const segment = /^[a-z0-9][a-z0-9._-]{0,99}$/i;
 const headers = (type: string) => ({
@@ -65,7 +64,7 @@ const xmlEscape = (text: string) =>
     c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c]!,
   );
 
-/** The sitemap lists only what the public read lists; `origin` is the site the visitor reached. */
+/** The sitemap lists only what the public read lists; `origin` is the configured canonical web address. */
 export function sitemapXml(origin: string, rows: readonly { handle: string; slug: string }[]) {
   const urls = new Set([`${origin}/-/explore`]);
   for (const { handle, slug } of rows) {
@@ -79,12 +78,25 @@ export function sitemapXml(origin: string, rows: readonly { handle: string; slug
     .join('\n')}\n</urlset>\n`;
 }
 
-const siteOrigin = (request: Request) => {
-  const forwarded = request.headers.get('x-forge-public-origin');
-  return forwarded && /^https:\/\/[a-z0-9.-]+$/i.test(forwarded) ? forwarded : new URL(request.url).origin;
-};
+/** Fixed-length digest comparison; the service key never enters a reply or a DB row. */
+async function siteCaller(request: Request) {
+  const key = process.env.FORGE_PUBLIC_READ_SECRET;
+  const supplied = request.headers.get('x-forge-public-key');
+  if (!key || !supplied) return false;
+  const hash = async (value: string) =>
+    new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
+  const [expected, actual] = await Promise.all([hash(key), hash(supplied)]);
+  let different = 0;
+  for (let i = 0; i < expected.length; i++) different |= expected[i]! ^ actual[i]!;
+  return different === 0;
+}
 
 export const serve = httpAction(async (ctx, request) => {
+  if (!(await siteCaller(request)))
+    return new Response('Public reads use the site cache.', {
+      status: 401,
+      headers: { 'cache-control': 'no-store' },
+    });
   const path = publicPath(new URL(request.url).pathname);
   if (!path) return missing();
   const now = Date.now();
@@ -109,8 +121,11 @@ export const serve = httpAction(async (ctx, request) => {
     const page = await ctx.runQuery(internal.publicRead.profilePage, { handle: path.handle, now });
     return page ? json(page) : missing();
   }
+  const origin = process.env.FORGE_WEB_URL;
+  if (!origin || !/^https:\/\/[a-z0-9.-]+$/i.test(origin))
+    return new Response('Public reads are not configured.', { status: 503 });
   const rows = await ctx.runQuery(internal.publicRead.sitemapRows, {});
-  return new Response(sitemapXml(siteOrigin(request), rows), {
+  return new Response(sitemapXml(origin, rows), {
     headers: headers('application/xml; charset=utf-8'),
   });
 });

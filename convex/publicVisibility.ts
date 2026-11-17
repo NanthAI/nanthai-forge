@@ -3,9 +3,7 @@
  * profiles, share cards, the sitemap and the agent lookup) passes through these functions.
  *
  * The plan fields and their rule belong to the planning contract (Item d3357f40, docs/planning.md "Public plan"): an
- * Item's `hidden`, the project's `planVisibility` and `publicPlanVisible` in src/planning-model.ts. Until that module
- * is on main, `publicPlanVisible` below keeps its exact signature and meaning so the public read already reads those
- * fields; when it lands, this file re-exports it and the local body goes (follow-up on Item 76be0714).
+ * Item's `hidden`, the project's `planVisibility` and `publicPlanVisible` in src/planning-model.ts.
  *
  * Open Lane titles are this Lane's own setting: shown only when the project opts in; otherwise visitors get counts.
  * Pure: no reads, no clock. */
@@ -20,30 +18,9 @@ export type ProjectVisibility = {
 export const isPublicProject = (project: ProjectVisibility | null | undefined): boolean =>
   project?.visibility === 'public' && !project.removal;
 
+import { publicPlanVisible } from '../src/planning-model';
+export { publicPlanVisible } from '../src/planning-model';
 type Hideable = { hidden?: boolean; initiativeId?: string | null; parentId?: string | null };
-/** The planning contract's rule (src/planning-model.ts publicPlanVisible, same signature). `undefined` for an
- * Initiative or parent the row names means "not looked up" and fails closed; `null` means looked up and absent. */
-export function publicPlanVisible(input: {
-  projectVisibility: 'public' | 'private';
-  planVisibility?: PlanVisibility;
-  item: Hideable;
-  initiative?: Pick<Hideable, 'hidden'> | null;
-  parent?: Pick<Hideable, 'hidden' | 'initiativeId'> | null;
-  parentInitiative?: Pick<Hideable, 'hidden'> | null;
-}): boolean {
-  if (input.projectVisibility !== 'public' || input.planVisibility === 'members') return false;
-  if (input.item.hidden) return false;
-  if (input.item.initiativeId && (input.initiative === undefined || input.initiative?.hidden)) return false;
-  if (input.item.parentId) {
-    if (input.parent === undefined || input.parent?.hidden) return false;
-    if (
-      input.parent?.initiativeId &&
-      (input.parentInitiative === undefined || input.parentInitiative?.hidden)
-    )
-      return false;
-  }
-  return true;
-}
 
 export type PlanRow = Hideable & { id: string; kind: string };
 /** The plan rows a visitor may see, in their given order. `known` holds every looked-up row by id (Initiatives and

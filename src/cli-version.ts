@@ -192,16 +192,6 @@ export async function cliStartup(
     return false;
   }
   const installation = cliInstallation(root);
-  // The canary and measurement-hold modules load only for a command that checks freshness.
-  const {
-    activeCliCanaryRefusal,
-    readCliCanaryRefusal,
-    canaryCloneHint,
-    cliCanaryNotice,
-    rememberCanaryClone,
-  } = await import('./cli-canary.js');
-  const { cliCommandProject, cliLandingCommand, waitForCliMeasurement } =
-    await import('./cli-measurement-hold.js');
   // Source checkouts remain available for development and exact-Candidate tests.
   if (!installation && existsSync(join(root, 'src', 'cli-entry.ts'))) return true;
   if (!installation)
@@ -209,6 +199,8 @@ export async function cliStartup(
       'CLI_UPDATE_SOURCE_REQUIRED',
       'This CLI has no configured Forge release source. Next: nforge update .',
     );
+  const { cliCommandProject, cliLandingCommand, waitForCliMeasurement } =
+    await import('./cli-measurement-hold.js');
   // Resolved from local files at most once, and only while a measurement hold exists.
   let project: Promise<string | null> | undefined;
   const commandProject = () => (project ??= cliCommandProject(args));
@@ -237,6 +229,9 @@ export async function cliStartup(
         (selected = (await carriedMain(address.url, address.projectId)) ?? (await source.current())),
     );
     if (released === installed && !restoreMain) return true;
+    // Current installations do not need the canary executor or its update-only dependencies.
+    const { activeCliCanaryRefusal, canaryCloneHint, cliCanaryNotice, rememberCanaryClone } =
+      await import('./cli-canary.js');
     // A build the canary refused (or an owner rolled back) never strands anyone: reads and writes
     // keep running on the working build, with one notice line, until the back-off ends or main moves.
     const refused = activeCliCanaryRefusal(installation, released);
@@ -310,6 +305,7 @@ export async function cliStartup(
   } catch (error) {
     if (error instanceof ForgeError && error.code === 'CLI_CANARY_FAILED') {
       // The new build failed its smoke test. The previous build is still selected and works.
+      const { readCliCanaryRefusal, cliCanaryNotice } = await import('./cli-canary.js');
       const refusal = readCliCanaryRefusal(installation);
       process.stderr.write(
         `${refusal ? cliCanaryNotice(installation, refusal, cliBuildCommit(root)) : error.message}\n`,

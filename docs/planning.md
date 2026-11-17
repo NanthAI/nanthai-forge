@@ -223,3 +223,10 @@ For an existing complete search generation, the owner can call `projectHostedPla
 returned cursor until `isDone`. Each call handles at most 100 roots/1 MB, retains an exact retry receipt and changes
 only the disposable projection. Full search preparation also fills Plan pages. Partial preparation keeps the legacy
 reader, and planning changes between pages are included by ordinary transactional upkeep. `compactReady:false` reports a completed pass that retained exact legacy reads because unusually large list metadata outgrew the compact page envelope. Such Item writes still succeed without truncation; a fresh pass can compact the partition after that metadata changes.
+
+“Public” means every viewer without a project role, including a signed-in account. Public query registration
+and journal re-entry apply this rule to Item bodies, versions, comments, reactions, list rows and counts. Members
+retain the exact plan. Role-less planning reads through compact authority headers load the current canonical
+project policy once inside the same query; old headers omit that policy. Members keep the compact path, with
+no new function call or header write. Cached discovery pages can retain the last public response for up to 30 seconds after an
+in-flight pre-change read finishes; browser responses revalidate and no stale copy is served after expiry.
