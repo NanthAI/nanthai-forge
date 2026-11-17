@@ -68,6 +68,36 @@ discussions (Item `9a3d6f5f`).
 A server advertises the `planning-model` contract feature once it stores these fields. The CLI refuses to send them
 to a server that does not, since that server would drop them.
 
+## Batches
+
+One action on many Items (move, re-parent, assign, change status or type, close many, split, merge) is one batch:
+a list of at most 100 ordinary puts and comments sent in one call, `projectPlanningBatch:apply`
+([`src/planning-batch.ts`](../src/planning-batch.ts) builds the lists). Each write is checked and journaled exactly like
+a single one, so readers and replay do not change. Each write's operation id derives from the batch's, so a retry
+applies nothing twice. The reply gives every write's outcome: applied, replayed, or refused with its reason. An Item
+that changed after it was read is refused with its current version and is never overwritten; the rest still apply.
+
+- Undo is one more batch that writes back each field the batch named (`batchUndo`). A new Item made by the batch is
+  abandoned with the reason "Undone"; copied comments stay, since comments are never deleted.
+- Close many sets each Item to Done with one note as its reason. An Item with open Done-when lines closes with that
+  note, or with the one-press close-anyway reason; the reply names those Items so a follow-up can be offered.
+- Split gives each Done-when line to one part. The Item keeps its prose and the lines it keeps; each new part is a
+  Planned Item in the same Initiative and parent, related both ways to the Item.
+- Merge carries each duplicate's Lane links (its planned Intent and linked Intents) and a copy of each comment to the
+  surviving Item, and abandons the duplicate as a duplicate with a `duplicate-of` link. Items have no watchers yet,
+  so there are none to carry.
+
+Agents send the same batch as `put-planning-item {"batch":[…]}` ([workflow](agents/workflow.md)).
+
+## Filters
+
+Reads filter by type, owner and relation with one rule ([`src/planning-filter.ts`](../src/planning-filter.ts)), as
+well as by kind, status and Initiative. `owner: "none"` matches Items with no owner, and a person's handle also
+matches the agents working for them (`handle/agent`). `relation` is a relation kind (`depends-on`, `duplicate-of`,
+`related`) or `"none"`. `status: "active"` is open work (Proposed, Planned and In progress), the Plan screen's
+default scope; `"all"` adds done and dropped Items. The web Plan screen keeps the same fields in its address, and a
+saved view is a personal shortcut to them.
+
 ## Progress
 
 An Initiative's progress counts its Items and their sub-items, one tick each: done, in progress, not started

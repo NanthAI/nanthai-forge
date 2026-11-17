@@ -159,6 +159,9 @@ export const hostedContractFeatures = [
   'planning-model',
   /** Optional session-bound Lane ownership; writers remain behind accessIdentities.laneHolders. */
   'lane-holder-v1',
+  /** Backlog batches (65b0e706): projectPlanningBatch:apply runs up to 100 planning writes in one call. Without it
+   * the CLI refuses put-planning-item {batch}. */
+  'planning-batch',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

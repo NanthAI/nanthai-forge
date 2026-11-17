@@ -473,8 +473,19 @@ export const hostedAgentCommandSchemas = {
       ...planningIssueFields,
       search: z.string().trim().min(1).optional(),
       kind: z.enum(['issue', 'initiative']).optional(),
-      status: z.enum([...planningStatuses, 'all']).optional(),
+      status: z.enum([...planningStatuses, 'active', 'all']).optional(),
       initiativeId: uuid.optional(),
+      /** Same filters as the web Plan views (src/planning-filter.ts); owner/relation "none" = without one. */
+      type: z.string().trim().min(1).max(32).optional(),
+      owner: z.string().trim().min(1).max(200).optional(),
+      // A checked string, not an enum, so the per-session tool listing names the field without its values
+      // (tests/mcp-tool-list.test.mjs budget); help and docs/planning.md list them.
+      relation: z
+        .string()
+        .refine(value => ['depends-on', 'duplicate-of', 'related', 'none'].includes(value), {
+          message: 'relation: depends-on, duplicate-of, related or none.',
+        })
+        .optional(),
       /** Return stored state counts in one bounded read; continue with the returned cursor. */
       counts: z.boolean().optional(),
       limit: z.number().int().min(1).max(100).default(50),
@@ -487,15 +498,36 @@ export const hostedAgentCommandSchemas = {
     })
     .strict()
     .refine(
-      input => !(input.counts && (input.id || input.search || input.schedule)),
-      'Use counts with a list read.',
+      input =>
+        !(
+          input.counts &&
+          (input.id ||
+            input.search ||
+            input.schedule ||
+            input.type ||
+            input.owner ||
+            input.relation ||
+            input.status === 'active')
+        ),
+      'Use counts with a list read (kind, one stored status and initiativeId filters only).',
     )
     .refine(input => !(input.id && input.search), 'Use planningItemId or search, not both.')
     .refine(input => !(input.schedule && (input.id || input.search)), 'Use schedule with a list read.'),
   'put-planning-item': planningPutSchema
     .omit({ action: true, operationId: true, itemId: true, ...omitKeys(planningModelPutKeys) })
-    .extend({ ...planningIssueFields, fields: planningPutAgentFields.optional() })
-    .strict(),
+    .extend({
+      ...planningIssueFields,
+      fields: planningPutAgentFields.optional(),
+      /** One backlog batch (src/hosted-agent-planning-batch.ts): up to 100 puts or comments, one call, one Undo. */
+      batch: z.array(z.record(z.string(), z.unknown())).min(1).max(100).optional(),
+    })
+    .strict()
+    .refine(
+      value =>
+        value.batch === undefined ||
+        Object.keys(value).every(key => key === 'batch' || key === 'expectedVersion'),
+      'batch: send the entries alone.',
+    ),
   'comment-planning-item': planningCommentCommandSchema
     .omit({ action: true, operationId: true, agent: true, decidedBy: true }) // Set by the session and server.
     .extend(planningIssueFields)

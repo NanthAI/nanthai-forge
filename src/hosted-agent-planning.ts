@@ -11,7 +11,13 @@ import { ForgeError, invariant, itemChanged } from './errors.js';
 import { isPlanningPrefix, planningIdMaxCandidates } from './planning-id.js';
 import { planningIssueArguments } from './planning-issue-arguments.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
-import type { PlanningItem, PlanningWrite } from './work-planning-types.js';
+import {
+  planningCommentCommandSchema,
+  planningPutAgentFields,
+  planningPutSchema,
+  type PlanningItem,
+  type PlanningWrite,
+} from './work-planning-types.js';
 import { issuePaths, SCHEDULE_RULE, suggestSchedule } from './work-schedule.js';
 import { markdownDoc } from './docs-resolution.js';
 
@@ -508,6 +514,20 @@ const holdAdvice = (id: string, version: number, lines: string[]) => {
   };
 };
 
+/** The type, owner and relation filters (src/planning-filter.ts), loaded only when a read names one. */
+async function rowFilter(input: {
+  type?: string | undefined;
+  owner?: string | undefined;
+  relation?: string | undefined;
+}): Promise<(row: object) => boolean> {
+  if (!input.type && !input.owner && !input.relation) return () => true;
+  const { planFilterMatch } = await import('./planning-filter.js');
+  const filter = { type: input.type, owner: input.owner, relation: input.relation } as Parameters<
+    typeof planFilterMatch
+  >[1];
+  return row => planFilterMatch(row as Parameters<typeof planFilterMatch>[0], filter);
+}
+
 async function readPlanning(
   port: PlanningPort,
   input: ReturnType<typeof hostedAgentCommandSchemas.planning.parse>,
@@ -526,7 +546,10 @@ async function readPlanning(
           limit: input.limit,
         },
       );
-      return Array.isArray(found?.items) ? { ...found, items: found.items.map(withPlannedLink) } : found;
+      const keep = await rowFilter(input);
+      return Array.isArray(found?.items)
+        ? { ...found, items: found.items.filter(keep).map(withPlannedLink) }
+        : found;
     } catch (error) {
       if (
         error instanceof Error &&
@@ -544,7 +567,7 @@ async function readPlanning(
   const filtered = port.serverFeatures?.includes('planning-filtered-reads');
   const planningFilter = {
     ...(input.kind ? { kind: input.kind } : {}),
-    ...(input.status && input.status !== 'all' ? { status: input.status } : {}),
+    ...(input.status && input.status !== 'all' && input.status !== 'active' ? { status: input.status } : {}),
     ...(input.initiativeId ? { initiativeId: input.initiativeId } : {}),
   };
   if (input.counts) {
@@ -625,6 +648,7 @@ async function readPlanning(
       ...(sync?.changed.length || sync?.failed || sync?.held?.length ? { reconciled: sync } : {}),
     };
   }
+  const keep = await rowFilter(input);
   let cursor = decode(input.cursor, ws);
   let scanned = 0;
   let done = false;
@@ -649,8 +673,11 @@ async function readPlanning(
         .filter(
           item =>
             (!input.kind || item.kind === input.kind) &&
-            (!input.status || input.status === 'all' || item.status === input.status) &&
-            (!input.initiativeId || item.initiativeId === input.initiativeId),
+            (!input.status ||
+              input.status === 'all' ||
+              (input.status === 'active' ? open.includes(item.status) : item.status === input.status)) &&
+            (!input.initiativeId || item.initiativeId === input.initiativeId) &&
+            keep(item),
         ),
     ];
   }
@@ -751,6 +778,18 @@ export async function executeHostedPlanning(
         commentId: journal.operationId,
         workRevision: revision,
       },
+    };
+  }
+  if (input.batch !== undefined) {
+    const { batch } = hostedAgentCommandSchemas['put-planning-item'].parse(input);
+    const { hostedPlanningBatch } = await import('./hosted-agent-planning-batch.js');
+    return {
+      operationId: journal.operationId,
+      result: await hostedPlanningBatch(port, batch!, journal, {
+        planningCommentCommandSchema,
+        planningPutAgentFields,
+        planningPutSchema,
+      }),
     };
   }
   const put = flattenModelFields(port, hostedAgentCommandSchemas['put-planning-item'].parse(input)) as Omit<
