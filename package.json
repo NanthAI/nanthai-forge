@@ -18,11 +18,17 @@
         {
           "name": "format",
           "script": "format:check",
+          "fix": ["npm", "run", "format"],
           "inputs": [
             "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}",
             ".oxfmtrc.json",
             ".gitignore"
           ]
+        },
+        {
+          "name": "lint",
+          "script": "lint",
+          "inputs": ["src/**", "web/src/**", "convex/**", "netlify/functions/**", ".oxlintrc.json", "scripts/oxc.mjs", "package.json", "package-lock.json"]
         },
         {
           "name": "documents",

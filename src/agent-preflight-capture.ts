@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { closeSync, mkdtempSync, openSync, readSync, rmSync, writeSync } from 'node:fs';
-import type { SpawnSyncOptions } from 'node:child_process';
+import { spawnSync, type SpawnSyncOptions } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnMeasured } from './agent-preflight-measure.js';
@@ -28,12 +28,23 @@ export function failureExcerpt(tail: string) {
 
 /** spawnMeasured with the child's output (stdout and stderr, which preflight sent to our stderr) copied
  * through to ours as before (not held in memory) and its last TAIL_BYTES returned, so a failed run can say why it failed. */
-export function spawnCaptured(command: string, args: string[], options: SpawnSyncOptions) {
+export function spawnCaptured(command: string, args: string[], options: SpawnSyncOptions, measure = true) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-preflight-err-'));
   const file = join(directory, 'stderr.txt');
   const fd = openSync(file, 'w', 0o600);
   try {
-    const run = spawnMeasured(command, args, { ...options, stdio: ['ignore', fd, fd] });
+    const capturedOptions: SpawnSyncOptions = { ...options, stdio: ['ignore', fd, fd] };
+    const run = measure
+      ? spawnMeasured(command, args, capturedOptions)
+      : (() => {
+          // Static checks need diagnostics, not an extra timing process between their timeout and program.
+          const child = spawnSync(command, args, capturedOptions);
+          return {
+            status: child.status,
+            peakRssMb: null,
+            errorCode: (child.error as NodeJS.ErrnoException | undefined)?.code ?? null,
+          };
+        })();
     closeSync(fd);
     const reader = openSync(file, 'r');
     let tail = Buffer.alloc(0);

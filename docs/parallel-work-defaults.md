@@ -265,8 +265,8 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
 
 | Setting | Default | Why | Change |
 | --- | --- | --- | --- |
-| `preflight` | `require` | About 30% of first landing checks failed (2026-10-30), and every failure costs a full landing round on the project runner. A local run of the affected tests catches most of them first. | `advise` prints the set without refusing; `off` removes it. |
-| `preflightMaxMinutes` | `10` | A large affected set would make preflight slower than the landing check it saves. Above this estimate, preflight is advice only. | Any whole number of minutes; `0` makes every set advisory. |
+| `preflight` | `require` | About 30% of first landing checks failed (2026-10-30), and every failure costs a full landing round on the project runner. A local run of the affected tests catches most of them first. | `advise` leaves tests advisory; static failures still refuse. `off` removes preflight. |
+| `preflightMaxMinutes` | `10` | A large affected set would make preflight slower than the landing check it saves. Above this estimate, tests are advice only; static checks still run. | Any whole number of minutes; `0` makes every set advisory. |
 | `urgentRoles` | `["owner"]` | Builders marked routine landings urgent, which pushed every other landing back. Urgent is for a red main or an incident the owner names. | `["owner","agents"]` lets agents on the owner's login use it again. |
 | `autoClaim` | `true` | An agent's unsaved edits were invisible to others ("unsaved edits unavailable"), and a clash on one file cost about an hour (2026-11-05). The first-write hook records "touching PATH" on the agent board so other agents' first writes to that file show it. | `false` stops new automatic claims and hides live ones. |
 | `checkpointNudgeMinutes` | `30` | A builder that stops unexpectedly loses everything unsaved. Saves take under a minute. | Any number of minutes; `0` turns the nudge off. |
@@ -297,12 +297,18 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   test that needs a credential or setting from your shell fails here as it would in the landing check.
 - **Static checks first.** Cheap repository-wide checks the landing check also runs (formatting,
   the foundation check, document and schema guards) run before any build or test, whenever the
-  change touches their inputs, and a failure ends the run with that check's own output and no tests
+  change touches their inputs. Hosted `land --save` also runs them when tests are advised or
+  deferred or their selection is unavailable (including estimates above `preflightMaxMinutes`); a failure refuses before compose
+  or submission, naming the check, its diagnostics and its declared `fix` command (otherwise its
+  recheck command). After a static failure, fix the source, save, then use the same landing options
+  with a fresh operation id; the refused operation retains its original source pins. The receipt and land reply carry `static` results separately from test status;
+  `staticOnly: true` records that no tests ran and never satisfies the test gate. A failure ends
+  the run with that check's own output and no tests
   started (`receipt.static`, plan `static.selected` and `static.untouched`). They are declared as
   `preflight.static` in a root `forge.json` (any language, for example
   `{"preflight":{"static":[{"name":"vet","command":["go","vet","./..."],"inputs":["**/*.go"]}]}}`)
   or as `forge.preflight.static` in `package.json`: each entry is a `package.json` script name or
-  `{name?, script? | command?: [program, ...args], inputs?: [glob, ...]}`; without `inputs` any
+  `{name?, script? | command?: [program, ...args], inputs?: [glob, ...], fix?: [program, ...args]}`; without `inputs` any
   change triggers it, and a declared script the project no longer defines makes the plan
   unavailable instead of silently skipping. With no declaration only a conventionally named
   formatter script (`format:check`, `check:format`, `fmt:check`) runs; an unknown `check` script is

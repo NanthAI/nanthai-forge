@@ -542,3 +542,67 @@ test('save advice reflects real unsaved bytes and never nudges a live landing', 
   settleTurnWork([id], 'session-a');
   assert.equal(ownsLiveLanding(root, 'session-a'), false, 'terminal landing clears the freeze');
 });
+
+test('a static-only pass never satisfies required tests after a policy change; preflight off stays off', t => {
+  const root = repo(t, {
+    'forge.json': JSON.stringify({
+      preflight: { static: [{ name: 'syntax', command: ['node', '-e', ''] }] },
+    }),
+  });
+  const staticPass = finishGates(root, defaults({ preflightMaxMinutes: 0 }), lane, advice(), true);
+  assert.equal(staticPass.preflight.status, 'advised');
+  assert.equal(staticPass.preflight.static[0].outcome, 'passed');
+  assert.equal(readPreflightReceipt(root, lane.laneId).staticOnly, true);
+  assert.throws(() => finishGates(root, defaults({}), lane, advice()), code('PREFLIGHT_REQUIRED'));
+  assert.deepEqual(finishGates(root, defaults({ preflight: 'off' }), lane, advice(), true), {});
+});
+
+test('static-only changes still run configured static checks', t => {
+  const root = repo(t, {
+    'forge.json': JSON.stringify({
+      preflight: { static: [{ name: 'syntax', command: ['node', '-e', ''] }] },
+    }),
+  });
+  const result = finishGates(root, defaults({}), lane, advice({ paths: ['README.md'] }), true);
+  assert.equal(result.preflight.tests, 0);
+  assert.equal(result.preflight.status, 'none');
+  assert.equal(result.preflight.static[0].outcome, 'passed');
+  assert.equal(readPreflightReceipt(root, lane.laneId).tests, 0);
+});
+
+test('unavailable test selection still runs independent static commands and keeps tests unavailable', t => {
+  const root = repo(t, {
+    'forge.json': JSON.stringify({
+      preflight: { static: [{ name: 'syntax', command: ['node', '-e', ''] }] },
+    }),
+  });
+  const result = finishGates(root, defaults({}), lane, advice({ complete: false }), true);
+  assert.equal(result.preflight.status, 'unavailable');
+  assert.equal(result.preflight.static[0].outcome, 'passed');
+  assert.equal(readPreflightReceipt(root, lane.laneId).staticOnly, true);
+});
+
+test('a static refusal without a declared fix asks for source repair and a fresh landing, never preflight replay', t => {
+  const root = repo(t, {
+    'forge.json': JSON.stringify({
+      preflight: {
+        static: [
+          {
+            name: 'syntax',
+            command: ['node', '-e', "console.error('src/a.ts: invalid syntax'); process.exit(1)"],
+          },
+        ],
+      },
+    }),
+  });
+  assert.throws(
+    () => finishGates(root, defaults({ preflightMaxMinutes: 0 }), lane, advice(), true),
+    error => {
+      assert.equal(error.code, 'PREFLIGHT_REQUIRED');
+      assert.equal(error.recovery.command, undefined);
+      assert.match(error.message, /Fix the reported files, save/);
+      assert.match(error.message, /fresh operationId/);
+      return true;
+    },
+  );
+});

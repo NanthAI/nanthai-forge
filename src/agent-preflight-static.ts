@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { spawnSync } from 'node:child_process';
+import { spawnCaptured, failureExcerpt } from './agent-preflight-capture.js';
 import { globRegExp } from './path-glob.js';
 import { declaredPreflight } from './project-config.js';
 
@@ -15,6 +15,7 @@ export { globRegExp };
 export type StaticCheck = {
   name: string;
   command: string[];
+  fix?: string[];
   inputs: string[] | null;
   source: 'declared' | 'conventional';
 };
@@ -22,6 +23,9 @@ export type StaticCheckResult = {
   name: string;
   outcome: 'passed' | 'failed' | 'timed-out';
   ms: number;
+  command?: string[];
+  fix?: string[];
+  excerpt?: string;
 };
 export const STATIC_CHECK_TIMEOUT_MS = 120_000;
 const CONVENTIONAL_FORMAT_SCRIPTS = ['format:check', 'check:format', 'fmt:check'];
@@ -64,6 +68,7 @@ export function staticChecks(packageJson: string | undefined, forgeJson?: string
             ? entry.name
             : String(entry.script ?? command.join(' ')),
         command,
+        ...(strings(entry.fix) ? { fix: strings(entry.fix)! } : {}),
         inputs: strings(entry.inputs),
         source: 'declared',
       });
@@ -138,12 +143,15 @@ export function runStaticChecks(
   return checks.map(check => {
     const started = Date.now();
     const [command, ...args] = check.command as [string, ...string[]];
-    const run = spawnSync(command, args, { cwd: root, env, stdio: ['ignore', 2, 2], timeout: timeoutMs });
-    const timedOut = (run.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT';
+    const run = spawnCaptured(command, args, { cwd: root, env, timeout: timeoutMs }, false);
+    const timedOut = run.errorCode === 'ETIMEDOUT';
     return {
       name: check.name,
       outcome: timedOut ? 'timed-out' : run.status === 0 ? 'passed' : 'failed',
       ms: Date.now() - started,
+      command: check.command,
+      ...(check.fix ? { fix: check.fix } : {}),
+      ...(run.status !== 0 ? { excerpt: failureExcerpt(run.tail) } : {}),
     };
   });
 }

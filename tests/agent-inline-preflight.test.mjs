@@ -22,11 +22,11 @@ const common = {
   'tests/docs.test.mjs':
     "import test from 'node:test'; import fs from 'node:fs'; test('document remains readable', () => fs.readFileSync(new URL('../README.md', import.meta.url)));\n",
 };
-async function fixture(t, policy = 'require', reader = common['tests/docs.test.mjs']) {
-  const files = { ...common, 'tests/docs.test.mjs': reader };
+async function fixture(t, policy = 'require', reader = common['tests/docs.test.mjs'], extra = {}) {
+  const files = { ...common, 'tests/docs.test.mjs': reader, ...extra };
   const s = agentFixture(t, {
     base: { ...files, 'README.md': 'Before\n' },
-    lane: { ...files, 'README.md': 'After\n' },
+    lane: { ...files, 'README.md': extra['README.md'] ?? 'After\n' },
   });
   s.caps.agentDefaults = effectiveAgentDefaults({ preflight: policy });
   s.caps.features = ['land-gates'];
@@ -202,4 +202,119 @@ test('protected-path approval is printed before required inline preflight spends
   const notice = output.findIndex(line => line.includes('Landing will need approval'));
   const check = output.findIndex(line => line.includes('preflight plan:'));
   assert(notice >= 0 && check > notice, 'approval is explained before the preflight run starts');
+});
+
+// A project's own formatter, lint command and test inventory, with no Forge-specific command names.
+const staticProject = bad => ({
+  'README.md': bad ? 'After  \n' : 'After\n',
+  'forge.json': JSON.stringify({
+    preflight: {
+      static: [
+        {
+          name: 'style',
+          command: ['node', 'scripts/style.mjs'],
+          fix: ['node', 'scripts/style.mjs', '--write'],
+        },
+        { name: 'lint', command: ['node', 'scripts/lint.mjs'] },
+      ],
+    },
+  }),
+  'scripts/style.mjs': `import fs from 'node:fs';
+    const text = fs.readFileSync('README.md', 'utf8');
+    const formatted = text.trimEnd() + '\\n';
+    if (process.argv.includes('--write')) fs.writeFileSync('README.md', formatted);
+    else if (text !== formatted) { console.error('README.md: format error'); process.exit(1); }`,
+  'scripts/lint.mjs': "import fs from 'node:fs'; fs.readFileSync('README.md');",
+  // At 4 s/file, this is over the unchanged 10-minute test gate. Tests throw if started.
+  ...Object.fromEntries(
+    Array.from({ length: 151 }, (_, i) => [
+      `tests/reader-${i}.test.mjs`,
+      "import test from 'node:test'; import fs from 'node:fs'; test('document reader must stay advised', () => { fs.readFileSync(new URL('../README.md', import.meta.url)); throw Error('tests should not run'); });\n",
+    ]),
+  ),
+});
+
+test('incident 229147a2: over-budget land with a format error refuses locally before any hosted check', async t => {
+  const s = await fixture(t, 'require', undefined, staticProject(true));
+  await assert.rejects(
+    submitHostedLand(
+      s.root,
+      { operationId: randomUUID(), message: 'Unformatted document' },
+      s.address,
+      s.transport(),
+    ),
+    error => {
+      assert.equal(error.code, 'PREFLIGHT_REQUIRED');
+      assert.match(error.message, /static checks/);
+      assert.match(error.message, /README.md: format error/);
+      assert.match(error.message, /Fix: 'node' 'scripts\/style.mjs' '--write'/);
+      assert.equal(error.recovery.static[0].outcome, 'failed');
+      assert.equal(error.recovery.command, "'node' 'scripts/style.mjs' '--write'");
+      assert.match(error.message, /save, then run land --save with the same options and a fresh operationId/);
+      assert.doesNotMatch(error.message, /Continue with: .*preflight|Then replay the same land operation/);
+      return true;
+    },
+  );
+  const receipt = readPreflightReceipt(s.root, s.lane.laneId);
+  assert.equal(receipt.staticOnly, true);
+  assert.equal(receipt.passed, false);
+  assert.equal(receipt.tests, 0);
+  assert(receipt.deferredTests > 150);
+  assert.deepEqual(
+    receipt.static.map(c => [c.name, c.outcome]),
+    [
+      ['style', 'failed'],
+      ['lint', 'passed'],
+    ],
+  );
+  assert.equal(receipt.buildMs, undefined);
+  assert(!s.calls.some(c => /Compose|Landing/.test(c.name)), 'no compose or hosted check dispatched');
+});
+
+test('an over-budget static pass remains advised on land and replay, adding zero Convex calls', async t => {
+  const counts = [];
+  for (const withStatic of [false, true]) {
+    const files = staticProject(false);
+    if (!withStatic) delete files['forge.json'];
+    const s = await fixture(t, 'require', undefined, files);
+    s.caps.features.push('save-preflight-timing');
+    const before = s.calls.length;
+    const result = await submitHostedLand(
+      s.root,
+      { operationId: randomUUID(), message: 'Formatted document' },
+      s.address,
+      s.transport(),
+    );
+    assert.equal(result.result.submission.phase, 'landed');
+    counts.push(s.calls.slice(before).map(c => c.name));
+    const gate = JSON.parse(s.calls.find(c => c.name === 'projectHostedLanding:enqueue').args.gates).lanes[0];
+    assert.equal(gate.preflight, 'advised');
+    if (withStatic) {
+      const receipt = readPreflightReceipt(s.root, s.lane.laneId);
+      assert.equal(receipt.staticOnly, true);
+      assert.equal(
+        gate.preflightMs,
+        undefined,
+        'static-only duration never enters the test preflight speed metric',
+      );
+      assert.deepEqual(result.result.defaults.preflight.static, receipt.static);
+      assert.equal(result.result.defaults.preflight.status, 'advised');
+      assert.equal(receipt.tests, 0);
+      assert.equal(receipt.evidence, undefined, 'a static pass creates no test-coverage evidence');
+      const replay = finishGates(
+        s.root,
+        s.caps.agentDefaults,
+        { laneId: s.lane.laneId, head: s.lane.head },
+        { changedPaths: { paths: ['README.md'], complete: true } },
+        true,
+      );
+      assert.equal(replay.preflight.status, 'advised', 'a cached static pass never satisfies tests');
+      assert.equal(replay.preflight.reason, 'over 10 min');
+      assert.deepEqual(
+        replay.preflight.static.map(c => c.outcome),
+        ['passed', 'passed'],
+      );
+    }
+  }
+  assert.deepEqual(counts[1], counts[0], 'static checks add zero Convex calls');
 });

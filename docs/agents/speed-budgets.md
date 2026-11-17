@@ -72,7 +72,8 @@ on the existing save record and receipt. It excludes the final call's transit an
 application. Replays retain the first measurement. Background saves include their server settle time.
 The CLI caches that receipt locally for the exact Lane/head; no timing fetch is needed.
 
-Preflight already returns a local receipt with `durationMs` (planning is excluded). The landing's existing
+Preflight already returns a local receipt with `durationMs` (planning is excluded). A static-only
+receipt is excluded from `preflightMs`, so advisory static work does not dilute the test preflight budget. The landing's existing
 `gates` argument carries that duration and the saved duration for matching source into `timing.ms`
 (the compact pair `[saveMs, preflightMs]`, with null for a missing duration). Multi-Lane landings use the longest known duration. Malformed optional timing stays unknown;
 extracting a metric never adds a landing refusal or changes preflight policy. Old clients/servers,

@@ -40,6 +40,7 @@ import {
   preflightGuards,
   staticChecks,
   type StaticCheckResult,
+  type StaticCheck,
 } from './agent-preflight-static.js';
 import type { NativeFile } from './state/format.js';
 import { sourceTree } from './source-tree.js';
@@ -124,6 +125,8 @@ export const preflightReceiptSchema = z
       .regex(/^[0-9a-f]{64}$/)
       .optional(),
     tests: z.number().int().nonnegative(),
+    /** Only static commands ran; this receipt never satisfies the test gate. */
+    staticOnly: z.literal(true).optional(),
     selection: z.string(),
     exitCode: z.number().int().nullable(),
     passed: z.boolean(),
@@ -153,6 +156,9 @@ export const preflightReceiptSchema = z
             name: z.string(),
             outcome: z.enum(['passed', 'failed', 'timed-out']),
             ms: z.number().nonnegative(),
+            command: z.array(z.string()).optional(),
+            fix: z.array(z.string()).optional(),
+            excerpt: z.string().max(700).optional(),
           })
           .strict(),
       )
@@ -234,8 +240,9 @@ export type LocalSelection = {
   deferredTo: 'pre-queue';
   summary: string;
 };
+type StaticSelection = { selected: Pick<StaticCheck, 'name' | 'command' | 'fix'>[]; untouched: string[] };
 export type PreflightPlan =
-  | { status: 'unavailable'; reason: string }
+  | { static?: StaticSelection; status: 'unavailable'; reason: string }
   | {
       status: 'planned';
       scope: string;
@@ -245,7 +252,7 @@ export type PreflightPlan =
       command: string | null;
       deferredTests?: string[];
       /** Static checks this change triggers, run before any test; `untouched` names the rest. */
-      static?: { selected: { name: string; command: string[] }[]; untouched: string[] };
+      static?: StaticSelection;
       local?: LocalSelection;
       reusedTests?: string[];
       reusedFrom?: z.infer<typeof reusedFromSchema>;
@@ -486,7 +493,11 @@ function runnerPlan(
     checks.selected.length || checks.untouched.length
       ? {
           static: {
-            selected: checks.selected.map(({ name, command }) => ({ name, command })),
+            selected: checks.selected.map(({ name, command, fix }) => ({
+              name,
+              command,
+              ...(fix ? { fix } : {}),
+            })),
             untouched: checks.untouched,
           },
         }
@@ -766,7 +777,24 @@ const testArgs = (root: string, tests: string[]) => {
 
 /** The landing check's shared selector over the saved changes (base to head). Unknown paths mean
  * no plan: missing observations never block a landing. */
-export function preflightPlan(
+export function preflightPlan(...args: Parameters<typeof planTests>): PreflightPlan {
+  const plan = planTests(...args);
+  if (plan.status !== 'unavailable') return plan;
+  // Static commands are independent of test selection. Unknown changed paths conservatively
+  // trigger every declaration; a failed test inventory must not suppress formatting or lint.
+  const [root, changed] = args;
+  try {
+    const checks = staticChecks(laneText(root, 'package.json'), laneText(root, FORGE_CONFIG_FILE));
+    const selection = changed?.complete
+      ? selectStaticChecks(checks, changed.paths)
+      : { selected: checks, untouched: [] };
+    return { ...plan, static: selection };
+  } catch {
+    return plan; // Keep the existing unavailable result for malformed project configuration.
+  }
+}
+
+function planTests(
   root: string,
   changed: { paths: string[]; complete: boolean; source?: 'projection' | 'manifests' } | undefined,
   context?: { laneId: string; files: NativeFile[]; base?: string },
@@ -1002,7 +1030,11 @@ export function preflightPlan(
       ...(checks.selected.length || checks.untouched.length
         ? {
             static: {
-              selected: checks.selected.map(({ name, command }) => ({ name, command })),
+              selected: checks.selected.map(({ name, command, fix }) => ({
+                name,
+                command,
+                ...(fix ? { fix } : {}),
+              })),
               untouched: checks.untouched,
             },
           }
@@ -1201,10 +1233,13 @@ export function runPreflight(
   head: string,
   plan: PreflightPlan & { status: 'planned' },
   tree?: string,
+  staticOnly = false,
 ) {
   const started = Date.now();
   // Before anything runs: a long run must never be silent about what it is doing and why.
-  process.stderr.write(`${planLine(plan)}\n`);
+  process.stderr.write(
+    `${staticOnly ? 'preflight: static checks only; tests remain advised. ' : ''}${planLine(plan)}\n`,
+  );
   let exitCode: number | null = 0;
   let environment: PreflightReceipt['environment'];
   const environmentNext = `nforge agent ${shellQuote(root)} land --save ${shellQuote(JSON.stringify({ laneId }))}`;
@@ -1234,9 +1269,8 @@ export function runPreflight(
     if (plan.static?.selected.length) {
       staticResults = runStaticChecks(
         root,
-        plan.static.selected.map(({ name, command }) => ({
-          name,
-          command,
+        plan.static.selected.map(check => ({
+          ...check,
           inputs: null,
           source: 'declared' as const,
         })),
@@ -1244,7 +1278,7 @@ export function runPreflight(
       );
       if (staticResults.some(result => result.outcome === 'failed')) exitCode = 1;
     }
-    if (plan.tests.length && exitCode === 0) {
+    if (!staticOnly && plan.tests.length && exitCode === 0) {
       // Only Forge's own Node layout (no project runner) builds first; another project's script of
       // that name is not Forge's to run, and its runner builds what it needs.
       const scripts = (() => {
@@ -1472,8 +1506,9 @@ export function runPreflight(
     laneId,
     head,
     ...(tree ? { tree } : {}),
-    tests: plan.tests.length - skipped,
-    ...(evidence && tree === sourceTree(evidence.files)
+    tests: staticOnly ? 0 : plan.tests.length - skipped,
+    ...(staticOnly ? { staticOnly: true as const } : {}),
+    ...(!staticOnly && evidence && tree === sourceTree(evidence.files)
       ? {
           evidence: writePreflightEvidence(root, {
             ...evidence,
@@ -1481,11 +1516,11 @@ export function runPreflight(
           }),
         }
       : {}),
-    ...(plan.reusedTests?.length
+    ...(!staticOnly && plan.reusedTests?.length
       ? { reusedTests: plan.reusedTests.length, reusedFrom: plan.reusedFrom }
       : {}),
-    ...(plan.deferredTests?.length || skipped
-      ? { deferredTests: (plan.deferredTests?.length ?? 0) + skipped }
+    ...(plan.deferredTests?.length || skipped || (staticOnly && plan.tests.length)
+      ? { deferredTests: (plan.deferredTests?.length ?? 0) + skipped + (staticOnly ? plan.tests.length : 0) }
       : {}),
     ...(notRun.length ? { stoppedForTime: notRun.length, stopped: notRun, stoppedRerun } : {}),
     ...(skippedFiles.length ? { skipped: skippedFiles } : {}),
@@ -1575,7 +1610,7 @@ function runSummary(receipt: PreflightReceipt, plan: PreflightPlan & { status: '
     ? ` Slowest: ${receipt.slowest.map(item => `${item.file} ${seconds(item.ms)}`).join(', ')}.`
     : '';
   return (
-    `preflight: ${preflightVerdict(receipt)}, ${receipt.tests} test file(s) in ${seconds(receipt.durationMs)} (${timing.join(', ')}).` +
+    `preflight: ${receipt.staticOnly ? 'static checks ' : ''}${preflightVerdict(receipt)}, ${receipt.tests} test file(s) in ${seconds(receipt.durationMs)} (${timing.join(', ')}).` +
     checks +
     untouched +
     stopped +

@@ -28,11 +28,35 @@ export function finishGates(
   const advisories: Record<string, unknown> = {};
   if (!defaults) return advisories;
   if (defaults.preflight !== 'off') {
-    const receipt = readPreflightReceipt(root, lane.laneId);
+    let receipt = readPreflightReceipt(root, lane.laneId);
     const sameSource =
       receipt?.laneId === lane.laneId &&
       (receipt.tree && lane.tree ? receipt.tree === lane.tree : receipt.head === lane.head);
-    if (sameSource && receipt?.environment && preflightOutcome(receipt) === 'environment')
+    const run = command(root, 'preflight', { laneId: lane.laneId });
+    const refuseStaticFailure = (result: typeof receipt) => {
+      const failed = result?.static?.filter(check => check.outcome === 'failed');
+      if (!failed?.length) return;
+      const causes = failed
+        .map(
+          check =>
+            `${check.name}: ${check.excerpt || 'failed'}. ${check.fix ? `Fix: ${check.fix.map(shellQuote).join(' ')}` : `Fix the reported files, then rerun: ${(check.command ?? []).map(shellQuote).join(' ')}`}.`,
+        )
+        .join(' ');
+      const fix = failed.find(check => check.fix)?.fix;
+      throw new ForgeError(
+        'PREFLIGHT_REQUIRED',
+        `Inline preflight failed static checks for saved head ${lane.head.slice(0, 12)}. ${causes} Fix the reported files, save, then run land --save with the same options and a fresh operationId.`,
+        undefined,
+        { ...(fix ? { command: fix.map(shellQuote).join(' ') } : {}), static: result!.static },
+      );
+    };
+    if (sameSource) refuseStaticFailure(receipt);
+    if (
+      sameSource &&
+      !receipt?.staticOnly &&
+      receipt?.environment &&
+      preflightOutcome(receipt) === 'environment'
+    )
       advisories.preflight = {
         status: 'environment',
         ...receipt.environment,
@@ -42,7 +66,12 @@ export function finishGates(
       };
     // Must-run files the budget did not start: never shown as a pass, never refused as a failure
     // (the landing check runs them); the receipt's one command finishes them first.
-    else if (sameSource && receipt?.incomplete && preflightOutcome(receipt) === 'incomplete')
+    else if (
+      sameSource &&
+      !receipt?.staticOnly &&
+      receipt?.incomplete &&
+      preflightOutcome(receipt) === 'incomplete'
+    )
       advisories.preflight = {
         status: 'incomplete',
         tests: receipt.tests,
@@ -53,7 +82,7 @@ export function finishGates(
         deferredTests: receipt.deferredTests ?? 0,
         at: receipt.at,
       };
-    else if (sameSource && receipt && preflightOutcome(receipt) === 'passed')
+    else if (sameSource && receipt && !receipt.staticOnly && preflightOutcome(receipt) === 'passed')
       advisories.preflight = {
         status: 'passed',
         tests: receipt.tests,
@@ -68,7 +97,46 @@ export function finishGates(
       };
     else {
       const plan = preflightPlan(root, advice?.changedPaths);
-      const run = command(root, 'preflight', { laneId: lane.laneId });
+      // Tests may be advised by policy, estimate or inferred setup. Their status must not
+      // skip independent static commands, nor can a static-only pass satisfy the test gate.
+      const gateMinutes =
+        plan.status === 'planned'
+          ? Math.max(
+              plan.totalEstimateMinutes ?? plan.estimateMinutes,
+              Math.ceil(
+                ((plan.tests.length + (plan.deferredTests?.length ?? 0) + (plan.reusedTests?.length ?? 0)) *
+                  PREFLIGHT_SECONDS_PER_FILE) /
+                  60,
+              ),
+            )
+          : Infinity;
+      const requireTests =
+        plan.status === 'planned' &&
+        plan.tests.length > 0 &&
+        defaults.preflight === 'require' &&
+        gateMinutes <= defaults.preflightMaxMinutes &&
+        !plan.advisory;
+      const staticPlan =
+        plan.status === 'planned'
+          ? plan
+          : {
+              ...plan,
+              status: 'planned' as const,
+              scope: 'static',
+              tests: [],
+              estimateMinutes: 0,
+              command: null,
+            };
+      if (
+        runRequired &&
+        !requireTests &&
+        staticPlan.static?.selected.length &&
+        !(sameSource && receipt?.static?.length)
+      ) {
+        if (typeof runRequired === 'function') runRequired();
+        receipt = runPreflight(root, lane.laneId, lane.head, staticPlan, lane.tree, true);
+        refuseStaticFailure(receipt);
+      }
       if (plan.status === 'unavailable')
         advisories.preflight = { status: 'unavailable', reason: plan.reason };
       else if (plan.tests.length) {
@@ -84,7 +152,7 @@ export function finishGates(
         // A failed run names its cause (exit code, files, the start of its error output) and the two
         // ways forward, never a bare "failed" (9ab983fd).
         const failed =
-          sameSource && receipt && !receipt.passed
+          sameSource && receipt && !receipt.staticOnly && !receipt.passed
             ? ` Its last run failed.${
                 receipt.exitCode || receipt.failure
                   ? ` ${[
@@ -103,29 +171,16 @@ export function finishGates(
         // A command Forge inferred (no declared runner) is advice: it can need setup only the
         // project's CI does, so its result is reported and never required.
         const lastRun =
-          sameSource && receipt && !receipt.passed
+          sameSource && receipt && !receipt.staticOnly && !receipt.passed
             ? { lastRun: { passed: false, exitCode: receipt.exitCode, at: receipt.at } }
             : {};
-        // Learned timings may make a run advisory, but must never expand the set
-        // that the existing fixed-cost policy made mandatory.
-        const gateMinutes = Math.max(
-          plan.totalEstimateMinutes ?? plan.estimateMinutes,
-          Math.ceil(
-            ((plan.tests.length + (plan.deferredTests?.length ?? 0) + (plan.reusedTests?.length ?? 0)) *
-              PREFLIGHT_SECONDS_PER_FILE) /
-              60,
-          ),
-        );
-        if (
-          defaults.preflight === 'require' &&
-          gateMinutes <= defaults.preflightMaxMinutes &&
-          !plan.advisory
-        ) {
+        if (requireTests) {
           if (runRequired) {
             if (typeof runRequired === 'function') runRequired();
             // Reuse this plan and its existing local wall-time budget. No hosted read, new
             // operation or recursive dispatch: the caller continues the original finish.
             const result = runPreflight(root, lane.laneId, lane.head, plan, lane.tree);
+            refuseStaticFailure(result);
             const next = result.incomplete?.finish ?? result.stoppedRerun ?? run;
             if (
               preflightOutcome(result) === 'failed' ||
@@ -164,6 +219,12 @@ export function finishGates(
           reason: 'pre-queue Lane check coverage',
         };
       }
+    }
+    if (receipt?.static?.length && (sameSource || receipt.head === lane.head)) {
+      advisories.preflight = {
+        ...((advisories.preflight as Record<string, unknown> | undefined) ?? { status: 'none', tests: 0 }),
+        static: receipt.static,
+      };
     }
   }
   return advisories;
