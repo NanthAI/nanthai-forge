@@ -166,7 +166,11 @@ export class SecretPins {
       );
       let verified: ReturnType<typeof verifySealedReply>;
       try {
-        verified = verifySealedReply(reply, null, { ...request, firstContact: true });
+        verified = verifySealedReply(reply, null, {
+          ...request,
+          firstContact: true,
+          anchor: { kind: 'device-head', value: { id: keys!.id, signPub: keys!.signPub } },
+        });
       } catch {
         throw new ForgeError(
           'SECRETS_PIN_LOST',
@@ -190,7 +194,11 @@ export class SecretPins {
       let result: ReturnType<typeof verifySealedReply> | undefined;
       try {
         lost(currentKeys && equalBytes(currentKeys.id, keys!.id));
-        result = verifySealedReply(reply, null, { ...request, firstContact: true });
+        result = verifySealedReply(reply, null, {
+          ...request,
+          firstContact: true,
+          anchor: { kind: 'device-head', value: { id: currentKeys!.id, signPub: currentKeys!.signPub } },
+        });
         let index: Index,
           recoveredIndex = false;
         try {

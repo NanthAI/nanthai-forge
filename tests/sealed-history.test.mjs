@@ -134,6 +134,17 @@ test('T69 a valid forward Checks replacement moves a pin; an older record cannot
   const newer = pin(old);
   await refuse(next, newer, 'SECRETS_SET_REPLACED', next.request);
 });
+test('a pin present at entry keeps the verified replacement anchor instead of applying a first-contact anchor', () => {
+  const old = fixture(),
+    next = fixture(19),
+    p = pin(old);
+  next.reply.supersede = replacement(old, next);
+  next.reply.previous = clone(old.reply);
+  const result = verifySealedReply(next.reply, p, pub(old));
+  assert.deepEqual(result.pin.roster.setId, next.reply.roster.setId);
+  result.key?.fill(0);
+  for (const secret of result.secrets) secret.value.fill(0);
+});
 test('T69 Checks pointer records are independently authorized, and owner non-holders walk from genesis', async () => {
   const checks = fixture(17, 'fixture-project', 2),
     dev = fixture();
@@ -232,6 +243,7 @@ test('T93 dropped former signers, re-addition and Checks proposal fallback retai
     ...c.request,
     machine: true,
     machineAnchor: clone(c.reply.roster),
+    anchor: undefined,
     headFloor: 1,
   });
   assert.equal(machine.secrets.length, 1);

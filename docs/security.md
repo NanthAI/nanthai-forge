@@ -278,11 +278,25 @@ can use `secret repin` only when loading that project/kind under the lock report
 `SECRETS_PIN_LOST`, to confirm a view signed by this device after seeing its
 date, device fingerprints and the possibility that it is older. Other cases need
 a holder confirmation in the sharing slice. Rebuilding one project's trust keeps
-other missing projects marked as lost. Holder first contact requires this device
-to be the genesis creator and walks
-from that genesis; a copied public device entry cannot enroll a first-contact
-holder in a server-minted set. For future non-holder first contacts, the server
-still supplies the genesis owner; pins protect subsequent reads, including the
+other missing projects marked as lost. A rebuild checks this device's own head
+signature with the public key from its local key store and starts at that signed
+roster; it does not require this device to have created the set.
+
+The verifier refuses a first-seen set without an explicit typed journey anchor;
+served roster bytes or a copied public device entry grant no trust. The owner
+CLI supplies only its locally held device identity as an own-genesis anchor:
+that device must be the sole genesis entry and the signature chain must walk
+from it. Retrying a retained sealed request checks this device's own signature
+on that saved request against its locally held public key. Rebuilds verify
+this device's own signed head. Checks
+first contact uses an explicit genesis anchor named by trusted Development.
+A passkey contact needs a person-signed checkpoint
+with matching roster bytes and the public keys derived locally from its seed;
+a listed person entry alone grants no trust. A missing checkpoint or a walk
+outside retained history requires holder confirmation. These are verification
+foundations: joined Development devices without a confirmed anchor remain
+refused. Sharing commands, passkey browser delivery and Checks delivery are
+not available yet. Pins protect subsequent reads, including the
 ciphertext-only offline cache. A compromised server can withhold records or keep
 an offline device on its last verified view. No decrypted cache is written.
 

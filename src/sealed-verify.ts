@@ -18,6 +18,7 @@ import { secretNameKind } from './secret-names.js';
 import { decodeSealedReply } from './sealed-decode.js';
 import { safeSecretName } from './sealed-display.js';
 import type { SealedProposal } from './sealed-future-records.js';
+import { checkpointAnchor, deviceHeadAnchor, type JourneyAnchor } from './sealed-anchors.js';
 
 export type SealedReply = {
   v: 1;
@@ -52,6 +53,8 @@ export type VerifyRequest = {
   machine?: boolean;
   headFloor?: number;
   machineAnchor?: Roster;
+  /** Explicitly supplied by a verified journey; a served roster is never an anchor. */
+  anchor?: JourneyAnchor;
 };
 const hashHead = (h: Head) => framedHash(headBytes(h));
 const refuse = (ok: unknown, rule: string) => invariant(ok, 'SECRETS_ROSTER_REFUSED', rule);
@@ -60,19 +63,19 @@ const rollback = (ok: unknown, rule: string) => invariant(ok, 'SECRETS_ROLLBACK'
 /** The only trust entry point, shared by online, cached, holder and public-only reads.
  * It has no IO and never changes its input pin. Callers commit the result under the pin lock. */
 export function verifySealedReply(reply: SealedReply, pin: SecretPin | null, request: VerifyRequest) {
+  const noPinAtEntry = !pin;
   let key: Buffer | undefined;
   const secrets: { name: string; kind: 'env' | 'file'; value: Buffer }[] = [],
     notices: string[] = [];
   try {
     reply = decodeSealedReply(reply);
-    const firstHolderContact = !pin && !request.machine && request.recipient;
-    if (firstHolderContact) {
-      const creator = reply.genesis.entries[0];
-      refuse(
-        creator && sameId(creator.id, request.recipient!.id),
-        'Holder first contact requires this device to have created the set genesis.',
-      );
-    }
+    refuse(
+      !(request.anchor && request.machineAnchor) &&
+        !(request.anchor && request.machine) &&
+        !Object.hasOwn(request, 'personCheckpoint') &&
+        !Object.hasOwn(request, 'deviceHead'),
+      'Supply exactly one typed journey anchor.',
+    );
     const projectId = forgeSecretId('project', request.forgeProjectId),
       h = reply.head,
       r = reply.roster;
@@ -165,23 +168,45 @@ export function verifySealedReply(reply: SealedReply, pin: SecretPin | null, req
         'Development names a different Checks set. Confirm it with a holder.',
       );
     }
-    if (!anchor) {
-      if (request.setKind === 2 && !request.machine) {
-        const pointer = request.development?.roster.checksPointer;
-        refuse(
-          pointer && sameId(pointer.checksSetId, r.setId) && sameId(pointer.checksGenesisHash, genesisHash),
-          'Checks is not anchored to trusted Development.',
-        );
-        anchor = reply.genesis;
-      } else {
-        invariant(
-          request.firstContact,
-          'SECRETS_PIN_LOST',
-          'Secret trust is missing. Run nforge secret repin.',
-        );
-        anchor = firstHolderContact ? reply.genesis : r;
+    if (noPinAtEntry && request.anchor) {
+      switch (request.anchor.kind) {
+        case 'own-genesis':
+          refuse(
+            sameId(reply.genesis.entries[0]!.id, request.anchor.deviceId) &&
+              (!request.recipient || sameId(request.recipient.id, request.anchor.deviceId)),
+            'Holder first contact requires this device to have created the set genesis.',
+          );
+          anchor = reply.genesis;
+          break;
+        case 'checks-genesis':
+          refuse(request.setKind === 2 && request.development, 'Checks needs a trusted Development anchor.');
+          anchor = reply.genesis;
+          break;
+        case 'person-checkpoint':
+          anchor = checkpointAnchor(reply, request.anchor.value);
+          break;
+        case 'device-head':
+          anchor = deviceHeadAnchor(reply, request.anchor.value);
+          break;
+        default:
+          refuse(false, 'Unknown journey anchor.');
       }
     }
+    if (noPinAtEntry && request.recipient?.kind === 3)
+      invariant(
+        request.anchor?.kind === 'person-checkpoint',
+        'SECRETS_PIN_TOO_OLD',
+        'A passkey contact needs its signed person checkpoint. Confirm with a holder.',
+      );
+    if (!anchor) {
+      invariant(
+        request.firstContact,
+        'SECRETS_PIN_LOST',
+        'Secret trust is missing. Run nforge secret repin.',
+      );
+      refuse(false, 'First contact needs an explicit verified journey anchor.');
+    }
+    invariant(anchor, 'SECRETS_ROSTER_REFUSED', 'First contact needs an explicit verified journey anchor.');
     rollback(r.rosterVersion >= anchor.rosterVersion, 'Roster is older than the pin.');
     invariant(
       r.rosterVersion - anchor.rosterVersion <= 64,

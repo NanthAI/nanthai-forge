@@ -448,6 +448,7 @@ export function sealedAcceptance() {
         ...f.request,
         machine: true,
         machineAnchor: clone(f.reply.roster),
+        anchor: undefined,
         headFloor: 1,
       }).secrets.length,
       2,

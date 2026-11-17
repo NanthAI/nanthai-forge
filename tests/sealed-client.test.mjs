@@ -23,6 +23,7 @@ import { headBytes } from '../dist/sealed-records.js';
 import { forgeSecretId, framedHash } from '../dist/sealed-format.js';
 import { fixture } from './helpers/sealed-fixture.mjs';
 import { FileKeyStore } from '../dist/sealed-local.js';
+import { deviceKeys } from '../dist/sealed-keys.js';
 import { SealedJournal } from '../dist/sealed-journal.js';
 import { SecretPins } from '../dist/sealed-pins.js';
 import { NetworkTransportError } from '../dist/network-fetch.js';
@@ -129,6 +130,55 @@ function clear(result) {
 }
 const code = expected => error => (error.code ?? error.data?.code) === expected;
 
+for (const journey of [
+  'member second device',
+  'another project with existing local trust',
+  'owner first set on a new project',
+])
+  test(`first contact on ${journey} refuses a server-made owner roster before any value write`, async t => {
+    const { directory, pins, f } = setup(t),
+      account = journey === 'member second device' ? 'fixture-member' : 'fixture-owner',
+      project =
+        journey === 'another project with existing local trust' ? 'new-project' : f.request.forgeProjectId,
+      attacker = fixture(19, project),
+      keys = account === 'fixture-owner' ? f.keys : deviceKeys(forgeSecretId('account', account), f.random),
+      store = new FileKeyStore(join(directory, 'device.bin'));
+    store.save({ ...keys, pinCounter: 0 });
+    if (journey === 'another project with existing local trust')
+      clear(await pins.verifyAndSave(f.reply, f.request, 1));
+    attacker.transition({
+      added: [
+        attacker.entry(keys, {
+          accountId: forgeSecretId('account', account),
+          role: 1,
+          how: account === 'fixture-owner' ? 4 : 6,
+          addedAtRosterVersion: 2,
+        }),
+      ],
+    });
+    attacker.wrap();
+    const response = sealedWrite(attacker.reply, randomUUID(), null),
+      writes = [];
+    const transport = {
+      read: async () => response,
+      write: async input => {
+        writes.push(input);
+        return { accepted: true, replay: false };
+      },
+    };
+    const client = new SealedClient(project, account, keys, pins, transport, false);
+    const bytes = () =>
+      Object.fromEntries(readdirSync(directory).map(name => [name, readFileSync(join(directory, name))]));
+    const before = bytes();
+    await assert.rejects(client.write('NEW_TOKEN', Buffer.from('synthetic-never-sent-secret')), {
+      code: 'SECRETS_ROSTER_REFUSED',
+    });
+    assert.equal(writes.length, 0, 'no sealed request reaches the hostile transport');
+    assert.deepEqual(bytes(), before);
+    await assert.rejects(client.read(), { code: 'SECRETS_ROSTER_REFUSED' });
+    assert.deepEqual(bytes(), before);
+  });
+
 test('owner genesis set/list/change/remove and cache reads use the real bounded server record', async t => {
   const { client, calls, s, pins, project } = setup(t);
   await client.write('API_TOKEN', Buffer.from('first-synthetic-value'));
@@ -148,6 +198,30 @@ test('owner genesis set/list/change/remove and cache reads use the real bounded 
   assert.equal(s.tables.sealedSecretHistory.size, 1);
   assert(await pins.load(project, 1));
   assert.equal(calls.filter(c => c.action === 'write').length, 3);
+});
+test('a crash after accepted receipt compaction but before first pin publication recovers through the local creator proof', async t => {
+  const { client, pins, project, calls, directory } = setup(t),
+    operationId = randomUUID(),
+    original = pins.verifyAndSave.bind(pins);
+  pins.verifyAndSave = async () => {
+    throw Error('synthetic crash before first pin publication');
+  };
+  await assert.rejects(
+    client.write('API_TOKEN', Buffer.from('synthetic-crash-recovery-value'), { operationId }),
+    /synthetic crash/,
+  );
+  pins.verifyAndSave = original;
+  assert.equal(await pins.load(project, 1), null);
+  const receiptPath = join(directory, 'operations', operationId + '.bin');
+  assert.equal(deserialize(readFileSync(receiptPath)).state, 'accepted');
+  assert.equal(readFileSync(receiptPath).includes(Buffer.from('synthetic-crash-recovery-value')), false);
+  const before = calls.filter(call => call.action === 'write').length;
+  assert.equal(
+    (await client.write('API_TOKEN', Buffer.from('synthetic-crash-recovery-value'), { operationId })).replay,
+    true,
+  );
+  assert.equal(calls.filter(call => call.action === 'write').length, before);
+  assert(await pins.load(project, 1));
 });
 test('T8 concurrent owner commands reconcile a CAS loser without losing either name', async t => {
   const { client, transport, pins, keys, project, account } = setup(t);

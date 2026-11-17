@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from './errors.js';
 import type { SealedReply } from './sealed-verify.js';
+import type { PersonCheckpoint } from './sealed-future-records.js';
 
 type Check = (value: unknown) => void;
 const bad = (ok: unknown) => invariant(ok, 'SECRETS_FORMAT_REFUSED', 'Malformed sealed record fields.');
@@ -187,6 +188,9 @@ export function decodeSealedReply(value: unknown): SealedReply {
     seen.add(v);
     reply(v);
   }
+  return copyBuffers(value) as SealedReply;
+}
+function copyBuffers(value: unknown): unknown {
   const copies = new Map<object, unknown>();
   const copy = (input: unknown): unknown => {
     if (input instanceof Uint8Array) return Buffer.from(input.buffer, input.byteOffset, input.byteLength);
@@ -203,5 +207,10 @@ export function decodeSealedReply(value: unknown): SealedReply {
       });
     return output;
   };
-  return copy(value) as SealedReply;
+  return copy(value);
+}
+/** Checkpoints and their rosters reject unsigned fields before they become trust anchors. */
+export function decodePersonCheckpoint(value: unknown): PersonCheckpoint {
+  record({ roster, rosterHash: bytes(32), at: number, signature: bytes(64) })(value);
+  return copyBuffers(value) as PersonCheckpoint;
 }

@@ -19,6 +19,7 @@ export type SealedProposal = {
   proposedAt: number;
   signature: Buffer;
 };
+export type PersonCheckpoint = { roster: Roster; rosterHash: Buffer; at: number; signature: Buffer };
 export const proposalBytes = (r: Roster, p: SealedProposal) =>
   frame(
     'proposal',

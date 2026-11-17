@@ -31,6 +31,9 @@ export class SealedClient {
     return {
       forgeProjectId: this.project,
       setKind: 1,
+      // Preserve the original creator-only proof: this locally held identity must be
+      // the sole genesis entry, and every subsequent transition must chain from it.
+      anchor: { kind: 'own-genesis', deviceId: this.keys.id },
       recipient: { id: this.keys.id, enc: this.keys.enc, kind: 1 },
     };
   }
@@ -115,7 +118,7 @@ export class SealedClient {
       );
     for (;;) {
       if (pending?.state === 'accepted') {
-        const current = await this.read(); // Recheck current access before returning a local receipt.
+        const current = await this.read(); // Recheck current access using the local creator-only anchor.
         try {
           if (value !== null)
             invariant(
@@ -234,6 +237,7 @@ export class SealedClient {
           const check = verifySealedReply(reply, state?.pin ?? null, {
             ...this.request(),
             firstContact: !state,
+            ...(!state ? { anchor: { kind: 'own-genesis' as const, deviceId: this.keys.id } } : {}),
           });
           check.key?.fill(0);
           for (const secret of check.secrets) secret.value.fill(0);
@@ -252,6 +256,7 @@ export class SealedClient {
         const check = verifySealedReply(sealedRead(pending.wire), null, {
           ...this.request(),
           firstContact: true,
+          anchor: { kind: 'device-head', value: { id: this.keys.id, signPub: this.keys.signPub } },
         });
         try {
           invariant(
@@ -306,7 +311,21 @@ export class SealedClient {
       const reply = sealedRead(pending.wire);
       const latest = await this.pins.load(this.project, 1);
       if (!latest || latest.pin.head.headVersion <= reply.head.headVersion) {
-        const verified = await this.pins.verifyAndSave(reply, this.request(), Date.now());
+        const verified = await this.pins.verifyAndSave(
+          reply,
+          {
+            ...this.request(),
+            ...(!latest
+              ? {
+                  anchor: {
+                    kind: 'device-head' as const,
+                    value: { id: this.keys.id, signPub: this.keys.signPub },
+                  },
+                }
+              : {}),
+          },
+          Date.now(),
+        );
         verified.key?.fill(0);
         for (const secret of verified.secrets) secret.value.fill(0);
       }
