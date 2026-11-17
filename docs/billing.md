@@ -62,8 +62,84 @@ storage and backend costs are separate from the displayed subscription preview.
 Warnings, removal controls and live usage remain open on the journey scorecard;
 the billing preview does not authorise a change to them.
 
-The home loads lazily with the Billing route. `sample=first|hobby|pro|team|over|late|worst`
-and `view=owner|member|loading|error` select explicit synthetic states. `screen=plan|invoices|payment`
-reserves the billing screen addresses and currently shows their read-only summary;
-the independently built screens replace those summaries. These switches never
+The home loads lazily with the Billing route. `sample=first|hobby|pro|team|quiet|over|late|worst`
+and `view=owner|manager|member|loading|error` select explicit synthetic states. These switches never
 change an account or start a payment flow.
+
+## Billing screens
+
+Each screen loads as its own chunk with its address, `screen=plan|invoices|payment|limit`, and
+reads the same adapter. `step=` selects a sample moment on a screen. The pure previews live in
+`web/src/billing/preview.ts` and take the pool's `asOf` instead of a clock.
+
+- **Change plan** compares the three plans in one table with each plan's cost at the month's
+  pace, and names a cheaper plan in either direction. A move up starts at once: it charges the
+  new plan for the days left of the calendar month, credits the days already paid on the current
+  plan, includes the new plan's full landings at once and drops extra blocks the new plan covers.
+  A move down waits for the reset and charges nothing. Paying hands off to a hosted payment page;
+  its outcomes (bank confirmation, declined, unknown, paid) are sample moments.
+- **Invoices** lists 24 per page, newest first, with one statement for the selected invoice. On a
+  phone the list or the invoice shows. It covers paid, unpaid, refunded, empty, loading and
+  payment-provider-unavailable states, the download action and a short corrected-invoice request.
+- **Payment and details** shows the card summary, the details printed on invoices, the limit on
+  extra landings and who has billing. A new paid plan allows two extra blocks; the screen states
+  where landings then wait and the most a month can cost. Card entry and replacement hand off to
+  the hosted payment page: Forge renders no card fields and holds no card secret.
+- **Landing limit** draws the plan-held moments (limit near, all used, as a writer, allowance
+  back, first extra block, at the limit, payment failed) from one source, `heldStory`, so the
+  rail foot, Lanes notice, held Lane, Needs-you row and decision and the agent's reply agree.
+
+A billing manager sees invoices, the plan, the card and the limit, and gains no source, project
+or people administration; the member view carries no financial data. Server-side access checks
+for these roles arrive with the P8 integration.
+
+### Rules the screens follow
+
+| Rule | Source |
+| --- | --- |
+| Calendar months for everyone; a mid-month start pays the days left and gets its full landings at once | owner decision 4.4 |
+| Moving up mid-month drops the extra blocks the new plan covers | 4.7 |
+| A new paid plan allows two extra blocks (`defaultExtraBlocks`); the owner changes it | 4.2 |
+| A limit approaching shows when the month's pace uses it before the reset, never at a fixed percentage | 176db9fb |
+| At the limit, Lanes wait at In queue with their places kept; saves continue; no check runs, so no CI minutes are spent; Hobby has no grace landing | 4.6 |
+| When allowance returns, waiting Lanes land in queue order on their original operations; nothing is resubmitted | 176db9fb |
+| Taking a landing out of main never counts and never waits on the plan | `landingCountingRule` |
+| A failed payment is tried on days 1, 4 and 8; landings continue 21 days, then the Hobby allowance applies with queued work kept; nothing is deleted (`paymentRecoveryRule`) | 4.8 |
+| Another plan that would cost less at the account's pace is named, in both directions | 4.9 |
+| No yearly billing in the first build | 4.10 |
+
+### Action contract
+
+`web/src/billing/actions.ts` defines the actions P8 connects: `checkout`, `reconcile`,
+`replaceCard`, `schedulePlan`, `setLimit`, `saveDetails`, `requestCorrection` and `download`.
+Each mutation carries an operation id. A repeated id returns the same attempt, and `reconcile`
+reads that attempt without starting another, so an unknown payment result is never paid twice;
+a new id is used only after a declined attempt. A failed edit returns a typed error, keeps what
+was typed and is retried on the same id. The P7 stub keeps results in memory: it makes no network
+call, sets no timer, stores nothing, charges nothing and sends no message. `handoffUrl` is null
+until P8 supplies a hosted payment page.
+
+### Billing email triggers
+
+Forge has no push notifications. Billing sends an email only when money moved or is about to stop
+work; each carries the amount, the date and one link. P7 sends none of them; P8 (5822dd13) sends
+them.
+
+| Email | When | To |
+| --- | --- | --- |
+| Invoice paid | On the 1st, and the day a plan starts; the PDF attached | owner and billing managers |
+| Payment failed | Each declined try: what was tried, the next try, and the date landings would wait | owner and billing managers |
+| Card expires before the next invoice | Once, 14 days ahead | owner and billing managers |
+| Landings are waiting | Once, when the limit is reached; not at a percentage, not daily | owner and billing managers |
+| Plan, card or limit changed | On each change, naming who changed it | owner |
+
+A price change is announced in the plan-changed email at least 30 days before it applies, with
+the plan, the current price, the new price and the date; nothing changes for the account before
+that date.
+
+### Screen cost
+
+The screens add no Convex calls, DB reads or writes, R2 operations or network requests per view
+or action, and nothing on an idle tab: the delta is $0 per 1,000 landings. A view works on one
+bounded page (24 invoices, 50 projects, 12 months), so its memory and work stay the same at
+double the account's history.

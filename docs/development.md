@@ -691,9 +691,10 @@ layer out of both first paints.
   for the body and comments. Idle costs nothing.
 
 Billing at `/-/account/billing` lazily loads `web/src/billing/Home.tsx`, replacing
-its placeholder. The shared [stub contract](billing.md) adds no accounting calls.
-`tests/billing-home.test.mjs` renders the real frame with synthetic data. Set
-`FORGE_BILLING_SHOTS` to a private output directory when running it to capture
+its placeholder; `screen=plan|invoices|payment|limit` lazily loads each [billing screen](billing.md#billing-screens).
+The shared [stub contract](billing.md) adds no accounting calls.
+`tests/billing-home.test.mjs` and `tests/billing-screens.test.mjs` render the real frame with
+synthetic data. Set `FORGE_BILLING_SHOTS` to a private output directory when running them to capture
 both themes at 1440 and 390 px. It does not verify an authenticated account.
 
 ### Convex Auth core beside Clerk

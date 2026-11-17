@@ -7,11 +7,20 @@ export const plans = {
 } as const;
 export type PlanId = keyof typeof plans;
 export const extraBlock = { landings: 500, usd: 10 } as const;
+/** Owner decision 4.2: a new paid plan allows two extra blocks until its owner changes the limit. */
+export const defaultExtraBlocks = 2;
+/** Owner decision 4.8: retries on days 1, 4 and 8; landings continue 21 days, then the Hobby allowance. Nothing is deleted. */
+export const paymentRecoveryRule = {
+  attemptDays: [1, 4, 8],
+  landingsContinueDays: 21,
+  fallback: 'hobby',
+} as const;
 export const billingPageSize = { projects: 50, months: 12, invoices: 24 } as const;
 export const landingCountingRule =
-  'One accepted landing per Lane, including each Lane in a grouped landing. Held, refused, failed and reverted work adds no usage.';
+  'One accepted landing per Lane, including each Lane in a grouped landing. Held, refused, failed and reverted work adds no usage, and taking a landing out of main never counts or waits on the plan.';
 
-export type BillingPeriod = { start: string; resetAt: string; label: string };
+/** `asOf` is when the supplied counters were read; previews use it instead of a clock. */
+export type BillingPeriod = { start: string; resetAt: string; asOf: string; label: string };
 export type BillingPool = {
   owner: { kind: 'person' | 'organisation'; handle: string };
   plan: PlanId;
@@ -42,6 +51,8 @@ export type BillingPayment = {
   last4: string;
   expires: string;
   declined: boolean;
+  /** First declined attempt of the open invoice, or null. */
+  firstDeclinedAt: string | null;
   billedTo: string;
   country: string;
   taxLabel: string;
@@ -49,7 +60,8 @@ export type BillingPayment = {
 export type BillingPage<T> = { rows: readonly T[]; total: number; nextCursor: string | null };
 export type BillingSnapshot = {
   source: 'stub';
-  view: 'owner' | 'member';
+  /** A billing manager sees invoices, plan, card and limit, and gains no source or project administration. */
+  view: 'owner' | 'manager' | 'member';
   pool: BillingPool;
   projects: BillingPage<BillingProject>;
   months: readonly BillingMonth[];

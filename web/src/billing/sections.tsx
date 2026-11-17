@@ -12,8 +12,13 @@ import {
 } from './contract';
 import { money, number, resetDay, vars } from './figures';
 
-export const billingHref = (screen = 'home', sample = 'first', view = 'owner') =>
-  `/-/account/billing?sample=${encodeURIComponent(sample)}&view=${encodeURIComponent(view)}${screen === 'home' ? '' : `&screen=${encodeURIComponent(screen)}`}`;
+export const billingHref = (
+  screen = 'home',
+  sample = 'first',
+  view = 'owner',
+  extra?: Record<string, string>,
+) =>
+  `/-/account/billing?${new URLSearchParams({ sample, view, ...(screen === 'home' ? {} : { screen }), ...extra })}`;
 type Props = { snapshot: BillingSnapshot; sample: string };
 export function Projects({ snapshot }: Props) {
   const [shown, setShown] = useState(8);
@@ -83,7 +88,7 @@ export function Plan({ snapshot, sample }: Props) {
           </div>
           <div className="meta">{number(p.includedLandings)} landings a month</div>
         </div>
-        {snapshot.view === 'owner' ? (
+        {snapshot.view !== 'member' ? (
           <A className="btn sm" href={billingHref('plan', sample)}>
             Change plan
           </A>
@@ -97,7 +102,7 @@ export function Plan({ snapshot, sample }: Props) {
             {number(p.includedLandings)}
           </div>
         </div>
-        {snapshot.view === 'owner' ? (
+        {snapshot.view !== 'member' ? (
           <A className="btn sm ghost" href={`${billingHref('payment', sample)}#limit`}>
             Change
           </A>
@@ -115,7 +120,7 @@ export function Plan({ snapshot, sample }: Props) {
     </>
   );
 }
-export function Statement({ invoice }: { invoice: BillingInvoice | null }) {
+export function Statement({ invoice, total = 'So far' }: { invoice: BillingInvoice | null; total?: string }) {
   if (!invoice) return <p className="quietline">No invoice. Hobby is free.</p>;
   return (
     <dl className="lines">
@@ -130,7 +135,7 @@ export function Statement({ invoice }: { invoice: BillingInvoice | null }) {
       ))}
       <dt>Tax, sample</dt>
       <dd>{money(invoice.taxUsd)}</dd>
-      <dt className="sum">So far</dt>
+      <dt className="sum">{total}</dt>
       <dd className="sum">{money(invoiceTotal(invoice))}</dd>
     </dl>
   );

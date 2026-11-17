@@ -14,4 +14,35 @@
   .billing-loading .sk:nth-child(2) { width: 72%; }
   .billing-loading .sk:nth-child(3) { width: 84%; }
   .billing-loading .sk:nth-child(4) { width: 48%; }
+  /* Screens: two panes side by side; one column on a phone. */
+  .billing-two { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); align-items: start; }
+  .billing-two > .region, .billing-stack { min-width: 0; align-self: stretch; background: var(--surface); }
+  .billing-stack { display: grid; align-content: start; }
+  .billing-confirm { padding-block: var(--s-3); }
+  .billing-confirm > h3 { padding: 0 var(--gut) var(--s-2); font-size: var(--t-lead); }
+  .billing-confirm > p, .billing-confirm > .btns, .billing-confirm > .foreign { margin: var(--s-3) var(--gut) 0; }
+  .billing-note { color: var(--text-2); font-size: var(--t-meta); margin: var(--s-2) var(--gut) 0; }
+  .billing-note .lk { background: none; border: 0; padding: 0; font: inherit; }
+  .billing-handoff { min-height: 110px; place-content: center; text-align: center; color: var(--text-2); }
+  .billing-handoff b { color: var(--text); }
+  .billing-plans .sub { display: block; color: var(--text-2); font-size: var(--t-meta); }
+  .billing-plans .tag-rec { margin-left: var(--s-2); }
+  .billing-plans td.act { width: 1%; white-space: nowrap; }
+  /* Numbers, dates and amounts never wrap; the description yields. */
+  .billing-invt td:first-child, .billing-invt td.amt, .billing-invt td:nth-child(2) { white-space: nowrap; overflow-wrap: normal; }
+  .billing-total { display: grid; gap: var(--s-1); padding: var(--gut); border-bottom: var(--rule) solid var(--line); }
+  .billing-total .big { font: var(--w-bold) var(--t-figure)/1.15 var(--font-sans); font-variant-numeric: tabular-nums; }
+  .billing-back { display: none; border-top: 0; border-bottom: var(--rule) solid var(--line); }
+  .billing-form { display: grid; gap: var(--s-3); max-width: 520px; }
+  .row.choice:has(> .rd:checked) { background: var(--accent-bg); }
+  .row.choice:has(> .rd:disabled) { cursor: default; }
+  .billing-tell { display: block; margin: 0; border: 0; border-bottom: var(--rule) solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .billing-timeline { list-style: none; margin: 0; padding: 0; }
+  .billing-timeline li { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); gap: var(--s-3); padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); font-size: var(--t-small); }
+  @media (max-width: 860px) {
+    .billing-two { grid-template-columns: minmax(0, 1fr); }
+    /* A phone shows the list or one invoice, never both. */
+    .billing-inv.picked > .region:first-child, .billing-inv:not(.picked) > .region + .region { display: none; }
+    .billing-inv.picked .billing-back { display: block; }
+  }
 }

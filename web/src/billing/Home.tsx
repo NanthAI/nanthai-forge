@@ -1,24 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
-// The account-wide P7 billing home. Every value is explicitly a stub; the adapter performs no IO.
-import { useState, type ReactNode } from 'react';
+// The account-wide P7 billing home and its screens. Every value is explicitly a stub; the adapter performs no IO.
+import { lazy, Suspense, useState, type ReactNode } from 'react';
 import { Dock, Key, Region, State, useDockLayout, type DockLayout, type DockRegion } from '../ds';
 import { A } from '../app/frames';
 import { navigate, useSearch } from '../app/router';
 import { extraBlock, landingAllowance, plans, poolUsage, remainingBudgetLine } from './contract';
-import { billingSample, createBillingStub, type BillingView } from './stub';
+import { billingSample, billingView, createBillingStub } from './stub';
 import { Month, Months, money, number, resetDay } from './figures';
+import { BillingHead, type ScreenProps } from './Head';
 import { InvoiceFoot, Invoices, Payment, Plan, Projects, Statement, billingHref } from './sections';
 import './billing.css';
+
+/** Each billing screen loads with its address (`screen=`), never with the home. */
+const screens = {
+  plan: lazy(() => import('./ChangePlan')),
+  invoices: lazy(() => import('./InvoiceHistory')),
+  payment: lazy(() => import('./PaymentDetails')),
+  limit: lazy(() => import('./LimitStates')),
+};
 
 const layout: DockLayout = {
   top: ['month'],
   a: ['projects', 'months'],
   b: ['plan', 'next', 'pay', 'invoices'],
-};
-const title: Record<string, string> = {
-  plan: 'Change plan',
-  invoices: 'Invoices',
-  payment: 'Payment and details',
 };
 const skeleton = (
   <div className="billing-loading" aria-hidden="true">
@@ -31,15 +35,28 @@ const skeleton = (
 export default function Billing() {
   const search = useSearch();
   const sample = billingSample(search.get('sample'));
-  const rawView = search.get('view');
-  const view: BillingView =
-    rawView === 'member' || rawView === 'loading' || rawView === 'error' ? rawView : 'owner';
+  const view = billingView(search.get('view'));
   const screen = search.get('screen') ?? 'home';
   const adapter = createBillingStub(sample, view);
   const state = adapter.read();
   const snapshot =
     state.status === 'ready' ? state.snapshot : state.status === 'error' ? state.previous : null;
-  const [cli, setCli] = useState(false);
+  const props: ScreenProps = { adapter, state, snapshot, sample, view, search };
+  const Screen = Object.hasOwn(screens, screen) ? screens[screen as keyof typeof screens] : null;
+  return (
+    <div className="billing">
+      {Screen ? (
+        <Suspense fallback={skeleton}>
+          <Screen key={[screen, sample, view, search.get('step'), search.get('to')].join('.')} {...props} />
+        </Suspense>
+      ) : (
+        <BillingHome {...props} />
+      )}
+    </div>
+  );
+}
+
+function BillingHome({ state, snapshot, sample, view }: ScreenProps) {
   const [asTable, setAsTable] = useState(false);
   const [arrangement, setArrangement, reset] = useDockLayout(
     `billing.${snapshot?.pool.owner.handle ?? 'sample'}.${view}`,
@@ -69,8 +86,6 @@ export default function Billing() {
   ) : (
     'Loading the billing sample…'
   );
-  const change = (nextSample: string, nextView: string) =>
-    navigate(billingHref('home', nextSample, nextView));
   const region = (
     id: string,
     name: string,
@@ -150,73 +165,33 @@ export default function Billing() {
     view === 'member'
       ? { ...arrangement, b: arrangement.b.filter(id => !['next', 'pay', 'invoices'].includes(id)) }
       : arrangement;
-  const isSummary = Object.hasOwn(title, screen);
   return (
-    <div className="billing">
-      <div className="head">
-        <h1>
-          {isSummary ? (
-            <>
-              <A href={billingHref('home', sample, view)}>Billing</A> <span className="t3">›</span>{' '}
-              {title[screen]}
-            </>
-          ) : (
-            <>
-              Billing{' '}
-              <span className="t3 cut" title={owner} dir="auto" translate="no">
-                · {owner}
-              </span>
-            </>
-          )}
-        </h1>
-        <p className="sit">{head}</p>
-        <div className="tools">
-          {view === 'owner' && !isSummary ? (
-            <A className="btn" href={billingHref('plan', sample)}>
+    <>
+      <BillingHead
+        owner={owner}
+        sample={sample}
+        view={view}
+        screen="home"
+        sentence={head}
+        command="nforge billing"
+        reply={
+          snapshot
+            ? `pool        ${owner}, ${plan.name}, ${snapshot.pool.period.label}\nlandings    ${number(snapshot.pool.acceptedLandings)} used, ${number(plan.includedLandings)} included\nextra       ${money(extraBlock.usd, 0)} per ${extraBlock.landings}\nresets      ${snapshot.pool.period.resetAt}\n${remainingBudgetLine(landingAllowance(snapshot.pool)) ?? 'billing pool  no low-budget line applies'}\nrun allowance  separate; not reported`
+            : null
+        }
+        tools={
+          view === 'owner' || view === 'manager' ? (
+            <A className="btn" href={billingHref('plan', sample, view)}>
               Change plan
             </A>
-          ) : null}
-          <Key
-            className="cli mono"
-            aria-controls="billing-cli"
-            aria-expanded={cli}
-            onClick={() => setCli(v => !v)}
-          >
-            nforge billing
-          </Key>
-          <span className="prop">Sample data · no charges</span>
-        </div>
-        <details className="billing-samples">
-          <summary>Sample states</summary>
-          <div className="btns">
-            <label>
-              Sample
-              <select className="inp" value={sample} onChange={e => change(e.target.value, view)}>
-                {['first', 'hobby', 'pro', 'team', 'over', 'late', 'worst'].map(value => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              View
-              <select className="inp" value={view} onChange={e => change(sample, e.target.value)}>
-                {['owner', 'member', 'loading', 'error'].map(value => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </details>
-      </div>
+          ) : null
+        }
+      />
       {state.status === 'error' ? (
         <div className="notice" data-st="failed" role="alert">
           <State word="Not seen" />
           <p>{state.message}</p>
-          <Key size="sm" kind="rec" onClick={() => change(sample, 'owner')}>
+          <Key size="sm" kind="rec" onClick={() => navigate(billingHref('home', sample, 'owner'))}>
             Retry
           </Key>
         </div>
@@ -231,53 +206,20 @@ export default function Billing() {
         <div className="notice" data-st="failed">
           <State word="Not paid" />
           <p>The sample invoice is not paid. The sample card was declined.</p>
-          <A className="btn sm rec" href={billingHref('payment', sample)}>
+          <A className="btn sm rec" href={billingHref('payment', sample, view)}>
             Replace the card
           </A>
         </div>
       ) : null}
-      {cli ? (
-        <pre className="cli-out mono" id="billing-cli">
-          <b>$ nforge billing</b> <span className="prop">command and reply proposed · sample data</span>
-          {snapshot
-            ? `\npool        ${owner}, ${plan.name}, ${snapshot.pool.period.label}\nlandings    ${number(snapshot.pool.acceptedLandings)} used, ${number(plan.includedLandings)} included\nextra       ${money(extraBlock.usd, 0)} per ${extraBlock.landings}\nresets      ${snapshot.pool.period.resetAt}\n${remainingBudgetLine(landingAllowance(snapshot.pool)) ?? 'billing pool  no low-budget line applies'}\nrun allowance  separate; not reported`
-            : '\nLoading the sample…'}
-        </pre>
-      ) : null}
-      {isSummary ? (
-        <>
-          <div className="pf">
-            <A className="lk" href={billingHref('home', sample, view)}>
-              Back to the month
-            </A>
-          </div>
-          <Region title={title[screen] ?? 'Billing'} hint="Sample data">
-            {props ? (
-              screen === 'plan' ? (
-                <Plan {...props} />
-              ) : view === 'member' ? (
-                <p className="quietline">Financial details are not part of this member sample.</p>
-              ) : screen === 'payment' ? (
-                <Payment {...props} />
-              ) : (
-                <Invoices {...props} />
-              )
-            ) : (
-              skeleton
-            )}
-          </Region>
-        </>
-      ) : (
-        <div aria-busy={state.status === 'loading'}>
-          <Dock
-            label="Billing regions"
-            regions={regions}
-            layout={currentLayout}
-            onLayout={setArrangement}
-            onReset={reset}
-          />
-        </div>
-      )}
-    </div>
+      <div aria-busy={state.status === 'loading'}>
+        <Dock
+          label="Billing regions"
+          regions={regions}
+          layout={currentLayout}
+          onLayout={setArrangement}
+          onReset={reset}
+        />
+      </div>
+    </>
   );
 }
