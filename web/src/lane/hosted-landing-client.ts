@@ -19,7 +19,10 @@ export type LandingIO = {
 /** Retain all discovery before mutation. A lost reply replays the same request. */
 export class BrowserLanding {
   private requests = new Map<string, Promise<HostedLandingRequest>>();
-  private reverts = new Map<string, Promise<{ candidateId: string; submission: HostedLandingState }>>();
+  private reverts = new Map<
+    string,
+    Promise<{ candidateId: string; laneId: string; submission: HostedLandingState }>
+  >();
   constructor(readonly io: LandingIO) {}
   private admit(request: HostedLandingRequest) {
     return reconcileSourceRequest(
@@ -282,6 +285,8 @@ export class BrowserLanding {
       );
     return {
       candidateId: candidate.id,
+      /** The reverse Lane: its landing check follows the take-out (9e7a17df). */
+      laneId: lane.laneId,
       submission: await this.admit((await this.requests.get(pins.land))!),
     };
   }

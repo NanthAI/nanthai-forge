@@ -53,6 +53,17 @@ outcome and links to its reverse submission. Source preparation/composition use
 finite job subscriptions; the landing queue continues independently once submitted.
 The Hand to an agent prompt remains available as a secondary route.
 
+In the rebuilt app under `/-`, the same revert is one press, **Take it out of main**,
+on a landed Lane's review page, its landing check and its proof page (one shared
+control, `web/src/app/take-out.ts`). It keeps one operation id per landing for the
+life of the page, so a press retried after a lost reply, or pressed twice, makes one
+reverse landing. Lane review then links the reverse Lane's landing check, where its
+checked landing and replay state show; the original Lane and its receipt stay
+reachable and show it as taken out. The word (Undo or Revert) and whether a revert of
+a failing main may go first in the queue are open owner questions 48 and 49
+([journey 35](ux/journeys/35-undo-for-a-person.md), Item 581bd373); until they are
+answered the press uses the approved design's words and the ordinary queue.
+
 ## Who can land without a check
 
 The web setting and CLI edit the same `acceptance.withoutCheck` policy. Omission

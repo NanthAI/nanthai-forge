@@ -225,6 +225,9 @@ test('inline browser revert makes reverse source, composes, checks and lands whi
   const id = randomUUID(),
     result = await client.revert(id, receipt.id, 'Keep the retry fix; undo the byte path.');
   assert.equal(result.submission.request.revertOf, receipt.id);
+  // The reverse Lane, whose landing check the take-out screens link (9e7a17df).
+  assert.match(result.laneId, /^[0-9a-f-]{36}$/);
+  assert.notEqual(result.laneId, f.lane.laneId);
   assert.equal(result.submission.request.check.kind, 'request');
   const intent = [...f.tables.projectHostedRecordBodies.values()]
     .map(row => JSON.parse(row.value))

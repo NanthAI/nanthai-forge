@@ -9,6 +9,7 @@ Walked: the ledger, Lane row, landing decision, signals (Undo), fix-notice and L
 | # | The person wants to | Where | What happens | Evidence |
 | --- | --- | --- | --- | --- |
 | 1 | Undo a landing made automatically today | Now → "Accepted today" and the ledger: each automatic landing has an `auto` tag and **Undo**. | **Undo** opens a tooltip with "the recorded way back, on tap or hover": text that says how to undo. It performs nothing. On a Lane row the word "Undo" is plain text with the same text as a hover title. | source |
+| 1a | Undo a landing in the rebuilt app (`/-`) | A landed Lane's review page, its landing check and its proof page: **Take it out of main** (key `u` on Lane review). | One press starts the revert in step 2, with no confirmation, as the approved design shows; the page says "Taking it out of main as a new landing. It is checked like any other; later landings stay."; Lane review links the reverse Lane's landing check. The "What Forge held" screen (Item 2a5fa2e5) is not rebuilt yet, so the Now and ledger tooltip of step 1 remain there. | source, tests |
 | 2 | Revert any landing | The Candidate page of the landed change → **Revert…** → an inline confirmation with an optional Why. "Creates a new Candidate: the reverse of this change on current main", "Checked (verify) and landed through the queue, like any Candidate". Progress: "Preparing reverse Candidate", "Reverse source submitted". Afterwards the original shows it was reverted, by whom, with which check and why. | "Later disjoint landings remain; conflicts surface in the reverse Candidate. Main is never rewound." | source, docs |
 | 3 | Undo a revert | Revert the revert, the same way. Not stated on the page. | | source |
 | 4 | Respond when Forge reverted a landing itself | Needs you → "Reverted from main": **Start a fix** ("Opens a sibling Lane from the reverted head with the failing tests, the diff and the undo command in its brief. Finishing it lands the original change plus the fix through the full check."), **Undo**, **Close** ("Close without a fix? The Intent is marked abandoned; its Lane and saved head stay."). | | source |
@@ -50,8 +51,10 @@ Walked: the ledger, Lane row, landing decision, signals (Undo), fix-notice and L
 
 ## Questions for the owner
 
-1. Does **Undo** on an automatic landing start the revert directly (with one confirmation), and is the word Undo or Revert everywhere?
+1. Does **Undo** on an automatic landing start the revert directly (with one confirmation), and is the word Undo or Revert everywhere? (Owner question 48 on Item 581bd373, open. The rebuilt app uses the approved design's **Take it out of main**, one press, no confirmation.)
 2. While a revert of a broken main is in the queue, are other landings held or do they continue?
 3. May a revert of a red main skip the queue (land first), since it restores a state that already passed?
+
+Questions 2 and 3 are owner question 49 on Item 581bd373, open; a revert waits in the ordinary queue meanwhile.
 4. Is Lane-level undo (e7812d8f) available to a person on the web, as "return to this save"?
 5. Do settings changes get an Undo for a period after they are made?

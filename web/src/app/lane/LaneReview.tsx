@@ -8,7 +8,7 @@ import { useConvex, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { reviewGroupLabels, type ReviewGroup } from '../../../../src/review-order';
-import { Avatar, Band, CodeBox, State, Who } from '../../ds';
+import { Avatar, Band, CodeBox, Key, State, Who } from '../../ds';
 import { requestHighlight } from '../../highlight-client';
 import type { SourceToken } from '../../source-highlight';
 import { A } from '../frames';
@@ -31,6 +31,9 @@ import {
   type Reply,
   type ReviewFile,
 } from './review-model';
+import { BrowserLanding } from '../../lane/hosted-landing-client';
+import { landingBrowserIO } from '../../lane/landing-browser-io';
+import { takenOutText, useTakeOut } from '../take-out';
 import './lane.css';
 
 type ProjectRoute = Extract<AppRoute, { frame: 'project' }>;
@@ -192,6 +195,9 @@ export function ReviewPage({
   const [order, setOrder] = useState<'eyes' | 'path'>('eyes');
   const [cli, setCli] = useState(false);
   const stop = laneStop(reply, feed);
+  const client = useConvex();
+  const landing = useMemo(() => new BrowserLanding(landingBrowserIO(client, projectId)), [client, projectId]);
+  const takeOut = useTakeOut(landing);
   const eyes = entries.filter(entry => entry.group === 'eyes').length;
   const readCount = entries.filter(
     entry => ticks.state(entry.path, readMark(entry.file.after)) === 'read',
@@ -240,7 +246,32 @@ export function ReviewPage({
         >
           <span className="mono">nforge agent . diff</span>
         </button>
+        {lane.landed && !lane.landed.revertedBy ? (
+          <Key
+            keys="u"
+            disabled={takeOut.busy || Boolean(takeOut.done)}
+            onClick={() => void takeOut.press(lane.landed!.receiptId, `Take “${goal}” out of main`)}
+          >
+            {takeOut.busy
+              ? 'Taking it out of main…'
+              : takeOut.done
+                ? 'Taken out, checking'
+                : 'Take it out of main'}
+          </Key>
+        ) : null}
       </Head>
+      {takeOut.done || takeOut.error ? (
+        <div className="notice" data-st={takeOut.error ? 'failed' : 'passed'} role="status">
+          <p>
+            {takeOut.error ?? takenOutText}{' '}
+            {takeOut.done ? (
+              <A href={hrefFor({ ...route, section: '', rest: `${takeOut.done.laneId}/check` })}>
+                Follow its check
+              </A>
+            ) : null}
+          </p>
+        </div>
+      ) : null}
       {cli ? (
         <pre className="cli-out mono" id="lane-cli">
           <b>$ {command}</b>

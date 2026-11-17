@@ -10,8 +10,9 @@ import { landingBrowserIO } from '../../lane/landing-browser-io';
 import { landingFailureExcerpt } from '../../lane/landing-output';
 import { hostedError } from '../../snapshot';
 import type { CheckRead } from './check-model';
+import { takenOutText, useTakeOut } from '../take-out';
 
-type Busy = 'retry' | 'undo' | null;
+type Busy = 'retry' | null;
 type Message = { text: string; failed?: boolean } | null;
 
 export function useCheckActions(client: ConvexReactClient, projectId: Id<'hostedProjects'>, read: CheckRead) {
@@ -20,7 +21,7 @@ export function useCheckActions(client: ConvexReactClient, projectId: Id<'hosted
   const [busy, setBusy] = useState<Busy>(null);
   const [message, setMessage] = useState<Message>(null);
   const [copied, setCopied] = useState(false);
-  const [undone, setUndone] = useState(false);
+  const takeOut = useTakeOut(landing);
   const [log, setLog] = useState<string | null | 'loading'>(null);
   /** One operation id per action on this submission: a retried press after a lost reply reconciles, never repeats. */
   const operation = (key: string) => {
@@ -40,10 +41,14 @@ export function useCheckActions(client: ConvexReactClient, projectId: Id<'hosted
     }
   };
   return {
-    busy,
-    message,
+    busy: busy ?? (takeOut.busy ? ('undo' as const) : null),
+    message: takeOut.error
+      ? { text: takeOut.error, failed: true }
+      : takeOut.done
+        ? { text: takenOutText }
+        : message,
     copied,
-    undone,
+    undone: takeOut.done,
     log,
     copy(text: string) {
       void navigator.clipboard?.writeText(text).then(() => {
@@ -65,15 +70,12 @@ export function useCheckActions(client: ConvexReactClient, projectId: Id<'hosted
         return 'Retrying the check. The Lane keeps its place; this page follows the new check.';
       });
     },
-    /** Undo an automatic landing: the existing exact-change revert, checked like any landing; later work stays. */
+    /** Undo a landing: "Take it out of main" (web/src/app/take-out.ts), the same press on every screen. */
     undo() {
       const receiptId = read.landing?.receiptId;
-      if (!receiptId) return;
-      void run('undo', `undo:${receiptId}`, async id => {
-        await landing.revert(id, receiptId, `Take “${read.title ?? read.laneId.slice(0, 8)}” out of main`);
-        setUndone(true);
-        return 'Taking it out of main as a new landing. It is checked like any other; later landings stay.';
-      });
+      if (!receiptId || takeOut.busy) return;
+      setMessage(null);
+      void takeOut.press(receiptId, `Take “${read.title ?? read.laneId.slice(0, 8)}” out of main`);
     },
     /** The failing output, read once when asked: excerpts of each stream's tail, never polled. */
     readLog() {

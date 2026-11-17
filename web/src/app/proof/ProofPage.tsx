@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useConvex, useMutation, useQuery } from 'convex/react';
-import { Component, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Component, useMemo, useState, type ReactNode } from 'react';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { hrefFor, type AppRoute } from '../paths';
@@ -9,6 +9,7 @@ import { Head } from '../Place';
 import { Key } from '../../ds';
 import { BrowserLanding } from '../../lane/hosted-landing-client';
 import { landingBrowserIO } from '../../lane/landing-browser-io';
+import { TakeOut, takenOutText } from '../take-out';
 import { proofRecheckId } from '../../../../src/run-evidence';
 import { ReportFiles } from './ReportFiles';
 import { ProofView, type ProofData } from './ProofView';
@@ -28,7 +29,7 @@ function ProofRead({ projectId, route }: { projectId: Id<'hostedProjects'>; rout
   const followups = useMutation(api.projectRunProofActions.followups);
   const client = useConvex();
   const landing = useMemo(() => new BrowserLanding(landingBrowserIO(client, projectId)), [client, projectId]);
-  const revertOperations = useRef(new Map<string, string>());
+  const takeOut = useMemo(() => new TakeOut(landing), [landing]);
   const [undone, setUndone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -81,18 +82,12 @@ function ProofRead({ projectId, route }: { projectId: Id<'hostedProjects'>; rout
         data.landing && !undone
           ? () =>
               void act(async () => {
-                const receiptId = data.landing!.receiptId;
-                if (!revertOperations.current.has(receiptId))
-                  revertOperations.current.set(receiptId, crypto.randomUUID());
-                await landing.revert(
-                  revertOperations.current.get(receiptId)!,
-                  receiptId,
+                await takeOut.press(
+                  data.landing!.receiptId,
                   'Take the change selected on the proof page out of main',
                 );
                 setUndone(true);
-                setMessage(
-                  'Taking it out of main as a new landing. It is checked like any other; later landings stay.',
-                );
+                setMessage(takenOutText);
               })
           : undefined
       }
