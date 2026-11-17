@@ -190,6 +190,9 @@ MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
   other landings changed) and `at:"main"` is `channel:"main"`. `expected` binds Lane versions. Missing source fails
   without substitution. All source reads exclude drafts and recheck access on
   cache hits.
+- `help` and `history --help` expose log, blame and show; MCP `forge_review` accepts
+  `action:"history"` with read-only `op:"status"|"log"|"blame"|"show"`. A file filter
+  belongs on history, not the UTC-window `landings` ledger.
 - `history {op,commit?,path?}` reads the Git history of a project imported from
   GitHub, so log, blame and old versions match GitHub. `op:"log"`
   (`limit` ≤1000, default 50, `skip`, optional `path`), `op:"blame"` (`path`,

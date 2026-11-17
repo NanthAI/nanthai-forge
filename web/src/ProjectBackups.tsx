@@ -5,7 +5,7 @@ import { ErrorToast } from './ui/Toast';
 import { projectIdentity, routeSearch, routeUrlState } from './shell/location';
 import ProjectHome from './ProjectHome';
 import { DetailPanel } from './DetailPanel';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useConvex, usePaginatedQuery } from 'convex/react';
 import type { FunctionArgs, FunctionReturnType } from 'convex/server';
 import type { Id } from '../../convex/_generated/dataModel';
@@ -124,12 +124,20 @@ function History({
   );
 }
 export default function ProjectBackups({ explore }: { explore?: () => void }) {
-  const client = useConvex(),
-    {
-      results: projects,
-      status,
-      loadMore,
-    } = usePaginatedQuery(api.projectBackups.list, {}, { initialNumItems: 20 });
+  const client = useConvex();
+  // Active and removed projects are separate lists, so removed ones never hide the active page.
+  const active = usePaginatedQuery(api.projectBackups.list, {}, { initialNumItems: 20 });
+  const removedList = usePaginatedQuery(api.projectBackups.list, { removed: true }, { initialNumItems: 20 });
+  const projects = useMemo(
+    () => [...active.results, ...removedList.results],
+    [active.results, removedList.results],
+  );
+  const status =
+    active.status === 'CanLoadMore' || removedList.status === 'CanLoadMore' ? 'CanLoadMore' : active.status;
+  const loadMore = (n: number) => {
+    if (active.status === 'CanLoadMore') active.loadMore(n);
+    if (removedList.status === 'CanLoadMore') removedList.loadMore(n);
+  };
   for (const project of projects) {
     if (project.handle && project.slug)
       projectIdentity(project.id, project.handle, project.name, project.slug);

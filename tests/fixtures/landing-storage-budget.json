@@ -453,15 +453,15 @@
     "indexes": {
       "before": {
         "entries": 225,
-        "keyBytes": 15814
+        "keyBytes": 15819
       },
       "immediate": {
         "entries": 416,
-        "keyBytes": 31497
+        "keyBytes": 31502
       },
       "retained": {
         "entries": 421,
-        "keyBytes": 31798
+        "keyBytes": 31803
       },
       "written": 1537
     }
@@ -920,15 +920,15 @@
     "indexes": {
       "before": {
         "entries": 24789,
-        "keyBytes": 1680078
+        "keyBytes": 1680083
       },
       "immediate": {
         "entries": 25173,
-        "keyBytes": 1711229
+        "keyBytes": 1711234
       },
       "retained": {
         "entries": 25206,
-        "keyBytes": 1713976
+        "keyBytes": 1713981
       },
       "written": 2874
     }
@@ -957,19 +957,19 @@
     "stored": [
       {
         "entries": 417,
-        "keyBytes": 31591
+        "keyBytes": 31596
       },
       {
         "entries": 611,
-        "keyBytes": 46560
+        "keyBytes": 46565
       },
       {
         "entries": 1699,
-        "keyBytes": 130398
+        "keyBytes": 130403
       },
       {
         "entries": 1699,
-        "keyBytes": 130398
+        "keyBytes": 130403
       }
     ]
   }

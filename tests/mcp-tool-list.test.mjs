@@ -65,7 +65,8 @@ test('the hosted tool list stays inside its context budget', async t => {
   // paying for the `replyTo decision:b` comment tokens.
   // 632 -> 590 (76e3ae31): concise existing summaries pay for explicit holder/session fields.
   // 590 -> 588 (58478c0b): Find/edit pays for the transfer field without growing tools/list bytes.
-  assert.equal(descriptionBytes, 588, 'cost fixes preserve the per-session MCP description bytes');
+  // P10: shorter source prose pays for history selectors in the same listing budget.
+  assert.equal(descriptionBytes, 527, 'cost fixes preserve the per-session MCP description bytes');
   t.diagnostic(`tools/list ${chars} chars (~${Math.ceil(chars / 4)} tokens); descriptions ${descriptions}`);
   assert(chars <= LIST_CHARS, `tool list characters: ${chars}`);
   // Codex sends each tool as a function definition under a server-prefixed name: same budget.

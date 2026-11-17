@@ -318,7 +318,8 @@ test('history help exposes the enforced log/blame/show selectors without a serve
   const before = s.calls.length;
   const text = await output(() => agentCli([s.root, 'history', '--help']));
   for (const word of ['log', 'blame', 'show', 'commit', 'path', 'skip']) assert(text.includes(word));
-  assert.match(hostedAgentHelp(), /history:/);
+  assert.match(await output(() => agentCli([s.root, 'help'])), /history:.*log, blame, show/);
+  assert.match(text, /who changed lines/);
   assert.equal(hostedHelpFor('history'), text);
   assert.equal(s.calls.length, before);
 });
@@ -326,4 +327,35 @@ test('history help exposes the enforced log/blame/show selectors without a serve
 test('limits help identifies the service rather than promising owner control of service quotas', () => {
   assert.match(helpTopicText('limits'), /service[^.\n]*(?:set|defined)|(?:set|defined)[^.\n]*service/i);
   assert.doesNotMatch(helpTopicText('limits'), /Limits are set by the project owner/);
+});
+
+// A file-history request must teach the existing reader rather than silently discard the filter.
+test('landings directs unsupported file filters to history log and blame without a query', async t => {
+  const s = agentFixture(t);
+  await assert.rejects(
+    () =>
+      agentCli(
+        [
+          s.root,
+          'landings',
+          JSON.stringify({ ...s.address, from: '2026-11-01', to: '2026-12-01', path: 'src/file.ts' }),
+        ],
+        { beforeDispatch: async () => assert.fail('invalid input must not reach release discovery') },
+      ),
+    error => error.code === 'BAD_ARGUMENT' && /history.*log.*path.*history.*blame/.test(error.message),
+  );
+  assert.equal(s.calls.length, 0);
+  const { landingsHostedSource } = await import('../dist/hosted-agent-landings.js');
+  await assert.rejects(
+    () =>
+      landingsHostedSource(
+        {
+          query() {
+            assert.fail('invalid input must stay local');
+          },
+        },
+        { path: 'src/file.ts' },
+      ),
+    error => error.code === 'BAD_ARGUMENT' && /history.*log.*path.*history.*blame/.test(error.message),
+  );
 });

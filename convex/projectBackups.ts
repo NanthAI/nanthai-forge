@@ -119,15 +119,23 @@ export const deletionStatus = query({
     return statusItem(project, account?.handle);
   },
 });
+/** The owner's projects, newest first: active ones by default, or with `removed` only those in the deletion
+ * window or being purged. Two index ranges, so a page of active projects is never hidden behind newer removed ones
+ * (an owner with many removed test projects saw an empty first page). */
 export const list = query({
-  args: { paginationOpts: paginationOptsValidator },
+  args: { paginationOpts: paginationOptsValidator, removed: v.optional(v.boolean()) },
   returns: paginationResultValidator(projectStatus),
-  handler: async (ctx, { paginationOpts }) => {
+  handler: async (ctx, { paginationOpts, removed }) => {
     const user = await ctx.auth.getUserIdentity();
     if (!user) return { page: [], isDone: true, continueCursor: '' };
     const result = await ctx.db
       .query('hostedProjects')
-      .withIndex('by_owner', q => q.eq('owner', user.subject))
+      // 'deleted' < 'deleting' < 'trash': every removal state sorts at or after 'deleted', active rows have none.
+      .withIndex('by_owner_and_removal', q =>
+        removed
+          ? q.eq('owner', user.subject).gte('removal', 'deleted')
+          : q.eq('owner', user.subject).eq('removal', undefined),
+      )
       .order('desc')
       .paginate(paginationOpts);
     const account = await accountFor(ctx, user.subject);

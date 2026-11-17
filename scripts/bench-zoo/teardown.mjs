@@ -18,16 +18,20 @@ async function projectList(cfg, repos, state) {
   const client = deadlineConvexClient(cfg.deployment, {});
   client.setAuth(resolveAuthToken(cfg.deployment));
   const projects = [];
-  let cursor = null;
-  do {
-    const page = await client.query(makeFunctionReference('projectBackups:list'), {
-      paginationOpts: { cursor, numItems: 100 },
-    });
-    projects.push(...page.page.filter(p => names.has(p.name) || ids.has(p.id)));
-    if (page.isDone) break;
-    if (page.continueCursor === cursor) throw Error('zoo project list did not advance');
-    cursor = page.continueCursor;
-  } while (cursor);
+  // Active and removed projects are separate lists; teardown needs both.
+  for (const removed of [false, true]) {
+    let cursor = null;
+    do {
+      const page = await client.query(makeFunctionReference('projectBackups:list'), {
+        paginationOpts: { cursor, numItems: 100 },
+        ...(removed ? { removed } : {}),
+      });
+      projects.push(...page.page.filter(p => names.has(p.name) || ids.has(p.id)));
+      if (page.isDone) break;
+      if (page.continueCursor === cursor) throw Error('zoo project list did not advance');
+      cursor = page.continueCursor;
+    } while (cursor);
+  }
   return projects;
 }
 

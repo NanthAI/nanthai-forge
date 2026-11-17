@@ -502,3 +502,52 @@ test('MCP hosted metrics uses eight finite metadata streams, one bill page and i
   assert(s.calls.every(call => call.name === 'projectHostedAgent:capabilities'));
   assert(!existsSync(`${s.root}.forge-metrics.jsonl`));
 });
+
+test('MCP lists history log/blame/show and dispatches the same read-only project reader', async t => {
+  const priorCache = process.env.FORGE_HISTORY_CACHE;
+  t.after(() => {
+    if (priorCache === undefined) delete process.env.FORGE_HISTORY_CACHE;
+    else process.env.FORGE_HISTORY_CACHE = priorCache;
+  });
+  const s = agentFixture(t),
+    transport = s.transport(),
+    tools = new Map();
+  const close = registerHostedAgentWorkflow(
+    {
+      registerTool(name, config, call) {
+        tools.set(name, { ...config, call });
+      },
+    },
+    transport,
+  );
+  t.after(close);
+  process.env.FORGE_HISTORY_CACHE = join(s.root, 'history-cache');
+  const review = tools.get('forge_review');
+  const command = z
+    .object(review.inputSchema)
+    .parse({ command: { action: 'history', op: 'status' } }).command;
+  let reads = 0;
+  t.mock.method(transport, 'action', async (name, input) => {
+    assert.equal(name, 'projectHistoryRead:open');
+    assert(Array.isArray(input.cached));
+    reads++;
+    return {
+      status: 'ready',
+      repository: 'fixture/history',
+      importCommit: 'a'.repeat(40),
+      importState: 'b'.repeat(64),
+      bytes: 0,
+      limitBytes: 1000,
+      packs: [],
+    };
+  });
+  const response = body(await review.call({ command }));
+  assert.equal(response.status, 'ready', JSON.stringify(response));
+  assert.equal(reads, 1);
+  for (const op of ['log', 'blame', 'show'])
+    assert(
+      z.object(review.inputSchema).safeParse({ command: { action: 'history', op, path: 'file.ts' } }).success,
+    );
+  for (const op of ['limit', 'retry'])
+    assert(!z.object(review.inputSchema).safeParse({ command: { action: 'history', op, bytes: 0 } }).success);
+});

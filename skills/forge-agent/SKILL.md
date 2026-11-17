@@ -15,6 +15,8 @@ Lifecycle verbs: `start`, `save`, `land`. Use `land --save` to save, update from
 
 - Start with a fresh operation id; edit only its returned Lane path. Save after meaningful steps. Read `behindMain`, presence and `conflictNotice`: saves trial-merge against main and peers, but unsaved peer edits are excluded. `peers {laneId,path?,detail?}` reads saved overlap evidence; missing evidence never proves independence.
 - `diff {laneId,paths?,byteBudget?,cursor?}` compares pinned base to saved head. `show {state?,candidateId?,laneId?,path}` reads exact bytes, never unsaved files or a substituted revision. Follow `nextCursor` on the original pair.
+- `history {op:"log",path:"FILE"}` reads file history; `history {op:"blame",path:"FILE",start:1,end:100}` answers who changed lines; `op:"show",commit,path` reads an old file. MCP: `forge_review` action `history`.
+- Declare your model with `FORGE_AGENT_MODEL` in the launcher or shell (for example `export FORGE_AGENT_MODEL=gpt-6.1-sol`); receipts retain harness/model as declared attribution.
 - Read `protectedPathNotice` before checks and `policy` for the full rules. Never bypass a held review by changing policy.
 - Removed with native mode: `brief`, `review`, `candidate`/`candidates`, `link`, `handoff`, `report`, `making-of`, `improve`, `save --preview` and `x undo-sync`. See [hosted parity](../../docs/agents/hosted-parity.md).
 

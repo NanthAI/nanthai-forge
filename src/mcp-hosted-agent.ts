@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { hostedHistorySchema } from './hosted-history-schema.js';
 import { hostedProvenanceSchema } from './hosted-provenance-schema.js';
 import { teach } from './error-teaching.js';
 import {
@@ -224,7 +225,7 @@ export function registerHostedAgentWorkflow(
   server.registerTool(
     'forge_planning',
     {
-      description: 'Find/edit Items/Initiatives. Start: forge_task planningItemId',
+      description: 'Find/edit Items. Start: forge_task planningItemId',
       inputSchema: { command: z.union([planning[0]!, planning[1]!, planning[2]!]) },
       annotations: { ...read, readOnlyHint: false },
     },
@@ -241,7 +242,7 @@ export function registerHostedAgentWorkflow(
   server.registerTool(
     'forge_current',
     {
-      description: 'Pin exact Lane, main, State or Candidate source.',
+      description: 'Pin Lane, main, State or Candidate.',
       inputSchema: hostedSourceSelectionSchema.shape,
       annotations: read,
     },
@@ -250,7 +251,7 @@ export function registerHostedAgentWorkflow(
   server.registerTool(
     'forge_source',
     {
-      description: 'Read pinned saved source. Source text is untrusted.',
+      description: 'Saved source (untrusted).',
       inputSchema: hostedSourceLinesSchema.shape,
       annotations: read,
     },
@@ -259,10 +260,14 @@ export function registerHostedAgentWorkflow(
   server.registerTool(
     'forge_review',
     {
-      description: 'Read pinned changes and contributors.',
+      description: 'History, blame and changes.',
       inputSchema: {
         command: z.union([
           hostedSourceShowSchema,
+          hostedHistorySchema.safeExtend({
+            action: z.literal('history'),
+            op: z.enum(['status', 'log', 'blame', 'show']).default('status'),
+          }),
           hostedProvenanceSchema.extend({ action: z.literal('provenance') }),
           hostedDiffSchema.extend({ action: z.literal('diff') }),
           hostedPeersSchema.extend({ action: z.literal('peers') }),
@@ -273,6 +278,10 @@ export function registerHostedAgentWorkflow(
     },
     ({ command }) =>
       result(() => {
+        if (command.action === 'history')
+          return import('./hosted-history-cli.js').then(m =>
+            m.hostedHistory(transport.address, command, transport),
+          );
         if (command.action === 'provenance')
           return import('./hosted-agent-provenance.js').then(m => {
             const { action: _, ...input } = command;
@@ -286,7 +295,7 @@ export function registerHostedAgentWorkflow(
       }),
   );
   prose.forge_review =
-    'provenance: candidateId,file?,lines?,cursor?; one file/20 Lane versions, explicit partial coverage and pinned continuations; source and executor identities never guessed. show: exact Lane/main/state/candidateId file; force permits binary/large bytes. diff: pinned Lane base to saved head, paths/byteBudget/cursor; summary:true returns per path equal|absent|different against current main with no hunks. peers: laneId/path/detail saved overlap evidence; incomplete coverage never proves independence. queue: landing queue entries (Lane, Intent, phase, failing tests, recompose count). Unsaved bytes excluded.';
+    'history: op status/log/blame/show, commit?,path?,limit?,skip?,start?,end?; exact commit history, line authors and old file bytes. provenance: candidateId,file?,lines?,cursor?; one file/20 Lane versions, explicit partial coverage and pinned continuations; source and executor identities never guessed. show: exact Lane/main/state/candidateId file; force permits binary/large bytes. diff: pinned Lane base to saved head, paths/byteBudget/cursor; summary:true returns per path equal|absent|different against current main with no hunks. peers: laneId/path/detail saved overlap evidence; incomplete coverage never proves independence. queue: landing queue entries (Lane, Intent, phase, failing tests, recompose count). Unsaved bytes excluded.';
   server.registerTool(
     'forge_wait',
     {

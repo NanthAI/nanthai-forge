@@ -111,7 +111,8 @@ CHECK_NOT_PASSED: acceptance needs a passed check for this exact head; land --sa
 - show {state?|candidateId?|laneId?|channel:"main"|at:"base"|"main",path} reads exact bytes; at:"base" is this Lane's pinned base, at:"main" is current main.
 - Saved Lane bytes exclude unsaved edits; show and diff never substitute another revision.
 - peers {laneId?,path?,detail?} reads saved overlap evidence (help overlap).
-- MCP: forge_review exposes show/diff/peers/queue.`,
+- history {op:"log",path?,limit?,skip?,commit?} reads commit history; history {op:"blame",path,start?,end?,commit?} answers who changed lines; history {op:"show",commit,path} reads that version's exact bytes. Compare saved States with diff; history has no compare operation.
+- MCP: forge_review exposes history (status/log/blame/show), show/diff/peers/queue.`,
   },
   queue: {
     title: 'The landing queue',
@@ -120,7 +121,7 @@ CHECK_NOT_PASSED: acceptance needs a passed check for this exact head; land --sa
 - LANDING_CANCELLED: the landing was withdrawn or cancelled; the Lane and its saves stay. Fix if needed and land --save again.
 - LANDING_STALLED: run the receipt's exact repair command; do not resubmit a live landing. If none is present, read queue '{}' and landing {operationId}. A terminal-failed receipt may explicitly direct a retry in the same Lane.
 - REVIEW_REQUIRED: acceptance needs a person under the project policy; wait {approval:LANE_ID} after request-approval, or ask the owner.
-- landings {from,to,limit?,cursor?} lists accepted landings in a UTC window, oldest first (30 per page): receipt, Lane, times, bases, checks, waits and who accepted. Follow nextCursor until null.`,
+- landings {from,to,limit?,cursor?} lists accepted landings in a UTC window, oldest first (30 per page): receipt, Lane, times, bases, checks, waits and who accepted. Follow nextCursor until null. For a file, use history {op:"log",path:"FILE"} or history {op:"blame",path:"FILE",start:1,end:100}.`,
   },
   board: {
     title: 'The agent board',

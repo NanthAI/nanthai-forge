@@ -698,7 +698,7 @@ test('delete retries coalesce the tracked R2 chain and owner-only list exposes r
   }
   await s.ctx.db.patch('project', { task: undefined, purgeBlocked: 'R2_MAINTENANCE_DISABLED' });
   assert.equal(
-    (await modules.projectBackups.list._handler(s.ctx, page)).page[0].purgeBlocked,
+    (await modules.projectBackups.list._handler(s.ctx, { ...page, removed: true })).page[0].purgeBlocked,
     'R2_MAINTENANCE_DISABLED',
   );
   s.caller('other');

@@ -733,8 +733,8 @@ export default defineSchema({
     receipt: v.string(),
   }).index('by_project_and_operation', ['projectId', 'operationId']),
   hostedProjects: defineTable(projectFields)
-    // index-order: caller: convex/projectBackups.ts#list; order: project list exposes newest-first creation-time pages.
-    .index('by_owner', ['owner'])
+    // index-order: caller: convex/projectBackups.ts#list; order: active and removed project lists expose newest-first creation-time pages.
+    .index('by_owner_and_removal', ['owner', 'removal'])
     .index('by_owner_and_key', ['owner', 'key']),
   ...publicationTables,
   projectBackups: defineTable(projectBackupFields)

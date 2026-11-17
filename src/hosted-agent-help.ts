@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { hostedHistorySchema } from './hosted-history-cli.js';
+import { hostedHistorySchema } from './hosted-history-schema.js';
 import { hostedClientReadSchemas } from './hosted-agent-reads.js';
 import { z } from 'zod';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
@@ -96,7 +96,10 @@ export function hostedAgentHelp(action?: string) {
     'nforge agent ROOT ACTION [JSON | --command-file FILE]; actions listed as `x ACTION` run as nforge x ROOT ACTION [JSON | --command-file FILE].',
     'Address: hosted checkout ROOT, retained address, or JSON url + projectId. Guide: nforge docs agent.',
     'Parameters (? = optional; nested fields and constraints follow the command schema):',
-    ...entries.map(entry => `  ${entry.command}: ${entry.parameters.join(', ') || '{}'}`),
+    ...entries.map(
+      entry =>
+        `  ${entry.command}: ${entry.parameters.join(', ') || '{}'}${entry.action === 'history' ? ' — log, blame, show' : ''}`,
+    ),
     ...(canonical ? entries.map(entry => JSON.stringify(entry.schema, null, 2)) : []),
     ...(topic
       ? [helpTopicText(topic)]
@@ -104,7 +107,7 @@ export function hostedAgentHelp(action?: string) {
         ? []
         : [
             'land --save from the Lane folder saves, updates from main, checks and lands; LANDED is acceptance, CHECK PASSED alone is not.',
-            'Keep this turn active while your work is unfinished: run the receipt waitCommand in the foreground; exit 3 means run the same wait again.',
+            'Run waitCommand in the foreground until terminal; exit 3 means wait again.',
             'Replaying an operationId keeps every original parameter, including message; use the receipt replay command.',
             'Errors print {code,message,next,learn}: run next, and run learn once for the topic. Receipts are brief; --detail prints all fields and available bodies (replay mutations with the original operationId). MCP: command.replyDetail:true; forge_wait: top level.',
             helpTopicIndex(),

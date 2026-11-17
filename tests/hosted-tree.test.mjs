@@ -172,11 +172,22 @@ for (const section of ['autonomy', 'checks'])
 
 test('Home lists reader-only projects with a role tag', async () => {
   const html = await render('?surface=projects', tree => {
-    tree.pages['projectBackups:list'] = () => [];
-    tree.pages['projectContributors:shared'] = () => [];
-    tree.pages['projectReaders:shared'] = () => [
-      { id: PROJECT, name: 'Reader project with a very long title — release/production/2026' },
-    ];
+    tree.queries['accountProjects:list'] = () => ({
+      projects: [
+        {
+          id: PROJECT,
+          name: 'Reader project with a very long title — release/production/2026',
+          role: 'read',
+          visibility: 'private',
+          activityAt: 1,
+          held: { n: 0, atLeast: false },
+          lanes: { n: 0, atLeast: false },
+          main: null,
+          items: null,
+        },
+      ],
+      more: false,
+    });
     tree.queries['projectCoordination:counts'] = () => ({
       activeAgents: 0,
       activeSubagents: 0,
@@ -192,9 +203,22 @@ test('Home lists reader-only projects with a role tag', async () => {
 test('Home shows the working count while its window is open and unknown after nextExpiryAt, with no extra query', async () => {
   const row = nextExpiryAt => async () => {
     const html = await render('?surface=projects', tree => {
-      tree.pages['projectBackups:list'] = () => [];
-      tree.pages['projectContributors:shared'] = () => [];
-      tree.pages['projectReaders:shared'] = () => [{ id: PROJECT, name: 'Expiry project' }];
+      tree.queries['accountProjects:list'] = () => ({
+        projects: [
+          {
+            id: PROJECT,
+            name: 'Expiry project',
+            role: 'read',
+            visibility: 'private',
+            activityAt: 1,
+            held: { n: 0, atLeast: false },
+            lanes: { n: 0, atLeast: false },
+            main: null,
+            items: null,
+          },
+        ],
+        more: false,
+      });
       tree.queries['projectCoordination:counts'] = () => ({
         activeAgents: 2,
         activeSubagents: 0,

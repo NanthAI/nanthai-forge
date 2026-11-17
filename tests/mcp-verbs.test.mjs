@@ -155,10 +155,23 @@ const modesOf = tools =>
         (option.properties.mode?.enum ?? []).map(mode => `${option.properties.action.const}/${mode}`),
       );
     const signed = [
-      ...(command?.description ?? '').matchAll(/\b(start|save|land):([a-z|-]+)(?=[( ])/g),
+      ...(command?.description ?? '').split('Fields:')[0].matchAll(/\b(start|save|land):([a-z|-]+)(?=[( ])/g),
     ].flatMap(([, verb, modes]) => modes.split('|').map(mode => `${verb}/${mode}`));
     return [...variants, ...signed];
   });
+
+test('numeric history start fields are not lifecycle mode signatures', () => {
+  assert.deepEqual(
+    modesOf([
+      {
+        inputSchema: {
+          properties: { command: { description: 'Required: start:open|reopen() . Fields: start:n end:n' } },
+        },
+      },
+    ]),
+    ['start/open', 'start/reopen'],
+  );
+});
 
 test('MCP accepts exactly the CLI mode forms (drift check)', async t => {
   // One client mode (Issue 657d63ee): the hosted MCP is the only agent MCP, so its forms equal the CLI's.

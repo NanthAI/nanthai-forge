@@ -162,7 +162,7 @@ export const armLegacyTrash = internalMutation({
   handler: async (ctx, { owner, cursor }) => {
     const page = await ctx.db
       .query('hostedProjects')
-      .withIndex('by_owner', q => q.eq('owner', owner))
+      .withIndex('by_owner_and_removal', q => q.eq('owner', owner).eq('removal', 'trash'))
       .paginate({ cursor, numItems: 50 });
     let armed = 0;
     for (const project of page.page)

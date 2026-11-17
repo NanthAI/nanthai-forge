@@ -124,7 +124,7 @@ export const page = internalQuery({
         kind === 'project'
           ? await ctx.db
               .query('hostedProjects')
-              .withIndex('by_owner', q => q.eq('owner', actor))
+              .withIndex('by_owner_and_removal', q => q.eq('owner', actor))
               .paginate(paginationOpts)
           : kind === 'import'
             ? await ctx.db

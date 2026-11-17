@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ErrorToast } from './ui/Toast';
-import { Component, useEffect, useMemo, type ReactNode } from 'react';
-import { usePaginatedQuery, useQuery } from 'convex/react';
-import { makeFunctionReference, type PaginationOptions, type PaginationResult } from 'convex/server';
+import { Component, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { Lane, PlanningItem, WorkData } from '../../src/work-types';
 import { useWorkIndex, useWorkRecords } from './hosted-work-index';
 import { portfolioWork } from './portfolio-work';
+// Shared numbers only (no server code): the page sizes of the account read.
+const ACCOUNT_PROJECTS_DEFAULT = 50;
+const ACCOUNT_PROJECTS_MAX = 200;
 export type PortfolioProject = {
   id: Id<'hostedProjects'>;
   name: string;
@@ -20,52 +22,29 @@ export type ProjectSummary = ReturnType<typeof portfolioWork> & {
   error: string;
   available: boolean;
 };
-export function usePortfolioProjects(discoverReaders = true) {
-  const owned = usePaginatedQuery(api.projectBackups.list, {}, { initialNumItems: 20 });
-  const shared = usePaginatedQuery(api.projectContributors.shared, {}, { initialNumItems: 20 });
-  const readers = usePaginatedQuery(
-    makeFunctionReference<
-      'query',
-      { paginationOpts: PaginationOptions },
-      PaginationResult<{ id: Id<'hostedProjects'>; name: string }>
-    >('projectReaders:shared'),
-    discoverReaders ? {} : 'skip',
-    { initialNumItems: 20 },
-  );
+/** Every active project the person owns or is a member of, from the one account read (convex/accountProjects.ts):
+ * removed projects never fill the page. "Load more" asks once for the larger page. */
+export function usePortfolioProjects(_discoverReaders = true) {
+  const [limit, setLimit] = useState<number>(ACCOUNT_PROJECTS_DEFAULT);
+  const read = useQuery(api.accountProjects.list, { limit });
   const projects = useMemo(
-    () => [
-      ...new Map(
-        [
-          ...readers.results.map(item => ({ ...item, shared: true, role: 'Reader' as const })),
-          ...shared.results.map(item => ({
-            id: item.id,
-            name: item.name,
-            shared: true,
-            role: 'Contributor' as const,
-          })),
-          ...owned.results
-            .filter(item => !item.removal)
-            .map(item => ({ id: item.id, name: item.name, shared: false, role: 'Owner' as const })),
-        ].map(item => [item.id, item]),
-      ).values(),
-    ],
-    [owned.results, shared.results, readers.results],
+    () =>
+      (read?.projects ?? []).map(item => ({
+        id: item.id,
+        name: item.name,
+        shared: item.role !== 'owner',
+        role: roleWords[item.role],
+      })),
+    [read],
   );
   return {
     projects,
-    loading:
-      owned.status === 'LoadingFirstPage' ||
-      shared.status === 'LoadingFirstPage' ||
-      (discoverReaders && readers.status === 'LoadingFirstPage'),
-    more:
-      owned.status === 'CanLoadMore' || shared.status === 'CanLoadMore' || readers.status === 'CanLoadMore',
-    loadMore: () => {
-      if (readers.status === 'CanLoadMore') readers.loadMore(20);
-      if (owned.status === 'CanLoadMore') owned.loadMore(20);
-      if (shared.status === 'CanLoadMore') shared.loadMore(20);
-    },
+    loading: read === undefined,
+    more: !!read?.more && limit < ACCOUNT_PROJECTS_MAX,
+    loadMore: () => setLimit(ACCOUNT_PROJECTS_MAX),
   };
 }
+const roleWords = { owner: 'Owner', write: 'Contributor', read: 'Reader' } as const;
 /** An access change in one project must leave the rest of Home usable. */
 export class PortfolioBoundary extends Component<
   { children: ReactNode; fallback: ReactNode },

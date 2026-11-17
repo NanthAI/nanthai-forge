@@ -154,7 +154,8 @@ export const prepare = mutation({
       } else {
         const page = await ctx.db
           .query('hostedProjects')
-          .withIndex('by_owner', q => q.eq('owner', user.subject))
+          // Active and removed rows: the trash selector needs both.
+          .withIndex('by_owner_and_removal', q => q.eq('owner', user.subject))
           .take(SCAN + 1);
         invariant(
           page.length <= SCAN,
