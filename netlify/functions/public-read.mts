@@ -16,6 +16,9 @@ import { exploreMeta, profileMeta, projectMeta, withMeta, type PageMeta } from '
 const SHARED = 'public, durable, s-maxage=30, must-revalidate';
 // This parameter is always removed before a read, so every HTML query shares one cache entry.
 const PAGE_KEY = '__forge_page';
+// Netlify copies the incoming query onto a redirect whose target has no query entries.
+// One empty entry explicitly clears it; a lone '?' does not. It has no page identity.
+const EMPTY_QUERY = '?=';
 /** First path segments under /- that are app places, never a profile handle (web/src/app/paths.ts). */
 const RESERVED = new Set(['account', 'signin', 'device', 'new', 'public', 'explore', 'terms', 'privacy']);
 /** Set on every function response, independent of static-page headers. */
@@ -34,7 +37,6 @@ const unavailable = (status: number, body: string) =>
     headers: {
       'cache-control': 'no-store',
       'netlify-cdn-cache-control': SHARED,
-      'netlify-vary': `query=${PAGE_KEY}`,
       'content-type': 'text/plain',
       'x-content-type-options': 'nosniff',
     },
@@ -117,11 +119,9 @@ export function readFor(
 ): { json: string; meta: (origin: string, body: never) => PageMeta } | null {
   let parts: string[];
   try {
-    parts = pathname
-      .split('/')
-      .filter(Boolean)
-      .slice(1)
-      .map(part => decodeURIComponent(part).toLowerCase());
+    const segments = pathname.split('/').filter(Boolean);
+    if (segments[0] !== '-') return null;
+    parts = segments.slice(1).map(part => decodeURIComponent(part).toLowerCase());
   } catch {
     return null;
   }
@@ -156,7 +156,6 @@ async function page(origin: string | null, pathname: string) {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'public, max-age=0, must-revalidate',
       'netlify-cdn-cache-control': SHARED,
-      'netlify-vary': `query=${PAGE_KEY}`,
     },
   });
 }
@@ -182,14 +181,27 @@ async function respond(request: Request) {
   const origin = siteOrigin();
   const path = canonicalPath(url.pathname);
   const data = path === '/sitemap.xml' || path.startsWith('/-/public/v1/');
+  if (path !== '/sitemap.xml' && !path.startsWith('/-/'))
+    return new Response(
+      '<!doctype html><html><head><title>Not found · Forge</title></head><body><h1>Page not found</h1></body></html>',
+      {
+        status: 404,
+        headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+      },
+    );
   // Canonicalize before loading the shell or calling the backend. HTML preserves app query state.
-  if (path !== url.pathname || (data && url.search) || url.searchParams.has(PAGE_KEY)) {
-    if (data) url.search = '';
+  if (
+    path !== url.pathname ||
+    (data && url.search && url.search !== EMPTY_QUERY) ||
+    url.searchParams.has(PAGE_KEY)
+  ) {
+    const hadQuery = Boolean(url.search);
+    if (data) url.search = url.search ? EMPTY_QUERY : '';
     else url.searchParams.delete(PAGE_KEY);
     return new Response(null, {
       status: 308,
       headers: {
-        location: `${origin ?? ''}${path}${url.search}`,
+        location: `${origin ?? ''}${path}${url.search || (hadQuery ? EMPTY_QUERY : '')}`,
         'cache-control': 'no-store',
       },
     });
@@ -208,6 +220,9 @@ export default async (request: Request) => {
     response = unavailable(502, 'The public read is unavailable; try again.');
   }
   for (const [name, value] of Object.entries(SECURITY)) response.headers.set(name, value);
+  // Cacheable requests never carry PAGE_KEY. Bare URLs and explicit empty-query targets
+  // therefore share one object for HTML, JSON and sitemap responses alike.
+  response.headers.set('netlify-vary', `query=${PAGE_KEY}`);
   return request.method === 'HEAD'
     ? new Response(null, { status: response.status, headers: response.headers })
     : response;
@@ -220,5 +235,7 @@ export const config: Config = {
     '/-/public/v1/*',
     '/:sitemap(\\/*[sS][iI][tT][eE][mM][aA][pP][.][xX][mM][lL]\\/*)',
   ],
+  // Native enforcement precedes handler redirects, but its distributed count can lag.
+  // Keep it at the platform: no per-request shared counter or additional I/O.
   rateLimit: { windowLimit: 60, windowSize: 60, aggregateBy: ['ip', 'domain'] },
 };

@@ -1310,6 +1310,42 @@ For local browser development, set `VITE_FORGE_WEB_URL` to the deployed web orig
 site's cache and budget. A bare Vite server does not host the site function. The
 [public discovery security contract](security.md) states rate limits, cache freshness and partial weekly coverage.
 
+The native limiter is asynchronous. Test sustained traffic, not an exact 61st response:
+
+```sh
+# Immediately after deployment, before warming the public JSON cache entry:
+node scripts/public-read-live-check.mjs HTTPS_DEV_ORIGIN self-redirect
+node scripts/public-read-live-check.mjs HTTPS_DEV_ORIGIN canonical
+# Wait at least 65 seconds without test traffic from this IP before the second shape.
+node scripts/public-read-live-check.mjs HTTPS_DEV_ORIGIN redirect
+```
+
+Each probe first requires the ordinary response (200 for explore, 308 for its uppercase alias), then sends a
+61-request burst followed by at most one request per second. It requires 429 within 25 seconds after the burst;
+the burst itself has a 45-second deadline and each request has a deadline with zero retries. No more than 86
+requests are made per probe. Responses are not followed, so a limited redirect must be observed as 429, never
+hidden behind a following request. `Retry-After` is checked when present; absence is reported, since native
+Netlify blocks currently omit it and expose no header override. The dev trace accepted 61 rapid redirects and
+returned 429 eleven seconds later, consistent with the documented roughly ten-second propagation delay. A
+passing probe establishes abuse protection for that deployment and request shape, not a strict traffic/spend cap.
+The sustained dev measurements were 9.962 seconds over 64 requests for the canonical address and 12.759 seconds
+over 63 requests for the redirecting address (3.099 and 2.204 seconds after their bursts, respectively).
+
+The `self-redirect` mode requests `/-/public/v1/explore/active.json?forge_probe=61` and
+`/-/explore?__forge_page=x` without following redirects. Each Location must end exactly in `?=`, and following
+each once must return 200 with no Location. Run it before warming the JSON entry or after its 30-second expiry:
+a warm entry can answer the data query directly with 200, so that does not exercise the redirect branch.
+The no-query restoration was observed on dev; the lone-`?` result was shown only in netlify-cli's local engine.
+The regression fixture and real local Netlify matcher test cover that distinction. Bare and cleared targets use the same
+cache key; confirm a repeat is a CDN hit with zero Convex executions after deploy.
+
+Raw dot paths need `curl --path-as-is`; `fetch` and browsers normalize them before transport. Dev refused the
+raw `/./` form with an empty edge 404 and zero function operations. This is a platform boundary, not a Forge
+500 or an application 404; the function cannot supply a browser body for a request it never receives. Preserve
+the request ID and inspect function operations when distinguishing that case from a normal nonempty app 404.
+Populated public-project share metadata remains unverified until a public project exists on dev; follow-up
+Issue 43d2f68d tracks that verification separately. Do not create one merely for this check.
+
 `nforge heavy --no-build node --test TEST` runs against the existing `dist/`
 for a failing-first regression check; the default still rebuilds stale core output.
 Nested heavy commands share the live outer slot. Commands declared in `forge.json`

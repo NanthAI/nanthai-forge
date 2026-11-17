@@ -6,6 +6,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { moduleUrl, moduleSource } from './convex-module.mjs';
 
 const functionSource = moduleSource('../netlify/functions/public-read.mts').replace(
@@ -29,7 +33,10 @@ const PAGE = {
 
 function backend(t, answers) {
   const asked = [];
-  t.mock.method(fs, 'readFile', async () => APP);
+  const readFile = fs.readFile.bind(fs);
+  t.mock.method(fs, 'readFile', async (path, ...args) =>
+    String(path).replaceAll('\\', '/').endsWith('/hosted-web-dist/app.html') ? APP : readFile(path, ...args),
+  );
   const names = ['FORGE_CONVEX_SITE_URL', 'FORGE_WEB_URL', 'FORGE_PUBLIC_READ_SECRET'];
   const previous = names.map(name => process.env[name]);
   process.env.FORGE_WEB_URL = 'https://site.example';
@@ -127,7 +134,7 @@ test('only explore, profiles and project front pages map to a public read', () =
     assert.equal(readFor(path), null, path);
 });
 
-test('query strings redirect to the configured bare identity with zero reads, including arbitrary vary names', async t => {
+test('query strings redirect to an explicitly cleared identity with zero reads, including arbitrary vary names', async t => {
   const asked = backend(t, () => {
     throw new Error('must not fetch');
   });
@@ -135,11 +142,89 @@ test('query strings redirect to the configured bare identity with zero reads, in
     for (const query of ['?utm_source=x', '?cache=1', '?cache=2&x=3']) {
       const response = await serve(new Request(`https://untrusted.example${path}${query}`));
       assert.equal(response.status, 308);
-      assert.equal(response.headers.get('location'), `https://site.example${path}`);
+      assert.equal(response.headers.get('location'), `https://site.example${path}?=`);
     }
   }
   assert.equal(asked.length, 0);
   assert.deepEqual(config.rateLimit, { windowLimit: 60, windowSize: 60, aggregateBy: ['ip', 'domain'] });
+});
+
+test('the live query cases cannot self-redirect after Netlify query pass-through', async t => {
+  const require = createRequire(import.meta.resolve('netlify-cli/package.json'));
+  const { RedirectsHandler } = await import(pathToFileURL(require.resolve('@netlify/redirects')).href);
+  const directory = await fs.mkdtemp(join(tmpdir(), 'forge-public-redirect-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const fixtures = JSON.parse(
+    readFileSync(new URL('./fixtures/public-read-netlify.json', import.meta.url)),
+  ).queryRedirects;
+  const asked = backend(t, () => json(PAGE));
+  for (const fixture of fixtures) {
+    const request = new Request(`https://site.example${fixture.path}`);
+    const response = await serve(request);
+    assert.equal(response.status, 308);
+    const matcher = new RedirectsHandler({
+      projectDir: directory,
+      configRedirects: [{ from: '/*', to: response.headers.get('location'), status: 308, force: true }],
+    });
+    const onNetlify = await matcher.match(request);
+    assert.notEqual(onNetlify.target.href, request.url, 'the platform must not restore a self-redirect');
+    assert.equal(onNetlify.target.href, `https://site.example${fixture.location}`);
+    const followed = await serve(new Request(onNetlify.target));
+    assert.equal(followed.status, 200, 'the redirect reaches a fixed point in one hop');
+    assert.equal(followed.headers.get('location'), null);
+  }
+  assert(asked.every(({ url }) => url.startsWith(`${SITE}/public/v1/`)));
+});
+
+test('bare and explicitly cleared JSON or sitemap queries share one cache identity', async t => {
+  const asked = backend(t, () => json({ found: true }));
+  for (const path of ['/sitemap.xml', '/-/public/v1/explore/active.json']) {
+    const cache = new Map();
+    for (const query of ['', '?=', '?forge_probe=61', '?__forge_page=unbounded']) {
+      let request = new Request(`https://site.example${path}${query}`);
+      if (query && query !== '?=') {
+        const redirect = await serve(request);
+        assert.equal(redirect.status, 308);
+        request = new Request(redirect.headers.get('location'));
+      }
+      const url = new URL(request.url);
+      const identity = `${url.pathname}:${url.searchParams.get('__forge_page') ?? ''}`;
+      if (!cache.has(identity)) {
+        const response = await serve(request);
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get('netlify-vary'), 'query=__forge_page');
+        cache.set(identity, response);
+      }
+    }
+    assert.equal(cache.size, 1);
+  }
+  assert.equal(asked.length, 2, 'one cold read per identity, none for redirects or cache hits');
+});
+
+test('paths outside the public root have a nonempty HTML 404 and cannot reach a backend', async t => {
+  const asked = backend(t, () => {
+    throw Error('must not fetch');
+  });
+  for (const path of ['/outside/explore', '/-/../../outside', '/-/public/v1/../../../../outside']) {
+    const response = await serve(new Request(`https://site.example${path}`));
+    assert.equal(response.status, 404);
+    assert.match(response.headers.get('content-type'), /text\/html/);
+    assert.match(await response.text(), /Page not found/);
+    assert.equal(readFor(new URL(`https://site.example${path}`).pathname), null);
+  }
+  assert.equal(asked.length, 0);
+});
+
+test('private app places retain the SPA shell without a public backend read', async t => {
+  const asked = backend(t, () => {
+    throw Error('must not fetch');
+  });
+  for (const path of ['/-/account', '/-/signin', '/-/device', '/-/ada/atlas/private']) {
+    const response = await serve(new Request(`https://site.example${path}`));
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), APP);
+  }
+  assert.equal(asked.length, 0);
 });
 
 test('self fetches and share URLs use configuration even on another request host', async t => {

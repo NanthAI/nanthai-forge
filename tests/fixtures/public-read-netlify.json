@@ -1,0 +1,33 @@
+{
+  "queryRedirects": [
+    {
+      "path": "/-/public/v1/explore/active.json?forge_probe=61",
+      "oldLocation": "/-/public/v1/explore/active.json?forge_probe=61",
+      "location": "/-/public/v1/explore/active.json?="
+    },
+    {
+      "path": "/-/explore?__forge_page=synthetic",
+      "oldLocation": "/-/explore?__forge_page=synthetic",
+      "location": "/-/explore?="
+    },
+    {
+      "path": "/-/explore?__forge_page=synthetic&q=kept",
+      "oldLocation": "/-/explore?q=kept",
+      "location": "/-/explore?q=kept"
+    }
+  ],
+  "rawDotPath": {
+    "path": "/-/ada/./atlas",
+    "status": 404,
+    "body": "",
+    "functionOperations": 0
+  },
+  "nativeRateLimit": {
+    "rapidRequests": 61,
+    "rapidStatus": 308,
+    "nextProbeDelayMs": 11000,
+    "nextStatus": 429,
+    "retryAfter": null,
+    "body": ""
+  }
+}
