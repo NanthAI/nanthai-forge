@@ -625,6 +625,18 @@ layer out of both first paints.
   credentials"). `nforge login` still links to `/device`: most existing
   accounts cannot sign in under `/-` before the account backfill and linking
   work, so the link moves with Clerk removal.
+- One Lane, `/-/{handle}/{project}/lanes/{laneId}` (`web/src/app/lane/`, lazy
+  with its route): one bounded read, `projectLaneReview.read`, names the pinned
+  saved head and every changed path with its exact blobs from the Lane's overlap
+  row (400 paths a page; about 7 documents a view; no State or file body). Files
+  are grouped by `src/review-order.ts`, the same groups and reasons as
+  `diff {summary:true}`. A file's body is read only when opened: one signed
+  `describe`, the storage GETs, the reader's re-check; over 1 MiB it is named,
+  never fetched. Read ticks stay in this browser (`localStorage`, keyed by the
+  exact blob read), so a file saved again comes back unread. A Lane combined on
+  top of the Lane ahead shows where each line came from (`line-origin.ts`:
+  main, the Lane ahead's pinned save, this Lane), and only while that Lane still
+  holds the pinned save.
 - Code (`web/src/app/code/`, lazy): `/-/{handle}/{project}/code` lists what
   landed, newest first, one receipt per row (`projectCode:history`, 25
   receipts a page, receipt fields only); `code/{receiptId}` opens one receipt.

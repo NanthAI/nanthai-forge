@@ -163,7 +163,10 @@ MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
   `status` (added|deleted|modified) and `main` (`equal`: main holds the saved
   bytes and mode, or the Lane deleted a path main lacks; `absent`: main has no
   such path; `different`: both have it and differ, or main still has a path the
-  Lane deleted), plus whole-set `counts`. No hunks, no blob reads: it reads the
+  Lane deleted), plus whole-set `counts`. Each path also has the reading order
+  the web Lane page uses: `group` (`eyes`, `tests` or `low`) and `reason`, an
+  observed fact (`new file`, `test changed`, `docs only`, `now executable`, …;
+  never a score), with whole-set `groups` counts. No hunks, no blob reads: it reads the
   base, saved-head and current-main State manifests (`cost.manifestBytes`) and
   pages by the same `nextCursor` (up to 500 paths or `byteBudget` bytes a page).
 - `lane-history {laneId?}` is one query from stored rows for an open, landed or

@@ -299,9 +299,9 @@ export function Prose({ label, children }: { label?: string; children: ReactNode
 }
 
 /** A diff or code block: mono, numbered, scrolling inside itself. */
-export function CodeBox({ label, children }: { label: string; children: ReactNode }) {
+export function CodeBox({ label, by, children }: { label: string; by?: boolean; children: ReactNode }) {
   return (
-    <div className="code" role="region" aria-label={label} tabIndex={0}>
+    <div className={by ? 'code by' : 'code'} role="region" aria-label={label} tabIndex={0}>
       {children}
     </div>
   );

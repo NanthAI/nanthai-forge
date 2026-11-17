@@ -1,0 +1,25 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* The Lane review screen's layout only (Item 52235fbf): the change beside what is known about it, and the read tick
+   beside each file's summary (outside it, so the tick is not a control inside the fold's own button). Every part is
+   the design system's (review.css, figures.css, core.css); every value is a token. */
+
+[data-ds] {
+  .lane-p { grid-template-columns: minmax(0, 1fr) 400px; align-items: start; }
+  .lane-p > .pane { align-self: stretch; }
+  .lane-p > .side { position: sticky; top: 0; }
+  @media (max-width: 1100px) { .lane-p { grid-template-columns: minmax(0, 1fr) 320px; } }
+  @media (max-width: 860px) {
+    .lane-p { display: flex; flex-direction: column; background: transparent; }
+    /* On a phone the decision comes first, then the change, then the rest of what is known about it. */
+    .lane-p > .side { display: contents; }
+    .lane-p > .side > * { order: 2; background: var(--surface); }
+    .lane-p > .side > .lr-lead { order: -1; border-bottom: var(--rule) solid var(--line); }
+  }
+  .lr-file { position: relative; }
+  .lr-file > .file > summary { padding-right: calc(var(--gut) + 30px); cursor: pointer; }
+  .lr-file > .tick { position: absolute; top: 0; right: calc(var(--gut) - 6px); width: 28px; height: var(--row-h); display: grid; place-items: center; border: 0; background: transparent; padding: 0; }
+  .lr-file > .tick:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .lr-tools { display: flex; gap: var(--s-2) var(--s-3); align-items: center; flex-wrap: wrap; padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); }
+  .lr-tools .right { margin-left: auto; }
+  .lr-more { width: 100%; justify-content: flex-start; border-radius: 0; border-bottom: var(--rule) solid var(--line); }
+}

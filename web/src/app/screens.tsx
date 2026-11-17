@@ -31,6 +31,8 @@ const screens: Partial<
   'settings/checks': lazy(() => import('./checks/LandingChecks')),
   plan: lazy(() => import('./plan/Plan')),
 };
+/** One Lane (`lanes/{laneId}`): its own screen beside whatever serves the Lanes list. */
+const laneScreen = lazy(() => import('./lane/LaneReview'));
 
 /** The place's rebuilt screen once the project is known; the placeholder otherwise. */
 export function PlaceScreen(
@@ -48,7 +50,11 @@ export function PlaceScreen(
         />
       </Suspense>
     );
-  const Screen = screens[`${props.route.place}/${props.route.section}`] ?? screens[props.route.place];
+  const { place, section, rest } = props.route;
+  const Screen =
+    place === 'lanes' && rest && !section && !rest.includes('/')
+      ? laneScreen
+      : (screens[`${place}/${section}`] ?? screens[place]);
   if (!Screen || !props.projectId) return <Placeholder route={props.route} projectName={props.projectName} />;
   return (
     <Suspense fallback={<Placeholder route={props.route} projectName={props.projectName} />}>

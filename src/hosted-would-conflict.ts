@@ -99,7 +99,7 @@ export function syncRequiredContinuation(
       command,
       nextCommand: command,
       inProgress: false,
-      instruction: `${advice.next} Run command in this Lane checkout. Edit and resolve the returned conflict, then land --save; the exact predecessor head and receipt fence its check and acceptance.`,
+      instruction: `${advice.next} After the sync, edit and resolve the conflict it returns, then land --save; the exact predecessor head and receipt fence its check and acceptance.`,
     };
   }
   const laneId = advice.laneId ?? input.laneId;
@@ -139,8 +139,16 @@ export function predecessorConflictAdvice(input: {
   const { groupId: _group, ...pin } = input.predecessor;
   void _group;
   const target = input.laneId
-    ? `Lane ${input.laneId} (submission ${pin.submissionId})`
-    : `submission ${pin.submissionId}`;
+    ? `predecessor Lane ${input.laneId}`
+    : `predecessor submission ${pin.submissionId}`;
+  const files = `${input.paths.length ? input.paths.join(', ') : 'the retained conflict files'}${input.more ? ` (and ${input.more} more files)` : ''}`;
+  // Item 577927f1: one recommended action with its plain reason and a complete command, and what a resolution made
+  // now depends on. Run inside this Lane's checkout, the command needs no other argument.
+  const command = `nforge agent . sync ${shellQuote(JSON.stringify({ predecessor: pin }))}`;
+  const provisional =
+    `A resolution made now is provisional: it is built on ${target} exactly as saved (State ${pin.head}, ` +
+    `receipt ${pin.receiptId}) and lands only after that lands. If it fails or is replaced, this Lane goes back to ` +
+    'its own last save, the combined save stays in history, and you resolve again.';
   return wouldConflictSchema.parse({
     code: 'COMPOSITION_CONFLICT',
     predecessor: input.predecessor,
@@ -152,6 +160,12 @@ export function predecessorConflictAdvice(input: {
     paths: input.paths,
     more: input.more,
     at: input.at,
-    next: `Exact COMPOSITION_CONFLICT in ${input.paths.length ? input.paths.join(', ') : 'the retained conflict files'}${input.more ? ` (and ${input.more} more files)` : ''} against predecessor ${target}, saved State ${pin.head}, receipt ${pin.receiptId}. ${input.early ? 'Resolve now against this exact predecessor with' : 'Early resolution is off; choose'} sync {"predecessor":${JSON.stringify(pin)}}${input.early ? '.' : ' to resolve now, or wait for this predecessor to settle.'}`,
+    next: input.early
+      ? `Conflict: ${files} also changed in ${target}, which is ahead of this Lane and not on main yet. ` +
+        `Recommended: Resolve now against this exact predecessor, so both land without waiting for it. Run: ${command}. ${provisional}`
+      : `Conflict: ${files} also changed in ${target}, which is ahead of this Lane and not on main yet. ` +
+        'Early resolution is off for this project, so the recommended action is to keep waiting: if it lands, ' +
+        'this landing stops with COMPOSITION_CONFLICT and land --save syncs main in and lands again. Or choose sync ' +
+        `to resolve now: ${command}. ${provisional}`,
   });
 }

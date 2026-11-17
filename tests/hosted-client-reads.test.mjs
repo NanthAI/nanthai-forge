@@ -178,6 +178,19 @@ test('diff summary:true says equal/absent/different against main from manifests 
     ],
   );
   assert.deepEqual(result.counts, { equal: 2, absent: 1, different: 3 });
+  // 52235fbf: the agent gets the web review screen's group and observed reason for each file, from the same facts.
+  assert.deepEqual(
+    result.items.map(item => [item.path, item.group, item.reason]),
+    [
+      ['a.ts', 'eyes', 'code changed'],
+      ['b.ts', 'eyes', 'removed'],
+      ['e.ts', 'eyes', 'new file'],
+      ['f.ts', 'eyes', 'new file'],
+      ['g.ts', 'eyes', 'code changed'],
+      ['h.ts', 'eyes', 'removed'],
+    ],
+  );
+  assert.deepEqual(result.groups, { eyes: 6, tests: 0, low: 0 });
   assert.equal(result.total, 6);
   assert.equal(result.nextCursor, null);
   assert.equal(result.main, f.main.head);

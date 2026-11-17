@@ -2,6 +2,8 @@
 import { digestChunks } from './state/hash.js';
 import { manifestNames } from './ecosystems.js';
 import { documentationPath } from './prose-paths.js';
+/** Re-exported for the diff summary, which loads lazily: one bundle chunk keeps the rule (see hosted-diff-summary.ts). */
+export { documentationPath };
 import { moduleEcosystem, moduleNarrowing } from './module-selection.js';
 import { applyPackageFlags, type PackageFlagSource } from './package-command-flags.js';
 import type { ModuleGraph } from './module-graph-types.js';

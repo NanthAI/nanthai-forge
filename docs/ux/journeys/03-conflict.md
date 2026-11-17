@@ -19,16 +19,12 @@ Walked: `help conflict`, `help overlap`, `help queue`, `policy`, `capabilities`,
 
 ### The early-resolve reply
 
-The advice field `wouldConflict.next` is one sentence, built on the server (source):
+The advice field `wouldConflict.next` (built on the server, `predecessorConflictAdvice`) names the files and the Lane ahead, gives one recommended action with its complete command, and says what a resolution made now depends on (Item 577927f1, J3-1, J3-2, J3-4):
 
-> Exact COMPOSITION_CONFLICT in `FILES` against predecessor Lane `LANE_ID` (submission `SUBMISSION_ID`), saved State `64-HEX`, receipt `RECEIPT_ID`. Project predecessor failure rate: `12.5% over 8 predecessor outcomes`; measured wait saved by resolving now: `4.20 minutes`.
+- **Early resolution on**: "Recommended: Resolve now against this exact predecessor, so both land without waiting for it. Run: `nforge agent . sync '{"predecessor":{…}}'`."
+- **Off**: "the recommended action is to keep waiting: if it lands, this landing stops with COMPOSITION_CONFLICT and land --save syncs main in and lands again. Or choose sync to resolve now: `COMMAND`."
 
-followed by one of two endings:
-
-- **Resolve early chosen** (`earlyResolve` automatic and favoured, or on): "Resolve now (`automatic: cold-start` | `automatic: measured-break-even` | `on: owner-on`) against this exact predecessor with sync {"predecessor":{…}}."
-- **Not chosen** (off, or automatic and not favoured): "Early resolution is off" or "Early resolution is not favored by the measured break-even; choose sync {"predecessor":{…}} to resolve now, or wait for this predecessor to settle."
-
-With no samples the two figures read "unknown (no predecessor outcomes yet)" and "unknown (no completed resolution timing yet)", and automatic picks resolve early (`cold-start`).
+Both end with the provisional rule: a resolution is built on that Lane exactly as saved (State, receipt) and lands only after it lands; if it fails or is replaced, this Lane goes back to its own last save, the combined save stays in history, and the agent resolves again. The web Lane page shows the same recommendation and command, and marks a combined result Provisional with the save it is pinned to. Reason enums are no longer printed (J3-3). Question E20 (the journey Lane's open question on the recommended action) was not landed; the recommendation follows the existing rule: wait when the owner turned early resolution off, resolve now when it is on.
 
 The setting is `acceptance.earlyResolve`: `"automatic"` (also when absent), `"on"` or `"off"`, changed with `nforge x ROOT set-policy '{"acceptance":{"earlyResolve":"off"}}'`.
 

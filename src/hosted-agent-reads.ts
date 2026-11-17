@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { documentationPath } from './package-graph.js';
 import { hostedProvenanceSchema } from './hosted-provenance-schema.js';
 import { hostedRecordsReadSchema } from './hosted-record-read.js';
 import { hostedCheckLogSchema } from './hosted-check-log.js';
@@ -14,7 +15,6 @@ import { contextualHunks } from './review-hunks.js';
 import { safeRelative } from './safe-relative.js';
 import { invariant } from './errors.js';
 import { selectHostedSource, selectHostedMain, hostedSourceShowSchema } from './mcp-hosted-source.js';
-import { summarizeAgainstMain } from './hosted-diff-summary.js';
 import { hostedWaitSchema } from './hosted-wait-schema.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
@@ -170,11 +170,14 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
     // One more manifest (current main's State); every standing is decided from manifest entries.
     const main = await selectHostedMain(transport);
     await cache.ensure([main.head]);
+    // Loaded only for a summary, so the review order and docs rule add nothing to CLI/MCP startup.
+    const { summarizeAgainstMain } = await import('./hosted-diff-summary.js');
     const page = summarizeAgainstMain(
       changes,
       parseNativeState(read(main.head)).files,
       offset,
       command.byteBudget,
+      documentationPath,
     );
     // Cache access and an old cursor never grant current project access.
     await transport.query('projectHostedLanes:select', { laneId: lane.laneId });
@@ -197,6 +200,7 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
         main: main.head,
         items: page.items,
         counts: page.counts,
+        groups: page.groups,
         total: changes.length,
         nextCursor: next,
         truncated: next !== null,
