@@ -2,6 +2,7 @@
 import type { AuthorshipClaim } from '../src/work-actor-types';
 import { needsFix, fixBrief } from '../src/culprit-bisect';
 import { v } from 'convex/values';
+import { sourceAuthorship } from '../src/work-actor-types';
 import { mutation, receiptMutation, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
@@ -111,6 +112,13 @@ async function execute(
     validated.success,
     'BAD_ARGUMENT',
     'Send a hosted start with an operation UUID and exact main pins.',
+  );
+  invariant(
+    validated.data.authorship?.kind !== 'agent' ||
+      validated.data.authorship.declaration === 'unknown' ||
+      Boolean(validated.data.agentClient?.includes(':')),
+    'BAD_ARGUMENT',
+    'Agent start requires model. Set model or FORGE_AGENT_MODEL; use "unknown" when unknown.',
   );
   // The agent slug only labels the Lane for other agents: a retry from another session is the same start.
   const {
@@ -331,6 +339,7 @@ async function execute(
     action === 'start'
       ? hostedLaneSelectionSchema.parse({
           schema: 2,
+          ...sourceAuthorship({ ...validated.data, ...(agent ? { agentRun: agent } : {}) }),
           projectId,
           laneId,
           intentId,
@@ -362,6 +371,7 @@ async function execute(
       },
       record: {
         kind: 'lane',
+        ...sourceAuthorship({ ...validated.data, ...(agent ? { agentRun: agent } : {}) }),
         id: laneId,
         ...(restoreBase ? { restoreBase } : {}),
         intentId,

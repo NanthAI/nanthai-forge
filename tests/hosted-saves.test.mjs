@@ -287,3 +287,71 @@ test('save preparation retries after a model or app switch retain the original s
   assert.deepEqual(replay.input, first.result.input);
   assert.equal(s.tables.projectHostedSaves.size, 1);
 });
+
+test('canonical saves retain each declared model and person independently across one mixed Lane', async () => {
+  const { moduleUrl } = await import('./convex-module.mjs');
+  const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+  const { readAuthorship } = await import('../dist/work-actor-types.js');
+  const s = await saveFixture();
+  let expected = { ...s.expected };
+  let before;
+  const saved = [];
+  for (const [i, stamp] of [
+    { authorship: { kind: 'agent' }, agentClient: 'fixture:model-one', agentRun: 'quiet-otter' },
+    { authorship: { kind: 'agent' }, agentClient: 'another:model-two', agentRun: 'quiet-otter' },
+    { authorship: { kind: 'person' } },
+    {},
+  ].entries()) {
+    const change = s.change(`version-${i}`);
+    if (before) change.before = before;
+    before = { blob: change.after.blob, mode: change.after.mode };
+    const x = await s.prepare([change], { expected, ...stamp });
+    await s.stage(x);
+    await s.submit(x);
+    const result = (await s.publish(await s.work(x))).outcome.result;
+    assert.deepEqual(result.authorship, stamp.authorship);
+    const read = await s.call(
+      'readSavedAuthorship',
+      {
+        _handler: ctx =>
+          records.readHostedRecord(ctx, {
+            projectId: s.projectId,
+            actor: 'owner',
+            kind: 'save',
+            key: result.saveId,
+          }),
+      },
+      {},
+    );
+    const value = JSON.parse(read.value);
+    assert.deepEqual(value.authorship, stamp.authorship);
+    assert.equal(value.actor, 'owner', 'the account is server-owned and stored once');
+    assert.equal(value.agentClient, stamp.agentClient);
+    assert.equal(value.agentRun, stamp.agentRun);
+    saved.push({ id: result.saveId, stamp: readAuthorship(value) });
+    expected = {
+      head: result.head,
+      version: result.version,
+      sourceVersion: result.sourceVersion,
+      lifecycleVersion: 0,
+    };
+  }
+  assert.deepEqual(
+    saved.map(s => s.stamp.model),
+    ['model-one', 'model-two', null, 'not-declared'],
+  );
+  const first = await s.call(
+    'readFirstSaveAgain',
+    {
+      _handler: ctx =>
+        records.readHostedRecord(ctx, {
+          projectId: s.projectId,
+          actor: 'owner',
+          kind: 'save',
+          key: saved[0].id,
+        }),
+    },
+    {},
+  );
+  assert.equal(readAuthorship(JSON.parse(first.value)).model, 'model-one');
+});

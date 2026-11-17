@@ -55,7 +55,7 @@ export const savePageSchema = z
     next: saveObjectSchema.nullable(),
   })
   .strict();
-export const saveExpectedSchema = hostedLaneSelectionSchema.pick({
+export const saveExpectedSchema = z.object(hostedLaneSelectionSchema.shape).pick({
   head: true,
   version: true,
   sourceVersion: true,
@@ -147,7 +147,8 @@ export const saveResultSchema = z
     supersededFinish: z.uuid().optional(),
     at: z.iso.datetime(),
   })
-  .strict();
+  .strict()
+  .refine(personStampValid, 'A person stamp has no model or run.');
 /** Optional diagnostics never prevent saving source, including a bad or overflowing clock sample. */
 export function saveDurationMs(value: number | undefined, elapsed = 0): number | undefined {
   if (value === undefined || !Number.isSafeInteger(value) || value < 0) return undefined;

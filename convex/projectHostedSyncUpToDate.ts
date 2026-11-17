@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { sourceAuthorship } from '../src/work-actor-types';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { findObject } from './projectObjectFind';
@@ -82,6 +83,7 @@ export async function syncLaneSelection(
   lane: Lane,
 ): Promise<HostedLaneSelection> {
   return hostedLaneSelectionSchema.parse({
+    ...sourceAuthorship(lane),
     schema: 2,
     projectId,
     laneId: lane.id,

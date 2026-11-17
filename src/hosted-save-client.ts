@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { reconcileSourceRequest } from './hosted-source-request.js';
+import { sourceAuthorship, withoutAuthorship } from './work-actor-types.js';
 import { sourceWaitSnapshot, waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { z } from 'zod';
@@ -73,6 +74,7 @@ export const overlapEvidenceLevel = (capabilities: {
       : true;
 /** What the server's save calls accept, from the capability read the session already made. */
 export type SaveContract = {
+  authorship?: import('./hosted-agent-transport.js').HostedAgentSession['authorship'];
   onCapture?: ((capture: Awaited<ReturnType<typeof captureHostedSave>>) => void | Promise<void>) | undefined;
   holderSessionId?: string;
   session?: import('zod').infer<typeof import('./hosted-lane.js').sessionClaimSchema>;
@@ -326,6 +328,7 @@ async function saveOnce(
     const built = buildSavePages(changes),
       selection = capture.marker.selection;
     request = saveRequestSchema.parse({
+      ...contract.authorship,
       operationId: command.operationId,
       laneId: selection.laneId,
       ...(contract.holderSessionId
@@ -679,7 +682,8 @@ function applyHostedSaveReceipt(
       tree: sourceTree(state.files),
       materialized: [...materialized].sort(),
       selection: {
-        ...old.selection,
+        ...withoutAuthorship(old.selection),
+        ...sourceAuthorship(result),
         head: result.head,
         version: result.version,
         sourceVersion: result.sourceVersion,

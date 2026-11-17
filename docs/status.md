@@ -9,7 +9,8 @@ See [review findings](guides/review.md#structured-review-findings) and the
 [land-it recipe](guides/agents.md#land-it).
 
 The rebuilt Lane proof route distinguishes check results, self-reported test-file
-figures and a separately attributed verification claim. Exact-source full checks
+figures and a separately attributed verification claim. It shows shard progress,
+requested test names and the recorded scope beside those results. Exact-source full checks
 and linked follow-up Items reuse existing operations. Hosted save readers retain
 optional declarations; client writers and the run-budget/outside-change workflows
 are separate work on the Phase 7 Items. See [run evidence](run-evidence.md).
@@ -254,6 +255,13 @@ exact counts, including mass failures. CLI/MCP `status {runId,reports:"failed"}`
 page's Test reports disclosure read detail on demand. Uploader, provider webhook and verdict confirmation coalesce report ingestion; settled replays skip report I/O while unfinished timing and output work remains repairable.
 
 The [batched CI result inbox](operations/github-actions-checks.md#batched-result-inbox) folds shard results by metadata page and keeps per-file reports off run heads. Negotiated packed results retain one combined object per shard and elect early collection with required-shard HEAD discovery and one conditional marker, with a 14-Class-A legacy or 15-Class-A R2-report twelve-shard fixture guard; independent provider conclusions authorize exact-verdict reuse. Full pre-queue admission is opt-in; an absent setting checks the composed head in the queue. A landing records its [first-check proof](pre-queue-checks.md#decision) or the reason it rechecks. Identical shared entries clear overlap but retain the existing global/declared-input and shared-folder risk checks; unchanged complete trees retain exact-tree reuse. Exit bench: [resumable runner](../evals/bench-t3code/README.md#run-the-bench) and [pinned deployment](workflows.md#automatic-main-mirror). [Rung 2 tooling](agents/regression-ladder.md#rung-2-path-triggered-dry-micro-bench) awaits live qualification/trailing coverage; mirror deploy-path pushes deploy dev. Its [fixed N=10 diagnostics](../evals/bench-t3code/README.md#fixed-n10-protocol-diagnostics) run synthetic conflict/clean cells with zero model tokens through the existing Forge/GitHub protocols; their service adapters are offline tested, with live qualification and costs unmeasured. Rework retains causal recovery totals and reports active work separately from command waiting. Its task identities are assigned before workspace preparation and preserved through the Forge relay; enclosing client sessions are cleared in both arms. Identity adapter changes still need fresh harness qualification before scored work. CLI run identity also honours an explicit session first, selects the closest recognised agent from a shared client table, and hashes process identity when that client exports no session variable; see [agent runs](agents/workflow.md#agent-runs-and-client-detection).
+
+The negotiated [source authorship contract](agents/workflow.md#authorship-stamp-compatibility)
+requires an agent model once at `start` (`model` or `FORGE_AGENT_MODEL`, with
+`unknown` allowed), inherits it for save and land, and retains each save's stamp
+independently. Person-only work and old clients remain readable; receipt builder
+identity stays separate from approval. Save-level blame and web labels are still
+being wired to those records.
 
 Exact saved-source conflicts also appear on `peers` replies. Run, peer, landing and source waits
 preserve a current notice beside a terminal outcome when completion beats notice batching; they

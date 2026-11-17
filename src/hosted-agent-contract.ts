@@ -186,6 +186,7 @@ export const hostedAgentCommandSchemas = {
     .strict(),
   start: z
     .object({
+      model: z.string().optional(),
       outcome: z.string().min(1).optional(),
       constraints: z.string().optional(),
       intentId: uuid.optional(),
@@ -224,7 +225,9 @@ export const hostedAgentCommandSchemas = {
       paths: z.array(z.string().refine(safeRelative)).optional(),
     })
     .strict(),
-  save: z.object({ ...lane, ...message, supersedeFinish: z.boolean().optional() }).strict(),
+  save: z
+    .object({ ...lane, ...message, model: z.string().optional(), supersedeFinish: z.boolean().optional() })
+    .strict(),
   compose: z.object(selection).strict(),
   sync: z
     .object({
@@ -270,6 +273,7 @@ export const hostedAgentCommandSchemas = {
   check: check.extend({ candidateId: uuid, expectedHead: hash.optional() }).strict(),
   finish: z
     .object({
+      model: z.string().optional(),
       ...selection,
       message: landingMessageSchema.optional(),
       check: check.optional(),

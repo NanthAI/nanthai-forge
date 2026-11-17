@@ -27,6 +27,14 @@ function autoIndex(directory: string, identity: string, session?: string) {
     `auto-${digest(session === undefined ? identity : canonicalPayload({ identity, session: digest(session) }))}.json`,
   );
 }
+/** A model switch changes display attribution, never the source operation being retried. */
+function sourceCommand(action: string, command: unknown) {
+  if (!['start', 'save', 'finish'].includes(action) || !command || typeof command !== 'object')
+    return command;
+  const { model, ...semantic } = command as Record<string, unknown>;
+  void model;
+  return semantic;
+}
 export function hostedAgentRoot(root: string) {
   let selected = canonicalRoot(root);
   for (;;) {
@@ -93,7 +101,13 @@ export class HostedAgentJournal {
   ) {
     const directory = hostedAgentDirectory(root);
     this.lock = join(directory, 'lock');
-    const identity = canonicalPayload({ root: hostedAgentRoot(root), address, actor, action, command });
+    const identity = canonicalPayload({
+      root: hostedAgentRoot(root),
+      address,
+      actor,
+      action,
+      command: sourceCommand(action, command),
+    });
     // Auto-addressed requests remain replayable even when stdout was lost after
     // the completed receipt was persisted. A fresh UUID explicitly starts new work.
     this.operationId = workLocked(this.lock, () => {
@@ -129,7 +143,13 @@ export class HostedAgentJournal {
     session?: string,
   ): { operationId: string; values: Record<string, unknown> } | undefined {
     const directory = hostedAgentDirectory(root);
-    const identity = canonicalPayload({ root: hostedAgentRoot(root), address, actor, action, command });
+    const identity = canonicalPayload({
+      root: hostedAgentRoot(root),
+      address,
+      actor,
+      action,
+      command: sourceCommand(action, command),
+    });
     const index = autoIndex(directory, identity, session);
     if (!checkoutPathExists(index)) return undefined;
     const operationId = z.uuid().parse(readAgentJson(index)),

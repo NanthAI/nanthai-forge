@@ -8,6 +8,12 @@ the runner; the interval between Forge's recorded timestamps is observed by Forg
 Missing test reports mean **not reported**, even when an older runner retained an
 empty report summary. They do not mean that zero tests ran.
 
+On **What was checked**, shard progress uses the run’s recorded plan total when available.
+The check scope, selection reason and names requested by the planner appear separately
+from CI’s test-file reports. A full check selects the configured command. The file
+report establishes only which files the checked code reported. The header also
+summarizes the verification limits the agent declared on the selected save or landing.
+
 Saves accept optional `notVerified` and `outside` declarations in the hosted save
 request. They are retained on the immutable save and its original terminal receipt,
 with the authenticated author and exact source head on the save. The receipt links

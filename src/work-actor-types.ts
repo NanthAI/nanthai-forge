@@ -23,6 +23,20 @@ export const authorshipClaimSchema = z
     'A person stamp has no agent model declaration.',
   );
 export type AuthorshipClaim = z.infer<typeof authorshipClaimSchema>;
+/** Project only the source declaration; account identity stays in the record's existing actor. */
+export function sourceAuthorship(value: {
+  authorship?: AuthorshipClaim | undefined;
+  agentClient?: string | undefined;
+  agentRun?: string | undefined;
+}) {
+  return value.authorship
+    ? {
+        authorship: value.authorship,
+        ...(value.agentClient ? { agentClient: value.agentClient } : {}),
+        ...(value.agentRun ? { agentRun: value.agentRun } : {}),
+      }
+    : {};
+}
 /** Receipt builders can differ from the approving actor. Lanes/saves use their existing actor. */
 export const authorshipSchema = authorshipClaimSchema.safeExtend({ actor: stampText });
 export const authorshipFields = {

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
-import { saveHostedLane, settlePriorHostedSave } from './hosted-save-client.js';
+import { saveHostedLane, settlePriorHostedSave, type SaveContract } from './hosted-save-client.js';
 import { keepHostedEditsPatch } from './hosted-abandon-patch.js';
 import { saveRequestSchema } from './hosted-save.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
@@ -37,6 +37,7 @@ export async function transitionHostedLane(
   root: string,
   command: z.input<typeof commandSchema>,
   exchange: Pick<ConvexExchange, 'client' | 'projectId' | 'uploadFile' | 'upload' | 'missing'>,
+  saveFeatures: SaveContract | false = false,
 ) {
   const parsed = commandSchema.parse(command);
   invariant(parsed.action !== 'abandon' || parsed.reason, 'BAD_ARGUMENT', 'Give a reason for abandoning.');
@@ -127,7 +128,7 @@ export async function transitionHostedLane(
         supersedeFinish: true,
       },
       exchange,
-      false,
+      saveFeatures,
       true,
     );
   if (!original.request) {
@@ -181,7 +182,7 @@ export async function transitionHostedLane(
             supersedeFinish: true,
           },
           exchange,
-          false,
+          saveFeatures,
           true,
         );
         if ('outcome' in childProgress && childProgress.outcome.status === 'failed')

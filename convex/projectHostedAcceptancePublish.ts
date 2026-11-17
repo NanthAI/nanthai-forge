@@ -326,6 +326,7 @@ export async function publishAcceptance(
     carried: grant ? grant.attemptId !== attempt.id : false,
   });
   const receipt = hostedAcceptanceSchema.parse({
+    ...(state.request.authorship ? { authorship: { ...state.request.authorship, actor: state.actor } } : {}),
     schema: 1,
     id: identity.receiptId,
     projectId: claim.projectId,

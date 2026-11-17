@@ -81,7 +81,10 @@ export function ReportFiles(props: Props) {
   const [open, setOpen] = useState(false);
   return (
     <details onToggle={event => setOpen(event.currentTarget.open)}>
-      <summary className="quietline">Reported test files</summary>
+      <summary className="quietline">
+        <span className="tw" aria-hidden="true" />
+        Reported test files
+      </summary>
       {open ? <ReportPage {...props} /> : null}
     </details>
   );

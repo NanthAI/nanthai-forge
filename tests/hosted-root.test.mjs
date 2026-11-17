@@ -14,6 +14,15 @@ import { hostedCloneCli, cloneHostedProject } from '../dist/hosted-clone-cli.js'
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { hostedAgentAddress } from '../dist/hosted-agent-cli.js';
 import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
+// These fixtures declare their own agents; a builder's launcher must not hide a missing model.
+const launcherModel = process.env.FORGE_AGENT_MODEL;
+test.before(() => {
+  delete process.env.FORGE_AGENT_MODEL;
+});
+test.after(() => {
+  if (launcherModel === undefined) delete process.env.FORGE_AGENT_MODEL;
+  else process.env.FORGE_AGENT_MODEL = launcherModel;
+});
 const transport = f => {
   const downloads = new HostedCheckoutDownloads(f.exchange);
   return {
@@ -53,12 +62,16 @@ test('second and third Lane use independent paths and locks, retain drafts, repl
   const f = await rootFixture(t);
   await clone(f);
   const agent = new HostedAgentTransport(f.root, f.address, f.exchange);
-  agent.agentSession = 'one-agent-session'; // the identical start below replays within this session
-  const first = await agent.dispatch('start', { outcome: 'First' });
+  agent.agentSession = `root-${digest(f.root)}`; // replay within this test, never another test's cache
+  await assert.rejects(
+    agent.dispatch('start', { outcome: 'Missing fixture declaration' }),
+    error => error.code === 'BAD_ARGUMENT' && /FORGE_AGENT_MODEL/.test(error.message),
+  );
+  const first = await agent.dispatch('start', { outcome: 'First', model: 'fixture-model' });
   writeFileSync(join(first.result.path, 'draft'), 'keep');
   const [second, third] = await Promise.all([
-    agent.dispatch('start', { outcome: 'Second' }),
-    agent.dispatch('start', { outcome: 'Third' }),
+    agent.dispatch('start', { outcome: 'Second', model: 'fixture-model' }),
+    agent.dispatch('start', { outcome: 'Third', model: 'fixture-model' }),
   ]);
   assert.equal(new Set([first, second, third].map(r => r.result.path)).size, 3);
   for (const r of [first, second, third]) {
@@ -66,7 +79,10 @@ test('second and third Lane use independent paths and locks, retain drafts, repl
     assert.equal(readFileSync(join(r.result.path, 'large.bin')).length, 4 * 1024 * 1024);
   }
   assert.equal(readFileSync(join(first.result.path, 'draft'), 'utf8'), 'keep');
-  assert.equal((await agent.dispatch('start', { outcome: 'First' })).result.path, first.result.path);
+  assert.equal(
+    (await agent.dispatch('start', { outcome: 'First', model: 'fixture-model' })).result.path,
+    first.result.path,
+  );
   const reopened = await agent.dispatch('open', { laneId: second.result.lane.laneId });
   assert.equal(reopened.result.root, second.result.path);
   const before = f.calls.length;
@@ -76,11 +92,14 @@ test('second and third Lane use independent paths and locks, retain drafts, repl
 test('single-Lane roots keep their original path and can start another Lane', async t => {
   const f = await rootFixture(t),
     agent = new HostedAgentTransport(f.root, f.address, f.exchange);
-  const first = await agent.dispatch('start', { outcome: 'Original unopened root' });
+  const first = await agent.dispatch('start', { outcome: 'Original unopened root', model: 'fixture-model' });
   // Existing open protocol still materializes its first Lane directly in ROOT.
   await agent.dispatch('open', { laneId: first.result.lane.laneId });
   writeFileSync(join(f.root, 'draft'), 'keep');
-  const second = await agent.dispatch('start', { outcome: 'Second from single-Lane root' });
+  const second = await agent.dispatch('start', {
+    outcome: 'Second from single-Lane root',
+    model: 'fixture-model',
+  });
   assert.notEqual(second.result.path, f.root);
   assert.equal(readFileSync(join(f.root, 'draft'), 'utf8'), 'keep');
 });
@@ -342,8 +361,8 @@ test('open and a replayed start into a deleted Lane folder install the Lane agai
   mkdirSync(f.root);
   await clone(f);
   const agent = new HostedAgentTransport(f.root, f.address, f.exchange);
-  agent.agentSession = 'one-agent-session'; // the identical start below replays within this session
-  const started = await agent.dispatch('start', { outcome: 'Deleted folder' });
+  agent.agentSession = `root-${digest(f.root)}`; // replay within this test, never another test's cache
+  const started = await agent.dispatch('start', { outcome: 'Deleted folder', model: 'fixture-model' });
   const laneId = started.result.lane.laneId,
     path = started.result.path;
   assert(existsSync(join(path, 'large.bin')));
@@ -356,7 +375,7 @@ test('open and a replayed start into a deleted Lane folder install the Lane agai
   assert.equal(readFileSync(join(path, 'large.bin')).length, 4 * 1024 * 1024);
   assert.equal(readHostedLaneCheckout(path).selection.laneId, laneId);
   rmSync(path, { recursive: true, force: true });
-  const replayed = await agent.dispatch('start', { outcome: 'Deleted folder' });
+  const replayed = await agent.dispatch('start', { outcome: 'Deleted folder', model: 'fixture-model' });
   assert.equal(replayed.operationId, started.operationId, 'the same start replays');
   assert.equal(replayed.result.lane.laneId, laneId);
   assert.equal(replayed.result.checkout.replayed, false);

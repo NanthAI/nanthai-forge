@@ -36,7 +36,10 @@ for (const { cell, history } of [
     for (const [metric, value] of Object.entries(metrics)) {
       const budget = budgets.find(b => b.metric === metric);
       assert(budget, `central budget for ${metric}`);
-      assert(value <= budget.max, `${metric}: ${value} exceeds ${budget.max}`);
+      assert(
+        value <= budget.max,
+        `${metric}: ${value} exceeds ${budget.max}; ${JSON.stringify(result.callCounts)}`,
+      );
     }
     assert.equal(result.idle, 0);
     assert.equal(result.landed.length, 10);
@@ -50,3 +53,35 @@ for (const { cell, history } of [
       }),
     );
   });
+
+test('the same queue wave crossing an hour adds only its declared account-order update', async t => {
+  const samples = [];
+  for (const minute of [0, 55])
+    await t.test(`fixed start minute ${minute}`, async subtest => {
+      const startAt = Date.UTC(2026, 0, 1, 12, minute);
+      const result = await replayAdmission(subtest, fixture.cells[0], {
+        admissionCheck: 'default',
+        startAt,
+      });
+      assert.equal(result.startedAt, startAt, 'the whole replay uses the selected synthetic epoch');
+      samples.push(result);
+    });
+  const [withinHour, acrossHour] = samples;
+  const { accountOrderTouch: firstTouches, ...firstCalls } = withinHour.callCounts;
+  const { accountOrderTouch: nextTouches, ...nextCalls } = acrossHour.callCounts;
+  assert.equal(firstTouches, 1);
+  assert.equal(nextTouches, 2);
+  assert.deepEqual(nextCalls, firstCalls, 'clock phase changes no queue, source or check call');
+  assert.equal(acrossHour.calls - withinHour.calls, nextTouches - firstTouches);
+  assert.equal(acrossHour.checks, withinHour.checks);
+  assert.equal(acrossHour.ciMinutes, withinHour.ciMinutes);
+  assert.equal(acrossHour.idle, 0);
+  t.diagnostic(
+    JSON.stringify({
+      withinHourCalls: withinHour.calls,
+      acrossHourCalls: acrossHour.calls,
+      withinHourOrderUpdates: firstTouches,
+      acrossHourOrderUpdates: nextTouches,
+    }),
+  );
+});

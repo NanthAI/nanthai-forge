@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { hostedLandingRequestSchema } from './hosted-landing.js';
 export const hostedLandingDesiredSchema = hostedLandingRequestSchema
   .pick({
+    authorship: true,
     governanceVersion: true,
     operationId: true,
     authorityEpoch: true,

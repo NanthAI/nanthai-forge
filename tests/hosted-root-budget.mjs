@@ -71,7 +71,12 @@ export async function measureRootBudget(t, f, { nodeArgs = [] } = {}) {
   // A dispatched request may lose its connection before reaching the fixture.
   // Keep the budget on actual client attempts, including those failed requests.
   assert(cloned.rpcCalls >= cloneCalls);
-  const started = await run(['agent', f.root, 'start', JSON.stringify({ outcome: 'Warm cache start' })]);
+  const started = await run([
+    'agent',
+    f.root,
+    'start',
+    JSON.stringify({ outcome: 'Warm cache start', model: 'fixture-model' }),
+  ]);
   // The message names why a warm start's checkout did not complete (status, reason, code).
   assert.equal(
     started.result.result.checkout.downloadedObjects,

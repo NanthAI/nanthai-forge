@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
+import { sourceAuthorship } from '../src/work-actor-types';
 import type { z } from 'zod';
 import type { SourceAuthority } from '../src/hosted-source-authority';
 import { mutation } from './cliServer';
@@ -21,6 +22,7 @@ import { accountFor } from './urlIdentity';
 import { acceptedHandoff } from './projectLaneHandoff';
 function selection(projectId: string, lane: z.infer<typeof hostedLaneSchema>, authority: SourceAuthority) {
   return hostedLaneSelectionSchema.parse({
+    ...sourceAuthorship(lane),
     schema: 2,
     projectId,
     laneId: lane.id,

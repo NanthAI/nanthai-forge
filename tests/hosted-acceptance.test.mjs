@@ -923,3 +923,17 @@ test('legacy declared receipt models and supervised builders retain one canonica
     assert(!hostedAcceptanceSchema.safeParse({ ...declared, agentRun: bad }).success);
   }
 });
+
+test('receipt writers distinguish source builder from person approval without client-owned actor fields', async () => {
+  const f = await acceptanceFixture();
+  const prepared = await f.ready(null, { authorship: { kind: 'agent', declaration: 'unknown' } });
+  const result = await f.accept(prepared.state);
+  assert.deepEqual(result.receipt.authorship, { kind: 'agent', declaration: 'unknown', actor: 'owner' });
+  assert.equal(result.receipt.actor.kind, 'person', 'existing approval evidence stays independent');
+  const person = await acceptanceFixture();
+  const ready = await person.ready(null, { authorship: { kind: 'person' } });
+  const accepted = await person.accept(ready.state);
+  assert.deepEqual(accepted.receipt.authorship, { kind: 'person', actor: 'owner' });
+  assert.equal(accepted.receipt.agentClient, undefined);
+  assert.equal(accepted.receipt.agentRun, undefined);
+});

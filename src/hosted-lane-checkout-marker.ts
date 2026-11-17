@@ -7,7 +7,7 @@ import { readSource, safeRelative } from './files.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { parseNativeStateValue, stateSchema } from './state/format.js';
 import { invariant } from './errors.js';
-export const hostedLaneExpectationSchema = hostedLaneSelectionSchema.pick({
+export const hostedLaneExpectationSchema = z.object(hostedLaneSelectionSchema.shape).pick({
   head: true,
   sourceVersion: true,
   version: true,

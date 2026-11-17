@@ -537,6 +537,12 @@ export async function executeHostedAgent(
       const parent = command.stackOn ? await selectAgentLane(session, command.stackOn) : null;
       return hostedStartSchema.parse({
         operationId,
+        ...(session.authorship
+          ? {
+              authorship: session.authorship.authorship,
+              ...(session.authorship.agentClient ? { agentClient: session.authorship.agentClient } : {}),
+            }
+          : {}),
         ...(session.capabilities.needsFix !== undefined ? { noticeVersion: 1 } : {}),
         ...(session.capabilities.openLanesVersion === 1 ? { openLanesVersion: 1 } : {}),
         ...(session.agent ? { agent: session.agent } : {}),
@@ -670,6 +676,7 @@ export async function executeHostedAgent(
       session.exchange,
       {
         ...saveContract(session.capabilities),
+        authorship: session.authorship,
         ...(session.holderSessionId
           ? {
               holderSessionId: session.holderSessionId,
@@ -919,6 +926,7 @@ export async function executeHostedAgent(
               : {}),
           },
           session.exchange,
+          { ...saveContract(session.capabilities), authorship: session.authorship },
         ),
       );
     }

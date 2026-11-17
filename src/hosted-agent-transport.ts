@@ -2,7 +2,7 @@
 import { protectedPathNotice, type ProtectedPathPolicy } from './public-governance.js';
 import type { SaveContract } from './hosted-save-client.js';
 import { capsuleHistoryQueries, hydrateLandingHistory, hasJournalHistory } from './landing-capsule-client.js';
-import { agentClient } from './agent-turn-work.js';
+import { agentClient, agentAuthorship } from './agent-turn-work.js';
 import { landingMessage } from './landing-message.js';
 import { keptApplyEnvelope } from './hosted-apply-kept.js';
 import { cliBuildCommit } from './cli-installation.js';
@@ -1024,6 +1024,19 @@ export class HostedAgentTransport {
       // Where the client's own environment gave the session id, the client process narrows it:
       // two processes sharing one session id never replay each other's start (issue 3676f3e1).
       const startSession = action === 'start' && !operationId ? this.startScope() : undefined;
+      const authorship =
+        this.serverFeatures?.includes('source-authorship-v1') &&
+        ['start', 'save', 'finish', 'resolve', 'abandon', 'complete', 'reopen'].includes(action)
+          ? agentAuthorship({
+              ...((command.data as { model?: string }).model !== undefined
+                ? { model: (command.data as { model: string }).model }
+                : {}),
+              required: action === 'start' && !replaying,
+              fallbackSession: sessionAgentIdentity(this.agentSession).sessionId,
+              ...(this.agentSession !== undefined ? { session: this.agentSession } : {}),
+              ...(this.agentSlug() ? { run: this.agentSlug()! } : {}),
+            })
+          : undefined;
       const previousStart =
         action === 'start' && !operationId
           ? await this.closedStart(root, capabilities.actor, command.data, startSession)
@@ -1069,6 +1082,12 @@ export class HostedAgentTransport {
       metricOperationId(journal.operationId);
       this.callerOperationId = journal.operationId;
       this.onOperation?.(action, journal.operationId);
+      // The receipt's existing client/run fields travel outside the request. Pin that envelope
+      // too, so a lost reply followed by a model switch cannot change the original declaration.
+      const sourceStamp =
+        authorship && action === 'finish'
+          ? await journal.retain('finish-authorship', () => authorship)
+          : authorship;
       // The finish gate's judgement of the checkout's saved head, sent again with the landing.
       let gatedLane: LandGateEntry | undefined;
       let carriedMain = mainFirstActions.has(action) ? capabilities.main : undefined;
@@ -1078,7 +1097,12 @@ export class HostedAgentTransport {
         exchange: this.exchange,
         capabilities,
         journal,
-        ...(this.sentAgent() ? { agent: this.sentAgent()! } : {}),
+        ...(sourceStamp ? { authorship: sourceStamp } : {}),
+        ...(sourceStamp?.agentRun
+          ? { agent: sourceStamp.agentRun }
+          : this.sentAgent()
+            ? { agent: this.sentAgent()! }
+            : {}),
         ...(this.serverFeatures?.includes('lane-holder-v1')
           ? {
               holderSessionId: sessionAgentIdentity(this.agentSession).sessionId,
@@ -1092,12 +1116,19 @@ export class HostedAgentTransport {
               },
             }
           : {}),
-        ...(this.serverFeatures?.includes('landing-agent-run') && this.agentSlug()
-          ? { landingAgent: this.agentSlug()! }
-          : {}),
-        ...(this.serverFeatures?.includes('landing-agent-client') && this.agentSlug() && agentClient()
-          ? { landingClient: agentClient()! }
-          : {}),
+        ...(sourceStamp?.agentRun
+          ? { landingAgent: sourceStamp.agentRun }
+          : !sourceStamp && this.serverFeatures?.includes('landing-agent-run') && this.agentSlug()
+            ? { landingAgent: this.agentSlug()! }
+            : {}),
+        ...(sourceStamp?.agentClient
+          ? { landingClient: sourceStamp.agentClient }
+          : !sourceStamp &&
+              this.serverFeatures?.includes('landing-agent-client') &&
+              this.agentSlug() &&
+              agentClient()
+            ? { landingClient: agentClient()! }
+            : {}),
         query: this.query.bind(this),
         mutation: this.mutation.bind(this),
         action: this.action.bind(this),
@@ -2024,6 +2055,7 @@ export class HostedAgentTransport {
   }
 }
 export type HostedAgentSession = {
+  authorship?: ReturnType<typeof agentAuthorship>;
   root: string;
   address: HostedAgentAddress;
   exchange: HostedAgentExchange;

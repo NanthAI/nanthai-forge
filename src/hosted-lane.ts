@@ -99,7 +99,8 @@ export const hostedLaneSelectionSchema = z
     base: mainExpectationSchema,
     authority: sourceAuthoritySchema,
   })
-  .strict();
+  .strict()
+  .refine(personStampValid, 'A person stamp has no model or run.');
 export type HostedLaneSelection = z.infer<typeof hostedLaneSelectionSchema>;
 
 export const hostedStartResultSchema = z

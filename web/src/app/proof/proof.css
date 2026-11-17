@@ -5,8 +5,7 @@
   .proof-row { align-items: start; }
   .proof-row > div { min-width: 0; }
   .proof-row .src { white-space: normal; max-width: 18ch; }
-  .proof-cover { padding: var(--s-3) var(--gut); display: flex; justify-content: space-between; gap: var(--s-3); border-bottom: var(--rule) solid var(--line); color: var(--text-2); font-size: var(--t-meta); }
-  .proof-cover b { color: var(--text); }
+  .proof-tests { margin: var(--s-2) var(--gut); padding-inline-start: var(--gut); }
   .proof-claims { padding: var(--s-3) var(--gut) var(--gut); }
   .proof-claims .quote { margin: 0; max-width: none; }
   .proof-claims li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s-3); align-items: start; padding: var(--s-2) 0; border-bottom: var(--rule) solid var(--line); color: var(--text); }
@@ -14,8 +13,8 @@
   .proof-claims li > span { overflow-wrap: anywhere; min-width: 0; white-space: pre-wrap; }
   .proof-source { display: block; white-space: normal; }
   @container (max-width: 520px) {
-    .proof-main { --proof-columns: minmax(0, 1fr) auto; }
-    .proof-row > .st { grid-column: 1 / -1; }
+    .proof-row { --proof-columns: minmax(0, 1fr); gap: var(--s-1); }
+    .proof-row .src { max-width: none; }
     .proof-claims li { grid-template-columns: minmax(0, 1fr); }
   }
   @media (max-width: 860px) { .proof-grid { grid-template-columns: minmax(0, 1fr); } }

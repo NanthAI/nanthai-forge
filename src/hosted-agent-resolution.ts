@@ -331,6 +331,7 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
       session.exchange,
       {
         ...saveContract(session.capabilities),
+        authorship: session.authorship,
         ...(session.holderSessionId
           ? {
               holderSessionId: session.holderSessionId,

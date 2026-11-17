@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-import { useState, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import type { checkEvidence } from '../../../../src/run-evidence';
 import { checkRunState } from '../../../../src/check-run-state';
 import { Glyph, Key, Region, Row, Who } from '../../ds';
 import { Head } from '../Place';
+import { checkScope, RequestedTests, ShardCount } from './CheckScope';
+import { useMoreRows } from './use-more-rows';
+import { evidenceSources } from '../../../../src/receipt-detail';
 import './proof.css';
 
 type Check = NonNullable<ReturnType<typeof checkEvidence>>;
@@ -33,6 +36,7 @@ export type ProofData = {
 };
 const number = (value: number | null | undefined) =>
   value == null ? 'Not reported' : value.toLocaleString();
+const sourceLabel = (label: string) => label.charAt(0).toLowerCase() + label.slice(1);
 const time = (at: string) => new Date(at).toLocaleString();
 
 function Fact({
@@ -58,7 +62,7 @@ function Fact({
         <div className="ttl any">{title}</div>
         <div className="meta any">{detail}</div>
       </div>
-      <span className="src">{source}</span>
+      <span className="src">{sourceLabel(source)}</span>
     </Row>
   );
 }
@@ -89,7 +93,7 @@ export function ProofView({
   reportDetails?: ReactNode;
   onRevert?: () => void;
 }) {
-  const [shown, setShown] = useState(8);
+  const { shown, showMore, focusNewRow } = useMoreRows(8);
   const { check } = data;
   const save = data.declaration ?? data.save;
   const claimKind = data.declaration ? 'landing' : 'save';
@@ -98,10 +102,20 @@ export function ProofView({
   const state = check ? checkRunState({ status: check.status }) : null;
   const sentence = !check
     ? 'No check is recorded for this selection. Test execution is not reported.'
-    : `${check.check}: ${state?.label ?? check.status}. ${check.files ? `${number(check.files.total)} test files reported by CI.` : 'Test-file execution was not reported.'}`;
+    : `${check.check}: ${state?.label ?? check.status}. ${check.files ? `${number(check.files.total)} ${check.files.total === 1 ? 'test file' : 'test files'} self-reported via CI.` : 'Test-file execution was not reported.'}`;
+  const author = save?.author?.split('/').at(-1)?.replace(/^@/, '').trim();
+  const claimSummary =
+    lines === undefined
+      ? `Whether ${author || 'the agent'} left anything unverified is not reported.`
+      : lines.length === 0
+        ? `${author || 'The agent'} says it verified everything it changed.`
+        : `${author || 'The agent'} lists ${number(lines.length)} ${lines.length === 1 ? 'thing' : 'things'} it did not verify.`;
   return (
     <>
-      <Head trail={[{ label: 'Lanes', href: lanesHref }, { label: 'What was checked' }]} sentence={sentence}>
+      <Head
+        trail={[{ label: 'Lanes', href: lanesHref }, { label: 'What was checked' }]}
+        sentence={`${sentence} ${claimSummary}`}
+      >
         {onRunAll && check ? (
           <Key disabled={busy} onClick={onRunAll}>
             Run every test now
@@ -144,10 +158,6 @@ export function ProofView({
           <Region title="What ran" hint="on the exact source named in the record">
             {check ? (
               <>
-                <div className="proof-cover">
-                  <span>Test files reported on this change</span>
-                  <b className="num">{number(check.files?.total)}</b>
-                </div>
                 <Fact
                   state={
                     state?.tone === 'passed'
@@ -164,19 +174,22 @@ export function ProofView({
                   title={`The check, ${check.check}`}
                   detail={
                     <>
-                      {number(check.shards.completed)} of {number(check.shards.total)} shards completed
-                      {check.files ? ` · ${number(check.files.failed)} test files reported failed` : ''}
+                      <ShardCount shards={check.shards} /> · {checkScope(check.selection)}
+                      {check.selection?.reason ? <div>{check.selection.reason}</div> : null}
                     </>
                   }
                   source="reported by your CI"
                 />
+                {check.selection?.tests?.length ? (
+                  <RequestedTests key={check.runId} tests={check.selection.tests} />
+                ) : null}
                 {check.files ? (
                   <Fact
                     state={check.files.failed ? 'failed' : 'passed'}
                     word={check.files.failed ? 'Failed' : 'Reported'}
-                    title={`${number(check.files.total)} test files`}
-                    detail="Counts and file timing come from the checked code. Total suite coverage is not reported."
-                    source="self-reported via CI"
+                    title={`${number(check.files.total)} ${check.files.total === 1 ? 'test file' : 'test files'} reported`}
+                    detail={`${number(check.files.failed)} failed · ${number(check.files.flaky)} flaky. Total suite coverage is not reported.`}
+                    source={evidenceSources.tests}
                   />
                 ) : (
                   <p className="quietline">
@@ -198,10 +211,9 @@ export function ProofView({
                 detail={check.skipped.reason}
                 source="chosen by Forge"
               />
-            ) : null}
-            <p className="quietline">
-              {check?.selection?.reason ?? 'Excluded tests and their reasons: not reported.'}
-            </p>
+            ) : (
+              <p className="quietline">Excluded tests and their reasons: not reported.</p>
+            )}
             <Fact
               state="stale"
               word="Not reported"
@@ -247,7 +259,7 @@ export function ProofView({
                       </div>
                       <ul>
                         {lines.slice(0, shown).map((line, index) => (
-                          <li key={index}>
+                          <li key={index} tabIndex={-1} ref={element => focusNewRow(element, index)}>
                             <span dir="auto">{line}</span>
                             {onFollowups ? (
                               <Key size="sm" disabled={busy} onClick={() => onFollowups(index)}>
@@ -260,7 +272,7 @@ export function ProofView({
                     </div>
                     <div className="btns">
                       {shown < lines.length ? (
-                        <Key size="sm" onClick={() => setShown(value => value + 50)}>
+                        <Key size="sm" onClick={() => showMore(50)}>
                           Show {Math.min(50, lines.length - shown)} more
                         </Key>
                       ) : null}
@@ -286,14 +298,12 @@ export function ProofView({
                 <code>{data.lane.intentId.slice(0, 12)}</code>
               </dd>
               <dt>Check</dt>
-              <dd>{check?.check ?? 'No check recorded'}</dd>
-              <dt>Selection</dt>
-              <dd>{check?.selection?.effective ?? check?.selection?.mode ?? 'Not reported'}</dd>
+              <dd>{check ? `${check.check}, ${checkScope(check.selection)}` : 'No check recorded'}</dd>
               <dt>Test files</dt>
               <dd>
                 {number(check?.files?.total)}
                 {check?.files ? (
-                  <small className="src proof-source">self-reported by checked code, via CI</small>
+                  <small className="src proof-source">{sourceLabel(evidenceSources.tests)}</small>
                 ) : null}
               </dd>
               <dt>CI time</dt>
@@ -301,7 +311,7 @@ export function ProofView({
                 {number(check?.ciMinutes)}
                 {check?.ciMinutes == null ? '' : ' min'}
                 {check?.ciMinutes == null ? null : (
-                  <small className="src proof-source">reported by your CI</small>
+                  <small className="src proof-source">{sourceLabel(evidenceSources.ciTime)}</small>
                 )}
               </dd>
               <dt>Wall time</dt>
@@ -309,7 +319,7 @@ export function ProofView({
                 {number(check?.wallSeconds)}
                 {check?.wallSeconds == null ? '' : ' s'}
                 {check?.wallSeconds == null ? null : (
-                  <small className="src proof-source">observed by Forge</small>
+                  <small className="src proof-source">{sourceLabel(evidenceSources.wallTime)}</small>
                 )}
               </dd>
               <dt>Check source</dt>

@@ -835,3 +835,32 @@ test('source stamp claims reject actor spoofing, person model/run claims and tra
     assert(!saveRequestSchema.safeParse({ ...save, agentRun: bad }).success);
   }
 });
+
+test('new start writers retain declared, unknown and person stamps while legacy starts remain unstamped', async () => {
+  for (const stamp of [
+    { authorship: { kind: 'agent' }, agentClient: 'fixture:model-one', agent: 'quiet-otter' },
+    { authorship: { kind: 'agent', declaration: 'unknown' }, agentClient: 'fixture', agent: 'quiet-otter' },
+    { authorship: { kind: 'person' } },
+    {},
+  ]) {
+    const s = await setup();
+    const result = await s.begin({ ...s.input(), ...stamp });
+    const selected = JSON.parse(
+      await s.invoke('select', reads.select, { projectId: s.projectId, laneId: result.lane.laneId }),
+    );
+    assert.deepEqual(selected.authorship, stamp.authorship);
+    assert.equal(selected.agentClient, stamp.agentClient);
+    assert.equal(selected.agentRun, stamp.agent);
+    assert.deepEqual(result.lane.authorship, selected.authorship);
+    if (stamp.authorship) assert(!('actor' in selected.authorship));
+  }
+  const s = await setup();
+  for (const authorship of [{ kind: 'agent' }, { kind: 'agent', declaration: 'not-declared' }])
+    await assert.rejects(
+      s.begin({ ...s.input(), authorship }),
+      error =>
+        (error.data?.code ?? error.code) === 'BAD_ARGUMENT' &&
+        /model/.test(error.data?.message ?? error.message) &&
+        /FORGE_AGENT_MODEL/.test(error.data?.message ?? error.message),
+    );
+});

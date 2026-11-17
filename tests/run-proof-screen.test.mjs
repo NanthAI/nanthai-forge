@@ -35,8 +35,8 @@ const source='a'.repeat(64);
 let reportPhase='passed';
 const client=new ConvexReactClient('https://forge.test.convex.cloud');
 client.action=async(_,args)=>JSON.stringify({contractReports:reportPhase==='running'?{}:Object.fromEntries(Array.from({length:args.cursor?9:8},(_,i)=>['tests/source-'+(i+(args.cursor?8:0))+'.test.mjs',{failed:false,durationMs:1250}])),nextCursor:reportPhase==='running'||args.cursor?null:'next'});
-const original={agentClient:'test-editor:test-model',lane:{id:'lane',intentId:'item',head:source,state:'active'},save:{id:'save',head:source,at:'2026-11-01T10:00:00.000Z',author:'builder/steady-fox',notVerified:['The optional adapter was not checked.','Transport timeout recovery was not checked on this platform.']},check:{runId:'run',head:source,status:'passed',check:'verify',files:{total:17,failed:0,flaky:0},selection:{mode:'scoped',reason:'Selected tests depend on the changed files.'},skipped:null,ciMinutes:1.25,wallSeconds:86,shards:{completed:3,passed:3,failed:0,total:3},at:'2026-11-01T10:00:00.000Z',endedAt:'2026-11-01T10:01:26.000Z',providerLink:null},claimMatchesCheck:true,currentHead:source,stale:false,afterLandingCheck:null};
-function Fixture(){const[data,setData]=useState(original);const[message,setMessage]=useState('');window.proofState=(kind)=>{reportPhase=kind==='running'||kind==='unreported'?'running':'passed';setData({...original,save:kind==='hiddenauthor'?{...original.save,author:undefined}:kind==='none'?{...original.save,notVerified:undefined}:kind==='empty'?{...original.save,notVerified:[]}:kind==='many'?{...original.save,notVerified:Array.from({length:37},(_,i)=>'Unverified line '+(i+1)+' '+('verylongtext'.repeat(20)))}:original.save,landing:kind==='different'?{receiptId:'receipt',candidateId:'candidate',head:'b'.repeat(64)}:null,declaration:kind==='landing'?{kind:'landing',id:'submission',head:source,at:original.save.at,author:original.save.author,notVerified:['The landing claim remains distinct.']}:null,check:kind==='nocheck'?null:kind==='running'||kind==='queued'||kind==='unknown'?{...original.check,status:kind,endedAt:null}:kind==='unreported'?{...original.check,files:null,ciMinutes:null}:original.check});};return <ConvexProvider client={client}><ProjectFrame route={{frame:'project',handle:'example',project:'workspace',place:'lanes',section:'',rest:'lane/checked'}} name="Workspace" projects={[]} controls={{onPalette(){},onKeys(){},onPicker(){},viewerHandle:'example'}}><ProofView data={data} reportDetails={data.check?<ReportFiles projectId="project" runId="run" version={data.check.endedAt?[data.check.endedAt,data.check.files?.total,data.check.files?.failed,data.check.files?.flaky].join(':'):null}/>:null} lanesHref="#lanes" changeHref="#change" recoveryHref="#check" message={message} onRunAll={()=>setMessage('A full check was requested on this exact source.')} onRevert={data.landing?()=>setMessage('Taking it out of main as a new landing.'):undefined} onFollowups={(line)=>setMessage(line===undefined?'37 linked Items in Plan.':'1 linked Item in Plan.')} /></ProjectFrame></ConvexProvider>};createRoot(document.getElementById('root')).render(<Fixture/>);`,
+const original={agentClient:'test-editor:test-model',lane:{id:'lane',intentId:'item',head:source,state:'active'},save:{id:'save',head:source,at:'2026-11-01T10:00:00.000Z',author:'builder/steady-fox',notVerified:['The optional adapter was not checked.','Transport timeout recovery was not checked on this platform.']},check:{runId:'run',head:source,status:'passed',check:'verify',files:{total:17,failed:0,flaky:0},selection:{mode:'contract',effective:'full',tests:Array.from({length:24},(_,i)=>'tests/requested-'+i+'.test.mjs'),reason:'The runner used the full command.'},skipped:null,ciMinutes:1.25,wallSeconds:86,shards:{completed:3,passed:3,failed:0,total:3},at:'2026-11-01T10:00:00.000Z',endedAt:'2026-11-01T10:01:26.000Z',providerLink:null},claimMatchesCheck:true,currentHead:source,stale:false,afterLandingCheck:null};
+function Fixture(){const[data,setData]=useState(original);const[message,setMessage]=useState('');window.proofState=(kind)=>{setMessage('');reportPhase=kind==='running'||kind==='unreported'?'running':'passed';setData({...original,save:kind==='hiddenauthor'?{...original.save,author:undefined}:kind==='none'?{...original.save,notVerified:undefined}:kind==='empty'?{...original.save,notVerified:[]}:kind==='many'?{...original.save,notVerified:Array.from({length:37},(_,i)=>'Unverified line '+(i+1)+' '+('verylongtext'.repeat(20)))}:original.save,landing:kind==='different'||kind==='accepted'?{receiptId:'receipt',candidateId:'candidate',head:kind==='different'?'b'.repeat(64):source,acceptedBy:{kind:'auto',note:'Project landing policy'}}:null,declaration:kind==='landing'?{kind:'landing',id:'submission',head:source,at:original.save.at,author:original.save.author,notVerified:['The landing claim remains distinct.']}:null,check:kind==='nocheck'?null:kind==='newScope'?{...original.check,selection:{mode:'future-mode'},shards:{completed:1,passed:0,failed:1,total:1}}:kind==='running'||kind==='queued'||kind==='unknown'?{...original.check,status:kind,endedAt:null,shards:{completed:0,passed:0,failed:0,total:null}}:kind==='unreported'?{...original.check,files:null,ciMinutes:null}:original.check});};return <ConvexProvider client={client}><ProjectFrame route={{frame:'project',handle:'example',project:'workspace',place:'lanes',section:'',rest:'lane/checked'}} name="Workspace" projects={[]} controls={{onPalette(){},onKeys(){},onPicker(){},viewerHandle:'example'}}><ProofView data={data} reportDetails={data.check?<ReportFiles projectId="project" runId="run" version={data.check.endedAt?[data.check.endedAt,data.check.files?.total,data.check.files?.failed,data.check.files?.flaky].join(':'):null}/>:null} lanesHref="#lanes" changeHref="#change" recoveryHref="#check" message={message} onRunAll={()=>setMessage('A full check was requested on this exact source.')} onRevert={data.landing?()=>setMessage('Taking it out of main as a new landing.'):undefined} onFollowups={(line)=>setMessage(line===undefined?'37 linked Items in Plan.':'1 linked Item in Plan.')} /></ProjectFrame></ConvexProvider>};createRoot(document.getElementById('root')).render(<Fixture/>);`,
   );
   const { build } = await import('vite');
   const out = join(temp, 'out');
@@ -67,7 +67,7 @@ function Fixture(){const[data,setData]=useState(original);const[message,setMessa
   });
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
-  const context = await browser.newContext();
+  const context = await browser.newContext({ reducedMotion: 'reduce' });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -100,9 +100,24 @@ function Fixture(){const[data,setData]=useState(original);const[message,setMessa
   });
   await page.goto('https://forge.test/proof.html');
   await page.getByRole('heading', { name: 'What ran', exact: true }).waitFor();
+  const ran = page.getByRole('region', { name: 'What ran', exact: true });
+  const exclusions = page.getByRole('region', { name: 'What did not run', exact: true });
+  await ran.getByText('3 of 3 shards · full check').waitFor();
+  await page.getByText('verify, full check', { exact: true }).waitFor();
+  assert.equal(await ran.locator('.shards .ok').count(), 3);
+  await ran.getByText('The runner used the full command.').waitFor();
+  assert.equal(await exclusions.getByText('The runner used the full command.').count(), 0);
+  await ran.getByText('Tests named in the request (24)').click();
+  assert.equal(await ran.getByText('tests/requested-23.test.mjs').count(), 0);
+  await ran.getByRole('button', { name: 'Show 4 more tests' }).click();
+  await ran.getByText('tests/requested-23.test.mjs').waitFor();
+  assert.equal(await page.locator(':focus').textContent(), 'tests/requested-20.test.mjs');
+  await ran.getByText('Tests named in the request (24)').click();
+  await page.getByText('steady-fox lists 2 things it did not verify.', { exact: false }).waitFor();
   await page.getByRole('button', { name: 'Run every test now' }).click();
   await page.getByRole('status').filter({ hasText: 'A full check was requested' }).waitFor();
   for (const kind of [
+    'newScope',
     'none',
     'hiddenauthor',
     'empty',
@@ -119,10 +134,24 @@ function Fixture(){const[data,setData]=useState(original);const[message,setMessa
       await page.getByRole('button', { name: 'Take it out of main', exact: true }).click();
       await page.getByRole('status').filter({ hasText: 'Taking it out of main as a new landing.' }).waitFor();
     }
-    if (kind === 'hiddenauthor') await page.getByText('Author not shown', { exact: true }).waitFor();
+    if (kind === 'newScope') {
+      await ran.getByText('1 of 1 shard · 1 failed · check scope not reported').waitFor();
+      assert.equal(await ran.locator('.shards .bad').count(), 1);
+    }
+    if (kind === 'hiddenauthor') {
+      await page.getByText('Author not shown', { exact: true }).waitFor();
+      await page.getByText('The agent lists 2 things it did not verify.', { exact: false }).waitFor();
+    }
     if (kind === 'none')
       await page.getByText('No verification list accompanied this save.', { exact: false }).waitFor();
-    if (kind === 'empty') await page.getByText('The agent sent an empty list:', { exact: false }).waitFor();
+    if (kind === 'none')
+      await page
+        .getByText('Whether steady-fox left anything unverified is not reported.', { exact: false })
+        .waitFor();
+    if (kind === 'empty') {
+      await page.getByText('The agent sent an empty list:', { exact: false }).waitFor();
+      await page.getByText('steady-fox says it verified everything it changed.', { exact: false }).waitFor();
+    }
     if (kind === 'nocheck')
       await page.getByText('No check recorded. Forge cannot say which tests ran.').waitFor();
     if (kind === 'unreported')
@@ -147,6 +176,8 @@ function Fixture(){const[data,setData]=useState(original);const[message,setMessa
     }
   }
   await page.evaluate(() => window.proofState('running'));
+  await ran.getByText('0 shards completed · total not reported', { exact: false }).waitFor();
+  assert.equal(await ran.locator('.stick').count(), 0);
   assert.equal(await page.getByRole('button', { name: 'Run every test now' }).isEnabled(), true);
   await page.getByText('Reported test files', { exact: true }).click();
   await page.getByText('No retained file reports are available.', { exact: true }).waitFor();
@@ -161,6 +192,8 @@ function Fixture(){const[data,setData]=useState(original);const[message,setMessa
   await page.getByText('test-editor', { exact: false }).waitFor();
   await page.getByText('test-model', { exact: false }).waitFor();
   await page.getByText('declared, not verified', { exact: true }).waitFor();
+  await page.evaluate(() => window.proofState('accepted'));
+  await page.getByRole('region', { name: 'This landing' }).waitFor();
   await page.addScriptTag({ path: axe });
   for (const theme of ['dark', 'light'])
     for (const width of [1440, 390]) {
@@ -169,7 +202,14 @@ function Fixture(){const[data,setData]=useState(original);const[message,setMessa
         document.documentElement.dataset.theme = theme;
         document.documentElement.getBoundingClientRect();
         await Promise.all(
-          document.getAnimations().map(animation => animation.finished.catch(() => undefined)),
+          document
+            .getAnimations()
+            .filter(
+              animation =>
+                animation.playState === 'running' &&
+                Number.isFinite(animation.effect?.getComputedTiming().endTime),
+            )
+            .map(animation => animation.finished.catch(() => undefined)),
         );
       }, theme);
       const violations = await page.evaluate(async () =>
@@ -184,7 +224,30 @@ function Fixture(){const[data,setData]=useState(original);const[message,setMessa
       );
       if (shots) {
         mkdirSync(shots, { recursive: true });
-        await page.screenshot({ path: join(shots, `checked-${width}-${theme}.png`), fullPage: true });
+        const capture = name =>
+          page.screenshot({ path: join(shots, `${name}-${width}-${theme}.png`), fullPage: width === 1440 });
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await capture('checked');
+        const requested = ran.getByText('Tests named in the request (24)');
+        await requested.click();
+        await requested.scrollIntoViewIfNeeded();
+        await capture('requested');
+        await requested.click();
+        await page.evaluate(() => window.proofState('running'));
+        await ran.getByText('0 shards completed · total not reported', { exact: false }).waitFor();
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await capture('checking');
+        await page.evaluate(() => window.proofState('many'));
+        await page.getByText('steady-fox lists 37 things it did not verify.', { exact: false }).waitFor();
+        const claims = page.getByRole('heading', {
+          name: 'Not verified, in the agent’s words',
+          exact: false,
+        });
+        await claims.evaluate(el => el.scrollIntoView({ block: 'start' }));
+        await page.screenshot({ path: join(shots, `claims-${width}-${theme}.png`) });
+        await page.evaluate(() => window.proofState('accepted'));
+        await page.getByRole('region', { name: 'This landing' }).waitFor();
+        await page.evaluate(() => window.scrollTo(0, 0));
       }
       assert.deepEqual(violations, [], `${theme}/${width}: axe`);
       assert(

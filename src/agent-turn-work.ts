@@ -5,9 +5,12 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { AGENT_STAMP_VALUE } from './agent-slug.js';
 import { resolveAgentSession } from './agent-session.js';
+import { agentSlug } from './agent-slug-session.js';
 import { backgroundWake } from './agent-wake.js';
 import { turnLedgerDirectory, turnLedgerFile, turnSessionKey } from './agent-turn-state.js';
 import { processStartTime } from './local-process.js';
+import { invariant } from './errors.js';
+import type { AuthorshipClaim } from './work-actor-types.js';
 
 export { turnLedgerDirectory, turnSessionKey };
 
@@ -48,6 +51,82 @@ export function agentClient(env: NodeJS.ProcessEnv = process.env): string | unde
   const model = declared && AGENT_STAMP_VALUE.test(declared) ? declared : undefined;
   if (!tool && !model) return undefined;
   return `${tool ?? 'agent'}${model ? `:${model}` : ''}`;
+}
+const modelSchema = z.object({ schema: z.literal(1), model: z.string().regex(AGENT_STAMP_VALUE) }).strict();
+/** A separate Forge record: advisory work-ledger updates cannot overwrite a declaration. */
+function sessionModel(session: string, declaration?: string) {
+  const path = turnLedgerFile(session).replace(/\.json$/, '.model.json');
+  let model: string | undefined;
+  try {
+    model = modelSchema.parse(JSON.parse(readFileSync(path, 'utf8'))).model;
+  } catch {
+    /* No declaration. */
+  }
+  if (declaration !== undefined && declaration !== model && !disabled()) {
+    try {
+      const directory = turnLedgerDirectory(),
+        temporary = join(directory, `.${randomUUID()}`);
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+      writeFileSync(temporary, JSON.stringify({ schema: 1, model: declaration }), { mode: 0o600 });
+      renameSync(temporary, path);
+    } catch {
+      /* Inheritance is best effort; this command still sends its declaration. */
+    }
+  }
+  return declaration ?? model;
+}
+/** Only Forge's declaration is read: never another app's session files or a guessed model.
+ * The run comes from the same existing session selector used by the transport. */
+export function agentAuthorship(
+  input: {
+    model?: string;
+    required?: boolean;
+    session?: string | null;
+    run?: string;
+    fallbackSession?: string;
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): { authorship: AuthorshipClaim; agentClient?: string; agentRun?: string } {
+  const session = resolveAgentSession(env, undefined, input.session);
+  if (env.FORGE_HUMAN === '1' || (!session && !input.run && input.session === null))
+    return { authorship: { kind: 'person' } };
+  const declared = input.model ?? env.FORGE_AGENT_MODEL;
+  invariant(
+    declared === undefined || AGENT_STAMP_VALUE.test(declared),
+    'BAD_ARGUMENT',
+    'model must use letters, digits, dot, underscore, slash or hyphen, beginning with a letter or digit (1–64 characters). Set model or FORGE_AGENT_MODEL; use "unknown" when unknown.',
+  );
+  // Only detected agent apps inherit declarations. A one-off model in a plain shell
+  // must not turn later commands in that shell into agent commands.
+  const key = session?.harness ? session.key : undefined;
+  const model = key ? sessionModel(key, declared) : declared;
+  if (!session && !input.run && model === undefined) return { authorship: { kind: 'person' } };
+  invariant(
+    !input.required || model !== undefined,
+    'BAD_ARGUMENT',
+    'Agent start requires model. Set model or FORGE_AGENT_MODEL; use "unknown" when unknown.',
+  );
+  const app = session?.harness;
+  const runKey =
+    session?.key ??
+    (declared !== undefined && input.fallbackSession ? `declared:${input.fallbackSession}` : undefined);
+  const run = input.run ?? (runKey ? agentSlug(runKey) : undefined);
+  return {
+    authorship: {
+      kind: 'agent',
+      ...(model === 'unknown'
+        ? { declaration: 'unknown' }
+        : model === undefined
+          ? { declaration: 'not-declared' }
+          : {}),
+    },
+    ...(model && model !== 'unknown'
+      ? { agentClient: `${app ?? 'agent'}:${model}` }
+      : app
+        ? { agentClient: app }
+        : {}),
+    ...(run ? { agentRun: run } : {}),
+  };
 }
 /** Test processes never touch the developer's real state unless they select one. */
 const disabled = () => Boolean(process.env.NODE_TEST_CONTEXT) && !process.env.XDG_STATE_HOME;

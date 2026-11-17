@@ -483,3 +483,29 @@ test('response-shape guard itself rejects dead ends, stale terminal advice and i
     /disagree/,
   );
 });
+
+test('CLI agent start requires model once and accepts explicit unknown through the negotiated contract', async t => {
+  const s = agentFixture(t);
+  s.caps.features = ['source-authorship-v1', 'agent-slug'];
+  http(t, s);
+  agentSession(t, `model-cli-${randomUUID()}`);
+  const prior = process.env.FORGE_AGENT_MODEL;
+  delete process.env.FORGE_AGENT_MODEL;
+  t.after(() => {
+    if (prior === undefined) delete process.env.FORGE_AGENT_MODEL;
+    else process.env.FORGE_AGENT_MODEL = prior;
+  });
+  const input = { ...s.address, outcome: 'CLI declared builder', open: false };
+  await assert.rejects(
+    agentCli([s.root, 'start', JSON.stringify(input)]),
+    e => e.code === 'BAD_ARGUMENT' && /model/.test(e.message) && /FORGE_AGENT_MODEL/.test(e.message),
+  );
+  assert.equal(s.calls.filter(c => c.name === 'projectHostedStart:start').length, 0);
+  await agentCli([s.root, 'start', JSON.stringify({ ...input, model: 'unknown' })]);
+  const request = s.calls.find(c => c.name === 'projectHostedStart:start').args;
+  assert.deepEqual(request.authorship, { kind: 'agent', declaration: 'unknown' });
+  assert(
+    !request.agentClient?.includes(':'),
+    'unknown has one explicit state rather than a second model carrier',
+  );
+});

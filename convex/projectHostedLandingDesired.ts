@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { supersededCheckCosts } from './projectHostedLandingRunnerCosts';
+import { withoutAuthorship, personStampValid } from '../src/work-actor-types';
 import { cancelPendingTask } from './schedulerCancel';
 import { chargeMemberWork } from './abuseLimits';
 import { landingPriority } from './projectHostedLandingOrder';
@@ -79,8 +80,13 @@ export async function submitDesiredLanding(
 ): Promise<string> {
   if (command.outside !== undefined) command = { ...command, outside: sanitizeOutside(command.outside) };
   const input = { projectId, agent, agentClient };
+  invariant(
+    personStampValid({ ...command, agentClient, agentRun: agent }),
+    'BAD_ARGUMENT',
+    'A person stamp has no model or run.',
+  );
   const project = await hostedWriteProject(ctx, input.projectId, actor.id, command.authorityEpoch);
-  const request = canonicalPayload(command);
+  const request = canonicalPayload(withoutAuthorship(command));
   const old = await ctx.db
     .query('projectHostedLandingDesired')
     .withIndex('by_project_and_actor_and_operation', q =>
@@ -241,6 +247,7 @@ export async function submitDesiredLanding(
       ...landGateTiming(gates?.value),
     },
     request: {
+      ...(command.authorship ? { authorship: command.authorship } : {}),
       ...(command.governanceVersion ? { governanceVersion: command.governanceVersion } : {}),
       operationId: command.operationId,
       authorityEpoch: command.authorityEpoch,

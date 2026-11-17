@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { JournalNeeded, journalReadReply } from './projectJournalStore';
+import { sourceAuthorship } from '../src/work-actor-types';
 import { v } from 'convex/values';
 import { query, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -245,6 +246,7 @@ export const select = query({
       );
       return JSON.stringify(
         hostedLaneSelectionSchema.parse({
+          ...sourceAuthorship(lane),
           schema: 2,
           projectId: input.projectId,
           laneId: lane.id,

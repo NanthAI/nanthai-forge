@@ -503,6 +503,39 @@ test('MCP hosted metrics uses eight finite metadata streams, one bill page and i
   assert(!existsSync(`${s.root}.forge-metrics.jsonl`));
 });
 
+test('MCP start accepts model and gives the same single missing-model error as CLI', async t => {
+  const s = agentFixture(t);
+  s.caps.features = ['source-authorship-v1', 'agent-slug'];
+  const prior = process.env.FORGE_AGENT_MODEL;
+  delete process.env.FORGE_AGENT_MODEL;
+  t.after(() => {
+    if (prior === undefined) delete process.env.FORGE_AGENT_MODEL;
+    else process.env.FORGE_AGENT_MODEL = prior;
+  });
+  const tools = new Map();
+  const close = registerHostedAgentWorkflow(
+    {
+      registerTool(name, config, call) {
+        tools.set(name, { ...config, call });
+      },
+    },
+    s.transport(`model-mcp-${randomUUID()}`),
+  );
+  t.after(close);
+  const tool = tools.get('forge_task');
+  const command = { action: 'start', outcome: 'MCP declared builder' };
+  const missing = await tool.call({ command });
+  assert.equal(missing.isError, true);
+  assert.match(missing.content[0].text, /model/);
+  assert.match(missing.content[0].text, /FORGE_AGENT_MODEL/);
+  const input = z.object(tool.inputSchema).parse({ command: { ...command, model: 'model-one' } });
+  const declared = await tool.call(input);
+  assert(!declared.isError, declared.content[0].text);
+  const request = s.calls.find(c => c.name === 'projectHostedStart:start').args;
+  assert.equal(request.authorship.kind, 'agent');
+  assert.match(request.agentClient, /:model-one$/);
+});
+
 test('MCP lists history log/blame/show and dispatches the same read-only project reader', async t => {
   const priorCache = process.env.FORGE_HISTORY_CACHE;
   t.after(() => {

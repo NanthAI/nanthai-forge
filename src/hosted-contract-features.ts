@@ -16,6 +16,8 @@ export const sourceStateFeature = 'source-state';
 /** Source/bootstrap version 2 and one descriptor refresh after a root replacement. */
 export const sourceStateV2Feature = 'source-state-v2';
 export const hostedContractFeatures = [
+  /** Reader expansion precedes this writer: start/save/land accept declared source authorship. */
+  'source-authorship-v1',
   /** State-bound physical run and recipe grants; bootstrap replies carry the trusted root pin. */
   'protected-path-notice',
   sourceStateFeature,

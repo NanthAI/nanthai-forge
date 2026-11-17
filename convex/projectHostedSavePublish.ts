@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { sanitizeOutside } from '../src/run-evidence';
+import { sourceAuthorship, withoutAuthorship } from '../src/work-actor-types';
 import { makeFunctionReference } from 'convex/server';
 import { wakeLifecycleSave } from './projectHostedLifecycleCascade';
 import type { MutationCtx } from './_generated/server';
@@ -159,7 +160,8 @@ export async function publishHostedSave(
         complete: state.overlapComplete !== false,
       },
       record: {
-        ...lane,
+        ...withoutAuthorship(lane),
+        ...sourceAuthorship(state.request),
         head,
         sourceVersion,
         version,
@@ -185,6 +187,7 @@ export async function publishHostedSave(
     ...(state.request.outside === undefined ? {} : { outside: sanitizeOutside(state.request.outside) }),
   };
   const result = saveResultSchema.parse({
+    ...sourceAuthorship(state.request),
     ...declarations,
     ...(durationMs === undefined ? {} : { durationMs }),
     schema: 1,
@@ -208,6 +211,7 @@ export async function publishHostedSave(
     expectedVersion: null,
     record: {
       kind: 'save',
+      ...sourceAuthorship(state.request),
       ...declarations,
       ...(durationMs === undefined ? {} : { durationMs }),
       id: result.saveId,

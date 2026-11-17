@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { withoutAuthorship } from '../src/work-actor-types';
+import { withoutAuthorship, personStampValid } from '../src/work-actor-types';
 import { sanitizeOutside } from '../src/run-evidence';
 import { bindLineSubmission } from './projectLiveLineSubmission';
 import {
@@ -315,6 +315,11 @@ export async function enqueueHostedLanding(
     supersededCheck?: SupersededCheck | undefined;
   },
 ) {
+  invariant(
+    personStampValid({ ...request, ...input }),
+    'BAD_ARGUMENT',
+    'A person stamp has no model or run.',
+  );
   if (request.outside !== undefined) request = { ...request, outside: sanitizeOutside(request.outside) };
   const project = await activeProject(ctx, input.projectId, actor.id);
   const reused = await reuseHostedLanding(ctx, {

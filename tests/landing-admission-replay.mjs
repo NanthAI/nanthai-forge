@@ -10,7 +10,14 @@ export const median = values => {
   const i = Math.floor(sorted.length / 2);
   return sorted.length ? (sorted.length % 2 ? sorted[i] : (sorted[i - 1] + sorted[i]) / 2) : null;
 };
-export async function replayAdmission(t, cell, { admissionCheck = 'full', red = [], history = 0 } = {}) {
+export async function replayAdmission(
+  t,
+  cell,
+  { admissionCheck = 'full', red = [], history = 0, startAt = Date.UTC(2026, 0, 1, 12) } = {},
+) {
+  // A relative workload must not inherit the launcher's position inside an activity-hour bucket.
+  // Boundary cases choose their own epoch; the fixture owns all subsequent clock advancement.
+  t.mock.method(Date, 'now', () => startAt);
   const paths = [...new Set(cell.entries.flatMap(e => e.files))];
   const lines = Array.from({ length: cell.entries.length * 3 }, (_, i) => `line ${i}\n`);
   const f = await batchesFixture(t, {
@@ -164,6 +171,7 @@ export async function replayAdmission(t, cell, { admissionCheck = 'full', red = 
   const ttm = [...landed].map(([i, at]) => at - (cell.entries[i].dispatchMs ?? cell.entries[i].submitMs));
   const isolation = [...isolated].map(([i, at]) => at - cell.entries[i].submitMs);
   const result = {
+    startedAt: started,
     checks: charged.length,
     ciMinutes: charged.reduce((n, r) => n + Math.ceil(r.elapsed / 60000), 0),
     ciSeconds: charged.reduce((n, r) => n + r.elapsed / 1000, 0),
@@ -182,6 +190,10 @@ export async function replayAdmission(t, cell, { admissionCheck = 'full', red = 
     redBeforeQueue: charged.filter(r => r.admission && r.status === 'failed').length,
     redQueueRuns: charged.filter(r => !r.admission && r.status === 'failed').length,
     calls: f.counts.length,
+    callCounts: f.counts.reduce((counts, { name }) => {
+      counts[name] = (counts[name] ?? 0) + 1;
+      return counts;
+    }, {}),
     documentsRead: f.counts.reduce((n, c) => n + c.documents, 0),
     documentsWritten: f.counts.reduce((n, c) => n + c.writes, 0),
     liveLineWrites: f.counts.reduce((n, c) => n + liveLineProjectionCounts(c).writes, 0),

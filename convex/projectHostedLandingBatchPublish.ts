@@ -328,6 +328,9 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
   for (const [index, member] of members.entries()) {
     const message = messages[index];
     const receipt = hostedAcceptanceSchema.parse({
+      ...(member.state.request.authorship
+        ? { authorship: { ...member.state.request.authorship, actor: member.state.actor } }
+        : {}),
       schema: 1,
       id: member.attempt.operations.accept,
       projectId: claim.projectId,

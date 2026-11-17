@@ -435,6 +435,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         session.exchange,
         {
           ...saveContract(session.capabilities),
+          authorship: session.authorship,
           ...(session.holderSessionId ? { holderSessionId: session.holderSessionId } : {}),
           onCapture: session.saveNotice,
         },
@@ -515,6 +516,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       session.pathNotice?.(null);
       const desired = await session.journal.retain('desired-landing', async () =>
         hostedLandingDesiredSchema.parse({
+          ...(session.authorship ? { authorship: session.authorship.authorship } : {}),
           governanceVersion: 1,
           operationId,
           authorityEpoch: epoch,
@@ -581,6 +583,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       });
     }
     return hostedLandingRequestSchema.parse({
+      ...(session.authorship ? { authorship: session.authorship.authorship } : {}),
       governanceVersion: 1,
       operationId,
       authorityEpoch: epoch,

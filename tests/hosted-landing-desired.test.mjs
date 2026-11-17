@@ -602,3 +602,31 @@ for (const mode of ['desired', 'direct']) {
     assert.equal(Object.hasOwn(absent.request, 'notVerified'), false);
   });
 }
+
+test('desired landing stamps survive handoff and reconcile after a model or app switch', async t => {
+  const f = await finishFixture(t);
+  const command = { ...request(f), authorship: { kind: 'agent', declaration: 'unknown' } };
+  const send = (value, agentClient) =>
+    f
+      .tx('desiredAuthorship', desired.submit, {
+        projectId: f.projectId,
+        request: JSON.stringify(value),
+        agent: 'quiet-otter',
+        agentClient,
+      })
+      .then(JSON.parse);
+  const first = await send(command, 'fixture:model-one');
+  const replay = await send(
+    { ...command, authorship: { kind: 'agent', declaration: 'not-declared' } },
+    'another:model-two',
+  );
+  assert.equal(replay.id, first.id);
+  assert.equal(f.tables.projectHostedLandingDesired.size, 1);
+  const row = [...f.tables.projectHostedLandingDesired.values()][0];
+  assert.equal(row.agentClient, 'fixture:model-one');
+  assert.deepEqual(JSON.parse(row.value).request.authorship, command.authorship);
+  await assert.rejects(
+    send({ ...command, after: randomUUID() }, 'another:model-two'),
+    code('WORK_OPERATION_CHANGED'),
+  );
+});
