@@ -35,7 +35,7 @@ import { withSourceRecovery } from './hosted-agent-source-recovery.js';
 import { readHostedOverlapAdvice } from './hosted-overlap-client.js';
 import { rememberStackOffer } from './hosted-coordination-client.js';
 import { presenceDelivery, presenceSince, type PresenceDelivery } from './hosted-presence-client.js';
-import { boardEnvelope, boardHostedSource, hostedBoardSchemas, readBoardCursor } from './hosted-board.js';
+import { boardEnvelope, boardHostedSource, hostedBoardSchemas, boardReadPosition } from './hosted-board.js';
 import { rememberBoardReader } from './board-local.js';
 import { rememberBoardServerFeatures } from './board-local.js';
 import { restackAfterSave, type StackHint } from './hosted-stack-restack.js';
@@ -1705,7 +1705,7 @@ export class HostedAgentTransport {
       paths,
       undefined,
       this.presenceAction ? presenceSince(laneId) : undefined,
-      this.boardVersion ? { after: readBoardCursor(this.root, laneId) } : undefined,
+      this.boardVersion ? boardReadPosition(this.root, laneId, this.serverFeatures ?? []) : undefined,
       this.overlapScope,
     );
     this.cachedAdvice = { laneId, value };

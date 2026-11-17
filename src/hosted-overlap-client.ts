@@ -48,7 +48,7 @@ export async function readHostedOverlapAdvice(
   paths = false,
   items?: number,
   presence?: { since?: number },
-  board?: { after: number },
+  board?: { after: number; laneAfter?: number },
   /** Declared scope of a fresh Lane (start scope.paths); sent only to servers with overlap-scope. */
   scope?: string[],
 ) {

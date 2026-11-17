@@ -34,6 +34,8 @@ export const hostedContractFeatures = [
   /** Board notes: the overlap read takes `board`, and projectBoard:read/post exist (was
    * boardVersion:1). Without it the CLI sends no board argument. */
   'agent-board',
+  /** Ordinary board/overlap pages accept a separate delivered-directed-note watermark. */
+  'board-lane-after',
   /** Wait delivery: the landing page subscription takes `board`, projectBoardWait:peer exists, and
    * the overlap read lists claims on a first-write path. Without it waits carry no board argument. */
   'board-wait',

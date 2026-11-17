@@ -302,6 +302,7 @@ export const read = query({
     projectId: v.id('hostedProjects'),
     laneId: v.optional(v.string()),
     after: v.optional(v.number()),
+    laneAfter: v.optional(v.number()),
     id: v.optional(v.string()),
     limit: v.optional(v.number()),
     /** Include resolved notes (marked `resolved`). Sent only with `board {all:true}`. */
@@ -343,6 +344,7 @@ export const read = query({
         ...(laneId ? { laneId } : {}),
         ...(intentId ? { intentId } : {}),
         after: input.after ?? 0,
+        ...(!input.all && input.laneAfter !== undefined ? { laneAfter: input.laneAfter } : {}),
         limit,
         order: 'desc',
         ...(input.all ? { includeResolved: true } : {}),

@@ -58,6 +58,7 @@ export async function boardInbox(
     laneId?: string;
     intentId?: string;
     after: number;
+    laneAfter?: number;
     limit: number;
     order: 'asc' | 'desc';
     includeResolved?: boolean;
@@ -78,14 +79,16 @@ export async function boardInbox(
         .unique(),
     ),
   );
-  const hot = inboxes.filter(row => row !== null && row.latestAt > input.after);
+  const after = (key: string) =>
+    key.startsWith('lane:') ? Math.max(input.after, input.laneAfter ?? 0) : input.after;
+  const hot = inboxes.filter(row => row !== null && row.latestAt > after(row.key));
   const pages = await Promise.all(
     hot.map(row =>
       (input.includeResolved
         ? ctx.db
             .query('projectBoardMessages')
             .withIndex('by_project_and_target_and_at', q =>
-              q.eq('projectId', input.projectId).eq('targetKey', row!.key).gt('at', input.after),
+              q.eq('projectId', input.projectId).eq('targetKey', row!.key).gt('at', after(row!.key)),
             )
         : ctx.db
             .query('projectBoardMessages')
@@ -94,7 +97,7 @@ export async function boardInbox(
                 .eq('projectId', input.projectId)
                 .eq('targetKey', row!.key)
                 .eq('resolvedAt', undefined)
-                .gt('at', input.after),
+                .gt('at', after(row!.key)),
             )
       )
         .order(input.order)
@@ -160,6 +163,7 @@ export async function boardDelivery(
     laneId: string;
     intentId: string;
     after: number;
+    laneAfter?: number;
     path?: string;
     /** First-write hook with feature board-claims: decide whether to send an automatic claim, and
      * list other Lanes' automatic claims on the path. `lane` is the caller's Lane as already read. */

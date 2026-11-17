@@ -64,11 +64,14 @@ export function writeBoardProjectCursor(root: string, after: number) {
  * Lane do not repeat. Filter only bytes already returned by the existing query. */
 export function unreadBoardNotes(root: string, messages: BoardNote[]): BoardNote[] {
   const after = readBoardProjectCursor(root);
-  return messages.filter(message =>
-    message.target === 'project'
-      ? message.at > after
-      : !message.target.startsWith('lane:') || message.at > directedNotesAfter(root, message.target.slice(5)),
-  );
+  const lanes = new Map<string, number>();
+  return messages.filter(message => {
+    if (message.target === 'project') return message.at > after;
+    if (!message.target.startsWith('lane:')) return true;
+    const laneId = message.target.slice(5);
+    if (!lanes.has(laneId)) lanes.set(laneId, directedNotesAfter(root, laneId));
+    return message.at > lanes.get(laneId)!;
+  });
 }
 export function readBoardCursor(root: string, laneId: string): number {
   const shared = cursorFile(root, laneId);
@@ -87,8 +90,15 @@ export function readBoardWaitCursor(root: string, laneId: string): number {
 }
 const directedNotesAfter = (root: string, laneId: string): number => {
   const value = readJson(waitCursorFile(root, laneId)) as { notesAfter?: number } | undefined;
-  return value?.notesAfter ?? 0;
+  return typeof value?.notesAfter === 'number' && Number.isFinite(value.notesAfter) ? value.notesAfter : 0;
 };
+/** Ordinary pages skip directed notes before filling the page, only on servers with this argument. */
+export function boardReadPosition(root: string, laneId: string, features: readonly string[]) {
+  return {
+    after: readBoardCursor(root, laneId),
+    ...(features.includes('board-lane-after') ? { laneAfter: directedNotesAfter(root, laneId) } : {}),
+  };
+}
 
 /** A delivered note as the server returns it (author already a Forge handle, or absent). */
 export type BoardNote = {
@@ -149,7 +159,14 @@ const serverFile = (projectId: string) =>
     'board',
     `server-${projectId.replace(/[^A-Za-z0-9_-]/g, '')}.json`,
   );
-const boardFeatureNames = ['agent-board', 'board-wait', 'board-claims', 'agent-slug', 'board-resolve'];
+const boardFeatureNames = [
+  'agent-board',
+  'board-wait',
+  'board-claims',
+  'agent-slug',
+  'board-resolve',
+  'board-lane-after',
+];
 export function readBoardServerFeatures(projectId: string): string[] {
   if (noState()) return [];
   const value = readJson(serverFile(projectId)) as { features?: unknown } | undefined;
@@ -187,8 +204,11 @@ export function writeBoardWokeAt(root: string, laneId: string, at = Date.now()) 
 const conflictFile = (root: string, laneId: string) => join(boardDir(root), `${laneId}.conflicts.json`);
 export function readBoardConflictIds(root: string, laneId: string): string[] {
   const value = readJson(conflictFile(root, laneId));
-  return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
+  return Array.isArray(value) ? value.slice(-64).filter((id): id is string => typeof id === 'string') : [];
 }
 export function writeBoardConflictIds(root: string, laneId: string, ids: string[]) {
-  writeJson(conflictFile(root, laneId), [...new Set([...readBoardConflictIds(root, laneId), ...ids])]);
+  writeJson(
+    conflictFile(root, laneId),
+    [...new Set([...readBoardConflictIds(root, laneId), ...ids])].slice(-64),
+  );
 }

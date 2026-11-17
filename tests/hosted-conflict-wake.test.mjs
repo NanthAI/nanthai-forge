@@ -54,6 +54,80 @@ async function fixture(selectedLaneId) {
   return { f, laneId, peerId, request, args, page, record };
 }
 
+for (const mode of ['off', 'on'])
+  test(`11c07518 S2: clearing ${mode === 'off' ? 'hidden' : 'visible'} early advice ${mode === 'off' ? 'retains' : 'advances'} notice generation`, async t => {
+    const w = await fixture();
+    const root = mkdtempSync(join(tmpdir(), 'forge-visible-generation-'));
+    t.after(() => {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(`${root}.forge-client`, { recursive: true, force: true });
+    });
+    const { boardWaitOption, freshBoardDelivery } = await import('../dist/hosted-board-wait.js');
+    const projected = async () =>
+      (
+        await w.f.call(
+          'exactNoticeProjection',
+          {
+            _handler: ctx => conflicts.laneConflicts(ctx, w.f.projectId, w.laneId, 'mine'),
+          },
+          {},
+        )
+      )[0];
+    await w.record();
+    const project = w.f.tables.hostedProjects.get(w.f.projectId);
+    w.f.patch('hostedProjects', project._id, {
+      autonomyPolicy: {
+        ...project.autonomyPolicy,
+        acceptance: { ...project.autonomyPolicy.acceptance, earlyResolve: mode },
+      },
+    });
+    const row = [...w.f.tables.projectHostedConflictNotices.values()].find(row => row.laneId === w.laneId);
+    const advice = {
+      paths: ['src/service.ts'],
+      more: 0,
+      at: new Date(1).toISOString(),
+      next: 'Synthetic advice',
+      landedSubmissionId: 'synthetic',
+    };
+    w.f.patch('projectHostedConflictNotices', row._id, { earlyResolution: JSON.stringify(advice) });
+    const before = await projected();
+    assert.equal(Boolean(before.earlyResolution), mode === 'on');
+    const initial = freshBoardDelivery(boardWaitOption(root, w.laneId), {
+      board: { messages: [], more: 0, cursor: before.generation, conflicts: [before] },
+    });
+    assert(initial);
+    boardWakeEnvelope(root, w.laneId, initial);
+    await w.record();
+    const cost = w.f.counts.at(-1);
+    assert(cost.documents <= 8 && cost.ranges <= 8, 'notice recording keeps its existing read/probe budget');
+    console.log(
+      `notice retry (${mode}): ${JSON.stringify({ documents: cost.documents, ranges: cost.ranges, writes: cost.writes, readBytes: cost.readBytes })}`,
+    );
+    const after = await projected();
+    const fresh = freshBoardDelivery(boardWaitOption(root, w.laneId), {
+      board: { messages: [], more: 0, cursor: after.generation, conflicts: [after] },
+    });
+    assert.equal(
+      Boolean(fresh),
+      mode === 'on',
+      'only a visible advice change reaches the client as a new notice',
+    );
+    if (fresh) boardWakeEnvelope(root, w.laneId, fresh);
+    assert.equal(after.earlyResolution, undefined);
+    if (mode === 'off')
+      assert.deepEqual(after, before, 'invisible advice cleanup cannot manufacture a new exact notice');
+    else assert(after.generation > before.generation, 'a changed visible field is a new notice');
+    await w.record();
+    const retry = await projected();
+    assert.deepEqual(retry, after, 'the same exact retry never advances generation again');
+    assert.equal(
+      freshBoardDelivery(boardWaitOption(root, w.laneId), {
+        board: { messages: [], more: 0, cursor: retry.generation, conflicts: [retry] },
+      }),
+      undefined,
+    );
+  });
+
 test('83e6d0d3: a notice recorded during a landing wait wakes its existing subscription without a page drain', async t => {
   const w = await fixture(),
     subscriptions = [];

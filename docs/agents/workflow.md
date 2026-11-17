@@ -1954,12 +1954,12 @@ subscription update also settles the wait, its current exact-conflict notice acc
 outcome immediately; completion does not discard it while the batching timer is pending. This also
 applies when source progress compacts to a terminal receipt or a chained resolve result. Member notes
 keep their batching behavior. Wait replies include `board.cursor` and `board.noticeIds` derived from the existing notice generation and contents; older servers retain content-only dedupe. A new own or peer head therefore wakes once even when its displayed ranges are unchanged.
-The CLI remembers conflict identities separately from the message cursor, so an older two-note page
+The CLI remembers the latest 64 conflict identities per Lane separately from the message cursor, so an older two-note page
 cannot redeliver the same conflict on every reconnect. Notes already read in another Lane and
 messages addressed to another Lane cannot interrupt this wait. Live wait delivery reads only the
-directed Lane inbox. Its local wait position is separate from ordinary board delivery: neither a directed-note wake nor a conflict-only wake acknowledges unread project or Issue notes. Delivered directed notes are filtered from later ordinary replies without an extra read. Project and Issue notes remain on ordinary board reads, so their backlog cannot
+directed Lane inbox. Its local wait position is separate from ordinary board delivery: neither a directed-note wake nor a conflict-only wake acknowledges unread project or Issue notes. With server feature `board-lane-after`, ordinary board reads, save advice and first-write hooks send the delivered-directed-note watermark as `laneAfter`. The server applies it only to the Lane inbox before filling the page; project and Issue inboxes retain their ordinary cursor. This reuses the existing indexed reads, so already-delivered Lane notes cannot crowd out an unread project or Issue note. Explicit note/history reads ignore `laneAfter`. Older servers receive no new argument and retain client-side filtering. Project and Issue notes remain on ordinary board reads, so their backlog cannot
 hide an unread directed note. A new conflict, a directed unread
-note, operation progress or the wait budget remains observable. Retrying the same trial does not wake the Lane twice. Board-note
+note, operation progress or the wait budget remains observable. Retrying the same trial does not wake the Lane twice. A notice generation advances only when its exact source pair, ranges or currently visible early-resolution advice changes. Cleaning up advice hidden by the current policy updates the stored metadata without a new inbox wake. Recording shares the existing queue/policy context across both notice directions. Board-note
 switches do not suppress source conflicts. A trial that dies cannot leave a save unpublished.
 Saved-peer conflicts remain advisory: they never hold admission or cancel a landing; main's own
 composition still decides. There is no guarantee that the trial finishes before the save or land

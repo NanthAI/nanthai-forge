@@ -7,7 +7,7 @@ import { assertBoardPaths, assertBoardText } from './board-text.js';
 import { memberDataNotice } from './member-data-notice.js';
 import {
   boardNoticeLine,
-  readBoardCursor,
+  boardReadPosition,
   readBoardProjectCursor,
   readBoardServerFeatures,
   unreadBoardNotes,
@@ -20,7 +20,7 @@ import { hostedActionError } from './hosted-action-error.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 
 // Local read state and notice lines live in the light board-local module (first-write hook).
-export { readBoardCursor, writeBoardCursor, boardEnvelope } from './board-local.js';
+export { readBoardCursor, writeBoardCursor, boardEnvelope, boardReadPosition } from './board-local.js';
 
 export const boardMessageSchema = z.looseObject({
   id: z.string(),
@@ -113,17 +113,15 @@ export async function boardHostedSource(
     (transport.address ? readBoardServerFeatures(transport.address.projectId) : []);
   if (action === 'board') {
     const id = command.id as string | undefined;
-    const after =
-      id || command.all
-        ? 0
-        : laneId
-          ? readBoardCursor(transport.root, laneId)
-          : readBoardProjectCursor(transport.root);
+    const position =
+      laneId && !id && !command.all ? boardReadPosition(transport.root, laneId, features) : undefined;
+    const after = id || command.all ? 0 : laneId ? position!.after : readBoardProjectCursor(transport.root);
     const result = await transport
       .query<Record<string, unknown>>('projectBoard:read', {
         ...(id ? { id: id.toLowerCase() } : {}),
         ...(laneId && !id ? { laneId } : {}),
         after,
+        ...(position?.laneAfter !== undefined ? { laneAfter: position.laneAfter } : {}),
         // Resolved notes are listed only on request, and only a server that knows the flag gets it.
         ...(command.all && !id && features.includes('board-resolve') ? { all: true } : {}),
       })

@@ -6,7 +6,7 @@ import { resolveAuthToken, deploymentUrl } from './auth-store.js';
 import {
   boardEnvelope,
   boardNoticeLine,
-  readBoardCursor,
+  boardReadPosition,
   readBoardServerFeatures,
   type BoardNote,
 } from './board-local.js';
@@ -59,7 +59,7 @@ export async function readHostedEditPeers(
     projectId: target.project,
     laneId: target.laneId,
     path: target.path,
-    board: { after: readBoardCursor(target.root, target.laneId), ...(claim ? { claim: true } : {}) },
+    board: { ...boardReadPosition(target.root, target.laneId, features), ...(claim ? { claim: true } : {}) },
   });
   const value = typeof raw === 'string' ? JSON.parse(raw) : raw;
   return {

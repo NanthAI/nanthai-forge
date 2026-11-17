@@ -5,6 +5,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { internalMutation, internalQuery, type MutationCtx, type QueryCtx } from './server';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { conflictPredecessor } from './projectHostedConflictPredecessor';
+import { landingQueue } from './projectHostedLandingEvents';
 import { readHostedRecord } from './projectHostedRecords';
 import { findObject } from './projectObjectFind';
 import { query } from './cliServer';
@@ -376,6 +377,22 @@ export const record = internalMutation({
       return null;
     }
     const now = Date.now();
+    // Each peer conflict writes both directions. Share these two reads instead of
+    // reading the queue/policy separately for each direction, including an empty queue.
+    let predecessorContext:
+      | Promise<{
+          queue: Awaited<ReturnType<typeof landingQueue>>;
+          enabled: boolean;
+        }>
+      | undefined;
+    const context = () =>
+      (predecessorContext ??= Promise.all([
+        landingQueue(ctx, { projectId: input.projectId, channel: 'main' }),
+        ctx.db.get(input.projectId),
+      ]).then(([queue, project]) => ({
+        queue,
+        enabled: Boolean(project && effectivePolicy(project).acceptance.earlyResolve !== 'off'),
+      })));
     const write = async (
       owner: Row,
       peer: string,
@@ -412,27 +429,36 @@ export const record = internalMutation({
         theirs: swap ? item.mine : item.theirs,
         reason: item.reason,
       }));
-      const early =
-        peer !== MAIN
-          ? await conflictPredecessor(ctx, input.projectId, [
+      const predecessor = peer !== MAIN ? await context() : undefined;
+      const early = predecessor?.enabled
+        ? await conflictPredecessor(
+            ctx,
+            input.projectId,
+            [
               {
                 peer,
                 peerHead,
                 paths,
                 flaggedAt: existing?.flaggedAt ?? now,
               },
-            ]).catch(() => undefined)
-          : undefined;
+            ],
+            predecessor.queue,
+          ).catch(() => undefined)
+        : undefined;
       const earlyResolution = early ? canonicalPayload(early.advice) : undefined;
-      // A retried result never rewakes the agent for the same saved pair and ranges.
+      // Only a changed source pair, ranges or visible advice publishes a generation.
+      // Hidden metadata may still be cleaned up without a new inbox clock/wake.
       if (
         existing &&
         existing.laneHead === owner.head &&
         existing.peerHead === peerHead &&
         canonicalPayload(existing.paths) === canonicalPayload(paths) &&
-        existing.earlyResolution === earlyResolution
-      )
+        (!predecessor?.enabled || existing.earlyResolution === earlyResolution)
+      ) {
+        if (existing.earlyResolution !== earlyResolution)
+          await ctx.db.patch(existing._id, { earlyResolution });
         return;
+      }
       const updatedAt = await wakeConflictLane(ctx, input.projectId, owner.laneId, now);
       const value = {
         paths,

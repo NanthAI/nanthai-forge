@@ -116,6 +116,8 @@ History log, blame and file-at-commit reads are discoverable in agent help, the 
 
 Default agent replies have a per-action byte ratchet: compact conflict files, preflight plans and receipts, and one rendering per board list note (explicit note reads keep full bodies). CLI `--detail` and MCP `replyDetail:true` retain full replies; local actor cursors stop project notes repeating across Lanes ([reply budget](agents/workflow.md#default-reply-byte-budget)).
 
+Directed waits keep ordinary board delivery independent. Servers advertising `board-lane-after` skip already-delivered Lane notes before filling ordinary pages, preserving older unread project and Issue notes. Exact-conflict generations distinguish changed source pairs while unchanged visible notices keep their identity; the CLI retains the latest 64 seen identities per Lane.
+
 Capsule-aware CLI and browser readers resolve selected terminal observations,
 status, attempts, Candidate and finish-input history through a server action. The
 action verifies compressed content and per-table digests, rechecks current access
