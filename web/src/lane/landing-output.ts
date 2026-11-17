@@ -4,10 +4,13 @@ import { verifyDownloadedOutput } from '../../../src/hosted-output-reader';
 import { invariant } from '../../../src/errors';
 import { failingTests } from './CheckPanel';
 /** A decision excerpt reads one tail chunk per text stream, without a tail loop.
- * These are excerpts, not a claim that complete output was retained. */
+ * These are excerpts, not a claim that complete output was retained. While the check runs, a stream not yet
+ * sealed is `live` and its tail chunk is the newest its runner has published (Item 42b8bf0e).
+ * Calls: 1 query per page of streams, 1 signing mutation per page with text, 1 R2 GET per text stream. */
 export async function landingFailureExcerpt(io: LandingIO, runId: string) {
   let cursor: string | null = null;
   const text: string[] = [];
+  let live = false;
   do {
     const page: {
       page: {
@@ -38,6 +41,7 @@ export async function landingFailureExcerpt(io: LandingIO, runId: string) {
     const byStream = new Map(tails.map((row, i) => [row.streamId, targets[i]!]));
     for (const row of page.page) {
       if (row.stream.stream === 'artifact') continue;
+      if (!row.seal && !row.retired) live = true;
       if (row.seal?.failureSummary) {
         text.push(row.seal.failureSummary);
         continue;
@@ -68,5 +72,9 @@ export async function landingFailureExcerpt(io: LandingIO, runId: string) {
     cursor = page.isDone ? null : page.continueCursor;
   } while (cursor !== null);
   const joined = text.join('\n');
-  return { failures: failingTests(joined), log: joined.trim().split('\n').slice(-8).join('\n').slice(-4096) };
+  return {
+    failures: failingTests(joined),
+    log: joined.trim().split('\n').slice(-8).join('\n').slice(-4096),
+    live,
+  };
 }

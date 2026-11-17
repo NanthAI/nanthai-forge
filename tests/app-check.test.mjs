@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 
-const { checkSentence, verdictState, agentReply, agentPrompt, nextLine } = await import(
+const { checkSentence, verdictState, agentReply, agentPrompt, nextLine, logWords } = await import(
   moduleUrl('../web/src/app/check/check-model.ts')
 );
 const { failureCause } = await import(moduleUrl('../src/check-failure-cause.ts'));
@@ -105,4 +105,18 @@ test('the copied prompt names the Lane, the cause and the read command, not the 
   assert.match(prompt, /Lane “Retry budget for fetch adapter” in tidepool/);
   assert.match(prompt, /status '\{"submissionId":"s"\}'/, 'the landing status, which carries the same cause');
   assert.doesNotMatch(prompt, /token=abc/);
+});
+
+test('while the check runs, the log press reads the output so far and offers newer lines; a finished run reads the log', () => {
+  const going = { ...run([]), status: 'running' };
+  assert.equal(logWords(going).press, 'Read the output so far');
+  assert.equal(logWords(going).newer, 'Read newer lines');
+  assert.equal(logWords(run([])).press, 'Read the log');
+  assert.equal(logWords(run([])).newer, null);
+  assert.equal(
+    logWords(run([]), true).title,
+    'Output so far',
+    'a stream still open keeps the newer-lines press',
+  );
+  assert.equal(logWords(null).press, 'Read the log');
 });

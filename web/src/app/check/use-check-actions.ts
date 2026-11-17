@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Failed check screen's presses. Each reads or writes only when pressed: retry and undo reuse the existing
-// retry-safe landing client (one operation id per press, kept across a lost reply), and the log is read once on demand.
+// retry-safe landing client (one operation id per press, kept across a lost reply), and the log is read once per press:
+// while the check runs, again on "Read newer lines", never on a timer and never while nobody presses.
 import { useMemo, useRef, useState } from 'react';
 import type { ConvexReactClient } from 'convex/react';
 import type { Id } from '../../../../convex/_generated/dataModel';
@@ -22,7 +23,8 @@ export function useCheckActions(client: ConvexReactClient, projectId: Id<'hosted
   const [message, setMessage] = useState<Message>(null);
   const [copied, setCopied] = useState(false);
   const takeOut = useTakeOut(landing);
-  const [log, setLog] = useState<string | null | 'loading'>(null);
+  const [log, setLog] = useState<{ text: string; live: boolean } | null>(null);
+  const [reading, setReading] = useState(false);
   /** One operation id per action on this submission: a retried press after a lost reply reconciles, never repeats. */
   const operation = (key: string) => {
     if (!operations.current.has(key)) operations.current.set(key, crypto.randomUUID());
@@ -40,6 +42,19 @@ export function useCheckActions(client: ConvexReactClient, projectId: Id<'hosted
       setBusy(null);
     }
   };
+  const readOutput = () => {
+    if (!read.run || reading) return;
+    setReading(true);
+    void landingFailureExcerpt(landing.io, read.run.runId)
+      .then(value => setLog({ text: value.log, live: value.live }))
+      .catch(error =>
+        setMessage({
+          text: `The log did not load: ${hostedError(error)} The verdict above is Forge's own record.`,
+          failed: true,
+        }),
+      )
+      .finally(() => setReading(false));
+  };
   return {
     busy: busy ?? (takeOut.busy ? ('undo' as const) : null),
     message: takeOut.error
@@ -50,6 +65,7 @@ export function useCheckActions(client: ConvexReactClient, projectId: Id<'hosted
     copied,
     undone: takeOut.done,
     log,
+    reading,
     copy(text: string) {
       void navigator.clipboard?.writeText(text).then(() => {
         setCopied(true);
@@ -79,18 +95,10 @@ export function useCheckActions(client: ConvexReactClient, projectId: Id<'hosted
     },
     /** The failing output, read once when asked: excerpts of each stream's tail, never polled. */
     readLog() {
-      if (!read.run || log === 'loading') return;
-      if (log !== null) return setLog(null);
-      setLog('loading');
-      void landingFailureExcerpt(landing.io, read.run.runId)
-        .then(value => setLog(value.log))
-        .catch(error => {
-          setLog(null);
-          setMessage({
-            text: `The log did not load: ${hostedError(error)} The verdict above is Forge's own record.`,
-            failed: true,
-          });
-        });
+      if (log) return setLog(null);
+      readOutput();
     },
+    /** A running check's output again, for the lines its runner published since the last press. */
+    newer: () => readOutput(),
   };
 }

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The landing check of one Lane (Items b030c3c5, 2c420916, 9e7a17df), the approved Failed check screen: the verdict and
 // the next action in the head, the four suspects on the right, what failed and the facts on the left, the log one press
-// away. One subscription (convex/projectFailureCause.ts forLane); every other read or write happens only on a press.
+// away (while the check runs, the output so far, read again only on a press: Item 42b8bf0e). One subscription
+// (convex/projectFailureCause.ts forLane); every other read or write happens only on a press.
 import { useState } from 'react';
 import { useConvex } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
@@ -16,6 +17,7 @@ import {
   agentReply,
   checkSentence,
   duration,
+  logWords,
   plural,
   suspectNames,
   verdictState,
@@ -90,6 +92,7 @@ export function CheckView({
   const verdict = verdictState(read);
   const sentence = checkSentence(read, clock);
   const recovery = read.cause?.next.recovery;
+  const words = logWords(read.run, actions.log?.live);
   return (
     <>
       <div className="head">
@@ -149,7 +152,7 @@ export function CheckView({
             ) : null}
             {read.run ? (
               <Key kind="ghost" aria-expanded={actions.log !== null} onClick={actions.readLog}>
-                {actions.log === 'loading' ? 'Reading the log…' : 'Read the log'}
+                {actions.reading && !actions.log ? 'Reading the log…' : words.press}
               </Key>
             ) : null}
           </span>
@@ -175,7 +178,13 @@ export function CheckView({
       ) : null}
       <div className="panes chk-p">
         <section className="pane" aria-label="Evidence">
-          <Failed read={read} log={actions.log} />
+          <Failed
+            read={read}
+            log={actions.log?.text ?? null}
+            words={words}
+            newer={actions.newer}
+            reading={actions.reading}
+          />
           <Facts read={read} />
         </section>
         <section className="pane side" aria-label="Whose fault">
@@ -186,15 +195,34 @@ export function CheckView({
   );
 }
 
-function Failed({ read, log }: { read: CheckRead; log: string | null | 'loading' }) {
+function Failed({
+  read,
+  log,
+  words,
+  newer,
+  reading,
+}: {
+  read: CheckRead;
+  log: string | null;
+  words: ReturnType<typeof logWords>;
+  newer: () => void;
+  reading: boolean;
+}) {
   const failing = read.cause?.failing ?? read.run?.failed ?? [];
   const count = read.cause?.failingCount ?? read.run?.files.failed ?? 0;
   const output =
-    log && log !== 'loading' ? (
-      <Region title="The log" hint="the failing output, as your CI sent it">
+    log !== null ? (
+      <Region title={words.title} hint={words.hint}>
         <pre className="out mono" tabIndex={0}>
-          {log || 'Your CI sent no output for this run.'}
+          {log || (words.newer ? 'Your CI has sent no output yet.' : 'Your CI sent no output for this run.')}
         </pre>
+        {words.newer ? (
+          <p className="quietline">
+            <Key kind="ghost" disabled={reading} onClick={newer}>
+              {reading ? 'Reading…' : words.newer}
+            </Key>
+          </p>
+        ) : null}
       </Region>
     ) : null;
   if (!failing.length)

@@ -64,6 +64,13 @@ a failing main may go first in the queue are open owner questions 48 and 49
 ([journey 35](ux/journeys/35-undo-for-a-person.md), Item 581bd373); until they are
 answered the press uses the approved design's words and the ordinary queue.
 
+While a landing's check is still running, its landing check page offers **Read the
+output so far**: the newest chunk each runner has published, read once when pressed
+(one streams query, one signing mutation, one object read per output stream).
+**Read newer lines** reads again. Nothing is pushed or polled, so an open page
+nobody presses, or a hidden tab, makes no calls. Agents read the same data with
+`nforge agent ROOT log {runId}` ([workflow](agents/workflow.md)).
+
 ## Who can land without a check
 
 The web setting and CLI edit the same `acceptance.withoutCheck` policy. Omission

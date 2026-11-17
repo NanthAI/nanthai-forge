@@ -113,6 +113,26 @@ export function checkSentence(
   return { lead: `${read.landing.label}.`, rest: `${read.landing.nextStep}${usual}` };
 }
 
+/** A run CI has not finished: its output is what the CI has sent so far (Item 42b8bf0e). */
+const going = new Set(['queued', 'preparing', 'dispatching', 'running']);
+/** The log press and region words. While the run is going, the output is read only when pressed and "Read newer
+ * lines" reads again: nothing is pushed or polled, so an open page that nobody presses costs no calls. */
+export function logWords(run: CheckRead['run'], live = false) {
+  return live || (run && going.has(run.status))
+    ? {
+        press: 'Read the output so far',
+        title: 'Output so far',
+        hint: 'what your CI has sent so far',
+        newer: 'Read newer lines',
+      }
+    : {
+        press: 'Read the log',
+        title: 'The log',
+        hint: 'the failing output, as your CI sent it',
+        newer: null,
+      };
+}
+
 /** When the check usually answers, from this project's own recent landings, or that it is not reported. */
 function expectedLine(read: CheckRead) {
   const expected = read.expected;

@@ -345,6 +345,19 @@ test('decision failure excerpts verify exact output and never download artifacts
   const result = await landingFailureExcerpt(io, 'run');
   assert.deepEqual(result.failures, ['browser ranges', 'upload retries']);
   assert.deepEqual(calls, ['out']);
+  assert.equal(result.live, true, 'a stream not yet sealed is the running check: its newest chunk so far');
+  const sealed = {
+    ...io,
+    query: async (...args) => {
+      const page = await io.query(...args);
+      return { ...page, page: page.page.map(row => ({ ...row, seal: {} })) };
+    },
+  };
+  assert.equal(
+    (await landingFailureExcerpt(sealed, 'run')).live,
+    false,
+    'a sealed stream is finished output',
+  );
   t.mock.method(globalThis, 'fetch', async () => new Response('corrupt'));
   await assert.rejects(landingFailureExcerpt(io, 'run'), code('R2_OBJECT_CHECKSUM_MISMATCH'));
 });
