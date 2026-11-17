@@ -15,6 +15,7 @@ import {
   type DockLayout,
   type ReorderItem,
 } from '../interactive';
+import { Segment } from '../Segment';
 import { Figures } from './Figures';
 import { DocsFrame } from '../DocsFrame';
 import '../docs.css';
@@ -82,6 +83,7 @@ const REACTIONS: ReactionCount[] = [
 const LAYOUT: DockLayout = { top: ['needs'], a: ['plan', 'lanes'], b: ['checks', 'notes'] };
 
 export function Reference() {
+  const [source, setSource] = useState('write');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [plan, setPlan] = useState(PLAN);
   const [sheet, setSheet] = useState(false);
@@ -313,6 +315,20 @@ export function Reference() {
         onLayout={setLayout}
         onReset={resetLayout}
       />
+      <Region title="Segmented choice">
+        <div className="pad">
+          <Segment
+            label="Sample source access"
+            value={source}
+            onChange={setSource}
+            options={[
+              { value: 'write', text: 'May write' },
+              { value: 'read', text: 'Read only' },
+              { value: 'coordination', text: 'Coordination only' },
+            ]}
+          />
+        </div>
+      </Region>
       <Figures />
       <section aria-label="Public standing" className="region">
         <div className="ph plain">

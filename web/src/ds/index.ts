@@ -22,3 +22,5 @@ export type {
   ReorderItem,
 } from './interactive';
 export { loadLayer, prefetchLayerWhenIdle } from './layer';
+
+export { Segment } from './Segment';

@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { ForgeError, invariant } from './errors.js';
 import { refuseRealUserState } from './test-isolation.js';
 import { ownerOnly } from './file-mode.js';
-import { deploymentUrl } from './deployment-origin.js';
+import { deploymentUrl, renewableDevices as renewable, renewableDevice } from './deployment-origin.js';
 export { deploymentUrl } from './deployment-origin.js';
 export type SavedCredential = {
   token: string;
@@ -24,8 +24,22 @@ export type SavedCredential = {
   scope: 'cli' | 'coordination';
   /** The one-time hint about renaming an older hostname-named device was shown. */
   renameHinted?: true;
+  deviceId?: string;
+  deviceCode?: string;
+  signInId?: string;
 };
-type Store = { defaultDeployment?: string; deployments: Record<string, SavedCredential> };
+export type SavedDevice = {
+  id: string;
+  publicKey: string;
+  privateKey: string;
+  previousKeys?: { id: string; publicKey: string; privateKey: string }[];
+  pendingRenewal?: { operationId: string; at: number; proof: string };
+};
+type Store = {
+  defaultDeployment?: string;
+  deployments: Record<string, SavedCredential>;
+  devices?: Record<string, SavedDevice>;
+};
 export function authFile() {
   return join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'forge', 'auth.json');
 }
@@ -106,6 +120,11 @@ export function authState(
   }
   const saved = store.deployments[origin];
   if (!saved) return { kind: 'none' };
+  if (saved.deviceId && store.devices?.[origin]?.id === saved.deviceId) {
+    for (const [token, value] of renewable)
+      if (value.deployment === origin && token !== saved.token) renewable.delete(token);
+    renewable.set(saved.token, { deployment: origin, expiresAt: saved.expiresAt });
+  }
   return saved.expiresAt > Date.now()
     ? { kind: 'saved', token: saved.token, expiresAt: saved.expiresAt }
     : { kind: 'expired', expiresAt: saved.expiresAt };
@@ -115,9 +134,22 @@ export function resolveAuthToken(
   override: string | undefined = process.env.FORGE_AUTH_TOKEN,
 ) {
   const state = authState(deployment, override);
+  if (state.kind === 'expired') {
+    const saved = readAuth().deployments[deploymentUrl(deployment)];
+    if (saved && renewableDevice(saved.token)) return saved.token;
+  }
   invariant(state.kind !== 'expired', 'AUTH_EXPIRED', AUTH_STATE_NEXT_STEP.expired);
   return state.kind === 'none' ? undefined : state.token;
 }
 export function hasSavedAuth() {
   return Object.keys(readAuth().deployments).length > 0;
+}
+
+/** Public device endpoints share the authenticated deployment's origin; this never follows redirects. */
+export function httpOrigin(deployment: string) {
+  if (process.env.FORGE_HTTP_URL) return deploymentUrl(process.env.FORGE_HTTP_URL);
+  const url = new URL(deployment);
+  if (url.hostname.endsWith('.convex.cloud'))
+    url.hostname = url.hostname.replace(/\.convex\.cloud$/, '.convex.site');
+  return url.origin;
 }

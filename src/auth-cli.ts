@@ -1,13 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 import { networkFetch, networkTimeout } from './network-fetch.js';
 import { childEnv } from '../scripts/child-env.mjs';
-import { authStatus } from './auth-status.js';
+import { localDevice, signedDevice, deviceCode, renewDevice } from './device-key.js';
+import { authStatus, folderAddress } from './auth-status.js';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { neutralDeviceName } from './neutral-names.js';
 import { spawn } from 'node:child_process';
 import { makeFunctionReference } from 'convex/server';
 import { coordinationClient } from './coordination-client.js';
-import { deploymentUrl, readAuth, resolveAuthToken, writeAuth, type SavedCredential } from './auth-store.js';
+import {
+  deploymentUrl,
+  readAuth,
+  resolveAuthToken,
+  writeAuth,
+  type SavedCredential,
+  httpOrigin,
+} from './auth-store.js';
 import { ForgeError, invariant } from './errors.js';
 const help = `nforge login [DEPLOYMENT_URL] [--name NAME] [--scope cli|coordination] [--no-browser]
 nforge logout [DEPLOYMENT_URL]
@@ -15,13 +23,7 @@ nforge auth rename NAME [DEPLOYMENT_URL]
 nforge auth status [DEPLOYMENT_URL] [--hostname HOST] [--json [fields]]
 nforge auth handle (NAME | --keep) [DEPLOYMENT_URL]
 auth status defaults to the hosted project in the current folder and reports its deployment/host; an explicit URL or --hostname wins. Outside a project it uses FORGE_DEPLOYMENT_URL or your most recent login. Other auth commands use that environment/login default. A device is named device-xxxx unless you pass --name; auth rename changes it later. Login uses a signed-in Forge browser approval and stores a revocable 30-day credential. Collaborators and agents see you by your Forge handle; \`auth handle\` picks it (or keeps the current one). FORGE_AUTH_TOKEN overrides stored credentials for hosted commands.\n`;
-export function httpOrigin(deployment: string) {
-  if (process.env.FORGE_HTTP_URL) return deploymentUrl(process.env.FORGE_HTTP_URL);
-  const url = new URL(deployment);
-  if (url.hostname.endsWith('.convex.cloud'))
-    url.hostname = url.hostname.replace(/\.convex\.cloud$/, '.convex.site');
-  return url.origin;
-}
+export { httpOrigin } from './auth-store.js';
 async function request(origin: string, operation: string, input: unknown) {
   let response: Response;
   try {
@@ -40,6 +42,13 @@ async function request(origin: string, operation: string, input: unknown) {
     'AUTH_SLOW_DOWN',
     'Too many device logins were started on this Forge deployment. Try again in a minute.',
   );
+  if (response.status === 404)
+    throw new ForgeError(
+      'AUTH_REQUEST_FAILED',
+      'This deployment uses the earlier device approval protocol.',
+      undefined,
+      { httpStatus: 404 },
+    );
   invariant(
     response.ok,
     'AUTH_REQUEST_FAILED',
@@ -112,7 +121,8 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
     }
   }
   const store = readAuth();
-  selected ??= process.env.FORGE_DEPLOYMENT_URL ?? store.defaultDeployment;
+  const folder = command === 'login' ? folderAddress() : null;
+  selected ??= folder?.url ?? process.env.FORGE_DEPLOYMENT_URL ?? store.defaultDeployment;
   invariant(selected, 'BAD_ARGUMENT', 'Provide a deployment URL or set FORGE_DEPLOYMENT_URL.');
   const deployment = deploymentUrl(selected),
     saved = store.deployments[deployment];
@@ -122,7 +132,9 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
     let remoteRevoked = false;
     // The backend decides expiry; a local clock or cached expiry must not skip revocation.
     try {
-      await coordinationClient(deployment, saved.token).mutation(
+      const token =
+        saved.deviceId && saved.expiresAt <= Date.now() ? (await renewDevice(deployment)).token : saved.token;
+      await coordinationClient(deployment, token).mutation(
         makeFunctionReference<'mutation'>('deviceCredentials:revoke'),
         { credentialId: saved.credentialId, operationId: randomUUID() },
       );
@@ -154,14 +166,56 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
   const clientNonce = randomBytes(32).toString('hex'),
     operationId = randomUUID(),
     origin = httpOrigin(deployment);
-  const input = { clientNonce, operationId, name, scope };
+  const projectId = folder?.url === deployment ? folder.projectId : undefined;
+  let device = localDevice(deployment);
+  let input = {
+    clientNonce,
+    operationId,
+    name,
+    scope,
+    ...(projectId ? { projectId } : {}),
+    device: signedDevice(device, origin, 'start', operationId, {
+      clientNonce,
+      name,
+      scope,
+      projectId: projectId ?? null,
+    }),
+  };
+  let protocol = 'start-v2';
+  const start = async () => {
+    try {
+      return await request(origin, protocol, input);
+    } catch (error) {
+      if (
+        !(error instanceof ForgeError) ||
+        error.code !== 'AUTH_REQUEST_FAILED' ||
+        error.recovery?.httpStatus !== 404 ||
+        protocol !== 'start-v2'
+      )
+        throw error;
+      protocol = 'start';
+      process.stderr.write('This deployment uses the earlier browser device approval.\n');
+      return request(origin, protocol, { clientNonce, operationId, name, scope });
+    }
+  };
   let flow;
   // Retry the same operation after an unknown network outcome.
   try {
-    flow = await request(origin, 'start', input);
+    flow = await start();
   } catch (error) {
     if (!(error instanceof ForgeError) || error.code !== 'AUTH_NETWORK') throw error;
-    flow = await request(origin, 'start', input);
+    flow = await start();
+  }
+  if (flow?.status === 'removed') {
+    device = localDevice(deployment, true);
+    input = { ...input, operationId: randomUUID() };
+    input.device = signedDevice(device, origin, 'start', input.operationId, {
+      clientNonce,
+      name,
+      scope,
+      projectId: projectId ?? null,
+    });
+    flow = await start();
   }
   invariant(
     flow &&
@@ -182,7 +236,7 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
     'Forge returned an invalid verification URL.',
   );
   process.stderr.write(
-    `Open ${verification.href}\nCode: ${flow.user_code}\nApprove ${name} (${scope}) in Forge.\n${named ? '' : `This device is named ${name}. Rename it any time: nforge auth rename NAME\n`}`,
+    `${protocol === 'start-v2' ? `Device ${deviceCode(device.publicKey)} (key reference)\n` : ''}Open ${verification.href}\nCode: ${flow.user_code}\nApprove ${name} (${scope}) in Forge.\n${named ? '' : `This device is named ${name}. Rename it any time: nforge auth rename NAME\n`}`,
   );
   if (browser) openBrowser(verification.href);
   const deadline = Date.now() + flow.expires_in * 1000,
@@ -222,20 +276,36 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
       'AUTH_RESPONSE_INVALID',
       'Forge returned an invalid credential.',
     );
+    if (protocol === 'start-v2' && typeof result.deviceId !== 'string')
+      process.stderr.write(
+        'This project uses the earlier device approval. The returned sign-in is a 30-day credential; stable device settings are not enabled here.\n',
+      );
     const credential: SavedCredential = {
       token: result.token,
       credentialId: result.credentialId,
       expiresAt: result.expiresAt,
-      name,
-      scope,
+      name: result.name ?? name,
+      scope: result.scope ?? scope,
+      ...(typeof result.deviceId === 'string'
+        ? { deviceId: result.deviceId, deviceCode: result.deviceCode, signInId: result.signInId }
+        : {}),
     };
     // Reload to preserve credentials saved for other deployments during approval.
     const latest = readAuth();
     latest.deployments[deployment] = credential;
+    if (latest.devices?.[deployment]?.publicKey === device.publicKey)
+      latest.devices[deployment].id = result.deviceId ?? randomUUID();
     latest.defaultDeployment = deployment;
     writeAuth(latest);
     await askForHandleOnce(deployment, credential.token);
-    return { deployment, loggedIn: true, name, scope, expiresAt: credential.expiresAt };
+    return {
+      deployment,
+      loggedIn: true,
+      name: credential.name,
+      scope: credential.scope,
+      ...(credential.deviceCode ? { deviceCode: credential.deviceCode } : {}),
+      expiresAt: credential.expiresAt,
+    };
   }
   throw new ForgeError('AUTH_EXPIRED', 'Device code expired. Run nforge login.');
 }

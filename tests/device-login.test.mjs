@@ -13,6 +13,7 @@ import { authFile, readAuth, writeAuth, resolveAuthToken } from '../dist/auth-st
 import { coordinationCredentials } from '../dist/coordination-client.js';
 const store = await import(moduleUrl('../convex/deviceStore.ts'));
 const actions = await import(moduleUrl('../convex/deviceActions.ts'));
+const approvalStore = await import(moduleUrl('../convex/deviceApprovalStore.ts'));
 const credentials = await import(moduleUrl('../convex/deviceCredentials.ts'));
 const hosted = await import(moduleUrl('../convex/projectBackups.ts'));
 const coordination = await import(moduleUrl('../convex/projectCoordination.ts'));
@@ -39,7 +40,11 @@ function fixture(t) {
   const originalQuery = s.ctx.runQuery;
   s.ctx.runQuery = async (ref, args) => {
     const [module, name] = getFunctionName(ref).split(':');
-    return module === 'deviceStore' ? store[name]._handler(s.ctx, args) : originalQuery(ref, args);
+    return module === 'deviceStore'
+      ? store[name]._handler(s.ctx, args)
+      : module === 'deviceApprovalStore'
+        ? approvalStore[name]._handler(s.ctx, args)
+        : originalQuery(ref, args);
   };
   const originalMutation = s.ctx.runMutation;
   s.ctx.runMutation = async (ref, args) => {

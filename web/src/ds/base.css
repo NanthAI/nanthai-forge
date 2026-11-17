@@ -59,7 +59,7 @@
   .seg { display: inline-flex; border: var(--rule) solid var(--line-strong); border-radius: var(--r); }
   .seg button { border: 0; border-radius: 0; margin: 0; background: transparent; height: 28px; padding: 0 10px; color: var(--text-2); font-size: var(--t-meta); font-weight: var(--w-strong); white-space: nowrap; }
   .seg button + button { border-left: var(--rule) solid var(--line-strong); }
-  .seg button[aria-pressed="true"] { background: var(--surface-3); color: var(--text); }
+  .seg button[aria-pressed="true"], .seg button[aria-checked="true"] { background: var(--surface-3); color: var(--text); }
   @media (hover: hover) and (pointer: fine) {
     .btn:not([disabled]):hover { background: var(--hover); } .btn.primary:hover { background: var(--brand-hover); }
     .btn.ghost:hover, .seg button:hover { color: var(--text); }

@@ -5,7 +5,11 @@ import { query, mutation, coordinationQuery, isDeviceIdentity } from './cliServe
 // Reviewed exception: self-revocation remains retryable after revocation and only removes
 // authority. Every other export uses the guarded cliServer builders.
 import { mutation as revocationMutation } from './server';
-import { deviceScope } from './deviceFields';
+import { keepsDeviceSettings, maySeeDeviceName } from './accessPolicy';
+import { deviceOperation, finishDeviceOperation } from './deviceOperation';
+import { currentCredential, deviceSettings, deviceScope } from './deviceFields';
+import { accessibleProject, memberProject } from './projectAuthority';
+import { projectRole } from './projectRole';
 import { accountFor } from './urlIdentity';
 import { invariant } from '../src/errors';
 const item = v.object({
@@ -41,7 +45,11 @@ export const list = query({
   },
 });
 export const revoke = revocationMutation({
-  args: { credentialId: v.string(), operationId: v.string() },
+  args: {
+    credentialId: v.string(),
+    operationId: v.string(),
+    action: v.optional(v.union(v.literal('signout'), v.literal('remove'))),
+  },
   returns: v.null(),
   handler: async (ctx, args) => {
     const user = await ctx.auth.getUserIdentity();
@@ -55,12 +63,33 @@ export const revoke = revocationMutation({
       'AUTH_SCOPE_DENIED',
       'A CLI device can revoke itself.',
     );
-    await ctx.db.patch(row._id, { revoked: true });
+    const action = args.action ?? 'signout';
+    const receipt = row.deviceKey
+      ? await deviceOperation(ctx, row.owner, args.operationId, { action, credentialId: row.credentialId })
+      : null;
+    if (receipt?.result) return null;
+    invariant(
+      !row.deviceKey || !isDeviceIdentity(user) || currentCredential(row, user.subject, user.forgeSignIn),
+      'AUTH_REVOKED',
+      'This device sign-in ended. Retry the original sign-out operation or sign in again.',
+    );
+    const keep = keepsDeviceSettings(action);
+    await ctx.db.patch(row._id, {
+      revoked: true,
+      ...(!keep ? { removed: true, name: '', settings: undefined } : {}),
+    });
+    if (receipt)
+      await finishDeviceOperation(ctx, receipt, args.operationId, row.credentialId, { ended: action });
     return null;
   },
 });
 export const rename = mutation({
-  args: { credentialId: v.string(), name: v.string(), operationId: v.string() },
+  args: {
+    credentialId: v.string(),
+    name: v.string(),
+    operationId: v.string(),
+    settings: v.optional(deviceSettings),
+  },
   returns: v.null(),
   handler: async (ctx, args) => {
     const user = await ctx.auth.getUserIdentity();
@@ -80,7 +109,38 @@ export const rename = mutation({
       'BAD_ARGUMENT',
       'Use a device name of 1 to 80 characters.',
     );
-    if (row.name !== name) await ctx.db.patch(row._id, { name });
+    invariant(!row.removed, 'AUTH_REVOKED', 'This device was removed. Approve a new key to use it again.');
+    invariant(
+      !args.settings || !isDeviceIdentity(user),
+      'AUTH_SCOPE_DENIED',
+      'Change device settings from your Forge browser.',
+    );
+    const receipt = row.deviceKey
+      ? await deviceOperation(ctx, row.owner, args.operationId, {
+          action: 'configure',
+          credentialId: row.credentialId,
+          name,
+          ...(args.settings ? { settings: args.settings } : {}),
+        })
+      : null;
+    if (receipt?.result) return null;
+    if (args.settings?.projects.kind === 'project') {
+      const id = ctx.db.normalizeId('hostedProjects', args.settings.projects.projectId);
+      invariant(id, 'PROJECT_UNAVAILABLE', 'Select an available project.');
+      await accessibleProject(ctx, id, row.owner);
+    }
+    if (row.name !== name || args.settings)
+      await ctx.db.patch(row._id, {
+        name,
+        ...(args.settings
+          ? {
+              settings: args.settings,
+              scope: args.settings.source === 'coordination' ? ('coordination' as const) : ('cli' as const),
+            }
+          : {}),
+      });
+    if (receipt)
+      await finishDeviceOperation(ctx, receipt, args.operationId, row.credentialId, { configured: true });
     return null;
   },
 });
@@ -92,16 +152,102 @@ export const status = coordinationQuery({
     credentialId: v.union(v.string(), v.null()),
     /** The account still has to pick or keep its handle once. */
     pick: v.optional(v.literal(true)),
+    device: v.optional(
+      v.object({
+        id: v.string(),
+        code: v.string(),
+        name: v.string(),
+        approvedAt: v.number(),
+        expiresAt: v.number(),
+        settings: deviceSettings,
+      }),
+    ),
   }),
   handler: async ctx => {
     const user = await ctx.auth.getUserIdentity();
     invariant(user, 'AUTH_REQUIRED', 'Sign in to Forge.');
+    const device = ctx.forgeDevice;
     return {
+      ...(device?.deviceCode && device.deviceApprovedAt !== undefined && device.settings
+        ? {
+            device: {
+              id: device.credentialId,
+              code: device.deviceCode,
+              name: device.name,
+              approvedAt: device.deviceApprovedAt,
+              expiresAt: device.expiresAt,
+              settings: device.settings,
+            },
+          }
+        : {}),
       ...(await (async () => {
         const account = await accountFor(ctx, user.subject);
         return { handle: account?.handle ?? null, ...(account?.handlePrompt ? { pick: true as const } : {}) };
       })()),
       credentialId: typeof user.forgeCredential === 'string' ? user.forgeCredential : null,
+    };
+  },
+});
+
+/** Folded devices for one roster person: one indexed account page, never one RPC per device. */
+export const project = coordinationQuery({
+  args: { projectId: v.id('hostedProjects'), person: v.string(), paginationOpts: paginationOptsValidator },
+  returns: paginationResultValidator(
+    v.object({
+      id: v.string(),
+      code: v.string(),
+      approvedAt: v.number(),
+      name: v.optional(v.string()),
+      state: v.union(
+        v.literal('signed-in'),
+        v.literal('signed-out'),
+        v.literal('expired'),
+        v.literal('removed'),
+      ),
+    }),
+  ),
+  handler: async (ctx, input) => {
+    const viewer = await ctx.auth.getUserIdentity();
+    invariant(viewer, 'PROJECT_UNAVAILABLE', 'Sign in to see project devices.');
+    const selected = await memberProject(ctx, input.projectId, viewer.subject);
+    invariant(
+      await projectRole(ctx, selected, input.person),
+      'PROJECT_UNAVAILABLE',
+      'This person is unavailable in this project.',
+    );
+    const page = await ctx.db
+      .query('cliCredentials')
+      .withIndex('by_owner', q => q.eq('owner', input.person))
+      .order('desc')
+      .paginate({
+        ...input.paginationOpts,
+        numItems: Math.min(input.paginationOpts.numItems, 25),
+        maximumRowsRead: 100,
+        maximumBytesRead: 64 * 1024,
+      });
+    return {
+      ...page,
+      page: page.page.flatMap(row =>
+        row.deviceCode &&
+        row.deviceApprovedAt !== undefined &&
+        (row.settings?.projects.kind === 'all' || row.settings?.projects.projectId === input.projectId)
+          ? [
+              {
+                id: row.credentialId,
+                code: row.deviceCode,
+                approvedAt: row.deviceApprovedAt,
+                ...(maySeeDeviceName(viewer.subject, row.owner) ? { name: row.name } : {}),
+                state: row.removed
+                  ? ('removed' as const)
+                  : row.revoked
+                    ? ('signed-out' as const)
+                    : row.expiresAt <= Date.now()
+                      ? ('expired' as const)
+                      : ('signed-in' as const),
+              },
+            ]
+          : [],
+      ),
     };
   },
 });

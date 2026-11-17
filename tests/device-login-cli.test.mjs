@@ -22,7 +22,10 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
     for await (const chunk of request) chunks.push(chunk);
     const input = JSON.parse(Buffer.concat(chunks).toString());
     response.setHeader('Content-Type', 'application/json');
-    if (request.url === '/auth/device/start' && limited) {
+    if (request.url === '/auth/device/start-v2') {
+      response.statusCode = 404;
+      response.end('{}');
+    } else if (request.url === '/auth/device/start' && limited) {
       response.statusCode = 429;
       response.end(JSON.stringify({ error: 'slow_down', interval: 60 }));
     } else if (request.url === '/auth/device/start') {

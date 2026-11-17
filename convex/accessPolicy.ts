@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/** C1 provisional policies. Owner-confirmation stays open on df06081d/76e3ae31.
- * Each disputed rule has one setting; consumers call the policy rather than copy it. */
+/** Owner-approved access policies. Each rule has one setting; consumers call the policy. */
 export const accessPolicy = {
   laneTakeover: 'same-person-or-project-owner' as 'same-person-or-project-owner' | 'project-writers',
   liveTakeoverReason: true,

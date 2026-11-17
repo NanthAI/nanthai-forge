@@ -2,10 +2,52 @@
 import { journalProject } from './projectJournalStore';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
+import { currentCredential } from './deviceFields';
+import type { Doc } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { projectExecution } from './projectExecution';
 import { hasWriteRole, projectRole } from './projectRole';
+const deviceReads = new WeakMap<object, Promise<Doc<'cliCredentials'> | null>>();
+/** Reuse the public guard's row; a nested caller checks once in its transaction.
+ * Source workers carry trusted job authority and may have no auth surface. */
+async function deviceProject(ctx: QueryCtx | MutationCtx, projectId: string, writing = false) {
+  let row: Doc<'cliCredentials'> | null | undefined = (ctx as { forgeDevice?: Doc<'cliCredentials'> | null })
+    .forgeDevice;
+  if (row === undefined) {
+    let selected = deviceReads.get(ctx);
+    if (!selected) {
+      selected = (async () => {
+        const user = await ctx.auth?.getUserIdentity();
+        if (typeof user?.forgeCredential !== 'string' || typeof user.forgeSignIn !== 'string') return null;
+        const found = await ctx.db
+          .query('cliCredentials')
+          .withIndex('by_credentialId', q => q.eq('credentialId', user.forgeCredential as string))
+          .unique();
+        invariant(
+          currentCredential(found, user.subject, user.forgeSignIn),
+          'AUTH_REVOKED',
+          'This device sign-in ended. Run nforge login; saved work remains.',
+        );
+        return found;
+      })();
+      deviceReads.set(ctx, selected);
+    }
+    row = await selected;
+  }
+  const settings = row?.settings;
+  invariant(
+    !settings || settings.projects.kind === 'all' || settings.projects.projectId === projectId,
+    'AUTH_SCOPE_DENIED',
+    'This device is approved for its selected project only. Change its settings in your Forge browser.',
+  );
+  invariant(
+    !writing || settings?.source !== 'read',
+    'AUTH_SCOPE_DENIED',
+    'This device is read only. Change its settings in your Forge browser to write; local work is kept.',
+  );
+}
 export async function ownedProject(ctx: QueryCtx | MutationCtx, id: Id<'hostedProjects'>, owner: string) {
+  await deviceProject(ctx, id);
   const project = await ctx.db.get(id);
   let authorized = false;
   try {
@@ -27,6 +69,7 @@ export async function activeOwnedProject(
   id: Id<'hostedProjects'>,
   owner: string,
 ) {
+  await deviceProject(ctx, id, true);
   const project = await ownedProject(ctx, id, owner);
   invariant(
     !project.removal,
@@ -40,6 +83,7 @@ export async function accessibleProject(
   projectId: Id<'hostedProjects'>,
   actor: string,
 ) {
+  await deviceProject(ctx, projectId);
   const project = await ctx.db.get(projectId);
   let authorized = false;
   try {
@@ -68,6 +112,7 @@ export async function accessibleProject(
   }
 }
 export async function activeProject(ctx: QueryCtx | MutationCtx, id: Id<'hostedProjects'>, actor: string) {
+  await deviceProject(ctx, id, true);
   const project = await accessibleProject(ctx, id, actor);
   invariant(
     await hasWriteRole(ctx, project, actor),
@@ -84,6 +129,7 @@ export async function activeProject(ctx: QueryCtx | MutationCtx, id: Id<'hostedP
 
 /** Full Work archives belong to project members, independently of public source visibility. */
 export async function memberProject(ctx: QueryCtx | MutationCtx, id: Id<'hostedProjects'>, actor: string) {
+  await deviceProject(ctx, id);
   const project = await ctx.db.get(id);
   invariant(
     project && !project.removal,

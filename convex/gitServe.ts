@@ -110,6 +110,7 @@ type Pack = PackBytes & { packSha1: string; state?: string };
 type LaneArgs = { list: boolean; named: string[]; commits: string[] };
 type LaneRow = { laneId: string; commit: string; pack: PackBytes | null };
 type Loaded = {
+  signInId?: string;
   status: 'ok';
   projectId: Id<'hostedProjects'>;
   member: boolean;
@@ -363,7 +364,10 @@ async function largeRedirect(
   if (!workerServes(worker, bytes)) return { prepared, redirect: null };
   const refused = overCap(loaded.workerUsage, bytes);
   if (refused) throw new ForgeError(refused.code, refused.message);
-  return { prepared, redirect: workerRedirect(worker, loaded.projectId, credentialId, !!prepared.gap) };
+  return {
+    prepared,
+    redirect: workerRedirect(worker, loaded.projectId, credentialId, !!prepared.gap, loaded.signInId),
+  };
 }
 
 const sessionEnded = () =>
@@ -430,7 +434,9 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
       ...route.project,
       ...(credential ? { credential } : {}),
       ...(lanes ? { lanes } : {}),
-      ...(session?.c ? { sessionCredentialId: session.c } : {}),
+      ...(session?.c
+        ? { sessionCredentialId: session.c, ...(session.g ? { sessionSignIn: session.g } : {}) }
+        : {}),
     })) as
       | Loaded
       | { status: 'sign-in'; message: string }

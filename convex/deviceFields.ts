@@ -2,6 +2,15 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 export const deviceScope = v.union(v.literal('cli'), v.literal('coordination'));
+export const deviceSettings = v.object({
+  source: v.union(v.literal('write'), v.literal('read'), v.literal('coordination')),
+  projects: v.union(
+    v.object({ kind: v.literal('all') }),
+    // This account-owned setting retains an opaque reference; it is not project-owned data.
+    v.object({ kind: v.literal('project'), projectId: v.string() }),
+  ),
+});
+export const deviceProof = v.object({ id: v.string(), key: v.string(), at: v.number(), proof: v.string() });
 export const credentialFields = {
   owner: v.string(),
   name: v.string(),
@@ -18,16 +27,7 @@ export const credentialFields = {
   deviceLastSeen: v.optional(v.number()),
   removed: v.optional(v.boolean()),
   renewal: v.optional(v.object({ operationId: v.string(), requestHash: v.string(), issuedAt: v.number() })),
-  settings: v.optional(
-    v.object({
-      source: v.union(v.literal('write'), v.literal('read'), v.literal('coordination')),
-      projects: v.union(
-        v.object({ kind: v.literal('all') }),
-        // This account-owned setting retains an opaque reference; it is not project-owned data.
-        v.object({ kind: v.literal('project'), projectId: v.string() }),
-      ),
-    }),
-  ),
+  settings: v.optional(deviceSettings),
 };
 export const credentialDocument = v.object({
   _id: v.id('cliCredentials'),
@@ -73,3 +73,19 @@ export const deviceTables = {
     handles: v.optional(v.array(v.object({ handle: v.string(), count: v.number() }))),
   }).index('by_owner', ['owner']),
 };
+
+/** Current stable sign-in generation; old bearer tokens never regain access after a re-login. */
+export function currentCredential(
+  row: import('./_generated/dataModel').Doc<'cliCredentials'> | null,
+  owner: string,
+  signIn: unknown,
+): row is import('./_generated/dataModel').Doc<'cliCredentials'> {
+  return Boolean(
+    row &&
+    row.owner === owner &&
+    !row.revoked &&
+    !row.removed &&
+    row.expiresAt > Date.now() &&
+    (!row.deviceKey || (typeof signIn === 'string' && row.renewal?.operationId === signIn)),
+  );
+}

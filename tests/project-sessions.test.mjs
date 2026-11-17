@@ -12,6 +12,19 @@ test('session pages disclose public handles and device codes but device names fo
   const f = await saveFixture();
   f.insert('forgeAccounts', { owner: peer, handle: 'peer-builder' });
   f.insert('projectContributors', { projectId: f.projectId, contributor: peer });
+  const deviceId = randomUUID();
+  f.insert('cliCredentials', {
+    owner: peer,
+    credentialId: deviceId,
+    deviceCode: 'dv-synthetic',
+    deviceApprovedAt: 1,
+    name: 'Current private label',
+    scope: 'cli',
+    issuedAt: 1,
+    expiresAt: 2,
+    tokenHash: 'synthetic',
+    revoked: false,
+  });
   f.insert('projectHostedPresence', {
     projectId: f.projectId,
     laneId: randomUUID(),
@@ -27,7 +40,7 @@ test('session pages disclose public handles and device codes but device names fo
       startedAt: 1,
       app: 'synthetic-app',
       identityFrom: 'declared',
-      device: { id: randomUUID(), code: 'dv-synthetic', approvedAt: 1, owner: peer, name: 'Private label' },
+      device: { id: deviceId, code: 'dv-synthetic', approvedAt: 1, owner: peer, name: 'Stale private label' },
     },
   });
   const read = actor =>
@@ -36,12 +49,12 @@ test('session pages disclose public handles and device codes but device names fo
     otherPage = await read('owner');
   const mine = { rows: minePage.rows.filter(r => r.device) },
     other = { rows: otherPage.rows.filter(r => r.device) };
-  assert.equal(mine.rows[0].device.name, 'Private label');
+  assert.equal(mine.rows[0].device.name, 'Current private label');
   assert.equal(other.rows[0].device.name, undefined);
   assert.equal(other.rows[0].device.code, 'dv-synthetic');
   assert.equal(other.rows[0].device.owner, undefined);
   assert.equal(other.rows[0].person, 'peer-builder');
-  assert.doesNotMatch(JSON.stringify(other), /user_PEERACCOUNT01|Private label/);
+  assert.doesNotMatch(JSON.stringify(other), /user_PEERACCOUNT01|private label/i);
   f.patch('hostedProjects', f.projectId, { visibility: 'public' });
   await assert.rejects(read('public-guest'), code('PROJECT_UNAVAILABLE'));
   f.patch(
@@ -151,6 +164,114 @@ test('session projection at current and doubled organisation scale reads one bou
     assert.equal(count.writeBytes, 0);
     console.log(
       JSON.stringify({ scale, people: 400 * scale, devices: 1200 * scale, sessions: 300 * scale, ...count }),
+    );
+  }
+});
+
+test('every public session-snapshot projection applies device-name policy, including nested saved JSON', async () => {
+  const people = await import(moduleUrl('../convex/publicPeople.ts'));
+  const f = await saveFixture();
+  f.insert('forgeAccounts', { owner: 'peer', handle: 'peer-builder' });
+  f.insert('projectContributors', { projectId: f.projectId, contributor: 'peer' });
+  const source = {
+    session: {
+      sessionId: 'a'.repeat(64),
+      device: {
+        id: randomUUID(),
+        code: 'dv-synthetic',
+        approvedAt: 1,
+        owner: 'owner',
+        name: 'Owner-private label',
+      },
+    },
+  };
+  const read = (actor, value) =>
+    f.transaction(
+      'snapshot projection',
+      { _handler: ctx => people.publicPeople(ctx, { projectId: f.projectId }, value) },
+      {},
+      actor,
+    );
+  for (const value of [source, JSON.stringify(source)]) {
+    const mine = await read('owner', value),
+      peer = await read('peer', value);
+    assert(JSON.stringify(mine).includes('Owner-private label'));
+    assert(!JSON.stringify(peer).includes('Owner-private label'));
+    assert(JSON.stringify(peer).includes('dv-synthetic'));
+  }
+  assert.equal(
+    source.session.device.name,
+    'Owner-private label',
+    'public projection never mutates the retained snapshot',
+  );
+});
+
+test('saved session identity never carries the account-owned private device label', async () => {
+  const { sessionIdentity } = await import(moduleUrl('../convex/projectSessionIdentity.ts'));
+  const snapshot = sessionIdentity('a'.repeat(64), { app: 'synthetic', identityFrom: 'declared' }, 1, {
+    credentialId: randomUUID(),
+    deviceCode: 'dv-synthetic',
+    deviceApprovedAt: 1,
+    owner: peer,
+    name: 'Private label',
+  });
+  assert.equal(snapshot.device.name, undefined);
+  assert.equal(snapshot.device.owner, peer);
+  assert.doesNotMatch(JSON.stringify(snapshot), /Private label/);
+});
+
+test('own device labels are deduplicated and bounded at current and doubled organisation scale', async () => {
+  for (const scale of [1, 2]) {
+    const f = await saveFixture();
+    for (let i = 0; i < 1200 * scale; i++) {
+      const id = randomUUID();
+      f.insert('cliCredentials', {
+        owner: 'owner',
+        credentialId: id,
+        deviceCode: `dv-${i}`,
+        deviceApprovedAt: 1,
+        name: 'Private current label',
+        scope: 'cli',
+        issuedAt: 1,
+        expiresAt: 2,
+        tokenHash: 'synthetic',
+        revoked: false,
+      });
+      if (i < 300 * scale)
+        f.insert('projectHostedPresence', {
+          projectId: f.projectId,
+          laneId: randomUUID(),
+          intentId: randomUUID(),
+          actor: 'owner',
+          agent: `session-${i}`,
+          goal: 'Synthetic work',
+          paths: [],
+          pathCount: 0,
+          at: i,
+          session: {
+            sessionId: String(i).padStart(64, '0'),
+            startedAt: 1,
+            device: { id, code: `dv-${i}`, approvedAt: 1, owner: 'owner' },
+          },
+        });
+    }
+    const page = JSON.parse(
+      await f.transaction('sessions', api.read, { projectId: f.projectId, cursor: null }),
+    );
+    assert.equal(page.rows.length, 25);
+    assert(page.rows.every(row => row.device.name === 'Private current label'));
+    const count = f.counts.at(-1);
+    assert.equal(count.readDocumentsByTable.cliCredentials, 25);
+    assert(count.documents <= 55);
+    assert.equal(count.writes, 0);
+    console.log(
+      JSON.stringify({
+        ownDeviceLabels: true,
+        scale,
+        ranges: count.ranges,
+        documents: count.documents,
+        readBytes: count.readBytes,
+      }),
     );
   }
 });

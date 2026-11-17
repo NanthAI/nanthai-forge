@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { maySeeDeviceName } from './accessPolicy';
 import { v } from 'convex/values';
 import { internalQuery, type ActionCtx, type MutationCtx, type QueryCtx } from './server';
 import type { Id } from './_generated/dataModel';
@@ -153,10 +154,31 @@ async function mapNode(view: View, node: unknown, person: boolean, shape?: Shape
       if (field && !field.optional) out[key] = null;
       continue;
     }
+    let projected = value;
+    // Session snapshots retain their raw account owner so every public read can apply
+    // the same display-name policy before the normal handle projection.
+    if (
+      key === 'device' &&
+      typeof record.sessionId === 'string' &&
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value)
+    ) {
+      const device = value as Record<string, unknown>;
+      if (
+        typeof device.owner === 'string' &&
+        typeof device.code === 'string' &&
+        typeof device.approvedAt === 'number' &&
+        !maySeeDeviceName(view.viewer ?? '', device.owner)
+      ) {
+        projected = { ...device };
+        delete (projected as Record<string, unknown>).name;
+      }
+    }
     const mapped =
       nameKeys.has(key) || (emailKeys.has(key) && !(await view.role()).owner)
         ? REMOVE
-        : await mapNode(view, value, personKeys.has(key), field?.fieldType);
+        : await mapNode(view, projected, personKeys.has(key), field?.fieldType);
     if (mapped !== REMOVE) out[key] = mapped;
     else if (field && !field.optional) out[key] = blank(value);
   }

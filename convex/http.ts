@@ -170,6 +170,31 @@ for (const operation of ['start', 'poll'] as const)
       }
     }),
   });
+for (const operation of ['start-v2', 'renew'] as const)
+  http.route({
+    path: `/auth/device/${operation}`,
+    method: 'POST',
+    handler: httpAction(async (ctx, request) => {
+      try {
+        const input = { ...(await request.json()), origin: new URL(request.url).origin };
+        const result = JSON.parse(
+          await ctx.runAction(
+            operation === 'renew' ? internal.deviceStableActions.renew : internal.deviceStableActions.start,
+            input,
+          ),
+        );
+        return Response.json(result, {
+          status: result.error === 'slow_down' ? 429 : 200,
+          headers: { 'Cache-Control': 'no-store' },
+        });
+      } catch {
+        return Response.json(
+          { error: 'Device proof or request is unavailable.' },
+          { status: 400, headers: { 'Cache-Control': 'no-store' } },
+        );
+      }
+    }),
+  });
 http.route({
   path: '/auth/jwks',
   method: 'GET',

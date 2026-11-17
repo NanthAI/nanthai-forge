@@ -56,6 +56,10 @@ export default function DeviceLogin() {
     setError('');
     try {
       const request = await client.action(api.deviceActions.inspect, { code });
+      if ('needsCode' in request) {
+        setPhase({ kind: 'enter' });
+        return;
+      }
       decision.current = null;
       // A code that already has a decision still opens its card, which says who decided what.
       setPhase({ kind: 'review', request });

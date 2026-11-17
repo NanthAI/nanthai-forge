@@ -20,3 +20,8 @@ export function deploymentUrl(value: string) {
   );
   return url.origin;
 }
+
+/** Populated only by the local auth store already read for a command. No eager auth-file imports. */
+export const renewableDevices = new Map<string, { deployment: string; expiresAt: number }>();
+export const renewableDevice = (token: string | undefined) =>
+  token && !process.env.FORGE_AUTH_TOKEN ? renewableDevices.get(token) : undefined;

@@ -67,8 +67,17 @@ export type WorkerConfig = NonNullable<ReturnType<typeof workerConfig>>;
 /** Shown in Git's "redirecting to" line when hosted main is ahead of the newest Git commit
  * (this path has no side-band, so no remote: line). */
 const gapSegment = 'unpublished-landings';
-export function workerRedirect(config: WorkerConfig, projectId: string, credentialId: string, gap: boolean) {
-  const token = signWorkerToken({ p: projectId, c: credentialId, e: Date.now() + workerTokenMs }, config.key);
+export function workerRedirect(
+  config: WorkerConfig,
+  projectId: string,
+  credentialId: string,
+  gap: boolean,
+  signInId?: string,
+) {
+  const token = signWorkerToken(
+    { p: projectId, c: credentialId, e: Date.now() + workerTokenMs, ...(signInId ? { g: signInId } : {}) },
+    config.key,
+  );
   const location = `${config.url}/gitw/${token}/${gap ? `${gapSegment}/` : ''}${projectId}.git/info/refs?service=git-upload-pack`;
   return new Response(null, {
     status: 302,

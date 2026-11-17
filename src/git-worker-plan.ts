@@ -33,7 +33,7 @@ export const workerTokenKey = (secret: string) =>
   hmac(sha256, utf8ToBytes(secret), utf8ToBytes('forge-git-worker-token-v1'));
 
 /** `p` project id, `c` Forge CLI credential id ('' only in legacy anonymous sessions), `e` expiry (ms). */
-export type WorkerSession = { p: string; c: string; e: number };
+export type WorkerSession = { p: string; c: string; e: number; g?: string };
 export function signWorkerToken(session: WorkerSession, key: Uint8Array) {
   const body = b64url(utf8ToBytes(JSON.stringify(session)));
   return `${body}.${b64url(hmac(sha256, key, utf8ToBytes(body)))}`;
@@ -55,6 +55,7 @@ export function verifyWorkerToken(token: string, key: Uint8Array, now = Date.now
   if (difference) return null;
   try {
     const session = JSON.parse(new TextDecoder().decode(unb64url(body))) as WorkerSession;
+    if (session.g !== undefined && typeof session.g !== 'string') return null;
     if (typeof session.p !== 'string' || typeof session.c !== 'string' || typeof session.e !== 'number')
       return null;
     return session.e > now ? session : null;

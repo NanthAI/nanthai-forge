@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { useState } from 'react';
+import { DeviceSettings } from './DeviceSettings';
+import type { DeviceSettings as Settings } from './access-contract';
+import { useState, type ReactNode } from 'react';
 import { Band, Key, Region, Row, State } from '../ds';
 import { Head } from './Place';
 import './access.css';
@@ -13,6 +15,10 @@ export type AccountSessions = {
     issuedAt: number;
     expiresAt: number;
     revoked: boolean;
+    code?: string;
+    approvedAt?: number;
+    removed?: boolean;
+    settings?: Settings;
   }[];
   github: string | null;
   notice: { at: number; passkeyId: string } | null;
@@ -32,6 +38,9 @@ type Actions = {
   remove: (id: string) => void;
   renameDevice: (id: string, name: string) => void;
   endDevice: (id: string) => void;
+  removeDevice?: (id: string) => void;
+  projectChoice?: (select: (projectId: string, name: string) => void) => ReactNode;
+  configureDevice?: (id: string, name: string, settings: Settings) => void;
 };
 export function YouView({
   data,
@@ -50,8 +59,12 @@ export function YouView({
   const [open, setOpen] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [name, setName] = useState('');
+  const [configuring, setConfiguring] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState<string | null>(null);
+  const [pickingProject, setPickingProject] = useState(false);
+  const [settings, setSettings] = useState<Settings | null>(null);
   const sentence = data
-    ? `You are signed in on ${data.sessions.length} ${data.sessions.length === 1 ? 'browser' : 'browsers'} and have ${data.devices.length}${data.isDone ? '' : ' shown'} ${data.devices.length === 1 ? 'device' : 'devices'}.`
+    ? `You are signed in on ${data.sessions.length} ${data.sessions.length === 1 ? 'browser' : 'browsers'} shown here and have ${data.devices.length}${data.isDone ? '' : ' shown'} ${data.devices.length === 1 ? 'device' : 'devices'}.`
     : 'Loading your sign-ins and devices…';
   const edit = (id: string, value: string) => {
     setEditing(id);
@@ -111,7 +124,7 @@ export function YouView({
                   <Key
                     kind="ghost"
                     size="sm"
-                    aria-label={`${open === d.credentialId ? 'Fold' : 'Open'} device ${d.name}`}
+                    aria-label={`${open === d.credentialId ? 'Fold' : 'Open'} device ${d.name || d.code || 'removed device'}`}
                     aria-expanded={open === d.credentialId}
                     onClick={() => setOpen(open === d.credentialId ? null : d.credentialId)}
                   >
@@ -119,20 +132,34 @@ export function YouView({
                   </Key>
                   <div>
                     <q dir="auto" translate="no">
-                      {d.name}
+                      {d.name || d.code || 'Removed device'}
                     </q>
                     <span className="sub">
-                      {d.revoked
-                        ? 'Signed out'
-                        : d.expiresAt <= now
-                          ? 'Sign-in expired'
-                          : `Signed in until ${date(d.expiresAt)}`}
+                      {d.removed
+                        ? 'Removed'
+                        : d.revoked
+                          ? 'Signed out'
+                          : d.expiresAt <= now
+                            ? d.code
+                              ? 'Renews on its next command'
+                              : 'Sign-in expired'
+                            : `Signed in until ${date(d.expiresAt)}`}
                     </span>
                   </div>
                   <span className="meta">
-                    {d.scope === 'coordination' ? 'Coordination only' : 'May write'}
+                    {d.settings?.source === 'read'
+                      ? 'Read only'
+                      : d.scope === 'coordination'
+                        ? 'Coordination only'
+                        : 'May write'}
                     <br />
-                    approved {date(d.issuedAt)}
+                    {d.code && (
+                      <>
+                        <span className="dcode">{d.code}</span>
+                        <br />
+                      </>
+                    )}
+                    approved {date(d.approvedAt ?? d.issuedAt)}
                   </span>
                 </Row>
                 {open === d.credentialId ? (
@@ -141,7 +168,12 @@ export function YouView({
                       <span>
                         Name <q dir="auto">{d.name}</q>
                       </span>
-                      <Key size="sm" kind="ghost" onClick={() => edit(d.credentialId, d.name)}>
+                      <Key
+                        size="sm"
+                        kind="ghost"
+                        disabled={busy || d.removed}
+                        onClick={() => edit(d.credentialId, d.name)}
+                      >
                         Rename
                       </Key>
                     </Row>
@@ -168,10 +200,142 @@ export function YouView({
                         </Key>
                       </form>
                     ) : null}
-                    <div className="pad">
+                    {d.code && (
+                      <>
+                        <Row cols="120px minmax(0,1fr)">
+                          <span className="t2">Code</span>
+                          <span>
+                            <span className="dcode">{d.code}</span>
+                            <span className="sub">
+                              From the key on this device. <code>nforge agent . whoami</code> prints the same
+                              reference.
+                            </span>
+                          </span>
+                        </Row>
+                        {d.settings && actions.configureDevice && (
+                          <Row cols="120px minmax(0,1fr) auto">
+                            <span className="t2">Agents may write</span>
+                            <span>
+                              {d.settings.source === 'write'
+                                ? 'They can start Lanes, save and land with a check.'
+                                : d.settings.source === 'read'
+                                  ? 'They read and cannot change work.'
+                                  : 'They see who is working and wait their turn.'}
+                            </span>
+                            <input
+                              className="sw"
+                              type="checkbox"
+                              role="switch"
+                              aria-label="Agents on this device may write"
+                              checked={d.settings.source === 'write'}
+                              disabled={busy || d.removed}
+                              onChange={event =>
+                                actions.configureDevice?.(d.credentialId, d.name, {
+                                  ...d.settings!,
+                                  source: event.target.checked ? 'write' : 'read',
+                                })
+                              }
+                            />
+                          </Row>
+                        )}
+                        <Row cols="120px minmax(0,1fr)">
+                          <span className="t2">Without a check</span>
+                          <span>Never. An agent needs a passing check.</span>
+                        </Row>
+                        <Row cols="120px minmax(0,1fr)">
+                          <span className="t2">Sign-in</span>
+                          <span>
+                            {d.removed
+                              ? 'Removed'
+                              : d.revoked
+                                ? 'Signed out; its name and settings are kept.'
+                                : `30 days, renewed while the device is in use.`}
+                          </span>
+                        </Row>
+                        <Row cols="120px minmax(0,1fr)">
+                          <span className="t2">Approved</span>
+                          <span>{date(d.approvedAt ?? d.issuedAt)}, by you.</span>
+                        </Row>
+                      </>
+                    )}
+                    {d.settings && actions.configureDevice && !d.removed && (
+                      <>
+                        {configuring === d.credentialId && settings ? (
+                          <form
+                            onSubmit={event => {
+                              event.preventDefault();
+                              actions.configureDevice?.(d.credentialId, d.name, settings);
+                              setConfiguring(null);
+                            }}
+                          >
+                            <DeviceSettings
+                              projectName={projectName}
+                              value={settings}
+                              change={setSettings}
+                              disabled={busy}
+                            />
+                            {actions.projectChoice && (
+                              <div className="pad">
+                                <Key size="sm" onClick={() => setPickingProject(!pickingProject)}>
+                                  Choose a project…
+                                </Key>
+                              </div>
+                            )}
+                            {pickingProject &&
+                              actions.projectChoice?.((projectId, name) => {
+                                setProjectName(name);
+                                setSettings({ ...settings, projects: { kind: 'project', projectId } });
+                                setPickingProject(false);
+                              })}
+                            <div className="pad btns">
+                              <Key type="submit" disabled={busy}>
+                                Save settings
+                              </Key>
+                              <Key type="button" onClick={() => setConfiguring(null)}>
+                                Cancel
+                              </Key>
+                            </div>
+                          </form>
+                        ) : (
+                          <div className="pad">
+                            <Key
+                              size="sm"
+                              onClick={() => {
+                                setConfiguring(d.credentialId);
+                                setSettings(d.settings!);
+                              }}
+                            >
+                              Change settings
+                            </Key>
+                            <p className="sub">
+                              {d.settings.projects.kind === 'all'
+                                ? 'Every project you can reach'
+                                : 'The approved project only'}
+                              . Changes apply to this device’s next command.
+                            </p>
+                          </div>
+                        )}
+                      </>
+                    )}
+                    <div className="pad btns">
                       <Key disabled={busy || d.revoked} onClick={() => actions.endDevice(d.credentialId)}>
                         Sign out this device
                       </Key>
+                      {d.code && actions.removeDevice && (
+                        <Key
+                          kind="danger"
+                          disabled={busy || d.removed}
+                          onClick={() => actions.removeDevice?.(d.credentialId)}
+                        >
+                          Remove this device
+                        </Key>
+                      )}
+                      {d.code && (
+                        <p className="sub">
+                          Signing out keeps its key, name and settings. Removing it revokes its key and drops
+                          its settings; approve a new key to use it again.
+                        </p>
+                      )}
                     </div>
                   </div>
                 ) : null}

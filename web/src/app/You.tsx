@@ -6,6 +6,7 @@ import { useOauth, useSignInWithGithub } from '@convex-dev/auth/methods/github/r
 import { useAddPasskey, useRemovePasskey } from '@convex-dev/auth/methods/username-passkey/react';
 import { api } from '../../../convex/_generated/api';
 import { assertPasskey } from './webauthn';
+import { DeviceProjectChoice } from './DeviceProjectChoice';
 import { YouView } from './YouView';
 export default function You({ handle, leave }: { handle?: string; leave?: () => void }) {
   const { signOut } = useAuthActions();
@@ -25,6 +26,34 @@ export default function You({ handle, leave }: { handle?: string; leave?: () => 
   const rename = useMutation(api.auth.renamePasskey);
   const revokeDevice = useMutation(api.deviceCredentials.revoke);
   const renameDevice = useMutation(api.deviceCredentials.rename);
+  const deviceOperations = useRef(new Map<string, string>());
+  const changeDevice = async (
+    kind: 'configure' | 'end',
+    input: {
+      credentialId: string;
+      name?: string;
+      settings?: Parameters<typeof renameDevice>[0]['settings'];
+      action?: 'remove';
+    },
+  ) => {
+    const key = JSON.stringify({ kind, ...input });
+    const operationId = deviceOperations.current.get(key) ?? crypto.randomUUID();
+    deviceOperations.current.set(key, operationId);
+    if (kind === 'configure')
+      await renameDevice({
+        credentialId: input.credentialId,
+        name: input.name!,
+        ...(input.settings ? { settings: input.settings } : {}),
+        operationId,
+      });
+    else
+      await revokeDevice({
+        credentialId: input.credentialId,
+        ...(input.action ? { action: input.action } : {}),
+        operationId,
+      });
+    deviceOperations.current.delete(key);
+  };
   const { addPasskey, pending: adding } = useAddPasskey(api.auth);
   const { removePasskey, pending: removing } = useRemovePasskey(api.auth);
   const { signIn: github } = useSignInWithGithub(api.authSessionGithub);
@@ -96,10 +125,13 @@ export default function You({ handle, leave }: { handle?: string; leave?: () => 
           if (!result.success) throw new Error('Passkey not renamed');
         })
       }
-      renameDevice={(id, name) =>
-        void run(() => renameDevice({ credentialId: id, name, operationId: crypto.randomUUID() }))
+      renameDevice={(id, name) => void run(() => changeDevice('configure', { credentialId: id, name }))}
+      projectChoice={select => <DeviceProjectChoice select={select} />}
+      configureDevice={(id, name, settings) =>
+        void run(() => changeDevice('configure', { credentialId: id, name, settings }))
       }
-      endDevice={id => void run(() => revokeDevice({ credentialId: id, operationId: crypto.randomUUID() }))}
+      removeDevice={id => void run(() => changeDevice('end', { credentialId: id, action: 'remove' }))}
+      endDevice={id => void run(() => changeDevice('end', { credentialId: id }))}
     />
   );
 }

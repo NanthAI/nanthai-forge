@@ -157,11 +157,12 @@ const shot = async (target, name) => {
 // --- the checks ---------------------------------------------------------------------------------------------------
 
 test('the reference surface: reorder, dock, late layer, axe and widths in both themes', async t => {
-  if (!existsSync(chromium.executablePath())) return t.skip('Playwright Chromium is not installed.');
+  const executablePath = process.env.FORGE_UI_BROWSER || chromium.executablePath();
+  if (!existsSync(executablePath)) return t.skip('A test browser is not installed.');
   const out = mkdtempSync(join(tmpdir(), 'forge-ds-reference-'));
   if (shots) mkdirSync(shots, { recursive: true });
   const layerFiles = await buildReference(out);
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath });
 
   /** A fresh page on the built surface; `hold` keeps the layer's chunks back until the returned release is called. */
   async function open(t, viewport = DESK, { hold = false } = {}) {

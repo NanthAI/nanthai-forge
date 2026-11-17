@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { renewableDevice } from './deployment-origin.js';
 import { measureCheckoutRpc } from './checkout-prep-observation.js';
 import { getFunctionName } from 'convex/server';
 import { longConvexAction } from './long-action.js';
@@ -30,6 +31,12 @@ export function deadlineConvexSubscription(
 function boundedClient<T extends object>(client: T, timeoutMs: number): T {
   const methods = new Map<PropertyKey, { source: unknown; bound: unknown }>();
   let mutationTail = Promise.resolve();
+  let credential: string | undefined;
+  const refreshed = async (token: string | undefined) => {
+    const saved = renewableDevice(token);
+    if (!saved || saved.expiresAt > Date.now()) return token;
+    return (await (await import('./device-key.js')).renewDevice(saved.deployment)).token;
+  };
   // Preserve the HTTP SDK's serial mutation order while entering each queued
   // request in its own cancellation context. The SDK's internal drain otherwise
   // inherits the first caller's async-local signal for every queued mutation.
@@ -40,6 +47,14 @@ function boundedClient<T extends object>(client: T, timeoutMs: number): T {
     args: unknown[],
     signal: AbortSignal,
   ) => {
+    const saved = renewableDevice(credential);
+    if (key !== 'close' && saved && saved.expiresAt <= Date.now() && target instanceof ConvexHttpClient) {
+      const token = await refreshed(credential);
+      if (token !== credential) {
+        target.setAuth(token!);
+        credential = token;
+      }
+    }
     const options = args[2] as { skipQueue?: boolean } | undefined;
     if (key !== 'mutation' || !(target instanceof ConvexHttpClient) || options?.skipQueue)
       return withExchangeProgress({ signal }, () => value.apply(target, args));
@@ -62,6 +77,23 @@ function boundedClient<T extends object>(client: T, timeoutMs: number): T {
     get(target, key) {
       const value = Reflect.get(target, key, target);
       if (typeof value !== 'function') return value;
+      if (key === 'clearAuth')
+        return (...args: unknown[]) => {
+          credential = undefined;
+          return value.apply(target, args);
+        };
+      if (key === 'setAuth')
+        return (auth: string | (() => Promise<string | null>), ...rest: unknown[]) => {
+          if (typeof auth === 'string') {
+            credential = auth;
+            return value.call(target, auth, ...rest);
+          }
+          return value.call(
+            target,
+            async () => (await refreshed((await auth()) ?? undefined)) ?? null,
+            ...rest,
+          );
+        };
       if (methods.get(key)?.source !== value)
         methods.set(key, {
           source: value,

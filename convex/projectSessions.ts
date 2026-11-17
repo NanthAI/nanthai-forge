@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
+import type { Doc } from './_generated/dataModel';
 import { query } from './cliServer';
 import { memberProject } from './projectAuthority';
 import { maySeeDeviceName } from './accessPolicy';
@@ -32,6 +33,30 @@ export const read = query({
         maximumRowsRead: 100,
         maximumBytesRead: 64 * 1024,
       });
+      // Private labels stay in account-owned credentials, never in shared source journals.
+      const names = new Map<string, string>();
+      const devices = new Map(
+        page.page.flatMap(row => {
+          const device = row.session?.device;
+          return device && maySeeDeviceName(user.subject, device.owner) ? [[device.id, device] as const] : [];
+        }),
+      );
+      for (const [id, device] of devices) {
+        const cached = (ctx as { forgeDevice?: Doc<'cliCredentials'> | null }).forgeDevice;
+        const credential =
+          cached?.credentialId === id
+            ? cached
+            : await ctx.db
+                .query('cliCredentials')
+                .withIndex('by_credentialId', q => q.eq('credentialId', id))
+                .unique();
+        if (
+          credential?.owner === device.owner &&
+          credential.deviceCode === device.code &&
+          credential.deviceApprovedAt === device.approvedAt
+        )
+          names.set(id, credential.name);
+      }
       return canonicalPayload({
         observedAt: Date.now(),
         continueCursor: page.continueCursor,
@@ -54,9 +79,7 @@ export const read = query({
                   id: device.id,
                   code: device.code,
                   approvedAt: device.approvedAt,
-                  ...(device.name && maySeeDeviceName(user.subject, device.owner)
-                    ? { name: device.name }
-                    : {}),
+                  ...(names.has(device.id) ? { name: names.get(device.id) } : {}),
                 }
               : null,
           };

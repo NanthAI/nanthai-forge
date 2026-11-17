@@ -20,7 +20,6 @@ export function sessionIdentity(
             code: credential.deviceCode,
             approvedAt: credential.deviceApprovedAt,
             owner: credential.owner,
-            name: credential.name,
           },
         }
       : {}),

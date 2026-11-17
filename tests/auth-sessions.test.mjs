@@ -137,7 +137,7 @@ test('B-07: every GitHub sign-in replaces the current verified address, includin
   await signIn({ email: null });
   assert.equal(s.tables.users.get('user').email, undefined);
 });
-test('C1 provisional policies have one decision point for each owner question', () => {
+test('owner-approved access policies have one central decision point for each rule', () => {
   assert(policy.mayTakeLane('person', 'person', 'owner'));
   assert(policy.mayTakeLane('owner', 'person', 'owner'));
   assert(!policy.mayTakeLane('stranger', 'person', 'owner'));

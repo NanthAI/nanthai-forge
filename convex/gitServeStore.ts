@@ -8,6 +8,7 @@ import { hostedStartMain } from './projectHostedChannels';
 import { ForgeError } from '../src/errors';
 import { isMember, laneRefs } from './gitServeLaneStore';
 import { downloadSignInMessage } from './projectDownloadAccess';
+import type { Doc } from './_generated/dataModel';
 import { workerUsage } from './gitServeWorkerStore';
 
 /** Everything one Git smart-HTTP request needs, in one query: the presented Forge
@@ -27,10 +28,12 @@ export const load = internalQuery({
     /** A Worker session's credential: its token hash was checked when the session was signed;
      * the row's revocation, expiry and scope are checked again here. */
     sessionCredentialId: v.optional(v.string()),
+    sessionSignIn: v.optional(v.string()),
   },
   returns: v.any(),
   handler: async (ctx, input) => {
     let actor = '';
+    let device: Doc<'cliCredentials'> | null = null;
     const credentialId = input.credential?.credentialId ?? input.sessionCredentialId;
     if (credentialId) {
       const row = await ctx.db
@@ -42,12 +45,16 @@ export const load = internalQuery({
         row.revoked ||
         row.expiresAt <= Date.now() ||
         row.scope !== 'cli' ||
-        (input.credential && row.tokenHash !== input.credential.tokenHash)
+        (input.credential && row.tokenHash !== input.credential.tokenHash) ||
+        (input.sessionCredentialId && row.deviceKey && row.renewal?.operationId !== input.sessionSignIn)
       )
         return { status: 'bad-credential' };
       actor = row.owner;
+      device = row;
     }
     const id = await resolveProjectId(ctx, input);
+    if (device?.settings?.projects.kind === 'project' && device.settings.projects.projectId !== id)
+      return { status: 'not-found', signedIn: true };
     if (!id) return { status: 'not-found', signedIn: !!actor };
     let project;
     try {
@@ -68,6 +75,7 @@ export const load = internalQuery({
     const member = await isMember(ctx, project, actor);
     return {
       status: 'ok',
+      ...(device?.deviceKey ? { signInId: device.renewal?.operationId } : {}),
       projectId: id,
       member,
       // Wants that are stored pack tips are main's commits, never Lane commits.

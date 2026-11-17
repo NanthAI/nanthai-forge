@@ -34,6 +34,15 @@ export async function authStatus(args: string[]): Promise<unknown> {
     saved = deployment ? store.deployments[deployment] : undefined,
     state = deployment ? authState(deployment) : ({ kind: 'none' } as const),
     token = 'token' in state ? state.token : undefined;
+  if (
+    state.kind === 'expired' &&
+    saved?.deviceId &&
+    store.devices?.[deployment!]?.id === saved.deviceId &&
+    !process.env.FORGE_AUTH_TOKEN
+  ) {
+    await (await import('./device-key.js')).renewDevice(deployment!);
+    return authStatus(args);
+  }
   if (!token) {
     // An expired login answers like a missing one, with its own state (SM-C M23), instead of throwing.
     process.exitCode = 1;
@@ -56,12 +65,53 @@ export async function authStatus(args: string[]): Promise<unknown> {
       options.fields,
     );
   }
+  type Device = {
+    id: string;
+    code: string;
+    name: string;
+    approvedAt: number;
+    expiresAt: number;
+    settings: {
+      source: 'write' | 'read' | 'coordination';
+      projects: { kind: 'all' } | { kind: 'project'; projectId: string };
+    };
+  };
+  let device: Device | undefined;
   let identity: { handle: string | null; credentialId: string | null; pick?: true };
   try {
     const result = (await coordinationClient(deployment!, token).query(
       makeFunctionReference<'query'>('deviceCredentials:status'),
       {},
-    )) as { handle?: unknown; subject?: unknown; credentialId?: unknown; pick?: unknown };
+    )) as { handle?: unknown; subject?: unknown; credentialId?: unknown; pick?: unknown; device?: Device };
+    const reported = result.device;
+    if (
+      reported &&
+      typeof reported.id === 'string' &&
+      typeof reported.code === 'string' &&
+      typeof reported.name === 'string' &&
+      Number.isFinite(reported.approvedAt) &&
+      Number.isFinite(reported.expiresAt) &&
+      reported.settings &&
+      ['write', 'read', 'coordination'].includes(reported.settings.source)
+    ) {
+      const projects = reported.settings.projects;
+      if (
+        projects?.kind === 'all' ||
+        (projects?.kind === 'project' && typeof projects.projectId === 'string')
+      )
+        device = {
+          id: reported.id,
+          code: reported.code,
+          name: reported.name,
+          approvedAt: reported.approvedAt,
+          expiresAt: reported.expiresAt,
+          settings: {
+            source: reported.settings.source,
+            projects:
+              projects.kind === 'all' ? { kind: 'all' } : { kind: 'project', projectId: projects.projectId },
+          },
+        };
+    }
     // Servers before the handle-only identity rule return `subject`; it is never printed.
     const legacy = result?.handle === undefined && typeof result?.subject === 'string';
     invariant(
@@ -95,8 +145,9 @@ export async function authStatus(args: string[]): Promise<unknown> {
       source: environment ? 'environment' : 'saved',
       tokenSource,
       hosts: { [host!]: [{ host, login: account, active: true, state: 'success', tokenSource }] },
-      name: !environment ? (saved?.name ?? null) : null,
-      scope: !environment ? (saved?.scope ?? null) : null,
+      ...(device ? { device } : {}),
+      name: !environment ? (device?.name ?? saved?.name ?? null) : null,
+      scope: !environment ? (device?.settings.source ?? saved?.scope ?? null) : null,
       expiresAt: !environment ? (saved?.expiresAt ?? null) : null,
       identity,
     },
@@ -122,7 +173,7 @@ function hintLegacyDeviceName(deployment: string) {
 }
 
 /** Walk only local checkout markers, stopping at a repository boundary. No discovery/network call. */
-function folderAddress() {
+export function folderAddress() {
   let root = process.cwd();
   for (;;) {
     if (

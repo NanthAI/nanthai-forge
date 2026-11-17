@@ -3,6 +3,7 @@ import { customAction, customCtx, customMutation, customQuery } from 'convex-hel
 import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
+import { currentCredential } from './deviceFields';
 import { recordCallerReceipts } from './projectSelfMetricReceiptStore';
 import {
   mutation as baseMutation,
@@ -38,8 +39,20 @@ function withPeople<B, C>(
         ? (v.object(declared as Record<string, never>) as unknown as { json: unknown }).json
         : (declared as { json?: unknown } | undefined)?.json
     ) as Shape;
-    const wrapped = async (ctx: C, args: unknown) =>
-      mapResult(ctx, args, await handler(ctx, await mapArgs(ctx, args)), returns);
+    const wrapped = async (ctx: C, args: unknown) => {
+      const selected =
+        args && typeof args === 'object' && 'projectId' in args
+          ? (args as { projectId: unknown }).projectId
+          : undefined;
+      const device = (ctx as { forgeDevice?: Doc<'cliCredentials'> | null }).forgeDevice;
+      if (typeof selected === 'string' && device?.settings?.projects.kind === 'project')
+        invariant(
+          selected === device.settings.projects.projectId,
+          'AUTH_SCOPE_DENIED',
+          'This device is approved for its selected project only. Change its settings in your Forge browser.',
+        );
+      return mapResult(ctx, args, await handler(ctx, await mapArgs(ctx, args)), returns);
+    };
     return (builder as (definition: unknown) => unknown)(
       typeof definition === 'function' ? wrapped : { ...(definition as object), handler: wrapped },
     );
@@ -60,27 +73,36 @@ export function isDeviceIdentity(user: { issuer?: string; forgeCredential?: unkn
  * (including an action's own post-run check); revocation and expiry therefore
  * take effect within this bound. Queries and mutations always read the row. */
 export const credentialReuseMs = 30_000;
-const verified = new Map<string, { at: number; expiresAt: number }>();
-async function authorizeAction(ctx: ActionCtx, args: { credentialId: string; owner: string; scope: string }) {
-  const key = JSON.stringify([args.credentialId, args.owner, args.scope]),
+const verified = new Map<string, { at: number; expiresAt: number; row: Doc<'cliCredentials'> }>();
+async function authorizeAction(
+  ctx: ActionCtx,
+  args: { credentialId: string; owner: string; scope: string; signInId?: string },
+) {
+  const key = JSON.stringify([args.credentialId, args.owner, args.scope, args.signInId]),
     now = Date.now(),
     hit = verified.get(key);
-  if (hit && now - hit.at < credentialReuseMs && now >= hit.at && hit.expiresAt > now) return;
+  if (hit && now - hit.at < credentialReuseMs && now >= hit.at && hit.expiresAt > now) return hit.row;
   verified.delete(key);
   const row = (await ctx.runQuery(
-    makeFunctionReference<'query', typeof args, { expiresAt: number }>('deviceStore:authorize'),
+    makeFunctionReference<'query', typeof args, Doc<'cliCredentials'>>('deviceStore:authorize'),
     args,
-  )) as { expiresAt?: number } | null;
+  )) as Doc<'cliCredentials'> | null;
   if (typeof row?.expiresAt !== 'number') return;
   if (verified.size >= 256) verified.delete(verified.keys().next().value!);
-  verified.set(key, { at: now, expiresAt: row.expiresAt });
+  verified.set(key, { at: now, expiresAt: row.expiresAt, row });
+  return row;
 }
 export async function guard(ctx: QueryCtx | MutationCtx | ActionCtx, scope: 'cli' | 'coordination') {
   try {
     const user = await ctx.auth.getUserIdentity();
     if (user && isDeviceIdentity(user)) {
       invariant(typeof user.forgeCredential === 'string', 'AUTH_REQUIRED', 'Use a Forge CLI credential.');
-      const args = { credentialId: user.forgeCredential, owner: user.subject, scope };
+      const args = {
+        credentialId: user.forgeCredential,
+        owner: user.subject,
+        scope,
+        ...(typeof user.forgeSignIn === 'string' ? { signInId: user.forgeSignIn } : {}),
+      };
       if ('db' in ctx) {
         // Reuse the same authorization implementation for reactive query dependencies.
         const row = await ctx.db
@@ -88,7 +110,7 @@ export async function guard(ctx: QueryCtx | MutationCtx | ActionCtx, scope: 'cli
           .withIndex('by_credentialId', q => q.eq('credentialId', args.credentialId))
           .unique();
         invariant(
-          row && !row.revoked && row.expiresAt > Date.now() && row.owner === user.subject,
+          currentCredential(row, user.subject, user.forgeSignIn),
           'AUTH_REVOKED',
           'Forge login expired or was revoked. Run nforge login.',
         );
@@ -97,10 +119,10 @@ export async function guard(ctx: QueryCtx | MutationCtx | ActionCtx, scope: 'cli
           'AUTH_SCOPE_DENIED',
           'This credential grants coordination only.',
         );
-        return { forgeDevice: row };
-      } else await authorizeAction(ctx, args);
+        return { forgeDevice: row, forgeScope: scope };
+      } else return { forgeDevice: await authorizeAction(ctx, args), forgeScope: scope };
     }
-    return { forgeDevice: null as Doc<'cliCredentials'> | null };
+    return { forgeDevice: null as Doc<'cliCredentials'> | null, forgeScope: scope };
   } catch (error) {
     return report(error);
   }
@@ -117,8 +139,8 @@ export const finishQuery = people(
   customQuery(
     baseQuery,
     customCtx(async (ctx: QueryCtx) => {
-      await guard(ctx, 'cli');
-      return { db: finishReadReader(ctx).db };
+      const guarded = await guard(ctx, 'cli');
+      return { ...guarded, db: finishReadReader(ctx).db };
     }),
   ),
 );
@@ -129,9 +151,10 @@ export const projectQuery = people(
   customQuery(
     baseQuery,
     customCtx(async (ctx: QueryCtx) => {
-      await guard(ctx, 'cli');
+      const guarded = await guard(ctx, 'cli');
       const projects = new Map<string, Promise<Doc<'hostedProjects'> | null>>();
       return {
+        ...guarded,
         db: new Proxy(ctx.db, {
           get(target, key) {
             if (key === 'get')
@@ -163,10 +186,10 @@ const guardedActionFor = (scope: 'cli' | 'coordination') =>
   customAction(baseAction, {
     args: {},
     input: async (ctx: ActionCtx) => {
-      await guard(ctx, scope);
+      const device = await guard(ctx, scope);
       const session = (await ctx.auth.getUserIdentity())?.forgeAuthSession;
       return {
-        ctx: {},
+        ctx: device,
         args: {},
         onSuccess: async () => {
           refreshIdentity(ctx);
@@ -213,9 +236,9 @@ export const receiptMutation = people(
   customMutation(baseMutation, {
     args: { metricReceipts: v.optional(v.string()) },
     input: async (ctx: MutationCtx, { metricReceipts }) => {
-      await guard(ctx, 'cli');
+      const guarded = await guard(ctx, 'cli');
       return {
-        ctx: {},
+        ctx: guarded,
         args: {},
         onSuccess: async ({ ctx: done, args }) => {
           const user = metricReceipts ? await done.auth.getUserIdentity() : null;

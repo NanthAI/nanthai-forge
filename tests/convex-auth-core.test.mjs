@@ -236,11 +236,11 @@ test('revoking the browser between inspection and decision leaves the device pen
     name: 'Synthetic race',
     scope: 'cli',
   });
-  const query = s.ctx.runQuery;
-  s.ctx.runQuery = async (ref, args) => {
-    const value = await query(ref, args);
-    if (getFunctionAddress(ref).name === 'deviceStore:lookup') s.sessions.delete('session');
-    return value;
+  const mutate = s.ctx.runMutation;
+  s.ctx.runMutation = async (ref, args) => {
+    // Revoke after the action's account check, before the granting transaction begins.
+    if (getFunctionAddress(ref).name === 'deviceStore:decide') s.sessions.delete('session');
+    return mutate(ref, args);
   };
   await assert.rejects(
     device.decide._handler(s.ctx, { code: flow.user_code, approve: true, operationId: randomUUID() }),

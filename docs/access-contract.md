@@ -18,15 +18,15 @@ fallback receives its own name and explicitly takes over an existing Lane.
 Holder transitions do not change the landing stop or create a Needs-you request.
 A refused save preserves local files and reports that nothing was saved.
 
-## Provisional policies
+## Access policies
 
 The C1 implementation keeps four independently named policies in one server-side
 module: who may take over; whether a live takeover needs a reason; device-name
-visibility; and sign-out versus removal. The current instruction is same-person
+visibility; and sign-out versus removal. The approved rules are same-person
 sessions or the project owner, a reason for a live holder, owner-only names, and
 sign-out retaining key/name/settings while removal revokes the key/settings.
-Owner-confirmation lines remain open until the lead records confirmation.
-Browser inactivity is one server-side setting, provisionally 14 days. Credential
+The owner has approved all four policies.
+Browser inactivity is one server-side setting, approved at 14 days. Credential
 lifetime and optional narrower durations are separate decisions.
 
 ## Read and write budgets
@@ -47,7 +47,7 @@ The C1 reader expansion accepts optional device identity/settings and Lane-holde
 metadata. Policy `accessIdentities.laneHolders` and `accessIdentities.devices`
 are independent rollout settings; absent means off. Readers land before their
 writers, and enabling either later uses the existing owner policy mechanism.
-Neither setting changes the four provisional decisions described above.
+Neither setting changes the four approved decisions described above.
 
 The optional session provenance reader distinguishes client-reported app/thread labels from the server's credential-bound device snapshot. Legacy records keep unknown provenance unknown. Compose and sync readers accept a holder reference before their writers send it. Device renewal receipts reuse the account-owned credential; there is no new table, index, timer or idle write.
 
@@ -81,4 +81,50 @@ page, rather than an organisation total. Device labels are projected through the
 central owner-visibility policy; public source views omit holder provenance.
 The app reuses the existing design-system regions, rows, controls and activity
 feed. The source guards reuse existing reads; no ordinary save or landing RPC is
-added. Rollout remains off by default pending the owner decisions and cost review.
+added. Rollout remains off by default pending activation through the existing owner policy and cost review.
+
+
+## Stable device approvals
+
+With `accessIdentities.devices` enabled for the selected project, login proposes
+an Ed25519 key kept in the existing owner-only local auth store. Browser approval
+records the stable code, one display name and settings. A 30-day bearer sign-in
+is a separate generation under that approval. Explicit login always opens the
+browser, so switching account still works; accounts have separate approvals for
+the same key. Re-login keeps the approved name and settings.
+
+An expired saved sign-in renews through a proof bound to its key, actual HTTP
+origin, purpose and operation. Valid commands make no renewal call. Unknown
+outcomes retain the operation locally; an already-settled expired proof is
+replaced automatically. Environment-supplied credentials never renew through a
+local device key. Sign-out and removal use the central device-end policy:
+sign-out retains key/name/settings, while removal revokes the
+approval and deletes its display name and settings. The key on a lost device cannot be erased
+remotely. An old bearer or redirected Git sign-in generation cannot regain
+access when a later login succeeds.
+
+The existing credential read supplies settings to ordinary authorization.
+Current project membership still decides the person's rights; a device only
+narrows projects and source writes. Trusted nested source operations check the
+same live credential in their existing transaction when no guard projection is
+available. Previously authorized jobs and checks retain their existing lifecycle.
+Action credential checks retain the existing 30-second isolate reuse bound;
+queries and mutations read current state on each invocation.
+
+The account screen uses one account query for browsers, passkeys and a device
+page. A different-project picker mounts only on request and reads three existing
+20-row directories (owned, shared-write and shared-read), each with explicit
+paging. The People screen's folded devices use one account-indexed query for the
+selected member (25 returned rows, at most 100 rows or 64 KiB scanned), with code,
+approval date and state for peers and names through the one visibility policy.
+At 1,200 and 2,400 devices, the synthetic member page reads 28 documents / four
+ranges / 10,100 bytes and writes nothing. All source bytes remain in R2; public
+key bindings, narrow settings and secret-free operation receipts stay in Convex.
+Account/key bindings derive an opaque account-specific reference and reuse the
+existing credential index. No table, index, heartbeat or scheduled renewal is added. Renewal performs one HTTP request with
+one nested query and one mutation, only after sign-in expiry. Rollout stays off
+until its existing owner-policy and cost review are complete.
+
+Private device labels remain in account-owned credentials. Shared session snapshots contain the stable code and approval metadata only. Session pages resolve permitted current labels by deduplicated credential IDs within their existing bounded query; historical labels are filtered from public replies.
+
+Selected-project device settings currently guard native Forge project operations and Git serving. Older imported Codescape views retain their existing person/provider authority. Whether those views must also be refused to a selected-project device is an open owner decision before activation (Issue df06081d); do not treat the current native-project scope as isolation for all legacy APIs.

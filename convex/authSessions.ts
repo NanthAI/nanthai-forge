@@ -6,6 +6,7 @@ import { authComponents as components } from './authComponents';
 import { linkAccount, confirmationOptions, confirmAccount, digest } from './authLinkAccount';
 import { authenticationResponse, requestOptions } from './authPasskeyWire';
 import { browserInactivitySeconds, browserLifetimeSeconds } from './accessPolicy';
+import { deviceSettings } from './deviceFields';
 import { invariant } from '../src/errors';
 const PURPOSE = 'forge:end-other-sessions';
 const session = v.object({
@@ -22,6 +23,10 @@ const device = v.object({
   issuedAt: v.number(),
   expiresAt: v.number(),
   revoked: v.boolean(),
+  code: v.optional(v.string()),
+  approvedAt: v.optional(v.number()),
+  removed: v.optional(v.boolean()),
+  settings: v.optional(deviceSettings),
 });
 export const list = query({
   args: { paginationOpts: paginationOptsValidator },
@@ -59,14 +64,31 @@ export const list = query({
         ...(name ? { name } : {}),
         createdAt,
       })),
-      devices: devices.page.map(({ credentialId, name, scope, issuedAt, expiresAt, revoked }) => ({
-        credentialId,
-        name,
-        scope,
-        issuedAt,
-        expiresAt,
-        revoked,
-      })),
+      devices: devices.page.map(
+        ({
+          credentialId,
+          name,
+          scope,
+          issuedAt,
+          expiresAt,
+          revoked,
+          deviceCode,
+          deviceApprovedAt,
+          removed,
+          settings,
+        }) => ({
+          ...(deviceCode ? { code: deviceCode } : {}),
+          ...(deviceApprovedAt !== undefined ? { approvedAt: deviceApprovedAt } : {}),
+          ...(removed !== undefined ? { removed } : {}),
+          ...(settings ? { settings } : {}),
+          credentialId,
+          name,
+          scope,
+          issuedAt,
+          expiresAt,
+          revoked,
+        }),
+      ),
       github: user.githubConflict ? null : (user.githubLogin ?? null),
       notice: user.passkeyNotice ?? null,
       isDone: devices.isDone,

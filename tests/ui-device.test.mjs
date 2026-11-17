@@ -299,16 +299,19 @@ test('B-02: the link the CLI prints opens a page the web app serves (switch to /
   const { readFileSync, existsSync } = await import('node:fs');
   const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
   const { isAppPath, parseAppPath } = await import(moduleUrl('../web/src/app/paths.ts'));
-  const path = /verification = new URL\('([^']+)', web\)/.exec(read('convex/deviceActions.ts'))?.[1];
-  assert.ok(path, 'convex/deviceActions.ts builds the approval link from one literal path');
-  const rebuilt =
-    isAppPath(path) && parseAppPath(path).frame === 'public' && parseAppPath(path).page === 'device';
-  const old =
-    path === '/device' &&
-    existsSync(new URL('../web/src/DeviceLogin.tsx', import.meta.url)) &&
-    read('web/src/Hosted.tsx').includes("location.pathname === '/device'");
-  assert.ok(
-    rebuilt || old,
-    `${path} must open an approval page; when /device goes, point the link at /-/device`,
-  );
+  const paths = [...read('convex/deviceActions.ts').matchAll(/'(\/-?\/?device)'/g)].map(match => match[1]);
+  for (const path of new Set(paths)) {
+    assert.ok(path, 'Each device protocol builds a served approval link');
+    const rebuilt =
+      isAppPath(path) && parseAppPath(path).frame === 'public' && parseAppPath(path).page === 'device';
+    const old =
+      path === '/device' &&
+      existsSync(new URL('../web/src/DeviceLogin.tsx', import.meta.url)) &&
+      read('web/src/Hosted.tsx').includes("location.pathname === '/device'");
+    assert.ok(
+      rebuilt || old,
+      `${path} must open an approval page; when /device goes, point the link at /-/device`,
+    );
+  }
+  assert(paths.includes('/device') && paths.includes('/-/device'));
 });
