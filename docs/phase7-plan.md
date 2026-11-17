@@ -2,7 +2,18 @@
 
 Phase 7 rebuilds the public website and the signed-in app in the approved redesign and delivers the Phase 7 product Items that the redesign needs. [Phase 8](roadmap.md#phase-8-public-beta-planned) follows: the production move, payments, pricing and publishing. Nothing in this phase is published, deployed to production or shown to outside users without the owner.
 
-Forge planning is the source of truth: Initiative `28591eeb-b74b-413a-ac41-1fef018b3dc1`, its build-index comment `3ee28029` and the owner decisions of 2026-11-16 (comment `e0404ba0`). Each Item carries its own Done-when lines, Scale line and dependencies; this page gives the order. Ids below are the first eight characters of the Item id.
+Forge planning is the source of truth: the stage Initiatives below, the backlog's build-index comment `3ee28029` and the owner decisions of 2026-11-16 (comment `e0404ba0`). Each Item carries its own Done-when lines, Scale line and dependencies; this page gives the order. Ids below are the first eight characters of the Item id.
+
+## On the board
+
+The Plan screen puts the three scheduled stage Initiatives first. Their Items include closed work, so progress shows what is done, in progress and left:
+
+- `5a141b20` — Phase 7 · Stage C: rebuilt screens.
+- `d924336c` — Phase 7 · Stage C: engineering alongside.
+- `3153d505` — Phase 7 · Stage D: close.
+- `28591eeb` — Phase 7 · backlog and new findings (lead triages).
+
+New findings go to the backlog Initiative `28591eeb` for lead triage. Its unscheduled Items keep their scope and status; dropping work remains an owner decision. Items scheduled in another phase stay in that phase's Initiative.
 
 ## Guardrails for every stage
 
