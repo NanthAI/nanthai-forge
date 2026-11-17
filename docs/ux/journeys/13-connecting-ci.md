@@ -23,6 +23,12 @@ Walked: `check-settings`, `help check`, `help wait`, `help limits`, the checks s
 
 ### Secrets for a check
 
+The rebuilt **Settings → Secrets** page now explains runner passthrough and the
+planned sealed Development/Checks sets in one place. Its provider remains an
+unavailable metadata stub. Gate A on `41a0df87` is unresolved; declared-name
+delivery from a Checks set and one machine-key setup are not delivered. The table
+below describes today's runner contract. See [current guidance](../../security.md#secrets-for-checks).
+
 | Need | Route |
 | --- | --- |
 | An environment variable or a credential in the check | Declare names, never values: `"env":["SERVICE_URL"],"credentials":["SERVICE_TOKEN"]`. "Omitted variables are absent; failed runs suggest omitted names that may need passthrough." The values must already exist on the runner (a GitHub Actions secret, or the machine's service environment). (docs) |

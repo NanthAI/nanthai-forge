@@ -170,6 +170,53 @@ recheck this current selection; a submitted check id does not choose the gate.
 
 The final hosted mutation is the unchecked-landing authority for web, CLI, MCP and agents. It rechecks current policy, caller authority and credential scope after source/evidence preparation. Checked landings, including disjoint evidence reuse, skip unchecked membership/team lookups entirely: zero additional calls, reads or writes; idle cost remains zero. Exact-Candidate passing checks, protected-path review and accepted-head preservation apply to automatic acceptance even on existing custom projects. Records include actor, policy, checked Candidate/run, action summary and undo instructions. Hosted run evidence is local-owner provenance and can be forged by that execution owner; policy does not create an independent execution attestation. Uploaded local policy never replaces hosted settings. All writers must be upgraded before a restrictive local policy is stored; format 11 prevents an older writer from ignoring it.
 
+## Secrets for checks
+
+Today, check definitions declare environment variable names in `env` and sensitive
+names in `credentials`. Both select values already present in the runner process;
+they do not fetch Secret Objects. Missing variables remain absent, rather than
+failing setup by name. A CI secret must be exposed to that runner process by the
+CI configuration. Forge does not perform a separate machine-key setup today.
+Definition digests and receipts carry names, never values. Commands can still
+print values into their CI logs; the future sealed-secret masking contract is
+not implemented. See [clean check environments](#clean-check-environments).
+
+The rebuilt **Settings → Secrets** page is value-free and currently shows that
+sealed secrets are not connected. Its metadata-only interface covers names in
+Development and Checks, holders, waiting computers, rotation state and recent
+changes. It makes no secret reads or writes. There is no value field, reveal
+control or public sample-data route. Proposed CLI commands are marked Proposed;
+holder removal and sharing settings await the protocol.
+
+The agreed replacement store is sealed Development and Checks sets, tracked by
+Item `41a0df87`; it is not another Secret Object store. Gate A (design resolution)
+is still open. Encryption, sharing, `nforge run`, import, machine-key delivery to
+checks and Secret Object retirement remain unimplemented. Gate B follows the
+encryption/sharing slices and precedes delivery of those later protocol slices.
+The screen and guidance do not claim either gate passed. Only owner devices and
+machine keys are intended to hold the Checks key; other write members propose
+values. The planned secret-envelope passkey uses its own ceremony and origin,
+never a sign-in passkey or session material. No printable recovery key is planned.
+
+### Secrets screen trust boundaries
+
+The route inherits the signed-in project frame. Its current provider is a local
+unavailable stub, with zero Convex calls, DB I/O, storage writes or idle work.
+Fixtures are confined to tests. A later server adapter must authorize current
+project write access before returning names, holders or history, including on a
+public project; browser state is not authorization. It must project only the
+metadata contract, never values, envelopes, ciphertext or keys. Failed reads must
+not render raw server errors, retain another project's data or preserve names
+after access is revoked. The screen's forbidden state renders no cached metadata.
+
+Metadata is untrusted text: React escapes displayed strings, never renders it as
+HTML, and clipboard actions construct quoted name-only commands without executing
+them. The clipboard is an explicit user-action boundary. No secret metadata is
+written to local storage, logs, receipts or a URL. This screen is not evidence of
+the future database/backup no-value guard, cryptographic revocation, hostile-server
+protection, output masking or the export/retirement sequence. Those need the gated
+protocol, its adversarial tests and security review before they can be claimed.
+
 ## Secret Objects
 
 A Secret Object is an encrypted credential with versions and six independent capabilities: discover, names, use, reveal, modify and delegate.

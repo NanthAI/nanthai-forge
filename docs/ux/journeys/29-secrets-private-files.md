@@ -6,6 +6,14 @@ Walked: the security doc (secret scan, Secret Objects), the repository's own all
 
 ## Steps today
 
+The rebuilt project's **Settings → Secrets** is value-free: no values are entered
+or shown. It explains current runner-secret passthrough and the intended sealed
+Development/Checks sets, with a metadata-only unavailable stub until the gated
+protocol lands. Secret Objects still exist on the account screen and do not feed
+checks. Export/retirement and rotate-on-removal remain open on `41a0df87`; no
+replacement store, machine-key setup or recovery ceremony is claimed here.
+See [secrets for checks](../../security.md#secrets-for-checks).
+
 | # | Situation | What happens | Evidence |
 | --- | --- | --- | --- |
 | 1 | An agent saves a file that looks like credentials | A save leaves out "ignored files and credential names", counted as `notSaved`. | docs |

@@ -310,7 +310,7 @@ Use per-check declarations for required parent settings:
 nforge x ROOT configure-check '{"command":{"name":"integration","executable":"node","args":["tests/integration.mjs"],"env":["SERVICE_URL"],"credentials":["SERVICE_TOKEN"],"environmentLabel":"clean"}}'
 ```
 
-`env` and `credentials` contain environment variable names, never values. Both are explicit passthrough; the latter identifies credentials separately. They change the definition digest and appear in check definitions and receipts. They do not inject Secret Objects. Omitted variables are absent; failed runs suggest omitted names that may need passthrough. Values are not retained by the runner, but commands can print them into logs. See [security](security.md#clean-check-environments) for the complete allowlist and filesystem limitations. A clean environment is not an OS sandbox.
+`env` and `credentials` contain environment variable names, never values. Both are explicit passthrough; the latter identifies credentials separately. They change the definition digest and appear in check definitions and receipts. They do not inject Secret Objects. Omitted variables are absent; failed runs suggest omitted names that may need passthrough. Values are not retained by the runner, but commands can print them into logs. See [secrets for checks](security.md#secrets-for-checks) for the runner store versus the planned sealed Checks set, and [clean check environments](security.md#clean-check-environments) for the complete allowlist and filesystem limitations. A clean environment is not an OS sandbox.
 
 ### Check command scope
 

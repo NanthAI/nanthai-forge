@@ -8,6 +8,12 @@ and linked follow-up Items reuse existing operations. Hosted save readers retain
 optional declarations; client writers and the run-budget/outside-change workflows
 are separate work on the Phase 7 Items. See [run evidence](run-evidence.md).
 
+Rebuilt Settings → Secrets has a value-free, metadata-only screen and current
+check-secret guidance. Its live provider is an unavailable stub: it makes no secret
+reads or writes. Gate A for sealed secrets remains open; encryption, sharing,
+machine-key delivery, `nforge run` and Secret Object retirement are not delivered.
+See [secrets for checks](security.md#secrets-for-checks).
+
 HostedStrip shares a bounded Lane feed and sleeping hook. Lanes initialize on
 write; stage/idle/cost fixtures pass. Dev latency, idle I/O, frames, browser cost
 and shell motion remain open. Attention retains the old shared reads.

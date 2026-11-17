@@ -33,6 +33,7 @@ const screens: Partial<
   lanes: lazy(() => import('./lanes/LanesPlace')),
   'settings/': lazy(() => import('./people/PeopleAccess')),
   'settings/checks': lazy(() => import('./checks/LandingChecks')),
+  'settings/secrets': lazy(() => import('./secrets/Secrets')),
   plan: lazy(() => import('./plan/Plan')),
 };
 /** One Lane (`lanes/{laneId}`): its own screen beside whatever serves the Lanes list. */

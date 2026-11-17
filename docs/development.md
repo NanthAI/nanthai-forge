@@ -775,6 +775,33 @@ Project owners are not rewritten. The existing GitHub App connection seals its
 user token in the account row for private-repository checks; the OAuth sign-in
 token itself is not retained.
 
+#### Secrets screen interface
+
+`web/src/app/secrets/Secrets.tsx` loads lazily at `/-/:handle/:project/settings/secrets`.
+`secrets-model.ts` defines a metadata-only `SecretsView`: unavailable, loading,
+forbidden, ready, or failed with optional previous metadata. `secretsView()` is
+the local unavailable stub; no secret backend or protocol has been added.
+
+`SecretsMetadata` carries Development/Checks pages with complete name and holder
+totals, rotation and missing-value totals, waiting-computer codes, the selected Development sharing
+mode and a newest-first recent page. The future authorized adapter supplies bounded
+pages, with up to 50 recent events. Partial pages explicitly say how many are shown;
+the interface imposes no limit on how many secrets a project may have. Add continuation
+actions with that adapter, not a per-row query. Recovery state is supplied only for
+a lone holder without an envelope holding a non-reissuable value; holder counts
+alone do not trigger the notice. Displayed handles and codes are metadata, never
+device keys or another person's private device name.
+
+The screen consumes no values, key material or envelopes. It has no value entry,
+reveal, removal or sharing mutation. Proposed commands stay marked until the CLI
+protocol exists. Tests render synthetic metadata through the real screen and project
+frame; no fixture switch is shipped. A failed load retains previous metadata only
+when explicitly supplied; forbidden and unavailable states never render it.
+See [trust boundaries and current check-secret guidance](security.md#secrets-for-checks).
+Gate A remains open; this UI does not start an encryption slice. Future device
+encryption must remain separate from `FORGE_SECRET_KEYS`, sign-in keys and
+`FORGE_GITHUB_TOKEN_KEYRING`; this slice adds or changes no keyring setting.
+
 #### Attach sign-in methods to an existing account
 
 Keep Clerk configured while accounts move. On `/-/signin`, choose **Add a
