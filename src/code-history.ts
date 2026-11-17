@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // One row of the Code place's history (convex/projectCode.ts#history): a landing on main, from its stored receipt
 // alone. The web screen and its tests share this shape; nothing here reads storage.
+import { readAuthorship } from './work-actor-types.js';
 import type { HostedAcceptance } from './hosted-acceptance.js';
 
 /** Receipts per page and the read budget of one page (a receipt is about 2 to 6 KB). */
@@ -38,6 +39,7 @@ export type CodeHistoryRow = {
 };
 
 export function codeHistoryRow(receipt: HostedAcceptance, sequence: number): CodeHistoryRow {
+  const builder = readAuthorship(receipt);
   const message = (receipt.message ?? '').trim();
   const [first = '', ...rest] = message.split('\n');
   const why = rest.join('\n').trim();
@@ -47,8 +49,8 @@ export function codeHistoryRow(receipt: HostedAcceptance, sequence: number): Cod
     at: receipt.at,
     title: first.trim() ? first.trim().slice(0, CODE_HISTORY_TITLE_CHARS) : null,
     why: why ? why.slice(0, CODE_HISTORY_WHY_CHARS) : null,
-    actor: receipt.actor.id,
-    agent: receipt.actor.kind === 'agent',
+    actor: builder.actor ?? receipt.actor.id,
+    agent: builder.kind === 'agent',
     agentRun: receipt.agentRun ?? null,
     agentClient: receipt.agentClient ?? null,
     head: receipt.candidate.head,

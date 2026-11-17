@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { withoutAuthorship } from '../src/work-actor-types';
 import { declarationIdentity } from '../src/run-evidence';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -45,7 +46,7 @@ export async function reuseHostedLanding(
   supersededCheck?: SupersededCheck;
 }> {
   const identity = { projectId: input.projectId, actor: input.actor, operationId: input.request.operationId };
-  const requestHash = digest(canonicalPayload(input.request));
+  const requestHash = digest(canonicalPayload(withoutAuthorship(input.request)));
   const alias = await landingAlias(ctx, identity);
   if (alias) {
     invariant(

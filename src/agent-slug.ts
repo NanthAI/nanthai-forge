@@ -358,6 +358,7 @@ export const actorLabel = (actor: string | undefined, fallback = 'a member') =>
 /** The receipt's agent client (81d12a32): the harness the agent session ran in and, when its
  * launcher declared one, the model, as `tool` or `tool:model` (`claude-code:claude-opus-5-5`).
  * Client-declared, never verified; any other shape is dropped. */
+export const AGENT_STAMP_VALUE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/;
 export const AGENT_CLIENT = /^[a-z][a-z0-9-]{0,31}(?::[A-Za-z0-9][A-Za-z0-9._/-]{0,63})?$/;
 export const landingAgentClient = (client: unknown): { agentClient?: string } =>
   typeof client === 'string' && AGENT_CLIENT.test(client) ? { agentClient: client } : {};

@@ -2282,3 +2282,29 @@ Lane status negotiates `lane-status-state` on the existing discovery and head
 reads. It includes `state` only for a capable caller; older replies keep their
 shape. A refused sync that observes completed or abandoned work offers reopening
 that Lane, keeping local edits in place. Active-Lane recovery still offers save.
+
+### Authorship stamp compatibility
+
+The existing `agentClient` (`harness:model`, or a bare harness) and `agentRun`
+fields are the only stored home for app, declared model and run. Lane and save
+readers accept those same carriers. An optional `authorship` adds source-builder
+kind (`agent` or `person`) and a missing-model `declaration` (`unknown` or
+`not-declared`). Only a receipt stamp also carries its non-empty builder `actor`,
+which can differ from the approving `actor`. Lanes and saves use their existing
+actor field. Person stamps have no agent declaration, client or run.
+
+Readers take an existing declared `agentClient` model before any missing-model
+marker; legacy receipts with a model never become “not declared”. Explicit
+`unknown` differs from an absent legacy declaration. Each save is immutable:
+changing a Lane declaration does not relabel earlier source. All stamp values
+use the existing model-ID character rule, without trimming or normalization.
+Attribution is excluded from start, save and landing retry identity; a resumed
+operation retains the original source request and its first declaration.
+
+This is the reader expansion for Issue 9f4ff056. Existing clients do not emit the
+new fields yet. The later writer activates only behind a negotiated contract
+feature, after these readers are on main. No server model guessing or other
+app's session-file reads are used. Stamps never grant access. The compact labels
+reuse existing calls and records: no added reads, tables, timers or idle I/O;
+source bytes stay in R2. Blame and log will join a bounded slim receipt summary,
+with current access and public-handle mapping, rather than hydrate whole receipts.

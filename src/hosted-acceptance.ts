@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { authorshipFields, authorshipSchema, personStampValid } from './work-actor-types.js';
 import { landingMessageSchema, cohortMessagesSchema } from './landing-message.js';
 import { candidateIsolationModeSchema, checkSkippedSchema, hostedMacEvidenceSchema } from './hosted-check.js';
 import { hostedLandingAttemptSchema } from './hosted-landing.js';
@@ -15,6 +16,8 @@ const hash = z.string().regex(/^[0-9a-f]{64}$/);
 export const hostedAcceptanceSchema = z
   .object({
     schema: z.literal(1),
+    /** Source builder, independent of the approving actor on a supervised landing. */
+    authorship: authorshipSchema.optional(),
     id: z.uuid(),
     projectId: z.string().min(1),
     channel: z.literal('main'),
@@ -74,10 +77,10 @@ export const hostedAcceptanceSchema = z
     actor: hostedLandingAttemptSchema.shape.actor,
     /** The agent run that submitted the landing (session slug, d730121f); shown as `handle/slug`.
      * Absent on older receipts, on person landings and from CLIs that predate it. */
-    agentRun: z.string().min(1).max(64).optional(),
+    agentRun: authorshipFields.agentRun,
     /** That run's client as it declared it: harness, and model when its launcher set one
      * (`claude-code:claude-opus-5-5`; 81d12a32). Not verified. Absent on older receipts. */
-    agentClient: z.string().min(1).max(100).optional(),
+    agentClient: authorshipFields.agentClient,
     policyDigest: hash,
     check: z
       .object({
@@ -116,7 +119,8 @@ export const hostedAcceptanceSchema = z
     /** Markdown-only conflicts merged automatically with the docs rule, and how to undo that. */
     docsResolution: docsResolutionSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine(personStampValid, 'A person stamp has no model or run.');
 export type HostedAcceptance = z.infer<typeof hostedAcceptanceSchema>;
 /** What a landing's completion tick does. A refs-only landing (`closes:false`, GitHub `Refs #N`) names the work without finishing it,
  * so like `keepOpen` it leaves the Lanes open for the follow-up edit that usually comes next (87c80c4b); closeOnLand "off" is

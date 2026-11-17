@@ -263,3 +263,27 @@ test('bad optional save timing never prevents saving source, and unsafe totals r
     assert.equal(result.outcome.result.durationMs, undefined);
   }
 });
+
+test('save preparation retries after a model or app switch retain the original source and declaration', async () => {
+  const s = await saveFixture();
+  const first = await s.prepare([s.change()], {
+    authorship: { kind: 'agent' },
+    agentClient: 'fixture:model-one',
+    agentRun: 'run-one',
+  });
+  const replay = JSON.parse(
+    await s.call('prepare', api.prepare, {
+      projectId: s.projectId,
+      request: JSON.stringify({
+        ...first.request,
+        authorship: { kind: 'agent', declaration: 'unknown' },
+        agentClient: 'another:model-two',
+        agentRun: 'run-two',
+      }),
+    }),
+  );
+  assert.equal(replay.state.request.agentClient, 'fixture:model-one');
+  assert.equal(replay.state.request.agentRun, 'run-one');
+  assert.deepEqual(replay.input, first.result.input);
+  assert.equal(s.tables.projectHostedSaves.size, 1);
+});

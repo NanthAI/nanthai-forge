@@ -948,6 +948,37 @@
                   ],
                   "additionalProperties": false
                 },
+                "authorship": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "agent",
+                        "person"
+                      ]
+                    },
+                    "declaration": {
+                      "type": "string",
+                      "enum": [
+                        "unknown",
+                        "not-declared"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                },
+                "agentClient": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,31}(?::[A-Za-z0-9][A-Za-z0-9._/-]{0,63})?$"
+                },
+                "agentRun": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$"
+                },
                 "stack": {
                   "type": "object",
                   "properties": {
@@ -1320,6 +1351,37 @@
             "lastSeen"
           ],
           "additionalProperties": false
+        },
+        "authorship": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "agent",
+                "person"
+              ]
+            },
+            "declaration": {
+              "type": "string",
+              "enum": [
+                "unknown",
+                "not-declared"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        "agentClient": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,31}(?::[A-Za-z0-9][A-Za-z0-9._/-]{0,63})?$"
+        },
+        "agentRun": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$"
         },
         "stack": {
           "type": "object",
@@ -1959,6 +2021,37 @@
               ],
               "additionalProperties": false
             },
+            "authorship": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "agent",
+                    "person"
+                  ]
+                },
+                "declaration": {
+                  "type": "string",
+                  "enum": [
+                    "unknown",
+                    "not-declared"
+                  ]
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            "agentClient": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,31}(?::[A-Za-z0-9][A-Za-z0-9._/-]{0,63})?$"
+            },
+            "agentRun": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$"
+            },
             "stack": {
               "type": "object",
               "properties": {
@@ -2291,6 +2384,37 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "authorship": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "agent",
+                "person"
+              ]
+            },
+            "declaration": {
+              "type": "string",
+              "enum": [
+                "unknown",
+                "not-declared"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        "agentClient": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,31}(?::[A-Za-z0-9][A-Za-z0-9._/-]{0,63})?$"
+        },
+        "agentRun": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$"
+        },
         "schema": {
           "type": "number",
           "const": 1
@@ -4749,6 +4873,29 @@
         "request": {
           "type": "object",
           "properties": {
+            "authorship": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "agent",
+                    "person"
+                  ]
+                },
+                "declaration": {
+                  "type": "string",
+                  "enum": [
+                    "unknown",
+                    "not-declared"
+                  ]
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
             "operationId": {
               "type": "string",
               "format": "uuid",

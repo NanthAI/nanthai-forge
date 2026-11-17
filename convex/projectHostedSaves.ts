@@ -4,6 +4,7 @@ import { sourceProgress } from './projectSourceProgress';
 import { boardWake } from './projectBoardDelivery';
 import { hostedSaveState } from '../src/hosted-save-state';
 import { boundOverlapChanges, type OverlapChange } from '../src/hosted-overlap';
+import { withoutAuthorship } from '../src/work-actor-types';
 import { sessionIdentity } from './projectSessionIdentity';
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
@@ -121,10 +122,11 @@ export const prepare = mutation({
             headWrittenAt: current.at,
           });
       }
+      const semantic = withoutAuthorship(request);
       const prepared = await beginHostedOperation(ctx, {
         ...auth,
-        payload: request,
-        request: { schema: 1, ...auth, expected, payloadHash: hostedPayloadHash(request, expected) },
+        payload: semantic,
+        request: { schema: 1, ...auth, expected, payloadHash: hostedPayloadHash(semantic, expected) },
         firstAttempt: {
           projectId: input.projectId,
           operationId: request.operationId,

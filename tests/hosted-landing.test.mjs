@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { landingFixture, api, control, store, pins, maxima, code } from './hosted-landing-fixture.mjs';
 import { HOSTED_LANDING_LEASE_MS, hostedLandingRequestSchema } from '../dist/hosted-landing.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
+import { digest } from '../dist/state/hash.js';
 const priorKeyId = process.env.FORGE_HOSTED_CHECK_KEY_ID;
 test.before(() => {
   process.env.FORGE_HOSTED_CHECK_KEY_ID = 'SYNTHETIC';
@@ -515,4 +516,43 @@ test('a standalone check passes after its infrastructure retry with the exact Ca
     ['projectHostedLandingStall:deadline'],
     'only the finite manual acceptance deadline remains',
   );
+});
+
+test('landing retries after a model or app switch retain one submission and its first declaration', async () => {
+  const f = await landingFixture();
+  const request = f.request({ authorship: { kind: 'agent', declaration: 'unknown' } });
+  const send = (authorship, agentClient) =>
+    f
+      .call('landingEnqueue', api.enqueue, {
+        projectId: f.projectId,
+        request: JSON.stringify({ ...request, authorship }),
+        agent: 'quiet-otter',
+        agentClient,
+      })
+      .then(JSON.parse);
+  const first = await send(request.authorship, 'fixture:model-one');
+  const replay = await send({ kind: 'agent', declaration: 'not-declared' }, 'another:model-two');
+  assert.equal(replay.id, first.id);
+  assert.equal(f.tables.projectHostedLandingRequests.size, 1);
+  assert.equal([...f.tables.projectHostedLandingRequests.values()][0].agentClient, 'fixture:model-one');
+});
+
+test('a retained landing alias ignores later attribution while preserving its exact source selection', async () => {
+  const f = await landingFixture();
+  const original = f.request();
+  const first = await f.enqueue(original);
+  const alias = { ...original, operationId: randomUUID() };
+  f.insert('projectHostedLandingAliases', {
+    projectId: f.projectId,
+    actor: 'owner',
+    operationId: alias.operationId,
+    requestHash: digest(canonicalPayload(alias)),
+    submissionId: first.id,
+  });
+  for (const declaration of ['unknown', 'not-declared']) {
+    const replay = await f.enqueue({ ...alias, authorship: { kind: 'agent', declaration } });
+    assert.equal(replay.id, first.id);
+  }
+  assert.equal(f.tables.projectHostedLandingRequests.size, 1);
+  await assert.rejects(f.enqueue({ ...alias, expectedHead: 'f'.repeat(64) }), code('WORK_OPERATION_CHANGED'));
 });

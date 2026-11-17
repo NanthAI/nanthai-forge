@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { authorshipFields, personStampValid } from './work-actor-types.js';
 import { needsFixSchema } from './culprit-bisect.js';
 import { semanticPayload } from './semantic-payload.js';
 import { semanticPlanSchema } from './intent-semantic-conflict.js';
@@ -45,6 +46,7 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
     .object({
       ...common,
       kind: z.literal('lane'),
+      ...authorshipFields,
       /** Optional reader expansion for explicit C1 holder transitions; writers land separately. */
       holder: z
         .object({
@@ -113,11 +115,13 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
         .strict()
         .optional(),
     })
-    .strict(),
+    .strict()
+    .refine(personStampValid, 'A person stamp has no model or run.'),
   z
     .object({
       ...common,
       kind: z.literal('save'),
+      ...authorshipFields,
       ...saveDeclarations,
       laneId: z.uuid(),
       actor: z.string().min(1),
@@ -129,7 +133,8 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
       changes: object,
       durationMs: z.number().int().nonnegative().optional(),
     })
-    .strict(),
+    .strict()
+    .refine(personStampValid, 'A person stamp has no model or run.'),
   z
     .object({
       ...common,

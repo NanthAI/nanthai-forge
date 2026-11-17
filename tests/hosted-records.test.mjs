@@ -604,3 +604,37 @@ test('generic Work metadata copies cannot publish a clean Candidate outside comp
   );
   assert.equal([...s.tables.projectHostedRecords.values()].filter(row => row.kind === 'candidate').length, 0);
 });
+
+// Reader-first rollout: immutable save records, rather than a mutable Lane, own historical attribution.
+test('retained source history keeps declared, unknown and person stamps across mixed saves and model switches', async () => {
+  const s = await setup(),
+    l = lane();
+  await s.put(l);
+  const labels = [
+    {},
+    { authorship: { kind: 'agent' }, agentClient: 'fixture:model-one', agentRun: 'run-one' },
+    { authorship: { kind: 'agent' }, agentClient: 'fixture:model-two', agentRun: 'run-one' },
+    { authorship: { kind: 'agent', declaration: 'unknown' }, agentClient: 'fixture' },
+    { authorship: { kind: 'person' } },
+  ];
+  const retained = [];
+  for (const label of labels) {
+    const record = { ...save(l.id), ...label };
+    await s.put(record);
+    const row = await store.readHostedRecord(s.ctx, { ...s.auth, kind: 'save', key: record.id });
+    const stored = JSON.parse(row.value);
+    for (const key of ['authorship', 'agentClient', 'agentRun']) assert.deepEqual(stored[key], label[key]);
+    retained.push(record);
+  }
+  await s.put({ ...l, version: 1, ...labels[2] }, 0);
+  for (const record of retained) {
+    const row = await store.readHostedRecord(s.ctx, { ...s.auth, kind: 'save', key: record.id });
+    const stored = JSON.parse(row.value);
+    for (const key of ['authorship', 'agentClient', 'agentRun']) assert.deepEqual(stored[key], record[key]);
+  }
+  await assert.rejects(
+    s.put({ ...retained[1], agentClient: 'different:model' }),
+    code('WORK_OPERATION_CHANGED'),
+    'an immutable save cannot be relabelled',
+  );
+});

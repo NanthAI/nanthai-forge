@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { authorshipClaimSchema } from './work-actor-types.js';
 import { saveDeclarations } from './agent-handoff-types.js';
 import { batchDiagnosticSchema } from './hosted-batch-diagnosis.js';
 import { checkFileSummarySchema } from './check-file-summary.js';
@@ -33,6 +34,7 @@ export const landingCheckSelectionSchema = z.union([
 ]);
 export const hostedLandingRequestSchema = z
   .object({
+    authorship: authorshipClaimSchema.optional(),
     operationId: z.uuid(),
     governanceVersion: z.literal(1).optional(),
     authorityEpoch: checkNumber,

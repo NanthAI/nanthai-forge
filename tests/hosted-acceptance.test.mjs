@@ -876,3 +876,50 @@ test('numeric spend marker counts new receipts once; replay, refs-only and rollb
   await refs.accept(prepared.state);
   assert.deepEqual(lines, ['FORGE_ACCEPTED_LANDINGS 1']);
 });
+
+// The reader mapping is used by Code history, so an approving person cannot replace its recorded builder.
+test('legacy declared receipt models and supervised builders retain one canonical attribution', async () => {
+  const { readAuthorship } = await import('../dist/work-actor-types.js');
+  const { codeHistoryRow } = await import('../dist/code-history.js');
+  const f = await acceptanceFixture();
+  const { state } = await f.ready();
+  const { receipt } = await f.accept(state);
+  assert.equal(hostedAcceptanceSchema.parse(receipt).authorship, undefined);
+  const declared = { ...receipt, agentClient: 'fixture:model-one', agentRun: 'run-one' };
+  assert.equal(
+    readAuthorship(declared).model,
+    'model-one',
+    'legacy declarations are never labelled not-declared',
+  );
+  const modern = {
+    ...declared,
+    authorship: { kind: 'agent', actor: 'builder', declaration: 'not-declared' },
+  };
+  const restored = hostedAcceptanceSchema.parse(JSON.parse(JSON.stringify(modern)));
+  assert.equal(
+    readAuthorship(restored).model,
+    'model-one',
+    'the canonical carrier wins over a missing-model marker',
+  );
+  const shown = codeHistoryRow(restored, 1);
+  assert.equal(shown.actor, 'builder', 'Code shows the builder, not the approving owner');
+  assert.equal(shown.agent, true);
+  assert.equal(shown.agentClient, 'fixture:model-one');
+  assert.equal(readAuthorship({ authorship: { kind: 'agent', declaration: 'unknown' } }).model, 'unknown');
+  assert.equal(
+    readAuthorship({ authorship: { kind: 'agent', declaration: 'not-declared' } }).model,
+    'not-declared',
+  );
+  for (const actor of ['', 'two words', 'a\nForged: trailer'])
+    assert(!hostedAcceptanceSchema.safeParse({ ...receipt, authorship: { kind: 'person', actor } }).success);
+  const person = { ...receipt, authorship: { kind: 'person', actor: 'builder' } };
+  delete person.agentClient;
+  delete person.agentRun;
+  assert(hostedAcceptanceSchema.safeParse(person).success);
+  for (const patch of [{ agentClient: 'fixture:model-one' }, { agentRun: 'run-one' }])
+    assert(!hostedAcceptanceSchema.safeParse({ ...person, ...patch }).success);
+  for (const bad of [' model', 'model ', 'model\n', 'model\nCo-Authored-By: forged']) {
+    assert(!hostedAcceptanceSchema.safeParse({ ...declared, agentClient: `fixture:${bad}` }).success);
+    assert(!hostedAcceptanceSchema.safeParse({ ...declared, agentRun: bad }).success);
+  }
+});

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { authorshipFields, personStampValid } from './work-actor-types.js';
 import { mainExpectationSchema } from './hosted-main.js';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
 import { hostedRecordSchema } from './hosted-records.js';
@@ -52,6 +53,8 @@ export const hostedIntentInputSchema = z.discriminatedUnion('kind', [
 ]);
 export const hostedStartSchema = z
   .object({
+    authorship: authorshipFields.authorship,
+    agentClient: authorshipFields.agentClient,
     noticeVersion: z.literal(1).optional(),
     /** The client reads openLanes in the reply (capability openLanesVersion); never part of the payload hash. */
     openLanesVersion: z.literal(1).optional(),
@@ -70,7 +73,11 @@ export const hostedStartSchema = z
     stackEntry: z.uuid().optional(),
     intent: hostedIntentInputSchema,
   })
-  .strict();
+  .strict()
+  .refine(
+    value => personStampValid(value) && (value.authorship?.kind !== 'person' || value.agent === undefined),
+    'A person stamp has no model or run.',
+  );
 export const hostedIntentSchema = hostedRecordSchema.options[0];
 export const hostedLaneSchema = hostedRecordSchema.options[1];
 /** A source pin is independent of uploaded backups and display generations. */
@@ -86,6 +93,7 @@ export const hostedLaneSelectionSchema = z
     lifecycleVersion: hostedLaneSchema.shape.lifecycleVersion,
     state: hostedLaneSchema.shape.state,
     holder: hostedLaneSchema.shape.holder,
+    ...authorshipFields,
     stack: hostedLaneSchema.shape.stack,
     earlyResolution: hostedLaneSchema.shape.earlyResolution,
     base: mainExpectationSchema,

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { AuthorshipClaim } from '../src/work-actor-types';
 import { needsFix, fixBrief } from '../src/culprit-bisect';
 import { v } from 'convex/values';
 import { mutation, receiptMutation, type MutationCtx } from './cliServer';
@@ -29,6 +30,13 @@ import { intentFinished, maxIntentChain, successorIntentId } from '../src/hosted
 const args = {
   projectId: v.id('hostedProjects'),
   operationId: v.string(),
+  authorship: v.optional(
+    v.object({
+      kind: v.union(v.literal('agent'), v.literal('person')),
+      declaration: v.optional(v.union(v.literal('unknown'), v.literal('not-declared'))),
+    }),
+  ),
+  agentClient: v.optional(v.string()),
   noticeVersion: v.optional(v.literal(1)),
   openLanesVersion: v.optional(v.literal(1)),
   /** The calling agent session's slug (feature agent-slug, c29d0780); not part of the payload. */
@@ -59,6 +67,8 @@ const args = {
 type Input = {
   projectId: Id<'hostedProjects'>;
   operationId: string;
+  authorship?: AuthorshipClaim;
+  agentClient?: string;
   noticeVersion?: 1;
   openLanesVersion?: 1;
   agent?: string;
@@ -103,8 +113,18 @@ async function execute(
     'Send a hosted start with an operation UUID and exact main pins.',
   );
   // The agent slug only labels the Lane for other agents: a retry from another session is the same start.
-  const { noticeVersion, openLanesVersion, agent, session, holderSessionId, ...semanticRequest } =
-    validated.data;
+  const {
+    noticeVersion,
+    openLanesVersion,
+    agent,
+    agentClient,
+    authorship,
+    session,
+    holderSessionId,
+    ...semanticRequest
+  } = validated.data;
+  void agentClient;
+  void authorship;
   const payload = { action, ...semanticRequest };
   invariant(action === 'start' || payload.intent.kind === 'new', 'BAD_ARGUMENT', 'Create a new Intent.');
   let overlapIntent = payload.intent.kind === 'existing' ? payload.intent.intentId : payload.intent.outcome;

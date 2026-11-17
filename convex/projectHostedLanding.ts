@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { withoutAuthorship } from '../src/work-actor-types';
 import { sanitizeOutside } from '../src/run-evidence';
 import { bindLineSubmission } from './projectLiveLineSubmission';
 import {
@@ -329,7 +330,7 @@ export async function enqueueHostedLanding(
     ...request.expectedMain,
     resourceId: request.candidateId,
   };
-  const payload = { kind: 'hosted-landing', request, actorKind: actor.kind };
+  const payload = { kind: 'hosted-landing', request: withoutAuthorship(request), actorKind: actor.kind };
   const prepared = await beginHostedOperation(ctx, {
     ...(reserved ? {} : { workKind: 'submissions' as const }),
     projectId: input.projectId,

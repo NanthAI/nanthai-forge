@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { authorshipFields, personStampValid } from './work-actor-types.js';
 import { sessionClaimSchema } from './hosted-lane.js';
 import { saveDeclarations } from './agent-handoff-types.js';
 import { stateSchema } from './state/format.js';
@@ -85,6 +86,7 @@ export const saveThenSchema = z
 export type SaveThen = z.infer<typeof saveThenSchema>;
 export const saveRequestSchema = z
   .object({
+    ...authorshipFields,
     operationId: z.uuid(),
     laneId: z.uuid(),
     /** Reader expansion for the later session-bound holder writer. */
@@ -105,6 +107,7 @@ export const saveRequestSchema = z
     then: saveThenSchema.optional(),
   })
   .strict()
+  .refine(personStampValid, 'A person stamp has no model or run.')
   .superRefine((value, ctx) => {
     if (
       (value.pages === null
@@ -129,6 +132,7 @@ export const saveInputSchema = z
   .strict();
 export const saveResultSchema = z
   .object({
+    ...authorshipFields,
     schema: z.literal(1),
     operationId: z.uuid(),
     laneId: z.uuid(),

@@ -773,3 +773,65 @@ test('incident 5c26c2ed: negotiated status names completed Lanes from the existi
   assert.equal(negotiated.head, legacy.head);
   assert.equal(s.counts.at(-1).documents, s.counts.at(-2).documents, 'no additional document read');
 });
+
+// Model/app changes label new work, not a second execution of an already retained operation.
+test('start retries after a model or app switch reconcile the same Lane', async () => {
+  const s = await setup();
+  const input = {
+    ...s.input(),
+    authorship: { kind: 'agent', declaration: 'unknown' },
+    agentClient: 'fixture:model-one',
+  };
+  const first = await s.begin(input);
+  const replay = await s.begin({
+    ...input,
+    authorship: { kind: 'agent', declaration: 'not-declared' },
+    agentClient: 'another:model-two',
+  });
+  assert.deepEqual(replay, first);
+  assert.equal([...s.tables.projectHostedRecordHeads.values()].filter(row => row.kind === 'lane').length, 1);
+});
+
+test('source stamp claims reject actor spoofing, person model/run claims and trailer injection', async () => {
+  const { hostedStartSchema } = await import('../dist/hosted-lane.js');
+  const { saveRequestSchema } = await import('../dist/hosted-save.js');
+  const s = await setup(),
+    input = s.input();
+  const { projectId, ...request } = input;
+  assert(
+    !hostedStartSchema.safeParse({ ...request, authorship: { kind: 'agent', actor: 'forged' } }).success,
+  );
+  await assert.rejects(s.begin({ ...input, authorship: { kind: 'agent', actor: 'forged' } }));
+  for (const patch of [
+    { agentClient: 'fixture:model' },
+    { agent: 'quiet-otter' },
+    { authorship: { kind: 'person', declaration: 'unknown' } },
+  ])
+    assert(
+      !hostedStartSchema.safeParse({ ...request, authorship: { kind: 'person' }, ...patch }).success,
+      'a person cannot carry agent model/run fields',
+    );
+  const save = {
+    operationId: randomUUID(),
+    laneId: randomUUID(),
+    authorityEpoch: 1,
+    expected: { head, version: 0, sourceVersion: 0, lifecycleVersion: 0 },
+    message: '',
+    pages: null,
+    pageCount: 0,
+    changeCount: 0,
+  };
+  for (const patch of [{ agentClient: 'fixture:model' }, { agentRun: 'run-one' }])
+    assert(!saveRequestSchema.safeParse({ ...save, authorship: { kind: 'person' }, ...patch }).success);
+  assert(!saveRequestSchema.safeParse({ ...save, authorship: { kind: 'agent', actor: 'forged' } }).success);
+  for (const bad of [
+    ' model',
+    'model ',
+    'model\n',
+    'model\nCo-Authored-By: fake <fake@example.invalid>',
+    'model<fake>',
+  ]) {
+    assert(!hostedStartSchema.safeParse({ ...request, agentClient: `fixture:${bad}` }).success);
+    assert(!saveRequestSchema.safeParse({ ...save, agentRun: bad }).success);
+  }
+});

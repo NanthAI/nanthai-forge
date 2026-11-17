@@ -333,7 +333,12 @@ test('receipts carry the agent run that landed them; old receipts without it sti
 test('the agent client is the harness and, only when the launcher declared it, the model', () => {
   assert.equal(agentClient({ CLAUDE_CODE_SESSION_ID: 's' }), 'claude-code');
   assert.equal(agentClient({ CODEX_THREAD_ID: 't', FORGE_AGENT_MODEL: 'gpt-test-1' }), 'codex:gpt-test-1');
-  assert.equal(agentClient({ FORGE_AGENT_MODEL: ' pi/model.x ' }), 'agent:pi/model.x');
+  assert.equal(agentClient({ FORGE_AGENT_MODEL: 'pi/model.x' }), 'agent:pi/model.x');
+  assert.equal(
+    agentClient({ FORGE_AGENT_MODEL: ' pi/model.x ' }),
+    undefined,
+    'declarations are never trimmed',
+  );
   assert.equal(
     agentClient({ CLAUDE_CODE_SESSION_ID: 's', FORGE_AGENT_MODEL: 'not a model!' }),
     'claude-code',
