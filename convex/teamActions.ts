@@ -3,7 +3,7 @@
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { action } from './cliServer';
-import { personByEmail } from './projectPeople';
+import { emailRecipient } from './projectPeople';
 import { api, internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import { currentAccess } from './access';
@@ -74,9 +74,14 @@ export const addByEmail = action({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'GITHUB_UNAVAILABLE', 'Sign in to manage a team.');
-      await ctx.runQuery(internal.teams.owned, { id, owner: user.subject });
-      const person = await personByEmail(email);
-      return await ctx.runMutation(internal.teams.add, { id, owner: user.subject, member: person.id });
+      const recipient = await ctx.runQuery(internal.teams.owned, { id, owner: user.subject, email });
+      const person = (await emailRecipient(email, recipient, true))!;
+      return await ctx.runMutation(internal.teams.add, {
+        id,
+        owner: user.subject,
+        member: person.id,
+        ...(recipient ? { email } : { legacyEmail: email }),
+      });
     } catch (error) {
       return report(error);
     }

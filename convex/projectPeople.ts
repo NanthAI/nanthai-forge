@@ -57,6 +57,26 @@ export async function personByEmail(value: string): Promise<Person> {
   invariant(person, 'BAD_ARGUMENT', 'No Forge account matches that email address.');
   return person;
 }
+/** Owner-approved mixed-provider rule: compare both current exact verified matches. */
+export async function emailRecipient(
+  value: string,
+  native: string | null,
+  required = false,
+): Promise<Person | null> {
+  const legacy = process.env.CLERK_SECRET_KEY
+    ? await findPersonByEmail(value)
+    : !native && required
+      ? await personByEmail(value)
+      : null;
+  invariant(
+    !native || !legacy || native === legacy.id,
+    'BAD_ARGUMENT',
+    'This email matches different Forge accounts. Invite by Forge handle instead.',
+  );
+  const person = native ? { id: native } : legacy;
+  invariant(!required || person, 'BAD_ARGUMENT', 'No Forge account matches that email address.');
+  return person;
+}
 /** URL identity seeds deliberately omit every name and email field. */
 export async function personUrlProfile(id: string) {
   const person = (await clerk(`/${encodeURIComponent(id)}`)) as Person | null;

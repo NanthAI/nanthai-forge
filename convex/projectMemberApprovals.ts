@@ -49,7 +49,11 @@ export async function applyApprovedMember(ctx: MutationCtx, row: ApprovalRow) {
   const common = { projectId: row.projectId, owner: user.subject };
   switch (change.kind) {
     case 'contributor':
-      await addContributor(ctx, { ...common, contributor: change.contributor });
+      await addContributor(ctx, {
+        ...common,
+        contributor: change.contributor,
+        ...(change.email ? { email: change.email } : {}),
+      });
       break;
     case 'invite':
       await inviteContributor(ctx, {

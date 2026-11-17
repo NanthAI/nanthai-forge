@@ -5,7 +5,8 @@ import { action } from './cliServer';
 import { api, internal } from './_generated/api';
 import { checkForgeUser } from './sharingActions';
 import { caller } from './projectWorkActions';
-import { personByEmail, findPersonByEmail } from './projectPeople';
+import { emailRecipient } from './projectPeople';
+import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { requestMemberApproval } from './projectMemberRequest';
@@ -32,14 +33,39 @@ export const addByEmail = action({
   handler: async (ctx, { projectId, email }): Promise<null> => {
     try {
       const owner = await caller(ctx);
-      await ctx.runQuery(internal.projectWork.owner, { projectId, owner });
-      const person = await personByEmail(email);
-      if (await requestMemberApproval(ctx, projectId, { kind: 'contributor', contributor: person.id }))
+      const recipient = await ctx.runQuery(internal.projectContributors.recipient, {
+        projectId,
+        owner,
+        email,
+      });
+      const person = (await emailRecipient(email, recipient, true))!;
+      if (
+        await requestMemberApproval(
+          ctx,
+          projectId,
+          recipient
+            ? {
+                kind: 'contributor',
+                contributor: person.id,
+                email,
+              }
+            : {
+                // The existing invitation form retains a legacy email without mislabelling it native.
+                kind: 'invite',
+                person: email.trim().toLowerCase(),
+                contributor: person.id,
+                operationId: digest(
+                  JSON.stringify(['email-member', projectId, owner, email.trim().toLowerCase(), person.id]),
+                ),
+              },
+        )
+      )
         return null;
       return await ctx.runMutation(internal.projectContributors.add, {
         projectId,
         owner,
         contributor: person.id,
+        ...(recipient ? { email } : { legacyEmail: email }),
       });
     } catch (error) {
       return report(error);
@@ -80,7 +106,11 @@ export const invitePerson = action({
       await ctx.runQuery(internal.projectWork.owner, { projectId, owner });
       person = person.trim().toLowerCase();
       const request = { projectId, owner, person, operationId, ...(role ? { role } : {}) };
-      if (await ctx.runQuery(internal.projectContributors.invitationOperation, request)) return null;
+      const lookup = await ctx.runQuery(internal.projectContributors.invitationOperation, {
+        ...request,
+        resolveRecipient: true,
+      });
+      if (typeof lookup === 'boolean' ? lookup : lookup.seen) return null;
       if (person.startsWith('@')) {
         const account = await ctx.runQuery(internal.projectContributors.identity, {
           projectId,
@@ -102,13 +132,21 @@ export const invitePerson = action({
           contributor: account.owner,
         });
       }
-      const account = await findPersonByEmail(person);
+      const native = typeof lookup === 'object' ? lookup.recipient : null;
+      const account = await emailRecipient(person, native);
       if (account) {
         if (
           await requestMemberApproval(
             ctx,
             projectId,
-            { kind: 'invite', person, operationId, ...(role ? { role } : {}), contributor: account.id },
+            {
+              kind: 'invite',
+              person,
+              operationId,
+              ...(role ? { role } : {}),
+              contributor: account.id,
+              ...(native ? { email: person } : {}),
+            },
             operationId,
           )
         )
@@ -116,6 +154,7 @@ export const invitePerson = action({
         return await ctx.runMutation(internal.projectContributors.invite, {
           ...request,
           contributor: account.id,
+          ...(native ? { email: person } : {}),
         });
       }
       if (

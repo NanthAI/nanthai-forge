@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { findVerifiedRecipient } from './authUsers';
+import { findVerifiedRecipient, currentEmailRecipient } from './authUsers';
 import { retainMembership } from './projectActorNames';
 import { queueInviteMail } from './projectInviteMail';
 import { v } from 'convex/values';
@@ -51,7 +51,13 @@ export async function intentAuthority(
   return { project, event, command: command as { action: 'intent'; base: string } | null };
 }
 export const add = internalMutation({
-  args: { projectId: v.id('hostedProjects'), owner: v.string(), contributor: v.string() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    owner: v.string(),
+    contributor: v.string(),
+    email: v.optional(v.string()),
+    legacyEmail: v.optional(v.string()),
+  },
   returns: v.null(),
   handler: addContributor,
 });
@@ -236,9 +242,31 @@ async function invitationSeen(
   }
 }
 export const invitationOperation = internalQuery({
-  args: { projectId: v.id('hostedProjects'), owner: v.string(), operationId: v.string(), person: v.string() },
-  returns: v.boolean(),
-  handler: invitationSeen,
+  args: {
+    projectId: v.id('hostedProjects'),
+    owner: v.string(),
+    operationId: v.string(),
+    person: v.string(),
+    resolveRecipient: v.optional(v.literal(true)),
+  },
+  returns: v.union(v.boolean(), v.object({ seen: v.boolean(), recipient: v.union(v.string(), v.null()) })),
+  handler: async (ctx, input) => {
+    const seen = await invitationSeen(ctx, input);
+    if (!input.resolveRecipient) return seen;
+    return {
+      seen,
+      recipient: seen || input.person.startsWith('@') ? null : await findVerifiedRecipient(ctx, input.person),
+    };
+  },
+});
+/** Replaces addByEmail's existing owner read; no additional action round trip. */
+export const recipient = internalQuery({
+  args: { projectId: v.id('hostedProjects'), owner: v.string(), email: v.string() },
+  returns: v.union(v.string(), v.null()),
+  handler: async (ctx, input) => {
+    await ownedProject(ctx, input.projectId, input.owner);
+    return findVerifiedRecipient(ctx, input.email);
+  },
 });
 export const invite = internalMutation({
   args: {
@@ -277,7 +305,8 @@ export async function redeemInvites(
 ) {
   if (!user.email || !user.emailVerified) return;
   const email = user.email.trim().toLowerCase();
-  if (user.forgeAuthUser && (await findVerifiedRecipient(ctx, email)) !== user.subject) return;
+  const current = await findVerifiedRecipient(ctx, email);
+  if ((current && current !== user.subject) || (user.forgeAuthUser && current !== user.subject)) return;
   const rows = await ctx.db
     .query('projectInvites')
     .withIndex('by_email', q => q.eq('email', email))
@@ -316,10 +345,28 @@ async function grant(
 
 export async function addContributor(
   ctx: MutationCtx,
-  { projectId, owner, contributor }: { projectId: Id<'hostedProjects'>; owner: string; contributor: string },
+  {
+    projectId,
+    owner,
+    contributor,
+    email,
+    legacyEmail,
+  }: {
+    projectId: Id<'hostedProjects'>;
+    owner: string;
+    contributor: string;
+    email?: string;
+    legacyEmail?: string;
+  },
 ): Promise<null> {
   try {
     await activeOwnedProject(ctx, projectId, owner);
+    invariant(
+      !email || (await currentEmailRecipient(ctx, email, contributor, true)),
+      'BAD_ARGUMENT',
+      'No Forge account currently matches that verified address.',
+    );
+    if (legacyEmail) await currentEmailRecipient(ctx, legacyEmail, contributor, false);
     if (contributor === owner) return null;
     const old = await ctx.db
       .query('projectContributors')
@@ -347,11 +394,19 @@ export async function inviteContributor(
   },
 ): Promise<null> {
   try {
-    const { projectId, owner, email, contributor, operationId, person } = input;
+    const { projectId, owner, operationId, person } = input;
+    let { email, contributor } = input;
     const role = input.role ?? 'write';
     await activeOwnedProject(ctx, projectId, owner);
     invariant(operationId.trim(), 'BAD_ARGUMENT', 'Retain the invitation operation id.');
     if (await invitationSeen(ctx, { projectId, owner, operationId, person })) return null;
+    if (contributor && !person.startsWith('@')) {
+      const valid = await currentEmailRecipient(ctx, email ?? person, contributor, !!email);
+      if (!valid) {
+        email = person.trim().toLowerCase();
+        contributor = undefined;
+      }
+    }
     let mail = false;
     if (contributor && contributor !== owner) await grant(ctx, projectId, contributor, role);
     else if (email) {

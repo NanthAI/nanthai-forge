@@ -312,3 +312,17 @@ until its separate removal checklist is complete. Browser-session management
 checks the live session and a fresh account-bound passkey or GitHub proof before
 revoking other sessions; no session id supplied by a client selects another
 account's sessions.
+
+
+Native email-resolved membership uses the current unique verified address and
+rechecks it in the existing grant mutation, including delayed membership approvals
+and team additions. A native profile that no longer reports an address clears its
+verification. Existing verified legacy-provider addresses, including secondary
+addresses, keep their provider's authority. Explicit handle and account-ID
+membership APIs keep their existing meaning. Email lookup compares the configured
+legacy provider with the current native binding. Different account matches grant
+nothing and tell the inviter to invite by Forge handle; same-account matches
+proceed. Grant transactions and retained email approvals also recheck the native
+binding, so an intervening conflict cannot grant access. Legacy redemption
+retains verified secondary-address support and refuses a current native conflict.
+A completed invitation replay does not repeat provider lookup.

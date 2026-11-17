@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { findVerifiedRecipient, currentEmailRecipient } from './authUsers';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { query, mutation, internalQuery, internalMutation } from './cliServer';
@@ -86,18 +87,30 @@ export const members = query({
   },
 });
 export const owned = internalQuery({
-  args: { id: v.id('teams'), owner: v.string() },
-  returns: v.null(),
-  handler: async (ctx, { id, owner }) => {
+  args: { id: v.id('teams'), owner: v.string(), email: v.optional(v.string()) },
+  returns: v.union(v.string(), v.null()),
+  handler: async (ctx, { id, owner, email }) => {
     await teamOwner(ctx, id, owner);
-    return null;
+    return email === undefined ? null : findVerifiedRecipient(ctx, email);
   },
 });
 export const add = internalMutation({
-  args: { id: v.id('teams'), owner: v.string(), member: v.string() },
+  args: {
+    id: v.id('teams'),
+    owner: v.string(),
+    member: v.string(),
+    email: v.optional(v.string()),
+    legacyEmail: v.optional(v.string()),
+  },
   returns: v.null(),
-  handler: async (ctx, { id, owner, member }) => {
+  handler: async (ctx, { id, owner, member, email, legacyEmail }) => {
     await teamOwner(ctx, id, owner);
+    invariant(
+      !email || (await currentEmailRecipient(ctx, email, member, true)),
+      'BAD_ARGUMENT',
+      'No Forge account currently matches that verified address.',
+    );
+    if (legacyEmail) await currentEmailRecipient(ctx, legacyEmail, member, false);
     const old = await ctx.db
       .query('teamMembers')
       .withIndex('by_teamId_and_member', q => q.eq('teamId', id).eq('member', member))
