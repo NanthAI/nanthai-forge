@@ -132,6 +132,57 @@ test('a literal Vite glob names exactly the files it matches (screens.tsx route 
   assert.ok(!selected(files, ['src/other.ts']).tests.includes('tests/screens.test.mjs'));
 });
 
+for (const [pattern, options, changed] of [
+  ['./features/**', '', 'web/src/app/features/nested/leaf.ts'],
+  ['./features/**/leaf.ts', '', 'web/src/app/features/leaf.ts'],
+  ['./features/**/leaf.ts', '', 'web/src/app/features/nested/leaf.ts'],
+  ['./*.ts', ", { base: './features' }", 'web/src/app/features/leaf.ts'],
+]) {
+  test(`Vite glob ${pattern}${options} selects its transitive consumer for ${changed}`, () => {
+    const files = fixture({
+      'web/src/app/registry.ts': `export const routes = import.meta.glob('${pattern}'${options});`,
+      'web/src/app/features/leaf.ts': 'export default 1;',
+      'web/src/app/features/nested/leaf.ts': 'export default 2;',
+      'tests/registry-fixture.mjs': "import '../web/src/app/registry.ts';",
+      'tests/registry.test.mjs': "import './registry-fixture.mjs';",
+    });
+    assert.ok(selected(files, [changed]).tests.includes('tests/registry.test.mjs'));
+    assert.ok(!selected(files, ['src/other.ts']).tests.includes('tests/registry.test.mjs'));
+  });
+}
+
+for (const options of ['{ base: basePath }', '{ caseSensitive: false }', '{ ...options }']) {
+  test(`unsupported Vite glob options ${options} preserve conservative loader coverage`, () => {
+    const files = fixture({
+      'web/src/app/registry.ts': `export const routes = import.meta.glob('./*.ts', ${options});`,
+      'tests/registry.test.mjs': "import '../web/src/app/registry.ts';",
+    });
+    assert.ok(selected(files, ['web/src/Leaf.tsx']).tests.includes('tests/registry.test.mjs'));
+    assert.equal(edge(testImportGraph(files), 'web/src/Leaf.tsx', 'web/src/app/registry.ts').kind, 'dynamic');
+  });
+}
+
+test('an absolute Vite base preserves consumers under every possible configured root', () => {
+  const files = fixture({
+    'web/src/app/registry.ts': "const routes = import.meta.glob('./*.ts', { base: '/src/features' });",
+    'src/features/leaf.ts': 'export default 1;',
+    'web/src/features/leaf.ts': 'export default 2;',
+    'tests/registry.test.mjs': "import '../web/src/app/registry.ts';",
+  });
+  for (const changed of ['web/src/features/leaf.ts', 'src/features/leaf.ts', 'web/src/Leaf.tsx']) {
+    assert.ok(selected(files, [changed]).tests.includes('tests/registry.test.mjs'), changed);
+    assert.equal(edge(testImportGraph(files), changed, 'web/src/app/registry.ts').kind, 'dynamic');
+  }
+});
+
+test('an unsupported Vite option keeps coverage broad even when its literal path resolves locally', () => {
+  const files = fixture({
+    'web/src/registry.ts': "const routes = import.meta.glob('./Leaf.tsx', { base: basePath });",
+    'tests/registry.test.mjs': "import '../web/src/registry.ts';",
+  });
+  assert.ok(selected(files, ['src/other.ts']).tests.includes('tests/registry.test.mjs'));
+});
+
 test('bounded computed loader domains remain broad within their source domain', () => {
   for (const text of [
     'await import(`../dist/${name}.js`)',

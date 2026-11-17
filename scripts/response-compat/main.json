@@ -4478,6 +4478,9 @@
               "flaggedAt": {
                 "type": "string"
               },
+              "generation": {
+                "type": "number"
+              },
               "earlyResolution": {
                 "anyOf": [
                   {

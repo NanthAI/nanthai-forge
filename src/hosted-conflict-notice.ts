@@ -10,6 +10,8 @@ export const exactConflictsSchema = z.array(
     with: z.string(),
     goal: z.string(),
     flaggedAt: z.string(),
+    // Optional for older servers; publication advances this only for a changed exact notice.
+    generation: z.number().optional(),
     earlyResolution: wouldConflictSchema.optional(),
     files: z.array(
       z.object({

@@ -520,6 +520,7 @@ export async function laneConflicts(
         with: row.peer,
         goal: row.peerGoal,
         flaggedAt: new Date(row.flaggedAt).toISOString(),
+        generation: row.updatedAt,
         files: row.paths,
         ...(peer?.open && peer.head === row.peerHead && row.earlyResolution
           ? { earlyResolution: JSON.parse(row.earlyResolution) }

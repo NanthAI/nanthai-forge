@@ -1950,11 +1950,11 @@ Every wait returns the notice at the top level beside its original resume select
 subscription update also settles the wait, its current exact-conflict notice accompanies that terminal
 outcome immediately; completion does not discard it while the batching timer is pending. This also
 applies when source progress compacts to a terminal receipt or a chained resolve result. Member notes
-keep their existing cursor and batching behavior. Wait replies include `board.cursor` and content-derived `board.noticeIds` for delivered exact conflicts.
+keep their batching behavior. Wait replies include `board.cursor` and `board.noticeIds` derived from the existing notice generation and contents; older servers retain content-only dedupe. A new own or peer head therefore wakes once even when its displayed ranges are unchanged.
 The CLI remembers conflict identities separately from the message cursor, so an older two-note page
 cannot redeliver the same conflict on every reconnect. Notes already read in another Lane and
 messages addressed to another Lane cannot interrupt this wait. Live wait delivery reads only the
-directed Lane inbox; project and Issue notes remain on ordinary board reads, so their backlog cannot
+directed Lane inbox. Its local wait position is separate from ordinary board delivery: neither a directed-note wake nor a conflict-only wake acknowledges unread project or Issue notes. Delivered directed notes are filtered from later ordinary replies without an extra read. Project and Issue notes remain on ordinary board reads, so their backlog cannot
 hide an unread directed note. A new conflict, a directed unread
 note, operation progress or the wait budget remains observable. Retrying the same trial does not wake the Lane twice. Board-note
 switches do not suppress source conflicts. A trial that dies cannot leave a save unpublished.

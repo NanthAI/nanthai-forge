@@ -64,7 +64,11 @@ export function writeBoardProjectCursor(root: string, after: number) {
  * Lane do not repeat. Filter only bytes already returned by the existing query. */
 export function unreadBoardNotes(root: string, messages: BoardNote[]): BoardNote[] {
   const after = readBoardProjectCursor(root);
-  return messages.filter(message => message.target !== 'project' || message.at > after);
+  return messages.filter(message =>
+    message.target === 'project'
+      ? message.at > after
+      : !message.target.startsWith('lane:') || message.at > directedNotesAfter(root, message.target.slice(5)),
+  );
 }
 export function readBoardCursor(root: string, laneId: string): number {
   const shared = cursorFile(root, laneId);
@@ -75,6 +79,16 @@ export function writeBoardCursor(root: string, laneId: string, after: number) {
   if (after <= readBoardCursor(root, laneId)) return;
   writeJson(cursorFile(root, laneId), { after });
 }
+
+/** Directed wait progress is independent of the ordinary three-inbox read position. */
+const waitCursorFile = (root: string, laneId: string) => join(boardDir(root), `${laneId}.directed.json`);
+export function readBoardWaitCursor(root: string, laneId: string): number {
+  return Math.max(readBoardCursor(root, laneId), cursorAt(waitCursorFile(root, laneId)));
+}
+const directedNotesAfter = (root: string, laneId: string): number => {
+  const value = readJson(waitCursorFile(root, laneId)) as { notesAfter?: number } | undefined;
+  return value?.notesAfter ?? 0;
+};
 
 /** A delivered note as the server returns it (author already a Forge handle, or absent). */
 export type BoardNote = {
@@ -106,9 +120,15 @@ export const boardNoticeLine = (message: BoardNote, laneId?: string) =>
 
 /** Envelope field for delivered notes: one line per note (≤240 chars each, ≤2 per reply). Writes
  * the local cursor, so the same notes are not shown again on this machine. */
-export function boardEnvelope(root: string, laneId: string, delivered: BoardDeliveryValue) {
+export function boardEnvelope(root: string, laneId: string, delivered: BoardDeliveryValue, directed = false) {
   const messages = unreadBoardNotes(root, delivered.messages);
-  writeBoardCursor(root, laneId, delivered.cursor);
+  if (directed) {
+    writeJson(waitCursorFile(root, laneId), {
+      after: Math.max(readBoardWaitCursor(root, laneId), delivered.cursor),
+      // A conflict-only wake (including board-off) never acknowledges undelivered member notes.
+      notesAfter: Math.max(directedNotesAfter(root, laneId), ...messages.map(message => message.at)),
+    });
+  } else writeBoardCursor(root, laneId, delivered.cursor);
   for (const message of messages) if (message.target === 'project') writeBoardProjectCursor(root, message.at);
   const notices = messages.map(message => boardNoticeLine(message, laneId));
   return {

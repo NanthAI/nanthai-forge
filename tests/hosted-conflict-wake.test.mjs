@@ -10,7 +10,7 @@ import { landingFixture } from './hosted-landing-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { observeHostedSubmissions } from '../dist/hosted-agent-submission-wait.js';
 import { boardWakeEnvelope, boardWakeTiming, readBoardWokeAt } from '../dist/hosted-board-wait.js';
-import { readBoardCursor } from '../dist/hosted-board.js';
+import { readBoardCursor, readBoardWaitCursor } from '../dist/board-local.js';
 const conflicts = await import(moduleUrl('../convex/projectHostedConflicts.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 
@@ -127,7 +127,8 @@ test('83e6d0d3: a notice recorded during a landing wait wakes its existing subsc
   assert.equal(envelope.conflictNotice.items[0].file, 'src/service.ts');
   assert.equal(envelope.conflictNotice.items[0].lines, '2');
   assert.equal(readBoardWokeAt(root, w.laneId), 0, 'a source notice adds no member-note cooldown');
-  assert.equal(readBoardCursor(root, w.laneId), page.board.cursor);
+  assert.equal(readBoardWaitCursor(root, w.laneId), page.board.cursor);
+  assert.equal(readBoardCursor(root, w.laneId), 0);
   assert.equal(JSON.parse(await w.page(page.board.cursor)).board, undefined, 'cursor suppresses replay');
   const inboxes = structuredClone([...w.f.tables.projectBoardInboxes.values()]);
   await w.record();
@@ -497,4 +498,120 @@ test('9829778c: reconnecting a wait never redelivers an exact notice behind olde
   t.mock.timers.tick(boardWakeTiming.batchMs);
   assert.equal(delivered.length, 1, 'new exact ranges interrupt once');
   assert.notDeepEqual(boardWakeEnvelope(root, laneId, delivered[0]).noticeIds, first.noticeIds);
+});
+
+for (const moved of ['peer', 'mine', 'ranges']) {
+  test(`11c07518: a revised ${moved} conflict wakes once through the real projection behind an older note page`, async t => {
+    const { boardWaitOption, freshBoardDelivery } = await import('../dist/hosted-board-wait.js');
+    const w = await fixture();
+    const root = mkdtempSync(join(tmpdir(), 'forge-conflict-identity-'));
+    t.after(() => {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(`${root}.forge-client`, { recursive: true, force: true });
+    });
+    await w.record();
+    const read = () =>
+      w.f.call(
+        'notices',
+        {
+          _handler: ctx => conflicts.laneConflicts(ctx, w.f.projectId, w.laneId),
+        },
+        {},
+      );
+    const first = { messages: [], more: 4, cursor: 2, conflicts: await read() };
+    const envelope = boardWakeEnvelope(
+      root,
+      w.laneId,
+      freshBoardDelivery(boardWaitOption(root, w.laneId), { board: first }),
+    );
+    const option = boardWaitOption(root, w.laneId);
+    assert.equal(freshBoardDelivery(option, { board: first }), undefined);
+    const overrides =
+      moved === 'peer'
+        ? { peers: [{ laneId: w.peerId, head: 'peer-v2' }] }
+        : moved === 'mine'
+          ? { head: 'mine-v2' }
+          : {
+              conflicts: [
+                { peer: w.peerId, path: 'src/service.ts', mine: [[4, 4]], theirs: [[3, 3]], reason: 'text' },
+              ],
+            };
+    if (moved !== 'ranges') {
+      const laneId = moved === 'peer' ? w.peerId : w.laneId;
+      const lane = [...w.f.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === laneId);
+      w.f.patch('projectHostedOverlapLanes', lane._id, { head: moved === 'peer' ? 'peer-v2' : 'mine-v2' });
+    }
+    await w.record(overrides);
+    const revised = { ...first, conflicts: await read() };
+    assert.equal(revised.conflicts[0].flaggedAt, first.conflicts[0].flaggedAt);
+    const fresh = freshBoardDelivery(option, { board: revised });
+    assert.ok(fresh, 'a new exact source pair or changed ranges must remain observable');
+    const next = boardWakeEnvelope(root, w.laneId, fresh);
+    assert.notDeepEqual(next.noticeIds, envelope.noticeIds);
+    await w.record(overrides);
+    assert.equal(
+      freshBoardDelivery(boardWaitOption(root, w.laneId), {
+        board: { ...revised, conflicts: await read() },
+      }),
+      undefined,
+      'retrying the same exact pair behind an old page never wakes again',
+    );
+  });
+}
+
+test('70b38346: a conflict-only wake leaves earlier project and Issue notes unread', async t => {
+  const { boardInbox } = await import(moduleUrl('../convex/projectBoardDelivery.ts'));
+  const { boardEnvelope } = await import('../dist/board-local.js');
+  const w = await fixture();
+  const root = mkdtempSync(join(tmpdir(), 'forge-conflict-unread-'));
+  t.after(() => {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(`${root}.forge-client`, { recursive: true, force: true });
+  });
+  for (const [targetKey, at] of [
+    ['issue:synthetic-issue', 1],
+    ['project', 2],
+  ]) {
+    w.f.insert('projectBoardMessages', {
+      projectId: w.f.projectId,
+      id: randomUUID(),
+      author: 'owner',
+      targetKey,
+      body: `Unread ${targetKey}`,
+      bytes: 16,
+      bodyHash: targetKey,
+      at,
+      expiresAt: Date.now() + 60000,
+    });
+    w.f.insert('projectBoardInboxes', { projectId: w.f.projectId, key: targetKey, latestAt: at, count: 1 });
+  }
+  await w.record();
+  const page = JSON.parse(await w.page());
+  assert.equal(page.board.messages.length, 0);
+  const { generation: _generation, ...old } = page.board.conflicts[0];
+  const delta =
+    Buffer.byteLength(JSON.stringify(page.board.conflicts[0])) - Buffer.byteLength(JSON.stringify(old));
+  assert(delta <= 32, `notice generation adds ${delta} reply bytes`);
+  t.diagnostic(`conflict reply delta ${delta} bytes; generation is projected from existing notice rows`);
+  boardWakeEnvelope(root, w.laneId, page.board);
+  const unread = await w.f.call(
+    'ordinaryInbox',
+    {
+      _handler: ctx =>
+        boardInbox(ctx, {
+          projectId: w.f.projectId,
+          laneId: w.laneId,
+          intentId: 'synthetic-issue',
+          after: readBoardCursor(root, w.laneId),
+          limit: 2,
+          order: 'asc',
+        }),
+    },
+    {},
+  );
+  assert.deepEqual(
+    unread.messages.map(message => message.target),
+    ['issue:synthetic-issue', 'project'],
+  );
+  assert.equal(boardEnvelope(root, w.laneId, unread).notices.length, 2);
 });

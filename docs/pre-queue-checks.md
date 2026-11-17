@@ -455,6 +455,12 @@ Each tier answers a different question. None depends on a particular CI provider
    code and documents alike: `scripts/test-tree-scanners.mjs` finds tests whose
    `readdir`, `opendir` or `glob` argument is built from the repository base
    (`import.meta` or `process.cwd()`) and takes the folder names that flow into it.
+   Literal Vite `import.meta.glob` loaders narrow to their matched files only for
+   supported relative patterns (`*`, recursive `**/` and trailing `**`) and literal
+   `base`, `eager` and `import` options. A relative base starts at the importer.
+   Absolute bases depend on the unmodeled Vite root and stay broad, as do
+   unknown patterns or options. These forms keep
+   conservative loader coverage; an unsupported form never proves an empty match.
    No import edge reaches such a test, so before this a new literal in a scanned
    file could fail only the landing check.
 2. **Pre-queue Lane check (project runner, any CI): the complete consumer set,

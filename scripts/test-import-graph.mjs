@@ -278,13 +278,12 @@ export function testImportGraph(files, scriptsChanged = []) {
         }
       }
       // A literal Vite glob (`import.meta.glob('./*/route.ts')`) loads exactly the files it matches.
-      const globbed =
+      const viteGlob =
         ts.isCallExpression(node) &&
         ts.isPropertyAccessExpression(node.expression) &&
         node.expression.name.text === 'glob' &&
-        ts.isMetaProperty(node.expression.expression)
-          ? literalGlobTargets(path, node.arguments[0], files)
-          : null;
+        ts.isMetaProperty(node.expression.expression);
+      const globbed = viteGlob ? literalGlobTargets(path, node.arguments, files) : null;
       if (globbed) {
         for (const target of globbed) edge(target, path, 'import');
         return;
@@ -298,7 +297,9 @@ export function testImportGraph(files, scriptsChanged = []) {
             node.expression.name.text === 'glob' &&
             ts.isMetaProperty(node.expression.expression)))
       ) {
-        const prefixes = loadingPrefixes(node.arguments[0], value => resolve(path, value) || external(value));
+        const prefixes = viteGlob
+          ? ['']
+          : loadingPrefixes(node.arguments[0], value => resolve(path, value) || external(value));
         if (prefixes.length) {
           // Packagers load installed artifacts, not repository sources. A literal ending is bounded.
           if (
@@ -332,19 +333,41 @@ export function testImportGraph(files, scriptsChanged = []) {
 }
 
 // A resolved literal in one branch must never hide an unknown alternative.
-/** Files a literal relative Vite glob (or a list of them) names, or null when the pattern is computed. */
-function literalGlobTargets(path, node, files) {
+/** Only proven literal Vite forms narrow coverage. Unknown patterns/options use the broad loader. */
+function literalGlobTargets(path, args, files) {
+  const [node, options] = args;
+  let base = posix.dirname(path);
+  if (args.length > 2) return null;
+  if (options) {
+    if (!ts.isObjectLiteralExpression(options)) return null;
+    for (const property of options.properties) {
+      if (!ts.isPropertyAssignment(property)) return null;
+      const name =
+        ts.isIdentifier(property.name) || ts.isStringLiteralLike(property.name) ? property.name.text : null;
+      const value = property.initializer;
+      if (name === 'base') {
+        if (!ts.isStringLiteralLike(value) || !/^\.\.?\/[\w./-]*$/.test(value.text)) return null;
+        base = posix.join(posix.dirname(path), value.text);
+      } else if (name === 'eager') {
+        if (![ts.SyntaxKind.TrueKeyword, ts.SyntaxKind.FalseKeyword].includes(value.kind)) return null;
+      } else if (name !== 'import' || !ts.isStringLiteralLike(value)) return null;
+    }
+  }
   const patterns = node && ts.isArrayLiteralExpression(node) ? [...node.elements] : [node];
-  // Only `*` and `**/` are read here; braces, classes, negation or `?` keep the loader broad.
-  if (!patterns.every(item => item && ts.isStringLiteralLike(item) && /^\.\/[^{}[\]!?]*$/.test(item.text)))
+  if (!patterns.every(item => item && ts.isStringLiteralLike(item) && /^\.\/[\w./*-]*$/.test(item.text)))
+    return null;
+  // A globstar is recursive only as a complete segment. Other syntax stays conservative.
+  if (patterns.some(item => item.text.split('/').some(part => part.includes('**') && part !== '**')))
     return null;
   const matchers = patterns.map(
     item =>
       new RegExp(
         `^${posix
-          .join(posix.dirname(path), item.text)
-          .split(/(\*\*\/|\*)/)
-          .map(part => (part === '**/' ? '(?:.*/)?' : part === '*' ? '[^/]*' : escape(part)))
+          .join(base, item.text)
+          .split(/(\*\*\/|\*\*|\*)/)
+          .map(part =>
+            part === '**/' ? '(?:.*/)?' : part === '**' ? '.*' : part === '*' ? '[^/]*' : escape(part),
+          )
           .join('')}$`,
       ),
   );

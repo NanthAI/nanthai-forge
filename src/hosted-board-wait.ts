@@ -6,7 +6,7 @@ import { exactConflictEnvelope, exactConflictNotice } from './hosted-conflict-no
 import { boardDeliverySchema } from './hosted-board.js';
 import {
   boardEnvelope,
-  readBoardCursor,
+  readBoardWaitCursor,
   readBoardWokeAt,
   writeBoardWokeAt,
   readBoardConflictIds,
@@ -56,12 +56,12 @@ export function boardWaitOption(root: string, laneId: string | undefined): Board
     laneId,
     root,
     conflictIds: readBoardConflictIds(root, laneId),
-    after: readBoardCursor(root, laneId),
+    after: readBoardWaitCursor(root, laneId),
     wokeAt: readBoardWokeAt(root, laneId),
   };
 }
 
-/** A stable identity from the existing exact notice bytes; no extra hosted read. */
+/** A stable identity from the notice generation and bytes; older servers keep content dedupe. */
 const conflictId = (conflict: NonNullable<BoardDelivery['conflicts']>[number]) =>
   createHash('sha256').update(JSON.stringify(conflict)).digest('hex');
 
@@ -131,7 +131,7 @@ export function boardWaker(option: BoardWaitOption, wake: (delivery: BoardDelive
 export function boardWakeEnvelope(root: string, laneId: string, delivery: BoardDelivery) {
   const noticeIds = (delivery.conflicts ?? []).map(conflictId);
   if (noticeIds.length) writeBoardConflictIds(root, laneId, noticeIds);
-  const envelope = boardEnvelope(root, laneId, delivery);
+  const envelope = boardEnvelope(root, laneId, delivery, true);
   if (delivery.messages.length) writeBoardWokeAt(root, laneId);
   const conflictNotice = exactConflictNotice(laneId, delivery.conflicts ?? []);
   return {
