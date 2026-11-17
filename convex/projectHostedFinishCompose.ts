@@ -202,7 +202,14 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
       parentAttemptId: null,
       at: pending.at,
       expected,
-      ids: { candidate: crypto.randomUUID(), job: crypto.randomUUID(), jobOperation: crypto.randomUUID() },
+      // A cached precompose can be adopted by a different landing attempt. Keep
+      // its existing owner id in the extensible reservation map, independent of
+      // either attempt id, so resolution notes retain their exact authority.
+      ids: {
+        submission: input.submissionId,
+        candidate: crypto.randomUUID(),
+        job: crypto.randomUUID(),
+      },
     },
   });
   invariant(!prepared.replayed, 'SOURCE_UNAVAILABLE', 'The pending source operation lost its composition.');
@@ -246,7 +253,10 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
     inputs: { next: null, pages: request.inputs.pages, count: request.inputs.count },
     dependencies: { next: null, pages: request.dependencies.pages, count: request.dependencies.count },
     candidateId: prepared.operation.firstAttempt.ids.candidate!,
-    jobOperationId: prepared.operation.firstAttempt.ids.jobOperation!,
+    // The Candidate UUID already names this unique source preparation. Reuse it
+    // for its job operation instead of retaining a second random reservation.
+    jobOperationId:
+      prepared.operation.firstAttempt.ids.jobOperation ?? prepared.operation.firstAttempt.ids.candidate!,
     status: 'ready',
   };
   const fields = {

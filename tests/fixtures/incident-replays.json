@@ -241,6 +241,11 @@
       "what": "An overlapping full admission spends its check before composing against work already ahead.",
       "file": "tests/hosted-queued-conflict-precheck.test.mjs",
       "test": "C1 wasted checks: overlapping admission composes before spending a check, predecessor fails=${failed}, width=${concurrency}, mode=${landingMode}"
+    },
+    {
+      "incident": "95a0b4d",
+      "file": "tests/landing-message-mirror.test.mjs",
+      "test": "incident 95a0b4d: a batch preserves a recomposed conflict message through another resolution"
     }
   ]
 }

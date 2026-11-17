@@ -2,6 +2,7 @@
 import test from 'node:test';
 import { ticketState, patchTicketState } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { batchesFixture, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { acceptanceFixture } from './hosted-acceptance-fixture.mjs';
@@ -255,7 +256,7 @@ test('incident 9f919ded: a cohort mirror commit with one peer message loses the 
 // normal Lane (a91b9b69) and resolution Lane c456f8db, made after df2ba360's landing ec6191b6
 // failed COMPOSITION_CONFLICT. The resolution finish named no message (request null, compose
 // "Agent change"), so its receipt had none and the commit kept only a91b9b69's message.
-test('incident f233bf1c: a batch of a normal Lane and a resolution Lane mirrors both messages', async t => {
+async function batchConflictMessages(t, recomposed, choice) {
   const finish = await import(moduleUrl('../convex/projectHostedFinishStore.ts'));
   const normal = 'Add a per-project budget for signed-out reads and storage quotas (a91b9b69).';
   const conflicted = `Guards: SPDX header lint (f44ac5e0) and no printing env values (df2ba360)\n\nBoth run in check-foundation.\n\n${footer}`;
@@ -272,8 +273,82 @@ test('incident f233bf1c: a batch of a normal Lane and a resolution Lane mirrors 
       githubMirror: { repo: 'synthetic/mirror', autoPush: true, laneRefs: false },
     },
   });
-  // The original df2ba360 landing, with the builder's message, conflicts with main.
-  const origin = await f.add(1);
+  // L10/95a0b4d failed on a child Candidate after main moved. The request
+  // remains pinned to its original Candidate, while the resolution selects the child.
+  const origin = await f.add(1, choice ? { request: { message: choice.message } } : {});
+  let conflictCandidateId = f.entries[1].candidate.id;
+  if (recomposed) {
+    const landingStore = await import(moduleUrl('../convex/projectHostedLandingStore.ts'));
+    const composeSource = await import(moduleUrl('../convex/projectHostedFinishCompose.ts'));
+    const prepared = await f.transaction(
+      'prepareRecomposedSource',
+      {
+        _handler: async ctx => {
+          const input = { projectId: f.projectId, submissionId: origin.id };
+          const { value } = await finish.loadFinish(ctx, input);
+          const main = f.currentMain();
+          return composeSource.prepareFinishCompose(ctx, input, {
+            ...value,
+            source: { ...value.source, message: choice?.composeMessage ?? 'Agent change' },
+            pending: {
+              id: choice?.cached ? randomUUID() : 'bb286e7a-e1a4-49cf-9442-cb1127316bca',
+              parentAttemptId: origin.attemptId,
+              number: 1,
+              at: new Date().toISOString(),
+              main: { head: main.head, receiptId: main.receipt.id },
+              operations: { compose: randomUUID(), check: randomUUID(), accept: randomUUID() },
+            },
+          });
+        },
+      },
+      {},
+    );
+    conflictCandidateId = prepared.state.candidateId;
+    // Publication indexes the exact Candidate; source execution itself is outside this replay.
+    f.patch('projectHostedComposes', prepared.row._id, { candidateId: conflictCandidateId });
+    const operationRow = [...f.tables.projectHostedOperations.values()].find(
+      row => row.operationId === prepared.state.request.operationId,
+    );
+    const operation = JSON.parse(operationRow.value);
+    if (!choice?.cached) {
+      // Retained pre-upgrade requests have no explicit submission reservation.
+      delete operation.firstAttempt.ids.submission;
+    }
+    if (choice?.mismatch) operation.firstAttempt.id = origin.attemptId;
+    if (choice?.wrongSourceCandidate) operation.firstAttempt.ids.candidate = f.entries[1].candidate.id;
+    f.patch('projectHostedOperations', operationRow._id, { value: JSON.stringify(operation) });
+
+    await f.transaction(
+      'recomposeOrigin',
+      {
+        _handler: async ctx => {
+          const { row, state } = await landingStore.loadLanding(ctx, {
+            projectId: f.projectId,
+            submissionId: origin.id,
+          });
+          const parent = await landingStore.loadLandingAttempt(ctx, {
+            projectId: f.projectId,
+            attemptId: state.attemptId,
+          });
+          const child = {
+            ...parent,
+            id: 'bb286e7a-e1a4-49cf-9442-cb1127316bca',
+            parentAttemptId: parent.id,
+            number: parent.number + 1,
+            candidate: { ...parent.candidate, id: conflictCandidateId },
+          };
+          await landingStore.insertLandingAttempt(ctx, child);
+          await landingStore.writeLanding(
+            ctx,
+            row,
+            { ...state, version: state.version + 1, attemptId: child.id },
+            false,
+          );
+        },
+      },
+      {},
+    );
+  }
   await f.transaction(
     'originConflict',
     {
@@ -293,7 +368,7 @@ test('incident f233bf1c: a batch of a normal Lane and a resolution Lane mirrors 
   await f.add(2, {
     lane: {
       resolution: {
-        candidateId: conflictedEntry.candidate.id,
+        candidateId: conflictCandidateId,
         conflicts: draft,
         left: 'a'.repeat(64),
         right: 'b'.repeat(64),
@@ -304,6 +379,25 @@ test('incident f233bf1c: a batch of a normal Lane and a resolution Lane mirrors 
     },
     request: { message: null },
   });
+  const retainedResolution = ticketState(
+    f,
+    [...f.tables.projectHostedLandingRequests.values()].find(
+      row => row.submissionId === f.entries[2].state.id,
+    ),
+  );
+  if (choice) {
+    assert.equal(
+      retainedResolution.message,
+      choice.mismatch || choice.wrongSourceCandidate ? undefined : (choice.message ?? undefined),
+      'resolution retains the exact landing choice, independently of compose text',
+    );
+    return;
+  }
+  assert.equal(
+    retainedResolution.message,
+    conflicted,
+    'the retained landing note survives the child Candidate',
+  );
   const live = [f.entries[0], f.entries[2]];
   const phase = entry =>
     JSON.parse(
@@ -347,7 +441,40 @@ test('incident f233bf1c: a batch of a normal Lane and a resolution Lane mirrors 
     assert.deepEqual(lostTrailers(message, seed.message), [], 'mirror commit keeps every finish trailer');
   // The f233bf1c commit shape itself fails the check.
   assert.deepEqual(lostTrailers(conflicted, `${normal}\n\n${trailers(mirrored)}`), [footer]);
-});
+}
+
+test('incident f233bf1c: a batch of a normal Lane and a resolution Lane mirrors both messages', t =>
+  batchConflictMessages(t, false));
+test('incident 95a0b4d: a batch preserves a recomposed conflict message through another resolution', t =>
+  batchConflictMessages(t, true));
+
+test('a recomposed resolution preserves an explicit default subject', t =>
+  batchConflictMessages(t, true, { message: 'Agent change' }));
+test('a recomposed resolution preserves an explicitly empty note', t =>
+  batchConflictMessages(t, true, { message: '' }));
+test('a recomposed resolution preserves omission despite custom compose text', t =>
+  batchConflictMessages(t, true, { message: null, composeMessage: 'Compose note omitted by the landing' }));
+test('a recomposed resolution keeps the landing override of its compose note', t =>
+  batchConflictMessages(t, true, { message: 'Landing note', composeMessage: 'Different compose note' }));
+
+test('a child Candidate never inherits a note from a mismatched landing attempt', t =>
+  batchConflictMessages(t, true, { message: 'Wrong Candidate note', mismatch: true }));
+
+test('an adopted cached precompose retains the exact landing note across new attempt ids', t =>
+  batchConflictMessages(t, true, { message: 'Cached landing note', cached: true }));
+test('an adopted cached precompose preserves explicit omission', t =>
+  batchConflictMessages(t, true, {
+    message: null,
+    composeMessage: 'Omitted cached compose note',
+    cached: true,
+  }));
+
+test('a cached source with another Candidate never inherits its reserved submission note', t =>
+  batchConflictMessages(t, true, {
+    message: 'Wrong source Candidate',
+    cached: true,
+    wrongSourceCandidate: true,
+  }));
 
 test('no supplied message keeps the outcome fallback and exact Forge identity trailers', async () => {
   const input = {

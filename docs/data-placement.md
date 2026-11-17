@@ -555,7 +555,7 @@ packing; existing capsules continue through the reader/recovery path. Logical
 history is preserved indefinitely. This does not enable a deployed setting or
 claim measured billing savings.
 
-Landing request phase state lives in the indexed `projectHostedLandingRequests` ticket.
+Landing request phase state lives in the indexed `projectHostedLandingRequests` ticket. Resolution-message inheritance follows existing compose, operation and submission indexes when a child attempt conflicted; older ordinary recomposes also read their landing attempt. New finish recomposes reserve the owning submission UUID in the existing operation-ID map, so cached precompose adoption preserves exact note choices. Their source job reuses the already unique Candidate UUID, replacing the redundant job-operation reservation (two fewer serialized bytes per operation). Healthy landing calls, writes and indexes stay unchanged; source bytes stay in R2.
 Its immutable request and larger batch selection live in separate rows of the unindexed
 `projectHostedLandingBodies` table, reached only by the ticket's private pointers. Existing
 index readers receive the same logical row. The finite observer hydrates only the request,
