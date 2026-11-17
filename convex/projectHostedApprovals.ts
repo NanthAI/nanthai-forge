@@ -29,6 +29,7 @@ import {
   type ApprovalRow,
 } from './projectHostedApprovalStore';
 import { notifyPullApproval } from './projectGithubPullQueue';
+import { settingCompare } from './projectSettingCompare';
 import { isAgentSlug } from '../src/agent-slug';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { deriveApproval } from '../src/approval-state';
@@ -308,11 +309,17 @@ export const observe = query({
       const row = await approvalRow(ctx, input.projectId, input.laneId);
       const view = approvalView(row, input.laneId);
       // Issue 470ef29b: a settings request has no Lane; the owner's page gets the change and its digest.
+      // Item 16093ed1: only an open request needs the comparison (one indexed read at most).
       if (row?.setting)
         return canonicalPayload({
           ...view,
           ...(input.detail && project.owner === user.subject
-            ? { currentHead: row.head, change: settingChange(row) }
+            ? {
+                currentHead: row.head,
+                change: settingChange(row),
+                // Item 16093ed1: the setting now and as granted, for a readable before/after.
+                ...(openSettingRequest(row) ? { compare: await settingCompare(ctx, project, row) } : {}),
+              }
             : {}),
           landing: null,
           url: laneApproveUrl(input.projectId, input.laneId),

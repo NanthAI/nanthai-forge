@@ -1,0 +1,33 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* A held settings change (Item 16093ed1). Shared by the approve page (fx tokens) and Needs me (design-system tokens):
+   each value names the design-system token first and the older page token as its fallback. Nothing scrolls the page
+   sideways: rows wrap and scripts wrap inside their block. */
+.sc { display: grid; gap: 10px; min-width: 0; }
+.sc-sum { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.sc-rows { display: grid; margin: 0; border: 1px solid var(--line, var(--fx-line)); border-radius: 8px; }
+.sc-row { display: grid; grid-template-columns: minmax(96px, 30%) minmax(0, 1fr); gap: 4px 12px; padding: 8px 12px; border-top: 1px solid var(--line, var(--fx-line)); font-size: 13px; }
+.sc-row:first-child { border-top: 0; }
+.sc-row dt { color: var(--text-2, var(--fx-text-2)); overflow-wrap: anywhere; }
+.sc-row dd { margin: 0; display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.sc-before { color: var(--text-2, var(--fx-text-2)); text-decoration: line-through; text-decoration-color: var(--line-strong, var(--fx-line)); }
+.sc-row[data-kind='added'] .sc-before { display: none; }
+.sc-after { color: var(--text, var(--fx-text)); }
+.sc-tag { color: var(--text-3, var(--fx-text-3)); font-size: 12px; text-decoration: none; display: inline-block; }
+.sc-script { margin: 0; display: grid; gap: 4px; min-width: 0; }
+.sc-script figcaption { font-size: 13px; color: var(--text-2, var(--fx-text-2)); }
+.sc-diff, .sc-raw {
+  margin: 0; padding: 8px 10px; border: 1px solid var(--line, var(--fx-line)); border-radius: 8px;
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 1.6;
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 28em; overflow-y: auto;
+}
+.sc-l { display: block; padding-left: 1.4em; text-indent: -1.4em; }
+.sc-op { display: inline-block; width: 1.4em; text-indent: 0; color: var(--text-3, var(--fx-text-3)); }
+.sc-add { background: var(--add-bg, rgba(95, 211, 154, 0.12)); }
+.sc-add .sc-op { color: var(--passed, var(--fx-passed)); }
+.sc-del { background: var(--del-bg, rgba(255, 111, 122, 0.12)); }
+.sc-del .sc-op { color: var(--failed, var(--fx-failed)); }
+.sc-note { margin: 0; font-size: 12.5px; color: var(--text-2, var(--fx-text-2)); }
+.sc-details > summary { cursor: pointer; font-size: 12.5px; color: var(--text-2, var(--fx-text-2)); }
+.sc-details[open] > summary { margin-bottom: 6px; }
+.sc-vh { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (max-width: 520px) { .sc-row { grid-template-columns: minmax(0, 1fr); } }

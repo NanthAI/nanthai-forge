@@ -4,6 +4,8 @@ import { Glyph } from '../ui/Glyph';
 import { ErrorToast } from '../ui/Toast';
 import { OwnerReviewActions, type OwnerReview } from '../lane/OwnerReviewActions';
 import { deriveApproval, type ApprovalPhase } from '../../../src/approval-state';
+import { SettingChange } from './SettingChange';
+import type { SettingCompare } from './setting-change';
 
 /** One Lane's approval request as projectHostedApprovals:observe {detail:1} returns it. */
 export type LaneApprovalRead = {
@@ -26,6 +28,8 @@ export type LaneApprovalRead = {
   setting?: { origin: 'policy' | 'check-definition' | 'check-import' | 'runner' | 'main-audit' };
   /** The change as the agent sent it (the owner's read only). */
   change?: unknown;
+  /** Item 16093ed1: the setting now and as granted (an open request, the owner's read only). */
+  compare?: SettingCompare | null;
 };
 type Words = { title: string; lead: string; tone: 'passed' | 'plain' };
 /** Lane approval wording for every state that is not an open or granted request. */
@@ -183,14 +187,13 @@ export function LaneApproval({
             ? `Requested by ${who}, signed in as an agent. Grant access to the account shown below.`
             : `Requested by ${who}, signed in as an agent. ${what[0]!.toUpperCase()}${what.slice(1)} changes decide what every landing must pass, so they need you.`,
         )}
-        <dl className="fx-dv-facts">
-          <div>
-            <dt>Change</dt>
-            <dd className="fx-dv-untrusted">
-              <pre>{JSON.stringify(approval.change ?? null, null, 2)}</pre>
-            </dd>
-          </div>
-        </dl>
+        <div className="fx-dv-untrusted">
+          <SettingChange
+            origin={approval.membership ? 'membership' : approval.setting?.origin}
+            compare={approval.compare}
+            change={approval.change}
+          />
+        </div>
         <OwnerReviewActions review={{ ...review, labels: { accept: 'Grant', decline: 'Decline' } }} />
       </>
     );

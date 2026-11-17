@@ -53,8 +53,12 @@ The write records one approval request instead (one row per setting, keyed
 `setting:policy`, `setting:runner`, `setting:main-audit`,
 `setting:check-definition:CHECK_ID` or `setting:check-import:…`; a new request
 replaces an open one) and replies `rule:"held"` with the owner's link
-`/approve?project=…&lane=setting:…`. The owner person opens it signed in, sees the
-change as sent, and grants or declines in one step (`projectHostedApprovals:decide`;
+`/approve?project=…&lane=setting:…`. The owner person opens it signed in (or opens the
+request under Needs me, Asked ahead), reads one summary line and a before/after row per
+changed field, with each script as a wrapped line diff; the request exactly as sent, internal
+ids included, stays behind Details. The owner's read (`observe {detail:1}`) adds the setting
+as it is now and as the grant would leave it, at most one indexed read and only for an
+open request. The owner grants or declines in one step (`projectHostedApprovals:decide`;
 agents, device sign-ins and contributors are refused). A grant applies exactly that
 request as the agent's own operation, so the agent's retry returns the applied
 receipt; a policy request applies only while the policy parts it would change are as

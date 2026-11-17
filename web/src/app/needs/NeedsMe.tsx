@@ -38,6 +38,7 @@ import {
   type NeedsRead,
   type NowRow,
 } from './model';
+import { HeldSetting } from './HeldSetting';
 import './needs.css';
 
 type ProjectRoute = PlaceProps['route'];
@@ -73,6 +74,7 @@ function NeedsMeScreen({ route, projectId, projectName, feed }: PlaceProps) {
       read={read}
       counts={counts}
       decide={decide}
+      settingDetail={laneId => <HeldSetting projectId={projectId} laneId={laneId} />}
       setup={
         <GettingStarted
           projectId={projectId}
@@ -101,12 +103,15 @@ export function NeedsMeView({
   counts,
   decide,
   setup,
+  settingDetail,
 }: Pick<PlaceProps, 'route' | 'projectName' | 'feed'> & {
   read: NeedsRead | undefined;
   counts: Parameters<typeof itemCounts>[0];
   decide: Decide;
   /** Getting started (start/GettingStarted.tsx), shown while nothing is held; it hides itself once setup is done. */
   setup?: ReactNode;
+  /** A held settings change, readable (Item 16093ed1); read only while its row is open. */
+  settingDetail?: (laneId: string) => ReactNode;
 }) {
   const view = useMemo(() => (read ? needsView(read) : null), [read]);
   const items = itemCounts(counts);
@@ -168,6 +173,7 @@ export function NeedsMeView({
                       <Ahead
                         key={row.laneId}
                         row={row}
+                        detail={row.kind === 'setting' ? settingDetail : undefined}
                         drawnAt={drawnAt}
                         decide={decide}
                         canDecide={read!.canDecide}
@@ -443,12 +449,14 @@ function Held({
 
 function Ahead({
   row,
+  detail,
   drawnAt,
   decide,
   canDecide,
   announce,
 }: {
   row: AheadRow;
+  detail?: (laneId: string) => ReactNode;
   drawnAt: number;
   decide: Decide;
   canDecide: boolean;
@@ -456,8 +464,9 @@ function Ahead({
 }) {
   const { run, busy } = useDecide(decide, announce);
   const asked = Date.parse(row.at);
+  const [open, setOpen] = useState(false);
   return (
-    <details className="sumdec">
+    <details className="sumdec" onToggle={event => setOpen(event.currentTarget.open)}>
       <summary>
         <State word={row.word}>{row.tag}</State>
         <span className="ttl" dir="auto">
@@ -475,6 +484,7 @@ function Ahead({
         <p className="why" dir="auto">
           {row.label}. {row.nextStep}
         </p>
+        {open && detail ? detail(row.laneId) : null}
         {row.needsOwner && canDecide ? (
           <div className="btns">
             <Key

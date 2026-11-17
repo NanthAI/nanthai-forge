@@ -1015,6 +1015,15 @@ test('owner-device settings writes apply before the first landing and are held f
   assert.equal(page.status, 'requested');
   assert.equal(page.live, true);
   assert.deepEqual(page.change.acceptance, { protectedPaths: [] });
+  // Item 16093ed1: the page compares the policy now with the policy the grant would leave.
+  assert.deepEqual(page.compare.before.acceptance.protectedPaths, ['boot/**']);
+  assert.deepEqual(page.compare.after.acceptance.protectedPaths, []);
+  const definitionPage = await observe(heldDefinition.approval.id);
+  assert.equal(definitionPage.compare.subject, 'verify');
+  assert.deepEqual(definitionPage.compare.after.args, ['ci.sh']);
+  assert.equal(definitionPage.compare.before.id, undefined, 'identity fields are not compared');
+  const runnerPage = await observe('setting:runner');
+  assert.deepEqual(runnerPage.compare.after, runnerPage.compare.before, 'the same runner asked again');
   await assert.rejects(decide('setting:policy', 'grant', DEVICE), code('PROJECT_UNAVAILABLE'));
   const granted = await decide('setting:policy', 'grant');
   assert.equal(granted.approval.status, 'granted');
