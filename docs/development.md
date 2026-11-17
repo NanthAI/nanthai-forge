@@ -648,6 +648,7 @@ layer out of both first paints.
   (`projectStats.closeDay`), scheduled by the project's first landing of a
   later UTC day, so the read re-runs once a day and an idle project costs
   nothing. See [Stats](run-evidence.md#stats).
+- Invitations: Home and `/-/account/people` load the recipient inbox lazily. The link carries no grant; the signed-in recipient accepts or declines. `FORGE_INVITATION_EMAIL=1` enables the separate sender on dev; its default is off. See [access](access.md#invitations).
 - Sign-in: one handle field (passkey sign-in or sign-up, browser autofill) and
   GitHub. After a first GitHub sign-in with no passkey, `/-/signin/passkey`
   offers one (`authFirstPasskey`), skippable. The return address is kept in

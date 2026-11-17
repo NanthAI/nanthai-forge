@@ -152,7 +152,7 @@ test('owner-approved access policies have one central decision point for each ru
 
 test('B-07: recipient lookup refuses ambiguous or unverified addresses and a passkey-only account cannot redeem email invitations', async t => {
   const s = fixture(t);
-  const contributors = await import(moduleUrl('../convex/projectContributors.ts'));
+  const recipients = await import(moduleUrl('../convex/projectInvitationRecipient.ts'));
   const user = s.tables.users.get('user');
   user.email = 'invite@example.com';
   user.emailVerified = true;
@@ -165,16 +165,18 @@ test('B-07: recipient lookup refuses ambiguous or unverified addresses and a pas
   s.tables.projectInvites = new Map([
     ['invite', { _id: 'invite', projectId: 'private-project', email: user.email }],
   ]);
-  await contributors.redeemInvites(s.ctx, { subject: s.owner, forgeAuthUser: 'user', emailVerified: false });
-  assert(s.tables.projectInvites.has('invite'));
-  await assert.rejects(
-    contributors.redeemInvites(s.ctx, {
+  assert.equal(
+    await recipients.recipientEmail(s.ctx, { subject: s.owner, forgeAuthUser: 'user', emailVerified: false }),
+    null,
+  );
+  assert.equal(
+    await recipients.recipientEmail(s.ctx, {
       subject: s.owner,
       forgeAuthUser: 'user',
       email: user.email,
       emailVerified: true,
     }),
-    refused('BAD_ARGUMENT'),
+    null,
   );
   assert(s.tables.projectInvites.has('invite'));
 });

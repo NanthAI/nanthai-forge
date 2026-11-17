@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { retainMembership } from './projectActorNames';
+import { createInvitation } from './projectInvitationCreate';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
@@ -111,8 +112,20 @@ export async function setReader(
       .query('projectReaders')
       .withIndex('by_project_and_reader', q => q.eq('projectId', input.projectId).eq('reader', input.reader))
       .unique();
-    if (input.present && !grant)
-      await ctx.db.insert('projectReaders', { projectId: input.projectId, reader: input.reader });
+    if (input.present && !grant) {
+      const account = await ctx.db
+        .query('forgeAccounts')
+        .withIndex('by_owner', q => q.eq('owner', input.reader))
+        .unique();
+      invariant(account, 'BAD_ARGUMENT', 'Invite this person by their Forge handle.');
+      await createInvitation(ctx, {
+        projectId: input.projectId,
+        owner: input.owner,
+        operationId: input.operationId,
+        person: `@${account.handle}`,
+        role: 'read',
+      });
+    }
     if (!input.present && grant) {
       await retainMembership(ctx, input.projectId, input.reader);
       await ctx.db.delete(grant._id);

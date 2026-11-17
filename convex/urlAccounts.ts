@@ -5,7 +5,6 @@ import { mutation, query } from './cliServer';
 import { accountFor, ensureAccount, handleTaken } from './urlIdentity';
 import { handleError } from '../src/readable-urls';
 import { invariant } from '../src/errors';
-import { redeemInvites } from './projectContributors';
 import { report } from './errors';
 export const current = query({
   args: {},
@@ -31,7 +30,6 @@ export const ensure = mutation({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'AUTH_REQUIRED', 'Sign in to set your handle.');
-      await redeemInvites(ctx, user);
       return (
         await ensureAccount(ctx, user.subject, {
           username: profile.username ?? user.nickname ?? null,

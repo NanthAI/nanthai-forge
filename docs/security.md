@@ -98,7 +98,7 @@ Downloaded data cannot be recalled. GitHub readers of a full repository already 
 
 After GitHub access is lost, an importer can still list and delete their own imports. That cleanup metadata does not allow reading source, graphs, exports or Restore. Permanent deletion removes objects that only that project owned, and keeps shared objects and minimal receipts. It does not purge provider backups or downloaded copies.
 
-Email-based membership lookup matches only an exact address with `verification.status === "verified"`. Missing, pending, expired and reserved verification states do not grant access. Verified secondary addresses remain valid; ambiguous verified matches are refused. Pending invitations are redeemed only by the signed-in account’s verified email claim. This follows the provider’s [email verification model](https://clerk.com/docs/reference/backend/types/backend-email-address) and [account email flow](https://clerk.com/docs/guides/development/custom-flows/account-updates/add-email); a future identity provider must preserve this rule.
+Project invitations never perform recipient email lookup at creation and never grant on sign-in. The signed-in invitee explicitly accepts a pending invitation using their account (for a handle) or unique current verified email (for an address). Unverified, cleared, ambiguous and wrong-account bindings cannot accept; a forwarded link grants nothing. Invitations expire after seven days, and ended invitations cannot send again. The person can decline or block an inviter across projects. Device credentials cannot answer for them. Invitation mail has its own off-by-default switch, verified-sender requirement and transactionally checked limits; see [access](access.md#invitations).
 
 ## CLI device credentials
 
@@ -378,23 +378,18 @@ invitation authority. The browser identity resolver supplies these fields from
 the already-read account row, never from a stale token claim.
 
 New-account recipient lookup uses an exact normalized verified address and refuses
-ambiguous matches. Invitation redemption rechecks that unique current binding;
-no unverified address redeems an invitation. The retained provider path remains
+ambiguous matches. Explicit invitation acceptance rechecks that unique current binding;
+no unverified address accepts an email invitation. The retained provider path remains
 until its separate removal checklist is complete. Browser-session management
 checks the live session and a fresh account-bound passkey or GitHub proof before
 revoking other sessions; no session id supplied by a client selects another
 account's sessions.
 
 
-Native email-resolved membership uses the current unique verified address and
-rechecks it in the existing grant mutation, including delayed membership approvals
-and team additions. A native profile that no longer reports an address clears its
-verification. Existing verified legacy-provider addresses, including secondary
-addresses, keep their provider's authority. Explicit handle and account-ID
-membership APIs keep their existing meaning. Email lookup compares the configured
-legacy provider with the current native binding. Different account matches grant
-nothing and tell the inviter to invite by Forge handle; same-account matches
-proceed. Grant transactions and retained email approvals also recheck the native
-binding, so an intervening conflict cannot grant access. Legacy redemption
-retains verified secondary-address support and refuses a current native conflict.
-A completed invitation replay does not repeat provider lookup.
+Team email additions retain the exact current verified native binding and the
+configured legacy provider comparison. Different account matches grant nothing;
+same-account matches proceed and the grant transaction rechecks the native
+binding. Project membership uses the pending invitation path instead: retained
+agent approvals and older project add APIs create invitations and the recipient
+accepts. A completed invitation retry performs no directory lookup, grants no
+membership and sends no second email.

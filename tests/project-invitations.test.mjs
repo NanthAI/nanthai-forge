@@ -2,12 +2,21 @@
 // Invitations with a role and one email (Item c6629fda), and the People and access read (b987e608, docs/access.md):
 // the role reaches the grant, the email names only the inviter, the project and the role, a resend is explicit and
 // idempotent, and the people read answers each role with only what the contract lets it see.
-import test from 'node:test';
+import test, { beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { state } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 
+const originalSwitch = process.env.FORGE_INVITATION_EMAIL;
+beforeEach(() => {
+  process.env.FORGE_INVITATION_EMAIL = '1';
+});
+afterEach(() => {
+  if (originalSwitch === undefined) delete process.env.FORGE_INVITATION_EMAIL;
+  else process.env.FORGE_INVITATION_EMAIL = originalSwitch;
+});
+const answers = await import(moduleUrl('../convex/projectInvitationAnswers.ts'));
 const contributors = await import(moduleUrl('../convex/projectContributors.ts'));
 const access = await import(moduleUrl('../convex/projectAccess.ts'));
 const mail = await import(moduleUrl('../convex/projectInviteMail.ts'));
@@ -20,6 +29,7 @@ function setup(visibility = 'private') {
     _creationTime: 1,
     owner: 'user_owner',
     key: 'synthetic',
+    slug: 'tools',
     name: 'Access project',
     visibility,
     revision: 1,
@@ -50,6 +60,13 @@ function setup(visibility = 'private') {
     _creationTime: 3,
     projectId: 'project',
     reader: 'user_reader',
+  });
+  s.tables.users.set('verified-owner', {
+    _id: 'verified-owner',
+    _creationTime: 1,
+    accountKey: 'user_owner',
+    emailVerified: true,
+    email: 'owner@example.test',
   });
   s.caller('user_owner');
   return s;
@@ -87,36 +104,28 @@ test('an email invitation keeps its role, sends one email and replays without a 
   assert.equal(operation.mail.status, 'sending');
   assert.equal(operation.mail.sends, 1);
   assert.equal(s.scheduled.length, 1, 'one send for one invitation, also on retry');
-  // Redeeming with that verified address grants read, not write.
-  await contributors.redeemInvites(s.ctx, {
+  assert.equal(rows(s, 'projectReaders').length, 1, 'invitation creates no membership');
+  s.ctx.auth.getUserIdentity = async () => ({
     subject: 'user_new',
     email: 'New@Example.com',
     emailVerified: true,
   });
+  await answers.answer._handler(s.ctx, {
+    invitationId: row._id,
+    choice: 'accept',
+    operationId: randomUUID(),
+  });
   assert.ok(rows(s, 'projectReaders').some(item => item.reader === 'user_new'));
   assert.ok(!rows(s, 'projectContributors').some(item => item.contributor === 'user_new'));
-  assert.equal(rows(s, 'projectInvites').length, 0);
-  // An unverified address redeems nothing.
-  await invite(s, { person: 'x@example.com', email: 'x@example.com' });
-  await contributors.redeemInvites(s.ctx, {
-    subject: 'user_x',
-    email: 'x@example.com',
-    emailVerified: false,
-  });
-  assert.equal(rows(s, 'projectInvites').length, 1);
+  assert.equal(rows(s, 'projectInvites')[0].state, 'accepted');
 });
 
-test('a handle invitation grants its role, write lifts read and read never lowers write', async () => {
+test('a handle invitation stays pending without email', async () => {
   const s = setup();
-  await invite(s, { person: '@nia', contributor: 'user_nia', role: 'read' });
-  assert.ok(rows(s, 'projectReaders').some(item => item.reader === 'user_nia'));
-  await invite(s, { person: '@nia', contributor: 'user_nia', role: 'write' });
-  assert.ok(rows(s, 'projectContributors').some(item => item.contributor === 'user_nia'));
-  assert.ok(!rows(s, 'projectReaders').some(item => item.reader === 'user_nia'));
-  await invite(s, { person: '@wren', contributor: 'user_writer', role: 'read' });
-  assert.ok(rows(s, 'projectContributors').some(item => item.contributor === 'user_writer'));
-  assert.ok(!rows(s, 'projectReaders').some(item => item.reader === 'user_writer'));
-  assert.equal(s.scheduled.length, 0, 'an account invitation sends no email');
+  await invite(s, { person: '@rook', contributor: 'user_reader', role: 'write' });
+  assert.ok(!rows(s, 'projectContributors').some(item => item.contributor === 'user_reader'));
+  assert.equal(rows(s, 'projectInvites')[0].state, 'pending');
+  assert.equal(s.scheduled.length, 0);
 });
 
 test('the email names the inviter, the project and the role only, with the project link and nothing tracked', async () => {
@@ -130,13 +139,13 @@ test('the email names the inviter, the project and the role only, with the proje
     assert.equal(email.to, 'new@example.com');
     assert.equal(email.subject, '@olive invited you to olive/tools on Forge');
     assert.match(email.text, /read and change olive\/tools/);
-    assert.match(email.text, /https:\/\/forge\.example\/-\/olive\/tools/);
+    assert.match(email.text, /https:\/\/forge\.example\/-\/account\/people/);
     const all = `${email.subject}\n${email.text}\n${email.html}`;
     for (const secret of ['wren', 'rook', 'user_', 'Access project', 'synthetic'])
       assert.ok(!all.includes(secret), `email leaks ${secret}`);
     assert.ok(!/<img|<script|utm_|\?/.test(email.html), 'no image, script, tracking or query string');
     const links = [...email.html.matchAll(/href="([^"]+)"/g)].map(match => match[1]);
-    assert.deepEqual(links, ['https://forge.example/-/olive/tools']);
+    assert.deepEqual(links, ['https://forge.example/-/account/people']);
     // Escaped: a name cannot inject markup.
     assert.ok(
       !mail.inviteEmail({ inviter: '<b>', project: 'p', role: 'read', url: 'u' }).html.includes('<b><'),
@@ -181,7 +190,7 @@ test('a send records sent, failed or off and never the address; a resend is expl
       'BAD_ARGUMENT',
       'no second send while one is in flight',
     );
-    await mail.deliver._handler(action, { projectId: 'project', operationId });
+    await mail.deliver._handler(action, { projectId: 'project', operationId, sendId: resendId });
     assert.deepEqual([operation().mail.status, operation().mail.code], ['failed', 'HTTP 502']);
     assert.equal(sent.length, 1);
     assert.equal(sent[0].body.to, 'new@example.com');

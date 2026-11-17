@@ -2,6 +2,11 @@
 /* People and access: the invite form's fields and the quiet landing line; the table, bands and notices are the design
    system's (ds/figures.css access table). Scoped to [data-ds] like the system; every value is a token. */
 [data-ds] {
+  .people-invitation { grid-template-columns: minmax(0, 1fr) auto; }
+  .people-invitation .nm { display: grid; min-width: 0; gap: var(--s-1); }
+  .people-invitation .sub { color: var(--text-2); font-size: var(--t-small); }
+  .people-invitation .btns { flex-wrap: wrap; }
+  @media (max-width: 600px) { .people-invitation { grid-template-columns: minmax(0, 1fr); } }
   .people-who { flex: 1 1 260px; min-width: 0; }
   .people-role { display: grid; gap: 5px; font-size: var(--t-meta); color: var(--text-2); font-weight: var(--w-strong); }
   .people-quiet { grid-template-columns: minmax(0, 1fr) auto; }

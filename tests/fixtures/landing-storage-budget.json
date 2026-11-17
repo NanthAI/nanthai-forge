@@ -192,7 +192,8 @@
       "projectStatsDays": 0,
       "authLinkEvents": 0,
       "projectPublic": 0,
-      "projectStars": 0
+      "projectStars": 0,
+      "invitationBlocks": 0
     },
     "retained": {
       "projectJournalSegments": 1397,
@@ -386,7 +387,8 @@
       "projectStatsDays": 0,
       "authLinkEvents": 0,
       "projectPublic": 0,
-      "projectStars": 0
+      "projectStars": 0,
+      "invitationBlocks": 0
     },
     "perProject": {
       "immediate": {
@@ -659,7 +661,8 @@
       "projectStatsDays": 0,
       "authLinkEvents": 0,
       "projectPublic": 0,
-      "projectStars": 0
+      "projectStars": 0,
+      "invitationBlocks": 0
     },
     "retained": {
       "projectJournalSegments": 3514,
@@ -853,7 +856,8 @@
       "projectStatsDays": 0,
       "authLinkEvents": 0,
       "projectPublic": 0,
-      "projectStars": 0
+      "projectStars": 0,
+      "invitationBlocks": 0
     },
     "perProject": {
       "immediate": {

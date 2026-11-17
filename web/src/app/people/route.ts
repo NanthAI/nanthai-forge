@@ -4,4 +4,5 @@ import type { ScreenRoutes } from '../screen-route';
 
 export default [
   { place: 'settings', section: '', load: () => import('./PeopleAccess') },
+  { place: 'people', load: () => import('./InvitationHome') },
 ] satisfies ScreenRoutes;

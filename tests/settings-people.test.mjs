@@ -10,6 +10,12 @@ const actions = await import(moduleUrl('../convex/projectContributorActions.ts')
 const accounts = await import(moduleUrl('../convex/urlAccounts.ts'));
 function setup() {
   const s = state([]);
+  s.tables.users.set('verified-owner', {
+    _id: 'verified-owner',
+    _creationTime: 1,
+    accountKey: 'owner',
+    emailVerified: true,
+  });
   s.tables.projectInvites = new Map();
   s.tables.projectAccessOperations = new Map();
   s.tables.hostedProjects.set('p', projectRow({ _id: 'p', owner: 'owner', name: 'Test', key: 'p' }));
@@ -32,9 +38,10 @@ test('handle search and invitations require current access management authority'
     { handle: 'maya' },
   ]);
   await actions.invitePerson._handler(s.ctx, { projectId: 'p', person: '@maya', operationId: 'handle-op' });
-  assert.equal([...s.tables.projectContributors.values()][0].contributor, 'maya-id');
+  assert.equal([...s.tables.projectInvites.values()][0].recipient, 'maya-id');
+  assert.equal(s.tables.projectContributors.size, 0);
   await actions.invitePerson._handler(s.ctx, { projectId: 'p', person: '@maya', operationId: 'handle-op' });
-  assert.equal(s.tables.projectContributors.size, 1);
+  assert.equal(s.tables.projectContributors.size, 0);
   await people.remove._handler(s.ctx, { projectId: 'p', contributor: 'maya-id' });
   await actions.invitePerson._handler(s.ctx, { projectId: 'p', person: '@maya', operationId: 'handle-op' });
   assert.equal(s.tables.projectContributors.size, 0, 'retry must not undo a later removal');
@@ -68,8 +75,6 @@ test('pending email invitation is private, retry-safe, and redeemed only by veri
     });
   assert.equal(s.tables.projectInvites.size, 1);
   assert.equal((await people.pending._handler(s.ctx, { projectId: 'p' }))[0].email, 'new@example.test');
-  await people.redeemInvites(s.ctx, { subject: 'new', email: 'new@example.test', emailVerified: false });
-  await people.redeemInvites(s.ctx, { subject: 'other', email: 'other@example.test', emailVerified: true });
   assert.equal(s.tables.projectContributors.size, 0);
   s.ctx.auth.getUserIdentity = async () => ({
     subject: 'new',
@@ -77,8 +82,8 @@ test('pending email invitation is private, retry-safe, and redeemed only by veri
     emailVerified: true,
   });
   await accounts.ensure._handler(s.ctx, {});
-  assert.equal(s.tables.projectInvites.size, 0);
-  assert.equal([...s.tables.projectContributors.values()][0].contributor, 'new');
+  assert.equal(s.tables.projectInvites.size, 1);
+  assert.equal(s.tables.projectContributors.size, 0, 'sign-in leaves acceptance to the person');
 });
 test('handle seeds use only the chosen username or GitHub login, never names or emails', async t => {
   const previous = globalThis.fetch,
@@ -124,5 +129,5 @@ test('cancelled invitations remain cancelled on retry and cannot be cancelled ac
   await people.cancelInvite._handler(s.ctx, { projectId: 'p', id });
   await people.cancelInvite._handler(s.ctx, { projectId: 'p', id });
   await people.invite._handler(s.ctx, input);
-  assert.equal(s.tables.projectInvites.size, 0);
+  assert.equal([...s.tables.projectInvites.values()][0].state, 'cancelled');
 });

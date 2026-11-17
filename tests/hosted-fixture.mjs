@@ -123,6 +123,8 @@ function indexFields(table, index) {
 
 export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords = false } = {}) {
   const tables = {
+    invitationBlocks: new Map(),
+    deviceAttempts: new Map(),
     forgeAccounts: new Map(),
     accountHandles: new Map(),
     projectSlugs: new Map(),

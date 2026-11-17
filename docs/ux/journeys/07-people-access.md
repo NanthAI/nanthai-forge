@@ -11,9 +11,9 @@ Walked: the Access, contributors, device, review and approval sources, `help aut
 | # | Step | What happens |
 | --- | --- | --- |
 | 1 | Owner opens Settings → Admin → Access | "People": the owner's row ("@handle · Owner"), then a field "@handle or email" and **Invite contributor**. Empty: "No contributors yet." (source) |
-| 2 | Owner enters a handle | An existing account gets contributor access at once: "Access saved." |
-| 3 | Owner enters an email with no account | A row under "Pending invitations" with **Cancel invitation**. No email is sent. When the person later signs in with that verified email, the invitation becomes contributor access. (docs) |
-| 4 | Teammate arrives | Signs in on the web, picks a handle, finds the project under "Shared with you" on Home, then installs the CLI and runs `nforge login`. |
+| 2 | Owner enters a handle | A pending invitation appears with the starting read or write role; access waits for acceptance. |
+| 3 | Owner enters an email with no account | A pending row offers End invitation and Copy link. Email is sent when the separate invitation sender is enabled, within its approved limits. The invited account accepts explicitly; sign-in alone grants nothing. |
+| 4 | Teammate arrives | Signs in with the invited account, opens Invitations on Home, and presses Accept or Decline. Invitations expire after seven days. After accepting, opens the project and runs `nforge login` for the CLI. |
 | 5 | Owner removes someone | **Remove contributor**: "Contributor access removed." Access is checked again at every write. |
 
 There is no CLI action for inviting.

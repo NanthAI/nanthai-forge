@@ -153,3 +153,7 @@ test('each stop of the line, desktop and phone, is named starting with the words
   );
   assert.equal(phone[0].name, 'Edit 1 Lane, editing');
 });
+
+test('recipient invitations have their own lazy account page', () => {
+  assert.equal(owner.get(accountScreenFor(entries, 'people')), 'people#1');
+});

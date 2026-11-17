@@ -47,10 +47,28 @@ The approved dev cleanup also uses legacy `_storage` pins in
 `convex/projectLegacyStorageRepair.ts` (field allowlist, expires 2027-01-31). It deletes
 only verified frozen-manifest files; the repair records a backfill time and moves no bytes.
 
+## Invitation metadata
+
+`projectInvites` remains the single invitation store: target as typed, optional
+handle-account binding, inviter, role, expiry, state, answer receipt and projected
+mail status. Email targets acquire no account binding until acceptance. Rows are
+retained as metadata; no source, email body, token or attachment bytes enter them.
+`projectAccessOperations` keeps retry receipts and its compatible mail projection.
+`invitationBlocks` is a recipient-owned account preference, indexed by recipient
+and inviter and by address digest for delivery suppression. It is independent of
+any project and deliberately survives a project purge; the project purge
+inventory therefore has no project-owned row to remove. The recipient-only
+handlers and negative tests guard its owner boundary. No automatic retention or
+cleanup is introduced. Existing `deviceAttempts` rows hold fixed-size invitation
+rate counters, reset in place, with no timer. The landing storage ratchet records
+zero invitation/block bytes per landing. Runtime mail and invitation operations
+are separately bounded in [access](access.md#scale).
+
 ## Convex tables
 
 | Tables | Hold | Grows with |
 | --- | --- | --- |
+| `invitationBlocks` | Recipient-owned invitation block preferences; no project ids or content bytes. | Explicit recipient preferences |
 | `legacyStorageCleanupPages` | Retry receipts for approved maintenance pages; no file bodies. | Maintenance pages |
 | `legacyStorageCleanupWindows` | One metadata fence per approved dev cleanup window; closing it invalidates older deletion transactions. No source or file bytes. | Approved maintenance windows |
 | `projectObjects` | One row per physical object: digest, size, placement (`r2Key`, `location`, legacy `storageId`), recipe pin. No bytes. | Repo size |

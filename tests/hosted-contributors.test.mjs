@@ -36,11 +36,28 @@ for (const name of [
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
 const indexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
+const invitationAnswers = await import(moduleUrl('../convex/projectInvitationAnswers.ts'));
 const grants = await import(moduleUrl('../convex/projectContributorActions.ts'));
 const proposals = historicalArchiveActions(await import(moduleUrl('../convex/projectProposalActions.ts')));
 const backups = historicalArchiveActions(await import(moduleUrl('../convex/projectBackupActions.ts')));
 const { previewWorkArchive } = await import(moduleUrl('../web/src/work-archive.ts'));
 const unavailable = e => e.data?.code === 'PROJECT_UNAVAILABLE';
+async function acceptContributorInvitation(s) {
+  const row = [...s.tables.projectInvites.values()].find(
+    row => row.recipient === 'contributor' && row.state === 'pending',
+  );
+  const identity = s.ctx.auth.getUserIdentity;
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'contributor' });
+  try {
+    await invitationAnswers.answer._handler(s.ctx, {
+      invitationId: row._id,
+      choice: 'accept',
+      operationId: randomUUID(),
+    });
+  } finally {
+    s.ctx.auth.getUserIdentity = identity;
+  }
+}
 async function setup(t, { retained = false, r2Ready = false } = {}) {
   if (!r2Ready) await r2Setup(t);
   const dir = mkdtempSync(join(tmpdir(), 'forge-contributors-'));
@@ -144,9 +161,26 @@ async function setup(t, { retained = false, r2Ready = false } = {}) {
     operationId: randomUUID(),
   });
   await indexActions.ensure._handler(s.ctx, { projectId: 'project', rebuild: true });
+  for (const person of ['owner', 'contributor', 'third']) {
+    if (![...s.tables.forgeAccounts.values()].some(row => row.owner === person))
+      s.tables.forgeAccounts.set(`account-${person}`, {
+        _id: `account-${person}`,
+        _creationTime: 1,
+        owner: person,
+        handle: person,
+      });
+  }
+  s.tables.users.set('verified-owner', {
+    _id: 'verified-owner',
+    _creationTime: 1,
+    accountKey: 'owner',
+    email: 'owner@example.test',
+    emailVerified: true,
+  });
   const cleanup = providers();
   t.after(cleanup);
   await grants.add._handler(s.ctx, { projectId: 'project', contributor: 'contributor' });
+  await acceptContributorInvitation(s);
   const read = async () => JSON.parse(await readHosted(s.ctx, { projectId: 'project' }));
   return {
     ...s,
@@ -427,7 +461,12 @@ test('proposal final completion rechecks grant after asynchronous archive read; 
   assert.deepEqual(s.tables.hostedProjects.get('project'), before);
   s.ctx.runMutation = native;
   s.caller('owner');
-  await grants.add._handler(s.ctx, { projectId: 'project', contributor: 'contributor' });
+  await grants.invitePerson._handler(s.ctx, {
+    projectId: 'project',
+    person: '@contributor',
+    operationId: randomUUID(),
+  });
+  await acceptContributorInvitation(s);
   s.caller('contributor');
   await assert.rejects(
     proposals.prepare._handler(s.ctx, { ...c.input, operationId: randomUUID(), baseState: 'f'.repeat(64) }),
@@ -531,7 +570,12 @@ test('archive and proposal transfers recheck grant after byte read, and unrelate
     globalThis.fetch = originalFetch;
   }
   s.caller('owner');
-  await grants.add._handler(s.ctx, { projectId: 'project', contributor: 'contributor' });
+  await grants.invitePerson._handler(s.ctx, {
+    projectId: 'project',
+    person: '@contributor',
+    operationId: randomUUID(),
+  });
+  await acceptContributorInvitation(s);
   s.caller('contributor');
   globalThis.fetch = revokedBody;
   try {
@@ -617,62 +661,36 @@ test('captured hosted journal identifies its exact source pair across a concurre
   assert.equal(s.tables.hostedProjects.get('project').currentBackup, 'new-backup');
 });
 
-test('email contributor lookup is exact, owner-bound and preserves the existing grant authority', async t => {
+test('legacy email addition creates a private pending invitation without provider lookup and rechecks current ownership', async t => {
   const s = await setup(t),
     previous = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = previous;
   });
-  const calls = [];
-  globalThis.fetch = async input => {
-    const url = new URL(String(input));
-    calls.push(url);
-    assert.equal(url.hostname, 'api.clerk.com');
-    assert.equal(url.searchParams.get('email_address'), 'person@example.test');
-    return Response.json([
-      {
-        id: 'third',
-        email_addresses: [{ email_address: 'Person@example.test', verification: { status: 'verified' } }],
-      },
-    ]);
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    throw new Error('No email directory probe');
   };
   s.caller('contributor');
   await assert.rejects(
     grants.addByEmail._handler(s.ctx, { projectId: 'project', email: 'person@example.test' }),
     unavailable,
   );
-  assert.equal(calls.length, 0);
   s.caller('owner');
   await grants.addByEmail._handler(s.ctx, { projectId: 'project', email: ' Person@example.test ' });
-  assert.ok([...s.tables.projectContributors.values()].some(row => row.contributor === 'third'));
-  globalThis.fetch = async () =>
-    Response.json([
-      {
-        id: 'wrong',
-        email_addresses: [
-          { email_address: 'prefix-person@example.test', verification: { status: 'verified' } },
-        ],
-      },
-    ]);
-  await assert.rejects(
-    grants.addByEmail._handler(s.ctx, { projectId: 'project', email: 'person@example.test' }),
-    e => e.data.code === 'BAD_ARGUMENT',
+  assert.equal(calls, 0);
+  assert.ok(
+    [...s.tables.projectInvites.values()].some(
+      row => row.email === 'person@example.test' && row.state === 'pending',
+    ),
   );
-  assert.ok(![...s.tables.projectContributors.values()].some(row => row.contributor === 'wrong'));
-  globalThis.fetch = async () => {
-    s.tables.hostedProjects.get('project').removal = 'trash';
-    return Response.json([
-      {
-        id: 'fourth',
-        email_addresses: [{ email_address: 'person@example.test', verification: { status: 'verified' } }],
-      },
-    ]);
-  };
+  assert.ok(![...s.tables.projectContributors.values()].some(row => row.contributor === 'third'));
+  s.tables.hostedProjects.get('project').removal = 'trash';
   await assert.rejects(
-    grants.addByEmail._handler(s.ctx, { projectId: 'project', email: 'person@example.test' }),
+    grants.addByEmail._handler(s.ctx, { projectId: 'project', email: 'other@example.test' }),
     unavailable,
   );
-  assert.ok(![...s.tables.projectContributors.values()].some(row => row.contributor === 'fourth'));
 });
 
 test('new contributor proposals transfer objects, preserve old archives, pull directly for native import and recheck access', async t => {

@@ -161,6 +161,7 @@ export function purgeIndex(table: ProjectPurgeTable): { index: string; scope?: s
   return typeof entry === 'string' ? { index: entry } : entry;
 }
 
+// invitationBlocks is recipient-owned, has no project reference, and survives project purges.
 /** Project rows that are not keyed by `projectId`; each has its own bounded purge step. */
 export const projectPurgeSpecial = {
   /** Unindexed cold bodies are deleted atomically with projectHostedLandingRequests.requestBodyId. */

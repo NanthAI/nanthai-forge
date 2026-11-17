@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { invitationState, invitationMail, invitationTables } from './projectInvitationFields';
 import { journalTables, journalReceiptTables } from './projectJournalFields';
 import { liveLineTables } from './projectLiveLineFields';
 import { publicDiscoveryTables } from './publicDiscoveryFields';
@@ -511,6 +512,7 @@ export const projectProposalDocument = v.object({
 });
 export default defineSchema({
   ...authTables,
+  ...invitationTables,
   ...journalTables,
   ...journalReceiptTables,
   ...finishReadTables,
@@ -704,11 +706,24 @@ export default defineSchema({
   projectInvites: defineTable({
     projectId: v.id('hostedProjects'),
     email: v.string(),
+    kind: v.optional(v.union(v.literal('email'), v.literal('handle'))),
+    inviter: v.optional(v.string()),
+    recipient: v.optional(v.string()),
+    state: v.optional(invitationState),
+    expiresAt: v.optional(v.number()),
+    endedAt: v.optional(v.number()),
+    answer: v.optional(v.object({ operationId: v.string(), person: v.string(), choice: v.string() })),
+    mail: v.optional(invitationMail),
     role: v.optional(v.union(v.literal('read'), v.literal('write'))),
     operationId: v.optional(v.string()),
   })
+    // index-order: caller: convex/projectAccess.ts#people; order: invitation history exposes newest-first creation-time pages, not target or operation order.
+    .index('by_project', ['projectId'])
     .index('by_project_and_email', ['projectId', 'email'])
-    .index('by_email', ['email']),
+    .index('by_email', ['email'])
+    .index('by_recipient', ['recipient'])
+    .index('by_project_and_operation', ['projectId', 'operationId'])
+    .index('by_project_and_state_and_expiry', ['projectId', 'kind', 'state', 'expiresAt']),
   projectContributors: defineTable(projectContributorFields)
     .index('by_project_and_contributor', ['projectId', 'contributor'])
     .index('by_contributor', ['contributor']),

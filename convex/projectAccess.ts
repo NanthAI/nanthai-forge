@@ -13,6 +13,8 @@ import { requireOwnerPerson } from './ownerPerson';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { invitationStatus, invitationLifetime, visibleInviteMail } from './projectInvitationPolicy';
+import { invitationState } from './projectInvitationFields';
 
 const role = v.union(...projectRoles.map(name => v.literal(name)));
 const answer = v.union(v.literal('yes'), v.literal('held'), v.literal('no'));
@@ -26,7 +28,11 @@ const mail = v.object({
 const MAX = 500;
 
 export const people = query({
-  args: { projectId: v.id('hostedProjects'), limit: v.optional(v.number()) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    limit: v.optional(v.number()),
+    invitationCursor: v.optional(v.union(v.string(), v.null())),
+  },
   returns: v.object({
     name: v.string(),
     visibility: v.union(v.literal('public'), v.literal('private')),
@@ -36,18 +42,21 @@ export const people = query({
     withoutCheck: v.union(v.literal('owner'), v.literal('chosen'), v.literal('writers')),
     write: v.object({ rows: v.array(member), more: v.boolean() }),
     read: v.object({ rows: v.array(member), more: v.boolean() }),
+    invitationCursor: v.union(v.string(), v.null()),
     invited: v.array(
       v.object({
         id: v.id('projectInvites'),
         email: v.string(),
         role: v.union(v.literal('read'), v.literal('write')),
         at: v.number(),
+        state: invitationState,
+        expiresAt: v.number(),
         operationId: v.optional(v.string()),
         mail: v.optional(mail),
       }),
     ),
   }),
-  handler: async (ctx, { projectId, limit }) => {
+  handler: async (ctx, { projectId, limit, invitationCursor }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to see who can do what.');
@@ -75,41 +84,37 @@ export const people = query({
         rows: rows.slice(0, take),
         more: rows.length > take,
       });
-      const invites =
+      const invitations =
         standing === 'owner'
           ? await ctx.db
               .query('projectInvites')
-              .withIndex('by_project_and_email', q => q.eq('projectId', projectId))
-              .take(50)
-          : [];
-      const invited = [];
-      for (const row of invites) {
-        const operation = row.operationId
-          ? await ctx.db
-              .query('projectAccessOperations')
-              .withIndex('by_project_and_operation', q =>
-                q.eq('projectId', projectId).eq('operationId', row.operationId!),
-              )
-              .unique()
+              .withIndex('by_project', q => q.eq('projectId', projectId))
+              .order('desc')
+              .paginate({ cursor: invitationCursor ?? null, numItems: 50 })
           : null;
-        invited.push({
+      const invites = invitations?.page ?? [];
+      const invited = invites.map(row => {
+        const mail = visibleInviteMail(row);
+        return {
           id: row._id,
           email: row.email,
           role: row.role ?? ('write' as const),
           at: row._creationTime,
+          state: invitationStatus(row),
+          expiresAt: row.expiresAt ?? row._creationTime + invitationLifetime,
           ...(row.operationId ? { operationId: row.operationId } : {}),
-          ...(operation?.mail
+          ...(mail
             ? {
                 mail: {
-                  status: operation.mail.status,
-                  sends: operation.mail.sends,
-                  at: operation.mail.at,
-                  ...(operation.mail.code ? { code: operation.mail.code } : {}),
+                  status: mail.status,
+                  sends: mail.sends,
+                  at: mail.at,
+                  ...(mail.code ? { code: mail.code } : {}),
                 },
               }
             : {}),
-        });
-      }
+        };
+      });
       const selection = effectivePolicy(project).acceptance.withoutCheck;
       const withoutCheck: 'owner' | 'chosen' | 'writers' =
         !selection || selection.mode === 'owner'
@@ -127,6 +132,7 @@ export const people = query({
         write: band(writers.map(row => ({ person: row.contributor, at: row._creationTime }))),
         read: band(readers.map(row => ({ person: row.reader, at: row._creationTime }))),
         invited,
+        invitationCursor: invitations?.isDone === false ? invitations.continueCursor : null,
       };
     } catch (error) {
       return report(error);

@@ -3,6 +3,7 @@
 // screen that serves it today, so every supported destination stays reachable through the new frames.
 import { lazy, Suspense, type ReactNode } from 'react';
 const You = lazy(() => import('./You'));
+const InvitationHome = lazy(() => import('./people/InvitationHome'));
 import { A } from './frames';
 import { currentScreenHref, hrefFor, type AppRoute } from './paths';
 import {
@@ -82,6 +83,12 @@ export function Head({
 
 /** The placeholder body of a place: its head and the way to the screen that serves it now. */
 export function Placeholder({ route, projectName }: { route: AppRoute; projectName: string }) {
+  if (route.frame === 'account' && route.place === 'projects')
+    return (
+      <Suspense fallback={<Head trail={[{ label: 'Home' }]} sentence="Loading…" />}>
+        <InvitationHome />
+      </Suspense>
+    );
   if (route.frame === 'project' && route.place === 'settings' && route.section === 'you')
     return (
       <Suspense

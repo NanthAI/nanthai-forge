@@ -22,9 +22,12 @@ for (const name of [
   'agentGuidance',
 ])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
+const answers = await import(moduleUrl('../convex/projectInvitationAnswers.ts'));
 const denied = e => e.data?.code === 'PROJECT_UNAVAILABLE';
 function setup(t) {
   const s = state([]);
+  for (const person of ['reader', 'another'])
+    s.tables.forgeAccounts.set(person, { _id: person, _creationTime: 1, owner: person, handle: person });
   const native = s.ctx.runQuery;
   s.ctx.runQuery = s.ctx.runMutation = (ref, args) => {
     const [module, name] = getFunctionName(ref).split(':');
@@ -87,7 +90,23 @@ function setup(t) {
       operationId: randomUUID(),
       ...input,
     });
-  return { ...s, set };
+  const accept = async person => {
+    const row = [...s.tables.projectInvites.values()].find(
+      row => row.recipient === person && row.state === 'pending',
+    );
+    const identity = s.ctx.auth.getUserIdentity;
+    s.ctx.auth.getUserIdentity = async () => ({ subject: person });
+    try {
+      await answers.answer._handler(s.ctx, {
+        invitationId: row._id,
+        choice: 'accept',
+        operationId: randomUUID(),
+      });
+    } finally {
+      s.ctx.auth.getUserIdentity = identity;
+    }
+  };
+  return { ...s, set, accept };
 }
 
 test('owner grants retry-safe reader access; reader sees real Work with no write capabilities', async t => {
@@ -95,6 +114,8 @@ test('owner grants retry-safe reader access; reader sees real Work with no write
     operationId = randomUUID();
   await s.set({ operationId, reader: ' reader ' });
   await s.set({ operationId });
+  assert.equal(s.tables.projectReaders.size, 0, 'sharing waits for acceptance');
+  await s.accept('reader');
   assert.equal(s.tables.projectReaders.size, 1);
   assert.equal(s.tables.projectReaderOperations.size, 1);
   assert.equal(s.tables.projectContributors.size, 0);
@@ -204,6 +225,7 @@ test('reader revocation is immediate; replaying an old grant cannot resurrect it
   const s = setup(t),
     operationId = randomUUID();
   await s.set({ operationId });
+  await s.accept('reader');
   await assert.rejects(
     s.set({ operationId, present: false }),
     e => e.data?.code === 'WORK_OPERATION_CHANGED',
@@ -251,6 +273,8 @@ test('Home discovers current reader grants and excludes other accounts, removals
   const s = setup(t);
   await s.set({ reader: 'reader' });
   await s.set({ reader: 'another' });
+  await s.accept('reader');
+  await s.accept('another');
   s.caller('reader');
   const list = () =>
     modules.projectReaders.shared._handler(s.ctx, { paginationOpts: { cursor: null, numItems: 20 } });

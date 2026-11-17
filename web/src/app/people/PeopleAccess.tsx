@@ -43,7 +43,8 @@ const Cell = ({ k, on }: { k: string; on: boolean }) => (
 export default function PeopleAccess({ route, projectId, projectName: name }: PlaceProps) {
   const trail = crumbsFor(route, name);
   const [limit, setLimit] = useState(PAGE);
-  const data = useQuery(api.projectAccess.people, { projectId, limit });
+  const [invitationCursor, setInvitationCursor] = useState<string | null>(null);
+  const data = useQuery(api.projectAccess.people, { projectId, limit, invitationCursor });
   const owner = data?.role === 'owner';
   const [inviting, setInviting] = useState(false);
   const [sent, setSent] = useState<{ who: string; role: Role; email: boolean } | null>(null);
@@ -56,7 +57,7 @@ export default function PeopleAccess({ route, projectId, projectName: name }: Pl
       (e: { data?: { message?: string } }) =>
         setError(e?.data?.message ?? 'Forge did not answer. Nothing changed.'),
     );
-  const projectHref = hrefFor({ ...route, place: 'needs', section: '', rest: '' });
+  const projectHref = hrefFor({ frame: 'account', place: 'people' });
   const checksHref = hrefFor({ ...route, place: 'settings', section: 'checks', rest: '' });
   return (
     <>
@@ -90,10 +91,8 @@ export default function PeopleAccess({ route, projectId, projectName: name }: Pl
         <div className="notice" data-st="passed" aria-live="polite">
           <State word="Done">Invited</State>
           <p>
-            <span className="mono">{sent.who}</span>{' '}
-            {sent.email
-              ? `gets one email with the link. They join with ${sent.role} access when they sign in with that address.`
-              : `can ${sent.role === 'write' ? 'change' : 'read'} ${name} now and sees it on their Home.`}
+            <span className="mono">{sent.who}</span> has a pending invitation for {sent.role} access. They
+            join only after they accept it.
           </p>
           <CopyLink href={projectHref} />
           <button type="button" className="btn sm ghost" onClick={() => setSent(null)}>
@@ -161,9 +160,30 @@ export default function PeopleAccess({ route, projectId, projectName: name }: Pl
               </div>
             ) : null}
             {owner && data.invited.length ? (
-              <Invited projectId={projectId} rows={data.invited} onError={setError} />
+              <>
+                <Invited projectId={projectId} rows={data.invited} onError={setError} />
+                <div className="quietline btns">
+                  {data.invitationCursor ? (
+                    <button
+                      type="button"
+                      className="btn sm"
+                      onClick={() => setInvitationCursor(data.invitationCursor)}
+                    >
+                      More invitations
+                    </button>
+                  ) : null}
+                  {invitationCursor ? (
+                    <button type="button" className="btn sm ghost" onClick={() => setInvitationCursor(null)}>
+                      Newest invitations
+                    </button>
+                  ) : null}
+                </div>
+              </>
             ) : null}
-            {owner && !data.write.rows.length && !data.read.rows.length && !data.invited.length ? (
+            {owner &&
+            !data.write.rows.length &&
+            !data.read.rows.length &&
+            !data.invited.filter(row => row.state === 'pending').length ? (
               <div className="empty">
                 <h3>Nobody else yet</h3>
                 <p>
@@ -237,8 +257,8 @@ function Situation({ data, name }: { data: Data; name: string }) {
             ? `${plural(data.read.rows.length, 'more person reads', 'more people read')} it. `
             : ''}
           Agents act through their person’s devices.
-          {data.invited.length
-            ? ` ${plural(data.invited.length, 'invitation is', 'invitations are')} open.`
+          {data.invited.filter(row => row.state === 'pending').length
+            ? ` ${plural(data.invited.filter(row => row.state === 'pending').length, 'invitation is', 'invitations are')} open.`
             : ''}
         </>
       );
@@ -371,7 +391,7 @@ function InviteForm({
           autoFocus
         />
         <span className="help" id="invite-help">
-          {problem || 'Someone without a Forge account joins when they first sign in with that address.'}
+          {problem || 'They sign in with the invited account, then accept. Invitations expire after 7 days.'}
         </span>
       </label>
       <span className="f people-role">
@@ -410,7 +430,7 @@ function Invited({
   const fail = (e: { data?: { message?: string } }) => onError(e?.data?.message ?? 'Forge did not answer.');
   return (
     <>
-      <Band title="Invited" count={rows.length} hint="joins when they sign in" />
+      <Band title="Invitations" count={rows.length} hint="latest invitations; access waits for acceptance" />
       {rows.map(row => (
         <div key={row.id} className="row acc ask">
           <span className="nm">
@@ -423,11 +443,15 @@ function Invited({
               </span>
             </span>
             <span className="sub">
-              {row.role} · <MailState mail={row.mail} />
+              {row.role} ·{' '}
+              <span>
+                {row.state === 'pending' ? 'Pending' : row.state[0]!.toUpperCase() + row.state.slice(1)}
+              </span>{' '}
+              · <MailState mail={row.mail} />
             </span>
           </span>
           <span className="btns">
-            {row.operationId && row.mail && row.mail.status !== 'sending' ? (
+            {row.state === 'pending' && row.operationId && row.mail ? (
               <button
                 type="button"
                 className="btn sm"
@@ -438,13 +462,16 @@ function Invited({
                 Resend
               </button>
             ) : null}
-            <button
-              type="button"
-              className="btn sm ghost"
-              onClick={() => void cancel({ projectId, id: row.id }).catch(fail)}
-            >
-              End invitation
-            </button>
+            {row.state === 'pending' ? (
+              <button
+                type="button"
+                className="btn sm ghost"
+                onClick={() => void cancel({ projectId, id: row.id }).catch(fail)}
+              >
+                End invitation
+              </button>
+            ) : null}
+            <CopyLink href={hrefFor({ frame: 'account', place: 'people' })} />
           </span>
         </div>
       ))}
@@ -455,9 +482,9 @@ function Invited({
 function MailState({ mail }: { mail: Data['invited'][number]['mail'] }) {
   if (!mail) return <>no email sent; copy the link</>;
   if (mail.status === 'sending') return <State word="Saving">Sending the email</State>;
-  if (mail.status === 'sent') return <>email sent{mail.sends > 1 ? ` ${mail.sends} times` : ''}</>;
+  if (mail.status === 'sent') return <>email submitted{mail.sends > 1 ? ` ${mail.sends} times` : ''}</>;
   if (mail.status === 'off')
-    return <State word="Not run">Email is not set up here; copy the link and send it yourself</State>;
+    return <State word="Not run">Invitation email is off here; copy the link and send it yourself</State>;
   return (
     <State word="Check failed">
       Email not sent{mail.code ? ` (${mail.code})` : ''}; resend or copy the link

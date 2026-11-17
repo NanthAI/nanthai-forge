@@ -49,17 +49,70 @@ Without a role, a private project answers exactly like a missing one: `PROJECT_U
 
 ## Invitations
 
-The owner invites by Forge handle or email address, choosing the starting role, read or write (write when the CLI does not say):
+The owner invites by Forge handle or email address, choosing read or write access.
+Every invitation is pending until its recipient presses **Accept**. Creating an
+invitation or signing in grants nothing. Until acceptance, the owner sees only
+what they typed and the invitation state; Forge does not look up an email during
+creation. Handle invitations bind to the selected account; email invitations bind
+to the signed-in person's current, unique verified address at acceptance. A read
+invitation never lowers existing write access. Accepting write replaces read.
 
-- A handle, or the email of an existing account, gives that role at once; the person sees the project on their Home. A read invitation never lowers an existing write grant, and a write invitation replaces a read grant.
-- An email without an account is an open invitation that keeps its role. It is redeemed only by an account whose verified email matches, at its next sign-in. The project's address grants nothing by itself: a forwarded link reaches the "not found" page for anyone else. A new invitation to the same address replaces the open one.
-- From a device, inviting opens a membership approval request for the owner person; the role travels with the request.
+Recipients see **Accept**, **Decline**, and **Decline and block inviter** on Home
+(`/-/account`) and the invitation page (`/-/account/people`). A link opens that
+page and carries no credential, email or private project identifier. Signing in
+preserves the destination; the wrong account can return after signing out and
+using the invited account. A forwarded link grants nothing and reveals no other
+account's invitations. Blocks belong to the recipient, apply across projects,
+suppress later invitation mail, and can be undone in **Blocked inviters**. They
+are never exposed to the inviter.
 
-One email per open email invitation (`convex/projectInviteMail.ts`), sent through the alert email sender's account, token and from address. The email names the inviter's handle, the project's address and the role, nothing else: no other members, no source, no tracking pixel and no query string or rewritten link. The send state (sending, sent, failed with the HTTP status, or off when email is not set up) sits on the invitation's operation row and is shown to the owner only; the address, token and body are never logged or stored beside it. A retry of the same invitation sends nothing more; Resend is explicit, from the owner person in a browser, and idempotent per resend id; a second send waits for the first to settle.
+Invitations expire after seven days. Expiry is checked when answering, resending
+and preparing delivery, with no expiry timer, polling or background deletion.
+Accepted, declined, cancelled, replaced and expired invitations cannot be resent;
+send a new invitation instead. Replacing an invitation ends the earlier one. A
+resend keeps the original expiry. An interrupted send becomes retryable after ten
+minutes; a late completion cannot settle a newer attempt. Invitation states and
+mail state are retained and paged on People and access. Existing invitations use
+their creation time plus seven days when they have no explicit expiry.
 
-People and access reads one bounded page (`projectAccess.people`): the viewer's role and every contract answer, up to 50 write and 50 read members per page by handle, and for the owner up to 50 open invitations with their send state. A reader sees only their own row. The owner person changes a member to read or write, or removes them, with `projectAccess.setRole` (retry-safe per operation id); agents keep the CLI paths, where removal stays open and additions are held for the person.
+An email invitation uses the existing alert sender's account, token and from
+address, but only when `FORGE_INVITATION_EMAIL=1`. The invitation switch is off by
+default; configuring alerts alone does not enable invitation email. A sender
+needs a verified identity (a verified email or connected GitHub identity).
+With email off, a verified owner can still create the invitation and copy its
+link. Failed sends show the HTTP status or network failure with Resend and Copy
+link as the next steps. Email content uses the inviter's handle, the project's
+current address and the role, with no tracking pixel or rewritten link. The
+production sender domain remains part of the Phase 8 production move.
 
-*Proposed* (owner): a per-sender sending limit before invitation emails are enabled beyond development; an "ask for access" button on an ended invitation link, which needs sign-in so the owner sees who asks (ux decision D.13).
+Sending limits are checked together before any write in the mutation that queues
+an email, including resends:
+
+| Scope | Limit |
+| --- | --- |
+| Inviter, across projects | 20 emails per UTC hour and 100 per UTC day |
+| Invitation | 3 resends per UTC day |
+| Project | 50 open email invitations; accepted, ended and expired rows do not count |
+| Deployment, across projects and accounts | 500 invitation emails per UTC day |
+| Recipient address, across projects and inviters | 3 invitation emails per UTC day |
+
+Over a sending limit, the operation refuses with `RATE_LIMITED` and writes and
+schedules nothing. Retry the same operation id after the relevant window. Exact
+completed retries charge nothing and send nothing again. Counters reset in place,
+inside the existing send transaction. Recipient counter keys contain a digest,
+not an extra copy of the address. These limits apply to actual queued email;
+turning invitation email off does not consume email allowance. Email creation no
+longer performs recipient directory lookups, so that lookup has no budget to spend.
+
+The first four inviter/project limits above were approved by the owner. The
+500/deployment/day and 3/recipient/day caps, separate off-by-default email switch,
+and verified-sender requirement are reversible lead defaults under the owner's
+delegation for security defaults, recorded on c6629fda; the owner can change them.
+
+The person approves an agent's membership request before it creates a pending
+invitation. That approval grants no invitee access: the recipient still accepts.
+The older project add and reader-sharing entry points follow the same pending
+path. Devices cannot accept, decline, block or unblock for their person.
 
 ## Teams and organizations (proposed, `1e474c35`, `517523cf`)
 
@@ -76,12 +129,27 @@ Membership lookups stay indexed: one more read per access check at most. Every p
 
 ## Owner questions
 
-1. Approve the role and verb table above (`b987e608`).
-2. Whether a reader of a private project may see the roster by handle (today: only themselves; GitHub shows collaborators to people with push access only).
-3. The invitation email sending limit (numbers on `c6629fda`).
+1. **Decided:** the role and verb table above is approved (`b987e608`).
+2. **Decided:** readers of private projects see only themselves; write access is needed to see the roster (`b987e608`).
+3. **Decided:** the sending limits and lead defaults are listed above (`c6629fda`).
 4. The organization model, its default base permission and whether organization admins may stop sessions (`1e474c35`).
 5. Team approvers for protected paths (`517523cf`).
 
 ## Scale
 
-Permission checks add no Convex round trip: the role is read inside the call that is already running. Idle costs nothing: no access function polls or schedules work. The People and access page makes one bounded read per view (its first pages of people and invitations) and re-runs only when a grant changes.
+Permission checks add no Convex round trip: the role is read inside the call that is already running. Idle costs nothing: no access function polls or schedules work. The People and access page makes one bounded read per view (its first pages of people and invitations) and re-runs on changes to the records it reads. The recipient inbox uses two
+parallel bounded queries (25 handle invitations and 25 email invitations), each
+with its own cursor; blocked preferences load only when opened, 25 per page.
+Sparse pages preserve their continuation. No live read uses clock-derived arguments.
+
+Email invitation creation is six function executions including delivery (action,
+owner query, mutation, scheduled delivery, details query, settlement); with email
+off it is three. Resend is four including delivery. All four email counters (five
+on resend) are small existing rate-store rows read and written inside the queuing
+mutation. People makes no per-invitation operation lookup: the invitation row
+projects mail state. Answering is one mutation, and no permission check or landing
+adds a call. The modeled change per 1,000 landings is $0; this is not a new billed
+cost baseline. At the provider's [listed email price](https://developers.cloudflare.com/email-service/platform/pricing/),
+1,000 invitations cost at most $0.35 for mail beyond included allowance, plus
+Convex executions and I/O; the existing sender plan is reused and no purchase is
+authorized here. Live billed invitation usage has not been measured.

@@ -18,6 +18,12 @@ const authority = await import(moduleUrl('../convex/projectAuthority.ts'));
 
 function setup(visibility) {
   const s = state([]);
+  s.tables.forgeAccounts.set('new-person', {
+    _id: 'new-person',
+    _creationTime: 1,
+    owner: 'someone',
+    handle: 'someone',
+  });
   s.tables.hostedProjects.set('project', {
     _id: 'project',
     _creationTime: 1,

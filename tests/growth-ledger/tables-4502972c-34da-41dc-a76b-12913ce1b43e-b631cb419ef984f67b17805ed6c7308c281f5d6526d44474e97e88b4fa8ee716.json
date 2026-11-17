@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "Replaces automatic project membership and email recipient lookup with explicit invitation acceptance; invitationBlocks adds recipient-owned account-wide preferences that cannot live in project-owned invitations. No CLI commands, public error codes or source-byte stores added.",
+  "date": "2026-11-17"
+}

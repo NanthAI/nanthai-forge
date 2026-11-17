@@ -11,6 +11,7 @@ const modules = Object.fromEntries(
       'projectContributorActions',
       'projectReaderActions',
       'projectMemberApprovals',
+      'projectInvitationAnswers',
       'projectContributors',
       'projectReaders',
       'projectHostedApprovals',
@@ -32,6 +33,13 @@ function fixture(t) {
     const [module, name] = getFunctionName(ref).split(':');
     return modules[module]?.[name]?._handler(s.ctx, input) ?? native(ref, input);
   };
+  s.tables.users.set('verified-owner', {
+    _id: 'verified-owner',
+    _creationTime: 1,
+    accountKey: 'owner',
+    email: 'owner@example.test',
+    emailVerified: true,
+  });
   s.tables.hostedProjects.set('project', projectRow({ _id: 'project' }));
   s.tables.forgeAccounts.set('account', {
     _id: 'account',
@@ -73,7 +81,7 @@ const cases = [
   ['projectReaderActions', 'set', { reader: 'target', present: true, operationId: randomUUID() }],
 ];
 for (const [module, name, fields] of cases)
-  test(`owner device ${name} waits for an exact person grant, including project bootstrap`, async t => {
+  test(`owner device ${name} waits for exact person approval and recipient acceptance, including project bootstrap`, async t => {
     const s = fixture(t),
       oldFetch = globalThis.fetch;
     globalThis.fetch = async url =>
@@ -118,10 +126,32 @@ for (const [module, name, fields] of cases)
     );
     s.person();
     await modules.projectHostedApprovals.decide._handler(s.ctx, decision);
-    assert.equal(s.tables.projectReaders.size + s.tables.projectContributors.size, 1);
+    assert.equal(
+      s.tables.projectReaders.size + s.tables.projectContributors.size,
+      0,
+      'owner approval invites; it does not accept for the recipient',
+    );
+    const invitation = [...s.tables.projectInvites.values()][0];
+    assert.equal(invitation.state, 'pending');
     s.device();
     await call();
+    assert.equal(s.tables.projectInvites.size, 1, 'the device replay creates no second invitation');
+    assert.equal(s.tables.projectReaders.size + s.tables.projectContributors.size, 0);
+    const ownerIdentity = s.ctx.auth.getUserIdentity;
+    s.ctx.auth.getUserIdentity = async () => ({
+      subject: 'target',
+      email: 'target@example.test',
+      emailVerified: true,
+    });
+    await modules.projectInvitationAnswers.answer._handler(s.ctx, {
+      invitationId: invitation._id,
+      choice: 'accept',
+      operationId: randomUUID(),
+    });
+    s.ctx.auth.getUserIdentity = ownerIdentity;
     assert.equal(s.tables.projectReaders.size + s.tables.projectContributors.size, 1);
+    await call();
+    assert.equal(s.tables.projectInvites.size, 1);
   });
 
 test('membership writer rollout is default-off and never falls through to an unapproved grant', async t => {

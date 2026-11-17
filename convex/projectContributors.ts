@@ -1,17 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { findVerifiedRecipient, currentEmailRecipient } from './authUsers';
+import { createInvitation } from './projectInvitationCreate';
+import { invitationStatus } from './projectInvitationPolicy';
 import { retainMembership } from './projectActorNames';
-import { queueInviteMail } from './projectInviteMail';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
-import {
-  query,
-  mutation,
-  internalQuery,
-  internalMutation,
-  type QueryCtx,
-  type MutationCtx,
-} from './cliServer';
+import { query, mutation, internalMutation, type QueryCtx, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { ownedProject, activeProject, activeOwnedProject } from './projectAuthority';
 import { invariant } from '../src/errors';
@@ -174,33 +167,6 @@ export const handles = query({
     }
   },
 });
-export const identity = internalQuery({
-  args: {
-    projectId: v.id('hostedProjects'),
-    owner: v.string(),
-    contributor: v.optional(v.string()),
-    handle: v.optional(v.string()),
-  },
-  returns: v.union(v.object({ owner: v.string(), handle: v.string() }), v.null()),
-  handler: async (ctx, input) => {
-    try {
-      await activeOwnedProject(ctx, input.projectId, input.owner);
-      const row =
-        input.handle !== undefined
-          ? await ctx.db
-              .query('forgeAccounts')
-              .withIndex('by_handle', q => q.eq('handle', input.handle!))
-              .unique()
-          : await ctx.db
-              .query('forgeAccounts')
-              .withIndex('by_owner', q => q.eq('owner', input.contributor!))
-              .unique();
-      return row ? { owner: row.owner, handle: row.handle } : null;
-    } catch (error) {
-      return report(error);
-    }
-  },
-});
 export const pending = query({
   args: { projectId: v.id('hostedProjects') },
   returns: v.array(v.object({ id: v.id('projectInvites'), email: v.string() })),
@@ -213,59 +179,12 @@ export const pending = query({
         .query('projectInvites')
         .withIndex('by_project_and_email', q => q.eq('projectId', projectId))
         .take(1000);
-      return rows.map(row => ({ id: row._id, email: row.email }));
+      return rows
+        .filter(row => invitationStatus(row) === 'pending')
+        .map(row => ({ id: row._id, email: row.email }));
     } catch (error) {
       return report(error);
     }
-  },
-});
-async function invitationSeen(
-  ctx: QueryCtx | MutationCtx,
-  input: { projectId: Id<'hostedProjects'>; owner: string; operationId: string; person: string },
-) {
-  try {
-    await activeOwnedProject(ctx, input.projectId, input.owner);
-    const old = await ctx.db
-      .query('projectAccessOperations')
-      .withIndex('by_project_and_operation', q =>
-        q.eq('projectId', input.projectId).eq('operationId', input.operationId),
-      )
-      .unique();
-    invariant(
-      !old || (old.owner === input.owner && old.person === input.person),
-      'WORK_OPERATION_CHANGED',
-      'Retry the original invitation.',
-    );
-    return !!old;
-  } catch (error) {
-    return report(error);
-  }
-}
-export const invitationOperation = internalQuery({
-  args: {
-    projectId: v.id('hostedProjects'),
-    owner: v.string(),
-    operationId: v.string(),
-    person: v.string(),
-    resolveRecipient: v.optional(v.literal(true)),
-  },
-  returns: v.union(v.boolean(), v.object({ seen: v.boolean(), recipient: v.union(v.string(), v.null()) })),
-  handler: async (ctx, input) => {
-    const seen = await invitationSeen(ctx, input);
-    if (!input.resolveRecipient) return seen;
-    return {
-      seen,
-      recipient: seen || input.person.startsWith('@') ? null : await findVerifiedRecipient(ctx, input.person),
-    };
-  },
-});
-/** Replaces addByEmail's existing owner read; no additional action round trip. */
-export const recipient = internalQuery({
-  args: { projectId: v.id('hostedProjects'), owner: v.string(), email: v.string() },
-  returns: v.union(v.string(), v.null()),
-  handler: async (ctx, input) => {
-    await ownedProject(ctx, input.projectId, input.owner);
-    return findVerifiedRecipient(ctx, input.email);
   },
 });
 export const invite = internalMutation({
@@ -291,58 +210,14 @@ export const cancelInvite = mutation({
       await ownedProject(ctx, projectId, user.subject);
       const row = await ctx.db.get(id);
       invariant(!row || row.projectId === projectId, 'PROJECT_UNAVAILABLE', 'Invitation unavailable.');
-      if (row) await ctx.db.delete(id);
+      if (row && invitationStatus(row) === 'pending')
+        await ctx.db.patch(id, { state: 'cancelled', endedAt: Date.now() });
       return null;
     } catch (error) {
       return report(error);
     }
   },
 });
-/** Redeem only the signed-in account’s verified email, never client-supplied identity. */
-export async function redeemInvites(
-  ctx: MutationCtx,
-  user: { subject: string; email?: string; emailVerified?: boolean; forgeAuthUser?: unknown },
-) {
-  if (!user.email || !user.emailVerified) return;
-  const email = user.email.trim().toLowerCase();
-  const current = await findVerifiedRecipient(ctx, email);
-  if ((current && current !== user.subject) || (user.forgeAuthUser && current !== user.subject)) return;
-  const rows = await ctx.db
-    .query('projectInvites')
-    .withIndex('by_email', q => q.eq('email', email))
-    .take(1000);
-  for (const row of rows) {
-    const project = await ctx.db.get(row.projectId);
-    if (!project || project.removal) continue;
-    if (project.owner !== user.subject) await grant(ctx, row.projectId, user.subject, row.role ?? 'write');
-    await ctx.db.delete(row._id);
-  }
-}
-
-/** Give `person` at least `role`: never lowers an existing write grant, and write replaces a read grant. */
-async function grant(
-  ctx: MutationCtx,
-  projectId: Id<'hostedProjects'>,
-  person: string,
-  role: 'read' | 'write',
-) {
-  const writer = await ctx.db
-    .query('projectContributors')
-    .withIndex('by_project_and_contributor', q => q.eq('projectId', projectId).eq('contributor', person))
-    .unique();
-  if (writer) return;
-  const reader = await ctx.db
-    .query('projectReaders')
-    .withIndex('by_project_and_reader', q => q.eq('projectId', projectId).eq('reader', person))
-    .unique();
-  if (role === 'read') {
-    if (!reader) await ctx.db.insert('projectReaders', { projectId, reader: person });
-    return;
-  }
-  if (reader) await ctx.db.delete(reader._id);
-  await ctx.db.insert('projectContributors', { projectId, contributor: person });
-}
-
 export async function addContributor(
   ctx: MutationCtx,
   {
@@ -361,21 +236,27 @@ export async function addContributor(
 ): Promise<null> {
   try {
     await activeOwnedProject(ctx, projectId, owner);
-    invariant(
-      !email || (await currentEmailRecipient(ctx, email, contributor, true)),
-      'BAD_ARGUMENT',
-      'No Forge account currently matches that verified address.',
-    );
-    if (legacyEmail) await currentEmailRecipient(ctx, legacyEmail, contributor, false);
+    const address = email ?? legacyEmail;
+    if (address)
+      return await createInvitation(ctx, {
+        projectId,
+        owner,
+        operationId: `add-email:${address.trim().toLowerCase()}`,
+        person: address,
+      });
     if (contributor === owner) return null;
-    const old = await ctx.db
-      .query('projectContributors')
-      .withIndex('by_project_and_contributor', q =>
-        q.eq('projectId', projectId).eq('contributor', contributor),
-      )
+    const account = await ctx.db
+      .query('forgeAccounts')
+      .withIndex('by_owner', q => q.eq('owner', contributor))
       .unique();
-    if (!old) await ctx.db.insert('projectContributors', { projectId, contributor });
-    return null;
+    invariant(account, 'BAD_ARGUMENT', 'Invite this person by their Forge handle.');
+    return await createInvitation(ctx, {
+      projectId,
+      owner,
+      operationId: `add:${contributor}`,
+      person: `@${account.handle}`,
+      contributor,
+    });
   } catch (error) {
     return report(error);
   }
@@ -394,40 +275,7 @@ export async function inviteContributor(
   },
 ): Promise<null> {
   try {
-    const { projectId, owner, operationId, person } = input;
-    let { email, contributor } = input;
-    const role = input.role ?? 'write';
-    await activeOwnedProject(ctx, projectId, owner);
-    invariant(operationId.trim(), 'BAD_ARGUMENT', 'Retain the invitation operation id.');
-    if (await invitationSeen(ctx, { projectId, owner, operationId, person })) return null;
-    if (contributor && !person.startsWith('@')) {
-      const valid = await currentEmailRecipient(ctx, email ?? person, contributor, !!email);
-      if (!valid) {
-        email = person.trim().toLowerCase();
-        contributor = undefined;
-      }
-    }
-    let mail = false;
-    if (contributor && contributor !== owner) await grant(ctx, projectId, contributor, role);
-    else if (email) {
-      const old = await ctx.db
-        .query('projectInvites')
-        .withIndex('by_project_and_email', q => q.eq('projectId', projectId).eq('email', email))
-        .unique();
-      // An open invitation to the same address is replaced, so its role and email follow the latest invitation.
-      if (old) await ctx.db.patch(old._id, { role, operationId });
-      else await ctx.db.insert('projectInvites', { projectId, email, role, operationId });
-      mail = true;
-    }
-    const id = await ctx.db.insert('projectAccessOperations', {
-      projectId,
-      owner,
-      operationId,
-      person,
-      role,
-    });
-    if (mail) await queueInviteMail(ctx, (await ctx.db.get(id))!);
-    return null;
+    return await createInvitation(ctx, input);
   } catch (error) {
     return report(error);
   }
