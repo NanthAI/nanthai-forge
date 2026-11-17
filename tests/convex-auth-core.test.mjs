@@ -307,7 +307,8 @@ test('GitHub callbacks keep numeric identity and account key, store verified ema
   const same = await users.createGithub._handler(s.ctx, { method: verified });
   assert.equal(same, id);
   await users.signedInGithub._handler(s.ctx, { userId: id, method });
-  assert.equal(account.emailVerified, true);
+  assert.equal(account.emailVerified, false);
+  assert.equal(account.email, undefined);
   const other = await users.createGithub._handler(s.ctx, {
     method: { ...verified, profile: { ...verified.profile, id: '777777' } },
   });

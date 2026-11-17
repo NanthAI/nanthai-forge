@@ -1,0 +1,121 @@
+// SPDX-License-Identifier: Apache-2.0
+import { v } from 'convex/values';
+import { paginationOptsValidator } from 'convex/server';
+import { query, mutation } from './cliServer';
+import { authComponents as components } from './authComponents';
+import { linkAccount, confirmationOptions, confirmAccount, digest } from './authLinkAccount';
+import { authenticationResponse, requestOptions } from './authPasskeyWire';
+import { browserInactivitySeconds, browserLifetimeSeconds } from './accessPolicy';
+import { invariant } from '../src/errors';
+const PURPOSE = 'forge:end-other-sessions';
+const session = v.object({
+  sessionId: v.string(),
+  creationTime: v.number(),
+  lastRefreshedAt: v.number(),
+  current: v.boolean(),
+});
+const passkey = v.object({ passkeyId: v.string(), name: v.optional(v.string()), createdAt: v.number() });
+const device = v.object({
+  credentialId: v.string(),
+  name: v.string(),
+  scope: v.string(),
+  issuedAt: v.number(),
+  expiresAt: v.number(),
+  revoked: v.boolean(),
+});
+export const list = query({
+  args: { paginationOpts: paginationOptsValidator },
+  returns: v.object({
+    sessions: v.array(session),
+    passkeys: v.array(passkey),
+    devices: v.array(device),
+    github: v.union(v.string(), v.null()),
+    notice: v.union(v.object({ at: v.number(), passkeyId: v.string() }), v.null()),
+    isDone: v.boolean(),
+    continueCursor: v.string(),
+  }),
+  handler: async (ctx, args) => {
+    const { user, sessionId } = await linkAccount(ctx);
+    const [sessions, passkeys, devices] = await Promise.all([
+      ctx.runQuery(components.auth.public.listSessions, { userId: user._id }),
+      ctx.runQuery(components.authPasskey.registration.listPasskeys, { userId: user._id }),
+      ctx.db
+        .query('cliCredentials')
+        .withIndex('by_owner', q => q.eq('owner', user.accountKey))
+        .order('desc')
+        .paginate(args.paginationOpts),
+    ]);
+    const now = Date.now();
+    return {
+      sessions: sessions
+        .filter(
+          row =>
+            row.creationTime + browserLifetimeSeconds * 1000 > now &&
+            row.lastRefreshedAt + browserInactivitySeconds * 1000 > now,
+        )
+        .map(row => ({ ...row, current: row.sessionId === sessionId })),
+      passkeys: passkeys.map(({ passkeyId, name, createdAt }) => ({
+        passkeyId,
+        ...(name ? { name } : {}),
+        createdAt,
+      })),
+      devices: devices.page.map(({ credentialId, name, scope, issuedAt, expiresAt, revoked }) => ({
+        credentialId,
+        name,
+        scope,
+        issuedAt,
+        expiresAt,
+        revoked,
+      })),
+      github: user.githubConflict ? null : (user.githubLogin ?? null),
+      notice: user.passkeyNotice ?? null,
+      isDone: devices.isDone,
+      continueCursor: devices.continueCursor,
+    };
+  },
+});
+export const startConfirmation = mutation({
+  args: {},
+  returns: requestOptions,
+  handler: async ctx => {
+    const { user } = await linkAccount(ctx);
+    return confirmationOptions(ctx, user, PURPOSE);
+  },
+});
+export const revokeOthers = mutation({
+  args: { response: authenticationResponse, operationId: v.string() },
+  returns: v.number(),
+  handler: async (ctx, { response, operationId }) => {
+    const { user, sessionId } = await linkAccount(ctx);
+    invariant(operationId.trim(), 'BAD_ARGUMENT', 'Retain the session sign-out operation id.');
+    const proofHash = 'done:' + (await digest(JSON.stringify(response)));
+    // Receipt lives on the existing account, bound to this browser and this operation.
+    if (
+      user.sessionEnd?.operationId === operationId &&
+      user.sessionEnd.sessionId === sessionId &&
+      user.sessionEnd.stateHash.startsWith('done:')
+    ) {
+      invariant(
+        user.sessionEnd.stateHash === proofHash,
+        'WORK_OPERATION_CHANGED',
+        'Retry the original session sign-out proof.',
+      );
+      return user.sessionEnd.revokedCount ?? 0;
+    }
+    await confirmAccount(ctx, user, PURPOSE, response);
+    const sessions = await ctx.runQuery(components.auth.public.listSessions, { userId: user._id });
+    const revoked = await ctx.runMutation(components.auth.public.revokeSessions, {
+      sessionIds: sessions.filter(row => row.sessionId !== sessionId).map(row => row.sessionId),
+    });
+    await ctx.db.patch(user._id, {
+      sessionEnd: {
+        operationId,
+        sessionId,
+        stateHash: proofHash,
+        revokedCount: revoked.length,
+        verifiedUntil: 0,
+      },
+    });
+    return revoked.length;
+  },
+});

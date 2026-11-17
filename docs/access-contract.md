@@ -42,3 +42,9 @@ Source bytes remain in R2; identity records stay in Convex. This consolidates
 per-session access assumptions; existing screens stay until their replacements
 cover their behavior. No new table, CLI command or runtime dependency is added
 by this interface landing.
+
+The C1 reader expansion accepts optional device identity/settings and Lane-holder
+metadata. Policy `accessIdentities.laneHolders` and `accessIdentities.devices`
+are independent rollout settings; absent means off. Readers land before their
+writers, and enabling either later uses the existing owner policy mechanism.
+Neither setting changes the four provisional decisions described above.

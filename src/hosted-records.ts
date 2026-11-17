@@ -44,6 +44,37 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
     .object({
       ...common,
       kind: z.literal('lane'),
+      /** Optional reader expansion for explicit C1 holder transitions; writers land separately. */
+      holder: z
+        .object({
+          actor: z.string().min(1),
+          agent: z.string().optional(),
+          sessionId: z.string().optional(),
+          since: z.number(),
+          lastSeen: z.number(),
+          change: z
+            .object({
+              operationId: z.uuid(),
+              kind: z.enum(['resume', 'take-back', 'takeover', 'handoff']),
+              by: z.string(),
+              previous: z
+                .object({
+                  actor: z.string(),
+                  agent: z.string().optional(),
+                  sessionId: z.string().optional(),
+                  since: z.number(),
+                  lastSeen: z.number(),
+                })
+                .strict()
+                .nullable(),
+              reason: z.string().optional(),
+              savedHead: hash,
+            })
+            .strict()
+            .optional(),
+        })
+        .strict()
+        .optional(),
       restoreBase: hash.optional(),
       earlyResolution: earlyResolutionSchema.optional(),
       stack: z

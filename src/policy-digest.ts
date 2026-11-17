@@ -142,6 +142,8 @@ export const OWNER_GATE: Readonly<Record<string, GateClass>> = {
   'checks.concurrency': 'gated',
   'integrationPreview.auto': 'gated',
   ownerRootUpdates: 'gated',
+  'accessIdentities.laneHolders': 'gated',
+  'accessIdentities.devices': 'gated',
   autoSnapshot: 'gated',
   autoSnapshotIntervalMinutes: 'gated',
   laneUpdates: 'gated',

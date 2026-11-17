@@ -775,6 +775,103 @@
                     "abandoned"
                   ]
                 },
+                "holder": {
+                  "type": "object",
+                  "properties": {
+                    "actor": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "agent": {
+                      "type": "string"
+                    },
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "since": {
+                      "type": "number"
+                    },
+                    "lastSeen": {
+                      "type": "number"
+                    },
+                    "change": {
+                      "type": "object",
+                      "properties": {
+                        "operationId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "resume",
+                            "take-back",
+                            "takeover",
+                            "handoff"
+                          ]
+                        },
+                        "by": {
+                          "type": "string"
+                        },
+                        "previous": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "actor": {
+                                  "type": "string"
+                                },
+                                "agent": {
+                                  "type": "string"
+                                },
+                                "sessionId": {
+                                  "type": "string"
+                                },
+                                "since": {
+                                  "type": "number"
+                                },
+                                "lastSeen": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "actor",
+                                "since",
+                                "lastSeen"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "savedHead": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        }
+                      },
+                      "required": [
+                        "operationId",
+                        "kind",
+                        "by",
+                        "previous",
+                        "savedHead"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "actor",
+                    "since",
+                    "lastSeen"
+                  ],
+                  "additionalProperties": false
+                },
                 "stack": {
                   "type": "object",
                   "properties": {
@@ -1050,6 +1147,103 @@
             "completed",
             "abandoned"
           ]
+        },
+        "holder": {
+          "type": "object",
+          "properties": {
+            "actor": {
+              "type": "string",
+              "minLength": 1
+            },
+            "agent": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "since": {
+              "type": "number"
+            },
+            "lastSeen": {
+              "type": "number"
+            },
+            "change": {
+              "type": "object",
+              "properties": {
+                "operationId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "resume",
+                    "take-back",
+                    "takeover",
+                    "handoff"
+                  ]
+                },
+                "by": {
+                  "type": "string"
+                },
+                "previous": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "actor": {
+                          "type": "string"
+                        },
+                        "agent": {
+                          "type": "string"
+                        },
+                        "sessionId": {
+                          "type": "string"
+                        },
+                        "since": {
+                          "type": "number"
+                        },
+                        "lastSeen": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "actor",
+                        "since",
+                        "lastSeen"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "savedHead": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "operationId",
+                "kind",
+                "by",
+                "previous",
+                "savedHead"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "actor",
+            "since",
+            "lastSeen"
+          ],
+          "additionalProperties": false
         },
         "stack": {
           "type": "object",
@@ -1591,6 +1785,103 @@
                 "completed",
                 "abandoned"
               ]
+            },
+            "holder": {
+              "type": "object",
+              "properties": {
+                "actor": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "agent": {
+                  "type": "string"
+                },
+                "sessionId": {
+                  "type": "string"
+                },
+                "since": {
+                  "type": "number"
+                },
+                "lastSeen": {
+                  "type": "number"
+                },
+                "change": {
+                  "type": "object",
+                  "properties": {
+                    "operationId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "resume",
+                        "take-back",
+                        "takeover",
+                        "handoff"
+                      ]
+                    },
+                    "by": {
+                      "type": "string"
+                    },
+                    "previous": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "actor": {
+                              "type": "string"
+                            },
+                            "agent": {
+                              "type": "string"
+                            },
+                            "sessionId": {
+                              "type": "string"
+                            },
+                            "since": {
+                              "type": "number"
+                            },
+                            "lastSeen": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "actor",
+                            "since",
+                            "lastSeen"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "savedHead": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    }
+                  },
+                  "required": [
+                    "operationId",
+                    "kind",
+                    "by",
+                    "previous",
+                    "savedHead"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "actor",
+                "since",
+                "lastSeen"
+              ],
+              "additionalProperties": false
             },
             "stack": {
               "type": "object",

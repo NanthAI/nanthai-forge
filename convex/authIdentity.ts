@@ -6,7 +6,16 @@ import { accountFromSession, isAuthSession } from './forgeIdentity';
 
 export const sessionAccount = internalQuery({
   args: {},
-  returns: v.union(v.object({ accountKey: v.string(), userId: v.string(), sessionId: v.string() }), v.null()),
+  returns: v.union(
+    v.object({
+      accountKey: v.string(),
+      userId: v.string(),
+      sessionId: v.string(),
+      email: v.optional(v.string()),
+      emailVerified: v.optional(v.boolean()),
+    }),
+    v.null(),
+  ),
   handler: async ctx => {
     const identity = await ctx.auth.getUserIdentity();
     return identity && isAuthSession(identity) ? accountFromSession(ctx, identity) : null;

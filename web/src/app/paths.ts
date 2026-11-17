@@ -23,7 +23,7 @@ export const placeSections: Record<ProjectPlace, readonly string[]> = {
 };
 
 export type AppRoute =
-  | { frame: 'public'; page: 'signin' | 'passkey' | 'device' }
+  | { frame: 'public'; page: 'signin' | 'passkey' | 'device' | 'terms' | 'privacy' }
   | { frame: 'bare'; page: 'new' }
   | { frame: 'account'; place: AccountPlace }
   | {
@@ -102,6 +102,7 @@ export function parseAppPath(pathname: string): AppRoute {
   if (first === 'signin' && !second) return { frame: 'public', page: 'signin' };
   if (first === 'signin' && second === 'passkey' && !more.length) return { frame: 'public', page: 'passkey' };
   if (first === 'device' && !second) return { frame: 'public', page: 'device' };
+  if ((first === 'terms' || first === 'privacy') && !second) return { frame: 'public', page: first };
   if (first === 'new' && !second) return { frame: 'bare', page: 'new' };
   if (!second) return { frame: 'missing', path: pathname };
   const [segment = '', ...tail] = more;

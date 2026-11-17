@@ -1,0 +1,19 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+[data-ds] {
+  .access-frame { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); align-items: start; }
+  .access-frame > * { min-width: 0; background: var(--surface); align-self: stretch; }
+  .access-frame .sub { display: block; color: var(--text-2); font-size: var(--t-meta); }
+  .access-frame .ttl { display: block; }
+  @media (max-width: 860px) { .access-frame { grid-template-columns: minmax(0, 1fr); } }
+  .access-device { min-height: var(--row-h-lane); align-items: start; }
+  .access-device > .meta { text-align: right; }
+  .access-device q { overflow-wrap: anywhere; }
+  .access-detail { border-bottom: var(--rule) solid var(--line); background: var(--surface-2); }
+  .access-edit { display: grid; gap: var(--s-3); }
+  .access-edit .inp { width: 100%; }
+  .access-browser { min-height: var(--row-h-lane); }
+  @media (max-width: 560px) {
+    .access-device { grid-template-columns: auto minmax(0,1fr) !important; }
+    .access-device > .meta { grid-column: 2; text-align: left; }
+  }
+}

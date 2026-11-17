@@ -81,6 +81,11 @@ export const saveRequestSchema = z
   .object({
     operationId: z.uuid(),
     laneId: z.uuid(),
+    /** Reader expansion for the later session-bound holder writer. */
+    holderSessionId: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
     authorityEpoch: number,
     expected: saveExpectedSchema,
     message: z.string(),

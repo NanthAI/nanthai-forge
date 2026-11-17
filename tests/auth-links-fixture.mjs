@@ -123,7 +123,7 @@ export function fixture(t, { mapped = true, github = false } = {}) {
         return { success: false, userError: { error: 'PROTOCOL_ERROR' } };
       registrations.delete(args.verifiedUserId);
       const passkeyId = `passkey-${keys.length}`;
-      keys.push({ userId: args.verifiedUserId, passkeyId });
+      keys.push({ userId: args.verifiedUserId, passkeyId, name: args.name, createdAt: Date.now() });
       return { success: true, passkeyId };
     }
     if (name.endsWith('/startAuthentication')) {

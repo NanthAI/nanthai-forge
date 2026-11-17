@@ -32,6 +32,10 @@ export const hostedStartSchema = z
     openLanesVersion: z.literal(1).optional(),
     /** The calling agent session's slug (feature agent-slug, c29d0780); never part of the payload hash. */
     agent: z.string().refine(isAgentSlug, 'agent must be a Forge agent slug').optional(),
+    holderSessionId: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
     operationId: z.uuid(),
     authorityEpoch: sourceAuthoritySchema.shape.epoch,
     expectedMain: mainExpectationSchema,
@@ -55,6 +59,7 @@ export const hostedLaneSelectionSchema = z
     sourceVersion: hostedLaneSchema.shape.sourceVersion,
     lifecycleVersion: hostedLaneSchema.shape.lifecycleVersion,
     state: hostedLaneSchema.shape.state,
+    holder: hostedLaneSchema.shape.holder,
     stack: hostedLaneSchema.shape.stack,
     earlyResolution: hostedLaneSchema.shape.earlyResolution,
     base: mainExpectationSchema,

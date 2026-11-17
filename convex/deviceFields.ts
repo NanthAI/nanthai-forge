@@ -11,6 +11,22 @@ export const credentialFields = {
   issuedAt: v.number(),
   expiresAt: v.number(),
   revoked: v.boolean(),
+  /** Reader expansion: stable identity/settings are independent of a bearer sign-in. */
+  deviceKey: v.optional(v.string()),
+  deviceCode: v.optional(v.string()),
+  deviceApprovedAt: v.optional(v.number()),
+  deviceLastSeen: v.optional(v.number()),
+  removed: v.optional(v.boolean()),
+  settings: v.optional(
+    v.object({
+      source: v.union(v.literal('write'), v.literal('read'), v.literal('coordination')),
+      projects: v.union(
+        v.object({ kind: v.literal('all') }),
+        // This account-owned setting retains an opaque reference; it is not project-owned data.
+        v.object({ kind: v.literal('project'), projectId: v.string() }),
+      ),
+    }),
+  ),
 };
 export const credentialDocument = v.object({
   _id: v.id('cliCredentials'),
@@ -32,6 +48,7 @@ export const deviceFields = {
   issuedAt: v.optional(v.number()),
   redemptionId: v.optional(v.string()),
   decisionId: v.optional(v.string()),
+  deviceKey: v.optional(v.string()),
 };
 export const deviceDocument = v.object({
   _id: v.id('deviceCodes'),

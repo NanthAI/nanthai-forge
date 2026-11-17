@@ -334,9 +334,25 @@ const count = (s, projectId) =>
 const pending = s =>
   [...s.tasks.entries()].filter(([, task]) => task.state.kind === 'pending').map(([id]) => id);
 
-test('delete tombstones at once, revokes access, measures retained size and purges every covered row at day 90', async t => {
+test('project deletion purges project-owned rows at day 90 and preserves account-owned device keys and settings', async t => {
   const s = fixture();
   t.mock.method(Date, 'now', () => s.now.value);
+  const accountDevice = {
+    _id: 'account-device',
+    _creationTime: 1,
+    owner: 'owner',
+    name: 'Build device',
+    credentialId: 'device-id',
+    tokenHash: 'synthetic',
+    scope: 'cli',
+    issuedAt: 1,
+    expiresAt: 2,
+    revoked: false,
+    deviceKey: 'synthetic-public-key',
+    deviceCode: 'device-code',
+    settings: { source: 'write', projects: { kind: 'project', projectId: 'project' } },
+  };
+  s.tables.cliCredentials.set(accountDevice._id, accountDevice);
   const foreignRows = count(s, 'foreign');
   await lifecycle.trash._handler(s.ctx, s.op());
   const project = () => s.tables.hostedProjects.get('project');
@@ -403,6 +419,11 @@ test('delete tombstones at once, revokes access, measures retained size and purg
     // The prefix purge action is modelled above by its completion mark.
     ['projectR2Maintenance:purgeDeletedProjectPage'],
     'idle after purge',
+  );
+  assert.deepEqual(
+    s.tables.cliCredentials.get(accountDevice._id),
+    accountDevice,
+    'a project reference never makes the whole device project-owned',
   );
   const receipt = project().purge;
   assert.equal(receipt.reason, 'retention');

@@ -566,3 +566,13 @@ automatic sweeps and `nforge prune` preview/apply. Existing checkout links and l
 install/link locks retain their trees, including sealed installs and relink rollback.
 Policy-suffixed npm links follow changed lockfiles automatically. Details:
 [dependency sharing](parallel-work-defaults.md#sharedependencies).
+
+The rebuilt Sign-in and devices account page lists the current account’s browser
+sessions, passkeys and existing CLI approvals. Ending other browsers requires a
+fresh passkey or linked GitHub check; a passkey-add notice is acknowledged only
+in the viewing browser. Browser inactivity is one server setting, provisionally
+14 days pending owner confirmation. Current verified GitHub addresses replace
+previous values, including clearing an address the provider no longer reports.
+Draft Terms and Privacy pages are public under `/-`; account creation records
+the displayed draft version in its existing write. Final legal approval, stable
+device identities/settings and explicit Lane-holder changes remain open.

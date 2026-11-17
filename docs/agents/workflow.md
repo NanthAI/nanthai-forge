@@ -113,7 +113,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `policy` | `operationId?` |
 | `approve-link` | `operationId?` |
 | `request-approval` | `laneId?, reason?, withdraw?, operationId?` |
-| `x set-policy` | `governanceVersion?, expectedPolicy?, preset?, acceptance?, checks?, integrationPreview?, ownerRootUpdates?, autoSnapshot?, autoSnapshotIntervalMinutes?, checkLogs?, laneUpdates?, lifecycle?, notify?, githubMirror?, trust?, agentDefaults?, autoExchange?, operationId?` |
+| `x set-policy` | `governanceVersion?, expectedPolicy?, preset?, acceptance?, checks?, integrationPreview?, ownerRootUpdates?, accessIdentities?, autoSnapshot?, autoSnapshotIntervalMinutes?, checkLogs?, laneUpdates?, lifecycle?, notify?, githubMirror?, trust?, agentDefaults?, autoExchange?, operationId?` |
 | `planning` | `planningItemId?, id?, itemId?, search?, kind?, status?, initiativeId?, counts?, limit?, cursor?, reconcile?, schedule?, operationId?` |
 | `put-planning-item` | `expectedVersion?, kind?, title?, body?, status?, reason?, intentIds?, initiativeId?, planningItemId?, id?, itemId?, fields?, operationId?` |
 | `comment-planning-item` | `itemId?, authorLabel?, text, planningItemId?, id?, operationId?` |

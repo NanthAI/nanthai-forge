@@ -1133,3 +1133,29 @@ Pure recovery preparation in `ui-now-recovery` counts exactly one indexed read o
 each of 600 Intents and 600 notices. Its unchanged 5 ms budget measures main-thread
 CPU in a fresh child after warm-up and GC, excluding descheduling and background
 compiler work. A planted doubled preparation must fail the same work-count guard.
+
+### Sign-in, devices and browser sessions
+
+The rebuilt account devices place and project Settings → You share the same lazy
+screen. `authSessions.list` reads one page of terminal credentials, the auth
+component's bounded browser sessions and the passkey list together. The session
+creation and last-refresh times are server facts; client names are not inferred.
+Dormant reads use the existing app lifecycle, with no polling or idle calls.
+
+Ending other browser sessions confirms a passkey for this account in the revoke
+transaction, or uses a fresh GitHub exchange bound to the originating live session,
+state and already linked numeric identity. Other accounts and the continuing
+browser are excluded from the bulk revoke. Adding a passkey writes a next-visit
+notice in the enrollment transaction; acknowledgement stays in the viewing browser and cannot hide the notice
+in another browser. A newer key has its own notice identity. These flows never revoke terminal credentials implicitly.
+
+`convex/accessPolicy.ts` owns the four provisional C1 policies independently.
+Browser inactivity is `browserInactivitySeconds`, provisionally 14 days, separate
+from the 30-day maximum and CLI lifetime. Owner confirmation remains open on the
+relevant Issues. The Lane schema accepts optional holder metadata before its
+writer rolls out, preserving earlier clients and saved source pins.
+
+Terms and privacy drafts under `/-/terms` and `/-/privacy` render without a Convex
+client. The sign-in line links both. New accounts retain the draft version once
+in their existing creation write. These drafts need owner approval before public
+launch; they do not settle the still-open public data-policy commitments.

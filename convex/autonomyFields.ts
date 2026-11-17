@@ -104,6 +104,9 @@ export const autonomyPolicy = v.object({
   ),
   integrationPreview: v.optional(v.object({ auto: v.boolean() })),
   ownerRootUpdates: v.optional(v.boolean()),
+  accessIdentities: v.optional(
+    v.object({ laneHolders: v.optional(v.boolean()), devices: v.optional(v.boolean()) }),
+  ),
   autoSnapshot: v.optional(v.boolean()),
   autoSnapshotIntervalMinutes: v.optional(v.number()),
   laneUpdates: v.union(v.literal('auto'), v.literal('ask')),

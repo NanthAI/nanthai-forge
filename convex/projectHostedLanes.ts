@@ -220,6 +220,7 @@ export const select = query({
           sourceVersion: lane.sourceVersion,
           lifecycleVersion: lane.lifecycleVersion,
           state: lane.state,
+          ...(lane.holder ? { holder: lane.holder } : {}),
           ...(lane.stack ? { stack: lane.stack } : {}),
           ...(lane.earlyResolution ? { earlyResolution: lane.earlyResolution } : {}),
           base: lane.base,

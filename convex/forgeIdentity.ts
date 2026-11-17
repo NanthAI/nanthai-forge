@@ -4,7 +4,13 @@ import type { QueryCtx, MutationCtx, ActionCtx } from './_generated/server';
 import { authComponents } from './authComponents';
 
 type Context = QueryCtx | MutationCtx | ActionCtx;
-type Account = { accountKey: string; userId: string; sessionId: string };
+type Account = {
+  accountKey: string;
+  userId: string;
+  sessionId: string;
+  email?: string;
+  emailVerified?: boolean;
+};
 const sessionAccount = makeFunctionReference<'query', Record<string, never>, Account | null>(
   'authIdentity:sessionAccount',
 );
@@ -22,7 +28,16 @@ export async function accountFromSession(
   const id = ctx.db.normalizeId('users', session.userId);
   if (!id) return null;
   const user = await ctx.db.get(id);
-  return user ? { accountKey: user.accountKey, userId: user._id, sessionId: identity.subject } : null;
+  return user
+    ? {
+        accountKey: user.accountKey,
+        userId: user._id,
+        sessionId: identity.subject,
+        ...(user.email && user.emailVerified
+          ? { email: user.email, emailVerified: true }
+          : { emailVerified: false }),
+      }
+    : null;
 }
 const resets = new WeakMap<object, () => void>();
 /** Query/mutation dependencies stay reactive. Only a single invocation shares this promise. */
@@ -47,6 +62,8 @@ export function identityContext<C extends Context>(ctx: C): C {
               subject: account.accountKey,
               forgeAuthSession: account.sessionId,
               forgeAuthUser: account.userId,
+              email: account.email,
+              emailVerified: account.emailVerified === true,
             }
           : null;
       };

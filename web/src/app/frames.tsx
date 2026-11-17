@@ -339,6 +339,8 @@ export function PublicFrame({ children, wide = false }: { children: ReactNode; w
         </a>
         <div className="end">
           <a href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/README.md">Docs</a>
+          <A href="/-/terms">Terms</A>
+          <A href="/-/privacy">Privacy policy</A>
         </div>
       </header>
       <main className={wide ? 'pubcol wide' : 'pubcol'} id="main" tabIndex={-1}>

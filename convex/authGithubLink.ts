@@ -66,7 +66,8 @@ export async function completeGithubLink(
         await ctx.db.patch(user._id, {
           githubId: profile.id,
           githubLogin: profile.login,
-          ...(profile.emailVerified && profile.email ? { email: profile.email, emailVerified: true } : {}),
+          email: profile.emailVerified && profile.email ? profile.email.trim().toLowerCase() : undefined,
+          emailVerified: Boolean(profile.emailVerified && profile.email),
         });
       }
       if (address === signup) {

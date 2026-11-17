@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ConvexError, v } from 'convex/values';
 import { vGithubProfile } from '@convex-dev/auth/methods/github/server';
-import { internalMutation, internalQuery, type MutationCtx } from './server';
+import { internalMutation, internalQuery, type MutationCtx, type QueryCtx } from './server';
 import { invariant } from '../src/errors';
+import { LEGAL_VERSION } from '../src/legal-version';
 import { ensureAccount } from './urlIdentity';
 
 const githubMethod = v.object({ name: v.literal('github'), profile: vGithubProfile });
@@ -11,7 +12,11 @@ async function insertUser(
   ctx: MutationCtx,
   fields: { githubId?: string; githubLogin?: string; email?: string; emailVerified: boolean },
 ) {
-  const id = await ctx.db.insert('users', { accountKey: 'pending', ...fields });
+  const id = await ctx.db.insert('users', {
+    accountKey: 'pending',
+    ...fields,
+    legalAcceptance: { version: LEGAL_VERSION, at: Date.now() },
+  });
   await ctx.db.patch(id, { accountKey: `user_${id}` });
   await ensureAccount(ctx, `user_${id}`, { githubLogin: fields.githubLogin });
   return id;
@@ -39,7 +44,7 @@ export const createGithub = internalMutation({
     return insertUser(ctx, {
       githubId: profile.id,
       githubLogin: profile.login,
-      ...(profile.emailVerified && profile.email ? { email: profile.email } : {}),
+      ...(profile.emailVerified && profile.email ? { email: profile.email.trim().toLowerCase() } : {}),
       emailVerified: profile.emailVerified && Boolean(profile.email),
     });
   },
@@ -67,7 +72,8 @@ export const signedInGithub = internalMutation({
       });
     await ctx.db.patch(userId, {
       githubLogin: profile.login,
-      ...(profile.emailVerified && profile.email ? { email: profile.email, emailVerified: true } : {}),
+      email: profile.emailVerified && profile.email ? profile.email.trim().toLowerCase() : undefined,
+      emailVerified: Boolean(profile.emailVerified && profile.email),
     });
     return null;
   },
@@ -88,4 +94,21 @@ export const githubAccounts = internalQuery({
       .unique();
     return user ? (user.githubId ? [user.githubId] : user.legacyGithubProvider ? null : []) : null;
   },
+});
+
+/** Shared by account lookup and redemption; no provider fallback. */
+export async function findVerifiedRecipient(ctx: QueryCtx | MutationCtx, email: string) {
+  email = email.trim().toLowerCase();
+  const rows = await ctx.db
+    .query('users')
+    .withIndex('by_email', q => q.eq('email', email))
+    .take(2);
+  invariant(rows.length <= 1, 'BAD_ARGUMENT', 'No unique account matches that address.');
+  return rows[0]?.emailVerified && rows[0].email === email ? rows[0].accountKey : null;
+}
+/** Internal recipient lookup: exact current verified address only. */
+export const verifiedRecipient = internalQuery({
+  args: { email: v.string() },
+  returns: v.union(v.string(), v.null()),
+  handler: (ctx, { email }) => findVerifiedRecipient(ctx, email),
 });

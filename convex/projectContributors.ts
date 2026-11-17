@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { findVerifiedRecipient } from './authUsers';
 import { retainMembership } from './projectActorNames';
 import { queueInviteMail } from './projectInviteMail';
 import { v } from 'convex/values';
@@ -272,10 +273,11 @@ export const cancelInvite = mutation({
 /** Redeem only the signed-in account’s verified email, never client-supplied identity. */
 export async function redeemInvites(
   ctx: MutationCtx,
-  user: { subject: string; email?: string; emailVerified?: boolean },
+  user: { subject: string; email?: string; emailVerified?: boolean; forgeAuthUser?: unknown },
 ) {
   if (!user.email || !user.emailVerified) return;
   const email = user.email.trim().toLowerCase();
+  if (user.forgeAuthUser && (await findVerifiedRecipient(ctx, email)) !== user.subject) return;
   const rows = await ctx.db
     .query('projectInvites')
     .withIndex('by_email', q => q.eq('email', email))

@@ -76,3 +76,27 @@ test('acceptance.autoRevert: absent means on, no preset sets it, a field edit me
   assert.match(hold(guarded, null, ['.github/workflows/ci.yml']), /protected/);
   assert.equal(hold(guarded, null, ['src/a.ts']), null, 'unknown culprit paths defer to the reverse paths');
 });
+
+test('C1 identity writers stay off until explicitly enabled; changing one rollout preserves the other', () => {
+  const previous = policyPreset('trusted');
+  assert.equal(previous.accessIdentities, undefined);
+  const holder = editedPolicy(previous, {
+    action: 'set-policy',
+    operationId: randomUUID(),
+    accessIdentities: { laneHolders: true },
+  });
+  const devices = editedPolicy(holder, {
+    action: 'set-policy',
+    operationId: randomUUID(),
+    accessIdentities: { devices: true },
+  });
+  assert.deepEqual(devices.accessIdentities, { laneHolders: true, devices: true });
+  assert.equal(
+    editedPolicy(devices, {
+      action: 'set-policy',
+      operationId: randomUUID(),
+      accessIdentities: { laneHolders: false },
+    }).accessIdentities.laneHolders,
+    false,
+  );
+});

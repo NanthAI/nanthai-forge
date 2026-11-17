@@ -15,6 +15,17 @@ export const authTables = {
   }).index('by_user_and_operation', ['userId', 'operationId']),
   users: defineTable({
     accountKey: v.string(),
+    legalAcceptance: v.optional(v.object({ version: v.string(), at: v.number() })),
+    passkeyNotice: v.optional(v.object({ at: v.number(), passkeyId: v.string() })),
+    sessionEnd: v.optional(
+      v.object({
+        sessionId: v.string(),
+        operationId: v.string(),
+        stateHash: v.string(),
+        verifiedUntil: v.number(),
+        revokedCount: v.optional(v.number()),
+      }),
+    ),
     githubId: v.optional(v.string()),
     /** Backfill found an unresolved competing verified identity claim. */
     githubConflict: v.optional(v.boolean()),
@@ -39,6 +50,7 @@ export const authTables = {
       v.object({ keyId: v.string(), nonce: v.string(), tag: v.string(), ciphertext: v.string() }),
     ),
   })
+    .index('by_email', ['email'])
     .index('by_githubId', ['githubId'])
     .index('by_accountKey', ['accountKey']),
 };

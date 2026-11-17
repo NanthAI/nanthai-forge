@@ -24,6 +24,13 @@ import { followLink, navigate, useRoute, useSearch } from './router';
 import { forget, recall, safeNext } from './session';
 import { FirstPasskey, SignIn } from './SignIn';
 import './app.css';
+const You = lazy(() => import('./You'));
+const Legal = lazy(() => import('./Legal'));
+const loadingPlace = (
+  <p className="quietline" aria-busy="true">
+    Loading…
+  </p>
+);
 
 const Billing = lazy(() => import('../billing/Home'));
 
@@ -48,6 +55,16 @@ function makeClient() {
 }
 
 export default function App() {
+  const route = useRoute();
+  if (route.frame === 'public' && (route.page === 'terms' || route.page === 'privacy'))
+    return (
+      <Suspense fallback={loadingPlace}>
+        <Legal page={route.page} />
+      </Suspense>
+    );
+  return <ConnectedApp />;
+}
+function ConnectedApp() {
   const [client] = useState(makeClient);
   useEffect(() => liveReads.watchActivity(), []);
   useEffect(() => prefetchLayerWhenIdle(), []);
@@ -87,12 +104,20 @@ function Pages() {
   const { isLoading, isAuthenticated } = useConvexAuth();
   const viewer = useQuery(api.urlAccounts.current, isAuthenticated ? {} : 'skip');
   const needsSignIn =
-    !isLoading && !isAuthenticated && !(route.frame === 'public' && route.page === 'signin');
+    !isLoading &&
+    !isAuthenticated &&
+    !(route.frame === 'public' && ['signin', 'terms', 'privacy'].includes(route.page));
   useEffect(() => {
     if (needsSignIn) navigate(signInHref(location.pathname + location.search), { replace: true });
   }, [needsSignIn]);
   if (isLoading || needsSignIn) return null;
   if (route.frame === 'public') {
+    if (route.page === 'terms' || route.page === 'privacy')
+      return (
+        <Suspense fallback={loadingPlace}>
+          <Legal page={route.page} />
+        </Suspense>
+      );
     if (route.page === 'signin')
       return isAuthenticated && search.get('link') !== 'existing' ? <AfterSignIn /> : <SignIn />;
     if (route.page === 'passkey') return <FirstPasskey onDone={finishPasskeyStep} />;
@@ -171,17 +196,13 @@ function SignedIn({
   if (route.frame === 'account')
     return (
       <AccountFrame place={route.place} back={lastProject} controls={controls}>
-        <Placeholder route={route} projectName="" />
         {route.place === 'devices' ? (
-          <div className="pad">
-            <button type="button" className="btn" onClick={leave}>
-              Sign out of this browser
-            </button>
-            <a className="btn" href="/-/signin/passkey" onClick={followLink}>
-              Manage sign-in methods
-            </a>
-          </div>
-        ) : null}
+          <Suspense fallback={loadingPlace}>
+            <You handle={viewerHandle} leave={leave} />
+          </Suspense>
+        ) : (
+          <Placeholder route={route} projectName="" />
+        )}
         {overlays}
       </AccountFrame>
     );

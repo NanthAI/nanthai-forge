@@ -149,7 +149,18 @@ function HandleSignIn() {
           </Key>
         </form>
       </div>
-      <p className="after">
+      <p className="after" data-weight="ref">
+        <span>
+          By continuing you agree to the{' '}
+          <a className="lk" href="/-/terms">
+            Terms
+          </a>{' '}
+          and the{' '}
+          <a className="lk" href="/-/privacy">
+            Privacy policy
+          </a>
+          .
+        </span>
         <span>New here? Type the handle you want.</span>
         <a href="/-/signin?link=existing">Add a passkey from your existing sign-in</a>
         <span>

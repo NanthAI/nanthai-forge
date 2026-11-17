@@ -249,3 +249,19 @@ Existing CLI access remains; long-term renewal and the deliberately unmatched
 accounts need owner review before removal. Clerk remains configured. See
 [the linking runbook](development.md#attach-sign-in-methods-to-an-existing-account)
 for proof boundaries, retries, scale and the migration exclusion.
+
+### Current verified addresses in the rebuilt sign-in
+
+Each GitHub sign-in replaces both the address and verified flag from its current
+profile. If GitHub reports no verified address, Forge clears the old address and
+flag, including on the linking path. A passkey-only account has no email-based
+invitation authority. The browser identity resolver supplies these fields from
+the already-read account row, never from a stale token claim.
+
+New-account recipient lookup uses an exact normalized verified address and refuses
+ambiguous matches. Invitation redemption rechecks that unique current binding;
+no unverified address redeems an invitation. The retained provider path remains
+until its separate removal checklist is complete. Browser-session management
+checks the live session and a fresh account-bound passkey or GitHub proof before
+revoking other sessions; no session id supplied by a client selects another
+account's sessions.

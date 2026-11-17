@@ -105,6 +105,10 @@ export const autonomyPolicySchema = z.object({
   integrationPreview: z.object({ auto: z.boolean() }).optional(),
   ownerRootUpdates: z.boolean().optional(),
   /** Debounced local snapshots of open native Lanes; absent means on. */
+  /** Expand-only C1 rollout settings; absent is off until the later writers are enabled. */
+  accessIdentities: z
+    .object({ laneHolders: z.boolean().optional(), devices: z.boolean().optional() })
+    .optional(),
   autoSnapshot: z.boolean().optional(),
   /** Hosted Lane snapshots (Issue 7ac4e32f): minutes between timed snapshots of one Lane during
    * activity. Absent means the default (10). The turn-end snapshot and the one before a command that
@@ -223,6 +227,7 @@ export const policyWriteObject = z
     checks: autonomyPolicySchema.shape.checks.unwrap().partial().optional(),
     integrationPreview: autonomyPolicySchema.shape.integrationPreview,
     ownerRootUpdates: autonomyPolicySchema.shape.ownerRootUpdates,
+    accessIdentities: autonomyPolicySchema.shape.accessIdentities,
     autoSnapshot: autonomyPolicySchema.shape.autoSnapshot,
     autoSnapshotIntervalMinutes: autonomyPolicySchema.shape.autoSnapshotIntervalMinutes,
     checkLogs: checkLogsSchema.optional(),
@@ -266,6 +271,7 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
     command.checks ||
     command.acceptance ||
     command.ownerRootUpdates !== undefined ||
+    command.accessIdentities !== undefined ||
     command.autoSnapshot !== undefined ||
     command.autoSnapshotIntervalMinutes !== undefined ||
     command.laneUpdates ||
@@ -297,6 +303,9 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
     },
     integrationPreview: command.integrationPreview ?? base.integrationPreview ?? { auto: false },
     ownerRootUpdates: command.ownerRootUpdates ?? base.ownerRootUpdates,
+    ...((command.accessIdentities ?? previous.accessIdentities) !== undefined
+      ? { accessIdentities: { ...previous.accessIdentities, ...command.accessIdentities } }
+      : {}),
     ...((command.autoSnapshot ?? previous.autoSnapshot) !== undefined
       ? { autoSnapshot: command.autoSnapshot ?? previous.autoSnapshot }
       : {}),

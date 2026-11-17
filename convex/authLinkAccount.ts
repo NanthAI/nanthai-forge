@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { MutationCtx } from './server';
+import type { MutationCtx, QueryCtx } from './server';
 import type { Doc } from './_generated/dataModel';
 import type { Infer } from 'convex/values';
 import { authComponents as components } from './authComponents';
@@ -8,7 +8,7 @@ import { invariant } from '../src/errors';
 import { passkeyConfig } from './auth';
 import { authenticationResponse, b64url } from './authPasskeyWire';
 
-export async function linkAccount(ctx: MutationCtx) {
+export async function linkAccount(ctx: MutationCtx | QueryCtx) {
   const identity = await ctx.auth.getUserIdentity();
   invariant(
     identity &&

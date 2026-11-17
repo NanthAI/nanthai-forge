@@ -40,12 +40,12 @@ export async function startRegistration(ctx: MutationCtx, user: Doc<'users'>) {
     extensions: {},
   };
 }
-export function finishRegistration(
+export async function finishRegistration(
   ctx: MutationCtx,
   user: Doc<'users'>,
   response: Infer<typeof registrationResponse>,
 ) {
-  return ctx.runMutation(
+  const result = await ctx.runMutation(
     components.authPasskey.registration._internal_dangerous_finishRegistrationForExistingUser,
     {
       expectedRpId: passkeyConfig.rpId,
@@ -55,4 +55,7 @@ export function finishRegistration(
       name: 'Forge passkey',
     },
   );
+  if (result.success)
+    await ctx.db.patch(user._id, { passkeyNotice: { at: Date.now(), passkeyId: result.passkeyId } });
+  return result;
 }

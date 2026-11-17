@@ -11,9 +11,15 @@ import { handleError } from '../src/readable-urls';
 import { invariant } from '../src/errors';
 import { ConvexError, v } from 'convex/values';
 import { mutation, type MutationCtx } from './cliServer';
+import { browserInactivitySeconds, browserLifetimeSeconds } from './accessPolicy';
 import { authComponents as components } from './authComponents';
 
-const core = setupConvexAuth({ component: components.auth, accessTokenTtlSeconds: 3600 });
+const core = setupConvexAuth({
+  component: components.auth,
+  accessTokenTtlSeconds: 3600,
+  refreshInactivityTimeoutSeconds: browserInactivitySeconds,
+  sessionMaxLifetimeSeconds: browserLifetimeSeconds,
+});
 export const { signOut, refreshSession, isAuthenticated } = core;
 const origin = process.env.FORGE_WEB_URL ?? '';
 export const passkeyConfig = {
@@ -63,7 +69,6 @@ export const {
   renamePasskey,
   startAddPasskey,
   verifyAddPasskey,
-  finishAddPasskey,
   startRemovePasskey,
   finishRemovePasskey,
 } = passkeys;
@@ -178,3 +183,23 @@ export const startAutofillSignInWithUsernamePasskey = protect(
     return run(ctx, args);
   },
 );
+
+/** Keep passkey additions visible on the account's next visit, in the ceremony transaction. */
+export const finishAddPasskey = protect(passkeys.finishAddPasskey, async (ctx, args, run) => {
+  const identity = await ctx.auth.getUserIdentity();
+  const sessionId = identity?.forgeAuthSession;
+  invariant(typeof sessionId === 'string', 'AUTH_REQUIRED', 'Sign in to add a passkey.');
+  const result = await run(
+    { ...ctx, auth: { ...ctx.auth, getUserIdentity: async () => ({ ...identity!, subject: sessionId }) } },
+    args,
+  );
+  if (result.success) {
+    const id =
+      typeof identity?.forgeAuthUser === 'string'
+        ? ctx.db.normalizeId('users', identity.forgeAuthUser)
+        : null;
+    invariant(id, 'AUTH_REQUIRED', 'Sign in to add a passkey.');
+    await ctx.db.patch(id, { passkeyNotice: { at: Date.now(), passkeyId: result.passkeyId } });
+  }
+  return result;
+});
