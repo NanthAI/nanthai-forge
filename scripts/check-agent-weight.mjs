@@ -138,10 +138,16 @@ export function measureAgentWeight(prefix, count = 5, enforceBoundary = true) {
   }
 }
 const median = values => values.sort((a, b) => a - b)[Math.floor(values.length / 2)];
-export function checkAgentWeight(prefix) {
-  const report = measureAgentWeight(prefix);
-  const baseline = readWeightBaseline(root);
-  const findings = weightFindings(report.actual, baseline);
+export function agentWeightFindings(report, baseline) {
+  const cpuCeilings = {},
+    exactCeilings = {};
+  for (const [name, limit] of Object.entries(baseline.ceilings))
+    (name.endsWith('Ms') ? cpuCeilings : exactCeilings)[name] = limit;
+  const exact = [
+    ...weightFindings(report.actual, { ceilings: exactCeilings }),
+    ...agentSurfaceFindings(report, baseline),
+  ];
+  const cpu = weightFindings(report.actual, { ceilings: cpuCeilings });
   for (const [name, metric] of [
     ['version', 'cliColdStartCpu'],
     ['help', 'cliColdStartCpu'],
@@ -152,12 +158,27 @@ export function checkAgentWeight(prefix) {
       report.samples[name].map(sample => ({ durationMs: sample.cpuMs })),
     );
     if (verdict.status !== 'pass')
-      findings.push(`${name}: exceeds the existing speed-budgets.json CPU ceiling ${verdict.budgetMs} ms.`);
+      cpu.push(`${name}: exceeds the existing speed-budgets.json CPU ceiling ${verdict.budgetMs} ms.`);
   }
-  findings.push(...agentSurfaceFindings(report, baseline));
+  return { exact, cpu };
+}
+export function checkAgentWeight(prefix, { measure = measureAgentWeight, log = console.log } = {}) {
+  const baseline = readWeightBaseline(root);
+  let report = measure(prefix);
+  let findings = agentWeightFindings(report, baseline);
+  // One in-job repeat for shared-runner CPU noise. Exact weight failures never retry,
+  // and both batches retain every unchanged CPU ceiling and five-sample median.
+  if (!findings.exact.length && findings.cpu.length) {
+    log(
+      `Agent weight CPU retry: ${JSON.stringify({ findings: findings.cpu, actual: report.actual, wallMs: report.wallMs })}`,
+    );
+    report = measure(prefix);
+    findings = agentWeightFindings(report, baseline);
+  }
   const { packages, samples, moduleInventory: inventories, ...summary } = report;
-  console.log(`Agent weight: ${JSON.stringify(summary)}`);
-  if (findings.length) throw new Error([...findings, ...moduleFindings(report, baseline)].join('\n'));
+  log(`Agent weight: ${JSON.stringify(summary)}`);
+  if (findings.exact.length || findings.cpu.length)
+    throw new Error([...findings.exact, ...findings.cpu, ...moduleFindings(report, baseline)].join('\n'));
   return report;
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
