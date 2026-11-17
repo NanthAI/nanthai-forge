@@ -5,7 +5,8 @@
 // never hydrates bodies or writes; one subscription per view re-runs on writes in its ranges. Members see hidden Items with their mark; the public
 // plan is read elsewhere through publicPlanVisible (src/planning-model.ts).
 import { v } from 'convex/values';
-import { query } from './cliServer';
+import { planQuery as query } from './cliServer';
+import { finishReadReader } from './projectFinishReadReader';
 import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
@@ -40,6 +41,7 @@ type Result = typeof planViewResult.type;
 const empty = (canEdit: boolean): Result => ({ rows: '[]', more: false, settled: [], canEdit });
 
 export async function planView(ctx: QueryCtx, projectId: Id<'hostedProjects'>): Promise<Result> {
+  ctx = finishReadReader(ctx, 'plan');
   const user = await ctx.auth.getUserIdentity();
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read your Forge project.');
   const project = await accessibleProject(ctx, projectId, user.subject);

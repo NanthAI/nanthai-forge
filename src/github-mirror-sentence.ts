@@ -7,6 +7,7 @@ export type MirrorDirection = 'off' | 'one-way' | 'two-way';
 /** The states the Mirror screen draws with the two-ends pattern. */
 export type MirrorState =
   | 'off'
+  | 'paused'
   | 'level'
   | 'behind'
   | 'retrying'
@@ -41,6 +42,14 @@ export function mirrorSummary(
   const direction = mirrorDirection(policy);
   const repository = status?.repository ?? policy?.repo ?? null;
   const base = { repository, direction };
+  if (policy && !policy.autoPush)
+    return {
+      ...base,
+      state: 'paused',
+      weight: 'reference',
+      sentence: `The mirror to ${policy.repo} is paused; the link stays, and landings stay on Forge until you resume.`,
+      next: null,
+    };
   if (direction === 'off')
     return {
       ...base,

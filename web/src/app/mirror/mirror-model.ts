@@ -5,6 +5,7 @@ import type { StateKind, StateWord } from '../../ds';
 import type { MirrorState } from '../../../../src/github-mirror-sentence';
 
 const marks: Record<MirrorState, { word: StateWord; state: StateKind; gap: string }> = {
+  paused: { word: 'Stopped', state: 'stale', gap: 'paused' },
   off: { word: 'Not run', state: 'stale', gap: 'not connected' },
   level: { word: 'Landed', state: 'passed', gap: 'level' },
   behind: { word: 'Working', state: 'active', gap: 'behind, pushing' },

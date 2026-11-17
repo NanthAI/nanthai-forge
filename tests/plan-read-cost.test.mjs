@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { meterWorkIO } from './hosted-read-set.mjs';
+import { meterWorkIO, trackReadSets } from './hosted-read-set.mjs';
 import { planFixture } from './plan-read-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const { planView } = await import(moduleUrl('../convex/projectPlanView.ts'));
@@ -11,7 +11,45 @@ const { workRecordWriter, finishWorkRecordWrites } = await import(
   moduleUrl('../convex/projectWorkRecordWriter.ts')
 );
 const budget = JSON.parse(readFileSync(new URL('./fixtures/plan-read-budget.json', import.meta.url)));
+const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
 const shape = result => ({ ...result, rows: JSON.parse(result.rows) });
+test('Plan headers ignore controller history while current ownership changes invalidate and revoke old access', async t => {
+  const s = await planFixture(t);
+  await s.project();
+  const subscriptions = trackReadSets(s.ctx, s.tables);
+  const dependency = await subscriptions.subscribe(() => planView(s.ctx, s.projectId));
+  subscriptions.reset();
+  await finishReadWriter(s.ctx).db.patch(s.projectId, { journalRevision: 2000 });
+  const project = s.tables.hostedProjects.get(s.projectId);
+  await finishReadWriter(s.ctx).db.patch(s.projectId, {
+    work: { ...project.work, revision: project.work.revision + 1 },
+  });
+  await finishReadWriter(s.ctx).db.patch(s.generationId, { revision: 2000 });
+  assert.equal(
+    subscriptions.invalidated([dependency]),
+    0,
+    'unrelated project Work revisions do not rerun Plan',
+  );
+  await finishReadWriter(s.ctx).db.patch(s.projectId, { owner: 'new-owner', visibility: 'private' });
+  assert.equal(subscriptions.invalidated([dependency]), 1);
+  await assert.rejects(() => planView(s.ctx, s.projectId), { code: 'PROJECT_UNAVAILABLE' });
+  const nextOwner = { ...s.ctx, auth: { getUserIdentity: async () => ({ subject: 'new-owner' }) } };
+  assert.equal((await planView(nextOwner, s.projectId)).canEdit, true);
+});
+test('oversized project headers retain exact source reads and recover on an ordinary update', async t => {
+  const s = await planFixture(t);
+  await s.project();
+  const before = await planView(s.ctx, s.projectId);
+  const name = s.tables.hostedProjects.get(s.projectId).name;
+  await finishReadWriter(s.ctx).db.patch(s.projectId, {
+    name: 'Large synthetic project name '.repeat(10000),
+  });
+  assert(![...s.tables.projectFinishReadRows.values()].some(row => row.kind === 'projectPlanProjects'));
+  assert.deepEqual(await planView(s.ctx, s.projectId), before);
+  await finishReadWriter(s.ctx).db.patch(s.projectId, { name });
+  assert([...s.tables.projectFinishReadRows.values()].some(row => row.kind === 'projectPlanProjects'));
+  assert.deepEqual(await planView(s.ctx, s.projectId), before);
+});
 for (const [name, scale, sparse] of [
   ['dogfood', 1, false],
   ['doubled', 2, false],
@@ -34,10 +72,21 @@ for (const [name, scale, sparse] of [
     assert(compact.readBytes <= budget[name].readBytes, JSON.stringify(compact));
     const pages = [...s.tables.projectWorkDataRecords.values()].filter(row => row.collection === PLAN_ROWS);
     const stored = pages.reduce((n, row) => n + Buffer.byteLength(JSON.stringify(row)), 0);
+    const headers = [...s.tables.projectFinishReadRows.values()].filter(row =>
+      ['projectPlanProjects', 'projectWorkGenerations'].includes(row.kind),
+    );
+    assert.equal(
+      headers.filter(row => row.kind === 'projectPlanProjects').length,
+      budget.headers.projectRows,
+    );
+    assert(
+      headers.filter(row => row.kind === 'projectWorkGenerations').length <= budget.headers.generationRows,
+    );
+    assert(headers.reduce((n, row) => n + Buffer.byteLength(JSON.stringify(row)), 0) <= budget.headers.bytes);
     assert(stored <= budget[name].projectionBytes);
     assert(pages.length <= budget[name].projectionPages);
     assert(
-      build.writeDocuments <= s.roots.length + pages.length + 1,
+      build.writeDocuments <= s.roots.length + pages.length + 2,
       'a batch flushes each compact page once',
     );
     for (const page of pages)

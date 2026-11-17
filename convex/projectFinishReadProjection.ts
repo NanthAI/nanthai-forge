@@ -8,6 +8,16 @@ import type { Doc } from './_generated/dataModel';
  * controller fences, wake identity, check progress, batch selection or restore bases. */
 export const finishReadFields = {
   hostedProjects: ['owner', 'visibility', 'removal', 'sourceAuthority', 'name', 'key'],
+  projectWorkGenerations: [
+    'projectId',
+    'backupId',
+    'format',
+    'status',
+    'recordsGenerationId',
+    'planRowsVersion',
+    'planRowsOversized',
+    'metadata',
+  ],
   projectHostedLandingRequests: [
     'hold',
     'requestBodyId',
@@ -47,6 +57,14 @@ export type FinishReadKind = keyof typeof finishReadFields;
 export function finishReadProjection(kind: FinishReadKind, row: Record<string, unknown>) {
   const result: Record<string, unknown> = {};
   for (const key of finishReadFields[kind]) if (row[key] !== undefined) result[key] = row[key];
+  if (kind === 'projectWorkGenerations' && typeof result.metadata === 'string') {
+    try {
+      // This Plan-only header selects a schema, never the Work metadata body.
+      result.metadata = canonicalPayload({ schema: JSON.parse(result.metadata).schema ?? null });
+    } catch {
+      // Keep malformed legacy metadata exact; its existing reader handles it.
+    }
+  }
   if (kind === 'projectHostedLandingRequests' && row.capsule) {
     const { protocol, sha256, size, rawSize, version, tables } =
       row.capsule as import('../src/hosted-landing').LandingCapsulePointer;
@@ -144,5 +162,29 @@ export function finishAheadQueueProjection(row: Record<string, unknown>) {
     projectId: row.projectId as Doc<'projectFinishReadRows'>['projectId'],
     channel: row.channel as string,
     value: canonicalPayload({ status: status ? { horizon: status.horizon, total: status.total } : null }),
+  };
+}
+
+/** Plan needs the current Work pointer as well as the same transactional authority fields.
+ * Keep that pointer out of the finite finish observer's dependency set. */
+export function finishPlanProjectProjection(row: Record<string, unknown>) {
+  const value: Record<string, unknown> = {};
+  for (const key of [...finishReadFields.hostedProjects, 'work'])
+    if (row[key] !== undefined) value[key] = row[key];
+  if (value.work) {
+    const { backupId, generationId, intentMigration } = value.work as NonNullable<
+      Doc<'hostedProjects'>['work']
+    >;
+    value.work = {
+      backupId,
+      ...(generationId ? { generationId } : {}),
+      ...(intentMigration ? { intentMigration } : {}),
+    };
+  }
+  return {
+    kind: 'projectPlanProjects',
+    sourceId: row._id as string,
+    projectId: row._id as Doc<'projectFinishReadRows'>['projectId'],
+    value: canonicalPayload(value),
   };
 }

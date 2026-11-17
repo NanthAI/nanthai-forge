@@ -125,11 +125,19 @@ async function writePolicy(
     acceptancePolicyDigest(previous) === acceptancePolicyDigest(policy)
       ? 0
       : ((await landingQueue(ctx, { projectId: project._id, channel: 'main' }))?.status?.total ?? 0);
-  await ctx.db.patch(project._id, { autonomyPolicy: policy });
+  const mirror = policy.githubMirror;
+  const sameMirror = mirror?.repo.toLowerCase() === previous.githubMirror?.repo.toLowerCase();
+  // Keep the disabled policy readable by existing CLIs (inbound:false); the project retains the resume choice.
+  const pausedInbound =
+    mirror && !mirror.autoPush && sameMirror
+      ? previous.githubMirror?.autoPush
+        ? previous.githubMirror.inbound === true
+        : project.githubMirrorPausedInbound
+      : undefined;
+  await ctx.db.patch(project._id, { autonomyPolicy: policy, githubMirrorPausedInbound: pausedInbound });
   // Friction 77518c88: connecting GitHub sync creates the mirror queue row the pull request and
   // push webhooks look up, so the first PR is checked without a landing first. Only on an edit that
   // changes the connection: one indexed read, one insert at most; every other edit adds nothing.
-  const mirror = policy.githubMirror;
   if (
     mirror?.autoPush &&
     project.sourceAuthority?.mode === 'server' &&
@@ -198,6 +206,28 @@ export async function enableConnectedMirror(
   });
   return 'enabled' as const;
 }
+/** Disconnect removes the matching mirror policy in the binding-removal transaction. */
+export async function disconnectMirrorPolicy(
+  ctx: MutationCtx,
+  project: Doc<'hostedProjects'>,
+  actor: string,
+  operationId: string,
+  repository: string,
+) {
+  const previous = effectivePolicy(project);
+  if (previous.githubMirror?.repo.toLowerCase() !== repository.toLowerCase()) return;
+  const policy = { ...previous, preset: 'custom' as const };
+  delete policy.githubMirror;
+  const command = policyWriteSchema.parse({ action: 'set-policy', operationId });
+  await writePolicy(ctx, project, {
+    actor,
+    command,
+    request: JSON.stringify(command),
+    previous,
+    policy,
+    rule: 'owner-person',
+  });
+}
 export const set = mutation({
   args: { projectId: v.id('hostedProjects'), command: v.string() },
   returns: v.object({
@@ -225,6 +255,13 @@ export const set = mutation({
       // Forge currently has owners/contributors, not a general maintainer role.
       const project = await activeOwnedProject(ctx, input.projectId, user.subject);
       const { command, request } = parsePolicyCommand(input.command);
+      invariant(
+        !isDeviceIdentity(user) ||
+          !command.githubMirror ||
+          (command.githubMirror.autoPush && effectivePolicy(project).githubMirror?.autoPush !== false),
+        'PROJECT_UNAVAILABLE',
+        'Only the owner person can pause or resume the GitHub mirror.',
+      );
       const original = await ctx.db
         .query('projectPolicyChanges')
         .withIndex('by_project_and_operation', q =>

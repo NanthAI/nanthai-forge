@@ -213,7 +213,8 @@ export const failed = internalMutation({
     if (queue?.activeId !== job._id) return null;
     if (input.code === 'GITHUB_SYNC_CHANGED' && !job.inbound) {
       const project = await ctx.db.get(job.projectId);
-      if (project && effectivePolicy(project).githubMirror?.inbound) {
+      const mirror = project ? effectivePolicy(project).githubMirror : null;
+      if (project && mirror?.autoPush && mirror.inbound) {
         await yieldToInbound(ctx, project, queue, job);
         return null;
       }

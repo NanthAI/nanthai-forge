@@ -32,7 +32,7 @@ const twoWay = { repo, autoPush: true, inbound: true };
 test('each recorded mirror state reads as one sentence; only states that wait on a person carry a next step', () => {
   const cases = [
     [null, null, 'off', 'reference'],
-    [{ repo, autoPush: false }, null, 'off', 'reference'],
+    [{ repo, autoPush: false }, null, 'paused', 'reference'],
     [twoWay, status(), 'level', 'reference'],
     [{ ...twoWay, inbound: false }, status(), 'level', 'reference'],
     [twoWay, status({ status: 'syncing', lagging: true }), 'behind', 'watch'],

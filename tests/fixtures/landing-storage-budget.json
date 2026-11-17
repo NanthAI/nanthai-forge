@@ -1,7 +1,7 @@
 {
   "fresh": {
     "immediate": {
-      "projectFinishReadRows": 7002,
+      "projectFinishReadRows": 6710,
       "legacyStorageCleanupWindows": 0,
       "legacyStorageCleanupPages": 0,
       "projectGithubMirrors": 0,
@@ -197,7 +197,7 @@
     "retained": {
       "projectJournalSegments": 1397,
       "projectJournalReceipts": 0,
-      "projectFinishReadRows": 12675,
+      "projectFinishReadRows": 12383,
       "legacyStorageCleanupWindows": 0,
       "legacyStorageCleanupPages": 314,
       "projectGithubMirrors": 0,
@@ -390,6 +390,10 @@
     },
     "perProject": {
       "immediate": {
+        "projectPlanProjects": {
+          "rows": 1,
+          "bytes": 300
+        },
         "projectHostedChannels": {
           "rows": 1,
           "bytes": 638
@@ -416,6 +420,10 @@
         }
       },
       "retained": {
+        "projectPlanProjects": {
+          "rows": 1,
+          "bytes": 300
+        },
         "projectHostedChannels": {
           "rows": 1,
           "bytes": 638
@@ -444,23 +452,23 @@
     },
     "indexes": {
       "before": {
-        "entries": 216,
-        "keyBytes": 15138
+        "entries": 225,
+        "keyBytes": 15814
       },
       "immediate": {
-        "entries": 407,
-        "keyBytes": 30821
+        "entries": 416,
+        "keyBytes": 31497
       },
       "retained": {
-        "entries": 412,
-        "keyBytes": 31122
+        "entries": 421,
+        "keyBytes": 31798
       },
-      "written": 1534
+      "written": 1537
     }
   },
   "dogfood": {
     "immediate": {
-      "projectFinishReadRows": 9303,
+      "projectFinishReadRows": 9007,
       "legacyStorageCleanupWindows": 0,
       "legacyStorageCleanupPages": 0,
       "projectGithubMirrors": 0,
@@ -656,7 +664,7 @@
     "retained": {
       "projectJournalSegments": 3514,
       "projectJournalReceipts": 0,
-      "projectFinishReadRows": 21163,
+      "projectFinishReadRows": 20867,
       "legacyStorageCleanupWindows": 0,
       "legacyStorageCleanupPages": 315,
       "projectGithubMirrors": 0,
@@ -849,6 +857,10 @@
     },
     "perProject": {
       "immediate": {
+        "projectPlanProjects": {
+          "rows": 1,
+          "bytes": 302
+        },
         "projectHostedChannels": {
           "rows": 1,
           "bytes": 668
@@ -875,6 +887,10 @@
         }
       },
       "retained": {
+        "projectPlanProjects": {
+          "rows": 1,
+          "bytes": 302
+        },
         "projectHostedChannels": {
           "rows": 1,
           "bytes": 668
@@ -903,18 +919,18 @@
     },
     "indexes": {
       "before": {
-        "entries": 24780,
-        "keyBytes": 1679384
+        "entries": 24789,
+        "keyBytes": 1680078
       },
       "immediate": {
-        "entries": 25164,
-        "keyBytes": 1710535
+        "entries": 25173,
+        "keyBytes": 1711229
       },
       "retained": {
-        "entries": 25197,
-        "keyBytes": 1713282
+        "entries": 25206,
+        "keyBytes": 1713976
       },
-      "written": 2871
+      "written": 2874
     }
   },
   "journal": {
@@ -940,20 +956,20 @@
     "written": 10740,
     "stored": [
       {
-        "entries": 408,
-        "keyBytes": 30915
+        "entries": 417,
+        "keyBytes": 31591
       },
       {
-        "entries": 602,
-        "keyBytes": 45883
+        "entries": 611,
+        "keyBytes": 46560
       },
       {
-        "entries": 1690,
-        "keyBytes": 129717
+        "entries": 1699,
+        "keyBytes": 130398
       },
       {
-        "entries": 1690,
-        "keyBytes": 129717
+        "entries": 1699,
+        "keyBytes": 130398
       }
     ]
   }

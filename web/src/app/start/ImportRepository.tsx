@@ -256,31 +256,25 @@ function Choose() {
               </div>
             ) : null}
             <div className="pad im-q">
-              <b id="im-mirror">Will anyone keep pushing to GitHub?</b>
+              <b id="im-mirror">Keep GitHub in sync both ways</b>
               <span className="sub">
                 Asked once. The mirror is on either way; you allow it on GitHub after main is ready.
               </span>
             </div>
-            <div role="radiogroup" aria-labelledby="im-mirror">
-              {(Object.keys(mirrorAnswers) as MirrorAnswer[]).map(answer => (
-                <button
-                  type="button"
-                  key={answer}
-                  role="radio"
-                  className="row choice"
-                  aria-checked={mirror === answer}
-                  disabled={busy}
-                  onClick={() => setMirror(answer)}
-                >
-                  <span className="rd" aria-hidden="true" />
-                  <span>
-                    <b>{mirrorAnswers[answer].title}</b>
-                    <span className="sub">{mirrorAnswers[answer].sub}</span>
-                  </span>
-                  <span />
-                </button>
-              ))}
-            </div>
+            <label className="row choice">
+              <input
+                type="checkbox"
+                className="ckb"
+                aria-labelledby="im-mirror"
+                checked={mirror === 'two-way'}
+                disabled={busy}
+                onChange={event => setMirror(event.target.checked ? 'two-way' : 'one-way')}
+              />
+              <span>
+                <b>{mirror === 'two-way' ? 'Yes' : 'No, Forge pushes only'}</b>
+                <span className="sub">{mirrorAnswers[mirror].sub}</span>
+              </span>
+            </label>
             <div className="pad gs-stack">
               <div className="btns">
                 <Key kind="primary" disabled={busy} onClick={() => void start()}>

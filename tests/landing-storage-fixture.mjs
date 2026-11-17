@@ -41,7 +41,9 @@ function storedBytes(f) {
           (n, row) =>
             n +
             ((name === 'projectFinishReadRows' &&
-              ['projectLandingCapsuleIndex', 'projectLiveLineSummary'].includes(row.kind)) ||
+              ['projectLandingCapsuleIndex', 'projectLiveLineSummary', 'projectPlanProjects'].includes(
+                row.kind,
+              )) ||
             (name === 'projectJournalReceipts' && fixedJournalControl(row))
               ? 0
               : Buffer.byteLength(JSON.stringify({ ...row, _creationTime: 0 }))),
@@ -63,6 +65,16 @@ export const storageBudgets = JSON.parse(
 export function fixedProjectStorage(f) {
   const bytes = storedBytes(f);
   return Object.fromEntries([
+    [
+      'projectPlanProjects',
+      {
+        rows: [...f.tables.projectFinishReadRows.values()].filter(row => row.kind === 'projectPlanProjects')
+          .length,
+        bytes: [...f.tables.projectFinishReadRows.values()]
+          .filter(row => row.kind === 'projectPlanProjects')
+          .reduce((n, row) => n + Buffer.byteLength(JSON.stringify({ ...row, _creationTime: 0 })), 0),
+      },
+    ],
     [
       'projectJournalControls',
       {

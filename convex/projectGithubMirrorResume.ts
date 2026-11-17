@@ -3,6 +3,7 @@
 // and Resume in the web mirror panel. The operator mutation (projectGithubMirrorStore:resume) stays.
 import { v } from 'convex/values';
 import { mutation } from './cliServer';
+import { requireOwnerPerson } from './ownerPerson';
 import { activeOwnedProject } from './projectAuthority';
 import { report } from './errors';
 import { invariant } from '../src/errors';
@@ -32,8 +33,7 @@ export const resume = mutation({
   }),
   handler: async (ctx, input) => {
     try {
-      const user = await ctx.auth.getUserIdentity();
-      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to resume the GitHub mirror.');
+      const user = await requireOwnerPerson(ctx, 'resume the GitHub mirror');
       const project = await activeOwnedProject(ctx, input.projectId, user.subject);
       const policy = effectivePolicy(project).githubMirror;
       invariant(

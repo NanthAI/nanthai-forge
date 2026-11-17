@@ -8,6 +8,7 @@ import { moduleUrl } from './convex-module.mjs';
 const prepare = await import(moduleUrl('../convex/projectHostedPlanningPrepare.ts'));
 const { planView } = await import(moduleUrl('../convex/projectPlanView.ts'));
 const { PLAN_ROWS } = await import(moduleUrl('../convex/projectPlanRows.ts'));
+const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
 const reply = r => ({ ...r, rows: JSON.parse(r.rows) });
 test('large exact titles keep legacy reads through aliases and partial preparation, then compact again after repair', async t => {
   const s = await planFixture(t, 1, true);
@@ -35,7 +36,7 @@ test('large exact titles keep legacy reads through aliases and partial preparati
   assert.equal(s.tables.projectWorkGenerations.get(s.generationId).planRowsVersion, undefined);
   assert.equal(s.tables.projectWorkGenerations.get(s.generationId).planRowsOversized, true);
   // A retained alias must not override its partition's current coverage.
-  await s.ctx.db.patch(aliasId, { planRowsVersion: 1 });
+  await finishReadWriter(s.ctx).db.patch(aliasId, { planRowsVersion: 1 });
   assert(JSON.parse((await planView(s.ctx, s.projectId)).rows).some(row => row.title === hugeTitle));
   while (!result.isDone)
     result = JSON.parse(
@@ -116,7 +117,7 @@ test('bounded Plan preparation preserves canonical bytes, retries exactly and co
   assert.equal(pages, 4, '324 roots use four bounded pages, not one call per Item');
   assert.equal(s.tables.projectWorkGenerations.get(s.generationId).planRowsVersion, 1);
   const compact = await planView(s.ctx, s.projectId);
-  await s.ctx.db.patch(s.generationId, { planRowsVersion: undefined });
+  await finishReadWriter(s.ctx).db.patch(s.generationId, { planRowsVersion: undefined });
   assert.deepEqual(reply(compact), reply(await planView(s.ctx, s.projectId)));
   for (const [id, value] of canonical)
     assert.equal(

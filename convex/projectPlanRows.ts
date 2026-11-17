@@ -15,7 +15,7 @@ export function encodePlanPage(rows: PlanRow[]): string {
   const settled =
     rows.length && rows[0]!.kind === 'issue' && ['closed', 'abandoned'].includes(rows[0]!.status);
   const value = settled ? rows.map(row => row.position) : rows;
-  const bytes = deflateSync(strToU8(JSON.stringify(value)), { level: 3 });
+  const bytes = deflateSync(strToU8(JSON.stringify(value)), { level: 6 });
   return btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join(''));
 }
 export function decodePlanPage(value: string, parent: string): PlanRow[] {

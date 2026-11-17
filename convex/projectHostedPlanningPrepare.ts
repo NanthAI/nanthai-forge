@@ -4,6 +4,7 @@ import { v } from 'convex/values';
 import { internal } from './_generated/api';
 import { internalMutation } from './server';
 import { finishWorkRecordWrites } from './projectWorkRecordWriter';
+import { ensurePlanProjectHeader } from './projectPlanHeaderStore';
 import { accessibleProject } from './projectAuthority';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { planningSearchEntries, planningSearchRowBytes, planningSummary } from '../src/planning-search';
@@ -60,6 +61,7 @@ export const page = internalMutation({
       'Restart preparation for the current generation.',
     );
     if (input.cursor === null) {
+      await ensurePlanProjectHeader(ctx, project);
       await ctx.db.patch(partition, { planRowsVersion: undefined, planRowsOversized: undefined });
       if (partition !== generation._id) await ctx.db.patch(generation._id, { planRowsVersion: undefined });
     }

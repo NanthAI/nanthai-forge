@@ -395,6 +395,8 @@ const projectFields = {
   planVisibility: v.optional(v.literal('members')),
   hostingRequest: v.optional(v.string()),
   autonomyPolicy: v.optional(autonomyPolicy),
+  /** Desired mirror direction retained while its existing policy is disabled. */
+  githubMirrorPausedInbound: v.optional(v.boolean()),
   /** Entry files of every check definition and setup action (src/public-governance.ts); kept current by the definition save. Absent until the first save after this field existed. */
   checkEntries: v.optional(v.array(v.string())),
   /** Server-selected verify (or sole) definition; null means the definition set is ambiguous. */

@@ -598,6 +598,30 @@ Pending commit identities and an operation UUID are saved before sending. After 
 
 ### Automatic main mirror
 
+Settings → GitHub mirror uses the same one-sentence status as `nforge github status`.
+At import, **Keep GitHub in sync both ways** starts ticked; unticking selects
+Forge-to-GitHub only. GitHub approval connects that choice after import.
+
+The owner person can **Pause** the mirror, keeping the repository binding,
+recorded history and direction, then **Resume** it later. Pause sets
+`githubMirror.autoPush:false` and `inbound:false`, keeping that policy readable by
+existing CLIs. The same project record remembers the direction for Resume; no
+extra read or write is added. Resume uses the same policy write and `nforge github resume`
+server path for a retained job. A push already sent to GitHub may finish; later
+steps check the paused policy before continuing. Landings continue on Forge.
+**Disconnect** asks once, naming the repository and what stops, then uses
+`nforge github disconnect`’s binding removal. It clears the matching mirror policy
+atomically and withdraws the repository’s runner grant for the owner’s projects.
+A preconfigured mirror without a stored binding can also be disconnected on the web:
+the request pins the displayed repository and ends its mirror policy. Operator-configured
+runner access stays in place. GitHub source/history, Forge source, Lanes and mirror history stay; reconnecting
+requires GitHub approval again. Pause, resume and disconnect require the owner
+person; device and agent credentials cannot perform them.
+
+The screen has one bounded read subscription: selected mirror metadata plus one
+indexed binding lookup for the owner’s disconnect control. Idle adds no calls.
+No landing-path calls, source storage or per-landing cost are added.
+
 For server-authority projects, each hosted main publication queues one mirror
 job in the same transaction. The fixed Convex action uses the installed GitHub
 App and Git Data API. It reads exact hosted/R2 source, creates only changed

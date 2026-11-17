@@ -1,11 +1,36 @@
 {
   "issue": "b7a0dff1",
   "reason": "Replaces body-bearing search-root dependencies with compressed metadata pages; canonical Items and history are unchanged.",
-  "dogfood": {"rows":324,"readBytes":40000,"projectionBytes":40000,"projectionPages":32},
-  "doubled": {"rows":648,"readBytes":80000,"projectionBytes":80000,"projectionPages":64},
-  "sparse": {"rows":324,"readBytes":40000,"projectionBytes":40000,"projectionPages":32},
-  "sparseDoubled": {"rows":648,"readBytes":80000,"projectionBytes":80000,"projectionPages":64},
-  "changedPageWrites":2,
-  "changedPageReadBytes":12000,
-  "changedPageWriteBytes":12000
+  "dogfood": {
+    "rows": 324,
+    "readBytes": 40000,
+    "projectionBytes": 40000,
+    "projectionPages": 32
+  },
+  "doubled": {
+    "rows": 648,
+    "readBytes": 80000,
+    "projectionBytes": 80000,
+    "projectionPages": 64
+  },
+  "sparse": {
+    "rows": 324,
+    "readBytes": 40000,
+    "projectionBytes": 40000,
+    "projectionPages": 32
+  },
+  "sparseDoubled": {
+    "rows": 648,
+    "readBytes": 80000,
+    "projectionBytes": 80000,
+    "projectionPages": 64
+  },
+  "changedPageWrites": 2,
+  "changedPageReadBytes": 16000,
+  "changedPageWriteBytes": 16000,
+  "headers": {
+    "projectRows": 1,
+    "generationRows": 2,
+    "bytes": 4000
+  }
 }

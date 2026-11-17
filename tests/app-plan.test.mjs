@@ -12,6 +12,7 @@ import { setup } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 
 const read = await import(moduleUrl('../convex/projectPlanView.ts'));
+const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
 const { planView, planSentence, movedRank, captureBody, matches } = await import(
   moduleUrl('../web/src/app/plan/model.ts')
 );
@@ -40,7 +41,7 @@ const item = (fields, i) => ({
 test('the plan read lists live work and counts settled Items of live Initiatives only, from root rows', async t => {
   const s = await setup(t);
   const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
-  await s.ctx.db.patch(generationId, { planRowsVersion: undefined });
+  await finishReadWriter(s.ctx).db.patch(generationId, { planRowsVersion: undefined });
   let position = 0;
   const add = async row => {
     for (const entry of indexedRecord('planningItems', row.id, '', position++, row))
@@ -111,7 +112,7 @@ test('the plan read lists live work and counts settled Items of live Initiatives
       position: Math.floor(rows[0].position / 128),
       value: encodePlanPage(rows),
     });
-  await s.ctx.db.patch(generationId, { planRowsVersion: 1 });
+  await finishReadWriter(s.ctx).db.patch(generationId, { planRowsVersion: 1 });
   const compact = await read.planView(s.ctx, s.projectId);
   assert.deepEqual(
     { ...compact, rows: JSON.parse(compact.rows) },

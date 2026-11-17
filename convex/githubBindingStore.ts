@@ -3,8 +3,10 @@ import { v } from 'convex/values';
 import { internalMutation, internalQuery } from './server';
 import { mutation, query, type QueryCtx, type MutationCtx } from './cliServer';
 import { accessibleProject, activeOwnedProject } from './projectAuthority';
+import { requireOwnerPerson } from './ownerPerson';
 import { bindingInstallation } from './githubBindingAccess';
-import { enableConnectedMirror } from './projectAutonomy';
+import { effectivePolicy } from '../src/autonomy-policy';
+import { enableConnectedMirror, disconnectMirrorPolicy } from './projectAutonomy';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { z } from 'zod';
@@ -269,11 +271,25 @@ export const list = query({
   },
 });
 export const remove = mutation({
-  args: { projectId, operationId: v.string(), repoId: v.number() },
+  args: {
+    projectId,
+    operationId: v.string(),
+    repoId: v.number(),
+    /** A preconfigured mirror has no numeric binding: repoId 0 pins the displayed repository instead. */
+    repository: v.optional(v.string()),
+  },
   returns: v.null(),
   handler: async (ctx, input) => {
     try {
-      const actor = await owner(ctx, input.projectId);
+      const user = await requireOwnerPerson(ctx, 'disconnect GitHub');
+      const project = await activeOwnedProject(ctx, input.projectId, user.subject);
+      const actor = user.subject;
+      const repository = input.repository?.trim().toLowerCase();
+      invariant(
+        input.repository === undefined || (input.repoId === 0 && Boolean(repository)),
+        'BAD_ARGUMENT',
+        'Select a repository name or a numeric binding.',
+      );
       invariant(z.uuid().safeParse(input.operationId).success, 'BAD_ARGUMENT', 'Use an operation UUID.');
       const old = await ctx.db
         .query('githubBindingRemovals')
@@ -287,16 +303,46 @@ export const remove = mutation({
           'WORK_OPERATION_CHANGED',
           'Retry the original removal.',
         );
+        if (old.repoId === 0) {
+          const change = await ctx.db
+            .query('projectPolicyChanges')
+            .withIndex('by_project_and_operation', q =>
+              q.eq('projectId', input.projectId).eq('operationId', input.operationId),
+            )
+            .unique();
+          invariant(
+            (!change && !repository) ||
+              (Boolean(repository) &&
+                change?.actor === actor &&
+                change.previous.githubMirror?.repo.toLowerCase() === repository),
+            'WORK_OPERATION_CHANGED',
+            'Retry the original disconnection.',
+          );
+        }
         return null;
       }
-      const found = await ctx.db
-        .query('projectGithubBindings')
-        .withIndex('by_repo', q => q.eq('repoId', input.repoId))
-        .unique();
+      if (repository)
+        invariant(
+          effectivePolicy(project).githubMirror?.repo.toLowerCase() === repository,
+          'WORK_OPERATION_CHANGED',
+          'The mirror changed since this disconnection was selected.',
+        );
+      const found = repository
+        ? await ctx.db
+            .query('projectGithubBindings')
+            .withIndex('by_project_and_name', q =>
+              q.eq('projectId', input.projectId).eq('fullName', repository),
+            )
+            .first()
+        : await ctx.db
+            .query('projectGithubBindings')
+            .withIndex('by_repo', q => q.eq('repoId', input.repoId))
+            .unique();
+      const repoId = found?.repoId ?? input.repoId;
       // Disconnect also withdraws the owner's runner grant, for all of the owner's projects.
       const grant = await ctx.db
         .query('githubRunnerGrants')
-        .withIndex('by_owner_and_repo', q => q.eq('owner', actor).eq('repoId', input.repoId))
+        .withIndex('by_owner_and_repo', q => q.eq('owner', actor).eq('repoId', repoId))
         .unique();
       invariant(
         !found || found.projectId === input.projectId || grant,
@@ -305,6 +351,8 @@ export const remove = mutation({
       );
       if (grant) await ctx.db.delete(grant._id);
       const binding = found?.projectId === input.projectId ? found : null;
+      if (repository || binding)
+        await disconnectMirrorPolicy(ctx, project, actor, input.operationId, repository ?? binding!.fullName);
       if (binding) {
         const installation = await bindingInstallation(ctx, binding.installationId);
         const revision = {
@@ -316,7 +364,12 @@ export const remove = mutation({
         else await ctx.db.insert('githubBindingInstallations', revision);
         await ctx.db.delete(binding._id);
       }
-      await ctx.db.insert('githubBindingRemovals', { ...input, actor });
+      await ctx.db.insert('githubBindingRemovals', {
+        projectId: input.projectId,
+        operationId: input.operationId,
+        repoId: input.repoId,
+        actor,
+      });
       return null;
     } catch (error) {
       return report(error);

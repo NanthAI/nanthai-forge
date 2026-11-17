@@ -216,6 +216,8 @@ planning writes, imports and rebuilds. Each touched page is read and flushed onc
 carry the marker from creation and become readable only after publication; aliases use their partition's current coverage.
 The query's row limits, permissions, order and counts stay the same. No screen open writes or prepares data.
 
+Plan also reads transactional authority/Work-pointer and generation headers from the existing `projectFinishReadRows` table. Generation headers retain the selected schema, status and coverage rather than the full index metadata. The finite landing observer keeps its separate authority header without a Work-revision dependency. Project controller history and journal revisions neither look up nor invalidate Plan headers. Empty projects and removal tombstones retain no Plan project header. Missing or unusually large headers use the exact source records; ordinary relevant writes and explicit preparation install the small headers without query-triggered backfills.
+
 For an existing complete search generation, the owner can call `projectHostedPlanningPrepare:page` with
 `planRowsOnly:true`, the project/owner/generation pins, a fresh operation UUID and `cursor:null`; continue with the
 returned cursor until `isDone`. Each call handles at most 100 roots/1 MB, retains an exact retry receipt and changes

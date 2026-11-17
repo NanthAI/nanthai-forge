@@ -6,12 +6,14 @@ import { landingRequestOriginalDb } from './projectLandingRequestBody';
 import { workRecordOriginalDb } from './projectWorkRecordWriter';
 import type { MutationCtx } from './_generated/server';
 import { metricReadWriter } from './projectMetricReadWriter';
+import { planHeaderFits, planProjectHeaderWanted } from './projectPlanHeaderStore';
 import {
   finishReadFields,
   finishReadProjection,
   finishOwnerProjection,
   finishPeerProjection,
   finishAheadQueueProjection,
+  finishPlanProjectProjection,
   type FinishReadKind,
 } from './projectFinishReadProjection';
 
@@ -52,18 +54,29 @@ export function finishReadWriter(ctx: MutationCtx): MutationCtx {
     (Object.keys(finishReadFields) as FinishReadKind[]).find(kind => source().normalizeId(kind, id) !== null);
   const selections = (kind: FinishReadKind) => [
     kind,
+    ...(kind === 'hostedProjects' ? ['projectPlanProjects'] : []),
     ...(kind === 'projectHostedFinishes' ? ['projectHostedFinishOwners'] : []),
     ...(kind === 'projectHostedLandingRequests' ? ['projectHostedLandingPeers'] : []),
     ...(kind === 'projectHostedLandingQueues' ? ['projectHostedAheadQueues'] : []),
   ];
   const project = (kind: FinishReadKind, selection: string, row: Record<string, unknown>) =>
-    selection === 'projectHostedFinishOwners'
-      ? finishOwnerProjection(row)
-      : selection === 'projectHostedLandingPeers'
-        ? finishPeerProjection(row)
-        : selection === 'projectHostedAheadQueues'
-          ? finishAheadQueueProjection(row)
-          : finishReadProjection(kind, row);
+    selection === 'projectPlanProjects'
+      ? finishPlanProjectProjection(row)
+      : selection === 'projectHostedFinishOwners'
+        ? finishOwnerProjection(row)
+        : selection === 'projectHostedLandingPeers'
+          ? finishPeerProjection(row)
+          : selection === 'projectHostedAheadQueues'
+            ? finishAheadQueueProjection(row)
+            : finishReadProjection(kind, row);
+  const fits = (
+    kind: FinishReadKind,
+    selection: string,
+    row: { value: string },
+    source: Record<string, unknown>,
+  ) =>
+    (selection !== 'projectPlanProjects' || planProjectHeaderWanted(source)) &&
+    ((kind !== 'projectWorkGenerations' && selection !== 'projectPlanProjects') || planHeaderFits(row.value));
   const writer = new Proxy({} as MutationCtx['db'], {
     has(_target, key) {
       return overrides.has(key) || Reflect.has(source(), key);
@@ -83,8 +96,10 @@ export function finishReadWriter(ctx: MutationCtx): MutationCtx {
           return serial(async () => {
             const kind = table as FinishReadKind;
             const id = await db.insert(kind, value as never);
-            for (const selection of selections(kind))
-              await db.insert('projectFinishReadRows', project(kind, selection, { ...value, _id: id }));
+            for (const selection of selections(kind)) {
+              const row = project(kind, selection, { ...value, _id: id });
+              if (fits(kind, selection, row, value)) await db.insert('projectFinishReadRows', row);
+            }
             return id;
           });
         };
@@ -120,6 +135,13 @@ export function finishReadWriter(ctx: MutationCtx): MutationCtx {
               return;
             let legacy: Record<string, unknown> | null | undefined;
             for (const selection of selections(kind)) {
+              // Journal/controller-only patches must not add a Plan lookup per wake.
+              if (
+                selection === 'projectPlanProjects' &&
+                key === 'patch' &&
+                ![...finishReadFields.hostedProjects, 'work'].some(field => field in value!)
+              )
+                continue;
               const old = await db
                 .query('projectFinishReadRows')
                 .withIndex('by_kind_and_source', q => q.eq('kind', selection).eq('sourceId', id))
@@ -174,6 +196,12 @@ export function finishReadWriter(ctx: MutationCtx): MutationCtx {
                 );
               }
               const next = project(kind, selection, { ...source, _id: id });
+              // Oversized optional headers retain the exact source reader; they
+              // never make an otherwise valid project/generation write fail.
+              if (!fits(kind, selection, next, source)) {
+                if (old) await db.delete(old._id);
+                continue;
+              }
               if (!old) await db.insert('projectFinishReadRows', next);
               else if (old.value !== next.value) await db.replace(old._id, next);
             }

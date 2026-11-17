@@ -15,7 +15,7 @@ const unpack = (db: QueryCtx['db'], row: Doc<'projectFinishReadRows'>) => {
 /** Selected exact read paths only. Old untouched rows remain readable, with an
  * explicit source-row dependency until their next ordinary write installs the
  * projection. No reader backfill, polling, source scan or extra RPC. */
-export function finishReadReader(ctx: QueryCtx, mode: 'pending' | 'owner' = 'pending'): QueryCtx {
+export function finishReadReader(ctx: QueryCtx, mode: 'pending' | 'owner' | 'plan' = 'pending'): QueryCtx {
   // The public boundary and handler can select different projection modes. Always wrap
   // the source port once, so a legacy/missing row never repeats the projection lookup.
   const db = sourcePorts.get(ctx.db) ?? ctx.db;
@@ -25,10 +25,17 @@ export function finishReadReader(ctx: QueryCtx, mode: 'pending' | 'owner' = 'pen
       get(target, key) {
         if (key === 'get')
           return async (id: string) => {
-            if (!db.normalizeId('hostedProjects', id)) return db.get(id as never);
+            const project = db.normalizeId('hostedProjects', id);
+            const generation = mode === 'plan' && db.normalizeId('projectWorkGenerations', id);
+            if (!project && !generation) return db.get(id as never);
+            const kind = generation
+              ? 'projectWorkGenerations'
+              : mode === 'plan'
+                ? 'projectPlanProjects'
+                : 'hostedProjects';
             const row = await db
               .query('projectFinishReadRows')
-              .withIndex('by_kind_and_source', q => q.eq('kind', 'hostedProjects').eq('sourceId', id))
+              .withIndex('by_kind_and_source', q => q.eq('kind', kind).eq('sourceId', id))
               .unique();
             return row ? unpack(db, row) : db.get(id as never);
           };
@@ -36,9 +43,12 @@ export function finishReadReader(ctx: QueryCtx, mode: 'pending' | 'owner' = 'pen
           return (table: string) => {
             if (
               !(table in finishReadFields) ||
-              ['projectHostedLandingAttempts', 'projectHostedCheckRuns', 'projectHostedChannels'].includes(
-                table,
-              )
+              [
+                'projectHostedLandingAttempts',
+                'projectHostedCheckRuns',
+                'projectHostedChannels',
+                'projectWorkGenerations',
+              ].includes(table)
             )
               // oxlint-disable-next-line forge/convex-bounded-query -- pass-through: callers chain on ctx.db, linted at their own call sites
               return db.query(table as never);

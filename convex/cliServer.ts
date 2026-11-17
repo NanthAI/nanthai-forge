@@ -144,6 +144,16 @@ export const finishQuery = people(
     }),
   ),
 );
+/** Plan uses current authority, Work-pointer and generation headers in the same read boundary. */
+export const planQuery = people(
+  customQuery(
+    baseQuery,
+    customCtx(async (ctx: QueryCtx) => {
+      const guarded = await guard(ctx, 'cli');
+      return { ...guarded, db: finishReadReader(ctx, 'plan').db };
+    }),
+  ),
+);
 /** The overlap query needs the full current policy row in several authority checks. Reuse only
  * canonical project reads inside this one query, including public mapping; clone each result so a
  * caller's local object edits cannot alter later authority checks. No grants or cross-query cache. */

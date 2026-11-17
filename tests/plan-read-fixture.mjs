@@ -6,10 +6,11 @@ import { moduleUrl } from './convex-module.mjs';
 const { workRecordWriter, finishWorkRecordWrites } = await import(
   moduleUrl('../convex/projectWorkRecordWriter.ts')
 );
+const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
 export async function planFixture(t, scale = 1, sparse = false) {
   const s = await setup(t);
   const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
-  await s.ctx.db.patch(generationId, { planRowsVersion: undefined });
+  await finishReadWriter(s.ctx).db.patch(generationId, { planRowsVersion: undefined });
   const initiatives = Array.from({ length: 22 * scale }, () => randomUUID());
   const topics = [
     'the source reader',
@@ -50,7 +51,7 @@ export async function planFixture(t, scale = 1, sparse = false) {
             : i % 7 === 0
               ? 'proposed'
               : 'open',
-      title: `Preserve ${topics[i % topics.length]} when ${topics[(i + 3) % topics.length]} changes during a concurrent update`,
+      title: `Preserve ${topics[i % topics.length]} when ${topics[(i + 3) % topics.length]} changes during a concurrent update ${randomUUID()}`,
       version: 3,
       previousVersion: 2,
       operationId: randomUUID(),
@@ -80,12 +81,37 @@ export async function planFixture(t, scale = 1, sparse = false) {
   }
   if (sparse) {
     const { _id, _creationTime, ...generation } = s.tables.projectWorkGenerations.get(generationId);
-    const alias = await s.ctx.db.insert('projectWorkGenerations', {
+    const alias = await finishReadWriter(s.ctx).db.insert('projectWorkGenerations', {
       ...generation,
       recordsGenerationId: generationId,
     });
     const project = s.tables.hostedProjects.get(s.projectId);
-    await s.ctx.db.patch(s.projectId, { work: { ...project.work, generationId: alias } });
+    await finishReadWriter(s.ctx).db.patch(s.projectId, {
+      work: { ...project.work, generationId: alias },
+      needsFix: Object.fromEntries(
+        Array.from({ length: 6 }, () => [
+          randomUUID(),
+          JSON.stringify({
+            at: '2026-11-17T00:00:00.000Z',
+            auditRunId: randomUUID(),
+            head: 'a'.repeat(64),
+            intentId: randomUUID(),
+            receiptId: randomUUID(),
+            state: 'needs-fix',
+            summary: 'Synthetic diagnostic history is irrelevant to a Plan read. '.repeat(4),
+          }),
+        ]),
+      ),
+    });
+    for (const id of [generationId, alias]) {
+      const current = s.tables.projectWorkGenerations.get(id);
+      await finishReadWriter(s.ctx).db.patch(id, {
+        metadata: JSON.stringify({
+          ...JSON.parse(current.metadata),
+          fixtureNotes: 'Unused index metadata. '.repeat(100),
+        }),
+      });
+    }
   }
   return {
     ...s,
@@ -93,14 +119,14 @@ export async function planFixture(t, scale = 1, sparse = false) {
     roots,
     initiatives,
     async project() {
-      const writer = workRecordWriter(s.ctx);
+      const writer = workRecordWriter(finishReadWriter(s.ctx));
       for (const id of roots)
         await writer.db.patch(id, { value: s.tables.projectPlanningRecords.get(id).value });
       await finishWorkRecordWrites(writer);
-      await s.ctx.db.patch(generationId, { planRowsVersion: 1 });
+      await finishReadWriter(s.ctx).db.patch(generationId, { planRowsVersion: 1 });
     },
     async patch(id, fields, compact = true) {
-      const writer = compact ? workRecordWriter(s.ctx) : s.ctx;
+      const writer = compact ? workRecordWriter(finishReadWriter(s.ctx)) : s.ctx;
       const root = s.tables.projectPlanningRecords.get(id);
       const value = { ...JSON.parse(root.value), ...fields };
       await writer.db.patch(id, {

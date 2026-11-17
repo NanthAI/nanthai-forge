@@ -3,17 +3,16 @@
 // distance between them, and one next action when a person must act. The words come from the same read as
 // `nforge github status` (projectGithubMirrorRead.read: the project row and about three mirror rows), one subscription
 // that re-runs on mirror or policy writes only. The owner changes direction with one switch (a set-policy write against
-// the policy just read), resumes a stopped mirror, or allows Forge on GitHub when there is no mirror. Pausing and
-// disconnecting stay CLI-only until their design is decided (G32).
+// the policy just read), pauses and resumes the link, or disconnects through the CLI’s binding-removal path.
 import { useRef, useState } from 'react';
 import { useConvex, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
-import type { AutonomyPolicy } from '../../../../src/autonomy-policy';
-import { Key, Region, Row, State } from '../../ds';
+import { Key, Region, State } from '../../ds';
 import { hostedError } from '../../snapshot';
 import { crumbsFor, Head } from '../Place';
 import type { PlaceProps } from '../screen-route';
 import { CommandBlock } from '../start/parts';
+import { MirrorSettings } from './MirrorSettings';
 import { endsWords, mirrorStateMark } from './mirror-model';
 import '../start/start.css';
 import './mirror.css';
@@ -24,7 +23,6 @@ export default function Mirror({ projectId, route, projectName }: PlaceProps) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState('');
   const [repo, setRepo] = useState('');
-  const write = useRef<string | null>(null);
   const connect = useRef<string | null>(null);
   const project = `./${route.project}`;
   const run = async (task: () => Promise<unknown>) => {
@@ -38,24 +36,6 @@ export default function Mirror({ projectId, route, projectName }: PlaceProps) {
       setBusy(false);
     }
   };
-  // Two-way on or off: the policy as read now, with only `inbound` changed; one id until the server answers.
-  const turn = (inbound: boolean) =>
-    run(async () => {
-      const policy = (await client.query(api.projectAutonomy.read, { projectId })) as AutonomyPolicy;
-      const current = policy.githubMirror;
-      if (!current?.autoPush) return;
-      write.current ??= crypto.randomUUID();
-      await client.mutation(api.projectAutonomy.set, {
-        projectId,
-        command: JSON.stringify({
-          action: 'set-policy',
-          operationId: write.current,
-          expectedPolicy: policy,
-          githubMirror: { ...current, inbound },
-        }),
-      });
-      write.current = null;
-    });
   const allow = (repository: string, oneWay: boolean) =>
     run(async () => {
       connect.current ??= crypto.randomUUID();
@@ -80,7 +60,13 @@ export default function Mirror({ projectId, route, projectName }: PlaceProps) {
         title="The two ends"
         weight={mirror.weight === 'reference' ? 'ref' : mirror.weight}
         waiting={mirror.weight === 'act' ? 1 : 0}
-        hint={mirror.direction === 'off' ? 'mirror off' : `mirror on, ${mirror.direction}`}
+        hint={
+          mirror.state === 'paused'
+            ? 'mirror paused'
+            : mirror.direction === 'off'
+              ? 'mirror off'
+              : `mirror on, ${mirror.direction}`
+        }
       >
         <div className="mr-ends" data-st={mark.state}>
           <div className="mr-end">
@@ -117,7 +103,7 @@ export default function Mirror({ projectId, route, projectName }: PlaceProps) {
         ) : null}
         {command && mirror.direction !== 'off' ? <p className="quietline">Next: {command}</p> : null}
       </Region>
-      {mirror.direction === 'off' && mirror.owner ? (
+      {mirror.state === 'off' && mirror.owner ? (
         <Region title="Turn the mirror on" weight="ref">
           <form
             className="pad gs-stack"
@@ -166,42 +152,8 @@ export default function Mirror({ projectId, route, projectName }: PlaceProps) {
           </details>
         </Region>
       ) : null}
-      {mirror.direction !== 'off' ? (
-        <Region title="Settings" hint={mirror.owner ? undefined : 'only the owner changes these'}>
-          <Row cols="minmax(0, 1fr) auto">
-            <span>
-              Push each landing to GitHub
-              <span className="sub">
-                One commit to main, never a force push. Lanes and other branches are never written.
-              </span>
-            </span>
-            <span className="t2">on</span>
-          </Row>
-          <Row cols="minmax(0, 1fr) auto">
-            <label htmlFor="mr-inbound">
-              Take GitHub pushes back in
-              <span className="sub">
-                A push or merge on GitHub main becomes a landing and passes the same check. Off: GitHub stays
-                a copy and Forge stops instead of pushing over a change made there.
-              </span>
-            </label>
-            <input
-              id="mr-inbound"
-              type="checkbox"
-              role="switch"
-              className="sw"
-              checked={mirror.direction === 'two-way'}
-              disabled={!mirror.owner || busy}
-              onChange={event => void turn(event.target.checked)}
-            />
-          </Row>
-          {problem ? (
-            <p className="pad gs-err" role="alert">
-              {problem}
-            </p>
-          ) : null}
-        </Region>
-      ) : problem ? (
+      {mirror.state !== 'off' ? <MirrorSettings mirror={mirror} projectId={projectId} /> : null}
+      {problem ? (
         <p className="pad gs-err" role="alert">
           {problem}
         </p>

@@ -4,7 +4,7 @@
 // (githubMirrorStatus: three selected rows on the healthy path); it re-runs only on mirror or policy
 // writes, never on a timer.
 import { v } from 'convex/values';
-import { query } from './cliServer';
+import { query, isDeviceIdentity } from './cliServer';
 import { accessibleProject } from './projectAuthority';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { githubMirrorStatus } from './projectGithubMirrorStatus';
@@ -34,6 +34,8 @@ export const read = query({
       }),
       v.null(),
     ),
+    repoId: v.union(v.number(), v.null()),
+    inbound: v.boolean(),
     /** The owner may change the mirror; others read it. */
     owner: v.boolean(),
   }),
@@ -43,7 +45,17 @@ export const read = query({
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read the GitHub mirror.');
       const project = await accessibleProject(ctx, projectId, user.subject);
       const policy = effectivePolicy(project).githubMirror;
-      const status = policy?.autoPush ? await githubMirrorStatus(ctx, project) : null;
+      const status = policy ? await githubMirrorStatus(ctx, project) : null;
+      const owner = project.owner === user.subject && !isDeviceIdentity(user);
+      const binding =
+        owner && policy
+          ? await ctx.db
+              .query('projectGithubBindings')
+              .withIndex('by_project_and_name', q =>
+                q.eq('projectId', projectId).eq('fullName', policy.repo.toLowerCase()),
+              )
+              .first()
+          : null;
       return {
         ...mirrorSummary(policy, status),
         ends: status
@@ -57,7 +69,12 @@ export const read = query({
               detail: status.detail,
             }
           : null,
-        owner: project.owner === user.subject,
+        owner,
+        repoId: binding?.repoId ?? null,
+        inbound:
+          policy?.autoPush === false
+            ? (project.githubMirrorPausedInbound ?? policy.inbound === true)
+            : policy?.inbound === true,
       };
     } catch (error) {
       return report(error);
