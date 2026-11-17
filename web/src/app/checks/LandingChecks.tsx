@@ -2,26 +2,25 @@
 // Settings > Landing and checks (Items 871e9b73, 0c9207b8): which check decides a landing, who approves landings and
 // the landing mode in effect, with the one press that changes each. A fixed frame. It reads once when it opens (the
 // setup read, the policy and the main audit's landing view: three calls) and again only after its own write; an open
-// tab holds no subscription. Settings that have no effect are not offered as choices; Automatic settings appear once
-// their engine (Item bd0f850e) is on main.
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+// tab holds no subscription. While the owner chooses a check, CheckRoutes starts from the CI the project has and lists
+// the workflows on main (use-workflows.ts). Settings that have no effect are not offered as choices; Automatic
+// settings appear once their engine (Item bd0f850e) is on main.
+import { useEffect, useState } from 'react';
 import { useConvex } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import type { AutonomyPolicy } from '../../../../src/autonomy-policy';
 import type { LandingModeView } from '../../../../src/landing-mode';
-import { Band, Key, Region, Row } from '../../ds';
-import { A } from '../frames';
+import { Key, Region, Row } from '../../ds';
 import { crumbsFor, Head } from '../Place';
-import { hrefFor, type AppRoute } from '../paths';
 import { approvalWords, useApprovalWrite, type ApprovalMode } from '../start/approvals';
 import { CommandBlock } from '../start/parts';
 import { checkWords, type SetupView } from '../start/setup-model';
-import { chooseCiFile, triggerLine, workflowProblem } from './choose-ci';
+import type { PlaceProps } from '../screen-route';
+import { CheckRoutes } from './CheckRoutes';
+import { triggerLine } from './choose-ci';
 import '../start/start.css';
 
-type ProjectRoute = Extract<AppRoute, { frame: 'project' }>;
-const DOCS = '/docs';
 type Facts = { setup: SetupView; policy: AutonomyPolicy; landing: LandingModeView | null };
 
 function sentence(facts: Facts) {
@@ -31,77 +30,6 @@ function sentence(facts: Facts) {
   return policy.acceptance.mode === 'review'
     ? `Each landing waits for a person after ${check} passes.`
     : `Checked work lands on its own when ${check} passes.`;
-}
-
-function CiFileForm({
-  projectId,
-  repository,
-  changing,
-  onDone,
-}: {
-  projectId: Id<'hostedProjects'>;
-  repository: string;
-  /** A check is already chosen: the form switches it. */
-  changing: boolean;
-  onDone: () => void;
-}) {
-  const client = useConvex();
-  const [workflow, setWorkflow] = useState('.github/workflows/ci.yml');
-  const [problem, setProblem] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const operation = useRef<{ id: string; workflow: string } | null>(null);
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    const wrong = workflowProblem(workflow);
-    setProblem(wrong);
-    if (wrong || busy) return;
-    // The same id until the server answers, so a retry after a lost reply records one change.
-    if (operation.current?.workflow !== workflow) operation.current = { id: crypto.randomUUID(), workflow };
-    setBusy(true);
-    try {
-      await chooseCiFile(client, projectId, operation.current.id, repository, workflow);
-      operation.current = null;
-      onDone();
-    } catch (error) {
-      setProblem(
-        error instanceof Error && /mirror/i.test(error.message)
-          ? 'Turn on the GitHub mirror first: a CI file checks Forge’s branches through it.'
-          : 'The check did not change. Nothing else changed either; try again.',
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <form className="pad gs-stack" onSubmit={event => void submit(event)} noValidate>
-      <label className="gs-stack">
-        <span className="ttl">
-          {changing ? 'Use a different CI file' : 'Use the CI file you already have'}
-        </span>
-        <span className="meta t2">A workflow in {repository} that runs on push.</span>
-        <input
-          className="inp mono"
-          value={workflow}
-          onChange={event => setWorkflow(event.target.value)}
-          autoComplete="off"
-          autoCapitalize="none"
-          spellCheck={false}
-          aria-invalid={problem ? true : undefined}
-          aria-describedby={problem ? 'ci-file-problem' : undefined}
-        />
-      </label>
-      {problem ? (
-        <p id="ci-file-problem" className="gs-err" role="alert">
-          {problem}
-        </p>
-      ) : null}
-      <div className="btns">
-        <Key kind="rec" type="submit" disabled={busy}>
-          {busy ? 'Choosing…' : 'Use this file'}
-        </Key>
-      </div>
-    </form>
-  );
 }
 
 function Approvals({
@@ -179,19 +107,12 @@ function Approvals({
   );
 }
 
-export default function LandingChecks({
-  projectId,
-  route,
-  projectName,
-}: {
-  projectId: Id<'hostedProjects'>;
-  route: ProjectRoute;
-  projectName: string;
-}) {
+export default function LandingChecks({ projectId, route, projectName, feed }: PlaceProps) {
   const client = useConvex();
   const [facts, setFacts] = useState<Facts | null | 'failed'>(null);
   const [revision, setRevision] = useState(0);
   const [cli, setCli] = useState(false);
+  const [changing, setChanging] = useState(false);
   useEffect(() => {
     let live = true;
     void Promise.all([
@@ -208,7 +129,10 @@ export default function LandingChecks({
       live = false;
     };
   }, [client, projectId, revision]);
-  const refresh = () => setRevision(value => value + 1);
+  const refresh = () => {
+    setChanging(false);
+    setRevision(value => value + 1);
+  };
   const trail = crumbsFor(route, projectName);
   if (facts === 'failed')
     return (
@@ -247,7 +171,7 @@ export default function LandingChecks({
         waiting={!setup.check && owner ? 1 : 0}
       >
         {setup.check ? (
-          <Row cols="minmax(0, 1fr)">
+          <Row cols="minmax(0, 1fr) auto">
             <div>
               <div className="ttl" dir="auto">
                 {checkWords(setup.check)}
@@ -260,13 +184,19 @@ export default function LandingChecks({
                     : 'Logs stay with GitHub, as visible as that repository.'}
               </div>
             </div>
+            {owner ? (
+              <Key size="sm" kind="ghost" aria-expanded={changing} onClick={() => setChanging(!changing)}>
+                {changing ? 'Keep it' : 'Change'}
+              </Key>
+            ) : null}
           </Row>
         ) : (
           <p className="quietline">
             None yet. A landing needs a check that passes on exactly what reaches main.
+            {owner ? '' : ' Only the owner chooses it.'}
           </p>
         )}
-        {setup.check?.kind === 'ci-file' ? (
+        {setup.check?.kind === 'ci-file' && !changing ? (
           <div className="pad gs-stack">
             <div className="meta t2">
               Its push branches need Forge’s branches. Your agent adds this in its first Lane:
@@ -274,38 +204,15 @@ export default function LandingChecks({
             <CommandBlock label="The trigger the CI file needs" text={triggerLine} />
           </div>
         ) : null}
-        {owner && mirrorRepository ? (
-          <CiFileForm
+        {owner && (!setup.check || changing) ? (
+          <CheckRoutes
             projectId={projectId}
-            repository={mirrorRepository}
-            changing={!!setup.check}
+            route={route}
+            mainHead={feed === undefined ? undefined : (feed.main?.head ?? null)}
+            mirror={mirrorRepository}
             onDone={refresh}
           />
-        ) : owner ? (
-          <p className="quietline">
-            To use your own CI file, turn on the GitHub mirror first:{' '}
-            <A href={hrefFor({ ...route, section: 'mirror', rest: '' })}>GitHub mirror</A>.
-          </p>
         ) : null}
-        <Band title="Other ways to check" hint="set up from a terminal" />
-        <Row cols="minmax(0, 1fr) auto">
-          <div>
-            <div className="ttl">Forge’s check workflow on GitHub Actions</div>
-            <div className="meta">Runs only the tests a change can affect, in shards.</div>
-          </div>
-          <a className="btn sm ghost" href={`${DOCS}/operations/github-actions-checks/`}>
-            How to set it up
-          </a>
-        </Row>
-        <Row cols="minmax(0, 1fr) auto">
-          <div>
-            <div className="ttl">A machine you run</div>
-            <div className="meta">For checks that need your own hardware or network.</div>
-          </div>
-          <a className="btn sm ghost" href={`${DOCS}/operations/self-hosted-runner/`}>
-            How to set it up
-          </a>
-        </Row>
       </Region>
       <Approvals facts={facts} projectId={projectId} onDone={refresh} />
       {landing ? (

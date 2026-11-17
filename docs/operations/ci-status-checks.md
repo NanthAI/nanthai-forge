@@ -25,6 +25,11 @@ project setting.
    nforge agent ROOT configure-runner '{"configuration":{"provider":"ci-status","ci":{"adapter":"github-actions","repository":"OWNER/NAME","workflow":".github/workflows/test.yml"},"runtime":"0000000000000000000000000000000000000000000000000000000000000000","environmentFingerprint":"0000000000000000000000000000000000000000000000000000000000000000"}}'
    ```
 
+On the web, the owner does step 3 from Settings → Landing and checks: it lists the
+workflows on main, says which can check a landing (a tags-only, schedule-only or
+pull-request-only workflow cannot), shows the exact step 2 change for the chosen file (an agent lands it in a Lane), and
+selects it with one press; the server derives the pins, so there are no placeholder values.
+
 The setting is refused while the mirror is off or points at another repository.
 
 ## What happens per landing

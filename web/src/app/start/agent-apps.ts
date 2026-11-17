@@ -63,10 +63,10 @@ export function setupSteps(app: AgentApp, deployment: string, project?: string):
     {
       title: 'Sign this machine in',
       detail:
-        'It prints a code and a link to the approval page here. Check that the code matches, name the device and approve; the agent waits until you do. The device then shows under Account, Devices, with the same name and code.',
+        'It prints a code and a link to the approval page here. Check that the code matches, name the device and approve; the agent waits until you do. It then shows with the same name and code under',
       commands: [`nforge login ${deployment}`],
       needsPerson: true,
-      link: { label: 'Sign-in and devices', href: hrefFor({ frame: 'account', place: 'devices' }) },
+      link: { label: 'Account, Sign-in and devices.', href: hrefFor({ frame: 'account', place: 'devices' }) },
     },
     project
       ? {
