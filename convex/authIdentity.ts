@@ -11,6 +11,7 @@ export const sessionAccount = internalQuery({
       accountKey: v.string(),
       userId: v.string(),
       sessionId: v.string(),
+      deviceVerifiedUntil: v.optional(v.number()),
       email: v.optional(v.string()),
       emailVerified: v.optional(v.boolean()),
     }),

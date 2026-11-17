@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { mutation, query } from './cliServer';
+import { query, accountMutation } from './cliServer';
 import { authComponents as components } from './authComponents';
 import { githubSignIn } from './auth';
 import { confirmAccount, confirmationOptions, digest, linkAccount } from './authLinkAccount';
@@ -23,7 +23,7 @@ export const current = query({
     return Boolean(user?.githubId && !user.githubConflict);
   },
 });
-export const startConfirmation = mutation({
+export const startConfirmation = accountMutation('same')({
   args: {},
   returns: v.union(requestOptions, v.null()),
   handler: async ctx => {
@@ -36,7 +36,7 @@ export const startConfirmation = mutation({
     }
   },
 });
-export const confirm = mutation({
+export const confirm = accountMutation('same')({
   args: { response: authenticationResponse },
   returns: v.null(),
   handler: async (ctx, { response }) => {
@@ -52,7 +52,7 @@ export const confirm = mutation({
     }
   },
 });
-export const startSignInWithGithub = mutation({
+export const startSignInWithGithub = accountMutation('same')({
   args: { redirectTo: v.string() },
   returns: v.object({ redirect: v.string(), state: v.string() }),
   handler: async (ctx, args) => {
@@ -88,7 +88,7 @@ export const startSignInWithGithub = mutation({
     }
   },
 });
-export const completeSignInWithGithub = mutation({
+export const completeSignInWithGithub = accountMutation('same')({
   args: { code: v.string(), state: v.string() },
   returns: v.union(
     v.object({

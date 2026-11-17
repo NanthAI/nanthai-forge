@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { creationOptions, registrationResponse, registrationResult } from './authPasskeyWire';
 import { startRegistration, finishRegistration } from './authPasskeyRegistration';
-import { mutation } from './cliServer';
+import { accountMutation } from './cliServer';
 import { authComponents as components } from './authComponents';
 import { invariant } from '../src/errors';
 import type { MutationCtx } from './_generated/server';
@@ -37,7 +37,7 @@ async function firstPasskeyAccount(ctx: MutationCtx) {
   invariant(passkeys.length === 0, 'BAD_ARGUMENT', 'Use the existing add-passkey flow for another passkey.');
   return user;
 }
-export const start = mutation({
+export const start = accountMutation('same')({
   args: {},
   returns: creationOptions,
   handler: async ctx => {
@@ -45,7 +45,7 @@ export const start = mutation({
     return startRegistration(ctx, user);
   },
 });
-export const finish = mutation({
+export const finish = accountMutation('same')({
   args: { response: registrationResponse },
   returns: registrationResult,
   handler: async (ctx, { response }) => {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
-import { query, mutation, internalMutation, type QueryCtx, type MutationCtx } from './cliServer';
+import { query, internalMutation, type QueryCtx, type MutationCtx, accountMutation } from './cliServer';
 import type { Id, Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { secretFields, secretVersionFields, secretEventFields, secretCapability } from './schema';
@@ -252,7 +252,7 @@ export async function deleteSecret(
   await resume(ctx, row);
   return deletionReceipt(row);
 }
-export const permanentlyDelete = mutation({
+export const permanentlyDelete = accountMutation('same')({
   args: { id: v.id('secretObjects'), operationId: v.string(), ...pins },
   returns: receipt,
   handler: async (ctx, input) => {

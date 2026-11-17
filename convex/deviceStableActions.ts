@@ -4,7 +4,7 @@ import { v } from 'convex/values';
 import { internalAction } from './server';
 import { internal } from './_generated/api';
 import { beginDeviceLogin, deviceConfig, startSlowDown } from './deviceActions';
-import { deviceProof, deviceScope } from './deviceFields';
+import { deviceProof, deviceScope, deviceSignInExpiry } from './deviceFields';
 import { verifyDeviceProof, issueDeviceToken, deviceHash } from '../src/device-token';
 import { invariant } from '../src/errors';
 type Proof = { id: string; key: string; at: number; proof: string };
@@ -17,14 +17,25 @@ async function renewVerified(ctx: import('./server').ActionCtx, operationId: str
     at: device.at,
     proofHash: deviceHash(device.proof),
   };
-  const selected = JSON.parse(await ctx.runQuery(internal.deviceStableStore.renewal, request));
+  const selected = JSON.parse(await ctx.runMutation(internal.deviceStableStore.renewal, request));
+  if (!selected.row) return selected.result;
   const issuedAt =
     typeof selected.result?.issuedAt === 'number'
       ? selected.result.issuedAt
       : Math.floor(Date.now() / 1000) * 1000;
+  const expiresAt = Math.min(
+    deviceSignInExpiry(selected.row, issuedAt),
+    typeof selected.result?.expiresAt === 'number' ? selected.result.expiresAt : Infinity,
+  );
   const { key, issuer } = deviceConfig();
   const token = (owner: string, time: number) =>
-    issueDeviceToken(key, issuer, { owner, credentialId: device.id, issuedAt: time, signInId: operationId });
+    issueDeviceToken(key, issuer, {
+      owner,
+      credentialId: device.id,
+      issuedAt: time,
+      expiresAt,
+      signInId: operationId,
+    });
   const proposed = token(selected.row.owner, issuedAt);
   const result = JSON.parse(
     await ctx.runMutation(internal.deviceStableStore.renew, {

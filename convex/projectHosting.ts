@@ -2,12 +2,12 @@
 import { accountFor } from './urlIdentity';
 import { hostedProjectRoot } from '../src/project-routes';
 import { v } from 'convex/values';
-import { mutation, guard, isDeviceIdentity } from './cliServer';
+import { guard, isDeviceIdentity, accountMutation } from './cliServer';
 import { createProject } from './projectCreation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 
-export const create = mutation({
+export const create = accountMutation('write')({
   args: {
     operationId: v.string(),
     name: v.string(),

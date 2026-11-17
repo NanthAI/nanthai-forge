@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
-import { query, mutation, coordinationQuery, isDeviceIdentity } from './cliServer';
+import { query, coordinationQuery, isDeviceIdentity, accountMutation } from './cliServer';
 // Reviewed exception: self-revocation remains retryable after revocation and only removes
 // authority. Every other export uses the guarded cliServer builders.
 import { mutation as revocationMutation } from './server';
 import { keepsDeviceSettings, maySeeDeviceName } from './accessPolicy';
 import { deviceOperation, finishDeviceOperation } from './deviceOperation';
-import { currentCredential, deviceSettings, deviceScope } from './deviceFields';
+import { currentCredential, deviceSettings, deviceScope, deviceApprovalExpired } from './deviceFields';
 import { accessibleProject, memberProject } from './projectAuthority';
 import { projectRole } from './projectRole';
 import { accountFor } from './urlIdentity';
@@ -65,7 +65,7 @@ export const revoke = revocationMutation({
     );
     const action = args.action ?? 'signout';
     const receipt = row.deviceKey
-      ? await deviceOperation(ctx, row.owner, args.operationId, { action, credentialId: row.credentialId })
+      ? await deviceOperation(ctx, row.owner, args.operationId, { credentialId: row.credentialId })
       : null;
     if (receipt?.result) return null;
     invariant(
@@ -76,14 +76,16 @@ export const revoke = revocationMutation({
     const keep = keepsDeviceSettings(action);
     await ctx.db.patch(row._id, {
       revoked: true,
-      ...(!keep ? { removed: true, name: '', settings: undefined } : {}),
+      ...(!keep
+        ? { removed: true, name: '', settings: undefined, deviceKey: undefined, deviceCode: undefined }
+        : {}),
     });
     if (receipt)
       await finishDeviceOperation(ctx, receipt, args.operationId, row.credentialId, { ended: action });
     return null;
   },
 });
-export const rename = mutation({
+export const rename = accountMutation('same')({
   args: {
     credentialId: v.string(),
     name: v.string(),
@@ -111,9 +113,9 @@ export const rename = mutation({
     );
     invariant(!row.removed, 'AUTH_REVOKED', 'This device was removed. Approve a new key to use it again.');
     invariant(
-      !args.settings || !isDeviceIdentity(user),
+      !args.settings || (!isDeviceIdentity(user) && Boolean(row.deviceKey)),
       'AUTH_SCOPE_DENIED',
-      'Change device settings from your Forge browser.',
+      'Change settings for an approved device key from your Forge browser.',
     );
     const receipt = row.deviceKey
       ? await deviceOperation(ctx, row.owner, args.operationId, {
@@ -241,7 +243,7 @@ export const project = coordinationQuery({
                   ? ('removed' as const)
                   : row.revoked
                     ? ('signed-out' as const)
-                    : row.expiresAt <= Date.now()
+                    : row.expiresAt <= Date.now() || deviceApprovalExpired(row)
                       ? ('expired' as const)
                       : ('signed-in' as const),
               },

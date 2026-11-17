@@ -10,8 +10,9 @@ import { accountFor, handleTaken } from './urlIdentity';
 import { handleError } from '../src/readable-urls';
 import { invariant } from '../src/errors';
 import { ConvexError, v } from 'convex/values';
-import { mutation, type MutationCtx } from './cliServer';
+import { type MutationCtx, accountMutation } from './cliServer';
 import { browserInactivitySeconds, browserLifetimeSeconds } from './accessPolicy';
+import { recordFreshBrowser } from './authDeviceFresh';
 import { authComponents as components } from './authComponents';
 
 const core = setupConvexAuth({
@@ -34,8 +35,10 @@ export const githubSignIn = setupGithub(core, {
   createUser: internal.authUsers.createGithub,
   onSignIn: internal.authUsers.signedInGithub,
 });
-export const { completeSignInWithGithub } = githubSignIn;
-export const startSignInWithGithub = mutation({
+export const completeSignInWithGithub = protect(githubSignIn.completeSignInWithGithub, (ctx, args, run) =>
+  run(ctx, args),
+);
+export const startSignInWithGithub = accountMutation('same')({
   args: { redirectTo: v.string() },
   returns: v.object({ redirect: v.string(), state: v.string() }),
   handler: async (ctx, args) => {
@@ -64,7 +67,6 @@ const passkeys = setupUsernamePasskey(core, {
   ...passkeyConfig,
 }).attachUserCallbacks({ createUser: internal.authUsers.createPasskey });
 export const {
-  finishSignInWithUsernamePasskey,
   listPasskeys,
   renamePasskey,
   startAddPasskey,
@@ -102,15 +104,23 @@ function protect<A extends DefaultFunctionArgs, R>(
       },
     ]),
   ) as unknown as { [K in keyof A]: Validator<A[K]> };
-  return mutation({
+  return accountMutation('same')({
     args,
     returns: {
       isConvexValidator: true,
       json: JSON.parse(registered.exportReturns()),
     } as unknown as Validator<unknown>,
-    handler: (ctx, input) => handler(ctx, input as A, registered._handler),
+    handler: async (ctx, input) => {
+      const result = await handler(ctx, input as A, registered._handler);
+      await recordFreshBrowser(ctx, result);
+      return result;
+    },
   }) as unknown as RegisteredMutation<'public', A, R>;
 }
+export const finishSignInWithUsernamePasskey = protect(
+  passkeys.finishSignInWithUsernamePasskey,
+  (ctx, args, run) => run(ctx, args),
+);
 const taken = () => ({ error: 'USERNAME_TAKEN' as const });
 const invalid = () => ({ error: 'USERNAME_HAS_INVALID_CHARACTERS' as const });
 export const startSignInWithUsernamePasskey = protect(

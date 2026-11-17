@@ -8,6 +8,7 @@ type Account = {
   accountKey: string;
   userId: string;
   sessionId: string;
+  deviceVerifiedUntil?: number;
   email?: string;
   emailVerified?: boolean;
 };
@@ -33,6 +34,9 @@ export async function accountFromSession(
         accountKey: user.accountKey,
         userId: user._id,
         sessionId: identity.subject,
+        ...(user.deviceApprovalProof?.sessionId === identity.subject
+          ? { deviceVerifiedUntil: user.deviceApprovalProof.verifiedUntil }
+          : {}),
         ...(user.email && user.emailVerified
           ? { email: user.email, emailVerified: true }
           : { emailVerified: false }),
@@ -62,6 +66,7 @@ export function identityContext<C extends Context>(ctx: C): C {
               subject: account.accountKey,
               forgeAuthSession: account.sessionId,
               forgeAuthUser: account.userId,
+              forgeAuthDeviceVerifiedUntil: account.deviceVerifiedUntil,
               email: account.email,
               emailVerified: account.emailVerified === true,
             }

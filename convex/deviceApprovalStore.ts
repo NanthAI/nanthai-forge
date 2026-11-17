@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { internalQuery } from './server';
+import { freshDeviceApproval } from './authDeviceFresh';
+import { deviceApprovalExpired } from './deviceFields';
 import { deviceApproval } from './deviceApproval';
 import { invariant } from '../src/errors';
 import { digest } from '../src/state/hash';
@@ -34,7 +36,13 @@ export const inspect = internalQuery({
         expiresAt: row.expiresAt,
         state: 'removed',
       });
+    const identity = await ctx.auth.getUserIdentity();
     return JSON.stringify({
+      ...(device?.enabled &&
+      (!current || deviceApprovalExpired(current)) &&
+      !freshDeviceApproval(identity ?? {})
+        ? { needsConfirmation: true }
+        : {}),
       name: current?.name ?? row.name,
       scope: current?.scope ?? row.scope,
       expiresAt: row.expiresAt,

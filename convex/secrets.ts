@@ -3,11 +3,11 @@ import { v, type Infer } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import {
   query,
-  mutation,
   internalQuery,
   internalMutation,
   type QueryCtx,
   type MutationCtx,
+  accountMutation,
 } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import {
@@ -169,7 +169,7 @@ export const details = query({
     }
   },
 });
-export const archive = mutation({
+export const archive = accountMutation('same')({
   args: {
     id: v.id('secretObjects'),
     archived: v.boolean(),
@@ -605,7 +605,7 @@ export const expire = internalMutation({
     }
   },
 });
-export const enabled = mutation({
+export const enabled = accountMutation('same')({
   args: {
     id: v.id('secretObjects'),
     enabled: v.boolean(),

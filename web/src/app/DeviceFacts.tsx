@@ -90,7 +90,7 @@ export function DeviceFacts({
         <>
           <b>30 days, renewed while the device is in use</b>
           <span className="sub">
-            The device stays yours, with this name and these settings, until you remove it.
+            Approval lasts at most twelve months. Approving it again keeps its name and settings.
           </span>
         </>,
       )}

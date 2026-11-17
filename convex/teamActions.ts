@@ -2,7 +2,7 @@
 'use node';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
-import { action } from './cliServer';
+import { action, accountAction } from './cliServer';
 import { emailRecipient } from './projectPeople';
 import { api, internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
@@ -11,7 +11,7 @@ import { checkForgeUser } from './sharingActions';
 import { ForgeError, invariant } from '../src/errors';
 import { report } from './errors';
 
-export const addMember = action({
+export const addMember = accountAction('person')({
   args: { id: v.id('teams'), member: v.string() },
   returns: v.null(),
   handler: async (ctx, { id, member }): Promise<null> => {
@@ -67,7 +67,7 @@ export const codescapes = action({
   },
 });
 
-export const addByEmail = action({
+export const addByEmail = accountAction('person')({
   args: { id: v.id('teams'), email: v.string() },
   returns: v.null(),
   handler: async (ctx, { id, email }): Promise<null> => {

@@ -184,7 +184,7 @@ for (const operation of ['start-v2', 'renew'] as const)
           ),
         );
         return Response.json(result, {
-          status: result.error === 'slow_down' ? 429 : 200,
+          status: result.error === 'slow_down' || result.status === 'slow_down' ? 429 : 200,
           headers: { 'Cache-Control': 'no-store' },
         });
       } catch {

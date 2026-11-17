@@ -48,7 +48,7 @@ function deriveTokenKeys(pem: string) {
 export function issueDeviceToken(
   pem: string,
   issuer: string,
-  input: { owner: string; credentialId: string; issuedAt: number; signInId?: string },
+  input: { owner: string; credentialId: string; issuedAt: number; expiresAt?: number; signInId?: string },
 ) {
   const keys = tokenKeys(pem);
   const payload = {
@@ -56,7 +56,7 @@ export function issueDeviceToken(
     aud: 'forge-cli',
     sub: input.owner,
     iat: input.issuedAt / 1000,
-    exp: (input.issuedAt + CLI_TOKEN_LIFETIME) / 1000,
+    exp: Math.min(input.issuedAt + CLI_TOKEN_LIFETIME, input.expiresAt ?? Infinity) / 1000,
     forgeCredential: input.credentialId,
     ...(input.signInId ? { forgeSignIn: input.signInId } : {}),
   };

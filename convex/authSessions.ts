@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { paginationOptsValidator } from 'convex/server';
-import { query, mutation } from './cliServer';
+import { query, accountMutation } from './cliServer';
 import { authComponents as components } from './authComponents';
 import { linkAccount, confirmationOptions, confirmAccount, digest } from './authLinkAccount';
 import { authenticationResponse, requestOptions } from './authPasskeyWire';
 import { browserInactivitySeconds, browserLifetimeSeconds } from './accessPolicy';
-import { deviceSettings } from './deviceFields';
+import { deviceSettings, deviceApprovalExpired } from './deviceFields';
+import { endAccountDevices } from './deviceEndAll';
 import { invariant } from '../src/errors';
 const PURPOSE = 'forge:end-other-sessions';
 const session = v.object({
@@ -26,6 +27,7 @@ const device = v.object({
   code: v.optional(v.string()),
   approvedAt: v.optional(v.number()),
   removed: v.optional(v.boolean()),
+  approvalExpired: v.optional(v.boolean()),
   settings: v.optional(deviceSettings),
 });
 export const list = query({
@@ -35,6 +37,7 @@ export const list = query({
     passkeys: v.array(passkey),
     devices: v.array(device),
     github: v.union(v.string(), v.null()),
+    deviceNotice: v.optional(v.object({ at: v.number(), credentialId: v.string(), signInId: v.string() })),
     notice: v.union(v.object({ at: v.number(), passkeyId: v.string() }), v.null()),
     isDone: v.boolean(),
     continueCursor: v.string(),
@@ -74,10 +77,14 @@ export const list = query({
           revoked,
           deviceCode,
           deviceApprovedAt,
+          deviceKey,
           removed,
           settings,
         }) => ({
           ...(deviceCode ? { code: deviceCode } : {}),
+          ...(deviceKey && deviceApprovalExpired({ deviceApprovedAt, expiresAt })
+            ? { approvalExpired: true }
+            : {}),
           ...(deviceApprovedAt !== undefined ? { approvedAt: deviceApprovedAt } : {}),
           ...(removed !== undefined ? { removed } : {}),
           ...(settings ? { settings } : {}),
@@ -91,12 +98,13 @@ export const list = query({
       ),
       github: user.githubConflict ? null : (user.githubLogin ?? null),
       notice: user.passkeyNotice ?? null,
+      ...(user.deviceNotice ? { deviceNotice: user.deviceNotice } : {}),
       isDone: devices.isDone,
       continueCursor: devices.continueCursor,
     };
   },
 });
-export const startConfirmation = mutation({
+export const startConfirmation = accountMutation('same')({
   args: {},
   returns: requestOptions,
   handler: async ctx => {
@@ -104,10 +112,14 @@ export const startConfirmation = mutation({
     return confirmationOptions(ctx, user, PURPOSE);
   },
 });
-export const revokeOthers = mutation({
-  args: { response: authenticationResponse, operationId: v.string() },
+export const revokeOthers = accountMutation('same')({
+  args: {
+    response: authenticationResponse,
+    operationId: v.string(),
+    includeDevices: v.optional(v.boolean()),
+  },
   returns: v.number(),
-  handler: async (ctx, { response, operationId }) => {
+  handler: async (ctx, { response, operationId, includeDevices }) => {
     const { user, sessionId } = await linkAccount(ctx);
     invariant(operationId.trim(), 'BAD_ARGUMENT', 'Retain the session sign-out operation id.');
     const proofHash = 'done:' + (await digest(JSON.stringify(response)));
@@ -118,7 +130,8 @@ export const revokeOthers = mutation({
       user.sessionEnd.stateHash.startsWith('done:')
     ) {
       invariant(
-        user.sessionEnd.stateHash === proofHash,
+        user.sessionEnd.stateHash === proofHash &&
+          Boolean(user.sessionEnd.includeDevices) === Boolean(includeDevices),
         'WORK_OPERATION_CHANGED',
         'Retry the original session sign-out proof.',
       );
@@ -129,15 +142,37 @@ export const revokeOthers = mutation({
     const revoked = await ctx.runMutation(components.auth.public.revokeSessions, {
       sessionIds: sessions.filter(row => row.sessionId !== sessionId).map(row => row.sessionId),
     });
+    if (includeDevices) await endAccountDevices(ctx, user.accountKey, Date.now());
     await ctx.db.patch(user._id, {
       sessionEnd: {
         operationId,
         sessionId,
         stateHash: proofHash,
         revokedCount: revoked.length,
+        ...(includeDevices ? { includeDevices: true } : {}),
         verifiedUntil: 0,
       },
     });
     return revoked.length;
+  },
+});
+
+const DEVICE_PURPOSE = 'forge:approve-device';
+export const startDeviceConfirmation = accountMutation('same')({
+  args: {},
+  returns: requestOptions,
+  handler: async ctx => {
+    const { user } = await linkAccount(ctx);
+    return confirmationOptions(ctx, user, DEVICE_PURPOSE);
+  },
+});
+export const confirmDeviceApproval = accountMutation('same')({
+  args: { response: authenticationResponse },
+  returns: v.null(),
+  handler: async (ctx, { response }) => {
+    const { user, sessionId } = await linkAccount(ctx);
+    await confirmAccount(ctx, user, DEVICE_PURPOSE, response);
+    await ctx.db.patch(user._id, { deviceApprovalProof: { sessionId, verifiedUntil: Date.now() + 600000 } });
+    return null;
   },
 });

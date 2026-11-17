@@ -735,8 +735,9 @@ the owner to the browser. Reversible trash and restore remain available to devic
 
 #### Delete many projects with one approval
 
-An agent or a device prepares the request; the owner person approves it once in the browser. This is the
-recommended path from a terminal: nobody copies a browser token.
+An unrestricted agent or device prepares the request; the owner person approves it once in the browser.
+Selected-project and read-only devices cannot prepare or withdraw account-wide cleanup requests (`AUTH_SCOPE_DENIED`).
+This is the recommended path from a terminal: nobody copies a browser token.
 
 ```sh
 nforge host ROOT --delete-projects 'bench-zoo-*'        # a slug pattern: * any run, ? one character

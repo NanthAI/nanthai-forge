@@ -3,12 +3,13 @@ import type { FormEvent } from 'react';
 import { Key, State } from '../ds';
 import { DeviceFacts } from './DeviceFacts';
 import type { DeviceSettings as Settings } from './access-contract';
-import { expiresIn, formatCode, scopeWords } from '../device/code';
+import { codeComplete, expiresIn, formatCode, scopeWords } from '../device/code';
 import { UntrustedName } from '../device/DeviceName';
 import { PublicFrame } from './frames';
 import { hrefFor } from './paths';
 export type DeviceRequest = {
   name: string;
+  needsConfirmation?: boolean;
   scope: 'cli' | 'coordination';
   expiresAt: number;
   state: string;
@@ -57,6 +58,8 @@ export function DeviceView({
   submit,
   decide,
   restart,
+  confirmPasskey,
+  confirmGithub,
 }: {
   phase: DevicePhase;
   name?: string;
@@ -76,6 +79,8 @@ export function DeviceView({
   submit: (event: FormEvent) => void;
   decide: (approve: boolean) => void;
   restart: () => void;
+  confirmPasskey?: () => void;
+  confirmGithub?: () => void;
 }) {
   const error = problem ? (
     <p className="err" role="alert">
@@ -160,6 +165,16 @@ export function DeviceView({
                     />
                   </label>
                 ) : null}
+                {request.needsConfirmation ? (
+                  <div className="btns">
+                    <Key onClick={confirmPasskey} disabled={busy}>
+                      Check with passkey
+                    </Key>
+                    <Key onClick={confirmGithub} disabled={busy}>
+                      Check with GitHub
+                    </Key>
+                  </div>
+                ) : null}
                 {error}
                 <Key
                   kind="primary"
@@ -168,7 +183,9 @@ export function DeviceView({
                   onClick={() => decide(true)}
                   disabled={
                     busy ||
-                    (requireTyped && formatCode(typed) !== formatCode(code)) ||
+                    request.needsConfirmation ||
+                    (requireTyped &&
+                      (code ? formatCode(typed) !== formatCode(code) : !codeComplete(typed))) ||
                     Boolean(request.device && !request.device.known && !(name ?? request.name).trim())
                   }
                 >

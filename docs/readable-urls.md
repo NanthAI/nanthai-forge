@@ -5,9 +5,10 @@ from the username the person chose, else their GitHub login, else a random `user
 placeholder. Real names and email addresses are never naming inputs. An account on a
 placeholder, or one whose handle was derived from a real name before this rule, is
 asked once to pick a handle (web sheet, and `nforge login` prints the prompt); keeping
-it counts as the answer. Pick one from the CLI with `nforge auth handle NAME` or keep
-the current one with `nforge auth handle --keep`. Handles are never renamed without
-that choice. Handles are lowercase, unique across accounts,
+it counts as the answer. Pick or keep the handle on the web in Settings → Account.
+Every device credential is refused handle changes, including unrestricted devices;
+the retained CLI handle command gives that same web-settings remedy. Handles are
+never renamed without that choice. Handles are lowercase, unique across accounts,
 2–39 letters, digits or hyphens, with no leading/trailing hyphen. Application route
 roots are reserved in `src/readable-urls.ts`. Collisions receive `-2`, `-3`, and so on.
 Project slugs are assigned from project names and are unique within an owner.

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { report } from './errors';
-import { mutation } from './cliServer';
+import { accountMutation } from './cliServer';
 import { createProject } from './projectCreation';
 import { invariant } from '../src/errors';
-export const open = mutation({
+export const open = accountMutation('write')({
   args: { key: v.string(), name: v.string() },
   returns: v.id('hostedProjects'),
   handler: async (ctx, input) => {

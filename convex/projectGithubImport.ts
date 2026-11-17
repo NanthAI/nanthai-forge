@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import { v } from 'convex/values';
-import { action } from './cliServer';
+import { action, accountAction } from './cliServer';
 import { internal } from './_generated/api';
 import type { Id, Doc } from './_generated/dataModel';
 import { githubInput } from '../src/github';
@@ -19,7 +19,7 @@ import { storeListing } from './projectGithubImportListing';
 import { report } from './errors';
 import { githubImportError, githubRequests, migrationCounts } from './projectGithubImportFields';
 
-export const start = action({
+export const start = accountAction('write')({
   args: {
     operationId: v.string(),
     url: v.string(),

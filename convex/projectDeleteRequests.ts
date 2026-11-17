@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Bulk permanent delete in one owner approval (Item 7456856f). Anyone signed in to the account prepares a request:
+// Bulk permanent delete in one owner approval (Item 7456856f). An unrestricted sign-in to the account prepares a request:
 // the exact list of projects (ids, slugs, revisions, last landing, size), frozen when it is made. Only the owner person
 // approves it, once, in the browser; approval re-checks every project and runs the existing permanent purge
 // (projectLifecycle `transition`) for each one that is unchanged. A project that changed since the list was made is
@@ -8,7 +8,7 @@
 import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
-import { isDeviceIdentity, mutation, query } from './cliServer';
+import { isDeviceIdentity, accountMutation, query } from './cliServer';
 import { requireOwnerPerson } from './ownerPerson';
 import { transition } from './projectLifecycle';
 import { STORAGE_QUOTA } from './abuseLimits';
@@ -109,10 +109,10 @@ function reply(row: Row) {
   });
 }
 
-/** Prepare a request. Any sign-in of the account, a device or agent included; it deletes nothing. Retry-safe by
+/** Prepare a request. An unrestricted account sign-in, a device or agent included; it deletes nothing. Retry-safe by
  * operation id. Reads: one page of the account's projects (a pattern or the trash) or one get per id, then one landing
  * read and one storage read per listed project (at most DELETE_REQUEST_LIMIT); one insert. */
-export const prepare = mutation({
+export const prepare = accountMutation('write')({
   args: { operationId: v.string(), select: selection },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -262,7 +262,7 @@ export const open = query({
 /** The owner person's decision. `approve` runs the permanent purge for every listed project not kept out and still as
  * it was; `count` is the number the owner typed and must equal that remainder as shown. Replaying the same decision is
  * a no-op. Device and agent sign-ins are refused (requireOwnerPerson); another account reads the request as missing. */
-export const decide = mutation({
+export const decide = accountMutation('same')({
   args: {
     requestId: v.string(),
     operationId: v.string(),
@@ -355,7 +355,7 @@ async function purgeOne(
 }
 
 /** Retry only the projects whose purge stopped: each one replays its original purge operation. Owner person only. */
-export const retry = mutation({
+export const retry = accountMutation('same')({
   args: { requestId: v.string() },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -396,7 +396,7 @@ export const retry = mutation({
 });
 
 /** The requester (any sign-in of the account) withdraws an open request; nothing was deleted. */
-export const withdraw = mutation({
+export const withdraw = accountMutation('write')({
   args: { requestId: v.string() },
   returns: v.string(),
   handler: async (ctx, input) => {

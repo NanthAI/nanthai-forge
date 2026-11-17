@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { mutation, internalMutation, type MutationCtx } from './cliServer';
+import { internalMutation, type MutationCtx, accountMutation } from './cliServer';
 import type { Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { invariant } from '../src/errors';
@@ -44,7 +44,7 @@ export async function deleteTeam(
   await schedule(ctx, (await ctx.db.get(team._id))!);
   return null;
 }
-export const permanentlyDelete = mutation({
+export const permanentlyDelete = accountMutation('write')({
   args: { id: v.id('teams'), operationId: v.string(), expectedCreation: v.number() },
   returns: v.null(),
   handler: async (ctx, input) => {

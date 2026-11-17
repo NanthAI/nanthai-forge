@@ -2,9 +2,10 @@
 import { findVerifiedRecipient, currentEmailRecipient } from './authUsers';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
-import { query, mutation, internalQuery, internalMutation } from './cliServer';
+import { query, internalQuery, internalMutation, accountMutation } from './cliServer';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
+import { isDeviceIdentity } from './cliServer';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 
@@ -18,7 +19,7 @@ export async function teamOwner(ctx: QueryCtx | MutationCtx, id: Id<'teams'>, ow
   );
   return team;
 }
-export const create = mutation({
+export const create = accountMutation('write')({
   args: { name: v.string(), operationId: v.string() },
   returns: v.id('teams'),
   handler: async (ctx, { name, operationId }) => {
@@ -104,6 +105,11 @@ export const add = internalMutation({
   },
   returns: v.null(),
   handler: async (ctx, { id, owner, member, email, legacyEmail }) => {
+    invariant(
+      !isDeviceIdentity((await ctx.auth.getUserIdentity()) ?? {}),
+      'AUTH_SCOPE_DENIED',
+      'Add team members in your Forge browser.',
+    );
     await teamOwner(ctx, id, owner);
     invariant(
       !email || (await currentEmailRecipient(ctx, email, member, true)),
@@ -119,7 +125,7 @@ export const add = internalMutation({
     return null;
   },
 });
-export const removeMember = mutation({
+export const removeMember = accountMutation('write')({
   args: { id: v.id('teams'), member: v.string() },
   returns: v.null(),
   handler: async (ctx, { id, member }) => {
@@ -137,7 +143,7 @@ export const removeMember = mutation({
     }
   },
 });
-export const link = mutation({
+export const link = accountMutation('write')({
   args: { id: v.id('teams'), importId: v.id('imports'), shared: v.boolean() },
   returns: v.null(),
   handler: async (ctx, { id, importId, shared }) => {

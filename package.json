@@ -80,6 +80,18 @@
       ],
       "guards": [
         {
+          "name": "account device registrations",
+          "tests": [
+            "tests/account-registration.test.mjs"
+          ],
+          "inputs": [
+            "convex/**",
+            "tests/account-registration.test.mjs",
+            "tests/convex-module.mjs",
+            "package.json"
+          ]
+        },
+        {
           "name": "convex runtime imports",
           "tests": [
             "tests/convex-runtime-imports.test.mjs"

@@ -8,7 +8,9 @@
 // is never shown and must be typed again before Approve; a decided or lapsed code offers no answer. No timers: expiry
 // is read when the card renders and again before an answer.
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { useAction } from 'convex/react';
+import { useSignInWithGithub } from '@convex-dev/auth/methods/github/react';
+import { assertPasskey } from './webauthn';
+import { useAction, useMutation } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import type { DeviceSettings as Settings } from './access-contract';
 import { codeComplete, codeProblem } from '../device/code';
@@ -19,6 +21,12 @@ export type { DeviceRequest, DevicePhase } from './DeviceView';
 import { errorCode } from './session';
 
 export function Device({ viewerHandle }: { viewerHandle: string | undefined }) {
+  const startConfirmation = useMutation(api.authSessions.startDeviceConfirmation);
+  const confirm = useMutation(api.authSessions.confirmDeviceApproval);
+  const { signIn: github } = useSignInWithGithub({
+    startSignInWithGithub: api.authSessionGithub.startDeviceSignInWithGithub,
+    completeSignInWithGithub: api.authSessionGithub.completeSignInWithGithub,
+  });
   const inspect = useAction(api.deviceActions.inspect);
   const decideAction = useAction(api.deviceActions.decide);
   const [code, setCode] = useState(takeLinkCode);
@@ -90,7 +98,8 @@ export function Device({ viewerHandle }: { viewerHandle: string | undefined }) {
     setProblem(null);
     try {
       await decideAction({
-        ...(requestId ? { requestId } : { code }),
+        ...(requestId ? { requestId } : {}),
+        ...(approve && (fromLink.current || requestId) ? { code: typed } : code ? { code } : {}),
         ...decision.current,
         ...(phase.request.device && !phase.request.device.known ? { name, settings } : {}),
       });
@@ -123,6 +132,25 @@ export function Device({ viewerHandle }: { viewerHandle: string | undefined }) {
   };
   return (
     <DeviceView
+      confirmPasskey={() =>
+        void (async () => {
+          const back = phase;
+          setBusy(true);
+          try {
+            await confirm({ response: await assertPasskey(await startConfirmation({})) });
+            await find();
+          } catch (error) {
+            fail(error, back);
+          } finally {
+            setBusy(false);
+          }
+        })()
+      }
+      confirmGithub={() =>
+        void github({ redirectTo: new URL('/-/device', location.origin).href }).catch(error =>
+          fail(error, phase),
+        )
+      }
       phase={phase}
       name={name}
       setName={setName}
@@ -132,7 +160,7 @@ export function Device({ viewerHandle }: { viewerHandle: string | undefined }) {
       setCode={setCode}
       typed={typed}
       setTyped={setTyped}
-      requireTyped={fromLink.current}
+      requireTyped={fromLink.current || Boolean(requestId)}
       busy={busy}
       problem={problem}
       viewerHandle={viewerHandle}

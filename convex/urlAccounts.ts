@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { authComponents as components } from './authComponents';
 import { v } from 'convex/values';
-import { mutation, query } from './cliServer';
+import { query, accountMutation } from './cliServer';
 import { accountFor, ensureAccount, handleTaken } from './urlIdentity';
 import { handleError } from '../src/readable-urls';
 import { invariant } from '../src/errors';
@@ -17,7 +17,7 @@ export const current = query({
       : null;
   },
 });
-export const ensure = mutation({
+export const ensure = accountMutation('handle')({
   args: {
     username: v.optional(v.string()),
     githubLogin: v.optional(v.string()),
@@ -53,7 +53,7 @@ export const available = query({
     );
   },
 });
-export const set = mutation({
+export const set = accountMutation('handle')({
   args: { handle: v.string(), operationId: v.string() },
   returns: v.null(),
   handler: async (ctx, input) => {

@@ -91,15 +91,26 @@ an Ed25519 key kept in the existing owner-only local auth store. Browser approva
 records the stable code, one display name and settings. A 30-day bearer sign-in
 is a separate generation under that approval. Explicit login always opens the
 browser, so switching account still works; accounts have separate approvals for
-the same key. Re-login keeps the approved name and settings.
+the same key. Re-login keeps the approved name and settings and always requires the terminal's
+typed code, including for remembered or signed-out keys. A request link alone
+cannot approve. A new approval, including re-approval after expiry, requires a
+browser sign-in or passkey/GitHub check within the existing ten-minute proof
+window. The proof is bound to this browser session; token refresh never extends
+it. Every approval writes an account notice in the same transaction, and the
+device row shows when its last sign-in was issued.
 
 An expired saved sign-in renews through a proof bound to its key, actual HTTP
-origin, purpose and operation. Valid commands make no renewal call. Unknown
+origin, purpose and operation. Valid commands make no renewal call. A device that has not renewed within 30 days after its sign-in lapses (at most
+about 60 days unused) must be approved again; every device is re-approved after
+12 months. This is a lapse-based renewal window, not exact last-command
+inactivity. Each newly issued sign-in and signed token expires no later than the approval’s twelve-month end; Git also checks the approval boundary. There is no per-command activity write. Both paths return to browser approval and retain
+the name and settings. Unknown
 outcomes retain the operation locally; an already-settled expired proof is
 replaced automatically. Environment-supplied credentials never renew through a
 local device key. Sign-out and removal use the central device-end policy:
 sign-out retains key/name/settings, while removal revokes the
-approval and deletes its display name and settings. The key on a lost device cannot be erased
+approval and deletes its display name, settings, public key and code. The same key
+can later be approved as a new device. The key on a lost device cannot be erased
 remotely. An old bearer or redirected Git sign-in generation cannot regain
 access when a later login succeeds.
 
@@ -109,7 +120,11 @@ narrows projects and source writes. Trusted nested source operations check the
 same live credential in their existing transaction when no guard projection is
 available. Previously authorized jobs and checks retain their existing lifecycle.
 Action credential checks retain the existing 30-second isolate reuse bound;
-queries and mutations read current state on each invocation.
+queries and mutations read current state on each invocation. Settings changes
+and new sign-in generations have the same thirty-second action-cache bound as
+revocation; a cache hit never moves its deadline or extends credential/approval
+expiry. Selected-project and read-only settings also refuse account-level writes.
+Handle changes and team membership additions require the person on the web.
 
 The account screen uses one account query for browsers, passkeys and a device
 page. A different-project picker mounts only on request and reads three existing
@@ -122,7 +137,16 @@ ranges / 10,100 bytes and writes nothing. All source bytes remain in R2; public
 key bindings, narrow settings and secret-free operation receipts stay in Convex.
 Account/key bindings derive an opaque account-specific reference and reuse the
 existing credential index. No table, index, heartbeat or scheduled renewal is added. Renewal performs one HTTP request with
-one nested query and one mutation, only after sign-in expiry. Rollout stays off
+two nested mutations, only after sign-in expiry. The first replaces the previous
+query and shares the start budget: 120 new starts/renewals per deployment per
+minute, one indexed counter read/write, no additional call. A known renewal
+reserves and settles its existing auth receipt, pinning issuance and expiry so a lost preparation reply does
+not spend another allowance. At 1,200 and 2,400 devices the synthetic renewal reads seven documents / 2,453 bytes and makes four writes / 1,861 bytes; the pinned expiry adds 28 read and write bytes, with no added call or document read. Unknown-key renewals
+use that budget too; known operation retries reuse their existing receipt.
+The optional “Also sign out all devices” choice on ending other browser sessions
+revokes credentials in bounded 100-row account pages in the original transaction
+and event-driven continuations; it keeps keys, names and settings and does no idle
+work. Later sign-ins are not selected by those continuations. Rollout stays off
 until its existing owner-policy and cost review are complete.
 
 Private device labels remain in account-owned credentials. Shared session snapshots contain the stable code and approval metadata only. Session pages resolve permitted current labels by deduplicated credential IDs within their existing bounded query; historical labels are filtered from public replies.

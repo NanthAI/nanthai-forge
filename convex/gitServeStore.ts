@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
+import { deviceApprovalExpired } from './deviceFields';
 import { internalQuery } from './server';
 import { accessibleProject } from './projectAuthority';
 import { resolveProjectId } from './urlProjects';
@@ -44,6 +45,7 @@ export const load = internalQuery({
         !row ||
         row.revoked ||
         row.expiresAt <= Date.now() ||
+        (row.deviceKey && deviceApprovalExpired(row)) ||
         row.scope !== 'cli' ||
         (input.credential && row.tokenHash !== input.credential.tokenHash) ||
         (input.sessionCredentialId && row.deviceKey && row.renewal?.operationId !== input.sessionSignIn)

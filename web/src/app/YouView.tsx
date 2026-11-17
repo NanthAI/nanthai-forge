@@ -18,10 +18,12 @@ export type AccountSessions = {
     code?: string;
     approvedAt?: number;
     removed?: boolean;
+    approvalExpired?: boolean;
     settings?: Settings;
   }[];
   github: string | null;
   notice: { at: number; passkeyId: string } | null;
+  deviceNotice?: { at: number; credentialId: string; signInId: string };
   isDone: boolean;
   continueCursor: string;
 };
@@ -31,8 +33,9 @@ type Actions = {
   leave: () => void;
   more: () => void;
   acknowledge: () => void;
-  revoke: () => void;
-  github: () => void;
+  acknowledgeDevice?: () => void;
+  revoke: (includeDevices?: boolean) => void;
+  github: (includeDevices?: boolean) => void;
   add: () => void;
   rename: (id: string, name: string) => void;
   remove: (id: string) => void;
@@ -56,6 +59,7 @@ export function YouView({
   busy: boolean;
   problem: string | null;
 }) {
+  const [includeDevices, setIncludeDevices] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [name, setName] = useState('');
@@ -73,14 +77,24 @@ export function YouView({
   return (
     <>
       <Head trail={[{ label: 'You' }]} sentence={sentence}>
-        <Key onClick={actions.revoke} disabled={busy || !data?.passkeys.length}>
+        <Key onClick={() => actions.revoke(includeDevices)} disabled={busy || !data?.passkeys.length}>
           Sign out other sessions
         </Key>
         {data?.github ? (
-          <Key onClick={actions.github} disabled={busy}>
+          <Key onClick={() => actions.github(includeDevices)} disabled={busy}>
             Check with GitHub and sign out other sessions
           </Key>
         ) : null}
+        <label className="btn">
+          <input
+            type="checkbox"
+            className="ckb"
+            checked={includeDevices}
+            onChange={e => setIncludeDevices(e.target.checked)}
+            disabled={busy}
+          />
+          Also sign out all devices
+        </label>
         <Key kind="ghost" onClick={actions.leave}>
           Sign out of this browser
         </Key>
@@ -96,6 +110,15 @@ export function YouView({
           <State state="waiting" word="Needs you" />
           <p>A passkey was added to your account on {date(data.notice.at)}.</p>
           <Key size="sm" onClick={actions.acknowledge}>
+            Seen
+          </Key>
+        </div>
+      ) : null}
+      {data?.deviceNotice ? (
+        <div className="notice" data-st="waiting" role="status">
+          <State state="waiting" word="Needs you" />
+          <p>A device was approved on {date(data.deviceNotice.at)}. Check your devices below.</p>
+          <Key size="sm" onClick={actions.acknowledgeDevice}>
             Seen
           </Key>
         </div>
@@ -139,11 +162,13 @@ export function YouView({
                         ? 'Removed'
                         : d.revoked
                           ? 'Signed out'
-                          : d.expiresAt <= now
-                            ? d.code
-                              ? 'Renews on its next command'
-                              : 'Sign-in expired'
-                            : `Signed in until ${date(d.expiresAt)}`}
+                          : d.approvalExpired
+                            ? 'Approve again in your browser'
+                            : d.expiresAt <= now
+                              ? d.code
+                                ? 'Renews on its next command'
+                                : 'Sign-in expired'
+                              : `Signed in until ${date(d.expiresAt)}`}
                     </span>
                   </div>
                   <span className="meta">
@@ -251,6 +276,10 @@ export function YouView({
                                 ? 'Signed out; its name and settings are kept.'
                                 : `30 days, renewed while the device is in use.`}
                           </span>
+                        </Row>
+                        <Row cols="120px minmax(0,1fr)">
+                          <span className="t2">Last sign-in issued</span>
+                          <span>{date(d.issuedAt)}</span>
                         </Row>
                         <Row cols="120px minmax(0,1fr)">
                           <span className="t2">Approved</span>

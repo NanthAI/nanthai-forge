@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v, type Infer } from 'convex/values';
-import { action, type ActionCtx } from './cliServer';
+import { type ActionCtx, accountAction } from './cliServer';
 import { internal } from './_generated/api';
 import { convexFetch, networkTimeout } from './networkFetch';
 import { invariant } from '../src/errors';
@@ -46,7 +46,7 @@ export async function liveLegacySession(
   );
   return { accountKey: identity.subject, sessionId };
 }
-export const start = action({
+export const start = accountAction('same')({
   args: { sessionId: v.string(), operationId: v.string() },
   returns: v.union(
     v.object({ step: v.literal('authenticate'), options: requestOptions }),
@@ -69,7 +69,7 @@ export const start = action({
     }
   },
 });
-export const confirm = action({
+export const confirm = accountAction('same')({
   args: { sessionId: v.string(), operationId: v.string(), response: authenticationResponse },
   returns: creationOptions,
   handler: async (ctx, args): Promise<Infer<typeof creationOptions>> => {
@@ -84,7 +84,7 @@ export const confirm = action({
     }
   },
 });
-export const finish = action({
+export const finish = accountAction('same')({
   args: { sessionId: v.string(), operationId: v.string(), response: registrationResponse },
   returns: registrationResult,
   handler: async (ctx, args): Promise<Infer<typeof registrationResult>> => {

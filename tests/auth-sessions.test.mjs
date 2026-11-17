@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getFunctionAddress } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
-import { fixture as accountFixture, assertion, refused, users } from './auth-links-fixture.mjs';
+import { fixture as accountFixture, assertion, refused, users, auth } from './auth-links-fixture.mjs';
 const sessionsApi = await import(moduleUrl('../convex/authSessions.ts'));
 const first = await import(moduleUrl('../convex/authFirstPasskey.ts'));
 const policy = await import(moduleUrl('../convex/accessPolicy.ts'));
@@ -277,4 +277,128 @@ test('B-05: a GitHub re-check cannot use another account, another originating br
   s.sessions.delete('session');
   await assert.rejects(s.call(githubSessions.completeSignInWithGithub, last), refused('AUTH_REQUIRED'));
   assert(s.sessions.has('other'));
+});
+
+test('SI-01: ending other browsers can also end devices, preserves their settings and never grants another account access', async t => {
+  const s = fixture(t),
+    now = Date.now();
+  const device = {
+    _id: 'device',
+    _creationTime: 1,
+    owner: s.owner,
+    credentialId: 'device',
+    name: 'Synthetic',
+    scope: 'cli',
+    issuedAt: now - 1000,
+    expiresAt: now + 60000,
+    tokenHash: 'synthetic',
+    revoked: false,
+    deviceKey: 'synthetic-key',
+    deviceCode: 'dv-synthetic',
+    deviceApprovedAt: now - 1000,
+    settings: { source: 'write', projects: { kind: 'all' } },
+  };
+  s.tables.cliCredentials.set('device', device);
+  s.tables.cliCredentials.set('foreign', { ...device, _id: 'foreign', owner: 'other' });
+  await s.call(sessionsApi.startConfirmation, {});
+  await s.call(sessionsApi.revokeOthers, {
+    operationId: 'with-devices',
+    response: assertion,
+    includeDevices: true,
+  });
+  assert.equal(s.tables.cliCredentials.get('device').revoked, true);
+  assert.deepEqual(s.tables.cliCredentials.get('device').settings, device.settings);
+  assert.equal(s.tables.cliCredentials.get('foreign').revoked, false);
+  await assert.rejects(
+    s.call(sessionsApi.revokeOthers, { operationId: 'with-devices', response: assertion }),
+    refused('WORK_OPERATION_CHANGED'),
+  );
+});
+
+test('SI-01: the device passkey proof is session-bound, refuses a different account, and expires without being extended by reads', async t => {
+  const s = fixture(t);
+  await assert.rejects(
+    s.call(sessionsApi.confirmDeviceApproval, { response: assertion }),
+    refused('AUTH_REQUIRED'),
+  );
+  await s.call(sessionsApi.startDeviceConfirmation, {});
+  await s.call(sessionsApi.confirmDeviceApproval, { response: assertion });
+  const proof = s.tables.users.get('user').deviceApprovalProof;
+  assert.equal(proof.sessionId, 'session');
+  const identity = await import(moduleUrl('../convex/forgeIdentity.ts'));
+  const auth = identity.identityContext(s.ctx);
+  assert.equal((await auth.auth.getUserIdentity()).forgeAuthDeviceVerifiedUntil, proof.verifiedUntil);
+  s.identity({ subject: 'other', issuer: 'https://auth-fixture.convex.cloud/components/auth' });
+  const other = identity.identityContext(s.ctx);
+  assert.equal((await other.auth.getUserIdentity()).forgeAuthDeviceVerifiedUntil, undefined);
+});
+
+test('SI-01: a GitHub device check proves the account without ending its other browsers', async t => {
+  const s = githubFixture(t);
+  const started = await s.call(githubSessions.startDeviceSignInWithGithub, {
+    redirectTo: 'https://forge.example/-/device',
+  });
+  const result = await s.call(githubSessions.completeSignInWithGithub, await s.ticket(started.state));
+  assert.equal(result.status, 'complete');
+  assert(s.sessions.has('session'));
+  assert(s.sessions.has('other'));
+  assert(s.sessions.has('stranger'));
+  assert.equal(s.tables.users.get('user').deviceApprovalProof.sessionId, 'new-session');
+});
+
+test('SI-01 review: direct GitHub sign-in completion preserves the library result and binds fresh proof to its new session', async t => {
+  const s = githubFixture(t);
+  s.bindings.set('123', 'user');
+  const proof = await s.ticket('direct-sign-in-state');
+  const result = await s.call(auth.completeSignInWithGithub, proof);
+  const accessToken =
+    'header.' + Buffer.from(JSON.stringify({ sub: 'new-session' })).toString('base64url') + '.signature';
+  assert.deepEqual(result, {
+    status: 'complete',
+    tokens: { userId: 'user', accessToken, refreshToken: 'synthetic-refresh', refreshTokenExpiresAt: 1000 },
+  });
+  const fresh = structuredClone(s.tables.users.get('user').deviceApprovalProof);
+  assert.equal(fresh.sessionId, 'new-session');
+  assert.deepEqual(await s.call(auth.completeSignInWithGithub, proof), {
+    status: 'error',
+    userError: { error: 'INVALID_CODE' },
+  });
+  assert.deepEqual(s.tables.users.get('user').deviceApprovalProof, fresh);
+});
+
+test('SI-01 review: the GitHub end-all-devices route revokes only this account’s devices and older browsers, retaining the returning browser and settings', async t => {
+  const s = githubFixture(t),
+    now = Date.now();
+  const device = {
+    _id: 'device',
+    _creationTime: 1,
+    owner: s.owner,
+    credentialId: 'device',
+    name: 'Synthetic',
+    scope: 'cli',
+    issuedAt: now - 1000,
+    expiresAt: now + 60000,
+    tokenHash: 'synthetic',
+    revoked: false,
+    deviceKey: 'synthetic-key',
+    deviceCode: 'dv-synthetic',
+    deviceApprovedAt: now - 1000,
+    settings: { source: 'write', projects: { kind: 'all' } },
+  };
+  s.tables.cliCredentials.set('device', device);
+  s.tables.cliCredentials.set('foreign', { ...device, _id: 'foreign', owner: 'other' });
+  const started = await s.call(githubSessions.startEndDevicesWithGithub, {
+    redirectTo: 'https://forge.example/-/account/devices',
+  });
+  const result = await s.call(githubSessions.completeSignInWithGithub, await s.ticket(started.state));
+  assert.equal(result.status, 'complete');
+  assert(s.sessions.has('new-session'));
+  assert(s.sessions.has('stranger'));
+  assert(!s.sessions.has('session'));
+  assert(!s.sessions.has('other'));
+  const ended = s.tables.cliCredentials.get('device');
+  assert.equal(ended.revoked, true);
+  assert.equal(ended.deviceKey, device.deviceKey);
+  assert.deepEqual(ended.settings, device.settings);
+  assert.equal(s.tables.cliCredentials.get('foreign').revoked, false);
 });

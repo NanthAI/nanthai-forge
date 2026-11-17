@@ -130,7 +130,10 @@ function fixture(t) {
         });
         return {
           userId,
-          accessToken: 'synthetic-access',
+          accessToken:
+            'header.' +
+            Buffer.from(JSON.stringify({ sub: 'registered-session' })).toString('base64url') +
+            '.signature',
           refreshToken: 'synthetic-refresh',
           refreshTokenExpiresAt: 1000,
         };
@@ -536,10 +539,56 @@ test('passkey registration commits the chosen Forge handle and no placeholder al
   const user = s.tables.users.get(result.tokens.userId);
   const account = [...s.tables.forgeAccounts.values()].find(row => row.owner === user.accountKey);
   assert.equal(account.handle, 'new-person');
+  assert.equal(user.deviceApprovalProof.sessionId, 'registered-session');
   assert.equal(account.handlePrompt, false);
   assert.equal(s.usernames.get(user._id), 'new-person');
   assert.deepEqual(
     [...s.tables.accountHandles.values()].filter(row => row.owner === user.accountKey).map(row => row.handle),
     ['new-person'],
   );
+});
+
+test('SI-01 review: direct passkey sign-in completion preserves the library result and records proof for its new browser session', async t => {
+  const s = fixture(t);
+  s.identity(null);
+  s.usernames.set(s.user._id, 'synthetic');
+  const tokens = {
+    userId: s.user._id,
+    accessToken:
+      'header.' +
+      Buffer.from(JSON.stringify({ sub: 'passkey-session' })).toString('base64url') +
+      '.signature',
+    refreshToken: 'synthetic-refresh',
+    refreshTokenExpiresAt: 1000,
+  };
+  const dispatch = s.ctx.runMutation;
+  s.ctx.runMutation = async (ref, args) => {
+    const name = getFunctionAddress(ref).reference ?? '';
+    if (name.endsWith('/finishAuthentication'))
+      return args.response.id === 'existing'
+        ? { success: true, userId: s.user._id }
+        : { success: false, userError: { error: 'PROTOCOL_ERROR' } };
+    if (name.endsWith('/_internal_dangerous_signIn')) {
+      s.sessions.set('passkey-session', { userId: args.userId, creationTime: Date.now() });
+      return tokens;
+    }
+    return dispatch(ref, args);
+  };
+  const response = {
+    id: 'existing',
+    rawId: 'existing',
+    type: 'public-key',
+    response: { clientDataJSON: '', authenticatorData: '', signature: '' },
+    clientExtensionResults: {},
+  };
+  checkArgs(auth.finishSignInWithUsernamePasskey, { response });
+  const result = await auth.finishSignInWithUsernamePasskey._handler(s.ctx, { response });
+  assert.deepEqual(result, { status: 'complete', tokens, username: 'synthetic' });
+  const proof = structuredClone(s.tables.users.get(s.user._id).deviceApprovalProof);
+  assert.equal(proof.sessionId, 'passkey-session');
+  assert.deepEqual(
+    await auth.finishSignInWithUsernamePasskey._handler(s.ctx, { response: { ...response, id: 'wrong' } }),
+    { status: 'error', userError: { error: 'PROTOCOL_ERROR' } },
+  );
+  assert.deepEqual(s.tables.users.get(s.user._id).deviceApprovalProof, proof);
 });

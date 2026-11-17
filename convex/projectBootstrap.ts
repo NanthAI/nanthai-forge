@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { blobStore } from './blobStore';
 import { v } from 'convex/values';
-import { action } from './cliServer';
+import { accountAction } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { emptyHostedProject } from '../src/hosted-bootstrap';
@@ -11,7 +11,7 @@ import { report } from './errors';
 import { invariant } from '../src/errors';
 import { storeSourceBytes } from './projectSourceBytes';
 
-export const create = action({
+export const create = accountAction('write')({
   args: { operationId: v.string(), name: v.string() },
   returns: v.id('hostedProjects'),
   handler: async (ctx, input): Promise<Id<'hostedProjects'>> => {

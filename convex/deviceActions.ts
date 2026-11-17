@@ -118,9 +118,7 @@ export async function beginDeviceLogin(
     device_code: deviceCode,
     user_code: code,
     verification_uri: verification,
-    verification_uri_complete: JSON.parse(row.request).rememberedDevice
-      ? `${verification}?request=${row.operationId}`
-      : `${verification}?code=${code}`,
+    verification_uri_complete: `${verification}?code=${code}`,
     expires_in: Math.max(0, Math.floor((row.expiresAt - Date.now()) / 1000)),
     interval: 5,
   };
@@ -155,13 +153,14 @@ export const poll = internalAction({
       'AUTH_REQUIRED',
       'Device approval is unavailable.',
     );
+    const expiresAt = row.signInExpiresAt ?? row.issuedAt + CLI_TOKEN_LIFETIME;
     const token = issueDeviceToken(key, issuer, {
       owner: row.owner,
       credentialId: row.credentialId,
       issuedAt: row.issuedAt,
+      expiresAt,
       ...(row.deviceKey ? { signInId: row.decisionId } : {}),
     });
-    const expiresAt = row.issuedAt + CLI_TOKEN_LIFETIME;
     const credential = await ctx.runMutation(internal.deviceStore.issue, {
       owner: row.owner,
       name: row.name,
@@ -185,7 +184,7 @@ export const poll = internalAction({
         : {}),
       status: 'approved',
       token,
-      expiresAt,
+      expiresAt: credential.expiresAt,
       credentialId: row.credentialId,
     };
   },
@@ -194,6 +193,7 @@ const approvalView = v.union(
   v.object({ needsCode: v.literal(true) }),
   v.object({
     name: v.string(),
+    needsConfirmation: v.optional(v.boolean()),
     scope: deviceScope,
     expiresAt: v.number(),
     state: v.string(),
@@ -243,9 +243,9 @@ export const decide = action({
     uuid(args.operationId);
     const owner = await browserOwner(ctx);
     invariant(
-      Boolean(args.code) !== Boolean(args.requestId),
-      'BAD_ARGUMENT',
-      'Choose the terminal code or your remembered-device request.',
+      Boolean(args.code) || (!args.approve && Boolean(args.requestId)),
+      args.approve ? 'AUTH_REQUIRED' : 'BAD_ARGUMENT',
+      'Type the code from your terminal before approving.',
     );
     await ctx.runMutation(internal.deviceStore.decide, {
       owner,
@@ -253,9 +253,8 @@ export const decide = action({
       operationId: args.operationId,
       ...(args.name !== undefined ? { name: args.name } : {}),
       ...(args.settings ? { settings: args.settings } : {}),
-      ...(args.requestId
-        ? { requestId: args.requestId }
-        : { userHash: deviceHash(normalizedCode(args.code!)) }),
+      ...(args.requestId ? { requestId: args.requestId } : {}),
+      ...(args.code ? { userHash: deviceHash(normalizedCode(args.code)) } : {}),
     });
     return null;
   },

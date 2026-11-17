@@ -43,9 +43,26 @@ The table is `projectVerbs` in `convex/projectAccessContract.ts`; `projectMay` g
 
 Agents act through a device their person approved with `nforge login`. A device narrows its person's rights and never widens them; the device record, its settings and its sign-ins are owned by `df06081d` (sign-in, devices and sessions). A live session is presence, not an access row: it holds a Lane, and the People and access screen lists devices inside their person, never sessions as grants. Agent-run names (`account/slug`) resolve to their person by the public identity rule.
 
+### Account changes from devices
+
+Changing the handle is browser-only for the person signed in on the web. Every
+device credential, including an unrestricted one, receives `AUTH_SCOPE_DENIED`:
+“Change your handle on the web: Settings → Account”. The CLI keeps its earlier
+handle command as that same refusal and does not send a write.
+
+Selected-project and read-only devices cannot make account-level writes, including
+team changes, account cleanup or project creation. The public wrapper decides
+from the credential it already reads; account mutations declare their device rule
+at registration. Unrestricted devices keep their existing account-write rights,
+subject to the same person-only rules. Adding team members by handle or email
+requires the person in a browser: the existing membership approval store is
+project-bound, so team additions use the refusal alternative and grant nothing
+from a device. Project membership additions retain their existing held request.
+
 ## Private projects answer not found
 
 Without a role, a private project answers exactly like a missing one: `PROJECT_UNAVAILABLE` from every function, and "No project here" on the page. An agent refusal reads the same. A visitor can never learn that a private project exists from an address, an invitation link, or the error.
+
 
 ## Invitations
 

@@ -34,9 +34,9 @@ import ${JSON.stringify(join(root, 'web/src/app/app.css'))};
 const params = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = params.get('theme') || 'dark';
 const now = 1794873600000;
-const data = { sessions: [{ sessionId:'browser-a', creationTime:now-3600000, lastRefreshedAt:now, current:true }, {sessionId:'browser-b',creationTime:now-86400000,lastRefreshedAt:now-7200000,current:false}], passkeys:[{passkeyId:'key-a',name:'Security key',createdAt:now-86400000},{passkeyId:'key-b',name:'Travel key',createdAt:now-86400000}], devices:[{credentialId:'terminal-a',name:'Build laptop',code:'dv-synthetic',approvedAt:now-86400000,settings:{source:'write',projects:{kind:'project',projectId:'synthetic-project'}},scope:'cli',issuedAt:now-86400000,expiresAt:now+86400000,revoked:false},{credentialId:'terminal-b',name:'Integration runner',scope:'coordination',issuedAt:now-86400000,expiresAt:now+86400000,revoked:false}],github:'example-builder',notice:{at:now-3600000,passkeyId:'key-b'},isDone:true,continueCursor:''};
-function Fixture(){ const [message,setMessage]=React.useState(''); const actions={leave:()=>setMessage('Signed out'),more:()=>{},acknowledge:()=>setMessage('Notice seen'),revoke:()=>setMessage('Fresh passkey requested'),github:()=>setMessage('Fresh GitHub check requested'),add:()=>setMessage('Add passkey requested'),rename:(_id,name)=>setMessage('Passkey renamed '+name),remove:()=>setMessage('Passkey removal requested'),renameDevice:(_id,name)=>setMessage('Device renamed '+name),endDevice:()=>setMessage('Device signed out'),removeDevice:()=>setMessage('Device removed'),configureDevice:(_id,_name,value)=>setMessage('Device settings '+value.source)}; return params.get('page')?.startsWith('device') ? <DeviceFixture/> : params.get('page') ? <Legal page={params.get('page')}/> : <AccountFrame place="devices" back={null} controls={{viewerHandle:'example-builder',onPalette(){},onKeys(){}}}><YouView data={data} handle="example-builder" now={now} busy={false} problem={null} {...actions}/><p role="status">{message}</p></AccountFrame> }
-function DeviceFixture(){ const known=params.get('page')==='device-known'; const [name,setName]=React.useState('Build laptop'),[typed,setTyped]=React.useState(''),[settings,setSettings]=React.useState({source:'write',projects:{kind:'project',projectId:'synthetic-project'}}),[message,setMessage]=React.useState(''); const request={name:'Build laptop',scope:'cli',expiresAt:now+480000,state:'pending',device:{id:'synthetic-device',code:'dv-synthetic',known,approvedAt:known?now-86400000:null,settings,projectName:'Synthetic project'}};return <><DeviceView phase={{kind:'review',request}} name={name} setName={setName} settings={settings} setSettings={setSettings} code="ABCDE-FGHJK" setCode={()=>{}} typed={typed} setTyped={setTyped} requireTyped={!known} busy={false} problem={null} viewerHandle="example-builder" now={now} submit={event=>event.preventDefault()} decide={approve=>setMessage(approve?'Device approved '+name:'Device denied')} restart={()=>{}}/><p role="status">{message}</p></> }
+const data = { sessions: [{ sessionId:'browser-a', creationTime:now-3600000, lastRefreshedAt:now, current:true }, {sessionId:'browser-b',creationTime:now-86400000,lastRefreshedAt:now-7200000,current:false}], passkeys:[{passkeyId:'key-a',name:'Security key',createdAt:now-86400000},{passkeyId:'key-b',name:'Travel key',createdAt:now-86400000}], devices:[{credentialId:'terminal-a',name:'Build laptop',code:'dv-synthetic',approvedAt:now-86400000,settings:{source:'write',projects:{kind:'project',projectId:'synthetic-project'}},scope:'cli',issuedAt:now-86400000,expiresAt:now+86400000,revoked:false},{credentialId:'terminal-b',name:'Integration runner',scope:'coordination',issuedAt:now-86400000,expiresAt:now+86400000,revoked:false}],github:'example-builder',notice:{at:now-3600000,passkeyId:'key-b'},deviceNotice:{at:now-1800000,credentialId:'terminal-a',signInId:'synthetic-approval'},isDone:true,continueCursor:''};
+function Fixture(){ const [message,setMessage]=React.useState(''); const actions={leave:()=>setMessage('Signed out'),more:()=>{},acknowledge:()=>setMessage('Notice seen'),acknowledgeDevice:()=>setMessage('Device notice seen'),revoke:(includeDevices)=>setMessage(includeDevices?'Fresh passkey requested with devices':'Fresh passkey requested'),github:()=>setMessage('Fresh GitHub check requested'),add:()=>setMessage('Add passkey requested'),rename:(_id,name)=>setMessage('Passkey renamed '+name),remove:()=>setMessage('Passkey removal requested'),renameDevice:(_id,name)=>setMessage('Device renamed '+name),endDevice:()=>setMessage('Device signed out'),removeDevice:()=>setMessage('Device removed'),configureDevice:(_id,_name,value)=>setMessage('Device settings '+value.source)}; return params.get('page')?.startsWith('device') ? <DeviceFixture/> : params.get('page') ? <Legal page={params.get('page')}/> : <AccountFrame place="devices" back={null} controls={{viewerHandle:'example-builder',onPalette(){},onKeys(){}}}><YouView data={data} handle="example-builder" now={now} busy={false} problem={null} {...actions}/><p role="status">{message}</p></AccountFrame> }
+function DeviceFixture(){ const known=params.get('page')==='device-known'; const [name,setName]=React.useState('Build laptop'),[typed,setTyped]=React.useState(''),[settings,setSettings]=React.useState({source:'write',projects:{kind:'project',projectId:'synthetic-project'}}),[message,setMessage]=React.useState(''); const request={name:'Build laptop',scope:'cli',expiresAt:now+480000,state:'pending',device:{id:'synthetic-device',code:'dv-synthetic',known,approvedAt:known?now-86400000:null,settings,projectName:'Synthetic project'}};return <><DeviceView phase={{kind:'review',request}} name={name} setName={setName} settings={settings} setSettings={setSettings} code="ABCDE-FGHJK" setCode={()=>{}} typed={typed} setTyped={setTyped} requireTyped={true} busy={false} problem={null} viewerHandle="example-builder" now={now} submit={event=>event.preventDefault()} decide={approve=>setMessage(approve?'Device approved '+name:'Device denied')} restart={()=>{}}/><p role="status">{message}</p></> }
 createRoot(document.getElementById('root')).render(<Fixture/>);
 `,
   );
@@ -122,8 +122,12 @@ createRoot(document.getElementById('root')).render(<Fixture/>);
           await page.getByRole('status').filter({ hasText: 'Device settings read' }).waitFor();
           await page.getByRole('button', { name: 'Remove this device', exact: true }).click();
           await page.getByRole('status').filter({ hasText: 'Device removed' }).waitFor();
+          await page.getByRole('checkbox', { name: 'Also sign out all devices', exact: true }).check();
           await page.getByRole('button', { name: 'Sign out other sessions', exact: true }).click();
-          await page.getByRole('status').filter({ hasText: 'Fresh passkey requested' }).waitFor();
+          await page
+            .getByRole('status')
+            .filter({ hasText: 'Fresh passkey requested with devices' })
+            .waitFor();
           assert.deepEqual(errors, []);
           for (const kind of ['device-new', 'device-known']) {
             await page.goto('https://forge.test/fixture.html?theme=' + theme + '&page=' + kind);
@@ -162,7 +166,12 @@ createRoot(document.getElementById('root')).render(<Fixture/>);
               await page.getByRole('status').filter({ hasText: 'Device approved Own chosen name' }).waitFor();
             } else {
               assert.equal(await page.getByRole('radio').count(), 0);
-              await page.getByRole('button', { name: 'Sign it in again', exact: true }).press('Enter');
+              const approve = page.getByRole('button', { name: 'Sign it in again', exact: true });
+              assert.equal(await approve.isDisabled(), true);
+              await page
+                .getByRole('textbox', { name: 'Type the code your terminal shows', exact: true })
+                .fill('ABCDE-FGHJK');
+              await approve.press('Enter');
               await page.getByRole('status').filter({ hasText: 'Device approved Build laptop' }).waitFor();
             }
           }

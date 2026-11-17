@@ -89,7 +89,10 @@ test('a forwarded link grants nothing; wrong accounts, stale addresses, ambiguou
     s.caller(subject, email, fields);
     if (fields.forgeCredential)
       assert.equal((await guard(s.ctx, 'cli')).forgeDevice._id, 'invitation-device');
-    await assert.rejects(s.answer(row), refusal('PROJECT_UNAVAILABLE'));
+    await assert.rejects(
+      s.answer(row),
+      refusal(fields.forgeCredential ? 'AUTH_SCOPE_DENIED' : 'PROJECT_UNAVAILABLE'),
+    );
     assert.equal(s.tables.projectReaders.size, 0);
   }
   s.tables.users.set('native', {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { mutation } from './cliServer';
+import { accountMutation } from './cliServer';
 import { requireOwnerPerson } from './ownerPerson';
 import type { MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
@@ -37,7 +37,7 @@ async function grant(
     await ctx.db.insert('projectContributors', { projectId, contributor: person });
   }
 }
-export const answer = mutation({
+export const answer = accountMutation('person')({
   args: {
     invitationId: v.id('projectInvites'),
     operationId: v.string(),
@@ -115,7 +115,7 @@ export const answer = mutation({
     }
   },
 });
-export const unblock = mutation({
+export const unblock = accountMutation('person')({
   args: { id: v.id('invitationBlocks'), operationId: v.string(), expectedVersion: v.number() },
   returns: v.null(),
   handler: async (ctx, { id, operationId, expectedVersion }) => {

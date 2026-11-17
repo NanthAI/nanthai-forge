@@ -18,6 +18,8 @@ export const authTables = {
     accountKey: v.string(),
     legalAcceptance: v.optional(v.object({ version: v.string(), at: v.number() })),
     passkeyNotice: v.optional(v.object({ at: v.number(), passkeyId: v.string() })),
+    deviceNotice: v.optional(v.object({ at: v.number(), credentialId: v.string(), signInId: v.string() })),
+    deviceApprovalProof: v.optional(v.object({ sessionId: v.string(), verifiedUntil: v.number() })),
     sessionEnd: v.optional(
       v.object({
         sessionId: v.string(),
@@ -25,6 +27,8 @@ export const authTables = {
         stateHash: v.string(),
         verifiedUntil: v.number(),
         revokedCount: v.optional(v.number()),
+        includeDevices: v.optional(v.boolean()),
+        purpose: v.optional(v.literal('device')),
       }),
     ),
     githubId: v.optional(v.string()),

@@ -8,21 +8,13 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { neutralDeviceName } from './neutral-names.js';
 import { makeFunctionReference } from 'convex/server';
 import { coordinationClient } from './coordination-client.js';
-import {
-  deploymentUrl,
-  readAuth,
-  resolveAuthToken,
-  writeAuth,
-  type SavedCredential,
-  httpOrigin,
-} from './auth-store.js';
+import { deploymentUrl, readAuth, writeAuth, type SavedCredential, httpOrigin } from './auth-store.js';
 import { ForgeError, invariant } from './errors.js';
 const help = `nforge login [DEPLOYMENT_URL] [--name NAME] [--scope cli|coordination] [--no-browser]
 nforge logout [DEPLOYMENT_URL]
 nforge auth rename NAME [DEPLOYMENT_URL]
 nforge auth status [DEPLOYMENT_URL] [--hostname HOST] [--json [fields]]
-nforge auth handle (NAME | --keep) [DEPLOYMENT_URL]
-auth status defaults to the hosted project in the current folder and reports its deployment/host; an explicit URL or --hostname wins. Outside a project it uses FORGE_DEPLOYMENT_URL or your most recent login. Other auth commands use that environment/login default. A device is named device-xxxx unless you pass --name; auth rename changes it later. Login uses a signed-in Forge browser approval and stores a revocable 30-day credential. Collaborators and agents see you by your Forge handle; \`auth handle\` picks it (or keeps the current one). FORGE_AUTH_TOKEN overrides stored credentials for hosted commands.\n`;
+auth status defaults to the hosted project in the current folder and reports its deployment/host; an explicit URL or --hostname wins. Outside a project it uses FORGE_DEPLOYMENT_URL or your most recent login. Other auth commands use that environment/login default. A device is named device-xxxx unless you pass --name; auth rename changes it later. Login uses a signed-in Forge browser approval and stores a revocable 30-day credential. Collaborators and agents see you by your Forge handle; change it on the web in Settings → Account. FORGE_AUTH_TOKEN overrides stored credentials for hosted commands.\n`;
 export { httpOrigin } from './auth-store.js';
 async function request(origin: string, operation: string, input: unknown) {
   let response: Response;
@@ -67,7 +59,8 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
   }
   if (command === 'auth') {
     const sub = args.shift();
-    if (sub === 'handle') return pickHandle(args);
+    if (sub === 'handle')
+      throw new ForgeError('AUTH_SCOPE_DENIED', 'Change your handle on the web: Settings → Account');
     if (sub === 'rename') return renameDevice(args);
     invariant(sub === 'status', 'BAD_ARGUMENT', help);
     return authStatus(args);
@@ -265,8 +258,13 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
     // Reload to preserve credentials saved for other deployments during approval.
     const latest = readAuth();
     latest.deployments[deployment] = credential;
-    if (latest.devices?.[deployment]?.publicKey === device.publicKey)
+    if (latest.devices?.[deployment]?.publicKey === device.publicKey) {
       latest.devices[deployment].id = result.deviceId ?? randomUUID();
+      if (typeof result.deviceId === 'string') {
+        delete latest.devices[deployment].previousKeys;
+        delete latest.devices[deployment].pendingRenewal;
+      }
+    }
     latest.defaultDeployment = deployment;
     writeAuth(latest);
     await askForHandleOnce(deployment, credential.token);
@@ -290,39 +288,10 @@ const status = makeFunctionReference<'query', Record<string, never>, { handle: s
 async function askForHandleOnce(deployment: string, token: string) {
   try {
     const account = await coordinationClient(deployment, token).query(status, {});
-    if (account.pick)
-      process.stderr.write(
-        `Pick your Forge handle: it is how collaborators and agents see you. Run nforge auth handle NAME${account.handle ? `, or nforge auth handle --keep to keep @${account.handle}` : ''}.\n`,
-      );
+    if (account.pick) process.stderr.write('Change your handle on the web: Settings → Account\n');
   } catch {
     /* Login succeeded; the prompt is advice and the web shows it too. */
   }
-}
-async function pickHandle(args: string[]) {
-  const keep = args.includes('--keep');
-  const positional = args.filter(arg => arg !== '--keep');
-  invariant(
-    positional.length <= (keep ? 1 : 2) && positional.every(arg => !arg.startsWith('-')),
-    'BAD_ARGUMENT',
-    help,
-  );
-  const wanted = keep ? undefined : positional.shift();
-  invariant(keep || wanted, 'BAD_ARGUMENT', help);
-  const store = readAuth();
-  const selected = positional[0] ?? process.env.FORGE_DEPLOYMENT_URL ?? store.defaultDeployment;
-  invariant(selected, 'BAD_ARGUMENT', 'Provide a deployment URL or set FORGE_DEPLOYMENT_URL.');
-  const deployment = deploymentUrl(selected),
-    token = resolveAuthToken(deployment);
-  invariant(token, 'AUTH_REQUIRED', 'Run nforge login first.');
-  const client = coordinationClient(deployment, token);
-  const handle = wanted ?? (await client.query(status, {})).handle;
-  invariant(handle, 'BAD_ARGUMENT', 'Pick a handle: nforge auth handle NAME.');
-  // Setting the same handle again is harmless, so each run uses a fresh operation id.
-  await client.mutation(makeFunctionReference<'mutation'>('urlAccounts:set'), {
-    handle: handle.trim().toLowerCase(),
-    operationId: randomUUID(),
-  });
-  return { deployment, handle: handle.trim().toLowerCase() };
 }
 /** Renames this saved device; the name is a label the owner sees in Account settings. */
 async function renameDevice(args: string[]) {

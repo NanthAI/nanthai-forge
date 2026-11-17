@@ -87,6 +87,11 @@ export async function renewDevice(deployment: string): Promise<SavedCredential> 
         signal: networkTimeout(15_000),
       });
       const result = (await response.json()) as Record<string, unknown>;
+      if (response.status === 429)
+        throw new ForgeError(
+          'AUTH_SLOW_DOWN',
+          'Device logins and renewals share this deployment’s request budget. Try the original command in a minute.',
+        );
       if (!response.ok)
         throw new ForgeError(
           'AUTH_REQUEST_FAILED',
@@ -118,9 +123,13 @@ export async function renewDevice(deployment: string): Promise<SavedCredential> 
     invariant(
       result.status === 'approved',
       'AUTH_REVOKED',
-      result.status === 'removed'
-        ? 'This device was removed. Run nforge login to approve a new device.'
-        : 'This device is signed out. Run nforge login; its name and settings are kept.',
+      result.status === 'unapproved' || result.status === 'superseded'
+        ? 'This device approval is unavailable. Run nforge login to approve it again.'
+        : result.status === 'approval-expired'
+          ? 'This device approval ended. Run nforge login to approve it again; its name and settings are kept.'
+          : result.status === 'removed'
+            ? 'This device was removed. Run nforge login to approve a new device.'
+            : 'This device is signed out. Run nforge login; its name and settings are kept.',
     );
     invariant(
       typeof result.token === 'string' && typeof result.expiresAt === 'number',

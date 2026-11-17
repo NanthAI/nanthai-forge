@@ -14,7 +14,8 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
     revoked = false,
     seenAuth = '',
     startName = '',
-    renamed;
+    renamed,
+    stableProtocol = false;
   const token = 'synthetic-forge-issued-token',
     envToken = 'synthetic-ci-override';
   const server = createServer(async (request, response) => {
@@ -22,13 +23,13 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
     for await (const chunk of request) chunks.push(chunk);
     const input = JSON.parse(Buffer.concat(chunks).toString());
     response.setHeader('Content-Type', 'application/json');
-    if (request.url === '/auth/device/start-v2') {
+    if (request.url === '/auth/device/start-v2' && !stableProtocol) {
       response.statusCode = 404;
       response.end('{}');
-    } else if (request.url === '/auth/device/start' && limited) {
+    } else if ((request.url === '/auth/device/start' || request.url === '/auth/device/start-v2') && limited) {
       response.statusCode = 429;
       response.end(JSON.stringify({ error: 'slow_down', interval: 60 }));
-    } else if (request.url === '/auth/device/start') {
+    } else if (request.url === '/auth/device/start' || request.url === '/auth/device/start-v2') {
       assert.match(input.clientNonce, /^[0-9a-f]{64}$/);
       assert.equal(input.scope, 'cli');
       startName = input.name;
@@ -42,12 +43,29 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
           interval: 5,
         }),
       );
+    } else if (request.url === '/auth/device/renew') {
+      response.end(
+        JSON.stringify({
+          status: 'approved',
+          token,
+          expiresAt: Date.now() + 60000,
+          signInId: input.operationId,
+        }),
+      );
     } else if (request.url === '/auth/device/poll') {
       assert.equal(input.deviceCode, 'a'.repeat(64));
       response.end(
         JSON.stringify(
           decision === 'approved'
-            ? { status: 'approved', token, credentialId: 'synthetic-device', expiresAt: Date.now() + 60000 }
+            ? {
+                status: 'approved',
+                token,
+                credentialId: 'synthetic-device',
+                expiresAt: Date.now() + 60000,
+                ...(stableProtocol
+                  ? { deviceId: 'synthetic-device', deviceCode: 'dv-synthetic', signInId: 'synthetic-signin' }
+                  : {}),
+              }
             : { status: 'access_denied' },
         ),
       );
@@ -145,6 +163,23 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
     { credentialId: 'synthetic-device', name: 'Desk' },
   );
   assert.equal(JSON.parse(readFileSync(file, 'utf8')).deployments[deployment].name, 'Desk');
+  // SI-01: an accepted replacement drops retired private keys and a prior failed renewal proof.
+  const priorKeys = JSON.parse(readFileSync(file, 'utf8'));
+  const privateKey = priorKeys.devices[deployment].privateKey;
+  priorKeys.devices[deployment].previousKeys = [
+    { id: 'old', publicKey: 'retired', privateKey: 'retired-private' },
+  ];
+  priorKeys.devices[deployment].pendingRenewal = { operationId: 'old-renewal', at: 1, proof: 'old-proof' };
+  writeFileSync(file, JSON.stringify(priorKeys), { mode: 0o600 });
+  stableProtocol = true;
+  const stableLogin = await run(['login', deployment, '--no-browser']);
+  assert.equal(stableLogin.code, 0);
+  const replaced = JSON.parse(readFileSync(file, 'utf8')).devices[deployment];
+  assert.equal(replaced.privateKey, privateKey);
+  assert.equal(replaced.previousKeys, undefined);
+  assert.equal(replaced.pendingRenewal, undefined);
+  assert.doesNotMatch(stableLogin.stdout + stableLogin.stderr, /retired-private|PRIVATE KEY/);
+  stableProtocol = false;
   decision = 'denied';
   const denied = await run(['login', deployment, '--no-browser']);
   assert.equal(denied.code, 1);

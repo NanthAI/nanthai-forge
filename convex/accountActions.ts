@@ -3,7 +3,7 @@
 import { v } from 'convex/values';
 import { requireOwnerPerson } from './ownerPerson';
 import { makeFunctionReference, paginationOptsValidator } from 'convex/server';
-import { action, type ActionCtx } from './cliServer';
+import { action, type ActionCtx, accountAction } from './cliServer';
 import { internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
 import { resourceKind, accountSelection, leaveKind } from './accountTypes';
@@ -75,7 +75,7 @@ export const inventory = action({
   },
 });
 // No source/credential bytes: each current ownership family is independently paged and pinned.
-export const begin = action({
+export const begin = accountAction('write')({
   args: { operationId: v.string(), selection: v.array(accountSelection), leave: v.array(leaveKind) },
   returns: v.any(),
   handler: async (ctx, input): Promise<Receipt> => {
@@ -190,7 +190,7 @@ export const begin = action({
     }
   },
 });
-export const advance = action({
+export const advance = accountAction('write')({
   args: { operationId: v.string(), cursor: v.union(v.string(), v.null()) },
   returns: v.any(),
   handler: async (

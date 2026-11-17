@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
+import { CLI_TOKEN_LIFETIME } from '../src/device-lifetime';
 export const deviceScope = v.union(v.literal('cli'), v.literal('coordination'));
 export const deviceSettings = v.object({
   source: v.union(v.literal('write'), v.literal('read'), v.literal('coordination')),
@@ -47,6 +48,7 @@ export const deviceFields = {
   owner: v.optional(v.string()),
   credentialId: v.string(),
   issuedAt: v.optional(v.number()),
+  signInExpiresAt: v.optional(v.number()),
   redemptionId: v.optional(v.string()),
   decisionId: v.optional(v.string()),
   deviceKey: v.optional(v.string()),
@@ -86,6 +88,28 @@ export function currentCredential(
     !row.revoked &&
     !row.removed &&
     row.expiresAt > Date.now() &&
-    (!row.deviceKey || (typeof signIn === 'string' && row.renewal?.operationId === signIn)),
+    (!row.deviceKey ||
+      (!deviceApprovalExpired(row) && typeof signIn === 'string' && row.renewal?.operationId === signIn)),
   );
+}
+
+/** Renewal uses the last sign-in end as its server-observable inactivity boundary; no heartbeat. */
+export function deviceApprovalExpired(
+  row: { deviceApprovedAt?: number; expiresAt: number },
+  now = Date.now(),
+) {
+  return (
+    row.deviceApprovedAt === undefined ||
+    now >= deviceApprovalEnd(row) ||
+    now >= row.expiresAt + 30 * 86400000
+  );
+}
+/** One calendar-year boundary for stored credentials, signed tokens and every transport. */
+function deviceApprovalEnd(row: { deviceApprovedAt?: number }) {
+  const approval = new Date(row.deviceApprovedAt ?? 0);
+  approval.setUTCFullYear(approval.getUTCFullYear() + 1);
+  return approval.getTime();
+}
+export function deviceSignInExpiry(row: { deviceApprovedAt?: number }, issuedAt: number) {
+  return Math.min(issuedAt + CLI_TOKEN_LIFETIME, deviceApprovalEnd(row));
 }

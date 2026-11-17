@@ -31,7 +31,7 @@ export async function deviceOperation(
     invariant(previous.kind === 'device', 'AUTH_OPERATION_CHANGED', 'Retain the original device operation.');
     const receipt = JSON.parse(previous.request) as { hash: string; result: Record<string, unknown> };
     invariant(receipt.hash === hash, 'AUTH_OPERATION_CHANGED', 'Retain the original device operation.');
-    return { userId: user._id, hash, result: receipt.result };
+    return { userId: user._id, hash, result: receipt.result, id: previous._id };
   }
   return { userId: user._id, hash, result: null };
 }
@@ -42,6 +42,15 @@ export async function finishDeviceOperation(
   deviceId: string,
   result: Record<string, unknown>,
 ) {
+  if ('id' in receipt && receipt.id) {
+    invariant(
+      receipt.result?.status === 'reserved',
+      'AUTH_OPERATION_CHANGED',
+      'Retain the original device operation.',
+    );
+    await ctx.db.patch(receipt.id, { request: canonicalPayload({ hash: receipt.hash, result }) });
+    return;
+  }
   await ctx.db.insert('authLinkEvents', {
     userId: receipt.userId,
     operationId,

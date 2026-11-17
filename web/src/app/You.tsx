@@ -20,6 +20,13 @@ export default function You({ handle, leave }: { handle?: string; leave?: () => 
       return '';
     }
   });
+  const [seenDevice, setSeenDevice] = useState(() => {
+    try {
+      return localStorage.getItem('forge.device-notice') ?? '';
+    } catch {
+      return '';
+    }
+  });
   const start = useMutation(api.authSessions.startConfirmation);
   const revoke = useMutation(api.authSessions.revokeOthers);
   const pendingRevoke = useRef<Parameters<typeof revoke>[0] | null>(null);
@@ -57,6 +64,10 @@ export default function You({ handle, leave }: { handle?: string; leave?: () => 
   const { addPasskey, pending: adding } = useAddPasskey(api.auth);
   const { removePasskey, pending: removing } = useRemovePasskey(api.auth);
   const { signIn: github } = useSignInWithGithub(api.authSessionGithub);
+  const { signIn: githubDevices } = useSignInWithGithub({
+    startSignInWithGithub: api.authSessionGithub.startEndDevicesWithGithub,
+    completeSignInWithGithub: api.authSessionGithub.completeSignInWithGithub,
+  });
   const { flowError } = useOauth();
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -74,7 +85,13 @@ export default function You({ handle, leave }: { handle?: string; leave?: () => 
   return (
     <YouView
       data={
-        data ? { ...data, notice: data.notice?.passkeyId === seenNotice ? null : data.notice } : undefined
+        data
+          ? {
+              ...data,
+              notice: data.notice?.passkeyId === seenNotice ? null : data.notice,
+              deviceNotice: data.deviceNotice?.signInId === seenDevice ? undefined : data.deviceNotice,
+            }
+          : undefined
       }
       handle={handle}
       now={Date.now()}
@@ -91,21 +108,35 @@ export default function You({ handle, leave }: { handle?: string; leave?: () => 
           /* This visit still remembers the acknowledgement. */
         }
       }}
-      revoke={() =>
+      acknowledgeDevice={() => {
+        if (!data?.deviceNotice) return;
+        setSeenDevice(data.deviceNotice.signInId);
+        try {
+          localStorage.setItem('forge.device-notice', data.deviceNotice.signInId);
+        } catch {
+          /* Kept for this visit. */
+        }
+      }}
+      revoke={includeDevices =>
         void run(async () => {
           if (!pendingRevoke.current) {
             const options = await start({});
             pendingRevoke.current = {
               operationId: crypto.randomUUID(),
               response: await assertPasskey(options),
+              ...(includeDevices ? { includeDevices: true } : {}),
             };
           }
           await revoke(pendingRevoke.current);
           pendingRevoke.current = null;
         })
       }
-      github={() =>
-        void run(() => github({ redirectTo: new URL('/-/account/devices', location.origin).href }))
+      github={includeDevices =>
+        void run(() =>
+          (includeDevices ? githubDevices : github)({
+            redirectTo: new URL('/-/account/devices', location.origin).href,
+          }),
+        )
       }
       add={() =>
         void run(async () => {

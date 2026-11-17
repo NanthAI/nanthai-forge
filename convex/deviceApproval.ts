@@ -13,7 +13,7 @@ export async function deviceApproval(ctx: QueryCtx | MutationCtx, row: Doc<'devi
     .withIndex('by_credentialId', q => q.eq('credentialId', row.credentialId))
     .unique();
   invariant(
-    !proposed || proposed.deviceKey === row.deviceKey,
+    !proposed || proposed.removed || proposed.deviceKey === row.deviceKey,
     'AUTH_REQUIRED',
     'Use the approved key for this device.',
   );
@@ -29,12 +29,12 @@ export async function deviceApproval(ctx: QueryCtx | MutationCtx, row: Doc<'devi
           .withIndex('by_credentialId', q => q.eq('credentialId', credentialId))
           .unique();
   invariant(
-    !current || current.deviceKey === row.deviceKey,
+    !current || current.removed || current.deviceKey === row.deviceKey,
     'AUTH_REQUIRED',
     'Use the approved key for this device.',
   );
   const foreign = Boolean(proposed && proposed.owner !== owner);
-  if (current?.deviceApprovedAt !== undefined)
+  if (current?.deviceApprovedAt !== undefined && !current.removed)
     return { current, projectName: null, credentialId, foreign, enabled: true };
   const proposal = JSON.parse(row.request) as { deviceVersion?: number; projectId?: string };
   if (proposal.deviceVersion !== 1 || !proposal.projectId)
@@ -57,7 +57,14 @@ export async function deviceApproval(ctx: QueryCtx | MutationCtx, row: Doc<'devi
             .unique(),
         );
     }
-    return { current: null, projectName: project.name, credentialId, foreign, enabled };
+    return {
+      current: null,
+      removedId: current?.removed ? current._id : undefined,
+      projectName: project.name,
+      credentialId,
+      foreign,
+      enabled,
+    };
   } catch (error) {
     if (!(error instanceof ForgeError) || error.code !== 'PROJECT_UNAVAILABLE') throw error;
     // Explicit login continues through the existing account-wide credential flow when

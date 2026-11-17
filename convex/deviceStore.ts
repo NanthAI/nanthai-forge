@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { publicAbuseBudgets } from './publicAbuseBudgets';
+import { deviceStartLimit, takeDeviceBudget } from './deviceBudget';
+export { deviceStartLimit } from './deviceBudget';
 import { internalMutation, internalQuery } from './server';
 import {
   deviceDocument,
@@ -9,17 +10,18 @@ import {
   credentialFields,
   deviceSettings,
   currentCredential,
+  deviceApprovalExpired,
+  deviceSignInExpiry,
 } from './deviceFields';
 import { accessibleProject } from './projectAuthority';
+import { freshDeviceApproval } from './authDeviceFresh';
 import { deviceApproval } from './deviceApproval';
 import { deviceOperation, finishDeviceOperation } from './deviceOperation';
-import { CLI_TOKEN_LIFETIME } from '../src/device-lifetime';
 import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 import { isDeviceIdentity } from './cliServer';
 /** New device logins per minute for the whole deployment, and expired login rows
  * removed by each new start. Retries of an existing start are not counted. */
-export const deviceStartLimit = { perMinute: 120, cleanup: 4 };
 /** Returns null when the start limit is reached. */
 export const start = internalMutation({
   args: { ...deviceFields, forceApproval: v.optional(v.literal(true)) },
@@ -51,22 +53,14 @@ export const start = internalMutation({
         .withIndex('by_credentialId', q => q.eq('credentialId', args.credentialId))
         .unique();
       invariant(
-        !known || known.deviceKey === args.deviceKey,
+        !known || known.removed || known.deviceKey === args.deviceKey,
         'AUTH_REQUIRED',
         'Use the approved key for this device.',
       );
-      if (known && (known.removed || !forceApproval)) return { known };
+      if (known && !known.removed && !forceApproval) return { known };
     }
     const now = Date.now();
-    const limit = publicAbuseBudgets()?.deviceStartsPerMinute ?? deviceStartLimit.perMinute;
-    // Reuse the bounded attempt-counter table: one point read, independent of the start rate.
-    const scope = 'system:device-start';
-    const recent = await ctx.db
-      .query('deviceAttempts')
-      .withIndex('by_owner', q => q.eq('owner', scope))
-      .unique();
-    const fresh = !recent || now < recent.windowAt || now - recent.windowAt >= 60_000;
-    if (!fresh && recent.count >= limit) return null;
+    if (!(await takeDeviceBudget(ctx))) return null;
     // Expired login rows are removed a few at a time by later starts; no scheduled job runs.
     const expired = await ctx.db
       .query('deviceCodes')
@@ -78,18 +72,8 @@ export const start = internalMutation({
       .withIndex('by_userHash', q => q.eq('userHash', args.userHash))
       .unique();
     invariant(!collision, 'AUTH_CODE_COLLISION', 'Retry login with a new operation.');
-    const budget = {
-      owner: scope,
-      windowAt: fresh ? now : recent.windowAt,
-      count: fresh ? 1 : recent.count + 1,
-    };
-    if (recent) await ctx.db.patch(recent._id, budget);
-    else await ctx.db.insert('deviceAttempts', budget);
     const id = await ctx.db.insert('deviceCodes', {
       ...proposed,
-      ...(args.deviceKey
-        ? { request: JSON.stringify({ ...JSON.parse(args.request), rememberedDevice: Boolean(known) }) }
-        : {}),
       ...(known ? { owner: known.owner } : {}),
     });
     return (await ctx.db.get(id))!;
@@ -147,6 +131,11 @@ export const decide = internalMutation({
       'AUTH_EXPIRED',
       'This device code expired or is unavailable.',
     );
+    invariant(
+      !args.approve || args.userHash === row.userHash,
+      'AUTH_REQUIRED',
+      'Type the code from your terminal before approving.',
+    );
     const device = await deviceApproval(ctx, row, args.owner);
     if (args.requestId)
       invariant(
@@ -183,12 +172,31 @@ export const decide = internalMutation({
       'Sign in to Forge in your browser.',
     );
     let issuedAt: number | undefined;
+    let signInExpiresAt: number | undefined;
     const credentialId = stable
       ? device!.credentialId
-      : device?.foreign
+      : row.deviceKey || device?.foreign
         ? crypto.randomUUID()
         : row.credentialId;
     if (args.approve && stable) {
+      const authId =
+        typeof approver.forgeAuthUser === 'string'
+          ? ctx.db.normalizeId('users', approver.forgeAuthUser)
+          : null;
+      const accountId =
+        authId ??
+        (
+          await ctx.db
+            .query('users')
+            .withIndex('by_accountKey', q => q.eq('accountKey', args.owner))
+            .unique()
+        )?._id;
+      invariant(accountId, 'AUTH_REQUIRED', 'Sign in to Forge in your browser.');
+      invariant(
+        (device?.current && !deviceApprovalExpired(device.current)) || freshDeviceApproval(approver),
+        'AUTH_REQUIRED',
+        'Check with your passkey or GitHub before approving this device.',
+      );
       invariant(device, 'AUTH_REQUIRED', 'Use the proposed device.');
       invariant(!device.current?.removed, 'AUTH_REVOKED', 'Approve a new key after removing a device.');
       const name = device.current?.name ?? args.name?.trim() ?? row.name;
@@ -209,6 +217,11 @@ export const decide = internalMutation({
         await accessibleProject(ctx, id, args.owner);
       }
       issuedAt = Math.floor(Date.now() / 1000) * 1000;
+      const deviceApprovedAt =
+        device.current && !deviceApprovalExpired(device.current)
+          ? device.current.deviceApprovedAt
+          : Date.now();
+      signInExpiresAt = deviceSignInExpiry({ deviceApprovedAt }, issuedAt);
       const value = {
         owner: args.owner,
         name,
@@ -216,20 +229,26 @@ export const decide = internalMutation({
         credentialId,
         deviceKey: row.deviceKey,
         deviceCode: `dv-${digest(row.deviceKey!).slice(0, 10)}`,
-        deviceApprovedAt: device.current?.deviceApprovedAt ?? Date.now(),
+        deviceApprovedAt,
         deviceLastSeen: Date.now(),
         settings,
         issuedAt,
-        expiresAt: issuedAt + CLI_TOKEN_LIFETIME,
+        expiresAt: signInExpiresAt,
         tokenHash: '',
         revoked: false,
         renewal: { operationId: args.operationId, requestHash: receipt!.hash, issuedAt },
       };
+      await ctx.db.patch(accountId, {
+        deviceNotice: { at: Date.now(), credentialId, signInId: args.operationId },
+      });
       if (device.current) await ctx.db.patch(device.current._id, value);
+      else if ('removedId' in device && device.removedId)
+        await ctx.db.patch(device.removedId, { ...value, removed: undefined });
       else await ctx.db.insert('cliCredentials', value);
     }
     await ctx.db.patch(row._id, {
       ...(issuedAt !== undefined ? { issuedAt } : {}),
+      ...(signInExpiresAt !== undefined ? { signInExpiresAt } : {}),
       ...(!stable ? { deviceKey: undefined } : {}),
       ...(args.approve ? { credentialId } : {}),
       state: args.approve ? 'approved' : 'denied',

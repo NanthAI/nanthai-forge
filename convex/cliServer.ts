@@ -3,7 +3,7 @@ import { customAction, customCtx, customMutation, customQuery } from 'convex-hel
 import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
-import { currentCredential } from './deviceFields';
+import { currentCredential, deviceApprovalExpired } from './deviceFields';
 import { deviceProjectRefusal, requireUnlinkedImportAccess, usesUnlinkedImport } from './accessPolicy';
 import { recordCallerReceipts } from './projectSelfMetricReceiptStore';
 import {
@@ -27,6 +27,8 @@ function withPeople<B, C>(
   builder: B,
   mapArgs: (ctx: C, args: unknown) => Promise<unknown>,
   mapResult: Mapper<C>,
+  account?: 'write' | 'person' | 'handle' | 'same',
+  writes = false,
 ): B {
   return ((definition: unknown) => {
     const handler =
@@ -42,6 +44,9 @@ function withPeople<B, C>(
     ) as Shape;
     const imported =
       usesUnlinkedImport((definition as { args?: unknown }).args) || usesUnlinkedImport(returns);
+    const argsShape = (definition as { args?: unknown }).args;
+    if (writes && !account && !resourceArguments(argsShape))
+      throw new Error('Account mutations must declare device access with accountMutation.');
     const wrapped = async (ctx: C, args: unknown) => {
       if (imported) requireUnlinkedImportAccess(ctx as object);
       const selected =
@@ -49,6 +54,23 @@ function withPeople<B, C>(
           ? (args as { projectId: unknown }).projectId
           : undefined;
       const device = (ctx as { forgeDevice?: Doc<'cliCredentials'> | null }).forgeDevice;
+      // An optional/unused selector never turns personal work into a project write.
+      const personal = args && typeof args === 'object' && 'scope' in args && args.scope === 'personal';
+      const policy = account ?? (writes && (selected === undefined || personal) ? 'write' : undefined);
+      if (device && policy && policy !== 'same') {
+        invariant(
+          policy !== 'person' && policy !== 'handle',
+          'AUTH_SCOPE_DENIED',
+          policy === 'handle'
+            ? 'Change your handle on the web: Settings → Account'
+            : 'Make this account change in your Forge browser.',
+        );
+        invariant(
+          !device.settings || (device.settings.projects.kind === 'all' && device.settings.source === 'write'),
+          'AUTH_SCOPE_DENIED',
+          'This device is limited to its selected projects or read-only access. Make account changes in your Forge browser.',
+        );
+      }
       if (typeof selected === 'string' && device?.settings?.projects.kind === 'project')
         invariant(selected === device.settings.projects.projectId, 'AUTH_SCOPE_DENIED', deviceProjectRefusal);
       return mapResult(ctx, args, await handler(ctx, await mapArgs(ctx, args)), returns);
@@ -58,7 +80,22 @@ function withPeople<B, C>(
     );
   }) as B;
 }
-const people = <B>(builder: B) => withPeople<B, QueryCtx | MutationCtx>(builder, subjectArgs, publicPeople);
+const people = <B>(builder: B, account?: 'write' | 'person' | 'handle' | 'same', writes = false) =>
+  withPeople<B, QueryCtx | MutationCtx>(builder, subjectArgs, publicPeople, account, writes);
+/** Registration, not request values, determines whether a mutation selects a resource. */
+function resourceArguments(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const shape = ('json' in value ? value.json : value) as Record<string, unknown>;
+  if (
+    shape.type === 'id' &&
+    (/^(?:project|hostedProject)/.test(String(shape.tableName)) ||
+      ['imports', 'sourceZones', 'agentGrants', 'savedViews', 'derivedArtifacts'].includes(
+        String(shape.tableName),
+      ))
+  )
+    return true;
+  return Object.entries(shape).some(([name, child]) => name === 'projectId' || resourceArguments(child));
+}
 const actionPeople = <B>(builder: B) =>
   withPeople<B, ActionCtx>(builder, actionSubjectArgs, actionPublicPeople);
 // Signed credential markers keep scope/revocation enforcement during issuer reconfiguration.
@@ -81,7 +118,14 @@ async function authorizeAction(
   const key = JSON.stringify([args.credentialId, args.owner, args.scope, args.signInId]),
     now = Date.now(),
     hit = verified.get(key);
-  if (hit && now - hit.at < credentialReuseMs && now >= hit.at && hit.expiresAt > now) return hit.row;
+  if (
+    hit &&
+    now - hit.at < credentialReuseMs &&
+    now >= hit.at &&
+    hit.expiresAt > now &&
+    (!hit.row.deviceKey || !deviceApprovalExpired(hit.row, now))
+  )
+    return hit.row;
   verified.delete(key);
   const row = (await ctx.runQuery(
     makeFunctionReference<'query', typeof args, Doc<'cliCredentials'>>('deviceStore:authorize'),
@@ -186,12 +230,17 @@ export const projectQuery = people(
     }),
   ),
 );
-export const mutation = people(
+const guardedMutationFor = (scope: 'cli' | 'coordination') =>
   customMutation(
     baseMutation,
-    customCtx((ctx: MutationCtx) => guard(ctx, 'cli')),
-  ),
-);
+    customCtx((ctx: MutationCtx) => guard(ctx, scope)),
+  );
+const guardedMutation = guardedMutationFor('cli');
+export const mutation = people(guardedMutation, undefined, true);
+/** Account writes declare their device rule at registration; no request can select a weaker rule. */
+export const accountMutation = (policy: 'write' | 'person' | 'handle' | 'same') =>
+  // Handle policy refuses every device itself, with one remedy for both credential scopes.
+  people(policy === 'handle' ? guardedMutationFor('coordination') : guardedMutation, policy, true);
 const guardedActionFor = (scope: 'cli' | 'coordination') =>
   customAction(baseAction, {
     args: {},
@@ -216,6 +265,14 @@ const guardedActionFor = (scope: 'cli' | 'coordination') =>
   });
 const guardedAction = guardedActionFor('cli');
 export const action = actionPeople(guardedAction);
+export const accountAction = (policy: 'write' | 'person' | 'handle' | 'same') =>
+  withPeople<typeof guardedAction, ActionCtx>(
+    policy === 'handle' ? guardedActionFor('coordination') : guardedAction,
+    actionSubjectArgs,
+    actionPublicPeople,
+    policy,
+  );
+
 export const coordinationAction = actionPeople(guardedActionFor('coordination'));
 /** A bounded result must paginate after the one public identity mapping. */
 export function actionWithMappedResult(transform: (value: unknown, args: unknown) => unknown) {
@@ -233,12 +290,7 @@ export const coordinationQuery = people(
     customCtx((ctx: QueryCtx) => guard(ctx, 'coordination')),
   ),
 );
-export const coordinationMutation = people(
-  customMutation(
-    baseMutation,
-    customCtx((ctx: MutationCtx) => guard(ctx, 'coordination')),
-  ),
-);
+export const coordinationMutation = people(guardedMutationFor('coordination'), undefined, true);
 /** A CLI mutation that may also carry deferred caller receipts (`metricReceipts`).
  * They are written only if the host mutation succeeds, bound to its authorized
  * project and authenticated requester. No extra call is made for them. */
@@ -263,4 +315,6 @@ export const receiptMutation = people(
       };
     },
   }),
+  undefined,
+  true,
 );

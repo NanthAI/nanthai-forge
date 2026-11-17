@@ -68,13 +68,17 @@ function fixture(t) {
   });
   f.insert('users', { accountKey: 'owner', emailVerified: false });
   f.insert('users', { accountKey: 'other', emailVerified: false });
-  let actor = 'owner';
+  let actor = 'owner',
+    freshUntil = Date.now() + 600000;
   const dispatch = (ref, args) => {
     const [name, method] = getFunctionName(ref).split(':');
-    return f.call(`${name}:${method}`, modules[name][method], args, actor);
+    return f.call(`${name}:${method}`, modules[name][method], args, {
+      subject: actor,
+      forgeAuthDeviceVerifiedUntil: freshUntil,
+    });
   };
   const ctx = {
-    auth: { getUserIdentity: async () => ({ subject: actor }) },
+    auth: { getUserIdentity: async () => ({ subject: actor, forgeAuthDeviceVerifiedUntil: freshUntil }) },
     runQuery: dispatch,
     runMutation: dispatch,
   };
@@ -113,6 +117,9 @@ function fixture(t) {
     approve,
     poll,
     renew,
+    fresh(value) {
+      freshUntil = value ? Date.now() + 600000 : 0;
+    },
     actor(value) {
       actor = value;
     },
@@ -155,8 +162,9 @@ test('first approval names and scopes the key once; remembered login keeps setti
   assert.equal(first.deviceCode, stableDeviceCode(device.key));
   assert.equal(JSON.parse(Buffer.from(first.token.split('.')[1], 'base64url')).forgeSignIn, operationId);
   const next = await f.start(device, { name: 'Different untrusted suggestion' });
-  assert.match(next.flow.verification_uri_complete, /\?request=/);
-  const known = await f.inspect({ requestId: next.input.operationId });
+  assert.match(next.flow.verification_uri_complete, /\?code=/);
+  assert.equal((await f.inspect({ requestId: next.input.operationId })).device.known, true);
+  const known = await f.inspect({ code: next.flow.user_code });
   assert.equal(known.name, 'Own private label');
   assert.deepEqual(known.device.settings, settings);
   await f.approve(next.flow);
@@ -236,8 +244,8 @@ test('sign-out keeps the approved key and settings; removal revokes them; replay
   assert.equal(removed.settings, undefined);
   assert.equal(removed.name, '');
   assert.equal(removed.removed, true);
-  assert.equal((await f.renew(device)).status, 'removed');
-  assert.equal((await f.start(device)).flow.status, 'removed');
+  assert.equal((await f.renew(device)).status, 'unapproved');
+  assert((await f.start(device)).flow.user_code);
 });
 
 test('renewal reconciles unknown outcomes, rejects changed proof on replay, and never reactivates a signed-out device', async t => {
@@ -447,4 +455,360 @@ test('the central device-end policy preserves older credential names on sign-out
   assert.equal(removed.removed, true);
   assert.equal(removed.name, '');
   assert.equal(removed.settings, undefined);
+});
+
+test('SI-01: silent renewal ends 30 days after the last sign-in ended and at twelve months despite daily renewal', async t => {
+  const f = fixture(t),
+    device = key(),
+    { flow } = await f.start(device);
+  await f.approve(flow);
+  await f.poll(flow);
+  const row = [...f.tables.cliCredentials.values()][0];
+  const day = 86400000;
+  f.patch('cliCredentials', row._id, { expiresAt: Date.now() - 30 * day });
+  assert.equal((await f.renew(device)).status, 'approval-expired');
+  f.patch('cliCredentials', row._id, {
+    expiresAt: Date.now() + day,
+    deviceLastSeen: Date.now(),
+    deviceApprovedAt:
+      Date.UTC(new Date().getUTCFullYear() - 1, new Date().getUTCMonth(), new Date().getUTCDate()) - day,
+  });
+  assert.equal((await f.renew(device)).status, 'approval-expired');
+  const again = await f.start(device);
+  await f.approve(again.flow);
+  await f.poll(again.flow);
+  assert.equal((await f.renew(device)).status, 'approved');
+});
+
+test('SI-02: a remembered request cannot approve without the matching typed terminal code, including after sign-out', async t => {
+  const f = fixture(t),
+    device = key(),
+    { flow } = await f.start(device);
+  await f.approve(flow);
+  const signed = await f.poll(flow);
+  await f.call('signout', credentials.revoke, {
+    credentialId: signed.credentialId,
+    operationId: randomUUID(),
+  });
+  const next = await f.start(device);
+  await assert.rejects(
+    f.approve(next.flow, { code: undefined, requestId: next.input.operationId }),
+    code('AUTH_REQUIRED'),
+  );
+  await assert.rejects(
+    f.approve(next.flow, { code: 'WRONG-WRONG', requestId: next.input.operationId }),
+    code('AUTH_REQUIRED'),
+  );
+  await f.approve(next.flow, { requestId: next.input.operationId });
+  assert.equal((await f.poll(next.flow)).status, 'approved');
+  const denied = await f.start(device);
+  await actions.decide._handler(f.ctx, {
+    requestId: denied.input.operationId,
+    approve: false,
+    operationId: randomUUID(),
+  });
+  assert.equal((await f.poll(denied.flow)).status, 'access_denied');
+});
+
+test('SI-07: removal clears public key and code, and that same key can be approved afresh', async t => {
+  const f = fixture(t),
+    device = key(),
+    { flow } = await f.start(device);
+  await f.approve(flow);
+  const signed = await f.poll(flow);
+  await f.call('remove', credentials.revoke, {
+    credentialId: signed.credentialId,
+    operationId: randomUUID(),
+    action: 'remove',
+  });
+  const removed = [...f.tables.cliCredentials.values()][0];
+  assert.equal(removed.deviceKey, undefined);
+  assert.equal(removed.deviceCode, undefined);
+  const next = await f.start(device);
+  await f.approve(next.flow, { name: 'Approved again' });
+  assert.equal((await f.poll(next.flow)).name, 'Approved again');
+});
+
+test('SI-01: every approval writes an account notice atomically, retries leave it alone, and a stale browser must prove a new key first', async t => {
+  const f = fixture(t),
+    device = key(),
+    { flow } = await f.start(device);
+  f.fresh(false);
+  assert.equal((await f.inspect({ code: flow.user_code })).needsConfirmation, true);
+  await assert.rejects(f.approve(flow), code('AUTH_REQUIRED'));
+  assert.equal(f.tables.cliCredentials.size, 0);
+  assert([...f.tables.users.values()].every(row => !row.deviceNotice));
+  f.fresh(true);
+  const operationId = randomUUID();
+  await f.approve(flow, {}, operationId);
+  const user = [...f.tables.users.values()].find(row => row.accountKey === 'owner');
+  const notice = user.deviceNotice;
+  assert.equal(notice.signInId, operationId);
+  const row = [...f.tables.cliCredentials.values()][0];
+  assert.equal(notice.credentialId, row.credentialId);
+  assert.equal(typeof row.issuedAt, 'number');
+  await f.approve(flow, {}, operationId);
+  assert.deepEqual(f.tables.users.get(user._id).deviceNotice, notice);
+});
+
+test('SI-01: daily use cannot carry a twelve-month device approval beyond its maximum', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2025, 0, 1) });
+  const f = fixture(t),
+    device = key(),
+    { flow } = await f.start(device);
+  await f.approve(flow);
+  await f.poll(flow);
+  let latest;
+  for (let day = 1; day < 365; day++) {
+    t.mock.timers.tick(86400000);
+    latest = await f.renew(device);
+    assert.equal(latest.status, 'approved');
+  }
+  t.mock.timers.tick(86400000 - 10000);
+  const action = {
+    auth: {
+      getUserIdentity: async () => ({
+        subject: 'owner',
+        forgeCredential: device.id,
+        forgeSignIn: latest.signInId,
+      }),
+    },
+    runQuery: (_ref, args) => f.call('cached action credential', modules.deviceStore.authorize, args),
+  };
+  await guard(action, 'cli');
+  t.mock.timers.tick(20000);
+  await assert.rejects(guard(action, 'cli'), code('AUTH_REVOKED'));
+  assert.equal((await f.renew(device)).status, 'approval-expired');
+});
+
+test('SI-07: unknown-key renewals share the existing start budget; retries of a known renewal do not spend it again', async t => {
+  const f = fixture(t),
+    device = key(),
+    { flow } = await f.start(device);
+  await f.approve(flow);
+  await f.poll(flow);
+  const operationId = randomUUID(),
+    at = Date.now();
+  const before = f.tables.deviceAttempts.size;
+  await f.renew(device, operationId, at);
+  const count = [...f.tables.deviceAttempts.values()].find(row => row.owner === 'system:device-start').count;
+  await f.renew(device, operationId, at);
+  assert.equal(
+    [...f.tables.deviceAttempts.values()].find(row => row.owner === 'system:device-start').count,
+    count,
+  );
+  assert.equal(f.tables.deviceAttempts.size, before);
+  const unknown = key();
+  for (let i = count; i < 120; i++) assert.equal((await f.renew(unknown)).status, 'unapproved');
+  assert.equal((await f.renew(unknown)).status, 'slow_down');
+  assert.equal((await f.start(key())).flow.error, 'slow_down');
+});
+
+test('SI-07: legacy keyless credentials cannot accept device settings, and rollout-off login ignores a client credential id', async t => {
+  const f = fixture(t),
+    credentialId = randomUUID();
+  f.insert('cliCredentials', {
+    owner: 'owner',
+    credentialId,
+    name: 'Legacy',
+    scope: 'cli',
+    tokenHash: 'synthetic',
+    issuedAt: 1,
+    expiresAt: Date.now() + 60000,
+    revoked: false,
+  });
+  await assert.rejects(
+    f.call('legacy settings', credentials.rename, {
+      credentialId,
+      name: 'Legacy',
+      operationId: randomUUID(),
+      settings: { source: 'read', projects: { kind: 'all' } },
+    }),
+    code('AUTH_SCOPE_DENIED'),
+  );
+  f.patch('hostedProjects', f.projectId, { autonomyPolicy: policyPreset('trusted') });
+  const device = key(),
+    { flow } = await f.start(device),
+    selectedId = device.id;
+  await f.approve(flow);
+  const signed = await f.poll(flow);
+  assert.notEqual(signed.credentialId, selectedId);
+  assert.equal(signed.deviceId, undefined);
+});
+
+test('SI-07: a lost renewal preparation reply reuses its budget reservation and pinned issue time', async t => {
+  const f = fixture(t),
+    device = key(),
+    { flow } = await f.start(device);
+  await f.approve(flow);
+  await f.poll(flow);
+  const operationId = randomUUID(),
+    signed = proof(device, 'renew', operationId);
+  const input = {
+    credentialId: device.id,
+    key: device.key,
+    operationId,
+    at: signed.at,
+    proofHash: deviceHash(signed.proof),
+  };
+  const first = JSON.parse(await f.call('first preparation', modules.deviceStableStore.renewal, input));
+  const count = [...f.tables.deviceAttempts.values()].find(row => row.owner === 'system:device-start').count;
+  const repeated = JSON.parse(await f.call('lost reply retry', modules.deviceStableStore.renewal, input));
+  assert.deepEqual(repeated, first);
+  assert.equal(
+    [...f.tables.deviceAttempts.values()].find(row => row.owner === 'system:device-start').count,
+    count,
+  );
+  const result = JSON.parse(await stable.renew._handler(f.ctx, { origin, operationId, device: signed }));
+  assert.equal(result.status, 'approved');
+  assert.equal(
+    [...f.tables.deviceAttempts.values()].find(row => row.owner === 'system:device-start').count,
+    count,
+  );
+});
+
+test('SI-01: signing out all devices uses bounded pages, retains settings, and a continuation leaves later sign-ins active', async t => {
+  const f = fixture(t),
+    before = Date.now();
+  const end = await import(moduleUrl('../convex/deviceEndAll.ts'));
+  const settings = { source: 'write', projects: { kind: 'all' } };
+  let later;
+  for (let i = 0; i < 201; i++) {
+    const id = f.insert('cliCredentials', {
+      owner: 'owner',
+      credentialId: randomUUID(),
+      name: 'Synthetic',
+      scope: 'cli',
+      issuedAt: before - 1000,
+      expiresAt: before + 60000,
+      tokenHash: 'synthetic',
+      revoked: false,
+      settings,
+      deviceLastSeen: before - 1000,
+    });
+    if (i === 150) later = id;
+  }
+  const start = f.counts.length;
+  await f.call(
+    'end first page',
+    {
+      _handler: async ctx => {
+        await end.endAccountDevices(ctx, 'owner', before);
+        return null;
+      },
+    },
+    {},
+  );
+  f.patch('cliCredentials', later, { deviceLastSeen: before + 1 });
+  for (let i = 0; i < f.scheduled.length; i++)
+    await f.call('continue device sign-out', end.next, f.scheduled[i].args);
+  assert.equal([...f.tables.cliCredentials.values()].filter(row => row.revoked).length, 200);
+  assert.equal(f.tables.cliCredentials.get(later).revoked, false);
+  for (const row of f.tables.cliCredentials.values()) assert.deepEqual(row.settings, settings);
+  assert.equal(f.counts.length - start, 3);
+  for (const page of f.counts.slice(start)) {
+    assert(page.documents <= 100);
+    assert(page.writes <= 100);
+  }
+});
+
+test('SI-07: renewal calls and indexed I/O stay constant at current and doubled device scale', async t => {
+  for (const total of [1200, 2400]) {
+    const f = fixture(t),
+      device = key(),
+      { flow } = await f.start(device);
+    await f.approve(flow);
+    await f.poll(flow);
+    for (let i = 1; i < total; i++)
+      f.insert('cliCredentials', {
+        owner: 'owner',
+        credentialId: randomUUID(),
+        name: 'Synthetic',
+        scope: 'cli',
+        issuedAt: 1,
+        expiresAt: Date.now() + 60000,
+        tokenHash: 'synthetic',
+        revoked: false,
+      });
+    const start = f.counts.length;
+    await f.renew(device);
+    const calls = f.counts.slice(start),
+      docs = calls.reduce((n, c) => n + c.documents, 0),
+      writes = calls.reduce((n, c) => n + c.writes, 0);
+    assert.equal(calls.length, 2);
+    assert.equal(docs, 7);
+    assert.equal(writes, 4);
+    console.log(
+      JSON.stringify({
+        renewalDevices: total,
+        internalCalls: calls.length,
+        documents: docs,
+        writes,
+        readBytes: calls.reduce((n, c) => n + c.readBytes, 0),
+        writeBytes: calls.reduce((n, c) => n + c.writeBytes, 0),
+      }),
+    );
+  }
+});
+
+test('SI-01 review: renewal at month 11.9 cannot authorize Git after the twelve-month approval end', async t => {
+  let now = Date.UTC(2025, 0, 1);
+  t.mock.method(Date, 'now', () => now);
+  const f = fixture(t),
+    device = key(),
+    { flow } = await f.start(device);
+  await f.approve(flow);
+  await f.poll(flow);
+  const row = [...f.tables.cliCredentials.values()][0];
+  const end = Date.UTC(2026, 0, 1);
+  now = Date.UTC(2025, 11, 29);
+  f.patch('cliCredentials', row._id, { expiresAt: now - 1, deviceLastSeen: now });
+  const renewed = await f.renew(device);
+  assert.equal(renewed.status, 'approved');
+  const git = await import(moduleUrl('../convex/gitServeStore.ts'));
+  const input = {
+    projectId: 'missing-project',
+    credential: { credentialId: renewed.credentialId, tokenHash: deviceHash(renewed.token) },
+  };
+  assert.deepEqual(await f.call('Git before approval end', git.load, input), {
+    status: 'not-found',
+    signedIn: true,
+  });
+  now = end;
+  assert.deepEqual(await f.call('Git at approval end', git.load, input), { status: 'bad-credential' });
+  assert.equal(renewed.expiresAt, end);
+  assert.equal(f.tables.cliCredentials.get(row._id).expiresAt, end);
+  assert.equal(JSON.parse(Buffer.from(renewed.token.split('.')[1], 'base64url')).exp, end / 1000);
+  // Older stored tokens may still carry a later expiry; the Git row check also enforces approval age.
+  f.patch('cliCredentials', row._id, { expiresAt: end + 30 * 86400000 });
+  assert.deepEqual(
+    await f.call('older Git row at approval end', git.load, {
+      projectId: 'missing-project',
+      sessionCredentialId: renewed.credentialId,
+      sessionSignIn: renewed.signInId,
+    }),
+    { status: 'bad-credential' },
+  );
+});
+
+test('SI-01 review: a remembered browser approval near month twelve caps its stored, returned and signed expiry', async t => {
+  let now = Date.UTC(2025, 0, 1);
+  t.mock.method(Date, 'now', () => now);
+  const f = fixture(t),
+    device = key(),
+    { flow } = await f.start(device);
+  await f.approve(flow);
+  await f.poll(flow);
+  const row = [...f.tables.cliCredentials.values()][0];
+  const end = Date.UTC(2026, 0, 1);
+  now = Date.UTC(2025, 11, 29);
+  f.patch('cliCredentials', row._id, { expiresAt: now - 1, deviceLastSeen: now });
+  f.fresh(true);
+  const again = await f.start(device);
+  await f.approve(again.flow);
+  const signed = await f.poll(again.flow);
+  assert.equal(f.tables.cliCredentials.get(row._id).deviceApprovedAt, Date.UTC(2025, 0, 1));
+  assert.equal(f.tables.cliCredentials.get(row._id).expiresAt, end);
+  assert.equal(signed.expiresAt, end);
+  assert.equal(JSON.parse(Buffer.from(signed.token.split('.')[1], 'base64url')).exp, end / 1000);
 });
