@@ -278,7 +278,8 @@ function byItem(rows: readonly YardRow[]) {
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
-/** The head's sentence: what needs the reader first, then where the rest is. Counts reconcile with the yard. */
+/** The head's sentence: what needs the reader, what is not listed, and what lands next. Counts per stop are the shell
+ * strip's alone: a second grouping of the same Lanes here read as a disagreement (owner dogfood 2026-11-17). */
 export function situation(yard: Yard): { lead: string; rest: string } {
   const needs = yard.counts.needs;
   const lead = !yard.open
@@ -287,9 +288,6 @@ export function situation(yard: Yard): { lead: string; rest: string } {
       ? `${plural(needs, 'Lane')} ${needs === 1 ? 'needs' : 'need'} you.`
       : 'No Lane needs you.';
   const parts = [
-    yard.counts.queue && `${yard.counts.queue.toLocaleString()} in the landing queue`,
-    yard.counts.work && `${yard.counts.work.toLocaleString()} being worked on`,
-    yard.counts.quiet && `${yard.counts.quiet.toLocaleString()} quiet`,
     yard.beyond &&
       `${yard.beyond.toLocaleString()}${yard.beyondIsLowerBound ? ' or more' : ''} more not shown`,
   ].filter(Boolean) as string[];

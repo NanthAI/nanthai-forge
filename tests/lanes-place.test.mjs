@@ -88,7 +88,7 @@ test('the yard puts every held Lane under Needs you, so its count equals the she
   assert.equal(yard.next.laneId, 'c', 'next is the queue position 1, never a held Lane');
   assert.deepEqual(model.situation(yard), {
     lead: '2 Lanes need you.',
-    rest: '1 in the landing queue, 2 being worked on. Check me lands next.',
+    rest: 'Check me lands next.',
   });
 });
 

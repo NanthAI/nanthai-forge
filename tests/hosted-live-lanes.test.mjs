@@ -308,3 +308,20 @@ test('Issue filtering follows the same bounded successor Intent chain as planned
     [lane],
   );
 });
+
+test('the CLI Loose ends view reads the reply the hosted transport already decoded, and still accepts JSON text', async () => {
+  const { liveLanes } = await import('../dist/hosted-live-lanes.js');
+  const reply = { at: 1, setAside: null, groups: { stopped: { reported: true, rows: [], more: false } } };
+  for (const sent of [reply, JSON.stringify(reply)]) {
+    const calls = [];
+    const transport = {
+      query: async (name, args) => {
+        calls.push([name, args]);
+        return sent;
+      },
+    };
+    const result = await liveLanes(transport, { view: 'loose-ends' });
+    assert.deepEqual(result.result, reply);
+    assert.deepEqual(calls, [['projectLooseEnds:read', {}]]);
+  }
+});

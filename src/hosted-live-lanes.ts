@@ -23,6 +23,10 @@ export const liveLanesInput = z
     view: z.enum(['all', 'live', 'dormant', 'loose-ends']).optional(),
   })
   .strict();
+/** The read returns canonical JSON text; the hosted transport already decodes JSON replies, so the reply may arrive as
+ * the object itself (a second JSON.parse made every `view:"loose-ends"` read fail). */
+const looseEnds = (reply: unknown) => (typeof reply === 'string' ? JSON.parse(reply) : reply);
+
 export async function liveLanes(transport: HostedAgentTransport, input: Record<string, unknown>) {
   const parsed = liveLanesInput.safeParse(planningIssueArguments('lanes', input));
   invariant(
@@ -39,7 +43,7 @@ export async function liveLanes(transport: HostedAgentTransport, input: Record<s
       resolved: null,
       result:
         parsed.data.view === 'loose-ends'
-          ? JSON.parse((await transport.query('projectLooseEnds:read', {})) as string)
+          ? looseEnds(await transport.query('projectLooseEnds:read', {}))
           : await transport.query('projectHostedLiveLanes:list', parsed.data),
     };
   } catch (error) {

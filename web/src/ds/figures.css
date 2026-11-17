@@ -309,13 +309,7 @@
 
   /* the yard: every open Lane on the four stops and main, the crossing, and the overlap view's own lines */
   .yard { --lab: 300px; --actw: 330px; }
-  .zones, .ln { display: grid; grid-template-columns: var(--lab) minmax(0, 1fr) var(--actw); }
-  .zones { position: sticky; top: var(--stick-top, 0px); z-index: 3; background: var(--surface); border-bottom: var(--rule) solid var(--line); height: 32px; align-items: stretch; font-size: var(--t-meta); color: var(--text-2); }
-  .zones .zl { display: flex; align-items: center; padding: 0 var(--gut); color: var(--text-3); gap: var(--s-2); white-space: nowrap; overflow: hidden; }
-  .zones .zs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) 34px; }
-  .zones .zs span { display: flex; align-items: center; gap: 6px; padding: 0 10px; border-left: var(--rule) solid var(--line); font-weight: var(--w-strong); white-space: nowrap; overflow: hidden; }
-  .zones .zs span b { font: var(--w-strong) 12px/1 var(--font-mono); color: var(--text); }
-  .zones .zs span.zm { padding: 0; overflow: visible; justify-content: center; color: var(--text); border-left: 0; }
+  .ln { display: grid; grid-template-columns: var(--lab) minmax(0, 1fr) var(--actw); }
   .ln { position: relative; align-items: center; min-height: var(--row-h-lane); border-bottom: var(--rule) solid var(--line); color: inherit; }
   .ln .lab { padding: var(--s-2) var(--s-3) var(--s-2) var(--gut); min-width: 0; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 1px 10px; align-items: start; }
   .ln .lab .av { grid-row: span 2; margin-top: 2px; }
@@ -354,10 +348,6 @@
   }
   @container (max-width: 900px) {
     .yard { --lab: 0px; --actw: 0px; }
-    .yard .zones { grid-template-columns: minmax(0, 1fr); }
-    .yard .zones .zl { display: none; }
-    .yard .zones .zs span { padding: 0 6px; font-size: var(--t-micro); }
-    .yard .zones .zs span:first-child { border-left: 0; }
     .yard .ln { grid-template-columns: minmax(0, 1fr); }
     .yard .ln .lab { padding: 10px var(--gut) 2px; }
     .yard .ln .actn { padding: var(--s-1) var(--gut) var(--s-2) 54px; }

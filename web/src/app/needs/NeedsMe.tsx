@@ -26,10 +26,10 @@ import { Announcer, useAnnounce } from '../../ds/behaviour/announce';
 import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { Head, Placeholder, crumbsFor } from '../Place';
+import { progressCells, progressOf, type PlanCountsRead } from '../progress';
 import type { PlaceProps } from '../screens';
 import GettingStarted from '../start/GettingStarted';
 import {
-  itemCounts,
   moving,
   needsSentence,
   needsView,
@@ -47,7 +47,7 @@ type ProjectRoute = PlaceProps['route'];
 const needsRead = makeFunctionReference<'query', { projectId: Id<'hostedProjects'> }, NeedsRead>(
   'projectNeedsMe:read',
 );
-const LAYOUT: DockLayout = { top: ['needs'], a: ['moving'], b: ['more'] };
+const LAYOUT: DockLayout = { top: ['needs'], a: ['fyi', 'moving'], b: ['more'] };
 /** Shown at most this many per band; the rest open in place, oldest last (DESIGN.md rule 43). */
 const CAP = 4;
 
@@ -69,13 +69,7 @@ export default function NeedsMe(props: PlaceProps) {
 
 function NeedsMeScreen({ route, projectId, projectName, feed }: PlaceProps) {
   const read = useQuery(needsRead, { projectId });
-  const counts = useQuery(api.projectWorkIndex.records, {
-    projectId,
-    collection: 'planningItems',
-    planningFilter: { kind: 'issue' },
-    counts: true,
-    paginationOpts: { numItems: 1000, cursor: null },
-  });
+  const counts = useQuery(api.projectPlanCounts.read, { projectId });
   const decide = useProjectDecide(projectId);
   return (
     <NeedsMeView
@@ -113,7 +107,7 @@ export function NeedsMeView({
   settingDetail,
 }: Pick<PlaceProps, 'route' | 'projectName' | 'feed'> & {
   read: NeedsRead | undefined;
-  counts: Parameters<typeof itemCounts>[0];
+  counts: PlanCountsRead | undefined;
   decide: Decide;
   /** Getting started (start/GettingStarted.tsx), shown while nothing is held; it hides itself once setup is done. */
   setup?: ReactNode;
@@ -121,7 +115,7 @@ export function NeedsMeView({
   settingDetail?: (laneId: string) => ReactNode;
 }) {
   const view = useMemo(() => (read ? needsView(read) : null), [read]);
-  const items = itemCounts(counts);
+  const items = progressOf(counts);
   const motion = moving(feed);
   const [layout, setLayout, resetLayout] = useDockLayout('needs-me', LAYOUT);
   const [message, announce] = useAnnounce();
@@ -201,6 +195,22 @@ export function NeedsMeView({
         </Region>
       ),
     },
+    // Only while something is in it: an empty FYI would be one more always-on line.
+    ...(view?.fyi.length
+      ? [
+          {
+            id: 'fyi',
+            title: 'FYI',
+            render: (handle: ReactNode) => (
+              <Fyi
+                rows={view.fyi}
+                handle={handle}
+                laneHref={laneId => at({ place: 'lanes', rest: laneId })}
+              />
+            ),
+          },
+        ]
+      : []),
     {
       id: 'moving',
       title: 'Moving without you',
@@ -221,8 +231,11 @@ export function NeedsMeView({
             <Row cols="auto minmax(0, 1fr) auto">
               <KindMark kind="lane" />
               <span className="ttl">
-                {motion.total.toLocaleString()} {motion.total === 1 ? 'Lane is' : 'Lanes are'} moving:{' '}
-                {motion.parts}
+                {motion.total.toLocaleString()}
+                {motion.total < motion.open && !motion.more
+                  ? ` of ${motion.open.toLocaleString()} open Lanes ${motion.total === 1 ? 'is' : 'are'}`
+                  : ` ${motion.total === 1 ? 'Lane is' : 'Lanes are'}`}{' '}
+                moving: {motion.parts}
                 {motion.more ? `, and ${motion.moreIsLowerBound ? 'at least ' : ''}${motion.more} more` : ''}
               </span>
               <A className="lk" href={at({ place: 'lanes' })}>
@@ -279,31 +292,17 @@ export function NeedsMeView({
       {setup && view && !view.count ? setup : null}
       <Standing
         of="app"
-        done={{
-          n: items?.done ?? 0,
-          more: items ? (feed?.main?.at ? `last landing ${clock(feed.main.at)}` : undefined) : 'not reported',
-          href: at({ place: 'code' }),
-        }}
-        inProgress={{
-          n: items?.inProgress ?? 0,
-          more:
+        {...progressCells(items, {
+          inProgress:
             lanesOpen === null
               ? undefined
               : `${lanesOpen.toLocaleString()} ${lanesOpen === 1 ? 'Lane' : 'Lanes'} open${view?.count ? `, ${view.count} held` : ''}`,
-          href: at({ place: 'lanes' }),
-        }}
-        left={{
-          n: items?.left ?? 0,
-          more: items
-            ? [
-                items.proposed ? `${items.proposed.toLocaleString()} proposed` : '',
-                items.complete ? '' : 'at least',
-              ]
-                .filter(Boolean)
-                .join(', ') || undefined
-            : 'not reported',
-          href: at({ place: 'plan' }),
-        }}
+          hrefs: {
+            done: at({ place: 'code' }),
+            inProgress: at({ place: 'lanes' }),
+            left: at({ place: 'plan' }),
+          },
+        })}
       />
       <Dock
         label="Regions on Needs me"
@@ -315,13 +314,6 @@ export function NeedsMeView({
       <Announcer message={message} />
     </div>
   );
-}
-
-function clock(iso: string) {
-  const at = new Date(iso);
-  return Number.isNaN(at.getTime())
-    ? 'not reported'
-    : at.toLocaleString(undefined, { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' });
 }
 
 /** The first rows, then the rest opening in place (oldest last). A count beyond the read says so (rule 1). */
@@ -359,6 +351,42 @@ function Capped<T>({
         </div>
       ) : null}
     </>
+  );
+}
+
+/** Held Lanes nothing asks a person about (Items 0cb9b064, 48049998): folded by default, never counted. */
+function Fyi({
+  rows,
+  handle,
+  laneHref,
+}: {
+  rows: NowRow[];
+  handle: ReactNode;
+  laneHref: (laneId: string) => string;
+}) {
+  return (
+    <Region
+      title="FYI"
+      weight="ref"
+      count={rows.length}
+      handle={handle}
+      fold="needs-fyi"
+      foldedByDefault
+      hint="agents handle these"
+    >
+      {rows.map(row => (
+        <Row key={row.laneId} cols="auto minmax(0, 1fr) auto">
+          <State word={row.word}>{row.tag}</State>
+          <A className="ttl lk" href={laneHref(row.laneId)} dir="auto">
+            {row.head}
+          </A>
+          <span className="t3">
+            {row.who ? `${row.who}: ` : ''}
+            {row.next}
+          </span>
+        </Row>
+      ))}
+    </Region>
   );
 }
 

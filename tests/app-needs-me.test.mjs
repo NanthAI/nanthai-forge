@@ -6,9 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 
-const { needsView, needsSentence, itemCounts, moving, whoOf } = await import(
-  moduleUrl('../web/src/app/needs/model.ts')
-);
+const { needsView, needsSentence, moving, whoOf } = await import(moduleUrl('../web/src/app/needs/model.ts'));
 const { heldCount } = await import(moduleUrl('../web/src/app/Line.tsx'));
 const { decideTarget } = await import(moduleUrl('../web/src/app/needs/decide.ts'));
 
@@ -131,18 +129,24 @@ test('incomplete approval coverage is reported, not read as none', () => {
   assert.equal(view.approvalsComplete, false);
 });
 
-test('standing counts Items: Left is planned work, proposed is its own fact, partial coverage says so', () => {
-  const counts = itemCounts({
-    counts: { closed: 5, 'in-progress': 2, open: 7, proposed: 3, abandoned: 1 },
-    isDone: true,
-  });
-  assert.deepEqual(counts, { done: 5, inProgress: 2, left: 7, proposed: 3, complete: true });
-  assert.equal(itemCounts({ counts: { open: 1 }, isDone: false }).complete, false);
-  assert.equal(
-    itemCounts({ counts: {}, isDone: true, coverage: 'partial-needs-preparation' }).complete,
-    false,
+test('one progress definition (3fa3187d): Done is all closed Issues, today beside it, capped figures read N+', async () => {
+  const { progressOf, progressCells } = await import(moduleUrl('../web/src/app/progress.ts'));
+  const issue = { closed: 579, inProgress: 57, open: 237, proposed: 8, abandoned: 4 };
+  const now = Date.parse('2026-11-17T15:00:00Z');
+  const exact = progressOf({ exact: true, issue, closedToday: { day: '2026-11-17', n: 12 } }, now);
+  assert.deepEqual(exact, { done: 579, inProgress: 57, left: 237, proposed: 8, today: 12, atLeast: false });
+  const cells = progressCells(exact, { inProgress: '3 Lanes open' });
+  assert.deepEqual(
+    [cells.done.n, cells.done.more, cells.done.atLeast, cells.left.more, cells.inProgress.more],
+    [579, '12 today', false, '8 proposed', '3 Lanes open'],
   );
-  assert.equal(itemCounts({ isDone: true }), null, 'no counts is not reported, never zero');
+  assert.equal(progressOf({ exact: true, issue, closedToday: { day: '2026-11-16', n: 9 } }, now).today, 0);
+  const capped = progressCells(progressOf({ exact: false, issue, closedToday: null }, now));
+  assert.deepEqual(
+    [capped.done.atLeast, capped.inProgress.atLeast, capped.left.atLeast, capped.done.more, capped.left.more],
+    [true, true, true, undefined, '8+ proposed'],
+  );
+  assert.equal(progressOf(undefined), null, 'no read is loading, never zero');
 });
 
 test('moving without you lists the line marks that are not held, by stop', () => {
@@ -161,5 +165,24 @@ test('moving without you lists the line marks that are not held, by stop', () =>
     exit: null,
   });
   assert.equal(result.total, 3);
+  assert.equal(result.open, 4, 'out of every open Lane the shell strip counts');
   assert.equal(result.parts, '2 saved, 1 checking');
+});
+
+test('0cb9b064: a landing its agent withdrew is FYI, labelled withdrawn, and never counted in Needs you', () => {
+  const view = needsView(read([held('l1', 'withdrawn', 30), held('l2', 'review', 10)], []));
+  assert.deepEqual(
+    view.now.map(row => row.laneId),
+    ['l2'],
+  );
+  assert.equal(view.count, 1);
+  assert.equal(view.fyi.length, 1);
+  const [fyi] = view.fyi;
+  assert.deepEqual(
+    [fyi.word, fyi.tag, fyi.next],
+    ['Set aside', 'Withdrawn', 'its agent lands again when ready'],
+  );
+  assert.match(fyi.head, /: its agent withdrew the landing\.$/);
+  assert.doesNotMatch(fyi.head, /refused/i);
+  assert.equal(needsSentence(needsView(read([held('l1', 'withdrawn', 30)], []))).bold, 'Nothing needs you.');
 });

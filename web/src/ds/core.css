@@ -302,7 +302,7 @@
   .region[data-weight="ref"], .pane[data-weight="ref"] { background: var(--ref-surface); }
   .region[data-weight="ref"] > .ph h2, .region[data-weight="ref"] > .ph h3 { color: var(--ref-ink); font-weight: var(--w-strong); }
   .region[data-weight="ref"] > .ph .cnt { background: transparent; box-shadow: inset 0 0 0 var(--rule) var(--line-strong); color: var(--ref-ink); }
-  .region[data-weight="ref"] .zones, .region[data-weight="ref"] .th { background: var(--ref-surface); }
+  .region[data-weight="ref"] .th { background: var(--ref-surface); }
   @media (hover: hover) and (pointer: fine) {   
     [data-weight="watch"] a.lk:hover, [data-weight="ref"] a.lk:hover { color: var(--accent); text-decoration-color: currentColor; }
     [data-weight="ref"] .row:hover .ttl, [data-weight="ref"] .ln:hover .lab .ttl, [data-weight="ref"] .row:hover .num.t2 { color: var(--text); }
@@ -354,7 +354,7 @@
   .pstate .ps b { color: var(--text); font: var(--w-bold) var(--t-body)/1 var(--font-mono); font-variant-numeric: tabular-nums; }
   .pstate .ps .more { color: var(--text-3); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   @media (hover: hover) and (pointer: fine) { .pstate a.ps:hover { color: var(--text); } .pstate a.ps:hover .more { color: var(--text-2); } }
-  @media (max-width: 860px) { .pstate { padding-inline: var(--gut); gap: var(--s-1) var(--s-4); } .pstate > .roll { flex-basis: 100%; } .pstate .ps { flex: 1 1 100%; white-space: normal; flex-wrap: wrap; } }
+  @media (max-width: 860px) { .pstate { padding-inline: var(--gut); gap: var(--s-1) var(--s-4); } .pstate > .roll { flex-basis: 100%; } .pstate .ps { flex: 1 1 100%; white-space: normal; flex-wrap: wrap; } .pstate a.ps { min-block-size: 24px; align-items: center; } }
   [data-weight="ref"] .nums b { font-size: var(--t-body); line-height: var(--lh-body); letter-spacing: 0; }
   [data-weight="ref"] .nums > div { padding-block: var(--s-2); }
   [data-weight="ref"] .nums span { color: var(--ref-ink-2); }

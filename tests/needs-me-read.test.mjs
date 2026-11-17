@@ -83,3 +83,54 @@ test('open approval requests are the same payload projectHostedApprovals:list re
   assert.equal(mine.approvals, list);
   assert.deepEqual(JSON.parse(mine.approvals).requests, []);
 });
+
+test('0cb9b064: a withdrawn landing stops holding its Lane; a hold from before reads withdrawn, titled in words', async t => {
+  const { landingObservation } = await import('../dist/hosted-landing.js');
+  const f = await finishFixture(t);
+  const state = await f.enqueue(f.request());
+  await observe(f, state.id, before => ({
+    observation: { ...before.observation, pendingReason: 'waiting-for-review' },
+  }));
+  assert.equal((await read(f)).held.length, 1);
+  await observe(f, state.id, () => ({
+    phase: 'terminal-failed',
+    observation: landingObservation('cancelled'),
+    error: { code: 'LANDING_CANCELLED', message: 'Withdrawn to add a delta.' },
+  }));
+  const shell = await f.tx('lineRead', line.read, { projectId: f.projectId });
+  assert.equal(shell.lanes.filter(lane => lane.held).length, 0, 'the top bar holds nothing for a person');
+  assert.deepEqual((await read(f)).held, [], 'and Needs me lists nothing');
+  // A mark held by a withdrawal before this change: Needs me names it withdrawn and titles it without the raw id.
+  const presence = await f.tx(
+    'legacyWithdrawnHold',
+    {
+      _handler: async ctx => {
+        const lane = q => q.eq('projectId', f.projectId).eq('laneId', f.lane.laneId);
+        const mark = await ctx.db
+          .query('projectLiveLineLanes')
+          .withIndex('by_project_and_lane', lane)
+          .unique();
+        await ctx.db.patch(mark._id, { held: true });
+        const row = await ctx.db
+          .query('projectHostedPresence')
+          .withIndex('by_project_and_lane', lane)
+          .unique();
+        if (row) await ctx.db.patch(row._id, { goal: `${f.lane.laneId.slice(0, 13)}-…: site function` });
+        return Boolean(row);
+      },
+    },
+    {},
+  );
+  const legacy = await read(f);
+  assert.equal(legacy.held[0].why, 'withdrawn');
+  assert.equal(legacy.held[0].note, 'Withdrawn to add a delta.');
+  assert.ok(presence, 'the fixture Lane has a presence row');
+  assert.equal(legacy.held[0].title, 'site function');
+  assert.equal(needs.withoutRawId('875a4b60-3aad-462c-9a03-e306ef5bf4be'), '');
+  assert.equal(needs.withoutRawId('Public pages: share cards'), 'Public pages: share cards');
+  assert.equal(
+    needs.withoutRawId('abcdef12 fix the bug'),
+    'abcdef12 fix the bug',
+    'a word that looks like hex stays',
+  );
+});

@@ -118,7 +118,7 @@ createRoot(document.getElementById('root')!).render(
       count={yard.rows.length}
       hint="stuck work first"
     >
-      <Yard rows={yard.rows} hrefOf={id => `#${id}`} dense={false} label="" />
+      <Yard rows={yard.rows} hrefOf={id => `#${id}`} dense={false} />
     </Region>
   </main>,
 );

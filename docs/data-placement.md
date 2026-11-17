@@ -341,6 +341,18 @@ storage/index and exceptional preparation work remain separate; no CPU or egress
 
 Plan reuses transactional `projectFinishReadRows` variants: one authority/Work-pointer row per active Work project and one schema/status/coverage header per generation. Empty projects and removal tombstones retain no Plan project header. Headers share the existing project purge and generation deletion paths. Controller history and unused Work metadata remain exact in their source rows and are absent from these reads. Only project authority/Work-pointer changes add a narrow header lookup; journal/controller-only patches add none, and byte-identical headers are not rewritten. Generation upkeep touches only its selected fields. RPC counts and idle costs stay unchanged. The Plan fixture budgets 4 KB for one project header and up to two generation headers; the landing ledger records the separate fixed project row (300/302 fixture bytes), nine fixed index entries (676/694 key bytes) and the measured three-entry index-write guard increase. These cannot merge into the finite observer header without making that observer depend on the Work pointer. The ordinary page update guard allows 16 KB per read/write side for unique title references, with two reads/two writes in the steady-state fixture; a split or move can touch another leaf. Optional oversized headers retain exact source reads instead of denying a project or generation write.
 
+### Planning progress counter
+
+One `_workStorePlanCounts` row (key `counts`, about 520 bytes) per record partition in `projectWorkDataRecords` holds
+Issue and Initiative counts by status and the Issues closed on the current UTC day (Item 3fa3187d). The common Work
+writer collects each search root's kind/status move and, only when a count moved, reads and patches the row once per
+transaction; a title or body edit costs nothing. Fresh partitions insert the row complete at creation. Older ones are
+counted by `projectPlanCounts:backfill`, 200 roots per transaction, with its cursor in the row itself: it is
+idempotent, safe to re-run and rebuildable with `restart`. While it runs, a move is counted only behind the cursor.
+Needs me and Plan read the row with one point read; without a complete row they read one capped page and mark every
+figure as a lower bound. It shares the partition's purge, snapshot exclusion and retirement; no table, index or
+retention rule is added.
+
 ### Candidate and projection retirement follow-up
 
 The Candidate page reads its file list once on opening; per-file provenance is

@@ -110,7 +110,7 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
             </div>
           ) : shown.length ? (
             <>
-              <Yard rows={shown} hrefOf={laneHref} dense={shown.length > 12} label="" />
+              <Yard rows={shown} hrefOf={laneHref} dense={shown.length > 12} />
               {shown.some(row => row.longWait) ? (
                 <div className="pf">
                   A Lane waits longer than a usual check.{' '}

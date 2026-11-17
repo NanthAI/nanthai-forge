@@ -21,6 +21,7 @@ import { useSafePaginatedQuery, useSafeQuery } from '../../safe-query';
 import { A } from '../frames';
 import { currentScreenHref, hrefFor } from '../paths';
 import { Head, crumbsFor } from '../Place';
+import { progressCells, progressOf, type PlanCountsRead } from '../progress';
 import { navigate, useSearch } from '../router';
 import type { PlaceProps } from '../screens';
 import { readComments, readItems, runBatch, batchApply, type BatchOutcome, type RunBatch } from './batch';
@@ -110,6 +111,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
   const search = useSearch();
   const query = useMemo(() => readQuery(search), [search.toString()]);
   const live = useSafeQuery(planRead, { projectId });
+  const counts = useSafeQuery(api.projectPlanCounts.read, { projectId });
   // A failed or offline refresh keeps the last rows and the chosen view; the page says so.
   const last = useRef<PlanRead | undefined>(undefined);
   if (live.value) last.current = live.value;
@@ -159,6 +161,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
       closed={closed}
       dropped={dropped}
       showDone={showDone}
+      progress={counts.value}
     />
   );
 }
@@ -190,7 +193,10 @@ export function PlanScreenView({
   closed = noSettled,
   dropped = noSettled,
   showDone = () => undefined,
+  progress: progressRead,
 }: Pick<PlaceProps, 'route' | 'projectName' | 'feed'> & {
+  /** The project's progress counts (convex/projectPlanCounts.ts), the same read Needs me shows. */
+  progress?: PlanCountsRead | undefined;
   /** Hosted reads for the Item page's comments and versions; without it the page draws neither. */
   projectId?: Id<'hostedProjects'> | undefined;
   read: PlanRead | undefined;
@@ -472,26 +478,13 @@ export function PlanScreenView({
       </Head>
       <Standing
         of="app"
-        done={{ n: whole?.done ?? 0, more: whole ? 'in open Initiatives' : 'loading' }}
-        inProgress={{
-          n: whole?.inProgress ?? 0,
-          more:
+        {...progressCells(progressOf(progressRead), {
+          inProgress:
             lanesOpen === null
               ? undefined
               : `${lanesOpen.toLocaleString()} ${lanesOpen === 1 ? 'Lane' : 'Lanes'} open`,
-          href: at({ place: 'lanes' }),
-        }}
-        left={{
-          n: whole ? whole.planned + whole.proposed : 0,
-          more: whole
-            ? [
-                whole.proposed ? `${whole.proposed.toLocaleString()} proposed` : '',
-                whole.more ? 'at least' : '',
-              ]
-                .filter(Boolean)
-                .join(', ') || undefined
-            : undefined,
-        }}
+          hrefs: { inProgress: at({ place: 'lanes' }) },
+        })}
       />
       <div className="plan-body">
         <ViewsColumn

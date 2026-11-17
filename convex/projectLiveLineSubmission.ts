@@ -6,7 +6,7 @@ import { changeLineMark, lineExit } from './projectLiveLineStore';
 import { lineOwner, detachLineOwner, type LineBinding, type LineOwnerValue } from './projectLiveLineOwners';
 
 type LineState = Pick<HostedLandingState, 'id' | 'projectId' | 'phase'> &
-  Partial<Pick<HostedLandingState, 'observation'>> & { held?: boolean };
+  Partial<Pick<HostedLandingState, 'observation' | 'error'>> & { held?: boolean };
 const pageKind = 'projectLiveLineSubmissionPage';
 function selection(state: LineState) {
   return {
@@ -14,9 +14,10 @@ function selection(state: LineState) {
       | 'checking'
       | 'ready'
       | 'saved',
+    // A landing withdrawn by its agent (or a person) waits on nobody: its Lane is back at Saved (Item 0cb9b064).
     held:
       state.held === true ||
-      state.phase === 'terminal-failed' ||
+      (state.phase === 'terminal-failed' && state.error?.code !== 'LANDING_CANCELLED') ||
       state.observation?.pendingReason === 'waiting-for-review' ||
       state.observation?.pendingReason === 'waiting-for-dependency',
   };

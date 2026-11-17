@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import { planRowsWriter } from './projectPlanRowsWriter';
+import { planCountsBirth, planCountsWriter } from './projectPlanCountsStore';
 import { requestPlanRepair } from './projectPlanPreparationStore';
 import type { Doc, Id } from './_generated/dataModel';
 import { splitRecordTable } from './projectWorkRecordTables';
@@ -100,6 +101,8 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
         repairs.add(id);
       },
     ));
+  let tally: ReturnType<typeof planCountsWriter> | undefined;
+  const counts = () => (tally ??= planCountsWriter(db()));
   let tail = Promise.resolve();
   let pending = false;
   const serial = <T>(work: () => Promise<T>) => {
@@ -135,6 +138,8 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
               planRowsVersion: 1,
             } as never);
             layouts.set(id, true);
+            // Its planning counts start complete: every root of this partition passes through this writer.
+            await db().insert('projectWorkDataRecords', planCountsBirth(input.projectId as never, id));
             return id;
           }
           if (table === 'projectWorkGenerations') {
@@ -153,6 +158,7 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
             await serial(async () => {
               remember({ ...input, _id: id });
               await plan().change(null, input as Row);
+              counts().change(null, input as Row);
             });
           return id;
         };
@@ -207,8 +213,10 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
               roots.delete(id);
               collections.delete(id);
               if (next) remember({ ...next, _id: id });
-              if (old.collection === 'planningSearch' || next?.collection === 'planningSearch')
+              if (old.collection === 'planningSearch' || next?.collection === 'planningSearch') {
                 await plan().change(old, next);
+                counts().change(old, next);
+              }
             }
           });
         };
@@ -232,6 +240,7 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
   flushers.set(context, () =>
     pending
       ? tail.then(async () => {
+          await tally?.flush();
           const result = await projection?.flush();
           if (!preparing) for (const id of repairs) await requestPlanRepair(context, id);
           repairs.clear();

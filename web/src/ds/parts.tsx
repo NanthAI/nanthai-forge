@@ -307,7 +307,8 @@ export function CodeBox({ label, by, children }: { label: string; by?: boolean; 
   );
 }
 
-export type StandingCell = { n: number; more?: ReactNode; href?: string };
+/** `atLeast`: the figure is a lower bound (a capped read), shown "N+", never as a bare number. */
+export type StandingCell = { n: number; atLeast?: boolean; more?: ReactNode; href?: string };
 export type StandingProps = {
   /** "app": Items, with landings and Lanes as the secondary line. "public": landings this week, open Lanes, open Items. */
   of: 'app' | 'public';
@@ -344,8 +345,11 @@ export function Standing({ of, done, inProgress, left }: StandingProps) {
           <Glyph of={glyph} />
           {word}
         </span>
-        <b>{value.n.toLocaleString()}</b>
-        <span>{value.n === 1 ? unit[0] : unit[1]}</span>
+        <b>
+          {value.n.toLocaleString()}
+          {value.atLeast ? '+' : ''}
+        </b>
+        <span>{value.n === 1 && !value.atLeast ? unit[0] : unit[1]}</span>
         {value.more ? <span className="more">· {value.more}</span> : null}
       </>
     );

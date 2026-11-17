@@ -170,10 +170,15 @@ export function meterWorkIO(ctx, tables) {
       writeDocuments++;
       if (row) {
         writeBytes += documentBytes(row);
-        // Plan pages share the private, source-return-excluded namespace, but are live
-        // metadata rather than the retired Work-store comparison/migration copies.
-        // Their documents and bytes remain included in every total above.
-        if (row.collection?.startsWith('_workStore') && row.collection !== '_workStorePlan')
+        // Plan pages and the planning progress counter (Item 3fa3187d) share the private,
+        // source-return-excluded namespace, but are live metadata rather than the retired
+        // Work-store comparison/migration copies. Their documents and bytes remain included
+        // in every total above.
+        if (
+          row.collection?.startsWith('_workStore') &&
+          row.collection !== '_workStorePlan' &&
+          row.collection !== '_workStorePlanCounts'
+        )
           migrationWrites++;
       }
       return result;

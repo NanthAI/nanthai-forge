@@ -15,6 +15,11 @@ import { openApprovalRequests } from './projectHostedApprovals';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { report } from './errors';
 import { invariant } from '../src/errors';
+import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
+
+const RAW_ID = /^\s*[0-9a-f]{8}(?:-[0-9a-f]{1,12})*(?:-?(?:…|\.{3}))?(?:\s*[:–—-]\s*|\s*$)/i;
+/** A Lane goal without a leading raw Item or Lane id ("875a4b60-3aad-…: site function" → "site function"). */
+export const withoutRawId = (goal: string) => goal.replace(RAW_ID, '').replace(/\s+/g, ' ').trim();
 
 /** The most held Lanes one read describes; the rest are counted, as the line does. */
 export const NEEDS_ME_HELD_LIMIT = 30;
@@ -28,6 +33,8 @@ export const needsMeWhy = v.union(
   v.literal('rejected'),
   v.literal('review'),
   v.literal('dependency'),
+  /** Its own agent (or a person) withdrew the landing: nothing to decide, shown under FYI (Item 0cb9b064). */
+  v.literal('withdrawn'),
   /** Held, but the bound landing is gone or names no reason: shown as not reported, never guessed. */
   v.literal('unknown'),
 );
@@ -76,13 +83,15 @@ async function reason(ctx: QueryCtx, projectId: Id<'hostedProjects'>, mark: Held
   const why =
     mark.overlap || observed?.cause === 'conflict'
       ? 'conflict'
-      : observed?.cause
-        ? observed.cause
-        : observed?.pendingReason === 'waiting-for-review'
-          ? 'review'
-          : observed?.pendingReason === 'waiting-for-dependency'
-            ? 'dependency'
-            : 'unknown';
+      : state?.error?.code === 'LANDING_CANCELLED'
+        ? 'withdrawn'
+        : observed?.cause
+          ? observed.cause
+          : observed?.pendingReason === 'waiting-for-review'
+            ? 'review'
+            : observed?.pendingReason === 'waiting-for-dependency'
+              ? 'dependency'
+              : 'unknown';
   const ended = state?.timing?.ciEndedAt ?? state?.timing?.settledAt;
   return {
     why,
@@ -109,6 +118,21 @@ export const read = query({
         openApprovalRequests(ctx, projectId),
       ]);
       const shown = marks.slice(0, NEEDS_ME_HELD_LIMIT);
+      // A goal that is only a raw id names its Item instead (the Lane's Intent is the Item it started from): one
+      // point read, only for such a row.
+      let partition: Id<'projectWorkGenerations'> | null | undefined;
+      const titleOf = async (presence: { goal: string; intentId: string } | null) => {
+        if (!presence) return null;
+        const words = withoutRawId(presence.goal);
+        if (words) return words;
+        if (partition === undefined) {
+          const generation = await selectedGeneration(ctx, project);
+          partition = generation ? recordPartition(generation) : null;
+        }
+        const root = partition ? await record(ctx, partition, 'planningSearch', presence.intentId) : null;
+        const title = root ? (JSON.parse(root.value) as { title?: unknown }).title : null;
+        return typeof title === 'string' && title.trim() ? title.replace(/\s+/g, ' ').trim() : null;
+      };
       const held = await Promise.all(
         shown.map(async mark => {
           const [presence, why] = await Promise.all([
@@ -121,7 +145,7 @@ export const read = query({
           return {
             laneId: mark.laneId,
             intentId: presence?.intentId ?? null,
-            title: presence?.goal ?? null,
+            title: await titleOf(presence),
             actor: presence?.actor ?? null,
             agent: presence?.agent ?? null,
             ...why,

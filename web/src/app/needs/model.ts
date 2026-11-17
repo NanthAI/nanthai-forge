@@ -14,6 +14,7 @@ export type HeldWhy =
   | 'rejected'
   | 'review'
   | 'dependency'
+  | 'withdrawn'
   | 'unknown';
 /** One held Lane as projectNeedsMe:read returns it (convex/projectNeedsMe.ts `needsMeResult`). */
 export type HeldLane = {
@@ -67,13 +68,17 @@ export type NowRow = HeldLane & {
   /** The short Lane mark, and how many held Lanes share its Item, so two rows never look the same. */
   mark: string;
   siblings: number;
+  /** For an FYI row: what happens next, and who does it. */
+  next: string | null;
 };
 /** `head` stays the request's own head, which a decision must name; `question` is what the row says. */
 export type AheadRow = Approval & { word: StateWord; tag: string; question: string; who: string | null };
 export type NeedsView = {
   now: NowRow[];
+  /** Held, but nothing for a person to decide (a landing its agent withdrew): listed apart, never counted. */
+  fyi: NowRow[];
   ahead: AheadRow[];
-  /** Held Lanes: the shown rows plus those past the read's limit. The same number as the top bar. */
+  /** Held Lanes that wait on a person: the shown rows plus those past the read's limit. */
   count: number;
   /** True when `count` is a lower bound (the read stopped at its limit). */
   atLeast: boolean;
@@ -91,6 +96,7 @@ const tags: Record<HeldWhy, string> = {
   rejected: 'Refused',
   review: 'Approval',
   dependency: 'Waiting its turn',
+  withdrawn: 'Withdrawn',
   unknown: 'Held',
 };
 const questions: Record<HeldWhy, (title: string) => string> = {
@@ -101,6 +107,7 @@ const questions: Record<HeldWhy, (title: string) => string> = {
   rejected: title => `${title}: Forge refused the landing.`,
   review: title => `${title} waits for your approval to land.`,
   dependency: title => `${title} waits for the Lane it depends on.`,
+  withdrawn: title => `${title}: its agent withdrew the landing.`,
   unknown: title => `${title} is held. Why: not reported.`,
 };
 
@@ -144,7 +151,7 @@ export function needsView(read: NeedsRead): NeedsView {
   const perItem = new Map<string, number>();
   for (const lane of read.held)
     if (lane.intentId) perItem.set(lane.intentId, (perItem.get(lane.intentId) ?? 0) + 1);
-  const now = read.held
+  const rows = read.held
     .map(lane => {
       const approval = laneApprovals.get(lane.laneId) ?? null;
       const why: HeldWhy = lane.why === 'unknown' && approval ? 'review' : lane.why;
@@ -162,10 +169,13 @@ export function needsView(read: NeedsRead): NeedsView {
             : null,
         mark: lane.laneId.slice(0, 8),
         siblings: lane.intentId ? (perItem.get(lane.intentId) ?? 1) : 1,
+        next: why === 'withdrawn' ? 'its agent lands again when ready' : null,
       };
     })
     // Longest held first (Item 9e748e41, I41); ties keep the read's order.
     .sort((a, b) => a.since - b.since);
+  const now = rows.filter(row => row.why !== 'withdrawn');
+  const fyi = rows.filter(row => row.why === 'withdrawn');
   // A Lane request holds that Lane's landing, so it is drawn on the held row, never twice (rule 9).
   const ahead = requests
     .filter(request => request.kind !== 'lane')
@@ -184,8 +194,9 @@ export function needsView(read: NeedsRead): NeedsView {
     }));
   return {
     now,
+    fyi,
     ahead,
-    count: read.held.length + read.more,
+    count: now.length + read.more,
     atLeast: read.moreIsLowerBound,
     approvalsComplete: complete,
   };
@@ -217,8 +228,9 @@ export function waited(since: number, now: number) {
   return `${Math.floor(hours / 24)} d`;
 }
 
-export type Moving = { total: number; parts: string; more: number; moreIsLowerBound: boolean };
-/** Lanes moving without the reader: the line's marks that are not held, by stop. */
+export type Moving = { total: number; open: number; parts: string; more: number; moreIsLowerBound: boolean };
+/** Lanes moving without the reader: the line's marks that are not held, by stop, out of every open Lane the shell
+ * strip counts, so the two add up on screen. */
 export function moving(feed: LineFeed | undefined): Moving | null {
   if (!feed) return null;
   const free = feed.lanes.filter(lane => !lane.held);
@@ -235,27 +247,11 @@ export function moving(feed: LineFeed | undefined): Moving | null {
     .filter(([n]) => n)
     .map(([n, word]) => `${n.toLocaleString()} ${word}`)
     .join(', ');
-  return { total: free.length, parts, more: feed.more, moreIsLowerBound: feed.moreIsLowerBound };
-}
-
-/** Item counts from the planning index (projectWorkIndex:records with counts). Left is planned work not started. */
-export type ItemCounts = {
-  done: number;
-  inProgress: number;
-  left: number;
-  proposed: number;
-  complete: boolean;
-};
-export function itemCounts(
-  page: { counts?: Record<string, number>; isDone: boolean; coverage?: string } | undefined,
-): ItemCounts | null {
-  if (!page?.counts) return null;
-  const n = (status: string) => page.counts![status] ?? 0;
   return {
-    done: n('closed'),
-    inProgress: n('in-progress'),
-    left: n('open'),
-    proposed: n('proposed'),
-    complete: page.isDone && !page.coverage,
+    total: free.length,
+    open: feed.lanes.length,
+    parts,
+    more: feed.more,
+    moreIsLowerBound: feed.moreIsLowerBound,
   };
 }

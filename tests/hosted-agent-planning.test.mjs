@@ -2122,3 +2122,100 @@ test('the CLI refuses planning model fields, with zero calls, on a server that d
   // Writes without model fields still go through on that server.
   assert.equal((await put(p, { kind: 'issue', title: 'Plain' })).result.version, 1);
 });
+
+test('3fa3187d: the stored counter and the CLI count the same Issues past 1,000, live, mid-backfill and after it', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const counts = await import(moduleUrl('../convex/projectPlanCounts.ts'));
+  const { workRecordWriter, finishWorkRecordWrites } = await import(
+    moduleUrl('../convex/projectWorkRecordWriter.ts')
+  );
+  const { progressOf } = await import(moduleUrl('../web/src/app/progress.ts'));
+  const projectId = s.projectId;
+  const generationId = s.tables.hostedProjects.get(projectId).work.generationId;
+  const counter = () =>
+    [...s.tables.projectWorkDataRecords.values()].find(
+      row => row.generationId === generationId && row.collection === '_workStorePlanCounts',
+    );
+  assert.equal(JSON.parse(counter().value).done, true, 'a new partition counts from birth');
+  const read = () => counts.read._handler(s.ctx, { projectId });
+  const cli = async () => {
+    const result = await list(p, { counts: true, kind: 'issue' });
+    assert.equal(result.coverage, 'complete');
+    const all = { proposed: 0, open: 0, 'in-progress': 0, closed: 0, abandoned: 0, ...result.counts };
+    // The read names in-progress `inProgress` (validator fields are identifiers); the figures are the CLI's.
+    return {
+      proposed: all.proposed,
+      open: all.open,
+      inProgress: all['in-progress'],
+      closed: all.closed,
+      abandoned: all.abandoned,
+    };
+  };
+  // Live: Items written through the planning command move the counter in the same transaction.
+  const made = [];
+  for (const status of ['open', 'open', 'in-progress', 'proposed']) {
+    const itemId = randomUUID();
+    await put(p, { itemId, kind: 'issue', title: `Synthetic ${status}`, status });
+    made.push(itemId);
+  }
+  const first = (await list(p, { id: made[0], reconcile: false })).item;
+  await put(p, { itemId: made[0], expectedVersion: first.version, status: 'closed' });
+  const live = await read();
+  assert.equal(live.exact, true);
+  assert.deepEqual(live.issue, await cli());
+  assert.equal(live.closedToday?.n, 1);
+  // A partition from before the counter: 1,201 more roots, written without the planning writer.
+  const statuses = ['open', 'in-progress', 'closed', 'proposed', 'abandoned'];
+  const roots = [];
+  for (let i = 0; i < 1201; i++) {
+    const key = randomUUID();
+    const status = statuses[i % statuses.length];
+    const id = await s.ctx.db.insert('projectPlanningRecords', {
+      projectId,
+      generationId,
+      collection: 'planningSearch',
+      key,
+      parent: '',
+      position: 10_000 + i,
+      value: JSON.stringify({ id: key, kind: 'issue', title: `Synthetic ${i}`, status }),
+      planning: { text: '', kind: 'issue', status, initiativeId: '', open: status !== 'closed' },
+    });
+    roots.push({ id, key, status });
+  }
+  await s.ctx.db.delete(counter()._id);
+  const capped = await read();
+  assert.equal(capped.exact, false, 'without a counter the read is a capped page, marked not exact');
+  assert.equal(progressOf(capped).atLeast, true, 'so every figure reads N+');
+  const total = Object.values(await cli()).reduce((sum, n) => sum + n, 0);
+  assert.ok(total > 1000);
+  // One backfill step, then a status move behind its cursor and one ahead of it, then the rest.
+  let step = await counts.backfill._handler(s.ctx, { projectId });
+  assert.deepEqual(step, { done: false, counted: counts.PLAN_COUNTS_PAGE });
+  const after = JSON.parse(counter().value).after;
+  const behind = roots.find(root => root.key <= after && root.status === 'open');
+  const ahead = roots.find(root => root.key > after && root.status === 'open');
+  for (const root of [behind, ahead]) {
+    const writer = workRecordWriter(s.ctx);
+    const row = s.tables.projectPlanningRecords.get(root.id);
+    await writer.db.patch(root.id, {
+      value: JSON.stringify({ ...JSON.parse(row.value), status: 'closed' }),
+      planning: { ...row.planning, status: 'closed', open: false },
+    });
+    await finishWorkRecordWrites(writer);
+  }
+  for (let guard = 0; !step.done && guard < 20; guard++)
+    step = await counts.backfill._handler(s.ctx, { projectId });
+  assert.equal(step.done, true);
+  assert.deepEqual(await counts.backfill._handler(s.ctx, { projectId }), { done: true, counted: 0 });
+  const exact = await read();
+  assert.equal(exact.exact, true);
+  const fromCli = await cli();
+  assert.deepEqual(exact.issue, fromCli, 'the web read and the CLI agree past 1,000 Items');
+  assert.equal(progressOf(exact).done, fromCli.closed);
+  // A title edit moves no count and writes nothing to the counter.
+  const before = counter().value;
+  const item = (await list(p, { id: made[1], reconcile: false })).item;
+  await put(p, { itemId: made[1], expectedVersion: item.version, title: 'Renamed synthetic Item' });
+  assert.equal(counter().value, before);
+});

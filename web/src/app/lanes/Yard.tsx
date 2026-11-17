@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// The yard (DESIGN.md figures): every open Lane on the shell's four stops and main, in bands, stuck work first. Each
+// The yard (DESIGN.md figures): every open Lane on the shell's four stops and main, in bands, stuck work first. The
+// counts per stop are the shell strip's alone, never repeated here (owner dogfood 2026-11-17). Each
 // row is a link to its Lane; the band that waits on the reader is the first stop. Static markup: no behaviour layer.
 import type { CSSProperties } from 'react';
 import { Avatar, Band, State } from '../../ds';
@@ -7,7 +8,6 @@ import { A } from '../frames';
 import type { LineStage } from '../Line';
 import { bandTitles, stopWords, type Band as BandName, type YardRow } from './model';
 
-const stops: readonly LineStage[] = ['editing', 'saved', 'checking', 'ready'];
 /** Where on the track a Lane sits: the middle of its stop (0 to 4, main at 4). */
 const place: Record<LineStage, number> = { editing: 0.5, saved: 1.5, checking: 2.5, ready: 3.5 };
 const order: readonly BandName[] = ['needs', 'queue', 'work', 'quiet'];
@@ -16,30 +16,13 @@ export function Yard({
   rows,
   hrefOf,
   dense,
-  label,
 }: {
   rows: readonly YardRow[];
   hrefOf: (laneId: string) => string;
   dense: boolean;
-  label: string;
 }) {
-  const at = (stage: LineStage) => rows.filter(row => row.stage === stage).length;
   return (
     <div className={dense ? 'yard dense' : 'yard'}>
-      <div className="zones" aria-hidden="true">
-        <div className="zl">{label}</div>
-        <div className="zs">
-          {stops.map(stage => (
-            <span key={stage}>
-              {stopWords[stage]} <b>{at(stage).toLocaleString()}</b>
-            </span>
-          ))}
-          <span className="zm" title="main">
-            main
-          </span>
-        </div>
-        <div className="zl" />
-      </div>
       {order.map(band => {
         const inBand = rows.filter(row => row.band === band);
         if (!inBand.length) return null;

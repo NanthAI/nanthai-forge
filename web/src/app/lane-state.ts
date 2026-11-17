@@ -40,7 +40,7 @@ export const stopWords: Record<LineStage, string> = {
   ready: 'Ready to land',
 };
 
-type Held = { glyph: StateWord; why: string; note: string };
+type Held = { glyph: StateWord; why: string; note: string; word?: string };
 /** Why a person holds it, by the current submission's state. Nothing known: "held for you", never a guess. */
 function heldBy(landing: CurrentLanding | null | undefined, overlap: boolean): Held {
   const state = landing?.state;
@@ -78,6 +78,13 @@ function heldBy(landing: CurrentLanding | null | undefined, overlap: boolean): H
         why: 'waits for the Lane it depends on',
         note: 'waits for its parent',
       };
+    case 'cancelled':
+      return {
+        glyph: 'Set aside',
+        word: 'Withdrawn',
+        why: 'its agent withdrew the landing',
+        note: 'withdrawn',
+      };
     case 'held-main-red':
       return { glyph: 'Waiting its turn', why: 'held while main’s check is red', note: 'main is red' };
     default:
@@ -89,8 +96,14 @@ function heldBy(landing: CurrentLanding | null | undefined, overlap: boolean): H
 export function heldState(landing: CurrentLanding | null | undefined, overlap = false) {
   const held = heldBy(landing, overlap);
   const kind: StateKind =
-    held.glyph === 'Conflict' ? 'conflict' : held.glyph === 'Check failed' ? 'failed' : 'waiting';
-  return { kind, glyph: held.glyph, word: held.glyph as string, why: held.why, note: held.note };
+    held.glyph === 'Conflict'
+      ? 'conflict'
+      : held.glyph === 'Check failed'
+        ? 'failed'
+        : held.glyph === 'Set aside'
+          ? 'stale'
+          : 'waiting';
+  return { kind, glyph: held.glyph, word: held.word ?? held.glyph, why: held.why, note: held.note };
 }
 
 /** The one Lane state. `landing` is the current submission only (see `currentEntries`), or nothing. */
@@ -200,6 +213,7 @@ export const heldWhyState = {
   rejected: 'rejected',
   review: 'held-review',
   dependency: 'held-dependency',
+  withdrawn: 'cancelled',
   unknown: 'unknown',
 } as const satisfies Record<string, LandingStateName>;
 
