@@ -41,7 +41,7 @@ for (const conflict of [true, false])
     assert.equal(current(f, 1).operationId, original.operationId);
     assert(finishRow(f, 1).wake, 'cancel transaction retains the replacement scheduler receipt');
     assert(JSON.parse(finishRow(f, 1).value).pending, 'replacement composition is reserved atomically');
-    assertProgressOwners(f);
+    await assertProgressOwners(f);
     await assert.rejects(f.rawChecks.pass(old), e =>
       ['CHECK_CANCELLED', 'EVIDENCE_CHANGED'].includes(e.data?.code ?? e.code),
     );
@@ -139,7 +139,7 @@ test('restart after cancellation resumes the committed composition wake without 
   // Only durable tables/scheduler entries survive; no session invokes resume.
   for (const table of Object.values(f.tables))
     for (const [id, row] of table) table.set(id, structuredClone(row));
-  assertProgressOwners(f);
+  await assertProgressOwners(f);
   await drain(f);
   assert.equal(current(f, 1).phase, 'checking');
   assert.notEqual(requestRow(f, 1).runId, b.id);
@@ -218,7 +218,7 @@ test('a failed or late CI adapter stop cannot strand the replacement or revive t
     .pending()
     .find(t => t.name === 'projectHostedActionsWebhook:cancel' && t.args[0].runId === b.id);
   assert(stop, 'the existing adapter receives cancellation of the exact provider run');
-  assertProgressOwners(f);
+  await assertProgressOwners(f);
   // The external stop action has not returned. Its failure is independent of
   // the atomic landing/source reservation already committed by cancellation.
   f.patch('_scheduled_functions', stop._id, { state: { kind: 'failed' } });
@@ -251,7 +251,7 @@ test('a failed replacement compose settles visibly instead of leaving a cancelle
   );
   assert.equal(current(f, 1).phase, 'terminal-failed');
   assert.equal(current(f, 1).error.code, 'SOURCE_RETRY_EXHAUSTED');
-  assertProgressOwners(f);
+  await assertProgressOwners(f);
   const page = JSON.parse(
     await f.transaction('observe-source-failure', observe.page, {
       projectId: f.projectId,
@@ -288,7 +288,7 @@ test('back-to-back acceptances coalesce into actual main before the cancelled la
   assert(replacement);
   assert.equal(replacement.candidate.base.head, actual.head);
   assert.equal(replacement.candidate.base.receiptId, actual.receipt.id);
-  assertProgressOwners(f);
+  await assertProgressOwners(f);
   await settle(f);
   assert(states(f).every(s => s.phase === 'landed'));
 });
@@ -307,7 +307,7 @@ test('a main move during replacement composition never starts CI on that obsolet
   assert.equal(checks[0].candidate.base.head, next.head);
   assert.equal(checks[0].candidate.base.receiptId, next.receipt.id);
   assert(!f.runs().some(r => r.request.operationId === obsolete.operations.check));
-  assertProgressOwners(f);
+  await assertProgressOwners(f);
   await settle(f);
   assert.equal(current(f, 1).phase, 'landed');
 });
@@ -319,5 +319,5 @@ test('the acceptance cancellation pass stops at eight running entries', async t 
   await drain(f, () => f.runs().filter(r => r.status === 'cancelled').length > 0);
   assert.equal(f.runs().filter(r => r.status === 'cancelled').length, 8);
   assert.equal(current(f, 9).phase, 'checking', 'the ninth entry remains outside this finite look-ahead');
-  assertProgressOwners(f);
+  await assertProgressOwners(f);
 });

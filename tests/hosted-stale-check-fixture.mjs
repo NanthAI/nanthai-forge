@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
-import { assertLandingProgress } from './landing-progress-invariant.mjs';
+import { assertQueueProgress } from './queue-sim/invariants.mjs';
 import { states, batchesFixture } from './hosted-landing-batches-fixture.mjs';
 export const current = (f, index) => states(f).find(s => s.id === f.entries[index].state.id);
 export const requestRow = (f, index) =>
@@ -15,7 +15,7 @@ export async function drain(f, stop = () => false) {
     if (!task || stop(task)) return;
     assert(step < 1000, JSON.stringify(states(f)));
     await f.execute(task);
-    assertProgressOwners(f);
+    await assertProgressOwners(f);
   }
 }
 export async function fixture(t, { conflict = true, memberPaths, count = 2, runner, ...options } = {}) {
@@ -36,8 +36,8 @@ export async function fixture(t, { conflict = true, memberPaths, count = 2, runn
   return f;
 }
 /** The fixture driver owns completion of these exact fake-provider runs. */
-export function assertProgressOwners(f) {
-  assertLandingProgress(f, {
+export async function assertProgressOwners(f) {
+  await assertQueueProgress(f, {
     externalRuns: new Set(
       f
         .runs()
@@ -52,6 +52,6 @@ export async function settle(f) {
     for (const run of f.runs().filter(r => ['queued', 'running'].includes(r.status)))
       await f.rawChecks.pass(run.status === 'queued' ? await f.rawChecks.activate(run.id) : run);
     await drain(f);
-    assertProgressOwners(f);
+    await assertProgressOwners(f);
   }
 }

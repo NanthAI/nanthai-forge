@@ -1,0 +1,313 @@
+{
+  "schema": 1,
+  "status": "not-predictive",
+  "sourceState": "707e3f79df8c0d55accfde85adb1f1d45b1cbae7956710884ea83a77b2041cd8",
+  "cells": [
+    {
+      "N": 1,
+      "rep": 1,
+      "replay": {
+        "timeToMainMedianSeconds": 334.19700000000006,
+        "timeToMainP90Seconds": 469.5020000000002,
+        "timeToMainMaxSeconds": 633.942,
+        "wallSeconds": 3930.57,
+        "ciBilledMinutes": 31,
+        "recomposes": 0,
+        "recomposesMax": 0,
+        "checkRuns": 10
+      },
+      "observed": {
+        "timeToMainMedianSeconds": 338.4715,
+        "wallSeconds": 3935.051,
+        "ciBilledMinutes": 31,
+        "recomposes": 0,
+        "recomposesMax": 0,
+        "checkRuns": 10
+      },
+      "calibration": []
+    },
+    {
+      "N": 1,
+      "rep": 2,
+      "replay": {
+        "timeToMainMedianSeconds": 304.106,
+        "timeToMainP90Seconds": 402.36799999999994,
+        "timeToMainMaxSeconds": 652.934,
+        "wallSeconds": 3618.119,
+        "ciBilledMinutes": 30,
+        "recomposes": 0,
+        "recomposesMax": 0,
+        "checkRuns": 10
+      },
+      "observed": {
+        "timeToMainMedianSeconds": 308.606,
+        "wallSeconds": 3622.308,
+        "ciBilledMinutes": 30,
+        "recomposes": 0,
+        "recomposesMax": 0,
+        "checkRuns": 10
+      },
+      "calibration": []
+    },
+    {
+      "N": 1,
+      "rep": 3,
+      "replay": {
+        "timeToMainMedianSeconds": 337.45650000000006,
+        "timeToMainP90Seconds": 549.3609999999999,
+        "timeToMainMaxSeconds": 577.4299999999998,
+        "wallSeconds": 3822.051,
+        "ciBilledMinutes": 29,
+        "recomposes": 0,
+        "recomposesMax": 0,
+        "checkRuns": 10
+      },
+      "observed": {
+        "timeToMainMedianSeconds": 341.829,
+        "wallSeconds": 3826.194,
+        "ciBilledMinutes": 29,
+        "recomposes": 0,
+        "recomposesMax": 0,
+        "checkRuns": 10
+      },
+      "calibration": []
+    },
+    {
+      "N": 10,
+      "rep": 1,
+      "replay": {
+        "timeToMainMedianSeconds": 296.0295,
+        "timeToMainP90Seconds": 433.35900000000004,
+        "timeToMainMaxSeconds": 779.055,
+        "wallSeconds": 808.31,
+        "ciBilledMinutes": 27,
+        "recomposes": 8,
+        "recomposesMax": 1,
+        "checkRuns": 9
+      },
+      "observed": {
+        "timeToMainMedianSeconds": 359.365,
+        "wallSeconds": 819.209,
+        "ciBilledMinutes": 27,
+        "recomposes": 8,
+        "recomposesMax": 1,
+        "checkRuns": 9
+      },
+      "calibration": [
+        {
+          "metric": "timeToMainMedianSeconds",
+          "observed": 359.365,
+          "replay": 296.0295
+        }
+      ]
+    },
+    {
+      "N": 10,
+      "rep": 2,
+      "replay": {
+        "timeToMainMedianSeconds": 308.437,
+        "timeToMainP90Seconds": 520.127,
+        "timeToMainMaxSeconds": 701.702,
+        "wallSeconds": 716.382,
+        "ciBilledMinutes": 30,
+        "recomposes": 8,
+        "recomposesMax": 1,
+        "checkRuns": 10
+      },
+      "observed": {
+        "timeToMainMedianSeconds": 363.642,
+        "wallSeconds": 762.705,
+        "ciBilledMinutes": 24,
+        "recomposes": 9,
+        "recomposesMax": 1,
+        "checkRuns": 8
+      },
+      "calibration": [
+        {
+          "metric": "timeToMainMedianSeconds",
+          "observed": 363.642,
+          "replay": 308.437
+        },
+        {
+          "metric": "ciBilledMinutes",
+          "observed": 24,
+          "replay": 30
+        }
+      ]
+    },
+    {
+      "N": 10,
+      "rep": 3,
+      "replay": {
+        "timeToMainMedianSeconds": 302.751,
+        "timeToMainP90Seconds": 422.435,
+        "timeToMainMaxSeconds": 647.998,
+        "wallSeconds": 676.481,
+        "ciBilledMinutes": 27,
+        "recomposes": 8,
+        "recomposesMax": 1,
+        "checkRuns": 9
+      },
+      "observed": {
+        "timeToMainMedianSeconds": 359.633,
+        "wallSeconds": 689.694,
+        "ciBilledMinutes": 21,
+        "recomposes": 9,
+        "recomposesMax": 1,
+        "checkRuns": 7
+      },
+      "calibration": [
+        {
+          "metric": "timeToMainMedianSeconds",
+          "observed": 359.633,
+          "replay": 302.751
+        },
+        {
+          "metric": "ciBilledMinutes",
+          "observed": 21,
+          "replay": 27
+        }
+      ]
+    },
+    {
+      "N": 3,
+      "rep": 1,
+      "replay": {
+        "timeToMainMedianSeconds": 361.3155,
+        "timeToMainP90Seconds": 485.668,
+        "timeToMainMaxSeconds": 942.976,
+        "wallSeconds": 1575.476,
+        "ciBilledMinutes": 30,
+        "recomposes": 6,
+        "recomposesMax": 1,
+        "checkRuns": 10
+      },
+      "observed": {
+        "timeToMainMedianSeconds": 377.131,
+        "wallSeconds": 1607.027,
+        "ciBilledMinutes": 30,
+        "recomposes": 7,
+        "recomposesMax": 1,
+        "checkRuns": 10
+      },
+      "calibration": []
+    },
+    {
+      "N": 3,
+      "rep": 2,
+      "replay": {
+        "timeToMainMedianSeconds": 299.3555,
+        "timeToMainP90Seconds": 457.656,
+        "timeToMainMaxSeconds": 827.631,
+        "wallSeconds": 1477.432,
+        "ciBilledMinutes": 30,
+        "recomposes": 6,
+        "recomposesMax": 1,
+        "checkRuns": 10
+      },
+      "observed": {
+        "timeToMainMedianSeconds": 328.6785,
+        "wallSeconds": 1508.91,
+        "ciBilledMinutes": 30,
+        "recomposes": 7,
+        "recomposesMax": 1,
+        "checkRuns": 10
+      },
+      "calibration": []
+    },
+    {
+      "N": 3,
+      "rep": 3,
+      "replay": {
+        "timeToMainMedianSeconds": 322.6044999999999,
+        "timeToMainP90Seconds": 702.0880000000001,
+        "timeToMainMaxSeconds": 887.595,
+        "wallSeconds": 1591.976,
+        "ciBilledMinutes": 30,
+        "recomposes": 6,
+        "recomposesMax": 1,
+        "checkRuns": 10
+      },
+      "observed": {
+        "timeToMainMedianSeconds": 380.22299999999996,
+        "wallSeconds": 1643.651,
+        "ciBilledMinutes": 30,
+        "recomposes": 7,
+        "recomposesMax": 1,
+        "checkRuns": 10
+      },
+      "calibration": [
+        {
+          "metric": "timeToMainMedianSeconds",
+          "observed": 380.22299999999996,
+          "replay": 322.6044999999999
+        }
+      ]
+    },
+    {
+      "N": 5,
+      "rep": 1,
+      "replay": {
+        "timeToMainMedianSeconds": 315.22249999999997,
+        "timeToMainP90Seconds": 722.8570000000001,
+        "timeToMainMaxSeconds": 780.6389999999999,
+        "wallSeconds": 1039.251,
+        "ciBilledMinutes": 30,
+        "recomposes": 7,
+        "recomposesMax": 1,
+        "checkRuns": 10
+      },
+      "observed": {
+        "timeToMainMedianSeconds": 350.326,
+        "wallSeconds": 1085.435,
+        "ciBilledMinutes": 30,
+        "recomposes": 8,
+        "recomposesMax": 1,
+        "checkRuns": 10
+      },
+      "calibration": [
+        {
+          "metric": "timeToMainMedianSeconds",
+          "observed": 350.326,
+          "replay": 315.22249999999997
+        }
+      ]
+    },
+    {
+      "N": 5,
+      "rep": 2,
+      "replay": {
+        "timeToMainMedianSeconds": 324.25250000000005,
+        "timeToMainP90Seconds": 562.354,
+        "timeToMainMaxSeconds": 583.265,
+        "wallSeconds": 1030.918,
+        "ciBilledMinutes": 29,
+        "recomposes": 6,
+        "recomposesMax": 1,
+        "checkRuns": 10
+      },
+      "observed": {
+        "timeToMainMedianSeconds": 353.5825,
+        "wallSeconds": 1081.605,
+        "ciBilledMinutes": 29,
+        "recomposes": 9,
+        "recomposesMax": 1,
+        "checkRuns": 10
+      },
+      "calibration": [
+        {
+          "metric": "recomposes",
+          "observed": 9,
+          "replay": 6
+        }
+      ]
+    }
+  ],
+  "incomplete": [
+    {
+      "N": 5,
+      "rep": 3,
+      "reason": "Incomplete check metadata rejected before replay."
+    }
+  ]
+}

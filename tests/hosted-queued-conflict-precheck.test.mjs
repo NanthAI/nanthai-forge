@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
-import { assertLandingProgress } from './landing-progress-invariant.mjs';
+import { assertQueueProgress } from './queue-sim/invariants.mjs';
 import { compose } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const landings = await import(moduleUrl('../convex/projectHostedLanding.ts'));
@@ -77,7 +77,7 @@ for (const failed of [false, true])
         await drainActive(f);
         const follower = await f.current(f.entries[2].state.id);
         assert.equal(follower.submission.phase, 'queued');
-        assertLandingProgress(f, {
+        await assertQueueProgress(f, {
           externalRuns: new Set(
             f
               .runs()

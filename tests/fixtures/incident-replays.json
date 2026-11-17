@@ -246,6 +246,18 @@
       "incident": "95a0b4d",
       "file": "tests/landing-message-mirror.test.mjs",
       "test": "incident 95a0b4d: a batch preserves a recomposed conflict message through another resolution"
+    },
+    {
+      "incident": "5e3c3a3c",
+      "what": "Stored order waits survive a holder generation change without a fresh claim or armed deadline; the read-only detector must expose the stale chain.",
+      "file": "tests/hosted-landing-queue-sim.test.mjs",
+      "test": "5e3c3a3c: holder starts a new check while followers are parked; a parked entry with no alarm is detected"
+    },
+    {
+      "incident": "e4aee4fe",
+      "what": "A slow older submission must retain its lifetime overtake budget while a stream of newer passes arrives.",
+      "file": "tests/hosted-landing-queue-sim.test.mjs",
+      "test": "e4aee4fe: a slow older entry keeps its lifetime generation budget as newer passes arrive"
     }
   ]
 }

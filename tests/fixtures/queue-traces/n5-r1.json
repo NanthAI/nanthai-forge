@@ -1,0 +1,738 @@
+{
+  "schema": 1,
+  "N": 5,
+  "rep": 1,
+  "series": "tuned",
+  "resultSha256": "ffa1d85571a9884eab0eeaee692bbbfe4f0c51ce3bd7a9acae6445b70ee25c9a",
+  "sourcePins": {
+    "cliState": "bc0691cdd9e10af35d97d5cba61cafc811816f2a021c254c5ba64391e0f56735",
+    "cliCommit": "f290bb0e6fa179453632565971e56adb07b8f426",
+    "harnessCommit": "f290bb0e6fa179453632565971e56adb07b8f426",
+    "harnessFilesSha256": "2c78f26762cb4e46351509de6fb8d8aefa1008b5dfa96dcc104f41f646997f88",
+    "deploymentCommit": "f290bb0e6fa179453632565971e56adb07b8f426"
+  },
+  "coverage": {
+    "complete": true,
+    "missing": [],
+    "limitation": "Stored waits have no transition timestamps. Attempt progress is the retained terminal snapshot, not a transaction journal."
+  },
+  "tasks": [
+    {
+      "task": "t26563",
+      "worker": 1,
+      "dispatchedAt": 25.278,
+      "counted": true,
+      "arriveAt": 77.222,
+      "submittedAt": 100.527,
+      "committedAt": 267.998,
+      "paths": [
+        "packages/shared/src/changedFileKind.test.ts",
+        "packages/shared/src/changedFileKind.ts"
+      ],
+      "observedTimeToMainSeconds": 242.72,
+      "observedRecomposes": 1,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "base",
+          "composeAt": 90.686,
+          "composeSeconds": 10.263,
+          "settledAt": 127.809,
+          "cause": null,
+          "outcome": "CHANNEL_CHANGED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 1,
+          "check": "check-2",
+          "mainFrom": "t27069",
+          "composeAt": 90.686,
+          "composeSeconds": 10.263,
+          "settledAt": 267.998,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 77.222,
+          "end": 268.708,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "task": "t27069",
+      "worker": 2,
+      "dispatchedAt": 22.258,
+      "counted": true,
+      "arriveAt": 65.223,
+      "submittedAt": 95.563,
+      "committedAt": 246.19,
+      "paths": [
+        "packages/shared/src/schemaJson.test.ts",
+        "packages/shared/src/schemaJson.ts"
+      ],
+      "observedTimeToMainSeconds": 223.932,
+      "observedRecomposes": 0,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "base",
+          "composeAt": 81.506,
+          "composeSeconds": 14.507,
+          "settledAt": 96.818,
+          "cause": null,
+          "outcome": "ATTEMPT_REPLACED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 0,
+          "check": "check-1",
+          "mainFrom": "base",
+          "composeAt": 81.506,
+          "composeSeconds": 14.507,
+          "settledAt": 246.19,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 65.223,
+          "end": 246.891,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "task": "t26770",
+      "worker": 3,
+      "dispatchedAt": 16.191,
+      "counted": true,
+      "arriveAt": 108.16,
+      "submittedAt": 136.095,
+      "committedAt": 329.962,
+      "paths": [
+        "packages/source-control-forgejo/src/server/ForgejoCli.ts",
+        "packages/source-control-forgejo/src/server/ForgejoSourceControlProvider.test.ts",
+        "packages/source-control-forgejo/src/server/ForgejoSourceControlProvider.ts"
+      ],
+      "observedTimeToMainSeconds": 313.771,
+      "observedRecomposes": 1,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "base",
+          "composeAt": 122.225,
+          "composeSeconds": 14.297,
+          "settledAt": 165.664,
+          "cause": null,
+          "outcome": "CHANNEL_CHANGED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 1,
+          "check": "check-3",
+          "mainFrom": "t26563",
+          "composeAt": 122.225,
+          "composeSeconds": 14.297,
+          "settledAt": 329.962,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 108.16,
+          "end": 330.676,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "task": "t19456",
+      "worker": 4,
+      "dispatchedAt": 12.281,
+      "counted": true,
+      "arriveAt": 423.461,
+      "submittedAt": 560.758,
+      "committedAt": 766.356,
+      "paths": [
+        "apps/server/src/preview/DesktopViewport.test.ts",
+        "apps/server/src/preview/DesktopViewport.ts",
+        "apps/server/src/preview/ServerBrowser.test.ts",
+        "apps/server/src/preview/ServerBrowser.ts",
+        "apps/server/src/preview/ServerBrowserPage.test.ts",
+        "apps/server/src/preview/ServerBrowserPage.ts",
+        "packages/shared/src/changedFileKind.test.ts",
+        "packages/shared/src/changedFileKind.ts",
+        "packages/shared/src/schemaJson.test.ts",
+        "packages/shared/src/schemaJson.ts",
+        "packages/source-control-forgejo/src/server/ForgejoCli.ts",
+        "packages/source-control-forgejo/src/server/ForgejoSourceControlProvider.test.ts",
+        "packages/source-control-forgejo/src/server/ForgejoSourceControlProvider.ts"
+      ],
+      "observedTimeToMainSeconds": 754.075,
+      "observedRecomposes": 1,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "t22302",
+          "composeAt": 551.338,
+          "composeSeconds": 17.548,
+          "settledAt": 569.755,
+          "cause": null,
+          "outcome": "CHANNEL_CHANGED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 1,
+          "check": null,
+          "mainFrom": "t23766",
+          "composeAt": 569.755,
+          "composeSeconds": 18.654,
+          "settledAt": 589.022,
+          "cause": "not-eligible",
+          "outcome": "ATTEMPT_REPLACED",
+          "proof": null
+        },
+        {
+          "number": 2,
+          "candidate": 1,
+          "check": "check-6",
+          "mainFrom": "t23766",
+          "composeAt": 569.755,
+          "composeSeconds": 18.654,
+          "settledAt": 766.356,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 423.461,
+          "end": 465.039,
+          "outcome": "COMPOSITION_CONFLICT"
+        },
+        {
+          "start": 544.4,
+          "end": 767.059,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "task": "t22302",
+      "worker": 5,
+      "dispatchedAt": 19.099,
+      "counted": true,
+      "arriveAt": 150.579,
+      "submittedAt": 175.093,
+      "committedAt": 372.574,
+      "paths": [
+        "apps/server/src/preview/ServerBrowser.test.ts",
+        "apps/server/src/preview/ServerBrowser.ts",
+        "apps/server/src/preview/ServerBrowserPage.test.ts",
+        "apps/server/src/preview/ServerBrowserPage.ts"
+      ],
+      "observedTimeToMainSeconds": 353.475,
+      "observedRecomposes": 1,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "base",
+          "composeAt": 165.985,
+          "composeSeconds": 9.515,
+          "settledAt": 203.477,
+          "cause": null,
+          "outcome": "CHANNEL_CHANGED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 1,
+          "check": "check-4",
+          "mainFrom": "t26770",
+          "composeAt": 165.985,
+          "composeSeconds": 9.515,
+          "settledAt": 372.574,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 150.579,
+          "end": 373.2,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "task": "t27456",
+      "worker": 2,
+      "dispatchedAt": 258.612,
+      "counted": true,
+      "arriveAt": 470.516,
+      "submittedAt": 879.714,
+      "committedAt": 1085.435,
+      "paths": [
+        "apps/server/src/preview/DesktopViewport.test.ts",
+        "apps/server/src/preview/DesktopViewport.ts",
+        "apps/server/src/preview/ServerBrowser.test.ts",
+        "apps/server/src/preview/ServerBrowser.ts",
+        "apps/server/src/preview/ServerBrowserPage.test.ts",
+        "apps/server/src/preview/ServerBrowserPage.ts",
+        "packages/effect-codex-app-server/src/client.test.ts",
+        "packages/effect-codex-app-server/src/client.ts",
+        "packages/shared/src/changedFileKind.test.ts",
+        "packages/shared/src/changedFileKind.ts",
+        "packages/shared/src/schemaJson.test.ts",
+        "packages/shared/src/schemaJson.ts",
+        "packages/source-control-forgejo/src/server/ForgejoCli.ts",
+        "packages/source-control-forgejo/src/server/ForgejoSourceControlProvider.test.ts",
+        "packages/source-control-forgejo/src/server/ForgejoSourceControlProvider.ts"
+      ],
+      "observedTimeToMainSeconds": 826.823,
+      "observedRecomposes": 1,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "t27514",
+          "composeAt": 869.388,
+          "composeSeconds": 22.264,
+          "settledAt": 923.049,
+          "cause": null,
+          "outcome": "CHANNEL_CHANGED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 1,
+          "check": "check-10",
+          "mainFrom": "t27521",
+          "composeAt": 869.388,
+          "composeSeconds": 22.264,
+          "settledAt": 1085.435,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 470.516,
+          "end": 511.502,
+          "outcome": "COMPOSITION_CONFLICT"
+        },
+        {
+          "start": 582.04,
+          "end": 789.108,
+          "outcome": "COMPOSITION_CONFLICT"
+        },
+        {
+          "start": 863.249,
+          "end": 1086.112,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "task": "t23766",
+      "worker": 1,
+      "dispatchedAt": 280,
+      "counted": true,
+      "arriveAt": 369.342,
+      "submittedAt": 394.021,
+      "committedAt": 566.623,
+      "paths": [
+        "packages/effect-codex-app-server/src/client.test.ts",
+        "packages/effect-codex-app-server/src/client.ts",
+        "packages/shared/src/changedFileKind.test.ts",
+        "packages/shared/src/changedFileKind.ts",
+        "packages/shared/src/schemaJson.test.ts",
+        "packages/shared/src/schemaJson.ts"
+      ],
+      "observedTimeToMainSeconds": 286.623,
+      "observedRecomposes": 0,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "t22302",
+          "composeAt": 383.846,
+          "composeSeconds": 21.978,
+          "settledAt": 406.642,
+          "cause": null,
+          "outcome": "ATTEMPT_REPLACED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 0,
+          "check": "check-5",
+          "mainFrom": "t22302",
+          "composeAt": 383.846,
+          "composeSeconds": 21.978,
+          "settledAt": 566.623,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 369.342,
+          "end": 567.276,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "task": "t23938",
+      "worker": 3,
+      "dispatchedAt": 349.686,
+      "counted": true,
+      "arriveAt": 647.765,
+      "submittedAt": 672.752,
+      "committedAt": 883.244,
+      "paths": [
+        "packages/effect-codex-app-server/src/_internal/stdio.test.ts",
+        "packages/effect-codex-app-server/src/_internal/stdio.ts",
+        "packages/effect-codex-app-server/src/client.test.ts",
+        "packages/effect-codex-app-server/src/client.ts",
+        "packages/effect-codex-app-server/src/errors.ts",
+        "packages/shared/src/changedFileKind.test.ts",
+        "packages/shared/src/changedFileKind.ts",
+        "packages/shared/src/schemaJson.test.ts",
+        "packages/shared/src/schemaJson.ts",
+        "packages/source-control-forgejo/src/server/ForgejoCli.ts",
+        "packages/source-control-forgejo/src/server/ForgejoSourceControlProvider.test.ts",
+        "packages/source-control-forgejo/src/server/ForgejoSourceControlProvider.ts"
+      ],
+      "observedTimeToMainSeconds": 533.558,
+      "observedRecomposes": 1,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "t23766",
+          "composeAt": 663.572,
+          "composeSeconds": 27.772,
+          "settledAt": 720.415,
+          "cause": null,
+          "outcome": "CHANNEL_CHANGED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 1,
+          "check": "check-8",
+          "mainFrom": "t27514",
+          "composeAt": 663.572,
+          "composeSeconds": 27.772,
+          "settledAt": 883.244,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 647.765,
+          "end": 883.981,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "task": "t27514",
+      "worker": 5,
+      "dispatchedAt": 430.521,
+      "counted": true,
+      "arriveAt": 598.717,
+      "submittedAt": 622.514,
+      "committedAt": 827.878,
+      "paths": [
+        "apps/server/src/orchestration-v2/testkit/fixtures/thread_rollback_after_stop/pi_transcript.ndjson",
+        "apps/server/src/orchestration-v2/testkit/fixtures/turn_interrupt_mid_tool/pi_transcript.ndjson",
+        "apps/server/src/preview/ServerBrowser.test.ts",
+        "apps/server/src/preview/ServerBrowser.ts",
+        "apps/server/src/preview/ServerBrowserPage.test.ts",
+        "apps/server/src/preview/ServerBrowserPage.ts",
+        "packages/provider-pi/src/server/adapter.test.ts",
+        "packages/provider-pi/src/server/adapter.ts",
+        "packages/shared/src/changedFileKind.test.ts",
+        "packages/shared/src/changedFileKind.ts",
+        "packages/shared/src/schemaJson.test.ts",
+        "packages/shared/src/schemaJson.ts",
+        "packages/source-control-forgejo/src/server/ForgejoCli.ts",
+        "packages/source-control-forgejo/src/server/ForgejoSourceControlProvider.test.ts",
+        "packages/source-control-forgejo/src/server/ForgejoSourceControlProvider.ts"
+      ],
+      "observedTimeToMainSeconds": 397.357,
+      "observedRecomposes": 1,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "t23766",
+          "composeAt": 613.161,
+          "composeSeconds": 20.693,
+          "settledAt": 666.866,
+          "cause": null,
+          "outcome": "CHANNEL_CHANGED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 1,
+          "check": "check-7",
+          "mainFrom": "t19456",
+          "composeAt": 613.161,
+          "composeSeconds": 20.693,
+          "settledAt": 827.878,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 598.717,
+          "end": 828.557,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "task": "t27521",
+      "worker": 1,
+      "dispatchedAt": 582.346,
+      "counted": true,
+      "arriveAt": 695.806,
+      "submittedAt": 719.404,
+      "committedAt": 929.523,
+      "paths": [
+        "apps/server/src/preview/ServerBrowser.test.ts",
+        "apps/server/src/preview/ServerBrowser.ts",
+        "apps/server/src/preview/ServerBrowserPage.test.ts",
+        "apps/server/src/preview/ServerBrowserPage.ts",
+        "packages/effect-codex-app-server/src/client.test.ts",
+        "packages/effect-codex-app-server/src/client.ts",
+        "packages/provider-pi/src/server/adapter.test.ts",
+        "packages/provider-pi/src/server/adapter.ts",
+        "packages/shared/src/changedFileKind.test.ts",
+        "packages/shared/src/changedFileKind.ts",
+        "packages/shared/src/schemaJson.test.ts",
+        "packages/shared/src/schemaJson.ts",
+        "packages/source-control-forgejo/src/server/ForgejoCli.ts",
+        "packages/source-control-forgejo/src/server/ForgejoSourceControlProvider.test.ts",
+        "packages/source-control-forgejo/src/server/ForgejoSourceControlProvider.ts"
+      ],
+      "observedTimeToMainSeconds": 347.177,
+      "observedRecomposes": 1,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "t23766",
+          "composeAt": 710.009,
+          "composeSeconds": 9.798,
+          "settledAt": 755.3,
+          "cause": null,
+          "outcome": "CHANNEL_CHANGED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 1,
+          "check": "check-9",
+          "mainFrom": "t23938",
+          "composeAt": 710.009,
+          "composeSeconds": 9.798,
+          "settledAt": 929.523,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 695.806,
+          "end": 930.228,
+          "outcome": "completed"
+        }
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "id": "check-1",
+      "kind": "full",
+      "members": [
+        "t27069"
+      ],
+      "at": 97.131,
+      "wallSeconds": 146.444,
+      "runnerSeconds": 94.285,
+      "billedMinutes": 3,
+      "outcome": "passed"
+    },
+    {
+      "id": "check-2",
+      "kind": "full",
+      "members": [
+        "t26563"
+      ],
+      "at": 128.171,
+      "wallSeconds": 137.191,
+      "runnerSeconds": 82.745,
+      "billedMinutes": 3,
+      "outcome": "passed"
+    },
+    {
+      "id": "check-3",
+      "kind": "full",
+      "members": [
+        "t26770"
+      ],
+      "at": 166.051,
+      "wallSeconds": 161.052,
+      "runnerSeconds": 94.221,
+      "billedMinutes": 3,
+      "outcome": "passed"
+    },
+    {
+      "id": "check-4",
+      "kind": "full",
+      "members": [
+        "t22302"
+      ],
+      "at": 203.867,
+      "wallSeconds": 165.944,
+      "runnerSeconds": 114.577,
+      "billedMinutes": 3,
+      "outcome": "passed"
+    },
+    {
+      "id": "check-5",
+      "kind": "full",
+      "members": [
+        "t23766"
+      ],
+      "at": 406.986,
+      "wallSeconds": 156.777,
+      "runnerSeconds": 86.309,
+      "billedMinutes": 3,
+      "outcome": "passed"
+    },
+    {
+      "id": "check-6",
+      "kind": "full",
+      "members": [
+        "t19456"
+      ],
+      "at": 589.404,
+      "wallSeconds": 174.38,
+      "runnerSeconds": 97.83,
+      "billedMinutes": 3,
+      "outcome": "passed"
+    },
+    {
+      "id": "check-7",
+      "kind": "full",
+      "members": [
+        "t27514"
+      ],
+      "at": 667.271,
+      "wallSeconds": 157.981,
+      "runnerSeconds": 101.188,
+      "billedMinutes": 3,
+      "outcome": "passed"
+    },
+    {
+      "id": "check-8",
+      "kind": "full",
+      "members": [
+        "t23938"
+      ],
+      "at": 720.813,
+      "wallSeconds": 160.012,
+      "runnerSeconds": 95.125,
+      "billedMinutes": 3,
+      "outcome": "passed"
+    },
+    {
+      "id": "check-9",
+      "kind": "full",
+      "members": [
+        "t27521"
+      ],
+      "at": 755.717,
+      "wallSeconds": 171.449,
+      "runnerSeconds": 113.432,
+      "billedMinutes": 3,
+      "outcome": "passed"
+    },
+    {
+      "id": "check-10",
+      "kind": "full",
+      "members": [
+        "t27456"
+      ],
+      "at": 923.41,
+      "wallSeconds": 159.537,
+      "runnerSeconds": 96.612,
+      "billedMinutes": 3,
+      "outcome": "passed"
+    }
+  ],
+  "observed": {
+    "timeToMainMedianSeconds": 350.326,
+    "wallSeconds": 1085.435,
+    "ciBilledMinutes": 30,
+    "recomposes": 8,
+    "recomposesMax": 1,
+    "checkRuns": 10
+  },
+  "normalization": {
+    "taskMedianSeconds": 350.326
+  }
+}

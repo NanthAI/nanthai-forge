@@ -94,3 +94,7 @@ A new core-claim incident adds its replay to the registry and a row here in the 
 it.
 
 `238b3573`: accepted dispatch startup failure with a lost webhook, and twelve signed passing shards whose provider run and eleven jobs remain in progress after every step completes; both replays are registered in `tests/fixtures/incident-replays.json`.
+
+Queue incidents `5e3c3a3c` and `e4aee4fe` run in `hosted-landing-queue-sim.test.mjs`.
+The [invariant reference](../operations/landing-queue-invariants.md) states known violations;
+the retained bench model is unqualified. The owner rollout decision requires switched rules and a live watch.

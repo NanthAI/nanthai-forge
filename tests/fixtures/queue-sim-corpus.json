@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "seed": 1,
+      "profile": "disjoint",
+      "invariants": [
+        "L1",
+        "L2",
+        "S10"
+      ],
+      "item": "5e3c3a3c"
+    },
+    {
+      "seed": 2,
+      "profile": "overlap",
+      "invariants": [
+        "L1",
+        "L2",
+        "S6",
+        "S10"
+      ],
+      "item": "5e3c3a3c"
+    },
+    {
+      "seed": 4,
+      "profile": "slow-old",
+      "invariants": [
+        "S4"
+      ],
+      "item": "e4aee4fe",
+      "mutant": "no-order-holding"
+    }
+  ]
+}

@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic, batchStore } from './hosted-landing-batches-fixture.mjs';
 import { landingApi } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { assertLandingProgress } from './landing-progress-invariant.mjs';
+import { assertQueueProgress } from './queue-sim/invariants.mjs';
 const finishCompose = await import(moduleUrl('../convex/projectHostedFinishCompose.ts'));
 const finishStore = await import(moduleUrl('../convex/projectHostedFinishStore.ts'));
 const finishWake = await import(moduleUrl('../convex/projectHostedFinishWake.ts'));
@@ -33,7 +33,7 @@ async function drain(f, skip = () => false, guard = false) {
     assert(steps < 2000, 'finite event-driven progress');
     await f.execute(task);
     if (guard)
-      assertLandingProgress(f, {
+      await assertQueueProgress(f, {
         externalRuns: new Set(
           f
             .runs()

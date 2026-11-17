@@ -52,7 +52,7 @@ for (const history of [0, 575, 1150])
     assert(cost.readBytes < 1024 * 1024, JSON.stringify(cost));
     assert(cost.writeBytes < 512 * 1024, JSON.stringify(cost));
     assert(cost.documents < 640, JSON.stringify(cost));
-    assertProgressOwners(f);
+    await assertProgressOwners(f);
     t.diagnostic(
       JSON.stringify({
         history,

@@ -28,6 +28,19 @@ const tsVersion = JSON.parse(
   readFileSync(new URL('node_modules/typescript/package.json', root), 'utf8'),
 ).version;
 const options = { target: 'ES2022', module: 'ESNext', jsx: 'ReactJSX' };
+// Mutants change test compilation only. Exact, unique anchors make a renamed
+// production branch fail loudly instead of silently disabling the detector.
+const sourcePatches = JSON.parse(process.env.FORGE_TEST_SOURCE_PATCHES ?? '[]');
+const patchedSources = new Map();
+for (const { file, find, replace } of sourcePatches) {
+  const url = new URL(file, root);
+  const source = patchedSources.get(url.href) ?? readFileSync(url, 'utf8');
+  if (typeof find !== 'string' || !find || source.split(find).length !== 2)
+    throw new Error(`Update this mutant: expected one source anchor in ${file}`);
+  if (typeof replace !== 'string') throw new Error(`Update this mutant: missing replacement in ${file}`);
+  patchedSources.set(url.href, source.replace(find, replace));
+}
+const sourceBytes = file => patchedSources.get(file.href) ?? readFileSync(file);
 const fromPattern = /from (['"])([^'"]+)\1/g;
 const dynamicPattern = /\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/g;
 let ts;
@@ -62,7 +75,7 @@ function resolveSpecifier(name, file) {
 function moduleFacts(file, keys) {
   const known = keys.facts.get(file.href);
   if (known) return known;
-  const source = readFileSync(file);
+  const source = Buffer.from(sourceBytes(file));
   const hash = createHash('sha256').update(file.href).update(source);
   const nested = [];
   for (const [, , name] of [
@@ -104,7 +117,7 @@ const moduleKeys = () => Object.assign(new Map(), { facts: new Map(), outputs: n
 function compile(file, directory, keys) {
   ts ??= require('typescript');
   return ts
-    .transpileModule(readFileSync(file, 'utf8'), {
+    .transpileModule(String(sourceBytes(file)), {
       fileName: file.pathname,
       compilerOptions: {
         target: ts.ScriptTarget.ES2022,

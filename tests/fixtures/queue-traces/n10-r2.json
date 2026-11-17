@@ -1,0 +1,686 @@
+{
+  "schema": 1,
+  "N": 10,
+  "rep": 2,
+  "series": "rerun",
+  "resultSha256": "d70ea16a0cffd83d9bec53d24745a8dddff8975291be340737f55b94ba481e26",
+  "sourcePins": {
+    "cliState": "206e558ce99a867c8cc9a7bd3c92c27f4fb1057562f416e77590fd6e93774634",
+    "cliCommit": "c6a2ab749ba3f7d3bda507d75eaecf43d0d77a1e",
+    "harnessCommit": "c6a2ab749ba3f7d3bda507d75eaecf43d0d77a1e",
+    "harnessFilesSha256": "4e38ee5aa313af9c806d547db70aaf2232ed1d215c309a062a402d6dfbb60d1d",
+    "deploymentCommit": "c6a2ab749ba3f7d3bda507d75eaecf43d0d77a1e"
+  },
+  "coverage": {
+    "complete": true,
+    "missing": [],
+    "limitation": "Stored waits have no transition timestamps. Attempt progress is the retained terminal snapshot, not a transaction journal."
+  },
+  "tasks": [
+    {
+      "task": "t27069",
+      "worker": 1,
+      "dispatchedAt": 34.913,
+      "counted": true,
+      "arriveAt": 78.292,
+      "submittedAt": 101.354,
+      "committedAt": 297.352,
+      "paths": [
+        "packages/shared/src/schemaJson.test.ts",
+        "packages/shared/src/schemaJson.ts"
+      ],
+      "observedTimeToMainSeconds": 262.439,
+      "observedRecomposes": 1,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "base",
+          "composeAt": 91.573,
+          "composeSeconds": 10.258,
+          "settledAt": 130.286,
+          "cause": null,
+          "outcome": "CHANNEL_CHANGED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 1,
+          "check": "check-2",
+          "mainFrom": "t26563",
+          "composeAt": 91.573,
+          "composeSeconds": 10.258,
+          "settledAt": 297.352,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 78.292,
+          "end": 299.144,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "task": "t26770",
+      "worker": 2,
+      "dispatchedAt": 11.311,
+      "counted": true,
+      "arriveAt": 95.449,
+      "submittedAt": 119.358,
+      "committedAt": 326.438,
+      "paths": [
+        "packages/source-control-forgejo/src/server/ForgejoCli.ts",
+        "packages/source-control-forgejo/src/server/ForgejoSourceControlProvider.test.ts",
+        "packages/source-control-forgejo/src/server/ForgejoSourceControlProvider.ts"
+      ],
+      "observedTimeToMainSeconds": 315.127,
+      "observedRecomposes": 1,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "base",
+          "composeAt": 110.027,
+          "composeSeconds": 9.798,
+          "settledAt": 168.082,
+          "cause": null,
+          "outcome": "CHANNEL_CHANGED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 1,
+          "check": "check-3",
+          "mainFrom": "t27069",
+          "composeAt": 110.027,
+          "composeSeconds": 9.798,
+          "settledAt": 326.438,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 95.449,
+          "end": 327.279,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "task": "t22302",
+      "worker": 3,
+      "dispatchedAt": 29.435,
+      "counted": true,
+      "arriveAt": 128.333,
+      "submittedAt": 152.532,
+      "committedAt": 391.425,
+      "paths": [
+        "apps/server/src/preview/ServerBrowser.test.ts",
+        "apps/server/src/preview/ServerBrowser.ts",
+        "apps/server/src/preview/ServerBrowserPage.test.ts",
+        "apps/server/src/preview/ServerBrowserPage.ts"
+      ],
+      "observedTimeToMainSeconds": 361.99,
+      "observedRecomposes": 1,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "base",
+          "composeAt": 143.355,
+          "composeSeconds": 9.637,
+          "settledAt": 206.326,
+          "cause": null,
+          "outcome": "CHANNEL_CHANGED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 1,
+          "check": "check-4",
+          "mainFrom": "t23766",
+          "composeAt": 143.355,
+          "composeSeconds": 9.637,
+          "settledAt": 391.425,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 128.333,
+          "end": 392.373,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "task": "t19456",
+      "worker": 4,
+      "dispatchedAt": 14.68,
+      "counted": true,
+      "arriveAt": 403.382,
+      "submittedAt": 537.634,
+      "committedAt": 762.705,
+      "paths": [
+        "apps/server/src/orchestration-v2/testkit/fixtures/thread_rollback_after_stop/pi_transcript.ndjson",
+        "apps/server/src/orchestration-v2/testkit/fixtures/turn_interrupt_mid_tool/pi_transcript.ndjson",
+        "apps/server/src/preview/ServerBrowser.test.ts",
+        "apps/server/src/preview/ServerBrowser.ts",
+        "apps/server/src/preview/ServerBrowserPage.test.ts",
+        "apps/server/src/preview/ServerBrowserPage.ts",
+        "packages/effect-codex-app-server/src/client.test.ts",
+        "packages/effect-codex-app-server/src/client.ts",
+        "packages/provider-pi/src/server/adapter.test.ts",
+        "packages/provider-pi/src/server/adapter.ts",
+        "packages/shared/src/changedFileKind.test.ts",
+        "packages/shared/src/changedFileKind.ts",
+        "packages/shared/src/schemaJson.test.ts",
+        "packages/shared/src/schemaJson.ts",
+        "packages/source-control-forgejo/src/server/ForgejoCli.ts",
+        "packages/source-control-forgejo/src/server/ForgejoSourceControlProvider.test.ts",
+        "packages/source-control-forgejo/src/server/ForgejoSourceControlProvider.ts"
+      ],
+      "observedTimeToMainSeconds": 748.025,
+      "observedRecomposes": 1,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "t27514",
+          "composeAt": 529.062,
+          "composeSeconds": 17.179,
+          "settledAt": 580.925,
+          "cause": null,
+          "outcome": "CHANNEL_CHANGED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 1,
+          "check": "check-8",
+          "mainFrom": "t27456",
+          "composeAt": 529.062,
+          "composeSeconds": 17.179,
+          "settledAt": 762.705,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 409.185,
+          "end": 411.191,
+          "outcome": "LANDING_NOT_LIVE"
+        },
+        {
+          "start": 439.643,
+          "end": 441.02,
+          "outcome": "NOT_FOUND"
+        },
+        {
+          "start": 403.382,
+          "end": 443.423,
+          "outcome": "COMPOSITION_CONFLICT"
+        },
+        {
+          "start": 523.368,
+          "end": 763.491,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "task": "t27456",
+      "worker": 5,
+      "dispatchedAt": 9.562,
+      "counted": true,
+      "arriveAt": 217.296,
+      "submittedAt": 359.925,
+      "committedAt": 584.953,
+      "paths": [
+        "apps/server/src/orchestration-v2/testkit/fixtures/thread_rollback_after_stop/pi_transcript.ndjson",
+        "apps/server/src/orchestration-v2/testkit/fixtures/turn_interrupt_mid_tool/pi_transcript.ndjson",
+        "apps/server/src/preview/ServerBrowser.test.ts",
+        "apps/server/src/preview/ServerBrowser.ts",
+        "apps/server/src/preview/ServerBrowserPage.test.ts",
+        "apps/server/src/preview/ServerBrowserPage.ts",
+        "packages/effect-codex-app-server/src/client.test.ts",
+        "packages/effect-codex-app-server/src/client.ts",
+        "packages/provider-pi/src/server/adapter.test.ts",
+        "packages/provider-pi/src/server/adapter.ts",
+        "packages/shared/src/changedFileKind.test.ts",
+        "packages/shared/src/changedFileKind.ts",
+        "packages/shared/src/schemaJson.test.ts",
+        "packages/shared/src/schemaJson.ts",
+        "packages/source-control-forgejo/src/server/ForgejoCli.ts",
+        "packages/source-control-forgejo/src/server/ForgejoSourceControlProvider.test.ts",
+        "packages/source-control-forgejo/src/server/ForgejoSourceControlProvider.ts"
+      ],
+      "observedTimeToMainSeconds": 575.391,
+      "observedRecomposes": 1,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "t23766",
+          "composeAt": 351.519,
+          "composeSeconds": 17.784,
+          "settledAt": 411.878,
+          "cause": null,
+          "outcome": "CHANNEL_CHANGED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 1,
+          "check": "check-7",
+          "mainFrom": "t23938",
+          "composeAt": 351.519,
+          "composeSeconds": 17.784,
+          "settledAt": 584.953,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 217.296,
+          "end": 274.031,
+          "outcome": "COMPOSITION_CONFLICT"
+        },
+        {
+          "start": 345.752,
+          "end": 585.694,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "task": "t23766",
+      "worker": 6,
+      "dispatchedAt": 17.425,
+      "counted": true,
+      "arriveAt": 93.983,
+      "submittedAt": 121.066,
+      "committedAt": 326.438,
+      "paths": [
+        "packages/effect-codex-app-server/src/client.test.ts",
+        "packages/effect-codex-app-server/src/client.ts"
+      ],
+      "observedTimeToMainSeconds": 309.013,
+      "observedRecomposes": 1,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "base",
+          "composeAt": 111.457,
+          "composeSeconds": 10.076,
+          "settledAt": 168.082,
+          "cause": null,
+          "outcome": "CHANNEL_CHANGED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 1,
+          "check": "check-3",
+          "mainFrom": "t27069",
+          "composeAt": 111.457,
+          "composeSeconds": 10.076,
+          "settledAt": 326.438,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 93.983,
+          "end": 327.249,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "task": "t23938",
+      "worker": 7,
+      "dispatchedAt": 32.584,
+      "counted": true,
+      "arriveAt": 274.579,
+      "submittedAt": 297.195,
+      "committedAt": 549.25,
+      "paths": [
+        "packages/effect-codex-app-server/src/_internal/stdio.test.ts",
+        "packages/effect-codex-app-server/src/_internal/stdio.ts",
+        "packages/effect-codex-app-server/src/client.test.ts",
+        "packages/effect-codex-app-server/src/client.ts",
+        "packages/effect-codex-app-server/src/errors.ts"
+      ],
+      "observedTimeToMainSeconds": 516.666,
+      "observedRecomposes": 1,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "t26563",
+          "composeAt": 288.783,
+          "composeSeconds": 18.674,
+          "settledAt": 362.724,
+          "cause": null,
+          "outcome": "CHANNEL_CHANGED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 1,
+          "check": "check-6",
+          "mainFrom": "t27514",
+          "composeAt": 288.783,
+          "composeSeconds": 18.674,
+          "settledAt": 549.25,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 274.579,
+          "end": 549.993,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "task": "t26563",
+      "worker": 8,
+      "dispatchedAt": 20.32,
+      "counted": true,
+      "arriveAt": 65.478,
+      "submittedAt": 95.222,
+      "committedAt": 276.998,
+      "paths": [
+        "packages/shared/src/changedFileKind.test.ts",
+        "packages/shared/src/changedFileKind.ts"
+      ],
+      "observedTimeToMainSeconds": 256.678,
+      "observedRecomposes": 0,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "base",
+          "composeAt": 81.66,
+          "composeSeconds": 14.163,
+          "settledAt": 96.693,
+          "cause": null,
+          "outcome": "ATTEMPT_REPLACED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 0,
+          "check": "check-1",
+          "mainFrom": "base",
+          "composeAt": 81.66,
+          "composeSeconds": 14.163,
+          "settledAt": 276.998,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 65.478,
+          "end": 277.712,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "task": "t27514",
+      "worker": 9,
+      "dispatchedAt": 23.295,
+      "counted": true,
+      "arriveAt": 164.527,
+      "submittedAt": 188.3,
+      "committedAt": 392.151,
+      "paths": [
+        "apps/server/src/orchestration-v2/testkit/fixtures/thread_rollback_after_stop/pi_transcript.ndjson",
+        "apps/server/src/orchestration-v2/testkit/fixtures/turn_interrupt_mid_tool/pi_transcript.ndjson",
+        "packages/provider-pi/src/server/adapter.test.ts",
+        "packages/provider-pi/src/server/adapter.ts"
+      ],
+      "observedTimeToMainSeconds": 368.856,
+      "observedRecomposes": 1,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "base",
+          "composeAt": 178.948,
+          "composeSeconds": 9.824,
+          "settledAt": 244.898,
+          "cause": null,
+          "outcome": "CHANNEL_CHANGED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 1,
+          "check": "check-5",
+          "mainFrom": "t27521",
+          "composeAt": 178.948,
+          "composeSeconds": 9.824,
+          "settledAt": 392.151,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [
+        {
+          "task": "t22302",
+          "held": "combined",
+          "footprints": "disjoint"
+        }
+      ],
+      "reactions": [
+        {
+          "start": 164.527,
+          "end": 392.975,
+          "outcome": "completed"
+        }
+      ]
+    },
+    {
+      "task": "t27521",
+      "worker": 10,
+      "dispatchedAt": 26.131,
+      "counted": true,
+      "arriveAt": 134.404,
+      "submittedAt": 156.888,
+      "committedAt": 391.425,
+      "paths": [
+        "packages/provider-pi/src/server/adapter.test.ts",
+        "packages/provider-pi/src/server/adapter.ts"
+      ],
+      "observedTimeToMainSeconds": 365.294,
+      "observedRecomposes": 1,
+      "attempts": [
+        {
+          "number": 0,
+          "candidate": 0,
+          "check": null,
+          "mainFrom": "base",
+          "composeAt": 148.138,
+          "composeSeconds": 9.305,
+          "settledAt": 206.326,
+          "cause": null,
+          "outcome": "CHANNEL_CHANGED",
+          "proof": null
+        },
+        {
+          "number": 1,
+          "candidate": 1,
+          "check": "check-4",
+          "mainFrom": "t23766",
+          "composeAt": 148.138,
+          "composeSeconds": 9.305,
+          "settledAt": 391.425,
+          "cause": null,
+          "outcome": "landed",
+          "proof": null
+        }
+      ],
+      "waits": [],
+      "reactions": [
+        {
+          "start": 134.404,
+          "end": 392.367,
+          "outcome": "completed"
+        }
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "id": "check-1",
+      "kind": "full",
+      "members": [
+        "t26563"
+      ],
+      "at": 97.197,
+      "wallSeconds": 177.289,
+      "runnerSeconds": 120.106,
+      "billedMinutes": 3,
+      "outcome": "passed"
+    },
+    {
+      "id": "check-2",
+      "kind": "full",
+      "members": [
+        "t27069"
+      ],
+      "at": 130.717,
+      "wallSeconds": 164.097,
+      "runnerSeconds": 115.916,
+      "billedMinutes": 3,
+      "outcome": "passed"
+    },
+    {
+      "id": "check-3",
+      "kind": "full",
+      "members": [
+        "t26770",
+        "t23766"
+      ],
+      "at": 168.691,
+      "wallSeconds": 155.194,
+      "runnerSeconds": 94.204,
+      "billedMinutes": 3,
+      "outcome": "passed"
+    },
+    {
+      "id": "check-4",
+      "kind": "full",
+      "members": [
+        "t22302",
+        "t27521"
+      ],
+      "at": 206.868,
+      "wallSeconds": 181.51,
+      "runnerSeconds": 119.422,
+      "billedMinutes": 3,
+      "outcome": "passed"
+    },
+    {
+      "id": "check-5",
+      "kind": "full",
+      "members": [
+        "t27514"
+      ],
+      "at": 245.383,
+      "wallSeconds": 134.277,
+      "runnerSeconds": 83.332,
+      "billedMinutes": 3,
+      "outcome": "passed"
+    },
+    {
+      "id": "check-6",
+      "kind": "full",
+      "members": [
+        "t23938"
+      ],
+      "at": 363.255,
+      "wallSeconds": 183.194,
+      "runnerSeconds": 119.43,
+      "billedMinutes": 3,
+      "outcome": "passed"
+    },
+    {
+      "id": "check-7",
+      "kind": "full",
+      "members": [
+        "t27456"
+      ],
+      "at": 412.313,
+      "wallSeconds": 169.764,
+      "runnerSeconds": 95.325,
+      "billedMinutes": 3,
+      "outcome": "passed"
+    },
+    {
+      "id": "check-8",
+      "kind": "full",
+      "members": [
+        "t19456"
+      ],
+      "at": 581.424,
+      "wallSeconds": 178.748,
+      "runnerSeconds": 116.083,
+      "billedMinutes": 3,
+      "outcome": "passed"
+    }
+  ],
+  "observed": {
+    "timeToMainMedianSeconds": 363.642,
+    "wallSeconds": 762.705,
+    "ciBilledMinutes": 24,
+    "recomposes": 9,
+    "recomposesMax": 1,
+    "checkRuns": 8
+  },
+  "normalization": {
+    "taskMedianSeconds": 363.642
+  }
+}

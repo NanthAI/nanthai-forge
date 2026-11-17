@@ -1,13 +1,8 @@
 # Landing batches
 
-Forge lands every change through the [hosted landing queue](../agents/workflow.md#landing-queue).
-The queue runs on the server: it keeps going after a client disconnects, and no owner process
-or local worker is needed. The native-owner batch driver that this page used to describe was
-removed with one client mode (Issue 657d63ee). Its journals, its `land-ready` recovery command
-and the owner Mac service went with it.
+The [hosted queue](../agents/workflow.md#landing-queue) continues after clients disconnect.
 
-This page covers what a queued landing reports, how hosted progress keeps its timing,
-queue-ahead advice, queue priority and the pre-queue Lane checks.
+Receipts, timing, queue advice, priority and pre-queue checks follow.
 
 ## Submission observations
 
@@ -156,61 +151,20 @@ or an agent using that owner's authority, can request urgent. Other contributors
 still submit normally and receive a `priorityReason` explaining the governance rule.
 Priority changes order; it does not change check, review or acceptance requirements.
 
-Checks of independent submissions run in parallel, but submissions take main in
-that order. A passed submission waits while an older one in its priority class is
-still queued, checking or passed; an urgent one waits only for older urgent ones.
-An older entry gives up its place when it fails, stalls, is held for red main, or
-waits for review or a dependency. An order-release event replaces any pending
-reservation or hold expiry wake immediately; a passed cohort never waits for an
-obsolete bound after its holder ends.
+Independent checks run in parallel; acceptance uses submission order within priority classes.
+Failed, stalled, red-main-held, review-waiting and dependency-waiting entries give up order.
+Related or unknown footprints keep strict order; combined and predicted-head groups overtake nothing.
+An unrelated solo pass may bypass graph-sealed work. Sealing requires reusable full evidence and
+`auto-on-pass` reuse policy. Scoped or non-dependent proof refusals mark `unsealed` for life.
+Otherwise `overtaken` spends one generation; the next check holds order. A wrong sealed prediction
+allows at most one additional lost generation.
 
-A passed solo submission does not wait for an older entry it is independent of: when
-neither change's paths equal, contain or sit inside the other's (the Candidates'
-stored changed paths) and together they touch no [global-risk file](../pre-queue-checks.md#global-risk-files)
-or shared test folder, it takes main first (core-claim incident `7d98c7da`, 2026-11-08:
-passed landings waited 17-40 min behind unrelated rechecks). The older entry keeps its
-check: on moved main it lands on that pass through the first-check rule, which applies
-the same test, so an independent landing never makes it re-check.
-
-**Graph-sealed order** (Issue `c6b81429`): an independent older entry never holds a
-passed newer one, for any number of its check generations, including a Ready entry
-that is itself parked behind an older submission. N independent landings therefore
-reach main in about one check wall plus serial acceptance, however many dependent
-entries are re-checking ahead of them. It is not sealed, and the bounded rule below
-decides, when the older entry is urgent, is a Ready entry about to take main (the one
-acceptance slot), is a member of a combined group, belongs to a project whose policy
-keeps exact rechecks (`hostedCrossHeadReuse:false` or acceptance other than
-`auto-on-pass`), or is **unsealed**: its re-check is scoped, or a proof of its pass was
-refused for a reason no dependent change causes (audit debt, a scoped first check,
-reuse policy). `unsealed` is set on the row once, in the write that installs that
-attempt, and kept. The bounded rule: such an entry gives up its place to an unrelated
-newer one for one check generation only (`overtaken` on the row); its next check holds
-strict order, so it re-checks at most once because newer entries overtook it (at most
-twice when a sealed guess was wrong). Combined groups and groups checked on a
-predecessor's predicted head overtake nothing; dependent entries keep strict order.
-
-The decision reads the claiming entry's project row and Candidate once and one Candidate
-per skipped entry, in the claim transaction; no call is added and an idle queue costs
-nothing. Each new wait is recorded on the row and copied to the receipt as `orderWaits`
-(at most 8): the older `submissionId`, `held` (`dependent`, `unknown-paths`,
-`accepting`, `urgent`, `overtaken`, `unsealed`, `no-proof`, `combined`, `composing`)
-and `footprints` (`overlap`, `disjoint` or `unknown`). `landings` lists it. A
-`disjoint` wait always names its cause; `accepting` is the acceptance slot, not order.
-Recording reads the two Candidates only when the holder was not already compared.
-
-The waiter keeps its passed check and owns no
-timer or stall alarm: the older entry keeps its own alarm, and when it gives up its
-place or lands, only the oldest waiter is woken and the rest wait for that one. A
-waiter whose check main has since moved past re-checks after the older entry lands,
-not beside it, so it re-checks once rather than once per landing ahead. So a
-re-check after a main race is only ever caused by an entry submitted before it,
-and each re-check attempt's
-`CHANNEL_CHANGED` message names the landings that moved main and whether they
-were submitted before or after it (core-claim incident `e4aee4fe`, 2026-11-01: a
-slow submission re-checked six times in an hour while newer ones overtook it).
-When main moved only in files disjoint from the Candidate, the first-check rule
-or the scoped re-check keeps the work bounded; a non-source file in a `scripts/` or
-`tests/` subfolder selects the code beside or naming it rather than the full suite.
+`orderWaits` records up to eight holders with `held` reason and `footprints` classification,
+reading Candidates only for a new comparison. Current parking clears the waiter's alarm and
+hands remaining waiters to the oldest wake; incident `5e3c3a3c` exposes stale edges in that path.
+The [queue invariants](landing-queue-invariants.md) distinguish current defects from target
+wake/deadline guarantees and describe the replay gate. `CHANNEL_CHANGED` retains which older
+or newer landings moved main; a recheck count alone does not establish starvation.
 
 An owner can reprioritise a queued Candidate submission through the existing agent
 CLI or the hosted `forge_task` MCP tool:
@@ -480,3 +434,4 @@ unchanged; a new priority write still needs the new server.
 Verified queue-advice objects are cached beside the Lane in
 `ROOT.forge-client/queue-ahead-objects`; observing the queue never adds downloaded
 object files to the Lane source directory.
+

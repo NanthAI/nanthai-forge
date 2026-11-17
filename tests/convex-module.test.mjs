@@ -25,7 +25,7 @@ function workspace(t) {
   return { cache, src, top: pathToFileURL(join(src, 'top.ts')) };
 }
 
-async function load(cache, top, windowsRename = false, mismatched = false) {
+async function load(cache, top, windowsRename = false, mismatched = false, patches = []) {
   const script = `import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 let collisions = 0;
@@ -51,7 +51,12 @@ const { moduleUrl } = await import(${JSON.stringify(loader)});
 const url = moduleUrl(new URL(process.argv[1]));
 console.log(JSON.stringify({ url, top: (await import(url)).top, ...(${windowsRename} ? { collisions } : {}) }));`;
   const { stdout } = await run(process.execPath, ['--input-type=module', '-e', script, top.href], {
-    env: { ...process.env, FORGE_TEST_MODULE_DIRECTORY: cache, FORGE_TEST_PRECOMPILED: '0' },
+    env: {
+      ...process.env,
+      FORGE_TEST_MODULE_DIRECTORY: cache,
+      FORGE_TEST_PRECOMPILED: '0',
+      FORGE_TEST_SOURCE_PATCHES: JSON.stringify(patches),
+    },
   });
   return JSON.parse(stdout);
 }
@@ -69,6 +74,19 @@ test('compiled modules are content addressed: reused when unchanged, rekeyed by 
   assert.equal(edited.top, 42, 'a dependency edit is never served from the old output');
   assert.notEqual(edited.url, first.url);
   assert.equal(readdirSync(cache).length, 4);
+});
+
+test('source mutants change transitive compiled behavior without editing source or sharing an unmutated cache key', async t => {
+  const { cache, src, top } = workspace(t);
+  const original = await load(cache, top);
+  const patches = [{ file: pathToFileURL(join(src, 'leaf.ts')).href, find: '= 1;', replace: '= 41;' }];
+  const mutant = await load(cache, top, false, false, patches);
+  assert.equal(mutant.top, 42);
+  assert.notEqual(mutant.url, original.url);
+  assert.deepEqual(await load(cache, top), original);
+  await assert.rejects(load(cache, top, false, false, [{ ...patches[0], find: 'missing anchor' }]), error =>
+    /Update this mutant/.test(error.stderr),
+  );
 });
 
 test('lazy Convex readers resolve literal dynamic imports and rekey after a dependency edit', async t => {
