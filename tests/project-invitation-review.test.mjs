@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { invitationFixture, contributors, access, mail, refusal, values } from './invitation-fixture.mjs';
 const account = await import(moduleUrl('../convex/accountActions.ts'));
+const data = await import(moduleUrl('../convex/accountData.ts'));
 const actions = await import(moduleUrl('../convex/projectContributorActions.ts'));
 const formerKey = 'invitation-generation';
 const member = s => s.ctx.db.insert('projectContributors', { projectId: 'project', contributor: 'guest' });
@@ -16,7 +17,13 @@ async function createCounter(s) {
 async function leaveProject(s) {
   s.caller();
   const operationId = randomUUID();
-  await account.begin._handler(s.ctx, { operationId, selection: [], leave: ['projects'] });
+  // The review's token first (accountData.shared), as the page reads it.
+  const { token: incoming } = await data.shared._handler(s.ctx, {
+    kind: 'projects',
+    cursor: null,
+    token: null,
+  });
+  await account.begin._handler(s.ctx, { operationId, selection: [], leave: ['projects'], incoming });
   let cursor = null;
   for (;;) {
     const page = await account.advance._handler(s.ctx, { operationId, cursor });

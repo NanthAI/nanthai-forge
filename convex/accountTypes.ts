@@ -4,7 +4,12 @@ export const resourceKind = v.union(
   ...(['project', 'import', 'secret', 'agent', 'team', 'view', 'interest'] as const).map(v.literal),
 );
 export const leaveKind = v.union(
-  ...(['readers', 'zones', 'teams', 'projects', 'secrets'] as const).map(v.literal),
+  ...(['readers', 'zones', 'teams', 'projects', 'projectReaders', 'secrets'] as const).map(v.literal),
+);
+/** What others shared with the person that the person can see, and so review row by row. Secret grants are not among
+ * them: a hidden grant is never listed, counted or hashed into a review (accountExecute.leaveSecrets). */
+export const sharedKind = v.union(
+  ...(['projects', 'projectReaders', 'readers', 'teams', 'zones'] as const).map(v.literal),
 );
 export const accountStage = v.union(
   ...(['preparing', 'ready', 'running', 'completed'] as const).map(v.literal),
@@ -23,6 +28,16 @@ export const accountFields = {
   captured: v.array(leaveKind),
   pending: v.number(),
   at: v.number(),
+  /** When the person read the reviewed list: a cleanup that leaves secret grants leaves only those given by then. */
+  secretsBefore: v.optional(v.number()),
+  /** Leaving those grants: unset until started, false while their rows are deleted in the background, true when done.
+   * They stop giving access when it starts (forgeAccounts.secretsLeftBefore), so no receipt waits for or shows it. */
+  secretsDone: v.optional(v.boolean()),
+  /** Where the next background page starts, and the task that runs it: a failed task is rescheduled from here. */
+  secretsCursor: v.optional(v.union(v.string(), v.null())),
+  secretsTask: v.optional(v.id('_scheduled_functions')),
+  /** How many selected items Forge kept because they changed after the review (each one's step found a new pin). */
+  kept: v.optional(v.number()),
 };
 export const accountItemFields = {
   owner: v.string(),
@@ -50,4 +65,5 @@ export const accountReceipt = v.object({
   request: v.string(),
   stage: accountStage,
   at: v.number(),
+  kept: v.number(),
 });

@@ -30,6 +30,6 @@ is not that portable archive; a source download or Git mirror must not be descri
 
 ## Account metadata
 
-Use the account's data controls to read the current inventory and export metadata. Check the stated contents: metadata does not include source bytes, secret values or credentials. Read [security](../security.md) and [current status](../status.md) for the delivered account-data scope.
+Use Account → Your data, signed in on the web, to read the current inventory and export metadata (device and agent credentials are refused there). Check the stated contents: metadata does not include source bytes, secret values or credentials. Read [security](../security.md) and [current status](../status.md) for the delivered account-data scope.
 
 Export does not require deleting a project or account. If you choose a removal action separately, read exactly what its current control says it removes and keeps.

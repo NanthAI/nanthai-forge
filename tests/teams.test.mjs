@@ -25,6 +25,34 @@ const add = (s, id, member = 'reader') => actions.addMember._handler(s.ctx, { id
 const list = (s, id, page = paginationOpts) =>
   actions.codescapes._handler(s.ctx, { id, paginationOpts: page });
 
+test('a team name has a sane length, as on GitHub: the longest is accepted, a longer one creates nothing', async () => {
+  const s = state([job()]),
+    cleanup = providers();
+  try {
+    s.caller('owner');
+    // Review s1-astra62 r4 #6: a name the size of the document limit left no room for its deletion's bookkeeping.
+    await assert.rejects(
+      teams.create._handler(s.ctx, { name: 'n'.repeat(101), operationId: randomUUID() }),
+      e => e.data.code === 'BAD_ARGUMENT',
+    );
+    assert.equal(s.tables.teams.size, 0, 'nothing created');
+    await teams.create._handler(s.ctx, { name: 'n'.repeat(100), operationId: randomUUID() });
+    assert.equal(s.tables.teams.size, 1);
+    // A creation that succeeded before the cap still answers its own retry (review c4ece6f2 #2).
+    const operationId = randomUUID();
+    s.tables.teams.set('long', {
+      _id: 'long',
+      _creationTime: 1,
+      owner: 'owner',
+      name: 'n'.repeat(500),
+      operationId,
+    });
+    assert.equal(await teams.create._handler(s.ctx, { name: 'n'.repeat(500), operationId }), 'long');
+  } finally {
+    cleanup();
+  }
+});
+
 test('reader teams reconcile creation/membership/import links and keep creator authority and membership metadata private', async () => {
   const s = state([job(), { ...job('other'), owner: 'other' }, { ...job('public'), visibility: 'public' }]),
     cleanup = providers();

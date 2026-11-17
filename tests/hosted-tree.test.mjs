@@ -92,13 +92,7 @@ test('the project list unifies projects and source without collection tabs', asy
 
 test('legacy styles sit in one cascade layer, so cockpit styles always win', () => {
   const read = name => readFileSync(new URL(`../web/src/${name}`, import.meta.url), 'utf8');
-  for (const file of [
-    'legacy.css',
-    'legacy-hosted.css',
-    'legacy-app.css',
-    'legacy-account-data.css',
-    'legacy-source-review.css',
-  ])
+  for (const file of ['legacy.css', 'legacy-hosted.css', 'legacy-app.css', 'legacy-source-review.css'])
     for (const line of read(file)
       .split('\n')
       .filter(item => item.startsWith('@import')))

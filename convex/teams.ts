@@ -20,6 +20,9 @@ export async function teamOwner(ctx: QueryCtx | MutationCtx, id: Id<'teams'>, ow
   );
   return team;
 }
+/** A team name's longest length, as GitHub allows for names (review s1-astra62 r4 #6: a name the size of the document
+ * limit left no room for its deletion's bookkeeping). */
+const TEAM_NAME_MAX = 100;
 export const create = accountMutation('write')({
   args: { name: v.string(), operationId: v.string() },
   returns: v.id('teams'),
@@ -46,6 +49,12 @@ export const create = accountMutation('write')({
         );
         return old._id;
       }
+      // After the replay: a creation that succeeded before the cap answers as it did (review c4ece6f2).
+      invariant(
+        name.length <= TEAM_NAME_MAX,
+        'BAD_ARGUMENT',
+        `Use a team name of at most ${TEAM_NAME_MAX} characters.`,
+      );
       const id = await ctx.db.insert('teams', { name: name.trim(), owner: user.subject, operationId });
       await ctx.db.insert('teamMembers', {
         teamId: id,

@@ -108,6 +108,7 @@ test('every address keeps the screen the shared registry gave it, and project ma
   );
   assert.equal(owner.get(accountScreenFor(entries, 'billing')), 'billing#0');
   assert.equal(owner.get(accountScreenFor(entries, 'devices')), 'devices#0');
+  assert.equal(owner.get(accountScreenFor(entries, 'data')), 'data#0');
   // Account > Projects serves the bulk delete request page (Item 7456856f); the rest of the place is a placeholder.
   assert.equal(owner.get(accountScreenFor(entries, 'projects')), 'requests#0');
 });

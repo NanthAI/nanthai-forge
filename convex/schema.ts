@@ -607,6 +607,10 @@ export default defineSchema({
     handle: v.string(),
     /** True until the person picks or keeps a handle once; unset until first checked. */
     handlePrompt: v.optional(v.boolean()),
+    /** Set when a Your data cleanup leaves the secret grants shared with the person: every grant to them given at or
+     * before this time stops giving access at once (secretGrantAuthority), before the grants themselves are deleted
+     * in the background (accountExecute.leaveSecrets). */
+    secretsLeftBefore: v.optional(v.number()),
   })
     .index('by_owner', ['owner'])
     .index('by_handle', ['handle']),
@@ -844,6 +848,9 @@ export default defineSchema({
     grantedBy: v.optional(v.string()),
     parentGrantId: v.optional(v.id('secretGrants')),
     revokedAt: v.optional(v.number()),
+    /** When this grant was last given (insert or in-place regrant); absent on rows given before it was kept. Account
+     * cleanup leaves only grants given before the person's review. */
+    grantedAt: v.optional(v.number()),
   })
     .index('by_secretId_and_principal', ['secretId', 'principal'])
     .index('by_principal_and_discover_and_secretId', ['principal', 'discover', 'secretId']),

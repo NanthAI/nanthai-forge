@@ -362,6 +362,7 @@ export const create = internalMutation({
         capabilities: all,
         discover: true,
         activeUntil: Number.MAX_VALUE,
+        grantedAt: Date.now(),
       });
       await ctx.db.insert('secretEvents', {
         secretId: id,
@@ -507,6 +508,7 @@ export const grant = internalMutation({
         discover: capabilities.includes('discover'),
         activeUntil: input.expiresAt ?? Number.MAX_VALUE,
         ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
+        grantedAt: Date.now(),
       };
       if (!capabilities.length) {
         if (row) await ctx.db.delete(row._id);

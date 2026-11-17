@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { v } from 'convex/values';
-import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
+import { v, getDocumentSize } from 'convex/values';
+import { paginationOptsValidator, paginationResultValidator, type GenericDocument } from 'convex/server';
 import { internalMutation, internalQuery, query, type QueryCtx, type MutationCtx } from './cliServer';
 import type { Doc, Id } from './_generated/dataModel';
 import {
@@ -13,6 +13,7 @@ import {
 import { accountReceipt, accountItemState, leaveKind } from './accountTypes';
 import { invariant } from '../src/errors';
 import { metadataBytes } from './accountMetadata';
+import { digest } from '../src/state/hash';
 import { report } from './errors';
 
 async function owned(ctx: QueryCtx | MutationCtx, operationId: string) {
@@ -29,6 +30,7 @@ const receipt = (r: Doc<'accountOperations'>) => ({
   request: r.request,
   stage: r.stage,
   at: r.at,
+  kept: r.kept ?? 0,
 });
 export const original = internalQuery({
   args: { operationId: v.string() },
@@ -51,6 +53,7 @@ export const register = internalMutation({
     request: v.string(),
     expectedItems: v.number(),
     leave: v.array(leaveKind),
+    secretsBefore: v.optional(v.number()),
   },
   returns: v.any(),
   handler: async (ctx, input) => {
@@ -87,13 +90,18 @@ const appendInput = v.object({
   kind: v.string(),
   resourceId: v.string(),
   pin: v.string(),
-  observed: v.string(),
+  /** Hidden (incoming) rows only: the exact row bytes the cleanup verified against its review. */
+  observed: v.optional(v.string()),
   operationId: v.string(),
   hidden: v.boolean(),
 });
+/** One append reads at most this much of the selected rows (plus the last row it checks), whatever their size. */
+export const APPEND_BYTES = 256 * 1024;
+/** Appends items in order and returns how many it took: it stops early once it has read APPEND_BYTES, and the caller
+ * sends the rest again (review ae15c5ca: names have no length limit, so a fixed count does not bound a read). */
 export const append = internalMutation({
   args: { operationId: v.string(), items: v.array(appendInput) },
-  returns: v.null(),
+  returns: v.number(),
   handler: async (ctx, { operationId, items }) => {
     try {
       const account = await owned(ctx, operationId);
@@ -102,30 +110,47 @@ export const append = internalMutation({
         'ACCOUNT_OPERATION_CHANGED',
         'This original selection is already sealed.',
       );
-      let added = 0;
+      let added = 0,
+        taken = 0,
+        bytes = 0;
+      const read = (doc: GenericDocument | null) => {
+        if (doc) bytes += getDocumentSize(doc);
+      };
       for (const item of items) {
+        if (taken && bytes >= APPEND_BYTES) break;
+        taken++;
+        // A stored item never changes (invariant 2a, comment c9ea033e): a retry finds it with the same pin or refuses.
         const old = await ctx.db
           .query('accountItems')
           .withIndex('by_account_and_key', q => q.eq('accountId', account._id).eq('key', item.key))
           .unique();
-        if (old) {
+        if (old)
           invariant(
-            old.resourceId === item.resourceId &&
-              old.kind === item.kind &&
-              (item.hidden || old.pin === item.pin),
+            old.resourceId === item.resourceId && old.kind === item.kind && old.hidden === item.hidden,
             'ACCOUNT_OPERATION_CHANGED',
             'Original selection changed.',
           );
-          continue;
-        }
+        invariant(
+          !old || old.pin === item.pin,
+          'ACCOUNT_CHANGED',
+          'Something on your list changed after your review. Review again; nothing was deleted.',
+        );
+        // Every item, stored or not, is checked against what Forge holds now, in this transaction.
         let expected: Doc<'accountItems'>['expected'];
         if (!item.hidden) {
-          const value = await ownedMetadata(ctx, item.kind as ResourceKind, item.resourceId, account.owner);
-          invariant(
-            value && metadataBytes(value) === item.observed,
-            'ACCOUNT_CHANGED',
-            'Selected Forge data changed. Existing data is preserved.',
+          const value = await ownedMetadata(
+            ctx,
+            item.kind as ResourceKind,
+            item.resourceId,
+            account.owner,
+            read,
           );
+          invariant(
+            value && digest(metadataBytes(value)) === item.pin,
+            'ACCOUNT_CHANGED',
+            'Selected metadata changed. The original resources are preserved.',
+          );
+          if (old) continue;
           const r = value as {
             revision?: number;
             version?: number;
@@ -142,12 +167,26 @@ export const append = internalMutation({
           };
           if (item.kind === 'view') {
             const row = await ctx.db.get(item.resourceId as Id<'savedViews'>);
+            read(row);
             expected.creationOperationId = row!.operationId;
           }
-        }
-        if (item.hidden) {
-          const value = await incomingCurrent(ctx, item.kind as LeaveKind, item.resourceId, account.owner);
-          if (!value || metadataBytes(value) !== item.observed) continue;
+        } else {
+          const value = await incomingCurrent(
+            ctx,
+            item.kind as LeaveKind,
+            item.resourceId,
+            account.owner,
+            read,
+          );
+          invariant(
+            value &&
+              item.observed !== undefined &&
+              metadataBytes(value) === item.observed &&
+              digest(item.observed) === item.pin,
+            'ACCOUNT_CHANGED',
+            'What is shared with you changed after your review. Review again; nothing was deleted.',
+          );
+          if (old) continue;
         }
         await ctx.db.insert('accountItems', {
           owner: account.owner,
@@ -164,7 +203,7 @@ export const append = internalMutation({
         added++;
       }
       if (added) await ctx.db.patch(account._id, { pending: account.pending + added });
-      return null;
+      return taken;
     } catch (e) {
       return report(e);
     }
@@ -184,35 +223,55 @@ export const captured = internalMutation({
   },
 });
 export const items = internalQuery({
-  args: { operationId: v.string(), paginationOpts: paginationOptsValidator },
+  /** `visible`: only the selected items (not what is left of others' things). */
+  args: {
+    operationId: v.string(),
+    paginationOpts: paginationOptsValidator,
+    visible: v.optional(v.boolean()),
+  },
   returns: v.any(),
-  handler: async (ctx, { operationId, paginationOpts }) => {
+  handler: async (ctx, { operationId, paginationOpts, visible }) => {
     try {
       const r = await owned(ctx, operationId);
-      return ctx.db
-        .query('accountItems')
-        .withIndex('by_account_and_key', q => q.eq('accountId', r._id))
-        .paginate(paginationOpts);
+      return visible
+        ? ctx.db
+            .query('accountItems')
+            .withIndex('by_account_and_hidden_and_key', q => q.eq('accountId', r._id).eq('hidden', false))
+            .paginate(paginationOpts)
+        : ctx.db
+            .query('accountItems')
+            .withIndex('by_account_and_key', q => q.eq('accountId', r._id))
+            .paginate(paginationOpts);
     } catch (e) {
       return report(e);
     }
   },
 });
 export const seal = internalMutation({
-  args: { operationId: v.string(), verifiedRequest: v.string(), verifiedItems: v.number() },
+  /** `verifiedTotal`: every item (owned and shared) this preparation verified. Items are only ever added, and each
+   * adds one to `pending`, so equal counts mean the stored set is exactly the verified one (an overlapping preparation
+   * that added anything makes this refuse). */
+  args: {
+    operationId: v.string(),
+    verifiedRequest: v.string(),
+    verifiedItems: v.number(),
+    verifiedTotal: v.number(),
+  },
   returns: accountReceipt,
   handler: async (ctx, input) => {
     try {
       const r = await owned(ctx, input.operationId);
+      if (r.stage !== 'preparing') return receipt(r);
       invariant(
         r.request === input.verifiedRequest &&
           r.expectedItems === input.verifiedItems &&
+          r.pending === input.verifiedTotal &&
           r.leave.every(k => r.captured.includes(k)),
         'ACCOUNT_OPERATION_CHANGED',
         'The original selection is incomplete. Reconcile it before removal.',
       );
-      if (r.stage === 'preparing') await ctx.db.patch(r._id, { stage: 'ready' });
-      return { ...receipt(r), stage: r.stage === 'preparing' ? ('ready' as const) : r.stage };
+      await ctx.db.patch(r._id, { stage: 'ready' });
+      return { ...receipt(r), stage: 'ready' as const };
     } catch (e) {
       return report(e);
     }
@@ -229,6 +288,7 @@ export const complete = internalMutation({
         'ACCOUNT_OPERATION_CHANGED',
         'Reconcile the original selection first.',
       );
+      // Only the listed items: the secret grants it leaves run on in the background and never change a receipt.
       if (r.pending) return receipt(r);
       await ctx.db.patch(r._id, { stage: 'completed' });
       return { ...receipt(r), stage: 'completed' as const };

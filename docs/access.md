@@ -59,8 +59,24 @@ device credential, including an unrestricted one, receives `AUTH_SCOPE_DENIED`:
 “Change your handle on the web: Settings → Account”. The CLI keeps its earlier
 handle command as that same refusal and does not send a write.
 
+Account → Your data is person-only: its inventory, metadata export, the deletion
+review, the cleanup itself and its receipts answer only the person signed in on
+the web. Every device, agent and legacy CLI credential, including an unrestricted
+one, receives `AUTH_SCOPE_DENIED` before any account row is read. A cleanup leaves
+exactly the shared teams, projects (as a contributor or a direct reader), imports
+and Source Zones the person reviewed, with the access each gave them when it was
+read (a changed maintainer flag counts as a change): if any of them changed after
+that review, it refuses before registering anything, and the person reviews again.
+Secret objects shared with the person are never listed, counted or part of the
+review, so nothing in it can show whether one exists. Leaving everything also
+leaves every secret grant the person held when they read the reviewed list, by
+the time the review's token carries: a grant given, or given again in place, at a
+later time stays. Those grants stop giving access as soon as the cleanup starts;
+their rows are then deleted in bounded background work, which never changes what
+the cleanup reports.
+
 Selected-project and read-only devices cannot make account-level writes, including
-team changes, account cleanup or project creation. The public wrapper decides
+team changes or project creation. The public wrapper decides
 from the credential it already reads; account mutations declare their device rule
 at registration. Unrestricted devices keep their existing account-write rights,
 subject to the same person-only rules. Adding team members by handle or email

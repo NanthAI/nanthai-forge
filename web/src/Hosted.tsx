@@ -50,7 +50,6 @@ const ImportedSourceSettings = lazy(() => import('./settings/ImportedSourceSetti
 const Teams = lazy(() => import('./Teams'));
 const Secrets = lazy(() => import('./Secrets'));
 const ProjectBackups = lazy(() => import('./ProjectBackups'));
-const AccountData = lazy(() => import('./AccountData'));
 const DeviceLogin = lazy(() => import('./DeviceLogin'));
 const OwnerApprove = lazy(() => import('./OwnerApprove'));
 const DeviceCredentials = lazy(() =>
@@ -617,7 +616,9 @@ function AccountSettings({ open, userId }: { open: (id: Id<'imports'>) => void; 
             {userId && (
               <>
                 <DeviceCredentials key={`devices-${userId}`} />
-                <AccountData key={userId} userId={userId} />
+                <p className="account-data-link">
+                  <a href="/-/account/data">Your data: take it out or delete it</a>
+                </p>
               </>
             )}
           </LazyPage>

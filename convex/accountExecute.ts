@@ -4,10 +4,14 @@ import { report } from './errors';
 import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
+import { internal } from './_generated/api';
+import { syncPersonOrder } from './accountProjectOrder';
 import {
   accountActor,
+  resourceMark,
   ownedMetadata,
   incomingCurrent,
+  grantsWithParents,
   type ResourceKind,
   type LeaveKind,
 } from './accountResources';
@@ -18,6 +22,105 @@ import { transition } from './projectLifecycle';
 import { deleteTeam } from './teamLifecycle';
 import { revokeAgent } from './agentGrants';
 import { invariant } from '../src/errors';
+import { digest } from '../src/state/hash';
+import { accountItemState } from './accountTypes';
+import { stream, type QueryStream } from 'convex-helpers/server/stream';
+import schema from './schema';
+
+/** Secret grants others gave the person are never listed, counted or hashed into a review (review ae15c5ca), so a
+ * deletion that leaves what is shared leaves them by time instead: every grant to the person on someone else's object
+ * given (inserted or given again in place, `grantedAt`) at or before the time the review's token carries
+ * (`secretsBefore`). A grant given after that stays, silently: a refusal or report would reveal it.
+ *
+ * Two steps, so no receipt depends on how many there are (reviews s1-sol62 r4 #2, s1-astra62 r4 #4). The first pass of
+ * the operation records the revocation on the person's account row (forgeAccounts.secretsLeftBefore): from that write
+ * those grants give nothing (secretGrantAuthority.leftByCleanup). Their rows are then deleted in the background, one
+ * byte-capped page per task; each page stores the next cursor and records the next task in one transaction, and a task
+ * whose cursor is not the stored one does nothing. A later pass of the same operation reschedules from the stored cursor
+ * when the recorded task failed or was cancelled (as secretLifecycle.resume does). Work is only ever started on an
+ * operation that has not completed and carries `secretsBefore`: a completed receipt, or one registered before secret
+ * grants were left by time, never starts new work. */
+export const startSecrets = internalMutation({
+  args: { operationId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { operationId }) => {
+    try {
+      const actor = await accountActor(ctx),
+        account = await ctx.db
+          .query('accountOperations')
+          .withIndex('by_owner_and_operation', q => q.eq('owner', actor).eq('operationId', operationId))
+          .unique();
+      invariant(account, 'ACCOUNT_UNAVAILABLE', 'This original data selection is unavailable.');
+      const before = account.secretsBefore;
+      if (account.stage === 'preparing' || before === undefined || account.secretsDone === true) return null;
+      if (account.secretsDone === undefined) {
+        if (account.stage === 'completed') return null;
+        const person = await ctx.db
+          .query('forgeAccounts')
+          .withIndex('by_owner', q => q.eq('owner', actor))
+          .unique();
+        if (person && (person.secretsLeftBefore ?? 0) < before)
+          await ctx.db.patch(person._id, { secretsLeftBefore: before });
+      } else {
+        const task = account.secretsTask ? await ctx.db.system.get(account.secretsTask) : null;
+        if (task && ['pending', 'inProgress'].includes(task.state.kind)) return null;
+      }
+      const next = await ctx.scheduler.runAfter(0, internal.accountExecute.leaveSecrets, {
+        accountId: account._id,
+        cursor: account.secretsCursor ?? null,
+      });
+      await ctx.db.patch(account._id, { secretsDone: false, secretsTask: next });
+      return null;
+    } catch (e) {
+      return report(e);
+    }
+  },
+});
+export const leaveSecrets = internalMutation({
+  args: { accountId: v.id('accountOperations'), cursor: v.union(v.string(), v.null()) },
+  returns: v.null(),
+  handler: async (ctx, { accountId, cursor }) => {
+    const account = await ctx.db.get(accountId);
+    if (
+      !account ||
+      account.secretsBefore === undefined ||
+      account.secretsDone !== false ||
+      cursor !== (account.secretsCursor ?? null)
+    )
+      return null;
+    const actor = account.owner,
+      before = account.secretsBefore;
+    const p = await grantsWithParents(
+      () =>
+        stream(ctx.db, schema)
+          .query('secretGrants')
+          .withIndex('by_principal_and_discover_and_secretId', q =>
+            q.eq('principal', actor),
+          ) as unknown as QueryStream<Doc<'secretGrants'>>,
+      cursor,
+      async row => ctx.db.get(row.secretId),
+    );
+    for (const { row: grant, parent } of p.rows) {
+      if ((grant.grantedAt ?? grant._creationTime) > before || parent?.owner === actor) continue;
+      await leaveSecret(ctx, grant, actor, child(account.operationId, `secrets:${grant._id}`));
+    }
+    if (p.isDone) {
+      await ctx.db.patch(account._id, { secretsDone: true, secretsCursor: null, secretsTask: undefined });
+      return null;
+    }
+    const next = await ctx.scheduler.runAfter(0, internal.accountExecute.leaveSecrets, {
+      accountId,
+      cursor: p.continueCursor,
+    });
+    await ctx.db.patch(account._id, { secretsCursor: p.continueCursor, secretsTask: next });
+    return null;
+  },
+});
+/** The child operation id of one left grant, in the same form as accountActions' item operation ids. */
+function child(operationId: string, key: string) {
+  const d = digest(operationId + '\n' + key);
+  return `${d.slice(0, 8)}-${d.slice(8, 12)}-4${d.slice(13, 16)}-8${d.slice(17, 20)}-${d.slice(20, 32)}`;
+}
 
 async function finish(
   ctx: MutationCtx,
@@ -26,30 +129,52 @@ async function finish(
   state: 'completed' | 'changed',
 ) {
   await ctx.db.patch(item._id, { state });
-  await ctx.db.patch(account._id, { pending: account.pending - 1, stage: 'running' });
+  await ctx.db.patch(account._id, {
+    pending: account.pending - 1,
+    stage: 'running',
+    ...(state === 'changed' ? { kept: (account.kept ?? 0) + 1 } : {}),
+  });
+}
+/** Leaves one secret grant: the object's policy moves on (so existing use stops) and the grant row goes. */
+async function leaveSecret(ctx: MutationCtx, grant: Doc<'secretGrants'>, actor: string, operationId: string) {
+  // Read now, not from the page: several grants on one object move its policy once each.
+  const object = await ctx.db.get(grant.secretId);
+  if (object && !object.deleting) {
+    const policyRevision = object.policyRevision + 1;
+    await ctx.db.patch(object._id, { policyRevision });
+    await ctx.db.insert('secretEvents', {
+      secretId: object._id,
+      actor,
+      operationId,
+      kind: 'grant',
+      version: object.version,
+      policyRevision,
+      at: Date.now(),
+      principal: actor,
+      capabilities: [],
+    });
+  }
+  await ctx.db.delete(grant._id);
 }
 async function leave(ctx: MutationCtx, item: Doc<'accountItems'>, actor: string) {
   if (item.kind === 'secrets') {
-    const row = await ctx.db.get(item.resourceId as Id<'secretGrants'>),
-      object = row && (await ctx.db.get(row.secretId));
-    if (object && !object.deleting) {
-      const policyRevision = object.policyRevision + 1;
-      await ctx.db.patch(object._id, { policyRevision });
-      await ctx.db.insert('secretEvents', {
-        secretId: object._id,
-        actor,
-        operationId: item.operationId,
-        kind: 'grant',
-        version: object.version,
-        policyRevision,
-        at: Date.now(),
-        principal: actor,
-        capabilities: [],
-      });
-    }
+    // Operations begun before review ae15c5ca listed secret grants as items; they still finish.
+    const row = await ctx.db.get(item.resourceId as Id<'secretGrants'>);
+    if (row) await leaveSecret(ctx, row, actor, item.operationId);
+    return;
   } else if (item.kind === 'projects') {
     const row = await ctx.db.get(item.resourceId as Id<'projectContributors'>);
     if (row) await retainMembership(ctx, row.projectId, actor);
+  } else if (item.kind === 'projectReaders') {
+    // As the owner removing a reader does (projectReaders.setReader): their name is kept, the read goes, their
+    // project order follows.
+    const row = await ctx.db.get(item.resourceId as Id<'projectReaders'>);
+    if (row) {
+      await retainMembership(ctx, row.projectId, actor);
+      await ctx.db.delete(row._id);
+      await syncPersonOrder(ctx, row.projectId, actor);
+    }
+    return;
   } else if (item.kind === 'zones') {
     const row = await ctx.db.get(item.resourceId as Id<'zoneReaders'>),
       zone = row && (await ctx.db.get(row.zoneId));
@@ -71,8 +196,10 @@ async function leave(ctx: MutationCtx, item: Doc<'accountItems'>, actor: string)
 }
 // Selection, authority, child-operation start and personal cleanup share ONE transaction.
 export const step = internalMutation({
-  args: { operationId: v.string(), itemId: v.id('accountItems'), observed: v.string() },
-  returns: v.null(),
+  args: { operationId: v.string(), itemId: v.id('accountItems') },
+  /** The item's state after this step. `started`: its removal is still running elsewhere; `mark` is the resource as
+   * this step left it (accountData.watch compares against it). */
+  returns: v.object({ state: accountItemState, mark: v.optional(v.string()) }),
   handler: async (ctx, input) => {
     try {
       const actor = await accountActor(ctx),
@@ -86,24 +213,25 @@ export const step = internalMutation({
         'ACCOUNT_UNAVAILABLE',
         'This original data selection is unavailable.',
       );
-      if (item.state === 'completed' || item.state === 'changed') return null;
+      if (item.state === 'completed' || item.state === 'changed') return { state: item.state };
       if (item.state === 'pending') {
         const value = item.hidden
           ? await incomingCurrent(ctx, item.kind as LeaveKind, item.resourceId, actor)
           : await ownedMetadata(ctx, item.kind as ResourceKind, item.resourceId, actor);
-        if (!value || metadataBytes(value) !== input.observed) {
+        // Pinned at selection; checked in this transaction (no separate read from the action).
+        if (!value || digest(metadataBytes(value)) !== item.pin) {
           await finish(ctx, account, item, 'changed');
-          return null;
+          return { state: 'changed' as const };
         }
         if (item.hidden) {
           await leave(ctx, item, actor);
           await finish(ctx, account, item, 'completed');
-          return null;
+          return { state: 'completed' as const };
         }
         if (item.kind === 'view' || item.kind === 'interest') {
           await ctx.db.delete(item.resourceId as Id<'savedViews'>);
           await finish(ctx, account, item, 'completed');
-          return null;
+          return { state: 'completed' as const };
         }
         await ctx.db.patch(item._id, { state: 'started' });
         await ctx.db.patch(account._id, { stage: 'running' });
@@ -148,7 +276,10 @@ export const step = internalMutation({
           await revokeAgent(ctx, item.resourceId as Id<'agentGrants'>);
         await finish(ctx, account, item, 'completed');
       }
-      return null;
+      const state = (await ctx.db.get(item._id))!.state;
+      return state === 'started'
+        ? { state, mark: await resourceMark(ctx, item.kind as ResourceKind, item.resourceId) }
+        : { state };
     } catch (e) {
       return report(e);
     }

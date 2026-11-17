@@ -33,6 +33,7 @@ const grantDocument = v.object({
   grantedBy: v.optional(v.string()),
   parentGrantId: v.optional(v.id('secretGrants')),
   revokedAt: v.optional(v.number()),
+  grantedAt: v.optional(v.number()),
 });
 const receipt = v.object({
   id: v.id('secretObjects'),

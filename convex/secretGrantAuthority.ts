@@ -20,6 +20,19 @@ export async function principalGrant(ctx: Ctx, id: Id<'secretObjects'>, principa
     .withIndex('by_secretId_and_principal', q => q.eq('secretId', id).eq('principal', principal))
     .unique();
 }
+/** Whether a Your data cleanup left this grant (forgeAccounts.secretsLeftBefore): it gives nothing from the moment
+ * the cleanup records that, before the row itself is deleted. A grant given, or given again in place, later keeps
+ * working. */
+export async function leftByCleanup(ctx: Ctx, row: Doc<'secretGrants'>) {
+  const person = await ctx.db
+    .query('forgeAccounts')
+    .withIndex('by_owner', q => q.eq('owner', row.principal))
+    .unique();
+  return (
+    person?.secretsLeftBefore !== undefined &&
+    (row.grantedAt ?? row._creationTime) <= person.secretsLeftBefore
+  );
+}
 /** Older rows already retain the issuing actor in the audit; no hosted rewrite is needed. */
 export async function granter(ctx: Ctx, row: Doc<'secretGrants'>): Promise<string | null> {
   if (row.grantedBy) return row.grantedBy;
@@ -59,7 +72,8 @@ export async function grantAuthority(ctx: Ctx, object: Doc<'secretObjects'>, act
       !row.capabilities.length ||
       (row.expiresAt !== undefined && row.expiresAt <= Date.now()) ||
       (child?.parentGrantId !== undefined && child.parentGrantId !== row._id) ||
-      (child && !row.capabilities.includes('delegate'))
+      (child && !row.capabilities.includes('delegate')) ||
+      (await leftByCleanup(ctx, row))
     )
       return { capabilities: [], expiresAt };
     capabilities = capabilities.filter(cap => row.capabilities.includes(cap));

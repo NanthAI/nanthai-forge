@@ -13,6 +13,8 @@ const modules = Object.fromEntries(
   ),
 );
 const denied = e => (e.data?.code ?? e.code) === 'PROJECT_UNAVAILABLE';
+// Your data is person-only (review 8e86eb09): the wrapper refuses devices before any account row is read.
+const personOnly = e => (e.data?.code ?? e.code) === 'AUTH_SCOPE_DENIED';
 function fixture() {
   const s = state([]);
   s.tables.hostedProjects.set('project', projectRow({ _id: 'project', name: 'synthetic', revision: 1 }));
@@ -50,7 +52,11 @@ test('owner device credentials cannot reveal secret values, permanently delete p
     ['projectHostedCheckWorker', 'register', { projectId: 'project', request: '{}' }],
   ]) {
     const s = fixture();
-    await assert.rejects(modules[module][name]._handler(s.ctx, input), denied, `${module}:${name}`);
+    await assert.rejects(
+      modules[module][name]._handler(s.ctx, input),
+      module === 'accountActions' ? personOnly : denied,
+      `${module}:${name}`,
+    );
     assert.equal(s.tables.hostedProjects.get('project').revision, 1);
     assert.equal(s.tables.accountOperations.size, 0);
   }
@@ -71,7 +77,7 @@ test('owner devices retain reversible trash and restore', async () => {
   assert.equal(s.tables.hostedProjects.get('project').removal, undefined);
 });
 
-test('project deletion in a retained account plan still requires the person on advance; unrelated cleanup remains available', async () => {
+test('a retained account plan refuses devices on advance, and devices cannot start any cleanup', async () => {
   const s = fixture();
   const device = s.ctx.auth.getUserIdentity;
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
@@ -87,12 +93,14 @@ test('project deletion in a retained account plan still requires the person on a
     leave: [],
   });
   s.ctx.auth.getUserIdentity = device;
-  await assert.rejects(modules.accountActions.advance._handler(s.ctx, { operationId, cursor: null }), denied);
+  await assert.rejects(
+    modules.accountActions.advance._handler(s.ctx, { operationId, cursor: null }),
+    personOnly,
+  );
   assert.equal(s.tables.hostedProjects.get('project').revision, 1);
-  const unrelated = await modules.accountActions.begin._handler(s.ctx, {
-    operationId: randomUUID(),
-    selection: [],
-    leave: [],
-  });
-  assert.equal(unrelated.stage, 'ready');
+  await assert.rejects(
+    modules.accountActions.begin._handler(s.ctx, { operationId: randomUUID(), selection: [], leave: [] }),
+    personOnly,
+  );
+  assert.equal(s.tables.accountOperations.size, 1);
 });

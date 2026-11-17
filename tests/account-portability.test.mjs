@@ -2,11 +2,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { state, job, providers } from './hosted-fixture.mjs';
 import { settleR2Purge } from './default-r2.mjs';
 const account = await import(moduleUrl('../convex/accountActions.ts'));
 const plan = await import(moduleUrl('../convex/accountPlan.ts'));
+const data = await import(moduleUrl('../convex/accountData.ts'));
 const teams = await import(moduleUrl('../convex/teams.ts'));
 const saved = await import(moduleUrl('../convex/savedViews.ts'));
 const teamLife = await import(moduleUrl('../convex/teamLifecycle.ts'));
@@ -24,16 +26,33 @@ async function inventory(f, kind) {
     cursor = p.continueCursor;
   }
 }
+/** The review's token over what is shared with the caller, read as the page reads it (accountData.shared). */
+async function reviewed(f, leave) {
+  const kinds = ['projects', 'projectReaders', 'readers', 'teams', 'zones'].filter(kind =>
+    leave.includes(kind),
+  );
+  if (!kinds.length) return null;
+  let token = null;
+  for (const kind of kinds)
+    for (let cursor = null; ;) {
+      const p = await data.shared._handler(f.ctx, { kind, cursor, token });
+      token = p.token;
+      if (p.isDone) break;
+      cursor = p.continueCursor;
+    }
+  return token;
+}
 async function begin(f, selection = [], leave = []) {
   const request = {
     operationId: randomUUID(),
     selection: selection.map(({ kind, id, pin }) => ({ kind, id, pin })),
     leave,
+    incoming: await reviewed(f, leave),
   };
   await account.begin._handler(f.ctx, request);
   return request;
 }
-async function advance(f, r) {
+async function pass(f, r) {
   let cursor = null;
   for (;;) {
     const p = await account.advance._handler(f.ctx, { operationId: r.operationId, cursor });
@@ -41,7 +60,23 @@ async function advance(f, r) {
     cursor = p.cursor;
   }
 }
-const row = (id, fields) => ({ _id: id, _creationTime: 1, ...fields });
+/** A pass, the secret-grant pages it scheduled (accountExecute.leaveSecrets), and the pass the page's watch starts. */
+async function advance(f, r) {
+  const last = await pass(f, r);
+  let ran = 0;
+  for (
+    let task;
+    (task = f.scheduled.find(t => getFunctionName(t.fn) === 'accountExecute:leaveSecrets'));
+    ran++
+  ) {
+    f.scheduled.splice(f.scheduled.indexOf(task), 1);
+    await f.ctx.runMutation(task.fn, task.args);
+  }
+  return ran ? pass(f, r) : last;
+}
+// Distinct creation times, as Convex gives: index-key cursors order ties by id, which the fixture does not model.
+let clock = 1;
+const row = (id, fields) => ({ _id: id, _creationTime: clock++, ...fields });
 
 test('full paged ownership inventory omits all other owners, credential/source bytes and hidden grants', async () => {
   const f = state([job(), { ...job('foreign'), owner: 'other' }]);
@@ -147,7 +182,7 @@ test('original selection/retry is stable; personal deletion preserves changed an
   const same = await account.begin._handler(f.ctx, r);
   assert.equal(same.operationId, r.operationId);
   await assert.rejects(
-    () => account.begin._handler(f.ctx, { ...r, leave: ['teams'] }),
+    () => account.begin._handler(f.ctx, { ...r, leave: ['teams'], incoming: 'a'.repeat(64) }),
     /ACCOUNT_OPERATION_CHANGED/,
   );
   const newId = await saved.put._handler(f.ctx, {
@@ -236,9 +271,11 @@ test('incoming self-leave keeps other grants/shared source and never exposes hid
   assert.ok(f.tables.imports.has('foreign'));
   assert.equal(f.tables.secretObjects.get('hidden').policyRevision, 2);
   assert.equal([...f.tables.secretEvents.values()][0].principal, 'owner');
+  // A grant made after the deletion started is not one it covers.
   f.tables.secretGrants.set(
     'later',
     row('later', {
+      _creationTime: Date.now() + 60_000,
       secretId: 'hidden',
       principal: 'owner',
       discover: false,
@@ -275,11 +312,21 @@ test('changed incoming grants are preserved; owned creator memberships never sel
       activeUntil: 9999999999999,
     }),
   );
+  f.tables.teams.set(
+    'their-team',
+    row('their-team', { owner: 'other', name: 'theirs', operationId: randomUUID() }),
+  );
+  f.tables.teamMembers.set('tm', row('tm', { teamId: 'their-team', member: 'owner' }));
   const own = await teams.create._handler(f.ctx, { name: 'my team', operationId: randomUUID() });
   const r = await begin(f, [], ['teams', 'secrets']);
+  // A listed grant replaced after the deletion started (removed, then given again) is kept; a secret grant is left
+  // as it stood when the deletion started (it is never listed, so it is bound by time, not by its bytes).
+  f.tables.teamMembers.delete('tm');
+  f.tables.teamMembers.set('tm-again', row('tm-again', { teamId: 'their-team', member: 'owner' }));
   f.tables.secretGrants.get('mine').capabilities = ['names'];
   await advance(f, r);
-  assert.ok(f.tables.secretGrants.has('mine'));
+  assert.ok(f.tables.teamMembers.has('tm-again'));
+  assert.ok(!f.tables.secretGrants.has('mine'));
   assert.ok([...f.tables.teamMembers.values()].some(x => x.teamId === own));
 });
 
@@ -504,7 +551,7 @@ test('a caller cannot turn a cross-table ID into personal deletion or bypass its
 
 test('account metadata, planner, executor and team lifecycle bundle without Node imports in Convex mutation/query runtime', async () => {
   const { build } = await import('esbuild');
-  for (const file of ['accountResources', 'accountPlan', 'accountExecute', 'teamLifecycle']) {
+  for (const file of ['accountResources', 'accountData', 'accountPlan', 'accountExecute', 'teamLifecycle']) {
     const result = await build({
       entryPoints: [new URL(`../convex/${file}.ts`, import.meta.url).pathname],
       bundle: true,
