@@ -21,6 +21,9 @@ const { LaneApproval } = await import(moduleUrl('../web/src/review/LaneApproval.
 const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 const { approvalDecisions } = await import(moduleUrl('../web/src/cockpit/attention.ts'));
+const needsMe = await import(moduleUrl('../convex/projectNeedsMe.ts'));
+const { needsView } = await import(moduleUrl('../web/src/app/needs/model.ts'));
+const { decideTarget } = await import(moduleUrl('../web/src/app/needs/decide.ts'));
 
 function syntheticR2(t) {
   const synthetic = {
@@ -122,6 +125,58 @@ test('the owner approves the exact held attempt and the waiting submission lands
   assert.equal(by.head, read.submission.acceptance.head, 'the exact Candidate the owner accepted landed');
   assert.deepEqual(by.paths, ['selected.txt']);
   assert.equal(by.carried, undefined);
+});
+
+test('48049998 replay: a protected-path policy hold has no Lane request, yet Needs me offers Approve and Decline on its exact attempt', async t => {
+  const { f, state, select } = await heldLanding(t);
+  const read = await f.tx('needsRead', needsMe.read, { projectId: f.projectId });
+  assert.equal(read.canDecide, true, 'the owner decides');
+  assert.deepEqual(
+    JSON.parse(read.approvals).requests.filter(request => request.kind === 'lane'),
+    [],
+    'a landing-policy hold opens no Lane approval request (the live case: no buttons before this fix)',
+  );
+  const [row] = needsView(read).now;
+  assert.equal(row.why, 'review');
+  assert.equal(row.approval, null);
+  const held = await select();
+  assert.deepEqual(row.landing, { submissionId: held.submissionId, attemptId: held.attemptId });
+  const target = decideTarget(row);
+  assert.deepEqual(
+    target,
+    { landing: row.landing },
+    'the held attempt itself, as the /approve page decides it',
+  );
+  // The web's grant is the /approve page's call on that exact attempt (decide.ts), with no other authority.
+  const approved = JSON.parse(
+    await f.tx('needsApprove', acceptance.approve, { projectId: f.projectId, ...target.landing }),
+  );
+  assert.equal(approved.status, 'landed');
+  assert.deepEqual(approved.receipt.actor, { id: 'owner', kind: 'person' });
+  await f.drain();
+  assert.equal((await f.current(state.id)).submission.observation.state, 'landed');
+  assert.deepEqual(
+    (await f.tx('needsReadAfter', needsMe.read, { projectId: f.projectId })).held,
+    [],
+    'approved anywhere, it leaves Needs me',
+  );
+});
+
+test('48049998: Decline from Needs me on a policy hold ends it REVIEW_DECLINED, as the /approve page does', async t => {
+  const { f, state } = await heldLanding(t);
+  const read = await f.tx('needsRead', needsMe.read, { projectId: f.projectId });
+  const target = decideTarget(needsView(read).now[0]);
+  const declined = JSON.parse(
+    await f.tx('needsDecline', review.decline, {
+      projectId: f.projectId,
+      ...target.landing,
+      operationId: randomUUID(),
+    }),
+  );
+  assert.equal(declined.error.code, 'REVIEW_DECLINED');
+  await f.drain();
+  assert.equal((await f.current(state.id)).submission.observation.state, 'terminal-failed');
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
 });
 
 test('main moves after the hold: approval does not publish the stale Candidate; a fresh attempt is checked and lands with it', async t => {

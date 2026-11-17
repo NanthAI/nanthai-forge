@@ -10,6 +10,7 @@ const { needsView, needsSentence, itemCounts, moving, whoOf } = await import(
   moduleUrl('../web/src/app/needs/model.ts')
 );
 const { heldCount } = await import(moduleUrl('../web/src/app/Line.tsx'));
+const { decideTarget } = await import(moduleUrl('../web/src/app/needs/decide.ts'));
 
 const held = (laneId, why, since, extra = {}) => ({
   laneId,
@@ -63,6 +64,36 @@ test('the Needs you count is the held-Lane count the top bar shows; asked-ahead 
   assert.equal(withApproval.approval.laneId, 'l2', 'the Lane request is drawn on its held row, not twice');
   assert.match(needsSentence(view).bold, /^2 Lanes are held until you decide\.$/);
   assert.match(needsSentence(view).rest, /^1 request asked ahead holds nothing yet\.$/);
+});
+
+test('48049998: every hold that waits for the owner has a decision target; a request asked ahead keeps its own head', () => {
+  const view = needsView(
+    read(
+      [
+        held('policy', 'review', 10, { submissionId: 's1', attemptId: 'a1' }),
+        held('asked', 'review', 20, { submissionId: 's2', attemptId: 'a2' }),
+        held('conflict', 'conflict', 30, { submissionId: 's3' }),
+      ],
+      [
+        request('asked', 'lane', { head: 'b'.repeat(64) }),
+        request('setting:runner', 'setting', { reason: 'Run 8 checks at once.' }),
+      ],
+    ),
+  );
+  const target = laneId => decideTarget(view.now.find(row => row.laneId === laneId));
+  assert.deepEqual(
+    target('policy'),
+    { landing: { submissionId: 's1', attemptId: 'a1' } },
+    'a landing-policy hold',
+  );
+  assert.deepEqual(
+    target('asked'),
+    { head: 'b'.repeat(64) },
+    "a Lane's request decides its held landing too",
+  );
+  assert.equal(target('conflict'), null, 'nothing for the owner to approve');
+  assert.equal(view.ahead[0].head, 'a'.repeat(64), 'the decision names the request head, never the row text');
+  assert.equal(view.ahead[0].question, 'Run 8 checks at once.');
 });
 
 test('the longest hold comes first and each row is titled by its Item and reason', () => {

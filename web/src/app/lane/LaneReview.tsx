@@ -35,6 +35,7 @@ import { BrowserLanding } from '../../lane/hosted-landing-client';
 import { landingBrowserIO } from '../../lane/landing-browser-io';
 import { takenOutText, useTakeOut } from '../take-out';
 import { laneState } from '../lane-state';
+import { LaneDecision } from '../needs/LaneDecision';
 import './lane.css';
 
 type ProjectRoute = Extract<AppRoute, { frame: 'project' }>;
@@ -273,6 +274,7 @@ export function ReviewPage({
           </p>
         </div>
       ) : null}
+      <LaneDecision projectId={projectId} laneId={lane.laneId} held={Boolean(stop?.held) && !lane.landed} />
       {cli ? (
         <pre className="cli-out mono" id="lane-cli">
           <b>$ {command}</b>

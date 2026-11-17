@@ -79,7 +79,7 @@ test('board reads advance the local cursor; delivery renders lines; an older ser
   assert.equal(f.calls[2].args.after, 0);
   const envelope = boardEnvelope(f.root, laneId, { messages: [{ ...message, at: 70 }], more: 3, cursor: 70 });
   assert.equal(envelope.notices.length, 2);
-  assert.equal(envelope.notices[1], `3+ more: board '{}'`);
+  assert.equal(envelope.notices[1], `3+ more: board '${JSON.stringify({ laneId })}'`);
   assert.equal(readBoardCursor(f.root, laneId), 70);
   boardEnvelope(f.root, laneId, { messages: [], more: 0, cursor: 60 });
   assert.equal(readBoardCursor(f.root, laneId), 70, 'the cursor never moves back');

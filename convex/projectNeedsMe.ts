@@ -45,6 +45,10 @@ export const needsMeResult = v.object({
       note: v.union(v.string(), v.null()),
       /** The held landing, for the failed-check screen (2c420916 owns its cause). */
       submissionId: v.union(v.string(), v.null()),
+      /** For a landing held for review: its held attempt, so the owner can approve or decline that exact attempt
+       * here with the calls the /approve page makes (projectHostedAcceptance:approve, projectHostedOwnerReview:decline).
+       * A landing-policy hold (protected paths, supervised) has no Lane approval request to decide instead. */
+      attemptId: v.optional(v.string()),
       /** When the hold began, as far as the records say (ms). */
       since: v.number(),
     }),
@@ -84,6 +88,7 @@ async function reason(ctx: QueryCtx, projectId: Id<'hostedProjects'>, mark: Held
     why,
     note: state?.error?.message ? state.error.message.replace(/\s+/g, ' ').slice(0, NOTE_CHARS) : null,
     submissionId: state?.id ?? null,
+    ...(why === 'review' && state?.attemptId ? { attemptId: state.attemptId } : {}),
     since: ended ? Date.parse(ended) : mark.changedAt,
   } as const;
 }

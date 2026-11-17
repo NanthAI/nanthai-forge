@@ -25,6 +25,8 @@ export type HeldLane = {
   why: HeldWhy;
   note: string | null;
   submissionId: string | null;
+  /** The held attempt of a landing held for review (the owner decides that exact attempt). */
+  attemptId?: string;
   since: number;
 };
 /** One open request from the approvals payload (projectHostedApprovals `openApprovalRequests`). */
@@ -59,11 +61,15 @@ export type NowRow = HeldLane & {
   who: string | null;
   /** The Lane's approval request, when the hold is a landing waiting for the owner. */
   approval: Approval | null;
+  /** The held landing itself, when it waits for review: a landing-policy hold (protected paths, a supervised
+   * project) has no request, and the owner decides this exact attempt as the /approve page does. */
+  landing: { submissionId: string; attemptId: string } | null;
   /** The short Lane mark, and how many held Lanes share its Item, so two rows never look the same. */
   mark: string;
   siblings: number;
 };
-export type AheadRow = Approval & { word: StateWord; tag: string; head: string; who: string | null };
+/** `head` stays the request's own head, which a decision must name; `question` is what the row says. */
+export type AheadRow = Approval & { word: StateWord; tag: string; question: string; who: string | null };
 export type NeedsView = {
   now: NowRow[];
   ahead: AheadRow[];
@@ -150,6 +156,10 @@ export function needsView(read: NeedsRead): NeedsView {
         head: questions[why](laneTitle(lane)),
         who: whoOf(lane.actor, lane.agent),
         approval,
+        landing:
+          why === 'review' && lane.submissionId && lane.attemptId
+            ? { submissionId: lane.submissionId, attemptId: lane.attemptId }
+            : null,
         mark: lane.laneId.slice(0, 8),
         siblings: lane.intentId ? (perItem.get(lane.intentId) ?? 1) : 1,
       };
@@ -169,7 +179,7 @@ export function needsView(read: NeedsRead): NeedsView {
           : request.kind === 'fork'
             ? 'Fork run'
             : 'Request',
-      head: aheadHead(request),
+      question: aheadHead(request),
       who: whoOf(request.requester, request.agent),
     }));
   return {

@@ -160,7 +160,9 @@ export function boardEnvelope(root: string, laneId: string, delivered: BoardDeli
   for (const message of messages) if (message.target === 'project') writeBoardProjectCursor(root, message.at);
   const notices = messages.map(message => boardNoticeLine(message, laneId));
   return {
-    notices: delivered.more ? [...notices, `${delivered.more}+ more: board '{}'`] : notices,
+    notices: delivered.more
+      ? [...notices, `${delivered.more}+ more: board '${JSON.stringify({ laneId })}'`]
+      : notices,
     more: delivered.more,
   };
 }

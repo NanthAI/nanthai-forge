@@ -12,6 +12,7 @@ import {
   type BoardNote,
 } from './board-local.js';
 import { queueBoardClaim, type ClaimTarget } from './board-claim-queue.js';
+import { BOARD_NOTICE_CHARS, BOARD_PATH_CHARS } from './board-text.js';
 import { actorLabel } from './agent-slug.js';
 import { memberDataNotice } from './member-data-notice.js';
 
@@ -140,7 +141,10 @@ function boardLines(
   const claims = [
     ...((value.claims as BoardNote[] | undefined) ?? [])
       .slice(0, 2)
-      .map(claim => `Claim on ${target.path}: ${boardNoticeLine(claim, target.laneId)}`),
+      .map(
+        claim =>
+          `Claim on ${target.path.slice(0, 80).replace(/[\uD800-\uDBFF]$/, '')}: ${boardNoticeLine(claim, target.laneId)}`,
+      ),
     ...touching.map(row => touchingLine(target.path, row)),
   ].slice(0, 3);
   const notices = value.messages.length
@@ -180,7 +184,12 @@ export function hostedEditContext(result: Awaited<ReturnType<typeof preEditHoste
   // Board lines are already single quoted-data lines (claims and unread notes, ≤2 each); one marker
   // for all of them (S-17).
   return (
-    lines.map(line => line.replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, 280)).join('\n') +
-    `\n${memberDataNotice}`
+    lines
+      .map(line =>
+        line
+          .replace(/[\x00-\x1f\x7f]/g, ' ')
+          .slice(0, BOARD_NOTICE_CHARS + BOARD_PATH_CHARS + 'Claim on : '.length),
+      )
+      .join('\n') + `\n${memberDataNotice}`
   );
 }

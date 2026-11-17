@@ -60,6 +60,13 @@ const client = {
       url: url(digest),
     }));
   },
+  // The owner's decision block subscribes to Needs me's read while the Lane is held; here it never answers, so the
+  // block stays hidden and only its name is recorded (window.__watches).
+  watchQuery: (ref: unknown) => {
+    const watches = ((window as unknown as { __watches?: string[] }).__watches ??= []);
+    watches.push(getFunctionName(ref as never));
+    return { onUpdate: () => () => {}, localQueryResult: () => undefined, journal: () => undefined };
+  },
 } as unknown as ConvexReactClient;
 
 const PEER = '3c1f9a20-5b7e-4d2a-9c11-2f0e6b8a4d19';

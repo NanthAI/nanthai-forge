@@ -180,7 +180,10 @@ createRoot(document.getElementById('root')).render(<Fixture/>);
             await page
               .getByRole('heading', { name: legal === 'terms' ? 'Terms' : 'Privacy policy', exact: true })
               .waitFor();
-            assert.match(await page.locator('.intro').textContent(), /Draft.*owner approval/);
+            assert.match(
+              await page.locator('.intro').textContent(),
+              /Draft.*not legal advice.*owner approval/,
+            );
             assert.deepEqual(
               await context.cookies(),
               [],

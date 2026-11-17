@@ -36,6 +36,8 @@ body:has(.docs-shell) { margin: 0; }
   .docs-copy-status { color: var(--text-2); font-size: var(--t-meta); white-space: normal; }
   .docs-footer { display: flex; flex-wrap: wrap; gap: var(--s-4); border-top: var(--rule) solid var(--line); margin-top: var(--s-12); padding-top: var(--s-5); max-width: var(--m-read); font-size: var(--t-small); }
   .docs-footer a { color: var(--accent); }
+  .docs-footer .docs-legal { display: flex; gap: var(--s-4); margin-inline-start: auto; }
+  .docs-footer .docs-legal a { color: var(--text-2); }
   @media (max-width: 860px) {
     .pubbar { padding-inline: var(--gut); gap: var(--s-4); }
     .docs-layout { grid-template-columns: minmax(0, 1fr); }

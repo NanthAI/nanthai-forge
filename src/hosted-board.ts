@@ -136,7 +136,8 @@ export async function boardHostedSource(
     const parsedMessages = messages.map(message => boardMessageSchema.parse(message));
     const shown = id || command.all ? parsedMessages : unreadBoardNotes(transport.root, parsedMessages);
     for (const message of shown)
-      if (!command.all && message.target === 'project') writeBoardProjectCursor(transport.root, message.at);
+      if (!id && !command.all && message.target === 'project')
+        writeBoardProjectCursor(transport.root, message.at);
     const notices = [...shown, ...(Array.isArray(result.replies) ? result.replies : [])].map(message =>
       boardNoticeLine(boardMessageSchema.parse(message), laneId),
     );

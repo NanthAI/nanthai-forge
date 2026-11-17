@@ -33,6 +33,8 @@ test('docs are static, contract-generated and usable without account or backend 
   assert.match(home, /<h1 id="forge-documentation">Forge documentation<\/h1>/);
   assert.match(home, /Your first project/);
   assert.doesNotMatch(home, /<!--docs-content-->|\/src\//);
+  // Every docs page links the draft Terms and Privacy pages (a9f4654f).
+  assert.match(home, /<a href="\/-\/terms">Terms<\/a><a href="\/-\/privacy">Privacy policy<\/a>/);
   const cli = read(out, 'docs/reference/cli.md');
   for (const entry of hostedAgentHelpEntries) {
     assert.ok(cli.includes(`## ${entry.command}\n`), entry.command);
@@ -154,6 +156,7 @@ test('docs are static, contract-generated and usable without account or backend 
           assert.ok(await page.evaluate(() => document.activeElement !== document.body));
           assert.deepEqual(errors, []);
           assert.deepEqual(backend, [], 'docs make no auth, Convex or remote asset calls');
+          assert.deepEqual(await context.cookies(), [], 'docs set no cookies');
           await context.close();
         }
       const noJs = await browser.newContext({ javaScriptEnabled: false });

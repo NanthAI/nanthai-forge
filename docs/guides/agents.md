@@ -2,6 +2,8 @@
 
 Use the CLI directly, or connect an MCP client with `nforge mcp ROOT --agent` after [signing in](../quickstart.md). [CLI](../reference/cli.md) and [MCP](../reference/mcp.md) references describe the same hosted contract. Ordinary source questions need only your file tools.
 
+In the commands below, `ROOT` is your project folder (the hosted clone from the [quickstart](../quickstart.md)), `ITEM_ID` is the Item's id from the Plan, and `FRESH_UUID` is a new UUID for each operation, for example from `uuidgen`.
+
 ```sh
 nforge mcp ROOT --agent
 ```

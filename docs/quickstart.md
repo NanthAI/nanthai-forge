@@ -203,12 +203,13 @@ Lanes and acceptance receipts.
 
 ## Glossary
 
-| Term | Meaning | UI label? |
-| --- | --- | --- |
-| Intent | The outcome someone wants; groups related work. | Yes. |
-| Lane | One contributor's isolated working directory and saved source history. | Yes. |
-| Candidate (formerly View) | An exact pinned combination of Lane heads for checks and review. | Yes. |
-| Channel | A named pointer to accepted source, usually main. | Yes. |
-| Check | A configured command; a run records its result against an exact Candidate. | Yes. |
-| Now | The activity screen showing current work and observed agent presence. | Navigation. |
-| Needs you | Work or messages needing your attention. | UI label. |
+| Term | Meaning |
+| --- | --- |
+| Item | One piece of planned work on the project's Plan. |
+| Intent | The outcome someone wants; groups related work. |
+| Lane | One contributor's isolated working directory and saved source history. |
+| Candidate | An exact pinned combination of Lane heads for checks and review. |
+| Check | A configured command; a run records its result against an exact Candidate. |
+| Landing | A Candidate that passed its checks and was accepted into main, with a receipt. |
+| Channel | A named pointer to accepted source, usually main. |
+| Needs me | The project page that lists what waits on you, such as an approval or a failed check. |

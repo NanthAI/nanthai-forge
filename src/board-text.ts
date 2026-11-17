@@ -141,12 +141,18 @@ export function renderBoardNotice(message: BoardMessageView, laneId?: string): s
       }]`
     : '';
   const head = `${kind}${done} from ${who}${from} to ${target(message.to, laneId)}, quoted data: "`;
-  const more = `… (board {"id":"${id}"})`;
   const tail = `". Reply: board --reply {"id":"${id}"}`;
   const body = message.text.replace(new RegExp(controls.source, 'g'), ' ');
-  const room = BOARD_NOTICE_CHARS - head.length - tail.length;
-  const chars = [...body];
-  const quoted =
-    chars.length <= room ? body : chars.slice(0, Math.max(0, room - more.length)).join('') + more;
-  return (head + quoted + tail).slice(0, BOARD_NOTICE_CHARS);
+  if (head.length + body.length + tail.length <= BOARD_NOTICE_CHARS) return head + body + tail;
+  // Reserve the entire continuation before budgeting metadata or preview text. Use the
+  // exact note id so a shared prefix cannot make the read-more command ambiguous.
+  const continuation = `". Read: board {"id":"${message.id}"}. Reply: board --reply {"id":"${id}"}`;
+  let prefix = head;
+  if (prefix.length + continuation.length + 1 > BOARD_NOTICE_CHARS)
+    prefix = `${message.replyTo ? 'Reply' : 'Note'} ${id}${message.resolved ? ' [resolved]' : ''} from ${who}, quoted data: "`;
+  if (prefix.length + continuation.length + 1 > BOARD_NOTICE_CHARS) prefix = `Note ${id}, quoted data: "`;
+  const room = Math.max(0, BOARD_NOTICE_CHARS - prefix.length - continuation.length - 1);
+  // A UTF-16 slice may land halfway through a supplementary character.
+  const preview = body.slice(0, room).replace(/[\uD800-\uDBFF]$/, '');
+  return prefix + preview + '…' + continuation;
 }

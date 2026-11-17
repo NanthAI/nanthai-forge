@@ -90,6 +90,10 @@ export function DocsFrame({
             <a href="/docs/quickstart/">Start your first Lane</a>
             <a href="/docs/reference/cli/">CLI reference</a>
             <a href="/docs/reference/mcp/">MCP reference</a>
+            <span className="docs-legal">
+              <a href="/-/terms">Terms</a>
+              <a href="/-/privacy">Privacy policy</a>
+            </span>
           </footer>
         </main>
       </div>

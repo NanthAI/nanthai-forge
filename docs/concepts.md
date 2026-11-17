@@ -8,14 +8,14 @@ An agent needs three nouns. Everything else is an internal record that receipts 
 
 | Term        | Plain meaning                                                                                                                                                                                      | GitHub analogy    |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
-| **Issue**   | A planned piece of work with Done-when lines. Start work from it; it closes when its work lands and every line is ticked.                                                                           | issue             |
-| **Lane**    | One contributor's isolated copy of the project for one Issue: a base, the contributor's saves on top, and `sync` to take in newer accepted work from `main`.                                     | branch + worktree |
+| **Item**    | A planned piece of work with Done-when lines. Start work from it; it closes when its work lands and every line is ticked.                                                                            | issue             |
+| **Lane**    | One contributor's isolated copy of the project for one Item: a base, the contributor's saves on top, and `sync` to take in newer accepted work from `main`.                                     | branch + worktree |
 | **landing** | `land --save`: save the Lane, update it from `main`, check the exact result and accept it into `main` under the project policy. Acceptance refuses a result that lacks `main`'s current head. | merging a PR      |
 
 Internals you may see in receipts and the web app:
 
 - *State* — an immutable snapshot of every file (paths, content hashes, modes) plus its parent States (Git: commit). A save records a Lane's files as a new State.
-- *Intent* — the execution record behind an Issue, with a status (`active`, `ready`, `completed`, `abandoned`); hosted Intents use the Issue's id.
+- *Intent* — the execution record behind an Item, with a status (`active`, `ready`, `completed`, `abandoned`); hosted Intents use the Item's id.
 - *Candidate* — the exact, pinned combination of one or more Lane heads on a base that a landing checks and accepts (Git: merge preview).
 - *Check* — a command definition; a *run* records the exact Candidate, definition, environment and result (CI job).
 - *Channel* — a named pointer to accepted source, such as `main` (protected branch). Agents need a passing exact-Candidate check to move it; people can accept under review.
@@ -56,7 +56,7 @@ replacement chain and exact details. Intent pages show their targeted decisions 
 and add a recorded Timeline event; project-wide decisions stay linked by count. Review keeps
 applicable context in a collapsed disclosure. Now shows a three-record pointer only when a
 record was entered within the last seven days. These read-only surfaces reuse the hosted Work projection; immutable records are paged once
-when their version in the existing workspace response changes. They add no polling or subscriptions. Recording from the site awaits the B1.5b hosted write path.
+when their version in the existing workspace response changes. They add no polling or subscriptions. Recording them from the site is not available yet.
 
 ## Autonomy
 

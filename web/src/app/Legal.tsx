@@ -6,7 +6,7 @@ export default function Legal({ page }: { page: 'terms' | 'privacy' }) {
     <PublicFrame>
       <div className="intro">
         <h1>{page === 'terms' ? 'Terms' : 'Privacy policy'}</h1>
-        <p>Draft {LEGAL_VERSION}. Pending owner approval before public launch.</p>
+        <p>Draft {LEGAL_VERSION}, not legal advice. Pending owner approval before public launch.</p>
       </div>
       <article className="blk pad md">
         {page === 'terms' ? (

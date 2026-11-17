@@ -5,7 +5,7 @@
 // Reads, sent together: projectNeedsMe:read (held Lanes and open requests, one subscription) and the planning
 // counts; the frame already reads the line. All re-run only on server writes; idle and hidden tabs cost nothing.
 import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react';
-import { useMutation, useQuery } from 'convex/react';
+import { useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
@@ -39,6 +39,8 @@ import {
   type NowRow,
 } from './model';
 import { HeldSetting } from './HeldSetting';
+import { decideTarget, useProjectDecide, type Decide } from './decide';
+import { DecisionKeys, useDecideRun } from './DecisionKeys';
 import './needs.css';
 
 type ProjectRoute = PlaceProps['route'];
@@ -74,8 +76,7 @@ function NeedsMeScreen({ route, projectId, projectName, feed }: PlaceProps) {
     counts: true,
     paginationOpts: { numItems: 1000, cursor: null },
   });
-  const mutate = useMutation(api.projectHostedApprovals.decide);
-  const decide: Decide = input => mutate({ projectId, ...input, operationId: crypto.randomUUID() });
+  const decide = useProjectDecide(projectId);
   return (
     <NeedsMeView
       route={route}
@@ -97,12 +98,8 @@ function NeedsMeScreen({ route, projectId, projectName, feed }: PlaceProps) {
   );
 }
 
-/** Grant or decline one open request (projectHostedApprovals:decide, retry-safe by its operation id). */
-export type Decide = (input: {
-  laneId: string;
-  head: string;
-  decision: 'grant' | 'decline';
-}) => Promise<string>;
+/** Grant or decline: a Lane's request, or a landing held for review on its exact attempt (decide.ts). */
+export type { Decide } from './decide';
 
 /** The screen from its reads; `undefined` reads draw as loading. */
 export function NeedsMeView({
@@ -365,25 +362,6 @@ function Capped<T>({
   );
 }
 
-function useDecide(decide: Decide, announce: (text: string) => void) {
-  const [busy, setBusy] = useState<string | null>(null);
-  const run = async (laneId: string, head: string, decision: 'grant' | 'decline', done: string) => {
-    setBusy(`${laneId}:${decision}`);
-    try {
-      const reply = await decide({ laneId, head, decision });
-      const failed = /"error"\s*:/.test(reply)
-        ? (JSON.parse(reply).error?.message as string | undefined)
-        : undefined;
-      announce(failed ? `Not done: ${failed}` : done);
-    } catch {
-      announce('Not done: Forge could not be reached. Nothing changed; try again.');
-    } finally {
-      setBusy(null);
-    }
-  };
-  return { run, busy };
-}
-
 function Held({
   row,
   drawnAt,
@@ -399,8 +377,7 @@ function Held({
   canDecide: boolean;
   announce: (text: string) => void;
 }) {
-  const { run, busy } = useDecide(decide, announce);
-  const approval = row.approval;
+  const target = decideTarget(row);
   const link =
     row.why === 'conflict'
       ? 'See where they cross'
@@ -428,32 +405,8 @@ function Held({
         </p>
       ) : null}
       <div className="btns">
-        {approval && approval.needsOwner && canDecide ? (
-          <>
-            <Key
-              kind="rec"
-              keys="a"
-              disabled={busy !== null}
-              onClick={() =>
-                run(
-                  row.laneId,
-                  approval.head,
-                  'grant',
-                  'Approved. It lands now; main is checked again on top of it.',
-                )
-              }
-            >
-              Approve and land
-            </Key>
-            <Key
-              disabled={busy !== null}
-              onClick={() =>
-                run(row.laneId, approval.head, 'decline', 'Declined. The agent was told and keeps its saves.')
-              }
-            >
-              Decline
-            </Key>
-          </>
+        {target && canDecide ? (
+          <DecisionKeys laneId={row.laneId} target={target} decide={decide} announce={announce} />
         ) : null}
         <A className="btn ghost sm" href={laneHref}>
           {link}
@@ -478,7 +431,7 @@ function Ahead({
   canDecide: boolean;
   announce: (text: string) => void;
 }) {
-  const { run, busy } = useDecide(decide, announce);
+  const { run, busy } = useDecideRun(decide, announce);
   const asked = Date.parse(row.at);
   const [open, setOpen] = useState(false);
   return (
@@ -486,7 +439,7 @@ function Ahead({
       <summary>
         <State word={row.word}>{row.tag}</State>
         <span className="ttl" dir="auto">
-          {row.head}
+          {row.question}
         </span>
         <span className="meta">
           asked {Number.isNaN(asked) ? 'at a time not reported' : `${waited(asked, drawnAt)} ago`}
@@ -505,13 +458,13 @@ function Ahead({
           <div className="btns">
             <Key
               disabled={busy !== null}
-              onClick={() => run(row.laneId, row.head, 'grant', 'Approved. It is in the log.')}
+              onClick={() => run(row.laneId, { head: row.head }, 'grant', 'Approved. It is in the log.')}
             >
               Approve
             </Key>
             <Key
               disabled={busy !== null}
-              onClick={() => run(row.laneId, row.head, 'decline', 'Declined. The agent was told.')}
+              onClick={() => run(row.laneId, { head: row.head }, 'decline', 'Declined. The agent was told.')}
             >
               Decline
             </Key>

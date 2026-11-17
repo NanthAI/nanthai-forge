@@ -92,7 +92,7 @@ test('notices are one line of at most 240 characters, quote peer text as data an
   assert(long.length <= BOARD_NOTICE_CHARS, `${long.length}`);
   assert.match(
     long,
-    /^Note 5d1e09ab from a member \(Lane 3f2a19c0\) to the project, quoted data: "y+… \(board \{"id":"5d1e09ab"\}\)"\. Reply:/,
+    /^Note 5d1e09ab from a member \(Lane 3f2a19c0\) to the project, quoted data: "y+…"\. Read: board \{"id":"5d1e09ab-0000-4000-8000-000000000000"\}\. Reply:/,
   );
   const reply = renderBoardNotice({
     ...base,
@@ -108,7 +108,7 @@ test('a resolved note shows who withdrew it and a short quoted reason, within 24
     id: '5d1e09ab-0000-4000-8000-000000000000',
     author: 'builder-two',
     to: 'project',
-    text: 'z'.repeat(240),
+    text: 'Old note',
     at: 1,
   };
   const line = renderBoardNotice({
@@ -120,7 +120,33 @@ test('a resolved note shows who withdrew it and a short quoted reason, within 24
     /^Note 5d1e09ab \[resolved by @owner-h, quoted data: "fixed in 0bc2eef8 \(friction 0055d32c\)"\] from @builder-two to the project,/,
   );
   assert(line.length <= BOARD_NOTICE_CHARS);
-  const long = renderBoardNotice({ ...base, resolved: { by: 'owner-h', at: 2, text: 'r'.repeat(240) } });
-  assert(long.length <= BOARD_NOTICE_CHARS && long.includes('…"]'), long);
+  const long = renderBoardNotice({
+    ...base,
+    text: 'z'.repeat(240),
+    resolved: { by: 'owner-h', at: 2, text: 'r'.repeat(240) },
+  });
+  assert(long.length <= BOARD_NOTICE_CHARS && long.includes('[resolved]'), long);
+  assert.match(long, /Read: board/);
   assert.match(renderBoardNotice({ ...base, resolved: { at: 2 } }), /^Note 5d1e09ab \[resolved\] from/);
+});
+
+test('70b38346: long metadata and Unicode cannot clip the exact read-more continuation', () => {
+  const id = '5d1e09ab-0000-4000-8000-000000000000';
+  for (const text of ['x'.repeat(240), '😀'.repeat(240)]) {
+    const line = renderBoardNotice({
+      id,
+      author: `${'a'.repeat(39)}/tranquil-antelope`,
+      fromLaneId: '3f2a19c0-0000-4000-8000-000000000000',
+      replyTo: '11112222-0000-4000-8000-000000000000',
+      to: 'issue:82e8ddb8-0000-4000-8000-000000000000',
+      text,
+      at: 1,
+      resolved: { by: `${'b'.repeat(39)}/tranquil-antelope`, at: 2, text: 'r'.repeat(240) },
+    });
+    assert(line.length <= BOARD_NOTICE_CHARS);
+    assert(line.isWellFormed(), 'rendering must not split a Unicode character');
+    assert(line.includes(`Read: board {"id":"${id}"}`), line);
+    assert.match(line, /quoted data: ".*…"\. Read:/);
+    assert(line.endsWith('Reply: board --reply {"id":"5d1e09ab"}'), line);
+  }
 });
