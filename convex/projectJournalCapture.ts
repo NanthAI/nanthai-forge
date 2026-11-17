@@ -24,8 +24,6 @@ export const page = internalMutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     if (!journalEnabled()) return canonicalPayload({ kept: 'disabled' });
-    const project = await ctx.db.get(input.projectId);
-    if (!project || project.removal) return canonicalPayload({ kept: 'unavailable' });
     const claimRow = await pendingJournal(ctx, input.projectId);
     const active = claimRow ? JSON.parse(claimRow.envelope) : null;
     if (
@@ -67,6 +65,8 @@ export const page = internalMutation({
         ...(saved.length > 2 ? { next: { ...request, phase: saved[2], part: saved[3] } } : { done: true }),
       });
     }
+    const project = await ctx.db.get(input.projectId);
+    if (!project || project.removal) return canonicalPayload({ kept: 'unavailable' });
     let future: { input: JournalRunInput; dueAt: number }[] = [];
     if (!pending) {
       // Expired scheduling dedup facts are derived metadata, not logical history.
@@ -87,6 +87,34 @@ export const page = internalMutation({
       future = known ?? [];
       const { claim: invocationClaim, ...request } = input;
       void invocationClaim;
+      if (!selected.refs.length) {
+        // Empty frontiers contain no bytes to verify in R2 and need no capture
+        // lease or publish round trip. Commit their cursor and continuation in
+        // this transaction, including metadata cleanup and future eligibility.
+        const next = selected.done
+          ? { ...request, phase: (input.phase ?? 0) + 1, part: 0 }
+          : { ...request, part: (input.part ?? 0) + 1 };
+        const result = canonicalPayload({
+          archived: 0,
+          segments: 0,
+          ...((!input.laneId || !selected.done) && (next.phase ?? 0) < 5 ? { next } : { done: true }),
+        });
+        if (input.laneId && selected.done) await putControl(ctx, input, null, controlRow, claimRow);
+        else
+          await putControl(
+            ctx,
+            input,
+            {
+              ...(control.runId ? { runId: control.runId } : {}),
+              cursor: selected.cursor,
+              last: { pageId, result },
+            },
+            controlRow,
+            claimRow,
+          );
+        for (const wake of future) await wakeJournal(ctx, wake.input, wake.dueAt);
+        return result;
+      }
       pending = {
         ...selected,
         pageId,

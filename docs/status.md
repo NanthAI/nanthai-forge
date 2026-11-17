@@ -119,6 +119,13 @@ are covered; live enablement, billed usage and two dev exports remain open. Reco
 mutable recovery ledger and selects its latest archived physical row; restored
 expired operation UUIDs reconcile against their newest retained receipt.
 
+Redundant S2 journal wakes finalize empty frontiers in one capture mutation,
+without publication, a capture lease or R2 I/O. Existing wake arguments and finite
+phase continuations remain supported; supersession writes add no scheduling reads.
+The [deferred-wake fixture](operations/cost-to-serve.md#empty-journal-frontiers)
+records the modeled cost reduction separately from the live rollout recheck.
+
+
 Web typechecking uses the existing native TypeScript compiler in both npm and
 the landing verifier. The JavaScript compiler remains an explicit all-scope
 fallback; scratch-copy checks cover strict and JSX diagnostic parity.

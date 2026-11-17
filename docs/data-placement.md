@@ -630,7 +630,16 @@ pointer when their own frontier is captured again. Claims use the existing ten-m
 expiry. The shared control writer clears the pointer on stale selection, fragment
 handoff and completion; no second cleanup path, table or index is added.
 
-Healthy pages keep one action and at most two mutations. Point reads of the claim
+Empty journal selections commit their cursor, replay result, eligibility wakes and
+phase continuation in the capture mutation itself. They acquire no capture lease,
+create no pending-project pointer and call neither publication nor R2. A replay of
+the control's last page returns before loading the project or selecting source rows.
+This also applies to already scheduled wakes with the original arguments. Empty
+metadata-cleanup pages still advance, and an empty Lane frontier removes its control.
+There is no scheduling-format change, coalescing lookup on supersession, new timer,
+periodic wake or change to the seven/fourteen-day eligibility rules.
+
+Healthy nonempty pages keep one action and at most two mutations. Point reads of the claim
 replace redundant control-row lookups; its capture/publication adds two small
 metadata writes per page. The project pointer exists only while a page is pending,
 so retained JSON and stored-index ceilings stay unchanged. No segment payload or

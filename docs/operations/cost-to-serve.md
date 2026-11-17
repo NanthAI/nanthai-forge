@@ -134,6 +134,65 @@ rewritten; main/exit has one small row. Attention retains the replaced strip's
 shared reads, so browser offsets are zero credited. Live browser cost, frames,
 latency and thirty-minute idle I/O remain unverified.
 
+### Empty journal frontiers
+
+The journal capture mutation commits an empty selection directly, including its
+cursor and future eligibility wakes. It removes the empty publication call and
+both writes of the transient project claim. Last-page retries return before the
+project/source reads. Nonempty captures retain the verified-object publication
+and recovery path. Coalescing was considered, but it adds a receipt lookup on every
+supersession; this change adds **zero reads or calls to landing writers** and keeps
+existing scheduled arguments. No format, retention, wake time or idle path changes.
+
+`tests/journal-wake-cost.test.mjs` models the observed 60-wake mix: 17 productive
+batches of 1–54 rows (253 total) and 43 empty frontiers. It exercises the shared
+capture path with coordination detail; the existing writer tests cover record,
+operation, save and provenance phases, seven-day eligibility, recovery and undo.
+Fresh/dogfood variants retain 12/1,200 protected messages, with the latter carrying
+larger message bodies. Bootstrap and initial cursor establishment are excluded.
+For normalization the fixture assigns one root wake to each landing; the live
+number of supersession wakes per landing is **not measured**. Multiply the marginal
+delta by the actual wakes/landing rather than treating 60 log executions as 60
+observed landings.
+
+| Quantity per 1,000 modeled landings | Before | After |
+| --- | ---: | ---: |
+| Pack actions | 1,000 | 1,000 |
+| Capture + publication mutations | 2,000 | 1,283.333 |
+| DB document reads | 27,716.667 | 25,566.667 |
+| DB read bytes, fresh | 8,543,500 | 6,913,750 |
+| DB read bytes, dogfood | 8,575,283.333 | 6,942,633.333 |
+| DB write bytes, fresh | 6,114,483.333 | 5,254,950 |
+| DB write bytes, dogfood | 6,152,166.667 | 5,289,783.333 |
+
+The fresh/dogfood I/O savings are $0.000497857/$0.000499007 per 1,000 at the
+retained $0.20/GB basis. Crediting only that marginal I/O saving against the
+**$1.688095** serving reference gives **$1.687597/$1.687596**, respectively.
+At full $2/million call rates the 716.667 removed mutations save another
+$0.001433333: total marginal savings **$0.001931190/$0.001932340**. Calls remain
+within allowances in the serving proxy, so that call credit must not also be
+subtracted from the proxy. Action count, R2 object requests and archived logical
+rows are unchanged; no compute, egress, storage or latency credit is claimed.
+
+Two interleaved baseline/candidate pairs reproduce these counts exactly (N=2,
+small sample). With the shared 10,000-resample bootstrap helper, seed 1, median
+read-byte differences per 60 wakes are −97,785 fresh (95% interval
+[−97,785, −97,785]) and −97,959 dogfood ([−97,959, −97,959]). These intervals
+cover deterministic fixture counts only, not provider load, billing or deployment
+variation. The second pair samples maximum process RSS of 259/269 MB before and
+264/363 MB after (fresh/dogfood); these are whole test-process samples including
+retained fixtures, not a memory improvement. Summed action-handler time is
+4.09/9.46 s before and 2.23/2.08 s after; no latency claim is made on this shared
+machine or from N=2. Selection remains bounded to 100 references and existing
+page-byte limits; no source collection or payload placement changes.
+
+This is a deterministic synthetic marginal estimate, not a revised all-in bill:
+the reference's deferred-maintenance allocation is still unknown below. The
+post-deploy function-name capture and actual rollout/billing attribution belong
+to Issue b149b16b. A one-mutation empty frontier still costs a scheduled action and
+its indexed capture reads; this change removes the redundant publication rather
+than claiming that delayed maintenance is free.
+
 ### Retained storage and weekly maintenance allocation
 
 **Storage and weekly backup maintenance remain unmeasured as a current all-in
