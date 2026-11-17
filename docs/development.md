@@ -610,9 +610,17 @@ layer out of both first paints.
   action. Full-check requests reuse the original Candidate and check pins; linked
   Items derive their retry identity from the immutable save and line. See
   [run evidence](run-evidence.md) for attribution and declarations.
-- Places: `web/src/app/screens.tsx` maps a rebuilt place to its lazy chunk, so
-  a new place adds one line there instead of editing `App.tsx`. A place reads
-  the frame's line feed from its props and never opens a second line read.
+- Places: each screen folder registers its own addresses in
+  `web/src/app/<folder>/route.ts`, a default-exported list of
+  `{ place, section?, match?, load: () => import('./Screen') }`
+  (`web/src/app/screen-route.ts`); account pages register `{ place, load }`.
+  `screens.tsx` collects every `route.ts` with `import.meta.glob`, so a new
+  screen adds files and edits no shared file. The entry with a matching `match`
+  wins, then the exact `section` ('' is the place itself), then the place's
+  catch-all; matches must not overlap. A route file is data: type imports only,
+  screens behind `load` (`tests/app-screen-routes.test.mjs`), so screens stay
+  out of the first paint. A place reads the frame's line feed from its props
+  and never opens a second line read.
 - Lanes (`web/src/app/lanes/`): the overview groups the line feed's Lanes into
   Needs you (every held Lane, so its count is the line's), the landing queue,
   being worked on and quiet. Folded regions read nothing until opened (Region
@@ -662,8 +670,6 @@ layer out of both first paints.
   nothing is held: one `projectSetup.read` (at most 8 documents) when it opens,
   a subscription only while setup is unfinished, and no read once this browser
   has seen it settled (first landing plus the one "who approves" answer).
-- `web/src/app/screens.tsx` maps a place, or a `place/section`, to its lazy
-  screen; the section entry wins.
 - Settings > Landing and checks (`web/src/app/checks/LandingChecks.tsx`) reads
   three queries once when it opens and again only after its own write; choosing
   a CI file writes the same ci-status runner setting `configure-runner` does.

@@ -19,7 +19,7 @@ export type CodeProps = {
   mainHead: string | null | undefined;
 };
 
-/** The Code place as the project frame mounts it (screens.tsx): main's head comes from the line it already reads. */
+/** The Code place as the project frame mounts it (code/route.ts): main's head comes from the line it already reads. */
 export default function CodePlace({ route, projectId, projectName, feed }: PlaceProps) {
   const props: CodeProps = {
     route,

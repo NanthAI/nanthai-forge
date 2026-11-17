@@ -158,6 +158,8 @@
   }
   .shell { display: grid; grid-template: "top top" var(--top-h) "rail main" minmax(0, 1fr) / var(--rail-w) minmax(0, 1fr); min-height: calc(100dvh); }
   .shell > .top { grid-area: top; position: sticky; top: 0; z-index: 20; }
+  /* What a sticky header inside main sticks under: the frame's own sticky top bar (and, on phones, the notch). */
+  .shell { --stick-top: var(--top-h); }
   .shell > .rail { grid-area: rail; }
   .shell > main, .shell > .main { grid-area: main; min-width: 0; }
   .shell > .line.phone, .shell > .tabs { display: none; }
@@ -185,6 +187,7 @@
     .shell[data-frame="bare"] { padding-bottom: 0; }
     .shell > .rail, .shell > .top .line, .shell > .top .fill { display: none; }
     .shell > .line.phone { display: grid; }
+    .shell { --stick-top: calc(var(--top-h) + env(safe-area-inset-top, 0px)); }
     .shell > .tabs { display: grid; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; }
     .shell > .top .brand { width: auto; padding: 0 var(--s-3) 0 var(--gut); }
     .shell > .top .proj, .shell > .top .owner { flex: 1 1 auto; min-width: 0; border-left: 0; padding-left: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
@@ -224,7 +227,7 @@
   .chip.off { background: transparent; border-style: dashed; color: var(--text-2); }
   .chip i { font-style: normal; color: var(--text-3); }
   .chip button { border: 0; background: transparent; padding: 0; color: var(--text-3); display: inline-grid; }
-  .bulk { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-3); align-items: center; min-height: var(--ph-h); padding: var(--s-1) var(--gut); background: var(--accent-bg); border-bottom: var(--rule) solid var(--line); position: sticky; top: 0; z-index: 4; }
+  .bulk { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-3); align-items: center; min-height: var(--ph-h); padding: var(--s-1) var(--gut); background: var(--accent-bg); border-bottom: var(--rule) solid var(--line); position: sticky; top: var(--stick-top, 0px); z-index: 4; }
   .bulk b { white-space: nowrap; }
   .pager { display: flex; gap: var(--s-2) var(--s-3); align-items: center; flex-wrap: wrap; padding: var(--s-2) var(--gut); border-top: var(--rule) solid var(--line); color: var(--text-2); font-size: var(--t-meta); }
   .pager .n { font-variant-numeric: tabular-nums; margin-right: auto; }

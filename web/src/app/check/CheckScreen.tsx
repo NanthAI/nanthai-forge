@@ -23,6 +23,7 @@ import {
   type CheckRead,
 } from './check-model';
 import { useCheckActions } from './use-check-actions';
+import { checkLaneOf } from './route';
 import './check.css';
 
 type ProjectRoute = Extract<AppRoute, { frame: 'project' }>;
@@ -33,13 +34,13 @@ export default function CheckScreen({
   route,
   projectId,
   projectName,
-  laneId,
 }: {
   route: ProjectRoute;
   projectId: Id<'hostedProjects'>;
   projectName: string;
-  laneId: string;
 }) {
+  // check/route.ts serves this screen only where the address names a Lane's check.
+  const laneId = checkLaneOf(route) ?? '';
   const { value, error } = useSafeQuery(api.projectFailureCause.forLane, { projectId, laneId });
   const read = value ? (JSON.parse(value) as CheckRead) : null;
   const at = (patch: Partial<ProjectRoute>) => hrefFor({ ...route, ...patch });

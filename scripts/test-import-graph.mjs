@@ -277,6 +277,18 @@ export function testImportGraph(files, scriptsChanged = []) {
           else widen(node);
         }
       }
+      // A literal Vite glob (`import.meta.glob('./*/route.ts')`) loads exactly the files it matches.
+      const globbed =
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === 'glob' &&
+        ts.isMetaProperty(node.expression.expression)
+          ? literalGlobTargets(path, node.arguments[0], files)
+          : null;
+      if (globbed) {
+        for (const target of globbed) edge(target, path, 'import');
+        return;
+      }
       // Unknown module loading widens coverage, including wrapper calls such as moduleUrl().
       if (
         ts.isCallExpression(node) &&
@@ -320,6 +332,25 @@ export function testImportGraph(files, scriptsChanged = []) {
 }
 
 // A resolved literal in one branch must never hide an unknown alternative.
+/** Files a literal relative Vite glob (or a list of them) names, or null when the pattern is computed. */
+function literalGlobTargets(path, node, files) {
+  const patterns = node && ts.isArrayLiteralExpression(node) ? [...node.elements] : [node];
+  // Only `*` and `**/` are read here; braces, classes, negation or `?` keep the loader broad.
+  if (!patterns.every(item => item && ts.isStringLiteralLike(item) && /^\.\/[^{}[\]!?]*$/.test(item.text)))
+    return null;
+  const matchers = patterns.map(
+    item =>
+      new RegExp(
+        `^${posix
+          .join(posix.dirname(path), item.text)
+          .split(/(\*\*\/|\*)/)
+          .map(part => (part === '**/' ? '(?:.*/)?' : part === '*' ? '[^/]*' : escape(part)))
+          .join('')}$`,
+      ),
+  );
+  return [...files.keys()].filter(candidate => matchers.some(matcher => matcher.test(candidate)));
+}
+
 function loadingPrefixes(node, known) {
   if (!node) return [''];
   if (ts.isStringLiteralLike(node)) return known(node.text) ? [] : [''];

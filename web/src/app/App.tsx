@@ -18,13 +18,12 @@ import { Device } from './Device';
 import { AccountFrame, BareFrame, ProjectFrame, PublicFrame, type FrameControls } from './frames';
 import { Keys, useFrameKeys, type Go } from './keys';
 import { hrefFor, parseAppPath, type AppRoute } from './paths';
-import { Head, Placeholder } from './Place';
-import { PlaceScreen } from './screens';
+import { Head } from './Place';
+import { AccountScreen, PlaceScreen } from './screens';
 import { followLink, navigate, useRoute, useSearch } from './router';
 import { forget, recall, safeNext } from './session';
 import { FirstPasskey, SignIn } from './SignIn';
 import './app.css';
-const You = lazy(() => import('./You'));
 const Legal = lazy(() => import('./Legal'));
 const loadingPlace = (
   <p className="quietline" aria-busy="true">
@@ -32,7 +31,6 @@ const loadingPlace = (
   </p>
 );
 
-const Billing = lazy(() => import('../billing/Home'));
 // Explore, profiles and a public project's front page for visitors: one chunk, loaded with its route (Item 8947a779).
 const Discover = lazy(() => import('../public/Discover'));
 
@@ -201,25 +199,10 @@ function SignedIn({
   const controls: FrameControls = { onPalette: go.openPalette, onKeys: go.openKeys, viewerHandle };
   const overlays = <Keys go={go} palette={palette} setPalette={setPalette} keys={keys} setKeys={setKeys} />;
   if (route.frame === 'project') return <ProjectView route={route} controls={controls} overlays={overlays} />;
-  if (route.frame === 'account' && route.place === 'billing')
-    return (
-      <AccountFrame place="billing" back={lastProject} controls={controls}>
-        <Suspense fallback={<Head trail={[{ label: 'Billing' }]} sentence="Loading billing…" />}>
-          <Billing />
-        </Suspense>
-        {overlays}
-      </AccountFrame>
-    );
   if (route.frame === 'account')
     return (
       <AccountFrame place={route.place} back={lastProject} controls={controls}>
-        {route.place === 'devices' ? (
-          <Suspense fallback={loadingPlace}>
-            <You handle={viewerHandle} leave={leave} />
-          </Suspense>
-        ) : (
-          <Placeholder route={route} projectName="" />
-        )}
+        <AccountScreen place={route.place} handle={viewerHandle} leave={leave} />
         {overlays}
       </AccountFrame>
     );

@@ -51,9 +51,11 @@ export function Line({
       {stops.map(stop => {
         const at = feed?.lanes.filter(lane => lane.stage === stop.stage) ?? [];
         const held = at.filter(lane => lane.held).length;
+        const shown = phone ? stop.short : stop.label;
+        // The name starts with what the stop shows ("Editing 1"), so speech and voice control match the screen.
         const words = feed
-          ? `${phone ? stop.short + ': ' : ''}${plural(at.length, 'Lane')} ${stop.label.toLowerCase()}${held ? `, ${held} held` : ''}`
-          : `${phone ? stop.short : stop.label}, not loaded yet`;
+          ? `${shown} ${plural(at.length, 'Lane')}${shown === stop.label ? '' : `, ${stop.label.toLowerCase()}`}${held ? `, ${held} held` : ''}`
+          : `${shown}, not loaded yet`;
         return (
           <a
             key={stop.stage}
@@ -64,9 +66,11 @@ export function Line({
             aria-label={words}
           >
             <span className="lbl" aria-hidden="true">
-              {phone ? stop.short : stop.label}
+              {shown}
             </span>
             <span className="slot" aria-hidden="true" />
+            {/* A space between the words and the count, so the shown text reads "Editing 1" (the flex row drops it). */}
+            {feed ? ' ' : null}
             {feed ? (
               <span className="n" aria-hidden="true">
                 {at.length}

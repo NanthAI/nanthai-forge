@@ -248,7 +248,7 @@ The app scale is fixed in pixels. The public page and docs scale is fluid: docs 
 ## Layout
 
 - **Space** is a 4 px step: 2, 4, 8, 12, 16, 20, 24, 32, 48; 64 and 96 on the public page only. The gutter inside every region is 16 px; the page head's is 20 px (16 on a phone).
-- **Shell:** top bar 48 px, rail 196 px (56 px as icons), region header 40 px, phone tab bar 58 px. Fixed chrome stays under 100 px of height before content. One scroll area per region.
+- **Shell:** top bar 48 px, rail 196 px (56 px as icons), region header 40 px, phone tab bar 58 px. Fixed chrome stays under 100 px of height before content. One scroll area per region. A sticky header inside a page sticks under the frame's top bar at `top: var(--stick-top, 0px)`; the frame sets `--stick-top` (the top bar, plus the notch on phones), so it never slides under the bar.
 - **Density:** a row is 40 px; 34 px dense when a list shows more than about 20 rows; 54 px for a Lane with two lines. Controls are 30 px (26 small, 44 large), inputs 34 px.
 - **Window breakpoints:** at 1240 px the rail shrinks to icons. At 860 px the page is one column, the rail becomes four bottom tabs and More, and the line moves to its own row under the top bar.
 - **Region breakpoints** (container queries, because regions can be moved): 900 px a yard stacks each label over its track; 700 px a Lane row stacks; 560 px a matrix stacks; 520 px the overlap ruler stacks; 420 px.

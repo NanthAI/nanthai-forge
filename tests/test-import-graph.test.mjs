@@ -105,7 +105,7 @@ test('unknown and partially known loaders stay broad across source and helper do
     "await import(flag ? '../dist/leaf.js' : variable)",
     'await import(flag ? `../dist/${name}.js` : variable)',
     "await import(unknown('../dist/leaf.js'))",
-    "import.meta.glob('./*.tsx')",
+    "import.meta.glob('./{a,b}/*.tsx')",
   ]) {
     const files = fixture({ 'tests/dynamic.test.mjs': text, 'tests/fixture.mjs': 'export const x = 1;' });
     for (const path of ['src/other.ts', 'web/src/Leaf.tsx', 'tests/fixture.mjs']) {
@@ -114,6 +114,22 @@ test('unknown and partially known loaders stay broad across source and helper do
       assert.equal(result.reasons['tests/dynamic.test.mjs'].kind, 'dynamic');
     }
   }
+});
+
+test('a literal Vite glob names exactly the files it matches (screens.tsx route files reach no script)', () => {
+  const files = fixture({
+    'web/src/app/screens.tsx': "const routes = import.meta.glob('./*/route.ts', { eager: true });",
+    'web/src/app/plan/route.ts': 'export default [];',
+    'web/src/app/plan/Plan.tsx': 'export default 1;',
+    'web/src/app/a/b/route.ts': 'export default [];',
+    'tests/screens.test.mjs': "import '../web/src/app/screens.tsx';",
+  });
+  const graph = testImportGraph(files);
+  assert.equal(edge(graph, 'web/src/app/plan/route.ts', 'web/src/app/screens.tsx')?.kind, 'import');
+  for (const path of ['web/src/app/plan/Plan.tsx', 'web/src/app/a/b/route.ts', 'src/other.ts'])
+    assert.equal(edge(graph, path, 'web/src/app/screens.tsx'), undefined, path);
+  assert.ok(selected(files, ['web/src/app/plan/route.ts']).tests.includes('tests/screens.test.mjs'));
+  assert.ok(!selected(files, ['src/other.ts']).tests.includes('tests/screens.test.mjs'));
 });
 
 test('bounded computed loader domains remain broad within their source domain', () => {

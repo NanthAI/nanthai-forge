@@ -105,7 +105,7 @@
   .row.acc.pickable { grid-template-columns: 16px minmax(0, 1fr) repeat(var(--cols, 3), 78px) var(--ctl-h-sm); }
   .row.acc > .c { display: grid; place-items: center; }
   .row.acc > .c > .k { display: none; }
-  .th.acc { display: grid; grid-template-columns: minmax(0, 1fr) repeat(var(--cols, 3), 78px) var(--ctl-h-sm); min-height: var(--ph-h); position: sticky; top: var(--top-h); z-index: 2; }
+  .th.acc { display: grid; grid-template-columns: minmax(0, 1fr) repeat(var(--cols, 3), 78px) var(--ctl-h-sm); min-height: var(--ph-h); position: sticky; top: var(--stick-top, var(--top-h)); z-index: 2; }
   .th.acc.pickable { grid-template-columns: 16px minmax(0, 1fr) repeat(var(--cols, 3), 78px) var(--ctl-h-sm); }
   .th.acc > span:nth-last-child(-n+4) { text-align: center; line-height: var(--lh-tight); }
   .row.acc .nm { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--s-1); align-items: center; }
@@ -310,7 +310,7 @@
   /* the yard: every open Lane on the four stops and main, the crossing, and the overlap view's own lines */
   .yard { --lab: 300px; --actw: 330px; }
   .zones, .ln { display: grid; grid-template-columns: var(--lab) minmax(0, 1fr) var(--actw); }
-  .zones { position: sticky; top: 0; z-index: 3; background: var(--surface); border-bottom: var(--rule) solid var(--line); height: 32px; align-items: stretch; font-size: var(--t-meta); color: var(--text-2); }
+  .zones { position: sticky; top: var(--stick-top, 0px); z-index: 3; background: var(--surface); border-bottom: var(--rule) solid var(--line); height: 32px; align-items: stretch; font-size: var(--t-meta); color: var(--text-2); }
   .zones .zl { display: flex; align-items: center; padding: 0 var(--gut); color: var(--text-3); gap: var(--s-2); white-space: nowrap; overflow: hidden; }
   .zones .zs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) 34px; }
   .zones .zs span { display: flex; align-items: center; gap: 6px; padding: 0 10px; border-left: var(--rule) solid var(--line); font-weight: var(--w-strong); white-space: nowrap; overflow: hidden; }
