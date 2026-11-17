@@ -4,7 +4,7 @@
 // stored. Each Initiative's band counts its Items one tick each. Loaded with its route only.
 // Reads: projectPlanView:read, one subscription, re-run only by planning writes in the ranges it read; the frame
 // already reads the line. Writes: projectWorkCommand:command (put-planning-item, retry-safe by its operation id).
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { api } from '../../../../convex/_generated/api';
@@ -31,6 +31,8 @@ import {
 } from './model';
 import './plan.css';
 
+/** An Item's comments (Item 9a3d6f5f) load with the Item page only, so the list never loads the Markdown renderer. */
+const ItemDiscussion = lazy(() => import('../discussion/ItemDiscussion'));
 const planRead = makeFunctionReference<'query', { projectId: Id<'hostedProjects'> }, PlanRead>(
   'projectPlanView:read',
 );
@@ -56,7 +58,16 @@ function PlanScreen({ route, projectId, projectName, feed }: PlaceProps) {
       command: JSON.stringify({ action: 'put-planning-item', operationId, ...command }),
     });
   };
-  return <PlanScreenView route={route} projectName={projectName} feed={feed} read={read} put={put} />;
+  return (
+    <PlanScreenView
+      route={route}
+      projectName={projectName}
+      feed={feed}
+      read={read}
+      put={put}
+      projectId={projectId}
+    />
+  );
 }
 
 /** The screen from its read; an `undefined` read draws as loading. */
@@ -66,7 +77,13 @@ export function PlanScreenView({
   feed,
   read,
   put,
-}: Pick<PlaceProps, 'route' | 'projectName' | 'feed'> & { read: PlanRead | undefined; put: Put }) {
+  projectId,
+}: Pick<PlaceProps, 'route' | 'projectName' | 'feed'> & {
+  read: PlanRead | undefined;
+  put: Put;
+  /** Hosted reads for the Item page's comments; without it the page draws no discussion. */
+  projectId?: Id<'hostedProjects'>;
+}) {
   const [find, setFind] = useState('');
   const [orders, setOrders] = useState<ReadonlyMap<string, string>>(new Map());
   const [capture, setCapture] = useState(false);
@@ -90,7 +107,8 @@ export function PlanScreenView({
     return () => removeEventListener('keydown', onKey);
   }, [canCapture]);
   const whole = useMemo(() => (read ? planView(read, '', orders) : null), [read, orders]);
-  if (route.rest) return <ItemPage route={route} projectName={projectName} view={whole} at={at} />;
+  if (route.rest)
+    return <ItemPage route={route} projectName={projectName} view={whole} at={at} projectId={projectId} />;
   const sentence = view ? planSentence(view) : null;
   const lanesOpen = feed ? feed.lanes.length + feed.more : null;
 
@@ -518,18 +536,20 @@ function Capture({
   );
 }
 
-/** An Item from the plan's own read: status, place in its Initiative, owner, done-when and relations. The body,
- * comments and history open on the current Item screen until the Item page is rebuilt. */
+/** An Item from the plan's own read: status, place in its Initiative, owner, done-when and relations, then its
+ * comments (their own reads). The body and history open on the current Item screen until the Item page is rebuilt. */
 function ItemPage({
   route,
   projectName,
   view,
   at,
+  projectId,
 }: {
   route: PlaceProps['route'];
   projectName: string;
   view: PlanView | null;
   at: (patch: Partial<PlaceProps['route']>) => string;
+  projectId: Id<'hostedProjects'> | undefined;
 }) {
   const row = view
     ? ([...view.byId.values()].find(entry => entry.id.startsWith(route.rest)) ?? null)
@@ -613,6 +633,11 @@ function ItemPage({
                 </Row>
               ))}
             </>
+          ) : null}
+          {projectId ? (
+            <Suspense fallback={<div className="quietline">Loading the comments…</div>}>
+              <ItemDiscussion projectId={projectId} itemId={row.id} />
+            </Suspense>
           ) : null}
         </Region>
       ) : row === null ? (

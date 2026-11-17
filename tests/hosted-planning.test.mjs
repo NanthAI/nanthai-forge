@@ -83,7 +83,8 @@ test('whole-project hosted planning creates a planned Intent, preserves versions
       versions.map(item => item.version),
       [1, 2, 3],
     );
-    assert.equal(after.data.planningComments[0].authorLabel, 'Supplied alias');
+    // A signed-in writer's typed label is never stored: the server records who wrote it (Item 9a3d6f5f, C1-10).
+    assert.equal(after.data.planningComments[0].authorLabel, '');
     assert.equal(after.data.planningComments[0].provenance, 'user-declared-local');
     assert.equal(after.events.find(event => event.id === after.data.planningComments[0].id).actor, 'owner');
     assert.equal(after.data.intents.length, 1);
@@ -1125,11 +1126,12 @@ test('mixed retained history pages large planning commands once across planning 
   const big = s.item({ body: 'Original large body\n'.repeat(18000) });
   await send(big);
   await send({ action: 'note', intentId, text: 'Mixed legacy planning', kind: 'comment' });
+  // Comments stay under the 65,536-character cap; the Item bodies above and below carry the large commands.
   await send({
     action: 'comment-planning-item',
     operationId: randomUUID(),
     itemId: big.itemId,
-    text: 'Large legacy comment\n'.repeat(18000),
+    text: 'Large legacy comment\n'.repeat(2800),
     authorLabel: 'Owner',
   });
   await store.setMode._handler(s.ctx, {
@@ -1143,7 +1145,7 @@ test('mixed retained history pages large planning commands once across planning 
     action: 'comment-planning-item',
     operationId: randomUUID(),
     itemId: big.itemId,
-    text: 'Large retained comment\n'.repeat(18000),
+    text: 'Large retained comment\n'.repeat(2800),
     authorLabel: 'Owner',
   });
   await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'records', writers: ['note'] });

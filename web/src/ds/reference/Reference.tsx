@@ -18,6 +18,8 @@ import {
 import { Figures } from './Figures';
 import { DocsFrame } from '../DocsFrame';
 import '../docs.css';
+import { Discussion } from '../../app/discussion/Discussion';
+import type { DiscussionComment, ReactionCount } from '../../app/discussion/model';
 
 type Planned = ReorderItem & { state: 'planned' | 'proposed'; by: string };
 
@@ -43,6 +45,38 @@ const CHECKS = [
   { id: 'c1', name: 'Type check', state: 'passed' as const, minutes: 1.4 },
   { id: 'c2', name: 'Unit tests', state: 'failed' as const, minutes: 3.9 },
   { id: 'c3', name: 'Browser tests', state: 'active' as const, minutes: 6.2 },
+];
+
+const NOTE = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const COMMENTS: DiscussionComment[] = [
+  {
+    id: NOTE(1),
+    itemId: NOTE(0),
+    at: '2026-11-10T16:20:00Z',
+    author: 'sample-two',
+    text: 'Do we resend the whole file, or only the missing parts?',
+  },
+  {
+    id: NOTE(2),
+    itemId: NOTE(0),
+    at: '2026-11-10T16:41:00Z',
+    author: 'sample-one',
+    replyTo: NOTE(1),
+    decision: true,
+    text: 'Only the missing parts. **Parts already sent are kept.**',
+  },
+  {
+    id: NOTE(3),
+    itemId: NOTE(0),
+    at: '2026-11-11T09:20:00Z',
+    author: 'sample-one',
+    agent: 'keen-impala',
+    text: 'Done in landing `5c1e`:\n\n- retries wait for the connection\n- the rest is sent once\n\n<b>raw HTML</b> is dropped; [links](https://example.com) open safely.',
+  },
+];
+const REACTIONS: ReactionCount[] = [
+  { commentId: NOTE(2), kind: '+1', count: 2, mine: true },
+  { commentId: NOTE(3), kind: 'rocket', count: 1, mine: false },
 ];
 
 const LAYOUT: DockLayout = { top: ['needs'], a: ['plan', 'lanes'], b: ['checks', 'notes'] };
@@ -222,6 +256,13 @@ export function Reference() {
               <span className="c">send(rest(from))</span>
             </div>
           </CodeBox>
+          <Discussion
+            comments={COMMENTS}
+            reactions={REACTIONS}
+            canWrite
+            onPost={async () => {}}
+            onReact={async () => {}}
+          />
         </Region>
       ),
     },

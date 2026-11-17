@@ -1,0 +1,35 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* An Item's comments (Item 9a3d6f5f), as the approved Item screen draws them: one rule between comments, replies
+   indented under their root, member text at the reading measure. Every value is a token. */
+
+[data-ds] .discussion {
+  .cmt { padding: var(--s-3) var(--gut-head); border-bottom: var(--rule) solid var(--line); display: grid; gap: var(--s-1); min-width: 0; }
+  .cmt.re { padding-left: calc(var(--gut-head) + 26px); }
+  .cmt .by { display: flex; gap: 6px var(--s-2); align-items: center; flex-wrap: wrap; font-size: var(--t-meta); color: var(--text-2); min-width: 0; }
+  .cmt .md { padding: 0; font-size: var(--t-body); line-height: 1.5; max-width: var(--m-prose); overflow-wrap: anywhere; }
+  .cmt .md > :last-child { margin-bottom: 0; }
+  .cmt .md p, .cmt .md ul, .cmt .md ol, .cmt .md pre, .cmt .md blockquote { margin-bottom: var(--s-2); }
+  .cmt .md pre { overflow-x: auto; max-width: 100%; }
+  .cmt .md blockquote { border-left: var(--rule) solid var(--line-strong); padding-left: var(--s-3); color: var(--text-2); }
+  .acts { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-2); align-items: center; }
+  .react { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: var(--rule) solid var(--line); border-radius: 999px; background: transparent; color: var(--text-2); font-size: var(--t-meta); }
+  .react.on { border-color: var(--line-strong); background: var(--surface-3); color: var(--text); }
+  .react:disabled { cursor: default; }
+  .compose { gap: var(--s-2); }
+  .compose .decide { font-size: var(--t-meta); display: inline-flex; gap: var(--s-2); align-items: center; }
+  .compose .decide input { accent-color: var(--text-2); }
+  .compose .err { color: var(--failed); font-size: var(--t-meta); }
+  @media (hover: hover) and (pointer: fine) {
+    .react:not(:disabled):hover { background: var(--hover); }
+    /* The keys to react and reply stay out of the reading until the pointer or focus reaches the comment. */
+    .acts > .btn { opacity: 0; }
+    .cmt:hover .acts > .btn, .cmt:focus-within .acts > .btn, .acts > .btn[aria-expanded="true"] { opacity: 1; }
+    .cmt { position: relative; }
+    .acts:not(:has(.react)) { position: absolute; top: var(--s-2); right: var(--gut-head); }
+  }
+  @media (max-width: 860px) {
+    .cmt { padding-inline: var(--gut); }
+    .cmt.re { padding-left: calc(var(--gut) + 18px); }
+    .react { height: var(--ctl-h-touch); padding: 0 var(--s-3); }
+  }
+}

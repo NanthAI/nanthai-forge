@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // Reactions on planning comments (Item 9a3d6f5f). One bounded read per open Item returns counts and the viewer's own
 // marks, never who else reacted; a toggle is one mutation. Who may react follows who may comment (the project's
-// planning writers), so reactions widen with comments, never ahead of them.
+// planning writers), so reactions widen with comments, never ahead of them. A reaction is a person's: agent (device)
+// credentials are refused, as for stars, and a reaction must name a comment that exists on that Item.
 import { v } from 'convex/values';
-import { mutation, query } from './cliServer';
+import { isDeviceIdentity, mutation, query, type MutationCtx } from './cliServer';
+import type { Doc } from './_generated/dataModel';
 import { accessibleProject, activeProject } from './projectAuthority';
 import { invariant } from '../src/errors';
 import { reactionKind, reactionKinds } from './planningReactionFields';
+import { recordHead } from './projectHostedRecords';
+import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 
 /** An Item's reactions are read in one page. Owner-only writers make far fewer; past this the counts say so. */
 const REACTION_READ_LIMIT = 2000;
@@ -39,6 +43,23 @@ export const forItem = query({
   },
 });
 
+/** Whether this comment is on this Item: one head read from the record store, or one index row from the Work index. */
+async function commentOnItem(
+  ctx: MutationCtx,
+  project: Doc<'hostedProjects'>,
+  itemId: string,
+  commentId: string,
+) {
+  if (project.workStore === 'records') {
+    const head = await recordHead(ctx, project._id, 'comment', commentId);
+    return head?.status === 'comment' && head.parent === itemId;
+  }
+  const generation = await selectedGeneration(ctx, project);
+  if (!generation) return false;
+  const row = await record(ctx, recordPartition(generation), 'planningComments', commentId);
+  return row?.parent === itemId;
+}
+
 /** Adds the viewer's reaction of this kind to the comment, or takes it off when it is there. Retrying a lost reply
  * converges: the reply says whether the reaction is now on. */
 export const toggle = mutation({
@@ -53,6 +74,11 @@ export const toggle = mutation({
   handler: async (ctx, { projectId, itemId, commentId, kind, on }) => {
     const user = await ctx.auth.getUserIdentity();
     invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to use your Forge project.');
+    invariant(
+      !isDeviceIdentity(user),
+      'AUTH_SCOPE_DENIED',
+      'A reaction is a person’s: agents cannot react. Open the Item in a browser, signed in, to react.',
+    );
     const project = await activeProject(ctx, projectId, user.subject);
     invariant(
       project.owner === user.subject,
@@ -60,6 +86,13 @@ export const toggle = mutation({
       'Project planning is available to its current owner.',
     );
     invariant(uuid.test(itemId) && uuid.test(commentId), 'BAD_ARGUMENT', 'Name the comment by its id.');
+    // Taking a reaction off needs no comment check, so one left on a comment that is gone can still be removed.
+    if (on)
+      invariant(
+        await commentOnItem(ctx, project, itemId, commentId),
+        'NOT_FOUND',
+        'React to a comment on this Item.',
+      );
     const mine = await ctx.db
       .query('planningReactions')
       .withIndex('by_project_and_comment_and_actor', q =>

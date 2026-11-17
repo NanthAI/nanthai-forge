@@ -1,0 +1,158 @@
+// SPDX-License-Identifier: Apache-2.0
+// An Item's discussion (Item 9a3d6f5f): member Markdown is drawn without running raw HTML or unsafe links, threads keep
+// replies under their root, the count reconciles with what is shown, and writers show by public identity only.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createElement as h } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { moduleUrl } from './convex-module.mjs';
+
+const { Discussion } = await import(moduleUrl('../web/src/app/discussion/Discussion.tsx'));
+const model = await import(moduleUrl('../web/src/app/discussion/model.ts'));
+const { safeHref } = await import(moduleUrl('../web/src/ds/markdown.tsx'));
+
+const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const comment = (n, extra = {}) => ({
+  id: id(n),
+  itemId: id(0),
+  text: `Comment ${n}`,
+  at: `2026-11-1${n % 10}T09:00:00.000Z`,
+  ...extra,
+});
+const render = props =>
+  renderToStaticMarkup(
+    h(Discussion, {
+      canWrite: true,
+      onPost: async () => {},
+      now: new Date('2026-11-17T12:00:00Z'),
+      ...props,
+    }),
+  );
+
+test('hostile comment text renders as inert text: no raw HTML, scripts, handlers or javascript: links', () => {
+  const html = render({
+    comments: [
+      comment(1, {
+        text: '<script>alert(1)</script>\n\nSay **bold** <img src=x onerror=alert(2)> [x](javascript:alert(3)) [y](data:text/html,hi) ![i](https://example.com/a.png) <a href="https://evil.example">raw</a>\n\n# Heading\n\n- list\n\n`code`',
+      }),
+    ],
+  });
+  assert.doesNotMatch(html, /<script|alert\(1\)/i, 'an HTML block is dropped whole');
+  assert.doesNotMatch(html, /onerror/i);
+  assert.doesNotMatch(html, /javascript:/i);
+  assert.doesNotMatch(html, /data:text/i);
+  assert.doesNotMatch(html, /<img/i, 'outside images are not loaded');
+  assert.doesNotMatch(html, /evil\.example/, 'raw HTML anchors are dropped');
+  assert.match(html, /<strong>bold<\/strong>/);
+  assert.match(html, /<h3>Heading<\/h3>/, 'member headings sit under the screen headings');
+  assert.match(html, /<li>list<\/li>/);
+  assert.match(html, /<code>code<\/code>/);
+});
+
+test('the security review hostile inputs stay inert: obfuscated schemes, raw HTML of every kind, images in links', () => {
+  const hostile = [
+    '<svg onload=alert(1)>',
+    '<iframe src="https://evil.example"></iframe>',
+    '<style>body{display:none}</style>',
+    '<!-- secret-note -->',
+    '[a](JaVaScRiPt:alert(1)) [b](java&#x73;cript:alert(1)) [c](java\tscript:alert(1))',
+    '[d](vbscript:msgbox) [e](file:///etc/passwd) [f](//evil.example) [g](\\\\evil.example) [h](/-/x)',
+    '[ref][r]\n\n[r]: javascript:alert(4)',
+    '<javascript:alert(5)>',
+    '[![i](https://evil.example/p.png)](https://example.com)',
+    '```js" onmouseover="alert(6)\ncode\n```',
+    'Note[^x" onclick="alert(7)].\n\n[^x" onclick="alert(7)]: foot',
+  ].join('\n\n');
+  const html = render({ comments: [comment(1, { text: hostile })] });
+  for (const bad of [/<svg/i, /<iframe/i, /<style/i, /secret-note/, /<img/i, /<[^>]*\son[a-z]+=/i])
+    assert.doesNotMatch(html, bad);
+  for (const href of html.matchAll(/href="([^"]*)"/g))
+    assert.match(href[1], /^(https?:\/\/|mailto:|#)/, `only safe links: ${href[1]}`);
+  assert.doesNotMatch(html, /evil\.example"/, 'no link or image leads to the outside host');
+});
+
+test('outside links name their host on hover, and footnote ids are kept apart per comment', () => {
+  const html = render({
+    comments: [
+      comment(1, { text: '[docs](https://docs.example.com/a?b=c) and a note[^1].\n\n[^1]: First.' }),
+      comment(2, { text: 'Another note[^1].\n\n[^1]: Second.' }),
+    ],
+  });
+  assert.match(html, /title="Opens docs\.example\.com"/);
+  const ids = [...html.matchAll(/ id="(user-content-[^"]+)"/g)].map(match => match[1]);
+  assert.ok(ids.length >= 4, 'each comment has its footnote and back reference');
+  assert.equal(new Set(ids).size, ids.length, 'no footnote id repeats on the page');
+  assert.ok(ids.some(entry => entry.startsWith(`user-content-${id(1)}-`)));
+});
+
+test('only http(s), mailto and in-page anchors become links, and outside links open safely', () => {
+  assert.deepEqual(safeHref('https://example.com/a'), { href: 'https://example.com/a', external: true });
+  assert.deepEqual(safeHref('#comment-1'), { href: '#comment-1', external: false });
+  for (const bad of [
+    'javascript:alert(1)',
+    ' JavaScript:x',
+    'data:text/html,x',
+    '//evil.example',
+    '/-/x',
+    'vbscript:x',
+  ])
+    assert.equal(safeHref(bad), null, bad);
+  const html = render({ comments: [comment(1, { text: '[docs](https://example.com/docs)' })] });
+  assert.match(html, /rel="noreferrer noopener nofollow ugc"/);
+  assert.match(html, /target="_blank"/);
+});
+
+test('replies sit under their thread root, and the count reconciles with the threads shown', () => {
+  const comments = [comment(1), comment(2, { replyTo: id(1) }), comment(3), comment(4, { replyTo: id(1) })];
+  const threads = model.threads(comments);
+  assert.deepEqual(
+    threads.map(thread => [thread.root.id, thread.replies.map(reply => reply.id)]),
+    [
+      [id(1), [id(2), id(4)]],
+      [id(3), []],
+    ],
+  );
+  const html = render({ comments, pageSize: 1 });
+  assert.match(html, /Showing the latest 1 of 2 threads\./);
+  assert.match(html, /Show 1 earlier/);
+  assert.match(html, />2 threads</);
+});
+
+test('writers show by the server-recorded account; a typed label is never shown as a checked writer', () => {
+  assert.deepEqual(model.writer(comment(1, { author: 'mara' })), { label: '@mara', verified: true });
+  assert.deepEqual(model.writer(comment(1, { author: 'mara', agent: 'keen-impala' })), {
+    label: 'mara/keen-impala',
+    verified: true,
+  });
+  assert.deepEqual(model.writer(comment(1, { authorLabel: '@lead-sweep' })), {
+    label: 'lead-sweep',
+    verified: false,
+  });
+  assert.equal(model.writer(comment(1, { authorLabel: 'Ada Lovelace' })), null);
+  assert.equal(model.writer(comment(1, { authorLabel: 'adas-macbook.local' })), null);
+  const html = render({
+    comments: [
+      comment(1, { authorLabel: 'Ada Lovelace' }),
+      comment(2, { author: 'mara', agent: 'keen-impala' }),
+      comment(3, { authorLabel: '@sample-forged' }),
+    ],
+  });
+  assert.doesNotMatch(html, /Ada/);
+  assert.match(html, /mara\/keen-impala/);
+  assert.match(html, /A member/);
+  assert.doesNotMatch(html, /@sample-forged/, 'a typed label never gets the handle mark');
+  assert.match(html, /sample-forged<\/span> <span class="t3">not verified/);
+});
+
+test('decisions are marked, reactions show counts and the viewer’s own, readers get no composer', () => {
+  const comments = [comment(1, { decision: true, author: 'mara' })];
+  const reactions = [{ commentId: id(1), kind: '+1', count: 3, mine: true }];
+  const html = render({ comments, reactions, onReact: async () => {} });
+  assert.match(html, />Decision</);
+  assert.match(html, /aria-pressed="true"[^>]*aria-label="thumbs up: 3, yours"/);
+  assert.match(html, /This is a decision: keep it in the body/);
+  const reader = render({ comments, reactions, canWrite: false });
+  assert.doesNotMatch(reader, /<textarea/);
+  assert.doesNotMatch(reader, />Reply</);
+  assert.match(reader, /disabled=""/);
+});

@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: Apache-2.0
+// Who a hosted planning comment names, set by the server only (Item 9a3d6f5f). The writer is the signed-in account
+// (stamped as `author` by the replay); a label the client typed never becomes the writer, because a reader who may not
+// see people would otherwise be shown whatever handle the client chose. The agent marker comes from the credential
+// kind: a device credential is an agent session, a browser sign-in is the person.
+import type { MutationCtx } from './_generated/server';
+import { invariant } from '../src/errors';
+import { isAgentSlug, slugFromDigest } from '../src/agent-slug';
+import { digest } from '../src/state/hash';
+import { isDeviceIdentity } from './cliServer';
+import { publicActorLabel } from './publicPeople';
+
+/** The longest comment a hosted project stores (GitHub's limit); the page draws nothing above it. */
+export const MAX_COMMENT_CHARACTERS = 65_536;
+
+type CommentCommand = {
+  text: string;
+  authorLabel: string;
+  agent?: string | undefined;
+  decision?: boolean | undefined;
+  decidedBy?: string | undefined;
+};
+
+/** Normalises a comment command in place before its request digest is taken, so a retry normalises the same way. */
+export async function serverCommentWriter(ctx: MutationCtx, command: CommentCommand) {
+  invariant(
+    command.text.length <= MAX_COMMENT_CHARACTERS,
+    'BAD_ARGUMENT',
+    `Keep a comment to ${MAX_COMMENT_CHARACTERS.toLocaleString('en-US')} characters or fewer.`,
+  );
+  delete command.decidedBy;
+  const user = await ctx.auth.getUserIdentity();
+  if (!user) {
+    // A scheduled Forge job (no sign-in): its label is written by server code, and it is never an agent session.
+    delete command.agent;
+    if (command.decision) command.decidedBy = '';
+    return;
+  }
+  command.authorLabel = '';
+  if (!isDeviceIdentity(user)) delete command.agent;
+  else if (!isAgentSlug(command.agent))
+    // A device that sent no session slug still reads as an agent: a stable slug from its credential.
+    command.agent = slugFromDigest(
+      digest(`planning-comment-agent:${String(user.forgeCredential ?? user.subject)}`),
+    );
+  // A decision's body line names the same writer, empty when the account has no handle.
+  if (command.decision) command.decidedBy = await publicActorLabel(ctx, user.subject, command.agent);
+}
