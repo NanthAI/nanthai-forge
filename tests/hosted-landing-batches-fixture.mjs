@@ -33,6 +33,7 @@ export async function batchesFixture(
     // Mechanics tests pin the earlier fixed cohort of eight; null selects auto sizing.
     batchMaxSize = 8,
     admissionCheck = false,
+    landingMode,
     concurrency,
     // Agent finishes name their check. Without owner provenance on the Lane the
     // entry is not batch-eligible, so its check starts at submission, in parallel
@@ -58,6 +59,7 @@ export async function batchesFixture(
           ...(batchMaxSize ? { batchMaxSize } : {}),
           // Queue-mechanics tests pin pre-queue checks off; 'default' leaves the policy default.
           ...(admissionCheck === 'default' ? {} : { admissionCheck }),
+          ...(landingMode ? { landingMode } : {}),
         },
         ...(concurrency ? { checks: { runner: 'github-actions', concurrency } } : {}),
         // Server land gates (Issue 029138ef) have their own tests (hosted-landing-desired.test.mjs).

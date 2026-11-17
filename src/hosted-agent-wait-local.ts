@@ -21,8 +21,7 @@ import {
   type HostedRunSubscription,
 } from './hosted-agent-observe.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
-import { boardWaker, type BoardWaitOption } from './hosted-board-wait.js';
-import { boardDeliverySchema } from './hosted-board.js';
+import { boardWaker, freshBoardDelivery, type BoardWaitOption } from './hosted-board-wait.js';
 
 /** What this client's own records say an operation id is, when the server has no landing for it. */
 export type LocalOperation =
@@ -104,12 +103,8 @@ async function observeHostedSave(
       const value = await transport.query('projectHostedSaves:progress', { operationId, ...boardArgs });
       const done = terminal(value);
       if (done) return done;
-      const delivery = boardWait
-        ? boardDeliverySchema.safeParse((value as { board?: unknown }).board)
-        : undefined;
-      return delivery?.success && (delivery.data.messages.length || delivery.data.conflicts?.length)
-        ? response({ status: 'message', board: delivery.data, inProgress: true })
-        : null;
+      const delivery = boardWait ? freshBoardDelivery(boardWait, value) : undefined;
+      return delivery ? response({ status: 'message', board: delivery, inProgress: true }) : null;
     } catch (error) {
       if (hostedActionError(error, 'save observation').code !== 'NOT_FOUND') throw error;
       return response({

@@ -87,8 +87,9 @@ test('peer wait (server): a note to my own Lane rides on the same query; Issue a
   assert.equal('board' in quiet, false, 'only the Lane inbox row is watched');
   await f.post({ to: `lane:${f.lanes.A}`, text: 'Landing in 5 min, then rebase on me', laneId: f.lanes.B });
   const woke = await peer({ peer: f.lanes.B, laneId: f.lanes.A, after: 0 });
-  assert.equal(woke.board.messages.length, 2, 'the delivery is the full cursor-safe set, at most 2');
-  assert(woke.board.more >= 1);
+  assert.equal(woke.board.messages.length, 1, 'only the unread directed note wakes the wait');
+  assert.equal(woke.board.more, 0, 'unrelated inboxes cannot hide the directed note');
+  assert.equal(woke.board.messages[0].target, `lane:${f.lanes.A}`);
   assert(woke.board.messages.every(message => message.author === 'owner-h'));
 });
 

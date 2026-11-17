@@ -161,3 +161,14 @@ export function writeBoardWokeAt(root: string, laneId: string, at = Date.now()) 
     /* The window is advisory. */
   }
 }
+
+/** Content identities of exact notices already returned by a wait on this machine. Kept
+ * separately from the message cursor: a two-note page can end before the conflict's clock. */
+const conflictFile = (root: string, laneId: string) => join(boardDir(root), `${laneId}.conflicts.json`);
+export function readBoardConflictIds(root: string, laneId: string): string[] {
+  const value = readJson(conflictFile(root, laneId));
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
+}
+export function writeBoardConflictIds(root: string, laneId: string, ids: string[]) {
+  writeJson(conflictFile(root, laneId), [...new Set([...readBoardConflictIds(root, laneId), ...ids])]);
+}

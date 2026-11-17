@@ -78,7 +78,7 @@ async function dispatchHostedAgentCli(
         import('./hosted-board-wait.js'),
         import('./hosted-agent-approval.js'),
       ]);
-    const { boardWaitOption, boardWakeEnvelope, observePeerLane } = board$;
+    const { boardWaitOption, boardWakeEnvelope, observePeerLane, freshBoardDelivery } = board$;
     const selectedWait = hostedWaitSchema.parse(command);
     const alone = selectedWait.peer ?? selectedWait.approval;
     invariant(
@@ -116,8 +116,9 @@ async function dispatchHostedAgentCli(
         response: Awaited<ReturnType<HostedAgentTransport['dispatch']>>,
         value: unknown,
       ) => {
-        const delivery = (value as { board?: Parameters<typeof boardWakeEnvelope>[2] } | undefined)?.board;
-        if (!board || !delivery) return undefined;
+        if (!board) return undefined;
+        const delivery = freshBoardDelivery(board, value);
+        if (!delivery) return undefined;
         const { conflictNotice, notice, ...envelope } = boardWakeEnvelope(root, board.laneId, delivery);
         process.exitCode = 3;
         const { next, waitCommand, inProgress } = operationWait(root, { ...selectedWait, ...address });
@@ -282,6 +283,8 @@ async function dispatchHostedAgentCli(
                         board: {
                           notices: notes.notices,
                           more: notes.more,
+                          cursor: notes.cursor,
+                          ...(notes.noticeIds ? { noticeIds: notes.noticeIds } : {}),
                           ...(!notes.conflictNotice && notes.notice ? { notice: notes.notice } : {}),
                         },
                       }

@@ -61,12 +61,14 @@ export async function boardInbox(
     limit: number;
     order: 'asc' | 'desc';
     includeResolved?: boolean;
+    /** Live waits only consume directed notes; ordinary board reads keep all three inboxes. */
+    laneOnly?: boolean;
   },
 ) {
   const keys = [
     ...(input.laneId ? [`lane:${input.laneId}`] : []),
-    ...(input.intentId ? [`issue:${input.intentId}`] : []),
-    'project',
+    ...(input.intentId && !input.laneOnly ? [`issue:${input.intentId}`] : []),
+    ...(input.laneOnly ? [] : ['project']),
   ];
   const inboxes = await Promise.all(
     keys.map(key =>
@@ -207,7 +209,8 @@ export async function boardDelivery(
 
 /** Wait delivery (live subscription): watches ONLY the Lane's own inbox row, so a post elsewhere
  * (Issue, project, another Lane) never re-runs this Lane's wait. When that row moved past the
- * cursor, the full delivery (Lane, Issue and project notes, ≤2) is read once, cursor-safe. */
+ * cursor, directed notes (≤2) are read once, cursor-safe. Project and Issue notes remain
+ * available to ordinary board reads and cannot starve a directed note behind their backlog. */
 export async function boardWake(
   ctx: Ctx,
   input: {
@@ -229,14 +232,10 @@ export async function boardWake(
   // Exact source conflicts remain deliverable when member-written board notes are switched off.
   if (await boardStopped(ctx, input.projectId))
     return conflicts.length ? { messages: [], more: 0, cursor: inbox.latestAt, conflicts } : undefined;
-  const lane = await ctx.db
-    .query('projectHostedPresence')
-    .withIndex('by_project_and_lane', q => q.eq('projectId', input.projectId).eq('laneId', input.laneId))
-    .unique();
   const delivered = await boardInbox(ctx, {
     projectId: input.projectId,
     laneId: input.laneId,
-    ...(lane ? { intentId: lane.intentId } : {}),
+    laneOnly: true,
     after: input.after,
     limit: 2,
     order: 'asc',

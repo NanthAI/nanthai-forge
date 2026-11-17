@@ -33,6 +33,11 @@ public projects. Direct Ready requests have bounded order and recovery deadlines
 reservations require a finish driver and stop on stalls.
 
 
+Waits deduplicate exact conflict identities independently of board message pages, returning
+notice IDs and a cursor. Already-read notes and another Lane's messages cannot interrupt them.
+Overlapping Strict-mode full admissions use already-ordered predecessor composition before a follower check,
+including when execution slots are full; failed predecessors retain follower source.
+
 Exact speculative-predecessor conflicts expose pinned early sync/resolve recovery.
 Save-time exact peer notices offer that sync as soon as the peer has a fixed check;
 resolved peer deltas no longer create false notices, and acceptance clears old notices.

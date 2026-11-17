@@ -446,3 +446,55 @@ test('83e6d0d3: head revalidation withdraws a stale conflict before the existing
   assert.deepEqual(delivered, []);
   waker.stop();
 });
+
+test('9829778c: reconnecting a wait never redelivers an exact notice behind older board pages', async t => {
+  const { boardWaker, boardWaitOption } = await import('../dist/hosted-board-wait.js');
+  const { rememberBoardReader, writeBoardProjectCursor } = await import('../dist/board-local.js');
+  const root = mkdtempSync(join(tmpdir(), 'forge-wait-reconnect-'));
+  t.after(() => {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(`${root}.forge-client`, { recursive: true, force: true });
+  });
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const laneId = randomUUID();
+  const conflict = {
+    with: randomUUID(),
+    goal: 'Synthetic peer',
+    flaggedAt: new Date().toISOString(),
+    files: [{ path: 'src/shared.ts', mine: [[1, 1]], theirs: [[1, 1]], reason: 'text' }],
+  };
+  const board = { messages: [], more: 4, cursor: 2, conflicts: [conflict] };
+  const first = boardWakeEnvelope(root, laneId, board);
+  assert.equal(first.noticeIds.length, 1);
+  assert.equal(first.cursor, 2, 'the message page stays before the conflict clock');
+  rememberBoardReader(root, 'synthetic-project', 'synthetic-actor');
+  writeBoardProjectCursor(root, 50);
+  const delivered = [];
+  const option = boardWaitOption(root, laneId);
+  const waker = boardWaker(option, value => delivered.push(value));
+  t.after(() => waker.stop());
+  // A project note already read in another Lane used to yield an empty message wake.
+  waker.offer({
+    board: {
+      ...board,
+      cursor: 4,
+      messages: [{ id: randomUUID(), target: 'project', text: 'Already read elsewhere', at: 4 }],
+    },
+  });
+  t.mock.timers.tick(120000);
+  assert.deepEqual(delivered, [], 'stale conflict plus already-read note cannot interrupt checking');
+  waker.offer({
+    board: {
+      ...board,
+      cursor: 5,
+      messages: [{ id: randomUUID(), target: `lane:${randomUUID()}`, text: 'For another Lane', at: 5 }],
+    },
+  });
+  t.mock.timers.tick(120000);
+  assert.deepEqual(delivered, [], 'another Lane message never interrupts this wait');
+  const changed = { ...conflict, files: [{ ...conflict.files[0], mine: [[2, 2]] }] };
+  waker.offer({ board: { ...board, cursor: 6, conflicts: [changed] } });
+  t.mock.timers.tick(boardWakeTiming.batchMs);
+  assert.equal(delivered.length, 1, 'new exact ranges interrupt once');
+  assert.notDeepEqual(boardWakeEnvelope(root, laneId, delivered[0]).noticeIds, first.noticeIds);
+});

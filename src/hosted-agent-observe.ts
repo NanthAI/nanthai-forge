@@ -16,10 +16,10 @@ import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
 import {
   boardConflictEnvelope,
   boardWaker,
+  freshBoardDelivery,
   type BoardDelivery,
   type BoardWaitOption,
 } from './hosted-board-wait.js';
-import { boardDeliverySchema } from './hosted-board.js';
 
 export const hostedRunWaitSchema = z
   .object({
@@ -161,12 +161,8 @@ async function observeHostedRunOnce(
   if (terminal) return result('terminal');
   if (signal?.aborted) return result('cancelled');
   if (!command.timeoutSeconds) {
-    const delivery = boardWait
-      ? boardDeliverySchema.safeParse((latest as { board?: unknown }).board)
-      : undefined;
-    return delivery?.success && (delivery.data.messages.length || delivery.data.conflicts?.length)
-      ? result('message', delivery.data)
-      : result('timeout');
+    const delivery = boardWait ? freshBoardDelivery(boardWait, latest) : undefined;
+    return delivery ? result('message', delivery) : result('timeout');
   }
   const client = subscribe();
   let unsubscribe: (() => void) | undefined;

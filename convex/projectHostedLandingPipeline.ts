@@ -40,6 +40,7 @@ export async function pipelinePredecessor(
     excludeIds?: string[];
     pins?: { submissionId: string; head: string; receiptId: string }[];
     requireSlot?: boolean;
+    onCapacity?: (full: boolean) => void;
     onBlocked?: (row: LandingRow) => void;
   } = {},
 ) {
@@ -80,6 +81,7 @@ export async function pipelinePredecessor(
   if (tail.pipelineRetiredAttemptId === tail.attemptId) return blocked();
   const attempt = await loadLandingAttempt(ctx, { projectId: input.projectId, attemptId: tail.attemptId });
   const groups = new Set(states.map(state => state.batchId ?? state.id));
+  options.onCapacity?.(groups.size >= hostedPipelineWidth(attempt.policy));
   if (
     !hostedBatching(attempt.policy) ||
     (options.requireSlot !== false && groups.size >= hostedPipelineWidth(attempt.policy)) ||

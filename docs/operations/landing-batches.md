@@ -331,6 +331,11 @@ queue order, so younger submissions that are already queued never wait for it.
 
 ### Pre-queue Lane checks
 
+When main already moved during source preparation, a batchable retained goal queues its exact selection
+for recomposition on current main before starting admission. The existing main read supplies this
+comparison; no extra query or source probe is made. A conflict with already-accepted source spends
+no check.
+
 Absent or `false`, `acceptance.admissionCheck` checks the composed head in the queue.
 `"full"` opts in to a separate pre-queue Lane check. It makes admission the project's configured check on any configured runner: GitHub Actions, other hosted CI or a registered
 self-hosted or Mac machine. Each batchable arrival's check runs at once, with
@@ -372,11 +377,16 @@ the same runner minutes as without the Lane check.
   entry can publish only after the group.
 
 A pending full admission can be the first predicted-head predecessor when a
-strict-mode follower has known disjoint paths with unplaceable global risk.
+follower has known disjoint paths with unplaceable global risk in Strict mode.
 Instead of checking the follower alone and repeating after the predecessor
 lands, the follower uses one full check of their exact union in the existing
-pipeline. Unknown paths, overlapping changes, placeable manifests, fast mode,
-different actor/policy/check/priority pins and a full execution width keep the
+pipeline. In Strict mode, overlapping paths whose fixed predecessor already holds queue order use that same exact composition before a follower check is reserved:
+a real text conflict returns pinned advice while the predecessor is pending, and only becomes
+terminal against accepted main. A failed predecessor releases the follower's original source.
+Earlier admissions still hold no queue order and do not become overlap predecessors. A full execution width queues the overlapping follower for existing capacity instead of starting
+an independent admission that cannot detect the conflict. Merge semantics are unchanged.
+Unknown paths, placeable disjoint manifests, disjoint risk in Fast mode,
+Fast-mode arrivals, different actor/policy/check/priority pins and disjoint risk at a full execution width keep the
 ordinary admission path. The predecessor keeps its admission and holds no general queue
 order. A successor that passes first parks its exact proof on that predecessor's
 existing settlement event; it does not treat the still-unaccepted base as a main

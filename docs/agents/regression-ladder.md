@@ -86,6 +86,9 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `1018d0f8` | An alert refresh overwrote an unticked measurement line and reconciliation closed an unmet Issue; refreshed alerts retain the existing body and reconciliation counts bare unticked checkboxes too |
 | `f5c45985` | A missing accepted-run stamp hid 3,317 discarded runner seconds; projections use the independent discard stamp and existing maintenance repairs retained null samples |
 
+| `9829778c` | A stale conflict beside older board pages or a note already read in another Lane repeatedly interrupts a wait |
+| `aad45785` | Overlapping full admissions spend checks before composing against an earlier pending predecessor; failed predecessors must preserve follower source |
+
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.
 

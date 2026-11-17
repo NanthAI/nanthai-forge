@@ -1,9 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
+import { createHash } from 'node:crypto';
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
 import { exactConflictEnvelope, exactConflictNotice } from './hosted-conflict-notice.js';
 import { boardDeliverySchema } from './hosted-board.js';
-import { boardEnvelope, readBoardCursor, readBoardWokeAt, writeBoardWokeAt } from './board-local.js';
+import {
+  boardEnvelope,
+  readBoardCursor,
+  readBoardWokeAt,
+  writeBoardWokeAt,
+  readBoardConflictIds,
+  writeBoardConflictIds,
+  unreadBoardNotes,
+} from './board-local.js';
 import { ForgeError } from './errors.js';
 import { memberDataNotice } from './member-data-notice.js';
 import { hostedActionError } from './hosted-action-error.js';
@@ -34,14 +43,49 @@ export const boardWakeTiming = {
 export { readBoardServerFeatures, rememberBoardServerFeatures, readBoardWokeAt } from './board-local.js';
 
 /** What a wait passes to its subscription: the caller's own Lane and its local cursor. */
-export type BoardWaitOption = { laneId: string; after: number; wokeAt: number };
+export type BoardWaitOption = {
+  laneId: string;
+  after: number;
+  wokeAt: number;
+  root?: string;
+  conflictIds?: string[];
+};
 export function boardWaitOption(root: string, laneId: string | undefined): BoardWaitOption | undefined {
   if (!laneId) return undefined;
   return {
     laneId,
+    root,
+    conflictIds: readBoardConflictIds(root, laneId),
     after: readBoardCursor(root, laneId),
     wokeAt: readBoardWokeAt(root, laneId),
   };
+}
+
+/** A stable identity from the existing exact notice bytes; no extra hosted read. */
+const conflictId = (conflict: NonNullable<BoardDelivery['conflicts']>[number]) =>
+  createHash('sha256').update(JSON.stringify(conflict)).digest('hex');
+
+/** Only new, relevant data may interrupt a wait. Message and conflict cursors are independent:
+ * an older two-message page must never redeliver the conflict beside it on every reconnect. */
+export function freshBoardDelivery(option: BoardWaitOption, value: unknown): BoardDelivery | undefined {
+  const parsed = safeParseHostedResponse(
+    boardDeliverySchema,
+    (value as { board?: unknown } | undefined)?.board,
+  );
+  if (!parsed.success) return undefined;
+  const delivery = parsed.data;
+  const messages = (
+    option.root ? unreadBoardNotes(option.root, delivery.messages) : delivery.messages
+  ).filter(
+    message =>
+      message.at > option.after &&
+      (!message.target.startsWith('lane:') || message.target === `lane:${option.laneId}`),
+  );
+  const seen = new Set(option.conflictIds ?? []);
+  const conflicts = (delivery.conflicts ?? []).filter(conflict => !seen.has(conflictId(conflict)));
+  if (!conflicts.length && !messages.some(message => message.target === `lane:${option.laneId}`))
+    return undefined;
+  return { ...delivery, messages, conflicts };
 }
 
 /** Turns subscription values into at most one early return: waits batchMs for notes arriving
@@ -53,11 +97,8 @@ export function boardWaker(option: BoardWaitOption, wake: (delivery: BoardDelive
   let timerAt = Infinity;
   return {
     offer(value: unknown) {
-      const parsed = safeParseHostedResponse(
-        boardDeliverySchema,
-        (value as { board?: unknown } | undefined)?.board,
-      );
-      if (!parsed.success || (!parsed.data.messages.length && !parsed.data.conflicts?.length)) {
+      const delivery = freshBoardDelivery(option, value);
+      if (!delivery) {
         // A later subscription value revalidated the saved head and withdrew the queued conflict.
         if (latest?.conflicts?.length) {
           latest = undefined;
@@ -67,11 +108,11 @@ export function boardWaker(option: BoardWaitOption, wake: (delivery: BoardDelive
         }
         return;
       }
-      latest = parsed.data;
+      latest = delivery;
       // A newly proven conflict uses the same batching timer, without the member-note cooldown.
       const at = Math.max(
         Date.now() + boardWakeTiming.batchMs,
-        parsed.data.conflicts?.length ? 0 : option.wokeAt + boardWakeTiming.windowMs,
+        delivery.conflicts?.length ? 0 : option.wokeAt + boardWakeTiming.windowMs,
       );
       if (timer && timerAt <= at) return;
       if (timer) clearTimeout(timer);
@@ -88,11 +129,15 @@ export function boardWaker(option: BoardWaitOption, wake: (delivery: BoardDelive
 /** Advance the delivery cursor; only member notes start their existing cooldown. Source
  * conflicts do not delay a subsequent member-note wake. */
 export function boardWakeEnvelope(root: string, laneId: string, delivery: BoardDelivery) {
+  const noticeIds = (delivery.conflicts ?? []).map(conflictId);
+  if (noticeIds.length) writeBoardConflictIds(root, laneId, noticeIds);
   const envelope = boardEnvelope(root, laneId, delivery);
   if (delivery.messages.length) writeBoardWokeAt(root, laneId);
   const conflictNotice = exactConflictNotice(laneId, delivery.conflicts ?? []);
   return {
     ...envelope,
+    cursor: delivery.cursor,
+    ...(noticeIds.length ? { noticeIds } : {}),
     ...(conflictNotice ? { conflictNotice } : {}),
     ...(delivery.messages.length || conflictNotice ? { notice: memberDataNotice } : {}),
   };

@@ -47,6 +47,8 @@ export async function pinLandingAttempt(
     /** Receives the pinned Candidate's Intent (landing reservation, 10d253c6): no second read. */
     intent?: (intentId: string) => void;
     paths?: (paths: string[] | null) => void;
+    /** Current main is already read for pin validation; source preparation may have raced it. */
+    mainMoved?: (moved: boolean) => void;
   },
 ) {
   invariant(
@@ -62,6 +64,7 @@ export async function pinLandingAttempt(
   );
   const project = await hostedWriteProject(ctx, input.projectId, input.actor.id, r.authorityEpoch);
   const main = await hostedStartMain(ctx, input.projectId);
+  input.mainMoved?.(main.head !== r.expectedMain.head || main.receipt.id !== r.expectedMain.receiptId);
   invariant(
     main.authority.epoch === r.authorityEpoch && main.authority.mode === project.sourceAuthority?.mode,
     'SOURCE_AUTHORITY_CHANGED',

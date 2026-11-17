@@ -379,6 +379,7 @@ export async function enqueueHostedLanding(
   const submissionId = first.ids.submission!;
   let intentId: string | undefined;
   let paths: string[] | null = null;
+  let mainMoved = false;
   const attempt = await pinLandingAttempt(ctx, {
     projectId: input.projectId,
     actor,
@@ -392,12 +393,17 @@ export async function enqueueHostedLanding(
     operations: { check: first.ids.check!, accept: first.ids.accept! },
     intent: id => (intentId = id),
     paths: value => (paths = value),
+    mainMoved: value => (mainMoved = value),
   });
   const queue = await ensureLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
-  const stacked = await pipelineAdmission(ctx, { project, attempt, request, paths, queue });
-  const admission = stacked
+  const staleAdmission = mainMoved && attempt.deferredCheck;
+  const stacked = staleAdmission
     ? null
-    : await startLandingAdmission(ctx, { projectId: input.projectId, attempt, request });
+    : await pipelineAdmission(ctx, { project, attempt, request, paths, queue });
+  const admission =
+    stacked || staleAdmission
+      ? null
+      : await startLandingAdmission(ctx, { projectId: input.projectId, attempt, request });
   // Issue 10d253c6: the same work superseded after a passed check reserves its files now.
   const reservation = await submissionReservation(
     ctx,

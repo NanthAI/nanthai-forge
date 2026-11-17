@@ -16,7 +16,7 @@ import { pipelinePredecessor } from './projectHostedLandingPipeline';
 import type { LandingRow } from './projectHostedLandingStore';
 import { landingChangedPaths } from './projectHostedLandingOvertake';
 
-/** A solo pass cannot carry a global-risk interaction. Use the existing exact
+/** A solo pass cannot carry an overlapping or global-risk interaction. Use the existing exact
  * predicted-head train instead of first spending a run on a tree that cannot
  * land. The predecessor still owns its admission; its failure, hold or re-pin
  * invalidates descendants through the ordinary pipeline. No new check or wake. */
@@ -54,6 +54,7 @@ export async function pipelineAdmission(
         .take(1);
   if (!queue.train?.length && !seed) return null;
   const selected: { row?: LandingRow; attempt?: HostedLandingAttempt } = {};
+  let full = false;
   const predecessor = await pipelinePredecessor(
     ctx,
     { projectId: project._id, channel: 'main' },
@@ -61,6 +62,12 @@ export async function pipelineAdmission(
     (row, pins) => {
       selected.row = row;
       selected.attempt = pins;
+    },
+    {
+      requireSlot: false,
+      onCapacity: value => {
+        full = value;
+      },
     },
   );
   if (!predecessor || !selected.row || !selected.attempt) return null;
@@ -76,10 +83,9 @@ export async function pipelineAdmission(
     return null;
   const earlier = await landingChangedPaths(ctx, prior.row, prior.state);
   const entries = [...project.checkEntries, ...(project.globalRiskPaths ?? [])];
-  return earlier?.length &&
-    !pathsOverlap(paths, earlier) &&
-    globalRiskBetween(paths, earlier, entries) &&
-    !placeableRisk(paths, earlier, entries)
+  if (!earlier?.length) return null;
+  if (pathsOverlap(paths, earlier)) return prior.row.orderLive === true ? predecessor.submissionId : null;
+  return !full && globalRiskBetween(paths, earlier, entries) && !placeableRisk(paths, earlier, entries)
     ? predecessor.submissionId
     : null;
 }

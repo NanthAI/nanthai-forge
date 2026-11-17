@@ -229,6 +229,18 @@
       "what": "Convex 1.50 throws when a running scheduled mutation cancels its own task, even though its system row remains pending.",
       "file": "tests/scheduler-cancel.test.mjs",
       "test": "incident ad80e037: scheduled mutation self-cancel is skipped even while its system row is pending, without DB I/O"
+    },
+    {
+      "incident": "9829778c",
+      "what": "An unchanged source conflict beside older board pages repeatedly wakes a landing wait.",
+      "file": "tests/hosted-conflict-wake.test.mjs",
+      "test": "9829778c: reconnecting a wait never redelivers an exact notice behind older board pages"
+    },
+    {
+      "incident": "aad45785",
+      "what": "An overlapping full admission spends its check before composing against work already ahead.",
+      "file": "tests/hosted-queued-conflict-precheck.test.mjs",
+      "test": "C1 wasted checks: overlapping admission composes before spending a check, predecessor fails=${failed}, width=${concurrency}, mode=${landingMode}"
     }
   ]
 }

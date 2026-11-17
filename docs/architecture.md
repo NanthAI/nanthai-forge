@@ -1991,8 +1991,13 @@ predecessor instead of running a solo admission that would need a combined reche
 One indexed admitting head and bounded train metadata select this route; unchanged
 head/receipt pins survive admission settlement, while refused or changed generations
 cannot supply a predecessor. Publication and invalidation use the existing train
-fences. Independent, overlapping, placed-manifest, fast-mode and unknown-evidence
-arrivals retain ordinary admission. Admissions wake their request only on a terminal
+fences. Overlapping arrivals in Strict mode use an already-ordered fixed predecessor composition before
+reserving a follower check, including when they must queue for execution capacity. Conflicts stay
+advisory until that predecessor is accepted; a failed predecessor releases the original follower
+source. Source preparation that finishes behind already-accepted main also queues recomposition
+before a batchable admission check, using the main comparison already made while pinning.
+Independent, placed-manifest disjoint, fast-mode disjoint and unknown-evidence arrivals retain
+ordinary admission. Admissions wake their request only on a terminal
 run write, and size and split cohorts as
 described in [hosted queue priority](operations/landing-batches.md#hosted-queue-priority). A retained train with no member checking holds
 later deferred entries for at most `HOSTED_TRAIN_HOLD_MS` after its newest compose;
@@ -2113,6 +2118,11 @@ The observer reads one selected request, at most twenty retained versions and
 one queue page with eight ahead entries. Older rows use their exact source until
 an ordinary write installs the projection; reads never repair or scan history.
 Current access, authority, advice, progress and acceptance remain dependencies.
+Live board delivery reads only directed Lane notes; ordinary board reads retain Issue and project
+notes. Client waits remember content-derived conflict identities separately from message cursors,
+so a conflict beside an older two-note page is returned once across reconnects. The wait reply
+includes the delivered notice IDs and message cursor; already-read or other-Lane notes cannot
+produce an empty early wake.
 Source and logs stay in R2; upkeep shares existing mutations and adds no RPC,
 poll, server timer or delay. Synthetic guards measure dependency parity and
 bounded I/O; live billed savings need matched-load deployment evidence.
