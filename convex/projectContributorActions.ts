@@ -67,14 +67,19 @@ export const labels = action({
 });
 
 export const invitePerson = action({
-  args: { projectId: v.id('hostedProjects'), person: v.string(), operationId: v.string() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    person: v.string(),
+    operationId: v.string(),
+    role: v.optional(v.union(v.literal('read'), v.literal('write'))),
+  },
   returns: v.null(),
-  handler: async (ctx, { projectId, person, operationId }): Promise<null> => {
+  handler: async (ctx, { projectId, person, operationId, role }): Promise<null> => {
     try {
       const owner = await caller(ctx);
       await ctx.runQuery(internal.projectWork.owner, { projectId, owner });
       person = person.trim().toLowerCase();
-      const request = { projectId, owner, person, operationId };
+      const request = { projectId, owner, person, operationId, ...(role ? { role } : {}) };
       if (await ctx.runQuery(internal.projectContributors.invitationOperation, request)) return null;
       if (person.startsWith('@')) {
         const account = await ctx.runQuery(internal.projectContributors.identity, {
@@ -87,7 +92,7 @@ export const invitePerson = action({
           await requestMemberApproval(
             ctx,
             projectId,
-            { kind: 'invite', person, operationId, contributor: account.owner },
+            { kind: 'invite', person, operationId, ...(role ? { role } : {}), contributor: account.owner },
             operationId,
           )
         )
@@ -103,7 +108,7 @@ export const invitePerson = action({
           await requestMemberApproval(
             ctx,
             projectId,
-            { kind: 'invite', person, operationId, contributor: account.id },
+            { kind: 'invite', person, operationId, ...(role ? { role } : {}), contributor: account.id },
             operationId,
           )
         )
@@ -117,7 +122,7 @@ export const invitePerson = action({
         await requestMemberApproval(
           ctx,
           projectId,
-          { kind: 'invite', person, operationId, email: person },
+          { kind: 'invite', person, operationId, ...(role ? { role } : {}), email: person },
           operationId,
         )
       )

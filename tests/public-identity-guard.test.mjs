@@ -21,6 +21,8 @@ const subject = 'user_builderBBBBBBBB';
 const emailAllowed = new Set([
   // The owner's own pending invitations, typed by the owner.
   'projectContributors.ts:pending',
+  // The same invitations on People and access: read only for the owner (convex/projectAccess.ts).
+  'projectAccess.ts:people',
   // The owner's own stall-alert addresses; publicPeople removes them for everyone else.
   'projectAutonomy.ts:read',
   'projectUncheckedLandingSettings.ts:read', // Same policy read; owner-entered alert recipients.

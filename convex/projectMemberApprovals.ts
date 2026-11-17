@@ -22,6 +22,7 @@ const memberChange = z.discriminatedUnion('kind', [
       contributor: z.string().optional(),
       email: z.string().optional(),
       operationId: z.string().min(1),
+      role: z.enum(['read', 'write']).optional(),
     })
     .strict(),
   z
@@ -55,6 +56,7 @@ export async function applyApprovedMember(ctx: MutationCtx, row: ApprovalRow) {
         contributor: change.contributor,
         email: change.email,
         operationId: change.operationId,
+        ...(change.role ? { role: change.role } : {}),
       });
       break;
     case 'reader':

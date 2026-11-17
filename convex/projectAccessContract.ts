@@ -24,7 +24,7 @@ export const projectVerbs = {
   /** Lanes, receipts, check results and the project's live line. On a public project visitors read them too; which
    * Lane titles a visitor sees follows the project's opt-in (public discovery, 6a60e89a). */
   readWork: { least: 'public', agents: 'same' },
-  /** The roster with handles. Readers see only themselves and the owner (public identity rule). */
+  /** The roster with handles. Readers see only themselves (public identity rule). */
   readPeople: { least: 'write', agents: 'same' },
   /** Full Work archives and checkpoints; reader grants and public visibility do not include them. */
   readArchives: { least: 'write', agents: 'same' },

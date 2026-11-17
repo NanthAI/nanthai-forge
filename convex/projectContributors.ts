@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { retainMembership } from './projectActorNames';
+import { queueInviteMail } from './projectInviteMail';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import {
@@ -246,6 +247,7 @@ export const invite = internalMutation({
     person: v.string(),
     email: v.optional(v.string()),
     contributor: v.optional(v.string()),
+    role: v.optional(v.union(v.literal('read'), v.literal('write'))),
   },
   returns: v.null(),
   handler: inviteContributor,
@@ -281,16 +283,33 @@ export async function redeemInvites(
   for (const row of rows) {
     const project = await ctx.db.get(row.projectId);
     if (!project || project.removal) continue;
-    const old = await ctx.db
-      .query('projectContributors')
-      .withIndex('by_project_and_contributor', q =>
-        q.eq('projectId', row.projectId).eq('contributor', user.subject),
-      )
-      .unique();
-    if (!old && project.owner !== user.subject)
-      await ctx.db.insert('projectContributors', { projectId: row.projectId, contributor: user.subject });
+    if (project.owner !== user.subject) await grant(ctx, row.projectId, user.subject, row.role ?? 'write');
     await ctx.db.delete(row._id);
   }
+}
+
+/** Give `person` at least `role`: never lowers an existing write grant, and write replaces a read grant. */
+async function grant(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  person: string,
+  role: 'read' | 'write',
+) {
+  const writer = await ctx.db
+    .query('projectContributors')
+    .withIndex('by_project_and_contributor', q => q.eq('projectId', projectId).eq('contributor', person))
+    .unique();
+  if (writer) return;
+  const reader = await ctx.db
+    .query('projectReaders')
+    .withIndex('by_project_and_reader', q => q.eq('projectId', projectId).eq('reader', person))
+    .unique();
+  if (role === 'read') {
+    if (!reader) await ctx.db.insert('projectReaders', { projectId, reader: person });
+    return;
+  }
+  if (reader) await ctx.db.delete(reader._id);
+  await ctx.db.insert('projectContributors', { projectId, contributor: person });
 }
 
 export async function addContributor(
@@ -322,29 +341,35 @@ export async function inviteContributor(
     person: string;
     email?: string;
     contributor?: string;
+    role?: 'read' | 'write';
   },
 ): Promise<null> {
   try {
     const { projectId, owner, email, contributor, operationId, person } = input;
+    const role = input.role ?? 'write';
     await activeOwnedProject(ctx, projectId, owner);
     invariant(operationId.trim(), 'BAD_ARGUMENT', 'Retain the invitation operation id.');
     if (await invitationSeen(ctx, { projectId, owner, operationId, person })) return null;
-    if (contributor && contributor !== owner) {
-      const old = await ctx.db
-        .query('projectContributors')
-        .withIndex('by_project_and_contributor', q =>
-          q.eq('projectId', projectId).eq('contributor', contributor),
-        )
-        .unique();
-      if (!old) await ctx.db.insert('projectContributors', { projectId, contributor });
-    } else if (email) {
+    let mail = false;
+    if (contributor && contributor !== owner) await grant(ctx, projectId, contributor, role);
+    else if (email) {
       const old = await ctx.db
         .query('projectInvites')
         .withIndex('by_project_and_email', q => q.eq('projectId', projectId).eq('email', email))
         .unique();
-      if (!old) await ctx.db.insert('projectInvites', { projectId, email });
+      // An open invitation to the same address is replaced, so its role and email follow the latest invitation.
+      if (old) await ctx.db.patch(old._id, { role, operationId });
+      else await ctx.db.insert('projectInvites', { projectId, email, role, operationId });
+      mail = true;
     }
-    await ctx.db.insert('projectAccessOperations', { projectId, owner, operationId, person });
+    const id = await ctx.db.insert('projectAccessOperations', {
+      projectId,
+      owner,
+      operationId,
+      person,
+      role,
+    });
+    if (mail) await queueInviteMail(ctx, (await ctx.db.get(id))!);
     return null;
   } catch (error) {
     return report(error);

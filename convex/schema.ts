@@ -672,8 +672,24 @@ export default defineSchema({
     owner: v.string(),
     operationId: v.string(),
     person: v.string(),
+    role: v.optional(v.union(v.literal('read'), v.literal('write'))),
+    // One invitation email's send state (convex/projectInviteMail.ts); never the address body or token.
+    mail: v.optional(
+      v.object({
+        status: v.union(v.literal('sending'), v.literal('sent'), v.literal('failed'), v.literal('off')),
+        sends: v.number(),
+        at: v.number(),
+        code: v.optional(v.string()),
+        resend: v.optional(v.string()),
+      }),
+    ),
   }).index('by_project_and_operation', ['projectId', 'operationId']),
-  projectInvites: defineTable({ projectId: v.id('hostedProjects'), email: v.string() })
+  projectInvites: defineTable({
+    projectId: v.id('hostedProjects'),
+    email: v.string(),
+    role: v.optional(v.union(v.literal('read'), v.literal('write'))),
+    operationId: v.optional(v.string()),
+  })
     .index('by_project_and_email', ['projectId', 'email'])
     .index('by_email', ['email']),
   projectContributors: defineTable(projectContributorFields)

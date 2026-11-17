@@ -49,13 +49,15 @@ Without a role, a private project answers exactly like a missing one: `PROJECT_U
 
 ## Invitations
 
-The owner invites by Forge handle or email address:
+The owner invites by Forge handle or email address, choosing the starting role, read or write (write when the CLI does not say):
 
-- A handle, or the email of an existing account, gives write access at once; the person sees the project on their Home. Read access is given with a reader grant.
-- An email without an account is an open invitation. It is redeemed only by an account whose verified email matches, at its next sign-in. The project's address grants nothing by itself: a forwarded link reaches the "not found" page for anyone else.
-- From a device, inviting opens a membership approval request for the owner person.
+- A handle, or the email of an existing account, gives that role at once; the person sees the project on their Home. A read invitation never lowers an existing write grant, and a write invitation replaces a read grant.
+- An email without an account is an open invitation that keeps its role. It is redeemed only by an account whose verified email matches, at its next sign-in. The project's address grants nothing by itself: a forwarded link reaches the "not found" page for anyone else. A new invitation to the same address replaces the open one.
+- From a device, inviting opens a membership approval request for the owner person; the role travels with the request.
 
-Being built (`c6629fda`): the role chosen at invitation (read or write), one email per invitation through the alert email sender with an explicit idempotent resend, and the send state on the invitation row. The email names the inviter's handle, the project and the role, nothing else: no other members, no source, no tracking pixel and no rewritten link.
+One email per open email invitation (`convex/projectInviteMail.ts`), sent through the alert email sender's account, token and from address. The email names the inviter's handle, the project's address and the role, nothing else: no other members, no source, no tracking pixel and no query string or rewritten link. The send state (sending, sent, failed with the HTTP status, or off when email is not set up) sits on the invitation's operation row and is shown to the owner only; the address, token and body are never logged or stored beside it. A retry of the same invitation sends nothing more; Resend is explicit, from the owner person in a browser, and idempotent per resend id; a second send waits for the first to settle.
+
+People and access reads one bounded page (`projectAccess.people`): the viewer's role and every contract answer, up to 50 write and 50 read members per page by handle, and for the owner up to 50 open invitations with their send state. A reader sees only their own row. The owner person changes a member to read or write, or removes them, with `projectAccess.setRole` (retry-safe per operation id); agents keep the CLI paths, where removal stays open and additions are held for the person.
 
 *Proposed* (owner): a per-sender sending limit before invitation emails are enabled beyond development; an "ask for access" button on an ended invitation link, which needs sign-in so the owner sees who asks (ux decision D.13).
 
