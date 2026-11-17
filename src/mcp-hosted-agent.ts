@@ -225,7 +225,7 @@ export function registerHostedAgentWorkflow(
     'forge_planning',
     {
       description:
-        'Search, read and update Issues/Initiatives. status:all includes history. Start: forge_task planningItemId.',
+        'Search, read, update Items/Initiatives. status:all adds history. Start: forge_task planningItemId',
       inputSchema: { command: z.union([planning[0]!, planning[1]!, planning[2]!]) },
       annotations: { ...read, readOnlyHint: false },
     },
@@ -236,7 +236,7 @@ export function registerHostedAgentWorkflow(
       }),
   );
   prose.forge_planning =
-    'Planning: indexed title/body search; active by default, status:all includes history. Filter kind/status/initiativeId; cursor pages or id+comments. reconcile:false skips Intent updates. New Issues/friction return advisory likelyDuplicates. put-planning-item sets only named fields (0 creates); comment-planning-item adds discussion. Issue key: planningItemId; id/itemId are aliases. Full UUID or unique 8+ hex prefix. Start via forge_task {action:start,planningItemId}.';
+    'Planning: indexed title/body search; active by default, status:all includes history. Filter kind/status/initiativeId; cursor pages or id+comments. reconcile:false skips Intent updates. New Issues/friction return advisory likelyDuplicates. put-planning-item sets only named fields (0 creates); model fields (order, type, parentId, owner, relations, hidden) go in `fields`, docs/planning.md; comment-planning-item adds discussion. Issue key: planningItemId; id/itemId are aliases. Full UUID or unique 8+ hex prefix. Start via forge_task {action:start,planningItemId}.';
   server.registerTool(
     'forge_current',
     {

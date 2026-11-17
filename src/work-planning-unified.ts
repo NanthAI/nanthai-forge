@@ -3,7 +3,7 @@ import { planningIntentStatus } from './work-planning-lifecycle.js';
 import { invariant, itemChanged } from './errors.js';
 import { resolvePlanningPut } from './work-planning-put.js';
 import { resolveIntentId, type IntentAlias } from './work-intent-local.js';
-import type { PlanningItem, PlanningWrite } from './work-planning-types.js';
+import { planningModelPutKeys, type PlanningItem, type PlanningWrite } from './work-planning-types.js';
 import type { WorkData } from './work-types.js';
 import type { UnifiedIntent, UnifiedWorkData } from './work-unified-types.js';
 
@@ -128,14 +128,19 @@ export function applyUnifiedPlanning(
     ...(put.reason !== undefined ? { reason: put.reason } : {}),
     intentIds: put.intentIds,
     ...(put.initiativeId ? { initiativeId: put.initiativeId } : {}),
+    ...put.model,
     at,
     provenance,
   };
   data.planningItems.push(item);
   if (put.kind === 'initiative') {
     // Update in place: selected-record callers track loaded records by identity.
-    if (target.initiative) Object.assign(target.initiative, item, { kind: 'initiative' });
-    else data.initiatives.push({ ...item, kind: 'initiative' });
+    if (target.initiative) {
+      // A cleared model field must not survive on the record.
+      for (const key of planningModelPutKeys)
+        if (key !== 'parentId') delete (target.initiative as Partial<PlanningItem>)[key];
+      Object.assign(target.initiative, item, { kind: 'initiative' });
+    } else data.initiatives.push({ ...item, kind: 'initiative' });
     placeMemberships(data, item.id, item.id, linked);
     return item;
   }

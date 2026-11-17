@@ -698,6 +698,19 @@ async function readPlanning(
   };
 }
 
+/** The agent's `fields` object becomes flat command fields. A server without `planning-model` would drop them
+ * silently: refuse before any call. */
+function flattenModelFields(port: PlanningPort, input: Record<string, unknown>) {
+  const { fields, ...rest } = input as { fields?: Record<string, unknown> };
+  const named = Object.keys(fields ?? {}).filter(key => fields![key] !== undefined);
+  invariant(
+    !named.length || port.serverFeatures?.includes('planning-model'),
+    'BAD_ARGUMENT',
+    `This Forge server does not store ${named.join(', ')} yet; it would drop them. Send the write without them, or again after the server deploys.`,
+  );
+  return { ...rest, ...fields };
+}
+
 export async function executeHostedPlanning(
   port: PlanningPort,
   actor: string,
@@ -737,7 +750,10 @@ export async function executeHostedPlanning(
       },
     };
   }
-  const put = hostedAgentCommandSchemas['put-planning-item'].parse(input);
+  const put = flattenModelFields(port, hostedAgentCommandSchemas['put-planning-item'].parse(input)) as Omit<
+    Extract<PlanningWrite, { action: 'put-planning-item' }>,
+    'action' | 'operationId' | 'itemId'
+  > & { itemId?: string };
   invariant(
     put.expectedVersion > 0 || (put.kind && put.title),
     'BAD_ARGUMENT',

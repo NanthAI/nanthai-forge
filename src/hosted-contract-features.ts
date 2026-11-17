@@ -151,6 +151,10 @@ export const hostedContractFeatures = [
   'planning-filtered-reads',
   /** History logs accept a client metadata-cache inventory and return commit/tree indexes. */
   'history-log',
+  /** Planning model fields (d3357f40, src/planning-model.ts): puts store order, type, parentId, owner, relations
+   * and hidden, and planning rows carry them. Without it the CLI refuses to send them, since an older server would
+   * drop them silently. */
+  'planning-model',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

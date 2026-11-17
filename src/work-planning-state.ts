@@ -98,6 +98,7 @@ export function applyPlanningMetadata(data: WorkData, command: PlanningWrite, at
     ...(put.reason !== undefined ? { reason: put.reason } : {}),
     intentIds: put.intentIds,
     ...(put.initiativeId ? { initiativeId: put.initiativeId } : {}),
+    ...put.model,
     at,
     provenance,
   };

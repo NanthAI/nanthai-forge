@@ -14,6 +14,9 @@ export const planningIssueFields = {
 /** Normalize before validation/journaling, preserving the released wire/journal keys. No I/O.
  * intentId always selects execution work and is never treated as an Issue alias. */
 export function planningIssueArguments(action: string, input: Record<string, unknown>) {
+  // Item is the visible noun (d3357f40); the stored kind stays `issue`, so old operations replay exactly.
+  if (input.kind === 'item' && ['planning', 'put-planning-item'].includes(action))
+    input = { ...input, kind: 'issue' };
   const target =
     action === 'planning'
       ? 'id'

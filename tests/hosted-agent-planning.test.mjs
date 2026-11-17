@@ -20,6 +20,7 @@ import {
 import { hostedAgentCommandSchemas, hostedAgentActions } from '../dist/hosted-agent-contract.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { hostedContractFeatures } from '../dist/hosted-contract-features.js';
+import { planningIssueArguments } from '../dist/planning-issue-arguments.js';
 import { z } from 'zod';
 import { ConvexError } from 'convex/values';
 import { ForgeError } from '../dist/errors.js';
@@ -2037,4 +2038,87 @@ test('incident 1018d0f8: alert refresh preserves every outstanding Done-when lin
   const held = await list(p, { id: issue.itemId });
   assert.equal(held.item.status, 'open');
   assert.deepEqual(held.reconciled.held[0].lines, ['Evidence pending']);
+});
+
+// Planning model contract (d3357f40, docs/planning.md): the model fields round-trip through the real handlers.
+test('planning model fields (order, type, parent, owner, relations, hidden) store, read back, keep and clear', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const initiative = (await put(p, { kind: 'initiative', title: 'Release', fields: { hidden: true } }))
+    .result;
+  const parent = (
+    await put(
+      p,
+      planningIssueArguments('put-planning-item', {
+        kind: 'item',
+        title: 'Parent',
+        initiativeId: initiative.itemId,
+      }),
+    )
+  ).result;
+  const blocker = (await put(p, { kind: 'issue', title: 'Blocker', body: '- [x] one\n- [ ] two\n' })).result;
+  const fields = {
+    parentId: parent.itemId,
+    order: 'AV',
+    type: 'bug',
+    owner: 'mara/amber-fox',
+    relations: [{ kind: 'depends-on', id: blocker.itemId }],
+  };
+  const child = (await put(p, { kind: 'issue', title: 'Child', fields })).result;
+  const row = (await list(p)).items.find(item => item.id === child.itemId);
+  assert.deepEqual(
+    { order: row.order, type: row.type, parentId: row.parentId, owner: row.owner, relations: row.relations },
+    fields,
+  );
+  assert.equal((await list(p)).items.find(item => item.id === initiative.itemId).hidden, true);
+  // `item` is stored as the replay-stable kind `issue`.
+  assert.equal((await list(p, { id: parent.itemId })).item.kind, 'issue');
+  // A status move keeps every model field; null and [] clear them.
+  await put(p, { itemId: child.itemId, expectedVersion: 1, status: 'in-progress' });
+  assert.equal((await list(p, { id: child.itemId })).item.owner, 'mara/amber-fox');
+  await put(p, {
+    itemId: child.itemId,
+    expectedVersion: 2,
+    fields: { owner: null, relations: [], order: null },
+  });
+  const cleared = (await list(p, { id: child.itemId })).item;
+  assert.deepEqual(
+    [cleared.owner, cleared.relations, cleared.order, cleared.type],
+    [undefined, undefined, undefined, 'bug'],
+  );
+  await put(p, { itemId: initiative.itemId, expectedVersion: 1, fields: { hidden: false } });
+  assert.equal((await list(p, { id: initiative.itemId })).item.hidden, undefined);
+  // Planning rows carry the Done-when count of the full body.
+  assert.deepEqual((await list(p)).items.find(item => item.id === blocker.itemId).doneWhen, [1, 2]);
+  await assert.rejects(
+    put(p, {
+      itemId: child.itemId,
+      expectedVersion: 3,
+      fields: { relations: [{ kind: 'related', id: child.itemId }] },
+    }),
+    code('BAD_ARGUMENT'),
+  );
+  await assert.rejects(
+    put(p, { kind: 'initiative', title: 'Nested', fields: { parentId: parent.itemId } }),
+    code('BAD_ARGUMENT'),
+  );
+  // Agents name model fields only inside `fields`; the flat names stay refused.
+  assert.equal(hostedAgentCommandSchemas['put-planning-item'].safeParse({ order: 'AV' }).success, false);
+});
+
+test('the CLI refuses planning model fields, with zero calls, on a server that does not advertise planning-model', async t => {
+  const s = await setup(t),
+    p = port(
+      s,
+      new Map(),
+      hostedContractFeatures.filter(name => name !== 'planning-model'),
+    );
+  p.calls.length = 0;
+  await assert.rejects(
+    put(p, { kind: 'issue', title: 'Ordered', fields: { order: 'AV' } }),
+    /does not store order/,
+  );
+  assert.deepEqual(p.calls, []);
+  // Writes without model fields still go through on that server.
+  assert.equal((await put(p, { kind: 'issue', title: 'Plain' })).result.version, 1);
 });

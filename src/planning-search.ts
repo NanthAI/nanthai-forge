@@ -4,15 +4,41 @@ import { digest } from './state/hash.js';
 import type { IndexEntry } from './work-hosted-index.js';
 import type { PlanningItem } from './work-planning-types.js';
 
+/** Done-when lines are the body's Markdown task lines ("- [ ]", "- [x]"): [ticked, total], or null when none. */
+export function doneWhenCounts(body: string): [number, number] | null {
+  let ticked = 0,
+    total = 0;
+  for (const match of body.matchAll(/^\s*[-*]\s+\[([ xX])\]\s/gm)) {
+    total++;
+    if (match[1] !== ' ') ticked++;
+  }
+  return total ? [ticked, total] : null;
+}
+
+/** The planning model fields a row carries when set (src/planning-model.ts); absent keys keep older rows' bytes. */
+export const planningModelRow = (item: Partial<PlanningItem>) => ({
+  ...(item.order ? { order: item.order } : {}),
+  ...(item.type ? { type: item.type } : {}),
+  ...(item.parentId && item.kind === 'issue' ? { parentId: item.parentId } : {}),
+  ...(item.owner ? { owner: item.owner } : {}),
+  ...(item.relations?.length ? { relations: item.relations } : {}),
+  ...(item.hidden ? { hidden: true as const } : {}),
+});
+
 export const planningSummary = (
   item: PlanningItem & {
     bodyLength?: number;
     hasDoneWhen?: boolean;
     payloadKey?: string;
+    doneWhen?: [number, number];
   },
 ) => {
   const bodyKnown = item.bodyLength !== undefined || !item.payloadKey || item.body.length > 0;
   const length = bodyKnown ? (item.bodyLength ?? item.body.length) : null;
+  // A search row carries the full body's count; a whole item is counted here.
+  const doneWhen =
+    item.doneWhen ??
+    (item.kind === 'issue' && length === item.body.length ? doneWhenCounts(item.body) : null);
   return {
     id: item.id,
     kind: item.kind,
@@ -21,12 +47,14 @@ export const planningSummary = (
     version: item.version,
     intentIds: item.intentIds,
     initiativeId: item.initiativeId ?? null,
+    ...planningModelRow(item),
     at: item.at,
     ...(item.author ? { author: item.author } : {}),
     body: item.body.slice(0, 400),
     bodyLength: length,
     hasDoneWhen: bodyKnown ? (item.hasDoneWhen ?? /done\s+when\s*:/i.test(item.body)) : null,
     ...(length === null || length > 400 ? { bodyTruncated: true } : {}),
+    ...(doneWhen ? { doneWhen } : {}),
   };
 };
 
@@ -47,6 +75,10 @@ export function planningIdPrefix(text: string): string | undefined {
     return terms.join('-');
   return undefined;
 }
+const doneWhenField = (item: PlanningItem) => {
+  const doneWhen = item.kind === 'issue' ? doneWhenCounts(item.body) : null;
+  return doneWhen ? { doneWhen } : {};
+};
 /** Search previews are bounded independently of the full, unchanged planning record. */
 export function planningSearchEntry(item: PlanningItem, position: number): IndexEntry {
   return {
@@ -68,6 +100,8 @@ export function planningSearchEntry(item: PlanningItem, position: number): Index
       bodyLength: item.body.length,
       ...(item.body.length > 400 ? { bodyTruncated: true } : {}),
       hasDoneWhen: /done\s+when\s*:/i.test(item.body),
+      ...planningModelRow(item),
+      ...doneWhenField(item),
     }),
     planning: {
       text: `${item.title}\n${item.body}`.replace(/[\uD800-\uDFFF]/gu, '\uFFFD'),

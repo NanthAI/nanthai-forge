@@ -14,7 +14,14 @@ import { revertTargetSchema } from './hosted-sync.js';
 import { saveExpectedSchema } from './hosted-save.js';
 import { snapshotsCommandSchema } from './lane-snapshot-contract.js';
 import { safeRelative } from './safe-relative.js';
-import { planningCommentCommandSchema, planningPutSchema } from './work-planning-types.js';
+import {
+  planningCommentCommandSchema,
+  planningModelPutKeys,
+  planningPutAgentFields,
+  planningPutSchema,
+} from './work-planning-types.js';
+const omitKeys = <K extends string>(keys: readonly K[]) =>
+  Object.fromEntries(keys.map(key => [key, true])) as Record<K, true>;
 import { invariant } from './errors.js';
 import { planningIssueFields } from './planning-issue-arguments.js';
 import { autonomyPolicySchema, policyWriteObject } from './autonomy-policy.js';
@@ -457,8 +464,8 @@ export const hostedAgentCommandSchemas = {
     .refine(input => !(input.id && input.search), 'Use planningItemId or search, not both.')
     .refine(input => !(input.schedule && (input.id || input.search)), 'Use schedule with a list read.'),
   'put-planning-item': planningPutSchema
-    .omit({ action: true, operationId: true, itemId: true })
-    .extend(planningIssueFields)
+    .omit({ action: true, operationId: true, itemId: true, ...omitKeys(planningModelPutKeys) })
+    .extend({ ...planningIssueFields, fields: planningPutAgentFields.optional() })
     .strict(),
   'comment-planning-item': planningCommentCommandSchema
     .omit({ action: true, operationId: true })

@@ -384,6 +384,9 @@ const projectFields = {
   stateTrees: v.optional(v.any()),
   sourceCutover: v.optional(v.object({ minimumCliVersion: v.string(), at: v.string() })),
   visibility: v.optional(v.union(v.literal('private'), v.literal('public'))),
+  /** Public plan setting (src/planning-model.ts publicPlanVisible): absent = the plan of a public project is public;
+   * 'members' keeps every Item, Initiative and comment to members. */
+  planVisibility: v.optional(v.literal('members')),
   hostingRequest: v.optional(v.string()),
   autonomyPolicy: v.optional(autonomyPolicy),
   /** Entry files of every check definition and setup action (src/public-governance.ts); kept current by the definition save. Absent until the first save after this field existed. */
