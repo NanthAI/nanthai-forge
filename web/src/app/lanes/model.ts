@@ -55,7 +55,8 @@ export type SharedFiles = {
 
 export type Band = 'needs' | 'queue' | 'work' | 'quiet';
 export const bandTitles: Record<Band, { title: string; hint: string }> = {
-  needs: { title: 'Needs you', hint: 'held until a person decides' },
+  // Every held Lane, an agent's too; Needs me counts only those that wait on a person (needs/count.ts).
+  needs: { title: 'Held', hint: 'stopped until someone acts; what waits on you is in Needs me' },
   queue: { title: 'In the landing queue', hint: 'in landing order' },
   work: { title: 'Being worked on', hint: 'latest change first' },
   quiet: { title: 'Quiet', hint: 'no save for a while' },
@@ -285,8 +286,8 @@ export function situation(yard: Yard): { lead: string; rest: string } {
   const lead = !yard.open
     ? 'No Lanes are open.'
     : needs
-      ? `${plural(needs, 'Lane')} ${needs === 1 ? 'needs' : 'need'} you.`
-      : 'No Lane needs you.';
+      ? `${plural(needs, 'Lane')} ${needs === 1 ? 'is' : 'are'} held.`
+      : 'No Lane is held.';
   const parts = [
     yard.beyond &&
       `${yard.beyond.toLocaleString()}${yard.beyondIsLowerBound ? ' or more' : ''} more not shown`,

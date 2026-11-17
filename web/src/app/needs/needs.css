@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* Needs me only (loaded with its route): the asked-ahead line that opens in place, and the fold line. */
+/* Needs me only (loaded with its route): the asked-ahead line that opens in place, the fold line, and FYI rows. */
 [data-ds] {
   .needs-me .sumdec { border-bottom: var(--rule) solid var(--line); }
   .needs-me .sumdec > summary { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-3); align-items: center; min-height: var(--row-h); padding: 7px var(--gut); cursor: pointer; list-style: none; min-width: 0; }
@@ -13,6 +13,22 @@
   .needs-me .needs-help button.lk { all: unset; color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
   .needs-me .needs-help button.lk:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   @media (hover: hover) and (pointer: fine) { .needs-me .sumdec > summary:hover { background: var(--hover); } }
+  .needs-me .needs-later .ttl { flex: 1 1 16ch; min-width: 0; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .needs-me .fyi-filter { padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); overflow-x: auto; }
+  .needs-me .fyi-row { align-items: start; }
+  .needs-me .fyi-row .fyi-at { padding-top: 2px; white-space: nowrap; }
+  .needs-me .fyi-row .ttl { overflow-wrap: anywhere; }
+  .needs-me .fyi-row .fyi-fact { display: block; font-weight: var(--w-regular); }
+  .needs-me .fyi-row .fyi-links { display: flex; gap: var(--s-3); white-space: nowrap; }
+  .needs-me .fyi-x { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r); background: transparent; color: var(--text-2); cursor: pointer; }
+  .needs-me .fyi-x:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  @media (hover: hover) and (pointer: fine) { .needs-me .fyi-x:hover { background: var(--hover); color: var(--text); } }
+  /* At phone width the design system wraps rows as flex: time and dismiss share the first line, then the row, then its links. */
+  @media (max-width: 560px) {
+    .needs-me .fyi-row .fyi-at { flex: 1 1 auto; }
+    .needs-me .fyi-row .ttl { order: 1; flex: 1 1 100%; }
+    .needs-me .fyi-row .fyi-links { order: 2; }
+  }
   .loose-ends .loose-tools { display: flex; gap: var(--s-2); flex-wrap: wrap; }
   .loose-ends .loose-row { align-items: start; }
   .loose-ends .loose-row input[type="checkbox"] { margin-top: 3px; width: 16px; height: 16px; accent-color: var(--accent); }

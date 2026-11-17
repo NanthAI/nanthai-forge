@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Needs me in a real browser (Items 3fa3187d, 0cb9b064), on synthetic data through its real view
 // (tests/browser/needs-progress.tsx): Done is the all-time total with today beside it, a capped read shows "N+" on every
-// figure, a withdrawn landing sits folded under FYI and out of the Needs you count; axe is clean with no sideways scroll
+// figure, a withdrawn landing sits under FYI and out of the Needs you count; axe is clean with no sideways scroll
 // at desk and phone width in both themes. Set FORGE_LANE_SHOTS to a folder to also save the screenshots.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -93,21 +93,21 @@ test('Needs me: exact progress, N+ when capped, a withdrawn landing under FYI; a
       ),
     );
   try {
-    await t.test('exact figures, today beside Done, the withdrawal folded under FYI', async t => {
+    await t.test('exact figures, today beside Done, the withdrawal under FYI', async t => {
       const page = await open(t, DESK);
       const [done, inProgress, left] = await standing(page);
       assert.match(done, /^Done 579 Items · 12 today$/);
       assert.match(inProgress, /^In progress 57 Items/);
       assert.match(left, /^Left 237 Items · 8 proposed$/);
-      const fold = page.locator('section[aria-label="FYI"] .fold');
-      assert.equal(await fold.textContent(), 'FYI');
-      assert.equal(await fold.getAttribute('aria-expanded'), 'false');
-      assert.equal(await page.locator('#fold-needs-fyi').isHidden(), true, 'FYI is folded by default');
+      // FYI is the quiet group of Item 48049998: the withdrawal is a row there, never counted in Needs you.
       assert.deepEqual(await page.getByText(/^Refused$/).allTextContents(), []);
-      await fold.click();
       assert.match(
-        await page.locator('#fold-needs-fyi').textContent(),
+        await page.locator('section[aria-label="FYI"]').textContent(),
         /Site function for share cards: its agent withdrew the landing\./,
+      );
+      assert.doesNotMatch(
+        await page.locator('section[aria-label="Needs you"]').textContent(),
+        /Site function for share cards/,
       );
     });
     await t.test('a capped read: every figure reads N+', async t => {
@@ -117,10 +117,9 @@ test('Needs me: exact progress, N+ when capped, a withdrawn landing under FYI; a
       assert.match(inProgress, /^In progress 7\+ Items/);
       assert.match(left, /^Left 49\+ Items · 3\+ proposed$/);
     });
-    await t.test('axe and widths: both themes, desk and phone, FYI open', async t => {
+    await t.test('axe and widths: both themes, desk and phone', async t => {
       for (const viewport of [DESK, PHONE]) {
         const page = await open(t, viewport);
-        await page.locator('section[aria-label="FYI"] .fold').click();
         await page.addScriptTag({ path: axePath });
         for (const theme of ['dark', 'light']) {
           await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);

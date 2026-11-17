@@ -26,7 +26,7 @@ import { FirstRun, type LanesProps } from './common';
 const LAYOUT: DockLayout = { top: ['yard'], a: ['overlaps'], b: ['landed'] };
 const filters: readonly { id: Filter; label: string }[] = [
   { id: 'all', label: 'All' },
-  { id: 'needs', label: 'Needs you' },
+  { id: 'needs', label: 'Held' },
   { id: 'mine', label: 'Mine' },
 ];
 

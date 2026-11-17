@@ -35,6 +35,7 @@ const allowed = {
   projectHostedSeed: ['begin'],
   projectLifecycle: ['rename'], // A device's rename is held for the owner person (Item eb631a53); the person's applies.
   projectNeedsMe: ['read'], // Read-only: says whether the viewer may decide; decide keeps its own person gate.
+  projectNeedsFyi: ['read'], // Read-only: the owner flag only hides settings and access rows from other readers.
   projectPlanSettled: ['page'], // Read-only done and dropped plan rows, one bounded page; no write.
   projectLooseEnds: ['read'], // Read-only: tells the owner the authority epoch; setting aside goes through abandon.
   projectPlanView: ['read'], // Read-only plan rows; moves and new Items go through projectWorkCommand's owner gate.

@@ -635,7 +635,8 @@ layer out of both first paints.
   out of the first paint. A place reads the frame's line feed from its props
   and never opens a second line read.
 - Lanes (`web/src/app/lanes/`): the overview groups the line feed's Lanes into
-  Needs you (every held Lane, so its count is the line's), the landing queue,
+  Held (every held Lane, so its count is the line's; Needs me counts only what
+  waits on the reader), the landing queue,
   being worked on and quiet. Folded regions read nothing until opened (Region
   `foldState`). `to-read` lists what landed and is unread, from per-account
   read state (`convex/projectLandingReads.ts`: one row per account and
@@ -713,13 +714,20 @@ layer out of both first paints.
   frame already reads: no other read, one `visibilitychange` listener (`.mk-hidden`)
   and at most one timer, for the next hold end, calm (60 s) or still (5 min or
   live reads asleep). DESIGN.md "Brand mark states" has the rules.
-- Needs me (`web/src/app/needs/`) is the project front page. It adds one read,
-  `projectNeedsMe:read`: the live line's held marks (at most 30, the rest
-  counted), each with its title, holder and recorded hold reason, plus the open
-  approval requests (`openApprovalRequests`, shared with
-  `projectHostedApprovals:list`). One row per held Lane, so its count is the
-  top bar's; requests that hold no Lane are listed and never counted. A reason
-  Forge did not record says "not reported". Idle costs nothing.
+- Needs me (`web/src/app/needs/`) is the project front page, in three
+  sections. Needs you reads `projectNeedsMe:read`: the live line's held marks
+  (at most 30, the rest counted), each with its title, holder and recorded
+  hold reason (the landing's recorded cause wins over an overlap mark), the
+  open approval requests (`openApprovalRequests`) and questions with choices
+  addressed to the reader. A held Lane is in Needs you only when the reader
+  decides it (an approval or a landing held for review, for the owner;
+  `needs/count.ts` `waitsOnPerson`); every other hold is an FYI row naming who
+  acts next. The top bar's Needs you count subscribes to the same read and
+  applies the same rule, so the two always agree. FYI adds
+  `projectNeedsFyi:read` (landings, main breaking, settings and access changes,
+  messages that ask nothing; each bounded) and writes only on Dismiss or Clear
+  all (`projectNeedsFyi:dismiss`, one row per account and project). Loose ends
+  reads `projectLooseEnds:read` only while unfolded. Idle costs nothing.
 - Plan (`web/src/app/plan/`) is the hand-ordered list grouped by Initiative
   ([planning model](planning.md)). It adds one read, `projectPlanView:read`:
   the Initiatives, every live Item (at most 500 per status) and each live

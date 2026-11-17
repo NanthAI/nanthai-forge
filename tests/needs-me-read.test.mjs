@@ -68,6 +68,13 @@ test('Needs me lists the line’s held Lanes with the recorded reason, and an id
   }));
   const failed = await read(f);
   assert.equal(failed.held[0].why, 'check-failed');
+  // Owner dogfood 2026-11-17: an overlapping Lane whose admission check failed read as "Conflict". The recorded
+  // cause names what stops it; the overlap mark is only the fallback.
+  const [mark] = [...f.tables.projectLiveLineLanes.entries()].find(([, row]) => row.laneId === f.lane.laneId);
+  f.patch('projectLiveLineLanes', mark, { overlap: true });
+  assert.equal((await read(f)).held[0].why, 'check-failed', 'the failed check, not the overlap');
+  f.patch('projectLiveLineLanes', mark, { overlap: false });
+  await read(f);
 
   const unchanged = f.readSet();
   f.advanceClock(30 * 60_000);
@@ -82,6 +89,23 @@ test('open approval requests are the same payload projectHostedApprovals:list re
   ];
   assert.equal(mine.approvals, list);
   assert.deepEqual(JSON.parse(mine.approvals).requests, []);
+});
+
+test('an approval granted anywhere (web, CLI or agent) leaves Needs me in the same read', async t => {
+  const f = await finishFixture(t);
+  const state = await f.enqueue(f.request());
+  await observe(f, state.id, before => ({
+    observation: { ...before.observation, pendingReason: 'waiting-for-review' },
+  }));
+  assert.equal((await read(f)).held.length, 1, 'a protected landing waits for the owner');
+  // The CLI's approve and the web's Approve both settle the landing past review; the page reads only that state.
+  await observe(f, state.id, before => ({
+    observation: { ...before.observation, pendingReason: 'queued' },
+  }));
+  const after = await read(f);
+  const shell = await f.tx('lineRead', line.read, { projectId: f.projectId });
+  assert.deepEqual(after.held, [], 'nothing left to approve');
+  assert.equal(shell.lanes.filter(lane => lane.held).length, 0, 'and the top bar agrees');
 });
 
 test('0cb9b064: a withdrawn landing stops holding its Lane; a hold from before reads withdrawn, titled in words', async t => {

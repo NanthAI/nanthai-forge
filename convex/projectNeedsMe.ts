@@ -12,6 +12,7 @@ import { accessibleProject } from './projectAuthority';
 import { lineOwner, type LineOwnerValue } from './projectLiveLineOwners';
 import { landingRow } from './projectHostedLandingStore';
 import { openApprovalRequests } from './projectHostedApprovals';
+import { messagesTo } from './projectNeedsFyi';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { report } from './errors';
 import { invariant } from '../src/errors';
@@ -67,11 +68,25 @@ export const needsMeResult = v.object({
   approvals: v.string(),
   /** Whether the viewer can grant or decline (the project owner). */
   canDecide: v.boolean(),
+  /** Questions with choices addressed to the viewer, unanswered, on an open Lane (Items 12fde646, 48049998). */
+  asks: v.optional(
+    v.array(
+      v.object({
+        id: v.string(),
+        at: v.number(),
+        actor: v.string(),
+        agent: v.union(v.string(), v.null()),
+        text: v.string(),
+        choices: v.array(v.string()),
+        laneId: v.union(v.string(), v.null()),
+      }),
+    ),
+  ),
 });
 
 type Held = Doc<'projectLiveLineLanes'>;
 
-/** Why one held Lane is held: the landing its mark is bound to, read once. A conflict mark wins. */
+/** Why one held Lane is held: the landing its mark is bound to, read once. Its recorded cause wins over an overlap mark. */
 async function reason(ctx: QueryCtx, projectId: Id<'hostedProjects'>, mark: Held) {
   const owner = await lineOwner(ctx.db, mark.laneId);
   const pageId = owner ? (JSON.parse(owner.value) as LineOwnerValue).pageId : undefined;
@@ -80,13 +95,15 @@ async function reason(ctx: QueryCtx, projectId: Id<'hostedProjects'>, mark: Held
   const parsed = row ? hostedLandingStateSchema.safeParse(JSON.parse(row.value)) : null;
   const state = parsed?.success ? parsed.data : null;
   const observed = state?.observation;
+  // A withdrawal first (its observation reads as a refusal), then the landing's recorded cause; an overlap mark is only
+  // the fallback (owner dogfood 2026-11-17: a failed admission check on an overlapping Lane read as "Conflict").
   const why =
-    mark.overlap || observed?.cause === 'conflict'
-      ? 'conflict'
-      : state?.error?.code === 'LANDING_CANCELLED'
-        ? 'withdrawn'
-        : observed?.cause
-          ? observed.cause
+    state?.error?.code === 'LANDING_CANCELLED'
+      ? 'withdrawn'
+      : observed?.cause
+        ? observed.cause
+        : mark.overlap
+          ? 'conflict'
           : observed?.pendingReason === 'waiting-for-review'
             ? 'review'
             : observed?.pendingReason === 'waiting-for-dependency'
@@ -110,12 +127,13 @@ export const read = query({
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read what needs you.');
       const project = await accessibleProject(ctx, projectId, user.subject);
-      const [marks, approvals] = await Promise.all([
+      const [marks, approvals, asks] = await Promise.all([
         ctx.db
           .query('projectLiveLineLanes')
           .withIndex('by_project_and_held', q => q.eq('projectId', projectId).eq('held', true))
           .take(NEEDS_ME_HELD_LIMIT + 1),
         openApprovalRequests(ctx, projectId),
+        messagesTo(ctx, projectId, user.subject, true),
       ]);
       const shown = marks.slice(0, NEEDS_ME_HELD_LIMIT);
       // A goal that is only a raw id names its Item instead (the Lane's Intent is the Item it started from): one
@@ -158,6 +176,7 @@ export const read = query({
         moreIsLowerBound: marks.length > NEEDS_ME_HELD_LIMIT,
         approvals,
         canDecide: project.owner === user.subject,
+        asks: asks.rows,
       };
     } catch (error) {
       return report(error);

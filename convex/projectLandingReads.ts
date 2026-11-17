@@ -95,7 +95,8 @@ export const list = query({
         });
       }
       return JSON.stringify({
-        started: state !== null,
+        // A row made only by Needs me's FYI clear has marked nothing here.
+        started: state !== null && (state.through >= 0 || state.read.length > 0),
         through: state?.through ?? null,
         newest: fetched[0]?.sequence ?? null,
         rows,

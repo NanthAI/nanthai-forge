@@ -16,6 +16,7 @@ import { useLiveLine } from '../shell/use-live-line';
 import { withRefreshHold } from './auth-hold';
 import { Device } from './Device';
 import { AccountFrame, BareFrame, ProjectFrame, PublicFrame, type FrameControls } from './frames';
+import { needsCount, needsRead } from './needs/count';
 import { Keys, useFrameKeys, type Go } from './keys';
 import { hrefFor, parseAppPath, type AppRoute } from './paths';
 import { Head } from './Place';
@@ -245,6 +246,11 @@ function ProjectView({
   const client = useConvex();
   const project = useQuery(api.urlProjects.resolve, { handle: route.handle, slug: route.project });
   const feed = useLiveLine((project?.id ?? null) as Id<'hostedProjects'> | null);
+  // The shell's "Needs you" count uses Needs me's own read and rule (needs/count.ts), so the two always agree; on
+  // Needs me the page shares this one subscription.
+  const needs = needsCount(
+    useQuery(needsRead, project?.id ? { projectId: project.id as Id<'hostedProjects'> } : 'skip'),
+  );
   const [picker, setPicker] = useState<readonly PickerEntry[] | null>(null);
   const asked = useRef(false);
   const name = project?.name ?? route.project;
@@ -287,6 +293,7 @@ function ProjectView({
       route={route}
       name={name}
       feed={feed}
+      needs={needs}
       projects={picker}
       controls={{ ...controls, onPicker }}
     >

@@ -54,6 +54,8 @@ const agentRules = [
   'Run the affected checks selected by `preflight {laneId}`, plus typecheck, lint and format. Do not run the full suite locally.',
   'Let `land --save` compose concurrent Lanes into one check on the project runner. A failing Lane is dropped from the batch and the others still land after passing. Do not rebase or babysit a merge queue.',
   'For hosted Lanes, read start/save/status behindMain and any save conflictNotice (a real trial-merge conflict; nothing to answer); saved-path windows exclude unsaved peer edits and never prove independence. Hosted `peers {laneId,path?,detail?}` reads the same saved overlap evidence in one query and `diff {laneId,paths?}` compares the pinned base to the saved head (MCP `forge_review`); show {channel:"main",path} or show {laneId,path} reads exact accepted or saved bytes. Announce paths and resolve overlap early.',
+  // Item 12fde646 (owner decision 2026-11-15): questions stay in the agent's own app.
+  'Forge is not a chat channel: ask the person running you in your own app; message through Forge only someone else who must decide (an owner approval, a real choice between options, a handoff to another Lane’s owner).',
   'Governance: hosted landing checks and lands under current project policy. Automatic projects land after passing evidence; protected paths or review-required policy may hold for a person. Never change policy to bypass a hold.',
   // Default project rules (docs/parallel-work-defaults.md); a project's `policy` read shows its own.
   ...agentDefaultLines(AGENT_DEFAULTS),

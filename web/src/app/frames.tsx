@@ -6,7 +6,7 @@
 import type { ReactNode } from 'react';
 import { Avatar, Count, Menu, State, initials, type MenuAction } from '../ds';
 import { ForgeMark } from '../shell/brand';
-import { Line, heldCount, type LineFeed } from './Line';
+import { Line, type LineFeed } from './Line';
 import { useMark } from './mark';
 import {
   accountPlaces,
@@ -140,6 +140,7 @@ export function ProjectFrame({
   route,
   name,
   feed,
+  needs,
   projects,
   controls,
   children,
@@ -148,13 +149,16 @@ export function ProjectFrame({
   /** The project's display name once resolved; the address slug until then. */
   name: string;
   feed: LineFeed | undefined;
+  /** What waits on the reader (needs/count.ts `needsCount`), the same number Needs me shows. */
+  needs: { n: number; atLeast: boolean } | undefined;
   /** The project picker's entries; null until the picker is first opened. */
   projects: readonly { handle: string; slug: string; name: string }[] | null;
   controls: FrameControls & { onPicker: () => void };
   children: ReactNode;
 }) {
-  const held = heldCount(feed);
-  const needsLabel = held === undefined ? 'Needs you' : `Needs you: ${held}`;
+  const held = needs?.n;
+  const needsLabel =
+    held === undefined ? 'Needs you' : `Needs you: ${needs?.atLeast ? 'at least ' : ''}${held}`;
   const pickerItems: MenuAction[] = [
     ...(projects ?? [])
       .filter(item => !(item.handle === route.handle && item.slug === route.project))

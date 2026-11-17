@@ -1,35 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Needs me, as data (Items 9e748e41, 12fde646): what holds work comes first, longest held first, one row per
-// held Lane so the count is the top bar's "Needs you" number; requests asked ahead are listed apart and never
-// counted (DESIGN.md rules 15, 16, 41). Pure: the screen draws it, tests/app-needs-me.test.mjs pins it.
+// Needs me, as data (Items 9e748e41, 12fde646, 48049998): what waits on the reader comes first, longest held first,
+// one row per held Lane that waits on a person (count.ts `waitsOnPerson`) plus questions for the reader, so the count
+// is the top bar's "Needs you" number; held Lanes that ask nobody become FYI rows naming who acts next; requests asked
+// ahead are listed apart and never counted (DESIGN.md rules 15, 16, 41). Pure: tests/app-needs-me.test.mjs pins it.
 import type { StateWord } from '../../ds';
-import type { LineFeed } from '../Line';
 import { heldState, heldWhyState } from '../lane-state';
+import { laneRequests, waitsOnPerson, type Ask, type HeldLane, type HeldWhy, type NeedsRead } from './count';
 
-export type HeldWhy =
-  | 'conflict'
-  | 'check-failed'
-  | 'infra'
-  | 'stale-head'
-  | 'rejected'
-  | 'review'
-  | 'dependency'
-  | 'withdrawn'
-  | 'unknown';
-/** One held Lane as projectNeedsMe:read returns it (convex/projectNeedsMe.ts `needsMeResult`). */
-export type HeldLane = {
-  laneId: string;
-  intentId?: string | null;
-  title: string | null;
-  actor: string | null;
-  agent: string | null;
-  why: HeldWhy;
-  note: string | null;
-  submissionId: string | null;
-  /** The held attempt of a landing held for review (the owner decides that exact attempt). */
-  attemptId?: string;
-  since: number;
-};
+export type { Ask, HeldLane, HeldWhy, NeedsRead } from './count';
 /** One open request from the approvals payload (projectHostedApprovals `openApprovalRequests`). */
 export type Approval = {
   laneId: string;
@@ -45,14 +23,6 @@ export type Approval = {
   membership?: boolean;
   setting?: { origin: string };
 };
-export type NeedsRead = {
-  held: readonly HeldLane[];
-  more: number;
-  moreIsLowerBound: boolean;
-  approvals: string;
-  canDecide: boolean;
-};
-
 export type NowRow = HeldLane & {
   word: StateWord;
   /** The kind, in the state's colour: what holds it. */
@@ -71,14 +41,17 @@ export type NowRow = HeldLane & {
   /** For an FYI row: what happens next, and who does it. */
   next: string | null;
 };
+export type AskRow = Ask & { who: string | null };
 /** `head` stays the request's own head, which a decision must name; `question` is what the row says. */
 export type AheadRow = Approval & { word: StateWord; tag: string; question: string; who: string | null };
 export type NeedsView = {
   now: NowRow[];
-  /** Held, but nothing for a person to decide (a landing its agent withdrew): listed apart, never counted. */
+  /** Questions with choices for the reader: they wait on the reader, so they are counted. */
+  asks: AskRow[];
+  /** Held, but nothing for a person to decide (count.ts `waitsOnPerson`): FYI rows, never counted. */
   fyi: NowRow[];
   ahead: AheadRow[];
-  /** Held Lanes that wait on a person: the shown rows plus those past the read's limit. */
+  /** What waits on the reader: held rows that wait on a person plus questions. The shell's number (count.ts). */
   count: number;
   /** True when `count` is a lower bound (the read stopped at its limit). */
   atLeast: boolean;
@@ -87,7 +60,11 @@ export type NeedsView = {
 };
 
 /** The held word is the one every screen says for this hold (lane-state.ts). */
-const wordOf = (why: HeldWhy): StateWord => heldState({ state: heldWhyState[why] }).glyph;
+const wordOf = (why: HeldWhy): StateWord =>
+  heldState({
+    state:
+      (heldWhyState as Record<string, (typeof heldWhyState)[keyof typeof heldWhyState]>)[why] ?? 'unknown',
+  }).glyph;
 const tags: Record<HeldWhy, string> = {
   conflict: 'Conflict',
   'check-failed': 'Check failed',
@@ -110,6 +87,42 @@ const questions: Record<HeldWhy, (title: string) => string> = {
   withdrawn: title => `${title}: its agent withdrew the landing.`,
   unknown: title => `${title} is held. Why: not reported.`,
 };
+/** FYI lines: what happened, without a question (nobody here is asked to decide). */
+const facts: Record<HeldWhy, (title: string) => string> = {
+  conflict: title => `${title} conflicts with another change.`,
+  'check-failed': title => `${title}: its check failed.`,
+  infra: title => `${title}: the check could not run on your CI.`,
+  'stale-head': title => `${title}: main moved under it.`,
+  rejected: title => `Forge refused the landing of ${title}.`,
+  review: title => `${title} waits for an approval.`,
+  dependency: title => `${title} waits for the Lane it depends on.`,
+  withdrawn: title => `${title}: its agent withdrew the landing.`,
+  unknown: title => `${title} is held. Why: not reported.`,
+};
+/** Who acts next on an FYI row, and how. `who` is the agent (or person) holding the Lane. */
+function nextStep(why: HeldWhy, who: string | null) {
+  const by = who ?? 'its holder';
+  switch (why) {
+    case 'conflict':
+      return `${by} updates it from main and lands again`;
+    case 'check-failed':
+      return `${by} fixes it in the same Lane`;
+    case 'infra':
+      return `${by} runs the check again`;
+    case 'stale-head':
+      return `${by} updates it from main`;
+    case 'rejected':
+      return `${by} reads why and lands again`;
+    case 'dependency':
+      return 'it lands after the Lane it depends on';
+    case 'withdrawn':
+      return `${by} lands again when ready`;
+    case 'review':
+      return 'the project owner approves or declines it';
+    default:
+      return 'Forge did not record what it waits on';
+  }
+}
 
 /** `person/agent` for an agent, `@person` for a person, nothing when the reader may not see people. */
 export function whoOf(actor: string | null | undefined, agent: string | null | undefined) {
@@ -118,9 +131,11 @@ export function whoOf(actor: string | null | undefined, agent: string | null | u
   return agent ? `${handle}/${agent}` : `@${handle}`;
 }
 
+/** A bare id (a UUID, or a long hex digest) is never a title: such a goal falls back to the short Lane mark. */
+const BARE_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{12,64})$/i;
 export function laneTitle(lane: Pick<HeldLane, 'title' | 'laneId'>) {
   const title = lane.title?.replace(/\s+/g, ' ').trim();
-  return title || `Lane ${lane.laneId.slice(0, 8)}`;
+  return title && !BARE_ID.test(title) ? title : `Lane ${lane.laneId.slice(0, 8)}`;
 }
 
 function approvalsOf(payload: string): { requests: Approval[]; complete: boolean } {
@@ -148,6 +163,7 @@ export function needsView(read: NeedsRead): NeedsView {
   const laneApprovals = new Map(
     requests.filter(request => request.kind === 'lane').map(request => [request.laneId, request]),
   );
+  const asked = laneRequests(read.approvals);
   const perItem = new Map<string, number>();
   for (const lane of read.held)
     if (lane.intentId) perItem.set(lane.intentId, (perItem.get(lane.intentId) ?? 0) + 1);
@@ -155,13 +171,16 @@ export function needsView(read: NeedsRead): NeedsView {
     .map(lane => {
       const approval = laneApprovals.get(lane.laneId) ?? null;
       const why: HeldWhy = lane.why === 'unknown' && approval ? 'review' : lane.why;
+      const who = whoOf(lane.actor, lane.agent);
+      const waits = waitsOnPerson({ why }, asked.has(lane.laneId), read.canDecide);
       return {
         ...lane,
         why,
+        waits,
         word: wordOf(why),
         tag: tags[why],
-        head: questions[why](laneTitle(lane)),
-        who: whoOf(lane.actor, lane.agent),
+        head: (waits ? questions : facts)[why](laneTitle(lane)),
+        who,
         approval,
         landing:
           why === 'review' && lane.submissionId && lane.attemptId
@@ -169,13 +188,16 @@ export function needsView(read: NeedsRead): NeedsView {
             : null,
         mark: lane.laneId.slice(0, 8),
         siblings: lane.intentId ? (perItem.get(lane.intentId) ?? 1) : 1,
-        next: why === 'withdrawn' ? 'its agent lands again when ready' : null,
+        next: waits ? null : nextStep(why, who),
       };
     })
     // Longest held first (Item 9e748e41, I41); ties keep the read's order.
     .sort((a, b) => a.since - b.since);
-  const now = rows.filter(row => row.why !== 'withdrawn');
-  const fyi = rows.filter(row => row.why === 'withdrawn');
+  const now = rows.filter(row => row.waits).map(({ waits: _waits, ...row }) => row);
+  const fyi = rows.filter(row => !row.waits).map(({ waits: _waits, ...row }) => row);
+  const asks = (read.asks ?? [])
+    .map(ask => ({ ...ask, who: whoOf(ask.actor, ask.agent) }))
+    .sort((a, b) => a.at - b.at);
   // A Lane request holds that Lane's landing, so it is drawn on the held row, never twice (rule 9).
   const ahead = requests
     .filter(request => request.kind !== 'lane')
@@ -194,10 +216,11 @@ export function needsView(read: NeedsRead): NeedsView {
     }));
   return {
     now,
+    asks,
     fyi,
     ahead,
-    count: now.length + read.more,
-    atLeast: read.moreIsLowerBound,
+    count: now.length + asks.length,
+    atLeast: read.more > 0,
     approvalsComplete: complete,
   };
 }
@@ -206,12 +229,12 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString
 
 /** The page sentence: the answer first, then at most one more clause (DESIGN.md rule 45). */
 export function needsSentence(view: NeedsView): { bold: string; rest: string } {
-  const lanes = `${view.atLeast ? 'At least ' : ''}${plural(view.count, 'Lane')}`;
+  const lanes = `${view.atLeast ? 'At least ' : ''}${plural(view.count, 'thing')}`;
   const ahead = view.ahead.length
     ? `${plural(view.ahead.length, 'request')} asked ahead ${view.ahead.length === 1 ? 'holds' : 'hold'} nothing yet.`
     : '';
   if (view.count)
-    return { bold: `${lanes} ${view.count === 1 ? 'is' : 'are'} held until you decide.`, rest: ahead };
+    return { bold: `${lanes} ${view.count === 1 ? 'holds' : 'hold'} work until you decide.`, rest: ahead };
   return {
     bold: 'Nothing needs you.',
     rest: ahead || 'Nothing is held and no agent is waiting for an answer.',
@@ -226,32 +249,4 @@ export function waited(since: number, now: number) {
   const hours = Math.floor(minutes / 60);
   if (hours < 48) return `${hours} h ${minutes % 60 ? `${minutes % 60} min` : ''}`.trim();
   return `${Math.floor(hours / 24)} d`;
-}
-
-export type Moving = { total: number; open: number; parts: string; more: number; moreIsLowerBound: boolean };
-/** Lanes moving without the reader: the line's marks that are not held, by stop, out of every open Lane the shell
- * strip counts, so the two add up on screen. */
-export function moving(feed: LineFeed | undefined): Moving | null {
-  if (!feed) return null;
-  const free = feed.lanes.filter(lane => !lane.held);
-  const at = (stage: string) => free.filter(lane => lane.stage === stage).length;
-  const parts = (
-    [
-      ['editing', 'editing'],
-      ['saved', 'saved'],
-      ['checking', 'checking'],
-      ['ready', 'ready to land'],
-    ] as const
-  )
-    .map(([stage, word]) => [at(stage), word] as const)
-    .filter(([n]) => n)
-    .map(([n, word]) => `${n.toLocaleString()} ${word}`)
-    .join(', ');
-  return {
-    total: free.length,
-    open: feed.lanes.length,
-    parts,
-    more: feed.more,
-    moreIsLowerBound: feed.moreIsLowerBound,
-  };
 }

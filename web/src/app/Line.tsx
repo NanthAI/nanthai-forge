@@ -23,11 +23,6 @@ const stops: readonly { stage: LineStage; label: string; short: string }[] = [
   { stage: 'ready', label: 'Ready to land', short: 'Ready' },
 ];
 
-/** What waits on a person: every held Lane in the feed. The count beside "Needs you" and on the rail. */
-export function heldCount(feed: LineFeed | undefined) {
-  return feed ? feed.lanes.filter(lane => lane.held).length : undefined;
-}
-
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 export function Line({

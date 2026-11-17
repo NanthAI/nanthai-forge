@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-// Needs me as data (Items 9e748e41, 12fde646): the count is the top bar's held-Lane number, requests asked ahead are
-// listed and never counted, a Lane's approval is drawn on its held row only, the longest hold comes first, and a
-// reason Forge did not record is said as not reported, never guessed.
+// Needs me as data (Items 9e748e41, 12fde646, 48049998): Needs you holds only what a person can act on and its count is
+// the shell's (needs/count.ts); an agent's conflict and a refusal are FYI rows naming who acts next; a protected-path
+// approval stays in Needs you; requests asked ahead are listed and never counted; a Lane's approval is drawn on its
+// held row only; the longest hold comes first; a reason Forge did not record is said as not reported, never guessed.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 
-const { needsView, needsSentence, moving, whoOf } = await import(moduleUrl('../web/src/app/needs/model.ts'));
-const { heldCount } = await import(moduleUrl('../web/src/app/Line.tsx'));
+const { needsView, needsSentence, whoOf } = await import(moduleUrl('../web/src/app/needs/model.ts'));
+const { needsCount } = await import(moduleUrl('../web/src/app/needs/count.ts'));
 const { decideTarget } = await import(moduleUrl('../web/src/app/needs/decide.ts'));
 
 const held = (laneId, why, since, extra = {}) => ({
@@ -39,28 +40,21 @@ const read = (lanes, requests, more = 0, moreIsLowerBound = false) => ({
   canDecide: true,
 });
 
-test('the Needs you count is the held-Lane count the top bar shows; asked-ahead requests are not counted', () => {
+test('the shell count is the page count: what waits on a person, never what asks nobody or is asked ahead', () => {
   const lanes = [held('l1', 'check-failed', 30), held('l2', 'review', 10)];
-  const view = needsView(read(lanes, [request('l2', 'lane'), request('setting:runner', 'setting')]));
-  const feed = {
-    lanes: lanes.map(lane => ({
-      laneId: lane.laneId,
-      stage: 'saved',
-      held: true,
-      overlap: false,
-      changedAt: 1,
-    })),
-    more: 0,
-    moreIsLowerBound: false,
-    main: null,
-    exit: null,
-  };
-  assert.equal(view.count, heldCount(feed));
+  const input = read(lanes, [request('l2', 'lane'), request('setting:runner', 'setting')]);
+  const view = needsView(input);
+  assert.deepEqual(needsCount(input), { n: view.count, atLeast: false });
+  assert.equal(view.count, 1, "an agent's failed check is its agent's to fix");
+  assert.deepEqual(
+    view.fyi.map(row => row.laneId),
+    ['l1'],
+  );
   assert.equal(view.ahead.length, 1, 'only the request that holds no Lane is asked ahead');
   assert.equal(view.ahead[0].laneId, 'setting:runner');
   const withApproval = view.now.find(row => row.laneId === 'l2');
   assert.equal(withApproval.approval.laneId, 'l2', 'the Lane request is drawn on its held row, not twice');
-  assert.match(needsSentence(view).bold, /^2 Lanes are held until you decide\.$/);
+  assert.match(needsSentence(view).bold, /^1 thing holds work until you decide\.$/);
   assert.match(needsSentence(view).rest, /^1 request asked ahead holds nothing yet\.$/);
 });
 
@@ -89,28 +83,119 @@ test('48049998: every hold that waits for the owner has a decision target; a req
     { head: 'b'.repeat(64) },
     "a Lane's request decides its held landing too",
   );
-  assert.equal(target('conflict'), null, 'nothing for the owner to approve');
+  assert.equal(
+    decideTarget(view.fyi.find(row => row.laneId === 'conflict')),
+    null,
+    'nothing for the owner to approve',
+  );
   assert.equal(view.ahead[0].head, 'a'.repeat(64), 'the decision names the request head, never the row text');
   assert.equal(view.ahead[0].question, 'Run 8 checks at once.');
 });
 
-test('the longest hold comes first and each row is titled by its Item and reason', () => {
-  const view = needsView(read([held('new', 'conflict', 300), held('old', 'check-failed', 100)], []));
+test("an agent's conflict and a refusal go to FYI naming the agent's next step; a protected-path approval stays", () => {
+  const input = read(
+    [
+      held('conflict', 'conflict', 10),
+      held('refused', 'rejected', 20, { agent: null }),
+      held('protected', 'unknown', 30),
+    ],
+    [request('protected', 'lane', { reason: 'Changes .github/workflows/ci.yml (protected path)' })],
+  );
+  const view = needsView(input);
+  assert.deepEqual(
+    view.now.map(row => [row.laneId, row.why]),
+    [['protected', 'review']],
+    'the approval holds the landing, whoever started it',
+  );
+  assert.deepEqual(
+    view.fyi.map(row => [row.laneId, row.head, row.next]),
+    [
+      [
+        'conflict',
+        'Title conflict conflicts with another change.',
+        'sample-one/quiet-otter updates it from main and lands again',
+      ],
+      ['refused', 'Forge refused the landing of Title refused.', '@sample-one reads why and lands again'],
+    ],
+  );
+  assert.equal(needsCount(input).n, 1);
+});
+
+test("Needs you holds only what the reader decides: a person's own stuck Lane is FYI; a question is counted", () => {
+  const input = {
+    ...read([held('mine', 'check-failed', 5, { agent: null }), held('ask', 'review', 9)], []),
+    asks: [
+      {
+        id: 'q1',
+        at: 3,
+        actor: 'cloud-agent',
+        agent: 'amber-fox',
+        text: 'Which lands first?',
+        choices: ['Mine', 'Theirs'],
+        laneId: 'mine',
+      },
+    ],
+  };
+  const view = needsView(input);
+  assert.deepEqual(
+    view.now.map(row => row.laneId),
+    ['ask'],
+    "owner dogfood 2026-11-17: nothing on a failed check is the reader's to decide here",
+  );
+  assert.deepEqual(
+    view.fyi.map(row => [row.laneId, row.next]),
+    [['mine', '@sample-one fixes it in the same Lane']],
+  );
+  assert.deepEqual(
+    view.asks.map(row => [row.id, row.who]),
+    [['q1', 'cloud-agent/amber-fox']],
+  );
+  assert.equal(view.count, 2);
+  assert.deepEqual(needsCount(input), { n: 2, atLeast: false });
+  assert.equal(needsSentence(view).bold, '2 things hold work until you decide.');
+
+  const reader = { ...input, canDecide: false };
+  assert.deepEqual(needsView(reader).now, [], 'a review hold waits on the owner, not on a reader');
+  assert.match(
+    needsView(reader).fyi.find(row => row.laneId === 'ask').next,
+    /the project owner approves or declines it/,
+  );
+  assert.deepEqual(
+    needsCount(reader),
+    { n: 1, atLeast: false },
+    'the shell counts the same rule for the same reader',
+  );
+});
+
+test('the longest hold comes first; FYI says the real cause; a bare id is never a title', () => {
+  const view = needsView(
+    read(
+      [
+        held('new', 'review', 300),
+        held('old', 'review', 100),
+        held('9f4ff056-050a-4fac-8552-950ef37feaa2', 'check-failed', 200, {
+          title: '9f4ff056-050a-4fac-8552-950ef37feaa2',
+        }),
+      ],
+      [],
+    ),
+  );
   assert.deepEqual(
     view.now.map(row => row.laneId),
     ['old', 'new'],
   );
-  assert.equal(view.now[0].word, 'Check failed');
-  assert.match(view.now[0].head, /^Title old: its check failed\./);
-  assert.equal(view.now[1].word, 'Conflict');
+  const failed = view.fyi[0];
+  assert.equal(failed.word, 'Check failed');
+  assert.equal(failed.head, 'Lane 9f4ff056: its check failed.', 'the Lane mark, never the raw goal id');
   assert.equal(view.now[0].who, 'sample-one/quiet-otter');
-  assert.equal(whoOf('sample-one', null), '@sample-one');
+  assert.equal(whoOf('sample-one', 'quiet-otter'), 'sample-one/quiet-otter');
   assert.equal(whoOf(null, 'quiet-otter'), null, 'no person is invented when the reader may not see people');
 });
 
 test('an unrecorded reason is not reported, never guessed; a waiting Lane request names it', () => {
-  const unknown = needsView(read([held('l1', 'unknown', 1, { title: null })], []));
-  assert.equal(unknown.now[0].head, 'Lane l1 is held. Why: not reported.');
+  const unknown = needsView(read([held('l1', 'unknown', 1, { title: null, agent: null })], []));
+  assert.equal(unknown.fyi[0].head, 'Lane l1 is held. Why: not reported.');
+  assert.match(unknown.fyi[0].next, /Forge did not record what it waits on/);
   const review = needsView(read([held('l1', 'unknown', 1)], [request('l1', 'lane')]));
   assert.equal(review.now[0].why, 'review');
 });
@@ -118,9 +203,9 @@ test('an unrecorded reason is not reported, never guessed; a waiting Lane reques
 test('a count past the read limit reconciles with the rows shown', () => {
   const lanes = Array.from({ length: 30 }, (_, i) => held(`l${i}`, 'review', i));
   const view = needsView(read(lanes, [], 1, true));
-  assert.equal(view.count, 31);
+  assert.equal(view.count, 30);
   assert.equal(view.atLeast, true);
-  assert.equal(needsSentence(view).bold, 'At least 31 Lanes are held until you decide.');
+  assert.equal(needsSentence(view).bold, 'At least 30 things hold work until you decide.');
   assert.equal(needsSentence(needsView(read([], []))).bold, 'Nothing needs you.');
 });
 
@@ -149,26 +234,6 @@ test('one progress definition (3fa3187d): Done is all closed Issues, today besid
   assert.equal(progressOf(undefined), null, 'no read is loading, never zero');
 });
 
-test('moving without you lists the line marks that are not held, by stop', () => {
-  const lane = (laneId, stage, isHeld = false) => ({
-    laneId,
-    stage,
-    held: isHeld,
-    overlap: false,
-    changedAt: 1,
-  });
-  const result = moving({
-    lanes: [lane('a', 'checking'), lane('b', 'saved'), lane('c', 'saved'), lane('d', 'saved', true)],
-    more: 0,
-    moreIsLowerBound: false,
-    main: null,
-    exit: null,
-  });
-  assert.equal(result.total, 3);
-  assert.equal(result.open, 4, 'out of every open Lane the shell strip counts');
-  assert.equal(result.parts, '2 saved, 1 checking');
-});
-
 test('0cb9b064: a landing its agent withdrew is FYI, labelled withdrawn, and never counted in Needs you', () => {
   const view = needsView(read([held('l1', 'withdrawn', 30), held('l2', 'review', 10)], []));
   assert.deepEqual(
@@ -180,7 +245,8 @@ test('0cb9b064: a landing its agent withdrew is FYI, labelled withdrawn, and nev
   const [fyi] = view.fyi;
   assert.deepEqual(
     [fyi.word, fyi.tag, fyi.next],
-    ['Set aside', 'Withdrawn', 'its agent lands again when ready'],
+    ['Set aside', 'Withdrawn', 'sample-one/quiet-otter lands again when ready'],
+    'FYI names who acts next',
   );
   assert.match(fyi.head, /: its agent withdrew the landing\.$/);
   assert.doesNotMatch(fyi.head, /refused/i);

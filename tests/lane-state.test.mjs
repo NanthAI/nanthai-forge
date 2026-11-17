@@ -253,6 +253,7 @@ test('d9e1ac62: Lanes of one Item sit together in a band, live first; nothing is
   assert.deepEqual(state.laneState({ stage: 'saved', held: false }).word, 'Saved');
 });
 
+// A check-failed sibling is the agent's to fix and goes to FYI (48049998), so both rows here wait on the person.
 test('d9e1ac62: Needs you rows of one Item carry their Lane mark and the Item count', () => {
   const view = needs.needsView({
     held: [
@@ -273,7 +274,7 @@ test('d9e1ac62: Needs you rows of one Item carry their Lane mark and the Item co
         title: 'Same title',
         actor: 'm',
         agent: null,
-        why: 'check-failed',
+        why: 'review',
         note: null,
         submissionId: null,
         since: 2,
@@ -288,7 +289,7 @@ test('d9e1ac62: Needs you rows of one Item carry their Lane mark and the Item co
     view.now.map(row => [row.mark, row.siblings, row.word]),
     [
       ['aaaa1111', 2, 'Needs you'],
-      ['bbbb2222', 2, 'Check failed'],
+      ['bbbb2222', 2, 'Needs you'],
     ],
   );
 });
