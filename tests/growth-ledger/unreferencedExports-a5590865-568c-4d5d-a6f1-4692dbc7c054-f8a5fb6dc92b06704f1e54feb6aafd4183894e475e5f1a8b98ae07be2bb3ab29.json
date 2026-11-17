@@ -1,0 +1,6 @@
+{
+  "kind": "unreferencedExports",
+  "delta": 2,
+  "reason": "d4d410e6 introduces the shared billing counting rule and RunAllowance interface for C2; nothing can be removed until their screen consumers land. No new commands, tables or enforcement.",
+  "date": "2026-11-17"
+}
