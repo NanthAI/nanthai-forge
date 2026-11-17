@@ -423,6 +423,19 @@ Switching the mode never invalidates a queued landing: it is read when a proof i
 agent sign-in, switching fast on is held for the owner person, like any edit that changes what may
 land; switching back to strict applies at once.
 
+Two server switches default to off while queue behavior is benchmarked. With
+`FORGE_QUEUE_COHORT_KEEP_HEALTHY=1`, batch selection leaves running individual checks in
+place. Where admission checks are enabled, a member without a pass proceeds through the
+individual check path. After an attributed check failure or a withdrawal, healthy members can fall back to
+their own admission evidence on the exact main receipt. Withdrawal groups the other survivors
+into one replacement check with the withdrawn source excluded. A replacement cohort can still
+use the existing scoped gate when every member has a valid full-pass basis.
+
+With `FORGE_QUEUE_CANCEL_HONOURS_FAST=1`, cancellation considers the running check's own
+risk rules and the project's live fast-mode breaker and audit. It leaves possible package
+placement and Markdown merges for ordinary proof evaluation. Acceptance still decides on
+the completed run and exact composed source.
+
 ## Three test tiers
 
 Each tier answers a different question. None depends on a particular CI provider.

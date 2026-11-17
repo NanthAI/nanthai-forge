@@ -2,6 +2,10 @@
 
 **Phase 6 is closed (2026-11-16); Phase 7 is current.** The [Phase 6 close](phase6-close.md) records exit evidence, owner-accepted benchmark caveats, final serving cost, the nonzero journal-maintenance idle capture and named Phase 7 follow-ups. Storage/weekly maintenance allocation and the remaining source-only sync gap remain unproven.
 
+Two default-off server switches let the queue retain valid individual evidence after a
+cohort changes and consider effective fast mode before cancelling a running check.
+See [landing modes](pre-queue-checks.md#landing-modes).
+
 Item discussions draw versioned structured review batches from existing comment text,
 including exact reported source pins, finding ids, severity, origin and reasoned outcomes.
 These remain advisory reports; automatic cross-save anchoring and enforcement are open.

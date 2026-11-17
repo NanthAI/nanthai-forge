@@ -52,8 +52,9 @@ export async function auditSettings(ctx: QueryCtx | MutationCtx, projectId: Id<'
 export async function mainGate(
   ctx: QueryCtx | MutationCtx,
   projectId: Id<'hostedProjects'>,
+  savedAudit?: Doc<'projectHostedMainAudits'> | null,
 ): Promise<MainGate> {
-  const row = await auditRow(ctx, projectId);
+  const row = savedAudit === undefined ? await auditRow(ctx, projectId) : savedAudit;
   const pending = row?.unaudited ?? { count: 0, firstAt: null };
   // During an audit the row's clock tracks the first newer counted landing;
   // the immutable run reason retains the older debt clock until it is covered.

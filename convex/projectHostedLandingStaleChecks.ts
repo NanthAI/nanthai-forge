@@ -18,12 +18,67 @@ import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { loadBatch, retryLandingBatch } from './projectHostedLandingBatchStore';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { cancelHostedCheck } from './projectHostedCheckCancel';
+import { auditFreshness, auditRow, mainGate, VERIFIED_MAIN } from './projectHostedMainAuditState';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { hostedCheckTerminal } from '../src/hosted-check';
+import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
 import { landingObservation } from '../src/hosted-landing';
 import { pathsOverlap } from '../src/hosted-cross-head-proof';
-import { firstCheckRiskPaths } from '../src/first-check-risk';
+import {
+  checkRunEntryPaths,
+  firstCheckRiskPaths,
+  globalRiskBetween,
+  orderSensitiveRisk,
+} from '../src/first-check-risk';
+import { effectivePolicy } from '../src/autonomy-policy';
+import { reducedEvidenceActor } from '../src/contract-gate-policy';
+import { fastEffective } from '../src/landing-mode';
+import { docsGate, fullGate } from '../src/main-audit';
+import { ForgeError } from '../src/errors';
+import { placeableRisk } from '../src/package-placement';
+import { markdownPath } from '../src/tested-docs';
 import { HOSTED_BATCH_MEMBERS } from '../src/hosted-landing-batch';
+
+const bestTrust = { level: 'autonomous', reason: 'upper bound' } as const;
+
+async function currentFastMode(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  main: Awaited<ReturnType<typeof hostedStartMain>>,
+) {
+  const audit = await auditRow(ctx, projectId);
+  const gate = await mainGate(ctx, projectId, audit);
+  if (gate.status === 'red' || gate.debt) return false;
+  if (fastEffective('fast', audit?.window, auditFreshness(audit, gate))) return true;
+  // The proof can also use an exact full main receipt, including checks whose
+  // runner never created an audit row. Check the live breaker before reading it.
+  if (!fastEffective('fast', audit?.window, VERIFIED_MAIN)) return false;
+  const row = await acceptanceRow(ctx, { projectId, receiptId: main.receipt.id });
+  const receipt = row && hostedAcceptanceSchema.parse(JSON.parse(row.value));
+  if (!receipt?.check || receipt.crossHeadProof || receipt.candidate.head !== main.head) return false;
+  try {
+    const { run } = await loadHostedCheck(ctx, { projectId, runId: receipt.check.runId }, false);
+    return run.status === 'passed' && fullGate(run) && !docsGate(run);
+  } catch (error) {
+    if (!(error instanceof ForgeError)) throw error;
+    return false;
+  }
+}
+
+function codeOverlap(paths: string[], changed: string[]) {
+  const moved = new Set(changed);
+  const sharedDocs = new Set(paths.filter(path => markdownPath(path) && moved.has(path)));
+  return (
+    pathsOverlap(
+      paths.filter(path => !sharedDocs.has(path)),
+      changed,
+    ) ||
+    pathsOverlap(
+      paths,
+      changed.filter(path => !sharedDocs.has(path)),
+    )
+  );
+}
 
 /** The existing post-acceptance transaction inspects at most eight running
  * entries. An empty indexed window reads zero documents/bytes. Source and test
@@ -59,6 +114,11 @@ export async function cancelStaleLandingChecks(
   const global =
     firstCheckRiskPaths(changed, [...(project?.checkEntries ?? []), ...(project?.globalRiskPaths ?? [])])
       .length > 0;
+  const policy =
+    process.env.FORGE_QUEUE_CANCEL_HONOURS_FAST === '1' && project ? effectivePolicy(project) : null;
+  const honourFast =
+    project && policy?.acceptance.mode === 'auto-on-pass' && policy.acceptance.hostedCrossHeadReuse !== false;
+  let fast: Promise<boolean> | undefined;
   const retired = new Set<string>();
   for (const selected of rows) {
     if (!selected.runId || retired.has(selected.runId)) continue;
@@ -96,7 +156,14 @@ export async function cancelStaleLandingChecks(
       )) === 'pending'
     )
       continue;
-    if (!global) {
+    // Match the proof's cheap eligibility bound before reading Candidate metadata.
+    const mayCarry =
+      honourFast &&
+      !grouped &&
+      !state.request.revertOf &&
+      reducedEvidenceActor(policy, project, attempt.actor, policy.trust?.enabled ? bestTrust : null);
+    let paths: string[] | undefined;
+    if (!global || mayCarry) {
       const record = await readHostedRecord(ctx, {
         projectId: input.projectId,
         actor: state.actor,
@@ -104,12 +171,27 @@ export async function cancelStaleLandingChecks(
         key: attempt.candidate.id,
       });
       if (!record || record.digest !== attempt.candidate.digest) continue;
-      const paths = hostedRecordSchema.options[3].parse(JSON.parse(record.value)).governance?.paths;
-      if (!paths || !pathsOverlap(paths, changed)) continue;
+      paths = hostedRecordSchema.options[3].parse(JSON.parse(record.value)).governance?.paths;
+      if (!paths || (!global && !pathsOverlap(paths, changed))) continue;
     }
     const runId = row.runId;
     const { run } = await loadHostedCheck(ctx, { projectId: input.projectId, runId }, false);
     if (hostedCheckTerminal(run)) continue;
+    if (mayCarry && paths && (fullGate(run) || docsGate(run)) && !attempt.semanticPlan?.members.length) {
+      const entries = checkRunEntryPaths(run.check);
+      // Use the proof's path rules. Selection pins and actual composed bytes
+      // still belong to proof construction, so leave possible Markdown merges
+      // and placeable package risk to that step.
+      if (
+        !codeOverlap(paths, changed) &&
+        (!globalRiskBetween(paths, changed, entries) ||
+          placeableRisk(paths, changed, entries) ||
+          (policy.acceptance.landingMode === 'fast' &&
+            !orderSensitiveRisk(paths, changed, entries).length &&
+            (await (fast ??= currentFastMode(ctx, input.projectId, main)))))
+      )
+        continue;
+    }
     if (state.batchId && !state.batchSolo) {
       const key = { projectId: input.projectId, batchId: state.batchId };
       const { batch } = grouped!;

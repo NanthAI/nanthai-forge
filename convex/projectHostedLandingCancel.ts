@@ -2,6 +2,7 @@
 import { cancelPendingTask } from './schedulerCancel';
 import { loadBatch, writeBatch } from './projectHostedLandingBatchStore';
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
+import { splitLandingBatch } from './projectHostedLandingBatchSplit';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { z } from 'zod';
@@ -211,19 +212,47 @@ export async function cancelHostedLanding(
       const key = { projectId, batchId };
       const { batch } = await loadBatch(ctx, key);
       const rejected = batch.included && !batch.included.includes(state.id) && batch.phase !== 'fallback';
-      if (!rejected)
-        await writeBatch(ctx, key, {
-          ...batch,
-          phase: batch.phase === 'landed' ? 'landed' : 'fallback',
-          transition: {
-            code: result.error?.code ?? 'LANDING_CANCELLED',
-            message: result.error?.message ?? 'A batch member was cancelled.',
-          },
-        });
-      // This member's finish never runs again, and it may hold the individual
-      // fallback turn: hand the turn on now (Issue 108a24e3, peers queued 36 h).
-      if (!rejected && batch.phase !== 'landed')
-        await advanceBatchFallback(ctx, key, (await loadBatch(ctx, key)).batch, state.id);
+      if (!rejected) {
+        const transition = {
+          code: result.error?.code ?? 'LANDING_CANCELLED',
+          message: result.error?.message ?? 'A batch member was cancelled.',
+        };
+        if (
+          process.env.FORGE_QUEUE_COHORT_KEEP_HEALTHY === '1' &&
+          input.withdrawLaneId &&
+          batch.phase === 'checking' &&
+          batch.runId &&
+          !state.batchSolo
+        ) {
+          // The union contains the withdrawn source. Reuse exact individual
+          // evidence when available and recompose the remaining members together.
+          await splitLandingBatch(ctx, key, batch, undefined, transition, true);
+          const current = await loadLanding(ctx, identity);
+          const { batchId: _batchId, ...detached } = current.state;
+          void _batchId;
+          await writeLanding(
+            ctx,
+            current.row,
+            { ...detached, batchOriginId: batch.id, batchSolo: true, version: detached.version + 1 },
+            false,
+          );
+        } else if (
+          process.env.FORGE_QUEUE_COHORT_KEEP_HEALTHY !== '1' ||
+          batch.phase !== 'split' ||
+          state.batchId ||
+          state.phase !== 'terminal-failed'
+        ) {
+          await writeBatch(ctx, key, {
+            ...batch,
+            phase: batch.phase === 'landed' ? 'landed' : 'fallback',
+            transition,
+          });
+          // This member's finish never runs again, and it may hold the individual
+          // fallback turn: hand the turn on now (Issue 108a24e3, peers queued 36 h).
+          if (batch.phase !== 'landed')
+            await advanceBatchFallback(ctx, key, (await loadBatch(ctx, key)).batch, state.id);
+        }
+      }
       result = (await loadLanding(ctx, identity)).state;
     }
     // Invalidate cancelled member IO after release has scheduled its peers.

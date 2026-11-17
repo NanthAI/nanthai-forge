@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { auditWindow } from '../dist/landing-mode.js';
 import { synthetic, states } from './hosted-landing-batches-fixture.mjs';
 import {
   fixture,
@@ -25,6 +26,75 @@ test.after(() => {
     else process.env[k] = v;
   }
 });
+
+for (const { name, paths, enabled, mode = 'fast', breaker = false, keep = false, person = false } of [
+  { name: 'switch off', paths: ['package.json', 'src/b.ts'], enabled: false },
+  { name: 'effective fast mode', paths: ['package.json', 'src/b.ts'], enabled: true, keep: true },
+  { name: 'person in fast mode', paths: ['package.json', 'src/b.ts'], enabled: true, person: true },
+  { name: 'strict mode', paths: ['package.json', 'src/b.ts'], enabled: true, mode: 'strict' },
+  { name: 'open fast breaker', paths: ['package.json', 'src/b.ts'], enabled: true, breaker: true },
+  { name: 'order-sensitive mover', paths: ['convex/schema.ts', 'src/b.ts'], enabled: true },
+  { name: 'overlapping code', paths: ['src/shared.ts', 'src/shared.ts'], enabled: true },
+])
+  test(`O4: ${name} ${keep ? 'preserves' : 'cancels'} the running check`, async t => {
+    const previous = process.env.FORGE_QUEUE_CANCEL_HONOURS_FAST;
+    process.env.FORGE_QUEUE_CANCEL_HONOURS_FAST = enabled ? '1' : '0';
+    t.after(() => {
+      if (previous === undefined) delete process.env.FORGE_QUEUE_CANCEL_HONOURS_FAST;
+      else process.env.FORGE_QUEUE_CANCEL_HONOURS_FAST = previous;
+    });
+    const f = await fixture(t, {
+      memberPaths: paths,
+      landingMode: mode,
+      concurrency: 1,
+      conflict: false,
+      count: 0,
+    });
+    await f.add(0);
+    await f.add(1, { request: person ? { agent: false } : {} });
+    await drain(f);
+    if (person) {
+      const { attempt } = await f.status(current(f, 1).id);
+      assert.equal(attempt.actor.kind, 'person');
+    }
+    const [a, b] = f.runs();
+    const running = await f.rawChecks.activate(b.id);
+    await f.rawChecks.pass(await f.rawChecks.activate(a.id));
+    await drain(f, task => task.name === 'projectHostedAcceptance:complete');
+    if (breaker) {
+      const red = { verdict: 'red', landings: 1 };
+      const window = [red, red, red].reduce((slots, verdict) => auditWindow(slots, verdict), undefined);
+      const audit = [...f.tables.projectHostedMainAudits.values()][0];
+      if (audit) f.patch('projectHostedMainAudits', audit._id, { window });
+      else f.insert('projectHostedMainAudits', { projectId: f.projectId, window });
+    }
+    await drain(f);
+    assert.equal(current(f, 0).phase, 'landed');
+    assert.equal(f.runs().find(run => run.id === b.id).status, keep ? 'running' : 'cancelled');
+    if (keep) {
+      assert.equal(requestRow(f, 1).runId, b.id);
+      await f.rawChecks.pass(running);
+      await drain(f);
+      assert.equal(current(f, 1).phase, 'landed');
+      assert.equal(f.runs().length, 2);
+      const receipt = [...f.tables.projectHostedAcceptances.values()].find(
+        row => row.receiptId === current(f, 1).acceptance.receiptId,
+      );
+      assert.equal(JSON.parse(receipt.value).crossHeadProof.algorithm, 'fast-first-check-v1');
+    } else if (name === 'switch off') {
+      await settle(f);
+      assert.equal(current(f, 1).phase, 'landed');
+      assert.equal(f.runs().length, 3);
+    }
+    if (keep || name === 'switch off')
+      t.diagnostic(
+        JSON.stringify({
+          calls: f.counts.length,
+          readBytes: f.counts.reduce((sum, cost) => sum + cost.readBytes, 0),
+          writeBytes: f.counts.reduce((sum, cost) => sum + cost.writeBytes, 0),
+        }),
+      );
+  });
 
 for (const conflict of [true, false])
   test(`83e6d0d3: accepted overlap cancels its running admission and ${conflict ? 'delivers conflict without old CI' : 'starts a fresh exact check in the same queue position'}`, async t => {
