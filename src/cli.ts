@@ -30,10 +30,10 @@ Usage:
   nforge --version
   nforge agent ROOT queue '{}'   # hosted landing queue
   nforge queue list|cancel OPERATION|prioritize OPERATION   # local command recovery
-  nforge github connect|status|disconnect|resume PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID] [--no-mirror]
+  nforge github connect|status|disconnect|resume PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID] [--no-mirror] [--no-browser]
   nforge github-sync ROOT [--repo OWNER/NAME] [--branch main] [--dry-run | --push] [--operation-id UUID] [--rebind] [--wait-audit] [--audit-timeout-ms MS]
   nforge host ROOT [--deployment URL] [--name NAME] [--visibility private|public] [--status | --new]
-  nforge login [DEPLOYMENT_URL] [--name NAME] [--scope cli|coordination]
+  nforge login [DEPLOYMENT_URL] [--name NAME] [--scope cli|coordination] [--no-browser]
   nforge logout [DEPLOYMENT_URL]
   nforge auth status [DEPLOYMENT_URL]
   nforge maintenance check-logs ROOT --dry-run|--apply --plan FILE [--hosted]
@@ -366,6 +366,9 @@ try {
     syncPending = false;
   }
   if (output !== undefined) {
+    if (process.stdout.isTTY && process.env.FORGE_LAND_CHILD !== '1')
+      for (const line of (await import('./cli-reply-lines.js')).cliReplyLines(process.argv.slice(2), output))
+        process.stderr.write(`${line}\n`);
     // Hosted agent receipts leave the process without the facts the agent already holds; --detail keeps all.
     const receipt = printedReceipt(output, {
       agent: process.argv[2] === 'agent',

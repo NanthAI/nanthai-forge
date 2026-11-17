@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { networkFetch, networkTimeout } from './network-fetch.js';
-import { childEnv } from '../scripts/child-env.mjs';
+import { browserApproval } from './browser-approval.js';
+export { openBrowser } from './browser-approval.js';
 import { localDevice, signedDevice, deviceCode, renewDevice } from './device-key.js';
 import { authStatus, folderAddress } from './auth-status.js';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { neutralDeviceName } from './neutral-names.js';
-import { spawn } from 'node:child_process';
 import { makeFunctionReference } from 'convex/server';
 import { coordinationClient } from './coordination-client.js';
 import {
@@ -58,34 +58,6 @@ async function request(origin: string, operation: string, input: unknown) {
     return await response.json();
   } catch {
     throw new ForgeError('AUTH_RESPONSE_INVALID', 'Forge returned an invalid login response.');
-  }
-}
-export function openBrowser(url: string) {
-  const command =
-    process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'rundll32' : 'xdg-open';
-  const args = process.platform === 'win32' ? ['url.dll,FileProtocolHandler', url] : [url];
-  try {
-    const child = spawn(command, args, {
-      detached: true,
-      stdio: 'ignore',
-      env: childEnv({
-        allow: [
-          'DISPLAY',
-          'WAYLAND_DISPLAY',
-          'XAUTHORITY',
-          'DBUS_SESSION_BUS_ADDRESS',
-          'XDG_RUNTIME_DIR',
-          'XDG_CURRENT_DESKTOP',
-          'XDG_CONFIG_HOME',
-          'XDG_DATA_DIRS',
-          'BROWSER',
-        ],
-      }),
-    });
-    child.on('error', () => {});
-    child.unref();
-  } catch {
-    /* The printed URL remains available. */
   }
 }
 export async function authCli(command: string, args: string[]): Promise<unknown> {
@@ -236,9 +208,9 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
     'Forge returned an invalid verification URL.',
   );
   process.stderr.write(
-    `${protocol === 'start-v2' ? `Device ${deviceCode(device.publicKey)} (key reference)\n` : ''}Open ${verification.href}\nCode: ${flow.user_code}\nApprove ${name} (${scope}) in Forge.\n${named ? '' : `This device is named ${name}. Rename it any time: nforge auth rename NAME\n`}`,
+    `${protocol === 'start-v2' ? `Device ${deviceCode(device.publicKey)} (key reference)\n` : ''}Code: ${flow.user_code}\nApprove this device (${scope}) in Forge.\n${named ? '' : `This device is named ${name}. Rename it any time: nforge auth rename NAME\n`}`,
   );
-  if (browser) openBrowser(verification.href);
+  browserApproval(verification.href, !browser);
   const deadline = Date.now() + flow.expires_in * 1000,
     redemptionId = randomUUID();
   let interval = 5000;

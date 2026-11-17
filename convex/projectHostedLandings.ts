@@ -149,6 +149,7 @@ async function evidence(
   return {
     bytes,
     row: {
+      title: (receipt.message ?? state?.message ?? state?.request?.message)?.split(/\r?\n/, 1)[0] ?? null,
       receiptId: receipt.id,
       submissionId: receipt.submissionId,
       laneId: lanes[0]?.key ?? null,

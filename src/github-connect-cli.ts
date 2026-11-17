@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { parseArgs } from 'node:util';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { digest } from './hash.js';
+import { browserApproval } from './browser-approval.js';
 import { createInterface } from 'node:readline/promises';
 import { z } from 'zod';
 import { makeFunctionReference } from 'convex/server';
 import { hostedAgentAddress } from './hosted-agent-address.js';
+import { hostedAgentAddressSchema } from './hosted-address.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 import { HostedAgentJournal } from './hosted-agent-journal.js';
 import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agent-observe.js';
@@ -86,7 +90,23 @@ export async function githubProtection(transport: ProtectionTransport, repositor
     };
   }
 }
-export async function githubConnectCli(args: string[]) {
+/** Connection recovery belongs to CLI state, including when PROJECT is an opaque id. */
+export function githubJournalRoot(address: { url: string; projectId: string }) {
+  return join(
+    process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'),
+    'forge',
+    'github',
+    digest(JSON.stringify([address.url, address.projectId])),
+  );
+}
+export async function githubConnectCli(
+  args: string[],
+  dependencies: {
+    transport?: (root: string, address: HostedAgentTransport['address']) => HostedAgentTransport;
+    subscribe?: () => HostedRunSubscription;
+    approve?: typeof browserApproval;
+  } = {},
+) {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -98,13 +118,14 @@ export async function githubConnectCli(args: string[]) {
       'repo-id': { type: 'string' },
       cursor: { type: 'string' },
       'no-mirror': { type: 'boolean' },
+      'no-browser': { type: 'boolean' },
       help: { type: 'boolean' },
     },
   });
   if (values.help)
     return {
       usage:
-        'nforge github connect|status|disconnect|resume PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID] [--repo-id ID] [--cursor CURSOR] [--no-mirror]',
+        'nforge github connect|status|disconnect|resume PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID] [--repo-id ID] [--cursor CURSOR] [--no-mirror] [--no-browser]',
     };
   const [command, project] = positionals;
   invariant(
@@ -113,16 +134,17 @@ export async function githubConnectCli(args: string[]) {
     'Use nforge github connect|status|disconnect|resume PROJECT.',
   );
   const root = resolve(project);
-  const address = hostedAgentAddress(
-    root,
-    values.url ? { url: values.url, projectId: values['project-id'] ?? project } : {},
-  );
+  const address = values.url
+    ? hostedAgentAddressSchema.parse({ url: values.url, projectId: values['project-id'] ?? project })
+    : hostedAgentAddress(root, {});
   invariant(
     address,
     'BAD_ARGUMENT',
     'Pass --url DEPLOYMENT with the hosted project ID, or use a hosted checkout path.',
   );
-  const transport = new HostedAgentTransport(root, address);
+  const journalRoot = githubJournalRoot(address);
+  const transport =
+    dependencies.transport?.(journalRoot, address) ?? new HostedAgentTransport(journalRoot, address);
   // Owner only: restarts a stopped mirror job (same cursor and State), re-points a mirror whose
   // repository changed, and posts a failed forge/verify status again. Safe to repeat.
   if (command === 'resume') return transport.mutation('projectGithubMirrorResume:resume', {});
@@ -150,7 +172,7 @@ export async function githubConnectCli(args: string[]) {
       'Pass --repo-id from github status.',
     );
     const journal = new HostedAgentJournal(
-      root,
+      journalRoot,
       address,
       actor,
       'github-disconnect',
@@ -179,11 +201,11 @@ export async function githubConnectCli(args: string[]) {
   }
   invariant(repository, 'BAD_ARGUMENT', 'Pass --repo OWNER/NAME for the repository to connect.');
   const journal = new HostedAgentJournal(
-    root,
+    journalRoot,
     address,
     actor,
     'github-connect',
-    { repository },
+    { repository, ...(values['no-mirror'] ? { mirror: false } : {}) },
     values['operation-id'],
   );
   const result = await transport.exchange.client.action(
@@ -199,12 +221,20 @@ export async function githubConnectCli(args: string[]) {
     .object({ authorizeUrl: z.url(), status: z.string() })
     .parse(typeof result === 'string' ? JSON.parse(result) : result);
   process.stdout.write(`${JSON.stringify({ operationId: journal.operationId, ...started })}\n`);
+  if (started.status === 'waiting')
+    (dependencies.approve ?? browserApproval)(started.authorizeUrl, values['no-browser']);
+  else process.stderr.write(`GitHub connection: ${started.status}; waiting for its result.\n`);
   const controller = new AbortController(),
     stop = () => controller.abort();
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
   try {
-    const completed = await waitForGithubConnection(address, journal.operationId, controller.signal);
+    const completed = await waitForGithubConnection(
+      address,
+      journal.operationId,
+      controller.signal,
+      dependencies.subscribe,
+    );
     if (completed.status === 'failed')
       throw new ForgeError(
         'GITHUB_CONNECTION_FAILED',

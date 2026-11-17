@@ -101,6 +101,8 @@ entries that share its immutable identity and request. Selected history pages
 reconstruct the same replies, including older full observations, without reading
 predecessor versions or adding calls.
 
+Interactive CLI reads show plain facts on stderr alongside exact JSON stdout (titles, UTC times, source prefixes and explicit runner-minute units). Login and GitHub connect always print browser guidance, open a browser only for terminal stdout, and honor `--no-browser`. GitHub connection recovery lives in CLI state rather than project-id folders.
+
 Default agent replies have a per-action byte ratchet: compact conflict files, preflight plans and receipts, and one rendering per board list note (explicit note reads keep full bodies). CLI `--detail` and MCP `replyDetail:true` retain full replies; local actor cursors stop project notes repeating across Lanes ([reply budget](agents/workflow.md#default-reply-byte-budget)).
 
 Capsule-aware CLI and browser readers resolve selected terminal observations,

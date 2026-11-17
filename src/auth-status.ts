@@ -102,7 +102,7 @@ export async function authStatus(args: string[]): Promise<unknown> {
         device = {
           id: reported.id,
           code: reported.code,
-          name: reported.name,
+          name: reported.name.startsWith('nforge on ') ? '' : reported.name,
           approvedAt: reported.approvedAt,
           expiresAt: reported.expiresAt,
           settings: {
@@ -146,7 +146,10 @@ export async function authStatus(args: string[]): Promise<unknown> {
       tokenSource,
       hosts: { [host!]: [{ host, login: account, active: true, state: 'success', tokenSource }] },
       ...(device ? { device } : {}),
-      name: !environment ? (device?.name ?? saved?.name ?? null) : null,
+      name:
+        !environment && !(device?.name ?? saved?.name)?.startsWith('nforge on ')
+          ? (device?.name ?? saved?.name ?? null)
+          : null,
       scope: !environment ? (device?.settings.source ?? saved?.scope ?? null) : null,
       expiresAt: !environment ? (saved?.expiresAt ?? null) : null,
       identity,

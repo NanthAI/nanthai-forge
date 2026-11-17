@@ -99,6 +99,7 @@ function fixture() {
       revert,
       version,
       counts,
+      message,
       created = minute(at),
     } = {},
   ) => {
@@ -168,6 +169,7 @@ function fixture() {
         value: JSON.stringify({
           id: id('receipt', n),
           at: iso(minute(at)),
+          ...(message ? { message } : {}),
           submissionId: sub,
           previous: { head: `h-${landedOn}`, receiptId: landedOn },
           candidate: { head: `landed-${n}` },
@@ -463,4 +465,19 @@ test('landings expose stamped costs and unknown legacy counts without another ro
   assert.equal(page.landings.length, 30);
   assert(page.bytesRead - old.bytesRead < 4096, 'only the pre-existing stamps enlarge DB bytes');
   assert(Buffer.byteLength(page.raw) < 64 * 1024);
+});
+
+test('landings title comes from the retained receipt message without additional record reads', async () => {
+  const f = fixture();
+  f.landing(1, { at: 60, message: 'Fix source comparison\n\nRemoves duplicate source parsing.' });
+  f.landing(2, { at: 90 });
+  const result = await f.read();
+  assert.equal(result.landings[0].title, 'Fix source comparison');
+  assert.equal(result.landings[1].title, null, 'old receipts do not invent titles');
+  const withTitles = { ...f.meter };
+  const control = fixture();
+  control.landing(1, { at: 60 });
+  control.landing(2, { at: 90 });
+  await control.read();
+  assert.deepEqual(withTitles, control.meter);
 });

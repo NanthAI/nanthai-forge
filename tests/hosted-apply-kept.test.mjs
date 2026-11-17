@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Recover-apply keeps only the changed files, in the client cache, lists them, and expires them.
 import test from 'node:test';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import assert from 'node:assert/strict';
 import {
   chmodSync,
@@ -256,4 +257,14 @@ test('an edit made after the copy starts another round instead of overwriting th
   assert.equal(readFileSync(join(recovered.preservedAt, 'a'), 'utf8'), 'local draft of a');
   assert.equal(readFileSync(join(later, 'a'), 'utf8'), 'second local draft');
   assert(later.startsWith(`${dirname(recovered.preservedAt)}/files-`));
+});
+
+test('status does not invent kept changes for empty retained apply receipts', t => {
+  const root = temporaryDirectory(t, 'forge-empty-kept-');
+  const directory = join(keptApplyRoot(root), '00000000-0000-4000-8000-000000000001');
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, 'receipt.json'), JSON.stringify({ rounds: { initial: [] }, confirmedAt: 1 }));
+  assert.deepEqual(listKeptApply(root), { entries: [], more: 0 });
+  assert.deepEqual(keptApplyEnvelope(root), {});
+  assert(existsSync(directory), 'a read preserves the retained folder');
 });

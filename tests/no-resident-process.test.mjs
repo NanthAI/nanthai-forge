@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 
 const DETACHED_JOBS = {
-  'auth-cli.ts': 'opens the login page in the system browser',
+  'browser-approval.ts': 'opens one login or GitHub approval page in the system browser',
   'board-claim-queue.ts': 'sends one file-claim note from the first-write hook',
   'check-controller.ts': 'owner-store: drives one local check run',
   'cli-canary.ts': 'one canary run of a newly installed CLI build',

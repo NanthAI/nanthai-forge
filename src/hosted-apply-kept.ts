@@ -284,7 +284,7 @@ function names(cache: string) {
     return [];
   }
 }
-function summarize(cache: string, id: string): KeptApplySummary | null {
+function summarize(cache: string, id: string, hideEmpty = false): KeptApplySummary | null {
   const directory = join(cache, id);
   let receipt;
   try {
@@ -300,6 +300,8 @@ function summarize(cache: string, id: string): KeptApplySummary | null {
       counts[entry.kind]++;
       if (paths[entry.kind].length < PATHS_SHOWN) paths[entry.kind].push(entry.path);
     }
+  // Held checkout remainders can contain bytes outside the indexed path rounds.
+  if (hideEmpty && !receipt.held && !counts.edited && !counts.extra && !counts.deleted) return null;
   return {
     id,
     directory,
@@ -320,7 +322,7 @@ function summarize(cache: string, id: string): KeptApplySummary | null {
 export function listKeptApply(root: string) {
   const cache = keptApplyRoot(root),
     all = names(cache),
-    shown = all.slice(0, LISTED).flatMap(id => summarize(cache, id) ?? []);
+    shown = all.slice(0, LISTED).flatMap(id => summarize(cache, id, true) ?? []);
   return { entries: shown, more: Math.max(0, all.length - LISTED) };
 }
 

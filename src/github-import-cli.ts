@@ -350,7 +350,20 @@ export async function githubImportCli(
     const report = await runGithubImport(client, directory, journal, {
       wait: !values['no-wait'],
       signal: controller.signal,
-      log: line => process.stderr.write(line + '\n'),
+      log: line => {
+        if (!process.stdout.isTTY) return void process.stderr.write(line + '\n');
+        const fact = JSON.parse(line) as {
+          phase?: string;
+          completed?: number;
+          total?: number;
+          resume?: string;
+        };
+        process.stderr.write(
+          fact.phase
+            ? `Import: ${fact.phase.replace(/\s+/g, ' ')} · ${fact.completed}/${fact.total} files.\n`
+            : `Import started. Resume: ${fact.resume}\n`,
+        );
+      },
     });
     if (report.error || (!values['no-wait'] && !report.ready)) process.exitCode = 1;
     return report;
