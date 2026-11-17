@@ -603,6 +603,17 @@ layer out of both first paints.
   account places `/-/account/{projects|billing|people|devices|data}`, public
   pages `/-/signin`, `/-/signin/passkey` and `/-/device`. Until a place is
   rebuilt it links to the screen that serves it today (`currentScreenHref`).
+- Places: `web/src/app/screens.tsx` maps a rebuilt place to its lazy chunk, so
+  a new place adds one line there instead of editing `App.tsx`. A place reads
+  the frame's line feed from its props and never opens a second line read.
+- Lanes (`web/src/app/lanes/`): the overview groups the line feed's Lanes into
+  Needs you (every held Lane, so its count is the line's), the landing queue,
+  being worked on and quiet. Folded regions read nothing until opened (Region
+  `foldState`). `to-read` lists what landed and is unread, from per-account
+  read state (`convex/projectLandingReads.ts`: one row per account and
+  project, a read line plus at most 500 one-by-one reads); it never counts
+  toward Needs you. `touching` shows shared saved files, who waits on whom
+  and the queue with held Lanes apart, saved work only.
 - Sign-in: one handle field (passkey sign-in or sign-up, browser autofill) and
   GitHub. After a first GitHub sign-in with no passkey, `/-/signin/passkey`
   offers one (`authFirstPasskey`), skippable. The return address is kept in

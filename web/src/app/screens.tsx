@@ -23,6 +23,7 @@ const CheckScreen = lazy(() => import('./check/CheckScreen'));
 const screens: Partial<Record<ProjectPlace, LazyExoticComponent<ComponentType<PlaceProps>>>> = {
   needs: lazy(() => import('./needs/NeedsMe')),
   code: lazy(() => import('./code/CodePlace')),
+  lanes: lazy(() => import('./lanes/LanesPlace')),
 };
 
 /** The place's rebuilt screen once the project is known; the placeholder otherwise. */

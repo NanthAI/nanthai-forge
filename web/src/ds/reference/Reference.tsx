@@ -4,7 +4,7 @@
 // All figures are invented and marked as sample data.
 import { useEffect, useState, type ReactNode } from 'react';
 import { Avatar, Count, ItemState, KindMark, State, Who } from '../marks';
-import { Band, Chip, CodeBox, Key, Prose, Region, Row, Standing, Table } from '../parts';
+import { Band, Chip, CodeBox, Key, Prose, Region, Row, Standing, Table, useFold } from '../parts';
 import {
   Dock,
   Menu,
@@ -52,6 +52,8 @@ export function Reference() {
   const [palette, setPalette] = useState(false);
   const [filters, setFilters] = useState(['Mine', 'Needs you']);
   const [layout, setLayout, resetLayout] = useDockLayout('reference', LAYOUT);
+  // The screen holds this fold so what the region reads waits until it is open (Region foldState).
+  const notesFold = useFold('reference-notes', false);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
@@ -198,7 +200,8 @@ export function Reference() {
       id: 'notes',
       title: 'Notes',
       render: (handle: ReactNode) => (
-        <Region title="Notes" weight="ref" handle={handle} fold="reference-notes" foldedByDefault>
+        <Region title="Notes" weight="ref" handle={handle} fold="reference-notes" foldState={notesFold}>
+          {notesFold[0] ? <p className="quietline">Read when opened.</p> : null}
           <Prose label="Item text">
             <p>
               Uploads restart from the last saved part. <code>retryUpload()</code> waits for the connection,

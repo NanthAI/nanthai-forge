@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "projectLandingReads: per-account To read state (one row per account and project, Item 9e748e41); no existing table holds per-account read state. The old Lanes screen stays: it still serves every account that cannot sign in under /- yet",
+  "date": "2026-11-17"
+}

@@ -71,6 +71,8 @@ export type RegionProps = {
   /** Remembered fold: the region can be folded and this id keeps it across visits. */
   fold?: string;
   foldedByDefault?: boolean;
+  /** The fold held by the screen (`useFold` with the same id), when what the region reads waits for it to open. */
+  foldState?: [boolean, () => void];
   quiet?: boolean;
   tools?: ReactNode;
   /** The dock's handle, drawn first in the head. */
@@ -89,12 +91,14 @@ export function Region({
   sum,
   fold,
   foldedByDefault = false,
+  foldState,
   quiet,
   tools,
   handle,
   children,
 }: RegionProps) {
-  const [open, toggle] = useFold(fold, !foldedByDefault);
+  const own = useFold(foldState ? undefined : fold, !foldedByDefault);
+  const [open, toggle] = foldState ?? own;
   const first = useFirstStop<HTMLElement>(weight === 'act' ? waiting : 'none');
   const H = level === 2 ? 'h2' : 'h3';
   const bodyId = fold ? `fold-${fold}` : undefined;

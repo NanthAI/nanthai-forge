@@ -341,6 +341,19 @@ test('the reference surface: reorder, dock, late layer, axe and widths in both t
       assert.deepEqual(await zones(phone), LAYOUT);
     });
 
+    await t.test('a fold held by the screen starts folded and the screen sees it open', async t => {
+      const { page } = await open(t);
+      const fold = page.locator('section.region[aria-label="Notes"] button.fold');
+      assert.equal(await fold.getAttribute('aria-expanded'), 'false');
+      assert.equal(await page.getByText('Read when opened.').count(), 0, 'nothing is read while folded');
+      await fold.click();
+      assert.equal(await fold.getAttribute('aria-expanded'), 'true');
+      await page.getByText('Read when opened.').waitFor();
+      await page.reload();
+      await page.getByText('Read when opened.').waitFor();
+      await fold.click();
+    });
+
     await t.test('axe and widths: both themes, desk and phone, folds and the sheet open', async t => {
       for (const viewport of [DESK, PHONE]) {
         const { page } = await open(t, viewport);

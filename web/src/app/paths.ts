@@ -15,7 +15,7 @@ export type AccountPlace = (typeof accountPlaces)[number];
 /** Sections of one place: the section strip. The first is the place itself (no path segment). */
 export const placeSections: Record<ProjectPlace, readonly string[]> = {
   needs: ['', 'held', 'loose-ends'],
-  lanes: ['', 'sessions', 'to-read'],
+  lanes: ['', 'to-read', 'touching', 'sessions'],
   plan: ['', 'initiatives'],
   code: ['', 'files'],
   stats: [''],

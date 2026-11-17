@@ -185,6 +185,7 @@
       "projectJournalReceipts": 0,
       "users": 0,
       "projectLiveLineLanes": 0,
+      "projectLandingReads": 0,
       "authLinkEvents": 0
     },
     "retained": {
@@ -372,6 +373,7 @@
       "githubDeliveries": 0,
       "users": 0,
       "projectLiveLineLanes": 0,
+      "projectLandingReads": 0,
       "authLinkEvents": 0
     },
     "perProject": {
@@ -630,6 +632,7 @@
       "projectJournalReceipts": 0,
       "users": 0,
       "projectLiveLineLanes": 0,
+      "projectLandingReads": 0,
       "authLinkEvents": 0
     },
     "retained": {
@@ -817,6 +820,7 @@
       "githubDeliveries": 0,
       "users": 0,
       "projectLiveLineLanes": 0,
+      "projectLandingReads": 0,
       "authLinkEvents": 0
     },
     "perProject": {
