@@ -206,13 +206,15 @@ export function PlanScreenView({
             ) : null}
             {view.next ? (
               <div className="plan-next">
-                <span className="nextmark">next</span>
+                <span
+                  className="nextmark"
+                  title="The first planned Item with no owner, no Lane and nothing blocking it, in order"
+                >
+                  next
+                </span>
                 <A className="lk" href={at({ rest: view.next.id })}>
                   {view.next.title}
                 </A>
-                <span className="t3">
-                  the first planned Item with no owner, no Lane and nothing blocking it
-                </span>
               </div>
             ) : null}
           </>
@@ -341,7 +343,14 @@ function Line({ line, href }: { line: PlanLine; href: string }) {
         <A className="ttl" href={href} dir="auto" title={row.title}>
           {row.title}
         </A>
-        {line.next ? <span className="nextmark">next</span> : null}
+        {line.next ? (
+          <span
+            className="nextmark"
+            title="The first planned Item with no owner, no Lane and nothing blocking it"
+          >
+            next
+          </span>
+        ) : null}
         {line.blockedBy ? (
           <span className="flag" title={`Cannot start until ${line.blockedBy.title} is done`}>
             blocked by {line.blockedBy.id.slice(0, 4)}
