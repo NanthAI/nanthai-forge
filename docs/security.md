@@ -194,27 +194,98 @@ changes. It makes no secret reads or writes. There is no value field, reveal
 control or public sample-data route. Proposed CLI commands are marked Proposed;
 holder removal and sharing settings await the protocol.
 
-The agreed replacement store is sealed Development and Checks sets, tracked by
-Item `41a0df87`; it is not another Secret Object store. The design gate (Gate A)
-has passed; encryption and sharing implementation remain pending. The non-encryption `nforge run` process boundary
-is implemented against synthetic providers in tests; the shipped command reports
-that secret delivery is not connected. Import, machine-key delivery to checks and
-Secret Object retirement remain unimplemented. Gate B follows the
-encryption/sharing slices and precedes delivery of the later protocol slices.
-The screen and process helpers do not establish the code-review gate. Only owner devices and
-machine keys are intended to hold the Checks key; other write members propose
-values. The planned secret-envelope passkey uses its own ceremony and origin,
-never a sign-in passkey or session material. No printable recovery key is planned.
+The replacement store is sealed Development and Checks sets, tracked by Item
+`41a0df87`. Slice 1 implements the owner's Development device, value entry from a
+hidden prompt or stdin, name-only list/remove commands and `run` delivery. Other
+recipients, sharing, proposals, passkey recovery, machine keys, Checks execution,
+import and Secret Object retirement remain unimplemented. Gate A passed; Gate B
+is a separate code review after sharing. No database-wide confidentiality claim
+applies while legacy Secret Objects and their server keyring remain.
+
+### Sealed Development core
+
+`nforge secret set NAME [--file]`, `nforge secret list`, `nforge secret rm NAME`
+and `nforge secret repin` use a stable device sign-in. Values never belong in
+arguments or replies. `--file` makes the stdin/prompt value a file-shaped secret;
+`run` supplies its private temporary path. Stdin bytes are kept exactly, including
+any trailing newline. Agent markers and non-interactive input permit new names
+only; changes/removals require a person until the proposals slice. The server's
+storage gate requires the owner account's unrestricted stable device credential;
+value authority is the owner device signature in the verified roster. Legacy
+Secret Objects keep their existing owner-person gate.
+
+Device signing and agreement keys are independent. Their account binding, set
+keys, wraps, padded values, hiding value commitments, per-name change signatures,
+roster history, former signers, tombstones and signed heads use purpose-separated
+format-v1 frames. Project/account protocol IDs are independently derived from the
+Forge IDs, with separate purpose labels; a server-supplied protocol ID is never
+accepted as the requested project's identity. Known-answer fixtures cover these
+layouts independently of the signing implementation.
+
+Device secret keys are kept in a private file readable by your user account:
+0600, in a 0700 configuration folder, outside projects and Lanes. The OS keychain
+is planned before Gate B (Issue `a9f9b608`). Re-login retains these keys. This does
+not protect against another process running as your user or an unlocked stolen
+disk. Local keys are binary buffers and are not passed in process arguments.
+
+Pins are MAC-authenticated per project/kind, with an account/device index and a
+counter kept beside the device keys. Writers use one exclusive lock file with
+PID, process-start marker and random token; only a dead holder's matching token
+may be reclaimed. Lock contents are fsynced before an exclusive hard-link
+publication; dead reclaim gates are recoverable, and incomplete legacy locks
+become reclaimable after 30 seconds. Readers use atomic snapshots and re-read
+under that lock before
+reporting lost trust. Writes use private temporary files, fsync and atomic rename.
+Network calls never hold the lock, and a response is re-verified against the latest
+pin before publication. Unchanged verification changes no pin, index or counter.
+These file-store/lock deviations remain explicit Gate B review items.
+
+A local retry journal retains only the exact sealed request while its outcome is
+unknown, in 0600 files within the same 0700 configuration folder. Journal writes
+share the pin lock and use temporary files, fsync and atomic rename. Acceptance
+immediately compacts a request to a value-free receipt (operation ID, project,
+name, action and accepted head hash); confirmed refusals delete it. The cap is
+64 entries, each at most 768 KiB (48 MiB total). Oldest confirmed receipts go
+first; unresolved requests are never silently dropped. A full unresolved journal
+returns `SECRETS_JOURNAL_FULL`. Run `nforge secret resolve --operation-id UUID`
+for each retained unknown operation: a matching change signature in the verified
+current head confirms it; otherwise a person may explicitly discard that local
+request, including when current access is unavailable. Cancelling keeps it. A
+discarded operation ID must never be reused; repeat a missing change with a new
+operation. This provides a way out of a full journal without silently dropping
+unknown requests. Agent entry points cannot approve discards. Replaying a retained
+confirmed receipt rechecks current access and writes no secret. A supplied retry
+value must match the retained ciphertext, or the original confirmed head while
+that exact head is current; otherwise `WORK_OPERATION_REUSED` refuses it. Use
+`secret resolve` to inspect a confirmed receipt without supplying a value. An
+unknown replay uses its original sealed
+bytes; if the server's 50-event window can no longer establish the outcome, it
+returns `SECRETS_WRITE_UNKNOWN`, never an automatic new seal. Run
+`nforge secret list` to see the current head, then repeat the change as a new
+operation if it is missing. This bounded local journal is also a Gate B item.
+
+Deleting or restoring old pin files does not reset first-contact trust. A person
+can use `secret repin` only when loading that project/kind under the lock reports
+`SECRETS_PIN_LOST`, to confirm a view signed by this device after seeing its
+date, device fingerprints and the possibility that it is older. Other cases need
+a holder confirmation in the sharing slice. Rebuilding one project's trust keeps
+other missing projects marked as lost. Holder first contact requires this device
+to be the genesis creator and walks
+from that genesis; a copied public device entry cannot enroll a first-contact
+holder in a server-minted set. For future non-holder first contacts, the server
+still supplies the genesis owner; pins protect subsequent reads, including the
+ciphertext-only offline cache. A compromised server can withhold records or keep
+an offline device on its last verified view. No decrypted cache is written.
 
 ### Run process boundary
 
 `nforge run [--root ROOT] [--set development|checks] [--only A,B] [--show] -- COMMAND [ARGS...]`
 resolves the containing clone or Lane root. The CLI reference is generated from
 its help at site build time. There is no plaintext stub-input flag or alternate
-secret store. Until the verified provider is connected, the command starts no
-child and reports that delivery is unavailable.
+secret store. Development uses the same verification entry point for network and
+cached records. Checks delivery remains outside this slice.
 
-The process helpers enforce these rules with synthetic values today:
+The process boundary enforces these rules:
 
 - Only names in the root `.env.example` can be injected; `--only` can narrow them.
   The file must be a regular file with exactly that spelling. A symbolic link or
@@ -234,8 +305,7 @@ The process helpers enforce these rules with synthetic values today:
   shared name validator. Its value-free write boundary prints one line for each
   exempt publish-token name written to Development: it is a publish token and
   belongs in Checks. `NODE_ENV`, ordinary names and writes to Checks produce no
-  such notice; using a token through `run` produces none. Live set/import/apply
-  entry points remain pending.
+  such notice; using a token through `run` produces none. Set uses this boundary; import and proposal apply remain pending.
 - The inherited environment wins, including case-insensitive comparison on
   Windows. Before injection the child loses Forge credentials and session
   material: every `FORGE_*` and `NFORGE_*` name and known agent session id, except
@@ -271,9 +341,8 @@ are still part of the later import/landing slice, including when approval is off
 These helpers add no hosted calls, database I/O, retained records or idle work.
 Masking memory scales with value encodings and one carry per stream; file bytes
 are temporary only. The scriptable test backend records synthetic replies and
-conditional writes. Thirty-four sealed-provider acceptance cases are explicitly
-skipped until the real verifier and signed fixtures exist; they are not security
-evidence. The per-added-name owner-alert acceptance case is separately deferred
+conditional writes. The hostile-server harness exercises the real verifier with signed synthetic
+fixtures; this does not replace Gate B. The per-added-name owner-alert acceptance case is separately deferred
 to slice 3, including alerts when protected-path approval is off.
 
 ### Secrets screen trust boundaries

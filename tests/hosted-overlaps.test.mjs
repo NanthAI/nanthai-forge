@@ -33,6 +33,9 @@ import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { mergeNativeText } from '../dist/native-text-merge.js';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
+import { boardReadPosition } from '../dist/board-local.js';
+import { boardWakeEnvelope } from '../dist/hosted-board-wait.js';
+import { readHostedOverlapAdvice } from '../dist/hosted-overlap-client.js';
 const overlaps = await import(moduleUrl('../convex/projectHostedOverlaps.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const tracking = await import(moduleUrl('../convex/projectHostedOverlapStore.ts'));
@@ -41,6 +44,7 @@ const mainLog = await import(moduleUrl('../convex/projectHostedOverlapMainLog.ts
 const capabilities = await import(moduleUrl('../convex/projectHostedAgent.ts'));
 const exact = await import(moduleUrl('../convex/projectHostedConflicts.ts'));
 const boardApi = await import(moduleUrl('../convex/projectBoard.ts'));
+const boardDelivery = await import(moduleUrl('../convex/projectBoardDelivery.ts'));
 // Path notices are gone (flip 4, Issue 853fcde3); peers stay readable on a detail read.
 const peerEvidence = async (s, laneId, name = 'peers') =>
   JSON.parse(
@@ -338,6 +342,72 @@ const trackChange = (s, lane, paths = [delta('a.txt')], intent = 'My change', ba
     },
     {},
   );
+
+test('70b38346: the real overlap validator and save-advice path carry laneAfter and deliver the unread note', async t => {
+  const { s, lane, exchange, transport } = await setup(t);
+  const client = transport(lane);
+  await client.dispatch('capabilities', {});
+  assert(client.advertisedFeatures.includes('board-lane-after'));
+  for (const [targetKey, at, body] of [
+    [`lane:${lane.id}`, 5, 'Delivered first'],
+    [`lane:${lane.id}`, 6, 'Delivered second'],
+    ['project', 7, 'Unread project note'],
+  ]) {
+    const id = randomUUID();
+    s.insert('projectBoardMessages', {
+      projectId: s.projectId,
+      id,
+      author: 'owner',
+      targetKey,
+      body,
+      bodyHash: id,
+      bytes: body.length,
+      at,
+      expiresAt: Date.now() + 86400000,
+    });
+    const inbox = [...s.tables.projectBoardInboxes.values()].find(row => row.key === targetKey);
+    if (inbox) s.patch('projectBoardInboxes', inbox._id, { latestAt: at, count: inbox.count + 1 });
+    else s.insert('projectBoardInboxes', { projectId: s.projectId, key: targetKey, latestAt: at, count: 1 });
+  }
+  const woke = await s.transaction(
+    'directedBoardWake',
+    {
+      _handler: ctx =>
+        boardDelivery.boardWake(ctx, { projectId: s.projectId, viewer: 'owner', laneId: lane.id, after: 0 }),
+    },
+    {},
+  );
+  boardWakeEnvelope(client.root, lane.id, woke);
+  const requests = [],
+    query = exchange.client.query.bind(exchange.client);
+  exchange.client.query = (ref, args) => {
+    if (getFunctionName(ref) === 'projectHostedOverlaps:read') requests.push(structuredClone(args));
+    return query(ref, args);
+  };
+  const direct = await readHostedOverlapAdvice(
+    client,
+    lane.id,
+    false,
+    undefined,
+    undefined,
+    boardReadPosition(client.root, lane.id, client.advertisedFeatures),
+  );
+  assert.deepEqual(
+    direct.board.messages.map(message => message.text),
+    ['Unread project note'],
+  );
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].board.laneAfter, 6);
+  requests.length = 0;
+  const saved = await client.dispatch('save', {
+    operationId: randomUUID(),
+    message: 'Save with unread board advice',
+  });
+  assert.equal(saved.result.outcome.status, 'completed');
+  assert(saved.board.notices.some(notice => notice.includes('Unread project note')));
+  assert.equal(requests.length, 1, 'the save gate and receipt share their existing overlap query');
+  assert.equal(requests[0].board.laneAfter, 6);
+});
 
 test('two separate checkout roots save the same file; the second save returns the exact conflict and names the peer once as presence', async t => {
   const { s, lane, peer, transport, discovery } = await setup(t);

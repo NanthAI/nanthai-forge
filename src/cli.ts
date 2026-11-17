@@ -27,7 +27,8 @@ Usage:
   nforge metrics record-bill ROOT --provider P --from DATE --to DATE --billed-usd N [--list-usd N] [--usage unit=qty,...] [--rate unit=usd,...] [--basis TEXT]
   nforge wait ID [--budget SECONDS]   # resume this agent session's own unfinished landing or run
   nforge docs [name]
-  nforge run [--root ROOT] [--set development|checks] [--only A,B] [--show] -- COMMAND [ARGS...]   # secret provider not connected yet
+  nforge run [--root ROOT] [--set development|checks] [--only A,B] [--show] -- COMMAND [ARGS...]
+  nforge secret set|list|rm|repin|resolve [options]
   nforge --version
   nforge agent ROOT queue '{}'   # hosted landing queue
   nforge queue list|cancel OPERATION|prioritize OPERATION   # local command recovery
@@ -109,6 +110,7 @@ async function main(args: string[]): Promise<unknown> {
   if (args[0] === 'metrics') return (await import('./metrics-cli.js')).metricsCli(args.slice(1));
   if (args[0] === 'docs') return (await import('./docs-cli.js')).docsCli(args.slice(1));
   if (args[0] === 'run') return (await import('./secret-run-cli.js')).secretRunCli(args.slice(1));
+  if (args[0] === 'secret') return (await import('./sealed-cli.js')).sealedCli(args.slice(1));
   if (args[0] === '--version') {
     invariant(args.length === 1, 'UNSUPPORTED_FLAG', `Unsupported flag: ${args[1]}`);
     const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {

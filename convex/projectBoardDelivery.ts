@@ -83,8 +83,8 @@ export async function boardInbox(
     key.startsWith('lane:') ? Math.max(input.after, input.laneAfter ?? 0) : input.after;
   const hot = inboxes.filter(row => row !== null && row.latestAt > after(row.key));
   const pages = await Promise.all(
-    hot.map(row =>
-      (input.includeResolved
+    hot.map(row => {
+      const query = input.includeResolved
         ? ctx.db
             .query('projectBoardMessages')
             .withIndex('by_project_and_target_and_at', q =>
@@ -98,21 +98,20 @@ export async function boardInbox(
                 .eq('targetKey', row!.key)
                 .eq('resolvedAt', undefined)
                 .gt('at', after(row!.key)),
-            )
-      )
+            );
+      // Exclude own notes before truncating: a full page of them must not let the
+      // cursor jump to latestAt past somebody else's unread note.
+      return (input.laneId ? query.filter(q => q.neq(q.field('fromLaneId'), input.laneId)) : query)
         .order(input.order)
-        .take(input.limit + 1),
-    ),
+        .take(input.limit + 1);
+    }),
   );
   const sign = input.order === 'asc' ? 1 : -1;
-  const rows = pages
-    .flat()
-    .filter(row => !input.laneId || row.fromLaneId !== input.laneId)
-    .sort((a, b) => sign * (a.at - b.at));
+  const rows = pages.flat().sort((a, b) => sign * (a.at - b.at));
   const shown = rows.slice(0, input.limit);
   return {
     messages: shown.map(boardMessageView),
-    /** At least this many more unread notes (a lower bound: each target reads limit + 1 rows). */
+    /** At least this many more unread notes (a lower bound: each target returns limit + 1 eligible rows). */
     more: Math.max(0, rows.length - shown.length),
     /** Where the caller's cursor goes: the last note shown oldest-first, else the newest seen. */
     cursor:

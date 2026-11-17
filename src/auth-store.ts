@@ -27,6 +27,8 @@ export type SavedCredential = {
   deviceId?: string;
   deviceCode?: string;
   signInId?: string;
+  /** Local sealed-key namespace established by explicit login, retained across renewal. */
+  sealedAccount?: string;
 };
 export type SavedDevice = {
   id: string;

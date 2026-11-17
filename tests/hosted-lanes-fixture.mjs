@@ -341,6 +341,15 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
                     });
                 return q;
               },
+              filter: build => {
+                const predicate = build({
+                  field: name => row => row[name],
+                  neq: (value, expected) => row => value(row) !== expected,
+                });
+                const indexed = match;
+                match = rows => indexed(rows).filter(predicate);
+                return q;
+              },
               order: direction => {
                 descending = direction === 'desc';
                 return q;

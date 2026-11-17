@@ -99,6 +99,24 @@ export function boardReadPosition(root: string, laneId: string, features: readon
     ...(features.includes('board-lane-after') ? { laneAfter: directedNotesAfter(root, laneId) } : {}),
   };
 }
+/** A cached feature can outlive a server rollback. Retry only its argument rejection,
+ * once; other failures keep their original handling and no mutation is repeated. */
+export async function readBoardCompatible<T>(
+  position: ReturnType<typeof boardReadPosition>,
+  read: (position: ReturnType<typeof boardReadPosition>) => Promise<T>,
+): Promise<T> {
+  try {
+    return await read(position);
+  } catch (error) {
+    if (
+      position.laneAfter !== undefined &&
+      error instanceof Error &&
+      /extra field\s+[`'"]?laneAfter\b/i.test(error.message)
+    )
+      return read({ after: position.after });
+    throw error;
+  }
+}
 
 /** A delivered note as the server returns it (author already a Forge handle, or absent). */
 export type BoardNote = {

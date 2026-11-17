@@ -28,6 +28,23 @@ export function docsReference(root: string) {
         usage = declaration.initializer.text;
   });
   if (!usage) throw new Error('CLI HELP must remain extractable for the generated reference.');
+  const secretSource = ts.createSourceFile(
+    'sealed-cli.ts',
+    readFileSync(join(root, 'src/sealed-cli.ts'), 'utf8'),
+    ts.ScriptTarget.Latest,
+  );
+  let secretUsage = '';
+  secretSource.forEachChild(node => {
+    if (ts.isVariableStatement(node))
+      for (const declaration of node.declarationList.declarations)
+        if (
+          declaration.name.getText(secretSource) === 'sealedUsage' &&
+          declaration.initializer &&
+          ts.isStringLiteral(declaration.initializer)
+        )
+          secretUsage = declaration.initializer.text;
+  });
+  if (!secretUsage) throw new Error('Secret help must remain extractable for the generated reference.');
   const tools: { name: string; description: string; schema: unknown }[] = [];
   const registry = {
     registerTool(name: string, options: { description: string; inputSchema: Record<string, z.ZodType> }) {
@@ -46,7 +63,9 @@ export function docsReference(root: string) {
   const cli =
     '# CLI reference\n\nGenerated from CLI help and enforced hosted command schemas at site build time. Optional parameters carry `?`. JSON schemas below include nested fields and constraints.\n\n```text\n' +
     usage.trim() +
-    '\n```\n\n' +
+    '\n```\n\n## Sealed Development secrets\n\n```text\n' +
+    secretUsage +
+    '\n```\n\nValues are read from a hidden prompt or stdin, never an argument. `--file` treats the input bytes as a file-shaped secret. `--operation-id` reconciles an unknown write outcome. `repin` is a person-only confirmation of a view signed by this device. Sharing and Checks delivery remain later slices.\n\n' +
     hostedAgentHelpEntries
       .map(
         entry =>

@@ -1,0 +1,6 @@
+{
+  "kind": "cliCommands",
+  "delta": 1,
+  "reason": "41a0df87: format-v1 sealed records, purpose-separated primitives and explicit failure codes are required for device-encrypted Development delivery; removes the unavailable run provider and preserves legacy Secret Objects until approved slice 6 retirement.",
+  "date": "2026-11-17"
+}

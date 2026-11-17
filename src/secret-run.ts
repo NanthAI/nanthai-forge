@@ -13,12 +13,6 @@ export type RunSecretProvider = (input: { root: string; set: 'development' | 'ch
   secrets: RunSecret[];
   machine?: boolean;
 }>;
-/** This slice deliberately has no backend, plaintext file or environment-value adapter.
- * Tests supply synthetic values through the same provider boundary. */
-export const unavailableRunSecrets: RunSecretProvider = async () => {
-  throw new ForgeError('BAD_ARGUMENT', 'Secret delivery is not connected in this build.');
-};
-
 export async function runWithSecrets(
   input: {
     root: string;

@@ -5,6 +5,8 @@ import schema from './schema';
  * is `projectId`. The purge walks this list in order; tests/project-purge-inventory
  * fails the build when a schema table with a hosted-project id is missing here. */
 export const projectPurgeTables = {
+  sealedSecretSets: 'by_project_and_kind_and_active',
+  sealedSecretHistory: 'by_project_and_setId',
   projectFinishReadRows: 'by_project',
   projectLiveLineLanes: 'by_project_and_lane',
   projectPublic: 'by_projectId',

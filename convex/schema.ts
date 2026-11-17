@@ -26,6 +26,7 @@ import { actorTables } from './projectActorFields';
 import { autonomyPolicy, autonomyTables, automaticAction } from './autonomyFields';
 import { briefTables } from './agentBriefFields';
 import { deviceTables } from './deviceFields';
+import { sealedSecretTables } from './sealedSecretFields';
 import { clientErrorTables } from './clientErrorFields';
 import { indexTables } from './projectWorkIndexFields';
 import { hostedRecordTables } from './projectHostedRecordFields';
@@ -626,6 +627,7 @@ export default defineSchema({
   ...briefTables,
   ...actorTables,
   ...deviceTables,
+  ...sealedSecretTables,
   ...clientErrorTables,
   ...checkTables,
   ...coordinationTables,

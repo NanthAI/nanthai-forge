@@ -18,7 +18,7 @@ import { Writable } from 'node:stream';
 import { fork, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
-import { runWithSecrets, unavailableRunSecrets } from '../dist/secret-run.js';
+import { runWithSecrets } from '../dist/secret-run.js';
 import { secretFileFolder } from '../dist/secret-run-files.js';
 
 const fixture = fileURLToPath(new URL('./fixtures/secret-file-worker.mjs', import.meta.url));
@@ -328,8 +328,7 @@ test('spawn failure cleans private files and buffers; the public CLI never accep
   );
   assert(value.every(byte => byte === 0));
   assert.deepEqual(readdirSync(join(tempRoot, `forge-run-secrets-${process.getuid?.() ?? 'user'}`)), []);
-  await assert.rejects(unavailableRunSecrets({ root, set: 'development' }), /not connected/);
   const help = spawnSync(process.execPath, ['dist/cli-entry.js', 'run', '--help'], { encoding: 'utf8' });
   assert.equal(help.status, 0);
-  assert.match(help.stdout, /not connected/);
+  assert.match(help.stdout, /verified sealed set/);
 });

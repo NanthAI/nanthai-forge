@@ -37,6 +37,15 @@ The table is `projectVerbs` in `convex/projectAccessContract.ts`; `projectMay` g
 | Approve a protected path (`approveProtected`) | no | no | no | yes | never | `projectHostedApprovals`, `projectHostedAcceptance` |
 | Secret values, permanent delete, runner keys (`ownerPersonOnly`) | no | no | no | yes | never | `requireOwnerPerson` |
 
+Sealed secret writes are authorised by the owner device key in the signed roster.
+The storage endpoint accepts only the project owner account on an unrestricted
+stable device sign-in with source-write access. Scoped, read-only, browser-only
+and keyless agent credentials cannot write sealed records. Readers verify the
+roster and signatures locally; the server stores ciphertext without decrypting.
+Secret Objects values stay owner-person only until their retirement. Agent and
+non-interactive entry points can add new Development names in slice 1; changing
+or removing an existing name needs a person until proposals ship.
+
 "Held" means an agent's request opens an exact approval request that its person grants or declines in a browser; nothing changes until then. "Never" means an agent's credential is refused even when its person may.
 
 ## Agents

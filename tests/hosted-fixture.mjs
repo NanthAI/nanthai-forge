@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { equalConvexValue } from './convex-value-equality.mjs';
 import { fixtureWorkRecordTable, assertWorkRecordDomain } from './work-record-domain-fixture.mjs';
 const checkLogModules = Object.fromEntries(
   await Promise.all(
@@ -333,7 +334,7 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
           return [...(tables[table]?.values() ?? [])]
             .filter(
               row =>
-                equal.every(([key, value]) => field(row, key) === value) &&
+                equal.every(([key, value]) => equalConvexValue(field(row, key), value)) &&
                 low.every(([key, value]) => row[key] > value) &&
                 high.every(([key, value]) => row[key] <= value) &&
                 bounds.every(test => test(row)),
@@ -399,6 +400,15 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
               },
             };
             build?.(q);
+            return query;
+          },
+          filter: build => {
+            bounds.push(
+              build({
+                field: name => row => field(row, name),
+                neq: (value, expected) => row => value(row) !== expected,
+              }),
+            );
             return query;
           },
           order: value => {

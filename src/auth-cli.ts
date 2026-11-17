@@ -255,6 +255,8 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
         ? { deviceId: result.deviceId, deviceCode: result.deviceCode, signInId: result.signInId }
         : {}),
     };
+    if (typeof result.deviceId === 'string')
+      credential.sealedAccount = (await import('./sealed-identity.js')).sealedAccount(credential.token);
     // Reload to preserve credentials saved for other deployments during approval.
     const latest = readAuth();
     latest.deployments[deployment] = credential;
@@ -267,6 +269,12 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
     }
     latest.defaultDeployment = deployment;
     writeAuth(latest);
+    if (typeof result.deviceId === 'string') {
+      const identity = await (
+        await import('./sealed-identity.js')
+      ).localSealedIdentity(deployment, credential.token);
+      for (const key of [identity.keys.sign, identity.keys.enc, identity.keys.pinKey]) key.fill(0);
+    }
     await askForHandleOnce(deployment, credential.token);
     return {
       deployment,

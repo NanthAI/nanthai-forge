@@ -430,7 +430,7 @@ export const record = internalMutation({
         reason: item.reason,
       }));
       const predecessor = peer !== MAIN ? await context() : undefined;
-      const early = predecessor?.enabled
+      const earlyResolution = predecessor?.enabled
         ? await conflictPredecessor(
             ctx,
             input.projectId,
@@ -443,9 +443,16 @@ export const record = internalMutation({
               },
             ],
             predecessor.queue,
-          ).catch(() => undefined)
+          )
+            .then(early => (early ? canonicalPayload(early.advice) : undefined))
+            // Unavailable is not absent for the same saved source pair. Never carry
+            // advice for old heads into a new generation when its lookup fails.
+            .catch(() =>
+              existing?.laneHead === owner.head && existing.peerHead === peerHead
+                ? existing.earlyResolution
+                : undefined,
+            )
         : undefined;
-      const earlyResolution = early ? canonicalPayload(early.advice) : undefined;
       // Only a changed source pair, ranges or visible advice publishes a generation.
       // Hidden metadata may still be cleaned up without a new inbox clock/wake.
       if (

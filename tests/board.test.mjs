@@ -59,7 +59,7 @@ test('a note to a Lane is read back once, with the Forge handle and never the ac
   const mine = await f.read({ laneId: f.lanes.A }, 'writer');
   assert.deepEqual(
     mine.messages.map(m => m.text),
-    ['OK, I will skip lines 1-40', 'Heads up: main is red'],
+    ['Heads up: main is red', 'OK, I will skip lines 1-40'],
   );
 });
 

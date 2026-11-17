@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 1,
+  "reason": "41a0df87: approved bounded ciphertext retry journal preserves unknown requests and compacts accepted requests; new named full-journal error replaces silent loss. Removes unavailable run provider; legacy Secret Objects remain until slice 6.",
+  "date": "2026-11-17"
+}

@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { AGENT_CLIENTS, nearestAgentProcess } from './agent-session.js';
 import { ForgeError, invariant } from './errors.js';
 import { canonicalRoot } from './root-paths.js';
-import { runWithSecrets, unavailableRunSecrets, type RunSecretProvider } from './secret-run.js';
+import { runWithSecrets, type RunSecretProvider } from './secret-run.js';
 
 export const secretRunUsage =
   'nforge run [--root ROOT] [--set development|checks] [--only A,B] [--show] -- COMMAND [ARGS...]';
@@ -62,9 +62,9 @@ export function secretRunRoot(from: string) {
     root = parent;
   }
 }
-export async function secretRunCli(args: string[], provider: RunSecretProvider = unavailableRunSecrets) {
+export async function secretRunCli(args: string[], provider?: RunSecretProvider) {
   if (args.length === 1 && ['--help', '-h'].includes(args[0]!)) {
-    process.stdout.write(`${secretRunUsage}\nSecret delivery is not connected in this build.\n`);
+    process.stdout.write(`${secretRunUsage}\nDevelopment uses the owner device’s verified sealed set.\n`);
     return;
   }
   const input = secretRunOptions(args);
@@ -78,7 +78,7 @@ export async function secretRunCli(args: string[], provider: RunSecretProvider =
   );
   process.exitCode = await runWithSecrets(
     { ...input, root: secretRunRoot(resolve(input.root ?? '.')) },
-    provider,
+    provider ?? (await import('./sealed-run.js')).sealedRunSecrets,
     { source, agent },
   );
 }

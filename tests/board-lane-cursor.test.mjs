@@ -10,10 +10,12 @@ import { boardHostedSource } from '../dist/hosted-board.js';
 import { boardWakeEnvelope } from '../dist/hosted-board-wait.js';
 import {
   readBoardCursor,
+  readBoardProjectCursor,
   readBoardConflictIds,
   writeBoardConflictIds,
   rememberBoardServerFeatures,
   unreadBoardNotes,
+  rememberBoardReader,
 } from '../dist/board-local.js';
 import { readHostedEditPeers } from '../dist/agent-edit-hosted.js';
 
@@ -30,7 +32,7 @@ function setup(t) {
   });
   const f = boardFixture();
   rememberBoardServerFeatures('project', features);
-  function note(targetKey, at, body) {
+  function note(targetKey, at, body, fromLaneId) {
     const id = randomUUID();
     f.tables.projectBoardMessages.set(id, {
       _id: id,
@@ -38,6 +40,7 @@ function setup(t) {
       id,
       author: 'owner',
       targetKey,
+      ...(fromLaneId ? { fromLaneId } : {}),
       body,
       bodyHash: id,
       bytes: body.length,
@@ -66,6 +69,119 @@ function setup(t) {
     return value.cursor;
   }
   return { f, root, note, directed };
+}
+
+test('70b38346 line 1: project notes read in another Lane cannot hide an older unread Issue note on a fresh Lane', async t => {
+  const { f, root, note } = setup(t);
+  rememberBoardReader(root, 'project', 'writer');
+  [...f.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === f.lanes.B).intentId =
+    randomUUID();
+  note(`issue:${f.issue}`, 1, 'Unread Issue note');
+  for (let at = 2; at <= 11; at++) note('project', at, `Project note ${at}`);
+  const transport = {
+    root,
+    advertisedFeatures: features,
+    query: async (_name, args) => f.read(args, 'writer'),
+  };
+  const other = await boardHostedSource(transport, 'board', { laneId: f.lanes.B });
+  assert.equal(other.notices.length, 10);
+  assert.equal(readBoardCursor(root, f.lanes.A), 0);
+  const fresh = await boardHostedSource(transport, 'board', { laneId: f.lanes.A });
+  assert.equal(fresh.notices.length, 1);
+  assert.match(fresh.notices[0], /Unread Issue note/);
+});
+
+test('70b38346: ordinary continuation reaches all eleven unread notes without dropping or repeating a page', async t => {
+  const { f, root, note } = setup(t);
+  rememberBoardReader(root, 'project', 'writer');
+  for (let at = 1; at <= 11; at++) note('project', at, `Unread ${at}`);
+  const transport = {
+    root,
+    advertisedFeatures: features,
+    query: async (_name, args) => f.read(args, 'writer'),
+  };
+  const first = await boardHostedSource(transport, 'board', { laneId: f.lanes.A });
+  assert.equal(first.notices.length, 10);
+  assert.equal(first.more, 1);
+  const next = await boardHostedSource(transport, 'board', { laneId: f.lanes.A });
+  assert.equal(next.notices.length, 1);
+  assert.equal(next.more, 0);
+  assert.equal(new Set([...first.messages, ...next.messages].map(message => message.id)).size, 11);
+});
+
+test('70b38346 M1: reading newest history acknowledges neither Lane nor project unread positions', async t => {
+  const { f, root, note } = setup(t);
+  rememberBoardReader(root, 'project', 'writer');
+  for (let at = 1; at <= 15; at++) note('project', at, `Unread ${at}`);
+  const transport = {
+    root,
+    advertisedFeatures: features,
+    query: async (_name, args) => f.read(args, 'writer'),
+  };
+  const history = await boardHostedSource(transport, 'board', { laneId: f.lanes.A, all: true });
+  assert.deepEqual(
+    history.messages.map(message => message.at),
+    [15, 14, 13, 12, 11, 10, 9, 8, 7, 6],
+  );
+  assert.equal(readBoardCursor(root, f.lanes.A), 0);
+  assert.equal(readBoardProjectCursor(root), 0);
+  const unread = await boardHostedSource(transport, 'board', { laneId: f.lanes.A });
+  assert.deepEqual(
+    unread.messages.slice(0, 5).map(message => message.at),
+    [1, 2, 3, 4, 5],
+  );
+  assert.equal(unread.notices.length, 10);
+});
+
+for (const kind of ['board', 'hook']) {
+  test(`70b38346 L2: ${kind} excludes own notes before filling the unread page`, async t => {
+    const { f, root, note } = setup(t);
+    const own = kind === 'board' ? 11 : 3;
+    for (let at = 1; at <= own; at++) note('project', at, `Own ${at}`, f.lanes.A);
+    note('project', own + 1, 'Other unread', f.lanes.B);
+    let calls = 0;
+    const result =
+      kind === 'board'
+        ? await boardHostedSource(
+            {
+              root,
+              advertisedFeatures: features,
+              query: async (_name, args) => {
+                calls++;
+                return f.read(args, 'writer');
+              },
+            },
+            'board',
+            { laneId: f.lanes.A },
+          )
+        : (
+            await readHostedEditPeers(
+              {
+                root,
+                project: 'project',
+                url: 'https://synthetic.invalid',
+                laneId: f.lanes.A,
+                path: 'src/file.ts',
+              },
+              async (_name, args) => {
+                calls++;
+                return {
+                  board: await delivery.boardDelivery(f.ctx, {
+                    projectId: 'project',
+                    viewer: 'writer',
+                    laneId: f.lanes.A,
+                    intentId: f.issue,
+                    ...args.board,
+                  }),
+                };
+              },
+            )
+          ).board;
+    assert.equal(calls, 1);
+    assert.equal(result.notices.length, 1);
+    assert.match(result.notices[0], /Other unread/);
+    assert.equal(readBoardCursor(root, f.lanes.A), own + 1);
+  });
 }
 
 test('70b38346 S1(a): delivered Lane notes cannot fill an ascending two-note hook page with an empty more hint', async t => {

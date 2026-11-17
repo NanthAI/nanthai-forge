@@ -15,13 +15,15 @@ optional declarations; client writers and the run-budget/outside-change workflow
 are separate work on the Phase 7 Items. See [run evidence](run-evidence.md).
 
 Rebuilt Settings → Secrets is value-free with an unavailable metadata provider.
-Lazy `nforge run` helpers now cover root `.env.example` names, release name rules,
-credential/session stripping, output masking and private temporary file cleanup
-with synthetic providers. The shipped CLI reports that delivery is not connected.
-Default policies protect `.env.example`; explicit owner lists stay authoritative.
-Encryption, sharing, server records, machine keys, import, per-added-name owner
-alerts and Secret Object retirement remain pending. These helpers establish no
-cryptographic gate. See [the process boundary](security.md#run-process-boundary).
+`nforge secret set/list/rm/repin/resolve` and lazy `nforge run` now use the owner's
+sealed Development set, signed metadata, local pins and a ciphertext-only cache.
+Release name rules, exact root `.env.example` reading, credential stripping,
+masking and private temporary-file cleanup remain the process boundary. Device
+keys use a private local file; an OS keychain backend remains planned. Sharing,
+proposals, passkey recovery, Checks/machine delivery, import, per-added-name owner
+alerts and Secret Object retirement remain pending. Gate B follows the sharing
+slice; no completed code-review gate is claimed. Default policies protect
+`.env.example`; explicit owner lists stay authoritative. See [security](security.md#sealed-development-core).
 
 HostedStrip shares a bounded Lane feed and sleeping hook. Lanes initialize on
 write; stage/idle/cost fixtures pass. Dev latency, idle I/O, frames, browser cost
@@ -117,6 +119,8 @@ History log, blame and file-at-commit reads are discoverable in agent help, the 
 Default agent replies have a per-action byte ratchet: compact conflict files, preflight plans and receipts, and one rendering per board list note (explicit note reads keep full bodies). CLI `--detail` and MCP `replyDetail:true` retain full replies; local actor cursors stop project notes repeating across Lanes ([reply budget](agents/workflow.md#default-reply-byte-budget)).
 
 Directed waits keep ordinary board delivery independent. Servers advertising `board-lane-after` skip already-delivered Lane notes before filling ordinary pages, preserving older unread project and Issue notes. Exact-conflict generations distinguish changed source pairs while unchanged visible notices keep their identity; the CLI retains the latest 64 seen identities per Lane.
+
+Ordinary board pages deliver oldest unread notes first with a working continuation, preserving unread Issue notes when another Lane already read the project's notes. A rolled-back server rejecting cached `laneAfter` gets one read retry without that argument; save mutations are not replayed. History reads leave both local read positions unchanged. Own-Lane notes are excluded before filling delivery pages. A failed predecessor-advice read retains the stored value only for an unchanged source pair, avoiding repeated conflict wakes without carrying advice to new heads.
 
 Capsule-aware CLI and browser readers resolve selected terminal observations,
 status, attempts, Candidate and finish-input history through a server action. The

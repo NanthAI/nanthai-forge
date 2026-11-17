@@ -12,7 +12,9 @@ import { agentBoundary } from './agent-weight.mjs';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const dist = join(root, 'dist');
 const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-const BUNDLED = /^(zod|ignore|convex|@noble\/|@lezer\/)/;
+// Keep secret-only curves external and behind the secret/run dynamic entry. Sharing their
+// SHA-512 implementation with the ordinary SHA-256 bundle would eagerly load crypto there.
+const BUNDLED = /^(zod|ignore|convex|@noble\/hashes(?:\/|$)|@lezer\/)/;
 const external = Object.keys(manifest.dependencies).filter(name => !BUNDLED.test(name));
 const sibling = id => {
   const path = resolve(id.split('?')[0]);

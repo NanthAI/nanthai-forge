@@ -7,6 +7,7 @@ import { boardDeliverySchema } from './hosted-board.js';
 import { parseHostedResponse } from './hosted-response.js';
 import { stackHintSchema } from './hosted-stack-restack.js';
 import { exactConflictsSchema } from './hosted-conflict-notice.js';
+import { readBoardCompatible } from './board-local.js';
 
 const advice = z.object({
   behindMain: z.object({
@@ -53,17 +54,16 @@ export async function readHostedOverlapAdvice(
   scope?: string[],
 ) {
   try {
-    return parseHostedResponse(
-      advice,
-      await transport.query('projectHostedOverlaps:read', {
+    const read = (cursor = board) =>
+      transport.query('projectHostedOverlaps:read', {
         laneId,
         ...(paths ? { paths: true } : {}),
         ...(items ? { items } : {}),
         ...(presence ? { presence } : {}),
-        ...(board ? { board } : {}),
+        ...(cursor ? { board: cursor } : {}),
         ...(scope?.length ? { scope } : {}),
-      }),
-    );
+      });
+    return parseHostedResponse(advice, board ? await readBoardCompatible(board, read) : await read());
   } catch (error) {
     const safe = hostedActionError(error, 'overlap observation');
     if (['PROJECT_UNAVAILABLE', 'AUTH_REQUIRED', 'FORBIDDEN', 'SOURCE_AUTHORITY_CHANGED'].includes(safe.code))

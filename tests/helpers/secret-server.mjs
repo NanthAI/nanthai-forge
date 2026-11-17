@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { serialize, deserialize } from 'node:v8';
+const clone = value => deserialize(serialize(value));
 /** Scriptable transport for the future sealed provider. It runs no repository code,
  * uses synthetic records, and retains requests/replies for storage-boundary guards. */
 export class SecretTestServer {
@@ -17,26 +19,26 @@ export class SecretTestServer {
     });
   }
   async query(id, input = {}) {
-    const reply = this.rewrite(structuredClone(this.rows.get(id)), { id, input });
-    this.calls.push(structuredClone({ kind: 'query', id, input, reply }));
+    const reply = this.rewrite(clone(this.rows.get(id)), { id, input });
+    this.calls.push(clone({ kind: 'query', id, input, reply }));
     return reply;
   }
   async mutation(id, input, expectedVersion) {
     const current = this.rows.get(id);
     const accepted = current?.version === expectedVersion;
-    this.calls.push(structuredClone({ kind: 'mutation', id, input, expectedVersion, accepted }));
-    if (accepted) this.rows.set(id, structuredClone(input));
+    this.calls.push(clone({ kind: 'mutation', id, input, expectedVersion, accepted }));
+    if (accepted) this.rows.set(id, clone(input));
     return { accepted };
   }
   dump() {
-    return structuredClone({ rows: [...this.rows], calls: this.calls });
+    return clone({ rows: [...this.rows], calls: this.calls });
   }
 }
 
 /** All negative verification cases must assert both a named error and unchanged trust.
  * The real verifier is deliberately supplied only after the encryption gate is met. */
 export async function assertSecretReplyRefused(assert, { verify, server, request, pin, code }) {
-  const before = structuredClone(pin);
+  const before = clone(pin);
   const reply = await server.query('set', request);
   await assert.rejects(verify(reply, pin, request), error => error.code === code);
   assert.deepEqual(pin, before);

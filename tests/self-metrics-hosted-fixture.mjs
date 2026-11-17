@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { equalConvexValue } from './convex-value-equality.mjs';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 import { checkArgs, checkDocument } from './convex-args.mjs';
@@ -101,7 +102,7 @@ export function fixture() {
             const bounds = {
               eq(key, value) {
                 assert.equal(key, [...spec.fields, '_creationTime', '_id'][equality++]);
-                predicates.push(row => field(row, key) === value);
+                predicates.push(row => equalConvexValue(field(row, key), value));
                 return bounds;
               },
               gte(key, value) {

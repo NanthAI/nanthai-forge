@@ -8,6 +8,7 @@ import { ownerBoundaryFindings } from '../scripts/check-owner-boundary.mjs';
 // decisions and metrics retain device access. Existing person gates remain in their own handlers.
 const allowed = {
   accountProjects: ['list'], // Read-only: the person's own and member projects with role; grants no authority.
+  sealedSecrets: ['write'], // Owner unrestricted stable device; readers enforce signed-roster authority.
   agentGuidance: ['setMaintainer'],
   backupTransfer: ['prepare'],
   clientErrors: ['recent'],

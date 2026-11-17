@@ -19,6 +19,10 @@ export const teachingByCode: Record<string, Entry> = {
   COMPOSITION_CONFLICT: { learn: 'conflict', next: `nforge agent <root> sync '<lane>'` },
   BAD_ARGUMENT: { learn: 'arguments', next: '<command> --help' },
   SECRETS_ENV_EXAMPLE_NOT_FILE: { learn: 'arguments', next: 'nforge run --help' },
+  SECRETS_PIN_LOST: { learn: 'auth', next: 'nforge secret repin' },
+  SECRETS_PIN_BUSY: { learn: 'retry', next: '<replay>' },
+  SECRETS_WRITE_UNKNOWN: { learn: 'retry', next: 'nforge secret list' },
+  SECRETS_JOURNAL_FULL: { learn: 'retry', next: 'nforge secret list' },
   LANDING_STALLED: { learn: 'queue', next: `nforge agent <root> queue '{}'` },
   HOSTED_ACTION_UNSUPPORTED: { learn: 'hosted', next: 'nforge agent <root> help' },
   WORK_STALE: { learn: 'retry', next: '<replay>' },
@@ -62,6 +66,7 @@ export const teachingByCode: Record<string, Entry> = {
 
 /** Every other public code learns from its family. Order matters: the first match wins. */
 export const teachingFamilies: readonly (readonly [RegExp, string])[] = [
+  [/^SECRETS_/, 'auth'],
   [/^SYSTEM_|^(DISK|CWD|UNSAFE|FILESYSTEM|PROCESS|TEST_REAL|FORGE_ROOT|TOOLCHAIN|DEPENDENCIES)_/, 'system'],
   [/^AUTH_|^(ACCOUNT|SECRET|PROJECT_OWNER|AGENT_SCOPE|AGENT_TOOL)_/, 'auth'],
   [

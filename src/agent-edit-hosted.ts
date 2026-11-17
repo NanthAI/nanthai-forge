@@ -7,6 +7,7 @@ import {
   boardEnvelope,
   boardNoticeLine,
   boardReadPosition,
+  readBoardCompatible,
   readBoardServerFeatures,
   type BoardNote,
 } from './board-local.js';
@@ -55,12 +56,15 @@ export async function readHostedEditPeers(
     client.setAuth(token);
     query = (name, args) => client.query(makeFunctionReference<'query'>(name), args);
   }
-  const raw = await query('projectHostedOverlaps:read', {
-    projectId: target.project,
-    laneId: target.laneId,
-    path: target.path,
-    board: { ...boardReadPosition(target.root, target.laneId, features), ...(claim ? { claim: true } : {}) },
-  });
+  const send = query;
+  const raw = await readBoardCompatible(boardReadPosition(target.root, target.laneId, features), cursor =>
+    send('projectHostedOverlaps:read', {
+      projectId: target.project,
+      laneId: target.laneId,
+      path: target.path,
+      board: { ...cursor, ...(claim ? { claim: true } : {}) },
+    }),
+  );
   const value = typeof raw === 'string' ? JSON.parse(raw) : raw;
   return {
     status: 'allowed',

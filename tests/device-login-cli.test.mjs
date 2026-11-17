@@ -16,8 +16,18 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
     startName = '',
     renamed,
     stableProtocol = false;
-  const token = 'synthetic-forge-issued-token',
+  // The HTTP fixture issues claim-shaped tokens; signature checks remain the server's job.
+  const tokenFor = signIn =>
+    `header.${Buffer.from(
+      JSON.stringify({
+        sub: 'synthetic-owner',
+        forgeCredential: 'synthetic-device',
+        forgeSignIn: signIn,
+      }),
+    ).toString('base64url')}.synthetic-signature`;
+  const token = tokenFor('synthetic-signin'),
     envToken = 'synthetic-ci-override';
+  let renewalToken;
   const server = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
@@ -44,10 +54,11 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
         }),
       );
     } else if (request.url === '/auth/device/renew') {
+      renewalToken = tokenFor(input.operationId);
       response.end(
         JSON.stringify({
           status: 'approved',
-          token,
+          token: renewalToken,
           expiresAt: Date.now() + 60000,
           signInId: input.operationId,
         }),
@@ -202,7 +213,8 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
   const logout = await run(['logout', deployment], envToken);
   assert.equal(logout.code, 0);
   assert.equal(revoked, true);
-  assert.equal(seenAuth, `Bearer ${token}`);
+  assert.equal(typeof renewalToken, 'string');
+  assert.equal(seenAuth, `Bearer ${renewalToken}`);
   const empty = await run(['auth', 'status', deployment]);
   assert.equal(empty.code, 1);
   assert.equal(JSON.parse(empty.stdout).authenticated, false);

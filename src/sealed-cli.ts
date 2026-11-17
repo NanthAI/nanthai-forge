@@ -1,0 +1,193 @@
+// SPDX-License-Identifier: Apache-2.0
+import { resolve } from 'node:path';
+import { AGENT_CLIENTS, nearestAgentProcess } from './agent-session.js';
+import { hostedAgentAddress } from './hosted-agent-address.js';
+import { resolveAuthToken } from './auth-store.js';
+import { secretRunRoot } from './secret-run-cli.js';
+import { invariant, ForgeError } from './errors.js';
+import { localSealedIdentity } from './sealed-identity.js';
+import { SealedClient } from './sealed-client.js';
+import { hostedSealedTransport, sealedRead } from './sealed-transport.js';
+import { safeSecretName } from './sealed-display.js';
+import { checkSecretWriteName } from './secret-names.js';
+
+export const sealedUsage =
+  'nforge secret set NAME [--file] [--root ROOT] [--operation-id UUID]\nnforge secret list [--root ROOT]\nnforge secret rm NAME [--root ROOT] [--operation-id UUID]\nnforge secret repin [--root ROOT]\nnforge secret resolve --operation-id UUID [--root ROOT]';
+export function sealedAgent() {
+  const source = process.env;
+  return (
+    !process.stdin.isTTY ||
+    Boolean(
+      source.FORGE_AGENT_SESSION ||
+      source.FORGE_AGENT ||
+      source.CLAUDECODE ||
+      AGENT_CLIENTS.some(c => c.sessionVariable && source[c.sessionVariable]) ||
+      nearestAgentProcess(),
+    )
+  );
+}
+export async function sealedClientForRoot(root: string, agent = sealedAgent()) {
+  const address = hostedAgentAddress(root, {});
+  invariant(address, 'PROJECT_UNAVAILABLE', 'Use a hosted Forge project or Lane.');
+  const token = resolveAuthToken(address.url);
+  invariant(token, 'AUTH_REQUIRED', 'Run nforge login.');
+  const identity = await localSealedIdentity(address.url, token, root);
+  const client = new SealedClient(
+    address.projectId,
+    identity.account,
+    identity.keys,
+    identity.pins,
+    hostedSealedTransport(address.url, address.projectId, token),
+    agent,
+    line => process.stderr.write(`${line}\n`),
+  );
+  return client;
+}
+async function readValue(): Promise<Buffer> {
+  if (!process.stdin.isTTY) {
+    const parts: Buffer[] = [];
+    let length = 0;
+    try {
+      for await (const part of process.stdin) {
+        const bytes = Buffer.from(part);
+        length += bytes.length;
+        parts.push(bytes);
+        invariant(length <= 65536, 'SECRETS_FORMAT_REFUSED', 'Value exceeds the format size.');
+      }
+      return Buffer.concat(parts);
+    } finally {
+      for (const part of parts) part.fill(0);
+    }
+  }
+  process.stderr.write('Value (hidden): ');
+  return new Promise((done, reject) => {
+    const parts: Buffer[] = [];
+    let length = 0;
+    const finish = (error?: Error) => {
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      process.stdin.off('data', data);
+      process.stderr.write('\n');
+      const value = Buffer.concat(parts);
+      for (const part of parts) part.fill(0);
+      if (error) {
+        value.fill(0);
+        reject(error);
+      } else done(value);
+    };
+    const data = (chunk: Buffer) => {
+      for (const byte of chunk) {
+        if (byte === 3) {
+          finish(new ForgeError('CANCELLED', 'Secret entry cancelled.'));
+          return;
+        }
+        if (byte === 13 || byte === 10) {
+          finish();
+          return;
+        }
+        if (byte === 127 || byte === 8) {
+          parts.pop()?.fill(0);
+          length = Math.max(0, length - 1);
+          continue;
+        }
+        parts.push(Buffer.from([byte]));
+        length++;
+        if (length > 65536) {
+          finish(new ForgeError('SECRETS_FORMAT_REFUSED', 'Value exceeds the format size.'));
+          return;
+        }
+      }
+    };
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on('data', data);
+  });
+}
+async function confirmRepin(summary: string) {
+  process.stderr.write(`${summary} [y/N] `);
+  const { createInterface } = await import('node:readline/promises');
+  const line = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    return /^(y|yes)$/i.test((await line.question('')).trim());
+  } finally {
+    line.close();
+  }
+}
+export async function sealedCli(args: string[]) {
+  if (!args.length || args.includes('--help') || args.includes('-h')) {
+    process.stdout.write(
+      `${sealedUsage}\nValues come from a hidden prompt or stdin, never an argument. Slice 1 supports the owner's Development device.\n`,
+    );
+    return;
+  }
+  const command = args.shift();
+  invariant(['set', 'list', 'rm', 'repin', 'resolve'].includes(command!), 'BAD_ARGUMENT', sealedUsage);
+  const name = ['set', 'rm'].includes(command!) ? args.shift() : undefined;
+  let root = '.',
+    file = false,
+    operationId: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--file' && command === 'set') file = true;
+    else if (arg === '--root' && args[i + 1]) root = args[++i]!;
+    else if (arg === '--operation-id' && args[i + 1]) operationId = args[++i];
+    else
+      throw new ForgeError(
+        command === 'set' ? 'SECRET_IN_ARGUMENT' : 'BAD_ARGUMENT',
+        'Use the documented options; secret values never belong in arguments.',
+      );
+  }
+  const agent = sealedAgent();
+  if (name) checkSecretWriteName(name, { set: 'development', agent, writeLine: () => {} });
+  if (command === 'set' || command === 'rm') invariant(name, 'BAD_ARGUMENT', sealedUsage);
+  const client = await sealedClientForRoot(secretRunRoot(resolve(root)), agent);
+  try {
+    if (command === 'set' || command === 'rm') {
+      const value = command === 'set' ? await readValue() : null;
+      try {
+        const receipt = await client.write(name!, value, { file, ...(operationId ? { operationId } : {}) });
+        process.stdout.write(
+          `${receipt.replay ? 'Confirmed original operation for' : command === 'rm' ? 'Removed' : 'Set'} ${name} in Development. Operation ${receipt.operationId}.\n`,
+        );
+      } finally {
+        value?.fill(0);
+      }
+    } else if (command === 'resolve') {
+      invariant(operationId, 'BAD_ARGUMENT', 'Use nforge secret resolve --operation-id UUID.');
+      const result = await client.resolve(operationId, agent ? undefined : confirmRepin);
+      process.stdout.write(
+        `Operation ${operationId}: ${result.resolved}. Use a new operation for any new change.\n`,
+      );
+    } else if (command === 'list') {
+      const result = await client.read();
+      if (!result) {
+        process.stdout.write('Development is not set up. The owner runs nforge secret set NAME.\n');
+        return;
+      }
+      try {
+        for (const n of result.pin.head.names)
+          if (n.kind !== 3)
+            process.stdout.write(
+              `${safeSecretName(n.name)}\t${n.kind === 1 ? 'env' : 'file'}\tv${n.valueVersion}\n`,
+            );
+      } finally {
+        result.key?.fill(0);
+        for (const secret of result.secrets) secret.value.fill(0);
+      }
+    } else {
+      invariant(
+        !agent && process.stdin.isTTY,
+        'SECRETS_PIN_LOST',
+        'A person runs nforge secret repin on a terminal.',
+      );
+      const wire = await client.transport.read({ kind: 1 });
+      invariant(wire, 'SECRETS_NOT_SET_UP', 'Development is not set up.');
+      const result = await client.pins.rebuild(sealedRead(wire), client.request(), true, confirmRepin);
+      result.key?.fill(0);
+      for (const secret of result.secrets) secret.value.fill(0);
+      process.stdout.write('Development trust rebuilt from this device’s signed head.\n');
+    }
+  } finally {
+    for (const key of [client.keys.sign, client.keys.enc, client.keys.pinKey]) key.fill(0);
+  }
+}

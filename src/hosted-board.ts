@@ -8,6 +8,7 @@ import { memberDataNotice } from './member-data-notice.js';
 import {
   boardNoticeLine,
   boardReadPosition,
+  readBoardCompatible,
   readBoardProjectCursor,
   readBoardServerFeatures,
   unreadBoardNotes,
@@ -116,17 +117,16 @@ export async function boardHostedSource(
     const position =
       laneId && !id && !command.all ? boardReadPosition(transport.root, laneId, features) : undefined;
     const after = id || command.all ? 0 : laneId ? position!.after : readBoardProjectCursor(transport.root);
-    const result = await transport
-      .query<Record<string, unknown>>('projectBoard:read', {
+    const result = await readBoardCompatible(position ?? { after }, cursor =>
+      transport.query<Record<string, unknown>>('projectBoard:read', {
         ...(id ? { id: id.toLowerCase() } : {}),
         ...(laneId && !id ? { laneId } : {}),
-        after,
-        ...(position?.laneAfter !== undefined ? { laneAfter: position.laneAfter } : {}),
+        ...cursor,
         // Resolved notes are listed only on request, and only a server that knows the flag gets it.
         ...(command.all && !id && features.includes('board-resolve') ? { all: true } : {}),
-      })
-      .catch(unsupported);
-    if (!id && laneId && typeof result.cursor === 'number')
+      }),
+    ).catch(unsupported);
+    if (!id && !command.all && laneId && typeof result.cursor === 'number')
       writeBoardCursor(transport.root, laneId, result.cursor);
     const messages = Array.isArray(result.messages)
       ? result.messages
@@ -136,7 +136,7 @@ export async function boardHostedSource(
     const parsedMessages = messages.map(message => boardMessageSchema.parse(message));
     const shown = id || command.all ? parsedMessages : unreadBoardNotes(transport.root, parsedMessages);
     for (const message of shown)
-      if (message.target === 'project') writeBoardProjectCursor(transport.root, message.at);
+      if (!command.all && message.target === 'project') writeBoardProjectCursor(transport.root, message.at);
     const notices = [...shown, ...(Array.isArray(result.replies) ? result.replies : [])].map(message =>
       boardNoticeLine(boardMessageSchema.parse(message), laneId),
     );

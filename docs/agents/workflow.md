@@ -281,7 +281,11 @@ Issue (`issue:ISSUE_ID`), or to the whole project (`project`).
   authenticated actor and project suppresses project notes already read in another
   Lane; it filters the existing reply without another call. Relevant Lane/Issue
   notes keep their Lane cursor, including notes older than that actor's project cursor.
-  `board {"all":true}` ignores the local cursor and also lists resolved notes.
+  Ordinary pages are oldest-first and continue at the last returned note when more
+  remain. The next `board {}` reaches the rest, including an unread Issue note behind
+  project notes already read in another Lane. `board {"all":true}` ignores the local
+  cursor and lists recent history newest-first, including resolved notes, without
+  changing either local read position.
 - Withdraw a note that no longer applies: `board --resolve {"id":"NOTE_ID","text":"fixed in 0bc2eef8"}`
   (reason optional, one short line). The note's author, or any member with write
   access, may resolve it. A resolved note stops arriving as `board.notices`, stops
@@ -1957,9 +1961,9 @@ keep their batching behavior. Wait replies include `board.cursor` and `board.not
 The CLI remembers the latest 64 conflict identities per Lane separately from the message cursor, so an older two-note page
 cannot redeliver the same conflict on every reconnect. Notes already read in another Lane and
 messages addressed to another Lane cannot interrupt this wait. Live wait delivery reads only the
-directed Lane inbox. Its local wait position is separate from ordinary board delivery: neither a directed-note wake nor a conflict-only wake acknowledges unread project or Issue notes. With server feature `board-lane-after`, ordinary board reads, save advice and first-write hooks send the delivered-directed-note watermark as `laneAfter`. The server applies it only to the Lane inbox before filling the page; project and Issue inboxes retain their ordinary cursor. This reuses the existing indexed reads, so already-delivered Lane notes cannot crowd out an unread project or Issue note. Explicit note/history reads ignore `laneAfter`. Older servers receive no new argument and retain client-side filtering. Project and Issue notes remain on ordinary board reads, so their backlog cannot
+directed Lane inbox. Its local wait position is separate from ordinary board delivery: neither a directed-note wake nor a conflict-only wake acknowledges unread project or Issue notes. With server feature `board-lane-after`, ordinary board reads, save advice and first-write hooks send the delivered-directed-note watermark as `laneAfter`. The server applies it only to the Lane inbox before filling the page; project and Issue inboxes retain their ordinary cursor. This reuses the existing indexed reads, so already-delivered Lane notes cannot crowd out an unread project or Issue note. Explicit note/history reads ignore `laneAfter`. Older servers receive no new argument and retain client-side filtering. If a server rollback leaves a cached feature that the validator now rejects, board reads, hooks and overlap/save advice retry once without `laneAfter`; other errors retain their existing handling. Healthy delivery stays one query; this validator-recovery path uses two queries and never repeats a save mutation. After a rollback, each first-write hook keeps using two queries until the next Lane action refreshes the cached capabilities. Project and Issue notes remain on ordinary board reads, so their backlog cannot
 hide an unread directed note. A new conflict, a directed unread
-note, operation progress or the wait budget remains observable. Retrying the same trial does not wake the Lane twice. A notice generation advances only when its exact source pair, ranges or currently visible early-resolution advice changes. Cleaning up advice hidden by the current policy updates the stored metadata without a new inbox wake. Recording shares the existing queue/policy context across both notice directions. Board-note
+note, operation progress or the wait budget remains observable. Retrying the same trial does not wake the Lane twice. A notice generation advances only when its exact source pair, ranges or currently visible early-resolution advice changes. Cleaning up advice hidden by the current policy updates the stored metadata without a new inbox wake. A failed predecessor read preserves stored advice only while both saved heads are unchanged, avoiding remove/restore wakes for the same source pair. A changed head discards advice for the old pair even when the read fails. Recording shares the existing queue/policy context across both notice directions. Board-note
 switches do not suppress source conflicts. A trial that dies cannot leave a save unpublished.
 Saved-peer conflicts remain advisory: they never hold admission or cancel a landing; main's own
 composition still decides. There is no guarantee that the trial finishes before the save or land

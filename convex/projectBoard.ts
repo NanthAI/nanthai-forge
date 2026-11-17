@@ -346,7 +346,9 @@ export const read = query({
         after: input.after ?? 0,
         ...(!input.all && input.laneAfter !== undefined ? { laneAfter: input.laneAfter } : {}),
         limit,
-        order: 'desc',
+        // Ordinary pages must continue at the last returned note, including when
+        // the client filters project notes already read in another Lane.
+        order: input.all ? 'desc' : 'asc',
         ...(input.all ? { includeResolved: true } : {}),
       });
       return canonicalPayload({ status: 'ok', ...inbox, ...(conflicts.length ? { conflicts } : {}) });
