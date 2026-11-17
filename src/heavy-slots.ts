@@ -158,9 +158,12 @@ export function acquireHeavySlot(
 }
 
 export const HEAVY_HELP = `nforge heavy CMD [ARGS...]
+nforge heavy --no-build CMD [ARGS...]
 nforge heavy --status
 nforge heavy --help | -h
 Run bounded builds and test batches under the machine-wide slot limit.
+Nested commands reuse their live parent slot; project-declared static commands run directly.
+--no-build runs tests against the existing dist/ without rebuilding it (failing-first checks).
 Callers wait first come, first served; a waiting caller prints its queue position and an estimate.
 --status lists the holders and the queue by Lane, command and time, never folders or arguments.
 Run long-lived servers (Vite/dev servers) directly, outside heavy.
@@ -279,12 +282,64 @@ export function nodeTestPathCount(args: string[]): number | null {
   return testing ? paths : null;
 }
 
+/** An inherited holder is a scheduling lease, never source or user authority. */
+function inheritedHeavySlot(directory: string): string | null {
+  try {
+    const inherited = JSON.parse(process.env.FORGE_HEAVY_PARENT ?? 'null');
+    if (
+      !inherited ||
+      inherited.directory !== canonicalRoot(directory) ||
+      !/^[1-9][0-9]*$/.test(inherited.slot)
+    )
+      return null;
+    const slot = join(directory, inherited.slot);
+    const pid = Number(readFileSync(join(slot, 'pid'), 'utf8'));
+    if (pid !== inherited.pid || !holderAlive(slot, pid, true)) return null;
+    return slot;
+  } catch {
+    return null;
+  }
+}
+
+/** Only commands the project already declares static bypass the build/test queue. */
+async function staticHeavyCommand(args: string[], cwd: string): Promise<boolean> {
+  try {
+    // This emitted core sibling loads only for heavy commands. A bundle split here would
+    // also split the shared config code onto unrelated agent commands' startup paths.
+    const { declaredPreflight, FORGE_CONFIG_FILE } = (await import(
+      /* @vite-ignore */ new URL('./project-config.js', import.meta.url).href
+    )) as typeof import('./project-config.js');
+    const text = (name: string) => {
+      try {
+        return readFileSync(join(cwd, name), 'utf8');
+      } catch {
+        return undefined;
+      }
+    };
+    const declared = declaredPreflight('static', text('package.json'), text(FORGE_CONFIG_FILE))?.value;
+    if (!Array.isArray(declared)) return false;
+    const entries: Array<{ script?: string; command?: string[] }> = declared;
+    return entries.some(
+      entry =>
+        JSON.stringify(entry.command) === JSON.stringify(args) ||
+        ((args.length === 3 || (args.length === 4 && ['-s', '--silent'].includes(args[2]!))) &&
+          /^(?:npm|pnpm|yarn|bun)(?:\.cmd)?$/.test(basename(args[0]!)) &&
+          args[1] === 'run' &&
+          entry.script === args.at(-1)),
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** nforge heavy CMD [ARGS...]: run one heavy local command under the machine-wide slot limit. */
 export async function heavyCli(
   args: string[],
   beforeRun?: () => Promise<boolean>,
   beforeLocal?: () => Promise<void>,
 ): Promise<number> {
+  const noBuild = args[0] === '--no-build';
+  if (noBuild) args = args.slice(1);
   if (!args.length || (args.length === 1 && ['--help', '-h'].includes(args[0]!))) {
     await beforeLocal?.();
     process.stdout.write(HEAVY_HELP);
@@ -312,8 +367,9 @@ export async function heavyCli(
     return 0;
   }
   if (beforeRun && !(await beforeRun())) return Number(process.exitCode ?? 0);
+  const inherited = inheritedHeavySlot(heavySlotDirectory());
   const slot =
-    slots === 0
+    slots === 0 || inherited || (await staticHeavyCommand(args, process.cwd()))
       ? null
       : await acquireHeavySlot(
           heavySlotDirectory(),
@@ -333,14 +389,27 @@ export async function heavyCli(
         JSON.stringify({ cwd: process.cwd(), startedAt: Date.now(), command: basename(args[0]!) }),
       );
     // Inside the slot, so builds stay bounded; a fresh dist/ costs one stat pass (friction 6288d0c2).
-    if (nodeTestPathCount(args)) {
+    if (nodeTestPathCount(args) && !noBuild) {
       const built = await ensureCoreBuild(process.cwd());
       if (built !== 0) return built;
       const missing = missingTestPreloads(args, process.cwd());
       if (missing.length) process.stderr.write(preloadNotice(missing));
     }
     return await new Promise<number>((resolve, reject) => {
-      const child = spawn(args[0]!, args.slice(1), { stdio: 'inherit' });
+      const held = slot ?? inherited;
+      const child = spawn(args[0]!, args.slice(1), {
+        stdio: 'inherit',
+        env: {
+          ...process.env,
+          FORGE_HEAVY_PARENT: held
+            ? JSON.stringify({
+                directory: canonicalRoot(heavySlotDirectory()),
+                slot: basename(held),
+                pid: Number(readFileSync(join(held, 'pid'), 'utf8')),
+              })
+            : '',
+        },
+      });
       const forward = (signal: NodeJS.Signals) => () => child.kill(signal);
       const handlers = (['SIGINT', 'SIGTERM', 'SIGHUP'] as const).map(
         signal => [signal, forward(signal)] as const,

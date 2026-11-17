@@ -40,6 +40,7 @@ const item = (fields, i) => ({
 test('the plan read lists live work and counts settled Items of live Initiatives only, from root rows', async t => {
   const s = await setup(t);
   const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
+  await s.ctx.db.patch(generationId, { planRowsVersion: undefined });
   let position = 0;
   const add = async row => {
     for (const entry of indexedRecord('planningItems', row.id, '', position++, row))

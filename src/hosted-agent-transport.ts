@@ -2001,6 +2001,7 @@ export class HostedAgentTransport {
     if (laneId)
       return this.query('projectHostedLanes:head', {
         laneId,
+        ...(this.serverFeatures?.includes('lane-status-state') ? { includeState: true } : {}),
         ...(command.whoami && this.serverFeatures?.includes('lane-holder-v1') ? { includeHolder: true } : {}),
       });
     if (!kind)

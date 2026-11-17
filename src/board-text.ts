@@ -30,7 +30,7 @@ const secretShapes = [
 ];
 const emailShape = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/;
 /** Absolute, home and drive paths name a machine; repository paths are relative. */
-const machinePath = new RegExp(`${boundary}(?:/[A-Za-z0-9._-]|~/|[A-Za-z]:\\\\|file://)`);
+const machinePath = new RegExp(`${boundary}(?:/(?!-/)[A-Za-z0-9._-]|~/|[A-Za-z]:\\\\|file://)`);
 /** Control, line and bidirectional-override characters: one visible line only. */
 const controls = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
 

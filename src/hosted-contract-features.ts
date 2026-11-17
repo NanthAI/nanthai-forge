@@ -164,6 +164,8 @@ export const hostedContractFeatures = [
   /** Backlog batches (65b0e706): projectPlanningBatch:apply runs up to 100 planning writes in one call. Without it
    * the CLI refuses put-planning-item {batch}. */
   'planning-batch',
+  /** Optional current lifecycle state on the existing Lane head read. */
+  'lane-status-state',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

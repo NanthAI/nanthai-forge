@@ -10,7 +10,7 @@ import {
 import { identityContext } from './forgeIdentity';
 import { landingRequestBodies } from './projectLandingRequestBody';
 import { query as baseQuery, internalQuery as baseInternalQuery, type QueryCtx } from './_generated/server';
-import { workRecordWriter } from './projectWorkRecordWriter';
+import { workRecordWriter, finishWorkRecordWrites } from './projectWorkRecordWriter';
 import { finishReadWriter } from './projectFinishReadWriter';
 import { pausedBuilder } from './legacyStorageServer';
 // Preserve context accessors instead of eagerly spreading the context. Retired
@@ -21,8 +21,19 @@ function withFinishReads<B extends typeof baseMutation | typeof baseInternalMuta
       typeof definition === 'function'
         ? definition
         : (definition as { handler: (ctx: MutationCtx, args: unknown) => unknown }).handler;
-    const wrapped = (ctx: MutationCtx, args: unknown) =>
-      handler(workRecordWriter(landingRequestBodies(finishReadWriter(identityContext(ctx)))), args);
+    const wrapped = (ctx: MutationCtx, args: unknown) => {
+      const writer = workRecordWriter(landingRequestBodies(finishReadWriter(identityContext(ctx))));
+      const result = handler(writer, args);
+      const finish = (value: unknown) => {
+        const pending = finishWorkRecordWrites(writer);
+        return pending ? pending.then(() => value) : value;
+      };
+      // Preserve synchronous returns and throws. Async handlers may first touch the
+      // DB after an await, so wait for their result before deciding whether to flush.
+      return result && typeof (result as PromiseLike<unknown>).then === 'function'
+        ? Promise.resolve(result).then(finish)
+        : finish(result);
+    };
     return (base as typeof baseMutation)(
       (typeof definition === 'function' ? wrapped : { ...(definition as object), handler: wrapped }) as never,
     );

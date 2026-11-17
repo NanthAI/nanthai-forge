@@ -9,6 +9,7 @@ import { getFunctionName, type FunctionReference } from 'convex/server';
 import '../../web/src/ds';
 import '../../web/src/app/app.css';
 import type { Id } from '../../convex/_generated/dataModel';
+import { review } from '../fixtures/review-findings.mjs';
 
 const params = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
@@ -56,6 +57,16 @@ const comments = [
     text: 'Checking the download numbers before the answer.',
   },
 ];
+if (params.has('review'))
+  comments.push({
+    id: uuid(15),
+    itemId: ITEM,
+    at: minutes(60 * 24 * 7 + 15),
+    authorLabel: '',
+    ...author('sample-two'),
+    agent: 'keen-impala',
+    text: JSON.stringify(review, null, 2),
+  });
 const reactions = reader
   ? []
   : [

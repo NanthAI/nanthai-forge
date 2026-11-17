@@ -24,8 +24,6 @@
     /* The keys to react and reply stay out of the reading until the pointer or focus reaches the comment. */
     .acts > .btn { opacity: 0; }
     .cmt:hover .acts > .btn, .cmt:focus-within .acts > .btn, .acts > .btn[aria-expanded="true"] { opacity: 1; }
-    .cmt { position: relative; }
-    .acts:not(:has(.react)) { position: absolute; top: var(--s-2); right: var(--gut-head); }
   }
   @media (max-width: 860px) {
     .cmt { padding-inline: var(--gut); }

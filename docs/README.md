@@ -14,7 +14,7 @@ Get a change from an idea to main, with people and agents working together.
 | Your task | Guide |
 | --- | --- |
 | Put work in order | [Plan with Items and Initiatives](guides/plan.md) |
-| Read a change or recover a failed check | [Review and land](guides/review.md) |
+| Read a change, record findings or map pull-request habits | [Review and land](guides/review.md) |
 | Connect a terminal or understand who holds a Lane | [Devices, sign-ins and holders](guides/access.md) |
 | Keep several Lanes moving | [Oversee the work](guides/oversight.md) |
 | Understand account billing | [Account billing](guides/billing.md) |

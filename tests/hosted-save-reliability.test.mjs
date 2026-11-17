@@ -747,3 +747,24 @@ test('negotiated save timing rides the final save call and caches only the compl
   }
   assert.deepEqual(counts[1], counts[0], 'timing introduces no Convex call');
 });
+
+test('incident 5c26c2ed: a refused sync on a completed Lane offers reopen instead of a save that cannot run', async t => {
+  const s = await fixture(t);
+  await s.changeLane(s.laneId, {
+    state: 'completed',
+    head: digest('later accepted source'),
+    sourceVersion: 1,
+    lifecycleVersion: 1,
+  });
+  const command = { ontoMain: true, apply: true };
+  const before = readFileSync(join(s.root, 'a.txt'), 'utf8');
+  await assert.rejects(executeHostedAgent(s.session('sync', command), 'sync', command), error => {
+    assert.equal(error.code, 'WORK_STALE');
+    assert.match(error.message, /Lane is completed.*local edits stay/);
+    assert.equal(error.recovery.next.action, 'reopen');
+    assert.match(error.recovery.command, /start --reopen/);
+    return true;
+  });
+  assert.equal(s.selects.length, 1, 'same refused-path metadata read');
+  assert.equal(readFileSync(join(s.root, 'a.txt'), 'utf8'), before);
+});

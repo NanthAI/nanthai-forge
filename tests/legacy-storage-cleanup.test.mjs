@@ -12,6 +12,8 @@ import { boundedPages, deletionPlan } from '../scripts/lib/legacy-storage-cleanu
 import { FLAG_NAMES } from '../scripts/lib/legacy-storage-window.mjs';
 const pause = await import(moduleUrl('../convex/legacyStoragePause.ts'));
 const server = await import(moduleUrl('../convex/server.ts'));
+const generatedServer = await import('../convex/_generated/server.js');
+const { pausedBuilder } = await import(moduleUrl('../convex/legacyStorageServer.ts'));
 function enable() {
   const now = Date.now();
   process.env.CONVEX_CLOUD_URL = 'https://fixture.convex.cloud';
@@ -22,7 +24,7 @@ function enable() {
     expiresAt: now + 1800000,
   });
 }
-test('absent pause preserves synchronous returns, exact throws and promise identity without context or DB access', async () => {
+test('absent pause preserves synchronous returns and exact failures without context access; the pause boundary preserves promise identity', async () => {
   const previous = process.env.FORGE_LEGACY_STORAGE_PAUSE;
   let accesses = 0;
   const ctx = new Proxy(
@@ -36,7 +38,14 @@ test('absent pause preserves synchronous returns, exact throws and promise ident
   );
   try {
     delete process.env.FORGE_LEGACY_STORAGE_PAUSE;
-    for (const builder of [server.mutation, server.internalMutation]) {
+    // Promise identity belongs to the pause boundary. The common server also
+    // waits for transactional projection writes after an async handler returns.
+    for (const [builder, identity] of [
+      [pausedBuilder(generatedServer.mutation), true],
+      [pausedBuilder(generatedServer.internalMutation), true],
+      [server.mutation, false],
+      [server.internalMutation, false],
+    ]) {
       for (const objectForm of [false, true]) {
         const register = handler => builder(objectForm ? { args: {}, handler } : handler);
         const args = {};
@@ -62,10 +71,12 @@ test('absent pause preserves synchronous returns, exact throws and promise ident
         events.push('caught');
         assert.deepEqual(events.slice(-2), ['throw', 'caught']);
         const promise = Promise.resolve(value);
-        assert.equal(register(() => promise)._handler(ctx, args), promise);
+        const fulfilled = register(() => promise)._handler(ctx, args);
+        if (identity) assert.equal(fulfilled, promise);
+        assert.equal(await fulfilled, value);
         const rejected = Promise.reject(error);
         const result = register(() => rejected)._handler(ctx, args);
-        assert.equal(result, rejected);
+        if (identity) assert.equal(result, rejected);
         await assert.rejects(result, actual => actual === error);
       }
     }

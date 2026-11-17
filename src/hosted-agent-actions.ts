@@ -525,11 +525,6 @@ export async function executeHostedAgent(
   }
   if (action === 'start') {
     const command = hostedAgentCommandSchemas.start.parse(input);
-    invariant(
-      !command.planningItemId || (!command.intentId && !command.outcome),
-      'BAD_ARGUMENT',
-      'Start from a planning Issue, an Intent, or a new outcome, not a mix.',
-    );
     if (command.planningItemId && !session.capabilities.actions.includes('planning'))
       throw unadvertisedActionError('planning');
     const planned = command.planningItemId

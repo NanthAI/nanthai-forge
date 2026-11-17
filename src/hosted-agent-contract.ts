@@ -201,7 +201,11 @@ export const hostedAgentCommandSchemas = {
         .strict()
         .optional(),
     })
-    .strict(),
+    .strict()
+    .refine(
+      command => !command.planningItemId || (!command.intentId && !command.outcome),
+      'planningItemId starts from its Issue; omit intentId and outcome.',
+    ),
   open: z
     .object({
       laneId: uuid,
@@ -274,7 +278,12 @@ export const hostedAgentCommandSchemas = {
       after: uuid.nullable().default(null),
       accept: z.boolean().optional(),
       keepOpen: z.boolean().optional(),
-      closes: z.boolean().optional(),
+      closes: z
+        .boolean()
+        .optional()
+        .describe(
+          'Boolean: true closes this Lane’s Intent under project policy; false keeps it open. It is not a list of Issue ids.',
+        ),
       priority: z.enum(['urgent', 'normal']).optional(),
       /** Land a Lane whose saved head changes nothing against its base (otherwise refused). */
       allowEmpty: z.boolean().optional(),
@@ -376,7 +385,12 @@ export const hostedAgentCommandSchemas = {
       runId: uuid.optional(),
       version: z.number().int().nonnegative().optional(),
       /** With runId: counts, failed/flaky file names, timings and selection scope, under 8 KB, not the 80 KB run. */
-      summary: z.boolean().optional(),
+      summary: z
+        .boolean()
+        .optional()
+        .describe(
+          'Requires runId; returns the selected check run summary. For a Lane summary pass laneId without summary.',
+        ),
       reports: z
         .union([
           z.literal('failed'),

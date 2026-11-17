@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -10,8 +11,9 @@ import { chromium } from 'playwright';
 const root = fileURLToPath(new URL('../', import.meta.url));
 test('Now recovery D/D2/D3 works in both themes with fakes, zero idle calls, retry pins and viewer authority', async t => {
   if (!existsSync(chromium.executablePath())) return t.skip('Playwright Chromium is not installed.');
-  const output = join(root, '.forge/b33a/browser'),
-    screenshots = join(root, '.forge/b33a/screenshots');
+  const temporary = temporaryDirectory(t, 'forge-now-recovery-browser-');
+  const output = join(temporary, 'browser'),
+    screenshots = join(temporary, 'screenshots');
   mkdirSync(screenshots, { recursive: true });
   await build({
     root: join(root, 'tests/fixtures/now-recovery'),

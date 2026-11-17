@@ -152,7 +152,7 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
 
     await t.test('axe and widths: both themes, desk and phone', async t => {
       for (const viewport of [DESK, PHONE])
-        for (const query of ['', 'viewer=reader']) {
+        for (const query of ['', 'viewer=reader', 'review=1']) {
           const page = await open(t, viewport, query);
           await page.addScriptTag({ path: axePath });
           for (const theme of ['dark', 'light']) {
@@ -180,6 +180,23 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
             });
             assert.deepEqual(violations, [], `axe at ${viewport.width} ${query} ${theme}`);
             if (!query) await shot(page, `discussion-${viewport.width}-${theme}`);
+            if (query === 'review=1') {
+              const section = page.locator('section[aria-label="Comments"]');
+              assert.equal(await section.locator('article').count(), 5);
+              assert.match(await section.textContent(), /Review · 2 findings/);
+              assert.match(await section.textContent(), /R2 · nit · declined/);
+              const record = section.getByText('Exact review record', { exact: true });
+              await record.focus();
+              const article = record.locator('xpath=ancestor::article');
+              const by = await article.locator('.by').boundingBox();
+              const actions = await article.locator('.acts').boundingBox();
+              assert.ok(actions.y >= by.y + by.height, 'keyboard-visible actions never cover the writer');
+              await page.keyboard.press('Enter');
+              assert.equal(await section.locator('details').getAttribute('open'), '');
+              assert.match(await section.locator('details pre').textContent(), /"head": "b{64}"/);
+              await page.keyboard.press('Enter');
+              await shot(page, `review-${viewport.width}-${theme}`);
+            }
           }
         }
     });

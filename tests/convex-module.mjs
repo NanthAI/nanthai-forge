@@ -48,8 +48,8 @@ function resolveSpecifier(name, file) {
   let resolved = name.startsWith('.') ? new URL(name, file).href : import.meta.resolve(name);
   if (resolved.includes('/src/') && !resolved.includes('/web/src/')) {
     resolved = resolved.replace('/src/', '/dist/');
-    if (!resolved.endsWith('.js')) resolved += '.js';
-  } else if (name.startsWith('.') && !resolved.endsWith('.js')) {
+    if (!/\.[cm]?js$/.test(resolved)) resolved += '.js';
+  } else if (name.startsWith('.') && !/\.[cm]?js$/.test(resolved)) {
     // A directory import (`'../ds'`) resolves to its index module, as Vite does.
     for (const ext of ['.ts', '.tsx', '/index.ts', '/index.tsx'])
       if (existsSync(new URL(resolved + ext))) return { nested: new URL(resolved + ext) };

@@ -189,3 +189,19 @@ console.log(JSON.stringify({ result: 'synthetic' }));`;
     'FORGE_FUTURE_DIAGNOSTIC 2',
   ]);
 });
+
+for (const extension of ['mjs', 'cjs'])
+  test(`incident B0B2A48F: relative .${extension} imports retain their executable extension`, async t => {
+    const { cache, src, top } = workspace(t);
+    writeFileSync(
+      join(src, `helper.${extension}`),
+      extension === 'mjs' ? 'export const leaf = 42;\n' : 'exports.leaf = 42;\n',
+    );
+    for (const source of [
+      `import { leaf } from './helper.${extension}'; export const top: number = leaf;\n`,
+      `export const top: number = (await import('./helper.${extension}')).leaf;\n`,
+    ]) {
+      writeFileSync(join(src, 'top.ts'), source);
+      assert.equal((await load(cache, top)).top, 42);
+    }
+  });

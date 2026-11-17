@@ -21,7 +21,11 @@ Agent `status`, `planning`, `save` and `land --save` reuse the existing
 call/fetch, or land's detached-submitter hand-off. This excludes release freshness
 and remote execution; installed freshness is exercised by package smoke's separate
 synthetic release service. No command contacts hosted services. Module counts
-include only file modules, not Node builtins. The MCP fixture boots the installed
+include only file modules, not Node builtins. Failed guards also list added module
+and chunk names against the recorded inventory. Paths are relative and chunk
+content hashes are normalized, so a rebuilt chunk is not reported as a new one.
+An older baseline without an inventory prints the loaded graph and labels the
+missing reference; `--record` includes inventories for later comparisons. The MCP fixture boots the installed
 ESM SDK server and real hosted agent registration, connects an in-memory client
 and calls `tools/list`; its startup includes that synthetic client. UTF-8 bytes
 are guarded here; per-harness token/schema budgets remain owned by Issue

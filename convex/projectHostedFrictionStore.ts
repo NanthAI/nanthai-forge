@@ -57,18 +57,23 @@ export async function resolveFriction(
 ) {
   const isCapture = (row: { value: string }) => JSON.parse(row.value).kind === 'capture';
   if (isPlanningUuid(ref)) {
-    const row = await frictionRow(ctx, projectId, ref);
+    const exact = await frictionRow(ctx, projectId, ref);
+    const row =
+      exact ?? (ref !== ref.toUpperCase() ? await frictionRow(ctx, projectId, ref.toUpperCase()) : null);
     invariant(row && isCapture(row), 'NOT_FOUND', `Friction ${ref} not found.`);
     return row;
   }
-  const rows = (
-    await ctx.db
-      .query('projectHostedFriction')
-      .withIndex('by_project_and_id', q =>
-        q.eq('projectId', projectId).gte('id', ref).lt('id', `${ref}\uffff`),
-      )
-      .take(planningIdMaxCandidates + 1)
-  ).filter(isCapture);
+  const readPrefix = async (key: string) =>
+    (
+      await ctx.db
+        .query('projectHostedFriction')
+        .withIndex('by_project_and_id', q =>
+          q.eq('projectId', projectId).gte('id', key).lt('id', `${key}\uffff`),
+        )
+        .take(planningIdMaxCandidates + 1)
+    ).filter(isCapture);
+  const exact = await readPrefix(ref);
+  const rows = exact.length || ref === ref.toUpperCase() ? exact : await readPrefix(ref.toUpperCase());
   invariant(rows.length > 0, 'NOT_FOUND', `No friction id starts with ${ref}.`);
   invariant(
     rows.length === 1,

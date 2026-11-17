@@ -34,7 +34,7 @@
       "unit": "bytes",
       "max": 1048576,
       "source": "Issue 6fbba986: tests/sync-resolve-cost-guard.test.mjs executes legacy recipe conflict sync then real save and resolve jobs. The former 4 MiB writer uploaded about 9.4 MB for the recovery pair.",
-      "reason": "The approved 1–8 MiB byte-range writer reuses verified spans, with unchanged State identity, call windows, source envelopes and zero idle work. New bodies fit one chunk plus bounded metadata.",
+      "reason": "The approved 1\u20138 MiB byte-range writer reuses verified spans, with unchanged State identity, call windows, source envelopes and zero idle work. New bodies fit one chunk plus bounded metadata.",
       "issue": "6fbba986"
     },
     {
@@ -1111,11 +1111,11 @@
       "measuredBy": "planning-fixture",
       "metric": "planningPrimaryReadBytes",
       "unit": "bytes",
-      "value": 14934,
+      "value": 16079,
       "floor": 0,
-      "source": "tests/hosted-contention.test.mjs primary Work I/O fixture, hosted run 830b45f1 on 2026-11-10: maximum over note, Intent, status, Issue put/comment and hosted Intent. Before migration telemetry retirement: 23859 B; after: 14934 B. Same commands already retain primary provenance on both fixture paths; the baseline leaves an unrelated writer in migration. Normalized fixture bytes, not provider billing.",
+      "source": "tests/hosted-contention.test.mjs primary Work I/O fixture: projection-aware maximum 16,079 B, including compact Plan page maintenance; previous canonical-only footprint 14,934 B. The writer reuses already-read search roots. Normalized fixture bytes, not provider billing. Item b7a0dff1.",
       "issue": "0695ab24",
-      "reason": "Ratchets removal of source fingerprints, target pointers and migration reader hashes from completed primary writes. Per-command paired assertions also require fewer documents and bytes; ordinary tab reads and idle calls do not rise."
+      "reason": "Preserves primary Work provenance without retired migration comparisons, and includes the same-transaction compact Plan pages. The additional 1,145 B per largest command costs a modeled $0.000229 per 1,000 writes at $0.20/GB; the 324-root one-Plan-tab fixture saves about $0.0779 per 1,000 planning writes after all projection I/O. Calls, bodies and idle behavior are unchanged."
     },
     {
       "id": "planning-primary-write-bytes",

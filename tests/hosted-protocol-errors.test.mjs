@@ -120,3 +120,25 @@ test('an older-schema CLI reads a start reply with one extra field (top level an
   assert.throws(() => parseHostedResponse(old, missing), z.ZodError);
   assert.throws(() => parseHostedResponse(old, { ...startReply, lane: 'x' }), z.ZodError);
 });
+
+test('mixed planned-start variants fail before retaining a start operation or making a hosted call', async t => {
+  const { agentFixture } = await import('./hosted-agent-fixture.mjs');
+  const { validateHostedCliCommand } = await import('../dist/hosted-cli-validation.js');
+  const { hostedAgentHelpEntries } = await import('../dist/hosted-agent-help.js');
+  const s = agentFixture(t);
+  const input = { planningItemId: 'ad80e037-35a3-44c5-9ba2-025519a2c45f', outcome: 'Mixed' };
+  assert.throws(
+    () => validateHostedCliCommand(s.root, 'start', input),
+    error => error.code === 'BAD_ARGUMENT',
+  );
+  await assert.rejects(s.transport().dispatch('start', input), error => error.code === 'BAD_ARGUMENT');
+  assert.equal(s.calls.length, 0);
+  assert.match(
+    hostedAgentHelpEntries.find(entry => entry.action === 'status').schema.properties.summary.description,
+    /Requires runId/,
+  );
+  assert.match(
+    hostedAgentHelpEntries.find(entry => entry.action === 'finish').schema.properties.closes.description,
+    /not a list/,
+  );
+});

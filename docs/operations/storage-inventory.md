@@ -102,3 +102,12 @@ creation time (normalized to zero) and document id. These are reproducible fixtu
 measurements, excluding system/search indexes and provider B-tree overhead; they
 are not billed physical index storage. Live row counts come from the read-only
 inventory above, and physical reclamation needs provider storage evidence.
+
+## Plan projection storage budget
+
+The current partition's `_workStorePlan` collection shares `projectWorkDataRecords`; it is disposable metadata,
+excluded from source-return snapshots, and covered by the existing generation/project purge inventory. There is no
+new table or retention rule. [Plan budgets](../../tests/fixtures/plan-read-budget.json) cap the whole fixture's retained
+page count and JSON bytes (32 pages/40 KB for 324 roots, 64 pages/80 KB for 648), independently of the read-byte budget. Both sizes cover dense positions and sparse positions shared through a generation alias.
+`tests/plan-read-cost.test.mjs` checks both budgets and one final page write per transaction; these figures exclude
+provider index/system storage. Canonical Item bodies, comments and history are not included in the projection.

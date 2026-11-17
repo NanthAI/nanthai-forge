@@ -36,8 +36,13 @@ async function laneRecord(
   return { lane: hostedLaneSchema.parse(JSON.parse(row.value)), project };
 }
 export const head = query({
-  args: { ...identity, includeHolder: v.optional(v.literal(true)) },
+  args: {
+    ...identity,
+    includeHolder: v.optional(v.literal(true)),
+    includeState: v.optional(v.literal(true)),
+  },
   returns: v.object({
+    state: v.optional(v.union(v.literal('active'), v.literal('completed'), v.literal('abandoned'))),
     head: v.string(),
     version: v.number(),
     sourceVersion: v.number(),
@@ -87,6 +92,7 @@ export const head = query({
           .unique()
       )?.landed;
       return {
+        ...(input.includeState ? { state: lane.state } : {}),
         ...(lane.holder && holderVisible
           ? {
               holder: {

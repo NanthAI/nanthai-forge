@@ -105,3 +105,34 @@ test('nforge heavy node --test builds a fresh Lane without dist/ and then runs t
   assert.equal(warm.status, 0, warm.stderr);
   assert.doesNotMatch(warm.stderr, /build:core/);
 });
+
+test('incident 2659b45c: --no-build runs a new failing-first test against the existing main build', t => {
+  const root = checkout(t, 'node -e "process.exit(93)"');
+  built(root, 1);
+  writeFileSync(join(root, 'dist', 'before.cjs'), 'exports.value = "main";\n');
+  writeFileSync(
+    join(root, 'sample.test.mjs'),
+    `import test from 'node:test';import assert from 'node:assert/strict';import old from './dist/before.cjs';test('main behaviour is still present',()=>assert.equal(old.value,'main'));\n`,
+  );
+  const slots = mkdtempSync(join(tmpdir(), 'forge-heavy-baseline-'));
+  t.after(() => rmSync(slots, { recursive: true, force: true }));
+  const result = spawnSync(
+    process.execPath,
+    [
+      join(process.cwd(), 'dist/cli-entry.js'),
+      'heavy',
+      '--no-build',
+      process.execPath,
+      '--test',
+      'sample.test.mjs',
+    ],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, FORGE_HEAVY_DIR: slots },
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stderr, /running npm run build:core/);
+  assert.equal(coreBuildState(root), 'stale', 'the accepted build stays pinned');
+});

@@ -250,12 +250,17 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
           operationId: session.journal.operationId,
         };
         const replayCommand = `nforge agent ${shellQuote(session.root)} land --save ${shellQuote(JSON.stringify(parameters))}`;
-        throw new ForgeError(error.code, `${error.message} Replay: ${replayCommand}`, undefined, {
-          ...error.recovery,
-          operationId: session.journal.operationId,
-          replayCommand,
-          replay: { action: 'finish', parameters },
-        });
+        throw new ForgeError(
+          error.code,
+          `${error.message} Source is pinned to this operation. If source is unchanged, replay: ${replayCommand}. If you edit or save different source after this pre-submit refusal, run land --save with the same options and a fresh operationId; replaying this id keeps the original source pins.`,
+          undefined,
+          {
+            ...error.recovery,
+            operationId: session.journal.operationId,
+            replayCommand,
+            replay: { action: 'finish', parameters },
+          },
+        );
       }
       throw error;
     }

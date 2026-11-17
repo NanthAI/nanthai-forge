@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { appendFileSync } from 'node:fs';
+import { testBrowserPath } from '../scripts/test-browser-path.mjs';
 import { installTestTemp } from '../scripts/test-temp.mjs';
 import { installDefaultR2 } from './default-r2.mjs';
 import { checkReturns, rawHandler, returnsCheck } from './convex-args.mjs';
 // The file supervisor owns the outer root across SIGKILL/timeouts. Direct test runs
 // still clean their private root on exit/signals and fail on unowned fixture leaks.
+process.env.PLAYWRIGHT_BROWSERS_PATH = testBrowserPath();
 const { queue: directory, config, home, state } = installTestTemp();
 process.env.FORGE_CHECK_QUEUE_DIR = directory;
 // Synthetic locks held by this test process expect immediate WORK_BUSY; lock-wait tests opt in explicitly.

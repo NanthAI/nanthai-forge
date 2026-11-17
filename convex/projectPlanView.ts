@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Plan screen's one read (Items d3357f40, b7a0dff1): the Initiatives, every live Item (proposed, planned, in
 // progress) and, per live Initiative, how many of its Items are done and dropped. All of it comes from the planning
-// search roots through their existing indexes, so no body is hydrated and no new row is written; one subscription per
-// view, re-run only by planning writes in the ranges it read. Members see hidden Items with their mark; the public
+// compact pages once their generation is covered, with indexed search roots as the legacy fallback. The query
+// never hydrates bodies or writes; one subscription per view re-runs on writes in its ranges. Members see hidden Items with their mark; the public
 // plan is read elsewhere through publicPlanVisible (src/planning-model.ts).
 import { v } from 'convex/values';
 import { query } from './cliServer';
@@ -14,36 +14,8 @@ import { planningRecordTable } from './projectWorkRecordTables';
 import { report } from './errors';
 import { invariant } from '../src/errors';
 import type { PlanRow } from '../src/planning-model';
-import { decodePlanPage, PLAN_ROWS, planParent } from './projectPlanRows';
-
-const text = (value: unknown) => (typeof value === 'string' && value ? value : undefined);
-/** A planning search root's value as the screen's row: the model fields and counts, never the body. */
-export function planViewRow(value: Record<string, unknown>, position: number): PlanRow | null {
-  const { id, kind, title, status } = value;
-  if (typeof id !== 'string' || (kind !== 'issue' && kind !== 'initiative') || typeof title !== 'string')
-    return null;
-  const relations = Array.isArray(value.relations) ? (value.relations as PlanRow['relations']) : undefined;
-  const doneWhen =
-    Array.isArray(value.doneWhen) && value.doneWhen.length === 2
-      ? (value.doneWhen as [number, number])
-      : undefined;
-  return {
-    id,
-    kind,
-    title,
-    status: status as PlanRow['status'],
-    position,
-    ...(typeof value.version === 'number' ? { version: value.version } : {}),
-    ...(text(value.initiativeId) ? { initiativeId: text(value.initiativeId) } : {}),
-    ...(text(value.parentId) ? { parentId: text(value.parentId) } : {}),
-    ...(text(value.order) ? { order: text(value.order) } : {}),
-    ...(text(value.type) ? { type: text(value.type) } : {}),
-    ...(text(value.owner) ? { owner: text(value.owner) } : {}),
-    ...(relations?.length ? { relations } : {}),
-    ...(value.hidden === true ? { hidden: true } : {}),
-    ...(doneWhen ? { doneWhen } : {}),
-  };
-}
+export { planViewRow } from './projectPlanRows';
+import { decodePlanPage, PLAN_ROWS, planParent, planViewRow } from './projectPlanRows';
 
 /** Live Items read per status, Initiatives read, and settled Items counted per live Initiative; beyond these the
  * screen says "at least". On the dogfood board (2026-11-17) the read is 22 Initiatives, 271 live Items and 31 settled
@@ -75,7 +47,9 @@ export async function planView(ctx: QueryCtx, projectId: Id<'hostedProjects'>): 
   const generation = await selectedGeneration(ctx, project);
   if (!generation) return empty(canEdit);
   const generationId = recordPartition(generation);
-  const compact = generation.planRowsVersion === 1;
+  // Coverage belongs to the shared record partition, not a source generation's alias.
+  const partition = generation.recordsGenerationId ? await ctx.db.get(generationId) : generation;
+  const compact = partition?.planRowsVersion === 1;
   const table = await planningRecordTable(ctx, generationId);
   const rows = (kind: 'issue' | 'initiative', status: string, initiativeId?: string) =>
     compact

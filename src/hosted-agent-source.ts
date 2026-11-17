@@ -230,12 +230,14 @@ export function composedRevertOf(session: HostedAgentSession, operationId: strin
 }
 /** The rebuilt sync was refused again: nothing began on the server. */
 export class SyncPinsStale extends ForgeError {
-  constructor(root: string, message: string) {
+  constructor(root: string, message: string, closedLaneId?: string) {
     const save = { message: 'Bring the Lane binding up to date' };
     // A recovery is surfaced as is: the next step is a save, not a replay of the refused sync.
     super('WORK_STALE', message, undefined, {
-      next: { action: 'save', ...save },
-      command: `nforge agent ${shellQuote(root)} save ${shellQuote(JSON.stringify(save))}`,
+      next: closedLaneId ? { action: 'reopen', laneId: closedLaneId } : { action: 'save', ...save },
+      command: closedLaneId
+        ? `nforge agent ${shellQuote(root)} start --reopen ${shellQuote(JSON.stringify({ laneId: closedLaneId }))}`
+        : `nforge agent ${shellQuote(root)} save ${shellQuote(JSON.stringify(save))}`,
     });
   }
 }
@@ -254,12 +256,16 @@ export async function syncAgentSource(
   operationId: string,
   refreshPins?: () => Promise<void>,
 ) {
+  let observedLane: HostedLaneSelection | undefined;
   const stale = (): never => {
     session.journal.forget(`sync:${operationId}`);
     const selection = session.marker()?.selection;
     throw new SyncPinsStale(
       session.root,
-      `The Lane moved past this checkout's binding${selection ? ` (head ${selection.head.slice(0, 12)}, version ${selection.version})` : ''}. Nothing was synced. Run save in this checkout (it brings the binding to the Lane's current version, keeping your edits), then retry this same sync; it rebuilds its pins.`,
+      observedLane && observedLane.state !== 'active'
+        ? `This Lane is ${observedLane.state}. Nothing was synced; your local edits stay in this checkout. Reopen this Lane to continue with those edits, then retry sync.`
+        : `The Lane moved past this checkout's binding${selection ? ` (head ${selection.head.slice(0, 12)}, version ${selection.version})` : ''}. Nothing was synced. Run save in this checkout (it brings the binding to the Lane's current version, keeping your edits), then retry this same sync; it rebuilds its pins.`,
+      observedLane && observedLane.state !== 'active' ? observedLane.laneId : undefined,
     );
   };
   try {
@@ -278,7 +284,9 @@ export async function syncAgentSource(
       // a pin, a reopen from another root: same head and sourceVersion), the marker follows the server
       // once (one bounded Lane read, only on this refused path) and the same operation is rebuilt. A
       // newer saved head may need a rebase of local edits, which only save does: name that step.
-      if (!(await adoptServerMetadata(session, command.laneId))) return stale();
+      const metadata = await adoptServerMetadata(session, command.laneId);
+      observedLane = metadata?.server;
+      if (!metadata?.advanced) return stale();
       try {
         return await syncAgentSourceOnce(session, command, operationId);
       } catch (third) {
@@ -290,9 +298,9 @@ export async function syncAgentSource(
 }
 async function adoptServerMetadata(session: HostedAgentSession, laneId?: string) {
   const marker = session.marker();
-  if (!marker || (laneId && laneId !== marker.selection.laneId)) return false;
+  if (!marker || (laneId && laneId !== marker.selection.laneId)) return null;
   const server = await selectAgentLane(session, marker.selection.laneId);
-  return advanceMarkerMetadata(session.root, marker.selection.laneId, server);
+  return { server, advanced: advanceMarkerMetadata(session.root, marker.selection.laneId, server) };
 }
 async function syncAgentSourceOnce(
   session: HostedAgentSession,

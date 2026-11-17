@@ -159,6 +159,8 @@ test('a failed inline land keeps its original operation and complete replay, wit
     submitHostedLand(s.root, { operationId, message: 'Retain original message' }, s.address, s.transport()),
     error => {
       assert.equal(error.code, 'PREFLIGHT_REQUIRED');
+      assert.match(error.message, /If source is unchanged, replay/);
+      assert.match(error.message, /fresh operationId.*original source pins/);
       assert.equal(error.recovery.operationId, operationId);
       assert.equal(error.recovery.replay.parameters.operationId, operationId);
       assert.equal(error.recovery.replay.parameters.message, 'Retain original message');

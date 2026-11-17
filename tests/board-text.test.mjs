@@ -39,6 +39,21 @@ test('board notes reject secrets, emails, machine paths, control characters and 
   assert.equal(code('é'.repeat(240)), null, 'characters, not bytes');
 });
 
+test('incident 61a42597: app route patterns pass without admitting local paths', () => {
+  for (const route of ['/-/{handle}/{project}/lanes', '/-/settings/you', '/-/{handle}/…'])
+    assert.equal(code(`Route ${route} stays lazy.`), null, route);
+  for (const path of [
+    '/opt/builder/work',
+    '/tmp/work',
+    '/srv/work',
+    '/-private/work',
+    '~/work',
+    'file:///-/work',
+  ])
+    assert.equal(code(`See ${path}`), 'BOARD_TEXT_PATH', path);
+  assert.equal(code('Route /-/settings plus /tmp/private'), 'BOARD_TEXT_PATH');
+});
+
 test('paths are repository-relative and bounded; targets parse strictly', () => {
   assertBoardPaths(['src/a.ts', 'tests/b.test.mjs']);
   for (const paths of [['/etc/passwd'], ['../x'], ['a\nb'], Array(11).fill('a.ts'), ['x'.repeat(201)]])

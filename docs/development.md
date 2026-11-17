@@ -61,8 +61,21 @@ Live checkout links and running install/link locks are always retained, even abo
 the budget. Prune remeasures sizes; ordinary sweeps reuse sealed-package size metadata and count
 writable tool output.
 There are no new calls, DB I/O, background workers or idle timers. Changed lockfiles
-relink at preflight/open automatically. See [dependency sharing](parallel-work-defaults.md#sharedependencies)
+relink at preflight/open automatically. A clone root with its own `node_modules`
+keeps that install on pull; run `npm ci --ignore-scripts` there after the lockfile
+changes, including before `npm run build:web`. Lane installs include the web
+development dependencies; a production-only CLI install does not. See [dependency sharing](parallel-work-defaults.md#sharedependencies)
 for concurrency, read-only removal, download-cache scope and private-install details.
+
+### Table registration diagnostics
+
+`tests/table-registrations.test.mjs` reports all missing registrations together:
+data placement, project purge inventory, owner entry-point classification, every
+storage-budget phase and the generated agent-help block. It reads the existing
+registries; it adds no runtime table or permission rule. The individual guards
+still check their detailed contracts. Owner registrations remain in
+`tests/owner-boundary-guard.test.mjs`; the combined guard parses their literal data
+without importing or executing that module.
 
 ### Shared schema compatibility
 
@@ -272,7 +285,7 @@ references: [SWC compilation](https://swc.rs/docs/configuration/compilation),
 
 ### Targeted test preparation
 
-Run `npm ci --ignore-scripts` and `npm run build:core` before focused core tests. Run `npm run build:web` as well before browser asset inspection or hosted UI checks; assets build into `hosted-web-dist`. Run focused tests with the private queue preload:
+Run `npm ci --ignore-scripts` and `npm run build:core` before focused core tests. Run `npm run build:web` as well before browser asset inspection or hosted UI checks; assets build into `hosted-web-dist`. The test preload resolves the installed Playwright browser cache before replacing HOME/XDG with private fixture directories, so browser tests run under `nforge heavy` too. An explicit `PLAYWRIGHT_BROWSERS_PATH` (including `0`) stays in effect. Run focused tests with the private queue preload:
 
 ```sh
 node --import ./tests/check-runtime.mjs --test tests/agent-verbs.test.mjs
@@ -1267,3 +1280,12 @@ Markdown rendering, links, keyboard interaction and both themes and widths.
 This delivery does not change docs-only preflight or admission: configured
 `docsPaths` keep their existing cheap path. The full suite belongs to the
 landing runner, and there is no new runtime dependency in the CLI or MCP.
+
+`nforge heavy --no-build node --test TEST` runs against the existing `dist/`
+for a failing-first regression check; the default still rebuilds stale core output.
+Nested heavy commands share the live outer slot. Commands declared in `forge.json`
+`preflight.static` (or the package fallback `forge.preflight.static`) run directly
+rather than waiting behind long test batches, including silent npm script invocations.
+`hosted-work ROOT JSON` resolves a Forge clone or Lane before opening any native
+Work store; it uses the same current project access as explicit deployment syntax.
+Legacy uppercase friction UUIDs can be read and triaged by their lowercase ids.

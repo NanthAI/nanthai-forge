@@ -7,6 +7,7 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { Band, Key, Menu, Who } from '../../ds';
 import { SafeMarkdown } from '../../ds/markdown';
+import { readReview, ReviewFindings } from './ReviewFindings';
 import {
   MAX_COMMENT_CHARACTERS,
   latest,
@@ -128,6 +129,7 @@ function Comment({
   onReply?: () => void;
 }) {
   const by = writer(comment);
+  const review = readReview(comment.text);
   const counts = reactionsFor(reactions, comment.id);
   const react = canWrite && onReact ? (kind: ReactionKind) => void onReact(comment.id, kind) : undefined;
   return (
@@ -156,6 +158,8 @@ function Comment({
           This comment is longer than {MAX_COMMENT_CHARACTERS.toLocaleString('en-US')} characters and is not
           shown.
         </p>
+      ) : review ? (
+        <ReviewFindings review={review} original={comment.text} />
       ) : (
         <SafeMarkdown text={comment.text} idPrefix={comment.id} />
       )}

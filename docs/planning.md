@@ -207,8 +207,17 @@ project. Existing same-project recovery is not that fresh-project round trip.
 
 ## Plan list projection
 
-The Plan query accepts compact `_workStorePlan` pages in the existing data partition. A page holds at most 128
+The Plan query accepts compact `_workStorePlan` pages in the existing data partition. A page holds at most 512
 creation positions, grouped by kind and status (settled Items also by Initiative); each page uses portable DEFLATE compression, and settled pages hold positions only. It contains only the list fields and Done-when counts. Item bodies, comments, exact agent reads and
 search remain in their existing records. `planRowsVersion: 1` on the generation means every root is covered. Older
 generations keep the existing indexed search-root reader until preparation completes; reads never start a backfill.
-The reader is shipped before the writer. The query's row limits, permissions, order and counts stay the same.
+The Work writer updates these pages in the same transaction as every search-root change, including batched
+planning writes, imports and rebuilds. Each touched page is read and flushed once per transaction. Fresh partitions
+carry the marker from creation and become readable only after publication; aliases use their partition's current coverage.
+The query's row limits, permissions, order and counts stay the same. No screen open writes or prepares data.
+
+For an existing complete search generation, the owner can call `projectHostedPlanningPrepare:page` with
+`planRowsOnly:true`, the project/owner/generation pins, a fresh operation UUID and `cursor:null`; continue with the
+returned cursor until `isDone`. Each call handles at most 100 roots/1 MB, retains an exact retry receipt and changes
+only the disposable projection. Full search preparation also fills Plan pages. Partial preparation keeps the legacy
+reader, and planning changes between pages are included by ordinary transactional upkeep. `compactReady:false` reports a completed pass that retained exact legacy reads because unusually large list metadata outgrew the compact page envelope. Such Item writes still succeed without truncation; a fresh pass can compact the partition after that metadata changes.

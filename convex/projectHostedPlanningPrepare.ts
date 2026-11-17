@@ -3,6 +3,7 @@ import { workRecordTable } from './projectWorkRecordTables';
 import { v } from 'convex/values';
 import { internal } from './_generated/api';
 import { internalMutation } from './server';
+import { finishWorkRecordWrites } from './projectWorkRecordWriter';
 import { accessibleProject } from './projectAuthority';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { planningSearchEntries, planningSearchRowBytes, planningSummary } from '../src/planning-search';
@@ -22,6 +23,8 @@ export const page = internalMutation({
     generationId: v.id('projectWorkGenerations'),
     operationId: v.string(),
     cursor: v.union(v.string(), v.null()),
+    /** Rebuild only compact Plan pages from an already complete search projection. */
+    planRowsOnly: v.optional(v.boolean()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -56,7 +59,82 @@ export const page = internalMutation({
       'WORK_STALE',
       'Restart preparation for the current generation.',
     );
-    let selection: { key: string; offset: number; version?: number } | null = null;
+    if (input.cursor === null) {
+      await ctx.db.patch(partition, { planRowsVersion: undefined, planRowsOversized: undefined });
+      if (partition !== generation._id) await ctx.db.patch(generation._id, { planRowsVersion: undefined });
+    }
+    if (input.planRowsOnly) {
+      invariant(
+        generation.planningSearchVersion === 2,
+        'WORK_INDEX_REBUILD_REQUIRED',
+        'Prepare the complete planning search before its compact Plan pages.',
+      );
+      let after: string | null = null;
+      let compactReady = true;
+      if (input.cursor !== null) {
+        let cursor: { after?: unknown; operationId?: unknown } | null = null;
+        try {
+          cursor = JSON.parse(input.cursor);
+        } catch {
+          invariant(false, 'BAD_ARGUMENT', 'Use the returned Plan preparation cursor.');
+        }
+        invariant(
+          cursor !== null &&
+            typeof cursor === 'object' &&
+            typeof cursor.after === 'string' &&
+            typeof cursor.operationId === 'string',
+          'BAD_ARGUMENT',
+          'Use the returned Plan preparation cursor.',
+        );
+        const prior = await record(
+          ctx,
+          partition,
+          'planningSearchPreparation',
+          cursor!.operationId as string,
+        );
+        invariant(
+          prior && JSON.parse(prior.value).result.nextCursor === input.cursor,
+          'WORK_STALE',
+          'Use the returned Plan preparation cursor for this generation.',
+        );
+        after = cursor!.after as string;
+        compactReady = JSON.parse(prior!.value).result.compactReady !== false;
+      }
+      const page = await ctx.db
+        .query(await workRecordTable(ctx, partition, 'planningSearch'))
+        .withIndex('by_generation_and_collection_and_key', q => {
+          const range = q.eq('generationId', partition).eq('collection', 'planningSearch');
+          return after === null ? range : range.gt('key', after);
+        })
+        .paginate({ cursor: null, numItems: 100, maximumRowsRead: 100, maximumBytesRead: 1000000 });
+      // The common writer repairs the companion without changing canonical root bytes or versions.
+      for (const root of page.page) await ctx.db.patch(root._id, { value: root.value });
+      compactReady = (await finishWorkRecordWrites(ctx)) !== false && compactReady;
+      if (page.isDone && (await ctx.db.get(partition))?.planRowsOversized) compactReady = false;
+      if (page.isDone && compactReady) {
+        await ctx.db.patch(partition, { planRowsVersion: 1 });
+        if (partition !== generation._id) await ctx.db.patch(generation._id, { planRowsVersion: 1 });
+      }
+      const result = {
+        processed: page.page.length,
+        nextCursor: page.isDone
+          ? null
+          : canonicalPayload({ after: page.page.at(-1)?.key ?? after, operationId: input.operationId }),
+        isDone: page.isDone,
+        compactReady,
+      };
+      await ctx.db.insert('projectWorkRecords', {
+        projectId: input.projectId,
+        generationId: partition,
+        collection: 'planningSearchPreparation',
+        key: input.operationId,
+        parent: '',
+        position: 0,
+        value: canonicalPayload({ request, result }),
+      });
+      return canonicalPayload(result);
+    }
+    let selection: { key: string; offset: number; version?: number; compactReady?: boolean } | null = null;
     if (input.cursor !== null) {
       try {
         selection = JSON.parse(input.cursor);
@@ -167,13 +245,27 @@ export const page = internalMutation({
       }
     }
     const done = rows.isDone && completePage && processed === rows.page.length;
-    if (done) await ctx.db.patch(generation._id, { planningSearchVersion: 2 });
+    const flushed = await finishWorkRecordWrites(ctx);
+    const compactReady =
+      flushed !== false &&
+      selection?.compactReady !== false &&
+      !(done && (await ctx.db.get(partition))?.planRowsOversized);
+    if (cursor) cursor = canonicalPayload({ ...JSON.parse(cursor), compactReady });
+    if (done) {
+      await ctx.db.patch(generation._id, {
+        planningSearchVersion: 2,
+        planRowsVersion: compactReady ? 1 : undefined,
+      });
+      if (partition !== generation._id)
+        await ctx.db.patch(partition, { planRowsVersion: compactReady ? 1 : undefined });
+    }
     const result = {
       processed,
       written,
       indexedBytes: bytes,
       nextCursor: done ? null : cursor,
       isDone: done,
+      compactReady,
     };
     await ctx.db.insert('projectWorkRecords', {
       projectId: input.projectId,

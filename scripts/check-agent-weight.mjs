@@ -13,6 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { moduleInventory, moduleFindings } from './agent-weight-modules.mjs';
 import { childEnv } from './child-env.mjs';
 import { agentCommands, firstNetworkSamples } from './perf/cli-first-network.mjs';
 import { measurement } from './perf/report.mjs';
@@ -46,6 +47,7 @@ export function measureAgentWeight(prefix, count = 5, enforceBoundary = true) {
   const temp = mkdtempSync(join(tmpdir(), 'forge-weight-'));
   const actual = { installedBytes: installation.bytes };
   const samples = {};
+  const inventories = {};
   try {
     const env = childEnv({
       extra: {
@@ -56,6 +58,7 @@ export function measureAgentWeight(prefix, count = 5, enforceBoundary = true) {
         XDG_CACHE_HOME: temp,
         TMPDIR: temp,
         NODE_COMPILE_CACHE: join(temp, 'compile-cache'),
+        FORGE_PROBE_MODULES_FILE: join(temp, 'modules.json'),
       },
     });
     const preload = join(root, 'scripts/perf/startup-preload.mjs');
@@ -71,7 +74,11 @@ export function measureAgentWeight(prefix, count = 5, enforceBoundary = true) {
         throw new Error('Startup fixture failed or returned incomplete evidence (diagnostics redacted).');
       const sample = JSON.parse(line);
       if (sample.code !== 0) throw new Error('Startup probe failed.');
-      return { ...sample, stdout: child.stdout };
+      return {
+        ...sample,
+        moduleUrls: JSON.parse(readFileSync(env.FORGE_PROBE_MODULES_FILE, 'utf8')),
+        stdout: child.stdout,
+      };
     };
     for (const [name, args] of [
       ['version', [join(installed, manifest.bin.nforge), '--version']],
@@ -83,6 +90,10 @@ export function measureAgentWeight(prefix, count = 5, enforceBoundary = true) {
       samples[name] = rows.map(s => ({ cpuMs: s.cpuMs, modules: s.modules, maxRssKiB: s.maxRssKiB }));
       actual[`${name}CpuMs`] = median(rows.map(s => s.cpuMs));
       actual[`${name}Modules`] = Math.max(...rows.map(s => s.modules));
+      inventories[name] = moduleInventory(
+        rows.flatMap(s => s.moduleUrls),
+        installed,
+      );
       if (name === 'mcp') actual.toolListBytes = JSON.parse(rows[0].stdout).toolListBytes;
     }
     for (const name of Object.keys(agentCommands)) {
@@ -96,10 +107,15 @@ export function measureAgentWeight(prefix, count = 5, enforceBoundary = true) {
       }));
       actual[`${name}Ms`] = median(rows.map(s => s.durationMs));
       actual[`${name}Modules`] = Math.max(...rows.map(s => s.modules.length));
+      inventories[name] = moduleInventory(
+        rows.flatMap(s => s.modules),
+        root,
+      );
     }
     return {
       actual,
       samples,
+      moduleInventory: inventories,
       boundary,
       agentActions: [
         ...agentActionNames(readFileSync(join(root, 'src/agent-verbs.ts'), 'utf8'), lifecycleVerbs),
@@ -139,9 +155,9 @@ export function checkAgentWeight(prefix) {
       findings.push(`${name}: exceeds the existing speed-budgets.json CPU ceiling ${verdict.budgetMs} ms.`);
   }
   findings.push(...agentSurfaceFindings(report, baseline));
-  const { packages, samples, ...summary } = report;
+  const { packages, samples, moduleInventory: inventories, ...summary } = report;
   console.log(`Agent weight: ${JSON.stringify(summary)}`);
-  if (findings.length) throw new Error(findings.join('\n'));
+  if (findings.length) throw new Error([...findings, ...moduleFindings(report, baseline)].join('\n'));
   return report;
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -1,0 +1,4 @@
+{
+  "issue": "ad80e037",
+  "reason": "ad80e037 preserve ordinary module names and normalize only emitted Forge chunks; refresh diagnostic inventories without changing any ceiling"
+}

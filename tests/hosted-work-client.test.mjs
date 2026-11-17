@@ -480,3 +480,43 @@ test('CLI and MCP planning-version pages hydrate the cold marker once and retain
     'projectJournalActions:history',
   ]);
 });
+
+test('incident f4339cbc: hosted-work resolves clone and Lane roots before constructing a Git WorkStore', async t => {
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { agentFixture } = await import('./hosted-agent-fixture.mjs');
+  const { hostedWorkCli } = await import('../dist/hosted-work-cli.js');
+  const { ConvexHttpClient } = await import('convex/browser');
+  const query = async (_ref, args) => {
+    assert.equal(args.projectId, 'project');
+    return JSON.stringify({ generationId: 'synthetic', revision: 1, sourceRevision: 1 });
+  };
+  const priorDeployment = process.env.FORGE_DEPLOYMENT_URL;
+  process.env.FORGE_DEPLOYMENT_URL = 'https://fixture.invalid';
+  t.after(() => {
+    if (priorDeployment === undefined) delete process.env.FORGE_DEPLOYMENT_URL;
+    else process.env.FORGE_DEPLOYMENT_URL = priorDeployment;
+  });
+  const priorToken = process.env.FORGE_AUTH_TOKEN;
+  process.env.FORGE_AUTH_TOKEN = 'synthetic-test-jwt';
+  t.after(() => {
+    if (priorToken === undefined) delete process.env.FORGE_AUTH_TOKEN;
+    else process.env.FORGE_AUTH_TOKEN = priorToken;
+  });
+  t.mock.method(ConvexHttpClient.prototype, 'query', query);
+  t.mock.method(WorkStore, 'open', () => assert.fail('a hosted checkout must not open a Git store'));
+  const folder = mkdtempSync(join(tmpdir(), 'forge-work-address-'));
+  t.after(() => {
+    for (const path of [folder, folder + '.forge-client']) rmSync(path, { recursive: true, force: true });
+  });
+  mkdirSync(folder + '.forge-client/agent', { recursive: true });
+  writeFileSync(
+    folder + '.forge-client/agent/address.json',
+    JSON.stringify({ url: 'https://fixture.invalid', projectId: 'project' }),
+  );
+  const lane = agentFixture(t);
+  await lane.transport().dispatch('open', { laneId: lane.lane.laneId });
+  for (const root of [folder, lane.root])
+    assert.equal((await hostedWorkCli([root, '{"action":"workspace"}'])).generationId, 'synthetic');
+});

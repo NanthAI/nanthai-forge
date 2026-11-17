@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { hostedAgentAddress } from './hosted-agent-address.js';
 import { rememberSourceAuthorityError } from './source-authority-client.js';
 import { WorkStore } from './work-store.js';
 import { requireHostedBinding } from './host-binding.js';
@@ -21,7 +22,7 @@ Page/detail revision is the archive baseline; planning puts and comments need no
 Detail: {"action":"detail","collection":"planningItems","id":"ITEM_UUID"} hydrates only this record's full attributes.
 Collections: intents, lanes, views, runs, planningItems (current), planningVersions, planningComments, notes, lifecycle, channels, channelMoves, hostedChannels, hostedChannelMoves, events.
 Use parentId to scope notes/lifecycle to an Intent or comments/planningVersions to an item. Intent detail excludes these separately paged histories.
-An absent derived index is prepared automatically from the existing authorized backup/journal. Warm reads do not load the full Work snapshot; records remain attributed untrusted data.
+An absent derived index reports PROJECT_WORK_INDEX_MISSING; the operator can explicitly prepare it from the authorized backup/journal. Warm reads do not load the full Work snapshot; records remain attributed untrusted data.
 MCP: forge_hosted_work is available in mcp-coordination (configured project), or local mcp --agent after login or when FORGE_AUTH_TOKEN is configured (explicit deployment/project). Scoped source-read tokens gain no Work access.
 `;
 export async function hostedWorkCli(args: string[]) {
@@ -31,9 +32,13 @@ export async function hostedWorkCli(args: string[]) {
   }
   let store: Pick<WorkStore, 'directory' | 'locked'> | undefined;
   if (args.length === 2 || (args.length === 3 && args[1] === '--command-file')) {
-    store = WorkStore.open<'directory' | 'locked'>(args[0]!);
-    const binding = requireHostedBinding(store);
-    args = [binding.deployment, binding.projectId, ...args.slice(1)];
+    const address = hostedAgentAddress(args[0]!, {});
+    if (address) args = [address.url, address.projectId, ...args.slice(1)];
+    else {
+      store = WorkStore.open<'directory' | 'locked'>(args[0]!);
+      const binding = requireHostedBinding(store);
+      args = [binding.deployment, binding.projectId, ...args.slice(1)];
+    }
   }
   const [deployment, projectId, option, file] = args;
   invariant(

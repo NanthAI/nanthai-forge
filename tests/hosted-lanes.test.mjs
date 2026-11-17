@@ -739,3 +739,37 @@ test('a planned start pins an Intent copied from the journal: same id, active, r
     2,
   );
 });
+
+test('incident 5c26c2ed: negotiated status names completed Lanes from the existing head read; legacy replies keep their shape', async () => {
+  const s = await setup(),
+    first = await s.begin(s.input());
+  const original = JSON.parse(
+    await s.invoke('detail', reads.detail, { projectId: s.projectId, laneId: first.lane.laneId }),
+  );
+  await s.invoke(
+    'complete-state',
+    {
+      _handler: async ctx =>
+        records.writeHostedRecord(ctx, {
+          projectId: s.projectId,
+          actor: 'owner',
+          authorityEpoch: 1,
+          expectedVersion: original.version,
+          record: {
+            ...original,
+            state: 'completed',
+            version: original.version + 1,
+            lifecycleVersion: original.lifecycleVersion + 1,
+          },
+        }),
+    },
+    {},
+  );
+  const input = { projectId: s.projectId, laneId: first.lane.laneId };
+  const legacy = await s.invoke('legacy-head', reads.head, input);
+  const negotiated = await s.invoke('negotiated-head', reads.head, { ...input, includeState: true });
+  assert.equal('state' in legacy, false);
+  assert.equal(negotiated.state, 'completed');
+  assert.equal(negotiated.head, legacy.head);
+  assert.equal(s.counts.at(-1).documents, s.counts.at(-2).documents, 'no additional document read');
+});

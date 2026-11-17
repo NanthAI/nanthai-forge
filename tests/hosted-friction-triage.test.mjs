@@ -192,3 +192,22 @@ test('friction-list {id} and triage take a full id or an 8+ character prefix in 
   );
   assert.equal(s.counts().writes, writes);
 });
+
+test('legacy uppercase friction UUIDs resolve and triage through lowercase full ids and prefixes', async t => {
+  const s = fixture(t);
+  const filed = (await file(s, 'Legacy case')).result;
+  const row = [...s.tables.projectHostedFriction.values()].find(row => row.id === filed.id);
+  row.id = row.id.toUpperCase();
+  row.value = JSON.stringify({ ...JSON.parse(row.value), id: row.id });
+  for (const id of [filed.id, filed.id.slice(0, 8)]) {
+    const read = await s.transport.dispatch('friction-list', { id });
+    assert.equal(read.result.items[0].id, row.id);
+  }
+  const triage = await s.transport.dispatch('friction-triage', {
+    frictionIds: [filed.id],
+    status: 'planned',
+    planningItemId: 'ad80e037-35a3-44c5-9ba2-025519a2c45f',
+  });
+  assert.deepEqual(triage.result.frictionIds, [row.id]);
+  assert.equal(JSON.parse(row.triage).status, 'planned');
+});
