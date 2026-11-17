@@ -205,6 +205,15 @@
   .tally b { color: var(--text); font-family: var(--font-mono); font-size: calc(1em * var(--mono-scale)); font-weight: var(--w-strong); font-variant-numeric: tabular-nums; }
   .tag-rec { font: var(--w-strong) var(--t-micro)/1 var(--font-sans); color: var(--text); border: var(--rule) solid var(--text-2); border-radius: var(--r); padding: 2px var(--s-1); vertical-align: 1px; white-space: nowrap; }
 
+  /* The calendar month against its owner pool: one figure, the shared pool and the facts beneath it. */
+  .month { padding: var(--gut) var(--gut-head) var(--s-3); display: grid; gap: var(--s-1); min-width: 0; }
+  .month .big { font: var(--w-bold) var(--t-figure)/1.15 var(--font-sans); letter-spacing: var(--head-track); font-variant-numeric: tabular-nums; }
+  .month .big small { font: var(--w-regular) var(--t-small)/1.4 var(--font-sans); color: var(--text-2); letter-spacing: 0; margin-left: var(--s-2); }
+  .facts { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-6); padding: 0 var(--gut-head) var(--gut); color: var(--text-2); font-size: var(--t-small); }
+  .facts > span { min-width: 0; overflow-wrap: anywhere; }
+  .facts b { color: var(--text); font-weight: var(--w-strong); font-variant-numeric: tabular-nums; }
+  @container (max-width: 560px) { .month, .facts { padding-inline: var(--gut); } }
+
   /* more yardsticks: the pool, the range stick in a meter, a limit across bars, the two ends, who waits on whom */
   .pool { position: relative; height: 34px; margin-top: var(--s-2); border-bottom: var(--rule) solid var(--text-3); background: linear-gradient(to right, var(--text-3) 1px, transparent 1px) 0 100% / calc(100% / var(--ticks, 30)) 5px repeat-x; }
   .pool .used { position: absolute; left: 0; bottom: 6px; height: 12px; width: calc(var(--used) / var(--full) * 100%); min-width: 2px; max-width: 100%; background: var(--text); }

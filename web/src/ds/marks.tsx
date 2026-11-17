@@ -52,6 +52,11 @@ export const stateWords = {
   'Signed out': 'stale',
   'Sign-in expired': 'stale',
   'Not reported': 'stale',
+  Paid: 'passed',
+  'Not paid': 'failed',
+  'Card declined': 'failed',
+  Refunded: 'stale',
+  'View only': 'stale',
 } as const satisfies Record<string, StateKind>;
 export type StateWord = keyof typeof stateWords;
 

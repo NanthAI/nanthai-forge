@@ -120,6 +120,35 @@ export function Figures() {
         </div>
       </Region>
 
+      <Region title="Calendar month pool" hint="Sample data">
+        <div className="month">
+          <div className="big">
+            120 of 300 landings<small>used this month</small>
+          </div>
+          <div
+            className="pool"
+            style={vars({ full: 300, used: 120, proj: 240, ticks: 30 })}
+            role="img"
+            aria-label="Sample pool: 120 of 300 landings used, 240 projected"
+          >
+            <i className="used" />
+            <i className="est" />
+            <i className="stop end" />
+          </div>
+          <div className="poolx" aria-hidden="true">
+            <span>
+              <b>0</b>
+            </span>
+            <span className="endl">
+              <b>300</b>included
+            </span>
+          </div>
+        </div>
+        <div className="facts">
+          <span>One owner pool · unlimited people</span>
+        </div>
+      </Region>
+
       <Region title="Figures" weight="ref" fold="reference-figures">
         <div className="fig">
           <h3>CI minutes for landing checks</h3>

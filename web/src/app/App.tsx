@@ -3,7 +3,7 @@
 // with the tab (live-reads.ts) and holds token refresh while asleep (auth-hold.ts), so an idle or hidden tab makes no
 // calls. Each page sends one bounded read for its frame: the project frame resolves its address and then reads the
 // line; the account and public frames read only the viewer.
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { ConvexAuthProvider, useAuthActions } from '@convex-dev/auth/react';
 import { ConvexReactClient, useConvex, useConvexAuth, useMutation, useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
@@ -24,6 +24,8 @@ import { followLink, navigate, useRoute, useSearch } from './router';
 import { forget, recall, safeNext } from './session';
 import { FirstPasskey, SignIn } from './SignIn';
 import './app.css';
+
+const Billing = lazy(() => import('../billing/Home'));
 
 document.documentElement.dataset.ds = '';
 // Safe areas (phone tabs, notch): only the rebuilt frames draw into them, so only they ask for the full screen.
@@ -154,6 +156,15 @@ function SignedIn({
   const controls: FrameControls = { onPalette: go.openPalette, onKeys: go.openKeys, viewerHandle };
   const overlays = <Keys go={go} palette={palette} setPalette={setPalette} keys={keys} setKeys={setKeys} />;
   if (route.frame === 'project') return <ProjectView route={route} controls={controls} overlays={overlays} />;
+  if (route.frame === 'account' && route.place === 'billing')
+    return (
+      <AccountFrame place="billing" back={lastProject} controls={controls}>
+        <Suspense fallback={<Head trail={[{ label: 'Billing' }]} sentence="Loading billing…" />}>
+          <Billing />
+        </Suspense>
+        {overlays}
+      </AccountFrame>
+    );
   if (route.frame === 'account')
     return (
       <AccountFrame place={route.place} back={lastProject} controls={controls}>

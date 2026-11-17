@@ -1,0 +1,6 @@
+{
+  "kind": "unreferencedExports",
+  "delta": -1,
+  "reason": "d4d410e6 billing home consumes the shared counting rule and merges the old disconnected journey wording into docs/billing.md. The RunAllowance interface remains for C2; no new tables, commands or enforcement.",
+  "date": "2026-11-17"
+}

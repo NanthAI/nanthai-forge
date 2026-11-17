@@ -1,0 +1,9 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* People and access: the invite form's fields and the quiet landing line; the table, bands and notices are the design
+   system's (ds/figures.css access table). Scoped to [data-ds] like the system; every value is a token. */
+[data-ds] {
+  .people-who { flex: 1 1 260px; min-width: 0; }
+  .people-role { display: grid; gap: 5px; font-size: var(--t-meta); color: var(--text-2); font-weight: var(--w-strong); }
+  .people-quiet { grid-template-columns: minmax(0, 1fr) auto; }
+  .people-quiet > .ttl { font-weight: var(--w-regular); color: var(--text-2); }
+}

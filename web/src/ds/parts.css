@@ -22,9 +22,10 @@
   .tbl .r { text-align: right; }
 
   /* A phone keeps the name readable: a row wraps, the name takes the room, the facts follow on the next line. An
-     ordered row keeps its columns (handle, position, name), since its name is cut, not hidden. */
+     ordered row keeps its columns (handle, position, name), since its name is cut, not hidden; an access row keeps its
+     own phone grid (figures.css). */
   @media (max-width: 860px) {
-    .row:not(.ds-row) { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--s-3); row-gap: var(--s-1); }
-    .row:not(.ds-row) > .ttl { flex: 1 1 55%; }
+    .row:not(.ds-row, .acc) { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--s-3); row-gap: var(--s-1); }
+    .row:not(.ds-row, .acc) > .ttl { flex: 1 1 55%; }
   }
 }

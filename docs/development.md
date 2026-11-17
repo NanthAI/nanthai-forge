@@ -649,6 +649,12 @@ layer out of both first paints.
   top bar's; requests that hold no Lane are listed and never counted. A reason
   Forge did not record says "not reported". Idle costs nothing.
 
+Billing at `/-/account/billing` lazily loads `web/src/billing/Home.tsx`, replacing
+its placeholder. The shared [stub contract](billing.md) adds no accounting calls.
+`tests/billing-home.test.mjs` renders the real frame with synthetic data. Set
+`FORGE_BILLING_SHOTS` to a private output directory when running it to capture
+both themes at 1440 and 390 px. It does not verify an authenticated account.
+
 ### Convex Auth core beside Clerk
 
 Convex upgrades must replay scheduler self-cancellation: use `cancelPendingTask` with request `scheduledFunctionId` and a pending-only check (running mutations still appear pending); pass an already-read task to avoid a second read.

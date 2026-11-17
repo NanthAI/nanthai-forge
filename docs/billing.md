@@ -36,3 +36,34 @@ zero. The marginal serving-cost delta is $0 per 1,000 landings against the Phase
 project, 12 month and 24 invoice rows rather than the number of landings. Memory
 is O(one bounded page); formatting is O(page size), with no timers or polling.
 No stored bytes or schema change. Live aggregate-counter design is P8 work.
+
+## Current service limits
+
+These existing service bounds are separate from the subscription samples. The
+P7 adapter does not read storage or limiter counters: current usage against these
+bounds is **not reported**. The service operator configures them; this page adds
+no new limit, warning or enforcement.
+
+| Resource | Existing service bound |
+| --- | --- |
+| Stored object | 100 MiB |
+| Stored project | 50 GiB or 4,000,000 objects |
+| Stored owner account | 100 GiB or 10,000,000 objects |
+| Signed-out reads | 120 calls/minute shared per public project; signed-in calls are not counted |
+| Fresh member work | 300 checks, 300 composes and 300 submissions per UTC day; owners are exempt |
+| Save manifest | 122,400 files and 19,360,000 logical manifest bytes per State |
+| Compose manifest | 68,800 files and 11,200,000 logical manifest bytes per State |
+| Sync/resolution manifest | 56,800 files and 9,200,000 logical manifest bytes per State |
+
+Storage and request bounds are defined in `convex/abuseLimits.ts`. The source
+bounds and their operation-specific recovery are in [source exchange](operations/source-exchange.md#supported-repository-envelope).
+CI minutes are paid by the account that owns the configured runner; operator
+storage and backend costs are separate from the displayed subscription preview.
+Warnings, removal controls and live usage remain open on the journey scorecard;
+the billing preview does not authorise a change to them.
+
+The home loads lazily with the Billing route. `sample=first|hobby|pro|team|over|late|worst`
+and `view=owner|member|loading|error` select explicit synthetic states. `screen=plan|invoices|payment`
+reserves the billing screen addresses and currently shows their read-only summary;
+the independently built screens replace those summaries. These switches never
+change an account or start a payment flow.

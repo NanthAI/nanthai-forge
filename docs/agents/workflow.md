@@ -2267,3 +2267,13 @@ Preparing landings appear in `queue` after admitted entries, with `position:null
 controller, not another queue entry; dispatch rank is assigned at admission.
 Replaying the original land request repairs a failed preparation wake under the same
 submission and operation identity. A running wake is fenced, never cancelled.
+
+### Billing pools and run allowances
+
+A run allowance is separate from the owner's monthly billing pool. Phase 7 uses
+[stub billing metadata](../billing.md), with no live accounting read or new hold.
+Below 20% remaining, the compact stub line names the pool, remaining landings and
+reset time. A plan-held stub keeps the original automatic continuation; do not
+submit another landing to replace its queue position. Existing service limits
+keep their recovery: use their reset time and retry the original command and
+operation id. Storage quotas have no time-based reset. Live plan metadata is P8.

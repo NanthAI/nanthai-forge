@@ -80,7 +80,13 @@ export function createBillingStub(
     source: 'stub',
     view: view === 'member' ? 'member' : 'owner',
     pool: {
-      owner: { kind: 'person', handle: '@sample-owner' },
+      owner: {
+        kind: 'person',
+        handle:
+          sample === 'worst'
+            ? '@sample-owner-with-a-long-handle-for-responsive-layout-review'
+            : '@sample-owner',
+      },
       plan,
       period: { start: '2026-11-01T00:00:00Z', resetAt: '2026-12-01T00:00:00Z', label: 'November' },
       acceptedLandings: used,

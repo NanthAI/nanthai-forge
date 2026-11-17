@@ -4,7 +4,7 @@
 // public bar and column. Every control at first paint is a plain link or button; menus and sheets attach with the
 // behaviour layer (decisions.md, shared-base rule 3). Each frame has a skip link, one main landmark and the phone tabs.
 import type { ReactNode } from 'react';
-import { Avatar, Count, Menu, State, type MenuAction } from '../ds';
+import { Avatar, Count, Menu, State, initials, type MenuAction } from '../ds';
 import { ForgeMark } from '../shell/brand';
 import { Line, heldCount, type LineFeed } from './Line';
 import { useMark } from './mark';
@@ -101,7 +101,7 @@ function End({
       <A
         className="ico"
         href={hrefFor({ frame: 'account', place: 'projects' })}
-        aria-label={handle ? `@${handle}, your account` : 'Your account'}
+        aria-label={handle ? `${initials(handle)}, @${handle}, your account` : 'Your account'}
       >
         {handle ? <Avatar handle={`@${handle}`} /> : <span className="av none" aria-hidden="true" />}
       </A>

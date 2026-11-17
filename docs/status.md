@@ -346,6 +346,8 @@ GitHub analysis owners can remove public or private analyses from Projects with 
 
 ## Partial
 
+- Billing under `/-/account/billing` uses the shared typed P7 stub adapter: monthly owner pool, project/month usage, plan, statement, payment and invoice summaries. All figures say Sample data. Live plan accounting, CLI/MCP plan metadata, provider calls, charging and plan holds remain Phase 8; [billing](billing.md) states the boundary and existing service limits.
+
 - **Existing-account sign-in linking.** A retained provider session can enroll
   a passkey on its exact Forge account; the methods screen attaches GitHub by
   its completed numeric-id OAuth proof, with passkey confirmation when present.
