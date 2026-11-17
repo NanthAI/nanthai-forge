@@ -226,6 +226,26 @@ tbody td { color: var(--text); }
 .js [data-live]:not([data-live="1"]) .tok, .js [data-live]:not([data-live="1"]) .pulse { animation-play-state: paused; }
 
 /* questions and limits */
+/* pricing: three plans side by side under one rule; figures from web/src/billing/contract.ts (checked by the page test) */
+.plans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 2px solid var(--text); }
+.plan { display: grid; gap: 6px; align-content: start; padding: 26px clamp(18px, 2.4vw, 36px) 30px; border-left: 1px solid var(--line); }
+.plan:first-child { border-left: 0; padding-left: 0; }
+.plan .pn { font-size: var(--t-h3); font-weight: 700; }
+.plan .amt { margin-top: 8px; font: var(--w-bold) clamp(56px, 6.4vw, 92px)/1 var(--font-sans); letter-spacing: var(--disp-track); font-variant-numeric: tabular-nums; }
+.plan .per { min-height: 1.6em; color: var(--text-2); font-size: 15px; }
+.plan .ld { margin-top: 18px; font-size: 18px; font-weight: 600; }
+.plan .ld b { font-weight: 700; font-variant-numeric: tabular-nums; }
+.plan .meter { height: 8px; margin: 10px 0 22px; background: var(--line); }
+.plan .meter i { display: block; width: var(--v); min-width: 6px; height: 100%; background: var(--series); transform-origin: 0 50%; transition: transform .9s var(--ease-out); }
+.js .plan .meter i { transform: scaleX(0); }
+.js .seen .plan .meter i { transform: none; }
+.btn { justify-self: start; display: inline-flex; align-items: center; justify-content: center; min-height: 46px; padding: 0 20px; border: 1.5px solid var(--text); border-radius: var(--r); font-size: 16px; font-weight: 700; transition: transform var(--d-quick) var(--ease-out), background-color var(--d-quick) ease, color var(--d-quick) ease; }
+.btn:active { transform: scale(.97); }
+.btn.go { background: var(--text); color: var(--bg); }
+.pfoot { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px clamp(18px, 2.4vw, 36px); margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--line); color: var(--text-2); font-size: 16px; }
+.pfoot b { display: block; color: var(--text); font-weight: 700; }
+#pricing .note { margin-top: 22px; color: var(--text-3); font-size: 13.5px; }
+
 .faq { border-top: 1px solid var(--line); }
 .faq details { border-bottom: 1px solid var(--line); }
 .faq summary { cursor: pointer; list-style: none; padding: 18px 34px 18px 0; font-weight: 700; font-size: 18px; position: relative; }
@@ -251,6 +271,8 @@ footer.ft a { padding: 4px 0; }
   .key:hover { background: var(--brand-hover); }
   .top nav a:hover, footer.ft a:hover { color: var(--text); }
   .lk:hover, .peek summary:hover, .tbl summary:hover { text-decoration-color: var(--text); }
+  .btn:hover { background: var(--text); color: var(--bg); }
+  .btn.go:hover { background: var(--text-2); border-color: var(--text-2); }
   .grp:hover .tip { opacity: 1; }
 }
 
@@ -283,13 +305,17 @@ footer.ft a { padding: 4px 0; }
   .fit .wire { width: 2px; height: 34px; margin: 12px 0 12px 4px; }
   .fit .wire .pulse { display: none; }
   .fit .ci { grid-column: 1; }
+  .plans, .pfoot { grid-template-columns: minmax(0, 1fr); }
+  .plan { padding: 24px 0 26px; border-left: 0; border-top: 1px solid var(--line); }
+  .plan:first-child { border-top: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .tok, .pulse { animation: none !important; }
   .route .tok { transform: translateX(100%); }
-  .js .bars .bb i, .js .grp .c { transition: none; transform: none; }
+  .js .bars .bb i, .js .grp .c, .js .plan .meter i { transition: none; transform: none; }
+  .btn { transition: none; }
   .js .band .wd { transition: none; opacity: 1; }
   .js .term div { opacity: 1; }
   .sig > canvas, .key, .mkl span { transition: none; }

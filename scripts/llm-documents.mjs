@@ -64,7 +64,7 @@ const agentRules = [
 // (web/index.html, tests/landing-page.test.mjs). Keep both in step: no install, sign-in or import before the person says so.
 export const sentHere =
   'If a person sent you here with the prompt from the Forge public page, explain before you act. Tell them, in a few plain lines: what Forge would change about how they and their agents land work in this repository; what it could cost or save in CI minutes against their current flow, quoting the measured results below as one published benchmark on one repository, not a promise; and what you need from them to try it on one small change. Do not install, sign in, import a repository or change any file until they say so.\n\n' +
-  'Forge is in open development. It is not published to npm and there is no public production service or price yet; trying it today means building from source ([quickstart](/docs/quickstart.md)). Current state: [status](/docs/status.md).';
+  'Forge is in open development. It is not published to npm and there is no public production service yet, so nothing is charged (the public page shows the prices planned for launch); trying it today means building from source ([quickstart](/docs/quickstart.md)). Current state: [status](/docs/status.md).';
 
 const startHere = new Set([
   'docs/README.md',

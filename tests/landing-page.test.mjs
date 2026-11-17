@@ -164,7 +164,8 @@ test('every link on the page has a real destination', () => {
       assert.equal(href, 'https://github.com/NanthAI/nanthai-forge', href);
     else
       assert.ok(
-        ['/', '/projects', '/llms.txt'].includes(href) || /^\/docs\/(?:[a-z0-9/-]+\/)?$/.test(href),
+        ['/', '/projects', '/llms.txt', '/-/privacy', '/-/terms'].includes(href) ||
+          /^\/docs\/(?:[a-z0-9/-]+\/)?$/.test(href),
         `${href} is a page the site serves`,
       );
   }
@@ -174,13 +175,52 @@ test('every link on the page has a real destination', () => {
     ['Development status', '/docs/status/'],
     ['Security', '/docs/security/'],
     ['Source', 'https://github.com/NanthAI/nanthai-forge'],
+    ['Privacy', '/-/privacy'],
+    ['Terms', '/-/terms'],
   ])
     assert.ok(html.includes(`<a href="${href}">${label}</a>`), label);
   assert.match(html, /<a class="in" href="\/projects">Sign in<\/a>/);
   assert.match(
     text,
-    /in open development and builds itself\. There is no public service, package or price yet\. Development status/,
+    /in open development and builds itself\. There is no public service or package yet, and nothing is charged\. Development status/,
   );
+});
+
+test('the pricing section shows the billing contract plans and says nothing is charged yet', async () => {
+  const { plans, extraBlock } = await import('../web/src/billing/contract.ts');
+  const shown = [...html.matchAll(/<div class="plan">([\s\S]*?)<\/div>\n/g)].map(m => m[1]);
+  assert.equal(shown.length, Object.keys(plans).length, 'one column per plan');
+  const most = Math.max(...Object.values(plans).map(p => p.includedLandings));
+  for (const [i, plan] of Object.values(plans).entries()) {
+    const col = shown[i];
+    assert.match(col, new RegExp(`<h3 class="pn">${plan.name}</h3>`));
+    assert.ok(col.includes(`<span class="amt">$${plan.monthlyUsd}</span>`), `${plan.name} price`);
+    assert.ok(
+      col.includes(`<span class="per">${plan.monthlyUsd ? 'a month' : 'free'}</span>`),
+      `${plan.name} period`,
+    );
+    assert.ok(
+      col.includes(`<b>${plan.includedLandings.toLocaleString('en-US')}</b> landings a month`),
+      plan.name,
+    );
+    assert.ok(
+      col.includes(`--v:${+((plan.includedLandings / most) * 100).toFixed(1)}%`),
+      `${plan.name} meter to scale`,
+    );
+  }
+  // Paid plans cannot be started yet: only the free plan has an action, and it is the app's first run.
+  assert.equal((html.match(/class="btn/g) ?? []).length, 1);
+  assert.ok(shown[0].includes('<a class="btn go" href="/projects">Import a repository</a>'));
+  assert.ok(
+    text.includes(`Extra landings $${extraBlock.usd} per ${extraBlock.landings}, only when you go over`),
+  );
+  assert.match(text, /Prices planned for launch\. Nothing is charged before then\./);
+  assert.doesNotMatch(
+    html,
+    /[Yy]early|annual/,
+    'yearly billing is out of the first build (owner decision 4.10)',
+  );
+  assert.match(html, /<a class="wide" href="#pricing">Pricing<\/a>/);
 });
 
 test('"Give this to your agent" copies an explain-first prompt that routes through llms.txt', () => {

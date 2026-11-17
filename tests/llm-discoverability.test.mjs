@@ -142,7 +142,10 @@ test('llms.txt answers the public page prompt explain-first and states the devel
   assert.match(section, /CI minutes/);
   assert.match(section, /one small change/);
   assert.match(section, /Do not install, sign in, import a repository or change any file until they say so/);
-  assert.match(section, /not published to npm and there is no public production service or price yet/);
+  assert.match(
+    section,
+    /not published to npm and there is no public production service yet, so nothing is charged/,
+  );
   assert.match(section, /\(\/docs\/quickstart\.md\)[\s\S]*\(\/docs\/status\.md\)/);
   // The prompt the page copies asks for the same three answers and forbids installing.
   const prompt = /<pre id="prompt" data-prompt>([\s\S]*?)<\/pre>/.exec(page)?.[1] ?? '';
