@@ -6,6 +6,13 @@ import { HostedAgentTransport } from './hosted-agent-transport.js';
 import type { HostedAgentAddress } from './hosted-address.js';
 import { hostedCheckLog } from './hosted-check-log.js';
 
+/** While a check runs: which streams are still writing, so the tail reads as "so far". */
+const liveLine = (streams: { shard: number; attempt: number; stream: string; live: boolean }[]) => {
+  const live = streams.filter(stream => stream.live);
+  return live.length
+    ? `; running, so far: ${live.map(s => `shard ${s.shard}${s.attempt ? ` attempt ${s.attempt}` : ''} ${s.stream}`).join(', ')} (run again for newer lines)`
+    : '';
+};
 /** CLI form of `log` on a hosted checkout: the retained tail of a check run's output on stdout, one line
  * of what it is on stderr. `{"json":true}` returns the structured result instead. */
 export async function hostedCheckLogCli(
@@ -34,7 +41,7 @@ export async function hostedCheckLogCli(
   }
   if (json === true) return { action: 'log', result };
   process.stderr.write(
-    `log ${result.runId} (${result.status}): ${result.streams.length} stream(s), ${result.truncated ? 'tail of the retained output' : 'all retained output'}${result.providerUrl ? `; provider ${result.providerUrl}` : ''}${'note' in result ? `; ${result.note}` : ''}\n`,
+    `log ${result.runId} (${result.status}): ${result.streams.length} stream(s)${liveLine(result.streams)}, ${result.truncated ? 'tail of the retained output' : 'all retained output'}${result.providerUrl ? `; provider ${result.providerUrl}` : ''}${'note' in result ? `; ${result.note}` : ''}\n`,
   );
   write(result.text);
   return undefined;

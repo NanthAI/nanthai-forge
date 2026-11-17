@@ -35,6 +35,9 @@ const pageSchema = z.object({
       streamId: z.string(),
       retired: z.boolean(),
       stream: outputStreamSchema,
+      /** Published so far: a running check's stream has chunks before its seal. */
+      bytes: z.number().optional(),
+      maxSequence: z.number().optional(),
       seal: outputSealSchema.nullable(),
     }),
   ),
@@ -47,6 +50,9 @@ const manifestSchema = z.object({
   fullLogs: z.string().optional(),
   providerUrl: z.string().nullable().optional(),
 });
+const isNotFound = (error: unknown) =>
+  (error as { code?: string; data?: { code?: string } })?.code === 'NOT_FOUND' ||
+  (error as { data?: { code?: string } })?.data?.code === 'NOT_FOUND';
 const downloadSchema = z.object({
   object: z.object({ sha256: z.string(), size: z.number() }),
   envelope: z.object({ sha256: z.string(), size: z.number() }).optional(),
@@ -55,8 +61,10 @@ const downloadSchema = z.object({
 
 /** The retained, redacted output of one hosted check run (the tail Forge keeps per job), read through
  * the same paged, access-checked accessors as the web view: no provider credential, no `gh`. A bounded tail
- * of the selected streams, newest chunks first. Calls: 1 manifest + 1 per 50 streams + 1 per chunk
- * actually needed (at most MAX_CHUNKS), each chunk one R2 GET; idle 0. */
+ * of the selected streams, newest chunks first. While the check runs, a stream not yet sealed is `live` and
+ * its tail is the chunks its collector has published so far (Item 42b8bf0e), read once per call: run it again
+ * for newer lines, nothing is pushed or polled. Calls: 1 manifest + 1 per 50 streams + 1 per chunk actually
+ * needed (at most MAX_CHUNKS), each chunk one R2 GET; idle 0. */
 export async function hostedCheckLog(input: unknown, transport: CheckLogTransport, request?: typeof fetch) {
   const command = hostedCheckLogSchema.parse(input);
   const identity = { runId: command.runId };
@@ -92,10 +100,12 @@ export async function hostedCheckLog(input: unknown, transport: CheckLogTranspor
       shard: row.stream.shard,
       attempt: row.stream.attempt,
       stream: row.stream.stream,
-      bytes: row.seal?.bytes ?? null,
+      bytes: row.seal?.bytes ?? row.bytes ?? null,
       sealed: !!row.seal,
+      live: !row.seal && !row.retired,
       retired: row.retired,
     })),
+    live: chosen.some(row => !row.seal && !row.retired),
   };
   if (!chosen.length)
     return {
@@ -117,8 +127,10 @@ export async function hostedCheckLog(input: unknown, transport: CheckLogTranspor
     fetched = 0,
     complete = true;
   walk: for (const row of [...chosen].reverse()) {
-    if (row.retired || !row.seal) continue;
-    for (let sequence = row.seal.chunks - 1; sequence >= 0; sequence--) {
+    if (row.retired) continue;
+    // A live stream's newest chunk can arrive before an older one: the tail stops at the first gap.
+    const last = row.seal ? row.seal.chunks - 1 : (row.maxSequence ?? -1);
+    for (let sequence = last; sequence >= 0; sequence--) {
       if (have >= command.tail) {
         complete = false;
         break walk;
@@ -127,13 +139,19 @@ export async function hostedCheckLog(input: unknown, transport: CheckLogTranspor
         complete = false;
         break walk;
       }
-      const link = downloadSchema.parse(
-        await transport.mutation('projectHostedOutputRead:download', {
+      let signed;
+      try {
+        signed = await transport.mutation('projectHostedOutputRead:download', {
           ...identity,
           streamId: row.streamId,
           sequence,
-        }),
-      );
+        });
+      } catch (error) {
+        if (row.seal || !isNotFound(error)) throw error;
+        complete = false;
+        break walk;
+      }
+      const link = downloadSchema.parse(signed);
       fetched++;
       const response = await networkFetch(
         link.url,

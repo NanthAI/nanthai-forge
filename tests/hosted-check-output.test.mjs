@@ -367,8 +367,9 @@ test('one command returns a hosted check run’s retained output as a bounded ta
   assert.equal(all.truncated, false);
   assert.deepEqual(downloads.sort(), [0, 1, 2]);
   assert.deepEqual(all.streams, [
-    { shard: 0, attempt: 0, stream: 'stdout', bytes: 15, sealed: true, retired: false },
+    { shard: 0, attempt: 0, stream: 'stdout', bytes: 15, sealed: true, live: false, retired: false },
   ]);
+  assert.equal(all.live, false);
   assert.equal(
     (await hostedCheckLog({ runId: s.check.id, stream: 'stderr' }, transport(), request)).text,
     '',
@@ -386,4 +387,50 @@ test('one command returns a hosted check run’s retained output as a bounded ta
     hostedCheckLog({ runId: 'nope' }, transport(), request),
     error => error.name === 'ZodError',
   );
+});
+
+test('a running check’s log is its published chunks so far, read once per call; a gap ends the tail (Item 42b8bf0e)', async () => {
+  const s = await outputFixture();
+  const parts = ['AAAA\n', 'BBBB\n', 'CCCC\n', 'DDDD\n'];
+  const published = new Set();
+  const publish = async i => {
+    await s.apply(chunk(s, i, parts[i], i * 5));
+    published.add(i);
+  };
+  await publish(0);
+  await publish(1);
+  const calls = { query: 0, mutation: 0 };
+  const transport = {
+    query: async (name, args) => {
+      calls.query++;
+      if (name === 'projectHostedOutputRead:manifest') return s.manifest('owner');
+      return s.streams(args.cursor, 'owner');
+    },
+    mutation: async (_name, args) => {
+      calls.mutation++;
+      if (!published.has(args.sequence))
+        throw Object.assign(new Error('missing'), { data: { code: 'NOT_FOUND' } });
+      return { object: pin(parts[args.sequence]), url: `https://r2.invalid/${args.sequence}` };
+    },
+  };
+  const request = async url => new Response(parts[Number(new URL(url).pathname.slice(1))]);
+  const running = await hostedCheckLog({ runId: s.check.id }, transport, request);
+  assert.equal(running.text, 'AAAA\nBBBB\n', 'the lines published so far, before any seal');
+  assert.equal(running.live, true);
+  assert.deepEqual(
+    running.streams.map(({ live, sealed, bytes }) => ({ live, sealed, bytes })),
+    [{ live: true, sealed: false, bytes: 10 }],
+  );
+  assert.deepEqual(
+    calls,
+    { query: 2, mutation: 2 },
+    'manifest, one stream page and one signed GET per chunk',
+  );
+  // Chunk 3 arrives before chunk 2: the tail is the newest contiguous part, marked incomplete.
+  await publish(3);
+  const gap = await hostedCheckLog({ runId: s.check.id }, transport, request);
+  assert.equal(gap.text, 'DDDD\n');
+  assert.equal(gap.truncated, true);
+  await publish(2);
+  assert.equal((await hostedCheckLog({ runId: s.check.id }, transport, request)).text, parts.join(''));
 });
