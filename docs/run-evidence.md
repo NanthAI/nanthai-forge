@@ -52,3 +52,60 @@ Compact successful landing receipts use `selfReportedTestFiles` for the number o
 test files reported by the checked code via CI. `null` means no file report, not
 zero tests executed. Failed/flaky details keep their source label; `--detail`
 keeps the complete original record, including zero counts.
+
+## Stats
+
+Stats shows a project owner what Forge measured in their project, and compares it with the same
+project's own history replayed through a GitHub-style flow. The comparison never applies the
+published benchmark's ratios to a project: a project is not the benchmark.
+
+### Measured figures
+
+Facts from the project's accepted landings, each with its unit:
+
+| Figure | Unit and source |
+| --- | --- |
+| CI minutes per landing | Runner minutes of the accepted check plus the checks its earlier attempts discarded, reported by your CI. A batch member carries its share of the shared check. |
+| First-try rate | Share of landings accepted on their first attempt. |
+| Time to main | Median from "land" to on main, observed by Forge, with its stops: in queue, checking, landing. |
+| Wasted CI minutes | Runner minutes of discarded checks. |
+
+A landing whose runner minutes are unknown is left out of every CI figure and counted ("12 landings
+without runner minutes"); it is never priced as zero.
+
+### Own-history replay
+
+The contract is `src/stats-estimate.ts` (Issue `a61d3c91`). It is pure and display-only: never an
+input to a verdict, a queue or a bill.
+
+- **Full check.** One replayed run costs the median billed runner seconds, and takes the median
+  check time, of the day's checks that ran the whole command. With no full run that day it uses the
+  scoped checks Forge ran, which can only understate a GitHub run, and says so (`basis`).
+- **CI minutes, a range.** Lower bound: each change runs the full check once as a pull request and
+  once in a merge queue. Upper bound: plus one rerun for each landing that reached main while it
+  waited (between its "land" and its own arrival on main, from Forge's recorded times), as when
+  branches must be up to date. Stats headlines the lower bound ("at least ... fewer").
+- **Time to main.** The same arrival times through a merge queue that checks one change at a time,
+  each run taking the full-check time; one pass, oldest first. The queue carries across days.
+- **Tokens.** Shown only as a measured Forge figure with a link to the published benchmark; never a
+  per-project "saved" claim.
+- **Left out.** Review time, flaky reruns and conflicts found after CI, so the real GitHub figure is
+  likely above the lower bound.
+
+The comparison starts at 50 landings in the window (`STATS_COMPARE_MIN_LANDINGS`); until then Stats
+shows only the measured figures.
+
+### Interface
+
+- `StatsLanding`: one accepted landing from fields its receipt and landing row already hold
+  (`submittedAt`, `landedAt`, check start and end, `runnerSeconds`, `discardedRunnerSeconds`,
+  `attempts`, `ranInFull`, `who`). `null` means unknown.
+- `replayEstimate(landings, freeAt)`: the CI range (`runs`, `reruns`, `replayRunnerSeconds`), the
+  replayed seconds to main and the full check it used, over priced landings only.
+- `statsDay(day, landings, freeAt)`: one closed UTC day as a `StatsDay` (`statsDaySchema`): counts,
+  sorted seconds for medians, the day's replay and its `freeAt` for the next day, and landings by
+  who (at most 40, the rest under `others`). A day past 2,000 landings is marked `partial`.
+- `statsWindow(days)`: what Stats shows for a window of closed days: `measured`, `comparison`
+  (null under 50 landings), and `who`.
+
+Days are additive, so a month is the merge of its days and medians stay exact.
