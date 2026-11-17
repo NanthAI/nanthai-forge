@@ -225,7 +225,7 @@ test('de6620eb: a new literal in a scanned source file selects the repo-wide gua
   });
 });
 
-test('425ecd74: a data fixture, its test and a doc select only that test and mandatory checks', t => {
+test('425ecd74: a data fixture, its test and a doc retain byte and folder readers plus mandatory checks', t => {
   const paths = [
     at('docs', 'agents', 'regression-ladder.md'),
     at('tests', 'fixtures', 'incident-replays.json'),
@@ -241,10 +241,13 @@ test('425ecd74: a data fixture, its test and a doc select only that test and man
   assert.deepEqual(readers, [at('tests', 'incident-replays.test.mjs')]);
   // Repo-wide guards that scan the docs or tests folder read these files too (Issue ec7960f9).
   const scanners = [...scanReaders(files, paths).keys()];
+  // A bare readdirSync('tests') observes the JSON folder too, even when the
+  // returned names are filtered to test files. Retain that conservative reader.
+  const directoryReaders = [at('tests', 'public-verify.test.mjs')];
   assert.deepEqual(
     [...plan.tests].sort(),
-    [...new Set([...readers, ...smokeTests, ...scanners])].sort(),
-    'local tiers hold the fixture reader, the folder scanners and the fixed smoke set only',
+    [...new Set([...readers, ...smokeTests, ...scanners, ...directoryReaders])].sort(),
+    'local tiers hold the fixture reader, folder readers and fixed smoke set only',
   );
   t.diagnostic(`local ${plan.tests.length}, deferred to pre-queue ${plan.deferredTests.length}`);
 });

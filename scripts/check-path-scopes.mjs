@@ -4,6 +4,21 @@ import { posix } from 'node:path';
 // paths stay unknown: a filename resemblance is never an independence proof.
 export const webTest = path => /^(?:tests\/ui-|tests\/.*-ui\.test)/.test(path);
 
+const codePath = /\.[cm]?[jt]sx?$/;
+/** Basenames also catch segment joins and variable-first templates. Unparsed
+ * executable/config readers cannot prove a smaller test set; Markdown is prose. */
+function jsonReaders(path, files) {
+  const name = posix.basename(path).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const named = new RegExp(`(?:^|[/'"\\x60\\s])${name}(?=$|[/'"\\x60\\s])`);
+  const readers = [];
+  for (const [file, text] of files) {
+    if (file === path || !named.test(text)) continue;
+    if (codePath.test(file)) readers.push(file);
+    else if (!/\.(?:md|mdx|markdown)$/i.test(file)) return null;
+  }
+  return readers;
+}
+
 /** A non-source file in a folder under scripts/ or tests/ (shell, Python, notes)
  * is data to the code that runs or reads it, which the selector never parses.
  * Its observers are its sibling code (relative spawns, folder walks) and any
@@ -13,22 +28,41 @@ export const webTest = path => /^(?:tests\/ui-|tests\/.*-ui\.test)/.test(path);
  * race re-check of a slow landing back to the full suite). */
 function scriptAsset(path, files) {
   const match = /^(scripts|tests)\/((?:[^/]+\/)+)([^/]+)$/.exec(path);
-  if (!match || /\.(?:[cm]?js|[cm]?tsx?|css|json|svg|html)$/.test(path) || manualFixture(path))
-    return undefined;
+  if (!match || /\.(?:[cm]?js|[cm]?tsx?|css|svg|html)$/.test(path) || manualFixture(path)) return undefined;
   const [, top, nested, name] = match;
+  const json = path.endsWith('.json');
+  if (json && top === 'tests') return undefined;
+  const namedReaders = json ? jsonReaders(path, files) : [];
+  if (namedReaders === null) return null;
   const folder = `${top}/${nested.slice(0, -1)}`;
   const segments = nested.slice(0, -1).split('/');
   const folders = segments.map((_, i) => segments.slice(0, i + 1).join('/'));
   const readers = [...files.keys()].filter(file => {
-    if (file === path) return false;
+    if (file === path || (json && !codePath.test(file))) return false;
     if (file.startsWith(`${folder}/`) && !file.slice(folder.length + 1).includes('/')) return true;
     const text = files.get(file);
-    return text.includes(name) || folders.some(f => text.includes(`${f}/`) || text.includes(`'${f}'`));
+    return (
+      (!json && text.includes(name)) ||
+      folders.some(
+        f => text.includes(`${f}/`) || ["'", '"', '`'].some(quote => text.includes(`${quote}${f}${quote}`)),
+      )
+    );
   });
-  if (readers.some(file => /^(?:src|web|convex|netlify)\/|^package(?:-lock)?\.json$/.test(file))) return null;
+  if (!json && readers.some(file => /^(?:src|web|convex|netlify)\/|^package(?:-lock)?\.json$/.test(file)))
+    return null;
   return {
     domain: top === 'tests' ? 'tests' : 'scripts',
-    seeds: [path, ...readers],
+    // Document manifests also generate the docs site's web bundle. Keep all
+    // web consumers, not just tests importing the manifest loader itself.
+    seeds: [
+      path,
+      ...namedReaders,
+      ...readers,
+      ...(/^scripts\/package-documents\/.+\.json$/.test(path)
+        ? [...files.keys()].filter(file => file.startsWith('web/src/'))
+        : []),
+    ],
+    ...(json ? { requireConsumer: true } : {}),
     reason: 'Script or fixture data and the code beside or naming it',
   };
 }
@@ -191,6 +225,18 @@ export function classifyCheckPath(path, files) {
   if (note !== undefined) return note;
   const asset = scriptAsset(path, files);
   if (asset !== undefined) return asset;
+  // Product JSON has the same conservative named readers as script data, plus
+  // the graph's import, directory and glob readers. Unobserved data stays broad.
+  if (/^(?:src|web\/src|convex|netlify)\/.+\.json$/.test(path) && files.has(path)) {
+    const readers = jsonReaders(path, files);
+    if (readers === null) return null;
+    return {
+      domain: path.startsWith('src/') ? 'core' : path.split('/')[0],
+      seeds: [path, ...readers],
+      requireConsumer: true,
+      reason: 'JSON data and its transitive named, import, directory and glob readers',
+    };
+  }
   if (!files.has(path)) return null;
   if (/^scripts\/.+\.(?:mjs|js|ts)$/.test(path)) return { domain: 'scripts', seeds: [path] };
   if (/^src\/.+\.ts$/.test(path)) return { domain: 'core', seeds: [path] };

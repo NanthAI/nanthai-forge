@@ -3,52 +3,11 @@ import ts from 'typescript';
 
 // Follow directory-valued expressions without executing them. Building a path
 // used only for string comparison is not a read of every module in that folder.
-// Escaping values and unsupported uses remain directory dependencies.
-export function directoryDependency(literal, ast) {
-  const identifiers = new Map(),
-    functions = new Map(),
-    initializers = new Map(),
-    pathFunctions = new Set(),
-    declarations = [],
-    writes = new Set();
-  const declare = (name, initializer) => {
-    if (!ts.isIdentifier(name)) return;
-    declarations.push(name);
-    initializers.set(name.text, initializers.has(name.text) ? null : initializer);
-  };
-  function scan(node) {
-    if (ts.isImportClause(node) && node.name) declarations.push(node.name);
-    if (ts.isImportSpecifier(node) || ts.isNamespaceImport(node)) declarations.push(node.name);
-    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
-      if (ts.isIdentifier(node.left)) writes.add(node.left.text);
-      if (ts.isPropertyAccessExpression(node.left) && ts.isIdentifier(node.left.expression))
-        writes.add(node.left.expression.text);
-    }
-    if (ts.isImportDeclaration(node) && ['node:path', 'node:url'].includes(node.moduleSpecifier.text)) {
-      for (const specifier of node.importClause?.namedBindings?.elements ?? []) {
-        if (
-          ['resolve', 'join', 'normalize', 'dirname', 'basename', 'fileURLToPath', 'pathToFileURL'].includes(
-            (specifier.propertyName ?? specifier.name).text,
-          )
-        )
-          pathFunctions.add(specifier.name.text);
-      }
-    }
-    if (ts.isVariableDeclaration(node) || ts.isParameter(node)) declare(node.name, node.initializer);
-    if ((ts.isClassDeclaration(node) || ts.isFunctionDeclaration(node)) && node.name)
-      declarations.push(node.name);
-    if (ts.isIdentifier(node)) {
-      if (!identifiers.has(node.text)) identifiers.set(node.text, []);
-      identifiers.get(node.text).push(node);
-    }
-    if (ts.isFunctionDeclaration(node) && node.name) {
-      if (functions.has(node.name.text)) functions.set(node.name.text, null);
-      else functions.set(node.name.text, node);
-    }
-    ts.forEachChild(node, scan);
-  }
-  scan(ast);
-  for (const name of writes) initializers.delete(name);
+// Escaping values and unsupported uses remain directory dependencies. An optional
+// reader set follows aliases to those directory APIs instead of treating metadata
+// and unrelated calls as directory reads. Exported path values still escape.
+export function directoryDependency(literal, ast, requireComparison = false, readers) {
+  const { identifiers, functions, initializers, pathFunctions, declarations } = directoryBindings(ast);
   const scope = name => {
     let parent = name.parent;
     if (ts.isFunctionDeclaration(parent)) parent = parent.parent;
@@ -63,10 +22,55 @@ export function directoryDependency(literal, ast) {
     }
     return undefined;
   };
+  const initializer = name => {
+    const declared = ts.isIdentifier(name) && binding(name);
+    return declared && ts.isVariableDeclaration(declared.parent) ? declared.parent.initializer : undefined;
+  };
+  const readerCall = (expression, seen = new Set()) => {
+    if (!expression || seen.has(expression)) return false;
+    seen.add(expression);
+    if (ts.isPropertyAccessExpression(expression)) return readers.has(expression.name.text);
+    if (ts.isElementAccessExpression(expression) && ts.isStringLiteralLike(expression.argumentExpression))
+      return readers.has(expression.argumentExpression.text);
+    if (ts.isParenthesizedExpression(expression)) return readerCall(expression.expression, seen);
+    if (!ts.isIdentifier(expression)) return false;
+    if (readers.has(expression.text)) return true;
+    const declared = binding(expression);
+    if (declared && ts.isImportSpecifier(declared.parent))
+      return readers.has((declared.parent.propertyName ?? declared.parent.name).text);
+    return readerCall(initializer(expression), seen);
+  };
   const pathFunction = name => {
-    if (!ts.isIdentifier(name) || !pathFunctions.has(name.text)) return false;
-    const declared = binding(name);
-    return declared && ts.isImportSpecifier(declared.parent);
+    const object = ts.isPropertyAccessExpression(name) ? name.expression : name;
+    if (!ts.isIdentifier(object)) return false;
+    const qualified = ts.isPropertyAccessExpression(name) ? `${object.text}.${name.name.text}` : object.text;
+    if (!pathFunctions.has(qualified)) return false;
+    const declared = binding(object);
+    return (
+      declared &&
+      (ts.isImportSpecifier(declared.parent) ||
+        ts.isNamespaceImport(declared.parent) ||
+        ts.isImportClause(declared.parent))
+    );
+  };
+  const computedPath = (node, seen = new Set()) => {
+    if (!node || seen.has(node)) return false;
+    seen.add(node);
+    if (ts.isIdentifier(node)) return computedPath(initializer(node), seen);
+    if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node))
+      return computedPath(node.expression, seen);
+    // A computed repository root before the folder does not make the filename
+    // computed: join(root, 'scripts', 'tool.mjs') names that tool, not all JSON.
+    const contains = part => part.pos <= literal.pos && part.end >= literal.end;
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken)
+      return (contains(node.left) && !ts.isStringLiteralLike(node.right)) || computedPath(node.left, seen);
+    if (ts.isCallExpression(node) && pathFunction(node.expression)) {
+      const index = node.arguments.findIndex(contains);
+      return (
+        index >= 0 && node.arguments.slice(index + 1).some(argument => !ts.isStringLiteralLike(argument))
+      );
+    }
+    return false;
   };
   function value(node, active = new Set()) {
     if (!node || active.has(node)) return '';
@@ -96,6 +100,7 @@ export function directoryDependency(literal, ast) {
     }
     return '';
   }
+  let compared = false;
   const queue = [literal],
     seen = new Set();
   const alias = name => {
@@ -108,7 +113,10 @@ export function directoryDependency(literal, ast) {
     if (seen.has(node)) continue;
     seen.add(node);
     const parent = node.parent;
-    if (!parent) return true;
+    if (!parent) {
+      if (!readers) return true;
+      continue;
+    }
     if ((ts.isVariableDeclaration(parent) || ts.isParameter(parent)) && parent.initializer === node) {
       if (
         ts.isVariableDeclaration(parent) &&
@@ -117,7 +125,7 @@ export function directoryDependency(literal, ast) {
         parent.parent.parent.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.ExportKeyword)
       )
         return true;
-      if (!alias(parent.name)) return true;
+      if (!alias(parent.name) && !readers) return true;
     } else if (ts.isCallExpression(parent) || ts.isNewExpression(parent)) {
       const expression = parent.expression;
       const name = ts.isIdentifier(expression)
@@ -125,10 +133,28 @@ export function directoryDependency(literal, ast) {
         : ts.isPropertyAccessExpression(expression)
           ? expression.name.text
           : '';
-      const local = ts.isIdentifier(expression) && functions.get(name);
+      if (readers && readerCall(expression)) return true;
+      // A computed filename can name any JSON in the literal folder. Once that
+      // assembled path escapes to a call, an unknown loader must retain it too.
+      if (
+        readers &&
+        computedPath(node) &&
+        !pathFunction(expression) &&
+        !(name === 'RegExp' && binding(expression) === undefined)
+      )
+        return true;
+      const initialized = readers && initializer(expression);
+      const local =
+        ts.isIdentifier(expression) &&
+        (functions.get(name) ||
+          (initialized && (ts.isArrowFunction(initialized) || ts.isFunctionExpression(initialized))
+            ? initialized
+            : null));
       if (local) {
         const index = parent.arguments?.indexOf(node);
-        if (index < 0 || !local.parameters[index] || !alias(local.parameters[index].name)) return true;
+        if (index < 0 || !local.parameters[index] || !alias(local.parameters[index].name)) {
+          if (!readers) return true;
+        }
         continue;
       }
       const method = ts.isPropertyAccessExpression(expression);
@@ -143,7 +169,10 @@ export function directoryDependency(literal, ast) {
               : receiver === 'string'
                 ? ['includes', 'startsWith', 'endsWith', 'indexOf', 'lastIndexOf']
                 : [];
-      if (predicates.includes(name)) continue;
+      if (predicates.includes(name)) {
+        compared = true;
+        continue;
+      }
       if (
         pathFunction(expression) ||
         (ts.isNewExpression(parent) && ['URL', 'Set'].includes(name) && binding(expression) === undefined) ||
@@ -153,13 +182,13 @@ export function directoryDependency(literal, ast) {
           ))
       )
         queue.push(parent);
-      else return true;
+      else if (!readers) return true;
     } else if (ts.isPropertyAccessExpression(parent)) {
       if (parent.name === node || parent.name.text === 'length') continue;
       queue.push(parent);
     } else if (ts.isBinaryExpression(parent)) {
       if (parent.operatorToken.kind === ts.SyntaxKind.EqualsToken && parent.right === node) {
-        if (!alias(parent.left)) return true;
+        if (!alias(parent.left) && !readers) return true;
       } else if (parent.operatorToken.kind === ts.SyntaxKind.PlusToken) queue.push(parent);
       else if (
         ![
@@ -168,8 +197,9 @@ export function directoryDependency(literal, ast) {
           ts.SyntaxKind.ExclamationEqualsToken,
           ts.SyntaxKind.ExclamationEqualsEqualsToken,
         ].includes(parent.operatorToken.kind)
-      )
-        return true;
+      ) {
+        if (!readers) return true;
+      } else compared = true;
     } else if (ts.isVariableDeclaration(parent) || ts.isParameter(parent)) {
       // Declaration names aren't reads. Other aliases with the same spelling
       // were included above, conservatively across lexical scopes.
@@ -184,9 +214,69 @@ export function directoryDependency(literal, ast) {
       ts.isSatisfiesExpression(parent)
     )
       queue.push(parent);
-    else return true;
+    else if (!readers) return true;
   }
-  return false;
+  return readers ? false : requireComparison && !compared;
+}
+
+const bindingMemo = new WeakMap();
+function directoryBindings(ast) {
+  if (bindingMemo.has(ast)) return bindingMemo.get(ast);
+  const identifiers = new Map(),
+    functions = new Map(),
+    initializers = new Map(),
+    pathFunctions = new Set(),
+    declarations = [],
+    writes = new Set();
+  const declare = (name, initializer) => {
+    if (!ts.isIdentifier(name)) return;
+    declarations.push(name);
+    initializers.set(name.text, initializers.has(name.text) ? null : initializer);
+  };
+  function scan(node) {
+    if (ts.isImportClause(node) && node.name) declarations.push(node.name);
+    if (ts.isImportSpecifier(node) || ts.isNamespaceImport(node)) declarations.push(node.name);
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      if (ts.isIdentifier(node.left)) writes.add(node.left.text);
+      if (ts.isPropertyAccessExpression(node.left) && ts.isIdentifier(node.left.expression))
+        writes.add(node.left.expression.text);
+    }
+    if (ts.isImportDeclaration(node) && ['node:path', 'node:url'].includes(node.moduleSpecifier.text)) {
+      const methods = [
+        'resolve',
+        'join',
+        'normalize',
+        'dirname',
+        'basename',
+        'fileURLToPath',
+        'pathToFileURL',
+      ];
+      for (const specifier of node.importClause?.namedBindings?.elements ?? [])
+        if (methods.includes((specifier.propertyName ?? specifier.name).text))
+          pathFunctions.add(specifier.name.text);
+      const bindings = node.importClause?.namedBindings;
+      const namespace =
+        node.importClause?.name ?? (bindings && ts.isNamespaceImport(bindings) ? bindings.name : null);
+      if (namespace) for (const method of methods) pathFunctions.add(`${namespace.text}.${method}`);
+    }
+    if (ts.isVariableDeclaration(node) || ts.isParameter(node)) declare(node.name, node.initializer);
+    if ((ts.isClassDeclaration(node) || ts.isFunctionDeclaration(node)) && node.name)
+      declarations.push(node.name);
+    if (ts.isIdentifier(node)) {
+      if (!identifiers.has(node.text)) identifiers.set(node.text, []);
+      identifiers.get(node.text).push(node);
+    }
+    if (ts.isFunctionDeclaration(node) && node.name) {
+      if (functions.has(node.name.text)) functions.set(node.name.text, null);
+      else functions.set(node.name.text, node);
+    }
+    ts.forEachChild(node, scan);
+  }
+  scan(ast);
+  for (const name of writes) initializers.delete(name);
+  const bindings = { identifiers, functions, initializers, pathFunctions, declarations };
+  bindingMemo.set(ast, bindings);
+  return bindings;
 }
 
 export const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

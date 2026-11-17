@@ -418,15 +418,20 @@ function selectWithGraph(
       seeds: classification.seeds.sort(),
     });
   }
-  const scriptsChanged = classifications.filter(item => scriptPath(item.path) && files.has(item.path));
+  const scriptsChanged = classifications.filter(
+    item =>
+      (scriptPath(item.path) ||
+        (item.domain === 'scripts' && item.path.endsWith('.json') && !docsPackager(item.path))) &&
+      files.has(item.path),
+  );
   const graph = suppliedGraph ?? (graphCache.graph ||= testImportGraph(files, scriptsChanged));
   if (graph.error) return full(graph.error);
   const { reverse, evidence, packageGraph, workspaceUsers } = graph;
-  // Product source is data to the static tools (build, typecheck, lint, format,
-  // schema, package smoke), which run on every exact Candidate. Its chains stop at
+  // Product source and JSON are data to the static tools (build, typecheck, lint, format,
+  // schema, package smoke), which run on every exact Candidate. Their chains stop at
   // those commands, and at those tools when the tool reads it rather than imports it.
   const fenced = (item, importer, edge) =>
-    productSource(item.changedPath) &&
+    (productSource(item.changedPath) || item.changedPath.endsWith('.json')) &&
     (packageGraph.staticCommands?.has(importer) ||
       (packageGraph.staticTools?.has(importer) && edge.kind !== 'import'));
   // The docs-check wrapper only spawns the docs check; the runner importing it is not a consumer.
@@ -443,8 +448,8 @@ function selectWithGraph(
   const walk = (queue, blocked) => {
     for (let i = 0; i < queue.length; i++) {
       const current = queue[i];
-      if (blocked && docsWrapper(current)) continue;
       const previous = affected.get(current) ?? held.get(current);
+      if (blocked && docsWrapper(current, previous.changedPath)) continue;
       const holding = !affected.has(current);
       for (const importer of reverse.get(current) ?? []) {
         if (affected.has(importer) || (holding && held.has(importer))) continue;
@@ -484,13 +489,13 @@ function selectWithGraph(
     true,
   );
   for (const item of scriptsChanged) {
-    const evidence = scriptSelectionReason(item, packageGraph.roots, tests, reverse);
+    const evidence = scriptSelectionReason(item, packageGraph.roots, tests, reverse, graph);
     if (evidence.full && !consumersOnly) return full(evidence.full);
     item.tests = [...(item.tests ?? []), ...(evidence.tests ?? [])];
     item.reason = evidence.reason;
   }
   for (const item of classifications) {
-    if (item.requireConsumer && !hasTestConsumer(item.path, reverse, tests)) {
+    if (item.requireConsumer && !item.seeds.some(seed => hasTestConsumer(seed, reverse, tests))) {
       // Fixtures used only by standalone measurement tooling have no test to run; static
       // checks cover them. Anything unused, or reaching the pipeline or product, stays full.
       const users = importersOf(item.path, reverse);

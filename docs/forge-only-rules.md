@@ -69,6 +69,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `scripts/test-import-graph.mjs` | `npm-lockfile` | 4 | Forge's import graph: external packages from its npm lockfile | declared dependencies of every manifest |
 | `scripts/test-directory-path.mjs` | `forge-folders` | 2 | Forge's selector: directory reads in its tests and scripts | the generic JS/TS import graph |
 | `scripts/check-path-scopes.mjs` | `docs-folder` | 1 | Forge's own repository path-scope check treats `docs/` as documentation | not run |
+| `scripts/check-path-scopes.mjs` | `js-extension` | 1 | Forge's own JSON asset readers are JS/TS modules; unknown or unobserved data stays full | each project's own test runner and generic import graph |
 | `scripts/control-build-key.mjs` | `package-json-config` | 1 | the build key of Forge's own CLI | not used |
 | `scripts/docs-readers.mjs` | `js-extension` | 1 | Forge's tested-docs reader scan matches JS/TS importers | declared `docsPaths` on their check definition |
 | `scripts/script-impact.mjs` | `tests-folder` | 4 | Forge's selector maps scripts to named tests in `tests/` | the project runner and the generic import graph |
@@ -92,7 +93,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `scripts/test-shards.mjs` | `tests-folder` | 1 | Forge's standard-check shards | their command in one job |
 | `scripts/test-name-watchers.mjs` | `tests-folder` | 1 | Forge's selector: modules a test names | named tests by module stem (`runnerSelection`) |
 | `scripts/convex-function-names.mjs` | `tests-folder` | 2 | Forge's selector: Convex functions its tests call by name | the generic JS/TS import graph |
-| `scripts/check-path-scopes.mjs` | `forge-folders` | 10 | Forge's own repository path-scope check (`npm run check`) | not run; their checks are their own |
+| `scripts/check-path-scopes.mjs` | `forge-folders` | 11 | Forge's own repository path-scope check (`npm run check`) | not run; their checks are their own |
 | `scripts/check-path-scopes.mjs` | `tests-folder` | 5 | Forge's own repository path-scope check | not run |
 | `scripts/control-build-key.mjs` | `npm-lockfile` | 1 | the build key of Forge's own CLI | not used |
 | `scripts/control-deps-key.mjs` | `npm-lockfile` | 1 | the dependency key of Forge's own CLI | not used |

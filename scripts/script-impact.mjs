@@ -6,8 +6,11 @@ import { posix } from 'node:path';
 // here selects those tests instead of the whole suite. Unknown packagers stay full.
 // Regexes, not strings: a path literal in a script would count as a reference to it.
 export const docsPackager = path =>
-  /^scripts\/(?:package-(?:documents|notices|smoke)|check-documents|selfhost-notices)\.mjs$/.test(path);
-export const docsWrapper = path => /^scripts\/check-documentation\.mjs$/.test(path);
+  /^scripts\/(?:package-(?:documents|notices|smoke)|check-documents|selfhost-notices)\.mjs$/.test(path) ||
+  /^scripts\/package-documents\/.+\.json$/.test(path);
+export const docsWrapper = (path, changedPath) =>
+  /^scripts\/check-documentation\.mjs$/.test(path) ||
+  (changedPath.endsWith('.json') && /^scripts\/verify\.mjs$/.test(path));
 const docsTests = [
   'tests/ci-scope.test.mjs',
   'tests/interaction-static.test.mjs',
@@ -104,7 +107,7 @@ export function packageScriptGraph(files, edge) {
   };
 }
 
-export function scriptSelectionReason(item, roots, tests, reverse) {
+export function scriptSelectionReason(item, roots, tests, reverse, graph) {
   const basename = posix.basename(item.path).replace(/\.(?:mjs|js|ts)$/, '');
   const matching = tests.filter(path => posix.basename(path) === `${basename}.test.mjs`);
   // Only claim a consumer when it is reachable from this particular changed script.
@@ -114,19 +117,28 @@ export function scriptSelectionReason(item, roots, tests, reverse) {
   while (queue.length) {
     const current = queue.shift();
     // The wrapper only spawns the docs check; the runner importing it is not a consumer.
-    if (docs && docsWrapper(current)) continue;
-    for (const importer of reverse.get(current) ?? [])
+    if (docs && docsWrapper(current, item.path)) continue;
+    for (const importer of reverse.get(current) ?? []) {
+      // Static tools run on the exact Candidate; their data walks do not make
+      // JSON an input to the orchestration that invokes those tools.
+      if (
+        item.path.endsWith('.json') &&
+        graph.packageGraph.staticTools?.has(importer) &&
+        graph.evidence.get(current)?.get(importer)?.kind !== 'import'
+      )
+        continue;
       if (!visited.has(importer)) {
         visited.add(importer);
         queue.push(importer);
       }
+    }
   }
   const critical = [...visited].find(
-    path => roots.has(path) && !(docs && (docsPackager(path) || docsWrapper(path))),
+    path => roots.has(path) && !(docs && (docsPackager(path) || docsWrapper(path, item.path))),
   );
   if (critical)
     return { full: `Check pipeline, packaging or build dependency: ${item.path} reaches ${critical}` };
-  if ([...visited].some(path => /^(?:src|web\/src|convex|netlify)\//.test(path)))
+  if (scriptPath(item.path) && [...visited].some(path => /^(?:src|web\/src|convex|netlify)\//.test(path)))
     return { full: `Product runtime dependency: ${item.path}` };
   const consuming = tests.filter(path => visited.has(path));
   return {

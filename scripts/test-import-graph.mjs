@@ -92,6 +92,34 @@ export function testImportGraph(files, scriptsChanged = []) {
     value.startsWith('node:') || [...packages].some(name => value === name || value.startsWith(`${name}/`));
   let uncertain;
   const domains = ['src/', 'web/src/', 'convex/', 'netlify/', 'scripts/', 'tests/'];
+  const jsonFiles = [...files.keys()].filter(
+    file => file.endsWith('.json') && domains.some(dir => file.startsWith(dir)),
+  );
+  const jsonReaders = new Set(['readdir', 'readdirSync', 'opendir', 'opendirSync', 'glob', 'globSync']);
+  const jsonGlobs = new Map();
+  const matchingJson = pattern => {
+    if (!jsonGlobs.has(pattern)) {
+      // Literal prefixes discard code/example strings before invoking a glob
+      // matcher. Cache the matching inventory once per pattern, not per reader.
+      const prefix = pattern.includes('\\') ? '' : pattern.split(/[*?{[(!+@]/, 1)[0];
+      jsonGlobs.set(
+        pattern,
+        jsonFiles.filter(target =>
+          [target, posix.basename(target)].some(
+            candidate => candidate.startsWith(prefix) && posix.matchesGlob(candidate, pattern),
+          ),
+        ),
+      );
+    }
+    return jsonGlobs.get(pattern);
+  };
+  const jsonFolders = new Map();
+  for (const file of jsonFiles)
+    for (let folder = posix.dirname(file); folder !== '.'; folder = posix.dirname(folder)) {
+      if (!jsonFolders.has(folder)) jsonFolders.set(folder, new Set());
+      jsonFolders.get(folder).add(file);
+    }
+
   const convexModules = [...files.keys()]
     .map(file => file.match(/^convex\/(?!_generated\/)(.+)\.[jt]s$/)?.[1])
     .filter(name => name && !name.endsWith('.d'));
@@ -208,6 +236,25 @@ export function testImportGraph(files, scriptsChanged = []) {
       }
       if (ts.isStringLiteralLike(node)) {
         const value = node.text;
+        // Folder arguments can be repo- or module-relative. Keep JSON readers
+        // even when another importer already resolves the changed data file.
+        // A default argument has caller-relative cwd, not this module's folder.
+        const locations = [
+          posix.normalize(value),
+          ...(!ts.isParameter(node.parent) && !posix.isAbsolute(value)
+            ? [posix.join(posix.dirname(path), value)]
+            : []),
+        ];
+        const folders = locations.map(value => jsonFolders.get(value.replace(/\/$/, ''))).filter(Boolean);
+        const glob = /[*?{[(]/.test(value);
+        if (value && (folders.length || glob) && directoryDependency(node, ast, false, jsonReaders)) {
+          for (const folder of folders)
+            for (const target of folder) edge(target, path, 'runtime-path', 'JSON directory reader');
+          if (glob)
+            for (const pattern of locations)
+              for (const target of matchingJson(pattern))
+                edge(target, path, 'runtime-path', 'Matching JSON glob');
+        }
         const name = value.match(/^([A-Za-z_][\w-]*(?:\/[A-Za-z_][\w-]*)*):[A-Za-z_]\w*$/)?.[1];
         // A well-formed name of a module absent from this inventory loads no module.
         if (name && convexModule(name)) functionReference(path, [name], 'Convex function name');
@@ -232,7 +279,10 @@ export function testImportGraph(files, scriptsChanged = []) {
             (ts.isCallExpression(parent) &&
               (parent.expression.kind === ts.SyntaxKind.ImportKeyword ||
                 (ts.isIdentifier(parent.expression) && loaders.includes(parent.expression.text))));
-          edge(target, path, importing ? 'import' : pathKind(path, value));
+          // A path used only for comparison observes its name, not source bytes.
+          // Reuse the same escape/data-flow proof as directory comparisons.
+          if (importing || directoryDependency(node, ast, true))
+            edge(target, path, importing ? 'import' : pathKind(path, value));
         }
         if (path.startsWith('tests/') || path.startsWith('scripts/')) packageGraph.reference?.(value, path);
         // Built web bundles, directory enumeration and generated CLI module paths.

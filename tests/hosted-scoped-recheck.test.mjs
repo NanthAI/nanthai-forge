@@ -14,7 +14,7 @@ import { policyPreset as preset } from '../dist/autonomy-policy.js';
 // Server preflight gate (Issue 029138ef) has its own tests (hosted-landing-desired.test.mjs).
 const policyPreset = name => ({ ...preset(name), agentDefaults: { preflight: 'advise' } });
 import { firstCheckReceipt, hostedAcceptanceSchema } from '../dist/hosted-acceptance.js';
-import { smokeTests } from '../scripts/test-impact.mjs';
+import { smokeTests, sourceFiles } from '../scripts/test-impact.mjs';
 import { finishFixture } from './hosted-finish-fixture.mjs';
 import { passWithSelection, seedFullMain, useSyntheticHostedEnv } from './hosted-race-fixture.mjs';
 import * as recheckSelection from '../dist/scoped-recheck.js';
@@ -855,4 +855,53 @@ test('a scoped cohort recheck adds no Convex calls or writes over the full union
   console.log(JSON.stringify({ on: on.budget, off: off.budget }));
   assert.equal(on.budget.calls, off.budget.calls, 'no extra Convex function calls per cohort');
   assert(on.budget.writes <= off.budget.writes, 'no extra document writes');
+});
+
+test('O1 L2 replay: JSON on main narrows a 978-test lane reach to the shared readers and own tests', () => {
+  // Reproduce the recorded 978/1179 selection shape; the historical exact inventory
+  // is external evidence, so this fixture does not claim its reader count.
+  const tree = new Map([
+    ['package.json', '{"scripts":{}}'],
+    ['src/lane.ts', 'export const value = 1;'],
+    ['scripts/response-compat/main.json', '{}'],
+    ['scripts/read-data.mjs', "readFileSync('scripts/response-compat/main.json');"],
+    ['tests/own.test.mjs', ''],
+    ...smokeTests.map(path => [path, '']),
+    ...Array.from({ length: 972 }, (_, i) => [
+      `tests/reach-${i}.test.mjs`,
+      `import '../src/lane.ts';${i < 130 ? "import '../scripts/read-data.mjs';" : ''}`,
+    ]),
+    ...Array.from({ length: 201 }, (_, i) => [`tests/unrelated-${i}.test.mjs`, '']),
+  ]);
+  const selected = scopedRecheckSelection({
+    lanePaths: ['src/lane.ts', 'tests/own.test.mjs'],
+    mainPaths: ['scripts/response-compat/main.json'],
+    files: tree,
+  });
+  assert.equal(selected.scope, 'scoped');
+  assert.equal(selected.tests.length, 136);
+  assert(selected.tests.includes('tests/own.test.mjs'));
+  assert(selected.tests.includes('tests/reach-129.test.mjs'));
+  assert(!selected.tests.includes('tests/reach-130.test.mjs'));
+  assert.doesNotMatch(selected.reason, /main reaches every test/);
+});
+
+test('O1 real-tree L2 recheck stops the JS-only static walker from widening main JSON', () => {
+  const tree = sourceFiles();
+  const selected = scopedRecheckSelection({
+    lanePaths: ['src/hosted-acceptance.ts'],
+    mainPaths: ['scripts/response-compat/main.json'],
+    files: tree,
+  });
+  assert.equal(selected.scope, 'scoped', selected.reason);
+  assert.doesNotMatch(selected.reason, /main reaches every test/);
+  assert(selected.tests.length < 100, `real L2-shaped recheck selected ${selected.tests.length}`);
+  for (const path of smokeTests) assert(selected.tests.includes(path), path);
+  console.log(
+    'O1-real-L2',
+    JSON.stringify({
+      inventoryTests: [...tree.keys()].filter(path => /^tests\/[^/]+\.test\.mjs$/.test(path)).length,
+      selected: selected.tests.length,
+    }),
+  );
 });

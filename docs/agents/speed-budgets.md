@@ -212,3 +212,16 @@ controls assert identical calls, document reads/writes and checks, including
 1,150 retained receipts; conflict controls assert no history-sized I/O. This
 replaces idle exact-conflict advice without raising existing latency or cost
 budgets. The numbers are modeled relative times, not a service measurement.
+
+First checks, preflight, standard scoped selection and scoped rechecks classify JSON data
+through import/file paths, conservative basename readers, directory loaders, computed filenames
+joined to JSON folders and matching globs, including transitive helpers. A non-Markdown,
+non-JS/config reader naming the JSON retains full coverage when present in the supplied inventory;
+the standard inventory includes package files but excludes shell, YAML and workflow files.
+Unknown or unobserved data stays broad. JSON reach stops at static tools reached through a
+non-import edge: those tools run on every Candidate. JSON imports retain pipeline coverage.
+The verify orchestration boundary applies only to document JSON; non-JSON packagers keep
+their previous pipeline coverage.
+Selections still include shared readers, own tests, Intent contracts and fixed smoke, with
+remaining full-suite recheck tests recorded as main-audit debt. This changes test selection only;
+queue admission, ordering, cancellation, waits and pass-reuse rules are unchanged.

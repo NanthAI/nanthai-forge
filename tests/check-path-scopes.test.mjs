@@ -204,3 +204,376 @@ test('non-source files in a scripts or tests folder select the code beside or na
   const packaged = new Map([...tree, ['package.json', '{"files":["scripts/bench/"]}']]);
   assert.equal(selectTests({ files: packaged, paths: ['scripts/bench/oracle.sh'] }).scope, 'full');
 });
+
+for (const path of [
+  'scripts/response-compat/main.json',
+  'src/speed-budgets.json',
+  'scripts/package-documents/operations/product-analytics.json',
+]) {
+  test(`JSON reader reach keeps ${path} scoped through a helper`, () => {
+    const tree = new Map([
+      ...files,
+      ['package.json', JSON.stringify({ scripts: { test: 'node --test tests/*.test.mjs' } })],
+      [path, '{}'],
+      ['scripts/read-data.mjs', `export const data = readFileSync('${path}');`],
+      ['src/consumer.ts', "import '../scripts/read-data.mjs';"],
+      ['tests/data-reader.test.mjs', "import '../dist/consumer.js';"],
+    ]);
+    const selected = selectTests({ files: tree, paths: [path] });
+    assert.equal(selected.scope, 'scoped', selected.reason);
+    assert(selected.tests.includes('tests/data-reader.test.mjs'));
+    assert(!selected.tests.includes('tests/core.test.mjs'));
+  });
+}
+
+test('JSON folder loaders retain nested fixture readers through helpers without selecting unrelated tests', () => {
+  const path = 'scripts/package-documents/operations/product-analytics.json';
+  const tree = new Map([
+    ...files,
+    [path, '{}'],
+    [
+      'scripts/package-documents.mjs',
+      "const directory = new URL('./package-documents/', import.meta.url); function walk(path) { for (const entry of readdirSync(path)) walk(entry); } walk(directory);",
+    ],
+    ['tests/manifest-helper.mjs', "import '../scripts/package-documents.mjs';"],
+    ['tests/manifests.test.mjs', "import './manifest-helper.mjs';"],
+  ]);
+  const selected = selectTests({ files: tree, paths: [path] });
+  assert.equal(selected.scope, 'scoped', selected.reason);
+  assert(selected.tests.includes('tests/manifests.test.mjs'));
+  assert(!selected.tests.includes('tests/core.test.mjs'));
+  // Unknown data is never inferred independent from a folder or sibling name.
+  tree.set('src/unobserved.json', '{}');
+  const unknown = selectTests({ files: tree, paths: ['src/unobserved.json'] });
+  assert.equal(unknown.scope, 'full');
+  assert.match(unknown.reason, /No known consuming test/);
+});
+
+test('JSON asset basename reach does not confuse main.json with hosted-main.json', () => {
+  const tree = new Map([
+    ...files,
+    ['package.json', JSON.stringify({ scripts: { test: 'node --test tests/*.test.mjs' } })],
+    ['scripts/contracts/main.json', '{}'],
+    ['scripts/contracts/read.mjs', "readFileSync(new URL('./main.json', import.meta.url));"],
+    ['tests/contract-data.test.mjs', "import '../scripts/contracts/read.mjs';"],
+    ['src/state.ts', "readFileSync('.forge/hosted-main.json');"],
+    ['tests/state-data.test.mjs', "import '../dist/state.js';"],
+  ]);
+  const selected = selectTests({ files: tree, paths: ['scripts/contracts/main.json'] });
+  assert.equal(selected.scope, 'scoped');
+  assert(selected.tests.includes('tests/contract-data.test.mjs'));
+  assert(!selected.tests.includes('tests/state-data.test.mjs'));
+});
+
+test('JSON document manifests stop at static check orchestration while their loader tests remain selected', () => {
+  const path = 'scripts/package-documents/operations/product-analytics.json';
+  const tree = new Map([
+    ...files,
+    [path, '{}'],
+    ['scripts/package-documents.mjs', "export const folder = './package-documents/';"],
+    ['scripts/check-documents.mjs', "import './package-documents.mjs';"],
+    ['scripts/verify.mjs', "run('node', ['scripts/check-documents.mjs']);"],
+    ['tests/manifest-reader.test.mjs', "import '../scripts/package-documents.mjs';"],
+    ['tests/verify-fixture.mjs', "import '../scripts/verify.mjs';"],
+    ['tests/orchestration.test.mjs', "import './verify-fixture.mjs';"],
+  ]);
+  const selected = selectTests({ files: tree, paths: [path] });
+  assert.equal(selected.scope, 'scoped');
+  assert(selected.tests.includes('tests/manifest-reader.test.mjs'));
+  assert(!selected.tests.includes('tests/orchestration.test.mjs'));
+});
+
+test('JSON read through a build helper does not flow through pure path classification comparisons', () => {
+  const path = 'scripts/package-documents/operations/product-analytics.json';
+  const tree = new Map([
+    ...files,
+    [path, '{}'],
+    ['scripts/package-documents.mjs', "read(new URL('./package-documents/', import.meta.url));"],
+    ['web/vite.config.ts', "import '../scripts/package-documents.mjs';"],
+    ['scripts/path-rules.mjs', "export const isConfig = path => ['web/vite.config.ts'].includes(path);"],
+    ['tests/classification.test.mjs', "import '../scripts/path-rules.mjs';"],
+    ['tests/real-reader.test.mjs', "import '../web/vite.config.ts';"],
+  ]);
+  tree.set(
+    'package.json',
+    JSON.stringify({
+      scripts: {
+        'build:web': 'node web/vite.config.ts',
+        build: 'npm run build:web',
+        test: 'npm run build',
+      },
+    }),
+  );
+  tree.set('tests/check-process.mjs', "spawn('npm', ['test']);");
+  tree.set('tests/check-process.test.mjs', "import './check-process.mjs';");
+  const selected = selectTests({ files: tree, paths: [path] });
+  assert.equal(selected.scope, 'scoped');
+  assert(selected.tests.includes('tests/real-reader.test.mjs'));
+  assert(!selected.tests.includes('tests/classification.test.mjs'));
+  assert(!selected.tests.includes('tests/check-process.test.mjs'));
+});
+
+test('JSON imports into a product generator keep full pipeline coverage while static data reads use consumers', () => {
+  const tree = new Map([
+    ...files,
+    [
+      'package.json',
+      JSON.stringify({ scripts: { build: 'node scripts/generate/build.mjs', test: 'npm run build' } }),
+    ],
+    ['scripts/generate/input.json', '{}'],
+    ['scripts/generate/build.mjs', "readFileSync(new URL('./input.json', import.meta.url));"],
+    ['tests/generator.test.mjs', "import '../scripts/generate/build.mjs';"],
+  ]);
+  const generator = selectTests({ files: tree, paths: ['scripts/generate/input.json'] });
+  assert.equal(generator.scope, 'scoped');
+  assert(generator.tests.includes('tests/generator.test.mjs'));
+  tree.set('scripts/generate/build.mjs', "import './input.json' with { type: 'json' };");
+  const imported = selectTests({ files: tree, paths: ['scripts/generate/input.json'] });
+  assert.equal(imported.scope, 'full');
+  assert.match(imported.reason, /Check pipeline/);
+  tree.set('package.json', '{"scripts":{}}');
+  tree.set('scripts/generate/build.mjs', "readFileSync(new URL('./input.json', import.meta.url));");
+  tree.set('src/consumer.ts', "import '../scripts/generate/input.json' with { type: 'json' };");
+  tree.set('tests/runtime-data.test.mjs', "import '../dist/consumer.js';");
+  const runtime = selectTests({ files: tree, paths: ['scripts/generate/input.json'] });
+  assert.equal(runtime.scope, 'scoped');
+  assert(runtime.tests.includes('tests/runtime-data.test.mjs'));
+  assert(!runtime.tests.includes('tests/core.test.mjs'));
+});
+
+const runtimeJsonTree = reader =>
+  new Map([
+    ...files,
+    ['package.json', '{"scripts":{}}'],
+    ['src/policy.json', '{}'],
+    ['src/direct-json.ts', "readFileSync('src/policy.json');"],
+    ['tests/direct-json.test.mjs', "import '../dist/direct-json.js';"],
+    ['tests/readers/indirect.mjs', reader],
+    ['tests/indirect-json.test.mjs', "import './readers/indirect.mjs';"],
+  ]);
+for (const [name, reader] of [
+  ['joined single-quoted segments', "readFileSync(join(root, 'src', 'policy.json'));"],
+  ['joined double-quoted segments', 'readFileSync(join(root, "src", "policy.json"));'],
+  ['variable-first template', 'readFileSync(`${root}/src/policy.json`);'],
+  ['bare directory', "readdirSync('src').map(name => readFileSync(join(root,'src',name)));"],
+  ['dot directory', "readdirSync('./src').map(name => readFileSync(join(root,'src',name)));"],
+  ['aliased directory reader', "import {readdirSync as entries} from 'node:fs'; entries('src').map(read);"],
+  [
+    'directory function alias',
+    "import {readdirSync} from 'node:fs'; const entries=readdirSync; entries('src').map(read);",
+  ],
+  ['directory method alias', "const entries=fs.readdirSync; entries('src').map(read);"],
+  ['arrow directory helper', "const load = folder => readdirSync(folder).map(read); load('src');"],
+  ['helper directory reader', "function load(folder) { return readdirSync(folder).map(read); } load('src');"],
+  ['fs wildcard', "globSync('src/*.json').map(read);"],
+  ['fs glob variable', "const pattern='src/*.json'; globSync(pattern).map(read);"],
+  ['fs globstar', "globSync('src/**/*.json').map(read);"],
+  ['fs brace glob', "globSync('src/*.{json,txt}').map(read);"],
+])
+  test(`product JSON retains a second ${name} reader when another importer resolves`, () => {
+    const selected = selectTests({ files: runtimeJsonTree(reader), paths: ['src/policy.json'] });
+    assert.equal(selected.scope, 'scoped', selected.reason);
+    assert(selected.tests.includes('tests/direct-json.test.mjs'));
+    assert(
+      selected.tests.includes('tests/indirect-json.test.mjs'),
+      `${name} must not disappear behind the resolving importer`,
+    );
+    assert(!selected.tests.includes('tests/core.test.mjs'));
+  });
+for (const folder of ['convex', 'netlify', 'web/src'])
+  test(`JSON basename readers also cover ${folder} data`, () => {
+    const path = `${folder}/policy.json`;
+    const tree = runtimeJsonTree(`readFileSync(\`${'${root}'}/${path}\`);`);
+    tree.delete('src/policy.json');
+    tree.set(path, '{}');
+    tree.set('src/direct-json.ts', `readFileSync('${path}');`);
+    const selected = selectTests({ files: tree, paths: [path] });
+    assert.equal(selected.scope, 'scoped', selected.reason);
+    assert(selected.tests.includes('tests/indirect-json.test.mjs'));
+  });
+
+test('JSON directory comparison and a glob matching another folder do not read its bytes', () => {
+  for (const reader of [
+    "const isSource = path => ['src'].includes(path);",
+    "globSync('other/*.json').map(read);",
+  ]) {
+    const selected = selectTests({ files: runtimeJsonTree(reader), paths: ['src/policy.json'] });
+    assert.equal(selected.scope, 'scoped', selected.reason);
+    assert(!selected.tests.includes('tests/indirect-json.test.mjs'));
+  }
+});
+
+for (const [file, text] of [
+  [
+    'package.json',
+    '{"scripts":{"test":"node --test --experimental-config-file=scripts/runner/node.config.json tests/*.test.mjs"}}',
+  ],
+  ['package-lock.json', '{"packages":{},"config":"scripts/runner/node.config.json"}'],
+  ['scripts/runner/run.sh', 'cat node.config.json'],
+  ['.github/workflows/check.yml', 'config: scripts/runner/node.config.json'],
+  ['scripts/runner/settings.yaml', 'config: node.config.json'],
+])
+  test(`scripts JSON named by unparsed ${file} keeps the full suite`, () => {
+    const tree = new Map([
+      ...files,
+      ['package.json', '{"scripts":{}}'],
+      ['scripts/runner/node.config.json', '{}'],
+      ['scripts/runner/read.mjs', 'export const value=1;'],
+      ['tests/config-reader.test.mjs', "import '../scripts/runner/read.mjs';"],
+      [file, text],
+    ]);
+    const selected = selectTests({ files: tree, paths: ['scripts/runner/node.config.json'] });
+    assert.equal(selected.scope, 'full', `${file}: ${selected.reason}`);
+  });
+test('Markdown JSON mentions and a different basename do not force full coverage', () => {
+  const tree = new Map([
+    ...files,
+    ['package.json', '{"scripts":{}}'],
+    ['scripts/runner/node.config.json', '{}'],
+    ['scripts/runner/read.mjs', 'export const value=1;'],
+    ['tests/config-reader.test.mjs', "import '../scripts/runner/read.mjs';"],
+    ['docs/config.md', 'Use `scripts/runner/node.config.json`.'],
+    ['scripts/other.sh', 'cat hosted-node.config.json'],
+  ]);
+  assert.equal(selectTests({ files: tree, paths: ['scripts/runner/node.config.json'] }).scope, 'scoped');
+});
+for (const quote of ['"', '`'])
+  test(`scripts JSON directory segments in ${quote} quotes retain their reader`, () => {
+    const path = 'scripts/response-compat/main.json';
+    const tree = new Map([
+      ...files,
+      ['package.json', '{"scripts":{}}'],
+      [path, '{}'],
+      ['scripts/response-compat/read.mjs', 'export const value=1;'],
+      ['tests/direct-reader.test.mjs', "import '../scripts/response-compat/read.mjs';"],
+      [
+        'tests/folder-helper.mjs',
+        `const folder=join(root,${quote}scripts${quote},${quote}response-compat${quote}); readdirSync(folder).map(read);`,
+      ],
+      ['tests/folder-reader.test.mjs', "import './folder-helper.mjs';"],
+    ]);
+    const selected = selectTests({ files: tree, paths: [path] });
+    assert.equal(selected.scope, 'scoped', selected.reason);
+    assert(selected.tests.includes('tests/folder-reader.test.mjs'));
+  });
+for (const path of ['scripts/check-documents.mjs', 'scripts/package-documents.mjs'])
+  test(`non-JSON ${path} keeps its verify pipeline coverage`, () => {
+    const tree = new Map([
+      ...files,
+      [
+        'package.json',
+        JSON.stringify({
+          scripts: { verify: 'node scripts/verify.mjs', test: 'node --test tests/*.test.mjs' },
+        }),
+      ],
+      [path, 'export const value=1;'],
+      ['scripts/verify.mjs', `run('node',['${path}']);`],
+      ['tests/docs-reader.test.mjs', `import '../${path}';`],
+    ]);
+    const selected = selectTests({ files: tree, paths: [path] });
+    assert.equal(selected.scope, 'full', selected.reason);
+    assert.match(selected.reason, /pipeline/i);
+  });
+
+test('a slash separator in a script path formatter is not a JSON directory read', () => {
+  const path = 'scripts/contracts/main.json';
+  const tree = new Map([
+    ...files,
+    ['package.json', '{"scripts":{}}'],
+    [path, '{}'],
+    ['scripts/contracts/read.mjs', 'export const value=1;'],
+    ['tests/data-reader.test.mjs', "import '../scripts/contracts/read.mjs';"],
+    ['scripts/build.mjs', "export const format = segments => segments.join('/');"],
+    ['tests/formatter.test.mjs', "import '../scripts/build.mjs';"],
+  ]);
+  const selected = selectTests({ files: tree, paths: [path] });
+  assert.equal(selected.scope, 'scoped', selected.reason);
+  assert(!selected.tests.includes('tests/formatter.test.mjs'));
+});
+
+test('an unparsed non-Markdown product JSON reader also keeps broad coverage', () => {
+  const tree = runtimeJsonTree("readFileSync(join(root,'src','policy.json'));");
+  tree.set('scripts/read-policy.sh', 'cat src/policy.json');
+  assert.equal(selectTests({ files: tree, paths: ['src/policy.json'] }).scope, 'full');
+});
+
+for (const [name, reader] of [
+  [
+    'joined locale names',
+    "import { join } from 'node:path'; for (const l of ['en', 'fr']) readFileSync(join(root, 'src', 'locales', `${l}.json`));",
+  ],
+  ['concatenated locale names', "for (const l of ['en', 'fr']) readFileSync('src/locales/' + l + '.json');"],
+  [
+    'aliased computed paths passed to a loader',
+    "import { join } from 'node:path'; const file = join(root, 'src/locales', name + '.json'); loadJson(file);",
+  ],
+  [
+    'namespace path joins',
+    "import path from 'node:path'; readFileSync(path.join(root, 'src/locales', name + '.json'));",
+  ],
+])
+  test(`computed JSON reader reach retains ${name} beside a resolving importer`, () => {
+    const tree = new Map([
+      ...files,
+      ['package.json', '{"scripts":{}}'],
+      ['src/locales/en.json', '{"greeting":"hello"}'],
+      ['src/locales/fr.json', '{}'],
+      ['src/i18n.ts', "import en from './locales/en.json' with { type: 'json' }; export const locale = en;"],
+      ['tests/i18n.test.mjs', "import '../dist/i18n.js';"],
+      ['tests/helpers/locale-reader.mjs', reader],
+      ['tests/locale-parity.test.mjs', "import './helpers/locale-reader.mjs';"],
+    ]);
+    const selected = selectTests({ files: tree, paths: ['src/locales/en.json'] });
+    assert.equal(selected.scope, 'scoped', selected.reason);
+    assert(selected.tests.includes('tests/i18n.test.mjs'));
+    assert(selected.tests.includes('tests/locale-parity.test.mjs'), name);
+    assert(!selected.tests.includes('tests/unrelated.test.mjs'));
+  });
+
+test('JSON reach stops at a static JS-only walker through a runtime folder edge', () => {
+  const tree = new Map([
+    ...files,
+    [
+      'package.json',
+      JSON.stringify({
+        scripts: {
+          lint: 'node scripts/walker.mjs',
+          test: 'node --test tests/*.test.mjs',
+          verify: 'npm run lint && npm test',
+        },
+      }),
+    ],
+    ['scripts/data/value.json', '{}'],
+    ['scripts/read-value.mjs', "readFileSync('scripts/data/value.json');"],
+    [
+      'scripts/walker.mjs',
+      "import { readdirSync } from 'node:fs'; function walk(dir) { return readdirSync(dir, { recursive: true }).filter(name => name.endsWith('.js')); } walk('.');",
+    ],
+    ['tests/value.test.mjs', "import '../scripts/read-value.mjs';"],
+    ['tests/walker.test.mjs', "import '../scripts/walker.mjs';"],
+  ]);
+  const selected = selectTests({ files: tree, paths: ['scripts/data/value.json'] });
+  assert.equal(selected.scope, 'scoped', selected.reason);
+  assert(selected.tests.includes('tests/value.test.mjs'));
+  assert(!selected.tests.includes('tests/walker.test.mjs'));
+  assert(!selected.tests.includes('tests/unrelated.test.mjs'));
+  tree.set('scripts/walker.mjs', "import value from './data/value.json' with { type: 'json' };");
+  assert.equal(
+    selectTests({ files: tree, paths: ['scripts/data/value.json'] }).scope,
+    'full',
+    'an actual JSON import into a static tool retains pipeline reach',
+  );
+});
+
+test('computed roots and matching expressions do not read every JSON in a folder', () => {
+  for (const reader of [
+    "const pattern = new RegExp('src/' + name); pattern.test(candidate);",
+    "import { join } from 'node:path'; readFileSync(join(root, 'src', 'not-json.txt'));",
+  ]) {
+    const tree = runtimeJsonTree(reader);
+    const selected = selectTests({ files: tree, paths: ['src/policy.json'] });
+    assert.equal(selected.scope, 'scoped');
+    assert(selected.tests.includes('tests/direct-json.test.mjs'));
+    assert(!selected.tests.includes('tests/indirect-json.test.mjs'));
+  }
+});
