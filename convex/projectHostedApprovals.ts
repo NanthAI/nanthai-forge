@@ -2,6 +2,8 @@
 import { v } from 'convex/values';
 import { applyApprovedMember } from './projectMemberApprovals';
 import { mutation, query, type MutationCtx } from './cliServer';
+import type { QueryCtx } from './_generated/server';
+import type { Id } from './_generated/dataModel';
 import { configureCheckSetting } from './projectHostedCheckDefinitions';
 import { importCheckFromWork } from './projectHostedCheckImport';
 import { configureMainAudit } from './projectHostedMainAudit';
@@ -118,7 +120,7 @@ function requestReply(
   return {
     ...approvalView(row, row.laneId),
     url,
-    next: `${url ? 'Hand this link to the project owner; they open it signed in and grant or decline. ' : ''}Landing this Lane holds for the owner until they grant it. Wait for the decision: nforge agent ROOT wait '{"approval":"${row.laneId}"}'.`,
+    next: `${url ? 'Hand this link to the project owner; they open it signed in and grant or decline. ' : ''}Landing this Lane holds for the owner until they grant it. Tell your user in your own app that it waits for the owner, then wait for the decision: nforge agent ROOT wait '{"approval":"${row.laneId}"}'.`,
   };
 }
 
@@ -343,8 +345,50 @@ export const observe = query({
  * the table and only Lane requests are stored `live`, so this reads the live index, the `setting:`
  * key range and the newest not-live rows (fork pull request run requests are open but never live).
  * A request is open per `deriveApproval`. Each read is bounded; `complete:false` says a bound was hit,
- * so a missing request is "can't confirm", never "none". No client polls this; Needs you reads it
- * through one reactive subscription for the owner, which re-runs only when these rows change. */
+ * so a missing request is "can't confirm", never "none". No client polls this; Needs me reads it
+ * inside its one reactive subscription (projectNeedsMe:read), which re-runs only when these rows
+ * change. Call only after project read access is established. */
+export async function openApprovalRequests(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
+  const byLive = (live: boolean) =>
+    ctx.db
+      .query('projectHostedApprovals')
+      .withIndex('by_project_and_live', q => q.eq('projectId', projectId).eq('live', live))
+      .order('desc')
+      .take(APPROVAL_LIVE_LIMIT);
+  const [liveRows, otherRows, settingRows] = await Promise.all([
+    byLive(true),
+    byLive(false),
+    ctx.db
+      .query('projectHostedApprovals')
+      .withIndex('by_project_and_lane', q =>
+        // ';' is the character after ':' so this range is exactly the `setting:` keys.
+        q.eq('projectId', projectId).gte('laneId', 'setting:').lt('laneId', 'setting;'),
+      )
+      .take(APPROVAL_LIVE_LIMIT),
+  ]);
+  const rows = new Map<string, ApprovalRow>();
+  for (const row of [...liveRows, ...settingRows, ...otherRows]) rows.set(row.laneId, row);
+  const requests = [...rows.values()]
+    .map(row => ({ row, view: approvalView(row, row.laneId) }))
+    .map(({ row, view }) => ({ row, view, state: deriveApproval(view) }))
+    .filter(({ state }) => state.open)
+    .sort((a, b) => b.row.at - a.row.at)
+    .map(({ row, view, state }) => ({
+      ...view,
+      kind: state.kind,
+      state: state.state,
+      open: state.open,
+      needsOwner: state.needsOwner,
+      label: state.label,
+      tone: state.tone,
+      nextStep: state.nextStep,
+      url: laneApproveUrl(projectId, row.laneId),
+    }));
+  return canonicalPayload({
+    requests,
+    complete: [liveRows, otherRows, settingRows].every(page => page.length < APPROVAL_LIVE_LIMIT),
+  });
+}
 export const list = query({
   args: { projectId: v.id('hostedProjects') },
   returns: v.string(),
@@ -353,45 +397,7 @@ export const list = query({
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read approval requests.');
       await accessibleProject(ctx, input.projectId, user.subject);
-      const byLive = (live: boolean) =>
-        ctx.db
-          .query('projectHostedApprovals')
-          .withIndex('by_project_and_live', q => q.eq('projectId', input.projectId).eq('live', live))
-          .order('desc')
-          .take(APPROVAL_LIVE_LIMIT);
-      const [liveRows, otherRows, settingRows] = await Promise.all([
-        byLive(true),
-        byLive(false),
-        ctx.db
-          .query('projectHostedApprovals')
-          .withIndex('by_project_and_lane', q =>
-            // ';' is the character after ':' so this range is exactly the `setting:` keys.
-            q.eq('projectId', input.projectId).gte('laneId', 'setting:').lt('laneId', 'setting;'),
-          )
-          .take(APPROVAL_LIVE_LIMIT),
-      ]);
-      const rows = new Map<string, ApprovalRow>();
-      for (const row of [...liveRows, ...settingRows, ...otherRows]) rows.set(row.laneId, row);
-      const requests = [...rows.values()]
-        .map(row => ({ row, view: approvalView(row, row.laneId) }))
-        .map(({ row, view }) => ({ row, view, state: deriveApproval(view) }))
-        .filter(({ state }) => state.open)
-        .sort((a, b) => b.row.at - a.row.at)
-        .map(({ row, view, state }) => ({
-          ...view,
-          kind: state.kind,
-          state: state.state,
-          open: state.open,
-          needsOwner: state.needsOwner,
-          label: state.label,
-          tone: state.tone,
-          nextStep: state.nextStep,
-          url: laneApproveUrl(input.projectId, row.laneId),
-        }));
-      return canonicalPayload({
-        requests,
-        complete: [liveRows, otherRows, settingRows].every(page => page.length < APPROVAL_LIVE_LIMIT),
-      });
+      return await openApprovalRequests(ctx, input.projectId);
     } catch (error) {
       return report(error);
     }

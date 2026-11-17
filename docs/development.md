@@ -620,6 +620,13 @@ layer out of both first paints.
   frame already reads: no other read, one `visibilitychange` listener (`.mk-hidden`)
   and at most one timer, for the next hold end, calm (60 s) or still (5 min or
   live reads asleep). DESIGN.md "Brand mark states" has the rules.
+- Needs me (`web/src/app/needs/`) is the project front page. It adds one read,
+  `projectNeedsMe:read`: the live line's held marks (at most 30, the rest
+  counted), each with its title, holder and recorded hold reason, plus the open
+  approval requests (`openApprovalRequests`, shared with
+  `projectHostedApprovals:list`). One row per held Lane, so its count is the
+  top bar's; requests that hold no Lane are listed and never counted. A reason
+  Forge did not record says "not reported". Idle costs nothing.
 
 ### Convex Auth core beside Clerk
 

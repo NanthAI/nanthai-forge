@@ -30,6 +30,7 @@ const allowed = {
   projectHostedLifecycleMerged: ['completeMerged'],
   projectHostedSeed: ['begin'],
   projectLifecycle: ['rename'],
+  projectNeedsMe: ['read'], // Read-only: says whether the viewer may decide; decide keeps its own person gate.
   projectProposals: ['remove'],
   projectR2Backfill: ['page', 'targets'],
   projectReaders: ['list', 'shared'],

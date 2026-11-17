@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: Apache-2.0
+// Rebuilt place screens (stage C), one lazy chunk per place, so each screen loads with its route and never on first
+// paint. A place with no entry here keeps its placeholder (Place.tsx). Each stage C Lane adds its own line.
+import { lazy, Suspense, type ComponentType, type LazyExoticComponent } from 'react';
+import type { Id } from '../../../convex/_generated/dataModel';
+import type { LineFeed } from './Line';
+import type { AppRoute, ProjectPlace } from './paths';
+import { Placeholder } from './Place';
+
+/** What every rebuilt place screen gets from the project frame: the address, the project and the line it already reads. */
+export type PlaceProps = {
+  route: Extract<AppRoute, { frame: 'project' }>;
+  projectId: Id<'hostedProjects'>;
+  projectName: string;
+  feed: LineFeed | undefined;
+  viewerHandle: string | undefined;
+};
+
+const screens: Partial<Record<ProjectPlace, LazyExoticComponent<ComponentType<PlaceProps>>>> = {
+  needs: lazy(() => import('./needs/NeedsMe')),
+};
+
+/** The place's rebuilt screen once the project is known; the placeholder otherwise. */
+export function PlaceScreen(
+  props: Omit<PlaceProps, 'projectId'> & { projectId: PlaceProps['projectId'] | null },
+) {
+  const Screen = screens[props.route.place];
+  if (!Screen || !props.projectId) return <Placeholder route={props.route} projectName={props.projectName} />;
+  return (
+    <Suspense fallback={<Placeholder route={props.route} projectName={props.projectName} />}>
+      <Screen {...props} projectId={props.projectId} />
+    </Suspense>
+  );
+}

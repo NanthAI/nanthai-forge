@@ -19,6 +19,7 @@ import { AccountFrame, BareFrame, ProjectFrame, PublicFrame, type FrameControls 
 import { Keys, useFrameKeys, type Go } from './keys';
 import { hrefFor, parseAppPath, type AppRoute } from './paths';
 import { Head, Placeholder } from './Place';
+import { PlaceScreen } from './screens';
 import { followLink, navigate, useRoute, useSearch } from './router';
 import { forget, recall, safeNext } from './session';
 import { FirstPasskey, SignIn } from './SignIn';
@@ -248,7 +249,13 @@ function ProjectView({
       projects={picker}
       controls={{ ...controls, onPicker }}
     >
-      <Placeholder route={route} projectName={name} />
+      <PlaceScreen
+        route={route}
+        projectId={(project?.id ?? null) as Id<'hostedProjects'> | null}
+        projectName={name}
+        feed={feed}
+        viewerHandle={controls.viewerHandle}
+      />
       {overlays}
     </ProjectFrame>
   );

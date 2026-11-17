@@ -1,0 +1,16 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Needs me only (loaded with its route): the asked-ahead line that opens in place, and the fold line. */
+[data-ds] {
+  .needs-me .sumdec { border-bottom: var(--rule) solid var(--line); }
+  .needs-me .sumdec > summary { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-3); align-items: center; min-height: var(--row-h); padding: 7px var(--gut); cursor: pointer; list-style: none; min-width: 0; }
+  .needs-me .sumdec > summary::-webkit-details-marker { display: none; }
+  .needs-me .sumdec > summary .ttl { flex: 1 1 16ch; font-weight: var(--w-strong); min-width: 0; overflow-wrap: anywhere; }
+  .needs-me .sumdec > summary .meta { margin-left: auto; color: var(--text-2); font-size: var(--t-meta); }
+  .needs-me .sumdec > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .needs-me .sumdec > .dec { border-bottom: 0; padding-top: 0; }
+  .needs-me .needs-fold { display: flex; gap: var(--s-3); align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  .needs-me .needs-help { padding: 0 var(--gut-head) var(--s-3); color: var(--text-2); font-size: var(--t-small); }
+  .needs-me .needs-help button.lk { all: unset; color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+  .needs-me .needs-help button.lk:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  @media (hover: hover) and (pointer: fine) { .needs-me .sumdec > summary:hover { background: var(--hover); } }
+}

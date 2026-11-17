@@ -43,7 +43,7 @@ export function Head({
   children,
 }: {
   trail: Crumb[];
-  sentence: string;
+  sentence: ReactNode;
   children?: ReactNode;
 }) {
   return (

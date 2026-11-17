@@ -343,6 +343,10 @@ Issue (`issue:ISSUE_ID`), or to the whole project (`project`).
   compose selection and that Candidate's newest landing request (three bounded
   reads, no new field or write). Write members only; the peer is named by Forge
   handle. MCP: `forge_wait {"peer":...}`. Needs contract feature `board-wait`.
+- Forge is not a chat channel: ask ordinary questions in your own app. Needs you
+  holds only what Forge must hold (approvals, shared-state decisions, notes between
+  different people or agents, requests from agents with no terminal); when you file
+  one, tell your user in your own app too.
 - Ask the owner for a go: `request-approval {"laneId":"…","reason":"…"}` (default:
   this checkout's Lane) records one request on a saved Lane and posts one project
   board note; the reply carries the owner's link `/approve?project=…&lane=…`. Until
