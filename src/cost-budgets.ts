@@ -157,3 +157,23 @@ export function formatCostVerdicts(verdicts: CostVerdict[]) {
 export function discardedRunnerSeconds(state: Pick<HostedLandingState, 'counts'> | null) {
   return state?.counts?.discardedRunnerSeconds ?? (state?.counts?.runnerSeconds === undefined ? null : 0);
 }
+
+/** A batch member's share of its cohort's shared check (Issue 80540753), from the run row the batch
+ * already holds. The shared run replaces any earlier check of the member, whose seconds become
+ * discarded (as carriedCostCounts does for a solo recompose). A pass makes the share the member's
+ * accepted check seconds, with discarded explicit (zero when none); any other outcome discards the
+ * share too. A run with no execution report leaves the counts as they are: unknown, never zero. */
+export function sharedCheckCounts(
+  counts: HostedLandingState['counts'],
+  seconds: number | undefined,
+  members: number,
+  passed: boolean,
+): HostedLandingState['counts'] {
+  if (seconds === undefined || !Number.isFinite(seconds) || !(members > 0)) return counts;
+  const share = Math.round(seconds / members),
+    { runnerSeconds: earlier, discardedRunnerSeconds: before, ...rest } = counts ?? {},
+    discarded = (before ?? 0) + (earlier ?? 0);
+  return passed
+    ? { ...rest, runnerSeconds: share, discardedRunnerSeconds: discarded }
+    : { ...rest, discardedRunnerSeconds: discarded + share };
+}

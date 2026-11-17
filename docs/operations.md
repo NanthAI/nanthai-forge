@@ -1302,7 +1302,10 @@ one P0 Issue per break, a recovery message, nothing while it stays broken
   shard execution seconds the check run row stores (`execution.seconds`, summed over shards). The
   accepted run's seconds are stamped when the landing sees the run end; a recompose that cannot reuse
   the check moves them to the discarded total; the main audit run's seconds join the newest landing's
-  sample once, when the audit ends. A run cancelled before it ended counts nothing.
+  sample once, when the audit ends. A run cancelled before it ended counts nothing. A batch member
+  carries its share of the shared check (the run's seconds over the members it checked) with discarded
+  stated, zero when none; a shared check that did not pass adds that share to each member's discarded
+  total (Issue 80540753). A run with no execution report leaves the landing unknown, never zero.
 
 **Runner minutes against check minutes.** `check-minutes` (about 12 per landing) is wall time: 1.48 runs
 times the 8.3 min p50, one run's 10 to 12 shards running side by side. Runner minutes are the sum over

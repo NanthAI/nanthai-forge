@@ -37,6 +37,11 @@ import { loadFinish } from './projectHostedFinishStore';
 import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 import { retainCheckProgress } from './projectHostedLandingCheckProgress';
+import { sharedCheckCounts } from '../src/cost-budgets';
+import type { HostedLandingState } from '../src/hosted-landing';
+
+/** Stored only when present: an absent count stays unknown. */
+const withCounts = (counts: HostedLandingState['counts']) => (counts ? { counts } : {});
 
 /** Runs within the ordinary queue tick. There is no second check observer. */
 async function prepareLandingCheckOnce(
@@ -79,6 +84,29 @@ async function prepareLandingCheckOnce(
           member => !batch.included || batch.included.includes(member.submissionId),
         );
         const outcome = checkFailureKind(run, semantic);
+        // Each included member's share of the shared run's shard seconds (Issue 80540753).
+        const included = batch.members.filter(
+          member => !batch.included || batch.included.includes(member.submissionId),
+        );
+        const runSeconds = run.endedAt && run.execution ? run.execution.seconds : undefined;
+        if (outcome !== 'passed' && runSeconds !== undefined)
+          for (const member of included) {
+            const { row, state: current } = await loadLanding(ctx, {
+              projectId: claim.projectId,
+              submissionId: member.submissionId,
+            });
+            if (current.phase === 'terminal-failed' || current.phase === 'landed') continue;
+            await writeLanding(
+              ctx,
+              row,
+              {
+                ...current,
+                version: current.version + 1,
+                ...withCounts(sharedCheckCounts(current.counts, runSeconds, included.length, false)),
+              },
+              false,
+            );
+          }
         if (outcome === 'platform') {
           // Runner unavailable, Actions 403/server error, cancelled or timed out:
           // no test failed, so the cohort stays together and checks again.
@@ -97,9 +125,7 @@ async function prepareLandingCheckOnce(
             },
             run,
           );
-          for (const member of batch.members.filter(
-            member => !batch.included || batch.included.includes(member.submissionId),
-          )) {
+          for (const member of included) {
             const { row, state: current } = await loadLanding(ctx, {
               projectId: claim.projectId,
               submissionId: member.submissionId,
@@ -115,6 +141,7 @@ async function prepareLandingCheckOnce(
                   : {}),
                 phase: 'ready',
                 version: current.version + 1,
+                ...withCounts(sharedCheckCounts(current.counts, runSeconds, included.length, true)),
                 ...(current.batchDiagnostic ? { batchDiagnostic: passedAlone(current.batchDiagnostic) } : {}),
                 ...(run.testFiles ? { testFiles: run.testFiles } : {}),
                 observation: landingObservation('queued'),
