@@ -4,17 +4,19 @@
 // the public identity rule (convex/publicPeople.ts), so a reader sees only themselves and invitation addresses reach
 // the owner only. Bounded: at most `limit` write and read members and 50 open invitations per call.
 import { v } from 'convex/values';
-import { query, mutation } from './cliServer';
+import { query, accountMutation } from './cliServer';
 import { accessibleProject, activeOwnedProject } from './projectAuthority';
 import { projectRole } from './projectRole';
 import { projectAnswers, projectRoles } from './projectAccessContract';
 import { retainMembership } from './projectActorNames';
+import { invitationWasRevoked, type InvitationRevocations } from './projectInvitationRevocation';
 import { requireOwnerPerson } from './ownerPerson';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { invitationStatus, invitationLifetime, visibleInviteMail } from './projectInvitationPolicy';
 import { invitationState } from './projectInvitationFields';
+import { syncPersonOrder } from './accountProjectOrder';
 
 const role = v.union(...projectRoles.map(name => v.literal(name)));
 const answer = v.union(v.literal('yes'), v.literal('held'), v.literal('no'));
@@ -93,28 +95,36 @@ export const people = query({
               .paginate({ cursor: invitationCursor ?? null, numItems: 50 })
           : null;
       const invites = invitations?.page ?? [];
-      const invited = invites.map(row => {
-        const mail = visibleInviteMail(row);
-        return {
-          id: row._id,
-          email: row.email,
-          role: row.role ?? ('write' as const),
-          at: row._creationTime,
-          state: invitationStatus(row),
-          expiresAt: row.expiresAt ?? row._creationTime + invitationLifetime,
-          ...(row.operationId ? { operationId: row.operationId } : {}),
-          ...(mail
-            ? {
-                mail: {
-                  status: mail.status,
-                  sends: mail.sends,
-                  at: mail.at,
-                  ...(mail.code ? { code: mail.code } : {}),
-                },
-              }
-            : {}),
-        };
-      });
+      const revoked: InvitationRevocations = new Map();
+      const invited = await Promise.all(
+        invites.map(async row => {
+          const mail = visibleInviteMail(row);
+          const state = invitationStatus(row);
+          const ended =
+            state === 'pending' &&
+            row.recipient &&
+            (await invitationWasRevoked(ctx, row, row.recipient, revoked));
+          return {
+            id: row._id,
+            email: row.email,
+            role: row.role ?? ('write' as const),
+            at: row._creationTime,
+            state: ended ? ('cancelled' as const) : state,
+            expiresAt: row.expiresAt ?? row._creationTime + invitationLifetime,
+            ...(row.operationId ? { operationId: row.operationId } : {}),
+            ...(mail
+              ? {
+                  mail: {
+                    status: mail.status,
+                    sends: mail.sends,
+                    at: mail.at,
+                    ...(mail.code ? { code: mail.code } : {}),
+                  },
+                }
+              : {}),
+          };
+        }),
+      );
       const selection = effectivePolicy(project).acceptance.withoutCheck;
       const withoutCheck: 'owner' | 'chosen' | 'writers' =
         !selection || selection.mode === 'owner'
@@ -143,7 +153,7 @@ export const people = query({
 /** Change a member to write or read, or remove them ('none'). The owner person only, in a browser; retry-safe per
  * operation id. Lowering or removing takes effect on the member's next call and on every call of their agents; their
  * saved work stays. Agents keep the CLI paths (removal open, additions held for the person). */
-export const setRole = mutation({
+export const setRole = accountMutation('person')({
   args: {
     projectId: v.id('hostedProjects'),
     person: v.string(),
@@ -191,7 +201,7 @@ export const setRole = mutation({
             q.eq('projectId', input.projectId).eq('reader', input.person),
           )
           .unique();
-        if (input.role === 'none') await retainMembership(ctx, input.projectId, input.person);
+        if (input.role !== 'write') await retainMembership(ctx, input.projectId, input.person, project.owner);
         if (input.role !== 'write') {
           if (contributor) await ctx.db.delete(contributor._id);
           if (input.role === 'none' && reader) await ctx.db.delete(reader._id);
@@ -205,6 +215,7 @@ export const setRole = mutation({
               contributor: input.person,
             });
         }
+        await syncPersonOrder(ctx, input.projectId, input.person);
       }
       await ctx.db.insert('projectAccessOperations', {
         projectId: input.projectId,

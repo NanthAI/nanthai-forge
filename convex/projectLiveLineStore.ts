@@ -2,6 +2,8 @@
 import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { lineOwner, detachLineOwner } from './projectLiveLineOwners';
+import { internal } from './_generated/api';
+import { nextActivityHour } from './accountProjectOrderHour';
 
 type Db = MutationCtx['db'];
 type Mark = Doc<'projectLiveLineLanes'>;
@@ -133,9 +135,11 @@ export async function patchLineLane(
   if (patch.open === false) await removeLineMark(db, old, patch.landed ? 'landed' : 'set-aside');
   else if ('conflicted' in patch) await changeLineMark(db, old, { overlap: Boolean(patch.conflicted) });
 }
-/** Main's small display snapshot shares the exit row; no Work revision is copied. */
+/** Main's small display snapshot shares the exit row; no Work revision is copied. With a scheduler (acceptance), a
+ * landing in a new hour bucket also records `hour` and schedules the person-order update once (Item 3d5d8839): no
+ * read is added, and a replay finds the same hour and schedules nothing. */
 export async function writeLineMain(
-  ctx: Pick<MutationCtx, 'db'>,
+  ctx: Pick<MutationCtx, 'db'> & Partial<Pick<MutationCtx, 'scheduler'>>,
   projectId: Id<'hostedProjects'>,
   main: { head: string; at?: string; actor?: string; automatic?: boolean; check?: string },
 ) {
@@ -143,6 +147,12 @@ export async function writeLineMain(
   const value = old ? JSON.parse(old.value) : {};
   if (JSON.stringify(value.main) === JSON.stringify(main)) return;
   value.main = main;
+  const at = main.at ? Date.parse(main.at) : NaN;
+  const hour = ctx.scheduler && Number.isFinite(at) ? nextActivityHour(value, at) : null;
+  if (hour !== null) {
+    value.hour = hour;
+    await ctx.scheduler!.runAfter(0, internal.accountProjectOrder.touch, { projectId, hour });
+  }
   const next = { kind: summaryKind, sourceId: String(projectId), projectId, value: JSON.stringify(value) };
   if (old) await ctx.db.replace(old._id, next);
   else await ctx.db.insert('projectFinishReadRows', next);

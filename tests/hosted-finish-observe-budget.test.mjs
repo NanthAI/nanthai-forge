@@ -291,7 +291,8 @@ test('one accepted landing budgets executions and aggregate read bytes with 100 
     const observerCalls = watchers.map(w => w.calls);
     const transactions = f.counts.slice(readStart);
     const otherCalls = transactions.filter(c => c.name !== 'observerBudgetPage').length;
-    assert(otherCalls <= 122, 'other functions do not grow to carry observation work');
+    // 123 = 122 + one accountProjectOrder:touch when the landing opens an hour bucket (Item 3d5d8839).
+    assert(otherCalls <= 123, 'other functions do not grow to carry observation work');
     const totalCalls = {
       source: otherCalls + watchers[0].calls,
       projected: otherCalls + watchers[1].calls,

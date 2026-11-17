@@ -5,7 +5,7 @@ import { action } from './cliServer';
 import { api, internal } from './_generated/api';
 import { checkForgeUser } from './sharingActions';
 import { caller } from './projectWorkActions';
-import { digest } from '../src/state/hash';
+import { legacyEmailInvitationOperation, assertInvitationTarget } from './projectInvitationPolicy';
 import { report } from './errors';
 import { requestMemberApproval } from './projectMemberRequest';
 export const add = action({
@@ -30,9 +30,10 @@ export const addByEmail = action({
   returns: v.null(),
   handler: async (ctx, { projectId, email }): Promise<null> => {
     try {
+      assertInvitationTarget(email);
       const owner = await caller(ctx);
       const person = email.trim().toLowerCase();
-      const operationId = digest(JSON.stringify(['email-invite', projectId, owner, person]));
+      const operationId = legacyEmailInvitationOperation(projectId, owner, person);
       if (
         await requestMemberApproval(
           ctx,
@@ -84,6 +85,7 @@ export const invitePerson = action({
   returns: v.null(),
   handler: async (ctx, { projectId, person, operationId, role }): Promise<null> => {
     try {
+      assertInvitationTarget(person);
       const owner = await caller(ctx);
       await ctx.runQuery(internal.projectWork.owner, { projectId, owner });
       person = person.trim().toLowerCase();

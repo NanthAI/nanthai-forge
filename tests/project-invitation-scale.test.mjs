@@ -97,3 +97,33 @@ test('concurrent emails cannot overspend the deployment allowance; refusal rolls
     500,
   );
 });
+
+test('removing a member reads and writes constant metadata at 400 and 800 retained invitations', async () => {
+  for (const total of [400, 800]) {
+    const { f, projectId } = seed(total);
+    await f.call('Remove member', access.setRole, {
+      projectId,
+      person: 'person-0',
+      role: 'none',
+      operationId: randomUUID(),
+    });
+    const count = f.counts.at(-1);
+    assert.equal(count.readDocumentsByTable.projectInvites ?? 0, 0);
+    assert.equal(count.writes, 4, 'one grant, recipient provenance, generation and retry receipt');
+    assert.equal(f.tables.projectInvites.size, total);
+    assert.equal(
+      [...f.tables.projectActorNames.values()].find(row => row.actor === 'person-0')
+        .invitationsEndedBeforeEpoch,
+      1,
+    );
+    console.log(
+      JSON.stringify({
+        invitations: total,
+        removalDocuments: count.documents,
+        removalBytes: count.readBytes,
+        removalWrites: count.writes,
+        removalRanges: count.ranges,
+      }),
+    );
+  }
+});

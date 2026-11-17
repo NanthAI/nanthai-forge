@@ -39,9 +39,11 @@ for (const history of [0, 1150])
     // 18af654d: the live line adds 32 reads and 33 slim projection writes;
     // preserve exact physical I/O and the zero-overhead early-resolution comparison.
     // 1122c9c9: pending-only scheduler cleanup adds exactly 15 status probes in both arms.
+    // 3d5d8839: the trio's first landing opens an hour bucket and schedules the person-order touch (+1 call, +1 read
+    // of its one stale-row range, +1 write: the schedule); equal in both arms.
     assert.deepEqual(
       [after.calls, after.reads, after.writes, after.lateTaskMs, after.idle],
-      [154, 2983, 1025, 180000, 0],
+      [155, 2984, 1026, 180000, 0],
       '8c9b84fc: disjoint baseline must not grow',
     );
     t.diagnostic(JSON.stringify({ history, before, after }));

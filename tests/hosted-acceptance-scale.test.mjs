@@ -47,7 +47,9 @@ test('205 included Lanes and 10,050 retained receipts keep final CAS constant; c
   // Writes 17 -> 18 (750c5929): the landing appends its ~0.3 KB main path log row, so saves and overlap reads
   // stop reading the whole main path-history row. The window trim is one indexed range that finds no
   // documents here. Still constant in history.
-  assert(source.ranges <= 41 && source.documents <= 41 && source.writes <= 18, JSON.stringify(final));
+  // Writes 18 -> 19 (3d5d8839): the landing's first main time in a new hour schedules the person-order touch (one
+  // scheduled-function write); no read is added. Still constant in history.
+  assert(source.ranges <= 41 && source.documents <= 41 && source.writes <= 19, JSON.stringify(final));
   assert(source.readBytes < 40 * 1024 && source.writeBytes < 16 * 1024);
   assert(!final.touched.includes('projectHostedAcceptancePages'));
   // 41 = 39 plus the one submission-order read before claiming main (incident e4aee4fe) and the
@@ -63,7 +65,11 @@ test('205 included Lanes and 10,050 retained receipts keep final CAS constant; c
   }
   assert.equal(ticks, 11);
   for (const lane of lanes) assert.equal((await f.readLane(lane.laneId)).state, 'completed');
-  assert.equal(f.pendingTasks().length, 0);
+  // Only finite work stays: the one person-order touch this landing's new hour scheduled (Item 3d5d8839).
+  assert.deepEqual(
+    f.pendingTasks().map(t => t.name),
+    ['accountProjectOrder:touch'],
+  );
   const completedPlan = [...f.tables.projectHostedAcceptancePlans.values()][0];
   assert.equal(completedPlan.appliedPage, 3);
   const scheduled = f.metrics.scheduled;

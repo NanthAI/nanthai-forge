@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "accountProjectOrder (Item 3d5d8839, review 5dccf92e): Account > Projects must page a person's owned and member projects by activity with a stable cursor; no existing table holds a per-person order (grants carry no activity, hostedProjects has no member rows). Nothing merges: it replaces the three unordered owner/contributor/reader page reads of accountProjects.list.",
+  "date": "2026-11-17"
+}

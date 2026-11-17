@@ -395,6 +395,25 @@ const landed = f =>
   [...f.tables.projectHostedLandingRequests.values()].filter(r => JSON.parse(r.value).phase === 'landed')
     .length;
 
+/** Review ff347162 finding 3: a project's person-order rows as they stand before its first landing in an hour: the
+ * owner plus 150 members (over one 100-row touch run, so the continuation is metered too), all at an older hour. */
+const ORDER_MEMBERS = 150;
+function seedOrder(f) {
+  const owner = f.tables.hostedProjects.get(f.projectId).owner;
+  const people = [
+    { person: owner, role: 'owner' },
+    ...Array.from({ length: ORDER_MEMBERS }, (_, i) => ({ person: `member-${i}`, role: 'write' })),
+  ];
+  for (const [i, row] of people.entries())
+    f.tables.accountProjectOrder.set(`order-${i}`, {
+      _id: `order-${i}`,
+      _creationTime: 1,
+      projectId: f.projectId,
+      activityHour: 0,
+      ...row,
+    });
+}
+
 async function resubmissionJourney(t, mode, failedSeconds) {
   Object.assign(process.env, synthetic);
   fixedClock(t);
@@ -562,6 +581,7 @@ async function solo(
   { moveMain = false, extraQuery = false, durations = false, indexExports = false, ...runner } = {},
 ) {
   const f = await finishFixture(t);
+  seedOrder(f);
   const m = meter(f, runner);
   if (indexExports) await measureIndexExportClaims(f);
   const state = await f.enqueue(
@@ -610,6 +630,7 @@ async function batch(t, { extraQuery = false, indexExports = false, ...runner } 
   const f = await batchesFixture(t, { count: 0, batching: 'default', batchMaxSize: null });
   const entries = [];
   for (let i = 0; i < 4; i++) entries.push(await f.add(i));
+  seedOrder(f);
   // Measured after enqueue: Candidate composition and the four enqueue mutations are outside it.
   const m = meter(f, runner);
   if (indexExports) await measureIndexExportClaims(f);
@@ -741,7 +762,8 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   t.diagnostic(`measured in ${Math.round(performance.now() - started)} ms`);
   assert.equal(baseline.landings, 6);
   assert(
-    baseline.measured.mutations <= 27.5,
+    // 167/6: +2 hour-bucket touch runs over 165/6, each fixture project seeding an owner and 150 members (Item 3d5d8839).
+    baseline.measured.mutations <= 167 / 6,
     'metrics read projections must share existing landing mutations (90-minute read-cost incident)',
   );
   assert(verdicts.length >= 10, 'every fixture quantity has a ledger entry');
@@ -791,7 +813,13 @@ test('unconditional Candidate listings keep the landing call ledger and zero leg
   const unchangedCalls = {
     queries: 0,
     observerQueries: 53 / 6,
-    mutations: 163 / 6,
+    // +4 over the six-landing mix: each fixture project's first landing opens an hour bucket and schedules
+    // accountProjectOrder:touch, one run per 100 stale person rows; the fixtures seed an owner and 150 members, so two
+    // runs per project (Item 3d5d8839). In use ceil(people/100) runs, at most once per project per hour with landings.
+    // Cost per project-hour = calls (ceil(people/100) x $2/M) + row I/O (each row read and rewritten, ~124 B each way,
+    // $0.20/GB); per landing divide by landings per project-hour L. 151 people: $0.000004 + $0.0000075, so
+    // $0.0115 per 1,000 landings at worst case L = 1 (0.68% of $1.688); see docs/data-placement.md.
+    mutations: 167 / 6,
     v8Actions: 59 / 6,
     nodeActions: 3 / 6,
   };

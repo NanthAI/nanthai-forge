@@ -4,12 +4,20 @@ import type { MutationCtx, QueryCtx } from './server';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { invariant } from '../src/errors';
+import { digest } from '../src/state/hash';
 
 export const invitationLifetime = 7 * 24 * 60 * 60_000;
 export const invitationSendTimeout = 10 * 60_000;
 export const invitationEmailEnabled = () => process.env.FORGE_INVITATION_EMAIL === '1';
 export const invitationEmailHash = (email: string) => bytesToHex(sha256(new TextEncoder().encode(email)));
 export const emailShape = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export function assertInvitationTarget(person: string) {
+  invariant(person.length <= 254, 'BAD_ARGUMENT', 'Invitation targets must be 254 characters or fewer.');
+}
+export const legacyEmailInvitationOperation = (projectId: string, owner: string, person: string) =>
+  digest(JSON.stringify(['email-invite', projectId, owner, person]));
+export const legacyContributorOperation = (contributor: string, email?: string) =>
+  email ? `add-email:${email.trim().toLowerCase()}` : `add:${contributor}`;
 export function invitationStatus(row: Doc<'projectInvites'>, now = Date.now()) {
   const state = row.state ?? 'pending';
   return state === 'pending' && (row.expiresAt ?? row._creationTime + invitationLifetime) <= now
@@ -37,7 +45,7 @@ export const invitationByOperation = (
 export async function invitationBudget(
   ctx: MutationCtx,
   inviter: string,
-  recipient: string,
+  recipient?: string,
   resend?: string,
   now = Date.now(),
 ) {
@@ -46,8 +54,12 @@ export async function invitationBudget(
   const scopes: [string, number, number][] = [
     [`invitation:inviter-day:${inviter}`, day, 100],
     [`invitation:inviter-hour:${inviter}`, hour, 20],
-    ['invitation:deployment-day', day, 500],
-    [`invitation:recipient-day:${invitationEmailHash(recipient)}`, day, 3],
+    ...(recipient
+      ? [
+          ['invitation:deployment-day', day, 500] as [string, number, number],
+          [`invitation:recipient-day:${invitationEmailHash(recipient)}`, day, 3] as [string, number, number],
+        ]
+      : []),
     ...(resend ? [[`invitation:resend-day:${resend}`, day, 3] as [string, number, number]] : []),
   ];
   const updates: {
@@ -64,7 +76,7 @@ export async function invitationBudget(
     invariant(
       count < limit,
       'RATE_LIMITED',
-      'Invitation email has reached a sending limit. Try after its UTC hour or day ends.',
+      'Invitations have reached a limit. Try after its UTC hour or day ends.',
     );
     updates.push({ row, value: { owner, windowAt, count: count + 1 } });
   }

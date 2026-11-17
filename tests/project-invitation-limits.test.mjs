@@ -117,7 +117,8 @@ test('invitation email is independently off by default and unverified senders ar
   const row = await s.invite();
   assert.equal(row.mail.status, 'off');
   assert.equal(s.scheduled.length, 0);
-  assert.equal(s.tables.deviceAttempts.size, 0);
+  assert.equal(s.tables.deviceAttempts.size, 2);
+  assert.ok(values(s, 'deviceAttempts').every(row => row.owner.startsWith('invitation:inviter-')));
   s.tables.users.get('verified-owner').emailVerified = false;
   const before = snapshot(s);
   await assert.rejects(s.invite('other@example.test'), refusal('AUTH_REQUIRED'));

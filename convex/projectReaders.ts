@@ -9,6 +9,7 @@ import { query, internalMutation } from './cliServer';
 import { activeOwnedProject, ownedProject } from './projectAuthority';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { syncPersonOrder } from './accountProjectOrder';
 
 export const set = internalMutation({
   args: {
@@ -127,8 +128,9 @@ export async function setReader(
       });
     }
     if (!input.present && grant) {
-      await retainMembership(ctx, input.projectId, input.reader);
+      await retainMembership(ctx, input.projectId, input.reader, input.owner);
       await ctx.db.delete(grant._id);
+      await syncPersonOrder(ctx, input.projectId, input.reader);
     }
     await ctx.db.insert('projectReaderOperations', input);
     return null;

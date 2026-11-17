@@ -13,6 +13,8 @@ import {
   recipientEmail,
 } from './projectInvitationRecipient';
 import { invitationStatus, invitationEmailHash } from './projectInvitationPolicy';
+import { syncPersonOrder } from './accountProjectOrder';
+import { invitationInviter, invitationWasRevoked } from './projectInvitationRevocation';
 
 /** Acceptance is the sole invitation grant path; an existing write grant is never lowered. */
 async function grant(
@@ -36,6 +38,8 @@ async function grant(
     if (reader) await ctx.db.delete(reader._id);
     await ctx.db.insert('projectContributors', { projectId, contributor: person });
   }
+  // Account > Projects order row in the same transaction (Item 3d5d8839).
+  await syncPersonOrder(ctx, projectId, person);
 }
 export const answer = accountMutation('person')({
   args: {
@@ -68,13 +72,13 @@ export const answer = accountMutation('person')({
         'Invitation unavailable for this account. Open your invitations with the invited account.',
       );
       invariant(
-        invitationStatus(row) === 'pending',
+        invitationStatus(row) === 'pending' && !(await invitationWasRevoked(ctx, row, user.subject)),
         'BAD_ARGUMENT',
         'This invitation has ended. Ask for a new invitation.',
       );
       const project = await ctx.db.get(row.projectId);
       invariant(
-        project && !project.removal && (!row.inviter || row.inviter === project.owner),
+        project && !project.removal && (await invitationInviter(ctx, row)) === project.owner,
         'PROJECT_UNAVAILABLE',
         'Invitation unavailable.',
       );

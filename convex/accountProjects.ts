@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 /** The signed-in person's projects for Account > Projects and the older Projects screen (Item 3d5d8839): every active
- * project they own or are a member of, with their role and compact counts, newest activity first. One query per view.
+ * project they own or are a member of, with their role and compact counts, newest activity first. One query per page.
  *
- * Bounds per call (limit L ≤ 200, default 50): ≤ L+1 owned rows from the active-only index (removed projects never
- * fill the page), ≤ L+1 write and ≤ L+1 read grants, then per shown project: its row, the owner's account (once per
- * owner), the line summary, ≤ 21 held and ≤ 61 open Lane marks, and on compact planning partitions ≤ 4 pages per live
- * Item state plus ≤ 40 done pages (positions only). Nothing is written; no per-project client query. */
+ * Order and paging come from the person's rows in accountProjectOrder (activity in whole hours, ties by project id;
+ * convex/accountProjectOrder.ts) with Convex's cursor: removed projects and ended grants have no row, so they never
+ * fill a page. Bounds per page (P ≤ 100, default 50): one index page of P order rows, then per row its project and,
+ * for a member row only, the role re-check (≤ 2 indexed reads; owner rows 0); per shown project the owner's account
+ * (once per owner), the line summary, ≤ 21 held and ≤ 61 open Lane marks, and on compact planning partitions ≤ 4
+ * pages per live Item state plus ≤ 40 done pages (positions only). A device limited to one project reads only that
+ * project. Nothing is written; no per-project client query. */
 import { v } from 'convex/values';
+import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
+import { projectRole } from './projectRole';
+import { HOUR_MS } from './accountProjectOrderHour';
 import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 import { query } from './cliServer';
@@ -15,8 +21,7 @@ import { lineSummary } from './projectLiveLineStore';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { decodePlanPage, PLAN_ROWS, planParent } from './projectPlanRows';
 
-export const ACCOUNT_PROJECTS_DEFAULT = 50;
-export const ACCOUNT_PROJECTS_MAX = 200;
+const ACCOUNT_PROJECTS_PAGE_MAX = 100;
 const HELD_LIMIT = 20;
 const OPEN_LIMIT = 60;
 const LIVE_PAGES = 4;
@@ -31,7 +36,7 @@ export const accountProject = v.object({
   slug: v.optional(v.string()),
   role,
   visibility: v.union(v.literal('private'), v.literal('public')),
-  /** Latest of: last landing on main, last Lane change, last Lane exit, the project's creation. */
+  /** The hour (as ms) of the last landing on main or the project's creation: the list's order key. */
   activityAt: v.number(),
   /** Lanes held for a person: what needs someone. */
   held: count,
@@ -41,8 +46,8 @@ export const accountProject = v.object({
   /** Items by state; null until the project's plan has compact pages (or it has no plan). */
   items: v.union(v.object({ left: count, inProgress: count, done: count }), v.null()),
 });
-export type AccountProject = typeof accountProject.type;
 
+type AccountProject = typeof accountProject.type;
 type Role = AccountProject['role'];
 const capped = (n: number, limit: number) => ({ n: Math.min(n, limit), atLeast: n > limit });
 
@@ -138,49 +143,43 @@ async function row(
 }
 
 export const list = query({
-  args: { limit: v.optional(v.number()) },
-  returns: v.object({ projects: v.array(accountProject), more: v.boolean() }),
-  handler: async (ctx, { limit: asked }) => {
+  args: { paginationOpts: paginationOptsValidator },
+  returns: paginationResultValidator(accountProject),
+  handler: async (ctx, { paginationOpts }) => {
     const user = await ctx.auth.getUserIdentity();
-    if (!user) return { projects: [], more: false };
-    const limit = Math.max(1, Math.min(ACCOUNT_PROJECTS_MAX, Math.floor(asked ?? ACCOUNT_PROJECTS_DEFAULT)));
-    const [owned, writes, reads] = await Promise.all([
-      ctx.db
-        .query('hostedProjects')
-        .withIndex('by_owner_and_removal', q => q.eq('owner', user.subject).eq('removal', undefined))
-        .order('desc')
-        .take(limit + 1),
-      ctx.db
-        .query('projectContributors')
-        .withIndex('by_contributor', q => q.eq('contributor', user.subject))
-        .order('desc')
-        .take(limit + 1),
-      ctx.db
-        .query('projectReaders')
-        .withIndex('by_reader', q => q.eq('reader', user.subject))
-        .order('desc')
-        .take(limit + 1),
-    ]);
-    let more = owned.length > limit || writes.length > limit || reads.length > limit;
-    const found = new Map<Id<'hostedProjects'>, { project: Doc<'hostedProjects'>; role: Role }>();
-    for (const project of owned.slice(0, limit)) found.set(project._id, { project, role: 'owner' });
-    for (const [grants, role] of [
-      [writes.slice(0, limit).map(grant => grant.projectId), 'write'],
-      [reads.slice(0, limit).map(grant => grant.projectId), 'read'],
-    ] as const)
-      for (const id of grants) {
-        if (found.has(id)) continue;
-        const project = await ctx.db.get(id);
-        if (project && !project.removal && project.owner !== user.subject) found.set(id, { project, role });
-      }
-    // A device limited to one project sees only that project here too.
-    const device = (ctx as { forgeDevice?: Doc<'cliCredentials'> | null }).forgeDevice;
-    const only = device?.settings?.projects.kind === 'project' ? device.settings.projects.projectId : null;
-    const chosen = [...found.values()].filter(({ project }) => !only || project._id === only);
+    const none = { page: [], isDone: true, continueCursor: '' };
+    if (!user) return none;
     const handles = new Map<string, Promise<string | undefined>>();
-    const rows = await Promise.all(chosen.map(({ project, role }) => row(ctx, project, role, handles)));
-    rows.sort((a, b) => b.activityAt - a.activityAt);
-    if (rows.length > limit) more = true;
-    return { projects: rows.slice(0, limit), more };
+    // A device limited to one project reads that project directly: no page of other projects is ever taken.
+    const device = (ctx as { forgeDevice?: Doc<'cliCredentials'> | null }).forgeDevice;
+    if (device?.settings?.projects.kind === 'project') {
+      const project = await ctx.db.get(device.settings.projects.projectId as Id<'hostedProjects'>);
+      const role = project && !project.removal ? await projectRole(ctx, project, user.subject) : null;
+      return role ? { ...none, page: [await row(ctx, project!, role, handles)] } : none;
+    }
+    const numItems = Math.max(1, Math.min(ACCOUNT_PROJECTS_PAGE_MAX, Math.floor(paginationOpts.numItems)));
+    // Activity order (whole hours, ties by project id) with Convex's own cursor; removal and grant writes keep the
+    // rows current in their own transaction, and the role is re-checked here so a row never grants a read.
+    const result = await ctx.db
+      .query('accountProjectOrder')
+      .withIndex('by_person_and_activity', q => q.eq('person', user.subject))
+      .order('desc')
+      .paginate({ ...paginationOpts, numItems });
+    const page = [];
+    for (const order of result.page) {
+      const project = await ctx.db.get(order.projectId);
+      if (!project || project.removal) continue;
+      const role = project.owner === user.subject ? 'owner' : await projectRole(ctx, project, user.subject);
+      if (role) page.push({ project, role, activityAt: order.activityHour * HOUR_MS });
+    }
+    return {
+      ...result,
+      page: await Promise.all(
+        page.map(async ({ project, role, activityAt }) => ({
+          ...(await row(ctx, project, role, handles)),
+          activityAt,
+        })),
+      ),
+    };
   },
 });

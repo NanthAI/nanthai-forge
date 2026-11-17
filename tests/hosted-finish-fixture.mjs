@@ -27,6 +27,7 @@ const batchAbandon = await import(moduleUrl('../convex/projectHostedBatchAbandon
 const revertNoticeApi = await import(moduleUrl('../convex/projectHostedRevertNotice.ts'));
 const acceptedByNoteApi = await import(moduleUrl('../convex/projectHostedAcceptedByNote.ts'));
 const statsApi = await import(moduleUrl('../convex/projectStats.ts'));
+const accountOrder = await import(moduleUrl('../convex/accountProjectOrder.ts'));
 const convexSourceModules = Object.fromEntries(
   await Promise.all(
     [
@@ -507,6 +508,9 @@ export async function finishFixture(
       } else if (task.name === 'projectStats:closeDay') {
         // A landing on a later UTC day closes the previous one (fake time can cross midnight).
         await tx('statsClose', statsApi.closeDay, input);
+      } else if (task.name === 'accountProjectOrder:touch') {
+        // A landing in a new hour bucket moves the person-order rows (Item 3d5d8839); measured with the mix.
+        await tx('accountOrderTouch', accountOrder.touch, input);
       } else if (task.name === 'projectHostedComposeJobs:publish') {
         // A small result the source step produced itself: published from the step commit, no read.
         await tx('finishSourcePublish', composeJobs.publish, input);

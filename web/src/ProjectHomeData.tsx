@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ErrorToast } from './ui/Toast';
-import { Component, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useQuery } from 'convex/react';
+import { Component, useEffect, useMemo, type ReactNode } from 'react';
+import { usePaginatedQuery, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { Lane, PlanningItem, WorkData } from '../../src/work-types';
 import { useWorkIndex, useWorkRecords } from './hosted-work-index';
 import { portfolioWork } from './portfolio-work';
-// Shared numbers only (no server code): the page sizes of the account read.
-const ACCOUNT_PROJECTS_DEFAULT = 50;
-const ACCOUNT_PROJECTS_MAX = 200;
+// Shared number only (no server code): the page size of the account read.
+const ACCOUNT_PROJECTS_PAGE = 50;
 export type PortfolioProject = {
   id: Id<'hostedProjects'>;
   name: string;
@@ -22,26 +21,25 @@ export type ProjectSummary = ReturnType<typeof portfolioWork> & {
   error: string;
   available: boolean;
 };
-/** Every active project the person owns or is a member of, from the one account read (convex/accountProjects.ts):
- * removed projects never fill the page. "Load more" asks once for the larger page. */
+/** Every active project the person owns or is a member of, from the one account read (convex/accountProjects.ts),
+ * newest activity first: removed projects never fill a page. "Load more" reads the next page by cursor. */
 export function usePortfolioProjects(_discoverReaders = true) {
-  const [limit, setLimit] = useState<number>(ACCOUNT_PROJECTS_DEFAULT);
-  const read = useQuery(api.accountProjects.list, { limit });
+  const read = usePaginatedQuery(api.accountProjects.list, {}, { initialNumItems: ACCOUNT_PROJECTS_PAGE });
   const projects = useMemo(
     () =>
-      (read?.projects ?? []).map(item => ({
+      read.results.map(item => ({
         id: item.id,
         name: item.name,
         shared: item.role !== 'owner',
         role: roleWords[item.role],
       })),
-    [read],
+    [read.results],
   );
   return {
     projects,
-    loading: read === undefined,
-    more: !!read?.more && limit < ACCOUNT_PROJECTS_MAX,
-    loadMore: () => setLimit(ACCOUNT_PROJECTS_MAX),
+    loading: read.status === 'LoadingFirstPage',
+    more: read.status === 'CanLoadMore',
+    loadMore: () => read.loadMore(ACCOUNT_PROJECTS_PAGE),
   };
 }
 const roleWords = { owner: 'Owner', write: 'Contributor', read: 'Reader' } as const;

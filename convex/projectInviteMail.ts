@@ -9,7 +9,7 @@ import { inviteEmail } from './projectInvitationEmail';
 export { inviteEmail } from './projectInvitationEmail';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction, internalMutation, internalQuery } from './server';
-import { mutation } from './cliServer';
+import { accountMutation } from './cliServer';
 import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { activeOwnedProject } from './projectAuthority';
@@ -20,6 +20,7 @@ import { invariant, ForgeError } from '../src/errors';
 import { report } from './errors';
 import { findVerifiedRecipient } from './authUsers';
 import { invitationBlock } from './projectInvitationRecipient';
+import { invitationWasRevoked } from './projectInvitationRevocation';
 import {
   invitationByOperation,
   invitationStatus,
@@ -64,7 +65,12 @@ export function invitationRow(ctx: MutationCtx, projectId: Id<'hostedProjects'>,
 }
 
 /** Called once by the invitation mutation, in its own transaction: marks the row sending and schedules one send. */
-export async function queueInviteMail(ctx: MutationCtx, row: Operation, invite: Doc<'projectInvites'>) {
+export async function queueInviteMail(
+  ctx: MutationCtx,
+  row: Operation,
+  invite: Doc<'projectInvites'>,
+  operationId: string,
+) {
   if (!emailShape.test(row.person)) return;
   const mail: InviteMail = {
     status: invitationEmailEnabled() ? 'sending' : 'off',
@@ -76,8 +82,8 @@ export async function queueInviteMail(ctx: MutationCtx, row: Operation, invite: 
   if (mail.status === 'sending')
     await ctx.scheduler.runAfter(0, deliverRef, {
       projectId: row.projectId,
-      operationId: row.operationId,
-      sendId: row.operationId,
+      operationId,
+      sendId: operationId,
     });
 }
 
@@ -116,6 +122,7 @@ export const details = internalQuery({
     if (
       !invite ||
       invitationStatus(invite) !== 'pending' ||
+      row.owner !== project.owner ||
       (invite.inviter && invite.inviter !== project.owner)
     )
       return null;
@@ -142,7 +149,10 @@ export const details = internalQuery({
       if (!(error instanceof ForgeError && error.code === 'BAD_ARGUMENT')) throw error;
     }
     const accountBlock = recipient ? await invitationBlock(ctx, recipient, row.owner) : null;
-    const suppressed = block.some(value => value.blocked) || accountBlock?.blocked === true;
+    const suppressed =
+      block.some(value => value.blocked) ||
+      accountBlock?.blocked === true ||
+      Boolean(recipient && (await invitationWasRevoked(ctx, invite, recipient)));
     const web = process.env.FORGE_WEB_URL;
     const path = '/-/account/people';
     const url = web ? new URL(path, web).href : path;
@@ -228,7 +238,7 @@ export const settle = internalMutation({
 });
 
 /** Send the invitation email again. Explicit (the owner person presses Resend) and idempotent per `resendId`. */
-export const resend = mutation({
+export const resend = accountMutation('person')({
   args: { projectId: v.id('hostedProjects'), operationId: v.string(), resendId: v.string() },
   returns: v.null(),
   handler: async (ctx, input) => {
@@ -270,10 +280,14 @@ export const resend = mutation({
         'AUTH_REQUIRED',
         'Connect a verified identity before sending email invitations.',
       );
-      const charge = invitationEmailEnabled()
-        ? await invitationBudget(ctx, user.subject, row.person, `${input.projectId}:${input.operationId}`)
-        : null;
-      if (charge) await charge();
+      const sending = invitationEmailEnabled();
+      const charge = await invitationBudget(
+        ctx,
+        user.subject,
+        sending ? row.person : undefined,
+        sending ? `${input.projectId}:${input.operationId}` : undefined,
+      );
+      await charge();
       const mail: InviteMail = {
         status: invitationEmailEnabled() ? 'sending' : 'off',
         sends: row.mail.sends + (invitationEmailEnabled() ? 1 : 0),

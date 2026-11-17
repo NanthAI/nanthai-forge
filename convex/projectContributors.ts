@@ -1,15 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createInvitation } from './projectInvitationCreate';
-import { invitationStatus } from './projectInvitationPolicy';
+import {
+  invitationStatus,
+  invitationLifetime,
+  legacyContributorOperation,
+  assertInvitationTarget,
+} from './projectInvitationPolicy';
+import { invitationWasRevoked, type InvitationRevocations } from './projectInvitationRevocation';
 import { retainMembership } from './projectActorNames';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
-import { query, mutation, internalMutation, type QueryCtx, type MutationCtx } from './cliServer';
+import {
+  query,
+  mutation,
+  accountMutation,
+  internalMutation,
+  type QueryCtx,
+  type MutationCtx,
+} from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { ownedProject, activeProject, activeOwnedProject } from './projectAuthority';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { selectedGeneration, record, recordPartition } from './projectWorkIndexStore';
+import { syncPersonOrder } from './accountProjectOrder';
 
 export async function intentAuthority(
   ctx: QueryCtx | MutationCtx,
@@ -54,14 +68,15 @@ export const add = internalMutation({
   returns: v.null(),
   handler: addContributor,
 });
-export const remove = mutation({
+// Project-scoped removal retains its existing owner/device permission.
+export const remove = accountMutation('same')({
   args: { projectId: v.id('hostedProjects'), contributor: v.string() },
   returns: v.null(),
   handler: async (ctx, { projectId, contributor }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to manage your Forge project.');
-      await ownedProject(ctx, projectId, user.subject);
+      const project = await ownedProject(ctx, projectId, user.subject);
       const grant = await ctx.db
         .query('projectContributors')
         .withIndex('by_project_and_contributor', q =>
@@ -69,8 +84,9 @@ export const remove = mutation({
         )
         .unique();
       if (grant) {
-        await retainMembership(ctx, projectId, contributor);
+        await retainMembership(ctx, projectId, contributor, project.owner);
         await ctx.db.delete(grant._id);
+        await syncPersonOrder(ctx, projectId, contributor);
       }
       return null;
     } catch (error) {
@@ -175,13 +191,34 @@ export const pending = query({
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to manage access.');
       await ownedProject(ctx, projectId, user.subject);
-      const rows = await ctx.db
-        .query('projectInvites')
-        .withIndex('by_project_and_email', q => q.eq('projectId', projectId))
-        .take(1000);
-      return rows
-        .filter(row => invitationStatus(row) === 'pending')
-        .map(row => ({ id: row._id, email: row.email }));
+      const now = Date.now();
+      const pages = await Promise.all(
+        (['handle', 'email', undefined] as const).map(kind =>
+          ctx.db
+            .query('projectInvites')
+            .withIndex('by_project_and_state_and_expiry', q =>
+              kind === undefined
+                ? q
+                    .eq('projectId', projectId)
+                    .eq('kind', undefined)
+                    .eq('state', undefined)
+                    .eq('expiresAt', undefined)
+                    .gt('_creationTime', now - invitationLifetime)
+                : q.eq('projectId', projectId).eq('kind', kind).eq('state', 'pending').gt('expiresAt', now),
+            )
+            .order('desc')
+            .take(50),
+        ),
+      );
+      const revoked: InvitationRevocations = new Map(),
+        rows = [];
+      for (const row of pages.flat().sort((a, b) => b._creationTime - a._creationTime)) {
+        if (invitationStatus(row, now) !== 'pending') continue;
+        if (row.recipient && (await invitationWasRevoked(ctx, row, row.recipient, revoked))) continue;
+        rows.push({ id: row._id, email: row.email });
+        if (rows.length === 50) break;
+      }
+      return rows;
     } catch (error) {
       return report(error);
     }
@@ -235,14 +272,16 @@ export async function addContributor(
   },
 ): Promise<null> {
   try {
-    await activeOwnedProject(ctx, projectId, owner);
     const address = email ?? legacyEmail;
+    if (address) assertInvitationTarget(address);
+    await activeOwnedProject(ctx, projectId, owner);
     if (address)
       return await createInvitation(ctx, {
         projectId,
         owner,
-        operationId: `add-email:${address.trim().toLowerCase()}`,
+        operationId: legacyContributorOperation(contributor, address),
         person: address,
+        explainEnded: true,
       });
     if (contributor === owner) return null;
     const account = await ctx.db
@@ -253,9 +292,10 @@ export async function addContributor(
     return await createInvitation(ctx, {
       projectId,
       owner,
-      operationId: `add:${contributor}`,
+      operationId: legacyContributorOperation(contributor),
       person: `@${account.handle}`,
       contributor,
+      explainEnded: true,
     });
   } catch (error) {
     return report(error);

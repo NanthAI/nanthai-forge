@@ -502,8 +502,8 @@
       "calls": 16
     },
     "landServerSolo": {
-      "calls": 35,
-      "reads": 494
+      "calls": 37,
+      "reads": 646
     },
     "planningFiltered": {
       "calls": 3,

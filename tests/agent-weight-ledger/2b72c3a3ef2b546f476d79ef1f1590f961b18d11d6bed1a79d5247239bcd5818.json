@@ -1,0 +1,4 @@
+{
+  "issue": "3d5d8839",
+  "reason": "Account Projects paging by activity (review 5dccf92e; ff347162 finding 3): a landing whose main time starts a new hour bucket for its project schedules accountProjectOrder:touch, one run per 100 stale person rows (bounded index range, patches only rows still at an older hour). The solo fixture now seeds an owner and 150 members, so its first landing pays two runs: +2 calls and +152 document reads (101 + 51 rows) over the pre-order baseline. In use this is once per project per hour with landings, ceil(people/100) runs; acceptance itself adds no read. Cost per project-hour = calls ceil(people/100) x $2/M + row I/O (~124 B read and rewritten per row, $0.20/GB), divided by landings per project-hour for per-landing: 151 people, worst case one landing per hour, $0.0115 per 1,000 landings (0.68% of $1.688)."
+}

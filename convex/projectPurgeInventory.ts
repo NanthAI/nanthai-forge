@@ -30,6 +30,7 @@ export const projectPurgeTables = {
   projectReleaseSignatures: 'by_project_and_head',
   projectReturnSupersessions: 'by_project_and_operation',
   projectSlugs: 'by_project',
+  accountProjectOrder: 'by_project_and_person',
   projectSourceCutovers: 'by_project_and_operation',
   projectSourceAuthorityTransitions: 'by_project_and_operation',
   projectPolicyChanges: 'by_project_and_operation',

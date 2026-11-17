@@ -4,6 +4,7 @@ import { policyPreset } from '../src/autonomy-policy';
 import type { MutationCtx } from './_generated/server';
 import { activeOwnedProject } from './projectAuthority';
 import { ensurePublicRow } from './publicListing';
+import { syncPersonOrder } from './accountProjectOrder';
 
 /** Shared creation seam: archive upload and CLI hosting use the same owner/key identity. */
 export async function createProject(
@@ -34,5 +35,6 @@ export async function createProject(
     user?.subject === input.owner ? { username: user.nickname ?? null } : {},
   );
   await ensureProjectSlug(ctx, project);
+  await syncPersonOrder(ctx, project._id, project.owner, project);
   return activeOwnedProject(ctx, project._id, input.owner);
 }

@@ -150,8 +150,55 @@ for (const [module, name, fields] of cases)
     });
     s.ctx.auth.getUserIdentity = ownerIdentity;
     assert.equal(s.tables.projectReaders.size + s.tables.projectContributors.size, 1);
-    await call();
+    if (name === 'add' || name === 'addByEmail')
+      await assert.rejects(
+        call(),
+        e => e.data?.code === 'BAD_ARGUMENT' && /new invitation/i.test(e.data.message),
+      );
+    else await call();
     assert.equal(s.tables.projectInvites.size, 1);
+  });
+
+for (const [module, name, fields] of cases.slice(0, 2))
+  test(`an approved device legacy ${name} retry explains a recipient decline without granting access`, async t => {
+    const s = fixture(t);
+    const oldFetch = globalThis.fetch;
+    globalThis.fetch = async () => Response.json({ id: 'target' });
+    t.after(() => {
+      globalThis.fetch = oldFetch;
+    });
+    const input = { projectId: 'project', ...fields };
+    const call = () => modules[module][name]._handler(s.ctx, input);
+    await assert.rejects(call(), e => e.data?.code === 'PROJECT_UNAVAILABLE');
+    const row = [...s.tables.projectHostedApprovals.values()][0];
+    s.person();
+    await modules.projectHostedApprovals.decide._handler(s.ctx, {
+      projectId: 'project',
+      laneId: row.laneId,
+      head: row.head,
+      decision: 'grant',
+      operationId: randomUUID(),
+    });
+    const invitation = [...s.tables.projectInvites.values()][0];
+    const ownerIdentity = s.ctx.auth.getUserIdentity;
+    s.ctx.auth.getUserIdentity = async () => ({
+      subject: 'target',
+      email: 'target@example.test',
+      emailVerified: true,
+    });
+    await modules.projectInvitationAnswers.answer._handler(s.ctx, {
+      invitationId: invitation._id,
+      choice: 'decline',
+      operationId: randomUUID(),
+    });
+    s.ctx.auth.getUserIdentity = ownerIdentity;
+    s.device();
+    await assert.rejects(
+      call(),
+      e => e.data?.code === 'BAD_ARGUMENT' && /new invitation/i.test(e.data.message),
+    );
+    assert.equal(s.tables.projectInvites.size, 1);
+    assert.equal(s.tables.projectReaders.size + s.tables.projectContributors.size, 0);
   });
 
 test('membership writer rollout is default-off and never falls through to an unapproved grant', async t => {

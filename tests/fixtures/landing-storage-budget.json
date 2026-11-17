@@ -193,7 +193,8 @@
       "authLinkEvents": 0,
       "projectPublic": 0,
       "projectStars": 0,
-      "invitationBlocks": 0
+      "invitationBlocks": 0,
+      "accountProjectOrder": 0
     },
     "retained": {
       "projectJournalSegments": 1397,
@@ -388,7 +389,8 @@
       "authLinkEvents": 0,
       "projectPublic": 0,
       "projectStars": 0,
-      "invitationBlocks": 0
+      "invitationBlocks": 0,
+      "accountProjectOrder": 0
     },
     "perProject": {
       "immediate": {
@@ -444,7 +446,7 @@
         },
         "projectJournalControls": {
           "rows": 8,
-          "bytes": 4771
+          "bytes": 4772
         },
         "projectLiveLineSummary": {
           "rows": 1,
@@ -662,7 +664,8 @@
       "authLinkEvents": 0,
       "projectPublic": 0,
       "projectStars": 0,
-      "invitationBlocks": 0
+      "invitationBlocks": 0,
+      "accountProjectOrder": 0
     },
     "retained": {
       "projectJournalSegments": 3514,
@@ -857,7 +860,8 @@
       "authLinkEvents": 0,
       "projectPublic": 0,
       "projectStars": 0,
-      "invitationBlocks": 0
+      "invitationBlocks": 0,
+      "accountProjectOrder": 0
     },
     "perProject": {
       "immediate": {
@@ -941,7 +945,7 @@
     "fresh": {
       "bootstrapControls": {
         "rows": 5,
-        "bytes": 2778
+        "bytes": 2779
       },
       "beforeRetainedBytes": 30479,
       "retainedBytes": 29780
@@ -957,23 +961,23 @@
   },
   "tenLandingIndexes": {
     "landings": 10,
-    "written": 10740,
+    "written": 11646,
     "stored": [
       {
-        "entries": 417,
-        "keyBytes": 31596
+        "entries": 861,
+        "keyBytes": 51802
       },
       {
-        "entries": 611,
-        "keyBytes": 46565
+        "entries": 1055,
+        "keyBytes": 66770
       },
       {
-        "entries": 1699,
-        "keyBytes": 130403
+        "entries": 2143,
+        "keyBytes": 149094
       },
       {
-        "entries": 1699,
-        "keyBytes": 130403
+        "entries": 2143,
+        "keyBytes": 149094
       }
     ]
   }

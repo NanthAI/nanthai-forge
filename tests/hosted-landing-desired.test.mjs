@@ -564,7 +564,8 @@ test('desired preparation budget: one server goal lands with no idle tasks or re
   await f.drain();
   const counts = f.counts.slice(before);
   const sum = key => counts.reduce((total, count) => total + (count[key] ?? 0), 0);
-  assert.equal(counts.length, 25, 'preparation retains the original server-call budget');
+  // 26 = 25 + one accountProjectOrder:touch: the landing opens an hour bucket for its project (Item 3d5d8839).
+  assert.equal(counts.length, 26, 'preparation retains the original server-call budget');
   assert.equal(f.pending().length, 0);
   assert.equal(f.tables.projectHostedAcceptances.size, 1);
   t.diagnostic(

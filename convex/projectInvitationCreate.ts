@@ -11,7 +11,26 @@ import {
   invitationEmailEnabled,
   invitationLifetime,
   invitationStatus,
+  invitationByOperation,
+  legacyEmailInvitationOperation,
+  assertInvitationTarget,
 } from './projectInvitationPolicy';
+import { invitationEpoch, invitationWasRevoked } from './projectInvitationRevocation';
+
+export async function assertLegacyInvitationOpen(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  operationId: string,
+) {
+  const row = await invitationByOperation(ctx, projectId, operationId);
+  invariant(
+    row &&
+      invitationStatus(row) === 'pending' &&
+      (!row.recipient || !(await invitationWasRevoked(ctx, row, row.recipient))),
+    'BAD_ARGUMENT',
+    'This earlier invitation has ended. Send a new invitation in People with a new operation id.',
+  );
+}
 
 export async function createInvitation(
   ctx: MutationCtx,
@@ -23,8 +42,10 @@ export async function createInvitation(
     role?: 'read' | 'write';
     email?: string;
     contributor?: string;
+    explainEnded?: boolean;
   },
 ): Promise<null> {
+  assertInvitationTarget(input.person);
   const { projectId, owner, operationId } = input;
   const person = input.person.trim().toLowerCase(),
     role = input.role ?? 'write';
@@ -35,6 +56,8 @@ export async function createInvitation(
     .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
     .unique();
   if (original) {
+    if (input.explainEnded || operationId === legacyEmailInvitationOperation(projectId, owner, person))
+      await assertLegacyInvitationOpen(ctx, projectId, operationId);
     invariant(
       original.owner === owner && original.person === person && (original.role ?? 'write') === role,
       'WORK_OPERATION_CHANGED',
@@ -80,9 +103,10 @@ export async function createInvitation(
     .take(1);
   if (isEmail && !(old[0] && invitationStatus(old[0]) === 'pending'))
     await checkOpenEmailInvitations(ctx, projectId);
-  const charge = isEmail && invitationEmailEnabled() ? await invitationBudget(ctx, owner, person) : null;
+  const charge = await invitationBudget(ctx, owner, isEmail && invitationEmailEnabled() ? person : undefined);
+  const epoch = await invitationEpoch(ctx, projectId);
   // All refusal paths, including all budgets, precede the first write.
-  if (charge) await charge();
+  await charge();
   if (old[0] && invitationStatus(old[0]) === 'pending')
     await ctx.db.patch(old[0]._id, { state: 'replaced', endedAt: Date.now() });
   const id = await ctx.db.insert('projectInvites', {
@@ -90,6 +114,7 @@ export async function createInvitation(
     email: person,
     kind: isEmail ? 'email' : 'handle',
     inviter: owner,
+    invitationEpoch: epoch,
     ...(recipient ? { recipient } : {}),
     role,
     operationId,
@@ -103,6 +128,7 @@ export async function createInvitation(
     person,
     role,
   });
-  if (isEmail) await queueInviteMail(ctx, (await ctx.db.get(operation))!, (await ctx.db.get(id))!);
+  if (isEmail)
+    await queueInviteMail(ctx, (await ctx.db.get(operation))!, (await ctx.db.get(id))!, operationId);
   return null;
 }

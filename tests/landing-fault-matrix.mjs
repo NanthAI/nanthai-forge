@@ -45,6 +45,11 @@ export const PERMANENT = {
   'projectHostedAcceptance:complete@receipt': [],
   'projectHostedFinishDriver:drive@receipt': [],
   'projectHostedLandingWouldConflict:mark@receipt': [],
+  // Item 3d5d8839: the Account > Projects order update a landing schedules when it opens a new hour for its project.
+  // It is an ordering hint only: the landing is already accepted, the list re-checks roles, and the next hour's
+  // landing re-touches the rows, so a lost or failing touch ends nothing.
+  'accountProjectOrder:touch@publish': [],
+  'accountProjectOrder:touch@receipt': [],
 };
 
 /** Dogfood incidents, each replayed against the implementation (file, test name)

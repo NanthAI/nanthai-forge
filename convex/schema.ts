@@ -608,6 +608,16 @@ export default defineSchema({
     'by_owner_and_operation',
     ['owner', 'operationId'],
   ),
+  // Item 3d5d8839: a person's projects in activity order (convex/accountProjectOrder.ts); an ordering hint, never access.
+  accountProjectOrder: defineTable({
+    person: v.string(),
+    projectId: v.id('hostedProjects'),
+    role: v.union(v.literal('owner'), v.literal('write'), v.literal('read')),
+    activityHour: v.number(),
+  })
+    .index('by_person_and_activity', ['person', 'activityHour', 'projectId'])
+    .index('by_project_and_person', ['projectId', 'person'])
+    .index('by_project_and_activity', ['projectId', 'activityHour']),
   projectSlugs: defineTable({ owner: v.string(), slug: v.string(), projectId: v.id('hostedProjects') })
     .index('by_owner_and_slug', ['owner', 'slug'])
     .index('by_project', ['projectId']),
@@ -689,8 +699,10 @@ export default defineSchema({
   projectAccessOperations: defineTable({
     projectId: v.id('hostedProjects'),
     owner: v.string(),
-    operationId: v.string(),
+    // The generation counter alone omits this; request writers require a string operation id.
+    operationId: v.optional(v.string()),
     person: v.string(),
+    invitationEpoch: v.optional(v.number()),
     role: v.optional(v.union(v.literal('read'), v.literal('write'))),
     // One invitation email's send state (convex/projectInviteMail.ts); never the address body or token.
     mail: v.optional(
@@ -709,6 +721,7 @@ export default defineSchema({
     kind: v.optional(v.union(v.literal('email'), v.literal('handle'))),
     inviter: v.optional(v.string()),
     recipient: v.optional(v.string()),
+    invitationEpoch: v.optional(v.number()),
     state: v.optional(invitationState),
     expiresAt: v.optional(v.number()),
     endedAt: v.optional(v.number()),

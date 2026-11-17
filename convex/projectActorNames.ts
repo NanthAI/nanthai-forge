@@ -8,6 +8,7 @@ import { selectedGeneration, recordPartition } from './projectWorkIndexStore';
 import { accessibleProject } from './projectAuthority';
 import { invariant } from '../src/errors';
 import { projectRole } from './projectRole';
+import { endInvitationEpoch } from './projectInvitationRevocation';
 async function known(
   ctx: QueryCtx | MutationCtx,
   project: Doc<'hostedProjects'>,
@@ -158,13 +159,26 @@ export async function withActorName<T extends { actor: string }>(
 }
 
 /** Preserve membership provenance before deleting a live grant. No name is stored. */
-export async function retainMembership(ctx: MutationCtx, projectId: Id<'hostedProjects'>, actor: string) {
+export async function retainMembership(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  actor: string,
+  owner?: string,
+) {
+  const projectOwner = owner ?? (await ctx.db.get(projectId))?.owner;
+  const invitationsEndedBeforeEpoch = projectOwner
+    ? await endInvitationEpoch(ctx, projectId, projectOwner)
+    : undefined;
   const row = await ctx.db
     .query('projectActorNames')
     .withIndex('by_project_and_actor', q => q.eq('projectId', projectId).eq('actor', actor))
     .unique();
-  if (row) await ctx.db.patch(row._id, { wasMember: true });
-  else await ctx.db.insert('projectActorNames', { projectId, actor, wasMember: true });
+  const retained = {
+    wasMember: true,
+    ...(invitationsEndedBeforeEpoch !== undefined ? { invitationsEndedBeforeEpoch } : {}),
+  };
+  if (row) await ctx.db.patch(row._id, retained);
+  else await ctx.db.insert('projectActorNames', { projectId, actor, ...retained });
 }
 
 async function membership(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>, actor: string) {

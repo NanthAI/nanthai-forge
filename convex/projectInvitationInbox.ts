@@ -3,6 +3,11 @@ import { v } from 'convex/values';
 import { query } from './cliServer';
 import { invitationPerson, recipientEmail, invitationBlock } from './projectInvitationRecipient';
 import { invitationLifetime, invitationStatus } from './projectInvitationPolicy';
+import {
+  invitationInviter,
+  invitationWasRevoked,
+  type InvitationRevocations,
+} from './projectInvitationRevocation';
 
 const invitation = v.object({
   invitationId: v.id('projectInvites'),
@@ -30,11 +35,13 @@ export const inbox = query({
         : ctx.db.query('projectInvites').withIndex('by_recipient', q => q.eq('recipient', user.subject));
     const page = await selected.order('desc').paginate({ cursor: input.cursor ?? null, numItems: 25 });
     const rows = [];
+    const revoked: InvitationRevocations = new Map();
     for (const row of page.page) {
       const state = invitationStatus(row);
-      if (state !== 'pending' && state !== 'expired') continue;
+      if (state !== 'pending') continue;
       const project = await ctx.db.get(row.projectId);
-      if (!project || project.removal || (row.inviter && row.inviter !== project.owner)) continue;
+      if (!project || project.removal || (await invitationInviter(ctx, row)) !== project.owner) continue;
+      if (await invitationWasRevoked(ctx, row, user.subject, revoked)) continue;
       if ((await invitationBlock(ctx, user.subject, project.owner))?.blocked) continue;
       const account = await ctx.db
         .query('forgeAccounts')

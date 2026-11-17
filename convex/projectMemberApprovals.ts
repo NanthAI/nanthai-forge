@@ -12,6 +12,8 @@ import { addContributor, inviteContributor } from './projectContributors';
 import { setReader } from './projectReaders';
 import { requireOwnerPerson } from './ownerPerson';
 import { invariant } from '../src/errors';
+import { assertLegacyInvitationOpen } from './projectInvitationCreate';
+import { legacyContributorOperation, legacyEmailInvitationOperation } from './projectInvitationPolicy';
 
 const memberChange = z.discriminatedUnion('kind', [
   z
@@ -85,7 +87,7 @@ export const request = internalMutation({
     const user = await ctx.auth.getUserIdentity();
     invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to manage project membership.');
     await activeOwnedProject(ctx, input.projectId, user.subject);
-    memberChange.parse(JSON.parse(input.request));
+    const change = memberChange.parse(JSON.parse(input.request));
     const key = `setting:membership:${input.operationId}`;
     const previous = await heldReplay(ctx, input.projectId, key, input.operationId, input.request);
     const row =
@@ -99,6 +101,20 @@ export const request = internalMutation({
         request: input.request,
         summary: 'Grant project membership',
       }));
+    if (row.ended?.kind === 'applied') {
+      if (change.kind === 'contributor')
+        await assertLegacyInvitationOpen(
+          ctx,
+          input.projectId,
+          legacyContributorOperation(change.contributor, change.email),
+        );
+      if (
+        change.kind === 'invite' &&
+        change.operationId ===
+          legacyEmailInvitationOperation(input.projectId, user.subject, change.person.trim().toLowerCase())
+      )
+        await assertLegacyInvitationOpen(ctx, input.projectId, change.operationId);
+    }
     return canonicalPayload({
       status: row.status,
       applied: row.ended?.kind === 'applied',

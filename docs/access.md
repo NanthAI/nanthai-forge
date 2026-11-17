@@ -85,12 +85,22 @@ are never exposed to the inviter.
 
 Invitations expire after seven days. Expiry is checked when answering, resending
 and preparing delivery, with no expiry timer, polling or background deletion.
+Expired invitations leave the recipient inbox; the owner's history retains them.
 Accepted, declined, cancelled, replaced and expired invitations cannot be resent;
 send a new invitation instead. Replacing an invitation ends the earlier one. A
 resend keeps the original expiry. An interrupted send becomes retryable after ten
 minutes; a late completion cannot settle a newer attempt. Invitation states and
 mail state are retained and paged on People and access. Existing invitations use
 their creation time plus seven days when they have no explicit expiry.
+Rows from before this change must prove their inviter through the original
+invitation operation, and that inviter must still own the project.
+
+Removing a member or lowering them to read ends their earlier open invitations to that project, including
+email invitations accepted by that account. A fresh invitation can be accepted
+even if created in the same millisecond as removal. A project generation and a
+recipient removal marker enforce this without scanning invitation history or
+looking up pending email addresses for the owner. Unbound email rows retain the
+owner's original projection; removal reveals no address-to-account match.
 
 An email invitation uses the existing alert sender's account, token and from
 address, but only when `FORGE_INVITATION_EMAIL=1`. The invitation switch is off by
@@ -101,13 +111,15 @@ link. Failed sends show the HTTP status or network failure with Resend and Copy
 link as the next steps. Email content uses the inviter's handle, the project's
 current address and the role, with no tracking pixel or rewritten link. The
 production sender domain remains part of the Phase 8 production move.
+The switch must remain off until the email-enablement requirements on
+[invitation email Issue c6629fda](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=c6629fda-c29f-48e9-b677-5094e5cf0d9b)
+are complete, including on dev.
 
-Sending limits are checked together before any write in the mutation that queues
-an email, including resends:
+Invitation limits are checked together before any write, including explicit resends:
 
 | Scope | Limit |
 | --- | --- |
-| Inviter, across projects | 20 emails per UTC hour and 100 per UTC day |
+| Inviter, across projects | 20 invitations per UTC hour and 100 per UTC day; handle, email and explicit resends share the allowance, including with email off |
 | Invitation | 3 resends per UTC day |
 | Project | 50 open email invitations; accepted, ended and expired rows do not count |
 | Deployment, across projects and accounts | 500 invitation emails per UTC day |
@@ -117,9 +129,11 @@ Over a sending limit, the operation refuses with `RATE_LIMITED` and writes and
 schedules nothing. Retry the same operation id after the relevant window. Exact
 completed retries charge nothing and send nothing again. Counters reset in place,
 inside the existing send transaction. Recipient counter keys contain a digest,
-not an extra copy of the address. These limits apply to actual queued email;
-turning invitation email off does not consume email allowance. Email creation no
+not an extra copy of the address. Deployment, recipient and resend-email
+allowances apply to actual queued email; with email off only the inviter
+allowance is charged. Email creation no
 longer performs recipient directory lookups, so that lookup has no budget to spend.
+Invitation targets longer than 254 characters are refused before database reads.
 
 The first four inviter/project limits above were approved by the owner. The
 500/deployment/day and 3/recipient/day caps, separate off-by-default email switch,
@@ -130,6 +144,10 @@ The person approves an agent's membership request before it creates a pending
 invitation. That approval grants no invitee access: the recipient still accepts.
 The older project add and reader-sharing entry points follow the same pending
 path. Devices cannot accept, decline, block or unblock for their person.
+The legacy `add` and `addByEmail` retry keys cannot create another invitation
+after their first one ends; they return `BAD_ARGUMENT` with the next step to send
+a new invitation in People using a new operation id. Explicit invitation and
+answer operation ids retain their original retry behavior.
 
 ## Teams and organizations (proposed, `1e474c35`, `517523cf`)
 
@@ -158,15 +176,30 @@ Permission checks add no Convex round trip: the role is read inside the call tha
 parallel bounded queries (25 handle invitations and 25 email invitations), each
 with its own cursor; blocked preferences load only when opened, 25 per page.
 Sparse pages preserve their continuation. No live read uses clock-derived arguments.
+The legacy `pending` query returns up to 50 live invitations, reading at most 50
+rows each from indexed handle, email and pre-change selectors (150 total), rather
+than scanning 1,000 history rows. People and access retains its full paged history.
 
 Email invitation creation is six function executions including delivery (action,
 owner query, mutation, scheduled delivery, details query, settlement); with email
 off it is three. Resend is four including delivery. All four email counters (five
 on resend) are small existing rate-store rows read and written inside the queuing
-mutation. People makes no per-invitation operation lookup: the invitation row
+mutation. Handle and email-off creation use the two inviter counters. Creation
+also reads one project generation row; removal reads and writes that same row
+and the existing member provenance row atomically. Self-leave reads the project
+owner once when it is not already available. Page and answer reads check the
+recipient marker, cached per project/account within a page. Legacy inbox rows
+also read their original operation to prove the inviter. People makes no per-invitation operation lookup: the invitation row
 projects mail state. Answering is one mutation, and no permission check or landing
 adds a call. The modeled change per 1,000 landings is $0; this is not a new billed
-cost baseline. At the provider's [listed email price](https://developers.cloudflare.com/email-service/platform/pricing/),
+cost baseline. At both 400 and 800 retained invitations, the transactional fixture
+measures removal at 8 documents / 364 read bytes and 4 writes, with no invitation
+history read or rewrite. A legacy pending page reads 104 documents / 10,508 bytes,
+including 52 invitation documents; a recipient page reads 101 documents / 11,726
+bytes. These are synthetic transaction measurements, not live billed usage.
+Memory is bounded by the selected pages (at most 150 invitation rows for the
+legacy query), not retained history.
+At the provider's [listed email price](https://developers.cloudflare.com/email-service/platform/pricing/),
 1,000 invitations cost at most $0.35 for mail beyond included allowance, plus
 Convex executions and I/O; the existing sender plan is reused and no purchase is
 authorized here. Live billed invitation usage has not been measured.

@@ -19,6 +19,7 @@ import { projectExecution } from './projectExecution';
 import { startRetention, stopRetention, purgeSettleMs } from './projectRetention';
 import { purgeProjectRowsPage } from './projectPurgeRows';
 import { projectPurgeWriter } from './projectFinishReadWriter';
+import { dropProjectOrder, restoreProjectOrder } from './accountProjectOrder';
 
 const args = { projectId: v.id('hostedProjects'), operationId: v.string(), expectedRevision: v.number() };
 async function schedule(ctx: MutationCtx, project: Doc<'hostedProjects'>) {
@@ -141,6 +142,9 @@ export async function transition(
         }
       : {}),
   });
+  // The person-order rows follow removal in the same transaction (Item 3d5d8839).
+  if (action === 'restore') await restoreProjectOrder(ctx, (await ctx.db.get(project._id))!);
+  else await dropProjectOrder(ctx, project._id);
   if (action === 'trash') await startRetention(ctx, project._id);
   if (action === 'delete') await schedule(ctx, (await ctx.db.get(project._id))!);
   return null;
