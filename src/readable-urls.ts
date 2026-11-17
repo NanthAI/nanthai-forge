@@ -23,6 +23,10 @@ export const reservedHandles = new Set([
   'contact',
   'signin',
   'signup',
+  // App addresses under /-/ (web/src/app/paths.ts): the cached public read and the legal pages.
+  'public',
+  'terms',
+  'privacy',
 ]);
 export function handleError(value: string): string | null {
   if (!/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])$/.test(value))
