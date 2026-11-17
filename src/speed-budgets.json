@@ -789,9 +789,10 @@
       "unit": "ops",
       "value": 11.34,
       "floor": 0.25,
+      "ceiling": 12.166666666666666,
       "source": "Six-landing S4 fixture: 69 -> 73 GET/HEAD requests. Add only the approved 4/6 listing requests to the existing 10.67 ledger; the measured pre-existing baseline of 11.5 remains a visible warning. Synthetic counts, not billed usage.",
       "issue": "71dbe458",
-      "reason": "Issue 91df7eda permits +0.67 Class B per landing for one Candidate listing. The remaining 0.83 request difference predates this cutover; do not absorb it into the listing budget. Convex executions are unchanged."
+      "reason": "Issue 91df7eda permits +0.67 Class B per landing for one Candidate listing. The remaining 0.83 request difference predates this cutover; do not absorb it into the listing budget. Issue ca19aec0 replays accepted States with the same 73 requests and caps that six-landing total exactly: one extra request fails. The fixture deliberately includes checksum-less PUT fallback HEADs. Convex executions are unchanged."
     },
     {
       "id": "landing-r2-bytes-put",

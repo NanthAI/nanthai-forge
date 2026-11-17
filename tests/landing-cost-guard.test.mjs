@@ -31,7 +31,7 @@ import { speedBudgets } from '../dist/speed-budgets.js';
 import { formatCostVerdicts, judgeCost, judgeCosts } from '../dist/cost-budgets.js';
 
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
-test.before(() => Object.assign(process.env, synthetic));
+test.beforeEach(() => Object.assign(process.env, synthetic));
 test.after(() => {
   for (const [key, value] of Object.entries(prior)) {
     if (value === undefined) delete process.env[key];
@@ -197,7 +197,10 @@ test('S3 report callbacks retain only a nine-index header and never touch report
 
 /** Counts every Convex execution and R2 request from now on: metered transactions (queries and
  * mutations), action executions (scheduled and nested), R2 requests by class and bytes put. */
-function meter(f, { extraShard = false, extraSetupSeconds = 0 } = {}) {
+function meter(
+  f,
+  { extraShard = false, extraSetupSeconds = 0, extraR2Read = false, checksumEcho = false } = {},
+) {
   // Signed synthetic runner usage, including job-side setup, makes shard fanout visible even
   // when the number of check runs is unchanged. No wall-clock measurement or real sleep.
   if (extraShard) f.rawChecks.setPlanOverrides({ shardCount: 3 });
@@ -228,7 +231,22 @@ function meter(f, { extraShard = false, extraSetupSeconds = 0 } = {}) {
       r2.a++;
       r2.bytesPut += Buffer.byteLength(init.body);
     } else r2.b++;
-    return inner(url, init);
+    const response = await inner(url, init);
+    if (extraR2Read && (!init?.method || init.method === 'GET')) {
+      extraR2Read = false;
+      r2.b++;
+      const repeated = await inner(url, init);
+      assert(repeated.ok, 'the seeded extra R2 read executes successfully');
+      await repeated.body?.cancel();
+    }
+    // The legacy fixture omits the checksum acknowledgement. Exercise both the
+    // supported no-echo fallback and exact successful-PUT acknowledgement.
+    if (checksumEcho && init?.method === 'PUT' && response.status === 200) {
+      const headers = new Headers(response.headers);
+      headers.set('x-amz-checksum-sha256', init.headers['x-amz-checksum-sha256']);
+      return new Response(response.body, { status: response.status, headers });
+    }
+    return response;
   };
   return {
     tasks,
@@ -632,9 +650,9 @@ async function batch(t, { extraQuery = false, indexExports = false, ...runner } 
 }
 
 /** The scripted mix in `costGuard.scenario`, per accepted landing. */
-async function measureLandingCosts(t, options = {}) {
+async function measureLandingCosts(t, { extraR2Read = false, ...options } = {}) {
   const scenarios = {
-    solo: await solo(t, options),
+    solo: await solo(t, { ...options, extraR2Read }),
     mainMoved: await solo(t, { ...options, moveMain: true }),
     batchOfFour: await batch(t, options),
   };
@@ -731,6 +749,41 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
     verdicts.filter(v => v.status === 'fail').map(v => v.message),
     [],
     'a per-landing cost rose past its ledger threshold',
+  );
+});
+
+test('ca19aec0: one additional executed R2 GET fails the exact six-landing request ceiling', async t => {
+  const seeded = await measureLandingCosts(t, { extraR2Read: true });
+  const before = Object.values(baseline.scenarios).reduce((sum, s) => sum + s.r2ClassB, 0);
+  const after = Object.values(seeded.scenarios).reduce((sum, s) => sum + s.r2ClassB, 0);
+  assert.equal(after, before + 1, 'the negative control adds exactly one real fixture GET');
+  const verdict = judgeCosts(costs, costGuard, 'landing-fixture', seeded.measured).find(
+    v => v.metric === 'r2ClassB',
+  );
+  assert.equal(verdict.status, 'fail');
+  assert.match(verdict.message, /exceeds its ceiling/);
+});
+
+test('ca19aec0: checksum-acknowledged PUTs remove fallback HEADs without changing landing work', async t => {
+  const acknowledged = await measureLandingCosts(t, { checksumEcho: true });
+  for (const metric of [
+    'queries',
+    'observerQueries',
+    'mutations',
+    'v8Actions',
+    'nodeActions',
+    'checkRuns',
+    'r2ClassA',
+    'r2BytesPut',
+  ])
+    assert.equal(acknowledged.measured[metric], baseline.measured[metric], `${metric}: same work`);
+  assert(acknowledged.measured.r2ClassB < baseline.measured.r2ClassB);
+  t.diagnostic(
+    JSON.stringify({
+      fallbackRequests: baseline.measured.r2ClassB * baseline.landings,
+      acknowledgedRequests: acknowledged.measured.r2ClassB * acknowledged.landings,
+      landings: acknowledged.landings,
+    }),
   );
 });
 

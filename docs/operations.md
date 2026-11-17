@@ -1262,6 +1262,14 @@ whole-batch capture, including setup, late CI and final-main export. This is cap
 usage priced at list rates, not an invoice or isolated steady-state price. Fixture
 ceilings and the weighted R2 alert are unchanged.
 
+The Class B fixture also has an exact ceiling of 73 requests across six landings
+(73/6 per landing). One extra GET or HEAD fails, even below the percentage or
+absolute-noise thresholds. The 11.34 reference stays unchanged: its existing
+0.83-request warning predates this ceiling. The fixture intentionally omits the
+successful-PUT checksum echo and therefore exercises fallback HEAD verification;
+a paired acknowledged-PUT control shows that difference. These are synthetic
+requests, not a new live cost or billed-usage measurement.
+
 **Reading the numbers.** Values are per accepted landing of a fixed fixture mix: one solo
 accepted-Candidate submission (initial save/compose excluded), one whose main moves during its check (recompose on a source job, second check) and a
 batch of four. They count queries, mutations, V8 and Node action executions, database bytes read and
