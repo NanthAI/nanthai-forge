@@ -580,3 +580,24 @@ test('desired preparation budget: one server goal lands with no idle tasks or re
     }),
   );
 });
+
+for (const mode of ['desired', 'direct']) {
+  test(`${mode} landing coalesces the same declaration but preserves a distinct claim on identical source`, async t => {
+    const f = await finishFixture(t);
+    const base = mode === 'desired' ? request(f) : f.request();
+    const send = command => (mode === 'desired' ? submit(f, command) : f.enqueue(command));
+    const first = await send({ ...base, notVerified: [] });
+    const alias = await send({ ...base, operationId: randomUUID(), notVerified: [] });
+    assert.equal(alias.id, first.id);
+    const different = await send({
+      ...base,
+      operationId: randomUUID(),
+      notVerified: ['Transport recovery was not checked'],
+    });
+    assert.notEqual(different.id, first.id);
+    assert.deepEqual(different.request.notVerified, ['Transport recovery was not checked']);
+    const absent = await send({ ...base, operationId: randomUUID() });
+    assert.notEqual(absent.id, first.id);
+    assert.equal(Object.hasOwn(absent.request, 'notVerified'), false);
+  });
+}

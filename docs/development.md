@@ -603,6 +603,13 @@ layer out of both first paints.
   account places `/-/account/{projects|billing|people|devices|data}`, public
   pages `/-/signin`, `/-/signin/passkey` and `/-/device`. Until a place is
   rebuilt it links to the screen that serves it today (`currentScreenHref`).
+- Evidence: `/-/{handle}/{project}/lanes/{laneId}/checked` loads its proof screen lazily.
+  Optional `save` and `run` query parameters select exact retained records; the read
+  never substitutes another supplied run. One bounded read gives the header and
+  claim. Report files load only when opened, through the existing paged report
+  action. Full-check requests reuse the original Candidate and check pins; linked
+  Items derive their retry identity from the immutable save and line. See
+  [run evidence](run-evidence.md) for attribution and declarations.
 - Places: `web/src/app/screens.tsx` maps a rebuilt place to its lazy chunk, so
   a new place adds one line there instead of editing `App.tsx`. A place reads
   the frame's line feed from its props and never opens a second line read.

@@ -84,3 +84,19 @@ export function handoffSummary(handoff: DeliveryHandoff | null) {
     read: { action: 'handoff-read' as const, laneId: handoff.laneId },
   };
 }
+
+/** Optional is deliberate: absent is not reported; [] is an attributed claim of complete verification. */
+export const saveDeclarations = {
+  notVerified: z.array(z.string()).optional(),
+  outside: z
+    .array(
+      z
+        .object({
+          kind: z.enum(['deploy', 'migration', 'external-setting']),
+          what: z.string(),
+          where: z.string().optional(),
+        })
+        .strict(),
+    )
+    .optional(),
+};

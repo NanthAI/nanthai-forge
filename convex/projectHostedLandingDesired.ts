@@ -25,6 +25,7 @@ import { enforceLandGates } from './projectHostedLandGates';
 import { hostedLandingDesiredSchema } from '../src/hosted-landing-desired';
 import { hostedLandingStateSchema, landingObservation } from '../src/hosted-landing';
 import { hostedRecordSchema } from '../src/hosted-records';
+import { sanitizeOutside, declarationIdentity } from '../src/run-evidence';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 import { ForgeError, invariant } from '../src/errors';
@@ -75,6 +76,7 @@ export async function submitDesiredLanding(
   /** Public submit only: judge the project land gates (two-way GitHub sync is not an agent landing). */
   gates?: { value: string | undefined },
 ): Promise<string> {
+  if (command.outside !== undefined) command = { ...command, outside: sanitizeOutside(command.outside) };
   const input = { projectId, agent, agentClient };
   const project = await hostedWriteProject(ctx, input.projectId, actor.id, command.authorityEpoch);
   const request = canonicalPayload(command);
@@ -129,6 +131,7 @@ export async function submitDesiredLanding(
   const selectionKey = digest(
     canonicalPayload({
       channel: 'main',
+      ...declarationIdentity(command, actor.id),
       message: command.message ?? null,
       ...(command.priority === 'urgent' ? { priority: 'urgent' } : {}),
       agent: true,
@@ -227,6 +230,8 @@ export async function submitDesiredLanding(
       authorityEpoch: command.authorityEpoch,
       channel: 'main',
       ...(command.message === undefined ? {} : { message: command.message }),
+      ...(command.notVerified === undefined ? {} : { notVerified: command.notVerified }),
+      ...(command.outside === undefined ? {} : { outside: command.outside }),
       expectedMain: source.state.request.expectedMain,
       candidateId: source.state.candidateId,
       expectedHead: null,

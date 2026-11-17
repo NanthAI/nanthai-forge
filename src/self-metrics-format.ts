@@ -122,7 +122,10 @@ export function formatFlakes(current: MetricsSurface) {
     `Flaky files (recovered on retry, never a clean pass): ${flakes.filesTotal} files in ${flakes.flakyRuns} runs${flakes.partial ? ' · partial' : ''}`,
     ...flakes.files.slice(0, FLAKE_LINES).map(row => {
       const attempts = row.lastAttempts
-        ?.map(a => `${a.failed ? 'failed' : 'passed'} ${ms(a.durationMs)}`)
+        ?.map(
+          a =>
+            `${a.failed ? 'failed' : 'passed'} ${ms(a.durationMs)} (self-reported by checked code, via CI)`,
+        )
         .join(' → ');
       const issue =
         row.issue === undefined

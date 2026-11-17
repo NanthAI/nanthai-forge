@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { sessionClaimSchema } from './hosted-lane.js';
+import { saveDeclarations } from './agent-handoff-types.js';
 import { stateSchema } from './state/format.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { safeRelative } from './safe-relative.js';
@@ -95,6 +96,7 @@ export const saveRequestSchema = z
     authorityEpoch: number,
     expected: saveExpectedSchema,
     message: z.string(),
+    ...saveDeclarations,
     /** Explicitly replace a live finish of this Lane instead of being refused. */
     supersedeFinish: z.boolean().optional(),
     pages: saveObjectSchema.nullable(),
@@ -131,6 +133,7 @@ export const saveResultSchema = z
     operationId: z.uuid(),
     laneId: z.uuid(),
     saveId: z.uuid(),
+    ...saveDeclarations,
     head: saveObjectSchema.shape.sha256,
     version: number,
     sourceVersion: number,

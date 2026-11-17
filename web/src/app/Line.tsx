@@ -52,8 +52,8 @@ export function Line({
         const at = feed?.lanes.filter(lane => lane.stage === stop.stage) ?? [];
         const held = at.filter(lane => lane.held).length;
         const words = feed
-          ? `${plural(at.length, 'Lane')} ${stop.label.toLowerCase()}${held ? `, ${held} held` : ''}`
-          : `${stop.label}, not loaded yet`;
+          ? `${phone ? stop.short + ': ' : ''}${plural(at.length, 'Lane')} ${stop.label.toLowerCase()}${held ? `, ${held} held` : ''}`
+          : `${phone ? stop.short : stop.label}, not loaded yet`;
         return (
           <a
             key={stop.stage}

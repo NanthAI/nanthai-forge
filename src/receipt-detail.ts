@@ -107,3 +107,11 @@ export function compactReplyDetail(action: unknown, result: Json): Json {
     });
   return out;
 }
+
+export const evidenceSources = {
+  tests: 'Self-reported by the checked code, via CI',
+  fileTiming: 'Self-reported by the checked code, via CI',
+  ciTime: 'Reported by your CI',
+  wallTime: 'Observed by Forge',
+  agent: 'Reported by the agent; not verified by Forge',
+} as const;

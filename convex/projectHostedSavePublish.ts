@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { sanitizeOutside } from '../src/run-evidence';
 import { makeFunctionReference } from 'convex/server';
 import { wakeLifecycleSave } from './projectHostedLifecycleCascade';
 import type { MutationCtx } from './_generated/server';
@@ -159,7 +160,12 @@ export async function publishHostedSave(
     : [];
   const clientMs = state.clientMs ?? input.clientMs;
   const durationMs = saveDurationMs(clientMs, Math.max(0, Date.now() - (state.submittedAt ?? Date.now())));
+  const declarations = {
+    ...(state.request.notVerified === undefined ? {} : { notVerified: state.request.notVerified }),
+    ...(state.request.outside === undefined ? {} : { outside: sanitizeOutside(state.request.outside) }),
+  };
   const result = saveResultSchema.parse({
+    ...declarations,
     ...(durationMs === undefined ? {} : { durationMs }),
     schema: 1,
     operationId: input.operationId,
@@ -182,6 +188,7 @@ export async function publishHostedSave(
     expectedVersion: null,
     record: {
       kind: 'save',
+      ...declarations,
       ...(durationMs === undefined ? {} : { durationMs }),
       id: result.saveId,
       version: 0,

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { saveDeclarations } from './agent-handoff-types.js';
 import { batchDiagnosticSchema } from './hosted-batch-diagnosis.js';
 import { checkFileSummarySchema } from './check-file-summary.js';
 import { semanticConflictsSchema, semanticPlanSchema } from './intent-semantic-conflict.js';
@@ -44,6 +45,7 @@ export const hostedLandingRequestSchema = z
     /** false: the landing only references its Lanes' Intents (GitHub `Refs #N`); absent or true declares them (`Closes #N`). */
     closes: z.boolean().optional(),
     message: landingMessageSchema.nullable().optional(),
+    ...saveDeclarations,
     priority: z.enum(['urgent', 'normal']).optional(),
     revertOf: z.uuid().optional(),
     retryReason: finishRetryReasonSchema.optional(),

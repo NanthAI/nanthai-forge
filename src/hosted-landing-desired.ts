@@ -10,6 +10,8 @@ export const hostedLandingDesiredSchema = hostedLandingRequestSchema
     keepOpen: true,
     closes: true,
     message: true,
+    notVerified: true,
+    outside: true,
     priority: true,
     retryReason: true,
     revertOf: true,

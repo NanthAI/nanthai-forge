@@ -2,6 +2,12 @@
 
 **Phase 6 is closed (2026-11-16); Phase 7 is current.** The [Phase 6 close](phase6-close.md) records exit evidence, owner-accepted benchmark caveats, final serving cost, the nonzero journal-maintenance idle capture and named Phase 7 follow-ups. Storage/weekly maintenance allocation and the remaining source-only sync gap remain unproven.
 
+The rebuilt Lane proof route distinguishes check results, self-reported test-file
+figures and a separately attributed verification claim. Exact-source full checks
+and linked follow-up Items reuse existing operations. Hosted save readers retain
+optional declarations; client writers and the run-budget/outside-change workflows
+are separate work on the Phase 7 Items. See [run evidence](run-evidence.md).
+
 HostedStrip shares a bounded Lane feed and sleeping hook. Lanes initialize on
 write; stage/idle/cost fixtures pass. Dev latency, idle I/O, frames, browser cost
 and shell motion remain open. Attention retains the old shared reads.

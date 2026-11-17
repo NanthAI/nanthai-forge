@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { sanitizeOutside } from '../src/run-evidence';
 import { bindLineSubmission } from './projectLiveLineSubmission';
 import {
   capsuleHistoryContext,
@@ -310,6 +311,7 @@ export async function enqueueHostedLanding(
     retryReason?: import('../src/hosted-landing').HostedLandingState['retryReason'];
   },
 ) {
+  if (request.outside !== undefined) request = { ...request, outside: sanitizeOutside(request.outside) };
   const project = await activeProject(ctx, input.projectId, actor.id);
   const reused = await reuseHostedLanding(ctx, {
     projectId: input.projectId,

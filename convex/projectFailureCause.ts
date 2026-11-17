@@ -115,7 +115,7 @@ export const forLane = query({
           ? {
               status: summary.status,
               failed: summary.failed,
-              failedCount: summary.files.failed,
+              failedCount: summary.files.failed ?? undefined,
               flaky: summary.flaky,
               step,
             }

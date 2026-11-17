@@ -357,7 +357,10 @@ test('a healthy brief still names what the next step needs', () => {
     healthy.land.result.submission.acceptance.receiptId,
   );
   assert.equal(landed.result.submission.acceptance.head, sha);
-  assert.deepEqual(landed.result.submission.testFiles, { counts: { total: 811, failed: 0, flaky: 0 } });
+  assert.equal(landed.result.submission.selfReportedTestFiles, 811);
+  const noReports = structuredClone(healthy.land);
+  noReports.result.submission.testFiles.counts = { total: 0, failed: 0, flaky: 0 };
+  assert.equal(slimReceipt(noReports).result.submission.selfReportedTestFiles, null);
   assert(!('landTiming' in landed), 'timings are --detail diagnostics');
   const observed = slimReceipt(healthy.wait).result;
   assert.deepEqual(Object.keys(observed), ['status', 'successful', 'submissions']);

@@ -18,6 +18,8 @@ export type PlaceProps = {
   viewerHandle: string | undefined;
 };
 
+const ProofPage = lazy(() => import('./proof/ProofPage'));
+
 /** A Lane's landing check (/lanes/<laneId>/check) is its own screen, whichever screen the Lanes place has. */
 const CheckScreen = lazy(() => import('./check/CheckScreen'));
 
@@ -38,6 +40,12 @@ const laneScreen = lazy(() => import('./lane/LaneReview'));
 export function PlaceScreen(
   props: Omit<PlaceProps, 'projectId'> & { projectId: PlaceProps['projectId'] | null },
 ) {
+  if (props.route.place === 'lanes' && props.route.rest.endsWith('/checked') && props.projectId)
+    return (
+      <Suspense fallback={<Placeholder route={props.route} projectName={props.projectName} />}>
+        <ProofPage route={props.route} projectId={props.projectId} />
+      </Suspense>
+    );
   const checkLane = checkLaneOf(props.route);
   if (checkLane && props.projectId)
     return (

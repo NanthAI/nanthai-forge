@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { compactReplyDetail } from './receipt-detail.js';
+import { compactReplyDetail, evidenceSources } from './receipt-detail.js';
 type Json = Record<string, unknown>;
 const omit = (value: Json, ...keys: string[]): Json =>
   Object.fromEntries(Object.entries(value).filter(([key]) => !keys.includes(key)));
@@ -201,12 +201,25 @@ function briefFlaky(entry: unknown): unknown {
 function briefLanded(result: Json): Json | undefined {
   const submission = obj(result.submission);
   if (!submission || submission.phase !== 'landed' || !obj(submission.acceptance)) return undefined;
+  const files = obj(submission.testFiles),
+    counts = obj(files?.counts);
+  const clean =
+    counts &&
+    counts.failed === 0 &&
+    counts.flaky === 0 &&
+    !(files?.failed as unknown[] | undefined)?.length &&
+    !(files?.flaky as unknown[] | undefined)?.length &&
+    !files?.omitted;
   const testFiles = briefTestFiles(submission.testFiles);
   return {
     submission: {
       phase: 'landed',
       acceptance: submission.acceptance,
-      ...(testFiles ? { testFiles } : {}),
+      ...(clean
+        ? { selfReportedTestFiles: counts.total === 0 ? null : counts.total }
+        : testFiles
+          ? { testFiles }
+          : {}),
     },
   };
 }
@@ -219,7 +232,11 @@ function briefTestFiles(value: unknown): Json | undefined {
   const failed = Array.isArray(files?.failed) ? files.failed : [],
     flaky = Array.isArray(files?.flaky) ? files.flaky : [];
   return {
-    counts,
+    counts: counts.total === 0 ? null : counts,
+    source: evidenceSources.tests,
+    ...(counts.total === 0
+      ? { report: 'Not reported; zero collected reports does not mean zero tests ran' }
+      : {}),
     ...(files?.omitted ? { omitted: files.omitted } : {}),
     ...(failed.length ? { failed } : {}),
     ...(flaky.length ? { flaky: flaky.map(briefFlaky) } : {}),

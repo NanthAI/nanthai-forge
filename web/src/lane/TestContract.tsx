@@ -11,7 +11,8 @@ export function TestContract({ contract }: { contract?: IntentTestContract | nul
       actions={<span className="num">{(contract.totalMs / 1000).toFixed(2)} s</span>}
     >
       <p className="fx-panel-note">
-        Measured on <code title={contract.measuredOn}>{contract.measuredOn.slice(0, 12)}</code>
+        Self-reported timing from checked code, via CI · on{' '}
+        <code title={contract.measuredOn}>{contract.measuredOn.slice(0, 12)}</code>
       </p>
       <ul className="fx-test-contract-tests">
         {contract.tests.map(test => (
@@ -22,7 +23,7 @@ export function TestContract({ contract }: { contract?: IntentTestContract | nul
       </ul>
       <ExactRecord
         rows={[
-          ['Measured on', contract.measuredOn],
+          ['Reported on', contract.measuredOn],
           ['Candidate', contract.candidateId],
           ['Run', contract.runId],
           ['Contract version', String(contract.version)],

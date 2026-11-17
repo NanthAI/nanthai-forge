@@ -112,6 +112,8 @@ export async function enqueueHostedCheck(
     actor: string;
     request: unknown;
     providerDelayReason?: string;
+    /** Explicit proof-page action: execute the full configured command on these pins, without borrowing an old pass. */
+    fullCheck?: { afterRunId: string };
     /** Main-race retry: a full gate may become the scoped recheck selection. */
     recheck?: ScopedRecheckBasis;
     /** A cohort's main-race retry (Issue 28f08555): every included member's full-pass basis. */
@@ -218,7 +220,8 @@ export async function enqueueHostedCheck(
   const check = checkSchema.parse(JSON.parse(definition.value));
   // No contract, a configured command that reads the changed paths: the contract gate's other
   // guards decide a package-graph-scoped first check (src/graph-first-check.ts). Same reads.
-  const graphFirst = !member && !input.recheck && !input.cohortRecheck && graphFirstCheck(check);
+  const graphFirst =
+    !input.fullCheck && !member && !input.recheck && !input.cohortRecheck && graphFirstCheck(check);
   const direct = runner.provider === 'github-actions' && !runner.credential;
   let gate =
     direct && project.autonomyPolicy?.acceptance.gate
@@ -258,6 +261,11 @@ export async function enqueueHostedCheck(
     )
   )
     gate = scopedRecheckBatchGate(input.cohortRecheck);
+  if (input.fullCheck)
+    gate = {
+      mode: 'full',
+      reason: `Full configured check requested after run ${input.fullCheck.afterRunId}.`,
+    };
   const run = hostedCheckRunSchema.parse({
     ...(input.providerDelayReason ? { failureReason: input.providerDelayReason } : {}),
     ...(gate ? { gate } : {}),
@@ -299,7 +307,7 @@ export async function enqueueHostedCheck(
     output: null,
     cost: { status: 'unknown' },
   });
-  const reused = await reusedHostedVerdict(ctx, run);
+  const reused = input.fullCheck ? null : await reusedHostedVerdict(ctx, run);
   if (reused) {
     await completeCheckOperation(ctx, prepared.operation, {
       runId: reused.id,

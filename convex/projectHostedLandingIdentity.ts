@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { declarationIdentity } from '../src/run-evidence';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { chargeMemberWork } from './abuseLimits';
@@ -80,6 +81,7 @@ export async function reuseHostedLanding(
   const selectionKey = digest(
     canonicalPayload({
       channel: input.request.channel,
+      ...declarationIdentity(input.request, input.actor),
       message: input.request.message ?? null,
       ...(input.request.priority === 'urgent' ? { priority: 'urgent' } : {}),
       inputs: candidate.inputs,

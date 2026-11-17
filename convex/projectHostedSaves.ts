@@ -23,6 +23,7 @@ import {
 import { refuseLiveLaneFinish } from './projectHostedLaneFinish';
 import { requireMemberAuthorityById } from './projectLaneAuthority';
 import { invariant } from '../src/errors';
+import { sanitizeOutside } from '../src/run-evidence';
 import { report } from './errors';
 import { chainProgress } from './projectHostedResolveChainProgress';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -91,8 +92,12 @@ export const prepare = mutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      const request = saveRequestSchema.parse(JSON.parse(input.request)),
-        auth = await caller(ctx, { projectId: input.projectId, operationId: request.operationId }),
+      const parsed = saveRequestSchema.parse(JSON.parse(input.request));
+      const request = {
+        ...parsed,
+        ...(parsed.outside === undefined ? {} : { outside: sanitizeOutside(parsed.outside) }),
+      };
+      const auth = await caller(ctx, { projectId: input.projectId, operationId: request.operationId }),
         expected = {
           authorityEpoch: request.authorityEpoch,
           head: request.expected.head,

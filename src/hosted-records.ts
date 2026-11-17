@@ -4,6 +4,7 @@ import { semanticPayload } from './semantic-payload.js';
 import { semanticPlanSchema } from './intent-semantic-conflict.js';
 import { intentTestContractSchema } from './intent-test-contract.js';
 import { z } from 'zod';
+import { saveDeclarations } from './agent-handoff-types.js';
 import { earlyResolutionSchema } from './early-resolution.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './state/hash.js';
@@ -117,6 +118,7 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
     .object({
       ...common,
       kind: z.literal('save'),
+      ...saveDeclarations,
       laneId: z.uuid(),
       actor: z.string().min(1),
       operationId: z.uuid(),

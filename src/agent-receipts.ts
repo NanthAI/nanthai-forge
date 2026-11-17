@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { evidenceSources } from './receipt-detail.js';
 import { checkFailedOrInfrastructure } from './check-run-state.js';
 import { checkFileSummary } from './check-file-summary.js';
 import { providerLogUrl } from './check-log-policy.js';
@@ -16,6 +17,7 @@ export const laneReceipt = (lane: Lane, path: string) => ({
   path,
 });
 export const runReceipt = (run: CheckRun) => ({
+  sources: evidenceSources,
   ...(run.backend ? { backend: run.backend } : {}),
   ...(run.backend?.fileReports ? { testFiles: checkFileSummary(run.backend.fileReports) } : {}),
   ...(run.detailRef ? { detailRef: run.detailRef, detailSummary: run.detailSummary } : {}),

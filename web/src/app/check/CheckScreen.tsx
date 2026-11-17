@@ -58,7 +58,16 @@ export default function CheckScreen({
       </Head>
     );
   if (!read) return <Head trail={trail} sentence="Reading the check…" />;
-  return <CheckView read={read} trail={trail} projectId={projectId} projectName={projectName} />;
+  const proofHref = `${at({ rest: `${laneId}/checked` })}${read.run ? `?run=${encodeURIComponent(read.run.runId)}` : ''}`;
+  return (
+    <CheckView
+      read={read}
+      trail={trail}
+      projectId={projectId}
+      projectName={projectName}
+      proofHref={proofHref}
+    />
+  );
 }
 
 export function CheckView({
@@ -66,11 +75,13 @@ export function CheckView({
   trail,
   projectId,
   projectName,
+  proofHref,
 }: {
   read: CheckRead;
   trail: { label: string; href?: string }[];
   projectId: Id<'hostedProjects'>;
   projectName: string;
+  proofHref?: string;
 }) {
   const client = useConvex();
   const actions = useCheckActions(client, projectId, read);
@@ -111,6 +122,11 @@ export function CheckView({
         </p>
         <div className="tools">
           <span className="btns">
+            {proofHref ? (
+              <A className="btn ghost" href={proofHref}>
+                What was checked
+              </A>
+            ) : null}
             {recovery === 'fix-in-lane' || recovery === 'read-log' ? (
               <Key kind="rec" keys="a" onClick={() => actions.copy(agentPrompt(read, projectName))}>
                 {actions.copied ? 'Copied' : 'Give this to your agent'}

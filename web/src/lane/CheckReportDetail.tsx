@@ -77,7 +77,7 @@ export function CheckReportDetail(props: { projectId: Id<'hostedProjects'>; runI
   const [open, setOpen] = useState(false);
   return (
     <details onToggle={event => setOpen(event.currentTarget.open)}>
-      <summary>Test reports</summary>
+      <summary>Test reports · self-reported by the checked code, via CI</summary>
       {open && <Reports {...props} />}
     </details>
   );

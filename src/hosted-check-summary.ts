@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Pure: runs in the CLI and in the Convex non-Node runtime.
 import type { HostedCheckRun } from './hosted-check.js';
+import { evidenceSources } from './receipt-detail.js';
 import { checkLogsField } from './runner-visibility.js';
 
 /** The whole summary reply stays under this many JSON bytes (Issue 12d2c89f: the full run is about 80 KB). */
@@ -41,10 +42,13 @@ export function summarizeCheckRun(run: HostedCheckRun) {
     candidateId: run.request.candidateId,
     head: run.request.expectedHead,
     counts: run.counts,
+    sources: evidenceSources,
+    reportsAvailable: (summary?.counts.total ?? reported.length) > 0,
     files: {
-      total: summary?.counts.total ?? reported.length,
-      failed: summary?.counts.failed ?? failedAll.length,
-      flaky: summary?.counts.flaky ?? flakyAll.length,
+      total: (summary?.counts.total ?? reported.length) || null,
+      failed:
+        (summary?.counts.total ?? reported.length) ? (summary?.counts.failed ?? failedAll.length) : null,
+      flaky: (summary?.counts.total ?? reported.length) ? (summary?.counts.flaky ?? flakyAll.length) : null,
       ...(summary?.truncated ? { truncated: summary.truncated } : {}),
     },
     failed: failedAll.slice(0, names).map(item => ({
@@ -78,7 +82,7 @@ export function summarizeCheckRun(run: HostedCheckRun) {
       ...(run.gate?.reason ? { reason: clip(run.gate.reason, 200) } : {}),
       ...(run.fallback ? { ranInFull: { code: run.fallback, reason: run.fallbackReason ?? null } } : {}),
       requestedTests: run.gate?.tests?.length ?? null,
-      reportedFiles: summary?.counts.total ?? reported.length,
+      reportedFiles: (summary?.counts.total ?? reported.length) || null,
       plannedTests: planned ?? null,
       shardCount: run.plan?.shardCount ?? null,
     },
