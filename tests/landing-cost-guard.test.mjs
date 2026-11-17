@@ -5,13 +5,14 @@
 // per landing fails here, a saving asks the author to ratchet the ledger down.
 import { assertCommandWeight } from '../scripts/agent-weight.mjs';
 import test from 'node:test';
+import { randomUUID } from 'node:crypto';
 import { indexEntriesPerWrite, indexStorage, measureIndexExportClaims } from './convex-index-cost.mjs';
 const indexSchema = (await import(moduleUrl('../convex/schema.ts'))).default;
 import { storageClock as fixedClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { inboundCostFixture } from './hosted-github-inbound-cost-fixture.mjs';
-import { finishFixture } from './hosted-finish-fixture.mjs';
+import { finishFixture, desired } from './hosted-finish-fixture.mjs';
 import { acceptanceFixture } from './hosted-acceptance-fixture.mjs';
 import { seedFullMain, passWithSelection } from './hosted-race-fixture.mjs';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
@@ -375,6 +376,166 @@ function assertRunMetrics(f) {
 const landed = f =>
   [...f.tables.projectHostedLandingRequests.values()].filter(r => JSON.parse(r.value).phase === 'landed')
     .length;
+
+async function resubmissionJourney(t, mode, failedSeconds) {
+  Object.assign(process.env, synthetic);
+  fixedClock(t);
+  const f = await batchesFixture(t, { count: 0, batching: false });
+  f.wallClockTables.add('projectHostedAcceptances');
+  f.advanceClock(Date.UTC(2026, 10, 10, 23) - Date.now());
+  const m = meter(f);
+  // The result fold supplies this run-header aggregate; the legacy callback fixture only stores shards.
+  const stamp = (run, seconds) => {
+    const row = [...f.tables.projectHostedCheckRuns.values()].find(r => JSON.parse(r.value).id === run.id);
+    f.patch('projectHostedCheckRuns', row._id, {
+      value: JSON.stringify({
+        ...JSON.parse(row.value),
+        execution: { seconds, shards: run.plan.shardCount },
+      }),
+    });
+  };
+  const pass = f.rawChecks.pass;
+  f.rawChecks.pass = async run => {
+    const result = await pass(run);
+    stamp(run, 240);
+    return result;
+  };
+  const original = f.request({ agent: true });
+  const base =
+    mode === 'direct'
+      ? original
+      : {
+          operationId: original.operationId,
+          authorityEpoch: 1,
+          composeOperationId: f.selection.request.operationId,
+          after: null,
+          check: original.check,
+        };
+  const send = command =>
+    mode === 'direct'
+      ? f.enqueue(command)
+      : f
+          .tx('desiredSubmit', desired.submit, {
+            projectId: f.projectId,
+            request: JSON.stringify(command),
+          })
+          .then(JSON.parse);
+  let command = base;
+  let state = await send(command);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await drain(f, m);
+    const queued = runs(f).filter(r => r.status === 'queued');
+    assert.equal(queued.length, 1, JSON.stringify({ mode, attempt, states: states(f), runs: runs(f) }));
+    const run = await f.rawChecks.activate(queued[0].id);
+    for (let i = 0; i < run.plan.shardCount; i++)
+      await f.rawChecks.callback(
+        f.rawChecks.shard(run, i, i === 0 ? 'failed' : 'passed', {
+          execution: {
+            startedAt: '2026-01-01T00:00:00.000Z',
+            endedAt: '2026-01-01T00:02:00.000Z',
+            seconds: failedSeconds / run.plan.shardCount,
+          },
+        }),
+      );
+    stamp(run, failedSeconds);
+    await f.rawChecks.callback(
+      f.rawChecks.complete(run, 'failed', {
+        contractReports: {
+          'tests/resubmitted.test.mjs': { failed: true, durationMs: 1, firstError: 'Synthetic failure' },
+        },
+      }),
+    );
+    await drain(f, m);
+    assert.equal(states(f).find(s => s.id === state.id).phase, 'terminal-failed');
+    if (attempt === 1) f.advanceClock(Date.UTC(2026, 10, 10, 23, 59, 50) - Date.now());
+    command = { ...base, operationId: randomUUID() };
+    state = await send(command);
+    assert.equal((await send(command)).id, state.id, 'replay retains the same successor');
+    assert.equal(
+      (await send({ ...command, operationId: randomUUID() })).id,
+      state.id,
+      'a live alias joins without adding the predecessor again',
+    );
+  }
+  await drain(f, m);
+  assert.equal(state.at.slice(0, 10), '2026-11-10', 'the successor starts before midnight');
+  f.advanceClock(Math.max(0, Date.UTC(2026, 10, 11, 0, 1) - Date.now()));
+  await f.passChecks();
+  await drain(f, m);
+  assert.equal(states(f).find(s => s.id === state.id).phase, 'landed');
+  const receipt = [...f.tables.projectHostedAcceptances.values()][0];
+  assert.equal(
+    new Date(receipt._creationTime).toISOString().slice(0, 10),
+    '2026-11-11',
+    'acceptance crosses midnight',
+  );
+  f.advanceClock(Date.UTC(2026, 10, 12, 0, 1) - Date.now());
+  await f.add(1);
+  for (let step = 0; f.pending().length; step++) {
+    assert(step < 100, 'the next day landing and close settle');
+    await f.passChecks();
+    await run(f, m, f.pending()[0]);
+  }
+  const measured = await m.stop();
+  const days = [...f.tables.projectStatsDays.values()].map(row => JSON.parse(row.value));
+  const acceptedDay = days.filter(day => day.day === '2026-11-11');
+  assert.equal(acceptedDay.length, 1, 'the successor accepted day closes once');
+  const [closed] = acceptedDay;
+  const closes = f.counts.filter(c => c.name === 'statsClose');
+
+  assert(closes.length <= 2, 'at most one existing close for each crossed active day');
+  for (const close of closes) {
+    assert(close.documents <= 6 && close.readBytes < 16_000, 'the close reads receipt and ticket/body pages');
+    assert.equal(close.writes, 1);
+  }
+  assert.equal(closed.landings, 1);
+  assert.deepEqual(closed.runner, {
+    priced: 1,
+    unknown: 0,
+    acceptedSeconds: 240,
+    discardedSeconds: 2 * failedSeconds,
+  });
+  assert.equal(
+    days.reduce((sum, day) => sum + day.runner.discardedSeconds, 0),
+    2 * failedSeconds,
+    'pre-midnight failures are charged only once, to the successor accepted day',
+  );
+  assert.deepEqual(closed.firstTry, { counted: 1, first: 0 });
+  const idle = f.counts.length;
+  f.advanceClock(86_400_000);
+  await drain(f, m);
+  assert.equal(f.counts.length, idle, 'a day idle makes no Convex call');
+  return measured;
+}
+
+for (const mode of ['direct', 'desired']) {
+  test(`resubmitted ${mode} landing carries lost checks across UTC midnight into its accepted day`, async t => {
+    let control, measured;
+    // Identical failure/retry events on the same current source. Only the reported CI seconds differ.
+    // Failure-log or other peer work therefore appears on both sides, without freezing an old base.
+    await t.test('zero-second failure control', async sub => {
+      control = await resubmissionJourney(sub, mode, 0);
+    });
+    await t.test('reported lost check usage', async sub => {
+      measured = await resubmissionJourney(sub, mode, 240);
+    });
+    for (const key of ['mutations', 'v8Actions', 'readDocuments'])
+      assert.equal(measured[key], control[key], `${mode}: carried usage adds no ${key} versus the control`);
+    for (const key of ['readBytes', 'writeBytes'])
+      assert(
+        measured[key] <= control[key] * 1.01,
+        `${mode}: carried scalars stay within 1% ${key} of control`,
+      );
+    const keys = ['mutations', 'v8Actions', 'readDocuments', 'readBytes', 'writeBytes'];
+    t.diagnostic(
+      JSON.stringify({
+        mode,
+        control: Object.fromEntries(keys.map(k => [k, control[k]])),
+        measured: Object.fromEntries(keys.map(k => [k, measured[k]])),
+      }),
+    );
+  });
+}
 
 /** One accepted-Candidate submission through check and acceptance; `moveMain` moves main during
  * the check, so it recomposes on a source job and checks again (the common dogfood case). */

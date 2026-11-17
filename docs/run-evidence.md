@@ -73,6 +73,22 @@ Facts from the project's accepted landings, each with its unit:
 A landing whose runner minutes are unknown is left out of every CI figure and counted ("12 landings
 without runner minutes"); it is never priced as zero.
 
+A resubmission of the same declared Lane selection carries its predecessor's latest check seconds
+and earlier discarded seconds into its own discarded total. Replays and joins of a live submission
+do not add them again. If the successor reuses the exact same run, those latest seconds stay accepted
+usage rather than being counted a second time as waste. A predecessor that never requested a check
+carries zero. An unreported execution carries the reason `superseded-check-execution-unreported`;
+later passes do not turn that missing usage into zero, and Stats excludes it from CI figures.
+Older resubmissions that lack a discarded-usage stamp are unknown too; their predecessor link
+identifies the missing carry, rather than implying zero waste. A recorded zero remains known on reuse.
+
+The carry uses the predecessor row already read during selection. A small server-only checkpoint
+on the existing desired/request row resolves exact-run reuse when the successor binds its solo,
+admission or shared check, inside that binding's existing write. It adds no function call, document
+read, table, timer or idle work. It carries CI usage only; compose request counts keep their existing
+scope. All carried waste is charged once to the successor's accepted UTC day, including when its
+submission and predecessor checks were on the previous day. Previously closed days are not rewritten.
+
 ### Own-history replay
 
 The contract is `src/stats-estimate.ts` (Issue `a61d3c91`). It is pure and display-only: never an

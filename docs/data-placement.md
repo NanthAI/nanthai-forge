@@ -581,6 +581,14 @@ so it never reads a batch selection merely to display status. Phase changes reus
 bodies; ordinary parent deletion and permanent project purge remove them atomically.
 Legacy inline tickets remain readable and separate their cold fields on their next state write.
 
+Resubmissions carry scalar CI usage on the existing ticket. Its optional server-only
+`supersededCheck` checkpoint (one run ID and usage scalars, about 60–90 serialized bytes) also rides
+the desired row until admission, when its existing write clears that copy. The request keeps it
+until the existing check-binding write consumes it. If no run ever binds, it remains with that
+request until the request is removed by existing cleanup or project deletion; there is no new
+expiry or retention rule. It prevents exact-run reuse from being counted twice, adds no lookup or
+new table, and changes no source-byte or history placement.
+
 
 ## Work journal segment readers
 

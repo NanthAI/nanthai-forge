@@ -236,6 +236,9 @@ Speed-alert refreshes retain owner-written Issue bodies and unticked acceptance 
 Discarded-runner projections use their own operation stamp even when the accepted run has
 no execution stamp; reports name unknown coverage. Existing expiry maintenance repairs
 retained null alert samples in bounded pages from available operation stamps.
+Resubmitted landings carry their predecessor's check usage into discarded seconds without another
+read. Exact-run reuse avoids counting those seconds twice; unreported predecessor execution stays
+unknown through later passes and the daily Stats close.
 
 Check status clients can negotiate `check-report-detail` for header-only replies. The shared
 server action serves exact paged reports from retained inline or paged runs and understands pinned

@@ -154,8 +154,10 @@ export function formatCostVerdicts(verdicts: CostVerdict[]) {
 }
 
 /** A discarded check is known independently of the accepted check's execution report. */
-export function discardedRunnerSeconds(state: Pick<HostedLandingState, 'counts'> | null) {
+export function discardedRunnerSeconds(state: Pick<HostedLandingState, 'counts' | 'supersedes'> | null) {
   if (state?.counts?.discardedRunnerUnknown) return null;
+  // Older resubmissions have a predecessor link but no carried usage stamp. Never price that gap as zero.
+  if (state?.supersedes && state.counts?.discardedRunnerSeconds === undefined) return null;
   return state?.counts?.discardedRunnerSeconds ?? (state?.counts?.runnerSeconds === undefined ? null : 0);
 }
 
@@ -163,14 +165,25 @@ export function discardedRunnerSeconds(state: Pick<HostedLandingState, 'counts'>
  * already holds. The shared run replaces any earlier check of the member, whose seconds become
  * discarded (as carriedCostCounts does for a solo recompose). A pass makes the share the member's
  * accepted check seconds, with discarded explicit (zero when none); any other outcome discards the
- * share too. A run with no execution report leaves the counts as they are: unknown, never zero. */
+ * share too. A missing failed-run report marks discarded usage unknown and retains the known
+ * earlier usage as a lower bound. A pass without a report leaves accepted usage unreported. */
 export function sharedCheckCounts(
   counts: HostedLandingState['counts'],
   seconds: number | undefined,
   members: number,
   passed: boolean,
 ): HostedLandingState['counts'] {
-  if (seconds === undefined || !Number.isFinite(seconds) || !(members > 0)) return counts;
+  if (!(members > 0)) return counts;
+  if (seconds === undefined) {
+    if (passed) return counts;
+    const { runnerSeconds: earlier, ...rest } = counts ?? {};
+    return {
+      ...rest,
+      discardedRunnerSeconds: (rest.discardedRunnerSeconds ?? 0) + (earlier ?? 0),
+      discardedRunnerUnknown: 'superseded-check-execution-unreported',
+    };
+  }
+  if (!Number.isFinite(seconds)) return counts;
   const share = Math.round(seconds / members),
     { runnerSeconds: earlier, discardedRunnerSeconds: before, ...rest } = counts ?? {},
     discarded = (before ?? 0) + (earlier ?? 0);

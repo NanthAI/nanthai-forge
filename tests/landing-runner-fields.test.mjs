@@ -12,6 +12,9 @@ import { sharedCheckCounts } from '../dist/cost-budgets.js';
 import { carriedCostCounts, landingSpeedSample } from '../dist/landing-speed-alerts.js';
 import { moduleUrl } from './convex-module.mjs';
 const { statsLanding } = await import(moduleUrl('../convex/projectStats.ts'));
+const { supersededCheckCosts, bindSupersededCheck } = await import(
+  moduleUrl('../convex/projectHostedLandingRunnerCosts.ts')
+);
 
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
@@ -97,6 +100,13 @@ test('a failed shared check is discarded minutes on every member that later land
 test('a run with no execution report leaves the landing unknown instead of zero', () => {
   assert.equal(sharedCheckCounts(undefined, undefined, 4, true), undefined);
   assert.deepEqual(sharedCheckCounts({ runnerSeconds: 100 }, 400, 4, false), { discardedRunnerSeconds: 200 });
+  assert.deepEqual(
+    sharedCheckCounts({ runnerSeconds: 100, discardedRunnerSeconds: 20 }, undefined, 4, false),
+    {
+      discardedRunnerSeconds: 120,
+      discardedRunnerUnknown: 'superseded-check-execution-unreported',
+    },
+  );
 });
 
 test('unreported superseded execution stays unknown after a pass, a shared check and recomposition', () => {
@@ -116,4 +126,32 @@ test('unreported superseded execution stays unknown after a pass, a shared check
     assert.equal(landingSpeedSample(state, 1).counts[4], null);
     assert.equal(statsLanding({ id: 'receipt', at: state.at }, state).discardedRunnerSeconds, null);
   }
+});
+
+test('legacy resubmissions without a discard stamp stay unknown while a recorded zero survives proof reuse', () => {
+  const supersedes = '11111111-1111-4111-8111-111111111111';
+  assert.equal(landingCosts({ supersedes, counts: { runnerSeconds: 300 } }, 0).runnerDiscarded, null);
+  const counts = carriedCostCounts({ runnerSeconds: 300, discardedRunnerSeconds: 0 }, undefined, true, true);
+  assert.equal(landingCosts({ supersedes, counts }, 0).runnerDiscarded, 0);
+  const legacy = supersededCheckCosts({ supersedes, counts: { runnerSeconds: 300 } }, 'retained-run');
+  assert.equal(legacy.counts.discardedRunnerSeconds, 300, 'known latest usage is still retained');
+  const reused = bindSupersededCheck(legacy.counts, legacy.supersededCheck, 'retained-run');
+  assert.equal(
+    landingCosts({ supersedes, counts: reused.counts }, 0).runnerDiscarded,
+    null,
+    'reusing the latest run does not erase an older missing carry',
+  );
+});
+
+test('a recorded shared failure stays known despite the leader reservation timestamp', () => {
+  const carried = supersededCheckCosts(
+    {
+      counts: { discardedRunnerSeconds: 120 },
+      batchOriginId: 'failed-cohort',
+      timing: { checkReservedAt: '2026-11-10T23:00:00.000Z' },
+    },
+    undefined,
+  );
+  assert.deepEqual(carried.counts, { discardedRunnerSeconds: 120 });
+  assert.equal(landingCosts({ counts: carried.counts }, 0).runnerDiscarded, 2);
 });

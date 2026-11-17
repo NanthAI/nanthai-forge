@@ -23,6 +23,7 @@ import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
 import { readWouldConflict, syncRequiredQueue } from './projectHostedLandingWouldConflict';
 import { latestStallAlert } from './projectHostedLandingStallAlert';
 import { reuseHostedLanding } from './projectHostedLandingIdentity';
+import { bindSupersededCheck, type SupersededCheck } from './projectHostedLandingRunnerCosts';
 import { startLandingAdmission } from './projectHostedLandingAdmission';
 import { pipelineAdmission } from './projectHostedLandingAdmissionPipeline';
 import { submissionReservation, landingReservationForReader } from './projectHostedLandingReservation';
@@ -309,6 +310,8 @@ export async function enqueueHostedLanding(
     timing?: import('../src/hosted-landing').HostedLandingState['timing'];
     supersedes?: string | undefined;
     retryReason?: import('../src/hosted-landing').HostedLandingState['retryReason'];
+    counts?: import('../src/hosted-landing').HostedLandingState['counts'];
+    supersededCheck?: SupersededCheck | undefined;
   },
 ) {
   if (request.outside !== undefined) request = { ...request, outside: sanitizeOutside(request.outside) };
@@ -411,6 +414,12 @@ export async function enqueueHostedLanding(
     Date.now(),
   );
   const sequence = queue.sequence + 1;
+  const inherited = reserved?.counts ? reserved : reused;
+  const carried = bindSupersededCheck(
+    inherited.counts,
+    inherited.supersededCheck,
+    attempt.check?.runId ?? admission,
+  );
   const state = hostedLandingStateSchema.parse({
     schema: 1,
     projectId: input.projectId,
@@ -426,6 +435,7 @@ export async function enqueueHostedLanding(
     firstAttemptId: attempt.id,
     attemptId: attempt.id,
     phase: admission ? 'checking' : 'queued',
+    ...(carried.counts ? { counts: carried.counts } : {}),
     ...((reserved?.supersedes ?? reused.supersedes)
       ? {
           supersedes: reserved?.supersedes ?? reused.supersedes,
@@ -446,6 +456,7 @@ export async function enqueueHostedLanding(
   // preserving the original queue/finish wake order and transaction IO count.
   const finish = await initializeFinish(ctx, state, true);
   await ctx.db.insert('projectHostedLandingRequests', {
+    ...(carried.supersededCheck ? { supersededCheck: carried.supersededCheck } : {}),
     projectId: input.projectId,
     channel: request.channel,
     submissionId,

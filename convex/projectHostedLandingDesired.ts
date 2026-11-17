@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { supersededCheckCosts } from './projectHostedLandingRunnerCosts';
 import { cancelPendingTask } from './schedulerCancel';
 import { chargeMemberWork } from './abuseLimits';
 import { landingPriority } from './projectHostedLandingOrder';
@@ -196,6 +197,21 @@ export async function submitDesiredLanding(
       gates: gates.value,
     });
   const previous = queuedState ?? existingState;
+  // Every live selection returned above. A replaced ownerless selection can still have its
+  // pre-cancellation phase here; its already-loaded counts are the same terminal predecessor's.
+  const carried = previous
+    ? supersededCheckCosts(
+        previous,
+        queuedState
+          ? (queued?.runId ?? queued?.admission?.runId)
+          : (existingCanonical?.runId ?? existingCanonical?.admission?.runId),
+        queuedState
+          ? queued?.supersededCheck
+          : existingCanonical
+            ? existingCanonical.supersededCheck
+            : existing?.supersededCheck,
+      )
+    : undefined;
   const id = crypto.randomUUID(),
     attemptId = crypto.randomUUID(),
     at = new Date().toISOString();
@@ -214,8 +230,8 @@ export async function submitDesiredLanding(
     attemptId,
     phase: 'composing',
     preparing: true,
-    ...(previous?.phase === 'terminal-failed'
-      ? { supersedes: previous.id, retryReason: command.retryReason ?? 'other' }
+    ...(previous
+      ? { supersedes: previous.id, retryReason: command.retryReason ?? 'other', counts: carried!.counts }
       : {}),
     observation: landingObservation('queued'),
     error: null,
@@ -246,6 +262,7 @@ export async function submitDesiredLanding(
     },
   });
   const key = await ctx.db.insert('projectHostedLandingDesired', {
+    ...(carried?.supersededCheck ? { supersededCheck: carried.supersededCheck } : {}),
     preparing: true,
     projectId: input.projectId,
     actor: actor.id,
@@ -323,10 +340,17 @@ export const advance = internalMutation({
           timing: state.timing,
           supersedes: state.supersedes,
           retryReason: state.retryReason,
+          counts: state.counts,
+          supersededCheck: row.supersededCheck,
         },
       );
       await cancelPendingTask(ctx, row.wake?.taskId);
-      await ctx.db.patch(row._id, { value: canonicalPayload(result), wake: null, preparing: undefined });
+      await ctx.db.patch(row._id, {
+        value: canonicalPayload(result),
+        wake: null,
+        preparing: undefined,
+        supersededCheck: undefined,
+      });
       return canonicalPayload(result);
     } catch (error) {
       return report(error);

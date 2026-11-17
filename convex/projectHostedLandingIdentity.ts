@@ -10,7 +10,8 @@ import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
-import type { HostedLandingRequest } from '../src/hosted-landing';
+import type { HostedLandingRequest, HostedLandingState } from '../src/hosted-landing';
+import { supersededCheckCosts, type SupersededCheck } from './projectHostedLandingRunnerCosts';
 
 export const landingAlias = (
   ctx: QueryCtx | MutationCtx,
@@ -35,7 +36,14 @@ export async function reuseHostedLanding(
     /** Preparing goals already charged their submission before source completion. */
     workCharged?: boolean;
   },
-) {
+): Promise<{
+  state?: HostedLandingState;
+  selectionKey?: string;
+  supersedes?: string;
+  retryReason?: HostedLandingState['retryReason'];
+  counts?: HostedLandingState['counts'];
+  supersededCheck?: SupersededCheck;
+}> {
   const identity = { projectId: input.projectId, actor: input.actor, operationId: input.request.operationId };
   const requestHash = digest(canonicalPayload(input.request));
   const alias = await landingAlias(ctx, identity);
@@ -106,6 +114,7 @@ export async function reuseHostedLanding(
       selectionKey,
       supersedes: state.id,
       retryReason: input.request.retryReason ?? ('other' as const),
+      ...supersededCheckCosts(state, existing.runId ?? existing.admission?.runId, existing.supersededCheck),
     };
   if (!input.workCharged) await chargeMemberWork(ctx, input.project, input.actor, 'submissions');
   await ctx.db.insert('projectHostedLandingAliases', {

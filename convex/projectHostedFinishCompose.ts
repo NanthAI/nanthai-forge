@@ -543,7 +543,7 @@ export async function installFinishCompose(
         composeStartedAt: pending.at,
         composedAt: new Date().toISOString(),
       },
-      counts: carriedCostCounts(state.counts, source.state.r2, !!proof),
+      counts: carriedCostCounts(state.counts, source.state.r2, !!proof, Boolean(state.supersedes)),
       observation: landingObservation('queued'),
       error: null,
     },

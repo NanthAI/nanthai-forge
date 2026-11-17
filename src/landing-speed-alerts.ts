@@ -472,6 +472,7 @@ export function carriedCostCounts(
   counts: HostedLandingState['counts'],
   composed: readonly [number, number, number] | undefined,
   reused: boolean,
+  keepKnownDiscardZero = false,
 ): HostedLandingState['counts'] {
   const so = counts?.r2 ?? [0, 0, 0],
     added = composed ?? [0, 0, 0],
@@ -480,7 +481,9 @@ export function carriedCostCounts(
   const carried = {
     ...(r2.some(Boolean) ? { r2 } : {}),
     ...(reused && counts?.runnerSeconds !== undefined ? { runnerSeconds: counts.runnerSeconds } : {}),
-    ...(discarded > 0 ? { discardedRunnerSeconds: discarded } : {}),
+    ...(discarded > 0 || (keepKnownDiscardZero && counts?.discardedRunnerSeconds === 0)
+      ? { discardedRunnerSeconds: discarded }
+      : {}),
     ...(counts?.discardedRunnerUnknown ? { discardedRunnerUnknown: counts.discardedRunnerUnknown } : {}),
   };
   return Object.keys(carried).length ? carried : undefined;

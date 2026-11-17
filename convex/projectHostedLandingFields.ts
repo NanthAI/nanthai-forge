@@ -2,6 +2,14 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { landingCapsulePointer } from './projectLandingCapsuleFields';
+/** Server-only accounting checkpoint; existing state/reply readers ignore it. Cleared at check binding. */
+const supersededCheck = v.optional(
+  v.object({
+    runId: v.string(),
+    runnerSeconds: v.optional(v.number()),
+    unknownBefore: v.optional(v.literal(true)),
+  }),
+);
 const alarm = v.optional(
   v.union(
     v.object({
@@ -54,6 +62,7 @@ export const hostedLandingTables = {
     .index('by_project_and_batch', ['projectId', 'batchId'])
     .index('by_project_and_compose', ['projectId', 'composeOperationId']),
   projectHostedLandingDesired: defineTable({
+    supersededCheck,
     alarm,
     preparing: v.optional(v.boolean()),
     projectId: v.id('hostedProjects'),
@@ -134,6 +143,7 @@ export const hostedLandingTables = {
   // S3: cold immutable request and batch selection; owned and deleted through its ticket.
   projectHostedLandingBodies: defineTable({ value: v.string() }),
   projectHostedLandingRequests: defineTable({
+    supersededCheck,
     requestBodyId: v.optional(v.id('projectHostedLandingBodies')),
     selectionBodyId: v.optional(v.id('projectHostedLandingBodies')),
     capsule: v.optional(landingCapsulePointer),

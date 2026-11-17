@@ -24,6 +24,7 @@ const encoded = rows => JSON.stringify(rows);
  * Concurrent commits retry only when a read document/range actually changed.
  * All counters describe matched provider ranges, never the fake's JS scans. */
 export function lanesFixture({ legacyWorkRecords = false } = {}) {
+  const wallClockTables = new Set(['projectHostedOperations']);
   const tables = Object.fromEntries(Object.keys(schema.tables).map(name => [name, new Map()]));
   const counts = [];
   const scheduled = [];
@@ -251,8 +252,8 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
             const id = `${table}-${++serial}`;
             // Real creation times are wall-clock; retention checks (Issue b78ca196) compare them with Date.now().
             // Operation receipts (expiry at 90 days) get wall-clock times, or every receipt would look
-            // expired; every other table keeps its serial order.
-            const at = table === 'projectHostedOperations';
+            // expired. Calendar tests opt their receipt tables in; others keep serial order.
+            const at = wallClockTables.has(table);
             put(
               table,
               id,
@@ -465,6 +466,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
     });
   }
   return {
+    wallClockTables,
     bindRepository,
     scheduled,
     tables,

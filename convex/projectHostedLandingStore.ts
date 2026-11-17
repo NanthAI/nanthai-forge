@@ -34,6 +34,7 @@ import { notifyFinish, wakeLandingOrderWaiters } from './projectHostedFinishWake
 import { notifyStackedLandingEnded } from './projectHostedStackNotice';
 import { recordLandingSpeed } from './projectLandingSpeed';
 import { recordFailure } from './projectFailureLog';
+import { bindSupersededCheck } from './projectHostedLandingRunnerCosts';
 import { invariant } from '../src/errors';
 export type { LandingChannel } from './projectHostedLandingEvents';
 export { landingQueue, ensureLandingQueue, recordLandingObservation } from './projectHostedLandingEvents';
@@ -192,6 +193,10 @@ export async function writeLanding(
     'WORK_OPERATION_CHANGED',
     'The selected attempt must belong to this original request.',
   );
+  const admitting = row.admission?.status === 'checking' && state.phase === 'checking';
+  const runId = attempt.check?.runId ?? (admitting ? row.admission!.runId : null);
+  const carried = bindSupersededCheck(state.counts, row.supersededCheck, runId);
+  if (carried.counts) state.counts = carried.counts;
   // Solo checking/ready tails can own speculative descendants too. Retire the
   // old generation in the mutation that changes its pins or stops its proof.
   const entersReview =
@@ -263,8 +268,6 @@ export async function writeLanding(
   await recoverEarlyResolutions(ctx, row, previous, state, attempt);
   await recordLandingObservation(ctx, state, undefined, speculative && !retireAdvice ? advice : undefined);
   // An admission run holds the request until it settles; it never joins a cohort meanwhile.
-  const admitting = row.admission?.status === 'checking' && state.phase === 'checking';
-  const runId = attempt.check?.runId ?? (admitting ? row.admission!.runId : null);
   // A submission still in its own admission (pre-queue) check is not in the queue yet,
   // nor is one held for peers still deciding their Lane proof (10b0a94b).
   const orderLive =
@@ -295,6 +298,7 @@ export async function writeLanding(
     pipelineRetiredAttemptId:
       previous.attemptId === state.attemptId ? row.pipelineRetiredAttemptId : undefined,
     runId,
+    supersededCheck: carried.supersededCheck,
     checkWakeVersion: row.runId === runId ? row.checkWakeVersion : undefined,
     admitting: admitting ? true : undefined,
     deciding,

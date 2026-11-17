@@ -89,7 +89,7 @@ async function prepareLandingCheckOnce(
           member => !batch.included || batch.included.includes(member.submissionId),
         );
         const runSeconds = run.endedAt && run.execution ? run.execution.seconds : undefined;
-        if (outcome !== 'passed' && runSeconds !== undefined)
+        if (outcome !== 'passed')
           for (const member of included) {
             const { row, state: current } = await loadLanding(ctx, {
               projectId: claim.projectId,
