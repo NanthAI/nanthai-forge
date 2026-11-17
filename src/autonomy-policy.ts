@@ -142,8 +142,9 @@ export function policyPreset(preset: Exclude<AutonomyPolicy['preset'], 'custom'>
       mode: preset === 'supervised' ? 'review' : 'auto-on-pass',
       gate: preset === 'supervised' ? 'full' : 'contract',
       disjointFastPath: false,
-      autoActors: [],
-      protectedPaths: [],
+      // An absent autoActors list already means []; avoid retaining a redundant
+      // field in every policy snapshot as the protected-name default is added.
+      protectedPaths: ['.env.example'],
     },
     integrationPreview: { auto: false },
     ownerRootUpdates: false,
@@ -152,7 +153,8 @@ export function policyPreset(preset: Exclude<AutonomyPolicy['preset'], 'custom'>
     notify: { awaySummary: true },
   };
 }
-/** Existing owners have no new restrictions or cleanup on upgrade. */
+/** Existing explicit protected-path settings remain authoritative; an unconfigured
+ * project uses the default .env.example protection. Cleanup is still opt-in. */
 export function legacyPolicy(): AutonomyPolicy {
   const policy = policyPreset('trusted');
   delete policy.acceptance.gate;
@@ -363,7 +365,10 @@ export function globPattern(glob: string): RegExp {
   }
 }
 export function protectedMatches(policy: Pick<AutonomyPolicy, 'acceptance'>, paths: string[]) {
-  const patterns = policy.acceptance.protectedPaths.map(globPattern);
+  const patterns = policy.acceptance.protectedPaths.map(glob => {
+    const pattern = globPattern(glob);
+    return glob.toLowerCase() === '.env.example' ? new RegExp(pattern.source, 'i') : pattern;
+  });
   return paths.filter(path => patterns.some(pattern => pattern.test(path)));
 }
 export function reviewReason(

@@ -14,11 +14,14 @@ and linked follow-up Items reuse existing operations. Hosted save readers retain
 optional declarations; client writers and the run-budget/outside-change workflows
 are separate work on the Phase 7 Items. See [run evidence](run-evidence.md).
 
-Rebuilt Settings → Secrets has a value-free, metadata-only screen and current
-check-secret guidance. Its live provider is an unavailable stub: it makes no secret
-reads or writes. Gate A for sealed secrets remains open; encryption, sharing,
-machine-key delivery, `nforge run` and Secret Object retirement are not delivered.
-See [secrets for checks](security.md#secrets-for-checks).
+Rebuilt Settings → Secrets is value-free with an unavailable metadata provider.
+Lazy `nforge run` helpers now cover root `.env.example` names, release name rules,
+credential/session stripping, output masking and private temporary file cleanup
+with synthetic providers. The shipped CLI reports that delivery is not connected.
+Default policies protect `.env.example`; explicit owner lists stay authoritative.
+Encryption, sharing, server records, machine keys, import, per-added-name owner
+alerts and Secret Object retirement remain pending. These helpers establish no
+cryptographic gate. See [the process boundary](security.md#run-process-boundary).
 
 HostedStrip shares a bounded Lane feed and sleeping hook. Lanes initialize on
 write; stage/idle/cost fixtures pass. Dev latency, idle I/O, frames, browser cost

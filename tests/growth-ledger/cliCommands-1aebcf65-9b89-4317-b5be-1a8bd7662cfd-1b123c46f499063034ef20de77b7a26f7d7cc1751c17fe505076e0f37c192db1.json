@@ -1,0 +1,6 @@
+{
+  "kind": "cliCommands",
+  "delta": 1,
+  "reason": "Issue 41a0df87 adds the first lazy run command and process boundary; nothing can be removed before the gated Secret Objects retirement slice.",
+  "date": "2026-11-17"
+}

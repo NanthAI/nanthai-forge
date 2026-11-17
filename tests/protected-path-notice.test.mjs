@@ -31,7 +31,8 @@ test('netlify incident: default, configured and check-entry paths name their exi
   assert.match(protectedPathNotice(configured, ['src/guarded.ts']).message, /a person allowed to accept/);
   assert.match(protectedPathNotice(configured, ['tools/check.mjs']).message, /project owner/);
   assert.equal(protectedPathNotice(policy({ ownerApprovalPaths: [] }), ['netlify.toml']), undefined);
-  assert.equal(protectedPathNotice(policy({ ownerApprovalPaths: [] }), null), undefined);
+  assert.equal(protectedPathNotice(policy({ ownerApprovalPaths: [], protectedPaths: [] }), null), undefined);
+  assert.equal(protectedPathNotice(policy({ ownerApprovalPaths: [] }), null).coverage, 'unavailable');
   assert.equal(protectedPathNotice(policy(), null).coverage, 'unavailable');
 });
 

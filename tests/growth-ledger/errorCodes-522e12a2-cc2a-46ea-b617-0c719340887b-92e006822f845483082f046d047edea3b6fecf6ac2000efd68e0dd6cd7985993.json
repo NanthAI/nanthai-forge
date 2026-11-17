@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 1,
+  "reason": "Issue 41a0df87: v2.2 requires the named non-file example refusal and recovery guidance; this replaces its generic unsafe-path refusal. No dependency or hosted action is added.",
+  "date": "2026-11-17"
+}

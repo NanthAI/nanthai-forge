@@ -18,6 +18,7 @@ const land = `nforge agent <root> land --save '{"message":"MESSAGE"}'`;
 export const teachingByCode: Record<string, Entry> = {
   COMPOSITION_CONFLICT: { learn: 'conflict', next: `nforge agent <root> sync '<lane>'` },
   BAD_ARGUMENT: { learn: 'arguments', next: '<command> --help' },
+  SECRETS_ENV_EXAMPLE_NOT_FILE: { learn: 'arguments', next: 'nforge run --help' },
   LANDING_STALLED: { learn: 'queue', next: `nforge agent <root> queue '{}'` },
   HOSTED_ACTION_UNSUPPORTED: { learn: 'hosted', next: 'nforge agent <root> help' },
   WORK_STALE: { learn: 'retry', next: '<replay>' },
