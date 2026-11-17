@@ -1,0 +1,33 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Plan only (loaded with its route): the ordered Item rows, the Initiative roll-up beside its band, the next line and
+   the capture form. Every value is a token; rows, bands, roll, shards, nextmark and flags are the design system's. */
+[data-ds] {
+  .plan .ph .find { flex: 0 1 280px; min-width: 0; }
+  .plan .rk { color: var(--text-3); font: var(--w-medium) var(--t-meta)/1 var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+  .plan .tt { display: flex; gap: var(--s-2); align-items: baseline; min-width: 0; }
+  .plan .tt.sub { padding-left: var(--s-4); }
+  .plan .tt .ttl { font-weight: var(--w-strong); min-width: min(14ch, 60%); overflow-wrap: anywhere; }
+  .plan .dw { display: inline-flex; gap: var(--s-1); align-items: center; font-size: var(--t-meta); white-space: nowrap; }
+  .plan .dw .num { font-variant-numeric: tabular-nums; color: var(--text-2); }
+  .plan .state { justify-self: end; white-space: nowrap; }
+  .plan .plan-roll { display: inline-flex; gap: var(--s-2); align-items: center; min-width: 0; }
+  .plan .plan-roll .roll { width: 120px; flex: none; }
+  .plan .plan-next { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-2); align-items: center; padding: var(--s-2) var(--gut); border-top: var(--rule) solid var(--line); font-size: var(--t-small); }
+  .plan .plan-next .t3 { font-size: var(--t-meta); }
+  .plan-capture { display: grid; gap: var(--s-3); }
+  .plan-capture label { display: grid; gap: var(--s-1); font-size: var(--t-small); color: var(--text-2); }
+  .plan-capture textarea { resize: vertical; min-height: 4.5em; }
+  .plan-similar { display: grid; gap: 2px; font-size: var(--t-meta); padding: var(--s-2); border: var(--rule) solid var(--line); border-radius: var(--r); }
+  @media (max-width: 860px) {
+    .plan .plan-wide { display: none; }
+    .plan .ph { flex-wrap: wrap; }
+    .plan .ph .tools { flex-basis: 100%; display: flex; }
+    .plan .ph .find { flex: 1 1 100%; max-width: none; }
+    .plan .tt { flex-wrap: wrap; row-gap: 2px; }
+    .plan .tt .ttl { flex-basis: 100%; }
+    .plan .plan-grp .band { flex-wrap: wrap; }
+    .plan .plan-grp .band .hint { white-space: normal; flex-basis: 100%; }
+    .plan .plan-roll { flex-wrap: wrap; white-space: normal; }
+    .plan .plan-roll .roll { width: 64px; }
+  }
+}

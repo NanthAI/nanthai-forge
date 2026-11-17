@@ -661,6 +661,15 @@ layer out of both first paints.
   `projectHostedApprovals:list`). One row per held Lane, so its count is the
   top bar's; requests that hold no Lane are listed and never counted. A reason
   Forge did not record says "not reported". Idle costs nothing.
+- Plan (`web/src/app/plan/`) is the hand-ordered list grouped by Initiative
+  ([planning model](planning.md)). It adds one read, `projectPlanView:read`:
+  the Initiatives, every live Item (at most 500 per status) and each live
+  Initiative's done and dropped counts, all from the planning search roots'
+  indexes, so no body is loaded and closed history outside live Initiatives is
+  never read. Moves write one `order` between the new neighbours and New Item
+  writes a Planned Item, both through `projectWorkCommand:command` (owner only).
+  The Item page shows the plan's own row and links to the current Item screen
+  for the body and comments. Idle costs nothing.
 
 Billing at `/-/account/billing` lazily loads `web/src/billing/Home.tsx`, replacing
 its placeholder. The shared [stub contract](billing.md) adds no accounting calls.
