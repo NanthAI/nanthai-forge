@@ -3,7 +3,7 @@
 // distance between them, and one next action when a person must act. The words come from the same read as
 // `nforge github status` (projectGithubMirrorRead.read: the project row and about three mirror rows), one subscription
 // that re-runs on mirror or policy writes only. The owner changes direction with one switch (a set-policy write against
-// the policy just read), pauses and resumes the link, or disconnects through the CLI’s binding-removal path.
+// the policy just read), pauses and resumes the link, or disconnects through the owner-person binding-removal path.
 import { useRef, useState } from 'react';
 import { useConvex, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
@@ -114,8 +114,9 @@ export default function Mirror({ projectId, route, projectName }: PlaceProps) {
             }}
           >
             <p className="t2">
-              With the mirror on, each landing pushes one commit to GitHub’s main, so GitHub stays a full copy
-              you can leave with. GitHub asks you once to allow Forge.
+              {mirror.repository
+                ? 'Resume in Settings below keeps the existing link and its previous direction. If the link needs a new GitHub authorization, allow it here.'
+                : 'With the mirror on, each landing pushes one commit to GitHub’s main, so GitHub stays a full copy you can leave with. GitHub asks you once to allow Forge.'}
             </p>
             {mirror.repository ? null : (
               <label className="f">
@@ -152,7 +153,9 @@ export default function Mirror({ projectId, route, projectName }: PlaceProps) {
           </details>
         </Region>
       ) : null}
-      {mirror.state !== 'off' ? <MirrorSettings mirror={mirror} projectId={projectId} /> : null}
+      {mirror.state !== 'off' || mirror.repository ? (
+        <MirrorSettings mirror={mirror} projectId={projectId} />
+      ) : null}
       {problem ? (
         <p className="pad gs-err" role="alert">
           {problem}

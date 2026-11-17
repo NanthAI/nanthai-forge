@@ -57,11 +57,9 @@ export function visibilityWords(origin: ImportVisibility, choices: readonly Impo
 /** The mirror question (Item c63c2171): asked once, Yes preselected; the mirror is on either way. */
 export const mirrorAnswers = {
   'two-way': {
-    title: 'Yes, people or tools still push there',
     sub: 'Two-way mirror. Each landing goes to GitHub main as one commit, and a push there becomes a Forge landing that passes the same check.',
   },
   'one-way': {
-    title: 'No, work lands in Forge from now on',
     sub: 'One-way mirror, Forge to GitHub. A push made on GitHub is not taken in; Forge stops and asks instead of pushing over it.',
   },
 } as const;

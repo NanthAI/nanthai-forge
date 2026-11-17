@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
+import { cancelPendingTask } from './schedulerCancel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { effectivePolicy } from '../src/autonomy-policy';
@@ -55,9 +56,46 @@ export async function mirrorJob(
   );
   const policy = effectivePolicy(project).githubMirror;
   invariant(
-    policy?.autoPush && policy.repo === job.repository,
+    policy?.autoPush && policy.repo.toLowerCase() === job.repository.toLowerCase(),
     'GITHUB_SYNC_DISABLED',
     'Hosted mirror policy changed.',
   );
   return { job, queue, project };
+}
+
+/** Explicit recovery of the same cursor, fencing failed or expired workers. Shared by the
+ * operator mutation in projectGithubMirrorStore and the owner command (projectGithubMirrorResume). A person un-pausing
+ * replaces even a live task: an old worker may still be reporting that it observed the pause. */
+export async function resumeMirrorJob(
+  ctx: MutationCtx,
+  jobId: Id<'projectGithubMirrorJobs'>,
+  replaceTask = false,
+) {
+  const job = await ctx.db.get(jobId);
+  if (!job) return { status: 'missing' as const, step: null };
+  if (job.status === 'done') return { status: 'done' as const, step: job.step };
+  const queue = await mirrorRow(ctx, job.projectId);
+  invariant(queue?.activeId === job._id, 'GITHUB_SYNC_PENDING', 'Resume the active retained mirror job.');
+  const task = job.scheduledId ? await ctx.db.system.get(job.scheduledId) : null;
+  const live = task && ['pending', 'inProgress'].includes(task.state.kind);
+  // Actions have a ten-minute runtime limit. A future backoff is still live;
+  // an overdue task beyond that window is recoverable by explicit resume.
+  if (!replaceTask && live && job.status !== 'failed' && task.scheduledTime + 11 * 60_000 > Date.now())
+    return { status: 'already-running' as const, step: job.step };
+  if (live) await cancelPendingTask(ctx, task._id, task);
+  const step = job.step + 1;
+  await ctx.db.patch(job._id, {
+    status: 'running',
+    step,
+    failures: 0,
+    nextAttemptAt: undefined,
+    error: undefined,
+    detail: undefined,
+    httpStatus: undefined,
+    apiOperation: undefined,
+    requestBytes: undefined,
+  });
+  await mirrorJob(ctx, { jobId: job._id, step });
+  await scheduleMirror(ctx, { _id: job._id, step });
+  return { status: 'scheduled' as const, step };
 }

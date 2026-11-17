@@ -156,6 +156,19 @@ rows are unchanged; no migration or deletion runs implicitly. See the [replaceme
 Those writers stay in Convex by design: the [S4 remaining-writers verdict](research/placement-review.md#s4-remaining-writers)
 sizes each one and proposes a single change, onboarding without per-file rows.
 
+The policy-history index on project and the previous mirror's enabled flag selects
+one recorded direction for pre-Pause disabled mirrors. It adds one index entry per
+policy-change row; no new table, source bytes, landing write or idle function.
+Explicit Resume selects current main and its acceptance metadata, then reuses the
+existing mirror job queue. One selected latest job under the existing receipt
+index is compared with the current repository (case-insensitively), so a completed
+publish to an old repository cannot suppress catch-up to a new one. No mirror-job
+index entry or key bytes are added. The paused window becomes one catch-up
+commit, not one job per paused landing. Its first seed reads the mapping's receipt
+and at most 21 acceptance rows by sequence to list the first 20 subjects and a
+remainder count, then pins that message. Adjacent publishes add zero history
+reads; replays read the pinned seed instead of rebuilding its message.
+
 ## Planning search
 
 Before filing an Issue or friction, search for an existing planning item and

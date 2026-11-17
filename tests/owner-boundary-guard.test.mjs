@@ -19,7 +19,7 @@ const allowed = {
   projectContributors: ['remove', 'list', 'handles', 'pending', 'cancelInvite'],
   projectExchangeMigration: ['migrate'],
   projectGithubMirrorRead: ['read'], // Read-only mirror sentence; the owner flag only shows controls.
-  projectGithubMirrorResume: ['resume'],
+  projectGithubMirrorResume: ['resume'], // Owner device recovery only; policy.set keeps Pause/un-pause person-only.
   projectGithubStatus: ['publish'],
   projectHostedAcceptance: ['approve'], // Existing acceptanceActor person gate.
   projectHostedApprovals: ['decide', 'observe'], // decide already requires a person.

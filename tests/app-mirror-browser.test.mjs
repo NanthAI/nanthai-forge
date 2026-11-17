@@ -48,15 +48,16 @@ test('import defaults to two-way; mirror pauses/resumes the retained link and co
     window.calls = [];
     const listeners = new Set();
     window.subscribe = f => { listeners.add(f); return () => listeners.delete(f); };
-    let policy = { githubMirror: { repo: 'example/parser', autoPush: true, inbound: true, laneRefs: false } };
+    let legacy = new URLSearchParams(location.search).has('legacy');
+    let policy = { githubMirror: { repo: 'example/parser', autoPush: !legacy, inbound: !legacy, laneRefs: false } };
     let pausedInbound = false;
     const status = { repository: 'example/parser', status: 'synced', lagging: false, targetHead: 'a'.repeat(64), mirroredHead: 'a'.repeat(64), gitHead: 'b'.repeat(40), mirroredAt: 1800000000000 };
-    const refresh = () => { window.mirror = { ...mirrorSummary(policy.githubMirror, status), owner: true, repoId: policy.githubMirror && !new URLSearchParams(location.search).has('unbound') ? 42 : null, inbound: policy.githubMirror?.autoPush === false ? pausedInbound : policy.githubMirror?.inbound === true, ends: policy.githubMirror ? { forgeHead: status.targetHead, mirroredHead: status.mirroredHead, gitHead: status.gitHead, mirroredAt: status.mirroredAt } : null }; listeners.forEach(f => f()); };
+    const refresh = () => { window.mirror = { ...mirrorSummary(policy.githubMirror ? { ...policy.githubMirror, paused: !legacy && !policy.githubMirror.autoPush } : null, status), owner: true, repoId: policy.githubMirror && !new URLSearchParams(location.search).has('unbound') ? 42 : null, inbound: policy.githubMirror?.autoPush === false ? (legacy || pausedInbound) : policy.githubMirror?.inbound === true, ends: policy.githubMirror ? { forgeHead: status.targetHead, mirroredHead: status.mirroredHead, gitHead: status.gitHead, mirroredAt: status.mirroredAt } : null }; listeners.forEach(f => f()); };
     window.client = {
       query: async () => policy,
       mutation: async (ref, args) => {
         const name = getFunctionName(ref); window.calls.push({ name, args });
-        if (name === 'projectAutonomy:set') { const next = JSON.parse(args.command).githubMirror; if (policy.githubMirror?.autoPush && !next.autoPush) pausedInbound = policy.githubMirror.inbound; policy = { githubMirror: next }; }
+        if (name === 'projectAutonomy:set') { const next = JSON.parse(args.command).githubMirror; if (policy.githubMirror?.autoPush && !next.autoPush) pausedInbound = policy.githubMirror.inbound; policy = { githubMirror: next }; if (next.autoPush) legacy = false; }
         if (name === 'githubBindingStore:remove') policy = {};
         refresh();
       },
@@ -163,7 +164,19 @@ test('import defaults to two-way; mirror pauses/resumes the retained link and co
     (await page.evaluate(() => window.calls)).filter(c => c.name === 'githubBindingStore:remove').length,
     1,
   );
+  await page.goto('https://forge.test/-/example/parser/settings/mirror?legacy=1');
+  await page.getByRole('heading', { name: 'Turn the mirror on', exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  if (shots) await page.screenshot({ path: join(shots, 'mirror-legacy-off.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Resume', exact: true }).click();
+  await page.getByRole('button', { name: 'Pause', exact: true }).waitFor();
+  assert.equal(
+    JSON.parse((await page.evaluate(() => window.calls))[0].args.command).githubMirror.inbound,
+    true,
+  );
   await page.goto('https://forge.test/-/example/parser/settings/mirror?unbound=1');
+  assert.match(await page.locator('.mr').textContent(), /without a new GitHub approval/);
+  assert(!(await page.locator('.mr').textContent()).includes('Reconnecting this stored link'));
   await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
   await dialog.getByRole('button', { name: 'Disconnect', exact: true }).click();
   await page.getByRole('button', { name: 'Allow on GitHub' }).waitFor();

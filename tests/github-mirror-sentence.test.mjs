@@ -32,10 +32,11 @@ const twoWay = { repo, autoPush: true, inbound: true };
 test('each recorded mirror state reads as one sentence; only states that wait on a person carry a next step', () => {
   const cases = [
     [null, null, 'off', 'reference'],
-    [{ repo, autoPush: false }, null, 'paused', 'reference'],
+    [{ repo, autoPush: false }, null, 'off', 'reference'],
+    [{ repo, autoPush: false, paused: true }, null, 'paused', 'reference'],
     [twoWay, status(), 'level', 'reference'],
     [{ ...twoWay, inbound: false }, status(), 'level', 'reference'],
-    [twoWay, status({ status: 'syncing', lagging: true }), 'behind', 'watch'],
+    [twoWay, status({ status: 'syncing', lagging: true, jobId: 'active' }), 'behind', 'watch'],
     [twoWay, status({ status: 'retrying', lagging: true, nextAttemptAt: 2 }), 'retrying', 'watch'],
     [twoWay, status({ status: 'failed', error: 'GITHUB_SYNC_CHANGED', nextStep: 'resume' }), 'moved', 'act'],
     [twoWay, status({ status: 'failed', error: 'GITHUB_SYNC_API', nextStep: 'resume' }), 'refused', 'act'],
@@ -56,6 +57,29 @@ test('each recorded mirror state reads as one sentence; only states that wait on
     mirrorSummary(null, null, './harbor').next,
     /^nforge github connect \.\/harbor --repo OWNER\/NAME/,
   );
+});
+
+test('behind never says nothing needs you, and an idle queue never claims to be pushing', () => {
+  for (const recorded of [
+    status({ status: 'unknown', lagging: true }),
+    status({ status: 'syncing', lagging: true, jobId: 'active' }),
+    status({ status: 'retrying', lagging: true, jobId: 'active' }),
+  ]) {
+    const summary = mirrorSummary(twoWay, recorded);
+    assert(!summary.sentence.includes('Nothing needs you'));
+    if (!recorded.jobId) {
+      assert.equal(summary.weight, 'act');
+      assert.match(summary.next, /nforge github resume/);
+      assert(!summary.sentence.includes('Forge is pushing'));
+    }
+  }
+});
+
+test('a legacy off mirror points to recovery of its existing link instead of new GitHub approval', () => {
+  const summary = mirrorSummary({ repo, autoPush: false }, null, './harbor');
+  assert.match(summary.next, /nforge github resume \.\/harbor/);
+  assert.match(summary.next, /Settings → GitHub mirror/);
+  assert(!summary.next.includes('connect'));
 });
 
 test('members read an honest no-mirror when the mirror was never configured; strangers read nothing', async () => {

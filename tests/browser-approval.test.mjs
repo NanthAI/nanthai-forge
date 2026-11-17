@@ -92,7 +92,16 @@ for (const tty of [true, false])
           },
           subscribe: () => ({
             onUpdate: (_ref, _args, update) => {
-              queueMicrotask(() => update({ operationId, status: 'completed', repoId: 42, code: null }));
+              queueMicrotask(() =>
+                update({
+                  operationId,
+                  status: 'completed',
+                  repoId: 42,
+                  code: null,
+                  mirror: 'enabled',
+                  direction: 'two-way',
+                }),
+              );
               return () => {};
             },
             close: async () => {},
@@ -110,6 +119,8 @@ for (const tty of [true, false])
       assert(lines.join('').includes(url));
       assert.equal(JSON.parse(stdout.join('')).operationId, result.operationId);
       assert.equal(JSON.parse(stdout.join('')).authorizeUrl, url);
+      assert.match(result.mirror, /Pause or Disconnect in Forge → Settings → GitHub mirror/);
+      assert(!result.mirror.includes('autoPush'));
       assert(selectedRoot.startsWith(directory));
       assert(!existsSync(join(directory, 'opaque-project-id.forge-client')));
     });

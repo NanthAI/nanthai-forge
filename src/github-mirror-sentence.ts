@@ -17,7 +17,10 @@ export type MirrorState =
   | 'stopped'
   | 'not-pushed'
   | 'unknown';
-export type MirrorPolicy = { repo: string; autoPush?: boolean; inbound?: boolean } | null | undefined;
+export type MirrorPolicy =
+  | { repo: string; autoPush?: boolean; inbound?: boolean; paused?: boolean }
+  | null
+  | undefined;
 export type MirrorSummary = {
   repository: string | null;
   direction: MirrorDirection;
@@ -42,7 +45,7 @@ export function mirrorSummary(
   const direction = mirrorDirection(policy);
   const repository = status?.repository ?? policy?.repo ?? null;
   const base = { repository, direction };
-  if (policy && !policy.autoPush)
+  if (policy && !policy.autoPush && policy.paused)
     return {
       ...base,
       state: 'paused',
@@ -56,7 +59,9 @@ export function mirrorSummary(
       state: 'off',
       weight: 'reference',
       sentence: `No mirror. Landings stay on Forge${repository ? ` and ${repository} on GitHub is not updated` : ''}.`,
-      next: `nforge github connect ${project} --repo ${repository ?? 'OWNER/NAME'} (a person allows it on GitHub once)`,
+      next: policy?.repo
+        ? `the owner person resumes in Settings → GitHub mirror; nforge github resume ${project} recovers enabled work`
+        : `nforge github connect ${project} --repo ${repository ?? 'OWNER/NAME'} (a person allows it on GitHub once)`,
     };
   const repo = repository!;
   const back =
@@ -99,8 +104,16 @@ export function mirrorSummary(
       ...base,
       state: 'retrying',
       weight: 'watch',
-      sentence: `GitHub is behind: a push to ${repo} failed and Forge retries it${status.nextAttemptAt === null ? '' : ` at ${new Date(status.nextAttemptAt).toISOString()}`}. Nothing needs you yet.`,
+      sentence: `GitHub is behind: a push to ${repo} failed and Forge retries it${status.nextAttemptAt === null ? '' : ` at ${new Date(status.nextAttemptAt).toISOString()}`}.`,
       next: null,
+    };
+  if (status.lagging && !status.jobId && status.mirroredHead !== null)
+    return {
+      ...base,
+      state: 'behind',
+      weight: 'act',
+      sentence: `GitHub is behind Forge; no push to ${repo} is running.`,
+      next: `the project owner runs nforge github resume ${project} (or Resume in Settings → GitHub mirror) to catch up`,
     };
   if (status.status === 'syncing' || status.lagging)
     return status.mirroredHead === null && status.status !== 'syncing'
@@ -115,7 +128,7 @@ export function mirrorSummary(
           ...base,
           state: 'behind',
           weight: 'watch',
-          sentence: `GitHub is behind Forge; Forge is pushing to ${repo} in order. Nothing needs you.`,
+          sentence: `GitHub is behind Forge; Forge is pushing to ${repo} in order.`,
           next: null,
         };
   if (status.status === 'synced')

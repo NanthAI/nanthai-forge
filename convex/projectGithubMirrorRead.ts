@@ -11,6 +11,7 @@ import { githubMirrorStatus } from './projectGithubMirrorStatus';
 import { mirrorSummary } from '../src/github-mirror-sentence';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { mirrorResumeInbound } from './projectGithubMirrorDirection';
 
 export const read = query({
   args: { projectId: v.id('hostedProjects') },
@@ -57,7 +58,10 @@ export const read = query({
               .first()
           : null;
       return {
-        ...mirrorSummary(policy, status),
+        ...mirrorSummary(
+          policy ? { ...policy, paused: project.githubMirrorPausedInbound !== undefined } : policy,
+          status,
+        ),
         ends: status
           ? {
               forgeHead: status.targetHead,
@@ -71,10 +75,7 @@ export const read = query({
           : null,
         owner,
         repoId: binding?.repoId ?? null,
-        inbound:
-          policy?.autoPush === false
-            ? (project.githubMirrorPausedInbound ?? policy.inbound === true)
-            : policy?.inbound === true,
+        inbound: await mirrorResumeInbound(ctx, project),
       };
     } catch (error) {
       return report(error);

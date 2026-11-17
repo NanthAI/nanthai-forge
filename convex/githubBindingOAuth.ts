@@ -246,7 +246,7 @@ export const callback = httpAction(async (ctx, request) => {
     return new Response(
       `GitHub repository connected.${
         mirror === 'enabled'
-          ? ' Forge now mirrors main to it; nforge github status says which way. To stop: nforge set-policy with githubMirror autoPush false.'
+          ? ' Forge now mirrors main to it; nforge github status says which way. Pause or Disconnect in Forge → Settings → GitHub mirror (owner person).'
           : ''
       } You can return to Forge.`,
       { headers },

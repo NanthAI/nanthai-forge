@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Mirror controls share the CLI's policy, resume and disconnect paths; one retained request per retry.
+// Mirror controls use policy/recovery and person-only binding removal; one retained request per retry.
 import { useRef, useState } from 'react';
 import { useConvex } from 'convex/react';
 import type { FunctionReturnType } from 'convex/server';
@@ -17,7 +17,7 @@ export function MirrorSettings({ mirror, projectId }: { mirror: Mirror; projectI
   const [confirm, setConfirm] = useState(false);
   const writes = useRef(new Map<string, string>());
   const removal = useRef<{ operationId: string; repoId: number; repository?: string } | null>(null);
-  const paused = mirror.state === 'paused';
+  const paused = mirror.direction === 'off';
   const run = async (task: () => Promise<void>) => {
     if (busy) return;
     setBusy(true);
@@ -84,7 +84,7 @@ export function MirrorSettings({ mirror, projectId }: { mirror: Mirror; projectI
             One commit to main, never a force push. Lanes and other branches are never written.
           </span>
         </span>
-        <span className="t2">{paused ? 'paused' : 'on'}</span>
+        <span className="t2">{mirror.state === 'off' ? 'off' : paused ? 'paused' : 'on'}</span>
       </Row>
       <Row cols="minmax(0, 1fr) auto">
         <label htmlFor="mr-inbound">
@@ -109,8 +109,8 @@ export function MirrorSettings({ mirror, projectId }: { mirror: Mirror; projectI
           {paused ? 'Resume the mirror' : 'Pause the mirror'}
           <span className="sub">
             {paused
-              ? 'Resume with the same repository and direction.'
-              : 'Stop both directions and keep the link so you can resume later.'}
+              ? 'Resume with the same repository and direction. One catch-up commit lists the paused landings it covers.'
+              : 'Stop both directions and keep the link. On Resume, one catch-up commit lists the paused landings it covers.'}
           </span>
         </span>
         {mirror.owner ? (
@@ -126,8 +126,9 @@ export function MirrorSettings({ mirror, projectId }: { mirror: Mirror; projectI
           <span>
             Disconnect {mirror.repository}
             <span className="sub">
-              Ends the link. GitHub keeps its source and history. Reconnecting needs your GitHub approval
-              again.
+              Ends the link. GitHub keeps its source and history. A stored link needs GitHub approval to
+              reconnect. Any operator-configured access stays in place and can be used again without a new
+              GitHub approval.
             </span>
           </span>
           {mirror.owner ? (
@@ -164,8 +165,8 @@ export function MirrorSettings({ mirror, projectId }: { mirror: Mirror; projectI
           all its source and history; Forge keeps your project and Lanes.
         </p>
         <p>
-          A stored runner grant also ends for your projects. Runner access preconfigured by the service
-          operator stays in place.
+          Removing a stored link also ends its runner grant for your projects. Access preconfigured by the
+          service operator stays in place.
         </p>
         {problem ? (
           <p className="gs-err" role="alert">

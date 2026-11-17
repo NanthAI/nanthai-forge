@@ -136,7 +136,7 @@ export async function githubConnectCli(
   if (values.help)
     return {
       usage:
-        'nforge github connect|status|disconnect|resume PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID] [--repo-id ID] [--cursor CURSOR] [--no-mirror] [--no-browser]',
+        'nforge github connect|status|disconnect|resume PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID] [--cursor CURSOR] [--no-mirror] [--no-browser]',
     };
   const [command, project] = positionals;
   invariant(
@@ -144,6 +144,11 @@ export async function githubConnectCli(
     'BAD_ARGUMENT',
     'Use nforge github connect|status|disconnect|resume PROJECT.',
   );
+  if (command === 'disconnect')
+    return {
+      status: 'open-settings',
+      next: 'Open this project in Forge → Settings → GitHub mirror → Disconnect. Only the owner person can confirm it there; this command changed nothing.',
+    };
   const root = resolve(project);
   const address = values.url
     ? hostedAgentAddressSchema.parse({ url: values.url, projectId: values['project-id'] ?? project })
@@ -181,24 +186,6 @@ export async function githubConnectCli(
   }
   const capabilities = await transport.dispatch('capabilities', {});
   const actor = z.object({ actor: z.string() }).parse(capabilities.result).actor;
-  if (command === 'disconnect') {
-    const repoId = Number(values['repo-id']);
-    invariant(
-      Number.isSafeInteger(repoId) && repoId > 0,
-      'BAD_ARGUMENT',
-      'Pass --repo-id from github status.',
-    );
-    const journal = new HostedAgentJournal(
-      journalRoot,
-      address,
-      actor,
-      'github-disconnect',
-      { repoId },
-      values['operation-id'],
-    );
-    await transport.mutation('githubBindingStore:remove', { operationId: journal.operationId, repoId });
-    return { operationId: journal.operationId, repoId, status: 'disconnected' };
-  }
   let repository = values.repo;
   if (!repository) {
     const settings = await transport.query<{ configuration: { repository?: string } | null }>(
@@ -266,7 +253,7 @@ export async function githubConnectCli(
     const mirror =
       completed.mirror === 'enabled'
         ? {
-            mirror: `on: Forge publishes accepted main to ${repository}${completed.direction === 'one-way' ? '; pushes made on GitHub are not taken in (one-way)' : ' and brings GitHub pushes and pull requests back in'}. Turn it off: nforge set-policy ROOT '{"operationId":"UUID","githubMirror":{"repo":"${repository}","autoPush":false,"laneRefs":false}}'`,
+            mirror: `on: Forge publishes accepted main to ${repository}${completed.direction === 'one-way' ? '; pushes made on GitHub are not taken in (one-way)' : ' and brings GitHub pushes and pull requests back in'}. Pause or Disconnect in Forge → Settings → GitHub mirror (owner person).`,
           }
         : completed.mirror === 'kept'
           ? {

@@ -19,6 +19,8 @@ const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const githubBindings = await import(moduleUrl('../convex/githubBindingStore.ts'));
 const bytes = value => Buffer.byteLength(JSON.stringify(value));
 const encoded = rows => JSON.stringify(rows);
+const fieldValue = (row, path) =>
+  path.includes('.') ? path.split('.').reduce((value, part) => value?.[part], row) : row[path];
 
 /** Snapshot transactions with indexed read-range OCC (including missing keys).
  * Concurrent commits retry only when a read document/range actually changed.
@@ -164,7 +166,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
           for (const row of rows.values()) {
             let group = groups;
             for (const [at, field] of fields.entries()) {
-              const value = row[field];
+              const value = fieldValue(row, field);
               if (!group.has(value)) group.set(value, at === fields.length - 1 ? [] : new Map());
               group = group.get(value);
             }
@@ -322,13 +324,18 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
                   equalRows(rows, terms)
                     .filter(
                       row =>
-                        terms.every(([k, v]) => row[k] === v) &&
-                        (!lower || row[lower[0]] > lower[1] || (lower[2] && row[lower[0]] === lower[1])) &&
-                        (!upper || row[upper[0]] < upper[1] || (upper[2] && row[upper[0]] === upper[1])),
+                        terms.every(([k, v]) => fieldValue(row, k) === v) &&
+                        (!lower ||
+                          fieldValue(row, lower[0]) > lower[1] ||
+                          (lower[2] && fieldValue(row, lower[0]) === lower[1])) &&
+                        (!upper ||
+                          fieldValue(row, upper[0]) < upper[1] ||
+                          (upper[2] && fieldValue(row, upper[0]) === upper[1])),
                     )
                     .sort((a, b) => {
                       for (const field of index.fields) {
-                        if (a[field] !== b[field]) return a[field] < b[field] ? -1 : 1;
+                        if (fieldValue(a, field) !== fieldValue(b, field))
+                          return fieldValue(a, field) < fieldValue(b, field) ? -1 : 1;
                       }
                       return a._creationTime - b._creationTime;
                     });
@@ -344,8 +351,8 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
                   match(rows)
                     .sort((a, b) => {
                       for (const field of [...indexFields, '_creationTime']) {
-                        if (a[field] === b[field]) continue;
-                        return (a[field] < b[field] ? -1 : 1) * (descending ? -1 : 1);
+                        if (fieldValue(a, field) === fieldValue(b, field)) continue;
+                        return (fieldValue(a, field) < fieldValue(b, field) ? -1 : 1) * (descending ? -1 : 1);
                       }
                       return 0;
                     })

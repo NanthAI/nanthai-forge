@@ -162,6 +162,8 @@ export const autonomyTables = {
     ),
   })
     .index('by_project_and_operation', ['projectId', 'operationId'])
+    // index-order: caller: convex/projectGithubMirrorDirection.ts#mirrorResumeInbound; order: the last enabled mirror direction survives unrelated edits without scanning policy history.
+    .index('by_project_and_previous_mirror', ['projectId', 'previous.githubMirror.autoPush'])
     // index-order: caller: convex/projectUncheckedLandingSettings.ts#history; order: policy history paginates newest-first by creation time; operation UUID order cannot preserve that timeline.
     .index('by_project', ['projectId']),
 };

@@ -25,8 +25,8 @@ export async function strandedMirrorJobs(
 const superseded = (repo: string) =>
   `Mirror repository changed to ${repo}; its next publish seeds the new repository from Forge main.`;
 /** Point the queue at `repo`, drop what belonged to the old repository (its mapping and its open or
- * stranded publish jobs, marked done with this reason) and leave the queue idle: the next accepted
- * State enqueues a normal job. A case-only change keeps the mapping. Returns whether it changed. */
+ * stranded publish jobs, marked done with this reason) and leave the queue ready for recovery
+ * to queue current main, or for the next accepted State to enqueue a normal job. A case-only change keeps the mapping. Returns whether it changed. */
 export async function retargetGithubMirror(ctx: MutationCtx, projectId: Id<'hostedProjects'>, repo: string) {
   const queue = await mirrorRow(ctx, projectId);
   if (!queue || queue.repository === repo) return false;

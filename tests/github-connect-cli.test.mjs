@@ -7,6 +7,17 @@ import { readdirSync } from 'node:fs';
 import { getFunctionName } from 'convex/server';
 import { waitForGithubConnection, githubConnectCli } from '../dist/github-connect-cli.js';
 const address = { url: 'https://forge.example', projectId: 'synthetic-project' };
+test('CLI disconnect guides the owner to web Settings without trying a person-only mutation', async () => {
+  const unavailable = () => {
+    throw new Error('Disconnect must not make an RPC or change a binding.');
+  };
+  const result = await githubConnectCli(['disconnect', address.projectId], {
+    transport: () => ({ query: unavailable, mutation: unavailable, dispatch: unavailable }),
+  });
+  assert.equal(result.status, 'open-settings');
+  assert.match(result.next, /Settings → GitHub mirror → Disconnect/);
+  assert.match(result.next, /changed nothing/);
+});
 test('GitHub connect waits on one operation subscription, closes when complete, and never polls', async () => {
   const operationId = randomUUID(),
     calls = [];

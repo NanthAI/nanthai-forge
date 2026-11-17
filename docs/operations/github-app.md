@@ -96,7 +96,9 @@ nforge github resume PROJECT_ID --url https://DEPLOYMENT.convex.cloud   # a stop
 A hosted Lane checkout path can replace `PROJECT_ID` and its `--url` argument.
 Without `--repo`, connect uses the configured runner or mirror repository, then
 asks in an interactive terminal if neither exists. Only the Forge project owner
-can connect or disconnect repositories. After a completed connect, and in status
+can connect repositories. Pause, un-pause and Disconnect require the owner person
+in web Settings → GitHub mirror; owner CLI recovery remains available while the
+mirror is enabled. After a completed connect, and in status
 on a two-way project, the result carries `protection` for `main`
 ([two-way protection](#two-way-protection-the-ruleset-you-import-once)).
 Status leads with `summary`, the mirror in one sentence, and `mirror` (`state`,
@@ -144,10 +146,12 @@ subsequent pages. Operator overrides are checked independently and do not appear
 as user-proven stored records.
 
 ```sh
-nforge github disconnect PROJECT_ID --url https://DEPLOYMENT.convex.cloud --repo-id NUMERIC_ID
+nforge github disconnect PROJECT_ID --url https://DEPLOYMENT.convex.cloud
 ```
 
-Disconnect removes the stored claim and fences in-flight proof for that
+This CLI command prints the web Settings → GitHub mirror path without changing
+a binding. The owner person confirms Disconnect there. It removes the stored claim
+and fences in-flight proof for that
 installation. Its operation UUID makes retries safe even after a newer binding.
 A different project can then claim the repository with fresh proof.
 
@@ -189,8 +193,8 @@ token mint (dispatch reservation, cancellation, lookup, confirmation, submodule
 access) reads the grant (two or three indexed reads), and the token is minted by
 numeric ID once GitHub confirms the same installation. GitHub refuses an ID the
 installation no longer covers. Removal webhooks delete the repository's grants,
-uninstall tombstones them, and `nforge github disconnect --repo-id` withdraws the
-caller's grant for all of their projects. `check-settings` shows the grant for
+uninstall tombstones them, and confirmed web Disconnect withdraws the
+owner's grant for all of their projects. `check-settings` shows the grant for
 the configured runner repository as `runnerGrant`.
 
 ## Enforcement and revocation

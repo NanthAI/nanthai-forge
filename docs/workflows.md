@@ -612,24 +612,51 @@ Forge-to-GitHub only. GitHub approval connects that choice after import.
 The owner person can **Pause** the mirror, keeping the repository binding,
 recorded history and direction, then **Resume** it later. Pause sets
 `githubMirror.autoPush:false` and `inbound:false`, keeping that policy readable by
-existing CLIs. The same project record remembers the direction for Resume; no
-extra read or write is added. Resume uses the same policy write and `nforge github resume`
-server path for a retained job. A push already sent to GitHub may finish; later
-steps check the paused policy before continuing. Landings continue on Forge.
-**Disconnect** asks once, naming the repository and what stops, then uses
-`nforge github disconnect`’s binding removal. It clears the matching mirror policy
-atomically and withdraws the repository’s runner grant for the owner’s projects.
-A preconfigured mirror without a stored binding can also be disconnected on the web:
-the request pins the displayed repository and ends its mirror policy. Operator-configured
-runner access stays in place. GitHub source/history, Forge source, Lanes and mirror history stay; reconnecting
-requires GitHub approval again. Pause, resume and disconnect require the owner
-person; device and agent credentials cannot perform them.
+existing CLIs; the project retains its chosen direction. Un-pausing restores that
+direction and, in the same policy mutation, wakes a retained job and queues one
+catch-up job for the current accepted main if GitHub is behind. The retained job
+keeps its cursor and runs first. No further landing is needed.
+
+**Paused landings remain separate in Forge. Their combined source changes reach
+GitHub in one catch-up commit**, naming each covered landing's subject and short
+receipt id (the first 20, then “...and K more”), with the latest main's Forge
+trailers. It never adds actor ids. The paused window does not become one GitHub
+commit per landing. Only a publish that skips landings reads this history: one
+mapping-receipt lookup and at most 21 rows by sequence. Normal adjacent publishes
+add **zero reads**; the commit message is pinned before any GitHub write.
+The normal non-forced fast-forward check still applies. A push already sent to
+GitHub may finish while paused; later steps check the policy before continuing.
+Un-pausing fences a pending or in-progress old worker before continuing its saved
+cursor, so a late failure cannot stop the replacement.
+
+**Disconnect** asks once, naming the repository and what stops, then clears the
+matching mirror policy and stored binding atomically. It withdraws the
+repository's runner grant for the owner's projects. A preconfigured mirror
+without a stored binding can also be disconnected: the request pins the displayed
+repository and ends its mirror policy. Operator-configured access stays in place,
+so its owner can turn the mirror on again without another GitHub approval. A
+stored link needs GitHub approval to reconnect. GitHub source/history, Forge
+source, Lanes and mirror history stay.
+
+Pause, un-pause and Disconnect require the owner person. `nforge github disconnect`
+prints Settings → GitHub mirror guidance and changes nothing. An owner CLI device
+can still run `nforge github resume` to recover an **already-enabled** mirror or
+queue its missing catch-up; that command cannot un-pause a disabled policy.
+Contributors and scoped agent grants cannot change these settings or recover an
+owner's job.
+
+Mirrors switched off before Pause existed still show **Turn the mirror on**. Resume
+keeps their previous direction: the read uses the stored policy or the most recent
+recorded enabled direction for the same repository, selected by index even after
+unrelated policy edits. It never scans the whole policy history.
 
 The screen has one bounded read subscription: selected mirror metadata plus one
-indexed binding lookup for the owner’s disconnect control. Idle adds no calls.
-No landing-path calls, source storage or per-landing cost are added.
+indexed binding lookup for the owner's Disconnect control. A legacy off mirror
+without its saved direction adds one selected policy-history row. Idle adds no
+calls. Catch-up adds selected main/receipt/job metadata only to explicit recovery;
+normal landing calls, source placement and per-landing cost are unchanged.
 
-For server-authority projects, each hosted main publication queues one mirror
+While the mirror is on for a server-authority project, each hosted main publication queues one mirror
 job in the same transaction. The fixed Convex action uses the installed GitHub
 App and Git Data API. It reads exact hosted/R2 source, creates only changed
 blobs in windows of at most 100 and 8 MiB (or one larger file), then creates a
@@ -744,9 +771,10 @@ To change it later, use the agent `set-policy` action (CLI or MCP):
 nforge x ROOT set-policy '{"githubMirror":{"repo":"OWNER/NAME","autoPush":true,"laneRefs":false}}'
 ```
 
-The setting defaults off and survives autonomy preset changes. Set `autoPush:false`
-with the same repo to stop future automatic attempts. Only main is published. Lane
-refs remain unpublished.
+The setting defaults off and survives autonomy preset changes. To stop it, the owner
+person uses Pause or Disconnect in Settings → GitHub mirror; CLI/device
+`autoPush:false` writes cannot substitute for that person. Only main is published.
+Lane refs remain unpublished.
 
 Automatic projection also omits paths protected by capture's credential-name and
 metadata rules even when an imported State retained them. It shares native

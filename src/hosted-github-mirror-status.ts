@@ -29,7 +29,7 @@ const resumeSteps: Record<string, string> = {
   GITHUB_VERIFY_POST_FAILED:
     'the project owner runs nforge github resume PROJECT to post forge/verify again (pushing the pull request branch again also checks the new head); the merge stays blocked until then',
   GITHUB_SYNC_BINDING:
-    'the project owner runs nforge github resume PROJECT to point the mirror at the new repository; the next landing then publishes Forge main there',
+    'the project owner runs nforge github resume PROJECT to point the mirror at the new repository and queue current main there',
 };
 /** What a person or agent does about a stopped mirror, or null when nothing is needed. One place
  * for the web, the CLI and MCP (Issue 68361cd5). */

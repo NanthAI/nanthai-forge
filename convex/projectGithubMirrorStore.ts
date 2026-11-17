@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { cancelPendingTask } from './schedulerCancel';
 import { wakeCiMirrorWaiters } from './projectCiStatusMirror';
 import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
-import { mirrorJob, mirrorRow, scheduleMirror } from './projectGithubMirrorQueue';
+import { mirrorJob, mirrorRow, scheduleMirror, resumeMirrorJob } from './projectGithubMirrorRows';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
 import { readHostedRecord } from './projectHostedRecords';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
@@ -12,7 +11,8 @@ import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
 import { githubSyncCommitSchema, githubSyncSchema } from '../src/github-sync-types';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
-import { mirrorMessage, noteMessage } from '../src/landing-message';
+import { noteMessage } from '../src/landing-message';
+import { mirrorPublishMessage } from './projectGithubMirrorMessage';
 import { missingObjectDelays, transientMirrorCodes } from '../src/hosted-github-retry';
 import { inboundBegin } from './projectGithubInbound';
 import { finish, inboundOutcomeSchema, yieldToInbound } from './projectGithubInboundQueue';
@@ -78,13 +78,7 @@ async function seed(ctx: MutationCtx, input: { jobId: Id<'projectGithubMirrorJob
     'GITHUB_SYNC_IDENTITY',
     'Configure the existing noreply sync identity with FORGE_GITHUB_SYNC_NAME and FORGE_GITHUB_SYNC_EMAIL, or retain it in githubSync.',
   );
-  const published = mirrorMessage({
-    ...receipt,
-    fallback,
-    state: receipt.candidate.head,
-    acceptanceId: receipt.id,
-    viewId: receipt.candidate.id,
-  });
+  const published = await mirrorPublishMessage(ctx, job.projectId, receipt, row.sequence, binding, fallback);
   // The first publish after a failed inbound landing says it takes that GitHub change out here.
   const outcome = queue.inbound ? inboundOutcomeSchema.parse(JSON.parse(queue.inbound)) : null;
   const note =
@@ -269,37 +263,6 @@ export const failed = internalMutation({
     return null;
   },
 });
-/** Explicit recovery of the same cursor, fencing failed or expired workers. Shared by the
- * operator mutation below and the owner command (projectGithubMirrorResume). */
-export async function resumeMirrorJob(ctx: MutationCtx, jobId: Id<'projectGithubMirrorJobs'>) {
-  const job = await ctx.db.get(jobId);
-  if (!job) return { status: 'missing' as const, step: null };
-  if (job.status === 'done') return { status: 'done' as const, step: job.step };
-  const queue = await mirrorRow(ctx, job.projectId);
-  invariant(queue?.activeId === job._id, 'GITHUB_SYNC_PENDING', 'Resume the active retained mirror job.');
-  const task = job.scheduledId ? await ctx.db.system.get(job.scheduledId) : null;
-  const live = task && ['pending', 'inProgress'].includes(task.state.kind);
-  // Actions have a ten-minute runtime limit. A future backoff is still live;
-  // an overdue task beyond that window is recoverable by explicit resume.
-  if (live && job.status !== 'failed' && task.scheduledTime + 11 * 60_000 > Date.now())
-    return { status: 'already-running' as const, step: job.step };
-  if (live) await cancelPendingTask(ctx, task._id, task);
-  const step = job.step + 1;
-  await ctx.db.patch(job._id, {
-    status: 'running',
-    step,
-    failures: 0,
-    nextAttemptAt: undefined,
-    error: undefined,
-    detail: undefined,
-    httpStatus: undefined,
-    apiOperation: undefined,
-    requestBytes: undefined,
-  });
-  await mirrorJob(ctx, { jobId: job._id, step });
-  await scheduleMirror(ctx, { _id: job._id, step });
-  return { status: 'scheduled' as const, step };
-}
 export const resume = internalMutation({
   args: { jobId: v.id('projectGithubMirrorJobs') },
   returns: v.object({

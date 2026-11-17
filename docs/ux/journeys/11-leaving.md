@@ -16,7 +16,7 @@ Walked: `policy`, `nforge github status`, `help github`, `help git`, the GitHub 
 | 6 | Download source and Work | Web → Settings → Admin → Transfer & backups | "Stored checkpoints", **Download source and Work**, and "Archive contents & export" with three commands: `nforge work ROOT '{"action":"export-work","archive":true}'`, `nforge restore-work ARCHIVE.tar.gz NEW_DIRECTORY`, `nforge restore-native ARCHIVE.tar.gz NEW_DIRECTORY`. (source) |
 | 7 | Export planning | Work → Planning → "Export planning history"; Initiative → "Export" | Not walked. |
 | 8 | Export account data | Account → "Your Forge data" | "Export your ownership metadata or remove selected Forge resources. Source archives and encrypted SecretObjects use their own export controls." **Download metadata**. (source) |
-| 9 | Stop the mirror | `nforge github disconnect PROJECT`, or a policy change | From an agent sign-in a mirror change is held for the owner. No web control was found. (docs, source) |
+| 9 | Stop the mirror | Settings → GitHub mirror → Pause or Disconnect (owner person) | Pause keeps the link and direction; Disconnect confirms first. `nforge github disconnect PROJECT` prints this web path and changes nothing. (docs, source; synthetic tests) |
 | 10 | Delete the project | Settings → Delete project | Hidden at once, restorable for 90 days, then purged; **Delete permanently now** is separate. (source) |
 
 ## Findings

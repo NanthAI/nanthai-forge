@@ -17,8 +17,12 @@ export async function enqueueGithubMirror(
   const old = await ctx.db
     .query('projectGithubMirrorJobs')
     .withIndex('by_project_and_receipt', q => q.eq('projectId', project._id).eq('receiptId', receipt.id))
-    .unique();
-  if (old) return;
+    .order('desc')
+    .first();
+  // Retarget can publish the same receipt to another repository. The newest job is this
+  // receipt's latest target; a retry for that target reuses it, including case-only renames.
+  if (old?.repository.toLowerCase() === policy.repo.toLowerCase())
+    return { jobId: old._id, scheduled: false };
   let queue = await ensureMirrorRow(ctx, project._id, policy.repo);
   if (queue.repositoryKey !== queue.repository.toLowerCase())
     await ctx.db.patch(queue._id, { repositoryKey: queue.repository.toLowerCase() });
@@ -36,8 +40,10 @@ export async function enqueueGithubMirror(
     state: receipt.candidate.head,
     ...(queue.repository === policy.repo ? {} : { error: 'GITHUB_SYNC_BINDING' }),
   });
-  if (!queue.activeId && queue.repository === policy.repo) {
+  const scheduled = !queue.activeId && queue.repository === policy.repo;
+  if (scheduled) {
     await ctx.db.patch(queue._id, { activeId: jobId });
     await scheduleMirror(ctx, { _id: jobId, step: 0 });
   }
+  return { jobId, scheduled };
 }

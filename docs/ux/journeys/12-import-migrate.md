@@ -21,7 +21,7 @@ Walked: the import and new-project sources, `nforge --help`, `help github`, `hel
 | 11 | People who still push to GitHub | Two-way: policy `githubMirror.inbound:true`. A push or merge on GitHub `main` "comes back in as an ordinary Forge landing and passes the same checks and review rules", attributed to the owner as agent `github-inbound`. | If that landing fails, `GITHUB_INBOUND_FAILED`; "the next Forge landing publishes Forge main over the GitHub commit, and its commit message says which GitHub commit it takes out. Fix and land that Lane to bring the change back." Limits: 500 changed directories and 5,000 changed files per push. (docs) |
 | 12 | Pull requests on the mirror | A pull request into `main` gets a check-only run and a `forge/verify` status. Nothing lands until GitHub merges it. | A pull request from a fork waits for the owner: "Fork PR: a project owner must approve this run." (docs) |
 | 13 | A local folder that is not on GitHub | `nforge host ROOT [--name NAME] [--visibility private or public]`. | Not walked. A 29,000-file folder exceeded a 20-second budget and reported `WORK_GIT_FAILED` (open Issue 2abda01f). |
-| 14 | Switching GitHub off | `nforge github disconnect PROJECT`. | No web control (journey 11, step 9). |
+| 14 | Switching GitHub off | Settings → GitHub mirror → Pause or Disconnect (owner person). | CLI disconnect directs the owner there; paused landings catch up in one combined GitHub commit on Resume (journey 11, step 9). |
 
 ## Findings
 

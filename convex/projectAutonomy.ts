@@ -42,6 +42,7 @@ import {
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 import { retargetGithubMirror } from './projectGithubMirrorRetarget';
+import { resumeMirrorQueue } from './projectGithubMirrorCatchup';
 /** Device identity always uses agent authority; callers may explicitly downscope to it. */
 export async function acceptanceActor(
   ctx: QueryCtx | MutationCtx | ActionCtx,
@@ -148,6 +149,14 @@ async function writePolicy(
   // (one indexed read, only when this edit sets the mirror).
   if (command.githubMirror && policy.githubMirror?.autoPush)
     await retargetGithubMirror(ctx, project._id, policy.githubMirror.repo);
+  // Un-pause is atomic: a lost web reply cannot leave a retained job and catch-up asleep.
+  if (
+    project.sourceAuthority?.mode === 'server' &&
+    sameMirror &&
+    previous.githubMirror?.autoPush === false &&
+    mirror?.autoPush
+  )
+    await resumeMirrorQueue(ctx, { ...project, autonomyPolicy: policy }, true);
   await ctx.db.insert('projectPolicyChanges', {
     projectId: project._id,
     operationId: command.operationId,
@@ -260,7 +269,7 @@ export const set = mutation({
           !command.githubMirror ||
           (command.githubMirror.autoPush && effectivePolicy(project).githubMirror?.autoPush !== false),
         'PROJECT_UNAVAILABLE',
-        'Only the owner person can pause or resume the GitHub mirror.',
+        'Only the owner person can pause or un-pause the GitHub mirror. Open Forge → Settings → GitHub mirror.',
       );
       const original = await ctx.db
         .query('projectPolicyChanges')

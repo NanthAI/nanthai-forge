@@ -1,59 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-// P8: owner-person pause/resume retains the link/direction; disconnect uses the CLI path and cannot repeat removal.
+// P8: owner-person pause/resume retains the link/direction; disconnect uses the binding transaction and cannot repeat removal.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { lanesFixture } from './hosted-lanes-fixture.mjs';
+import { mirrorControlsFixture as fixture } from './github-mirror-controls-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 const policy = await import(moduleUrl('../convex/projectAutonomy.ts'));
 const binding = await import(moduleUrl('../convex/githubBindingStore.ts'));
-const mirror = await import(moduleUrl('../convex/projectGithubMirrorRead.ts'));
 const resume = await import(moduleUrl('../convex/projectGithubMirrorResume.ts'));
 const queue = await import(moduleUrl('../convex/projectGithubInboundQueue.ts'));
 const rows = await import(moduleUrl('../convex/projectGithubMirrorRows.ts'));
 const refusal = e => (e.data?.code ?? e.code) === 'PROJECT_UNAVAILABLE';
-function fixture(inbound = true) {
-  const f = lanesFixture();
-  const projectId = f.insert('hostedProjects', {
-    owner: 'owner',
-    key: randomUUID(),
-    name: 'Synthetic',
-    currentBackup: null,
-    revision: 0,
-    sourceAuthority: { mode: 'server', epoch: 1 },
-    autonomyPolicy: {
-      ...policyPreset('supervised'),
-      githubMirror: { repo: 'example/repo', autoPush: true, laneRefs: false, inbound },
-    },
-  });
-  const bound = {
-    projectId,
-    repoId: 42,
-    fullName: 'example/repo',
-    installationId: 9,
-    boundBy: 'owner',
-    boundAt: 1,
-  };
-  const bindingId = f.insert('projectGithubBindings', bound);
-  const mirrorId = f.insert('projectGithubMirrors', {
-    projectId,
-    repository: 'example/repo',
-    repositoryKey: 'example/repo',
-    activeId: null,
-    mapping: null,
-  });
-  const read = () => f.call('mirror', mirror.read, { projectId });
-  const change = autoPush => ({
-    projectId,
-    command: JSON.stringify({
-      action: 'set-policy',
-      operationId: randomUUID(),
-      githubMirror: { repo: 'example/repo', autoPush, inbound: autoPush && inbound, laneRefs: false },
-    }),
-  });
-  return { ...f, projectId, bindingId, mirrorId, bound, read, change };
-}
 test('pause then resume retains repository, two-way direction and mirror history without inbound work while paused', async () => {
   const f = fixture();
   const before = structuredClone(f.tables.projectGithubBindings.get(f.bindingId));
@@ -94,11 +52,19 @@ test('disconnect ends the mirror and its binding atomically, preserves source, a
   await f.call('disconnect-retry', binding.remove, request);
   assert.equal(f.tables.projectGithubBindings.size, 1, 'new connection survives an old retry');
 });
-test('another person, a device and an agent credential cannot pause, resume or disconnect; the web offers no owner controls to devices', async () => {
-  for (const actor of ['stranger', 'device', 'agent']) {
+test('a write contributor, stranger and owner device cannot pause or disconnect; only the owner recovers a job', async () => {
+  for (const actor of ['stranger', 'contributor', 'device']) {
     const f = fixture();
     let subject = actor;
-    if (actor !== 'stranger') {
+    if (actor === 'contributor') {
+      f.insert('projectContributors', { projectId: f.projectId, contributor: subject });
+      assert.equal(
+        (await f.read(subject)).owner,
+        false,
+        'the caller has real contributor access, not stranger access',
+      );
+    }
+    if (actor === 'device') {
       subject = 'owner';
       f.insert('cliCredentials', {
         owner: subject,
@@ -106,7 +72,7 @@ test('another person, a device and an agent credential cannot pause, resume or d
         scope: 'cli',
         credentialId: `${actor}-key`,
         tokenHash: 'synthetic',
-        issuedAt: 1,
+        issuedAt: Date.now(),
         expiresAt: Date.now() + 600000,
         revoked: false,
       });
@@ -122,12 +88,20 @@ test('another person, a device and an agent credential cannot pause, resume or d
         binding.remove,
         { projectId: f.projectId, operationId: randomUUID(), repoId: 0, repository: 'example/repo' },
       ],
-      ['resume', resume.resume, { projectId: f.projectId }],
     ])
       await assert.rejects(f.call(name, fn, input, subject), refusal, actor + ' ' + name);
+    if (actor !== 'device')
+      await assert.rejects(
+        f.call('recover-job', resume.resume, { projectId: f.projectId }, subject),
+        refusal,
+      );
     assert.equal(f.tables.projectGithubBindings.size, 1);
     assert.equal(f.tables.hostedProjects.get(f.projectId).autonomyPolicy.githubMirror.autoPush, true);
-    if (actor !== 'stranger') assert.equal((await f.read()).owner, false);
+    if (actor === 'contributor') {
+      await f.call('owner-pause', policy.set, f.change(false));
+      await assert.rejects(f.call('contributor-unpause', policy.set, f.change(true), subject), refusal);
+    }
+    if (actor === 'device') assert.equal((await f.read()).owner, false);
   }
 });
 test('paused two-way policy fences an already queued mirror step before it can reach GitHub', async () => {
