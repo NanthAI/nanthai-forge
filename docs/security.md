@@ -233,11 +233,16 @@ counter kept beside the device keys. Writers use one exclusive lock file with
 PID, process-start marker and random token; only a dead holder's matching token
 may be reclaimed. Lock contents are fsynced before an exclusive hard-link
 publication; dead reclaim gates are recoverable, and incomplete legacy locks
-become reclaimable after 30 seconds. Readers use atomic snapshots and re-read
+become reclaimable after 30 seconds. Completed candidate files left by a crashed
+holder are swept only when their token matches and their recorded process is
+dead; live, incomplete or unidentifiable candidates are preserved. Readers use atomic snapshots and re-read
 under that lock before
 reporting lost trust. Writes use private temporary files, fsync and atomic rename.
 Network calls never hold the lock, and a response is re-verified against the latest
 pin before publication. Unchanged verification changes no pin, index or counter.
+Restoring one kind after index or counter recovery keeps every unchecked sibling
+kind lost until it is restored independently. Lost-kind identity survives later
+writes, and rebuilding never resets counters below an earlier publication.
 These file-store/lock deviations remain explicit Gate B review items.
 
 A local retry journal retains only the exact sealed request while its outcome is

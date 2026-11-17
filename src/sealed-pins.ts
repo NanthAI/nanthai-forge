@@ -1,67 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
-import { createHmac } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { serialize, deserialize } from 'node:v8';
+import { serialize } from 'node:v8';
 import { isDeepStrictEqual } from 'node:util';
 import { ForgeError, invariant } from './errors.js';
-import { equalBytes, fixed, forgeSecretId, frame, uint } from './sealed-format.js';
+import { equalBytes, forgeSecretId } from './sealed-format.js';
 import { headBytes } from './sealed-records.js';
 import { verifyBytes } from './sealed-keys.js';
-import {
-  atomicPrivate,
-  readPrivate,
-  secretLocked,
-  wipeDeviceKeys,
-  type KeyStore,
-  type StoredDeviceKeys,
-} from './sealed-local.js';
-import { verifySealedReply, type SecretPin, type SealedReply, type VerifyRequest } from './sealed-verify.js';
+import { atomicPrivate, secretLocked, wipeDeviceKeys, type KeyStore } from './sealed-local.js';
+import { verifySealedReply, type SealedReply, type VerifyRequest } from './sealed-verify.js';
+import { knownKinds, lost, packed, unpack, type Index, type PinFile } from './sealed-pin-store.js';
 
-type PinFile = {
-  counter: number;
-  lostKinds?: number[];
-  kinds: Partial<Record<1 | 2 | 3, { pin: SecretPin; cache: SealedReply; fetchedAt: number }>>;
-};
-type Index = { counter: number; files: Record<string, { counter: number; kinds: number[] }> };
-const lost = (ok: unknown) =>
-  invariant(
-    ok,
-    'SECRETS_PIN_LOST',
-    'Secret trust is missing or older than its counter. Run nforge secret repin.',
-  );
 function discard(result: ReturnType<typeof verifySealedReply> | undefined) {
   result?.key?.fill(0);
   for (const secret of result?.secrets ?? []) secret.value.fill(0);
-}
-function packed(
-  purpose: 'pins' | 'pin-index',
-  keys: StoredDeviceKeys,
-  counter: number,
-  body: Buffer,
-  projectId?: Buffer,
-) {
-  const mac = createHmac('sha256', keys.pinKey)
-    .update(
-      purpose === 'pins'
-        ? frame('pins', fixed(keys.id, 16), fixed(projectId!, 16), uint(counter), body)
-        : frame('pin-index', fixed(keys.id, 16), uint(counter), body),
-    )
-    .digest();
-  return serialize({ counter, body, mac });
-}
-function unpack<T>(
-  path: string,
-  purpose: 'pins' | 'pin-index',
-  keys: StoredDeviceKeys,
-  projectId?: Buffer,
-): T {
-  const stored = deserialize(readPrivate(path)) as { counter: number; body: Buffer; mac: Buffer };
-  const rebuilt = deserialize(packed(purpose, keys, stored.counter, stored.body, projectId)) as typeof stored;
-  lost(equalBytes(stored.mac, rebuilt.mac));
-  const body = deserialize(stored.body) as T & { counter: number };
-  lost(body.counter === stored.counter);
-  return body;
 }
 export class SecretPins {
   readonly lock: string;
@@ -90,7 +42,7 @@ export class SecretPins {
         lost(existsSync(path));
         file = unpack<PinFile>(path, 'pins', keys!, id);
         lost(file.counter === entry.counter || file.counter === entry.counter + 1);
-        lost(entry.kinds.every(k => Object.hasOwn(file.kinds, k)));
+        lost(entry.kinds.every(k => file.lostKinds?.includes(k) || Object.hasOwn(file.kinds, k)));
       } else if (existsSync(path)) {
         // Interrupted first file publication, before its index write.
         file = unpack<PinFile>(path, 'pins', keys!, id);
@@ -144,7 +96,7 @@ export class SecretPins {
           s.file.counter !== (s.index.files[s.name]?.counter ?? 0) ||
           s.index.counter !== s.keys.pinCounter
         ) {
-          s.index.files[s.name] = { counter: s.file.counter, kinds: Object.keys(s.file.kinds).map(Number) };
+          s.index.files[s.name] = { counter: s.file.counter, kinds: knownKinds(s.file) };
           s.index.counter = Math.max(s.index.counter, s.keys.pinCounter) + 1;
           atomicPrivate(this.indexPath, packed('pin-index', s.keys, s.index.counter, serialize(s.index)));
           s.keys.pinCounter = s.index.counter;
@@ -159,7 +111,7 @@ export class SecretPins {
           counter: Math.max(s.index.counter, s.keys.pinCounter) + 1,
           files: {
             ...s.index.files,
-            [s.name]: { counter: file.counter, kinds: Object.keys(file.kinds).map(Number) },
+            [s.name]: { counter: file.counter, kinds: knownKinds(file) },
           },
         };
         atomicPrivate(s.path, packed('pins', s.keys, file.counter, serialize(file), s.id));
@@ -167,7 +119,7 @@ export class SecretPins {
         this.store.save({
           ...s.keys,
           pinCounter: index.counter,
-          pinned: { ...s.keys.pinned, [s.name]: Object.keys(file.kinds).map(Number) },
+          pinned: { ...s.keys.pinned, [s.name]: knownKinds(file) },
         });
         return result;
       } catch (error) {
@@ -243,7 +195,7 @@ export class SecretPins {
           recoveredIndex = false;
         try {
           index = unpack<Index>(this.indexPath, 'pin-index', currentKeys!);
-          lost(index.counter >= currentKeys!.pinCounter);
+          lost(index.counter === currentKeys!.pinCounter || index.counter === currentKeys!.pinCounter + 1);
         } catch {
           recoveredIndex = true;
           index = {
@@ -265,27 +217,35 @@ export class SecretPins {
         } catch {
           /* Explicitly confirmed rebuild replaces only this project/kind. */
         }
+        const entry = index.files[name],
+          lostSiblings =
+            recoveredIndex ||
+            index.counter !== currentKeys!.pinCounter ||
+            previous.counter !== (entry?.counter ?? 0),
+          remembered = [
+            ...knownKinds(previous),
+            ...(entry?.kinds ?? []),
+            ...(currentKeys!.pinned?.[name] ?? []),
+          ],
+          counter = Math.max(previous.counter, index.counter, currentKeys!.pinCounter) + 1;
         const file: PinFile = {
-          counter: previous.counter + 1,
+          counter,
           lostKinds: [
-            ...new Set([
-              ...(previous.lostKinds ?? []),
-              ...(recoveredIndex ? Object.keys(previous.kinds).map(Number) : []),
-            ]),
+            ...new Set([...(previous.lostKinds ?? []), ...(lostSiblings ? remembered : [])]),
           ].filter(kind => kind !== request.setKind),
           kinds: {
             ...previous.kinds,
             [request.setKind]: { pin: result.pin, cache: reply, fetchedAt: Date.now() },
           },
         };
-        index.counter = Math.max(index.counter, currentKeys!.pinCounter) + 1;
-        index.files[name] = { counter: file.counter, kinds: Object.keys(file.kinds).map(Number) };
+        index.counter = counter;
+        index.files[name] = { counter: file.counter, kinds: knownKinds(file) };
         atomicPrivate(path, packed('pins', currentKeys!, file.counter, serialize(file), id));
         atomicPrivate(this.indexPath, packed('pin-index', currentKeys!, index.counter, serialize(index)));
         this.store.save({
           ...currentKeys!,
           pinCounter: index.counter,
-          pinned: { ...currentKeys!.pinned, [name]: Object.keys(file.kinds).map(Number) },
+          pinned: { ...currentKeys!.pinned, [name]: knownKinds(file) },
         });
         return result;
       } catch (error) {

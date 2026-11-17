@@ -1,0 +1,142 @@
+// SPDX-License-Identifier: Apache-2.0
+import './check-runtime.mjs';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+  readdirSync,
+  rmSync,
+  unlinkSync,
+  existsSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { serialize, deserialize } from 'node:v8';
+import { randomUUID } from 'node:crypto';
+import { childEnv } from '../scripts/child-env.mjs';
+import { FileKeyStore, secretLocked } from '../dist/sealed-local.js';
+import { SecretPins } from '../dist/sealed-pins.js';
+import { forgeSecretId } from '../dist/sealed-format.js';
+import { deviceKeys } from '../dist/sealed-keys.js';
+import { fixture } from './helpers/sealed-fixture.mjs';
+
+const clear = result => {
+  result.key?.fill(0);
+  for (const secret of result.secrets) secret.value.fill(0);
+};
+function local(t, f = fixture()) {
+  const directory = mkdtempSync(join(tmpdir(), 'forge-sharing-foundations-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const store = new FileKeyStore(join(directory, 'device.bin'));
+  store.save({ ...f.keys, pinCounter: 0 });
+  return { directory, f, store, pins: new SecretPins(directory, store) };
+}
+const pinPath = (directory, project) =>
+  join(directory, forgeSecretId('project', project).toString('hex') + '.bin');
+const pinBytes = directory =>
+  Object.fromEntries(
+    readdirSync(directory)
+      .filter(name => name.endsWith('.bin'))
+      .map(name => [name, readFileSync(join(directory, name))]),
+  );
+
+for (const cause of ['older project file', 'missing index and project file'])
+  test(`L2 rebuilding Development after ${cause} preserves lost Checks trust across later writes`, async t => {
+    const { directory, f, pins } = local(t),
+      project = f.request.forgeProjectId,
+      checks = fixture(17, project, 2),
+      path = pinPath(directory, project);
+    clear(await pins.verifyAndSave(f.reply, f.request, 1));
+    clear(await pins.verifyAndSave(checks.reply, checks.request, 1));
+    const prior = readFileSync(path);
+    f.bump();
+    f.name();
+    clear(await pins.verifyAndSave(f.reply, f.request, 2));
+    if (cause === 'older project file') writeFileSync(path, prior);
+    else {
+      unlinkSync(path);
+      unlinkSync(pins.indexPath);
+    }
+    await assert.rejects(pins.load(project, 1), { code: 'SECRETS_PIN_LOST' });
+    clear(await pins.rebuild(f.reply, f.request, true, async () => true));
+    assert(await pins.load(project, 1));
+    await assert.rejects(pins.load(project, 2), { code: 'SECRETS_PIN_LOST' });
+    assert.equal(await pins.load(project, 3), null, 'a never-pinned kind retains first contact');
+    const rebuilt = readFileSync(path);
+    writeFileSync(path, prior);
+    await assert.rejects(pins.load(project, 1), { code: 'SECRETS_PIN_LOST' });
+    writeFileSync(path, rebuilt);
+    f.bump();
+    f.name();
+    clear(await pins.verifyAndSave(f.reply, f.request, 3));
+    unlinkSync(pins.indexPath);
+    clear(await pins.rebuild(f.reply, f.request, true, async () => true));
+    await assert.rejects(pins.load(project, 2), { code: 'SECRETS_PIN_LOST' });
+    assert.equal(await pins.load('never-pinned-project', 1), null);
+  });
+
+test('L8 an invalid intermediate Checks owner is refused even when a later removal leaves a valid final roster', async t => {
+  const f = fixture(17, 'fixture-project', 2),
+    { directory, pins } = local(t, f);
+  clear(await pins.verifyAndSave(f.reply, f.request, 1));
+  const before = pinBytes(directory),
+    accountId = forgeSecretId('account', 'second-owner'),
+    other = deviceKeys(accountId, f.random);
+  f.bump();
+  f.transition({
+    added: [f.entry(other, { accountId, role: 1, how: 6, addedAtRosterVersion: 2 })],
+  });
+  f.rekey({ removed: [other.id], epochBumped: 1 });
+  await assert.rejects(
+    pins.verifyAndSave(f.reply, f.request, 2),
+    error =>
+      error.code === 'SECRETS_ROSTER_REFUSED' &&
+      error.message === 'Checks owner account has no Development owner device.',
+  );
+  assert.deepEqual(pinBytes(directory), before);
+
+  // The identical Checks chain remains valid when trusted Development authorizes that account.
+  const development = fixture();
+  development.transition({
+    added: [development.entry(other, { accountId, role: 1, how: 6, addedAtRosterVersion: 2 })],
+  });
+  development.transition({ newChecksPointer: f.request.development.roster.checksPointer });
+  const request = { ...f.request, development: development.pin() };
+  clear(await pins.verifyAndSave(f.reply, request, 2));
+});
+
+test('F3 a killed holder loses its lock candidate while live and unidentifiable candidates are preserved', async t => {
+  const { directory } = local(t),
+    path = join(directory, 'pins.lock'),
+    child = spawn(process.execPath, ['tests/fixtures/sealed-pin-worker.mjs', 'hold', directory], {
+      env: childEnv(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  t.after(() => {
+    if (child.exitCode === null) child.kill('SIGKILL');
+  });
+  await once(child.stdout, 'data');
+  const candidate = readdirSync(directory).find(name => name.endsWith('.candidate')),
+    candidatePath = join(directory, candidate),
+    bytes = readFileSync(candidatePath);
+  await assert.rejects(
+    secretLocked(path, () => true, 0),
+    { code: 'SECRETS_PIN_BUSY' },
+  );
+  assert.deepEqual(readFileSync(candidatePath), bytes, 'a live candidate must not be swept');
+  const exited = once(child, 'exit');
+  child.kill('SIGKILL');
+  await exited;
+  const mismatched = `${path}.${randomUUID()}.candidate`,
+    incomplete = `${path}.${randomUUID()}.candidate`;
+  writeFileSync(mismatched, serialize(deserialize(bytes)), { mode: 0o600 });
+  writeFileSync(incomplete, Buffer.alloc(0), { mode: 0o600 });
+  assert.equal(await secretLocked(path, () => true), true);
+  assert.equal(existsSync(candidatePath), false, 'the dead holder candidate must be reclaimed');
+  assert.deepEqual(readFileSync(mismatched), bytes);
+  assert.equal(readFileSync(incomplete).length, 0);
+});

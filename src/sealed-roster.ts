@@ -181,7 +181,7 @@ export function walkTransition(
   from: Roster,
   t: Transition,
   revoked: readonly Buffer[],
-  _development?: Roster,
+  development?: Roster,
 ) {
   invariant(
     t.fromVersion === from.rosterVersion &&
@@ -269,7 +269,7 @@ export function walkTransition(
     ],
     former: former.filter(e => !d.droppedFormer.some(id => sameId(id, e.deviceId))),
   };
-  checkRoster(next);
+  checkRoster(next, development);
   invariant(
     sameId(framedHash(rosterBytes(next)), t.toHash),
     'SECRETS_FORK',

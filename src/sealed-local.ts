@@ -8,12 +8,13 @@ import {
   linkSync,
   mkdirSync,
   openSync,
+  opendirSync,
   readFileSync,
   renameSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { deserialize, serialize } from 'node:v8';
 import { randomUUID } from 'node:crypto';
 import { ForgeError, invariant } from './errors.js';
@@ -87,9 +88,9 @@ const staleLock = (path: string) => {
     return undefined;
   }
 };
-function removeStale(path: string) {
+function removeStale(path: string, expectedToken?: string) {
   const before = staleLock(path);
-  if (!before?.stale) return false;
+  if (!before?.stale || (expectedToken !== undefined && before.lock?.token !== expectedToken)) return false;
   const now = staleLock(path);
   if (
     !now?.stale ||
@@ -98,12 +99,33 @@ function removeStale(path: string) {
     now.lock?.token !== before.lock?.token
   )
     return false;
-  unlinkSync(path);
-  return true;
+  try {
+    unlinkSync(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+}
+/** Stream the directory; a complete candidate's token and dead process must both match. */
+function sweepCandidates(path: string) {
+  const directory = opendirSync(dirname(path)),
+    prefix = `${basename(path)}.`;
+  try {
+    for (let entry; (entry = directory.readSync());) {
+      if (!entry.isFile() || !entry.name.startsWith(prefix) || !entry.name.endsWith('.candidate')) continue;
+      const token = entry.name.slice(prefix.length, -'.candidate'.length);
+      if (/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(token))
+        removeStale(join(dirname(path), entry.name), token);
+    }
+  } finally {
+    directory.closeSync();
+  }
 }
 /** Publish complete, fsynced lock contents with an exclusive hard link. No empty lock window. */
 export async function secretLocked<T>(path: string, run: () => T, waitMs = 10_000): Promise<T> {
   privateDirectory(dirname(path));
+  sweepCandidates(path);
   const own = { ...processIdentityIfKnown(), token: randomUUID() },
     began = Date.now();
   const temporary = `${path}.${own.token}.candidate`;
