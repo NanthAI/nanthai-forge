@@ -70,6 +70,18 @@ test('a runner that never started says not started, not failed', () => {
   assert.equal(checkSentence(page, at).rest, nextLine('wait'));
 });
 
+test('while CI has not started, the head gives the usual answer time from this project or says it is not reported', () => {
+  const waiting = { main: { result: 'passed', redSince: null } };
+  const known = checkSentence(
+    read('waiting-for-runner', waiting, { expected: { seconds: 310, landings: 32 } }),
+    at,
+  );
+  assert.match(known.rest, /usually answer in about 5 min 10 s \(median of the last 32 landings\)/);
+  const unknown = checkSentence(read('waiting-for-runner', waiting, { expected: null }), at);
+  assert.match(unknown.rest, /not reported/);
+  assert.doesNotMatch(unknown.rest, /\d+ min/, 'no number without evidence');
+});
+
 test('a landed check has nothing to explain and says it is on main', () => {
   const page = { ...read('landed', {}), landing: landing('landed', { phase: 'landed', receiptId: 'x' }) };
   assert.equal(page.cause, null);
@@ -91,6 +103,6 @@ test('the copied prompt names the Lane, the cause and the read command, not the 
   });
   const prompt = agentPrompt(page, 'tidepool');
   assert.match(prompt, /Lane “Retry budget for fetch adapter” in tidepool/);
-  assert.match(prompt, new RegExp(`status '\\{"laneId":"${laneId}"\\}'`));
+  assert.match(prompt, /status '\{"submissionId":"s"\}'/, 'the landing status, which carries the same cause');
   assert.doesNotMatch(prompt, /token=abc/);
 });

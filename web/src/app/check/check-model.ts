@@ -40,6 +40,9 @@ export type CheckRead = {
   cause: FailureCause | null;
   main: { result: string | null; redSince: string | null } | null;
   lane: { count: number; complete: boolean } | null;
+  /** The project's median check time over its recent landings, while this check has not answered; null when
+   * fewer than three landings reported one (convex/projectFailureCause.ts). Absent on older replies. */
+  expected?: { seconds: number; landings: number } | null;
 };
 
 export const suspectNames: Record<FailureSuspect, string> = {
@@ -88,7 +91,11 @@ export function checkSentence(
     const since = cause.mainFailingSince
       ? ` main has been failing since ${time(cause.mainFailingSince)}.`
       : '';
-    return { lead: cause.sentence, rest: `${since} ${nextLine(cause.next.recovery)}`.trim() };
+    const usual =
+      read.landing?.state === 'waiting-for-runner' && read.expected !== undefined
+        ? ` ${expectedLine(read)}`
+        : '';
+    return { lead: cause.sentence, rest: `${since} ${nextLine(cause.next.recovery)}${usual}`.trim() };
   }
   if (!read.landing)
     return { lead: 'This Lane has not asked to land yet.', rest: 'Its check runs when it does.' };
@@ -99,7 +106,18 @@ export function checkSentence(
         ? `It checked the exact result that landed, in ${plural(read.run.timings.shards, 'shard')}.`
         : '',
     };
-  return { lead: `${read.landing.label}.`, rest: read.landing.nextStep };
+  const usual =
+    (read.landing.state === 'queued' || read.landing.state === 'checking') && read.expected !== undefined
+      ? ` ${expectedLine(read)}`
+      : '';
+  return { lead: `${read.landing.label}.`, rest: `${read.landing.nextStep}${usual}` };
+}
+
+/** When the check usually answers, from this project's own recent landings, or that it is not reported. */
+function expectedLine(read: CheckRead) {
+  const expected = read.expected;
+  if (!expected) return 'How long checks usually take here is not reported yet.';
+  return `Checks here usually answer in about ${duration(expected.seconds)} (median of the last ${plural(expected.landings, 'landing')}).`;
 }
 
 const nextLines: Record<FailureRecovery, string> = {
@@ -111,6 +129,14 @@ const nextLines: Record<FailureRecovery, string> = {
 };
 export const nextLine = (recovery: FailureRecovery) => nextLines[recovery];
 
+/** The read an agent runs for this page: the landing's status carries the same `failureCause`; a Lane that has
+ * not asked to land has only its Lane status. */
+function statusCommand(read: CheckRead) {
+  return read.landing
+    ? `nforge agent . status '{"submissionId":"${read.landing.submissionId}"}'`
+    : `nforge agent . status '{"laneId":"${read.laneId}"}'`;
+}
+
 /** The prompt "Give this to your agent" copies: the cause and where to start, never a log or a secret. */
 export function agentPrompt(read: CheckRead, project: string) {
   const title = read.title ? `“${read.title}”` : read.laneId.slice(0, 8);
@@ -119,7 +145,7 @@ export function agentPrompt(read: CheckRead, project: string) {
     `The landing check of Lane ${title} in ${project} did not pass.`,
     cause ? `Forge says: ${cause.sentence}` : '',
     cause ? cause.next.agent : '',
-    `Read it: nforge agent . status '{"laneId":"${read.laneId}"}'`,
+    `Read it: ${statusCommand(read)}`,
   ]
     .filter(Boolean)
     .join(' ');
@@ -128,7 +154,7 @@ export function agentPrompt(read: CheckRead, project: string) {
 /** What an agent's reply carries for this page: the same cause, suspects and next step, as the chip's output. */
 export function agentReply(read: CheckRead) {
   const field = failureCauseField(read.cause);
-  const lines = [`$ nforge agent . status '{"laneId":"${read.laneId}"}'`];
+  const lines = [`$ ${statusCommand(read)}`];
   if (read.landing) lines.push(`state     ${read.landing.state}   ${read.landing.label}`);
   if (field) {
     lines.push(`cause     ${field.cause}   ${field.sentence}`);

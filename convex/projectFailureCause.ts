@@ -6,30 +6,60 @@ import { v } from 'convex/values';
 import { z } from 'zod';
 import { query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
-import { composeRow } from './projectHostedComposeStore';
 import { loadLanding } from './projectHostedLandingStore';
-import { landingAttemptRow, loadLandingAttempt } from './projectHostedLandingAttemptRead';
-import { loadHostedCheck } from './projectHostedCheckStore';
-import { checkFailureStep } from './projectHostedCheckFailure';
-import { auditRow } from './projectHostedMainAuditState';
 import { readHostedRecord } from './projectHostedRecords';
+import {
+  causeFrom,
+  landingRun,
+  laneLandingRequest,
+  laneOverlap,
+  lanePaths,
+  mainEvidence,
+} from './projectFailureCauseRead';
 import { report } from './errors';
-import { summarizeCheckRun } from '../src/hosted-check-summary';
-import { failureCause } from '../src/check-failure-cause';
-import { landingStateOf } from '../src/landing-state';
+import { landingStateOf, type LandingStateName } from '../src/landing-state';
+import { landingSpeedStateSchema } from '../src/landing-speed-alerts';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
+import type { QueryCtx } from './server';
+import type { Id } from './_generated/dataModel';
 
-const composeCandidate = z.looseObject({ candidateId: z.uuid() });
 const intentTitle = z.looseObject({ outcome: z.string() });
-/** At most this many changed paths feed attribution; a larger Lane is marked incomplete. */
-const LANE_PATHS = 2_000;
+/** States where the check has not answered yet, so the screen says when it usually does. */
+const unanswered = new Set<LandingStateName>(['queued', 'waiting-for-runner', 'checking']);
+/** The median check time needs at least this many settled landings; fewer is "not reported". */
+export const EXPECTED_MIN_SAMPLES = 3;
+
+/** The project's usual check time, from the landing-speed window it already keeps (src/landing-speed-alerts.ts:
+ * check minutes, from the check's reservation to its result, of up to the last 40 landings). One indexed read
+ * of a row of about 3.7 KB. Null when fewer than EXPECTED_MIN_SAMPLES landings reported a check time. */
+async function expectedCheck(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
+  const row = await ctx.db
+    .query('projectLandingSpeed')
+    .withIndex('by_project', q => q.eq('projectId', projectId))
+    .unique();
+  const parsed = row ? landingSpeedStateSchema.safeParse(JSON.parse(row.value)) : null;
+  return expectedFromSamples(parsed?.success ? parsed.data.samples : []);
+}
+/** Median check seconds of the samples that reported one. Pure. */
+export function expectedFromSamples(samples: readonly (readonly unknown[])[]) {
+  const minutes = samples
+    .map(sample => sample[2])
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0)
+    .sort((a, b) => a - b);
+  if (minutes.length < EXPECTED_MIN_SAMPLES) return null;
+  const middle = minutes.length >> 1;
+  const median = minutes.length % 2 ? minutes[middle]! : (minutes[middle - 1]! + minutes[middle]!) / 2;
+  return { seconds: Math.round(median * 60), landings: minutes.length };
+}
 
 /**
  * Budget per view (stated for b030c3c5): 1 query execution. Reads, all by index: project access (2), the Lane's
  * overlap row (1), its intent (2), the newest compose selection and its row (2), the newest landing request,
  * its state and attempt (3), the check run (1), main's audit row (1), and only for a failed run that names no
- * test file the run's job summaries (at most 64). No writes, no scheduler, no log fetch, no polling.
+ * test file the run's job summaries (at most 64). While the check has not answered (queued, waiting for a runner,
+ * checking), the landing-speed row (1, about 3.7 KB), which re-runs an open page once per landing in the project.
+ * No writes, no scheduler, no log fetch, no polling.
  */
 export const forLane = query({
   args: { projectId: v.id('hostedProjects'), laneId: v.string() },
@@ -39,10 +69,7 @@ export const forLane = query({
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read a landing check.');
       await accessibleProject(ctx, projectId, user.subject);
-      const overlap = await ctx.db
-        .query('projectHostedOverlapLanes')
-        .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
-        .unique();
+      const overlap = await laneOverlap(ctx, projectId, laneId);
       const intent = overlap
         ? await readHostedRecord(ctx, {
             projectId,
@@ -52,41 +79,9 @@ export const forLane = query({
           })
         : null;
       const title = intent ? (intentTitle.safeParse(JSON.parse(intent.value)).data?.outcome ?? null) : null;
-      const changes = overlap ? (JSON.parse(overlap.changes) as { path: string }[]) : null;
-      const lane = changes
-        ? {
-            paths: changes.slice(0, LANE_PATHS).map(change => change.path),
-            complete: overlap!.complete && changes.length <= LANE_PATHS,
-          }
-        : null;
-      const [selection] = await ctx.db
-        .query('projectHostedComposeSelections')
-        .withIndex('by_project_and_kind_and_key', q =>
-          q.eq('projectId', projectId).eq('kind', 'inputs').eq('key', laneId),
-        )
-        .order('desc')
-        .take(1);
-      const compose = selection ? await composeRow(ctx, selection) : null;
-      const candidateId = compose ? composeCandidate.parse(JSON.parse(compose.value)).candidateId : null;
-      const [request] = candidateId
-        ? await ctx.db
-            .query('projectHostedLandingRequests')
-            .withIndex('by_project_and_candidate_and_sequence', q =>
-              q.eq('projectId', projectId).eq('candidateId', candidateId),
-            )
-            .order('desc')
-            .take(1)
-        : [];
-      const audit = await auditRow(ctx, projectId);
-      const main = audit
-        ? {
-            result:
-              audit.lastGreen && audit.lastGreen.sequence >= (audit.audit?.sequence ?? -1)
-                ? 'passed'
-                : (audit.audit?.status ?? null),
-            redSince: audit.red?.since ?? null,
-          }
-        : null;
+      const { count, lane } = lanePaths(overlap);
+      const { candidateId, request } = await laneLandingRequest(ctx, projectId, laneId);
+      const main = await mainEvidence(ctx, projectId);
       if (!request)
         return canonicalPayload({
           laneId,
@@ -96,33 +91,14 @@ export const forLane = query({
           run: null,
           cause: null,
           main,
-          lane,
+          lane: lane ? { count: count!, complete: lane.complete } : null,
+          expected: null,
         });
       const { state, row } = await loadLanding(ctx, { projectId, submissionId: request.submissionId });
-      const attemptKey = { projectId, attemptId: state.attemptId };
-      const live = await landingAttemptRow(ctx, attemptKey);
-      const attempt = row.capsule && !live ? null : await loadLandingAttempt(ctx, attemptKey, live);
-      const loaded = attempt?.check
-        ? await loadHostedCheck(ctx, { projectId, runId: attempt.check.runId })
-        : null;
-      const summary = loaded ? summarizeCheckRun(loaded.run) : null;
-      const step =
-        loaded && loaded.run.status === 'failed' ? await checkFailureStep(ctx, projectId, loaded.run) : null;
+      const { summary, step } = await landingRun(ctx, projectId, row, state);
       const landing = landingStateOf(state, laneId);
-      const cause = failureCause({
-        landing: { state: landing.state, code: state.error?.code },
-        run: summary
-          ? {
-              status: summary.status,
-              failed: summary.failed,
-              failedCount: summary.files.failed ?? undefined,
-              flaky: summary.flaky,
-              step,
-            }
-          : null,
-        lane: lane?.complete ? lane : null,
-        main,
-      });
+      const cause = causeFrom({ state, laneId, summary, step, lane, main });
+      const expected = unanswered.has(landing.state) ? await expectedCheck(ctx, projectId) : null;
       return canonicalPayload({
         laneId,
         title,
@@ -142,7 +118,8 @@ export const forLane = query({
         run: summary,
         cause,
         main,
-        lane: lane ? { count: changes!.length, complete: lane.complete } : null,
+        lane: lane ? { count: count!, complete: lane.complete } : null,
+        expected,
       });
     } catch (error) {
       return report(error);

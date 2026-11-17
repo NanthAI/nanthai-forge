@@ -1436,6 +1436,17 @@ sentence. `finish {stage:"inputs"}` on a superseded or withdrawn landing returns
 entry with `state:"superseded"` (outcome `terminal-failed`, cause `stale-head`)
 instead of failing.
 
+A landing whose check did not pass (`check-failed`, `not-run`,
+`waiting-for-runner`, `held-main-red`, `stale-head`) also carries `failureCause`
+on `status {submissionId}` and on the `land`/`wait` reply (in `submissions[]`):
+`{cause, sentence, recovery, next, retryReason?, mainFailingSince?, suspects}`, the
+same reading the web's Failed check screen shows. `cause` is `change`, `flaky-test`,
+`main-failing`, `main-moved`, `ci-not-started`, `ci-stopped` or `unknown`;
+`recovery` is `fix-in-lane`, `retry` (replay `land --save` with `"retry":true` and
+the given `retryReason`), `wait-for-main`, `wait` or `read-log`; `suspects` judges
+the change, the test, main and your CI. Forge never guesses: an unknown cause says
+so. Other states carry no `failureCause` and read nothing extra for it.
+
 Every JSON event/summary has a `cursor`. Reconnect with the last cursor and same
 owner/targets to suppress unchanged observations; terminal states remain in the
 summary. `any-change` detects disconnected changes too. Cursors deduplicate

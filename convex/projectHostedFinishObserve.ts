@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readProviderDelay } from './projectHostedLandingCheckProgress';
+import { failureCauseReply } from './projectFailureCauseRead';
 import { finishReadReader } from './projectFinishReadReader';
 import { readWouldConflict, syncRequiredQueue } from './projectHostedLandingWouldConflict';
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
@@ -200,9 +201,13 @@ async function observePage(
         if (event.submission.version === state.version)
           event.submission = noteHeldPolicy(event.submission, pin);
     const delay = await readProviderDelay(ctx, selectedRow, state);
-    for (const event of events) if (event.submission.version === state.version) Object.assign(event, delay);
+    // The cause and next step the Failed check screen shows (b030c3c5); failure states only, 0 reads otherwise.
+    const cause = await failureCauseReply(ctx, input.projectId, selectedRow, state);
+    for (const event of events)
+      if (event.submission.version === state.version) Object.assign(event, delay, cause);
     const payload = {
       ...delay,
+      ...cause,
       projectId: input.projectId,
       operationId: input.operationId,
       canonicalOperationId: state.operationId,

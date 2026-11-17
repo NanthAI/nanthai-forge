@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readProviderDelay } from './projectHostedLandingCheckProgress';
+import { failureCauseReply } from './projectFailureCauseRead';
 import { capsuleHistoryContext } from './projectLandingCapsuleContext';
 import { supersededOutcome } from '../src/landing-state';
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
@@ -69,6 +70,8 @@ export const status = query({
       return canonicalPayload({
         ...(reservation ? { reservation } : {}),
         ...(await readProviderDelay(ctx, row, state)),
+        // The cause and next step the Failed check screen shows (b030c3c5); failure states only.
+        ...(await failureCauseReply(ctx, input.projectId, row, state)),
         version: state.version,
         unchanged: state.phase !== 'queued' && input.version === state.version,
         submission: landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),

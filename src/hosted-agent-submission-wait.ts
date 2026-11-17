@@ -44,6 +44,8 @@ export const hostedSubmissionWaitSchema = z
 const eventSchema = z.object({
   submission: hostedLandingStateSchema,
   providerDelay: z.string().optional(),
+  /** Why a failed check did not pass and the one next step (src/check-failure-cause.ts failureCauseField). */
+  failureCause: z.unknown().optional(),
   pendingAttempt: hostedFinishSchema.shape.pending,
   queue: z.unknown().optional(),
   queueAheadSelection: z.unknown().optional(),
@@ -131,6 +133,7 @@ export async function observeHostedSubmissions(
               const {
                 submission,
                 providerDelay,
+                failureCause,
                 pendingAttempt,
                 queue,
                 wouldConflict,
@@ -143,6 +146,7 @@ export async function observeHostedSubmissions(
               current.set(event.operationId, {
                 submission,
                 ...(providerDelay ? { providerDelay } : {}),
+                ...(failureCause ? { failureCause } : {}),
                 pendingAttempt,
                 ...(recovery ? { recovery } : {}),
                 ...(conflict ? { conflict } : {}),
@@ -446,6 +450,7 @@ async function observeHostedSubmissionsOnce(
           ? await observedConflictRecovery(transport, {
               submission: page.submission,
               ...(page.providerDelay ? { providerDelay: page.providerDelay } : {}),
+              ...(page.failureCause ? { failureCause: page.failureCause } : {}),
               ...((page.recovery ?? suppliedAdvice?.recovery)
                 ? { recovery: page.recovery ?? suppliedAdvice?.recovery }
                 : {}),

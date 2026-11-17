@@ -295,6 +295,21 @@ function Facts({ read }: { read: CheckRead }) {
         <dd className="num">{run?.timings.shards ?? <span className="t2">not reported</span>}</dd>
         <dt>Took</dt>
         <dd className="num">{run ? duration(run.timings.wallSeconds) : 'not reported'}</dd>
+        {read.expected !== undefined &&
+        (read.landing?.state === 'queued' ||
+          read.landing?.state === 'waiting-for-runner' ||
+          read.landing?.state === 'checking') ? (
+          <>
+            <dt>Usually</dt>
+            <dd className="num">
+              {read.expected ? (
+                `${duration(read.expected.seconds)}, median of ${plural(read.expected.landings, 'landing')}`
+              ) : (
+                <span className="t2">not reported</span>
+              )}
+            </dd>
+          </>
+        ) : null}
         <dt>CI used</dt>
         <dd className="num">
           {run?.cost ? duration(run.cost.seconds) : <span className="t2">not reported</span>}
