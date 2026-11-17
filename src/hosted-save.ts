@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { sessionClaimSchema } from './hosted-lane.js';
 import { stateSchema } from './state/format.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { safeRelative } from './safe-relative.js';
@@ -69,6 +70,10 @@ export const keepPathsSchema = z
 export const saveThenSchema = z
   .object({
     kind: z.literal('resolve'),
+    holderSessionId: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
     operationId: z.uuid(),
     authorityEpoch: number,
     lifecycleVersion: saveExpectedSchema.shape.lifecycleVersion,
@@ -82,6 +87,7 @@ export const saveRequestSchema = z
     operationId: z.uuid(),
     laneId: z.uuid(),
     /** Reader expansion for the later session-bound holder writer. */
+    session: sessionClaimSchema.optional(),
     holderSessionId: z
       .string()
       .regex(/^[0-9a-f]{64}$/)

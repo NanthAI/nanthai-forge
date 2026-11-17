@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { assertSourceStateSize, type SourceSizePhase } from '../src/source-state-size';
 import { z } from 'zod';
+import { sessionMetadataSchema } from '../src/hosted-lane';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
@@ -17,6 +18,7 @@ import { sourceServerTimingSchema } from './projectSourceStepTiming';
 
 export const saveStateSchema = z
   .object({
+    session: sessionMetadataSchema.optional(),
     overlapChanges: z.string().optional(),
     overlapComplete: z.boolean().optional(),
     request: saveRequestSchema,

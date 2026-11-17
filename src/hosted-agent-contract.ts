@@ -94,6 +94,23 @@ export const hostedAgentClientActions = [
 export { hostedAgentAddressSchema, type HostedAgentAddress } from './hosted-address.js';
 export const hostedAgentCapabilitiesSchema = z
   .object({
+    device: z
+      .object({
+        id: z.string(),
+        code: z.string().nullable(),
+        name: z.string().optional(),
+        approvedAt: z.number().nullable(),
+        expiresAt: z.number(),
+        source: z.enum(['write', 'read', 'coordination']),
+        projects: z
+          .union([
+            z.object({ kind: z.literal('all') }).strict(),
+            z.object({ kind: z.literal('project'), projectId: z.string() }).strict(),
+          ])
+          .optional(),
+      })
+      .strict()
+      .optional(),
     protectedPathPolicy: z
       .object({ acceptance: autonomyPolicySchema.shape.acceptance, checkEntries: z.array(z.string()) })
       .strict()

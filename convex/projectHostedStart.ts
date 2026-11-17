@@ -30,6 +30,12 @@ const args = {
   openLanesVersion: v.optional(v.literal(1)),
   /** The calling agent session's slug (feature agent-slug, c29d0780); not part of the payload. */
   agent: v.optional(v.string()),
+  session: v.optional(
+    v.object({
+      app: v.optional(v.string()),
+      identityFrom: v.optional(v.union(v.literal('app-thread'), v.literal('declared'), v.literal('process'))),
+    }),
+  ),
   holderSessionId: v.optional(v.string()),
   authorityEpoch: v.number(),
   expectedMain: v.object({ head: v.string(), receiptId: v.string() }),
@@ -94,10 +100,12 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
     noticeVersion,
     openLanesVersion,
     agent,
+    session: _readerOnlyClaim,
     holderSessionId: _readerOnlySession,
     ...semanticRequest
   } = validated.data;
   void _readerOnlySession;
+  void _readerOnlyClaim;
   const payload = { action, ...semanticRequest };
   invariant(action === 'start' || payload.intent.kind === 'new', 'BAD_ARGUMENT', 'Create a new Intent.');
   let overlapIntent = payload.intent.kind === 'existing' ? payload.intent.intentId : payload.intent.outcome;

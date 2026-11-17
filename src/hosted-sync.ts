@@ -14,6 +14,10 @@ export const SYNC_ALGORITHM = 'forge-native-sync-v1';
 export const resolutionSchema = hostedRecordSchema.options[1].shape.resolution.unwrap();
 const common = {
   operationId: z.uuid(),
+  holderSessionId: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
   authorityEpoch: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   message: z.string(),
 };

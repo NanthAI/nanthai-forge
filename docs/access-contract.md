@@ -48,3 +48,5 @@ metadata. Policy `accessIdentities.laneHolders` and `accessIdentities.devices`
 are independent rollout settings; absent means off. Readers land before their
 writers, and enabling either later uses the existing owner policy mechanism.
 Neither setting changes the four provisional decisions described above.
+
+The optional session provenance reader distinguishes client-reported app/thread labels from the server's credential-bound device snapshot. Legacy records keep unknown provenance unknown. Compose and sync readers accept a holder reference before their writers send it. Device renewal receipts reuse the account-owned credential; there is no new table, index, timer or idle write.

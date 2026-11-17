@@ -6,6 +6,31 @@ import { hostedRecordSchema } from './hosted-records.js';
 import { intentCreateSchema } from './work-intent-types.js';
 import { isAgentSlug } from './agent-slug.js';
 
+/** Display provenance is a client claim, never an access grant. */
+export const sessionClaimSchema = z
+  .object({
+    app: z.string().min(1).max(80).optional(),
+    identityFrom: z.enum(['app-thread', 'declared', 'process']).optional(),
+  })
+  .strict();
+/** Device details are supplied by the authenticated credential, never a client claim. */
+export const sessionMetadataSchema = sessionClaimSchema
+  .extend({
+    sessionId: z.string().regex(/^[0-9a-f]{64}$/),
+    startedAt: z.number().nonnegative(),
+    device: z
+      .object({
+        id: z.string(),
+        code: z.string(),
+        approvedAt: z.number(),
+        owner: z.string(),
+        name: z.string().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
 export const hostedIntentInputSchema = z.discriminatedUnion('kind', [
   z
     .object({
@@ -32,6 +57,7 @@ export const hostedStartSchema = z
     openLanesVersion: z.literal(1).optional(),
     /** The calling agent session's slug (feature agent-slug, c29d0780); never part of the payload hash. */
     agent: z.string().refine(isAgentSlug, 'agent must be a Forge agent slug').optional(),
+    session: sessionClaimSchema.optional(),
     holderSessionId: z
       .string()
       .regex(/^[0-9a-f]{64}$/)

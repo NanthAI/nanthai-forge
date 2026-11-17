@@ -1,12 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
+const session = v.optional(
+  v.object({
+    sessionId: v.string(),
+    startedAt: v.number(),
+    app: v.optional(v.string()),
+    identityFrom: v.optional(v.union(v.literal('app-thread'), v.literal('declared'), v.literal('process'))),
+    device: v.optional(
+      v.object({
+        id: v.string(),
+        code: v.string(),
+        approvedAt: v.number(),
+        owner: v.string(),
+        name: v.optional(v.string()),
+      }),
+    ),
+  }),
+);
 export const hostedOverlapTables = {
   projectHostedOverlapLanes: defineTable({
     projectId: v.id('hostedProjects'),
     laneId: v.string(),
     intentId: v.string(),
     actor: v.string(),
+    session,
     /** The agent session's word-list slug (c29d0780); absent for a person. Shown as `handle/slug`. */
     agent: v.optional(v.string()),
     intent: v.string(),
@@ -99,6 +117,7 @@ export const hostedOverlapTables = {
     laneId: v.string(),
     intentId: v.string(),
     actor: v.string(),
+    session,
     /** The agent session's word-list slug (c29d0780); absent for a person. Shown as `handle/slug`. */
     agent: v.optional(v.string()),
     goal: v.string(),

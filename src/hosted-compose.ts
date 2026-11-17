@@ -33,6 +33,10 @@ export const composeManifestSchema = z.object({ root: object, pages: count.min(1
 export const composeRequestSchema = z
   .object({
     operationId: z.uuid(),
+    holderSessionId: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
     intentId: z.uuid(),
     authorityEpoch: count,
     expectedMain: main,

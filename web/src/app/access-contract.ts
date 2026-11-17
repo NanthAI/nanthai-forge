@@ -38,13 +38,13 @@ export type HolderChange = {
   savedHead: string;
 };
 export type AgentPresence = {
-  sessionId: string;
+  sessionId: string | null;
   name: string;
   person: string;
   device: Pick<DeviceIdentity, 'id' | 'code' | 'approvedAt' | 'name'> | null;
   app: string | null;
-  identityFrom: 'app-thread' | 'declared' | 'process';
-  startedAt: number;
+  identityFrom: 'app-thread' | 'declared' | 'process' | null;
+  startedAt: number | null;
   lastSeen: number;
   lane: { id: string; title: string; holder: LaneHolder | null } | null;
 };

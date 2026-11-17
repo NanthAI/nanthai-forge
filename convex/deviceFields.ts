@@ -17,6 +17,7 @@ export const credentialFields = {
   deviceApprovedAt: v.optional(v.number()),
   deviceLastSeen: v.optional(v.number()),
   removed: v.optional(v.boolean()),
+  renewal: v.optional(v.object({ operationId: v.string(), requestHash: v.string(), issuedAt: v.number() })),
   settings: v.optional(
     v.object({
       source: v.union(v.literal('write'), v.literal('read'), v.literal('coordination')),
