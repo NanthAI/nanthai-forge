@@ -285,6 +285,51 @@ export function Figures() {
         </div>
       </Region>
 
+      <Region
+        title="Who did it"
+        weight="ref"
+        fold="reference-who"
+        hint="a person, or an agent run with its model and its person"
+      >
+        <div className="row">
+          <Who handle="@sample-one" layout="line" personHref="#who" />
+        </div>
+        <div className="row">
+          <Who
+            handle="sample-one/amber-fox"
+            model="sample-model-1"
+            layout="line"
+            personHref="#who"
+            runHref="#who"
+          />
+        </div>
+        <div className="row">
+          <Who handle="sample-two/copper-moth" model="" layout="line" personHref="#who" runHref="#who" />
+        </div>
+        <div className="row">
+          <Who
+            handle="sample-one/amber-fox"
+            model="sample-model-1"
+            layout="line"
+            size="md"
+            nofor
+            runHref="#who"
+          />
+        </div>
+        <div className="row" style={{ maxWidth: 240 }}>
+          <Who
+            handle="sample-one/incandescent-mantis-shrimp"
+            model="a-vendor/a-long-model-identifier-preview"
+            layout="line"
+          />
+        </div>
+        <p className="pad">
+          Handed over by{' '}
+          <Who handle="sample-two/copper-moth" model="sample-model-2" personHref="#who" runHref="#who" /> at
+          09:38.
+        </p>
+      </Region>
+
       <Region title="Access and holders" weight="ref" fold="reference-access">
         <div className="th acc" style={vars({ cols: 3 })}>
           <span>Who</span>

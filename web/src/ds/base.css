@@ -70,6 +70,20 @@
   /* who: a person is a solid square, an agent (a session) a hollow one; a team, a device and nobody are marked apart */
   .who { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; vertical-align: bottom; }
   .who > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* who did it (Item 41514fee): run name or handle first and last to be cut; the model gives way first, never to a stub */
+  .who { white-space: nowrap; font-size: var(--t-meta); line-height: 20px; color: var(--text-2); }
+  .who a { color: inherit; position: relative; z-index: 1; }
+  .who .a-run { flex: 0 1 auto; min-width: 4ch; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: var(--w-strong); }
+  .who .a-model { flex: 0 50 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .who .a-model.nd { font-family: var(--font-sans); color: var(--text-3); flex-shrink: 0; }
+  .who .a-for { flex: 0 3 auto; min-width: 6ch; overflow: hidden; text-overflow: ellipsis; }
+  .who .a-model::before, .who .a-for::before { content: "·"; color: var(--text-3); margin-right: 6px; font-family: var(--font-sans); }
+  .who.line { display: flex; vertical-align: baseline; container: who / inline-size; }
+  .who.line .a-model.long { min-width: 14ch; }
+  @container who (max-width: 300px) { .who .a-model { display: none; } }
+  @container who (max-width: 190px) { .who .a-for .w { display: none; } }
+  .who.a-md { font-size: var(--t-body); line-height: 22px; } .who.a-md .a-model, .who.a-md .a-for { font-size: var(--t-meta); }
+  @media (hover: hover) and (pointer: fine) { .who a:hover { color: var(--text); text-decoration: underline; text-decoration-color: var(--text-3); text-underline-offset: 3px; } }
   .av { display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: var(--r); background: var(--k-person); border: var(--rule) solid var(--k-person); color: var(--on-person); font: var(--w-strong) 10px/1 var(--font-mono); text-transform: lowercase; }
   .av.ag { background: transparent; border-color: var(--k-session); color: var(--text-2); }
   .av.tm { background: var(--surface-3); border-color: var(--text-3); color: var(--text-2); }

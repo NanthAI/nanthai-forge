@@ -391,6 +391,7 @@ Each is a component or class in `web/src/ds/`; the class names below are what th
 - **Choices:** segmented choice (`.seg`), switch (`.sw`), input (`.inp`), tick box (`.ck`), a choice of one written out (`.row.choice`).
 - **State** (`State`, `.st[data-st]`): glyph and word in the state colour, no background. **Kind mark** (`KindMark`, `.km[data-k]`).
 - **Who** (`Who`, `Avatar`): square initials and a handle in mono; a team (`.av.tm`), a device (`.av.si`, dashed) and nobody (`.av.none`).
+- **Who did it** (`Who` with `model`, `layout="line"`): a person, or an agent run as `run · model · for @person` on one line that never wraps. The model is shown as declared ("model not declared" when none); in `line` layout it measures itself and the model gives way first, dropped whole under 300 px; run name and handle are cut last. Names link to the person page and the run's page (`whoLinks`); inside a row that is itself a link, leave the links out.
 - **Count** (`Count`; hot only for Needs you above zero), **Proposed** (`.prop`), **Sample data** (`.sample`).
 - **Command chip** (`.cli`) and its output (`.cli-out`); the command block (`.cmd`), a check's output (`pre.out`), the transcript (`.term`, docs only).
 - **Decision** (`.dec`): what holds it, how long, where on the five stops; a title that asks the question; the reason; two or three written-out answers, the recommended one first; one way out.

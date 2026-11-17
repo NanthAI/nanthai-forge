@@ -7,6 +7,7 @@ import { Head } from '../Place';
 import { hrefFor } from '../paths';
 import type { PlaceProps } from '../screens';
 import { when, type SessionRow, type SessionsRead } from './model';
+import { whoLinks } from '../who-links';
 export function AgentView({
   route,
   data,
@@ -84,7 +85,13 @@ export function AgentView({
           <div>
             <dl className="kv">
               <dt>Acts for</dt>
-              <dd>{current ? <Who handle={`@${current.person}`} /> : 'Not reported'}</dd>
+              <dd>
+                {current ? (
+                  <Who handle={`@${current.person}`} {...whoLinks(current.person)} />
+                ) : (
+                  'Not reported'
+                )}
+              </dd>
               <dt>Agent app</dt>
               <dd>
                 {current?.app ?? 'Not reported'}

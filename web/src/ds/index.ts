@@ -5,8 +5,20 @@ import './base.css';
 import './core.css';
 import './parts.css';
 
-export { Avatar, Count, Glyph, ItemState, KindMark, State, Who, initials, stateWords } from './marks';
-export type { ItemGlyph, Kind, StateKind, StateWord } from './marks';
+export {
+  Avatar,
+  Count,
+  Glyph,
+  ItemState,
+  KindMark,
+  State,
+  Who,
+  initials,
+  stateWords,
+  whoParts,
+  whoWords,
+} from './marks';
+export type { ItemGlyph, Kind, StateKind, StateWord, WhoProps } from './marks';
 export { useFirstStop } from './first-stop';
 export { Band, Chip, CodeBox, Key, PhoneTabs, Prose, Region, Row, Standing, Table, useFold } from './parts';
 export type { Column, KeyProps, RegionProps, StandingCell, StandingProps } from './parts';

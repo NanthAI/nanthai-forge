@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The drawn vocabulary of the design system: six state glyphs with their fixed words, two Item glyphs, the five kind
 // marks and the person/agent square. Static markup only: no behaviour layer, no effects, safe for first paint.
-import type { ReactNode } from 'react';
+import type { MouseEventHandler, ReactNode } from 'react';
 
 /** The six states. Each is always a shape, a word and a colour together (DESIGN.md, "State"). */
 export type StateKind = 'active' | 'waiting' | 'conflict' | 'failed' | 'passed' | 'stale';
@@ -170,15 +170,97 @@ export function Avatar({ handle, large = false }: { handle: string; large?: bool
   );
 }
 
-/** Who: the square and the public handle in mono. The full handle stays in the label when it is cut. */
-export function Who({ handle, app }: { handle: string; app?: string }) {
-  return (
-    <span className="who" title={handle}>
-      <Avatar handle={handle} />
-      <span className="mono" dir="auto" translate="no">
-        {handle}
+/** What a run's identity reads as: `handle/run` is an agent run, anything else a person (`@handle`). */
+export function whoParts(handle: string) {
+  const slash = handle.indexOf('/');
+  if (slash < 0)
+    return { agent: false as const, person: handle.startsWith('@') ? handle : `@${handle}`, run: '' };
+  return { agent: true as const, person: `@${handle.slice(0, slash)}`, run: handle.slice(slash + 1) };
+}
+
+/** Who did it (Item 41514fee), as the hover title: a run's full public address (`handle/run-name`, what a person
+ * copies or searches for) and the model it declared. */
+export function whoWords(handle: string, model?: string | null) {
+  const { agent, person, run } = whoParts(handle);
+  if (!agent) return person;
+  const said = model === undefined ? null : model || 'model not declared';
+  return [`${person.slice(1)}/${run}`, said].filter(Boolean).join(' · ');
+}
+
+export type WhoProps = {
+  /** `@handle` for a person, `handle/run-name` for an agent run. Public identities only: never a name or a device. */
+  handle: string;
+  /** The model the run declared, shown as declared; '' or null reads "model not declared". Leave it out when the
+   * record carries no declaration at all (older rows): then nothing about a model is said. A person has none. */
+  model?: string | null;
+  /** The agent app as the run reported it (older detail rows). */
+  app?: string;
+  /** `line` gives it a line of its own that measures itself: the model gives way first and goes whole under 300px.
+   * The default sits inline in a sentence or a cell and only cuts with an ellipsis. */
+  layout?: 'inline' | 'line';
+  /** `md` when who did it is the row's own title (a list of agents, the agent page's band). */
+  size?: 'md';
+  /** Leave out "for @person" (on that person's own page). */
+  nofor?: boolean;
+  /** Where the handle and the run name lead. Without one the name is text (also inside a row that is itself a link). */
+  personHref?: string;
+  runHref?: string;
+  /** The app's in-page navigation for those links. */
+  onFollow?: MouseEventHandler<HTMLAnchorElement>;
+};
+
+/** Who did it: a person (solid square, the handle) or an agent run (hollow square, run · model · for @person), on one
+ * line that never wraps. The marks are the system's own; no kind takes a colour. Spec: DESIGN.md "Who did it". */
+export function Who({
+  handle,
+  model,
+  app,
+  layout = 'inline',
+  size,
+  nofor,
+  personHref,
+  runHref,
+  onFollow,
+}: WhoProps) {
+  const { agent, person, run } = whoParts(handle);
+  const name = (text: string, href: string | undefined, cls: string) =>
+    href ? (
+      <a className={cls} href={href} onClick={onFollow} dir="auto" translate="no">
+        {text}
+      </a>
+    ) : (
+      <span className={cls} dir="auto" translate="no">
+        {text}
       </span>
-      {app ? <span className="t2">{app}</span> : null}
+    );
+  const cls = `who${layout === 'line' ? ' line' : ''}${size ? ` a-${size}` : ''}`;
+  if (!agent)
+    return (
+      <span className={cls} data-kind="person" title={person}>
+        <Avatar handle={person} />
+        {name(person, personHref, 'a-run mono')}
+        {app ? <span className="t2">{app}</span> : null}
+      </span>
+    );
+  return (
+    <span className={cls} data-kind="agent" title={whoWords(handle, model)}>
+      <Avatar handle={handle} />
+      <span className="sr">agent run </span>
+      {name(run, runHref, 'a-run mono')}
+      {model === undefined ? null : model ? (
+        <span className={`a-model mono${model.length > 12 ? ' long' : ''}`} translate="no">
+          {model}
+        </span>
+      ) : (
+        <span className="a-model nd">model not declared</span>
+      )}
+      {nofor ? null : (
+        <span className="a-for">
+          <span className="w">for </span>
+          {name(person, personHref, 'mono')}
+        </span>
+      )}
+      {app ? <span className="a-app t2">{app}</span> : null}
     </span>
   );
 }
