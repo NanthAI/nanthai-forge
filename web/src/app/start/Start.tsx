@@ -62,7 +62,7 @@ export default function Start() {
         title="Connect your agent app yourself"
         fold="start.connect"
         foldedByDefault
-        sum="Claude Code, Codex, or any app with a terminal"
+        sum="Claude Code, Codex, Cursor, or any app with a terminal"
       >
         <ConnectSteps deployment={deploymentUrl()} />
       </Region>

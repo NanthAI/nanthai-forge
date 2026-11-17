@@ -46,6 +46,26 @@ test('every step for every agent app runs a command the CLI ships, and nothing f
   assert.match(apps.setupSteps('other', DEPLOYMENT).at(-1).detail, /Hooks cover Claude Code and Codex only/);
 });
 
+test('Cursor gets the steps that work today: its terminal and the MCP entry, with no hooks promised', () => {
+  const last = apps.setupSteps('cursor', DEPLOYMENT).at(-1);
+  assert.deepEqual(last.commands, ['nforge mcp-config . --agent']);
+  assert.match(last.detail, /\.cursor\/mcp\.json/);
+  assert.match(last.detail, /no hooks to Cursor/);
+  assert.match(
+    last.detail,
+    /remove that entry to undo/,
+    'Forge writes no Cursor configuration; the person can undo',
+  );
+});
+
+test('the sign-in step sends the person to the devices page where the same code and name show', () => {
+  for (const app of apps.agentApps) {
+    const signIn = apps.setupSteps(app, DEPLOYMENT).find(step => step.needsPerson);
+    assert.equal(signIn.link.href, '/-/account/devices');
+    assert.match(signIn.detail, /code matches/);
+  }
+});
+
 test('the copied prompt makes the agent explain first, and is the landing page’s prompt', () => {
   const prompt = apps.explainFirstPrompt('https://forge.example');
   assert.match(prompt, /^Read https:\/\/forge\.example\/llms\.txt\./);

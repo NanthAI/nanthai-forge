@@ -18,7 +18,7 @@ Build or install Forge, then print a ready-made client entry:
 nforge mcp-config /absolute/path/to/project --agent
 ```
 
-Merge the printed `mcpServers.forge` entry into your client's configuration. It uses the absolute Node and CLI paths. Run the server directly with Node, not through `npm run`, because npm's output corrupts the stdio stream. Remove that one entry to undo.
+Merge the printed `mcpServers.forge` entry into your client's configuration (Claude Code: `.mcp.json` in the project folder; Cursor: `.cursor/mcp.json`). Forge adds advisory hooks to Claude Code and Codex only; in Cursor, agents run the same `nforge agent` commands in its terminal. It uses the absolute Node and CLI paths. Run the server directly with Node, not through `npm run`, because npm's output corrupts the stdio stream. Remove that one entry to undo.
 
 | Process | Tools | Authority |
 | --- | --- | --- |

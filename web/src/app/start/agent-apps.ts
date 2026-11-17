@@ -4,18 +4,26 @@
 // CI and never starts an agent itself: these are words to paste and commands to run, nothing more. Every command here
 // is one the CLI ships now (tests/start-agent-apps.test.mjs checks each against the CLI's usage); the published package
 // and the bare `nforge login` are Phase 8 and do not appear.
+import { hrefFor } from '../paths';
 
-export const agentApps = ['claude-code', 'codex', 'other'] as const;
+export const agentApps = ['claude-code', 'codex', 'cursor', 'other'] as const;
 export type AgentApp = (typeof agentApps)[number];
 
 export const agentAppLabels: Record<AgentApp, string> = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
+  cursor: 'Cursor',
   other: 'Another app',
 };
 
-/** One step of a connection: what it does, the commands to run, and who has to act. */
-export type SetupStep = { title: string; detail: string; commands: readonly string[]; needsPerson?: boolean };
+/** One step of a connection: what it does, the commands to run, who has to act, and where on the web they act. */
+export type SetupStep = {
+  title: string;
+  detail: string;
+  commands: readonly string[];
+  needsPerson?: boolean;
+  link?: { label: string; href: string };
+};
 
 /** The prompt the landing page copies, with this site's own discovery file. The agent explains first and installs
  * nothing until its person says so (owner decision 5.2). */
@@ -55,9 +63,10 @@ export function setupSteps(app: AgentApp, deployment: string, project?: string):
     {
       title: 'Sign this machine in',
       detail:
-        'It prints a link and a code. Open the link here, check the code and approve the device; the agent waits until you do.',
+        'It prints a code and a link to the approval page here. Check that the code matches, name the device and approve; the agent waits until you do. The device then shows under Account, Devices, with the same name and code.',
       commands: [`nforge login ${deployment}`],
       needsPerson: true,
+      link: { label: 'Sign-in and devices', href: hrefFor({ frame: 'account', place: 'devices' }) },
     },
     project
       ? {
@@ -84,6 +93,13 @@ export function setupSteps(app: AgentApp, deployment: string, project?: string):
       detail:
         'The first nforge run adds advisory hooks to Codex and prints the undo. The plugin holds Forge’s skill and agent tools.',
       commands: ['nforge plugin-config . NEW_DIRECTORY'],
+    });
+  else if (app === 'cursor')
+    steps.push({
+      title: 'Tools over MCP',
+      detail:
+        'Cursor runs nforge agent commands in its terminal. For tools as well, add the printed forge entry to .cursor/mcp.json in the project folder; remove that entry to undo. Forge adds no hooks to Cursor.',
+      commands: ['nforge mcp-config . --agent'],
     });
   else
     steps.push({

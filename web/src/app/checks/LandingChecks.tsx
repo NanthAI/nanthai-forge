@@ -11,8 +11,9 @@ import type { Id } from '../../../../convex/_generated/dataModel';
 import type { AutonomyPolicy } from '../../../../src/autonomy-policy';
 import type { LandingModeView } from '../../../../src/landing-mode';
 import { Band, Key, Region, Row } from '../../ds';
+import { A } from '../frames';
 import { crumbsFor, Head } from '../Place';
-import type { AppRoute } from '../paths';
+import { hrefFor, type AppRoute } from '../paths';
 import { approvalWords, useApprovalWrite, type ApprovalMode } from '../start/approvals';
 import { CommandBlock } from '../start/parts';
 import { checkWords, type SetupView } from '../start/setup-model';
@@ -283,12 +284,7 @@ export default function LandingChecks({
         ) : owner ? (
           <p className="quietline">
             To use your own CI file, turn on the GitHub mirror first:{' '}
-            <a
-              href={`/${encodeURIComponent(route.handle)}/${encodeURIComponent(route.project)}/settings/github`}
-            >
-              GitHub settings
-            </a>
-            .
+            <A href={hrefFor({ ...route, section: 'mirror', rest: '' })}>GitHub mirror</A>.
           </p>
         ) : null}
         <Band title="Other ways to check" hint="set up from a terminal" />

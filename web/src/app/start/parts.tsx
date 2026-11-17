@@ -4,6 +4,7 @@
 // explainers), and the app picker with each app's connection steps.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Band, Key, Row, useFold } from '../../ds';
+import { A } from '../frames';
 import {
   agentAppLabels,
   agentApps,
@@ -104,7 +105,15 @@ export function ConnectSteps({ deployment, project }: { deployment: string; proj
                   {step.title}
                   {step.needsPerson ? <span className="t3"> · needs you once</span> : null}
                 </div>
-                <div className="meta">{step.detail}</div>
+                <div className="meta">
+                  {step.detail}
+                  {step.link ? (
+                    <>
+                      {' '}
+                      <A href={step.link.href}>{step.link.label}</A>
+                    </>
+                  ) : null}
+                </div>
                 <CommandBlock label={step.title} text={step.commands.join('\n')} />
               </div>
             </Row>

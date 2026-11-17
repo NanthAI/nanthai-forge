@@ -75,10 +75,7 @@ function StepRow({ step, route }: { step: SetupStep; route: ProjectRoute }) {
       : step.id === 'check'
         ? { href: settings('checks'), label: 'Choose' }
         : step.id === 'repository' || step.id === 'mirror'
-          ? {
-              href: `/${encodeURIComponent(route.handle)}/${encodeURIComponent(route.project)}/settings/github`,
-              label: 'Open GitHub settings',
-            }
+          ? { href: settings('mirror'), label: 'Open the mirror' }
           : null;
   return (
     <Row weight={step.state === 'done' ? 'ref' : 'watch'} cols="auto minmax(0, 1fr) auto" className="gs-row">
@@ -99,15 +96,9 @@ function StepRow({ step, route }: { step: SetupStep; route: ProjectRoute }) {
           </span>
         ) : null}
         {go ? (
-          go.href.startsWith('/-') ? (
-            <A className="btn sm" href={go.href}>
-              {go.label}
-            </A>
-          ) : (
-            <a className="btn sm" href={go.href}>
-              {go.label}
-            </a>
-          )
+          <A className="btn sm" href={go.href}>
+            {go.label}
+          </A>
         ) : null}
       </span>
     </Row>
@@ -256,7 +247,7 @@ export default function GettingStarted({
           title="Connect your agent app yourself"
           fold="start.connect"
           foldedByDefault
-          sum="Claude Code, Codex, or any app with a terminal"
+          sum="Claude Code, Codex, Cursor, or any app with a terminal"
         >
           <ConnectSteps deployment={deploymentUrl()} project={projectUrl} />
         </Region>
