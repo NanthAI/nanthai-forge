@@ -1,0 +1,33 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* A bulk delete request (loaded with its route): the frozen list beside what goes and the typed count. One column on
+   a phone; long project names wrap, never the page. */
+[data-ds] {
+  .delete-request .req { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: var(--s-4); align-items: start; }
+  .delete-request .row.out .nm { color: var(--text-3); text-decoration: line-through; }
+  .delete-request .nm { min-width: 0; overflow-wrap: anywhere; }
+  .delete-request .meta { color: var(--text-2); font-size: var(--t-meta); }
+  .delete-request .num { font-variant-numeric: tabular-nums; }
+  .delete-request .r { display: flex; gap: var(--s-2); align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+  .delete-request .pf { margin: 0; padding: var(--s-3) var(--gut); color: var(--text-2); font-size: var(--t-small); }
+  .delete-request .lost { margin: 0; padding: var(--s-3) var(--gut) var(--s-3) calc(var(--gut) + 1.2em); display: grid; gap: var(--s-2); }
+  .delete-request .facts { margin: 0; padding: var(--s-3) var(--gut); display: grid; gap: var(--s-2); border-top: var(--rule) solid var(--line); }
+  .delete-request .facts > div { display: grid; grid-template-columns: 10ch minmax(0, 1fr); gap: var(--s-3); }
+  .delete-request .facts dt { color: var(--text-3); font-size: var(--t-meta); }
+  .delete-request .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .delete-request .confirm { display: grid; gap: var(--s-2); padding: var(--s-3) var(--gut) var(--s-4); border-top: var(--rule) solid var(--line); }
+  .delete-request .confirm label { font-weight: var(--w-strong); }
+  .delete-request .confirm .inp { max-width: 12ch; font-variant-numeric: tabular-nums; }
+  .delete-request .confirm .meta { margin: 0; }
+  .delete-request .btns { display: flex; flex-wrap: wrap; gap: var(--s-2); padding-top: var(--s-2); }
+  .delete-request > .req > .region .btns:only-child { padding: var(--s-3) var(--gut); }
+  .delete-request .err { margin: 0; padding: 0 var(--gut) var(--s-3); color: var(--failed); }
+  @media (max-width: 860px) {
+    .delete-request .req { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 560px) {
+    .delete-request .th { display: none; }
+    .delete-request .row:not(.th) { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--s-3); }
+    .delete-request .row > .nm { flex: 1 0 100%; }
+    .delete-request .row > .r { margin-left: auto; }
+  }
+}

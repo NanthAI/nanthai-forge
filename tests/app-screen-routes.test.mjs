@@ -108,7 +108,8 @@ test('every address keeps the screen the shared registry gave it, and project ma
   );
   assert.equal(owner.get(accountScreenFor(entries, 'billing')), 'billing#0');
   assert.equal(owner.get(accountScreenFor(entries, 'devices')), 'devices#0');
-  assert.equal(accountScreenFor(entries, 'projects'), undefined);
+  // Account > Projects serves the bulk delete request page (Item 7456856f); the rest of the place is a placeholder.
+  assert.equal(owner.get(accountScreenFor(entries, 'projects')), 'requests#0');
 });
 
 // The visible text as axe reads it: the anchor's text nodes joined as they are, so "Editing" and "1" with no text

@@ -719,11 +719,41 @@ Credentials issued by `nforge login DEPLOYMENT_URL`, including CLI scope, cannot
 permanently delete projects. The mutation returns `PROJECT_UNAVAILABLE` and directs
 the owner to the browser. Reversible trash and restore remain available to devices.
 
-The existing CLI command below calls the same public
-`projectLifecycle:permanentlyDelete` mutation. It requires owner-person authentication
-through an existing browser account JWT override (`FORGE_AUTH_TOKEN`, bound to the
-trusted deployment as described in [security](security.md#cli-device-credentials));
-a device credential cannot substitute for it:
+#### Delete many projects with one approval
+
+An agent or a device prepares the request; the owner person approves it once in the browser. This is the
+recommended path from a terminal: nobody copies a browser token.
+
+```sh
+nforge host ROOT --delete-projects 'bench-zoo-*'        # a slug pattern: * any run, ? one character
+nforge host ROOT --delete-projects --ids ID,ID           # exact project ids
+nforge host ROOT --delete-projects --trash               # everything in the trash
+nforge host ROOT --delete-projects --wait REQUEST_ID     # one subscription until it is decided and every purge ends
+nforge host ROOT --delete-projects --withdraw REQUEST_ID
+```
+
+Preparing deletes nothing. It freezes the exact list (slug, revision, newest landing, stored size, in the trash or
+not), prints it with the approval link `/-/account?request=ID`, and exits. A request holds at most 100 projects and
+expires 30 minutes after it is made; an expired request deletes nothing. Both numbers follow the Item's suggestion
+and are open for the owner to change. On the page the owner reads the whole list, keeps any project out, types the
+number left and approves once; **Decline** tells the agent through the same read. Approval re-checks every project in
+that one transaction: a project with a new landing, a new revision or a new owner since the list was made is skipped
+and named, never deleted. Each other project starts the same permanent purge as the single delete, and its row shows
+deleting, deleted or could not delete as that purge ends. **Retry** replays only the purges that stopped. Approving
+twice, or replaying the same decision, changes nothing.
+
+Only the owner person approves or retries: device and agent sign-ins of the owner's account are refused with
+`PROJECT_UNAVAILABLE`. Another account reads the request as not found. Costs: prepare reads one bounded page of the
+account's projects (or one get per id) plus one landing read and one storage read per listed project. The page and
+`--wait` hold one subscription to the request row, which is written on prepare, on the decision and once per project
+as its purge ends. Nothing polls, and an open request with nobody watching costs nothing.
+
+#### Delete one project from the CLI
+
+The command below calls the same public `projectLifecycle:permanentlyDelete` mutation. It needs owner-person
+authentication, which a device credential cannot give. Use the request above instead of an account JWT override
+(`FORGE_AUTH_TOKEN`, see [security](security.md#cli-device-credentials)). That override still works, but it is not the
+recommended path:
 
 ```sh
 nforge host ROOT --delete-project PROJECT_ID --confirm PROJECT_SLUG

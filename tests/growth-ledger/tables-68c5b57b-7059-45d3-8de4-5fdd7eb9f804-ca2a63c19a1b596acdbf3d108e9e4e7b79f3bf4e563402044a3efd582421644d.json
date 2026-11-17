@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "Item 7456856f: projectDeleteRequests holds a bulk permanent-delete request as one frozen list the owner approves once; accountOperations is the account-data plan with its own lifecycle and the project purge must not own it, so nothing existing fits",
+  "date": "2026-11-17"
+}

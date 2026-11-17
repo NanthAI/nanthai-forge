@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { cancelPendingTask } from './schedulerCancel';
 import { scheduleR2Purge } from './projectPurgeScheduling';
+import { noteDeleteOutcome } from './projectDeleteRequestOutcome';
 import { ensureProjectSlug, slugTaken } from './urlIdentity';
 import { blobStore } from './blobStore';
 import { invariant as check } from '../src/errors';
@@ -432,6 +433,7 @@ export const purge = internalMutation({
       task: undefined,
       purgeBlocked: undefined,
     });
+    await noteDeleteOutcome(ctx, finished, 'deleted');
     return null;
   },
 });

@@ -122,9 +122,10 @@ export function lineDiff(before: string, after: string): DiffLine[] | null {
       lines.push({ op: 'same', text: a[i]! });
       i++;
       j++;
-    } else if (j < m && (i === n || lcs[i]![j + 1]! >= lcs[i + 1]![j]!))
-      lines.push({ op: 'add', text: b[j++]! });
-    else lines.push({ op: 'del', text: a[i++]! });
+      // A removed line reads before the line that replaces it.
+    } else if (i < n && (j === m || lcs[i + 1]![j]! >= lcs[i]![j + 1]!))
+      lines.push({ op: 'del', text: a[i++]! });
+    else lines.push({ op: 'add', text: b[j++]! });
   }
   return lines;
 }

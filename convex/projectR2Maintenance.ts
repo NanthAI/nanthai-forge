@@ -12,6 +12,7 @@ import { deleteR2Object, listR2Prefix, projectPrefix } from './r2Operations';
 import { ForgeError, invariant } from '../src/errors';
 import { scheduleR2Purge } from './projectPurgeScheduling';
 import { authorizedKeys, purgeAuthority, type PurgeAuthority } from './projectPurgeAuthority';
+import { noteDeleteOutcome } from './projectDeleteRequestOutcome';
 
 const ref = (name: string) => makeFunctionReference<'query'>(name);
 const mutation = (name: string) => makeFunctionReference<'mutation'>(name);
@@ -152,6 +153,7 @@ async function counted(
 ) {
   if (purgeAuthority(project)?.operationId !== page.operationId) {
     await ctx.db.patch(project._id, { task: undefined, purgeBlocked: 'R2_PURGE_UNAUTHORIZED' });
+    await noteDeleteOutcome(ctx, project, 'failed');
     return false;
   }
   const purge = project.purge!;
@@ -206,17 +208,20 @@ export const pageResult = internalMutation({
     if (outcome === 'page') {
       if (page && (await counted(ctx, project, page)))
         await scheduleR2Purge(ctx, (await ctx.db.get(projectId))!, cursor ?? null);
-      else if (!page)
+      else if (!page) {
         await ctx.db.patch(projectId, { task: undefined, purgeBlocked: 'R2_PURGE_UNAUTHORIZED' });
+        await noteDeleteOutcome(ctx, project, 'failed');
+      }
     } else {
       const failures = project.r2Purge.failures + 1;
-      if (outcome === 'unauthorized' || failures >= 8)
+      if (outcome === 'unauthorized' || failures >= 8) {
         await ctx.db.patch(projectId, {
           task: undefined,
           purgeBlocked: outcome === 'unauthorized' ? 'R2_PURGE_UNAUTHORIZED' : 'R2_PURGE_RETRY_EXHAUSTED',
           r2Purge: { ...project.r2Purge, failures },
         });
-      else
+        await noteDeleteOutcome(ctx, project, 'failed');
+      } else
         await scheduleR2Purge(
           ctx,
           project,

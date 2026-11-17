@@ -91,8 +91,8 @@ export function SettingChange({
       ))}
       {view.same && !view.unavailable ? (
         <p className="sc-note">
-          {view.same.toLocaleString('en')} other {view.same === 1 ? 'field stays' : 'fields stay'} as they
-          are.
+          {view.same.toLocaleString('en')} other{' '}
+          {view.same === 1 ? 'field stays as it is.' : 'fields stay as they are.'}
         </p>
       ) : null}
       <details className="sc-details">

@@ -55,6 +55,11 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
     );
     return abandonPendingHost(WorkStore.open<'directory' | 'locked'>(root), flags[1], flags[3]);
   }
+  if (flags.includes('--delete-projects')) {
+    // Many projects in one owner approval (Item 7456856f); loaded only for this command.
+    const { deleteProjects } = await import('./host-delete-projects.js');
+    return deleteProjects(root, flags, json);
+  }
   if (flags.includes('--delete-project')) {
     const result = await deleteHostedProject(root, {
       ...parseDeleteProjectOptions(flags),
