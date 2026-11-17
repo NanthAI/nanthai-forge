@@ -635,6 +635,19 @@ layer out of both first paints.
   through the existing source reader, so a whole State never reaches the
   browser. The views take only a project id and a route, so signed-out public
   reading is a routing change.
+- `/-/new` (`web/src/app/start/Start.tsx`) is the first-project page: the
+  explain-first prompt (the same words as `web/index.html`), import, and the
+  agent app steps (`start/agent-apps.ts`, each command checked against the CLI
+  usage by `tests/app-getting-started.test.mjs`). No Convex call. Getting
+  started (`start/GettingStarted.tsx`) is the setup checklist on Needs me while
+  nothing is held: one `projectSetup.read` (at most 8 documents) when it opens,
+  a subscription only while setup is unfinished, and no read once this browser
+  has seen it settled (first landing plus the one "who approves" answer).
+- `web/src/app/screens.tsx` maps a place, or a `place/section`, to its lazy
+  screen; the section entry wins.
+- Settings > Landing and checks (`web/src/app/checks/LandingChecks.tsx`) reads
+  three queries once when it opens and again only after its own write; choosing
+  a CI file writes the same ci-status runner setting `configure-runner` does.
 - Keys: `Mod+K` palette, `?` all keys, `1`–`6` project places; never inside
   fields or dialogs.
 - The top-bar mark (`web/src/app/mark.ts`) follows the line feed the project

@@ -28,6 +28,7 @@ const screens: Partial<
   code: lazy(() => import('./code/CodePlace')),
   lanes: lazy(() => import('./lanes/LanesPlace')),
   'settings/': lazy(() => import('./people/PeopleAccess')),
+  'settings/checks': lazy(() => import('./checks/LandingChecks')),
 };
 
 /** The place's rebuilt screen once the project is known; the placeholder otherwise. */

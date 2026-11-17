@@ -27,6 +27,7 @@ import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { Head, Placeholder, crumbsFor } from '../Place';
 import type { PlaceProps } from '../screens';
+import GettingStarted from '../start/GettingStarted';
 import {
   itemCounts,
   moving,
@@ -72,6 +73,14 @@ function NeedsMeScreen({ route, projectId, projectName, feed }: PlaceProps) {
       read={read}
       counts={counts}
       decide={decide}
+      setup={
+        <GettingStarted
+          projectId={projectId}
+          route={route}
+          project={projectName}
+          lanes={feed ? feed.lanes.length : 0}
+        />
+      }
     />
   );
 }
@@ -91,10 +100,13 @@ export function NeedsMeView({
   read,
   counts,
   decide,
+  setup,
 }: Pick<PlaceProps, 'route' | 'projectName' | 'feed'> & {
   read: NeedsRead | undefined;
   counts: Parameters<typeof itemCounts>[0];
   decide: Decide;
+  /** Getting started (start/GettingStarted.tsx), shown while nothing is held; it hides itself once setup is done. */
+  setup?: ReactNode;
 }) {
   const view = useMemo(() => (read ? needsView(read) : null), [read]);
   const items = itemCounts(counts);
@@ -251,6 +263,7 @@ export function NeedsMeView({
         }
       />
       <LaneHelp />
+      {setup && view && !view.count ? setup : null}
       <Standing
         of="app"
         done={{

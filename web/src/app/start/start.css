@@ -1,0 +1,32 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Getting started (web/src/app/start): the two doors before a first project, the copy blocks, the one-line first-run
+   help and the agent app steps. Every value is a design-system token; scoped to [data-ds] like the system itself. */
+[data-ds] {
+  .gs-stack { display: grid; gap: var(--s-2); min-width: 0; }
+  .gs-doors { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1px; background: var(--line); border-bottom: var(--rule) solid var(--line); }
+  .gs-doors > .region { border-bottom: 0; }
+  .gs-first { display: flex; gap: var(--s-3); align-items: center; justify-content: space-between; padding: var(--s-2) var(--gut-head); border-bottom: var(--rule) solid var(--line); background: var(--surface-2); color: var(--text-2); font-size: var(--t-small); }
+  .gs-first > span { min-width: 0; }
+  .gs-cmd { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; border: var(--rule) solid var(--line); border-radius: var(--r); background: var(--bg); min-width: 0; }
+  .gs-cmd > .cmd { border-bottom: 0; background: transparent; }
+  .gs-cmd > .btn { margin: var(--s-1); }
+  .gs-peek > summary { padding: var(--s-2) var(--gut); color: var(--text-2); font-size: var(--t-meta); }
+  .gs-peek > .gs-cmd { margin: 0 var(--gut) var(--s-3); }
+  .gs-apps { padding-bottom: 0; }
+  .gs-steps { list-style: none; margin: 0; padding: 0; }
+  .gs-step { align-items: start; }
+  .gs-step > .num { padding-top: 1px; }
+  .gs-row { align-items: start; }
+  .gs-row > .ck, .gs-row > .st { margin-top: 2px; }
+  .gs-by { display: inline-flex; gap: var(--s-2); align-items: center; justify-content: flex-end; flex-wrap: wrap; min-width: 0; }
+  .gs-err { margin-top: var(--s-2); color: var(--failed); }
+  .gs-later { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-4); }
+  /* A phone row wraps (ds parts.css): the step keeps the room beside its tick, who and when follow underneath. */
+  @media (max-width: 860px) {
+    .gs-row > div { flex: 1 1 0; min-width: 0; }
+    .gs-row > .gs-by { flex: 1 0 100%; justify-content: flex-start; padding-left: calc(16px + var(--s-3)); }
+    .gs-row > .gs-by:empty { display: none; }
+    .gs-doors { grid-template-columns: minmax(0, 1fr); }
+    .gs-first { padding-inline: var(--gut); }
+  }
+}

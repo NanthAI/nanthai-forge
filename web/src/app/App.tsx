@@ -27,6 +27,9 @@ import './app.css';
 
 const Billing = lazy(() => import('../billing/Home'));
 
+// Rebuilt places load with their route, never in the first paint.
+const Start = lazy(() => import('./start/Start'));
+
 document.documentElement.dataset.ds = '';
 // Safe areas (phone tabs, notch): only the rebuilt frames draw into them, so only they ask for the full screen.
 document
@@ -185,14 +188,9 @@ function SignedIn({
   if (route.frame === 'bare')
     return (
       <BareFrame controls={controls}>
-        <Head
-          trail={[{ label: 'Start your first project' }]}
-          sentence="A project holds your code, its Lanes and its plan."
-        >
-          <a className="btn sm" href="/projects">
-            Open the current projects screen
-          </a>
-        </Head>
+        <Suspense fallback={null}>
+          <Start />
+        </Suspense>
         {overlays}
       </BareFrame>
     );
