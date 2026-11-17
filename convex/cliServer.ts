@@ -4,6 +4,7 @@ import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
 import { currentCredential } from './deviceFields';
+import { deviceProjectRefusal, requireUnlinkedImportAccess, usesUnlinkedImport } from './accessPolicy';
 import { recordCallerReceipts } from './projectSelfMetricReceiptStore';
 import {
   mutation as baseMutation,
@@ -39,18 +40,17 @@ function withPeople<B, C>(
         ? (v.object(declared as Record<string, never>) as unknown as { json: unknown }).json
         : (declared as { json?: unknown } | undefined)?.json
     ) as Shape;
+    const imported =
+      usesUnlinkedImport((definition as { args?: unknown }).args) || usesUnlinkedImport(returns);
     const wrapped = async (ctx: C, args: unknown) => {
+      if (imported) requireUnlinkedImportAccess(ctx as object);
       const selected =
         args && typeof args === 'object' && 'projectId' in args
           ? (args as { projectId: unknown }).projectId
           : undefined;
       const device = (ctx as { forgeDevice?: Doc<'cliCredentials'> | null }).forgeDevice;
       if (typeof selected === 'string' && device?.settings?.projects.kind === 'project')
-        invariant(
-          selected === device.settings.projects.projectId,
-          'AUTH_SCOPE_DENIED',
-          'This device is approved for its selected project only. Change its settings in your Forge browser.',
-        );
+        invariant(selected === device.settings.projects.projectId, 'AUTH_SCOPE_DENIED', deviceProjectRefusal);
       return mapResult(ctx, args, await handler(ctx, await mapArgs(ctx, args)), returns);
     };
     return (builder as (definition: unknown) => unknown)(

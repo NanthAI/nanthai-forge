@@ -4,7 +4,7 @@
 // longest held first; requests asked ahead are listed under it and not counted. Loaded with its route only.
 // Reads, sent together: projectNeedsMe:read (held Lanes and open requests, one subscription) and the planning
 // counts; the frame already reads the line. All re-run only on server writes; idle and hidden tabs cost nothing.
-import { useMemo, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { api } from '../../../../convex/_generated/api';
@@ -49,8 +49,18 @@ const LAYOUT: DockLayout = { top: ['needs'], a: ['moving'], b: ['more'] };
 /** Shown at most this many per band; the rest open in place, oldest last (DESIGN.md rule 43). */
 const CAP = 4;
 
+const LooseEnds = lazy(() => import('./LooseEnds'));
+
 export default function NeedsMe(props: PlaceProps) {
-  // Its sections (held, loose ends) keep their placeholders until they are rebuilt.
+  if (props.route.section === 'loose-ends')
+    return (
+      <Suspense
+        fallback={<Head trail={crumbsFor(props.route, props.projectName)} sentence="Loading loose ends…" />}
+      >
+        <LooseEnds {...props} />
+      </Suspense>
+    );
+  // The held section keeps its placeholder until it is rebuilt.
   if (props.route.section) return <Placeholder route={props.route} projectName={props.projectName} />;
   return <NeedsMeScreen {...props} />;
 }

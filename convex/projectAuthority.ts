@@ -3,6 +3,7 @@ import { journalProject } from './projectJournalStore';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { currentCredential } from './deviceFields';
+import { deviceProjectRefusal } from './accessPolicy';
 import type { Doc } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { projectExecution } from './projectExecution';
@@ -38,7 +39,7 @@ async function deviceProject(ctx: QueryCtx | MutationCtx, projectId: string, wri
   invariant(
     !settings || settings.projects.kind === 'all' || settings.projects.projectId === projectId,
     'AUTH_SCOPE_DENIED',
-    'This device is approved for its selected project only. Change its settings in your Forge browser.',
+    deviceProjectRefusal,
   );
   invariant(
     !writing || settings?.source !== 'read',

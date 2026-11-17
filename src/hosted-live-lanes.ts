@@ -16,8 +16,10 @@ export const liveLanesInput = z
     intentId: z.uuid().optional(),
     cursor: z.string().startsWith('forge-lanes-v1:').nullable().default(null),
     limit: z.number().int().min(1).max(100).default(50),
-    /** `live` hides dormant Lanes; `dormant` lists only them, each with `abandonable`; default lists all. */
-    view: z.enum(['all', 'live', 'dormant']).optional(),
+    /** `live` hides dormant Lanes; `dormant` lists only them, each with `abandonable`; default lists all.
+     * `loose-ends` is one compact read of five groups (dormant, stopped, checked never landed, leftover projects,
+     * dated checks), each listed or marked not reported with the reason. */
+    view: z.enum(['all', 'live', 'dormant', 'loose-ends']).optional(),
   })
   .strict();
 export async function liveLanes(transport: HostedAgentTransport, input: Record<string, unknown>) {
@@ -34,7 +36,10 @@ export async function liveLanes(transport: HostedAgentTransport, input: Record<s
       action: 'lanes' as const,
       operationId: null,
       resolved: null,
-      result: await transport.query('projectHostedLiveLanes:list', parsed.data),
+      result:
+        parsed.data.view === 'loose-ends'
+          ? JSON.parse((await transport.query('projectLooseEnds:read', {})) as string)
+          : await transport.query('projectHostedLiveLanes:list', parsed.data),
     };
   } catch (error) {
     if (

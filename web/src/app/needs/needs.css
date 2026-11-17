@@ -13,4 +13,12 @@
   .needs-me .needs-help button.lk { all: unset; color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
   .needs-me .needs-help button.lk:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
   @media (hover: hover) and (pointer: fine) { .needs-me .sumdec > summary:hover { background: var(--hover); } }
+  .loose-ends .loose-tools { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+  .loose-ends .loose-row { align-items: start; }
+  .loose-ends .loose-row input[type="checkbox"] { margin-top: 3px; width: 16px; height: 16px; accent-color: var(--accent); }
+  .loose-ends .loose-row .ttl .who { display: inline-flex; vertical-align: middle; }
+  @media (max-width: 560px) {
+    .loose-ends .loose-row:has(> input) { grid-template-columns: auto minmax(0, 1fr) !important; }
+    .loose-ends .loose-row:has(> input) > .meta, .loose-ends .loose-row:has(> input) > .r { grid-column: 2; justify-self: start; }
+  }
 }

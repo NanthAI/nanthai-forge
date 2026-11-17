@@ -14,6 +14,7 @@ import { hostedStatus, type HostedStatus } from '../src/hosted-status';
 import { indexedHostedQuery } from './hostedQueryIndex';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { requireUnlinkedImportAccess } from './accessPolicy';
 
 export const start = action({
   args: { url: v.string(), ref: v.optional(v.string()) },
@@ -148,6 +149,7 @@ export const discover = action({
   returns: v.string(),
   handler: async (ctx, { paginationOpts }): Promise<string> => {
     try {
+      requireUnlinkedImportAccess(ctx);
       const candidates = await ctx.runQuery(internal.imports.publicPage, { paginationOpts });
       const page = [];
       let unavailable = 0;

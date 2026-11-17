@@ -6,6 +6,7 @@ import { internal } from './_generated/api';
 import { assertImporter, authorizeGithub } from '../src/github-access';
 import { invariant } from '../src/errors';
 import { githubUserToken } from './githubUserTokenActions';
+import { requireUnlinkedImportAccess } from './accessPolicy';
 
 export function githubConfig(ctx?: ActionCtx) {
   return {
@@ -24,6 +25,7 @@ export async function currentAccess(
   allowTrash = false,
   ownerOnly = false,
 ) {
+  requireUnlinkedImportAccess(ctx);
   const read = async () => {
     const job: Doc<'imports'> | null = await ctx.runQuery(internal.imports.get, { id });
     invariant(

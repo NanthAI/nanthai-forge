@@ -587,17 +587,18 @@ Policy-suffixed npm links follow changed lockfiles automatically. Details:
 The rebuilt Sign-in and devices account page lists the current account’s browser
 sessions, passkeys and existing CLI approvals. Ending other browsers requires a
 fresh passkey or linked GitHub check; a passkey-add notice is acknowledged only
-in the viewing browser. Browser inactivity is one server setting, provisionally
-14 days pending owner confirmation. Current verified GitHub addresses replace
+in the viewing browser. Browser inactivity is one server setting, approved at 14 days. Current verified GitHub addresses replace
 previous values, including clearing an address the provider no longer reports.
 Draft Terms and Privacy pages are public under `/-`; account creation records
 the displayed draft version in its existing write. Explicit Lane holders, takeover
 and accepted handover preserve saved work and appear in Sessions and Lane history
 when the project rollout setting is enabled. CLI `whoami` reports its existing
 session identity without a separate identity RPC. Stable device approvals, settings
-and key renewal are available behind their independent rollout setting. Final legal
-approval, the four provisional access policies and browser inactivity still await
-owner confirmation.
+and key renewal are available behind their independent rollout setting. Selected-project
+devices refuse unlinked imported source, graph, export and lifecycle views; all-project
+devices retain existing person/provider checks. The four access rules are owner-approved
+and centrally defined. Final legal approval, rollout activation and the remaining
+session-stop and optional-lifetime proposals stay open.
 
 ## Documentation destination
 
