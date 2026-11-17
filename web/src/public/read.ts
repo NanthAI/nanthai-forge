@@ -55,7 +55,7 @@ export type ProjectPage = {
     checking: number;
     ready: number;
     held: number;
-    titles: { stage: string; title?: string }[];
+    titles: { stage: string; held?: true; title?: string }[];
   };
   plan: PlanView;
 };

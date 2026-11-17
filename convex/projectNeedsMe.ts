@@ -35,6 +35,8 @@ export const needsMeResult = v.object({
   held: v.array(
     v.object({
       laneId: v.string(),
+      /** The Lane's Intent, so several held Lanes of one Item can be told apart and grouped. */
+      intentId: v.union(v.string(), v.null()),
       title: v.union(v.string(), v.null()),
       actor: v.union(v.string(), v.null()),
       agent: v.union(v.string(), v.null()),
@@ -113,6 +115,7 @@ export const read = query({
           ]);
           return {
             laneId: mark.laneId,
+            intentId: presence?.intentId ?? null,
             title: presence?.goal ?? null,
             actor: presence?.actor ?? null,
             agent: presence?.agent ?? null,

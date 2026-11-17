@@ -199,9 +199,10 @@ test('open Lane titles reach visitors only when the project opts in, and Lane id
   for (const text of await everyPublicRead(closed))
     assert.doesNotMatch(text, /Secret Lane title|lane-1|lane-2/);
   const open = await page(fixture({ laneTitles: true }));
+  // Each listed Lane carries its stop and hold, as members see them (Item 31328be4); the hold's reason stays private.
   assert.deepEqual(open.lanes.titles, [
     { stage: 'editing', title: 'Secret Lane title' },
-    { stage: 'checking' },
+    { stage: 'checking', held: true },
   ]);
   assert.doesNotMatch(JSON.stringify(open), /lane-1|lane-2/);
 });

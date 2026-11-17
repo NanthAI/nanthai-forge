@@ -18,7 +18,8 @@ export const liveLanesInput = z
     limit: z.number().int().min(1).max(100).default(50),
     /** `live` hides dormant Lanes; `dormant` lists only them, each with `abandonable`; default lists all.
      * `loose-ends` is one compact read of five groups (dormant, stopped, checked never landed, leftover projects,
-     * dated checks), each listed or marked not reported with the reason. */
+     * dated checks), each listed or marked not reported with the reason; a quiet Lane beside a live Lane of the same
+     * Issue carries `replacedBy` and the abandon command as `next`. */
     view: z.enum(['all', 'live', 'dormant', 'loose-ends']).optional(),
   })
   .strict();

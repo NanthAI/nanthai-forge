@@ -42,11 +42,20 @@ test('the yard puts every held Lane under Needs you, so its count equals the she
     listed: 3,
     more: false,
     entries: [
-      { position: 1, laneId: 'c', phase: 'checking', submittedAt: '', lastProgressAt: '' },
+      // Each entry carries the server's one reading of its submission (src/landing-state.ts).
+      {
+        position: 1,
+        laneId: 'c',
+        phase: 'checking',
+        landingState: { state: 'checking' },
+        submittedAt: '',
+        lastProgressAt: '',
+      },
       {
         position: null,
         laneId: 'a',
         phase: 'ready',
+        landingState: { state: 'held-review' },
         submittedAt: '',
         lastProgressAt: '',
         hold: { kind: 'review', reason: 'protected paths: a', paths: ['a'] },
@@ -55,6 +64,7 @@ test('the yard puts every held Lane under Needs you, so its count equals the she
         position: null,
         laneId: 'b',
         phase: 'terminal-failed',
+        landingState: { state: 'check-failed' },
         submittedAt: '',
         lastProgressAt: '',
         lastFailingTests: ['t1', 't2'],

@@ -11,6 +11,8 @@ export type LooseRow = {
   agent: string | null;
   paths: number;
   at: number;
+  /** Another open Lane of the same Item is live: this one was left behind, and its agent abandons it. */
+  replacedBy?: string;
 };
 type Group = { reported: true; rows: LooseRow[]; more: boolean } | { reported: false; why: string };
 export type LooseEndsRead = {

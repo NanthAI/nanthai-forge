@@ -34,6 +34,7 @@ import {
 import { BrowserLanding } from '../../lane/hosted-landing-client';
 import { landingBrowserIO } from '../../lane/landing-browser-io';
 import { takenOutText, useTakeOut } from '../take-out';
+import { laneState } from '../lane-state';
 import './lane.css';
 
 type ProjectRoute = Extract<AppRoute, { frame: 'project' }>;
@@ -321,15 +322,11 @@ export function ReviewPage({
 function Stops({ reply, stop }: { reply: Reply; stop: ReturnType<typeof laneStop> }) {
   if (!stop) return null;
   const at = STOPS.findIndex(entry => entry.stage === stop.stage);
-  const tone = reply.conflicts.length
-    ? 'conflict'
-    : stop.held
-      ? 'waiting'
-      : stop.stage === 'main'
-        ? 'passed'
-        : 'active';
+  // The same state the yard, Needs you and the queue say (lane-state.ts); this page holds the mark, not the queue.
+  const said = laneState({ ...stop, overlap: stop.overlap || reply.conflicts.length > 0 });
+  const tone = said.kind;
   const note: Partial<Record<string, string>> = {
-    ...(stop.held ? { [stop.stage]: 'held for you' } : {}),
+    ...(said.note ? { [stop.stage]: said.note } : {}),
     ...(reply.lane.landed ? { main: clock(reply.lane.landed.at) } : {}),
   };
   return (
@@ -338,7 +335,7 @@ function Stops({ reply, stop }: { reply: Reply; stop: ReturnType<typeof laneStop
         className="stops"
         role="img"
         data-st={tone}
-        aria-label={`This Lane is at ${STOPS[at]!.label}${stop.held ? ', held for you' : ''}`}
+        aria-label={`This Lane is at ${STOPS[at]!.label}${said.note ? `, ${said.note}` : ''}`}
       >
         {STOPS.map((entry, index) => (
           <div key={entry.stage} className={index < at ? 'on' : index === at ? 'at' : undefined}>

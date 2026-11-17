@@ -411,7 +411,13 @@ function Held({
     <div className="dec" data-st={row.word === 'Conflict' ? 'conflict' : undefined}>
       <div className="dtop">
         <State word={row.word}>{row.tag}</State>
-        <span>holds 1 Lane</span>
+        <span>
+          holds{' '}
+          <span className="mono" translate="no">
+            Lane {row.mark}
+          </span>
+          {row.siblings > 1 ? `, 1 of ${row.siblings} held for this Item` : ''}
+        </span>
         <span>waiting {waited(row.since, drawnAt)}</span>
         {row.who ? <Who handle={row.who} /> : null}
       </div>

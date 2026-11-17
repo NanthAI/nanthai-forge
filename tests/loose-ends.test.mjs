@@ -76,3 +76,28 @@ test('a Lane that changed meanwhile is skipped and named; only a failed call is 
   assert.equal(setAsideWord('has-saved-work').retry, false);
   assert.equal(setAsideWord('failed').retry, true);
 });
+
+test('d9e1ac62: a quiet Lane whose Item has a live Lane says what replaced it and how its agent abandons it', async () => {
+  const s = fixture();
+  const now = Date.now();
+  // 'quiet' and 'busy' are two open Lanes of one Item; 'busy' saved five minutes ago.
+  s.tables.projectHostedPresence.get('presence-busy').intentId = 'intent-quiet';
+  for (const laneId of ['quiet', 'busy', 'dormant'])
+    s.tables.projectHostedRecordHeads.set(`head-${laneId}`, {
+      _id: `head-${laneId}`,
+      _creationTime: laneId === 'busy' ? 3 : 2,
+      projectId: 'project',
+      kind: 'lane',
+      key: laneId,
+      parent: `intent-${laneId === 'busy' ? 'quiet' : laneId}`,
+      status: 'active',
+      recordId: `record-${laneId}`,
+      at: now,
+    });
+  const result = await read(s, 'owner');
+  const [quiet] = result.groups.stopped.rows;
+  assert.equal(quiet.replacedBy, 'busy');
+  assert.equal(quiet.next, 'nforge x ROOT abandon {"laneId":"quiet","reason":"Replaced by Lane busy"}');
+  // A Lane alone on its Item is never called replaced.
+  assert.equal(result.groups.idle.rows.find(row => row.laneId === 'dormant').replacedBy, undefined);
+});

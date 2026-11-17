@@ -152,7 +152,7 @@ async function lanesOf(ctx: QueryCtx, project: Doc<'hostedProjects'>, laneTitles
     if (mark.held) held++;
     if (mark.overlap) overlap++;
   }
-  let titled: Array<{ stage: string; title?: string }> = [];
+  let titled: Array<{ stage: string; held?: true; title?: string }> = [];
   if (laneTitles) {
     const generation = await selectedGeneration(ctx, project);
     const partition = generation ? recordPartition(generation) : null;
@@ -160,7 +160,13 @@ async function lanesOf(ctx: QueryCtx, project: Doc<'hostedProjects'>, laneTitles
     for (const mark of marks.slice(0, 20)) {
       const row = partition ? await record(ctx, partition, 'lanes', mark.laneId) : null;
       const name = row ? (JSON.parse(row.value) as { name?: string }).name : undefined;
-      rows.push({ laneId: mark.laneId, stage: mark.stage, ...(name ? { title: name.slice(0, 200) } : {}) });
+      // The hold is the line's own mark, as members see it (web/src/app/lane-state.ts); the reason stays private.
+      rows.push({
+        laneId: mark.laneId,
+        stage: mark.stage,
+        ...(mark.held ? { held: true as const } : {}),
+        ...(name ? { title: name.slice(0, 200) } : {}),
+      });
     }
     titled = visibleLanes(project, laneTitles, rows);
   }

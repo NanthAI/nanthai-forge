@@ -3,12 +3,13 @@
 // queue in order with held Lanes apart, and who has what. Built only from the existing queue, hold and overlap
 // records the Lanes place already reads; saved work only, so no row here ever proves two Lanes independent.
 import { useMemo, type ReactNode } from 'react';
-import { Avatar, Dock, Key, Region, State, useDockLayout, type DockLayout, type StateWord } from '../../ds';
+import { Avatar, Dock, Key, Region, State, useDockLayout, type DockLayout } from '../../ds';
 import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { Head, crumbsFor } from '../Place';
 import type { LanesProps } from './common';
-import { buildYard, sharedFiles, waits, type QueueEntry, type YardRow } from './model';
+import { currentEntries, queueEntryState, waitLine, type LaneMark } from '../lane-state';
+import { buildYard, sharedFiles, waits, yardReady, type QueueEntry, type YardRow } from './model';
 import { useLaneMeta, useQueue, useSharedFiles } from './reads';
 
 const LAYOUT: DockLayout = { top: ['cross'], a: ['waits', 'queue'], b: ['has'] };
@@ -24,24 +25,45 @@ const age = (from: string, now: number) => {
 };
 
 export function Touching({ route, projectId, projectName, feed }: LanesProps) {
-  const { lanes } = useLaneMeta(projectId);
+  const { lanes, error: laneError } = useLaneMeta(projectId);
   const { queue, error: queueError } = useQueue(projectId);
   const shared = useSharedFiles(projectId, true);
   const [layout, setLayout, resetLayout] = useDockLayout('touching', LAYOUT);
   const now = Date.now();
   const yard = useMemo(
-    () => (feed ? buildYard(feed, lanes ?? [], queue, Date.now()) : null),
-    [feed, lanes, queue],
+    () =>
+      feed && yardReady({ feed, lanes, laneError, queue, queueError })
+        ? buildYard(feed, lanes ?? [], queue, Date.now())
+        : null,
+    [feed, lanes, laneError, queue, queueError],
   );
   const rowOf = new Map<string, YardRow>(yard?.rows.map(row => [row.laneId, row]));
   const titleOf = (laneId: string) => rowOf.get(laneId)?.title ?? `Lane ${laneId.slice(0, 8)}`;
   const laneHref = (laneId: string) => hrefFor({ ...route, section: '', rest: laneId });
   const files = sharedFiles(shared.view);
-  const pairs = waits(queue?.entries ?? [], titleOf);
-  const onPerson = pairs.filter(pair => pair.person).length;
   const ordered = (queue?.entries ?? []).filter(entry => entry.position !== null);
-  // Out of the order: held for a person, a dependency or main, and failed checks (every held Lane on the line).
-  const held = (queue?.entries ?? []).filter(entry => entry.position === null);
+  // Out of the order: held for a person, a dependency or main, and ended checks; only each Lane's current submission
+  // (an earlier one is history).
+  const current = currentEntries(queue?.entries ?? []);
+  const held = (queue?.entries ?? []).filter(
+    entry => entry.position === null && (!entry.laneId || current.get(entry.laneId) === entry),
+  );
+  const pairs = waits(
+    (queue?.entries ?? []).filter(entry => !entry.laneId || current.get(entry.laneId) === entry),
+    titleOf,
+  );
+  const onPerson = pairs.filter(pair => pair.person).length;
+  const markOf = new Map(feed?.lanes.map(mark => [mark.laneId, mark]));
+  const row = (entry: QueueEntry) => (
+    <QueueRow
+      key={entry.submissionId ?? entry.laneId ?? entry.submittedAt}
+      entry={entry}
+      title={entry.laneId ? titleOf(entry.laneId) : (entry.intentTitle ?? 'A landing')}
+      href={entry.laneId ? laneHref(entry.laneId) : null}
+      mark={entry.laneId ? (markOf.get(entry.laneId) ?? null) : null}
+      wait={waitLine(entry, ordered, now)?.line ?? null}
+    />
+  );
   const lead = !shared.view
     ? 'Loading the Lanes…'
     : files.files.length
@@ -142,7 +164,7 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
                     {row.actor ?? 'not reported'}
                   </span>
                 </span>
-                <State word="Working" state={row.state}>
+                <State word={row.glyph} state={row.state}>
                   {row.word}
                 </State>
               </A>
@@ -203,14 +225,7 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
           hint="in order, each checked on top of the one before"
         >
           {queue && !ordered.length ? <p className="quietline">Nothing is in the landing queue.</p> : null}
-          {ordered.map(entry => (
-            <QueueRow
-              key={entry.laneId ?? entry.submittedAt}
-              entry={entry}
-              title={entry.laneId ? titleOf(entry.laneId) : (entry.intentTitle ?? 'A landing')}
-              href={entry.laneId ? laneHref(entry.laneId) : null}
-            />
-          ))}
+          {ordered.map(row)}
           {queue && queue.more ? <div className="pf">More are in the queue than are listed here.</div> : null}
           {held.length ? (
             <>
@@ -218,14 +233,7 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
                 <span>Held, out of the order</span>{' '}
                 <span className="cnt">{held.length.toLocaleString()}</span>
               </div>
-              {held.map(entry => (
-                <QueueRow
-                  key={entry.laneId ?? entry.submittedAt}
-                  entry={entry}
-                  title={entry.laneId ? titleOf(entry.laneId) : (entry.intentTitle ?? 'A landing')}
-                  href={entry.laneId ? laneHref(entry.laneId) : null}
-                />
-              ))}
+              {held.map(row)}
             </>
           ) : null}
         </Region>
@@ -258,7 +266,19 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
   );
 }
 
-function QueueRow({ entry, title, href }: { entry: QueueEntry; title: string; href: string | null }) {
+function QueueRow({
+  entry,
+  title,
+  href,
+  mark,
+  wait,
+}: {
+  entry: QueueEntry;
+  title: string;
+  href: string | null;
+  mark: LaneMark | null;
+  wait: string | null;
+}) {
   const name = href ? (
     <A className="ttl cut" href={href} dir="auto">
       {title}
@@ -268,16 +288,7 @@ function QueueRow({ entry, title, href }: { entry: QueueEntry; title: string; hr
       {title}
     </span>
   );
-  const failed = !entry.hold && entry.position === null;
-  const word: StateWord = failed
-    ? 'Check failed'
-    : entry.hold
-      ? entry.hold.kind === 'review'
-        ? 'Needs you'
-        : 'Waiting its turn'
-      : entry.phase === 'checking'
-        ? 'Checking'
-        : 'Waiting its turn';
+  const said = queueEntryState(entry, mark);
   return (
     <div className="row lanes-q">
       <span className="qn" aria-label={entry.position ? `number ${entry.position}` : 'held'}>
@@ -286,16 +297,17 @@ function QueueRow({ entry, title, href }: { entry: QueueEntry; title: string; hr
       <span className="any">
         {name}
         <span className="meta cut" style={{ display: 'block' }}>
-          {entry.hold
-            ? entry.hold.reason
-            : failed
-              ? (entry.lastFailingTests ?? []).join(', ') || entry.error || 'its check failed'
+          {entry.hold?.reason ??
+            (entry.position === null
+              ? said.why
               : entry.position === 1
                 ? 'lands next'
-                : `behind ${entry.position! - 1}`}
+                : (wait ?? `behind ${entry.position - 1}`))}
         </span>
       </span>
-      <State word={word} />
+      <State word={said.glyph} state={said.kind}>
+        {said.word}
+      </State>
     </div>
   );
 }

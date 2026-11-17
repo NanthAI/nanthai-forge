@@ -12,6 +12,8 @@ import type { Id } from '../../../convex/_generated/dataModel';
 import { Avatar, Glyph, Sheet, Standing, State, initials } from '../ds';
 import { ForgeMark } from '../shell/brand';
 import { followLink } from '../app/router';
+import { stopWords } from '../app/lane-state';
+import type { LineStage } from '../app/Line';
 import { hrefFor, type AppRoute } from '../app/paths';
 import {
   usePublicRead,
@@ -497,12 +499,11 @@ function Profile({ handle, signedIn }: { handle: string; signedIn: boolean }) {
 
 /* ---------- a public project's front page ---------- */
 
-const STOPS: [keyof ProjectPage['lanes'] & ('editing' | 'saved' | 'checking' | 'ready'), string][] = [
-  ['editing', 'Working'],
-  ['saved', 'Saved'],
-  ['checking', 'Checking'],
-  ['ready', 'Ready to land'],
-];
+/** The app's stop words (lane-state.ts), so a visitor and a member name a Lane's place the same way. */
+const STOPS = (['editing', 'saved', 'checking', 'ready'] as const).map(
+  stop => [stop, stopWords[stop]] as const,
+);
+const isStop = (stage: string): stage is LineStage => stage in stopWords;
 
 function Project({ handle, slug }: { handle: string; slug: string }) {
   const [read, retry] = usePublicRead<ProjectPage>(
@@ -610,7 +611,7 @@ function Project({ handle, slug }: { handle: string; slug: string }) {
                     {lane.title ?? 'A Lane'}
                   </span>
                   <span className="meta">
-                    {STOPS.find(([stop]) => stop === lane.stage)?.[1] ?? lane.stage}
+                    {isStop(lane.stage) ? `${stopWords[lane.stage]}${lane.held ? ', held' : ''}` : lane.stage}
                   </span>
                 </div>
               ))

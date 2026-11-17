@@ -4,7 +4,9 @@
 // person, the reason it is held and the queue order. Pure and read-free: every count here comes from rows in hand and
 // says when the rows are not all of them.
 import type { LineFeed, LineStage } from '../Line';
-import type { StateKind } from '../../ds';
+import type { StateKind, StateWord } from '../../ds';
+import { QUIET_MS } from '../../../../src/lane-quiet';
+import { currentEntries, landingOf, laneState, stopWords, waitLine } from '../lane-state';
 
 /** One open Lane from `projectHostedLiveLanes:list` (the agent `lanes` page). */
 export type LaneMeta = {
@@ -17,14 +19,19 @@ export type LaneMeta = {
   dormant?: boolean;
   lastActivityAt?: string;
 };
-/** One entry from `projectHostedQueueView:read`. */
+/** One entry from `projectHostedQueueView:read`. `landingState` is the server's one reading of this submission
+ * (src/landing-state.ts); a Lane can have older entries too, and only its newest is current (lane-state.ts). */
 export type QueueEntry = {
   position: number | null;
   laneId: string | null;
+  submissionId?: string;
   intentTitle?: string | null;
+  landingState?: { state: string; label?: string } | null;
   phase: string;
   lastFailingTests?: string[];
   moreFailingTests?: number;
+  recomposeCount?: number;
+  batchId?: string | null;
   submittedAt: string;
   lastProgressAt: string;
   error?: string;
@@ -54,31 +61,37 @@ export const bandTitles: Record<Band, { title: string; hint: string }> = {
   quiet: { title: 'Quiet', hint: 'no save for a while' },
 };
 
-/** The shell's stop words (Line.tsx), so a row and the top bar always say the same thing. */
-export const stopWords: Record<LineStage, string> = {
-  editing: 'Editing',
-  saved: 'Saved',
-  checking: 'Checking',
-  ready: 'Ready to land',
-};
+export { stopWords };
 
 export type YardRow = {
   laneId: string;
+  /** The short Lane mark that tells two Lanes of one Item apart. */
+  mark: string;
+  intentId: string | null;
   band: Band;
   stage: LineStage;
   title: string;
   actor: string | null;
-  /** The state glyph and colour, and the word beside it. */
+  /** The state glyph and colour, and the word beside it (lane-state.ts, the same as every other screen). */
   state: StateKind;
+  glyph: StateWord;
   word: string;
-  /** Why it is here, in a few words: the hold's reason, the queue place, the last save. */
+  /** Why it is here, in a few words: the hold's reason, what it waits on, the last save. */
   why: string;
+  /** A second line under `why`, when there is one. */
+  detail: string | null;
   position: number | null;
   /** When it last changed stop (ms), for ordering the work band. */
   changedAt: number;
   overlap: boolean;
   /** The Lane page did not list it (beyond its window): the title is not known. */
   untitled: boolean;
+  /** Open Lanes for the same Item, this one included (1 when it is alone). */
+  lanes: number;
+  /** The Lane of the same Item that took this one's place, when this one is left (`replacedBy`). */
+  replacedBy: string | null;
+  /** Waiting in the queue for longer than a usual check. */
+  longWait: boolean;
 };
 
 export type Yard = {
@@ -100,31 +113,40 @@ const ago = (ms: number) => {
   return `${Math.round(hours / 24)} days ago`;
 };
 
-function heldWords(entry: QueueEntry | undefined): { state: StateKind; word: string; why: string } {
-  if (entry?.phase === 'terminal-failed' || entry?.error)
-    return {
-      state: 'failed',
-      word: 'Check failed',
-      why: entry.lastFailingTests?.length
-        ? `${entry.lastFailingTests[0]}${entry.lastFailingTests.length + (entry.moreFailingTests ?? 0) > 1 ? ` and ${entry.lastFailingTests.length - 1 + (entry.moreFailingTests ?? 0)} more` : ''}`
-        : 'its check failed',
-    };
-  if (entry?.hold?.kind === 'review')
-    return {
-      state: 'waiting',
-      word: 'Needs you',
-      why: entry.hold.paths?.length
-        ? `approval: changes ${entry.hold.paths.length === 1 ? 'a protected path' : `${entry.hold.paths.length} protected paths`}`
-        : 'waiting for approval',
-    };
-  if (entry?.hold?.kind === 'dependency')
-    return { state: 'waiting', word: 'Needs you', why: 'waits for the Lane it depends on' };
-  if (entry?.hold?.kind === 'main-red')
-    return { state: 'waiting', word: 'Needs you', why: 'held while main’s check is red' };
-  return { state: 'waiting', word: 'Needs you', why: 'held for a person' };
+/** The yard draws once its reads are in (Item 31328be4): the line feed, the Lane page and the queue, each answered or
+ * failed. Drawing from the feed alone would show ids for titles, no person and states the queue then changes. */
+export function yardReady(reads: {
+  feed: LineFeed | undefined;
+  lanes: readonly LaneMeta[] | undefined;
+  laneError?: Error;
+  queue: QueueView | undefined;
+  queueError?: Error;
+}) {
+  return !!reads.feed && (!!reads.lanes || !!reads.laneError) && (!!reads.queue || !!reads.queueError);
 }
 
-/** The yard: every Lane the feed shows, in its band, stuck work first. `now` is the render time, never a query arg. */
+type Sibling = { laneId: string; intentId: string; lastAt: number; inFlight: boolean };
+/** Several open Lanes for one Item (Item d9e1ac62): one that has been quiet for QUIET_MS with no landing in flight is
+ * replaced by the busiest other Lane of that Item (a landing in flight first, then the latest save). When every Lane of
+ * the Item is quiet, or none is, nothing is called replaced: they are only grouped. */
+export function replacedBy(lanes: readonly Sibling[], now: number) {
+  const byItem = new Map<string, Sibling[]>();
+  for (const lane of lanes) byItem.set(lane.intentId, [...(byItem.get(lane.intentId) ?? []), lane]);
+  const out = new Map<string, string>();
+  for (const group of byItem.values()) {
+    if (group.length < 2) continue;
+    const quiet = (lane: Sibling) => !lane.inFlight && now - lane.lastAt >= QUIET_MS;
+    const live = group
+      .filter(lane => !quiet(lane))
+      .sort((a, b) => Number(b.inFlight) - Number(a.inFlight) || b.lastAt - a.lastAt)[0];
+    if (!live) continue;
+    for (const lane of group) if (quiet(lane)) out.set(lane.laneId, live.laneId);
+  }
+  return out;
+}
+
+/** The yard: every Lane the feed shows, in its band, stuck work first; Lanes of one Item sit together, a replaced one
+ * below the one that replaced it. `now` is the render time, never a query arg. */
 export function buildYard(
   feed: LineFeed,
   lanes: readonly LaneMeta[],
@@ -132,50 +154,83 @@ export function buildYard(
   now: number,
 ): Yard {
   const meta = new Map(lanes.map(lane => [lane.laneId, lane]));
-  const entries = new Map(
-    (queue?.entries ?? []).flatMap(entry => (entry.laneId ? [[entry.laneId, entry] as const] : [])),
+  const entries = currentEntries(queue?.entries ?? []);
+  const perItem = new Map<string, number>();
+  for (const lane of lanes) perItem.set(lane.intentId, (perItem.get(lane.intentId) ?? 0) + 1);
+  const lastAt = (laneId: string, changedAt: number) => {
+    const lane = meta.get(laneId);
+    const at = Date.parse(lane?.lastSaveAt ?? lane?.lastActivityAt ?? '');
+    return Number.isFinite(at) ? Math.max(at, changedAt) : changedAt;
+  };
+  const replaced = replacedBy(
+    feed.lanes.flatMap(mark => {
+      const lane = meta.get(mark.laneId);
+      if (!lane) return [];
+      const inFlight =
+        entries.has(mark.laneId) || mark.held || mark.stage === 'checking' || mark.stage === 'ready';
+      return [
+        {
+          laneId: mark.laneId,
+          intentId: lane.intentId,
+          lastAt: lastAt(mark.laneId, mark.changedAt),
+          inFlight,
+        },
+      ];
+    }),
+    now,
   );
+  const short = (laneId: string) => laneId.slice(0, 8);
   const rows = feed.lanes.map((mark): YardRow => {
     const lane = meta.get(mark.laneId);
     const entry = entries.get(mark.laneId);
+    const said = laneState(mark, entry ? landingOf(entry) : null);
+    const by = replaced.get(mark.laneId) ?? null;
     const base = {
       laneId: mark.laneId,
+      mark: short(mark.laneId),
+      intentId: lane?.intentId ?? null,
       stage: mark.stage,
-      title: lane?.intent ?? entry?.intentTitle ?? `Lane ${mark.laneId.slice(0, 8)}`,
+      title: lane?.intent ?? entry?.intentTitle ?? `Lane ${short(mark.laneId)}`,
       actor: lane?.actor ?? null,
       changedAt: mark.changedAt,
       overlap: mark.overlap,
       untitled: !lane?.intent && !entry?.intentTitle,
       position: null,
+      state: said.kind,
+      glyph: said.glyph,
+      word: said.word,
+      why: said.why,
+      detail: null,
+      lanes: lane ? (perItem.get(lane.intentId) ?? 1) : 1,
+      replacedBy: by,
+      longWait: false,
     };
-    if (mark.held) return { ...base, band: 'needs', ...heldWords(entry) };
-    if (entry && entry.position !== null)
+    const left = by ? { why: `replaced by ${short(by)}`, detail: said.why || null } : {};
+    if (mark.held) return { ...base, band: 'needs', ...left };
+    if (entry && entry.position !== null) {
+      const wait = mark.stage === 'ready' ? waitLine(entry, queue?.entries ?? [], now) : null;
       return {
         ...base,
         band: 'queue',
         position: entry.position,
-        state: mark.stage === 'checking' ? 'active' : 'waiting',
-        word: mark.stage === 'checking' ? stopWords.checking : stopWords[mark.stage],
-        why: entry.position === 1 ? 'lands next' : `position ${entry.position}`,
+        why: wait?.line ?? (entry.position === 1 ? 'lands next' : `position ${entry.position}`),
+        detail: wait?.long ? 'longer than a usual check' : null,
+        longWait: wait?.long ?? false,
       };
+    }
     if (lane?.dormant)
       return {
         ...base,
         band: 'quiet',
         state: 'stale',
-        word: stopWords[mark.stage],
         why: `no save since ${ago(now - Date.parse(lane.lastActivityAt ?? lane.lastSaveAt ?? ''))}`,
+        ...left,
       };
     return {
       ...base,
       band: mark.stage === 'checking' || mark.stage === 'ready' ? 'queue' : 'work',
-      state: mark.overlap ? 'conflict' : 'active',
-      word: mark.overlap ? 'Conflict' : stopWords[mark.stage],
-      why: mark.overlap
-        ? 'its saved changes conflict with another Lane'
-        : lane?.lastSaveAt
-          ? `saved ${ago(now - Date.parse(lane.lastSaveAt))}`
-          : 'no save yet',
+      why: said.why || (lane?.lastSaveAt ? `saved ${ago(now - Date.parse(lane.lastSaveAt))}` : 'no save yet'),
+      ...left,
     };
   });
   const order: Record<Band, number> = { needs: 0, queue: 1, work: 2, quiet: 3 };
@@ -189,13 +244,36 @@ export function buildYard(
   const counts = { needs: 0, queue: 0, work: 0, quiet: 0 };
   for (const row of rows) counts[row.band]++;
   return {
-    rows,
+    rows: byItem(rows),
     counts,
     beyond: feed.more,
     beyondIsLowerBound: feed.moreIsLowerBound,
     open: rows.length + feed.more,
     next: rows.find(row => row.position === 1) ?? null,
   };
+}
+
+/** Within each band, Lanes of one Item sit together where the first live one sits; replaced ones follow it, and a
+ * replaced Lane whose replacement is in another band goes to the bottom of its own band. Stable otherwise. */
+function byItem(rows: readonly YardRow[]) {
+  const rank = new Map(rows.map((row, index) => [row.laneId, index]));
+  const head = new Map<string, number>();
+  for (const row of rows)
+    if (row.intentId && !row.replacedBy) {
+      const key = `${row.band}:${row.intentId}`;
+      if (!head.has(key)) head.set(key, rank.get(row.laneId)!);
+    }
+  const groupRank = (row: YardRow) =>
+    (row.intentId ? head.get(`${row.band}:${row.intentId}`) : undefined) ??
+    (row.replacedBy ? rows.length + rank.get(row.laneId)! : rank.get(row.laneId)!);
+  return rows
+    .slice()
+    .sort(
+      (a, b) =>
+        groupRank(a) - groupRank(b) ||
+        Number(!!a.replacedBy) - Number(!!b.replacedBy) ||
+        rank.get(a.laneId)! - rank.get(b.laneId)!,
+    );
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
@@ -286,11 +364,11 @@ export function waits(entries: readonly QueueEntry[], titleOf: (laneId: string) 
         person: false,
       });
     else if (entry.position !== null && entry.position > 1) {
-      const ahead = queued[queued.indexOf(entry) - 1];
+      const wait = waitLine(entry, queued, 0);
       out.push({
         laneId: entry.laneId,
-        on: ahead?.laneId ? titleOf(ahead.laneId) : `number ${entry.position - 1} in the queue`,
-        why: 'next in the queue behind it',
+        on: wait?.aheadLaneId ? titleOf(wait.aheadLaneId) : `number ${entry.position - 1} in the queue`,
+        why: wait?.reason ?? 'next in the queue behind it',
         since: entry.submittedAt,
         person: false,
       });

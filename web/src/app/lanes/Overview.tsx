@@ -9,7 +9,16 @@ import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { navigate, useSearch } from '../router';
 import { Head, crumbsFor } from '../Place';
-import { atStop, buildYard, filterRows, sharedFiles, situation, stopWords, type Filter } from './model';
+import {
+  atStop,
+  buildYard,
+  filterRows,
+  sharedFiles,
+  situation,
+  stopWords,
+  yardReady,
+  type Filter,
+} from './model';
 import { useLaneMeta, useLandings, useQueue, useSharedFiles } from './reads';
 import { Yard } from './Yard';
 import { FirstRun, type LanesProps } from './common';
@@ -26,16 +35,20 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
   const filter = (filters.find(f => f.id === search.get('show'))?.id ?? 'all') as Filter;
   const stop = search.get('stop');
   const { lanes, error: laneError } = useLaneMeta(projectId);
-  const { queue } = useQueue(projectId);
+  const { queue, error: queueError } = useQueue(projectId);
   const overlapsFold = useFold('lanes-overlaps', true);
   const landedFold = useFold('lanes-landed', false);
   const shared = useSharedFiles(projectId, overlapsFold[0]);
   const landed = useLandings(projectId, 'recent', landedFold[0]);
   const [layout, setLayout, resetLayout] = useDockLayout('lanes', LAYOUT);
-  // Ages ("saved 4 min ago") are worked out when the data changes, never on a timer.
+  // Ages ("saved 4 min ago") are worked out when the data changes, never on a timer. Rows wait for all three reads, so
+  // a reload never paints titles, people or states that change a moment later (Item 31328be4).
   const yard = useMemo(
-    () => (feed ? buildYard(feed, lanes ?? [], queue, Date.now()) : null),
-    [feed, lanes, queue],
+    () =>
+      feed && yardReady({ feed, lanes, laneError, queue, queueError })
+        ? buildYard(feed, lanes ?? [], queue, Date.now())
+        : null,
+    [feed, lanes, laneError, queue, queueError],
   );
   const laneHref = (laneId: string) => hrefFor({ ...route, section: '', rest: laneId });
   const setFilter = (id: Filter) => {
@@ -98,6 +111,14 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
           ) : shown.length ? (
             <>
               <Yard rows={shown} hrefOf={laneHref} dense={shown.length > 12} label="" />
+              {shown.some(row => row.longWait) ? (
+                <div className="pf">
+                  A Lane waits longer than a usual check.{' '}
+                  <A className="lk" href={touching}>
+                    Who waits on whom
+                  </A>
+                </div>
+              ) : null}
               {yard.beyond || laneError ? (
                 <div className="pf">
                   {yard.beyond

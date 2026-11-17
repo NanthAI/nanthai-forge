@@ -13,7 +13,7 @@ Lifecycle verbs: `start`, `save`, `land`. Use `land --save` to save, update from
 
 ## Hosted checkouts
 
-- Start with a fresh operation id; edit only its returned Lane path. Save after meaningful steps. Read `behindMain`, presence and `conflictNotice`: saves trial-merge against main and peers, but unsaved peer edits are excluded. `peers {laneId,path?,detail?}` reads saved overlap evidence; missing evidence never proves independence.
+- Start with a fresh operation id; edit only its returned Lane path. A new Lane that replaces one of the Issue's `openLanes` (for example a resolution Lane) abandons the old one: `x abandon {laneId,reason:"Replaced by Lane NEW"}`. Save after meaningful steps. Read `behindMain`, presence and `conflictNotice`: saves trial-merge against main and peers, but unsaved peer edits are excluded. `peers {laneId,path?,detail?}` reads saved overlap evidence; missing evidence never proves independence.
 - `diff {laneId,paths?,byteBudget?,cursor?}` compares pinned base to saved head. `show {state?,candidateId?,laneId?,path}` reads exact bytes, never unsaved files or a substituted revision. Follow `nextCursor` on the original pair.
 - `history {op:"log",path:"FILE"}` reads file history; `history {op:"blame",path:"FILE",start:1,end:100}` answers who changed lines; `op:"show",commit,path` reads an old file. MCP: `forge_review` action `history`.
 - Declare your model with `FORGE_AGENT_MODEL` in the launcher or shell (for example `export FORGE_AGENT_MODEL=gpt-6.1-sol`); receipts retain harness/model as declared attribution.

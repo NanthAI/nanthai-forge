@@ -4,6 +4,7 @@
 // counted (DESIGN.md rules 15, 16, 41). Pure: the screen draws it, tests/app-needs-me.test.mjs pins it.
 import type { StateWord } from '../../ds';
 import type { LineFeed } from '../Line';
+import { heldState, heldWhyState } from '../lane-state';
 
 export type HeldWhy =
   | 'conflict'
@@ -17,6 +18,7 @@ export type HeldWhy =
 /** One held Lane as projectNeedsMe:read returns it (convex/projectNeedsMe.ts `needsMeResult`). */
 export type HeldLane = {
   laneId: string;
+  intentId?: string | null;
   title: string | null;
   actor: string | null;
   agent: string | null;
@@ -57,6 +59,9 @@ export type NowRow = HeldLane & {
   who: string | null;
   /** The Lane's approval request, when the hold is a landing waiting for the owner. */
   approval: Approval | null;
+  /** The short Lane mark, and how many held Lanes share its Item, so two rows never look the same. */
+  mark: string;
+  siblings: number;
 };
 export type AheadRow = Approval & { word: StateWord; tag: string; head: string; who: string | null };
 export type NeedsView = {
@@ -70,16 +75,8 @@ export type NeedsView = {
   approvalsComplete: boolean;
 };
 
-const words: Record<HeldWhy, StateWord> = {
-  conflict: 'Conflict',
-  'check-failed': 'Check failed',
-  infra: 'Not run',
-  'stale-head': 'Needs you',
-  rejected: 'Needs you',
-  review: 'Needs you',
-  dependency: 'Waiting its turn',
-  unknown: 'Needs you',
-};
+/** The held word is the one every screen says for this hold (lane-state.ts). */
+const wordOf = (why: HeldWhy): StateWord => heldState({ state: heldWhyState[why] }).glyph;
 const tags: Record<HeldWhy, string> = {
   conflict: 'Conflict',
   'check-failed': 'Check failed',
@@ -138,6 +135,9 @@ export function needsView(read: NeedsRead): NeedsView {
   const laneApprovals = new Map(
     requests.filter(request => request.kind === 'lane').map(request => [request.laneId, request]),
   );
+  const perItem = new Map<string, number>();
+  for (const lane of read.held)
+    if (lane.intentId) perItem.set(lane.intentId, (perItem.get(lane.intentId) ?? 0) + 1);
   const now = read.held
     .map(lane => {
       const approval = laneApprovals.get(lane.laneId) ?? null;
@@ -145,11 +145,13 @@ export function needsView(read: NeedsRead): NeedsView {
       return {
         ...lane,
         why,
-        word: words[why],
+        word: wordOf(why),
         tag: tags[why],
         head: questions[why](laneTitle(lane)),
         who: whoOf(lane.actor, lane.agent),
         approval,
+        mark: lane.laneId.slice(0, 8),
+        siblings: lane.intentId ? (perItem.get(lane.intentId) ?? 1) : 1,
       };
     })
     // Longest held first (Item 9e748e41, I41); ties keep the read's order.

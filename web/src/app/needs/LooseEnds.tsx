@@ -164,6 +164,14 @@ export function LooseEndsView({
                   </span>
                   <span className="meta">
                     {row.paths.toLocaleString('en')} {row.paths === 1 ? 'file' : 'files'}, {row.age}
+                    {row.replacedBy ? (
+                      <>
+                        , replaced by{' '}
+                        <span className="mono" translate="no">
+                          Lane {row.replacedBy.slice(0, 8)}
+                        </span>
+                      </>
+                    ) : null}
                   </span>
                   <span className="r">
                     {word ? (

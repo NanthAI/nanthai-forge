@@ -66,13 +66,12 @@ export function Yard({
 function LaneLine({ row, href, dense }: { row: YardRow; href: string; dense: boolean }) {
   const who = row.actor ?? 'not reported';
   const where = `${stopWords[row.stage]}${row.position ? `, number ${row.position} in the queue` : ''}`;
+  // Two open Lanes of one Item must never look the same: the short Lane mark, and how many the Item has.
+  const mark = row.untitled ? null : row.mark;
   return (
-    <A
-      className="ln"
-      href={href}
-      data-st={row.state}
-      aria-label={`${row.title}. ${row.word}: ${row.why}. ${where}. ${row.actor ?? 'person not reported'}`}
-    >
+    // The visible text is the link's name, in reading order (no hand-made label to drift from it); the stop and queue
+    // place, drawn on the track, are spoken from a hidden line at the end.
+    <A className="ln" href={href} data-st={row.state}>
       <div className="lab">
         <Avatar handle={row.actor ?? '?'} />
         <div className={dense ? 'ttl' : 'ttl wrap2'} dir="auto">
@@ -82,6 +81,15 @@ function LaneLine({ row, href, dense }: { row: YardRow; href: string; dense: boo
           <span className="mono" translate="no" dir="auto">
             {who}
           </span>
+          {mark ? (
+            <>
+              {' · '}
+              <span className="mono" translate="no" title={`Lane ${row.laneId}`}>
+                {mark}
+              </span>
+            </>
+          ) : null}
+          {row.lanes > 1 ? ` · ${row.lanes.toLocaleString()} Lanes` : null}
         </div>
       </div>
       <div className="trk" style={{ '--p': place[row.stage] } as CSSProperties} aria-hidden="true">
@@ -95,12 +103,14 @@ function LaneLine({ row, href, dense }: { row: YardRow; href: string; dense: boo
         </div>
       </div>
       <div className="actn">
-        <State word="Working" state={row.state}>
+        <State word={row.glyph} state={row.state}>
           {row.word}
         </State>
         <span className="why">
           <b>{row.why}</b>
+          {row.detail ? <> {row.detail}</> : null}
         </span>
+        <span className="sr">. {where}</span>
       </div>
     </A>
   );
