@@ -58,7 +58,7 @@
   --t-read: 16px; --t-land: 17px; --t-land-lead: clamp(17px, 1.45vw, 21px); --t-h3: 19px;
   --t-h2: clamp(28px, 3.3vw, 48px); --t-h1: clamp(34px, 5.5vw, 82px); --t-stmt: clamp(30px, 4.6vw, 70px);
   --lh-read: 1.6; --lh-disp: 1;
-  --m-sit: 74ch; --m-prose: 72ch; --m-read: 68ch; --m-lede: 58ch; --m-note: 46ch;
+  --docs-tree-w: 260px; --m-sit: 74ch; --m-prose: 72ch; --m-read: 68ch; --m-lede: 58ch; --m-note: 46ch;
 
   /* space: a 4 px step; 64 and 96 on the public page only */
   --s-0: 2px; --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px; --s-8: 32px; --s-12: 48px; --s-16: 64px; --s-24: 96px;

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { generatedDocumentationPaths } from './docs-output-paths.mjs';
 import { landingAttemptForkFindings } from './check-landing-attempt-forks.mjs';
 import { workStoreAccessFindings } from './check-work-store-access.mjs';
 import { networkBoundaryFindings } from './check-network-boundaries.mjs';
@@ -86,7 +87,9 @@ for (const file of files) {
     const target = match[1];
     if (/^(?:[a-z]+:|#)/i.test(target)) continue;
     const path = decodeURIComponent(target.split('#')[0]);
-    check(existsSync(resolve(dirname(file), path)), `${relative(root, file)}: missing link ${target}`);
+    const resolved = path.startsWith('/') ? resolve(root, `.${path}`) : resolve(dirname(file), path);
+    const generated = generatedDocumentationPaths.includes(relative(root, resolved).split(sep).join('/'));
+    check(existsSync(resolved) || generated, `${relative(root, file)}: missing link ${target}`);
   }
   check(text.endsWith('\n'), `${relative(root, file)}: missing final newline`);
 }

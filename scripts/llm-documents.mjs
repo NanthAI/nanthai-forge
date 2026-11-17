@@ -18,6 +18,14 @@ export const llmsFullPaths = [
   'docs/why-forge.md',
   'docs/principles.md',
   'docs/quickstart.md',
+  'docs/guides/people.md',
+  'docs/guides/agents.md',
+  'docs/guides/plan.md',
+  'docs/guides/review.md',
+  'docs/guides/access.md',
+  'docs/guides/oversight.md',
+  'docs/guides/billing.md',
+  'docs/guides/export.md',
   'docs/concepts.md',
   'docs/agents.md',
   'docs/agents/briefings.md',
@@ -139,7 +147,7 @@ export function llmDocuments(root) {
     doc => !startHere.has(doc.path) && !agentDocs.has(doc.path) && !referenceDocs.has(doc.path),
   );
   const llms =
-    `${introduction}## If someone sent you here\n\n${sentHere}\n\n## Start here\n\n${links(documents.filter(doc => startHere.has(doc.path)))}\n` +
+    `${introduction}## If someone sent you here\n\n${sentHere}\n\n## Documentation site\n\n- [Documentation](/docs/): Static, readable guides for people and agents.\n- [Generated CLI reference](/docs/reference/cli.md): Every hosted command and its enforced JSON schema.\n- [Generated MCP reference](/docs/reference/mcp.md): Hosted tool names and enforced input schemas.\n\n## Start here\n\n${links(documents.filter(doc => startHere.has(doc.path)))}\n` +
     `- [README](${repository}/README.md): ${describe('README.md', full[0].source).note}\n\n` +
     `## For agents\n\n${agentRules.map(rule => `- ${rule}`).join('\n')}\n\n` +
     `${links(documents.filter(doc => agentDocs.has(doc.path)))}\n` +

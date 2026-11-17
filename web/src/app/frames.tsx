@@ -338,7 +338,7 @@ export function PublicFrame({ children, wide = false }: { children: ReactNode; w
           <span>Forge</span>
         </a>
         <div className="end">
-          <a href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/README.md">Docs</a>
+          <a href="/docs/">Docs</a>
           <A href="/-/terms">Terms</A>
           <A href="/-/privacy">Privacy policy</A>
         </div>

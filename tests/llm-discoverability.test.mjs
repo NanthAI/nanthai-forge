@@ -76,8 +76,8 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
   ])
     assert.ok(llms.includes(`## ${section}\n\n`), section);
   const links = [...llms.matchAll(/^- \[[^\n]+\]\(([^)]+)\): (.+)$/gm)];
-  // Every packaged doc, the README and skill on GitHub, and the full-text file are linked once.
-  assert.equal(links.length, packageDocuments.length + 3);
+  // Every packaged doc, the README and skill, full text, docs home and both generated references are linked.
+  assert.equal(links.length, packageDocuments.length + 6);
   for (const [, target, note] of links) {
     assert.ok(note.length > 0);
     if (target.startsWith(githubBlob)) {
@@ -85,7 +85,10 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
       continue;
     }
     assert.ok(target.startsWith('/'), `${target} is a site route or a repository link`);
-    assert.ok(readFileSync(join(output, target), 'utf8').length > 0, target);
+    assert.ok(
+      readFileSync(join(output, target.endsWith('/') ? `${target}index.html` : target), 'utf8').length > 0,
+      target,
+    );
     assert.ok(crawlable(robots, target), target);
   }
   for (const path of packageDocuments) {

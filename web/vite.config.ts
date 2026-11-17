@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react';
 import optimizeLocales from '@react-aria/optimize-locales-plugin';
 import { builtinModules } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { docsSite } from '../scripts/docs-site.tsx';
 import { llmDocuments, llmsFullSizeReport } from '../scripts/llm-documents.mjs';
 import { LAYER_GZIP_BUDGET, layerBundleReport, layerImportViolation } from '../scripts/ds-build-guard.mjs';
 // Two pages: index.html is the static public page (no app code), app.html the signed-in app. On the dev and preview
@@ -58,6 +59,7 @@ export default defineConfig({
           );
       },
     },
+    docsSite(fileURLToPath(new URL('../', import.meta.url))),
     appRoutes,
     {
       // Vite silently swaps a Node builtin for an empty stub in the browser; a chunk that then calls
@@ -100,6 +102,7 @@ export default defineConfig({
       input: {
         index: fileURLToPath(new URL('./index.html', import.meta.url)),
         app: fileURLToPath(new URL('./app.html', import.meta.url)),
+        docs: fileURLToPath(new URL('./docs.html', import.meta.url)),
       },
     },
   },

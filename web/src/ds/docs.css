@@ -1,0 +1,46 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Docs use the shared frame and prose, with a tree instead of the app rail (DESIGN.md rule 47). */
+body:has(.docs-shell) { margin: 0; }
+[data-ds] .docs-shell {
+  min-height: 100dvh;
+  background: var(--surface);
+  .pubbar .mk .stem, .pubbar .mk .stemB { fill: currentColor; }
+  .pubbar .mk .arm { fill: var(--brand); }
+  .pubbar .mk .xT { fill: var(--mark-warm); }
+  .pubbar .mk .xL { fill: var(--mark-teal); }
+  .pubbar .mk .sp { display: none; }
+  .pubbar { gap: var(--s-6); }
+  .pubbar .end { margin-left: auto; display: flex; align-items: center; gap: var(--s-4); }
+  .docs-layout { display: grid; grid-template-columns: var(--docs-tree-w) minmax(0, 1fr); max-width: var(--wrap-land); margin-inline: auto; }
+  .docs-tree { border-right: var(--rule) solid var(--line); padding: var(--s-6) var(--s-5) var(--s-12); }
+  .docs-contents > summary { font-weight: var(--w-bold); margin-bottom: var(--s-4); cursor: pointer; }
+  .docs-find { display: grid; gap: var(--s-2); color: var(--text-2); font-size: var(--t-meta); margin-bottom: var(--s-6); }
+  .docs-find input { width: 100%; min-width: 0; height: var(--ctl-h-touch); border: var(--rule) solid var(--line-strong); border-radius: var(--r); background: var(--bg); padding-inline: var(--s-3); }
+  .docs-tree h2 { color: var(--text-3); font-size: var(--t-meta); font-weight: var(--w-strong); padding: var(--s-5) var(--s-2) var(--s-2); }
+  .docs-tree a { display: block; padding: var(--s-2); color: var(--text-2); overflow-wrap: anywhere; }
+  .docs-tree a[aria-current] { color: var(--accent); background: var(--surface-2); font-weight: var(--w-bold); }
+  .docs-tree a:hover { color: var(--accent); }
+  main { min-width: 0; padding: var(--s-6) var(--s-12) var(--s-12); }
+  .docs-tools { color: var(--text-3); font-size: var(--t-meta); margin-bottom: var(--s-6); }
+  .docs-tools a { color: var(--text-2); text-decoration: underline; text-underline-offset: 3px; }
+  .md { padding: 0; max-width: var(--m-read); }
+  .md > * { max-width: 100%; }
+  .md h1 { font-size: var(--t-big); }
+  .md h2, .md h3 { scroll-margin-block-start: var(--s-6); }
+  .md pre { max-width: 100%; margin-bottom: 0; white-space: pre; }
+  .md .docs-table { overflow-x: auto; margin-bottom: var(--s-4); }
+  .md .docs-table table { margin-bottom: 0; }
+  .md details { margin-block: var(--s-3); }
+  .md summary { cursor: pointer; color: var(--text-2); }
+  .docs-copy { display: flex; gap: var(--s-3); align-items: center; margin-bottom: var(--s-4); padding-top: var(--s-2); }
+  .docs-copy-status { color: var(--text-2); font-size: var(--t-meta); white-space: normal; }
+  .docs-footer { display: flex; flex-wrap: wrap; gap: var(--s-4); border-top: var(--rule) solid var(--line); margin-top: var(--s-12); padding-top: var(--s-5); max-width: var(--m-read); font-size: var(--t-small); }
+  .docs-footer a { color: var(--accent); }
+  @media (max-width: 860px) {
+    .pubbar { padding-inline: var(--gut); gap: var(--s-4); }
+    .docs-layout { grid-template-columns: minmax(0, 1fr); }
+    .docs-tree { border-right: 0; border-bottom: var(--rule) solid var(--line); padding: var(--s-4) var(--gut); }
+    .docs-contents:not(:focus-within) > summary { margin-bottom: 0; }
+    main { padding: var(--s-6) var(--gut) var(--s-12); }
+  }
+}

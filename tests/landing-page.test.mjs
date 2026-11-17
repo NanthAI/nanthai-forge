@@ -141,7 +141,7 @@ test('the limits section states the caveats the reports carry', () => {
   assert.match(text, /375 s against 474 s to main, and 6 of ten tasks strictly right against 7/);
   assert.match(text, /9 CI jobs against 29 on the release run/);
   assert.match(text, /not a pass of the exit bar/);
-  assert.match(html, /docs\/research\/p6-exit-bench-results\.md">Method, raw runs and every table/);
+  assert.match(html, /docs\/research\/p6-exit-bench-results\/">Method, raw runs and every table/);
 });
 
 test('every link on the page has a real destination', () => {
@@ -162,14 +162,20 @@ test('every link on the page has a real destination', () => {
       );
     else if (href.startsWith('https://'))
       assert.equal(href, 'https://github.com/NanthAI/nanthai-forge', href);
-    else assert.ok(['/', '/projects', '/llms.txt'].includes(href), `${href} is a page the site serves`);
+    else
+      assert.ok(
+        ['/', '/projects', '/llms.txt'].includes(href) || /^\/docs\/(?:[a-z0-9/-]+\/)?$/.test(href),
+        `${href} is a page the site serves`,
+      );
   }
-  for (const label of ['Docs', 'Benchmark method', 'Development status', 'Security', 'Source'])
-    assert.match(
-      html,
-      new RegExp(`<a href="https://github.com/NanthAI/nanthai-forge[^"]*">${label}</a>`),
-      label,
-    );
+  for (const [label, href] of [
+    ['Docs', '/docs/'],
+    ['Benchmark method', '/docs/research/p6-exit-bench-results/'],
+    ['Development status', '/docs/status/'],
+    ['Security', '/docs/security/'],
+    ['Source', 'https://github.com/NanthAI/nanthai-forge'],
+  ])
+    assert.ok(html.includes(`<a href="${href}">${label}</a>`), label);
   assert.match(html, /<a class="in" href="\/projects">Sign in<\/a>/);
   assert.match(
     text,

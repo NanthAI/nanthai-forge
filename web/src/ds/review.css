@@ -51,7 +51,7 @@
   .sus.hit { background: color-mix(in srgb, var(--st-bg) 60%, var(--surface)); }
   .sus.hit .v { color: var(--st); }
   .sus li, ul.dash > li { position: relative; padding: 3px 0 0 14px; color: var(--text-2); font-size: var(--t-small); overflow-wrap: anywhere; }
-  .sus li::before, ul.dash > li::before { content: ""; position: absolute; left: 0; top: .95em; width: 6px; height: 1.5px; background: var(--text-3); }
+  .sus li::before, ul.dash > li::before { content: "\2013"; position: absolute; left: 0; top: 3px; color: var(--text-3); }
   .row .runs { display: grid; grid-template-columns: repeat(20, minmax(0, 1fr)); padding: 0; height: 18px; gap: 1px; align-items: end; }
   .row .runs i { height: 8px; }
   .row .runs i.bad { height: 16px; }

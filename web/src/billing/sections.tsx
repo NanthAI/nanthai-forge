@@ -108,10 +108,7 @@ export function Plan({ snapshot, sample }: Props) {
         <p>{landingCountingRule}</p>
       </details>
       <div className="pf">
-        <a
-          className="lk"
-          href="https://github.com/NanthAI/nanthai-forge/blob/main/docs/billing.md#current-service-limits"
-        >
+        <a className="lk" href="/docs/billing/#current-service-limits">
           Service limits
         </a>
       </div>

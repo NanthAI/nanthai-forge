@@ -20,7 +20,7 @@ import { chooseCiFile, triggerLine, workflowProblem } from './choose-ci';
 import '../start/start.css';
 
 type ProjectRoute = Extract<AppRoute, { frame: 'project' }>;
-const DOCS = 'https://github.com/NanthAI/nanthai-forge/blob/main/docs';
+const DOCS = '/docs';
 type Facts = { setup: SetupView; policy: AutonomyPolicy; landing: LandingModeView | null };
 
 function sentence(facts: Facts) {
@@ -297,7 +297,7 @@ export default function LandingChecks({
             <div className="ttl">Forge’s check workflow on GitHub Actions</div>
             <div className="meta">Runs only the tests a change can affect, in shards.</div>
           </div>
-          <a className="btn sm ghost" href={`${DOCS}/operations/github-actions-checks.md`}>
+          <a className="btn sm ghost" href={`${DOCS}/operations/github-actions-checks/`}>
             How to set it up
           </a>
         </Row>
@@ -306,7 +306,7 @@ export default function LandingChecks({
             <div className="ttl">A machine you run</div>
             <div className="meta">For checks that need your own hardware or network.</div>
           </div>
-          <a className="btn sm ghost" href={`${DOCS}/operations/self-hosted-runner.md`}>
+          <a className="btn sm ghost" href={`${DOCS}/operations/self-hosted-runner/`}>
             How to set it up
           </a>
         </Row>

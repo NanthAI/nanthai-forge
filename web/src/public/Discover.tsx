@@ -23,7 +23,7 @@ import {
 } from './read';
 
 type Props = { route: AppRoute; signedIn: boolean; viewerHandle: string | undefined };
-const DOCS = 'https://github.com/NanthAI/nanthai-forge/blob/main/docs/README.md';
+const DOCS = '/docs/';
 const nf = new Intl.NumberFormat('en-US');
 const plural = (n: number, one: string, many = `${one}s`) => `${nf.format(n)} ${n === 1 ? one : many}`;
 const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });

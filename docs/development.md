@@ -1187,3 +1187,27 @@ Terms and privacy drafts under `/-/terms` and `/-/privacy` render without a Conv
 client. The sign-in line links both. New accounts retain the draft version once
 in their existing creation write. These drafts need owner approval before public
 launch; they do not settle the still-open public data-policy commitments.
+
+## Documentation website
+
+`/docs/` is a static section emitted by the hosted Vite build. It uses the design
+system's `DocsFrame` and prose rules: a left tree and a 68-character column at
+16 px/1.6. It needs neither sign-in nor the app bundle. Optional browser code
+filters page titles, copies code and remembers the theme; it makes no backend
+calls, polls or idle timers. The public page and sign-in help link here.
+
+The existing explicit `packageDocuments` inventory supplies both HTML pages and
+raw Markdown. New guides need a manifest under `scripts/package-documents/`, as
+before. `scripts/docs-reference.ts` generates CLI help from `src/cli.ts` and the
+enforced hosted help entries, and MCP help from the actual hosted tool
+registrations without executing their handlers. Other MCP modes show their exact
+source registrations through static syntax extraction, without opening an index
+or authorizing a grant. Schemas are rendered at build
+time; there is no checked-in reference copy to drift. A missing source or nav
+page fails the build. Docs tests guard generated command/tool coverage, safe
+Markdown rendering, links, keyboard interaction and both themes and widths.
+`/llms.txt`, `/llms-full.txt` and crawler rules include the docs destination.
+
+This delivery does not change docs-only preflight or admission: configured
+`docsPaths` keep their existing cheap path. The full suite belongs to the
+landing runner, and there is no new runtime dependency in the CLI or MCP.

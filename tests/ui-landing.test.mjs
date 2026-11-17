@@ -72,17 +72,14 @@ test('the example briefing names detected instruction files and plain paths', ()
   assert.doesNotMatch(none.copyText, /Follow this repo/);
 });
 
-// J34-4/J34-7/J34-8: links lead to the mirror, and the first-run guide covers either landing policy.
+// J34-4/J34-7/J34-8: links lead to the mirror and the docs destination; the first-run guide covers either landing policy.
 test('public frame links to the current mirror and status; signed-out app routes point back to the public page', async () => {
   const { createElement } = await import('react');
   const { renderToStaticMarkup } = await import('react-dom/server');
   const { PublicFrame } = await import(moduleUrl('../web/src/shell/PublicFrame.tsx'));
   const html = renderToStaticMarkup(createElement(PublicFrame, { children: 'Example' }));
   assert.match(html, /href="https:\/\/github.com\/NanthAI\/nanthai-forge#readme"/);
-  assert.match(
-    html,
-    /href="https:\/\/github.com\/NanthAI\/nanthai-forge\/blob\/main\/docs\/status.md">Development status/,
-  );
+  assert.match(html, /href="\/docs\/status\/">Development status/);
   assert.doesNotMatch(html, /github.com\/nanthai\/forge/);
   // The public page itself is static HTML; tests/landing-page.test.mjs checks its links.
   const { SignedOut } = await import(moduleUrl('../web/src/explore/SignedOut.tsx'));

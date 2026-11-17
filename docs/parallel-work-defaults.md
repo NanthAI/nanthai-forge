@@ -609,3 +609,12 @@ code (`PREFLIGHT_REQUIRED`) and next step.
   prove the tests ran. A landing of a Lane from outside its checkout reports `no-checkout`, as before.
 - Person landings, replays of an operation and server re-landings are not judged. Projects with
   `advise` or `off` read nothing extra.
+
+### Project development alert destination
+
+The Forge development project uses the `ntfy` webhook preset in
+`agentDefaults.stallAlerts`; its destination is held in the Convex dev secret
+`FORGE_ALERT_WEBHOOK_URL`. No topic or recipient address belongs in source.
+The owner confirmed a forced-stall notification end to end. Email recipients
+are configured through `agentDefaults.stallAlerts.email`; email delivery from
+development is not available yet.

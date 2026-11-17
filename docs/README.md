@@ -1,28 +1,39 @@
 # Forge documentation
 
-Forge is a source host and workspace for people and agents working on the same
-code at the same time. Start with the guide that matches your task.
+Get a change from an idea to main, with people and agents working together.
 
-- [Principles](principles.md): our north star and how everyday friction guides improvement.
-- [Improvement loop](agents/improvement-loop.md): capture, rank and resolve workflow friction.
-- [Lint rules and guards](agents/lint-rules.md): build-failing guards for repeat bug classes and how to add one.
-- [Why Forge](why-forge.md): differences from GitHub, measured landing throughput and what remains unmeasured.
-- [Quickstart](quickstart.md): import GitHub source into a writable hosted project, then save and land a Lane.
-- [Concepts](concepts.md): Intents, Lanes, Candidates, checks and Channels.
-- [Lead playbook](agents/lead.md): plan, delegate, verify, measure cost and release.
-- [Agent workflow](agents/workflow.md): work in a Lane, coordinate and finish through the project's runner.
-- [Agents](agents.md) and [briefings](agents/briefings.md): CLI/MCP tools and generated agent context.
-- [Workflows](workflows.md): hosted usage; [Git serving](git-serving.md): plain `git clone` and `git fetch` from hosted Forge.
-- [Architecture](architecture.md) and [decisions](decisions.md): how Forge is built.
-- [Operations](operations.md): hosting, source exchange and check runners.
-- [Hosted landing ownership contract](operations/hosted-landing-contract.md): shared submission/fencing rules and deferred native-owner migration gaps.
-- [Story: parallel builders coordinate](stories/2026-11-05-parallel-builders-coordinate.md): the real overlap answers, board notes and peer wait 13 agents used on one night.
-- [Security](security.md): trust boundaries and authorization.
-- [Development](development.md): contributing and verification.
-- [Status](status.md), [roadmap](roadmap.md) and [backlog](backlog.md): public development tracking.
-- [Dependency licenses](dependency-licenses.md) and [native dependency licenses](native-dependency-licenses.md): distribution disclosures.
+## Start with your first landing
 
-Run `nforge docs` to list every installed document and `nforge docs why-forge` to
-read the comparison offline. The hosted build generates `/llms.txt`,
-`/llms-full.txt` (a curated, size-budgeted subset) and the linked Markdown files
-from the explicit packaged inventory; see [documentation for agents and LLMs](why-forge.md#documentation-for-agents-and-llms).
+- [For people](guides/people.md): build the CLI, sign in, bring a project across and review the first change.
+- [For agents](guides/agents.md): connect your tools, start from an Item, edit in a Lane and follow the landing receipt.
+- [Quickstart](quickstart.md): the full hosted setup, from building the CLI from source to a checked landing.
+- [Concepts](concepts.md): Lanes, saves, checks and main in plain words.
+
+## Do the next thing
+
+| Your task | Guide |
+| --- | --- |
+| Put work in order | [Plan with Items and Initiatives](guides/plan.md) |
+| Read a change or recover a failed check | [Review and land](guides/review.md) |
+| Connect a terminal or understand who holds a Lane | [Devices, sign-ins and holders](guides/access.md) |
+| Keep several Lanes moving | [Oversee the work](guides/oversight.md) |
+| Understand account billing | [Account billing](guides/billing.md) |
+| Keep a copy or leave with your work | [Export and mirrors](guides/export.md) |
+
+## Look up a command
+
+The [CLI reference](reference/cli.md) and [MCP reference](reference/mcp.md) are generated from the contracts used by the running tools on every site build. For installed offline help, run:
+
+```sh
+nforge docs
+nforge docs quickstart
+nforge docs agents/hosted
+```
+
+For a model, start at [llms.txt](/llms.txt), read the [full-text guides](/llms-full.txt), or use the Markdown link on any page. Documentation is static: browsing, searching page titles and leaving a tab open make no backend calls.
+
+## Operations and trust
+
+Read about [checks on your CI](operations/github-actions-checks.md), [your own runners](operations/self-hosted-runner.md), [security](security.md), [where data lives](data-placement.md), [costs and measurements](operations/cost-to-serve.md) and [current capability status](status.md).
+
+[Principles](principles.md) explain the choices. [Development](development.md), [architecture](architecture.md) and [decisions](decisions.md) describe how Forge is built. [Dependency licenses](dependency-licenses.md) and [native dependency licenses](native-dependency-licenses.md) carry the distribution disclosures.

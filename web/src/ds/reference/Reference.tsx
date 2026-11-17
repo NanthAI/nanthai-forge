@@ -16,6 +16,8 @@ import {
   type ReorderItem,
 } from '../interactive';
 import { Figures } from './Figures';
+import { DocsFrame } from '../DocsFrame';
+import '../docs.css';
 
 type Planned = ReorderItem & { state: 'planned' | 'proposed'; by: string };
 
@@ -276,6 +278,25 @@ export function Reference() {
           <h2>On the public page</h2>
         </div>
         <Standing of="public" done={{ n: 14 }} inProgress={{ n: 5 }} left={{ n: 31 }} />
+      </section>
+      <section aria-label="Documentation frame">
+        <DocsFrame
+          current="/docs/"
+          groups={[
+            {
+              label: 'Start here',
+              pages: [
+                { title: 'Documentation', href: '/docs/' },
+                { title: 'Quickstart', href: '/docs/quickstart/' },
+              ],
+            },
+          ]}
+        >
+          <h2>Documentation</h2>
+          <p>
+            One readable column and a left tree. <a href="/docs/">Open the docs</a>.
+          </p>
+        </DocsFrame>
       </section>
       <Sheet
         open={sheet}
