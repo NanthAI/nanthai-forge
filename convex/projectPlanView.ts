@@ -14,6 +14,7 @@ import { planningRecordTable } from './projectWorkRecordTables';
 import { report } from './errors';
 import { invariant } from '../src/errors';
 import type { PlanRow } from '../src/planning-model';
+import { decodePlanPage, PLAN_ROWS, planParent } from './projectPlanRows';
 
 const text = (value: unknown) => (typeof value === 'string' && value ? value : undefined);
 /** A planning search root's value as the screen's row: the model fields and counts, never the body. */
@@ -74,28 +75,38 @@ export async function planView(ctx: QueryCtx, projectId: Id<'hostedProjects'>): 
   const generation = await selectedGeneration(ctx, project);
   if (!generation) return empty(canEdit);
   const generationId = recordPartition(generation);
+  const compact = generation.planRowsVersion === 1;
   const table = await planningRecordTable(ctx, generationId);
   const rows = (kind: 'issue' | 'initiative', status: string, initiativeId?: string) =>
-    initiativeId === undefined
+    compact
       ? ctx.db
-          .query(table)
-          .withIndex('by_planning_kind_and_status', q =>
+          .query('projectWorkDataRecords')
+          .withIndex('by_generation_and_collection_and_parent_and_position', q =>
             q
               .eq('generationId', generationId)
-              .eq('collection', 'planningSearch')
-              .eq('planning.kind', kind)
-              .eq('planning.status', status),
+              .eq('collection', PLAN_ROWS)
+              .eq('parent', planParent(kind, status, initiativeId)),
           )
-      : ctx.db
-          .query(table)
-          .withIndex('by_planning_initiativeId_and_kind_and_status', q =>
-            q
-              .eq('generationId', generationId)
-              .eq('collection', 'planningSearch')
-              .eq('planning.initiativeId', initiativeId)
-              .eq('planning.kind', kind)
-              .eq('planning.status', status),
-          );
+      : initiativeId === undefined
+        ? ctx.db
+            .query(table)
+            .withIndex('by_planning_kind_and_status', q =>
+              q
+                .eq('generationId', generationId)
+                .eq('collection', 'planningSearch')
+                .eq('planning.kind', kind)
+                .eq('planning.status', status),
+            )
+        : ctx.db
+            .query(table)
+            .withIndex('by_planning_initiativeId_and_kind_and_status', q =>
+              q
+                .eq('generationId', generationId)
+                .eq('collection', 'planningSearch')
+                .eq('planning.initiativeId', initiativeId)
+                .eq('planning.kind', kind)
+                .eq('planning.status', status),
+            );
   const parse = (root: { key: string; position: number; value: string }) => {
     try {
       return planViewRow(JSON.parse(root.value), root.position);
@@ -103,27 +114,42 @@ export async function planView(ctx: QueryCtx, projectId: Id<'hostedProjects'>): 
       return null;
     }
   };
+  const readRows = async (
+    kind: 'issue' | 'initiative',
+    status: string,
+    limit: number,
+    initiativeId?: string,
+  ) => {
+    if (!compact)
+      return (await rows(kind, status, initiativeId).take(limit + 1))
+        .map(parse)
+        .filter((row): row is PlanRow => row !== null);
+    const result: PlanRow[] = [];
+    for await (const page of rows(kind, status, initiativeId)) {
+      result.push(...decodePlanPage(page.value, page.parent));
+      if (result.length > limit) break;
+    }
+    return result.sort((a, b) => a.position - b.position).slice(0, limit + 1);
+  };
   let more = false;
   const out: PlanRow[] = [];
   const initiatives = (
     await Promise.all(
       [...liveStatuses, 'closed', 'abandoned'].map(status =>
-        rows('initiative', status).take(PLAN_INITIATIVE_LIMIT + 1),
+        readRows('initiative', status, PLAN_INITIATIVE_LIMIT),
       ),
     )
   ).flat();
   if (initiatives.length > PLAN_INITIATIVE_LIMIT) more = true;
   for (const root of initiatives.slice(0, PLAN_INITIATIVE_LIMIT)) {
-    const row = parse(root);
-    if (row) out.push(row);
+    out.push(root);
   }
   for (const pageRows of await Promise.all(
-    liveStatuses.map(status => rows('issue', status).take(PLAN_LIVE_LIMIT + 1)),
+    liveStatuses.map(status => readRows('issue', status, PLAN_LIVE_LIMIT)),
   )) {
     if (pageRows.length > PLAN_LIVE_LIMIT) more = true;
     for (const root of pageRows.slice(0, PLAN_LIVE_LIMIT)) {
-      const row = parse(root);
-      if (row) out.push(row);
+      out.push(root);
     }
   }
   const live = out.filter(
@@ -132,9 +158,7 @@ export async function planView(ctx: QueryCtx, projectId: Id<'hostedProjects'>): 
   const settled = await Promise.all(
     live.map(async ({ id }) => {
       const [done, dropped] = await Promise.all(
-        (['closed', 'abandoned'] as const).map(status =>
-          rows('issue', status, id).take(PLAN_SETTLED_LIMIT + 1),
-        ),
+        (['closed', 'abandoned'] as const).map(status => readRows('issue', status, PLAN_SETTLED_LIMIT, id)),
       );
       return {
         initiativeId: id,

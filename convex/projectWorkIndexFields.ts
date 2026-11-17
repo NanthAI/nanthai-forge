@@ -23,6 +23,8 @@ export const indexEntry = v.object({
   value: v.string(),
 });
 export const generationFields = {
+  /** Complete compact Plan projection in this record partition. */
+  planRowsVersion: v.optional(v.literal(1)),
   recordTables: v.optional(v.union(v.literal('copying'), v.literal('split'))),
   recordTablesProgress: v.optional(v.string()),
   planningSearchVersion: v.optional(v.union(v.literal(1), v.literal(2))),

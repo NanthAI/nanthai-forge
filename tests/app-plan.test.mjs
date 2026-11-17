@@ -15,6 +15,9 @@ const read = await import(moduleUrl('../convex/projectPlanView.ts'));
 const { planView, planSentence, movedRank, captureBody, matches } = await import(
   moduleUrl('../web/src/app/plan/model.ts')
 );
+const { encodePlanPage, planParent, planPageKey, PLAN_ROWS } = await import(
+  moduleUrl('../convex/projectPlanRows.ts')
+);
 const { effectiveRank, legacyRank } = await import(moduleUrl('../src/planning-model.ts'));
 
 const item = (fields, i) => ({
@@ -86,6 +89,34 @@ test('the plan read lists live work and counts settled Items of live Initiatives
   assert.equal(rows.find(row => row.id === first.id).owner, '@sample');
   // Roots read: 2 Initiatives + 5 live Items + 2 settled Items of the live Initiative; 40 closed history rows: none.
   assert.equal(cost.documents, 9 + 2, 'plus the project and its generation');
+
+  // A complete compact projection gives exactly the same rows and counts as the legacy reader.
+  const pages = new Map();
+  for (const root of s.tables.projectPlanningRecords.values()) {
+    if (root.collection !== 'planningSearch') continue;
+    const row = read.planViewRow(JSON.parse(root.value), root.position);
+    const parent = planParent(row.kind, row.status, row.initiativeId);
+    const key = planPageKey(parent, row.position);
+    if (!pages.has(key)) pages.set(key, { parent, rows: [] });
+    pages.get(key).rows.push(row);
+  }
+  for (const [key, { parent, rows }] of pages)
+    await s.ctx.db.insert('projectWorkDataRecords', {
+      projectId: s.projectId,
+      generationId,
+      collection: PLAN_ROWS,
+      key,
+      parent,
+      position: Math.floor(rows[0].position / 128),
+      value: encodePlanPage(rows),
+    });
+  await s.ctx.db.patch(generationId, { planRowsVersion: 1 });
+  const compact = await read.planView(s.ctx, s.projectId);
+  assert.deepEqual(
+    { ...compact, rows: JSON.parse(compact.rows) },
+    { ...result, rows: JSON.parse(result.rows) },
+    'compact coverage preserves the Plan rows and counts',
+  );
 
   const view = planView(result);
   assert.equal(view.live, 5);

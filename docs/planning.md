@@ -92,3 +92,11 @@ that original identities were authenticated or that imported work landed in Forg
 This is the reader contract. A backlog batch writer, review, Undo and full project archive are not yet available.
 The existing internal planning export contains all retained Item and Initiative versions, comments, relations
 and linked Intent metadata. It is narrower than a full source and Work archive.
+
+## Plan list projection
+
+The Plan query accepts compact `_workStorePlan` pages in the existing data partition. A page holds at most 128
+creation positions, grouped by kind and status (settled Items also by Initiative); each page uses portable DEFLATE compression, and settled pages hold positions only. It contains only the list fields and Done-when counts. Item bodies, comments, exact agent reads and
+search remain in their existing records. `planRowsVersion: 1` on the generation means every root is covered. Older
+generations keep the existing indexed search-root reader until preparation completes; reads never start a backfill.
+The reader is shipped before the writer. The query's row limits, permissions, order and counts stay the same.

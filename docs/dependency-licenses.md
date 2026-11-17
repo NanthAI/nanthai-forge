@@ -1,6 +1,6 @@
 # Pinned npm dependency license inventory
 
-Generated from package-lock.json with node scripts/render-dependency-licenses.mjs. All 1355 locked dependency instances are listed, including platform-specific optional packages. These are upstream manifest declarations, not a review of every bundled third-party source or trademark permission. Preserve upstream package notices.
+Generated from package-lock.json with node scripts/render-dependency-licenses.mjs. All 1356 locked dependency instances are listed, including platform-specific optional packages. These are upstream manifest declarations, not a review of every bundled third-party source or trademark permission. Preserve upstream package notices.
 
 The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Apache-2.0 license](https://github.com/get-convex/convex-backend/blob/precompiled-2026-09-28-5c7cb5b/LICENSE.md), not the npm client license. Its bundled native dependencies are outside this npm inventory; [native license coverage](native-dependency-licenses.md) records the inspected pins and remaining gaps. Forge's own boundaries are in [the licensing map](../LICENSE.md).
 
@@ -730,6 +730,7 @@ The separately downloaded self-host backend is covered by its pinned [FSL-1.1-Ap
 | node_modules/fdir | 6.5.0 | MIT | development |
 | node_modules/fecha | 4.2.3 | MIT | development |
 | node_modules/fetch-blob | 3.2.0 | MIT | development |
+| node_modules/fflate | 0.8.2 | MIT | development |
 | node_modules/figures | 6.1.0 | MIT | development |
 | node_modules/file-uri-to-path | 1.0.0 | MIT | development |
 | node_modules/fill-range | 7.1.1 | MIT | development |
