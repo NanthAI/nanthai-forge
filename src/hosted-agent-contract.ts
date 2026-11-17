@@ -544,7 +544,7 @@ export const hostedAgentCommandSchemas = {
       'batch: send the entries alone.',
     ),
   'comment-planning-item': planningCommentCommandSchema
-    .omit({ action: true, operationId: true, agent: true, decidedBy: true }) // Set by the session and server.
+    .omit({ action: true, operationId: true, agent: true, agentClient: true, decidedBy: true }) // Set by the session and server.
     .extend(planningIssueFields)
     .strict()
     .refine(

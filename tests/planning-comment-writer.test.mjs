@@ -94,11 +94,12 @@ test('a forged label never becomes the writer: an outside reader of a public pro
   assert.equal(outside.length, 2);
   for (const row of outside) {
     assert.equal(row.author, undefined, 'an outside reader may not see people');
-    assert.equal(model.writer(row), null);
+    assert.deepEqual(model.writer(row), { kind: 'person', label: '', model: null, verified: false });
   }
   const html = renderToStaticMarkup(h(Discussion, { comments: outside, canWrite: false }));
   assert.doesNotMatch(html, /mara/, 'the forged handle shows nowhere');
-  assert.match(html, /A member/);
+  assert.doesNotMatch(html, /A member/);
+  assert.match(html, /a person<\/span><span class="kind">person/);
   as({ subject: 'owner' });
   const body = (await s.read()).data.planningItems.filter(item => item.id === issue.itemId).at(-1).body;
   assert.match(
@@ -145,4 +146,79 @@ test('a comment over the size cap is refused by the server and never drawn by th
   );
   assert.match(html, /longer than 65,536 characters and is not shown/);
   assert.ok(html.length < 5_000);
+});
+
+test('each viewer sees who wrote a comment by the public identity rule: owner, member, reader, public (Item 2fb69177)', async t => {
+  const { s, comment, comments } = await publicProject(t);
+  s.tables.projectContributors.set('member-row', {
+    _id: 'member-row',
+    projectId: 'project',
+    contributor: 'member',
+  });
+  s.tables.projectReaders.set('reader-row', { _id: 'reader-row', projectId: 'project', reader: 'reader' });
+  await comment({ text: 'From the owner in the browser.' });
+  await comment(
+    { agent: 'keen-impala', agentClient: 'claude-code:claude-opus-5-5', text: 'From an agent.' },
+    { subject: 'owner', forgeCredential: 'credential-1' },
+  );
+  await comment(
+    { agent: 'amber-fox', text: 'From an agent with no model.' },
+    { subject: 'owner', forgeCredential: 'credential-1' },
+  );
+  const seen = async viewer =>
+    Object.fromEntries((await comments(viewer)).map(row => [row.text, model.writer(row)]));
+  for (const viewer of ['owner', 'member']) {
+    const by = await seen(viewer);
+    assert.deepEqual(by['From the owner in the browser.'], {
+      kind: 'person',
+      label: '@sample-owner',
+      model: null,
+      verified: true,
+    });
+    assert.deepEqual(by['From an agent.'], {
+      kind: 'agent',
+      label: 'sample-owner/keen-impala',
+      model: 'claude-opus-5-5',
+      verified: true,
+    });
+    assert.equal(by['From an agent with no model.'].model, null, 'no model declared');
+  }
+  for (const viewer of ['reader', 'stranger', null]) {
+    const by = await seen(viewer).catch(() => null);
+    if (!by) continue; // a signed-out read is refused before any row
+    assert.deepEqual(by['From the owner in the browser.'], {
+      kind: 'person',
+      label: '',
+      model: null,
+      verified: false,
+    });
+    assert.deepEqual(by['From an agent.'], {
+      kind: 'agent',
+      label: 'keen-impala',
+      model: 'claude-opus-5-5',
+      verified: true,
+    });
+    assert.doesNotMatch(JSON.stringify(by), /sample-owner/, `${viewer}: no person is named`);
+  }
+});
+
+test('a browser sign-in cannot claim a model; a device keeps the one its session declared (Item 2fb69177)', async t => {
+  const { comment, comments } = await publicProject(t);
+  await comment({
+    agent: 'keen-impala',
+    agentClient: 'claude-code:claude-opus-5-5',
+    text: 'From the browser.',
+  });
+  await comment(
+    { agent: 'keen-impala', agentClient: 'claude-code:claude-opus-5-5', text: 'From a device.' },
+    { subject: 'owner', forgeCredential: 'credential-1' },
+  );
+  await comment(
+    { agentClient: 'claude-code:claude-opus-5-5', text: 'From a device, no slug.' },
+    { subject: 'owner', forgeCredential: 'credential-1' },
+  );
+  const rows = Object.fromEntries((await comments('owner')).map(row => [row.text, row]));
+  assert.equal(rows['From the browser.'].agentClient, undefined, 'a person never carries a model');
+  assert.equal(rows['From a device.'].agentClient, 'claude-code:claude-opus-5-5');
+  assert.equal(rows['From a device, no slug.'].agentClient, 'claude-code:claude-opus-5-5');
 });

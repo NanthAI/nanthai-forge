@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Pure planning schemas can be validated in the Convex non-Node runtime.
 import { z } from 'zod';
+import { AGENT_CLIENT } from './agent-slug.js';
 const id = z.string().uuid();
 const oid = z.string().regex(/^[0-9a-f]{40,64}$/);
 const agentSlugShape = /^[a-z]{2,10}-[a-z]{2,10}$/;
@@ -110,6 +111,9 @@ export const planningItemSchema = z.object({
 const discussionFields = {
   author: z.string().min(1).max(200).optional(),
   agent: z.string().regex(agentSlugShape).optional(),
+  /** The writing agent session's client as its launcher declared it, `tool` or `tool:model` (receipts' agentClient,
+   * 81d12a32); declared, never verified, and only beside `agent`. */
+  agentClient: z.string().regex(AGENT_CLIENT).optional(),
   replyTo: id.optional(),
   decision: z.literal(true).optional(),
 };
@@ -142,6 +146,8 @@ export const planningCommentCommandSchema = z.object({
   decision: z.boolean().optional(),
   /** The writing agent session's slug; anything outside the fixed lists is dropped by the reducer. */
   agent: z.string().max(40).optional(),
+  /** The writing agent session's declared client and model (`tool:model`); dropped without `agent` or off-shape. */
+  agentClient: z.string().max(100).optional(),
   /** Set by the hosted server for a decision: the writer's public label for the body line. */
   decidedBy: z.string().max(80).optional(),
 });

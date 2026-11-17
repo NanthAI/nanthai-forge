@@ -12,6 +12,8 @@ export type DiscussionComment = {
   authorLabel?: string;
   author?: string;
   agent?: string;
+  /** The agent session's declared client, `tool` or `tool:model` (declared, never verified). */
+  agentClient?: string;
   replyTo?: string;
   decision?: true;
 };
@@ -44,27 +46,52 @@ export type ReactionCount = { commentId: string; kind: ReactionKind; count: numb
 
 const handle = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/;
 const slug = /^[a-z]{2,10}-[a-z]{2,10}$/;
+/** A receipt's agent client (src/agent-slug.ts AGENT_CLIENT): `tool` or `tool:model`. */
+const clientShape = /^[a-z][a-z0-9-]{0,31}(?::[A-Za-z0-9][A-Za-z0-9._/-]{0,63})?$/;
 const legacyLabel = /^@?([a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?(?:\/[a-z]{2,10}-[a-z]{2,10})?)$/;
 
 /** The longest comment a hosted project stores (convex/planningCommentWriter.ts); longer text is never drawn. */
 export const MAX_COMMENT_CHARACTERS = 65_536;
 
-/** Who wrote a comment. `verified` is the server-recorded account, as the design's `who`: `@handle` for a person,
- * `handle/agent` for an agent acting for that person. A hosted server stores no typed label on new comments; an older
- * comment's typed label shows only when it has the shape of a public identity, without `@` and marked as not verified,
- * so a typed label can never pass for a writer the server checked. `null` reads as "A member". */
-export type Writer = { label: string; verified: boolean };
-export function writer(comment: DiscussionComment): Writer | null {
+/** Who wrote a comment, as the design's "who did it": a person (`@handle`) or an agent run (`handle/run`) with the model
+ * its session declared. `verified` is the server-recorded account. A reader who may not see people gets no account
+ * from the server (convex/publicPeople.ts), so the comment still says whether a person or an agent run wrote it, with
+ * the run name only. An older comment's typed label shows only when it has the shape of a public identity, marked as
+ * not verified, so a typed label can never pass for a writer the server checked. */
+export type Writer = {
+  /** `forge`: a Forge job wrote it (a system actor, never an account). */
+  kind: 'person' | 'agent' | 'forge';
+  /** `@handle`, `handle/run`, or the run alone when the person is hidden; '' when no one may be named. */
+  label: string;
+  /** The declared model, or null for an agent that declared none (a person has none). */
+  model: string | null;
+  verified: boolean;
+};
+const modelOf = (client: string | undefined) => {
+  const model = client && clientShape.test(client) ? client.split(':')[1] : undefined;
+  return model ?? null;
+};
+export function writer(comment: DiscussionComment): Writer {
+  const agent = comment.agent && slug.test(comment.agent) ? comment.agent : undefined;
+  const model = agent ? modelOf(comment.agentClient) : null;
   if (comment.author && handle.test(comment.author))
-    return {
-      label:
-        comment.agent && slug.test(comment.agent)
-          ? `${comment.author}/${comment.agent}`
-          : `@${comment.author}`,
-      verified: true,
-    };
+    return agent
+      ? { kind: 'agent', label: `${comment.author}/${agent}`, model, verified: true }
+      : { kind: 'person', label: `@${comment.author}`, model: null, verified: true };
+  // System actors ('forge:expiry', 'landing controller') are never accounts and never hidden.
+  if (comment.author && /[\s:]/.test(comment.author))
+    return { kind: 'forge', label: 'Forge', model: null, verified: true };
+  // The server records the writer on every hosted comment; with no account here the person is hidden from this reader.
+  if (agent) return { kind: 'agent', label: agent, model, verified: true };
   const typed = legacyLabel.exec(comment.authorLabel?.trim() ?? '');
-  return typed ? { label: typed[1]!, verified: false } : null;
+  if (typed)
+    return {
+      kind: typed[1]!.includes('/') ? 'agent' : 'person',
+      label: typed[1]!,
+      model: null,
+      verified: false,
+    };
+  return { kind: 'person', label: '', model: null, verified: false };
 }
 
 /** Threads oldest first, replies oldest first under their root. A reply whose root is not loaded stands alone. */

@@ -2,10 +2,12 @@
 // An Item's comments (Item 9a3d6f5f; the approved Item screen's Comments section): threads with their replies, member
 // Markdown drawn safely, reactions on comments, and one composer that can also record a decision in the Item body.
 // Data comes in as props, so the Item screen (Item d3357f40) decides how it reads; useDiscussion.ts wires the hosted
-// reads and writes. Who wrote a comment is the server-recorded account by public identity only: `@handle`, or
-// `handle/agent` for an agent acting for that person; an older typed label is marked as not verified.
+// reads and writes. Who wrote a comment is the server-recorded account by public identity only (Item 2fb69177): `@handle`
+// and "person", or `handle/run`, "agent" and the model its session declared; an older typed label is marked as not
+// verified. An agent's words sit behind a thin rule (DESIGN.md rule 33), so the two kinds read apart.
 import { useId, useRef, useState, type FormEvent } from 'react';
-import { Band, Key, Menu, Who } from '../../ds';
+import { Band, Key, Menu } from '../../ds';
+import { By } from './By';
 import { SafeMarkdown } from '../../ds/markdown';
 import { readReview, ReviewFindings } from './ReviewFindings';
 import {
@@ -133,17 +135,9 @@ function Comment({
   const counts = reactionsFor(reactions, comment.id);
   const react = canWrite && onReact ? (kind: ReactionKind) => void onReact(comment.id, kind) : undefined;
   return (
-    <article className={`cmt${reply ? ' re' : ''}`} id={`comment-${comment.id}`}>
+    <article className={`cmt${reply ? ' re' : ''}`} id={`comment-${comment.id}`} data-kind={by.kind}>
       <div className="by">
-        {by?.verified ? (
-          <Who handle={by.label} />
-        ) : by ? (
-          <span className="unverified" title="Typed by the writer; Forge did not record who wrote it">
-            <span className="mono">{by.label}</span> <span className="t3">not verified</span>
-          </span>
-        ) : (
-          <span className="t2">A member</span>
-        )}
+        <By by={by} />
         <time dateTime={comment.at} title={comment.at}>
           {when(comment.at, now)}
         </time>

@@ -17,6 +17,7 @@ type CommentCommand = {
   text: string;
   authorLabel: string;
   agent?: string | undefined;
+  agentClient?: string | undefined;
   decision?: boolean | undefined;
   decidedBy?: string | undefined;
 };
@@ -33,12 +34,16 @@ export async function serverCommentWriter(ctx: MutationCtx, command: CommentComm
   if (!user) {
     // A scheduled Forge job (no sign-in): its label is written by server code, and it is never an agent session.
     delete command.agent;
+    delete command.agentClient;
     if (command.decision) command.decidedBy = '';
     return;
   }
   command.authorLabel = '';
-  if (!isDeviceIdentity(user)) delete command.agent;
-  else if (!isAgentSlug(command.agent))
+  // A browser sign-in is the person: no agent session and no declared model.
+  if (!isDeviceIdentity(user)) {
+    delete command.agent;
+    delete command.agentClient;
+  } else if (!isAgentSlug(command.agent))
     // A device that sent no session slug still reads as an agent: a stable slug from its credential.
     command.agent = slugFromDigest(
       digest(`planning-comment-agent:${String(user.forgeCredential ?? user.subject)}`),

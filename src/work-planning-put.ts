@@ -2,7 +2,7 @@
 // Pure: also runs in the Convex non-Node runtime.
 import { invariant } from './errors.js';
 import { planningModelPutKeys, type PlanningItem, type PlanningWrite } from './work-planning-types.js';
-import { isAgentSlug } from './agent-slug.js';
+import { AGENT_CLIENT, isAgentSlug } from './agent-slug.js';
 import { digest } from './state/hash.js';
 
 /** Stable within and across projects: a source key names one imported Item, independently of the batch. */
@@ -86,6 +86,7 @@ type Discussed = {
   replyTo?: string | undefined;
   decision?: boolean | undefined;
   agent?: string | undefined;
+  agentClient?: string | undefined;
 };
 
 /** The optional fields a new comment stores. A reply must name a comment on the same Item. */
@@ -99,6 +100,10 @@ export function discussionFields(comments: readonly Comment[], itemId: string, c
   return {
     ...(replyTo ? { replyTo } : {}),
     ...(isAgentSlug(command.agent) ? { agent: command.agent } : {}),
+    // The declared model belongs to an agent session only; a person's comment never carries one.
+    ...(isAgentSlug(command.agent) && command.agentClient && AGENT_CLIENT.test(command.agentClient)
+      ? { agentClient: command.agentClient }
+      : {}),
     ...(command.decision ? { decision: true as const } : {}),
   };
 }

@@ -106,11 +106,11 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
         assert.equal(await section.locator('article.re').count(), 1, 'the reply sits under its root');
         assert.match(
           await section.locator('article').nth(2).locator('.by').textContent(),
-          /sample-one\/keen-impala/,
+          /sample-one\/keen-impala·?agent·?model not declared/,
         );
         assert.match(
           await section.locator('article').nth(3).locator('.by').textContent(),
-          /sample-three not verified/,
+          /sample-threepersonnot verified/,
         );
         assert.equal(await section.locator('img, script').count(), 0, 'member HTML never becomes elements');
         assert.equal(
@@ -144,7 +144,13 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
     await t.test('a reader of a public project sees no people, no composer and no reaction keys', async t => {
       const page = await open(t, DESK, 'viewer=reader');
       const section = page.locator('section[aria-label="Comments"]');
-      assert.equal(await section.getByText('A member').count(), 3);
+      assert.equal(await section.getByText('A member').count(), 0, 'never "A member" (Item 2fb69177)');
+      assert.ok((await section.getByText('a person', { exact: true }).count()) >= 2, 'a person, unnamed');
+      assert.ok(
+        (await section.getByText('keen-impala', { exact: true }).count()) >= 1,
+        'the agent run stays',
+      );
+      assert.equal(await section.getByText(/sample-(one|two)/).count(), 0, 'no person is named');
       assert.equal(await section.locator('textarea').count(), 0);
       assert.equal(await section.getByRole('button', { name: /React|Reply/ }).count(), 0);
       assert.equal(await section.locator('.who').count(), 0, 'no handle is drawn as a checked writer');

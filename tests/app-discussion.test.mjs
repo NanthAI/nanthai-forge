@@ -118,30 +118,72 @@ test('replies sit under their thread root, and the count reconciles with the thr
   assert.match(html, />2 threads</);
 });
 
-test('writers show by the server-recorded account; a typed label is never shown as a checked writer', () => {
-  assert.deepEqual(model.writer(comment(1, { author: 'mara' })), { label: '@mara', verified: true });
-  assert.deepEqual(model.writer(comment(1, { author: 'mara', agent: 'keen-impala' })), {
+test('writers show who wrote it: person or agent run with its declared model, never "A member" (Item 2fb69177)', () => {
+  const person = { kind: 'person', model: null, verified: true };
+  // Owner and members: the server maps the account to the handle.
+  assert.deepEqual(model.writer(comment(1, { author: 'mara' })), { ...person, label: '@mara' });
+  assert.deepEqual(
+    model.writer(
+      comment(1, { author: 'mara', agent: 'keen-impala', agentClient: 'claude-code:claude-opus-5-5' }),
+    ),
+    { kind: 'agent', label: 'mara/keen-impala', model: 'claude-opus-5-5', verified: true },
+  );
+  assert.deepEqual(model.writer(comment(1, { author: 'mara', agent: 'keen-impala', agentClient: 'codex' })), {
+    kind: 'agent',
     label: 'mara/keen-impala',
+    model: null,
     verified: true,
   });
+  // Readers and public viewers: the server leaves the account out; the kind and the run name stay.
+  assert.deepEqual(model.writer(comment(1, { agent: 'keen-impala' })), {
+    kind: 'agent',
+    label: 'keen-impala',
+    model: null,
+    verified: true,
+  });
+  assert.deepEqual(model.writer(comment(1, {})), { kind: 'person', label: '', model: null, verified: false });
+  // A Forge job and an older typed label.
+  assert.equal(model.writer(comment(1, { author: 'forge:expiry' })).kind, 'forge');
   assert.deepEqual(model.writer(comment(1, { authorLabel: '@lead-sweep' })), {
+    kind: 'person',
     label: 'lead-sweep',
+    model: null,
     verified: false,
   });
-  assert.equal(model.writer(comment(1, { authorLabel: 'Ada Lovelace' })), null);
-  assert.equal(model.writer(comment(1, { authorLabel: 'adas-macbook.local' })), null);
+  assert.equal(model.writer(comment(1, { authorLabel: 'Ada Lovelace' })).label, '');
+  assert.equal(model.writer(comment(1, { authorLabel: 'adas-macbook.local' })).label, '');
   const html = render({
     comments: [
       comment(1, { authorLabel: 'Ada Lovelace' }),
-      comment(2, { author: 'mara', agent: 'keen-impala' }),
+      comment(2, { author: 'mara', agent: 'keen-impala', agentClient: 'claude-code:claude-opus-5-5' }),
       comment(3, { authorLabel: '@sample-forged' }),
+      comment(4, { author: 'jun', agent: 'copper-moth' }),
+      comment(5, { author: 'orla' }),
+      comment(6, { agent: 'amber-fox' }),
     ],
   });
   assert.doesNotMatch(html, /Ada/);
-  assert.match(html, /mara\/keen-impala/);
-  assert.match(html, /A member/);
+  assert.doesNotMatch(html, /A member/);
+  assert.match(
+    html,
+    /mara\/keen-impala<\/span><span class="kind">agent<\/span><span class="mono model"[^>]*>claude-opus-5-5/,
+  );
+  assert.match(
+    html,
+    /jun\/copper-moth<\/span><span class="kind">agent<\/span><span class="model nd">model not declared/,
+  );
+  assert.match(html, /@orla<\/span><span class="kind">person</);
+  assert.match(
+    html,
+    /amber-fox<\/span><span class="kind">agent/,
+    'a hidden person still shows the agent run',
+  );
+  assert.match(html, /data-kind="agent"[^>]*>[\s\S]*?class="av ag"/, 'an agent run gets the outlined mark');
   assert.doesNotMatch(html, /@sample-forged/, 'a typed label never gets the handle mark');
-  assert.match(html, /sample-forged<\/span> <span class="t3">not verified/);
+  assert.match(
+    html,
+    /sample-forged<\/span><span class="kind">person<\/span><span class="t3"[^>]*>not verified/,
+  );
 });
 
 test('decisions are marked, reactions show counts and the viewer’s own, readers get no composer', () => {

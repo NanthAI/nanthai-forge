@@ -113,6 +113,12 @@ Initiative together with every Item in it; hiding is reversible. Every public re
 one rule `publicPlanVisible`: a hidden Item never appears or counts anywhere public, and a read that has not looked
 up an Item's Initiative or parent treats it as hidden.
 
+Who wrote a comment comes from the sign-in, never from typed text: a browser sign-in is the person, a device
+credential is an agent run (its session slug, and the model its launcher declared in `FORGE_AGENT_MODEL`, stored as
+`agentClient` beside the slug; declared, not verified). Members see `@handle` and "person", or `handle/run`, "agent"
+and the model ("model not declared" when none). Readers and public viewers see no person: "a person", or the run
+name with its model.
+
 ## Imported history attribution
 
 Retained planning readers accept optional `imported` attribution: `source` (a source note), `key` (the original

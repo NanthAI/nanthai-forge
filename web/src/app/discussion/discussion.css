@@ -6,11 +6,19 @@
   .cmt { padding: var(--s-3) var(--gut-head); border-bottom: var(--rule) solid var(--line); display: grid; gap: var(--s-1); min-width: 0; }
   .cmt.re { padding-left: calc(var(--gut-head) + 26px); }
   .cmt .by { display: flex; gap: 6px var(--s-2); align-items: center; flex-wrap: wrap; font-size: var(--t-meta); color: var(--text-2); min-width: 0; }
+  /* An agent's words are quoted exactly, behind a thin rule (DESIGN.md rule 33); a person's stand plain. */
+  .cmt[data-kind="agent"] > .md, .cmt[data-kind="agent"] > .review { border-left: var(--rule) solid var(--k-session); padding-left: var(--s-3); }
   .cmt .md { padding: 0; font-size: var(--t-body); line-height: 1.5; max-width: var(--m-prose); overflow-wrap: anywhere; }
   .cmt .md > :last-child { margin-bottom: 0; }
   .cmt .md p, .cmt .md ul, .cmt .md ol, .cmt .md pre, .cmt .md blockquote { margin-bottom: var(--s-2); }
   .cmt .md pre { overflow-x: auto; max-width: 100%; }
   .cmt .md blockquote { border-left: var(--rule) solid var(--line-strong); padding-left: var(--s-3); color: var(--text-2); }
+  .by-who { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; white-space: nowrap; }
+  .by-who > .name { overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: var(--w-strong); min-width: 4ch; }
+  .by-who > b { color: var(--text); font-weight: var(--w-strong); }
+  .by-who > .kind, .by-who > .model.nd { color: var(--text-3); }
+  .by-who > .model { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .by-who > .kind::before, .by-who > .model::before { content: "·"; color: var(--text-3); margin-right: 6px; font-family: var(--font-sans); }
   .acts { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-2); align-items: center; }
   .react { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: var(--rule) solid var(--line); border-radius: 999px; background: transparent; color: var(--text-2); font-size: var(--t-meta); }
   .react.on { border-color: var(--line-strong); background: var(--surface-3); color: var(--text); }

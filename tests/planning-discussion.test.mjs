@@ -112,6 +112,21 @@ test('only fixed-list agent slugs are kept on a comment', async t => {
   assert.equal((await comment(item.id, { agent: 'dinos-macbook' })).agent, undefined);
 });
 
+test('a comment keeps its agent session’s declared model only beside the agent slug (Item 2fb69177)', async t => {
+  const { put, comment } = setup(t);
+  const item = await put({});
+  const agent = await comment(item.id, { agent: 'keen-impala', agentClient: 'claude-code:claude-opus-5-5' });
+  assert.equal(agent.agentClient, 'claude-code:claude-opus-5-5');
+  assert.equal(
+    (await comment(item.id, { agentClient: 'claude-code:claude-opus-5-5' })).agentClient,
+    undefined,
+  );
+  assert.equal(
+    (await comment(item.id, { agent: 'keen-impala', agentClient: 'Not A Client!' })).agentClient,
+    undefined,
+  );
+});
+
 test('hosted replay stamps the server-observed actor on a new comment and its decision version', () => {
   const data = { planningItems: [{ id: 'i', version: 1 }], planningComments: [] };
   const command = {
