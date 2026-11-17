@@ -31,6 +31,7 @@ export async function pipelineAdmission(
   },
 ) {
   const { project, attempt, request, paths, queue } = input;
+  const fast = attempt.policy.acceptance.landingMode === 'fast';
   if (
     !paths?.length ||
     !project.checkEntries ||
@@ -39,19 +40,27 @@ export async function pipelineAdmission(
     !hostedBatching(attempt.policy) ||
     request.check?.kind !== 'request' ||
     request.finish?.after ||
-    attempt.policy.acceptance.landingMode === 'fast' ||
+    (fast && !queue.train?.length && !queue.status?.runningGroups) ||
     attempt.policy.acceptance.hostedCrossHeadReuse === false
   )
     return null;
   const [seed] = queue.train?.length
     ? []
-    : await ctx.db
-        .query('projectHostedLandingRequests')
-        .withIndex('by_project_and_channel_and_admitting_and_sequence', q =>
-          q.eq('projectId', project._id).eq('channel', 'main').eq('admitting', true),
-        )
-        .order('asc')
-        .take(1);
+    : fast
+      ? await ctx.db
+          .query('projectHostedLandingRequests')
+          .withIndex('by_project_and_channel_and_orderLive_and_sequence', q =>
+            q.eq('projectId', project._id).eq('channel', 'main').eq('orderLive', true),
+          )
+          .order('asc')
+          .take(1)
+      : await ctx.db
+          .query('projectHostedLandingRequests')
+          .withIndex('by_project_and_channel_and_admitting_and_sequence', q =>
+            q.eq('projectId', project._id).eq('channel', 'main').eq('admitting', true),
+          )
+          .order('asc')
+          .take(1);
   if (!queue.train?.length && !seed) return null;
   const selected: { row?: LandingRow; attempt?: HostedLandingAttempt } = {};
   let full = false;
@@ -64,6 +73,7 @@ export async function pipelineAdmission(
       selected.attempt = pins;
     },
     {
+      queue,
       requireSlot: false,
       onCapacity: value => {
         full = value;
@@ -85,7 +95,10 @@ export async function pipelineAdmission(
   const entries = [...project.checkEntries, ...(project.globalRiskPaths ?? [])];
   if (!earlier?.length) return null;
   if (pathsOverlap(paths, earlier)) return prior.row.orderLive === true ? predecessor.submissionId : null;
-  return !full && globalRiskBetween(paths, earlier, entries) && !placeableRisk(paths, earlier, entries)
+  return !fast &&
+    !full &&
+    globalRiskBetween(paths, earlier, entries) &&
+    !placeableRisk(paths, earlier, entries)
     ? predecessor.submissionId
     : null;
 }

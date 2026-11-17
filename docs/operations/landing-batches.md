@@ -380,13 +380,13 @@ A pending full admission can be the first predicted-head predecessor when a
 follower has known disjoint paths with unplaceable global risk in Strict mode.
 Instead of checking the follower alone and repeating after the predecessor
 lands, the follower uses one full check of their exact union in the existing
-pipeline. In Strict mode, overlapping paths whose fixed predecessor already holds queue order use that same exact composition before a follower check is reserved:
+pipeline. In Strict and Fast mode, overlapping paths whose fixed predecessor already holds queue order use that same exact composition before a follower check is reserved:
 a real text conflict returns pinned advice while the predecessor is pending, and only becomes
 terminal against accepted main. A failed predecessor releases the follower's original source.
 Earlier admissions still hold no queue order and do not become overlap predecessors. A full execution width queues the overlapping follower for existing capacity instead of starting
 an independent admission that cannot detect the conflict. Merge semantics are unchanged.
 Unknown paths, placeable disjoint manifests, disjoint risk in Fast mode,
-Fast-mode arrivals, different actor/policy/check/priority pins and disjoint risk at a full execution width keep the
+Fast-mode disjoint arrivals, different actor/policy/check/priority pins and disjoint risk at a full execution width keep the
 ordinary admission path. The predecessor keeps its admission and holds no general queue
 order. A successor that passes first parks its exact proof on that predecessor's
 existing settlement event; it does not treat the still-unaccepted base as a main

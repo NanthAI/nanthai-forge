@@ -40,24 +40,40 @@ async function orderedPrefix(t, { concurrency = 6, landingMode = 'strict', conte
     row => row.submissionId === f.entries[0].state.id,
   );
   const rootRun = f.runs().find(run => run.id === rootRow.admission.runId);
-  const predecessorRun = f.runs().find(run => run.id !== rootRun.id);
+  if (landingMode === 'fast') {
+    // Fast admissions stay independent. Let accepted global-risk work require the
+    // second entry's ordinary exact recheck; that recheck now holds queue order.
+    await f.rawChecks.pass(await f.rawChecks.activate(rootRun.id));
+    await drainActive(f);
+    const pending = [...f.tables.projectHostedLandingRequests.values()].find(
+      row => row.submissionId === f.entries[1].state.id,
+    );
+    if (pending.admitting) {
+      await f.rawChecks.pass(await f.rawChecks.activate(pending.admission.runId));
+      await drainActive(f);
+    }
+  }
   const row = [...f.tables.projectHostedLandingRequests.values()].find(
     row => row.submissionId === f.entries[1].state.id,
   );
   assert.equal(row.orderLive, true, 'the predecessor already holds queue order, unlike an admission');
-  return { f, rootRun, predecessorRun };
+  const predecessorRun = f.runs().find(run => run.id === row.runId);
+  assert(predecessorRun && !predecessorRun.cancelRequested);
+  return { f, rootRun, predecessorRun, checks: f.runs().length, rootSettled: landingMode === 'fast' };
 }
 
 for (const failed of [false, true])
   for (const concurrency of [2, 6])
-    for (const landingMode of ['strict'])
+    for (const landingMode of ['strict', 'fast'])
       test(`C1 wasted checks: overlapping admission composes before spending a check, predecessor fails=${failed}, width=${concurrency}, mode=${landingMode}`, async t => {
-        const { f, rootRun, predecessorRun } = await orderedPrefix(t, { concurrency, landingMode });
-        assert.equal(f.runs().length, 2);
+        const { f, rootRun, predecessorRun, checks, rootSettled } = await orderedPrefix(t, {
+          concurrency,
+          landingMode,
+        });
         await f.add(2);
-        assert.equal(f.runs().length, 2, 'the follower spends no independent admission check');
+        assert.equal(f.runs().length, checks, 'the follower spends no independent admission check');
         await drainActive(f);
-        await f.rawChecks.pass(await f.rawChecks.activate(rootRun.id));
+        if (!rootSettled) await f.rawChecks.pass(await f.rawChecks.activate(rootRun.id));
         await drainActive(f);
         const follower = await f.current(f.entries[2].state.id);
         assert.equal(follower.submission.phase, 'queued');
@@ -94,7 +110,7 @@ for (const failed of [false, true])
         } else {
           assert.equal(states(f)[2].phase, 'terminal-failed');
           assert.equal(states(f)[2].error.code, 'COMPOSITION_CONFLICT');
-          assert.equal(f.runs().length, 2, 'conflicting follower spends zero checks');
+          assert.equal(f.runs().length, checks, 'conflicting follower spends zero checks');
         }
       });
 
@@ -194,33 +210,46 @@ for (const conflict of [false, true])
     }
   });
 
-test('C1 ordered overlap cost: exact combined source preserves both edits with no discarded follower admission', async t => {
-  const base = 'export const left = 0;\n\n// middle\n\nexport const right = 0;\n';
-  const { f } = await orderedPrefix(t, {
-    baselineFiles: [['src/shared.ts', base]],
-    contents: ['root build', base.replace('left = 0', 'left = 1'), base.replace('right = 0', 'right = 1')],
-  });
-  await f.add(2);
-  await drainActive(f);
-  for (let n = 0; states(f).some(s => s.phase !== 'landed'); n++) {
-    assert(n < 10, 'ordered source and exact checks make bounded progress');
-    for (const run of f.runs().filter(run => run.status === 'queued' && !run.cancelRequested))
-      await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+for (const landingMode of ['strict', 'fast'])
+  test(`C1 ordered overlap cost: exact combined source preserves both edits with no discarded follower admission, mode=${landingMode}`, async t => {
+    const base = 'export const left = 0;\n\n// middle\n\nexport const right = 0;\n';
+    const { f } = await orderedPrefix(t, {
+      landingMode,
+      baselineFiles: [['src/shared.ts', base]],
+      contents: ['root build', base.replace('left = 0', 'left = 1'), base.replace('right = 0', 'right = 1')],
+    });
+    await f.add(2);
     await drainActive(f);
-  }
-  const tree = JSON.parse(f.c.objects.get(f.currentMain().head));
-  const text = f.c.objects.get(tree.files.find(file => file.path === 'src/shared.ts').blob).toString();
-  assert.match(text, /left = 1/);
-  assert.match(text, /right = 1/);
-  assert.equal(f.pending().length, 0);
-  const budget = {
-    calls: f.counts.length,
-    reads: f.counts.reduce((n, c) => n + c.documents, 0),
-    writes: f.counts.reduce((n, c) => n + c.writes, 0),
-    readBytes: f.counts.reduce((n, c) => n + c.readBytes, 0),
-    writeBytes: f.counts.reduce((n, c) => n + c.writeBytes, 0),
-    runs: f.runs().length,
-  };
-  t.diagnostic(JSON.stringify(budget));
-  assert.equal(budget.runs, 3, 'ordered overlap removes the discarded fourth solo-admission check');
-});
+    for (let n = 0; states(f).some(s => s.phase !== 'landed'); n++) {
+      assert(n < 10, 'ordered source and exact checks make bounded progress');
+      for (const run of f.runs().filter(run => run.status === 'queued' && !run.cancelRequested))
+        await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+      await drainActive(f);
+    }
+    const tree = JSON.parse(f.c.objects.get(f.currentMain().head));
+    const text = f.c.objects.get(tree.files.find(file => file.path === 'src/shared.ts').blob).toString();
+    assert.match(text, /left = 1/);
+    assert.match(text, /right = 1/);
+    assert.equal(f.pending().length, 0);
+    const budget = {
+      mode: landingMode,
+      passedChecks: f.runs().filter(run => run.status === 'passed').length,
+      calls: f.counts.length,
+      reads: f.counts.reduce((n, c) => n + c.documents, 0),
+      writes: f.counts.reduce((n, c) => n + c.writes, 0),
+      readBytes: f.counts.reduce((n, c) => n + c.readBytes, 0),
+      writeBytes: f.counts.reduce((n, c) => n + c.writeBytes, 0),
+      runs: f.runs().length,
+    };
+    t.diagnostic(JSON.stringify(budget));
+    assert.equal(
+      budget.runs,
+      landingMode === 'fast' ? 4 : 3,
+      'ordered overlap removes the discarded solo-admission check',
+    );
+    assert.equal(
+      f.runs().filter(run => run.status === 'passed').length,
+      3,
+      'both modes execute three passing checks; Fast retains its cancelled prefix admission',
+    );
+  });

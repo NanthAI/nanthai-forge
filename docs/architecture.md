@@ -1991,7 +1991,7 @@ predecessor instead of running a solo admission that would need a combined reche
 One indexed admitting head and bounded train metadata select this route; unchanged
 head/receipt pins survive admission settlement, while refused or changed generations
 cannot supply a predecessor. Publication and invalidation use the existing train
-fences. Overlapping arrivals in Strict mode use an already-ordered fixed predecessor composition before
+fences. Overlapping arrivals in Strict and Fast mode use an already-ordered fixed predecessor composition before
 reserving a follower check, including when they must queue for execution capacity. Conflicts stay
 advisory until that predecessor is accepted; a failed predecessor releases the original follower
 source. Source preparation that finishes behind already-accepted main also queues recomposition
