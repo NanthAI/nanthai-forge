@@ -9,14 +9,14 @@ import './proof.css';
 type Check = NonNullable<ReturnType<typeof checkEvidence>>;
 export type ProofData = {
   lane: { id: string; intentId: string; head: string; state: string };
-  save: { id: string; head: string; at: string; author: string; notVerified?: string[] } | null;
+  save: { id: string; head: string; at: string; author?: string; notVerified?: string[] } | null;
   agentClient?: string | null;
   declaration?: {
     kind: 'landing';
     id: string;
     head: string;
     at: string;
-    author: string;
+    author?: string;
     notVerified: string[];
   } | null;
   check: Check | null;
@@ -240,7 +240,7 @@ export function ProofView({
                   <div className="proof-claims">
                     <div className="quote">
                       <div className="by">
-                        <Who handle={save.author} />
+                        {save.author ? <Who handle={save.author} /> : <span>Author not shown</span>}
                         <span>
                           wrote with the {claimKind} at {time(save.at)}
                         </span>
