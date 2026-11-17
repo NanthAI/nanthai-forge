@@ -30,6 +30,7 @@ const secretPatterns: [RegExp, string][] = [
   [/\beyJ[\w-]{4,}\.[\w-]{4,}\.[\w-]+/g, '[redacted]'],
   [/\bBearer\s+[\w.~+/-]+=*/gi, 'Bearer [redacted]'],
   [/\b(?:fga|sk|rk)_[\w-]{8,}/g, '[redacted]'],
+  [/\b(?:gh[oprsu]_|github_pat_)\w{8,}/g, '[redacted]'],
   [
     /\b((?:access[_-]?|refresh[_-]?|id[_-]?)?token|secret|password|passwd|api[_-]?key|authorization|credential)(s?["']?\s*[:=]\s*["']?)[^\s"'&,;]+/gi,
     '$1$2[redacted]',

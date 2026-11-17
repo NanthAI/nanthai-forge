@@ -39,6 +39,7 @@ export const projectPurgeTables = {
   projectBriefingSources: 'by_projectId_and_backupId_and_head_and_part',
   projectActorNames: 'by_project_and_actor',
   clientErrors: 'by_projectId',
+  projectFailures: 'by_project',
   projectCheckRunners: 'by_project',
   projectCheckRequests: 'by_project_and_updatedAt',
   projectCoordinationSessions: 'by_project',

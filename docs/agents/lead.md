@@ -144,6 +144,10 @@ what the owner needs to decide. Include reconcilable done/in-progress/open count
 per Initiative, landing ids since the previous report and any changed denominator.
 A speed or reliability question gets a number with its metric and window, or
 "cannot measure yet". Say first when the metrics cannot observe the path.
+Each check-in runs `nforge metrics ROOT --failures --from <previous check-in>` and
+reports the top failure codes with counts, any code not seen in the previous report
+and any landing failure an agent could not recover from. A rising or new code gets a
+planning search and a comment or new Issue, like a flaky file.
 At stage close, list evidence and every open acceptance line, including the Issue
 that owns a moved line. Never silently carry incomplete work forward.
 

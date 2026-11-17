@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "projectFailures (Item 2c420916): failure-only log so a failed operation's code and scrubbed cause outlive Convex's short logs and the health report reads one bounded index; projectHostedOperations keeps one receipt per operation with no failure index, so counting failures there would scan every healthy receipt. Nothing removed: clientErrors holds browser errors only",
+  "date": "2026-11-17"
+}

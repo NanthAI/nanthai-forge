@@ -11,6 +11,7 @@ import { invariant } from '../src/errors';
 import { activeProject } from './projectAuthority';
 import { hostedWriteProject } from './projectHostedRecords';
 import { recordMutationReceipt } from './projectSelfMetricReceiptStore';
+import { recordFailure } from './projectFailureLog';
 import { callerActorKind } from './metricActorKind';
 import type { MetricMutationAction } from '../src/self-metric-receipts';
 import {
@@ -179,6 +180,14 @@ export async function finishHostedOperation(
       ...(process.env.FORGE_JOURNAL_SEGMENTS === '1' ? { journalReadyAt: dueAt } : {}),
     });
     await wakeJournal(ctx, { projectId: input.projectId, operationId: `source:${row._id}` }, dueAt);
+    if (operation.terminal?.outcome.status === 'failed')
+      await recordFailure(ctx, {
+        projectId: input.projectId,
+        operationId: input.operationId,
+        kind: 'operation',
+        error: operation.terminal.outcome.error,
+        startedAt: operation.firstAttempt.at,
+      });
     if (row.metricAction && operation.terminal?.outcome.status === 'completed')
       await recordMutationReceipt(ctx, {
         projectId: input.projectId,

@@ -835,6 +835,15 @@ test('client error maintenance expires only older than 30 days in one retry-safe
   seed('young', 29);
   seed('boundary', 30);
   for (let i = 0; i < 12; i++) seed(`old-${i}`, 31);
+  // The failure log (Item 2c420916) expires on the same 30-day page.
+  for (let i = 0; i < 10; i++)
+    s.tables.projectFailures.set(`projectFailures-${i}`, {
+      _id: `projectFailures-${i}`,
+      _creationTime: now - (i ? 31 : 29) * 86_400_000,
+      projectId: s.projectId,
+      operationId: `failure-${i}`,
+      value: '{}',
+    });
   for (const kind of ['create', 'revoke', 'expire', 'cascade-revoke', 'describe', 'read'])
     s.tables.agentEvents.set(kind, {
       _id: kind,
@@ -856,6 +865,7 @@ test('client error maintenance expires only older than 30 days in one retry-safe
   const expire = args => s.store.call('clientErrorExpiry', expiry.check, args);
   const out = await expire(input);
   assert.equal(out.tables.find(row => row.table === 'clientErrors').rows, 8);
+  assert.equal(out.tables.find(row => row.table === 'projectFailures').rows, 8);
   assert.equal(s.tables.clientErrors.size, 6);
   assert(s.tables.clientErrors.has('clientErrors-young'));
   assert(s.tables.clientErrors.has('clientErrors-boundary'));
@@ -864,6 +874,7 @@ test('client error maintenance expires only older than 30 days in one retry-safe
   assert.deepEqual([...s.tables.agentEvents], audit);
   await expire({ ...input, operationId: 'next-maintenance' });
   assert.deepEqual([...s.tables.clientErrors.keys()].sort(), ['clientErrors-boundary', 'clientErrors-young']);
+  assert.deepEqual([...s.tables.projectFailures.keys()], ['projectFailures-0']);
   assert.deepEqual([...s.tables.agentEvents], audit);
 });
 

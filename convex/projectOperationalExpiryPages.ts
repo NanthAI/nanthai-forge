@@ -84,20 +84,23 @@ async function expiryPage(ctx: MutationCtx, input: PageIdentity, kind: string, w
   const outcome = await work();
   // Reuse this scheduled transaction and its receipt; never schedule diagnostics alone.
   if (!outcome.kept && kind !== 'source') {
-    const errors = await ctx.db
-      .query('clientErrors')
-      .withIndex('by_creation_time', q => q.lt('_creationTime', Date.now() - 30 * 86_400_000))
-      .take(pageSize);
-    let removedBytes = 0;
-    for (const error of errors) {
-      removedBytes += bytes(error);
-      await ctx.db.delete(error._id);
-    }
-    if (errors.length) {
-      outcome.rows += errors.length;
-      outcome.bytes += removedBytes;
-      outcome.readBytes = (outcome.readBytes ?? 0) + removedBytes;
-      (outcome.tables ??= []).push({ table: 'clientErrors', rows: errors.length, bytes: removedBytes });
+    // Diagnostics kept 30 days: browser errors and the failure log (Item 2c420916).
+    for (const table of ['clientErrors', 'projectFailures'] as const) {
+      const errors = await ctx.db
+        .query(table)
+        .withIndex('by_creation_time', q => q.lt('_creationTime', Date.now() - 30 * 86_400_000))
+        .take(pageSize);
+      let removedBytes = 0;
+      for (const error of errors) {
+        removedBytes += bytes(error);
+        await ctx.db.delete(error._id);
+      }
+      if (errors.length) {
+        outcome.rows += errors.length;
+        outcome.bytes += removedBytes;
+        outcome.readBytes = (outcome.readBytes ?? 0) + removedBytes;
+        (outcome.tables ??= []).push({ table, rows: errors.length, bytes: removedBytes });
+      }
     }
   }
   if (!outcome.kept) {

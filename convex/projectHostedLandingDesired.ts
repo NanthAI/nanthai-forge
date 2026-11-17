@@ -19,7 +19,7 @@ import { loadCompose } from './projectHostedComposeStore';
 import { enqueueHostedLanding } from './projectHostedLanding';
 import { replaceOwnerlessLanding } from './projectHostedLaneFinish';
 import { landingAlias } from './projectHostedLandingIdentity';
-import { landingRow } from './projectHostedLandingStore';
+import { failedLanding, landingRow } from './projectHostedLandingStore';
 import { notifyStackedLandingEnded } from './projectHostedStackNotice';
 import { enforceLandGates } from './projectHostedLandGates';
 import { hostedLandingDesiredSchema } from '../src/hosted-landing-desired';
@@ -353,6 +353,7 @@ export const fail = internalMutation({
     await cancelPendingTask(ctx, row.wake?.taskId);
     await scheduleLandingAlarm(ctx, failed);
     await ctx.db.patch(row._id, { value: canonicalPayload(failed), wake: null, preparing: undefined });
+    await failedLanding(ctx, failed);
     // This failure never reaches writeLanding: Lanes stacked on the Lanes it carried are told here (dc62b120).
     await notifyStackedLandingEnded(ctx, {
       projectId: row.projectId,

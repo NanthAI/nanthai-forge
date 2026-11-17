@@ -33,6 +33,7 @@ import { hostedOperationRow } from './projectHostedOperations';
 import { notifyFinish, wakeLandingOrderWaiters } from './projectHostedFinishWake';
 import { notifyStackedLandingEnded } from './projectHostedStackNotice';
 import { recordLandingSpeed } from './projectLandingSpeed';
+import { recordFailure } from './projectFailureLog';
 import { invariant } from '../src/errors';
 export type { LandingChannel } from './projectHostedLandingEvents';
 export { landingQueue, ensureLandingQueue, recordLandingObservation } from './projectHostedLandingEvents';
@@ -428,8 +429,20 @@ export async function settleLandingOperation(ctx: MutationCtx, state: HostedLand
           },
   };
   const operation = completeHostedOperation(hostedOperationSchema.parse(JSON.parse(row.value)), receipt);
-  if (canonicalPayload(operation) !== row.value)
-    await ctx.db.patch(row._id, { value: canonicalPayload(operation) });
+  if (canonicalPayload(operation) === row.value) return;
+  await ctx.db.patch(row._id, { value: canonicalPayload(operation) });
+  if (receipt.outcome.status === 'failed') await failedLanding(ctx, state);
+}
+/** One failure-log row for a landing that ended failed with an error (Item 2c420916). */
+export async function failedLanding(ctx: MutationCtx, state: HostedLandingState) {
+  if (state.error)
+    await recordFailure(ctx, {
+      projectId: state.projectId as Id<'hostedProjects'>,
+      operationId: state.operationId,
+      kind: 'landing',
+      error: state.error,
+      startedAt: state.timing?.submittedAt ?? state.at,
+    });
 }
 
 /** Mutable evidence is separate from immutable attempt/source/operation pins. A

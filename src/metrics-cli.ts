@@ -12,7 +12,7 @@ export async function metricsCli(args: string[]) {
   if (args[0] === 'record-bill') return recordBillCli(args.slice(1));
   if (!args.length || args[0] === '--help') {
     process.stdout.write(
-      'nforge metrics ROOT [--from DATE] [--to DATE] [--json | --text] [--report FILE.md] [--compare FROM..TO] [--limit N] [--cursor C] [--context-days N] [--flake-issues]\nnforge metrics record-bill ROOT --provider P --from DATE --to DATE --billed-usd N [...]\nUTC windows are [from,to). JSON is the default for agents/non-TTY output.\n--limit N pages the report row lists (N entries per list; follow page.nextCursor with --cursor C, same window); per-day rows are omitted when paging.\n--context-days N (0 to 30, default 2) sets the days of pre-window history read to classify landings; the window and this horizon bound the read.\n--flake-issues prints only the flaky-file list, each with its Issue.\n',
+      'nforge metrics ROOT [--from DATE] [--to DATE] [--json | --text] [--report FILE.md] [--compare FROM..TO] [--limit N] [--cursor C] [--context-days N] [--flake-issues]\nnforge metrics ROOT --failures [--from DATE] [--to DATE] [--text]\nnforge metrics record-bill ROOT --provider P --from DATE --to DATE --billed-usd N [...]\nUTC windows are [from,to). JSON is the default for agents/non-TTY output.\n--limit N pages the report row lists (N entries per list; follow page.nextCursor with --cursor C, same window); per-day rows are omitted when paging.\n--context-days N (0 to 30, default 2) sets the days of pre-window history read to classify landings; the window and this horizon bound the read.\n--flake-issues prints only the flaky-file list, each with its Issue.\n--failures prints the health report: failed operations and landings in the window counted by code, with first and last time, median time to fail and the latest message (one bounded read; default window the last 7 days).\n',
     );
     return;
   }
@@ -30,6 +30,7 @@ export async function metricsCli(args: string[]) {
         '--json',
         '--text',
         '--flake-issues',
+        '--failures',
         '--limit',
         '--cursor',
         '--context-days',
@@ -37,7 +38,8 @@ export async function metricsCli(args: string[]) {
       'BAD_ARGUMENT',
       'Unknown or repeated metrics option.',
     );
-    if (flag === '--json' || flag === '--text' || flag === '--flake-issues') options[flag] = 'true';
+    if (flag === '--json' || flag === '--text' || flag === '--flake-issues' || flag === '--failures')
+      options[flag] = 'true';
     else {
       const value = flags[++i];
       invariant(value && !value.startsWith('--'), 'BAD_ARGUMENT', `${flag} requires a value.`);
@@ -76,6 +78,30 @@ export async function metricsCli(args: string[]) {
     'BAD_ARGUMENT',
     '--context-days N (0 to 30, default 2) sets the days of pre-window history read to classify landings; the window and this horizon bound the read.\n--flake-issues prints only the flake list; do not combine it with --limit or --compare.',
   );
+  if (options['--failures']) {
+    invariant(
+      limit === undefined &&
+        !compare &&
+        !options['--flake-issues'] &&
+        !options['--report'] &&
+        contextDays === undefined,
+      'BAD_ARGUMENT',
+      '--failures takes only --from, --to and --json or --text.',
+    );
+    const address = metricAddress(owner).address;
+    invariant(
+      address,
+      'BAD_ARGUMENT',
+      'The failure report reads a hosted project; run it from a hosted checkout.',
+    );
+    // One query: the bounded failure-log read (convex/projectFailureReport.ts).
+    const failures: unknown = JSON.parse(
+      String(await metricQuery(address)('projectFailureReport:report', { from: period.from, to: period.to })),
+    );
+    if (options['--text']) process.stdout.write(JSON.stringify(failures, null, 2) + '\n');
+    else return failures;
+    return;
+  }
   const result = metricsSurface(
     await readMetricRecords(
       owner,
