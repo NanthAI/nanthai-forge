@@ -25,7 +25,7 @@ export type LaneApprovalRead = {
   landing: { submissionId: string; held: boolean } | null;
   /** Issue 470ef29b: a held settings change from an agent sign-in, not a Lane. */
   membership?: boolean;
-  setting?: { origin: 'policy' | 'check-definition' | 'check-import' | 'runner' | 'main-audit' };
+  setting?: { origin: 'policy' | 'check-definition' | 'check-import' | 'runner' | 'main-audit' | 'address' };
   /** The change as the agent sent it (the owner's read only). */
   change?: unknown;
   /** Item 16093ed1: the setting now and as granted (an open request, the owner's read only). */
@@ -57,6 +57,7 @@ const SETTING_LABEL: Record<NonNullable<LaneApprovalRead['setting']>['origin'], 
   'check-import': 'check definition',
   runner: 'check runner',
   'main-audit': 'main audit setting',
+  address: 'project name and address',
 };
 export type LaneApprovalPhase =
   | { kind: 'loading' }

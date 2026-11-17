@@ -145,6 +145,7 @@ export async function saveCheckSetting(
 }
 const settingLabel: Record<SettingOrigin, string> = {
   membership: 'Project membership',
+  address: 'Project address',
   policy: 'Policy',
   'check-definition': 'Check definition',
   'check-import': 'Check definition import',

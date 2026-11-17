@@ -248,6 +248,17 @@ function ProjectView({
   const [picker, setPicker] = useState<readonly PickerEntry[] | null>(null);
   const asked = useRef(false);
   const name = project?.name ?? route.project;
+  // Item eb631a53: an old address (renamed project) opens the project at its current address.
+  const moved = project && (project.handle !== route.handle || project.slug !== route.project);
+  useEffect(() => {
+    if (moved)
+      navigate(
+        `${hrefFor({ ...route, handle: project.handle, project: project.slug })}${location.search}${location.hash}`,
+        {
+          replace: true,
+        },
+      );
+  }, [moved, project, route]);
   if (project) lastProject = { href: hrefFor({ ...route, place: 'needs', section: '', rest: '' }), name };
   // The picker's entries: one page of the viewer's projects, read once on the first intent to open it.
   const onPicker = () => {

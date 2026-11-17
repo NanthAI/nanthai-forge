@@ -91,5 +91,8 @@ export async function settingCompare(
     case 'membership': {
       return { before: null, after: without(change, ['operationId']) };
     }
+    case 'address':
+      // Exactly what the grant applies: the name and address when the request was made, and the result.
+      return { before: record(change.before), after: record(change.after) };
   }
 }

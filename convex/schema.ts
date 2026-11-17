@@ -433,7 +433,13 @@ const projectFields = {
     }),
   ),
   lifecycle: v.optional(
-    v.object({ operationId: v.string(), action: v.string(), expectedRevision: v.number() }),
+    v.object({
+      operationId: v.string(),
+      action: v.string(),
+      expectedRevision: v.number(),
+      /** A restore that moved to a free address (Item eb631a53): its answer, kept for a retry. */
+      address: v.optional(v.object({ slug: v.string(), previousSlug: v.string() })),
+    }),
   ),
 };
 const projectBackupFields = {

@@ -2,13 +2,17 @@
 import { cancelPendingTask } from './schedulerCancel';
 import { scheduleR2Purge } from './projectPurgeScheduling';
 import { noteDeleteOutcome } from './projectDeleteRequestOutcome';
-import { ensureProjectSlug, slugTaken } from './urlIdentity';
+import { claimSlug, ensureProjectSlug, restoreProjectSlug, slugTaken } from './urlIdentity';
 import { blobStore } from './blobStore';
 import { invariant as check } from '../src/errors';
 import { purgeExchangeObjects } from './projectObjectLifecycle';
 import { v } from 'convex/values';
 import { requireOwnerPerson } from './ownerPerson';
-import { mutation } from './cliServer';
+import { isDeviceIdentity, mutation } from './cliServer';
+import { heldReplay, holdSetting, settingKey, settingReply } from './projectSettingApprovals';
+import type { ApprovalRow } from './projectHostedApprovalStore';
+import { activeOwnedProject } from './projectAuthority';
+import { canonicalPayload } from '../src/hosted-source-operation';
 import { internalMutation, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
@@ -67,7 +71,8 @@ export async function transition(
       'Reconcile this original project operation.',
     );
     if (project.removal === 'deleting') await schedule(ctx, project);
-    return null;
+    // A retried restore answers as the first one did (its response may have been lost).
+    return project.lifecycle.address ?? null;
   }
   // SM-D guards (machine M1): restoring an active project and trashing a trashed one already
   // hold the state they ask for. They return before the revision check and write nothing, so a stale
@@ -147,11 +152,35 @@ export async function transition(
   else await dropProjectOrder(ctx, project._id);
   if (action === 'trash') await startRetention(ctx, project._id);
   if (action === 'delete') await schedule(ctx, (await ctx.db.get(project._id))!);
+  if (action === 'restore') {
+    // Item eb631a53: a live project may have taken this address while it was removed.
+    const address = await restoreProjectSlug(ctx, (await ctx.db.get(project._id))!);
+    if (address.moved) {
+      const moved = { slug: address.slug, previousSlug: address.previousSlug! };
+      await ctx.db.patch(project._id, {
+        lifecycle: {
+          operationId: input.operationId,
+          action,
+          expectedRevision: input.expectedRevision,
+          address: moved,
+        },
+      });
+      return moved;
+    }
+  }
   return null;
 }
+const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+/** Project slugs are at most 100 characters, like repository names and the derived default (uniqueUrlName). */
+const SLUG_MAX = 100;
+type RenameInput = { operationId: string; expectedRevision: number; name: string; slug?: string };
+
+/** Item eb631a53: the project's name and address. The owner person changes them directly; an agent's change (any
+ * device sign-in) is held for the owner person on the approve page, like membership. The old address stays an alias
+ * that resolves to the project (the web moves to the new address); an address held only by removed projects is free. */
 export const rename = mutation({
   args: { ...args, name: v.string(), slug: v.optional(v.string()) },
-  returns: v.null(),
+  returns: v.union(v.null(), v.string()),
   handler: async (ctx, input) => {
     try {
       const user = await ctx.auth.getUserIdentity(),
@@ -167,70 +196,143 @@ export const rename = mutation({
         'PROJECT_UNAVAILABLE',
         'This Forge project is unavailable with the current account.',
       );
-      const name = input.name.trim();
-      invariant(
-        name && input.operationId.trim() && Number.isSafeInteger(input.expectedRevision),
-        'BAD_ARGUMENT',
-        'Enter a project name and retain the original operation.',
-      );
-      if (project.nameChange?.operationId === input.operationId) {
-        invariant(
-          project.nameChange.name === name &&
-            project.nameChange.slug === input.slug &&
-            project.nameChange.expectedRevision === input.expectedRevision,
-          'WORK_OPERATION_CHANGED',
-          'Reconcile the original rename request.',
-        );
-        return null;
-      }
-      invariant(
-        project.revision === input.expectedRevision,
-        'WORK_STALE',
-        'Project changed. Refresh its current name before making another change.',
-      );
-      const previousSlug = await ensureProjectSlug(ctx, project);
-      const slug = input.slug ?? previousSlug;
-      check(
-        /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug),
-        'BAD_ARGUMENT',
-        'Use lowercase letters, numbers and hyphens for the project slug.',
-      );
-      check(
-        !(await slugTaken(ctx, project.owner, slug, project._id)),
-        'BAD_ARGUMENT',
-        'This project slug is already taken.',
-      );
-      if (
-        slug !== previousSlug &&
-        !(await ctx.db
-          .query('projectSlugs')
-          .withIndex('by_owner_and_slug', q => q.eq('owner', project.owner).eq('slug', slug))
-          .unique())
-      )
-        await ctx.db.insert('projectSlugs', { owner: project.owner, slug, projectId: project._id });
-      await ctx.db.patch(project._id, {
-        name,
-        slug,
-        revision: project.revision + 1,
-        nameChange: {
-          operationId: input.operationId,
-          expectedRevision: input.expectedRevision,
-          name,
-          ...(input.slug !== undefined ? { slug: input.slug } : {}),
-        },
-      });
+      if (isDeviceIdentity(user)) return await holdRename(ctx, project, user.subject, input);
+      await applyRename(ctx, project, input);
       return null;
     } catch (error) {
       return report(error);
     }
   },
 });
+function renameRequest(input: RenameInput) {
+  const name = input.name.trim();
+  invariant(
+    name && input.operationId.trim() && Number.isSafeInteger(input.expectedRevision),
+    'BAD_ARGUMENT',
+    'Enter a project name and retain the original operation.',
+  );
+  check(
+    input.slug === undefined || SLUG.test(input.slug),
+    'BAD_ARGUMENT',
+    'Use lowercase letters, numbers and hyphens for the project slug.',
+  );
+  check(
+    input.slug === undefined || input.slug.length <= SLUG_MAX,
+    'BAD_ARGUMENT',
+    `Use at most ${SLUG_MAX} characters for the project slug.`,
+  );
+  return { name, ...(input.slug !== undefined ? { slug: input.slug } : {}) };
+}
+/** What an agent asked for and what the owner sees: the request, the project's name and address when it was made (at
+ * `expectedRevision`), and the fully resolved result. The approval digest covers all of it. */
+type AddressRequest = {
+  asked: { name: string; slug: string | null; expectedRevision: number };
+  before: { name: string; slug: string };
+  after: { name: string; slug: string };
+};
+const staleWords =
+  "The project's name or address changed after this request; nothing was applied. Ask for the change again.";
+/** One request row per project (a newer request replaces an open one). Item eb631a53 review: a request binds the
+ * revision it was made at, so a grant applies only the exact before -> after it showed, and an old request replayed
+ * after a later change is refused, never reopened: each request applies at most once. */
+async function holdRename(
+  ctx: MutationCtx,
+  project: Doc<'hostedProjects'>,
+  requester: string,
+  input: RenameInput,
+) {
+  const change = renameRequest(input);
+  const asked = { name: change.name, slug: change.slug ?? null, expectedRevision: input.expectedRevision };
+  const key = settingKey('address');
+  const replay = await heldReplay(ctx, project._id, key, input.operationId, stored => {
+    const held = JSON.parse(stored) as AddressRequest;
+    return canonicalPayload(held.asked) === canonicalPayload(asked);
+  });
+  if (replay) return canonicalPayload({ rule: 'held', ...settingReply(replay) });
+  invariant(project.revision === input.expectedRevision, 'WORK_STALE', staleWords);
+  const slug = await ensureProjectSlug(ctx, project);
+  const request: AddressRequest = {
+    asked,
+    before: { name: project.name, slug },
+    after: { name: change.name, slug: change.slug ?? slug },
+  };
+  const row = await holdSetting(ctx, {
+    projectId: project._id,
+    key,
+    origin: 'address',
+    requester,
+    operationId: input.operationId,
+    request: canonicalPayload(request),
+    summary: request.after.slug !== slug ? `Move the project to ${request.after.slug}` : 'Rename the project',
+  });
+  return canonicalPayload({ rule: 'held', ...settingReply(row) });
+}
+/** The owner person's grant of a held rename: exactly the before -> after the request showed, at the revision it was
+ * made against. Anything else (a later rename, a restore, another grant) fails with WORK_STALE. */
+export async function applyApprovedAddress(ctx: MutationCtx, row: ApprovalRow) {
+  const user = await requireOwnerPerson(ctx, 'change the project address');
+  const project = await activeOwnedProject(ctx, row.projectId, user.subject);
+  const request = JSON.parse(row.setting!.request) as AddressRequest;
+  invariant(
+    project.revision === request.asked.expectedRevision &&
+      project.name === request.before.name &&
+      project.slug === request.before.slug,
+    'WORK_STALE',
+    staleWords,
+  );
+  await applyRename(ctx, project, {
+    operationId: row.operationId,
+    expectedRevision: request.asked.expectedRevision,
+    name: request.after.name,
+    slug: request.after.slug,
+  });
+  return { rule: 'owner-approved', slug: request.after.slug };
+}
+async function applyRename(ctx: MutationCtx, project: Doc<'hostedProjects'>, input: RenameInput) {
+  const { name } = renameRequest(input);
+  if (project.nameChange?.operationId === input.operationId) {
+    invariant(
+      project.nameChange.name === name &&
+        project.nameChange.slug === input.slug &&
+        project.nameChange.expectedRevision === input.expectedRevision,
+      'WORK_OPERATION_CHANGED',
+      'Reconcile the original rename request.',
+    );
+    return;
+  }
+  invariant(
+    project.revision === input.expectedRevision,
+    'WORK_STALE',
+    'Project changed. Refresh its current name before making another change.',
+  );
+  const previousSlug = await ensureProjectSlug(ctx, project);
+  const slug = input.slug ?? previousSlug;
+  check(
+    !(await slugTaken(ctx, project.owner, slug, project._id)),
+    'BAD_ARGUMENT',
+    'This project slug is already taken.',
+  );
+  // The old address stays this project's alias; one held only by a removed project moves to this one.
+  await claimSlug(ctx, project, slug);
+  await ctx.db.patch(project._id, {
+    name,
+    slug,
+    revision: project.revision + 1,
+    nameChange: {
+      operationId: input.operationId,
+      expectedRevision: input.expectedRevision,
+      name,
+      ...(input.slug !== undefined ? { slug: input.slug } : {}),
+    },
+  });
+}
 export const trash = mutation({
   args,
   returns: v.null(),
   handler: async (ctx, input) => {
     try {
-      return await transition(ctx, input, 'trash');
+      await transition(ctx, input, 'trash');
+      return null;
     } catch (error) {
       return report(error);
     }
@@ -238,7 +340,8 @@ export const trash = mutation({
 });
 export const restore = mutation({
   args,
-  returns: v.null(),
+  /** Item eb631a53: the new address when a live project took the old one while this one was removed. */
+  returns: v.union(v.null(), v.object({ slug: v.string(), previousSlug: v.string() })),
   handler: async (ctx, input) => {
     try {
       return await transition(ctx, input, 'restore');
@@ -252,7 +355,8 @@ export const permanentlyDelete = mutation({
   returns: v.null(),
   handler: async (ctx, input) => {
     try {
-      return await transition(ctx, input, 'delete');
+      await transition(ctx, input, 'delete');
+      return null;
     } catch (error) {
       return report(error);
     }

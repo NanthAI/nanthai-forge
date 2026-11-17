@@ -33,7 +33,7 @@ const allowed = {
   projectHostedLanePin: ['setPin'],
   projectHostedLifecycleMerged: ['completeMerged'],
   projectHostedSeed: ['begin'],
-  projectLifecycle: ['rename'],
+  projectLifecycle: ['rename'], // A device's rename is held for the owner person (Item eb631a53); the person's applies.
   projectNeedsMe: ['read'], // Read-only: says whether the viewer may decide; decide keeps its own person gate.
   projectPlanSettled: ['page'], // Read-only done and dropped plan rows, one bounded page; no write.
   projectLooseEnds: ['read'], // Read-only: tells the owner the authority epoch; setting aside goes through abandon.

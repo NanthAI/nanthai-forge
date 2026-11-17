@@ -10,7 +10,8 @@ export type SettingOriginName =
   | 'check-import'
   | 'runner'
   | 'main-audit'
-  | 'membership';
+  | 'membership'
+  | 'address';
 export type SettingCompare = { subject?: string; before: unknown; after: unknown };
 type ChangeRow = {
   path: string;
@@ -47,6 +48,7 @@ const WHAT: Record<SettingOriginName, string> = {
   runner: 'Check runner',
   'main-audit': 'Main audit',
   membership: 'Project membership',
+  address: 'Project address',
 };
 /** Fields that say how the request is applied, not what it changes: shown only behind "Details". */
 const INTERNAL = new Set([

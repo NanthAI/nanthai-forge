@@ -49,7 +49,7 @@ export default function ProjectLifecycle({ project }: { project: Project }) {
     setMessage('');
     try {
       const { kind, ...input } = operation;
-      await client.mutation(
+      const moved = await client.mutation(
         kind === 'trash'
           ? api.projectLifecycle.trash
           : kind === 'restore'
@@ -64,7 +64,7 @@ export default function ProjectLifecycle({ project }: { project: Project }) {
         kind === 'trash'
           ? 'Project deleted. You can restore it here for 90 days.'
           : kind === 'restore'
-            ? 'Project restored with its source and Work. Grant access and register runners again.'
+            ? `Project restored with its source and Work${moved ? ` at ${moved.slug}: another project now uses ${moved.previousSlug}` : ''}. Grant access and register runners again.`
             : 'Permanent removal started. Its progress updates here.',
       );
     } catch (e) {
@@ -134,10 +134,12 @@ export default function ProjectLifecycle({ project }: { project: Project }) {
               disabled={busy || !!renameAttempt}
               onChange={event => setSlug(event.target.value)}
               pattern="[a-z0-9]+(-[a-z0-9]+)*"
+              maxLength={100}
             />
           </label>
           <p>
-            /{project.handle ?? 'your-handle'}/{slug} · Previous links keep working.
+            /{project.handle ?? 'your-handle'}/{slug} · Links to its 10 most recent previous addresses keep
+            working.
           </p>
           <button
             disabled={

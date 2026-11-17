@@ -36,13 +36,18 @@ export type SettingOrigin =
   | 'check-import'
   | 'runner'
   | 'main-audit'
-  | 'membership';
+  | 'membership'
+  /** Item eb631a53: the project's name and address. */
+  | 'address';
 
 /** Settings requests share the approvals table under a `setting:` key, one row per setting. Like fork
  * PR requests they are never `live` (they hold no landing, so the landing gate's read never sees
  * them); a request is open until it `ended`. */
-export const settingKey = (origin: SettingOrigin, item?: string) =>
-  `setting:${origin}${item ? `:${item}` : ''}`;
+// A hoisted declaration, not a const: projectAutonomy reads it while modules are still loading, and the address
+// approval path (projectLifecycle) closes an import cycle back to this module (land check 1fe1874f).
+export function settingKey(origin: SettingOrigin, item?: string) {
+  return `setting:${origin}${item ? `:${item}` : ''}`;
+}
 
 /** Direct for the owner person; for an agent, direct only before the project's first accepted landing.
  * One indexed read, only for an agent's settings write; nothing on the landing path. */
@@ -74,17 +79,19 @@ export function settingReply(row: ApprovalRow) {
   };
 }
 
-/** The held request with this operation id, for a replay; refuses a changed retry. */
+/** The held request with this operation id, for a replay; refuses a changed retry. `request` is the exact stored
+ * request, or a test of it for a request that also records state read when it was made. */
 export async function heldReplay(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   key: string,
   operationId: string,
-  request: string,
+  request: string | ((stored: string) => boolean),
 ) {
   const row = await approvalRow(ctx, projectId, key);
   if (row?.operationId !== operationId || !row.setting) return null;
-  invariant(row.setting.request === request, 'WORK_OPERATION_CHANGED', 'Retry with the original values.');
+  const same = typeof request === 'string' ? row.setting.request === request : request(row.setting.request);
+  invariant(same, 'WORK_OPERATION_CHANGED', 'Retry with the original values.');
   return row;
 }
 
