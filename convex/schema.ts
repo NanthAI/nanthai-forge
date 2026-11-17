@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { journalTables, journalReceiptTables } from './projectJournalFields';
 import { liveLineTables } from './projectLiveLineFields';
+import { publicDiscoveryTables } from './publicDiscoveryFields';
 import { landingReadTables } from './projectLandingReadFields';
 import { finishReadTables } from './projectFinishReadFields';
 import { hostedOverlapTables } from './projectHostedOverlapFields';
@@ -508,6 +509,7 @@ export default defineSchema({
   ...journalReceiptTables,
   ...finishReadTables,
   ...liveLineTables,
+  ...publicDiscoveryTables,
   ...landingReadTables,
   legacyStorageCleanupWindows: defineTable({
     operationId: v.string(),

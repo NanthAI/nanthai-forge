@@ -32,6 +32,7 @@ const allowed = {
   projectLifecycle: ['rename'],
   projectNeedsMe: ['read'], // Read-only: says whether the viewer may decide; decide keeps its own person gate.
   projectProposals: ['remove'],
+  publicDiscovery: ['stargazers', 'settings'], // Owner-only read-only metadata: who starred, the Lane-title opt-in.
   projectR2Backfill: ['page', 'targets'],
   projectReaders: ['list', 'shared'],
   projectSelfMetricBills: ['record', 'page'],

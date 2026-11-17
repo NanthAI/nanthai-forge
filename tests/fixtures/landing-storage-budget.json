@@ -186,7 +186,9 @@
       "users": 0,
       "projectLiveLineLanes": 0,
       "projectLandingReads": 0,
-      "authLinkEvents": 0
+      "authLinkEvents": 0,
+      "projectPublic": 0,
+      "projectStars": 0
     },
     "retained": {
       "projectJournalSegments": 1397,
@@ -374,7 +376,9 @@
       "users": 0,
       "projectLiveLineLanes": 0,
       "projectLandingReads": 0,
-      "authLinkEvents": 0
+      "authLinkEvents": 0,
+      "projectPublic": 0,
+      "projectStars": 0
     },
     "perProject": {
       "immediate": {
@@ -633,7 +637,9 @@
       "users": 0,
       "projectLiveLineLanes": 0,
       "projectLandingReads": 0,
-      "authLinkEvents": 0
+      "authLinkEvents": 0,
+      "projectPublic": 0,
+      "projectStars": 0
     },
     "retained": {
       "projectJournalSegments": 3514,
@@ -821,7 +827,9 @@
       "users": 0,
       "projectLiveLineLanes": 0,
       "projectLandingReads": 0,
-      "authLinkEvents": 0
+      "authLinkEvents": 0,
+      "projectPublic": 0,
+      "projectStars": 0
     },
     "perProject": {
       "immediate": {

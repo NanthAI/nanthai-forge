@@ -7,6 +7,8 @@ import schema from './schema';
 export const projectPurgeTables = {
   projectFinishReadRows: 'by_project',
   projectLiveLineLanes: 'by_project_and_lane',
+  projectPublic: 'by_projectId',
+  projectStars: 'by_project_and_account',
   projectLandingReads: 'by_project_and_account',
   projectGithubMirrors: 'by_project',
   projectGithubMirrorJobs: 'by_project_and_state',

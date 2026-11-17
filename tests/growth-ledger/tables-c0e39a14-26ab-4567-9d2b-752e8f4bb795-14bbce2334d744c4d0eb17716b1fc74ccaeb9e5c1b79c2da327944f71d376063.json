@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 2,
+  "reason": "Public discovery (8947a779, 6a60e89a): projectPublic is the one small row per public project that bounded public reads, explore order and the sitemap index (listing, star count, Lane-title opt-in, weekly activity summary), so signed-out reads never scan hostedProjects or the plan; projectStars is one row per person per starred project (one star per person, owner decision 2026-11-16). No existing table holds either; hostedProjects stays untouched on the landing path. The per-browser star in the web app goes in this Lane's web landing.",
+  "date": "2026-11-17"
+}

@@ -130,6 +130,8 @@ Forge's archive export authenticates before any object IO, including after a cac
 Legacy Codescape snapshot downloads also require sign-in. No raw-file or ZIP download
 control is currently implemented in Code.
 
+**Public discovery reads** (explore, profiles, a public project's front page, the sitemap; `convex/publicHttp.ts`) are one unauthenticated GET route, `/public/v1/…`, built to sit behind the site's shared cache. It takes only a handle, a slug or an explore order from a strict path parse, forwards no cookie or credential, and answers missing, private and removed projects with the same 404 body. Everything it returns passes `convex/publicVisibility.ts`: the plan follows the planning contract (an Item or Initiative marked hidden, everything under a hidden Initiative, and a members-only plan never appear, counts included; a parent that was not read fails closed), open Lanes appear as counts and stages unless the owner opted in to titles, and Lane ids and people other than the owner's handle in the address never appear. Each read is bounded (receipts of the last 7 days ≤1,000, Lane marks ≤101, open plan rows ≤3×300 plus ≤200 Initiatives, explore ≤200 rows, profile ≤100, sitemap ≤1,000). Its only write is the explore activity note, at most once per project per 10 minutes, never per visitor. Starring needs a signed-in person: agent (device) credentials are refused, one star per person per project. Only the owner person changes the Lane-title opt-in or sees who starred.
+
 `FORGE_PUBLIC_ABUSE_BUDGETS` accepts only `{ "deviceStartsPerMinute": 120 }` (a positive
 integer override). The approved default is 120 starts per minute without any setting.
 There is no anonymous clone budget or counter. Device starts use one point counter

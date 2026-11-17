@@ -3,6 +3,7 @@ import { ensureAccount, ensureProjectSlug } from './urlIdentity';
 import { policyPreset } from '../src/autonomy-policy';
 import type { MutationCtx } from './_generated/server';
 import { activeOwnedProject } from './projectAuthority';
+import { ensurePublicRow } from './publicListing';
 
 /** Shared creation seam: archive upload and CLI hosting use the same owner/key identity. */
 export async function createProject(
@@ -23,6 +24,8 @@ export async function createProject(
       revision: 0,
     });
     project = (await ctx.db.get(id))!;
+    // A public project can be found from its first moment (explore, profiles); private ones get no row.
+    if (project.visibility === 'public') await ensurePublicRow(ctx, project);
   }
   const user = await ctx.auth.getUserIdentity();
   await ensureAccount(
