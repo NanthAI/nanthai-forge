@@ -80,3 +80,15 @@ On a public project the plan (Items, Initiatives and comments) is readable by an
 Initiative together with every Item in it; hiding is reversible. Every public read and every public count uses the
 one rule `publicPlanVisible`: a hidden Item never appears or counts anywhere public, and a read that has not looked
 up an Item's Initiative or parent treats it as hidden.
+
+## Imported history attribution
+
+Retained planning readers accept optional `imported` attribution: `source` (a source note), `key` (the original
+record key), `createdAt`, optional `closedAt` and `originalHandle` (a public handle), and `batchId` (the import UUID).
+Original dates use ISO 8601 with an offset. The normal `at` remains the time Forge recorded that version; it is
+never replaced with an original date. Search and compact agent rows retain the attribution. It makes no claim
+that original identities were authenticated or that imported work landed in Forge.
+
+This is the reader contract. A backlog batch writer, review, Undo and full project archive are not yet available.
+The existing internal planning export contains all retained Item and Initiative versions, comments, relations
+and linked Intent metadata. It is narrower than a full source and Work archive.

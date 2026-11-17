@@ -65,6 +65,18 @@ const planningPutFields = {
 };
 /** Fields a server without `planning-model` drops; the CLI refuses to send them there. */
 export const planningModelPutKeys = ['order', 'type', 'parentId', 'owner', 'relations', 'hidden'] as const;
+/** Original backlog facts are attribution, never Forge acceptance evidence. Reader expansion precedes the importer. */
+const planningImportSchema = z.object({
+  source: z.string().trim().min(1),
+  key: z.string().trim().min(1),
+  createdAt: z.iso.datetime({ offset: true }),
+  closedAt: z.iso.datetime({ offset: true }).optional(),
+  originalHandle: z
+    .string()
+    .regex(/^@?[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?(?:\/[a-z0-9-]+)?$/)
+    .optional(),
+  batchId: id,
+});
 export const planningItemSchema = z.object({
   id,
   operationId: id,
@@ -73,6 +85,7 @@ export const planningItemSchema = z.object({
   previousVersion: z.number().int().nonnegative(),
   ...planningFields,
   ...modelFields,
+  imported: planningImportSchema.optional(),
   /** The account that last wrote this body, recorded by the hosted journal replay (S-17). Public reads
    * map it to a Forge handle (convex/publicPeople.ts); absent on local Work and on older rows. */
   author: z.string().min(1).max(200).optional(),
