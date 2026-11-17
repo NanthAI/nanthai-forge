@@ -3,19 +3,37 @@
 import { deflateSync, inflateSync, strToU8, strFromU8 } from 'fflate';
 import type { PlanRow } from '../src/planning-model';
 
-export const PLAN_PAGE_SIZE = 512;
+export const PLAN_PAGE_SIZE = 128;
 export const PLAN_ROWS = '_workStorePlan';
+export const PLAN_PAGE_PREFIX = '2';
+export const PLAN_OVERSIZED_PREFIX = 'x';
 export const planParent = (kind: string, status: string, initiativeId = '') =>
   `${kind}:${status}${kind === 'issue' && ['closed', 'abandoned'].includes(status) ? `:${initiativeId}` : ''}`;
-export const planPageKey = (parent: string, position: number) =>
-  `${parent}:${Math.floor(position / PLAN_PAGE_SIZE)}`;
+export const planPageKey = (parent: string, start: number, end = Number.MAX_SAFE_INTEGER) => {
+  const [kind, status, ...rest] = parent.split(':');
+  const states: Record<string, string> = {
+    proposed: 'p',
+    open: 'o',
+    'in-progress': 'w',
+    closed: 'c',
+    abandoned: 'a',
+  };
+  const scope =
+    (kind === 'issue' || kind === 'initiative') && states[status!]
+      ? [(kind === 'issue' ? 'i' : 'n') + states[status!], ...rest].join(':')
+      : parent;
+  return `${PLAN_PAGE_PREFIX}${scope}:${start.toString(36)}:${end === Number.MAX_SAFE_INTEGER ? '~' : end.toString(36)}`;
+};
 
-/** Portable DEFLATE stays on the backend; neither CLI/MCP nor the web imports this module. */
-export function encodePlanPage(rows: PlanRow[]): string {
+/** The stored payload, also used to size the exact bytes before compression. */
+export function planPagePayload(rows: PlanRow[]) {
   const settled =
     rows.length && rows[0]!.kind === 'issue' && ['closed', 'abandoned'].includes(rows[0]!.status);
-  const value = settled ? rows.map(row => row.position) : rows;
-  const bytes = deflateSync(strToU8(JSON.stringify(value)), { level: 6 });
+  return settled ? rows.map(row => row.position) : rows;
+}
+/** Portable DEFLATE stays on the backend; neither CLI/MCP nor the web imports this module. */
+export function encodePlanPage(rows: PlanRow[]): string {
+  const bytes = deflateSync(strToU8(JSON.stringify(planPagePayload(rows))), { level: 6 });
   return btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join(''));
 }
 export function decodePlanPage(value: string, parent: string): PlanRow[] {

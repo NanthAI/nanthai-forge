@@ -112,4 +112,10 @@ page count and JSON bytes (32 pages/40 KB for 324 roots, 64 pages/80 KB for 648)
 `tests/plan-read-cost.test.mjs` checks both budgets and one final page write per transaction; these figures exclude
 provider index/system storage. Canonical Item bodies, comments and history are not included in the projection.
 
+Leaves cap at 128 rows and split sooner above 11 KB encoded payload. Indexed position ranges avoid sparse-window
+fragmentation. Replacement first clears old leaves in 32-document/1 MB batches before reconstructing roots in
+100-root/1 MB batches. One generation-local preparation control object (fixture budget 512 JSON bytes) holds
+only ids/progress; it is removed on success, or retained as blocked until a relevant edit/retirement. Scheduled
+task references follow the existing schema-derived purge inventory. No source bodies or new history are retained.
+
 Plan authority and generation headers reuse `projectFinishReadRows`: one fixed row per active Work project, one companion per generation, with the existing project purge and generation deletion lifetime. Empty projects and removal tombstones retain no Plan project header. The Plan fixture caps their combined JSON storage at 4 KB for a project plus two generations. The landing storage ledger separates the fixed project header from per-landing growth and counts its nine index entries; no new table or retention period is added.

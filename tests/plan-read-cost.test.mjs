@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { meterWorkIO, trackReadSets } from './hosted-read-set.mjs';
-import { planFixture } from './plan-read-fixture.mjs';
+import { planFixture, planRowKeys } from './plan-read-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const { planView } = await import(moduleUrl('../convex/projectPlanView.ts'));
 const { PLAN_ROWS, decodePlanPage } = await import(moduleUrl('../convex/projectPlanRows.ts'));
@@ -90,7 +90,12 @@ for (const [name, scale, sparse] of [
       'a batch flushes each compact page once',
     );
     for (const page of pages)
-      for (const row of decodePlanPage(page.value, page.parent)) assert(!('body' in row));
+      for (const row of decodePlanPage(page.value, page.parent))
+        for (const key of Object.keys(row))
+          assert(planRowKeys.has(key), `unexpected stored Plan field: ${key}`);
+    for (const row of JSON.parse(after.rows))
+      for (const key of Object.keys(row))
+        assert(planRowKeys.has(key), `unexpected returned Plan field: ${key}`);
     // An ordinary title/owner/order/checklist update replaces one page, at the same operation boundary.
     const id = s.roots[22 * scale + 1];
     const fields = {

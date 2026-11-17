@@ -207,22 +207,43 @@ project. Existing same-project recovery is not that fresh-project round trip.
 
 ## Plan list projection
 
-The Plan query accepts compact `_workStorePlan` pages in the existing data partition. A page holds at most 512
-creation positions, grouped by kind and status (settled Items also by Initiative); each page uses portable DEFLATE compression, and settled pages hold positions only. It contains only the list fields and Done-when counts. Item bodies, comments, exact agent reads and
-search remain in their existing records. `planRowsVersion: 1` on the generation means every root is covered. Older
-generations keep the existing indexed search-root reader until preparation completes; reads never start a backfill.
-The Work writer updates these pages in the same transaction as every search-root change, including batched
-planning writes, imports and rebuilds. Each touched page is read and flushed once per transaction. Fresh partitions
-carry the marker from creation and become readable only after publication; aliases use their partition's current coverage.
-The query's row limits, permissions, order and counts stay the same. No screen open writes or prepares data.
+The Plan query reads compact `_workStorePlan` pages in the existing data partition. Each leaf holds at most
+128 rows, grouped by kind/status (settled Items also by Initiative), and splits sooner above 11 KB of encoded
+payload. Leaves cover creation-position ranges rather than fixed position windows, so gaps do not create mostly
+empty pages. The existing parent/position index selects one predecessor leaf; a new interval can also read its
+successor. Portable DEFLATE and the row payload remain compatible with earlier readers. Settled pages contain
+positions only. Live pages contain only the PlanRow allow-list and Done-when counts; bodies, comments, authors,
+times and source bookkeeping stay in their existing records.
 
-Plan also reads transactional authority/Work-pointer and generation headers from the existing `projectFinishReadRows` table. Generation headers retain the selected schema, status and coverage rather than the full index metadata. The finite landing observer keeps its separate authority header without a Work-revision dependency. Project controller history and journal revisions neither look up nor invalidate Plan headers. Empty projects and removal tombstones retain no Plan project header. Missing or unusually large headers use the exact source records; ordinary relevant writes and explicit preparation install the small headers without query-triggered backfills.
+A completed search preparation stamps both a selected alias and its record partition. Historical aliases whose
+partition marker is older can still prove complete coverage for their exact shared partition; exceptional repair
+uses at most two extra authority/generation reads for this legacy proof, never per Item.
 
-For an existing complete search generation, the owner can call `projectHostedPlanningPrepare:page` with
-`planRowsOnly:true`, the project/owner/generation pins, a fresh operation UUID and `cursor:null`; continue with the
-returned cursor until `isDone`. Each call handles at most 100 roots/1 MB, retains an exact retry receipt and changes
-only the disposable projection. Full search preparation also fills Plan pages. Partial preparation keeps the legacy
-reader, and planning changes between pages are included by ordinary transactional upkeep. `compactReady:false` reports a completed pass that retained exact legacy reads because unusually large list metadata outgrew the compact page envelope. Such Item writes still succeed without truncation; a fresh pass can compact the partition after that metadata changes.
+`planRowsVersion: 1` still means complete coverage, independent of leaf layout. New leaf keys identify the
+128-row layout; an ordinary write encountering old keys clears coverage and requests one bounded replacement
+repair. Untouched covered generations remain readable. The writer maintains prepared leaves in the source
+transaction, caching each touched leaf and already-observed root. Non-root planning rows retain only their
+classification in that cache, so payload retirement and header repair do not read their bodies twice. Row limits,
+permissions, ordering, counts and exact Item/agent reads are unchanged. Reads never start a backfill.
+
+Plan also reads transactional authority/Work-pointer and generation headers from `projectFinishReadRows`.
+Controller history and journal-only patches neither look up nor invalidate Plan headers. Missing or unusually
+large headers retain exact source reads; ordinary relevant writes restore them. The finite landing observer
+keeps its separate authority header without a Work-pointer dependency.
+
+The existing owner-only `projectHostedPlanningPrepare:page` accepts `planRowsOnly:true`, project/owner/generation
+pins, an operation UUID and `cursor:null`. It first deletes only this partition's Plan pages in batches of at most
+32 documents/1 MB, then re-applies at most 100 search roots/1 MB per call. No roots are re-applied before clearing
+finishes. Retry receipts preserve exact responses; concurrent rebuilds continue the current shared progress.
+Canonical root bytes, versions and unrelated collections stay untouched. Coverage stays off until completion,
+and ordinary writes between pages are included. Full search preparation requests the same finite Plan repair.
+
+Layout upgrades and oversized-leaf fallback schedule the internal `repair` continuation automatically, one
+fenced mutation per bounded step, coalesced per partition. A stale callback is a no-op. Metadata beyond the
+internal envelope still succeeds as source data and uses exact legacy reads; one repair pass stops as blocked
+if it still cannot fit. A relevant edit, move or deletion starts repair again automatically. An edit during a
+blocked pass can request one additional replacement pass. There is no polling, idle timer, title limit,
+truncation or mandatory operator preparation. When finite work ends, idle costs zero calls and writes.
 
 “Public” means every viewer without a project role, including a signed-in account. Public query registration
 and journal re-entry apply this rule to Item bodies, versions, comments, reactions, list rows and counts. Members

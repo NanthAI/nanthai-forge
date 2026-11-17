@@ -25,6 +25,19 @@ export const indexEntry = v.object({
 export const generationFields = {
   /** Complete compact Plan projection in this record partition. */
   planRowsVersion: v.optional(v.literal(1)),
+  /** One finite replacement rebuild; blocked metadata retries on a relevant write, never a timer. */
+  planRowsPreparation: v.optional(
+    v.object({
+      id: v.string(),
+      step: v.string(),
+      phase: v.union(v.literal('clear'), v.literal('rows'), v.literal('blocked')),
+      after: v.union(v.string(), v.null()),
+      compactReady: v.boolean(),
+      automatic: v.boolean(),
+      restart: v.optional(v.boolean()),
+      task: v.optional(v.id('_scheduled_functions')),
+    }),
+  ),
   /** Exact legacy reads remain available when list metadata outgrows a compact page. */
   planRowsOversized: v.optional(v.literal(true)),
   recordTables: v.optional(v.union(v.literal('copying'), v.literal('split'))),

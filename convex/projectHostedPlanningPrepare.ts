@@ -5,6 +5,8 @@ import { internal } from './_generated/api';
 import { internalMutation } from './server';
 import { finishWorkRecordWrites } from './projectWorkRecordWriter';
 import { ensurePlanProjectHeader } from './projectPlanHeaderStore';
+import { advancePlanPreparation } from './projectPlanPreparation';
+import { startPlanPreparation, requestPlanRepair } from './projectPlanPreparationStore';
 import { accessibleProject } from './projectAuthority';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { planningSearchEntries, planningSearchRowBytes, planningSummary } from '../src/planning-search';
@@ -15,8 +17,8 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 
-/** Explicit operator preparation for pre-search generations. One page/operation, no scheduler,
- * source bytes, R2 reads, full Work reconstruction, or query-triggered backfill. */
+/** Exact search preparation is one bounded page per operator call, without source
+ * bytes, R2 reads or full Work reconstruction. Plan replacement continues in finite scheduled steps. */
 export const page = internalMutation({
   args: {
     projectId: v.id('hostedProjects'),
@@ -62,7 +64,7 @@ export const page = internalMutation({
     );
     if (input.cursor === null) {
       await ensurePlanProjectHeader(ctx, project);
-      await ctx.db.patch(partition, { planRowsVersion: undefined, planRowsOversized: undefined });
+      if (!input.planRowsOnly) await requestPlanRepair(ctx, partition);
       if (partition !== generation._id) await ctx.db.patch(generation._id, { planRowsVersion: undefined });
     }
     if (input.planRowsOnly) {
@@ -71,59 +73,58 @@ export const page = internalMutation({
         'WORK_INDEX_REBUILD_REQUIRED',
         'Prepare the complete planning search before its compact Plan pages.',
       );
-      let after: string | null = null;
-      let compactReady = true;
-      if (input.cursor !== null) {
-        let cursor: { after?: unknown; operationId?: unknown } | null = null;
+      const partitionRow = await ctx.db.get(partition);
+      invariant(partitionRow, 'WORK_STALE', 'Restart preparation for the current generation.');
+      let state = partitionRow.planRowsPreparation;
+      if (input.cursor === null) state = await startPlanPreparation(ctx, partition, input.operationId);
+      else {
+        let cursor: { operationId?: unknown; preparationId?: unknown } | null = null;
         try {
           cursor = JSON.parse(input.cursor);
         } catch {
           invariant(false, 'BAD_ARGUMENT', 'Use the returned Plan preparation cursor.');
         }
         invariant(
-          cursor !== null &&
-            typeof cursor === 'object' &&
-            typeof cursor.after === 'string' &&
-            typeof cursor.operationId === 'string',
+          cursor && typeof cursor === 'object' && typeof cursor.operationId === 'string',
           'BAD_ARGUMENT',
           'Use the returned Plan preparation cursor.',
         );
-        const prior = await record(
-          ctx,
-          partition,
-          'planningSearchPreparation',
-          cursor!.operationId as string,
-        );
+        const prior = await record(ctx, partition, 'planningSearchPreparation', cursor.operationId);
         invariant(
           prior && JSON.parse(prior.value).result.nextCursor === input.cursor,
           'WORK_STALE',
           'Use the returned Plan preparation cursor for this generation.',
         );
-        after = cursor!.after as string;
-        compactReady = JSON.parse(prior!.value).result.compactReady !== false;
+        // A concurrent rebuild has the same derived target and generation pin.
+        // Continue its authoritative progress instead of making the caller restart.
+        invariant(
+          state || partitionRow.planRowsVersion === 1,
+          'WORK_STALE',
+          'Restart preparation for the current generation.',
+        );
       }
-      const page = await ctx.db
-        .query(await workRecordTable(ctx, partition, 'planningSearch'))
-        .withIndex('by_generation_and_collection_and_key', q => {
-          const range = q.eq('generationId', partition).eq('collection', 'planningSearch');
-          return after === null ? range : range.gt('key', after);
-        })
-        .paginate({ cursor: null, numItems: 100, maximumRowsRead: 100, maximumBytesRead: 1000000 });
-      // The common writer repairs the companion without changing canonical root bytes or versions.
-      for (const root of page.page) await ctx.db.patch(root._id, { value: root.value });
-      compactReady = (await finishWorkRecordWrites(ctx)) !== false && compactReady;
-      if (page.isDone && (await ctx.db.get(partition))?.planRowsOversized) compactReady = false;
-      if (page.isDone && compactReady) {
-        await ctx.db.patch(partition, { planRowsVersion: 1 });
-        if (partition !== generation._id) await ctx.db.patch(generation._id, { planRowsVersion: 1 });
-      }
+      const advanced =
+        state && state.phase !== 'blocked'
+          ? await advancePlanPreparation(ctx, partitionRow, state)
+          : {
+              state: state ?? null,
+              processed: 0,
+              cleared: 0,
+              isDone: true,
+              compactReady: partitionRow.planRowsVersion === 1,
+            };
       const result = {
-        processed: page.page.length,
-        nextCursor: page.isDone
+        processed: advanced.processed,
+        cleared: advanced.cleared,
+        nextCursor: advanced.isDone
           ? null
-          : canonicalPayload({ after: page.page.at(-1)?.key ?? after, operationId: input.operationId }),
-        isDone: page.isDone,
-        compactReady,
+          : canonicalPayload({
+              preparationId: advanced.state!.id,
+              operationId: input.operationId,
+              after: advanced.state!.after,
+            }),
+        isDone: advanced.isDone,
+        compactReady: advanced.compactReady,
       };
       await ctx.db.insert('projectWorkRecords', {
         projectId: input.projectId,
@@ -248,10 +249,12 @@ export const page = internalMutation({
     }
     const done = rows.isDone && completePage && processed === rows.page.length;
     const flushed = await finishWorkRecordWrites(ctx);
+    const completedGeneration = done ? await ctx.db.get(partition) : null;
     const compactReady =
       flushed !== false &&
       selection?.compactReady !== false &&
-      !(done && (await ctx.db.get(partition))?.planRowsOversized);
+      !completedGeneration?.planRowsOversized &&
+      !completedGeneration?.planRowsPreparation;
     if (cursor) cursor = canonicalPayload({ ...JSON.parse(cursor), compactReady });
     if (done) {
       await ctx.db.patch(generation._id, {
@@ -259,7 +262,10 @@ export const page = internalMutation({
         planRowsVersion: compactReady ? 1 : undefined,
       });
       if (partition !== generation._id)
-        await ctx.db.patch(partition, { planRowsVersion: compactReady ? 1 : undefined });
+        await ctx.db.patch(partition, {
+          planningSearchVersion: 2,
+          planRowsVersion: compactReady ? 1 : undefined,
+        });
     }
     const result = {
       processed,
@@ -279,5 +285,33 @@ export const page = internalMutation({
       value: canonicalPayload({ request, result }),
     });
     return canonicalPayload(result);
+  },
+});
+
+/** Scheduled only by a layout/size repair request; each fenced step is safe to replay. */
+export const repair = internalMutation({
+  args: {
+    projectId: v.id('hostedProjects'),
+    generationId: v.id('projectWorkGenerations'),
+    preparationId: v.string(),
+    step: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, input) => {
+    const generation = await ctx.db.get(input.generationId);
+    const state = generation?.planRowsPreparation;
+    if (
+      !generation ||
+      generation.projectId !== input.projectId ||
+      !state ||
+      state.id !== input.preparationId ||
+      state.step !== input.step ||
+      state.phase === 'blocked'
+    )
+      return null;
+    const project = await ctx.db.get(input.projectId);
+    if (!project || project.removal) return null;
+    await advancePlanPreparation(ctx, generation, state);
+    return null;
   },
 });

@@ -3,7 +3,24 @@ import { randomUUID } from 'node:crypto';
 import { setup } from './hosted-planning-fixture.mjs';
 import { indexedRecord } from '../dist/work-hosted-index.js';
 import { moduleUrl } from './convex-module.mjs';
-const { workRecordWriter, finishWorkRecordWrites } = await import(
+export const planRowKeys = new Set([
+  'id',
+  'kind',
+  'title',
+  'status',
+  'position',
+  'version',
+  'initiativeId',
+  'parentId',
+  'order',
+  'type',
+  'owner',
+  'relations',
+  'hidden',
+  'inLane',
+  'doneWhen',
+]);
+const { workRecordWriter, finishWorkRecordWrites, preparePlanRowsWrites } = await import(
   moduleUrl('../convex/projectWorkRecordWriter.ts')
 );
 const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
@@ -59,7 +76,15 @@ export async function planFixture(t, scale = 1, sparse = false) {
       at: '2026-11-17T00:00:00.000Z',
       provenance: 'user-declared-local',
       intentIds: [],
-      body: 'Done when:\n- [x] Preserve the original source and identity\n- [ ] Keep concurrent writes in the same transaction\n- [ ] Report current coverage and exact counts\n- [ ] Retain readable evidence for every recorded change\n',
+      body:
+        `Distinct Item ${randomUUID()} — ${topics[i % topics.length]}\n` +
+        'Done when:\n- [x] Preserve the original source and identity\n- [ ] Keep concurrent writes in the same transaction\n' +
+        Array.from(
+          { length: i % 9 },
+          (_, line) => `- [ ] Keep ${randomUUID()} exact in section ${line}\n`,
+        ).join('') +
+        `\nPrivate fixture detail ${randomUUID()} `.repeat(i % 7),
+      author: `user_synthetic${i}`,
       ...(!initiative
         ? {
             initiativeId: initiatives[i % (4 * scale)],
@@ -120,6 +145,7 @@ export async function planFixture(t, scale = 1, sparse = false) {
     initiatives,
     async project() {
       const writer = workRecordWriter(finishReadWriter(s.ctx));
+      preparePlanRowsWrites(writer);
       for (const id of roots)
         await writer.db.patch(id, { value: s.tables.projectPlanningRecords.get(id).value });
       await finishWorkRecordWrites(writer);

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
 import { planRowsWriter } from './projectPlanRowsWriter';
-import type { Doc } from './_generated/dataModel';
+import { requestPlanRepair } from './projectPlanPreparationStore';
+import type { Doc, Id } from './_generated/dataModel';
 import { splitRecordTable } from './projectWorkRecordTables';
 
 const tag = Symbol('workRecordWriter');
@@ -9,22 +10,55 @@ const originals = new WeakMap<object, () => MutationCtx['db']>();
 export const workRecordOriginalDb = (db: MutationCtx['db']) => originals.get(db)?.() ?? db;
 type Row = Omit<Doc<'projectWorkRecords'>, '_id' | '_creationTime'>;
 const flushers = new WeakMap<object, () => Promise<boolean | undefined> | undefined>();
+const preparations = new WeakMap<object, () => void>();
 export const finishWorkRecordWrites = (ctx: MutationCtx) => flushers.get(ctx)?.();
-/** Route existing logical inserts once, with no layout reads or migration mirrors. The wrapper
+/** Replacement preparation has already cleared the old layout; never schedule itself recursively. */
+export const preparePlanRowsWrites = (ctx: MutationCtx) => preparations.get(ctx)?.();
+/** Route existing logical inserts once, without migration mirrors. The wrapper
  * remains lazy: constructing a retired endpoint must never touch its context. */
 export function workRecordWriter(ctx: MutationCtx): MutationCtx {
   const db = () => ctx.db;
   const overrides = new Map<PropertyKey, unknown>();
   const roots = new Map<string, Doc<'projectPlanningRecords'>>();
+  const collections = new Map<string, string>();
+  const layouts = new Map<string, boolean>();
+  const waitingRepairs = new Set<string>();
+  const repairs = new Set<Id<'projectWorkGenerations'>>();
+  let preparing = false;
+  // Only generation-shaped records need table discrimination. Unrelated reads
+  // retain their narrow DB port and never acquire a normalization dependency.
   const remember = <T>(row: T): T => {
     if (
       row &&
       typeof row === 'object' &&
-      'collection' in row &&
-      row.collection === 'planningSearch' &&
-      '_id' in row
-    )
-      roots.set(String(row._id), { ...row } as unknown as Doc<'projectPlanningRecords'>);
+      '_id' in row &&
+      'backupId' in row &&
+      'metadata' in row &&
+      db().normalizeId('projectWorkGenerations', String(row._id))
+    ) {
+      const state =
+        'planRowsPreparation' in row
+          ? (row.planRowsPreparation as { phase?: string } | undefined)
+          : undefined;
+      if (state?.phase === 'rows' || state?.phase === 'blocked') layouts.set(String(row._id), true);
+      else if (state?.phase === 'clear' || !('planRowsVersion' in row) || !row.planRowsVersion)
+        layouts.set(String(row._id), false);
+      else layouts.delete(String(row._id));
+      if (
+        'planRowsPreparation' in row &&
+        row.planRowsPreparation &&
+        !(row.planRowsPreparation as { task?: string }).task
+      )
+        waitingRepairs.add(String(row._id));
+      else waitingRepairs.delete(String(row._id));
+    }
+    if (row && typeof row === 'object' && 'collection' in row && '_id' in row) {
+      const id = String(row._id);
+      collections.set(id, String(row.collection));
+      if (row.collection === 'planningSearch')
+        roots.set(id, { ...row } as unknown as Doc<'projectPlanningRecords'>);
+      else roots.delete(id);
+    }
     return row;
   };
   // Keep the exact root the caller already read; upkeep must not bill that same body-bearing row twice.
@@ -58,7 +92,14 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
       },
     });
   let projection: ReturnType<typeof planRowsWriter> | undefined;
-  const plan = () => (projection ??= planRowsWriter(db()));
+  const plan = () =>
+    (projection ??= planRowsWriter(
+      db(),
+      id => (preparing ? true : layouts.get(id)),
+      id => {
+        repairs.add(id);
+      },
+    ));
   let tail = Promise.resolve();
   let pending = false;
   const serial = <T>(work: () => Promise<T>) => {
@@ -88,10 +129,23 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
         return async (table: string, input: Record<string, unknown>) => {
           // A fresh partition is projection-aware from birth, including paged builds. Shared
           // legacy partitions retain their existing coverage marker until explicit preparation.
-          if (table === 'projectWorkGenerations' && !input.recordsGenerationId)
-            return db().insert('projectWorkGenerations', { ...input, planRowsVersion: 1 } as never);
+          if (table === 'projectWorkGenerations' && !input.recordsGenerationId) {
+            const id = await db().insert('projectWorkGenerations', {
+              ...input,
+              planRowsVersion: 1,
+            } as never);
+            layouts.set(id, true);
+            return id;
+          }
+          if (table === 'projectWorkGenerations') {
+            // Repair state belongs to the shared record partition, never its aliases.
+            const alias = { ...input };
+            delete alias.planRowsPreparation;
+            return db().insert('projectWorkGenerations', alias as never);
+          }
           if (table === 'projectWorkRecords') table = splitRecordTable(String(input.collection));
           const id = await db().insert(table as never, input as never);
+          if (table === 'projectPlanningRecords') remember({ ...input, _id: id });
           if (
             (table === 'projectWorkRecords' || table === 'projectPlanningRecords') &&
             input.collection === 'planningSearch'
@@ -110,21 +164,51 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
               : method === 'replace'
                 ? db().replace(id as never, value as never)
                 : db().patch(id as never, value as never);
-          if (
-            !db().normalizeId('projectPlanningRecords', id) ||
-            (value?.collection && value.collection !== 'planningSearch')
-          )
-            return mutate();
+          if (db().normalizeId('projectWorkGenerations', id)) {
+            if (value && 'planRowsPreparation' in value) {
+              if (value.planRowsPreparation && !(value.planRowsPreparation as { task?: string }).task)
+                waitingRepairs.add(id);
+              else waitingRepairs.delete(id);
+            }
+            if (method === 'delete') layouts.delete(id);
+            else if (
+              method === 'replace' ||
+              (value && ('planRowsVersion' in value || 'planRowsPreparation' in value))
+            ) {
+              const phase = (value?.planRowsPreparation as { phase?: string } | undefined)?.phase;
+              if (phase === 'rows' || phase === 'blocked') layouts.set(id, true);
+              else if (phase === 'clear' || (value && 'planRowsVersion' in value && !value.planRowsVersion))
+                layouts.set(id, false);
+              else layouts.delete(id);
+            }
+            await mutate();
+            if (!preparing && value?.planningSearchVersion === 2 && waitingRepairs.has(id))
+              await requestPlanRepair(context, id as Id<'projectWorkGenerations'>);
+            return;
+          }
+          if (!db().normalizeId('projectPlanningRecords', id)) return mutate();
           return serial(async () => {
+            if (
+              collections.has(id) &&
+              collections.get(id) !== 'planningSearch' &&
+              value?.collection !== 'planningSearch'
+            ) {
+              await mutate();
+              if (method === 'delete') collections.delete(id);
+              else if (value?.collection) collections.set(id, String(value.collection));
+              return;
+            }
             const old =
               roots.get(id) ?? ((await db().get(id as never)) as Doc<'projectPlanningRecords'> | null);
             await mutate();
-            if (old?.collection === 'planningSearch') {
+            if (old) {
               const next =
                 method === 'delete' ? null : ({ ...(method === 'patch' ? old : {}), ...value } as Row);
               roots.delete(id);
+              collections.delete(id);
               if (next) remember({ ...next, _id: id });
-              await plan().change(old, next);
+              if (old.collection === 'planningSearch' || next?.collection === 'planningSearch')
+                await plan().change(old, next);
             }
           });
         };
@@ -142,6 +226,18 @@ export function workRecordWriter(ctx: MutationCtx): MutationCtx {
       return key === 'db' ? writer : Reflect.get(target, key, receiver);
     },
   });
-  flushers.set(context, () => (pending ? tail.then(() => projection?.flush()) : undefined));
+  preparations.set(context, () => {
+    preparing = true;
+  });
+  flushers.set(context, () =>
+    pending
+      ? tail.then(async () => {
+          const result = await projection?.flush();
+          if (!preparing) for (const id of repairs) await requestPlanRepair(context, id);
+          repairs.clear();
+          return result;
+        })
+      : undefined,
+  );
   return context;
 }
