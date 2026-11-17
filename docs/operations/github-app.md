@@ -99,11 +99,18 @@ asks in an interactive terminal if neither exists. Only the Forge project owner
 can connect or disconnect repositories. After a completed connect, and in status
 on a two-way project, the result carries `protection` for `main`
 ([two-way protection](#two-way-protection-the-ruleset-you-import-once)).
+Status leads with `summary`, the mirror in one sentence, and `mirror` (`state`,
+`direction`: `off`, `one-way` or `two-way`, `repository` and one `next` action when
+a person must act), read from `projectGithubMirrorRead.read`, the same read and
+words as Settings > GitHub mirror on the web (`/-/OWNER/PROJECT/settings/mirror`). A project with no mirror says so (`No mirror.`)
+and names the connect command.
 
 One approval does both jobs: the owner's authorization of the repository also turns
 the mirror on for it (`githubMirror` with `autoPush` and `inbound`, written in the
 callback's own transaction as an owner-approved policy edit), so no second
-`set-policy` approval follows. `--no-mirror` at connect connects only. A mirror that
+`set-policy` approval follows. `--no-mirror` at connect connects only;
+`--one-way` turns the mirror on from Forge to GitHub only (`inbound: false`): each
+landing is pushed, and pushes made on GitHub are not taken in. A mirror that
 is already on (any repository) is left as it is; the result's `mirror` field says
 `on`, `unchanged` or `off`, with the one command that turns it off. The approval is
 the GitHub authorization by an account linked to the owner, which the callback

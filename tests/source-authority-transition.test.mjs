@@ -16,7 +16,15 @@ const stale = current => error => {
   assert.deepEqual(error.data?.authority ?? error.authority, current);
   return true;
 };
-function setup() {
+/** A hosted main row: server authority serves it, so a switch to server needs it (Item 2abda01f). */
+const seedMain = (s, projectId) =>
+  s.insert('projectHostedChannels', {
+    projectId,
+    name: 'main',
+    operationId: randomUUID(),
+    selection: JSON.stringify({ schema: 2, projectId, head: 'c'.repeat(64) }),
+  });
+function setup({ seeded = true } = {}) {
   const s = lanesFixture();
   const projectId = s.insert('hostedProjects', {
     owner: 'owner',
@@ -25,6 +33,7 @@ function setup() {
     currentBackup: null,
     revision: 0,
   });
+  if (seeded) seedMain(s, projectId);
   const transition = (expected = native, mode = 'server', operationId = randomUUID(), actor) =>
     s.call(
       'transition',
@@ -112,8 +121,9 @@ test('legacy final append transaction fences an authority switch', async () => {
 });
 
 test('existing seed rejects a stale epoch using its authorized project row', async () => {
-  const s = setup();
-  await s.transition();
+  // The seed is under test: authority is given directly, since a switch needs a seeded main.
+  const s = setup({ seeded: false });
+  s.patch('hostedProjects', s.projectId, { sourceAuthority: server });
   const selection = {
     schema: 2,
     projectId: s.projectId,
@@ -201,8 +211,8 @@ test('transition reports indexed nonterminal owner entries and batches without r
 });
 
 test('a bootstrap seed refuses a retained working physical root without selecting main', async t => {
-  const s = setup();
-  await s.transition();
+  const s = setup({ seeded: false });
+  s.patch('hostedProjects', s.projectId, { sourceAuthority: server });
   const head = 'a'.repeat(64);
   const id = s.insert('projectObjects', {
     projectId: s.projectId,
@@ -247,4 +257,17 @@ test('a bootstrap seed refuses a retained working physical root without selectin
     }),
   );
   assert.equal(s.tables.projectHostedChannels.size, 1);
+});
+
+test('a switch to server authority is refused until hosted main is seeded, and changes nothing (2abda01f)', async () => {
+  const s = setup({ seeded: false });
+  await assert.rejects(s.transition(), error => {
+    assert.equal(error.data?.code ?? error.code, 'SOURCE_UNAVAILABLE');
+    assert.match(error.data?.message ?? error.message, /not been seeded/);
+    return true;
+  });
+  assert.equal(s.tables.hostedProjects.get(s.projectId).sourceAuthority, undefined);
+  assert.equal(s.tables.projectSourceAuthorityTransitions.size, 0);
+  seedMain(s, s.projectId);
+  assert.deepEqual(await s.transition(), server);
 });

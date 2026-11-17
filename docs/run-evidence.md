@@ -109,3 +109,11 @@ shows only the measured figures.
   (null under 50 landings), and `who`.
 
 Days are additive, so a month is the merge of its days and medians stay exact.
+
+### When it is computed and what it costs
+
+A day closes once, when the project's first landing of a later UTC day is recorded (`convex/projectStatsClose.ts`):
+one scheduled mutation per active project-day and nothing for an idle project, so the newest active day shows once the
+next one starts. The close reads each landing's receipt, landing row and body pages once (about four documents and
+10 KB per landing) and writes one `projectStatsDays` row. The Stats screen makes one query of at most 92 day rows,
+re-run only when a day closes; it takes no clock argument.

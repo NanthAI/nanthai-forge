@@ -153,6 +153,8 @@ export const hostedContractFeatures = [
   'history-log',
   /** Optional agent declarations on exact save and landing requests; absent is distinct from empty. */
   'save-declarations',
+  /** Source-keyed backlog preparation and atomic import pages; writer enablement is deployment staged. */
+  'planning-import-pages',
   /** Planning model fields (d3357f40, src/planning-model.ts): puts store order, type, parentId, owner, relations
    * and hidden, and planning rows carry them. Without it the CLI refuses to send them, since an older server would
    * drop them silently. */

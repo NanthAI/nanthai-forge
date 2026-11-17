@@ -26,6 +26,7 @@ const acceptanceApi = await import(moduleUrl('../convex/projectHostedAcceptance.
 const batchAbandon = await import(moduleUrl('../convex/projectHostedBatchAbandon.ts'));
 const revertNoticeApi = await import(moduleUrl('../convex/projectHostedRevertNotice.ts'));
 const acceptedByNoteApi = await import(moduleUrl('../convex/projectHostedAcceptedByNote.ts'));
+const statsApi = await import(moduleUrl('../convex/projectStats.ts'));
 const convexSourceModules = Object.fromEntries(
   await Promise.all(
     [
@@ -503,6 +504,9 @@ export async function finishFixture(
           });
         }
         if (stop === 'after-source-publish') throw new Error('synthetic crash after source publication');
+      } else if (task.name === 'projectStats:closeDay') {
+        // A landing on a later UTC day closes the previous one (fake time can cross midnight).
+        await tx('statsClose', statsApi.closeDay, input);
       } else if (task.name === 'projectHostedComposeJobs:publish') {
         // A small result the source step produced itself: published from the step commit, no read.
         await tx('finishSourcePublish', composeJobs.publish, input);

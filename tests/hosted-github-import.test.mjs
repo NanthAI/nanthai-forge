@@ -20,6 +20,7 @@ for (const name of [
   'projectGithubImportObjects',
   'projectGithubImportWorker',
   'projectGithubImport',
+  'projectGithubImportPreview',
   'projectGithubImportProgress',
   'projectObjectRecipeStore',
 ])
@@ -35,6 +36,7 @@ function fixture(
     app = false,
     userLimit = null,
     lfs = null,
+    migration = {},
   } = {},
 ) {
   const s = state([]);
@@ -55,8 +57,10 @@ function fixture(
     'GITHUB_APP_ID',
     'GITHUB_APP_PRIVATE_KEY',
     'GITHUB_PUBLIC_TOKEN',
+    'FORGE_MIGRATION_LEDGER',
   ];
   const priorEnv = envKeys.map(key => process.env[key]);
+  delete process.env.FORGE_MIGRATION_LEDGER;
   if (privateRepository) for (const key of envKeys.slice(0, 3)) process.env[key] = 'synthetic-fixture';
   if (app) {
     process.env.GITHUB_APP_ID = '123';
@@ -112,6 +116,7 @@ function fixture(
     if (app && p === '/repos/example/repo/installation') return Response.json({ id: 7 });
     if (app && p === '/app/installations/7/access_tokens') return Response.json({ token: 'ghs_synthetic' });
     if (denied) return new Response('', { status: 404 });
+    if (p === '/graphql') return reply(migration, options);
     if (p === '/repos/example/repo' && limited)
       return reply('{}', options, {
         status: 403,
@@ -763,4 +768,144 @@ test('a rejected public credential still imports and publishes complete hosted m
     row => row.projectId === job.projectId && row.digest === digest(s.bytes),
   );
   assert.deepEqual(await storedBytes(s, row), s.bytes);
+});
+
+test('a public repository imports private when chosen; a private one refuses public and creates nothing (a488af2a)', async t => {
+  const s = fixture(t);
+  const id = await modules.projectGithubImport.start._handler(s.ctx, {
+    operationId: randomUUID(),
+    url: 'example/repo',
+    visibility: 'private',
+  });
+  for (let i = 0; i < 3 && s.tables.projectGithubImports.get(id).phase !== 'ready'; i++) await s.advance(id);
+  const job = s.tables.projectGithubImports.get(id);
+  assert.equal(job.phase, 'ready');
+  assert.equal(s.tables.hostedProjects.get(job.projectId).visibility, 'private');
+  assert.equal((await modules.projectGithubImport.status._handler(s.ctx, { id })).visibility, 'private');
+
+  const p = fixture(t, { privateRepository: true });
+  await assert.rejects(
+    modules.projectGithubImport.start._handler(p.ctx, {
+      operationId: randomUUID(),
+      url: 'example/repo',
+      visibility: 'public',
+    }),
+    error => (error.data?.code ?? error.code) === 'BAD_ARGUMENT',
+  );
+  assert.equal(p.tables.projectGithubImports.size, 0);
+  assert.equal(p.tables.hostedProjects.size, 0);
+});
+
+test('asked to resume at the provider reset, the same operation runs once at that time with no client polling (2abda01f)', async t => {
+  const s = fixture(t),
+    op = randomUUID(),
+    id = await s.start(op),
+    reset = Math.ceil(Date.now() / 1000) + 1800;
+  await s.advance(id);
+  s.limit(reset);
+  await s.advance(id);
+  assert.equal(s.tables.projectGithubImports.get(id).phase, 'error');
+  const before = s.scheduled.length;
+  const resume = () =>
+    modules.projectGithubImport.start._handler(s.ctx, {
+      operationId: op,
+      url: 'example/repo',
+      atReset: true,
+    });
+  assert.equal(await resume(), id);
+  assert.equal(await resume(), id, 'a replay keeps the one scheduled run');
+  const later = s.scheduled.slice(before);
+  assert.equal(later.length, 1);
+  assert.equal(later[0].at, reset * 1000);
+  assert.equal(getFunctionName(later[0].fn), 'projectGithubImportWorker:run');
+  const progress = await modules.projectGithubImportProgress.current._handler(s.ctx, { id });
+  assert.equal(progress.phase, 'paused');
+  assert.equal(progress.error.resumeAt, reset * 1000);
+  // Resuming now replaces the run scheduled for the reset, so one worker runs.
+  s.limit(null);
+  assert.equal(await s.start(op), id);
+  assert.equal((await s.ctx.db.system.get(later[0].id)).state.kind, 'canceled');
+  for (let i = 0; i < 3 && s.tables.projectGithubImports.get(id).phase !== 'ready'; i++) await s.advance(id);
+  assert.equal(s.tables.projectGithubImports.get(id).phase, 'ready');
+});
+
+test('the pre-import report reads what an import would and creates nothing (a488af2a)', async t => {
+  const s = fixture(t);
+  const report = await modules.projectGithubImportPreview.preview._handler(s.ctx, { url: 'example/repo' });
+  assert.equal(report.repository, 'example/repo');
+  assert.deepEqual([report.origin, report.choices], ['public', ['public', 'private']]);
+  assert.equal(report.commit, 'a'.repeat(40));
+  assert.equal(report.ref, 'main');
+  // This fixture's tree is listed only in parts: the count is known once the import starts.
+  assert.deepEqual([report.files, report.warnings.map(w => w.code)], [null, [null]]);
+  assert.equal(s.tables.projectGithubImports.size, 0);
+  assert.equal(s.tables.hostedProjects.size, 0);
+  assert.equal(s.scheduled.length, 0);
+  const p = fixture(t, { privateRepository: true });
+  const hidden = await modules.projectGithubImportPreview.preview._handler(p.ctx, { url: 'example/repo' });
+  assert.deepEqual(hidden.choices, ['private']);
+});
+
+test('staged migration collection stays off by default and preserves the original source path', async t => {
+  const s = fixture(t, { privateRepository: true }),
+    id = await s.start();
+  assert.equal(s.github.filter(row => row.path === '/graphql').length, 0);
+  assert.equal(Object.hasOwn(s.tables.projectGithubImports.get(id), 'migration'), false);
+});
+
+test('one migration batch is retained across source retries and publication with the same operation and commit', async t => {
+  const counts = { issues: 1000, pullRequests: 0, branches: 3, collaborators: 4 };
+  const migration = {
+    data: {
+      issues: { issues: { totalCount: counts.issues } },
+      pullRequests: { pullRequests: { totalCount: counts.pullRequests } },
+      branches: { refs: { totalCount: counts.branches } },
+      collaborators: { collaborators: { totalCount: counts.collaborators } },
+    },
+  };
+  const s = fixture(t, { privateRepository: true, migration }),
+    operationId = randomUUID();
+  process.env.FORGE_MIGRATION_LEDGER = '1';
+  const id = await s.start(operationId),
+    job = s.tables.projectGithubImports.get(id);
+  assert.deepEqual(job.migration, counts);
+  assert.equal(await s.start(operationId), id);
+  assert.equal(s.github.filter(row => row.path === '/graphql').length, 1);
+  assert.equal(job.operationId, operationId);
+  assert.equal(job.commit, 'a'.repeat(40));
+  for (let i = 0; i < 3; i++) await s.advance(id);
+  const status = await modules.projectGithubImport.status._handler(s.ctx, { id });
+  assert.equal(status.phase, 'ready');
+  assert.deepEqual(status.migration, counts);
+  assert.equal(status.commit, job.commit);
+  assert.equal(s.github.filter(row => row.path === '/graphql').length, 1);
+  assert.ok(!JSON.stringify([...s.tables.projectGithubImports.values()]).includes('ghu_'));
+});
+
+test('unavailable migration metadata and anonymous public imports still publish their pinned source', async t => {
+  const s = fixture(t, { migration: new Response('{}', { status: 503 }) });
+  process.env.FORGE_MIGRATION_LEDGER = '1';
+  const id = await s.start(),
+    job = s.tables.projectGithubImports.get(id);
+  assert.equal(job.migration.notReportedReason, 'credential-unavailable');
+  assert.equal(s.github.filter(row => row.path === '/graphql').length, 0);
+  for (let i = 0; i < 3; i++) await s.advance(id);
+  assert.equal((await modules.projectGithubImport.status._handler(s.ctx, { id })).phase, 'ready');
+});
+
+test('a failed origin-count request reports unknown totals and does not fail source import', async t => {
+  const s = fixture(t, { privateRepository: true, migration: new Response('{}', { status: 503 }) });
+  process.env.FORGE_MIGRATION_LEDGER = '1';
+  const id = await s.start(),
+    job = s.tables.projectGithubImports.get(id);
+  assert.deepEqual(job.migration, {
+    issues: null,
+    pullRequests: null,
+    branches: null,
+    collaborators: null,
+    notReportedReason: 'metadata-unavailable',
+  });
+  assert.equal(s.github.filter(row => row.path === '/graphql').length, 1);
+  for (let i = 0; i < 3; i++) await s.advance(id);
+  assert.equal((await modules.projectGithubImport.status._handler(s.ctx, { id })).phase, 'ready');
 });

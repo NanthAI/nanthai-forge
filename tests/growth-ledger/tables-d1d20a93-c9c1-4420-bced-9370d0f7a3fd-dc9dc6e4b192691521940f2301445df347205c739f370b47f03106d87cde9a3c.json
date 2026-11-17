@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "projectStatsDays: one closed-day Stats summary per active project-day (Items 2cf30e0a, a61d3c91); no existing table holds per-day history, and the one-row projectLandingSpeed is written on every landing so 92 days there would add write bytes per landing. Nothing removed: the speed row keeps its 40 live samples for alerts",
+  "date": "2026-11-17"
+}

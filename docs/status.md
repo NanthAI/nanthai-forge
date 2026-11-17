@@ -612,3 +612,13 @@ help and the public page link to this destination. Account billing runs on stubs
 charging, package publication, the default login service and a public production
 service are not available yet. Independent agent scorecard and
 fresh-model getting-started validation remain open.
+
+Backlog transfer preparation and source-keyed apply pages use the existing planning reducer and operation receipts
+([planning import](planning.md#backlog-import)). Apply is staged default off under `FORGE_PLANNING_IMPORTS`;
+synthetic tests cover original dates, closed history, source-key reruns, device authority and partial retry. Web
+review, look-alike merge, import Undo, hosted planning download and full project archive remain open.
+
+Repository-import migration counts are staged default off under `FORGE_MIGRATION_LEDGER`. Enabled starts collect
+four aggregate origin totals in one metadata request and retain them on the existing import job; retries keep the
+same operation and pinned source. Missing totals stay not reported. CLI reports include that scope and the same
+ledger; web ledger rendering, live metadata qualification and the full portable archive remain open.

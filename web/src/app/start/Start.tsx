@@ -2,9 +2,11 @@
 // Before a first project (`/-/new`, the bare frame): give a prompt to the agent app the person already uses, or import
 // a repository yourself (Items 6beca32b, c3e4a838). The agent explains first and installs nothing until its person says
 // so; Forge never starts an agent. The page makes no Convex call: everything on it is words and commands. The import
-// door opens today's import screen until the rebuilt import flow lands (run C2).
+// door opens the import page (`/-/new/import`).
 import { Region } from '../../ds';
+import { A } from '../frames';
 import { Head } from '../Place';
+import { hrefFor } from '../paths';
 import { deploymentUrl, explainFirstPrompt } from './agent-apps';
 import { CommandBlock, ConnectSteps, CopyKey, FirstRunLine } from './parts';
 import './start.css';
@@ -46,9 +48,9 @@ export default function Start() {
               Pick a repository on GitHub. History comes with it, and nothing changes there.
             </p>
             <div className="btns">
-              <a className="btn" href="/projects">
+              <A className="btn" href={hrefFor({ frame: 'bare', page: 'import' })}>
                 Import from GitHub
-              </a>
+              </A>
             </div>
           </div>
           <p className="quietline">

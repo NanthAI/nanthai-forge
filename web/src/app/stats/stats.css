@@ -1,0 +1,36 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Stats only (loaded with its route): the three comparison figures, the per-day bars and their readout, and the
+   assumptions panel. Bars, legend, split and kv are the design system's figures; every value here is a token. */
+[data-ds] {
+  .stats { display: grid; gap: var(--s-4); min-width: 0; }
+  .stats-period { display: inline-flex; align-items: center; }
+  /* Links sitting in a sentence carry an underline, not colour alone. */
+  .stats a.lk { text-decoration: underline; text-underline-offset: 3px; }
+  .stats-period .inp { max-width: 100%; }
+  .stats-note { padding: var(--s-3) var(--gut); color: var(--text-2); max-width: var(--m-note); }
+  .stats-three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .stats-three > .fig + .fig { border-left: var(--rule) solid var(--line); }
+  /* Headroom for the printed value above the tallest bar. */
+  .stats-three .vb i { height: calc(var(--h) * .8%); }
+  .stats-how { margin-left: auto; }
+  .stats-how-body { padding: var(--s-3) var(--gut) var(--gut); border-top: var(--rule) solid var(--line); color: var(--text-2); max-width: var(--m-prose); }
+  .stats-how-body > p { margin: 0 0 var(--s-3); }
+  .stats-how-body b { color: var(--text); }
+  .stats-tools { display: flex; justify-content: flex-end; padding: var(--s-2) var(--gut) 0; }
+  .stats-days { display: flex; align-items: flex-end; gap: 2px; height: 120px; margin: var(--s-2) var(--gut) 0; border-bottom: var(--rule) solid var(--text-3); }
+  .stats-days button { flex: 1 1 0; min-width: 0; height: 100%; padding: 0; border: 0; background: none; display: flex; align-items: flex-end; cursor: pointer; border-radius: var(--r-bar) var(--r-bar) 0 0; }
+  .stats-days button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  .stats-days i { display: block; width: 100%; min-height: 2px; height: calc(var(--h) * 1%); background: var(--series); border-radius: var(--r-bar) var(--r-bar) 0 0; opacity: .55; transition: opacity var(--d-quick) var(--ease-out); }
+  .stats-days button[aria-pressed='true'] i, .stats-days button:hover i { opacity: 1; }
+  .stats-readout { min-height: calc(var(--t-meta) * var(--lh-body)); padding: var(--s-2) var(--gut) var(--s-3); margin: 0; color: var(--text-2); font-size: var(--t-meta); font-variant-numeric: tabular-nums; }
+  .stats-readout b { color: var(--text); font-weight: var(--w-strong); }
+  @container (max-width: 720px) {
+    .stats-three { grid-template-columns: minmax(0, 1fr); }
+    .stats-three > .fig + .fig { border-left: 0; border-top: var(--rule) solid var(--line); }
+  }
+  @media (max-width: 720px) {
+    .stats-three { grid-template-columns: minmax(0, 1fr); }
+    .stats-three > .fig + .fig { border-left: 0; border-top: var(--rule) solid var(--line); }
+  }
+  @media (prefers-reduced-motion: reduce) { .stats-days i { transition: none; } }
+}

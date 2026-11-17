@@ -24,6 +24,13 @@ export async function readJobState(
   input: { id: import('./_generated/dataModel').Id<'projectGithubImports'>; actor: string },
 ) {
   const row = await readJob(ctx, input);
+  // A failure whose person asked to resume at the provider reset waits for its scheduled run.
+  if (row.phase === 'error' && row.error?.resumeAt !== undefined && row.task) {
+    const later = await ctx.db.system.get(row.task);
+    if (later?.state.kind === 'pending') return { ...row, phase: 'paused' as const };
+    if (later?.state.kind === 'inProgress') return { ...row, phase: 'importing' as const };
+    return row;
+  }
   if (row.phase === 'ready' || row.phase === 'error' || !row.task) return row;
   const task = await ctx.db.system.get(row.task);
   if (!task || ['failed', 'canceled'].includes(task.state.kind))

@@ -87,7 +87,10 @@ Agents and scripts import the same way from the CLI, after `nforge login`:
 
 ```sh
 nforge import https://github.com/OWNER/REPO --ref v1.2.0 --name REPO
-nforge import --resume OPERATION_UUID   # after an interruption or a rate-limit reset
+nforge import https://github.com/OWNER/REPO --preview   # what comes across and which limits apply; creates nothing
+nforge import https://github.com/OWNER/REPO --private   # a public repository, private here
+nforge import --resume OPERATION_UUID   # after an interruption
+nforge import --resume OPERATION_UUID --at-reset   # rate-limited: Forge resumes at GitHub's reset
 ```
 
 It waits until hosted `main` is ready and prints the project ID, pinned commit,

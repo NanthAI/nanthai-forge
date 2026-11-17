@@ -15,14 +15,21 @@ import { deploymentUrl, readAuth, resolveAuthToken } from './auth-store.js';
 import { deadlineConvexClient, deadlineConvexSubscription } from './network-convex-client.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { durableReplace } from './state/durability.js';
+import { migrationSummary } from './migration-ledger.js';
 import { ForgeError, invariant } from './errors.js';
+import { importPreviewLine } from './github-import-report.js';
 
-export const IMPORT_HELP = `nforge import <github-url|OWNER/NAME> [--ref BRANCH|TAG|SHA] [--name NAME] [--deployment URL] [--operation-id UUID] [--no-wait]
-nforge import --resume OPERATION_UUID [--no-wait]
+export const IMPORT_HELP = `nforge import <github-url|OWNER/NAME> [--ref BRANCH|TAG|SHA] [--name NAME] [--private] [--deployment URL] [--operation-id UUID] [--no-wait]
+nforge import <github-url|OWNER/NAME> --preview [--ref REF] [--deployment URL]
+nforge import --resume OPERATION_UUID [--at-reset] [--no-wait]
 
 Imports one GitHub commit into a new hosted Forge project whose main is ready for Lanes.
-The ref resolves once to a commit; resuming keeps that commit. Prints the project ID,
-commit, readiness and the GitHub REST requests the import made, by who paid them.
+The project is public or private as on GitHub; --private keeps a public repository private here.
+--preview reports what would come across and which limits apply, and creates nothing.
+The ref resolves once to a commit; resuming keeps that commit. --at-reset resumes an import
+paused by GitHub's rate limit at its reset, on Forge, with nothing left running here.
+Prints the project ID, commit, visibility, readiness and the GitHub REST requests the import
+made, by who paid them.
 `;
 const uuid = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const requestsSchema = z.object({
@@ -32,10 +39,17 @@ const requestsSchema = z.object({
   anonymous: z.number(),
   userWindow: z.object({ reset: z.number(), used: z.number(), limit: z.number() }).optional(),
 });
-const errorSchema = z.object({ code: z.string(), message: z.string(), retryAt: z.number().optional() });
+const errorSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  retryAt: z.number().optional(),
+  resumeAt: z.number().optional(),
+});
 const statusSchema = z.object({
   projectId: z.string(),
   commit: z.string(),
+  /** Absent from older servers. */
+  visibility: z.enum(['public', 'private']).optional(),
   phase: z.string(),
   completed: z.number(),
   total: z.number(),
@@ -68,6 +82,8 @@ const journalSchema = z.object({
   url: z.string(),
   ref: z.string().nullable(),
   name: z.string().nullable(),
+  /** Chosen at import; absent (older journals) or null keeps GitHub's visibility. */
+  visibility: z.literal('private').nullable().optional(),
   operationId: z.string().regex(uuid),
   jobId: z.string().nullable(),
   startedAt: z.string(),
@@ -111,6 +127,7 @@ export function selectImport(
     url?: string;
     ref?: string;
     name?: string;
+    visibility?: 'private';
     deployment?: string | undefined;
     operationId?: string;
   },
@@ -136,6 +153,7 @@ export function selectImport(
     url: input.url.trim(),
     ref: input.ref?.trim() || null,
     name: input.name?.trim() || null,
+    visibility: input.visibility ?? null,
   };
   const operationId = (input.operationId ?? randomUUID()).toLowerCase();
   const previous = readImportJournal(directory, operationId);
@@ -144,7 +162,8 @@ export function selectImport(
       previous.deployment === request.deployment &&
         previous.url === request.url &&
         previous.ref === request.ref &&
-        previous.name === request.name,
+        previous.name === request.name &&
+        (previous.visibility ?? null) === request.visibility,
       'WORK_OPERATION_CHANGED',
       `Operation ${operationId} imported another request. Resume it with nforge import --resume ${operationId}, or start a new import without --operation-id.`,
     );
@@ -155,6 +174,7 @@ export function selectImport(
   return journal;
 }
 
+/** `paused` (waiting for a resume scheduled at the provider reset) is not terminal: the wait goes on. */
 const terminal = (phase: string) => phase === 'ready' || phase === 'error';
 /** Waits on the owner's progress subscription (server writes push updates; no
  * timer, no polling) until the import is ready or failed, or `signal` aborts. */
@@ -199,6 +219,7 @@ export function importReport(journal: ImportJournal, status: Status) {
     ref: journal.ref,
     projectId: status.projectId,
     commit: status.commit,
+    visibility: status.visibility ?? null,
     phase: status.phase,
     ready,
     files: status.total,
@@ -207,10 +228,46 @@ export function importReport(journal: ImportJournal, status: Status) {
     submodules: status.submodules,
     githubRequests: status.githubRequests ?? null,
     ...(status.migration ? { migration: status.migration } : {}),
+    migrationSummary: migrationSummary(status.migration),
     error: status.error,
     next: ready
       ? `nforge clone ${status.projectId} DIR --deployment ${journal.deployment}`
-      : `nforge import --resume ${journal.operationId}`,
+      : status.phase === 'paused' && status.error?.resumeAt
+        ? `nothing: Forge resumes this import at ${new Date(status.error.resumeAt).toISOString()}`
+        : status.error?.retryAt && status.error.retryAt > Date.now()
+          ? `nforge import --resume ${journal.operationId} --at-reset (resumes on Forge at ${new Date(status.error.retryAt).toISOString()})`
+          : `nforge import --resume ${journal.operationId}`,
+  };
+}
+
+const previewSchema = z.object({
+  repository: z.string(),
+  origin: z.enum(['public', 'private']),
+  choices: z.array(z.enum(['public', 'private'])),
+  ref: z.string(),
+  commit: z.string(),
+  files: z.number().nullable(),
+  bytes: z.number().nullable(),
+  submodules: z.number().nullable(),
+  attributes: z.number().nullable(),
+  lfs: z.string(),
+  warnings: z.array(z.object({ code: z.string().nullable(), message: z.string() })),
+  githubRequests: requestsSchema,
+});
+/** The pre-import report: the reads an import makes first, returned instead of acted on. Creates nothing. */
+export async function previewGithubImport(client: ImportClient, input: { url: string; ref?: string }) {
+  let value: unknown;
+  try {
+    value = await client.action('projectGithubImportPreview:preview', input);
+  } catch (error) {
+    const failure = hostedActionError(error, 'import preview');
+    throw new ForgeError(failure.code, failure.message, failure.retryAt);
+  }
+  const preview = previewSchema.parse(value);
+  return {
+    summary: importPreviewLine(preview),
+    ...preview,
+    next: `nforge import ${input.url}${input.ref ? ` --ref ${input.ref}` : ''}${preview.origin === 'public' ? ' [--private]' : ''}`,
   };
 }
 
@@ -219,7 +276,7 @@ export async function runGithubImport(
   client: ImportClient,
   directory: string,
   journal: ImportJournal,
-  options: { wait: boolean; signal?: AbortSignal; log?: (line: string) => void },
+  options: { wait: boolean; atReset?: boolean; signal?: AbortSignal; log?: (line: string) => void },
 ) {
   const log = options.log ?? (() => {});
   let jobId: string;
@@ -230,6 +287,8 @@ export async function runGithubImport(
         url: journal.url,
         ...(journal.ref ? { ref: journal.ref } : {}),
         ...(journal.name ? { name: journal.name } : {}),
+        ...(journal.visibility ? { visibility: journal.visibility } : {}),
+        ...(options.atReset ? { atReset: true } : {}),
       }),
     );
   } catch (error) {
@@ -313,6 +372,9 @@ export async function githubImportCli(
       'operation-id': { type: 'string' },
       resume: { type: 'string' },
       'no-wait': { type: 'boolean' },
+      private: { type: 'boolean' },
+      preview: { type: 'boolean' },
+      'at-reset': { type: 'boolean' },
       help: { type: 'boolean' },
     },
   });
@@ -322,17 +384,31 @@ export async function githubImportCli(
   }
   invariant(
     values.resume
-      ? positionals.length === 0 && !values.ref && !values.name && !values['operation-id']
-      : positionals.length === 1,
+      ? positionals.length === 0 &&
+          !values.ref &&
+          !values.name &&
+          !values['operation-id'] &&
+          !values.private &&
+          !values.preview
+      : positionals.length === 1 && !values['at-reset'],
     'BAD_ARGUMENT',
     IMPORT_HELP,
   );
+  if (values.preview) {
+    const deployment = values.deployment ?? process.env.FORGE_DEPLOYMENT_URL ?? readAuth().defaultDeployment;
+    invariant(deployment, 'AUTH_REQUIRED', 'Run nforge login DEPLOYMENT_URL first, or pass --deployment.');
+    return previewGithubImport((dependencies.client ?? convexImportClient)(deploymentUrl(deployment)), {
+      url: positionals[0]!.trim(),
+      ...(values.ref ? { ref: values.ref.trim() } : {}),
+    });
+  }
   const directory = dependencies.directory ?? importJournalDirectory();
   const journal = selectImport(directory, {
     ...(values.resume ? { resume: values.resume } : {}),
     ...(positionals[0] ? { url: positionals[0] } : {}),
     ...(values.ref ? { ref: values.ref } : {}),
     ...(values.name ? { name: values.name } : {}),
+    ...(values.private ? { visibility: 'private' as const } : {}),
     ...(values['operation-id'] ? { operationId: values['operation-id'] } : {}),
     deployment: values.deployment ?? process.env.FORGE_DEPLOYMENT_URL ?? readAuth().defaultDeployment,
   });
@@ -349,6 +425,7 @@ export async function githubImportCli(
   try {
     const report = await runGithubImport(client, directory, journal, {
       wait: !values['no-wait'],
+      ...(values['at-reset'] ? { atReset: true } : {}),
       signal: controller.signal,
       log: line => {
         if (!process.stdout.isTTY) return void process.stderr.write(line + '\n');

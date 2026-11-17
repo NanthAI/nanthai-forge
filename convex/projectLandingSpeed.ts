@@ -19,6 +19,7 @@ import {
   type LandingSpeedState,
 } from '../src/landing-speed-alerts';
 import { speedBudgets } from '../src/speed-budgets';
+import { scheduleStatsClose } from './projectStatsClose';
 
 /** Speed and cost budgets, judged inside the mutation that lands: one indexed read and one write of a
  * row of about 3.5 KB; no new Convex call. `attempts` is the accepted attempt's ordinal plus one, from
@@ -74,6 +75,8 @@ async function applyLandingSample(
   const value = canonicalPayload(next);
   if (row) await ctx.db.patch(row._id, { value });
   else await ctx.db.insert('projectLandingSpeed', { projectId, value });
+  // The first landing of a later UTC day closes the previous one for Stats (a61d3c91): no read added.
+  await scheduleStatsClose(ctx, projectId, previous?.samples.at(-1)?.[0], sample.at);
   if (!events.length) return events;
   const project = await ctx.db.get(projectId);
   if (!project) return events;

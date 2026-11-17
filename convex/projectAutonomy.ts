@@ -170,7 +170,14 @@ async function writePolicy(
  * would have asked for. A mirror that is already on, for any repository, is left as it is. */
 export async function enableConnectedMirror(
   ctx: MutationCtx,
-  input: { projectId: Id<'hostedProjects'>; actor: string; repo: string; operationId: string },
+  input: {
+    projectId: Id<'hostedProjects'>;
+    actor: string;
+    repo: string;
+    operationId: string;
+    /** Two-way (the default) takes GitHub pushes back in; false is one-way, Forge to GitHub. */
+    inbound?: boolean;
+  },
 ) {
   const project = await activeOwnedProject(ctx, input.projectId, input.actor);
   const previous = effectivePolicy(project);
@@ -179,7 +186,7 @@ export async function enableConnectedMirror(
   const command = policyWriteSchema.parse({
     action: 'set-policy',
     operationId: input.operationId,
-    githubMirror: { repo: input.repo, autoPush: true, laneRefs: false, inbound: true },
+    githubMirror: { repo: input.repo, autoPush: true, laneRefs: false, inbound: input.inbound !== false },
   });
   await writePolicy(ctx, project, {
     actor: input.actor,

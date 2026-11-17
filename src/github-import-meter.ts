@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Counts the GitHub REST requests one source import makes, by who pays for them,
+// Counts the GitHub API requests one source import makes, by who pays for them,
 // and keeps the importer's own credential to a small share of their hourly limit.
 // No token is stored: requests are classified by the credential's public prefix.
 import { ForgeError } from './errors.js';

@@ -2,7 +2,7 @@
 import { findWorkEvent } from './projectWorkEventStore';
 import { readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { parseWork } from '../src/work-unified-types';
-import { commandPayloadRows, commandPlanningRows } from './projectWorkCommandRows';
+import { commandPayloadRows, commandPlanningRows, commandValues } from './projectWorkCommandRows';
 import { v } from 'convex/values';
 import { mutation, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -121,6 +121,23 @@ export async function executeCommand(
       Promise.all(keys.map(key => record(ctx, recordPartition(generation), key.collection, key.key)));
     await commandPayloadRows(rows, lookup);
     await commandPlanningRows(rows, command, lookup);
+  }
+  if (
+    command.action === 'put-planning-item' &&
+    command.imported &&
+    process.env.FORGE_PLANNING_IMPORTS !== '1'
+  ) {
+    await commandPayloadRows(rows, keys =>
+      Promise.all(keys.map(key => record(ctx, recordPartition(generation), key.collection, key.key))),
+    );
+    const imported = commandValues(rows, 'planningItems').find(item => item.id === command.itemId)?.imported;
+    invariant(
+      imported &&
+        Object.keys(imported).length === Object.keys(command.imported).length &&
+        Object.entries(command.imported).every(([key, value]) => imported[key] === value),
+      'HOSTED_ACTION_UNSUPPORTED',
+      'Backlog imports are not enabled on this deployment yet.',
+    );
   }
   // Imported Channel names can live in retained payload chunks. Creation uses
   // exact values, matching the existing action's source-pin validation.

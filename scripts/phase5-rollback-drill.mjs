@@ -142,6 +142,13 @@ try {
     currentBackup: null,
     revision: 0,
   });
+  // Server authority needs a seeded hosted main (2abda01f); the drill's fake has one.
+  fake.insert('projectHostedChannels', {
+    projectId,
+    name: 'main',
+    operationId: randomUUID(),
+    selection: JSON.stringify({ schema: 2, projectId, head: 'c'.repeat(64) }),
+  });
   const client = {
     mutation: (ref, args) => {
       assert.equal(getFunctionName(ref), 'projectSourceAuthority:transition');

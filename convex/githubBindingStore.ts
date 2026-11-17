@@ -25,6 +25,7 @@ export const start = internalMutation({
     verifier: v.string(),
     authorizeUrl: v.string(),
     mirror: v.optional(v.boolean()),
+    oneWay: v.optional(v.boolean()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -185,6 +186,7 @@ export const complete = internalMutation({
           actor: op.actor,
           repo: input.fullName,
           operationId: op.operationId,
+          inbound: op.oneWay !== true,
         })
       : null;
     await ctx.db.patch(op._id, {
@@ -228,6 +230,7 @@ export const status = query({
         repoId: op.repoId ?? null,
         code: op.code ?? null,
         mirror: op.mirrorResult ?? null,
+        direction: op.mirrorResult === 'enabled' ? (op.oneWay ? 'one-way' : 'two-way') : null,
       });
     } catch (error) {
       return report(error);

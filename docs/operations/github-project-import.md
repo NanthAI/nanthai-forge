@@ -7,10 +7,10 @@ subscription opens the project when complete hosted `main` is published. The
 separate read-only analysis tour calls `hosted.start` and creates no writable
 project. The [quickstart](../quickstart.md) covers installation and Lane work.
 
-From the CLI, `nforge import URL [--ref REF] [--name NAME] [--deployment URL]
+From the CLI, `nforge import URL [--ref REF] [--name NAME] [--private] [--deployment URL]
 [--operation-id UUID] [--no-wait]` calls the same start with the saved login,
 waits on the same progress subscription (no polling) and prints one JSON report:
-`operationId`, `projectId`, `commit`, `phase`, `ready`, file and byte counts,
+`operationId`, `projectId`, `commit`, `visibility`, `phase`, `ready`, file and byte counts,
 `githubRequests`, any structured `error` and `next` (the `nforge clone` command,
 or the resume command). The original request and operation UUID are kept in
 `$XDG_STATE_HOME/forge/imports/` (default `~/.local/state`), so
@@ -31,10 +31,61 @@ tracker synchronization or imported pull-request work.
 
 Readers retain an optional `migration` object with origin counts for `issues`,
 `pullRequests`, `branches` and `collaborators`. A `null` count means **not reported**;
-zero means the provider reported zero. Older jobs have no object. These fields are
-reader compatibility only: this release does not fetch or write origin counts yet.
-When present, the CLI keeps them alongside the same operation, ref and exact commit,
+zero means the provider reported zero. Older jobs have no object. The collector is staged behind `FORGE_MIGRATION_LEDGER=1`, default off. When enabled, start makes one aggregate
+metadata request using its existing authorized read credential, overlapping source discovery. It stores totals in
+the existing job write; retries reuse them and never refetch per row. Missing credentials, permission gaps or
+provider failure keep the affected counts not reported, with `notReportedReason`; source import can continue.
+Counts describe the origin at import start, not ongoing tracker synchronization. The aggregate fields follow
+the [GitHub GraphQL repository schema](https://docs.github.com/en/graphql/reference/repos).
+The CLI includes the same migration scope in `migrationSummary`, even when counts are unavailable. When present,
+it keeps the totals alongside the same operation, ref and exact commit,
 including on failure and resume. No account identities are included in this ledger.
+
+## Before the import: the report
+
+`nforge import URL --preview [--ref REF]` (and the web import page `/-/new/import` before its
+Import button) calls `projectGithubImportPreview.preview`: the same reads a start
+makes first (repository access, the commit, one recursive listing; about three
+GitHub requests on the same quota as the import) returned instead of acted on. It
+writes nothing: no project, job, journal or row. It reports the repository, its
+GitHub visibility and the visibilities allowed here, the pinned commit, files,
+bytes, submodules and `.gitattributes` files, what happens to Git LFS files, and
+warnings from limits that already exist. It adds no quota:
+
+- A file count above the [source-step envelope](source-exchange.md#supported-repository-envelope)
+  names the smallest step it crosses (sync 56,800 files, landing 68,800, save
+  122,400): the import can finish, but that step on the project is refused with
+  `SOURCE_STATE_TOO_LARGE` until the repository is split or the limit rises
+  (Issue `c3add134` owns raising it).
+- Git LFS files come across as the real files up to 1 GiB per import (raisable to
+  8 GiB, or 0 keeps pointers); above that the import stops before main is published
+  (`GITHUB_LFS_LIMIT`). With no `.gitattributes` the report says no LFS applies.
+- When GitHub lists the tree only in parts, the file count is known once the
+  import starts; nothing is published unless all of it arrives.
+
+Refusals the listing finds (paths that are not UTF-8, unsupported modes, files
+GitHub cannot return) arrive in the report, before any work begins.
+
+## Visibility
+
+The project is public or private as on GitHub unless the importer chooses:
+`visibility: "private"` on `projectGithubImport.start` (`--private` in the CLI)
+imports a public repository private here. A private repository always imports
+private; asking for public is refused with `BAD_ARGUMENT` and creates nothing. A
+chosen visibility is part of the request: a resume keeps it, and the same operation
+with another visibility reports `WORK_OPERATION_CHANGED`. The status reply and the
+CLI report carry the resulting `visibility`.
+
+## Paused by GitHub: resume at the reset
+
+A run stopped by GitHub's rate limit records `retryAt`. Repeating the original start
+with `atReset: true` (`nforge import --resume UUID --at-reset`, or **Resume at HH:MM
+for me** on the import page) keeps the same operation and schedules one worker run at that
+recorded time on Forge: no client stays connected and nothing polls. Progress then
+reads `phase: "paused"` with `error.resumeAt`. A replay keeps the one scheduled run;
+resuming now instead replaces it, so only one worker runs. A limit hit before the
+job exists (at the very first access check) leaves nothing to retain: repeat the
+command after the reset.
 
 ## Identity, access and publication
 
@@ -42,7 +93,8 @@ including on failure and resume. No account identities are included in this ledg
 ref and optional project name. The ref resolves once. Repeating the original
 request resumes the same job and exact commit; changing its request reports
 `WORK_OPERATION_CHANGED`. The import belongs to its signed-in importer. A public
-upstream creates a public mirror; a private upstream stays private. Access is
+upstream creates a public project unless the importer chose private; a private
+upstream stays private. Access is
 checked through the existing GitHub authorization path. Credentials are never
 stored in progress or cursor records.
 
@@ -71,7 +123,7 @@ published, and repeating the original start after the reset resumes from saved
 progress. It never stalls silently.
 
 `githubRequests` on the job, in `projectGithubImport.status` and in the CLI report
-counts every `api.github.com` request by who paid: `user` (the importer's token),
+counts every `api.github.com` request (including the staged GraphQL metadata batch) by who paid: `user` (the importer's token),
 `app` (installation token, App JWT or App client credentials), `server`
 (`GITHUB_PUBLIC_TOKEN`) and `anonymous`, plus the importer's current window
 (`userWindow`: GitHub's reset, the requests this import used, the limit). Tokens

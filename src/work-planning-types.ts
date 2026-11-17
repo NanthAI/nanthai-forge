@@ -47,6 +47,7 @@ const modelFields = {
   relations: relations.optional(),
   /** Hidden from public reads of a public plan (with its sub-items, or an Initiative's Items). Stored only when true. */
   hidden: z.literal(true).optional(),
+  imported: planningImportSchema.optional(),
 };
 /** Model fields of a put: omitted keeps, null (relations [], hidden false) clears. */
 const modelPutFields = {
@@ -56,10 +57,13 @@ const modelPutFields = {
   owner: owner.nullable().optional(),
   relations: relations.optional(),
   hidden: z.boolean().optional(),
+  imported: planningImportSchema.nullable().optional(),
 };
 /** Agents name the model fields in one `fields` object (one MCP listing token); the CLI flattens it into the
  * stored command, so the wire and journal keep one flat shape. */
-export const planningPutAgentFields = z.object(modelPutFields).strict();
+export const planningPutAgentFields = z
+  .object({ ...modelPutFields, imported: z.unknown().optional() })
+  .strict();
 /**
  * A put names only what it changes. An omitted field keeps the stored value (kind and title are
  * required only to create); clearing needs an explicit empty value: body "", intentIds [],
@@ -76,7 +80,15 @@ const planningPutFields = {
   ...modelPutFields,
 };
 /** Fields a server without `planning-model` drops; the CLI refuses to send them there. */
-export const planningModelPutKeys = ['order', 'type', 'parentId', 'owner', 'relations', 'hidden'] as const;
+export const planningModelPutKeys = [
+  'order',
+  'type',
+  'parentId',
+  'owner',
+  'relations',
+  'hidden',
+  'imported',
+] as const;
 export const planningItemSchema = z.object({
   id,
   operationId: id,
@@ -85,7 +97,6 @@ export const planningItemSchema = z.object({
   previousVersion: z.number().int().nonnegative(),
   ...planningFields,
   ...modelFields,
-  imported: planningImportSchema.optional(),
   /** The account that last wrote this body, recorded by the hosted journal replay (S-17). Public reads
    * map it to a Forge handle (convex/publicPeople.ts); absent on local Work and on older rows. */
   author: z.string().min(1).max(200).optional(),

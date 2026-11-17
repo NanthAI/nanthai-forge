@@ -3,6 +3,7 @@ import test from 'node:test';
 import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readdirSync } from 'node:fs';
 import { getFunctionName } from 'convex/server';
 import { waitForGithubConnection, githubConnectCli } from '../dist/github-connect-cli.js';
 const address = { url: 'https://forge.example', projectId: 'synthetic-project' };
@@ -188,6 +189,100 @@ test('nforge import keeps the operation for resume and names the reset when GitH
   const report = await githubImportCli(['--resume', operationId], { client: () => failed.client, directory });
   assert.equal(report.ready, false);
   assert.equal(report.error.retryAt, retryAt);
-  assert.equal(report.next, `nforge import --resume ${operationId}`);
+  // A recorded reset still ahead: the next step asks Forge to resume then, with nothing left running here.
+  assert.equal(
+    report.next,
+    `nforge import --resume ${operationId} --at-reset (resumes on Forge at ${new Date(retryAt).toISOString()})`,
+  );
   assert.equal(process.exitCode, 1);
+});
+test('nforge import --private sends the choice, keeps it for resume, and a changed choice is another request (a488af2a)', async t => {
+  t.after(() => {
+    process.exitCode = undefined;
+  });
+  const directory = temporaryDirectory(t, 'forge-import-'),
+    { client, calls } = importClient();
+  const report = await githubImportCli(
+    ['example/repo', '--private', '--deployment', 'https://forge.example'],
+    {
+      client: () => client,
+      directory,
+    },
+  );
+  assert.equal(calls[0][1].visibility, 'private');
+  assert.equal(readImportJournal(directory, report.operationId).visibility, 'private');
+  const resumed = importClient();
+  await githubImportCli(['--resume', report.operationId], { client: () => resumed.client, directory });
+  assert.equal(resumed.calls[0][1].visibility, 'private');
+  await assert.rejects(
+    githubImportCli(
+      ['example/repo', '--operation-id', report.operationId, '--deployment', 'https://forge.example'],
+      {
+        client: () => importClient().client,
+        directory,
+      },
+    ),
+    { code: 'WORK_OPERATION_CHANGED' },
+  );
+});
+test('nforge import --resume --at-reset asks Forge to resume at the reset and keeps waiting while paused (2abda01f)', async t => {
+  t.after(() => {
+    process.exitCode = undefined;
+  });
+  const directory = temporaryDirectory(t, 'forge-import-'),
+    first = importClient();
+  const report = await githubImportCli(['example/repo', '--deployment', 'https://forge.example'], {
+    client: () => first.client,
+    directory,
+  });
+  const paused = importClient({ updates: ['paused', 'importing', 'ready'] });
+  const resumed = await githubImportCli(['--resume', report.operationId, '--at-reset'], {
+    client: () => paused.client,
+    directory,
+  });
+  assert.equal(paused.calls[0][1].atReset, true);
+  assert.equal(resumed.ready, true, 'paused is not terminal: the one subscription waits for ready');
+  await assert.rejects(githubImportCli(['example/repo', '--at-reset'], { directory }), {
+    code: 'BAD_ARGUMENT',
+  });
+});
+test('nforge import --preview makes one read and starts nothing (a488af2a)', async t => {
+  const directory = temporaryDirectory(t, 'forge-import-'),
+    calls = [];
+  const client = {
+    async action(name, args) {
+      calls.push([name, args]);
+      return {
+        repository: 'example/repo',
+        origin: 'public',
+        choices: ['public', 'private'],
+        ref: 'main',
+        commit: 'a'.repeat(40),
+        files: 60000,
+        bytes: 10,
+        submodules: 0,
+        attributes: 0,
+        lfs: 'No .gitattributes, so no Git LFS files.',
+        warnings: [{ code: 'SOURCE_STATE_TOO_LARGE', message: '60,000 files is above the limit.' }],
+        githubRequests: { user: 0, app: 0, server: 0, anonymous: 3 },
+      };
+    },
+    watch() {
+      throw Error('a preview never waits');
+    },
+  };
+  const report = await githubImportCli(
+    ['example/repo', '--preview', '--deployment', 'https://forge.example'],
+    {
+      client: () => client,
+      directory,
+    },
+  );
+  assert.deepEqual(
+    calls.map(([name]) => name),
+    ['projectGithubImportPreview:preview'],
+  );
+  assert.match(report.summary, /60,000 files/);
+  assert.equal(report.next, 'nforge import example/repo [--private]');
+  assert.deepEqual(readdirSync(directory), [], 'no journal: nothing was started');
 });

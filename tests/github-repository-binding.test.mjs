@@ -78,9 +78,11 @@ function fixture(t) {
     repository = 'synthetic/repo',
     githubAccounts = [linkedAccount],
     mirror,
+    oneWay,
   } = {}) {
     await call('start', {
       ...(mirror === undefined ? {} : { mirror }),
+      ...(oneWay === undefined ? {} : { oneWay }),
       operationId,
       state,
       repository,
@@ -169,8 +171,8 @@ function github(
   return { calls, request };
 }
 /** Incident d4eb053e: connect used to leave the mirror off and a second owner approval turned it on. */
-async function connectWithMirror(f, mirror, repoId = 42) {
-  const op = await f.start({ mirror, repository: 'synthetic/repo' });
+async function connectWithMirror(f, mirror, repoId = 42, oneWay) {
+  const op = await f.start({ mirror, oneWay, repository: 'synthetic/repo' });
   await f.proving(op.state);
   const result = await f.s.call('complete', store.complete, {
     state: op.state,
@@ -195,6 +197,19 @@ test('the owner approval of a connect also turns the mirror on, both ways, and t
     ['owner-approved'],
   );
   assert.equal(JSON.parse(await f.call('status', { operationId: op.operationId })).mirror, 'enabled');
+});
+test('a one-way connect turns the mirror on from Forge to GitHub only, and the status names the direction (c63c2171)', async t => {
+  const f = fixture(t);
+  const { op, result, project } = await connectWithMirror(f, true, 42, true);
+  assert.equal(result, 'enabled');
+  assert.deepEqual(project.autonomyPolicy.githubMirror, {
+    repo: 'Synthetic/Repo',
+    autoPush: true,
+    laneRefs: false,
+    inbound: false,
+  });
+  const status = JSON.parse(await f.call('status', { operationId: op.operationId }));
+  assert.deepEqual([status.mirror, status.direction], ['enabled', 'one-way']);
 });
 test('connecting without the mirror request, or with a mirror already on, leaves the policy alone', async t => {
   const plain = fixture(t);

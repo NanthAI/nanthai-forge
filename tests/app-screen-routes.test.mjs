@@ -94,7 +94,7 @@ test('every address keeps the screen the shared registry gave it, and project ma
     [project('settings', 'checks'), 'checks#0'],
     [project('settings', 'secrets'), 'secrets#0'],
     [project('settings', 'project'), undefined],
-    [project('stats'), undefined],
+    [project('stats'), 'stats#0'],
   ];
   for (const [route, expected] of cases) {
     assert.equal(owner.get(projectScreenFor(entries, route)), expected, JSON.stringify(route));

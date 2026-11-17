@@ -19,12 +19,12 @@ export const placeSections: Record<ProjectPlace, readonly string[]> = {
   plan: ['', 'initiatives'],
   code: ['', 'files'],
   stats: [''],
-  settings: ['', 'checks', 'secrets', 'project', 'you'],
+  settings: ['', 'checks', 'mirror', 'secrets', 'project', 'you'],
 };
 
 export type AppRoute =
   | { frame: 'public'; page: 'signin' | 'passkey' | 'device' | 'terms' | 'privacy' }
-  | { frame: 'bare'; page: 'new' }
+  | { frame: 'bare'; page: 'new' | 'import' }
   /** Public discovery (Item 8947a779): readable signed out, served from the cached public read. */
   | { frame: 'discover'; page: 'explore' }
   | { frame: 'discover'; page: 'profile'; handle: string }
@@ -75,7 +75,7 @@ export function hrefFor(route: AppRoute): string {
     case 'public':
       return `${ROOT}/${route.page === 'passkey' ? 'signin/passkey' : route.page}`;
     case 'bare':
-      return `${ROOT}/new`;
+      return route.page === 'import' ? `${ROOT}/new/import` : `${ROOT}/new`;
     case 'discover':
       return route.page === 'explore' ? `${ROOT}/explore` : `${ROOT}/${enc(route.handle)}`;
     case 'account':
@@ -109,6 +109,7 @@ export function parseAppPath(pathname: string): AppRoute {
   if (first === 'device' && !second) return { frame: 'public', page: 'device' };
   if ((first === 'terms' || first === 'privacy') && !second) return { frame: 'public', page: first };
   if (first === 'new' && !second) return { frame: 'bare', page: 'new' };
+  if (first === 'new' && second === 'import' && !more.length) return { frame: 'bare', page: 'import' };
   if (first === 'explore')
     return second ? { frame: 'missing', path: pathname } : { frame: 'discover', page: 'explore' };
   if (!second) return { frame: 'discover', page: 'profile', handle: first };
@@ -163,6 +164,6 @@ export function currentScreenHref(route: AppRoute): string | null {
     case 'stats':
       return null;
     case 'settings':
-      return `${root}/settings/${{ '': 'access', checks: 'checks', secrets: 'general', project: 'general', you: 'you' }[route.section] ?? 'general'}`;
+      return `${root}/settings/${{ '': 'access', checks: 'checks', mirror: 'general', secrets: 'general', project: 'general', you: 'you' }[route.section] ?? 'general'}`;
   }
 }

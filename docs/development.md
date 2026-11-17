@@ -629,6 +629,12 @@ layer out of both first paints.
   project, a read line plus at most 500 one-by-one reads); it never counts
   toward Needs you. `touching` shows shared saved files, who waits on whom
   and the queue with held Lanes apart, saved work only.
+- Stats (`web/src/app/stats/`): reads `projectStats.read`, the newest 92
+  closed days of `projectStatsDays`, with each month and the whole read
+  computed by `statsWindow` (`src/stats-estimate.ts`). A day closes once
+  (`projectStats.closeDay`), scheduled by the project's first landing of a
+  later UTC day, so the read re-runs once a day and an idle project costs
+  nothing. See [Stats](run-evidence.md#stats).
 - Sign-in: one handle field (passkey sign-in or sign-up, browser autofill) and
   GitHub. After a first GitHub sign-in with no passkey, `/-/signin/passkey`
   offers one (`authFirstPasskey`), skippable. The return address is kept in
@@ -670,6 +676,14 @@ layer out of both first paints.
   nothing is held: one `projectSetup.read` (at most 8 documents) when it opens,
   a subscription only while setup is unfinished, and no read once this browser
   has seen it settled (first landing plus the one "who approves" answer).
+- `/-/new/import` (`web/src/app/start/ImportRepository.tsx`) is the GitHub
+  import page: the pre-import report (one `projectGithubImportPreview.preview`
+  action, no rows written), the visibility and mirror questions, one start, then
+  one `projectGithubImportProgress.current` subscription (import writes only).
+  The request is kept in the address, so a reload shows the same import.
+- Settings > GitHub mirror (`web/src/app/mirror/Mirror.tsx`) is one
+  `projectGithubMirrorRead.read` subscription (the same words as `nforge github
+  status`); the two-way switch reads the policy once and writes one set-policy.
 - Settings > Landing and checks (`web/src/app/checks/LandingChecks.tsx`) reads
   three queries once when it opens and again only after its own write; choosing
   a CI file writes the same ci-status runner setting `configure-runner` does.

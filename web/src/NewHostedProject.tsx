@@ -6,7 +6,6 @@ import { api } from '../../convex/_generated/api';
 import { PendingWrite } from './pending-write';
 import { hostedError } from './snapshot';
 import { ErrorToast } from './ui/Toast';
-import ImportGithubProject from './ImportGithubProject';
 
 export default function NewHostedProject({
   created,
@@ -62,10 +61,10 @@ export default function NewHostedProject({
           {busy ? 'Creating…' : pending.current.pending ? 'Retry creation' : 'Create project'}
         </button>
       </form>
-      <details>
-        <summary>Import from GitHub</summary>
-        <ImportGithubProject created={id => created(id, 'github')} />
-      </details>
+      {/* The import page reports what comes across and asks who can see it before anything starts. */}
+      <a className="fx-btn" href="/-/new/import">
+        Import from GitHub
+      </a>
     </>
   );
 }

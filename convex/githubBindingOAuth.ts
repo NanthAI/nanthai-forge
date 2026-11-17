@@ -87,12 +87,14 @@ export const connect = action({
     repository: v.string(),
     /** Default on: the owner's authorization also turns the GitHub mirror on. `false` connects only. */
     mirror: v.optional(v.boolean()),
+    /** With the mirror: one-way, Forge to GitHub; pushes made on GitHub are not taken in. */
+    oneWay: v.optional(v.boolean()),
   },
   returns: v.string(),
   handler: async (ctx, input): Promise<string> => {
     try {
       const repository = input.repository.toLowerCase();
-      const { mirror, ...identity } = input;
+      const { mirror, oneWay, ...identity } = input;
       const replay: string | null = await ctx.runQuery(
         makeFunctionReference<'query'>('githubBindingStore:authorize'),
         { ...identity, repository },
@@ -123,6 +125,7 @@ export const connect = action({
       return await ctx.runMutation(mutation('start'), {
         ...identity,
         mirror: mirror !== false,
+        ...(oneWay && mirror !== false ? { oneWay: true } : {}),
         repository,
         githubAccounts,
         state,
@@ -243,7 +246,7 @@ export const callback = httpAction(async (ctx, request) => {
     return new Response(
       `GitHub repository connected.${
         mirror === 'enabled'
-          ? ' Forge now mirrors main to it, both ways. To stop: nforge set-policy with githubMirror autoPush false.'
+          ? ' Forge now mirrors main to it; nforge github status says which way. To stop: nforge set-policy with githubMirror autoPush false.'
           : ''
       } You can return to Forge.`,
       { headers },

@@ -115,13 +115,95 @@ up an Item's Initiative or parent treats it as hidden.
 
 Retained planning readers accept optional `imported` attribution: `source` (a source note), `key` (the original
 record key), optional `createdAt`, `closedAt` and `originalHandle` (a public handle), and `batchId` (the import UUID). Original dates retain a date-only value when that is all the source records, and stay absent when unknown; source handle case is preserved.
-Original dates use ISO 8601 with an offset. The normal `at` remains the time Forge recorded that version; it is
+Original timestamps use ISO 8601 with an offset. The normal `at` remains the time Forge recorded that version; it is
 never replaced with an original date. Search and compact agent rows retain the attribution. It makes no claim
 that original identities were authenticated or that imported work landed in Forge.
 
-This is the reader contract. A backlog batch writer, review, Undo and full project archive are not yet available.
+The backlog writer is staged default off; web review, import Undo and a full project archive remain open.
 The existing internal planning export contains all retained Item and Initiative versions, comments, relations
 and linked Intent metadata. It is narrower than a full source and Work archive.
+
+## Backlog import
+
+Agents translate the source into one `planning` transfer. Forge does not have a parser per tracker or ongoing
+tracker synchronization. Preparation reads the proposed rows and matching source keys without writing planning.
+Preparation uses normal planning read access. Apply uses the same planning reducer and authority as ordinary
+puts, including an authorised owner device.
+With existing authorization, an agent can send `apply:true` directly.
+Imports create planning history, never Lanes, checks or landing receipts.
+
+The writer is staged behind the deployment setting `FORGE_PLANNING_IMPORTS=1`, default off. Readers landed first.
+Preparation, completed-operation replay and ordinary edits of retained imported work stay available before
+enablement; new imports on a deployment that has not enabled the writer report
+`HOSTED_ACTION_UNSUPPORTED`. Undo, look-alike merging and the web review are still open on the backlog import
+Item. The writer has synthetic coverage; live import and billed usage are not yet qualified.
+
+A transfer has `mode: "import"`, `rows`, optional `batchId`, and `apply` (false for preparation). Each row has:
+
+| Field | Meaning |
+| --- | --- |
+| `key` | Stable source key, unique within the project; include a source namespace |
+| `source` | Original source note, such as a repository-relative document path or Issue URL |
+| `kind`, `title`, `body` | `issue` or `initiative`, title, optional body |
+| `status`, `reason` | Original final status and optional reason; status defaults to `closed` |
+| `createdAt`, `closedAt` | Optional original ISO calendar date or timestamp with an offset; missing stays not reported |
+| `originalHandle` | Optional public Forge or GitHub handle; never invent a handle from a person's name |
+| `initiativeKey`, `parentKey` | Source keys for the Initiative and optional parent Item |
+| `fields` | Existing planning fields, including hand order and type |
+| `selected` | Whether to apply this row; true by default |
+
+Source keys derive stable Item ids, independently of the import operation. The same key is skipped on later
+imports, including after someone edits the Item. No existing Item is overwritten. Source-key matches appear in
+the review, with attention rows first. Each apply page has an immutable request and receipt. A server-side page failure rolls back its additions. A lost reply may already have committed; replaying its
+original operation reconciles the result. A partial reply lists confirmed created and skipped ids, retained rows,
+the unconfirmed page and unfinished keys. `applyRequested` names the request, not an unconfirmed outcome.
+Replay the same input and operation id to retry unfinished pages. Changing rows or selections needs a new
+operation id; keep the `batchId` to group the changed request with the same import.
+
+Normal puts that omit retained import attribution keep it.
+
+### Recipe: recreate past milestones, then plan the next one
+
+Ask your agent: “Read the milestone documents, recreate the completed milestones and their Items as closed
+planning, preserving dates and source references; then create the next milestone as Planned.” The agent reads
+those documents and prepares a request file like this synthetic example:
+
+```json
+{
+  "transfer": {
+    "mode": "import",
+    "rows": [
+      {"key":"docs:m3", "source":"docs/milestones/m3.md", "kind":"initiative", "title":"Milestone 3", "status":"closed", "closedAt":"2024-03-05"},
+      {"key":"docs:m3/task-1", "source":"docs/milestones/m3.md", "kind":"issue", "title":"Previous task", "initiativeKey":"docs:m3", "status":"closed", "createdAt":"2024-01-02", "closedAt":"2024-03-05"}
+    ]
+  }
+}
+```
+
+Run `nforge agent ROOT planning --command-file import.json`. Review every returned row, then add
+`"apply":true` inside `transfer` and replay with the returned operation id. On an enabled deployment this applies
+the prepared request. Create the next Initiative with `put-planning-item` using `expectedVersion:0`,
+`kind:"initiative"`, `title` and `status:"open"`; put its new Items in that Initiative with `initiativeId`.
+
+The same recipe works for GitHub Issues: the agent reads an authorised Issue/milestone export or API, gives each
+row a stable key such as `github:owner/project:issue:123`, maps completed work to `closed` and won't-do work to
+`abandoned` with its original reason, and keeps the Issue URL in `source`. It uses only known public handles and
+original dates. Pull requests, tags, CI configuration and accounts do not become imported planning or Lanes.
+
+The client sends at most 100 rows per page, targeting 128 KiB of row JSON; a larger individual row gets its own
+page. There is no total row ceiling in the transfer client. A 1,000-row request takes ten prepare queries and ten
+apply mutations, plus the existing capability read for each command. At 2,000 rows those are twenty and twenty.
+Completed pages are local retry receipts; retrying known completed pages writes nothing. Idle adds no calls.
+Source text and attribution use existing planning records and their existing history archival path. No new table,
+archive store, worker or idle scheduler is added.
+
+## Planning export and full archives
+
+The existing internal planning export reducer contains retained Item and Initiative versions, comments, relations,
+import attribution and linked Intent metadata. A hosted planning download/action and full project archive are not
+yet available. Full archive work must preserve source/history, planning, comments, receipts and Lane metadata,
+apply current visibility, and distinguish imported historical receipts from acceptance authority in a fresh
+project. Existing same-project recovery is not that fresh-project round trip.
 
 ## Plan list projection
 

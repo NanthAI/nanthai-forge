@@ -3,6 +3,7 @@ import { journalTables, journalReceiptTables } from './projectJournalFields';
 import { liveLineTables } from './projectLiveLineFields';
 import { publicDiscoveryTables } from './publicDiscoveryFields';
 import { landingReadTables } from './projectLandingReadFields';
+import { statsTables } from './projectStatsFields';
 import { finishReadTables } from './projectFinishReadFields';
 import { hostedOverlapTables } from './projectHostedOverlapFields';
 import { boardTables } from './projectBoardFields';
@@ -512,6 +513,7 @@ export default defineSchema({
   ...liveLineTables,
   ...publicDiscoveryTables,
   ...landingReadTables,
+  ...statsTables,
   legacyStorageCleanupWindows: defineTable({
     operationId: v.string(),
     deployment: v.string(),

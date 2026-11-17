@@ -18,6 +18,7 @@ const allowed = {
   projectCheckLogCleanupStore: ['archive', 'review'],
   projectContributors: ['remove', 'list', 'handles', 'pending', 'cancelInvite'],
   projectExchangeMigration: ['migrate'],
+  projectGithubMirrorRead: ['read'], // Read-only mirror sentence; the owner flag only shows controls.
   projectGithubMirrorResume: ['resume'],
   projectGithubStatus: ['publish'],
   projectHostedAcceptance: ['approve'], // Existing acceptanceActor person gate.

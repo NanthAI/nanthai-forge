@@ -5,6 +5,12 @@ import { planningModelPutKeys, type PlanningItem, type PlanningWrite } from './w
 import { isAgentSlug } from './agent-slug.js';
 import { digest } from './state/hash.js';
 
+/** Stable within and across projects: a source key names one imported Item, independently of the batch. */
+export function planningImportId(key: string) {
+  const hex = digest(JSON.stringify(['forge-planning-import', key]));
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
 export type PlanningPut = Extract<PlanningWrite, { action: 'put-planning-item' }>;
 
 /**
@@ -50,6 +56,12 @@ function resolveModelFields(command: PlanningPut, current?: Partial<PlanningItem
     'BAD_ARGUMENT',
     'An Item cannot relate to itself.',
   );
+  const imported = keep(command.imported, current?.imported);
+  invariant(
+    !imported || command.itemId === planningImportId(imported.key),
+    'BAD_ARGUMENT',
+    'An imported Item id must be derived from its source key; use planning with transfer to prepare it.',
+  );
   const hidden = command.hidden === undefined ? current?.hidden : command.hidden || undefined;
   const fields = {
     order: keep(command.order, current?.order),
@@ -58,6 +70,7 @@ function resolveModelFields(command: PlanningPut, current?: Partial<PlanningItem
     owner: keep(command.owner, current?.owner),
     relations: relations.length ? relations : undefined,
     hidden: hidden ? (true as const) : undefined,
+    imported,
   };
   return Object.fromEntries(
     planningModelPutKeys.flatMap(key => (fields[key] === undefined ? [] : [[key, fields[key]]])),

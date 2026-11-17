@@ -15,7 +15,7 @@ Walked: the import and new-project sources, `nforge --help`, `help github`, `hel
 | 5 | Large and unusual content | Binary files, executable modes and symlinks are kept. Submodules stay commit pointers. Git LFS files hold their bytes, up to 1 GiB of LFS objects per import. | A path that is not valid UTF-8 refuses the import with `GITHUB_SOURCE_UNSUPPORTED` and the fix ("rename them in Git to UTF-8 names, push, and retry"). A repository above the size limits (56,800 files per State for sync) is refused later, at the first operation that exceeds them, with `SOURCE_STATE_TOO_LARGE` and "split the repository". (docs) |
 | 6 | Visibility | Follows the upstream: "A public upstream produces a public mirror; a private upstream retains private visibility". | No choice is offered at import. (docs) |
 | 7 | CI | Nothing is imported. "A fresh import has source and Work, but does not infer a check command or install a GitHub Actions runner." | The owner defines a check command and a runner by hand. See [journey 13](13-connecting-ci.md). (docs) |
-| 8 | Issues and pull requests | Nothing is imported. No route was found in the web source, the CLI help or the docs. | Planning starts empty. Open pull requests stay on GitHub. (source, docs) |
+| 8 | Issues and pull requests | Source import leaves them at the origin. Separate agent planning transfer prepares a source-agnostic backlog; apply is staged default off. | Original status, dates and source are retained. Integrated web review, look-alike merge and import Undo remain open. Pull-request work stays at the origin. (source, docs, synthetic tests) |
 | 9 | People | Nothing is imported. | The owner invites each teammate by handle or email. See [journey 7](07-people-access.md). (docs) |
 | 10 | Keeping GitHub current during the move | `nforge github connect PROJECT --repo OWNER/NAME` turns on the mirror; every landing pushes one commit. | See [journey 11](11-leaving.md). An empty GitHub repository now gets its first commit automatically; a very large import still needs one manual first push (open Issue 5bc16ea7). (docs) |
 | 11 | People who still push to GitHub | Two-way: policy `githubMirror.inbound:true`. A push or merge on GitHub `main` "comes back in as an ordinary Forge landing and passes the same checks and review rules", attributed to the owner as agent `github-inbound`. | If that landing fails, `GITHUB_INBOUND_FAILED`; "the next Forge landing publishes Forge main over the GitHub commit, and its commit message says which GitHub commit it takes out. Fix and land that Lane to bring the change back." Limits: 500 changed directories and 5,000 changed files per push. (docs) |
@@ -27,8 +27,8 @@ Walked: the import and new-project sources, `nforge --help`, `help github`, `hel
 
 | Id | Severity | Finding | Evidence |
 | --- | --- | --- | --- |
-| J12-1 | S1 | **Nobody is told what a migration leaves behind.** Source and history come across. Issues, pull requests, CI configuration, collaborators, branch rules, releases and tags do not. No page, reply or doc lists the two sides. A team finds out one missing thing at a time. | source, docs |
-| J12-2 | S1 | **Issues do not migrate.** A team that plans in GitHub Issues arrives at an empty backlog with no import. The journeys Issue (a0cf8c22) names "repo, Issues, history" as one step. Nothing tracks an issue import. | source, docs |
+| J12-1 | S1 | **Migration scope is documented; the integrated ledger remains open.** Source and separate Git history acquisition are distinguished from work at the origin. Staged aggregate counts and the CLI scope report preserve unknown counts; web rendering and live qualification remain open. A team finds out one missing thing at a time. | source, docs |
+| J12-2 | S1 | **Backlog import is staged.** Agents prepare source-agnostic history through existing planning commands; apply is default off. Web review, look-alike merge and exact-additions Undo are still tracked on the import Item. Source import itself does not migrate tracker work. | source, docs |
 | J12-3 | S2 | **"Git history is separate" hides a strength.** The full history is kept with the same commit ids, and blame matches GitHub. The quickstart's four words read as "history is lost". | docs |
 | J12-4 | S2 | **Branches and tags other than the one imported are not mentioned.** The import pins one commit. Nothing says what happens to other branches, to open pull request branches or to tags. Forge has Lanes instead of branches, so the answer needs saying. | docs |
 | J12-5 | S2 | **Visibility is inherited, not chosen.** A person importing their own public repository to try Forge in private cannot. A public upstream "produces a public mirror". | docs |
@@ -43,7 +43,7 @@ Walked: the import and new-project sources, `nforge --help`, `help github`, `hel
 
 ## Dead ends
 
-- Importing issues or pull requests: no route.
+- Integrated backlog review and import Undo remain open; pull-request work stays at the origin.
 - Importing a public repository as a private project.
 - An account with no GitHub link importing a public repository (J12-9).
 - A repository above the limits: "split the repository" is the only next step.
@@ -61,9 +61,24 @@ Walked: the import and new-project sources, `nforge --help`, `help github`, `hel
 
 ## Questions for the owner
 
-1. Does Forge import GitHub issues (and their comments) into Items? If yes, once at import or kept in step while the mirror is two-way?
+1. Decided: agents read authorized source exports or APIs and recreate backlog through the source-agnostic planning path. Built-in tracker connectors and ongoing two-way tracker synchronization are outside the current scope.
 2. What is the promise for open pull requests at the time of the move: finish them on GitHub through two-way, or re-create them as Lanes?
 3. May a person choose private when importing a public repository?
 4. What is two-way called beside "mirror", and is it on by default when a mirror is connected (today `nforge github connect` turns it on)?
 5. Should the import report compare the repository with the size limits and warn before the first refusal?
 6. Do tags and release notes come across (see [journey 19](19-releases.md))?
+
+## Migration ledger and backlog transfer
+
+The source import and [migration ledger](../../operations/github-project-import.md#migration-scope) distinguish
+selected source, separate Git history acquisition and work that stays at the origin. The staged collector uses
+one aggregate metadata batch, keeps unknown counts not reported, and retains the operation, ref and exact commit
+on failure or resume. The CLI report carries the same ledger and a readable scope sentence. The collection
+setting is default off; live qualification and web ledger rendering remain open.
+
+[Backlog transfer](../../planning.md#backlog-import) is source-agnostic: an authorized agent reads milestone docs
+or an authorized Issue export/API and prepares rows with original dates, final status, source and public handles.
+Preparation writes no planning. Apply is staged default off; it uses existing planning authority and stable source
+keys, keeps closed history closed and never creates a landing. The integrated web review, look-alike merge and
+exact-additions Undo for the agreed 30 days remain open. There is no ongoing tracker synchronization or imported
+pull-request work.

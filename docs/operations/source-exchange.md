@@ -1481,7 +1481,9 @@ hosted commit and the local pin update, repeat the same command; its receipt
 finishes the local update without another transition. A known stale CAS updates
 the observed pin and releases the pending command; an unknown outcome retains it.
 Coordinate this command with the cutover's seeded source/Work pins and queue drain.
-It does not seed main, drain work or enable hosted routing on its own.
+It does not seed main, drain work or enable hosted routing on its own: a switch to
+`server` before hosted main is seeded is refused with `SOURCE_UNAVAILABLE` and
+changes nothing (seed first; `nforge host ROOT` resumes the seed).
 
 `requireSourceAuthority(project, expected?)` in `src/hosted-source-authority.ts` is
 the shared writer guard. `project` needs only an optional `sourceAuthority`;

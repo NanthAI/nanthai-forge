@@ -731,6 +731,11 @@ async function readPlanning(
  * silently: refuse before any call. */
 function flattenModelFields(port: PlanningPort, input: Record<string, unknown>) {
   const { fields, ...rest } = input as { fields?: Record<string, unknown> };
+  invariant(
+    fields?.imported === undefined || port.serverFeatures?.includes('planning-import-pages'),
+    'HOSTED_ACTION_UNSUPPORTED',
+    'This server does not store planning import attribution yet.',
+  );
   const named = Object.keys(fields ?? {}).filter(key => fields![key] !== undefined);
   invariant(
     !named.length || port.serverFeatures?.includes('planning-model'),
@@ -748,6 +753,11 @@ export async function executeHostedPlanning(
   operationId: string | undefined,
 ) {
   input = planningIssueArguments(action, input);
+  if (action === 'planning' && input.transfer !== undefined) {
+    const { importPlanning } = await import('./hosted-agent-planning-import.js');
+    const imported = await importPlanning(port, actor, input, operationId);
+    return { ...imported, result: marked(imported.result) };
+  }
   if (action === 'planning') {
     const read = hostedAgentCommandSchemas.planning.parse(input);
     return { operationId: null, result: marked(await readPlanning(port, read)) };

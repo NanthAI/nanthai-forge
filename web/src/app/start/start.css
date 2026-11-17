@@ -21,6 +21,9 @@
   .gs-by { display: inline-flex; gap: var(--s-2); align-items: center; justify-content: flex-end; flex-wrap: wrap; min-width: 0; }
   .gs-err { margin-top: var(--s-2); color: var(--failed); }
   .gs-later { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-4); }
+  /* A row or question with a second, quieter line under its name (the import page, the Mirror screen). */
+  :is(.gs, .mr) .row > :is(span, label) > .sub, .im-q > .sub { display: block; color: var(--text-2); font-size: var(--t-meta); font-weight: var(--w-regular); }
+  .im-q { display: grid; gap: 2px; padding-bottom: var(--s-2); }
   /* A phone row wraps (ds parts.css): the step keeps the room beside its tick, who and when follow underneath. */
   @media (max-width: 860px) {
     .gs-row > div { flex: 1 1 0; min-width: 0; }

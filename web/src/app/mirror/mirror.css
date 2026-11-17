@@ -1,0 +1,16 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Settings > GitHub mirror (web/src/app/mirror): the two ends, Forge main and GitHub main, with the distance between
+   them in the middle. Every value is a design-system token; scoped to [data-ds] like the system itself. */
+[data-ds] {
+  .mr-ends { display: grid; grid-template-columns: minmax(0, 1fr) minmax(140px, 1fr) minmax(0, 1fr); gap: var(--s-3); align-items: center; padding: var(--gut) var(--gut-head); border-bottom: var(--rule) solid var(--line); }
+  .mr-end { display: grid; gap: var(--s-1); min-width: 0; overflow-wrap: anywhere; }
+  .mr-end:last-child { text-align: right; justify-items: end; }
+  .mr-end code { font-size: var(--t-lead); }
+  .mr-gap { display: flex; gap: var(--s-2); align-items: center; min-width: 0; }
+  .mr-rule { flex: 1 1 var(--s-5); min-width: var(--s-3); border-top: var(--rule) dashed var(--line-strong); }
+  [data-st="passed"] .mr-rule { border-top-style: solid; }
+  @media (max-width: 860px) {
+    .mr-ends { grid-template-columns: minmax(0, 1fr); padding: var(--gut); }
+    .mr-end:last-child { text-align: left; justify-items: start; }
+  }
+}

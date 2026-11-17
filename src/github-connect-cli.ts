@@ -21,6 +21,16 @@ const statusSchema = z.object({
   code: z.string().nullable(),
   /** What connect did about the mirror (absent from older servers). */
   mirror: z.enum(['enabled', 'kept']).nullable().optional(),
+  /** Which way a mirror connect turned on (absent from older servers). */
+  direction: z.enum(['one-way', 'two-way']).nullable().optional(),
+});
+/** `projectGithubMirrorRead:read`: the mirror in one sentence, the same words as the web Mirror screen. */
+const mirrorReadSchema = z.object({
+  repository: z.string().nullable(),
+  direction: z.enum(['off', 'one-way', 'two-way']),
+  state: z.string(),
+  sentence: z.string(),
+  next: z.string().nullable(),
 });
 /** One reactive observation of the existing connection operation, no polling or
  * scheduler. Closing the command closes the subscription and its connection. */
@@ -112,6 +122,7 @@ export async function githubConnectCli(
     allowPositionals: true,
     options: {
       url: { type: 'string' },
+      'one-way': { type: 'boolean' },
       repo: { type: 'string' },
       'project-id': { type: 'string' },
       'operation-id': { type: 'string' },
@@ -153,14 +164,20 @@ export async function githubConnectCli(
       cursor: values.cursor ?? null,
     });
     const bindings = typeof listed === 'string' ? JSON.parse(listed) : listed;
-    const policy = await transport.query<{ githubMirror?: { repo: string; inbound?: boolean } }>(
-      'projectAutonomy:read',
-      {},
-    );
+    const mirror = mirrorReadSchema.parse(await transport.query<unknown>('projectGithubMirrorRead:read', {}));
+    const summary = {
+      summary: mirror.sentence,
+      mirror: {
+        state: mirror.state,
+        direction: mirror.direction,
+        repository: mirror.repository,
+        next: mirror.next?.replace(/ \. /, ` ${project} `) ?? null,
+      },
+    };
     // Two-way sync only: one read-only protection check of the mirrored repository.
-    return policy.githubMirror?.inbound
-      ? { ...bindings, protection: await githubProtection(transport, policy.githubMirror.repo) }
-      : bindings;
+    return mirror.direction === 'two-way' && mirror.repository
+      ? { ...summary, ...bindings, protection: await githubProtection(transport, mirror.repository) }
+      : { ...summary, ...bindings };
   }
   const capabilities = await transport.dispatch('capabilities', {});
   const actor = z.object({ actor: z.string() }).parse(capabilities.result).actor;
@@ -215,6 +232,7 @@ export async function githubConnectCli(
       operationId: journal.operationId,
       repository,
       ...(values['no-mirror'] ? { mirror: false } : {}),
+      ...(values['one-way'] && !values['no-mirror'] ? { oneWay: true } : {}),
     },
   );
   const started = z
@@ -248,7 +266,7 @@ export async function githubConnectCli(
     const mirror =
       completed.mirror === 'enabled'
         ? {
-            mirror: `on: Forge publishes accepted main to ${repository} and brings GitHub pushes and pull requests back in. Turn it off: nforge set-policy ROOT '{"operationId":"UUID","githubMirror":{"repo":"${repository}","autoPush":false,"laneRefs":false}}'`,
+            mirror: `on: Forge publishes accepted main to ${repository}${completed.direction === 'one-way' ? '; pushes made on GitHub are not taken in (one-way)' : ' and brings GitHub pushes and pull requests back in'}. Turn it off: nforge set-policy ROOT '{"operationId":"UUID","githubMirror":{"repo":"${repository}","autoPush":false,"laneRefs":false}}'`,
           }
         : completed.mirror === 'kept'
           ? {

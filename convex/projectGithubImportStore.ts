@@ -3,7 +3,7 @@ import { v } from 'convex/values';
 import { blobStore } from './blobStore';
 import { internalMutation, internalQuery, type QueryCtx } from './server';
 import { internal } from './_generated/api';
-import { githubImportDocument, githubRequests } from './projectGithubImportFields';
+import { githubImportDocument, githubRequests, migrationCounts } from './projectGithubImportFields';
 import { activeOwnedProject } from './projectAuthority';
 import { readJob, readJobState } from './projectGithubImportRead';
 import { createProject } from './projectCreation';
@@ -17,6 +17,7 @@ import { completion, recipePin, completeObjects } from './projectGithubImportBat
 import { retain, inventoryEntry } from './projectGithubImportInventory';
 import { catalogEntry, recordWindow } from './projectGithubImportCatalog';
 import { beginHistory } from './projectHistoryStore';
+import { cancelPendingTask } from './schedulerCancel';
 
 const key = { actor: v.string(), operationId: v.string(), request: v.string() };
 async function find(ctx: QueryCtx, input: { actor: string; operationId: string; request: string }) {
@@ -58,6 +59,7 @@ export const begin = internalMutation({
     archive: v.optional(v.object({ total: v.number(), totalBytes: v.number(), submodules: v.number() })),
     visibility: v.union(v.literal('public'), v.literal('private')),
     githubRequests: v.optional(githubRequests),
+    migration: v.optional(migrationCounts),
   },
   returns: v.object({ id: v.id('projectGithubImports'), projectId: v.id('hostedProjects') }),
   handler: async (ctx, input) => {
@@ -102,6 +104,7 @@ export const begin = internalMutation({
       totalBytes: input.archive?.totalBytes ?? 0,
       ...(input.archive ? { submodules: input.archive.submodules } : {}),
       ...(input.githubRequests ? { githubRequests: input.githubRequests } : {}),
+      ...(input.migration ? { migration: input.migration } : {}),
     });
     if (input.rootTree && !input.archive)
       await ctx.db.insert('projectGithubImportInventory', {
@@ -283,13 +286,29 @@ export const fail = internalMutation({
   },
 });
 export const resume = internalMutation({
-  args: { id: v.id('projectGithubImports'), actor: v.string() },
+  args: {
+    id: v.id('projectGithubImports'),
+    actor: v.string(),
+    /** Resume at the provider reset the failure recorded (Item 2abda01f), not now. */
+    atReset: v.optional(v.boolean()),
+  },
   returns: v.null(),
-  handler: async (ctx, input) => {
+  handler: async (ctx, { atReset, ...input }) => {
     const row = await readJob(ctx, input);
     if (row.phase === 'ready') return null;
     const task = row.task ? await ctx.db.system.get(row.task) : null;
     if (task && ['pending', 'inProgress'].includes(task.state.kind) && row.phase !== 'error') return null;
+    const reset = row.phase === 'error' ? row.error?.retryAt : undefined;
+    if (atReset && reset !== undefined && reset > Date.now()) {
+      // One scheduled run at the reset, no client polling; a replay keeps it.
+      if (task?.state.kind === 'pending' && row.error?.resumeAt === reset) return null;
+      await cancelPendingTask(ctx, row.task, task);
+      const later = await ctx.scheduler.runAt(reset, internal.projectGithubImportWorker.run, input);
+      await ctx.db.patch(row._id, { task: later, error: { ...row.error!, resumeAt: reset } });
+      return null;
+    }
+    // Resuming now replaces a run scheduled for the reset, so only one worker runs.
+    await cancelPendingTask(ctx, row.task, task);
     const scheduled = await ctx.scheduler.runAfter(0, internal.projectGithubImportWorker.run, input);
     await ctx.db.patch(row._id, {
       task: scheduled,

@@ -36,6 +36,7 @@ const Discover = lazy(() => import('../public/Discover'));
 
 // Rebuilt places load with their route, never in the first paint.
 const Start = lazy(() => import('./start/Start'));
+const ImportRepository = lazy(() => import('./start/ImportRepository'));
 
 document.documentElement.dataset.ds = '';
 // Safe areas (phone tabs, notch): only the rebuilt frames draw into them, so only they ask for the full screen.
@@ -209,9 +210,7 @@ function SignedIn({
   if (route.frame === 'bare')
     return (
       <BareFrame controls={controls}>
-        <Suspense fallback={null}>
-          <Start />
-        </Suspense>
+        <Suspense fallback={null}>{route.page === 'import' ? <ImportRepository /> : <Start />}</Suspense>
         {overlays}
       </BareFrame>
     );

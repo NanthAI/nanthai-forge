@@ -7,6 +7,7 @@ import type { Id, Doc } from './_generated/dataModel';
 import { githubInput } from '../src/github';
 import { beginGithubSource } from '../src/github-project-source';
 import { listGithubTree } from '../src/github-archive-source';
+import { githubMigrationCounts } from '../src/github-migration-ledger';
 import { lfsImportMaxBytes } from '../src/github-import-pages';
 import { importReadToken } from './githubAppToken';
 import { convexFetch } from './networkFetch';
@@ -26,6 +27,10 @@ export const start = action({
     name: v.optional(v.string()),
     /** Unique Git LFS bytes to fetch (default 1 GiB, at most 8 GiB); 0 keeps pointers. */
     lfsLimitBytes: v.optional(v.number()),
+    /** The project's visibility here; absent keeps GitHub's. A public repository may import private. */
+    visibility: v.optional(v.union(v.literal('public'), v.literal('private'))),
+    /** On a replay of a job paused by a provider limit: resume at the recorded reset, not now. */
+    atReset: v.optional(v.boolean()),
   },
   returns: v.id('projectGithubImports'),
   handler: async (ctx, input): Promise<Id<'projectGithubImports'>> => {
@@ -54,6 +59,7 @@ export const start = action({
         input.name?.trim() ?? null,
         // Present only when chosen, so earlier requests keep their identity.
         ...(input.lfsLimitBytes === undefined ? [] : [input.lfsLimitBytes]),
+        ...(input.visibility === undefined ? [] : [{ visibility: input.visibility }]),
       ]);
       const key = { actor: user.subject, operationId: input.operationId, request };
       const existing: Doc<'projectGithubImports'> | null = await ctx.runQuery(
@@ -64,6 +70,7 @@ export const start = action({
         await ctx.runMutation(internal.projectGithubImportStore.resume, {
           id: existing._id,
           actor: user.subject,
+          ...(input.atReset ? { atReset: true } : {}),
         });
         return existing._id;
       }
@@ -74,6 +81,11 @@ export const start = action({
         meter.wrap(networkFetch),
         ctx,
       );
+      invariant(
+        input.visibility !== 'public' || !access.repository.private,
+        'BAD_ARGUMENT',
+        `${access.repository.full_name} is private on GitHub, so it imports private. Leave visibility out or choose private.`,
+      );
       // Reads go on the Forge App's own quota when it is installed on the
       // repository; the importer's credential then only proves their access.
       const token =
@@ -82,6 +94,10 @@ export const start = action({
           (access.repository as { id?: unknown }).id,
           meter.wrap(convexFetch),
         )) ?? access.token;
+      const migrationPending =
+        process.env.FORGE_MIGRATION_LEDGER === '1'
+          ? githubMigrationCounts(access.repository.full_name, token, meter.wrap(networkFetch))
+          : undefined;
       const source = await beginGithubSource(
         access.repository.full_name,
         ref ?? access.repository.default_branch,
@@ -90,12 +106,10 @@ export const start = action({
       );
       // One recursive listing decides the transfer: a complete tree streams the
       // commit archive; a truncated one keeps directory-by-directory discovery.
-      const listing = await listGithubTree(
-        source.repository,
-        source.pending[0]!.sha,
-        token,
-        meter.wrap(networkFetch),
-      );
+      const [listing, migration] = await Promise.all([
+        listGithubTree(source.repository, source.pending[0]!.sha, token, meter.wrap(networkFetch)),
+        migrationPending,
+      ]);
       const begun = await ctx.runMutation(internal.projectGithubImportStore.begin, {
         ...(listing
           ? {
@@ -114,8 +128,9 @@ export const start = action({
         at: new Date().toISOString(),
         cursor: '',
         rootTree: source.pending[0]!.sha,
-        visibility: access.repository.private ? 'private' : 'public',
+        visibility: input.visibility ?? (access.repository.private ? 'private' : 'public'),
         githubRequests: meter.counts,
+        ...(migration ? { migration } : {}),
       });
       // The listing is paid for once: its file table is kept in R2 and every archive step reads it.
       if (listing)
@@ -135,6 +150,8 @@ export const status = action({
   returns: v.object({
     projectId: v.id('hostedProjects'),
     commit: v.string(),
+    /** The project's visibility here, as chosen at import (GitHub's when nothing was chosen). */
+    visibility: v.union(v.literal('public'), v.literal('private')),
     phase: v.string(),
     completed: v.number(),
     total: v.number(),
@@ -144,7 +161,7 @@ export const status = action({
     submodules: v.number(),
     report: v.string(),
     error: v.union(githubImportError, v.null()),
-    /** GitHub REST requests so far, by who paid; null for imports started before counting. */
+    /** GitHub API requests so far, by who paid; null for imports started before counting. */
     githubRequests: v.union(githubRequests, v.null()),
     migration: v.optional(migrationCounts),
   }),
@@ -159,6 +176,7 @@ export const status = action({
       return {
         projectId: job.projectId,
         commit: job.commit,
+        visibility: job.visibility,
         phase: job.phase,
         completed: job.completed,
         total: job.total,

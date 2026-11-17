@@ -47,6 +47,8 @@ export const githubBindingTables = {
     /** The connect asks for the GitHub mirror (publish and two-way) on this repository; the owner's
      * authorization is its approval. Absent on operations started without it. */
     mirror: v.optional(v.boolean()),
+    /** One-way mirror (Forge to GitHub only): pushes on GitHub are not taken in. Absent: two-way. */
+    oneWay: v.optional(v.boolean()),
     /** What `complete` did about it: turned on, or left alone because a mirror was already set. */
     mirrorResult: v.optional(v.union(v.literal('enabled'), v.literal('kept'))),
   })

@@ -471,6 +471,7 @@ export const hostedAgentCommandSchemas = {
   planning: z
     .object({
       ...planningIssueFields,
+      transfer: z.unknown().optional(),
       search: z.string().trim().min(1).optional(),
       kind: z.enum(['issue', 'initiative']).optional(),
       status: z.enum([...planningStatuses, 'active', 'all']).optional(),

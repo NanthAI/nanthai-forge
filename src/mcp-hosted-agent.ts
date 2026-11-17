@@ -224,7 +224,7 @@ export function registerHostedAgentWorkflow(
   server.registerTool(
     'forge_planning',
     {
-      description: 'Search/edit Items/Initiatives. Start: forge_task planningItemId',
+      description: 'Find/edit Items/Initiatives. Start: forge_task planningItemId',
       inputSchema: { command: z.union([planning[0]!, planning[1]!, planning[2]!]) },
       annotations: { ...read, readOnlyHint: false },
     },
@@ -236,6 +236,8 @@ export function registerHostedAgentWorkflow(
   );
   prose.forge_planning =
     'Planning: indexed title/body search; active by default, status:all includes history. Filter kind/status/initiativeId/type/owner/relation; cursor pages or id+comments. reconcile:false skips Intent updates. New Issues/friction return advisory likelyDuplicates. put-planning-item sets only named fields (0 creates); model fields (order, type, parentId, owner, relations, hidden) go in `fields`, docs/planning.md; comment-planning-item adds discussion. batch:[…] ≤100 puts/comments: one call, per-Item results, one undo. Issue key: planningItemId; id/itemId are aliases. Full UUID or unique 8+ hex prefix. Start via forge_task {action:start,planningItemId}.';
+  prose.forge_planning +=
+    ' Import attribution goes in fields.imported. planning.transfer {mode:import,rows,apply} prepares or applies source-keyed pages; docs/planning.md.';
   server.registerTool(
     'forge_current',
     {

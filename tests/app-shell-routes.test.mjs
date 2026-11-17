@@ -24,6 +24,7 @@ const everyRoute = [
   { frame: 'public', page: 'passkey' },
   { frame: 'public', page: 'device' },
   { frame: 'bare', page: 'new' },
+  { frame: 'bare', page: 'import' },
   { frame: 'discover', page: 'explore' },
   { frame: 'discover', page: 'profile', handle: 'mara' },
   ...accountPlaces.map(place => ({ frame: 'account', place })),

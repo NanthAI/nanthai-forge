@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
-/** GitHub REST requests this import made, by who paid (src/github-import-meter.ts). */
+/** GitHub API requests this import made, by who paid (src/github-import-meter.ts). */
 export const githubRequests = v.object({
   user: v.number(),
   app: v.number(),
@@ -9,11 +9,13 @@ export const githubRequests = v.object({
   anonymous: v.number(),
   userWindow: v.optional(v.object({ reset: v.number(), used: v.number(), limit: v.number() })),
 });
-/** A structured failure; `retryAt` (ms) names a provider reset when one applies. */
+/** A structured failure; `retryAt` (ms) names a provider reset when one applies. `resumeAt` (ms) is set once
+ * the person asked to resume at that reset: the worker is scheduled for then, and progress reads `paused`. */
 export const githubImportError = v.object({
   code: v.string(),
   message: v.string(),
   retryAt: v.optional(v.number()),
+  resumeAt: v.optional(v.number()),
 });
 /** Optional origin counts; null means not reported, never zero. No account identities are retained. */
 export const migrationCounts = v.object({
@@ -48,7 +50,14 @@ export const githubImportFields = {
   at: v.string(),
   step: v.number(),
   cursor: v.string(),
-  phase: v.union(v.literal('discovering'), v.literal('importing'), v.literal('ready'), v.literal('error')),
+  /** `paused` is derived on read (a failure waiting for its scheduled resume at the provider reset), never stored. */
+  phase: v.union(
+    v.literal('discovering'),
+    v.literal('importing'),
+    v.literal('ready'),
+    v.literal('error'),
+    v.literal('paused'),
+  ),
   totalKnown: v.boolean(),
   completed: v.number(),
   total: v.number(),
