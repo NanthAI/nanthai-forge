@@ -1,0 +1,6 @@
+{
+  "kind": "unreferencedExports",
+  "delta": 3,
+  "reason": "df06081d: the contract-first landing exports DeviceSignIn, HolderChange and AgentPresence for the concurrent People and sessions consumers; the follow-on C1 screen implementation consumes these interfaces. No existing runtime code can be removed in a type-only landing.",
+  "date": "2026-11-17"
+}
