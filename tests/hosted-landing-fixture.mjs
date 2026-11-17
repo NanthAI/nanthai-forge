@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
+import { controllerMetadataFits } from './observer-projection-budget.mjs';
 import { landingBodyCounts } from './observer-projection-budget.mjs';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
@@ -105,7 +106,7 @@ export async function landingFixture(source = null) {
           c.documents - landingBodyCounts(c).reads <= (page ? 140 : 80),
         `${name}: bounded reads`,
       );
-      assert(c.readBytes < 512 * 1024 && c.writeBytes < 512 * 1024, `${name}: bounded metadata`);
+      assert(controllerMetadataFits(c, 512 * 1024, 512 * 1024), `${name}: bounded metadata`);
       assert(
         !c.touched.some(t =>
           [

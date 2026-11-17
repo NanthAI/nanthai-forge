@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { pendingRunnerState } from './cancelledRunUsage';
 import { readProviderDelay } from './projectHostedLandingCheckProgress';
 import { failureCauseReply } from './projectFailureCauseRead';
 import { finishReadReader } from './projectFinishReadReader';
@@ -143,7 +144,7 @@ async function observePage(
     stage = 'landing';
     const selectedRow = await withLandingCapsule(ctx, rows[0] ?? null);
     invariant(selectedRow, 'NOT_FOUND', 'Hosted landing request not found.');
-    const state = landingStateFromRow(selectedRow);
+    const state = pendingRunnerState(landingStateFromRow(selectedRow), selectedRow.runnerAccounting?.pending);
     const cold = selectedRow.capsule && input.nextVersion <= selectedRow.capsule.version;
     phase = state.phase;
     version = state.version;
@@ -182,13 +183,15 @@ async function observePage(
         break;
       }
       const event = readLandingTransition(row.value, state);
+      const submission = hostedLandingStateSchema.parse(event.submission);
+      if (submission.version === state.version) {
+        if (state.counts) submission.counts = state.counts;
+        else delete submission.counts;
+      }
       events.push({
         ...event,
         pendingAttempt: finishPendingForReader(event.pendingAttempt),
-        submission: landingStateForReader(
-          hostedLandingStateSchema.parse(event.submission),
-          input.priorityInfo,
-        ),
+        submission: landingStateForReader(submission, input.priorityInfo),
       });
       nextVersion++;
       eventCount = events.length;

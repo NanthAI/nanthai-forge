@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
+import { cancelledUsageAllowance, controllerMetadataFits } from './observer-projection-budget.mjs';
 import { randomUUID } from 'node:crypto';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -48,8 +49,13 @@ export async function checksFixture(source = null, { candidateFields = {}, state
       return result;
     } finally {
       for (const c of s.counts.filter(c => c.name === name)) {
-        assert(c.ranges <= 40 && c.documents <= (name.endsWith('Page') ? 110 : 40), `${name}: bounded reads`);
-        assert(c.readBytes < 256 * 1024 && c.writeBytes < 128 * 1024, `${name}: bounded metadata`);
+        const accounting = cancelledUsageAllowance(c);
+        assert(
+          c.ranges <= 40 + accounting.documents &&
+            c.documents <= (name.endsWith('Page') ? 110 : 40) + accounting.documents,
+          `${name}: bounded reads ${JSON.stringify({ documents: c.documents, ranges: c.ranges, accounting })}`,
+        );
+        assert(controllerMetadataFits(c, 256 * 1024, 128 * 1024), `${name}: bounded metadata`);
         assert(
           !c.touched.some(table =>
             [

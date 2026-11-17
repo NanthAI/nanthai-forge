@@ -143,6 +143,7 @@ export async function pinLandingAttempt(
         r.check.kind === 'run'
           ? (await loadHostedCheck(ctx, { projectId: input.projectId, runId: r.check.runId })).run
           : await enqueueHostedCheck(ctx, {
+              usageSubmissions: [input.submissionId],
               projectId: input.projectId,
               actor: input.actor.id,
               ...(input.recheck ? { recheck: input.recheck } : {}),

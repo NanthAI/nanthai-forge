@@ -111,6 +111,7 @@ export async function enqueueHostedCheck(
     projectId: Id<'hostedProjects'>;
     actor: string;
     request: unknown;
+    usageSubmissions?: string[];
     providerDelayReason?: string;
     /** Explicit proof-page action: execute the full configured command on these pins, without borrowing an old pass. */
     fullCheck?: { afterRunId: string };
@@ -317,15 +318,20 @@ export async function enqueueHostedCheck(
     });
     return reused;
   }
-  return insertHostedCheckRun(ctx, run);
+  return insertHostedCheckRun(ctx, run, input.usageSubmissions);
 }
 
 /** Insert an already prepared run and retain the existing provider dispatch hooks. */
-export async function insertHostedCheckRun(ctx: MutationCtx, run: HostedCheckRun): Promise<HostedCheckRun> {
+export async function insertHostedCheckRun(
+  ctx: MutationCtx,
+  run: HostedCheckRun,
+  usageSubmissions?: string[],
+): Promise<HostedCheckRun> {
   const reportsInR2 =
     process.env.FORGE_CHECK_REPORTS_R2 === '1' && run.configuration.provider !== 'ci-status';
   if (reportsInR2) useObjectReports(run);
   await ctx.db.insert('projectHostedCheckRuns', {
+    ...(usageSubmissions?.length ? { cancelledUsage: { submissions: [...new Set(usageSubmissions)] } } : {}),
     ...(reportsInR2 ? { reportStorage: 'r2' as const } : {}),
     projectId: run.projectId as Id<'hostedProjects'>,
     runId: run.id,

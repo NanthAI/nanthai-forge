@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { collectCancelledUsage } from './projectCancelledRunUsage';
 import { collectResultBatch } from './projectHostedActionsBatch';
 import { cleanupCiBranch } from './projectCiStatusCleanup';
 import { callback as githubOAuthCallback } from './githubBindingOAuth';
@@ -127,7 +128,14 @@ http.route({
         const value = JSON.parse(cleanup);
         if (value.reportBatch)
           await collectResultBatch(ctx, value.identity, value.conclusion, value.reportBatch);
-        else await cleanupCiBranch(ctx, value);
+        else if (value.repository) await cleanupCiBranch(ctx, value);
+        if (value.cancelledUsage) {
+          try {
+            await collectCancelledUsage(ctx, value.cancelledUsage);
+          } catch {
+            console.warn('Cancelled runner usage remains pending', { runId: value.cancelledUsage.runId });
+          }
+        }
       }
       return new Response(null, { status: 204 });
     }

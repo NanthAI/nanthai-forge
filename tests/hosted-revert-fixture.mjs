@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
+import { controllerMetadataFits } from './observer-projection-budget.mjs';
 import { randomUUID } from 'node:crypto';
 import { finishFixture, compose } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -28,7 +29,7 @@ export async function revertFixture(t, options) {
     } finally {
       for (const m of f.counts.filter(x => x.name === name)) {
         assert(m.ranges <= 100 && m.documents <= 100, `${name}: constant-size revert reads`);
-        assert(m.readBytes < 128 * 1024 && m.writeBytes < 128 * 1024, `${name}: bounded metadata`);
+        assert(controllerMetadataFits(m, 128 * 1024, 128 * 1024), `${name}: bounded metadata`);
         assert(
           !m.touched.some(x => ['projectHostedAcceptancePages', 'projectHostedAcceptanceEvents'].includes(x)),
           `${name}: no acceptance history or selection hydration`,

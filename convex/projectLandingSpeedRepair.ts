@@ -47,9 +47,10 @@ export async function repairLandingSpeedPage(
           .unique()
       : null;
     readBytes += (receipt?.value.length ?? 0) + (operation?.value.length ?? 0);
-    const seconds = operation
-      ? discardedRunnerSeconds(JSON.parse(operation.value) as HostedLandingState)
-      : null;
+    const seconds =
+      operation && !operation.runnerAccounting?.pending
+        ? discardedRunnerSeconds(JSON.parse(operation.value) as HostedLandingState)
+        : null;
     if (seconds !== null) {
       sample[7] ??= [null, null, null, null, null, null];
       sample[7][4] = seconds;

@@ -112,3 +112,27 @@ test('the replayed queue carries across days, and Stats compares only from the m
     ],
   );
 });
+
+test('closed-day and window runner totals price the same complete-usage landings as the replay', () => {
+  const known = Array.from({ length: 50 }, (_, i) =>
+    landing(`known-${i}`, i, i + 5, { runnerSeconds: 120, discardedRunnerSeconds: 30 }),
+  );
+  const missingDiscard = landing('missing-discard', 0, 5, {
+    runnerSeconds: 600,
+    discardedRunnerSeconds: null,
+  });
+  const missingAccepted = landing('missing-accepted', 1, 6, {
+    runnerSeconds: null,
+    discardedRunnerSeconds: 180,
+  });
+  const day = statsDay('2026-11-17', [...known, missingDiscard, missingAccepted]);
+  assert.equal(day.runner.priced, 50);
+  assert.equal(day.runner.unknown, 2);
+  assert.equal(day.runner.acceptedSeconds, 50 * 120);
+  assert.equal(day.runner.discardedSeconds, 50 * 30);
+  const window = statsWindow([day]);
+  assert.equal(window.measured.ciMinutes, 125);
+  assert.equal(window.measured.ciMinutesPerLanding, 2.5);
+  assert.equal(window.measured.wastedMinutes, 25);
+  assert.equal(window.comparison.savedMinutes.atLeast, (day.replay.runnerSeconds.low - 7500) / 60);
+});

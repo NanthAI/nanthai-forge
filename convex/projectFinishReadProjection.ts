@@ -19,6 +19,7 @@ export const finishReadFields = {
     'metadata',
   ],
   projectHostedLandingRequests: [
+    'runnerAccounting',
     'hold',
     'requestBodyId',
     'capsule',
@@ -51,7 +52,14 @@ export const finishReadFields = {
   ],
   projectHostedCheckRuns: ['projectId', 'runId', 'value'],
   projectHostedChannels: ['projectId', 'name', 'selection'],
-  projectHostedLandingDesired: ['projectId', 'submissionId', 'operationId', 'actor', 'value'],
+  projectHostedLandingDesired: [
+    'runnerAccounting',
+    'projectId',
+    'submissionId',
+    'operationId',
+    'actor',
+    'value',
+  ],
 } as const;
 export type FinishReadKind = keyof typeof finishReadFields;
 export function finishReadProjection(kind: FinishReadKind, row: Record<string, unknown>) {

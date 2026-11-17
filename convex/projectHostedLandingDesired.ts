@@ -205,6 +205,7 @@ export async function submitDesiredLanding(
   const previous = queuedState ?? existingState;
   // Every live selection returned above. A replaced ownerless selection can still have its
   // pre-cancellation phase here; its already-loaded counts are the same terminal predecessor's.
+  const previousAccounting = (queuedState ? queued : (existingCanonical ?? existing))?.runnerAccounting;
   const carried = previous
     ? supersededCheckCosts(
         previous,
@@ -216,6 +217,7 @@ export async function submitDesiredLanding(
           : existingCanonical
             ? existingCanonical.supersededCheck
             : existing?.supersededCheck,
+        previousAccounting?.lastCancelled,
       )
     : undefined;
   const id = crypto.randomUUID(),
@@ -269,6 +271,7 @@ export async function submitDesiredLanding(
     },
   });
   const key = await ctx.db.insert('projectHostedLandingDesired', {
+    runnerAccounting: previousAccounting ?? { root: id, pending: 0 },
     ...(carried?.supersededCheck ? { supersededCheck: carried.supersededCheck } : {}),
     preparing: true,
     projectId: input.projectId,
@@ -349,6 +352,7 @@ export const advance = internalMutation({
           retryReason: state.retryReason,
           counts: state.counts,
           supersededCheck: row.supersededCheck,
+          runnerAccounting: row.runnerAccounting,
         },
       );
       await cancelPendingTask(ctx, row.wake?.taskId);

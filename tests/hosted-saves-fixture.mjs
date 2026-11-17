@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
+import { controllerMetadataFits } from './observer-projection-budget.mjs';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
@@ -57,7 +58,7 @@ export async function saveFixture(originalText = 'original', originalPath = 'a.t
           c.documents <= (name === 'stage' ? 140 : 100) && c.ranges <= (name === 'stage' ? 140 : 100),
           `${name}: per-function reads`,
         );
-        assert(c.readBytes < 512 * 1024 && c.writeBytes < 512 * 1024, `${name}: metadata only`);
+        assert(controllerMetadataFits(c, 512 * 1024, 512 * 1024), `${name}: metadata only`);
         assert(
           !c.touched.some(table =>
             ['projectBackups', 'projectWorkRecords', 'projectWorkEvents', 'projectWorkGenerations'].includes(

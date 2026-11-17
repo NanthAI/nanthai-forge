@@ -386,14 +386,14 @@
     },
     {
       "id": "landing-runner-discarded-mean",
-      "area": "GitHub runner minutes of checks a landing's attempts discarded (shard execution), per landing",
+      "area": "GitHub runner minutes of discarded checks, including cancelled provider job execution, per landing",
       "measuredBy": "landing-record",
       "metric": "runnerDiscarded",
       "stat": "mean",
       "unit": "min",
       "max": 12,
-      "source": "Shard execution seconds of the check runs of the 36 landings that settled 2026-11-10 04:06Z to 08:31Z, from each run's stored summary (timings.executionSeconds); the live stamp is the same field of the run row, read when the landing sees the run end. Discarded: mean 4.7 min, rolling 20-landing mean 2.5 to 5.9 (3 discarded runs of about 50 to 60 min in 36 landings).",
-      "reason": "One full discarded run in 20 landings adds about 3 minutes; 12 is four of them, so it breaks when main races keep throwing checks away (incident 10d253c6), not on one unlucky window. Counts runs that ended with their shard seconds recorded; a run cancelled before it ended counts nothing.",
+      "source": "Shard execution seconds of the check runs of the 36 landings that settled 2026-11-10 04:06Z to 08:31Z, from each run's stored summary (timings.executionSeconds); completed checks use the same execution stamp, while cancelled checks use final provider job intervals from the existing completion event. Discarded baseline: mean 4.7 min, rolling 20-landing mean 2.5 to 5.9 (3 discarded runs of about 50 to 60 min in 36 landings).",
+      "reason": "One full discarded run in 20 landings adds about 3 minutes; 12 is four of them, so it breaks when main races keep throwing checks away (incident 10d253c6), not on one unlucky window. Counts recorded discarded execution and final provider job intervals for cancelled runs. Cancelled usage remains pending and unknown until the existing provider completion event supplies complete timings; late corrections update retained samples and closed UTC days once per run.",
       "issue": "51bbbd00"
     },
     {

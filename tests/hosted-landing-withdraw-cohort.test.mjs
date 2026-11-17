@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { liveLineProjectionCounts } from './observer-projection-budget.mjs';
+import { cancelledUsageAllowance, liveLineProjectionCounts } from './observer-projection-budget.mjs';
 // Issue 78a97771 cohort regression: a withdrawn, known failing member stops supplying speculative
 // source to the cohort stacked on it. Survivors recompose without it and land; its cancelled check
 // evidence stays and late callbacks for its old shared run cannot publish it.
@@ -61,9 +61,10 @@ for (const count of [10, 20])
     assert.equal(withdrawCalls.length, 1);
     const companions = landingBodyCounts(withdrawCalls[0]);
     const line = liveLineProjectionCounts(withdrawCalls[0]);
+    const accounting = cancelledUsageAllowance(withdrawCalls[0]);
     assert(
-      withdrawCalls[0].documents - companions.reads - line.reads < 160 + 15 * count &&
-        withdrawCalls[0].writes - companions.writes - line.writes < 90 + 9 * count,
+      withdrawCalls[0].documents - companions.reads - line.reads < 160 + 15 * count + accounting.documents &&
+        withdrawCalls[0].writes - companions.writes - line.writes < 90 + 9 * count + accounting.writes,
       JSON.stringify(withdrawCalls[0]),
     );
     assert(
@@ -99,6 +100,11 @@ for (const count of [10, 20])
       JSON.stringify({
         count,
         withdrawCalls: withdrawCalls.length,
+        sourceDocuments: withdrawCalls[0].documents - companions.reads - line.reads,
+        sourceWrites: withdrawCalls[0].writes - companions.writes - line.writes,
+        cancelledRuns: withdrawCalls[0].cancelledRuns,
+        readBytes: withdrawCalls[0].readBytes,
+        writeBytes: withdrawCalls[0].writeBytes,
         reads: withdrawCalls.reduce((sum, c) => sum + c.documents, 0),
         writes: withdrawCalls.reduce((sum, c) => sum + c.writes, 0),
         runs: f.runs().length,

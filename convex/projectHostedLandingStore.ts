@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { pendingRunnerState } from './cancelledRunUsage';
 import { recoverEarlyResolutions } from './projectHostedEarlyResolutionRecovery';
 import { wakeLandingCapsule, landingCapsuleGraceMs } from './projectLandingCapsuleWake';
 import { withLandingCapsule } from './projectLandingCapsuleStore';
@@ -39,7 +40,7 @@ import {
 import { notifyStackedLandingEnded } from './projectHostedStackNotice';
 import { recordLandingSpeed } from './projectLandingSpeed';
 import { recordFailure } from './projectFailureLog';
-import { bindSupersededCheck } from './projectHostedLandingRunnerCosts';
+import { bindRunnerAccounting, bindSupersededCheck } from './projectHostedLandingRunnerCosts';
 import { invariant } from '../src/errors';
 export type { LandingChannel } from './projectHostedLandingEvents';
 export { landingQueue, ensureLandingQueue, recordLandingObservation } from './projectHostedLandingEvents';
@@ -303,6 +304,9 @@ export async function writeLanding(
     pipelineRetiredAttemptId:
       previous.attemptId === state.attemptId ? row.pipelineRetiredAttemptId : undefined,
     runId,
+    ...(row.runnerAccounting && runId && runId !== row.runId
+      ? { runnerAccounting: bindRunnerAccounting(row.runnerAccounting, runId) }
+      : {}),
     supersededCheck: carried.supersededCheck,
     checkWakeVersion: row.runId === runId ? row.checkWakeVersion : undefined,
     admitting: admitting ? true : undefined,
@@ -354,7 +358,12 @@ export async function writeLanding(
       runId: row.runId,
     });
   if (state.phase === 'landed' && previous.phase !== 'landed' && state.acceptance) {
-    await recordLandingSpeed(ctx, row.projectId, state, attempt.number + 1);
+    await recordLandingSpeed(
+      ctx,
+      row.projectId,
+      pendingRunnerState(state, row.runnerAccounting?.pending),
+      attempt.number + 1,
+    );
     const project = await ctx.db.get(row.projectId);
     if (project?.needsFix)
       await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedCulprit:accepted'), {

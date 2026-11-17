@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { pendingRunnerState } from './cancelledRunUsage';
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import type { QueryCtx } from './_generated/server';
@@ -176,7 +177,7 @@ async function evidence(
         : null,
       // A check binding replaces an attempt without composing again: count distinct Candidates.
       recomposeCount: recomposes(attempts, last?.number),
-      costs: landingCosts(state, last?.number),
+      costs: landingCosts(pendingRunnerState(state, request?.runnerAccounting?.pending), last?.number),
       // Each attempt restamps timing.composeStartedAt; the first compose is the first attempt's (19328518).
       firstComposeStartedAt: progress[0]?.timing?.composeStartedAt ?? state?.timing?.composeStartedAt ?? null,
       heldAfterCheck: heldAfterCheck(attempts, progress),

@@ -216,6 +216,7 @@ export async function batchFinishStep(
     const { kind: _kind, ...check } = settings;
     void _kind;
     const run = await enqueueBatchCheck(ctx, {
+      usageSubmissions: included.map(member => member.submissionId),
       projectId: input.projectId,
       actor: state.actor,
       recheck: cohortRecheckBases(batch.recheck, included),

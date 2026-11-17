@@ -2,6 +2,7 @@
 import type { Doc } from './_generated/dataModel';
 import type { HostedLandingState } from '../src/hosted-landing';
 
+export type RunnerAccounting = Doc<'projectHostedLandingRequests'>['runnerAccounting'];
 export type SupersededCheck = NonNullable<Doc<'projectHostedLandingRequests'>['supersededCheck']>;
 type Counts = HostedLandingState['counts'];
 
@@ -11,6 +12,7 @@ export function supersededCheckCosts(
   previous: HostedLandingState,
   runId: string | null | undefined,
   pending?: SupersededCheck,
+  lastCancelled?: string,
 ): { counts: NonNullable<Counts>; supersededCheck: SupersededCheck | undefined } {
   const counts = previous.counts;
   // A split can still pin the failed shared run. The failure loop already put its share in
@@ -18,7 +20,8 @@ export function supersededCheckCosts(
   const sharedDiscarded = Boolean(
     runId && previous.batchDiagnostic?.sharedRunId === runId && counts?.runnerSeconds === undefined,
   );
-  const latestRunId = sharedDiscarded ? undefined : runId;
+  const cancelledLatest = Boolean(lastCancelled && (!runId || runId === lastCancelled));
+  const latestRunId = sharedDiscarded || cancelledLatest ? undefined : runId;
   const unknownBefore = Boolean(
     counts?.discardedRunnerUnknown ||
     ((previous.supersedes || sharedDiscarded) && counts?.discardedRunnerSeconds === undefined),
@@ -28,7 +31,11 @@ export function supersededCheckCosts(
       discardedRunnerSeconds: (counts?.discardedRunnerSeconds ?? 0) + (counts?.runnerSeconds ?? 0),
       ...(unknownBefore ||
       ((latestRunId ||
-        (!pending && !previous.batchId && !previous.batchOriginId && previous.timing?.checkReservedAt)) &&
+        (!pending &&
+          !cancelledLatest &&
+          !previous.batchId &&
+          !previous.batchOriginId &&
+          previous.timing?.checkReservedAt)) &&
         counts?.runnerSeconds === undefined)
         ? { discardedRunnerUnknown: 'superseded-check-execution-unreported' }
         : {}),
@@ -58,4 +65,16 @@ export function bindSupersededCheck(
   };
   if (!pending.unknownBefore) delete next.discardedRunnerUnknown;
   return { counts: next, supersededCheck: undefined };
+}
+
+/** Binding a later check ends the previous latest-cancel marker, while its
+ * independent pending cost still follows the stable submission root. */
+export function bindRunnerAccounting(
+  accounting: RunnerAccounting,
+  runId: string | null | undefined,
+): RunnerAccounting {
+  if (!accounting || !runId || runId === accounting.lastCancelled) return accounting;
+  const { lastCancelled: _previous, ...retained } = accounting;
+  void _previous;
+  return retained;
 }

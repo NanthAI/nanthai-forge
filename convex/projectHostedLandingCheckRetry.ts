@@ -28,6 +28,7 @@ export async function retrySoloLandingCheck(
   const operationId = crypto.randomUUID();
   const reason = providerRetryDelay(run.failureReason);
   const next = await enqueueHostedCheck(ctx, {
+    usageSubmissions: [attempt.submissionId],
     ...(reason ? { providerDelayReason: reason } : {}),
     projectId: claim.projectId,
     actor: attempt.actor.id,

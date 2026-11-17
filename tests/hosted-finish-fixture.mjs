@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
+import { controllerMetadataFits } from './observer-projection-budget.mjs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
@@ -218,7 +219,7 @@ export async function finishFixture(
       for (const count of newCounts(name)) {
         assert(count.ranges <= 1600 && count.documents <= 1600, `${name}: bounded reads`);
         assert(
-          count.readBytes < 2 * 1024 * 1024 && count.writeBytes < 512 * 1024,
+          controllerMetadataFits(count, 2 * 1024 * 1024, 512 * 1024),
           `${name}: metadata bytes ${JSON.stringify({ documents: count.documents, writes: count.writes, readBytes: count.readBytes, writeBytes: count.writeBytes })}`,
         );
         assert(

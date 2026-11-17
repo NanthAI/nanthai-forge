@@ -72,6 +72,7 @@ export async function startLandingAdmission(
   const { kind: _kind, ...settings } = check;
   void _kind;
   const run = await enqueueHostedCheck(ctx, {
+    usageSubmissions: [attempt.submissionId],
     ...(input.providerDelayReason ? { providerDelayReason: input.providerDelayReason } : {}),
     projectId: input.projectId,
     actor: attempt.actor.id,

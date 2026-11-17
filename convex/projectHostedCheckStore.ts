@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { deferCancelledRunWrite } from './projectCancelledRunWrites';
+import { markCancelledRunPending } from './projectCancelledRunOwners';
 import { cancelPendingTask } from './schedulerCancel';
 import {
   reportsDetached,
@@ -207,6 +209,10 @@ export async function writeHostedCheck(
   });
 }
 export async function completeHostedCheck(ctx: MutationCtx, run: HostedCheckRun) {
+  if (run.status === 'cancelled')
+    deferCancelledRunWrite(ctx, run.id, () =>
+      markCancelledRunPending(ctx, run.projectId as Id<'hostedProjects'>, run.id),
+    );
   if (run.configuration.provider !== 'ci-status')
     await scheduleCheckExpiry(ctx, run.projectId as Id<'hostedProjects'>, run.id, Date.parse(run.endedAt!));
   // Existing terminal events also clear an interrupted batch inbox; no sweep or idle timer.

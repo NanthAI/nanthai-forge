@@ -103,6 +103,24 @@ transition messages. The existing expiry catch-up repairs retained null samples 
 operation stamps once, one sample per page (at most 40 retained samples per project), without
 new landing calls or idle timers. Missing operations or missing stamps remain unknown.
 
+Cancelled checks retain their original submission IDs on the existing run record at dispatch.
+The existing provider run ID binds completion to those submissions, including replacements.
+Receipts show discarded minutes as pending until the authenticated completion event supplies
+all final job intervals. That event applies one atomic correction per run to landing counters,
+retained budget samples and already-closed UTC days; days receive additive deltas and keep their
+original queue replay and distributions. Daily Stats price only landings with both accepted
+and discarded usage known; a correction adds or removes that landing’s complete priced
+contribution. Pending or permanently unknown landings stay outside both runner sums. Missing or incomplete completion remains unknown. Final cancelled-job
+intervals include job setup and plan/static jobs; accepted and audit baselines retain their
+existing recorded shard seconds.
+This replaces zero-minute cancellation accounting; admission, ordering, cancellation and waits
+are unchanged. Cancellation accounting flushes after the existing handler writes in the same
+mutation, so an earlier queue snapshot cannot overwrite it. Existing sample repair leaves pending
+usage unknown. No polling, new timer or pass-path reads/calls are added. Private attribution and
+closed-day contribution metadata reuse existing records, with one indexed supersession root
+on each landing request/desired table.
+
+
 ## Drill
 
 On the dev deployment only, from the project folder (never `--prod`; the drill is an internal function, so only

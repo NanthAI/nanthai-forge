@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
+import { controllerMetadataFits } from './observer-projection-budget.mjs';
 import { randomUUID } from 'node:crypto';
 import { landingFixture, control, store as landingStore, pins } from './hosted-landing-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -37,7 +38,7 @@ export async function acceptanceFixture(source = null) {
           `${name}: bounded reads`,
         );
         assert(
-          c.readBytes < 2 * 1024 * 1024 && c.writeBytes < 512 * 1024,
+          controllerMetadataFits(c, 2 * 1024 * 1024, 512 * 1024),
           `${name}: bounded metadata ${JSON.stringify({ readBytes: c.readBytes, writeBytes: c.writeBytes, documents: c.documents, writes: c.writes })}`,
         );
         assert(

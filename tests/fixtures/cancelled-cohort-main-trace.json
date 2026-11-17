@@ -1,0 +1,362 @@
+{
+  "source": {
+    "channel": "main",
+    "path": "convex/projectHostedLandingBatchCheck.ts",
+    "sha256": "fd61149c84aeac915af3dc69338cfddede68890bc8e982c5f22fa26be064f8bc",
+    "note": "Captured by executing these accepted main module bytes with the same two-member cancellation fixture. Other modules use the O2 Lane; accounting disabled."
+  },
+  "scenario": {
+    "trace": [
+      {
+        "member": 0,
+        "version": 0,
+        "phase": "queued",
+        "sequence": 1,
+        "observation": {
+          "cause": null,
+          "pendingReason": "queued",
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 1,
+        "version": 0,
+        "phase": "queued",
+        "sequence": 2,
+        "observation": {
+          "cause": null,
+          "pendingReason": "queued",
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 0,
+        "version": 1,
+        "phase": "queued",
+        "sequence": 1,
+        "observation": {
+          "cause": null,
+          "pendingReason": "queued",
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 0,
+        "version": 2,
+        "phase": "queued",
+        "sequence": 1,
+        "observation": {
+          "cause": null,
+          "pendingReason": "queued",
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 1,
+        "version": 1,
+        "phase": "queued",
+        "sequence": 2,
+        "observation": {
+          "cause": null,
+          "pendingReason": "queued",
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 0,
+        "version": 3,
+        "phase": "checking",
+        "sequence": 1,
+        "observation": {
+          "cause": null,
+          "pendingReason": "checking",
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 1,
+        "version": 2,
+        "phase": "checking",
+        "sequence": 2,
+        "observation": {
+          "cause": null,
+          "pendingReason": "checking",
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 0,
+        "version": 4,
+        "phase": "checking",
+        "sequence": 1,
+        "observation": {
+          "cause": null,
+          "pendingReason": "checking",
+          "stall": {
+            "code": "LANDING_STALLED",
+            "message": "No landing progress for 15 minutes at checking; missing progress from check runner / landing controller.",
+            "missingOwner": "check runner / landing controller",
+            "step": "checking",
+            "alarmDelayMs": 900000
+          },
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 1,
+        "version": 3,
+        "phase": "checking",
+        "sequence": 2,
+        "observation": {
+          "cause": null,
+          "pendingReason": "checking",
+          "stall": {
+            "code": "LANDING_STALLED",
+            "message": "No landing progress for 15 minutes at checking; missing progress from check runner / landing controller.",
+            "missingOwner": "check runner / landing controller",
+            "step": "checking",
+            "alarmDelayMs": 900000
+          },
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 0,
+        "version": 5,
+        "phase": "checking",
+        "sequence": 1,
+        "observation": {
+          "cause": null,
+          "pendingReason": "checking",
+          "stall": {
+            "code": "LANDING_STALLED",
+            "message": "No landing progress for 15 minutes at checking; missing progress from check runner / landing controller.",
+            "missingOwner": "check runner / landing controller",
+            "step": "checking",
+            "alarmDelayMs": 900000
+          },
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 0,
+        "version": 6,
+        "phase": "checking",
+        "sequence": 1,
+        "observation": {
+          "cause": null,
+          "pendingReason": "checking",
+          "stall": {
+            "code": "LANDING_STALLED",
+            "message": "No landing progress for 15 minutes at checking; missing progress from check runner / landing controller.",
+            "missingOwner": "check runner / landing controller",
+            "step": "checking",
+            "alarmDelayMs": 900000
+          },
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 1,
+        "version": 4,
+        "phase": "checking",
+        "sequence": 2,
+        "observation": {
+          "cause": null,
+          "pendingReason": "checking",
+          "stall": {
+            "code": "LANDING_STALLED",
+            "message": "No landing progress for 15 minutes at checking; missing progress from check runner / landing controller.",
+            "missingOwner": "check runner / landing controller",
+            "step": "checking",
+            "alarmDelayMs": 900000
+          },
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 0,
+        "version": 7,
+        "phase": "checking",
+        "sequence": 1,
+        "observation": {
+          "cause": null,
+          "pendingReason": "checking",
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 1,
+        "version": 5,
+        "phase": "checking",
+        "sequence": 2,
+        "observation": {
+          "cause": null,
+          "pendingReason": "checking",
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 0,
+        "version": 8,
+        "phase": "checking",
+        "sequence": 1,
+        "observation": {
+          "cause": null,
+          "pendingReason": "checking",
+          "stall": {
+            "code": "LANDING_STALLED",
+            "message": "No landing progress for 15 minutes at checking; missing progress from check runner / landing controller.",
+            "missingOwner": "check runner / landing controller",
+            "step": "checking",
+            "alarmDelayMs": 900000
+          },
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 1,
+        "version": 6,
+        "phase": "checking",
+        "sequence": 2,
+        "observation": {
+          "cause": null,
+          "pendingReason": "checking",
+          "stall": {
+            "code": "LANDING_STALLED",
+            "message": "No landing progress for 15 minutes at checking; missing progress from check runner / landing controller.",
+            "missingOwner": "check runner / landing controller",
+            "step": "checking",
+            "alarmDelayMs": 900000
+          },
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 0,
+        "version": 9,
+        "phase": "checking",
+        "sequence": 1,
+        "observation": {
+          "cause": null,
+          "pendingReason": "checking",
+          "stall": {
+            "code": "LANDING_STALLED",
+            "message": "No landing progress for 15 minutes at checking; missing progress from check runner / landing controller.",
+            "missingOwner": "check runner / landing controller",
+            "step": "checking",
+            "alarmDelayMs": 900000
+          },
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 0,
+        "version": 10,
+        "phase": "ready",
+        "sequence": 1,
+        "observation": {
+          "cause": null,
+          "pendingReason": "queued",
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 1,
+        "version": 7,
+        "phase": "ready",
+        "sequence": 2,
+        "observation": {
+          "cause": null,
+          "pendingReason": "queued",
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 1,
+        "version": 8,
+        "phase": "ready",
+        "sequence": 2,
+        "observation": {
+          "cause": null,
+          "pendingReason": "queued",
+          "stall": {
+            "code": "LANDING_STALLED",
+            "message": "No landing progress for 15 minutes at ready; missing progress from landing / finish controller.",
+            "missingOwner": "landing / finish controller",
+            "step": "ready",
+            "alarmDelayMs": 900000
+          },
+          "state": "pending"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 0,
+        "version": 11,
+        "phase": "landed",
+        "sequence": 1,
+        "observation": {
+          "cause": null,
+          "pendingReason": null,
+          "state": "landed"
+        },
+        "pendingPhase": null
+      },
+      {
+        "member": 1,
+        "version": 9,
+        "phase": "landed",
+        "sequence": 2,
+        "observation": {
+          "cause": null,
+          "pendingReason": null,
+          "state": "landed"
+        },
+        "pendingPhase": null
+      }
+    ],
+    "phases": [
+      "landed",
+      "landed"
+    ],
+    "attempts": [
+      3,
+      3
+    ],
+    "checks": [
+      "cancelled",
+      "passed"
+    ],
+    "accepts": [
+      {
+        "receipts": 2,
+        "mainMoves": 1,
+        "landed": 2
+      }
+    ],
+    "waits": [
+      null,
+      null
+    ]
+  }
+}

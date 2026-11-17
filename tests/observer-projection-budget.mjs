@@ -98,3 +98,26 @@ export function liveLineProjectionCounts(count) {
   assert((line.metaWriteBytes ?? 0) <= 16384 * (line.metaWrites ?? 0));
   return { reads, writes };
 }
+
+/** Dispatch-bounded measurement work is separate from the controller's existing
+ * limits. Physical meters and landing-cost-guard still include every byte. No
+ * cancellation means no allowance, so pass-path ceilings remain unchanged.
+ * 436bd3e0: up to seven selected reads and two writes per attributed owner, plus
+ * the run fence; the no-target path adds only its one run-row read. Byte bounds
+ * retain the existing metadata scale, including both selected observer roles.
+ */
+export function cancelledUsageAllowance(count) {
+  return (count.cancelledRuns ?? []).reduce(
+    (sum, run) => ({
+      documents: sum.documents + 1 + 7 * run.members,
+      writes: sum.writes + (run.attributed ? 1 + 2 * run.members : 0),
+      bytes: sum.bytes + (run.attributed ? 8192 + 16384 * run.members : 8192),
+    }),
+    { documents: 0, writes: 0, bytes: 0 },
+  );
+}
+
+export function controllerMetadataFits(count, readLimit, writeLimit) {
+  const accounting = cancelledUsageAllowance(count);
+  return count.readBytes < readLimit + accounting.bytes && count.writeBytes < writeLimit + accounting.bytes;
+}

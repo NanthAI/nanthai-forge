@@ -11,6 +11,7 @@ import { identityContext } from './forgeIdentity';
 import { landingRequestBodies } from './projectLandingRequestBody';
 import { query as baseQuery, internalQuery as baseInternalQuery, type QueryCtx } from './_generated/server';
 import { workRecordWriter, finishWorkRecordWrites } from './projectWorkRecordWriter';
+import { cancelledRunWriter, finishCancelledRunWrites } from './projectCancelledRunWrites';
 import { finishReadWriter } from './projectFinishReadWriter';
 import { pausedBuilder } from './legacyStorageServer';
 // Preserve context accessors instead of eagerly spreading the context. Retired
@@ -22,11 +23,19 @@ function withFinishReads<B extends typeof baseMutation | typeof baseInternalMuta
         ? definition
         : (definition as { handler: (ctx: MutationCtx, args: unknown) => unknown }).handler;
     const wrapped = (ctx: MutationCtx, args: unknown) => {
-      const writer = workRecordWriter(landingRequestBodies(finishReadWriter(identityContext(ctx))));
-      const result = handler(writer, args);
+      // Handlers may flush planning writes before deciding whether preparation
+      // completed. Keep their context identical to the registered Work writer.
+      const records = workRecordWriter(
+        cancelledRunWriter(landingRequestBodies(finishReadWriter(identityContext(ctx)))),
+      );
+      const result = handler(records, args);
       const finish = (value: unknown) => {
-        const pending = finishWorkRecordWrites(writer);
-        return pending ? pending.then(() => value) : value;
+        const pending = finishWorkRecordWrites(records);
+        const accounting = () => {
+          const corrections = finishCancelledRunWrites(records);
+          return corrections ? corrections.then(() => value) : value;
+        };
+        return pending ? pending.then(accounting) : accounting();
       };
       // Preserve synchronous returns and throws. Async handlers may first touch the
       // DB after an await, so wait for their result before deciding whether to flush.

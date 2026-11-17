@@ -17,6 +17,7 @@ import {
   STATS_COMPARE_MIN_LANDINGS,
   STATS_DAY_MAX_LANDINGS,
   statsDay,
+  rerunsWhileWaiting,
   statsDaySchema,
   statsWindow,
   type StatsDay,
@@ -39,10 +40,15 @@ const ms = (iso: string | undefined) => {
   return Number.isFinite(value) ? value : null;
 };
 /** One accepted landing for the replay, from its receipt and landing row only. */
-export function statsLanding(receipt: HostedAcceptance, state: HostedLandingState | null): StatsLanding {
+export function statsLanding(
+  receipt: HostedAcceptance,
+  state: HostedLandingState | null,
+  pending = 0,
+): StatsLanding {
   const landedAt = ms(state?.timing?.committedAt) ?? ms(receipt.at)!;
   const runner = state?.counts?.runnerSeconds ?? null,
-    discarded = discardedRunnerSeconds(state);
+    discarded = pending > 0 ? null : discardedRunnerSeconds(state);
+  const observedDiscarded = state?.counts?.discardedRunnerSeconds ?? 0;
   return {
     id: receipt.id,
     who: receipt.agentRun ?? (receipt.actor?.kind === 'person' ? 'by hand' : null),
@@ -53,7 +59,8 @@ export function statsLanding(receipt: HostedAcceptance, state: HostedLandingStat
     runnerSeconds: runner,
     discardedRunnerSeconds: discarded,
     // First try: no resubmission and no discarded check (a batch join is not a retry).
-    attempts: state?.supersedes || (discarded ?? 0) > 0 ? 2 : discarded === 0 ? 1 : null,
+    attempts:
+      state?.supersedes || observedDiscarded > 0 || (discarded ?? 0) > 0 ? 2 : discarded === 0 ? 1 : null,
     ranInFull: Boolean(state?.ranInFull),
   };
 }
@@ -114,11 +121,13 @@ export const closeDay = internalMutation({
       .take(Math.min(STATS_CLOSE_LANDINGS, STATS_DAY_MAX_LANDINGS) + 1);
     const landings: StatsLanding[] = [];
     const contributions: Contribution[] = [];
+    const contributionIds = new Map<number, string>();
     for (const row of receipts.slice(0, STATS_CLOSE_LANDINGS)) {
       const receipt = JSON.parse(row.value) as HostedAcceptance;
       const request = await landingRow(ctx, { projectId, submissionId: receipt.submissionId }, false);
       const state = request ? (JSON.parse(request.value) as HostedLandingState) : null;
-      landings.push(statsLanding(receipt, state));
+      if (request) contributionIds.set(landings.length, request.submissionId);
+      landings.push(statsLanding(receipt, state, request?.runnerAccounting?.pending));
       contributions.push(...landingContributions(receipt, state));
     }
     // A person's day (Item 6a251b23): the Lanes started that day, open or not, from the same close.
@@ -154,7 +163,17 @@ export const closeDay = internalMutation({
     const value = canonicalPayload(
       receipts.length > STATS_CLOSE_LANDINGS ? { ...closed, partial: true } : closed,
     );
-    await ctx.db.insert('projectStatsDays', { projectId, day, value });
+    const reruns = rerunsWhileWaiting(landings);
+    const runnerContributions = [...contributionIds].map(([i, submissionId]) => ({
+      submissionId,
+      reruns: reruns[i]!,
+    }));
+    await ctx.db.insert('projectStatsDays', {
+      projectId,
+      day,
+      value,
+      ...(runnerContributions.length ? { runnerContributions } : {}),
+    });
     return null;
   },
 });

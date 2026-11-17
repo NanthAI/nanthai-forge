@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
+import { controllerMetadataFits } from './observer-projection-budget.mjs';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
@@ -53,7 +54,7 @@ export async function composeFixture({ baselineFiles = [] } = {}) {
       for (const c of s.counts.filter(c => c.name === name)) {
         const bound = name === 'composeStage' ? 1200 : 100;
         assert(c.ranges <= bound && c.documents <= bound, `${name}: bounded reads`);
-        assert(c.readBytes < 2 * 1024 * 1024 && c.writeBytes < 512 * 1024, `${name}: metadata bytes`);
+        assert(controllerMetadataFits(c, 2 * 1024 * 1024, 512 * 1024), `${name}: metadata bytes`);
         assert(
           !c.touched.some(t =>
             ['projectBackups', 'projectWorkRecords', 'projectWorkEvents', 'projectWorkGenerations'].includes(

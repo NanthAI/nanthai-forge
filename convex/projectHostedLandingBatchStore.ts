@@ -251,6 +251,7 @@ export async function enqueueBatchCheck(
     projectId: Id<'hostedProjects'>;
     actor: string;
     request: unknown;
+    usageSubmissions?: string[];
     recheck?: ScopedRecheckBasis[] | undefined;
     providerDelayReason?: string;
   },

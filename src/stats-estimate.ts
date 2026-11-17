@@ -211,6 +211,7 @@ export function statsDay(day: string, input: readonly StatsLanding[], freeAt = 0
   }
   const ranked = [...tally].sort((a, b) => b[1][0] - a[1][0] || a[0].localeCompare(b[0]));
   const counted = landings.filter(l => l.attempts !== null);
+  const priced = landings.filter(l => known(l.runnerSeconds) && known(l.discardedRunnerSeconds));
   return statsDaySchema.parse({
     schema: 1,
     day,
@@ -219,12 +220,8 @@ export function statsDay(day: string, input: readonly StatsLanding[], freeAt = 0
     runner: {
       priced: estimate.priced,
       unknown: estimate.unknownRunner,
-      acceptedSeconds: landings
-        .filter(l => known(l.runnerSeconds) && known(l.discardedRunnerSeconds))
-        .reduce((s, l) => s + l.runnerSeconds!, 0),
-      discardedSeconds: landings
-        .filter(l => known(l.runnerSeconds) && known(l.discardedRunnerSeconds))
-        .reduce((s, l) => s + l.discardedRunnerSeconds!, 0),
+      acceptedSeconds: priced.reduce((s, l) => s + l.runnerSeconds!, 0),
+      discardedSeconds: priced.reduce((s, l) => s + l.discardedRunnerSeconds!, 0),
     },
     firstTry: { counted: counted.length, first: counted.filter(l => l.attempts === 1).length },
     toMain: sortedInts(landings.map(l => span(l.submittedAt, l.landedAt))),

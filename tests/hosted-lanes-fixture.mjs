@@ -80,6 +80,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         writeBytesByTable: {},
         touched: [],
         written: [],
+        cancelledRuns: [],
         liveLine: {
           metaReads: 0,
           metaRanges: 0,
@@ -181,8 +182,24 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         }
         return group;
       };
+      const runStatus = row => {
+        try {
+          return JSON.parse(row?.value ?? 'null')?.status;
+        } catch {
+          return undefined;
+        }
+      };
       const put = (table, id, row) => {
         row = checkDocument(schema, table, row);
+        if (
+          table === 'projectHostedCheckRuns' &&
+          runStatus(row) === 'cancelled' &&
+          runStatus(view(table).get(id)) !== 'cancelled'
+        )
+          meter.cancelledRuns.push({
+            attributed: !!row.cancelledUsage,
+            members: row.cancelledUsage?.submissions.length ?? 0,
+          });
         assert(bytes(row) < 1024 * 1024, `${name}: document size`);
         equalityIndexes.delete(writable(table));
         writable(table).set(id, structuredClone(row));

@@ -48,6 +48,17 @@ export const hostedCheckTables = {
     'version',
   ]),
   projectHostedCheckRuns: defineTable({
+    // Dispatch attribution and one idempotent late usage receipt; never acceptance evidence.
+    cancelledUsage: v.optional(
+      v.object({
+        submissions: v.array(v.string()),
+        pending: v.optional(v.literal(true)),
+        corrected: v.optional(v.literal(true)),
+        final: v.optional(
+          v.object({ seconds: v.number(), receipt: v.object({ sha256: v.string(), size: v.number() }) }),
+        ),
+      }),
+    ),
     metricsProjected: v.optional(v.literal(true)),
     metricProjection: v.optional(v.object({ rowId: v.id('projectFinishReadRows'), digest: v.string() })),
     projectId: v.id('hostedProjects'),

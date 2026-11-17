@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelledUsageTarget } from './projectCancelledRunUsage';
 import { prepareReportCollection } from './projectHostedReportCollection';
 import { resultBatchIndex } from '../src/hosted-actions-result-batch';
 import { convexFetch } from './networkFetch';
@@ -82,13 +83,21 @@ export const receive = internalMutation({
       'EVIDENCE_CHANGED',
       'Workflow revision changed.',
     );
+    if (run.status === 'cancelled' && payload.action === 'completed' && !run.executionId) {
+      run.executionId = String(workflow.id);
+      run.actions.workflowSha = workflow.head_sha;
+      // Identity/accounting only: do not re-deliver terminal queue notifications.
+      await ctx.db.patch(row._id, { value: JSON.stringify(run) });
+    }
     if (row.reportStorage === 'r2' && row.resultBatch && payload.action === 'completed') {
       if (!run.executionId || !run.actions.workflowSha) {
         run.executionId = String(workflow.id);
         run.actions.workflowSha = workflow.head_sha;
         await writeHostedCheck(ctx, row._id, run);
       }
+      const completedUsage = await cancelledUsageTarget(ctx, selected, workflow.conclusion === 'cancelled');
       return JSON.stringify({
+        ...(completedUsage ? { cancelledUsage: completedUsage } : {}),
         reportBatch: await prepareReportCollection(ctx, selected, workflow.conclusion, applyConclusion),
         identity: {
           projectId: row.projectId,
@@ -106,7 +115,9 @@ export const receive = internalMutation({
         await writeHostedCheck(ctx, selected.row._id, run);
         await requestDirectCancel(ctx, run);
       }
-      return null;
+      const completedUsage =
+        payload.action === 'completed' ? await cancelledUsageTarget(ctx, selected) : null;
+      return completedUsage ? JSON.stringify({ cancelledUsage: completedUsage }) : null;
     }
     run.executionId = String(workflow.id);
     run.actions.workflowSha = workflow.head_sha;
@@ -132,7 +143,8 @@ export const receive = internalMutation({
             conclusion: workflow.conclusion,
           },
         );
-        return null;
+        const usage = await cancelledUsageTarget(ctx, selected, workflow.conclusion === 'cancelled');
+        return usage ? JSON.stringify({ cancelledUsage: usage }) : null;
       }
       const conclusion = workflow.conclusion;
       // Workflow failure is not Candidate evidence: OIDC/source/setup can fail
@@ -151,7 +163,8 @@ export const receive = internalMutation({
       await writeHostedCheck(ctx, selected.row._id, run);
       await requestDirectCancel(ctx, run);
     }
-    return null;
+    const cancelledUsage = payload.action === 'completed' ? await cancelledUsageTarget(ctx, selected) : null;
+    return cancelledUsage ? JSON.stringify({ cancelledUsage }) : null;
   },
 });
 export const cancellation = internalMutation({

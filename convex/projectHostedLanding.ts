@@ -24,7 +24,11 @@ import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
 import { readWouldConflict, syncRequiredQueue } from './projectHostedLandingWouldConflict';
 import { latestStallAlert } from './projectHostedLandingStallAlert';
 import { reuseHostedLanding } from './projectHostedLandingIdentity';
-import { bindSupersededCheck, type SupersededCheck } from './projectHostedLandingRunnerCosts';
+import {
+  bindRunnerAccounting,
+  bindSupersededCheck,
+  type SupersededCheck,
+} from './projectHostedLandingRunnerCosts';
 import { startLandingAdmission } from './projectHostedLandingAdmission';
 import { pipelineAdmission } from './projectHostedLandingAdmissionPipeline';
 import { submissionReservation, landingReservationForReader } from './projectHostedLandingReservation';
@@ -309,6 +313,7 @@ export async function enqueueHostedLanding(
     attemptId: string;
     at?: string;
     timing?: import('../src/hosted-landing').HostedLandingState['timing'];
+    runnerAccounting?: import('./projectHostedLandingRunnerCosts').RunnerAccounting;
     supersedes?: string | undefined;
     retryReason?: import('../src/hosted-landing').HostedLandingState['retryReason'];
     counts?: import('../src/hosted-landing').HostedLandingState['counts'];
@@ -462,6 +467,10 @@ export async function enqueueHostedLanding(
   // preserving the original queue/finish wake order and transaction IO count.
   const finish = await initializeFinish(ctx, state, true);
   await ctx.db.insert('projectHostedLandingRequests', {
+    runnerAccounting: bindRunnerAccounting(
+      reserved?.runnerAccounting ?? reused.runnerAccounting ?? { root: submissionId, pending: 0 },
+      attempt.check?.runId ?? admission,
+    ),
     ...(carried.supersededCheck ? { supersededCheck: carried.supersededCheck } : {}),
     projectId: input.projectId,
     channel: request.channel,

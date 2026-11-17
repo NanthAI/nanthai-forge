@@ -245,3 +245,41 @@ for (const reported of [false, true]) {
     });
   }
 }
+
+for (const mode of ['direct', 'desired']) {
+  test(`${mode} late cancelled usage follows durable supersession attribution into the eventual landing`, async t => {
+    const { f, base, send, first } = await setup(t, mode);
+    await f.drain();
+    const cancelled = f.runs().find(run => run.status === 'queued');
+    const row = [...f.tables.projectHostedCheckRuns.values()].find(r => r.runId === cancelled.id);
+    f.patch('projectHostedCheckRuns', row._id, {
+      value: JSON.stringify({ ...cancelled, executionId: '123' }),
+    });
+    await f.tx('withdrawBeforeProviderStops', landingApi.cancel, {
+      projectId: f.projectId,
+      request: JSON.stringify({ operationId: randomUUID(), authorityEpoch: 1, submissionId: first.id }),
+    });
+    await f.drain();
+    const next = await send({ ...base, operationId: randomUUID() });
+    const usage = await import(moduleUrl('../convex/projectCancelledRunUsage.ts'));
+    await f.tx('completeSupersededUsage', usage.complete, {
+      projectId: f.projectId,
+      runId: cancelled.id,
+      fence: cancelled.fence,
+      executionId: '123',
+      usage: { seconds: 210, receipt: { sha256: 'f'.repeat(64), size: 100 } },
+    });
+    await f.drain();
+    await pass(f, 300, true);
+    await f.drain();
+    const landed = states(f).find(state => state.id === next.id);
+    assert.equal(landed.phase, 'landed');
+    assert.equal(landed.counts.discardedRunnerSeconds, 210);
+    assert.equal(landed.counts.discardedRunnerUnknown, undefined);
+    const accepted = [...f.tables.projectHostedLandingRequests.values()].find(
+      r => r.submissionId === next.id,
+    );
+    assert.equal(accepted.runnerAccounting.root, first.id);
+    assert.equal(accepted.runnerAccounting.pending, 0);
+  });
+}

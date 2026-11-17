@@ -44,6 +44,7 @@ export async function reuseHostedLanding(
   retryReason?: HostedLandingState['retryReason'];
   counts?: HostedLandingState['counts'];
   supersededCheck?: SupersededCheck;
+  runnerAccounting?: import('./projectHostedLandingRunnerCosts').RunnerAccounting;
 }> {
   const identity = { projectId: input.projectId, actor: input.actor, operationId: input.request.operationId };
   const requestHash = digest(canonicalPayload(withoutAuthorship(input.request)));
@@ -115,7 +116,13 @@ export async function reuseHostedLanding(
       selectionKey,
       supersedes: state.id,
       retryReason: input.request.retryReason ?? ('other' as const),
-      ...supersededCheckCosts(state, existing.runId ?? existing.admission?.runId, existing.supersededCheck),
+      runnerAccounting: existing.runnerAccounting,
+      ...supersededCheckCosts(
+        state,
+        existing.runId ?? existing.admission?.runId,
+        existing.supersededCheck,
+        existing.runnerAccounting?.lastCancelled,
+      ),
     };
   if (!input.workCharged) await chargeMemberWork(ctx, input.project, input.actor, 'submissions');
   await ctx.db.insert('projectHostedLandingAliases', {

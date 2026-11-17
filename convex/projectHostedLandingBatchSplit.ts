@@ -271,6 +271,7 @@ export async function retryLandingBatchCheck(
   const checkOperationId = crypto.randomUUID();
   const reason = providerRetryDelay(run.failureReason);
   const next = await enqueueBatchCheck(ctx, {
+    usageSubmissions: pending.map(member => member.original.submissionId),
     ...(reason ? { providerDelayReason: reason } : {}),
     projectId: input.projectId,
     actor: shared.actor.id,

@@ -19,6 +19,7 @@ import {
   type LandingSpeedState,
 } from '../src/landing-speed-alerts';
 import { speedBudgets } from '../src/speed-budgets';
+import { discardedRunnerSeconds } from '../src/cost-budgets';
 import { scheduleStatsClose } from './projectStatsClose';
 
 /** Speed and cost budgets, judged inside the mutation that lands: one indexed read and one write of a
@@ -77,6 +78,14 @@ async function applyLandingSample(
   else await ctx.db.insert('projectLandingSpeed', { projectId, value });
   // The first landing of a later UTC day closes the previous one for Stats (a61d3c91): no read added.
   await scheduleStatsClose(ctx, projectId, previous?.samples.at(-1)?.[0], sample.at);
+  return deliverBudgetEvents(ctx, projectId, events);
+}
+
+async function deliverBudgetEvents(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  events: ReturnType<typeof observeLandingSpeed>['events'],
+) {
   if (!events.length) return events;
   const project = await ctx.db.get(projectId);
   if (!project) return events;
@@ -96,6 +105,53 @@ async function applyLandingSample(
       );
   }
   return events;
+}
+
+/** Late usage edits the existing window once, without inserting a landing or
+ * scheduling a day close. Only retained samples are adjusted; no history scan. */
+export async function correctLandingRunnerCosts(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  landings: HostedLandingState[],
+) {
+  if (!landings.some(s => s.phase === 'landed' && s.acceptance)) return;
+  const row = await ctx.db
+    .query('projectLandingSpeed')
+    .withIndex('by_project', q => q.eq('projectId', projectId))
+    .unique();
+  if (!row) return;
+  const parsed = landingSpeedStateSchema.safeParse(JSON.parse(row.value));
+  if (!parsed.success) return;
+  const state = parsed.data;
+  let changed = false;
+  for (const landing of landings) {
+    const sample = state.samples.find(s => s[3] === landing.acceptance?.receiptId);
+    if (!sample) continue;
+    sample[7] ??= [null, null, null, null, null, null];
+    sample[7][4] = discardedRunnerSeconds(landing);
+    changed = true;
+  }
+  if (!changed) return;
+  const latest = state.samples.at(-1)!;
+  const observed = observeLandingSpeed(
+    { ...state, samples: state.samples.slice(0, -1) },
+    {
+      at: latest[0],
+      toMain: latest[1],
+      check: latest[2],
+      id: latest[3],
+      settle: latest[4] ?? null,
+      attempts: latest[5],
+      writes: latest[6],
+      counts: latest[7],
+      saveMs: latest[8],
+      preflightMs: latest[9],
+      stages: { queue: null, check: null, settle: null },
+    },
+    speedBudgets,
+  );
+  await ctx.db.patch(row._id, { value: canonicalPayload(observed.state) });
+  await deliverBudgetEvents(ctx, projectId, observed.events);
 }
 
 /** Drill (run by an operator with `npx convex run`, never by the product): push one window of synthetic

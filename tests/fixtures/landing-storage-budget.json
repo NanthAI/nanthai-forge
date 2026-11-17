@@ -1,7 +1,7 @@
 {
   "fresh": {
     "immediate": {
-      "projectFinishReadRows": 6710,
+      "projectFinishReadRows": 6797,
       "legacyStorageCleanupWindows": 0,
       "legacyStorageCleanupPages": 0,
       "projectGithubMirrors": 0,
@@ -72,7 +72,7 @@
       "projectHostedCheckWorkers": 0,
       "projectHostedCheckSettings": 0,
       "projectHostedCheckSettingVersions": 0,
-      "projectHostedCheckRuns": 3698,
+      "projectHostedCheckRuns": 3772,
       "projectHostedCheckCallbacks": 1039,
       "projectHostedCheckShards": 720,
       "projectHostedMainAudits": 0,
@@ -90,7 +90,7 @@
       "projectHostedLandingAliases": 0,
       "projectHostedLandingObservations": 7474,
       "projectHostedLandingCheckWakes": 163,
-      "projectHostedLandingRequests": 2289,
+      "projectHostedLandingRequests": 2368,
       "projectHostedLandingAttempts": 3328,
       "projectLandingSpeed": 233,
       "projectHostedFinishes": 1208,
@@ -273,7 +273,7 @@
       "projectHostedCheckWorkers": 0,
       "projectHostedCheckSettings": 0,
       "projectHostedCheckSettingVersions": 0,
-      "projectHostedCheckRuns": 3698,
+      "projectHostedCheckRuns": 3772,
       "projectHostedCheckCallbacks": 0,
       "projectHostedCheckShards": 0,
       "projectHostedMainAudits": 0,
@@ -292,7 +292,7 @@
       "projectHostedLandingObservations": 0,
       "projectHostedLandingCheckWakes": 163,
       "projectHostedLandingBodies": 1013,
-      "projectHostedLandingRequests": 2289,
+      "projectHostedLandingRequests": 2368,
       "projectHostedLandingAttempts": 0,
       "projectLandingSpeed": 233,
       "projectHostedFinishes": 1208,
@@ -478,7 +478,7 @@
   },
   "dogfood": {
     "immediate": {
-      "projectFinishReadRows": 9007,
+      "projectFinishReadRows": 9094,
       "legacyStorageCleanupWindows": 0,
       "legacyStorageCleanupPages": 0,
       "projectGithubMirrors": 0,
@@ -549,7 +549,7 @@
       "projectHostedCheckWorkers": 0,
       "projectHostedCheckSettings": 0,
       "projectHostedCheckSettingVersions": 0,
-      "projectHostedCheckRuns": 573484,
+      "projectHostedCheckRuns": 573632,
       "projectHostedCheckCallbacks": 2088,
       "projectHostedCheckShards": 1448,
       "projectHostedMainAudits": 0,
@@ -567,7 +567,7 @@
       "projectHostedLandingAliases": 0,
       "projectHostedLandingObservations": 15661,
       "projectHostedLandingCheckWakes": 330,
-      "projectHostedLandingRequests": 2406,
+      "projectHostedLandingRequests": 2485,
       "projectHostedLandingAttempts": 7024,
       "projectLandingSpeed": 232,
       "projectHostedFinishes": 1210,
@@ -750,7 +750,7 @@
       "projectHostedCheckWorkers": 0,
       "projectHostedCheckSettings": 0,
       "projectHostedCheckSettingVersions": 0,
-      "projectHostedCheckRuns": 7440,
+      "projectHostedCheckRuns": 7588,
       "projectHostedCheckCallbacks": 0,
       "projectHostedCheckShards": 0,
       "projectHostedMainAudits": 0,
@@ -769,7 +769,7 @@
       "projectHostedLandingObservations": 0,
       "projectHostedLandingCheckWakes": 330,
       "projectHostedLandingBodies": 1015,
-      "projectHostedLandingRequests": 2406,
+      "projectHostedLandingRequests": 2485,
       "projectHostedLandingAttempts": 0,
       "projectLandingSpeed": 232,
       "projectHostedFinishes": 1210,
@@ -950,7 +950,7 @@
         "entries": 25206,
         "keyBytes": 1713981
       },
-      "written": 2874
+      "written": 2882
     }
   },
   "journal": {
@@ -973,23 +973,23 @@
   },
   "tenLandingIndexes": {
     "landings": 10,
-    "written": 11646,
+    "written": 11720,
     "stored": [
       {
-        "entries": 861,
-        "keyBytes": 51802
+        "entries": 862,
+        "keyBytes": 51897
       },
       {
-        "entries": 1055,
-        "keyBytes": 66770
+        "entries": 1056,
+        "keyBytes": 66865
       },
       {
-        "entries": 2143,
-        "keyBytes": 149094
+        "entries": 2147,
+        "keyBytes": 149478
       },
       {
-        "entries": 2143,
-        "keyBytes": 149094
+        "entries": 2147,
+        "keyBytes": 149478
       }
     ]
   }

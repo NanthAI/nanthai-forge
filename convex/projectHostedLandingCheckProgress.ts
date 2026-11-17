@@ -35,7 +35,7 @@ export function retainCheckProgress(state: HostedLandingState, run: HostedCheckR
       : {}),
   };
   // Shard execution seconds of the ended run, from the run row already in hand (Issue 3e3f9fe6).
-  if (run.endedAt && run.execution)
+  if (run.status !== 'cancelled' && run.endedAt && run.execution)
     state.counts = { ...state.counts, runnerSeconds: Math.round(run.execution.seconds) };
   if (run.testFiles) state.testFiles = run.testFiles;
   if (run.fallbackReason) state.ranInFull = run.fallbackReason;

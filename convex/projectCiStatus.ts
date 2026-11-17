@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cancelledUsageTarget } from './projectCancelledRunUsage';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalMutation, type MutationCtx } from './server';
@@ -264,7 +265,9 @@ export async function receiveCiStatus(
         run.ci.link = verdict.link;
         await writeHostedCheck(ctx, selected.row._id, run);
       }
-      return ciBranchCleanup(ctx, run);
+      const cleanup = await ciBranchCleanup(ctx, run);
+      const cancelledUsage = await cancelledUsageTarget(ctx, selected);
+      return cancelledUsage ? { ...(cleanup === true ? {} : cleanup), cancelledUsage } : cleanup;
     }
     return true;
   }
@@ -281,5 +284,7 @@ export async function receiveCiStatus(
     verdict.status,
     `${ciStatusEntryPaths(ci.ci)[0]} concluded ${verdict.conclusion}${verdict.link ? ` (${verdict.link})` : ''}.`,
   );
-  return ciBranchCleanup(ctx, run);
+  const cleanup = await ciBranchCleanup(ctx, run);
+  const cancelledUsage = await cancelledUsageTarget(ctx, selected);
+  return cancelledUsage ? { ...(cleanup === true ? {} : cleanup), cancelledUsage } : cleanup;
 }

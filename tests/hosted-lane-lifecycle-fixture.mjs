@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
+import { controllerMetadataFits } from './observer-projection-budget.mjs';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { saveFixture } from './hosted-saves-fixture.mjs';
@@ -29,7 +30,7 @@ export async function lifecycleFixture() {
     } finally {
       for (const c of f.counts.filter(c => c.name === name)) {
         assert(c.ranges <= 500 && c.documents <= 500, `${name}: bounded reads`);
-        assert(c.readBytes < 1024 * 1024 && c.writeBytes < 512 * 1024, `${name}: bounded metadata`);
+        assert(controllerMetadataFits(c, 1024 * 1024, 512 * 1024), `${name}: bounded metadata`);
         assert(
           !c.touched.some(t =>
             [

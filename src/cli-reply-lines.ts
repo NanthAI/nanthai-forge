@@ -114,7 +114,7 @@ export function cliReplyLines(args: string[], output: unknown): string[] {
     return rows(result.landings).map(landing => {
       const costs = row(landing.costs),
         accepted = row(landing.acceptedBy);
-      return `Landed: ${text(landing.title) || `Lane ${short(landing.laneId) || 'unknown'} (title unavailable)`} · ${when(landing.committedAt)} · State ${short(landing.landedHead)} · ${accepted.kind === 'auto' ? 'accepted automatically' : accepted.kind === 'person' ? `accepted by ${handle(accepted.actor) || 'a person'}` : 'acceptance unknown'} · ${count(costs.runnerAccepted)} accepted runner-minutes, ${count(costs.runnerDiscarded)} discarded runner-minutes.`;
+      return `Landed: ${text(landing.title) || `Lane ${short(landing.laneId) || 'unknown'} (title unavailable)`} · ${when(landing.committedAt)} · State ${short(landing.landedHead)} · ${accepted.kind === 'auto' ? 'accepted automatically' : accepted.kind === 'person' ? `accepted by ${handle(accepted.actor) || 'a person'}` : 'acceptance unknown'} · ${count(costs.runnerAccepted)} accepted runner-minutes, ${costs.runnerDiscarded == null ? 'pending' : count(costs.runnerDiscarded)} discarded runner-minutes.`;
     });
   if (action === 'lanes' || action === 'planning') {
     if (!result.item && !Array.isArray(result.page ?? result.items)) return [];

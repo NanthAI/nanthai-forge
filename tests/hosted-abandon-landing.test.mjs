@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { observerProjectionBudget } from './observer-projection-budget.mjs';
+import { cancelledUsageAllowance, observerProjectionBudget } from './observer-projection-budget.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -119,12 +119,14 @@ test('explicit cancellation stops a shared batch provider while its live request
   const f = await batchesFixture(t);
   await f.drain();
   const runId = await directRun(f);
-  const before = structuredClone(f.tables.projectHostedLandingRequests);
+  const pins = () =>
+    [...f.tables.projectHostedLandingRequests].map(([id, { runnerAccounting, ...row }]) => [id, row]);
+  const before = pins();
   const operationId = randomUUID();
   const run = await f.rawChecks.cancel(runId, 'owner', operationId);
   assert.equal(run.status, 'cancelled');
   assert.equal(providerCancels(f).length, 1);
-  assert.deepEqual(f.tables.projectHostedLandingRequests, before);
+  assert.deepEqual(pins(), before, 'cancellation retains every queue pin and state field');
   const after = structuredClone(f.tables);
   assert.deepEqual(await f.rawChecks.cancel(runId, 'owner', operationId), run);
   assert.deepEqual(f.tables, after);
@@ -163,7 +165,11 @@ test('abandon lookup reads only the selected Lane at doubled dogfood history siz
   const args = await abandon(f);
   const meter = f.counts.slice(calls).find(c => c.name === 'abandonLanding');
   const source = observerProjectionBudget(meter);
-  assert(source.documents <= 80 && source.writes <= 35);
+  const accounting = cancelledUsageAllowance(meter);
+  assert(
+    source.documents <= 80 + accounting.documents && source.writes <= 35 + accounting.writes,
+    JSON.stringify({ source, accounting }),
+  );
   assert(meter.readBytes < 128 * 1024 && meter.writeBytes < 256 * 1024);
   assert.equal(providerCancels(f).length, 1);
   const scheduled = f.pending().length;
@@ -171,6 +177,9 @@ test('abandon lookup reads only the selected Lane at doubled dogfood history siz
   assert.equal(f.pending().length, scheduled);
   t.diagnostic(
     JSON.stringify({
+      sourceDocuments: source.documents,
+      sourceWrites: source.writes,
+      cancelledRuns: meter.cancelledRuns,
       selections: 5600,
       landingHistory: 1150,
       calls: 1,
@@ -263,7 +272,8 @@ test('abandon continues all selected composition pages with bounded calls and re
       .filter(c => c.name === 'cancelContinuationPage')
       .every(c => {
         const source = observerProjectionBudget(c);
-        return source.documents <= 120 && source.writes <= 40;
+        const accounting = cancelledUsageAllowance(c);
+        return source.documents <= 120 + accounting.documents && source.writes <= 40 + accounting.writes;
       }),
   );
   t.diagnostic(JSON.stringify({ submissions: 13, continuationCalls: ticks }));

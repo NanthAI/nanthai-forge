@@ -23,7 +23,7 @@ test('terminal landing lines use retained titles, explicit units, human times an
   assert.match(line, /Fix comparison/);
   assert.match(line, /UTC · State aaaaaaaa/);
   assert.match(line, /accepted by @river/);
-  assert.match(line, /95.65 accepted runner-minutes, unknown discarded runner-minutes/);
+  assert.match(line, /95.65 accepted runner-minutes, pending discarded runner-minutes/);
   assert(!line.includes('a'.repeat(64)));
   assert.deepEqual(result, original, 'machine evidence stays intact');
   assert.match(agent('landings', { landings: [{}] })[0], /title unavailable.*time unknown/);

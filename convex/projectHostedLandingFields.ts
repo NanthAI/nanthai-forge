@@ -10,6 +10,13 @@ const supersededCheck = v.optional(
     unknownBefore: v.optional(v.literal(true)),
   }),
 );
+export const runnerAccounting = v.optional(
+  v.object({
+    root: v.string(),
+    pending: v.number(),
+    lastCancelled: v.optional(v.string()),
+  }),
+);
 const alarm = v.optional(
   v.union(
     v.object({
@@ -62,6 +69,7 @@ export const hostedLandingTables = {
     .index('by_project_and_batch', ['projectId', 'batchId'])
     .index('by_project_and_compose', ['projectId', 'composeOperationId']),
   projectHostedLandingDesired: defineTable({
+    runnerAccounting,
     supersededCheck,
     alarm,
     preparing: v.optional(v.boolean()),
@@ -81,6 +89,7 @@ export const hostedLandingTables = {
   })
     .index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId'])
     .index('by_project_and_submission', ['projectId', 'submissionId'])
+    .index('by_project_and_runner_cost_root', ['projectId', 'runnerAccounting.root'])
     .index('by_project_and_selection', ['projectId', 'selectionKey'])
     .index('by_project_and_preparing', ['projectId', 'preparing'])
     .index('by_project_and_compose', ['projectId', 'composeOperationId']),
@@ -143,6 +152,7 @@ export const hostedLandingTables = {
   // S3: cold immutable request and batch selection; owned and deleted through its ticket.
   projectHostedLandingBodies: defineTable({ value: v.string() }),
   projectHostedLandingRequests: defineTable({
+    runnerAccounting,
     supersededCheck,
     requestBodyId: v.optional(v.id('projectHostedLandingBodies')),
     selectionBodyId: v.optional(v.id('projectHostedLandingBodies')),
@@ -271,6 +281,7 @@ export const hostedLandingTables = {
     // index-order: caller: convex/projectSelfMetrics.ts#page; order: metrics bound _creationTime for submission windows.
     .index('by_project', ['projectId'])
     .index('by_project_and_submission', ['projectId', 'submissionId'])
+    .index('by_project_and_runner_cost_root', ['projectId', 'runnerAccounting.root'])
     .index('by_project_and_channel_and_orderLive_and_sequence', [
       'projectId',
       'channel',

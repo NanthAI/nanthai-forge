@@ -62,7 +62,7 @@ async function prepareLandingCheckOnce(
     const key = { projectId: claim.projectId, batchId: state.batchId };
     const { batch } = await loadBatch(ctx, key);
     if (batch.phase === 'checking' && batch.runId) {
-      const { run } = await loadHostedCheck(ctx, {
+      const { row: runRow, run } = await loadHostedCheck(ctx, {
         projectId: claim.projectId,
         runId: batch.runId,
       });
@@ -88,7 +88,14 @@ async function prepareLandingCheckOnce(
         const included = batch.members.filter(
           member => !batch.included || batch.included.includes(member.submissionId),
         );
-        const runSeconds = run.endedAt && run.execution ? run.execution.seconds : undefined;
+        // Keep main's per-member transition. Only attributed cancellations defer
+        // provider minutes to the late correction; other runs keep main's counts.
+        const runSeconds =
+          run.status === 'cancelled' && runRow.cancelledUsage
+            ? 0
+            : run.endedAt && run.execution
+              ? run.execution.seconds
+              : undefined;
         if (outcome !== 'passed')
           for (const member of included) {
             const { row, state: current } = await loadLanding(ctx, {
@@ -258,6 +265,7 @@ async function prepareLandingCheckOnce(
   const { kind: _kind, ...settings } = selection;
   void _kind;
   const run = await enqueueHostedCheck(ctx, {
+    usageSubmissions: [state.id],
     projectId: claim.projectId,
     actor: attempt.actor.id,
     ...(attempt.recheck ? { recheck: attempt.recheck } : {}),

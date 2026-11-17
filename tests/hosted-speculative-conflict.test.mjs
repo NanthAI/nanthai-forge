@@ -8,7 +8,11 @@ import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixt
 import { landingApi } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { queuedConflict } from '../dist/hosted-agent-finish.js';
-import { landingBodyCounts, observerProjectionBudget } from './observer-projection-budget.mjs';
+import {
+  cancelledUsageAllowance,
+  landingBodyCounts,
+  observerProjectionBudget,
+} from './observer-projection-budget.mjs';
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 const conflictStore = await import(moduleUrl('../convex/projectHostedLandingBatchConflict.ts'));
 const sync = await import(moduleUrl('../convex/projectHostedSync.ts'));
@@ -291,13 +295,31 @@ for (const count of [10, 50])
         writes: counts.reduce((sum, count) => sum + count.writes, 0),
         maxReads: Math.max(...counts.map(count => count.documents)),
         maxWrites: Math.max(...counts.map(count => count.writes)),
+        cancelled: counts
+          .filter(count => count.cancelledRuns.length)
+          .map(({ name, documents, writes, readBytes, writeBytes, cancelledRuns }) => ({
+            name,
+            documents,
+            writes,
+            readBytes,
+            writeBytes,
+            cancelledRuns,
+          })),
         wallMs: performance.now() - start,
         peakRssBytes: process.resourceUsage().maxRSS * 1024,
       };
     assert(cost.calls / count < 100, JSON.stringify(cost));
     const source = counts.map(observerProjectionBudget);
-    assert(Math.max(...source.map(count => count.documents)) < 320, JSON.stringify(cost));
-    assert(Math.max(...source.map(count => count.writes)) < 160, JSON.stringify(cost));
+    cost.sourceDocuments = Math.max(...source.map(count => count.documents));
+    cost.sourceWrites = Math.max(...source.map(count => count.writes));
+    assert(
+      source.every((item, index) => item.documents < 320 + cancelledUsageAllowance(counts[index]).documents),
+      JSON.stringify(cost),
+    );
+    assert(
+      source.every((item, index) => item.writes < 160 + cancelledUsageAllowance(counts[index]).writes),
+      JSON.stringify(cost),
+    );
     const idle = f.counts.length;
     assert.equal(await drainActive(f), 0);
     assert.equal(f.counts.length, idle);
