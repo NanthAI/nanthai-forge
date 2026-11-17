@@ -59,6 +59,7 @@ export function BulkBar({
   rows,
   loaded,
   initiatives,
+  parents,
   owners,
   viewer,
   run,
@@ -71,6 +72,8 @@ export function BulkBar({
   /** How many matching rows are loaded: "select all" names this count and stops at the batch limit. */
   loaded: number;
   initiatives: readonly PlanRow[];
+  /** Top-level open Items, which can take sub-items without making a loop. */
+  parents: readonly PlanRow[];
   owners: readonly string[];
   viewer: string | undefined;
   run: RunBatch;
@@ -125,6 +128,15 @@ export function BulkBar({
       });
     return go(writes.slice(0, planningBatchLimit));
   };
+  // Re-parent within one Initiative only: the sub-item stays where its parent is.
+  const shared = new Set(rows.map(row => row.initiativeId ?? null));
+  const picked = new Set(rows.map(row => row.id));
+  const under =
+    shared.size === 1
+      ? parents
+          .filter(row => !picked.has(row.id) && (row.initiativeId ?? null) === [...shared][0])
+          .slice(0, 30)
+      : [];
   const mine = viewer ? `@${viewer.replace(/^@/, '')}` : undefined;
   const people = [...new Set([...(mine ? [mine] : []), ...owners])].slice(0, 12);
   const n = rows.length;
@@ -141,6 +153,18 @@ export function BulkBar({
           })),
           'separator' as const,
           { id: 'none', label: 'No Initiative', onAction: () => void move(null) },
+        ]}
+      />
+      <Menu
+        label="Put under…"
+        items={[
+          ...under.map(parent => ({
+            id: parent.id,
+            label: parent.title,
+            onAction: () => void change({ parentId: parent.id }),
+          })),
+          ...(under.length ? ['separator' as const] : []),
+          { id: 'none', label: 'Top level (no parent)', onAction: () => void change({ parentId: null }) },
         ]}
       />
       <Menu

@@ -182,6 +182,22 @@ test('plan views and bulk bar: real components keep the view in the address and 
     assert.equal(await page.evaluate(() => window.calls.length), 2, 'Undo is one more call');
     // The refused row stays ticked so it can be tried again.
     assert.match(await bar.textContent(), /1 selected/);
+    // Re-parent: only top-level Items of the same Initiative are offered, so no loop can be made.
+    await bar.getByRole('button', { name: 'Clear the selection' }).click();
+    await page.getByRole('checkbox', { name: 'Select Name every error the parser can return' }).check();
+    await page
+      .getByRole('region', { name: 'Change the selected Items' })
+      .getByRole('button', { name: 'Put under…' })
+      .click();
+    assert.equal(await page.getByRole('menuitem', { name: 'Write the recovery guide' }).count(), 0);
+    await page.getByRole('menuitem', { name: 'Stream parser: preserve split bytes across reads' }).click();
+    await page.locator('.toasts').waitFor();
+    assert.deepEqual(
+      await page.evaluate(() =>
+        window.calls.at(-1).map(write => [write.itemId.slice(-2), write.parentId.slice(-2)]),
+      ),
+      [['13', '10']],
+    );
     await page.getByRole('button', { name: 'Board', exact: true }).click();
     assert.match(page.url(), /view=board/);
     assert.equal(await page.locator('.plan-col').count(), 3, 'open scope: Proposed, Planned, In progress');

@@ -469,6 +469,7 @@ export function PlanScreenView({
               rows={selected}
               loaded={loadedIds.length}
               initiatives={initiatives}
+              parents={liveItems.filter(row => !row.parentId || !byId.has(row.parentId))}
               owners={owners}
               viewer={viewer}
               run={run}
