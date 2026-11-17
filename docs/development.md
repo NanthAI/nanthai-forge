@@ -687,8 +687,16 @@ layer out of both first paints.
   indexes, so no body is loaded and closed history outside live Initiatives is
   never read. Moves write one `order` between the new neighbours and New Item
   writes a Planned Item, both through `projectWorkCommand:command` (owner only).
-  The Item page shows the plan's own row and links to the current Item screen
-  for the body and comments. Idle costs nothing.
+  The Item page shows the plan's own row, compares and restores versions (the
+  versions sheet reads `planningVersions` pages only while open) and links to
+  the current Item screen for the body and comments. The view (scope, type,
+  owner, Initiative, relation, order, list / tree / board, find) lives in the
+  address; saved views are names for those addresses kept on one browser. The
+  Closed and Everything scopes add `projectPlanSettled:page`, one page of 50
+  done or dropped root rows each, subscribed only while that scope is shown.
+  Ticked rows change together through `projectPlanningBatch:apply` with one
+  Undo; a merge or split reads the full Items and comments once, at that
+  moment. Idle costs nothing.
 
 Billing at `/-/account/billing` lazily loads `web/src/billing/Home.tsx`, replacing
 its placeholder; `screen=plan|invoices|payment|limit` lazily loads each [billing screen](billing.md#billing-screens).

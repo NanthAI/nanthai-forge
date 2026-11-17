@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* Plan only (loaded with its route): the ordered Item rows, the Initiative roll-up beside its band, the next line and
-   the capture form. Every value is a token; rows, bands, roll, shards, nextmark and flags are the design system's. */
+/* Plan only (loaded with its route): the views column, the ordered Item rows, the Initiative roll-up beside its band,
+   the bulk bar, the board, the next line and the capture form. Every value is a token; rows, bands, roll, shards, nextmark and flags are the design system's. */
 [data-ds] {
   .plan .ph .find { flex: 0 1 280px; min-width: 0; }
   .plan .rk { color: var(--text-3); font: var(--w-medium) var(--t-meta)/1 var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
@@ -17,7 +17,37 @@
   .plan-capture label { display: grid; gap: var(--s-1); font-size: var(--t-small); color: var(--text-2); }
   .plan-capture textarea { resize: vertical; min-height: 4.5em; }
   .plan-similar { display: grid; gap: 2px; font-size: var(--t-meta); padding: var(--s-2); border: var(--rule) solid var(--line); border-radius: var(--r); }
+  /* Views column, toolbar, bulk bar and board (Items e0a23825, 65b0e706). */
+  .plan .plan-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 0 var(--s-4); align-items: start; }
+  .plan .plan-views { position: sticky; top: var(--s-2); display: grid; align-content: start; }
+  .plan .plan-views-h { padding: var(--s-3) var(--gut) var(--s-1); color: var(--text-3); font-size: var(--t-meta); }
+  .plan .plan-save { justify-self: start; margin: var(--s-2) var(--gut); }
+  .plan .plan-picker { display: none; }
+  .plan .plan-tbar { padding: var(--s-2) var(--gut); }
+  .plan .plan-bulk .plan-why { flex: 1 1 160px; min-width: 120px; max-width: 280px; }
+  .plan .plan-bulk .plan-why .inp { width: 100%; height: 28px; }
+  .plan .plan-fold { margin: 0 var(--gut) var(--s-1); }
+  .plan-pick { display: grid; gap: var(--s-2); border: 0; margin: 0; padding: 0; }
+  .plan-pick legend { padding: 0; margin-bottom: var(--s-1); color: var(--text-2); font-size: var(--t-small); }
+  .plan-pick > label { display: flex; gap: var(--s-2); align-items: baseline; color: var(--text); }
+  .plan-pick .plan-split-line { display: grid; grid-template-columns: minmax(0, 1fr) minmax(8em, 14em); gap: var(--s-2); align-items: center; }
+  .plan-saved { display: flex; flex-wrap: wrap; gap: var(--s-1); }
+  .plan .plan-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(168px, 1fr); gap: var(--s-3); padding: var(--s-2) var(--gut); overflow-x: auto; }
+  .plan .plan-col { display: grid; gap: var(--s-2); align-content: start; min-width: 0; }
+  .plan .plan-col-h { margin: 0; font-size: var(--t-small); font-weight: var(--w-strong); display: flex; gap: var(--s-2); align-items: baseline; }
+  .plan .plan-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-1) var(--s-2); padding: var(--s-2); border: var(--rule) solid var(--line); border-radius: var(--r); background: var(--surface-2); font-size: var(--t-small); }
+  .plan .plan-card > :not(.ckhit) { grid-column: 2; }
+  .plan .plan-card .ttl { font-weight: var(--w-strong); overflow-wrap: anywhere; color: var(--text); }
+  .plan-pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2); }
+  .plan-diff { margin: 0; max-height: 50vh; overflow: auto; padding: var(--s-2); border: var(--rule) solid var(--line); border-radius: var(--r); font: var(--t-meta)/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .plan-diff .old { color: var(--text-2); background: var(--del-bg); }
+  .plan-diff .new { color: var(--text); background: var(--add-bg); }
   @media (max-width: 860px) {
+    .plan .plan-body { grid-template-columns: minmax(0, 1fr); }
+    .plan .plan-views { display: none; }
+    .plan .plan-picker { display: block; padding: 0 var(--gut) var(--s-2); }
+    .plan .plan-board { grid-auto-flow: row; grid-auto-columns: auto; overflow-x: visible; }
+    .plan .plan-bulk .plan-why { flex-basis: 100%; max-width: none; }
     .plan .plan-wide { display: none; }
     .plan .ph { flex-wrap: wrap; }
     .plan .ph .tools { flex-basis: 100%; display: flex; }

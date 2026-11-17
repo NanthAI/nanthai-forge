@@ -32,6 +32,7 @@ const allowed = {
   projectHostedSeed: ['begin'],
   projectLifecycle: ['rename'],
   projectNeedsMe: ['read'], // Read-only: says whether the viewer may decide; decide keeps its own person gate.
+  projectPlanSettled: ['page'], // Read-only done and dropped plan rows, one bounded page; no write.
   projectPlanView: ['read'], // Read-only plan rows; moves and new Items go through projectWorkCommand's owner gate.
   projectProposals: ['remove'],
   publicDiscovery: ['stargazers', 'settings'], // Owner-only read-only metadata: who starred, the Lane-title opt-in.

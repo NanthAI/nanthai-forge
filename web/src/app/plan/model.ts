@@ -61,11 +61,13 @@ export function matches(row: Pick<PlanRow, 'title' | 'id'>, find: string) {
   return words.every(word => hay.includes(word));
 }
 
-/** `orders` holds moves made here that the read has not caught up with yet. */
+/** `orders` holds moves made here that the read has not caught up with yet; `keep` is the view's filter (type,
+ * owner, relation, Initiative), applied to the listed lines only, so every count stays the whole plan's. */
 export function planView(
   read: PlanRead,
   find = '',
   orders: ReadonlyMap<string, string> = new Map(),
+  keep?: (row: PlanRow) => boolean,
 ): PlanView {
   const all = parseRows(read).map(row => (orders.has(row.id) ? { ...row, order: orders.get(row.id)! } : row));
   const byId = new Map(all.map(row => [row.id, row]));
@@ -87,7 +89,7 @@ export function planView(
     rows.forEach(({ row, depth }) => {
       // Sub-items share their parent's place; only top-level Items are numbered.
       if (!depth) top++;
-      if (find && !matches(row, find)) return;
+      if ((find && !matches(row, find)) || (keep && !keep(row))) return;
       const blocker = row.relations?.find(
         relation => relation.kind === 'depends-on' && relation.id !== row.id && open.has(relation.id),
       );
