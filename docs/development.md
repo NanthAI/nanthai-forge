@@ -730,7 +730,15 @@ layer out of both first paints.
   done or dropped root rows each, subscribed only while that scope is shown.
   Ticked rows change together through `projectPlanningBatch:apply` with one
   Undo; a merge or split reads the full Items and comments once, at that
-  moment. Idle costs nothing.
+  moment. Each Initiative group folds to its header and stays as the viewer
+  left it (this browser only, no server write); Collapse all turns the list
+  into the Initiatives overview, whose rows are dragged or moved by keyboard
+  into hand order with the same one `order` write as an Item. A group's name
+  opens the Initiative page (`plan/<Initiative id>`): its open Items in hand
+  order, its counted progress, its About text read once per version, an edit
+  of name, About and status, and its done and dropped Items through
+  `projectPlanSettled:page` with `initiativeId`, subscribed only while that
+  fold is open. There is no separate Initiatives tab. Idle costs nothing.
 
 Billing at `/-/account/billing` lazily loads `web/src/billing/Home.tsx`, replacing
 its placeholder; `screen=plan|invoices|payment|limit` lazily loads each [billing screen](billing.md#billing-screens).

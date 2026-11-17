@@ -175,6 +175,35 @@ export function movedRank(lines: readonly PlanLine[], ids: readonly string[], mo
   return rankBetween(rank(before), rank(after));
 }
 
+/** The rank a moved Initiative takes: strictly between its new neighbours among the Initiatives shown, the same one
+ * write as an Item move (docs/planning.md, Hand order). `ids` is the Initiatives' order after the move. */
+export function movedInitiativeRank(
+  initiatives: readonly PlanRow[],
+  ids: readonly string[],
+  movedId: string,
+) {
+  const byId = new Map(initiatives.map(row => [row.id, row]));
+  const at = ids.indexOf(movedId);
+  if (at < 0 || !byId.has(movedId)) return null;
+  const rank = (id: string | undefined) => (id && byId.has(id) ? effectiveRank(byId.get(id)!) : undefined);
+  return rankBetween(rank(ids[at - 1]), rank(ids[at + 1]));
+}
+
+/** An Initiative's own progress line: done of all, then what is moving and what is left. */
+export function initiativeWords(
+  group: Pick<PlanGroup, 'done' | 'total' | 'inProgress' | 'live' | 'dropped' | 'atLeast'>,
+) {
+  const notStarted = group.live - group.inProgress;
+  return [
+    `${group.done.toLocaleString()}${group.atLeast ? '+' : ''} of ${group.total.toLocaleString()} done`,
+    group.inProgress ? `${group.inProgress.toLocaleString()} in progress` : '',
+    notStarted ? `${notStarted.toLocaleString()} not started` : '',
+    group.dropped ? `${group.dropped.toLocaleString()} dropped` : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
 /** Done-when lines written in capture become the body's task lines (docs/planning.md, Status). */
 export function captureBody(doneWhen: string) {
   const lines = doneWhen

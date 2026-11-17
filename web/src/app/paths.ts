@@ -16,7 +16,7 @@ export type AccountPlace = (typeof accountPlaces)[number];
 export const placeSections: Record<ProjectPlace, readonly string[]> = {
   needs: ['', 'held', 'loose-ends'],
   lanes: ['', 'to-read', 'touching', 'sessions'],
-  plan: ['', 'initiatives'],
+  plan: [''],
   code: ['', 'files'],
   stats: [''],
   settings: ['', 'checks', 'mirror', 'secrets', 'project', 'you'],

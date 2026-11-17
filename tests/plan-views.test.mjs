@@ -154,6 +154,28 @@ test('done and dropped Items come one bounded page at a time from root rows', as
   const dropped = await settled.settledPage(s.ctx, s.projectId, 'abandoned', { cursor: null, numItems: 50 });
   assert.equal(dropped.page.length, 1);
 
+  // An Initiative page (Item 4df3ee17) reads only its own done Items, by the Initiative index: 70 others cost nothing.
+  const initiativeId = randomUUID();
+  const own = [await add({ initiativeId }), await add({ initiativeId })];
+  await add({ initiativeId, status: 'abandoned' });
+  let mine;
+  const narrow = await meter.cost(async () => {
+    mine = await settled.settledPage(
+      s.ctx,
+      s.projectId,
+      'closed',
+      { cursor: null, numItems: 50 },
+      initiativeId,
+    );
+  });
+  assert.deepEqual(mine.page.map(value => JSON.parse(value).id).sort(), own.map(row => row.id).sort());
+  assert.equal(mine.isDone, true);
+  assert.ok(narrow.documents <= own.length + 8, JSON.stringify(narrow));
+  await assert.rejects(
+    settled.settledPage(s.ctx, s.projectId, 'closed', { cursor: null, numItems: 50 }, 'x'.repeat(65)),
+    /BAD_ARGUMENT|at most 64/,
+  );
+
   s.caller('stranger');
   await assert.rejects(settled.settledPage(s.ctx, s.projectId, 'closed', { cursor: null, numItems: 50 }));
 });

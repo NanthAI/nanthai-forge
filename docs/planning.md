@@ -39,6 +39,8 @@ The list has one hand order. An Item that was never moved has no stored `order` 
 A move stores `order`, a rank strictly between the two neighbours' ranks (`rankBetween`); nobody else is rewritten.
 An Item moved to the end (`rankAtEnd`) still sorts before Items created later. The plan order is: Initiatives by
 their own rank, then No Initiative; within each group, Items by rank, each followed by its sub-items (`planOrder`).
+Initiatives move the same way: a moved Initiative stores one `order` between its neighbours among the Initiatives
+shown (the web Plan's group headers and the Initiatives overview).
 
 ## Next
 

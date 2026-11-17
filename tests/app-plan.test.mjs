@@ -13,9 +13,12 @@ import { moduleUrl } from './convex-module.mjs';
 
 const read = await import(moduleUrl('../convex/projectPlanView.ts'));
 const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
-const { planView, planSentence, movedRank, captureBody, matches } = await import(
-  moduleUrl('../web/src/app/plan/model.ts')
+const { planView, planSentence, movedRank, movedInitiativeRank, initiativeWords, captureBody, matches } =
+  await import(moduleUrl('../web/src/app/plan/model.ts'));
+const { isShut, toggled, allFolds, readFolds, FOLD_FLIPS } = await import(
+  moduleUrl('../web/src/app/plan/fold.ts')
 );
+const { bandRollWidth, rollTicks, BAND_TICKS } = await import(moduleUrl('../web/src/app/plan/rows.tsx'));
 const { encodePlanPage, planParent, planPageKey, PLAN_ROWS } = await import(
   moduleUrl('../convex/projectPlanRows.ts')
 );
@@ -177,4 +180,55 @@ test('a move takes one rank strictly between its new sibling neighbours', () => 
 test('capture writes done-when lines as the body task lines', () => {
   assert.equal(captureBody(''), '');
   assert.equal(captureBody('runs clean\n- [ ] linked\n\n'), 'Done when:\n- [ ] runs clean\n- [ ] linked\n');
+});
+
+test('an Initiative move takes one rank strictly between its new Initiative neighbours (Item 4df3ee17)', () => {
+  const initiative = (id, position, order) => ({
+    id,
+    kind: 'initiative',
+    title: id,
+    status: 'open',
+    position,
+    order,
+  });
+  const rows = [initiative('a', 1), initiative('b', 5, null), initiative('c', 9)];
+  const between = movedInitiativeRank(rows, ['a', 'c', 'b'], 'c');
+  assert(between > effectiveRank(rows[0]) && between < effectiveRank(rows[1]));
+  assert(movedInitiativeRank(rows, ['c', 'a', 'b'], 'c') < legacyRank(1), 'to the top');
+  const last = movedInitiativeRank(rows, ['b', 'c', 'a'], 'a');
+  assert(last > legacyRank(9) && last < legacyRank(10), 'to the end, still before Initiatives created later');
+  assert.equal(movedInitiativeRank(rows, ['a', 'b'], 'missing'), null);
+});
+
+test('group folds: per project on this browser, Collapse all folds later Initiatives too (decision afcb5bc3)', () => {
+  let folds = readFolds(null);
+  assert.equal(isShut(folds, 'a'), false, 'everything opens by default');
+  folds = toggled(folds, 'a');
+  assert.equal(isShut(folds, 'a'), true);
+  folds = allFolds('shut');
+  assert.equal(isShut(folds, 'a') && isShut(folds, 'created-later'), true);
+  folds = toggled(folds, 'b');
+  assert.equal(isShut(folds, 'b'), false, 'one group opened from the overview');
+  assert.deepEqual(readFolds(JSON.stringify(folds)), folds, 'kept as written');
+  assert.deepEqual(
+    readFolds('{"base":"sideways"}'),
+    { base: 'open', flip: [] },
+    'an unreadable entry folds nothing',
+  );
+  let many = allFolds('open');
+  for (let i = 0; i < FOLD_FLIPS + 5; i++) many = toggled(many, `g${i}`);
+  assert.equal(many.flip.length, FOLD_FLIPS, 'a bounded entry');
+});
+
+test('a band roll is always wide enough for its ticks, so it never draws over its words (f49e3a5c)', () => {
+  for (const total of [0, 1, 3, 9, 24, 77, 131, 1284]) {
+    const ticks = rollTicks(total, BAND_TICKS);
+    // Each tick has a 2 px floor and a 2 px gap (web/src/ds/core.css .roll).
+    assert.ok(bandRollWidth(ticks) >= ticks * 4 - 2, `${total} Items`);
+    assert.ok(bandRollWidth(ticks) <= 120);
+  }
+  assert.equal(
+    initiativeWords({ done: 123, total: 131, inProgress: 1, live: 1, dropped: 7, atLeast: false }),
+    '123 of 131 done, 1 in progress, 7 dropped',
+  );
 });

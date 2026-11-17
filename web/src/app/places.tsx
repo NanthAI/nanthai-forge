@@ -24,7 +24,7 @@ export const accountTabLabels: Partial<Record<AccountPlace, string>> = { people:
 export const sectionLabels: Record<ProjectPlace, Record<string, string>> = {
   needs: { '': 'Needs me', held: 'Held, redone or refused', 'loose-ends': 'Loose ends' },
   lanes: { '': 'Lanes', 'to-read': 'To read', touching: 'Who is touching what', sessions: 'Sessions' },
-  plan: { '': 'Backlog', initiatives: 'Initiatives' },
+  plan: { '': 'Backlog' },
   code: { '': 'What landed', files: 'Files' },
   stats: { '': 'Stats' },
   settings: {

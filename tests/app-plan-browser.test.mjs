@@ -2,7 +2,10 @@
 // The Plan screen's views and bulk bar (Items e0a23825, 65b0e706) as real components with synthetic rows: the view
 // lives in the address, list / tree / board show the same rows, only ticked rows change, a batch reply names a row
 // changed meanwhile and offers one Undo, and every state passes axe with no sideways scroll at desk and phone width in
-// both themes. Set FORGE_PLAN_SHOTS to a folder to also save the screenshots.
+// both themes. Initiative groups (Item 4df3ee17) fold and stay folded on reload, Collapse all gives the Initiatives
+// overview, an Initiative moves with one order write, a group header's roll never draws over its "N of M done" words
+// (f49e3a5c, 3-digit counts at 1440, 1024 and 390), and the Initiative page edits its title and asks for its done
+// Items. Set FORGE_PLAN_SHOTS to a folder to also save the screenshots.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
@@ -27,12 +30,15 @@ import { ProjectFrame } from ${JSON.stringify(join(root, 'web/src/app/frames.tsx
 import { navigate, useSearch } from ${JSON.stringify(join(root, 'web/src/app/router.ts'))};
 import { batchUndo } from ${JSON.stringify(join(root, 'src/planning-batch.ts'))};
 import ${JSON.stringify(join(root, 'web/src/app/app.css'))};
-const route = { frame: 'project', handle: 'example-builder', project: 'synthetic', place: 'plan', section: '', rest: '' };
+const rest = decodeURIComponent(location.pathname.split('/plan/')[1] ?? '');
+const route = { frame: 'project', handle: 'example-builder', project: 'synthetic', place: 'plan', section: '', rest };
 const uuid = n => '00000000-0000-4000-8000-' + String(n).padStart(12, '0');
 const launch = { id: uuid(1), kind: 'initiative', title: 'Launch the parser', status: 'open', position: 0, version: 3 };
 const docs = { id: uuid(2), kind: 'initiative', title: 'Documentation and recovery paths', status: 'open', position: 1, version: 1 };
+const big = { id: uuid(3), kind: 'initiative', title: 'A long running release with a name that will not fit on a phone line', status: 'open', position: 2, version: 1 };
 const item = (n, fields) => ({ id: uuid(n), kind: 'issue', status: 'open', position: n, version: 2, doneWhen: [1, 3], ...fields });
-const rows = [launch, docs,
+const rows = [launch, docs, big,
+  item(17, { title: 'Last open step of the long release', initiativeId: big.id, status: 'in-progress', order: 'a' }),
   item(10, { title: 'Stream parser: preserve split bytes across reads', initiativeId: launch.id, owner: '@example-builder', type: 'bug', order: 'a' }),
   item(11, { title: 'Recover from a truncated frame without losing the next one', initiativeId: launch.id, status: 'in-progress', owner: '@example-builder/amber-fox', order: 'b' }),
   item(12, { title: 'Bench the parser against the old reader', initiativeId: launch.id, parentId: uuid(10), order: 'c', doneWhen: null }),
@@ -41,7 +47,7 @@ const rows = [launch, docs,
   item(15, { title: 'Examples for every reader option, including the rarely used ones', initiativeId: docs.id, order: 'b', doneWhen: [0, 12] }),
   item(16, { title: 'Tidy the old notes', order: 'a', doneWhen: [2, 2] }),
 ];
-const read = { rows: JSON.stringify(rows), more: false, settled: [{ initiativeId: launch.id, done: 4, dropped: 1, atLeast: false }, { initiativeId: docs.id, done: 0, dropped: 0, atLeast: false }], canEdit: true };
+const read = { rows: JSON.stringify(rows), more: false, settled: [{ initiativeId: launch.id, done: 4, dropped: 1, atLeast: false }, { initiativeId: docs.id, done: 0, dropped: 0, atLeast: false }, { initiativeId: big.id, done: 123, dropped: 7, atLeast: false }], canEdit: true };
 const settledRows = [item(20, { title: 'Old reader removed', status: 'closed', initiativeId: launch.id }), item(21, { title: 'Ship a second parser', status: 'abandoned' })];
 const settled = { rows: settledRows, more: false, loading: false, failed: false, loadMore() {} };
 window.calls = [];
@@ -52,7 +58,13 @@ const run = async writes => {
     : { index, itemId: write.itemId, action: write.action, outcome: 'applied', version: (write.expectedVersion || 0) + 1, before: { owner: null, status: 'open', type: null, initiativeId: null } });
   return { results, ...batchUndo(writes, results) };
 };
-const reads = { items: async () => [], comments: async () => ({ comments: [], more: [] }) };
+window.puts = [];
+window.doneFor = [];
+const put = async command => { window.puts.push(command); };
+const reads = {
+  items: async ids => ids.map(id => (id === launch.id ? { ...launch, body: 'Everything that must land before the parser ships.' } : { id, version: 1, kind: 'issue', title: id, body: '' })),
+  comments: async () => ({ comments: [], more: [] }),
+};
 function Fixture() {
   const search = useSearch();
   const query = readQuery(search);
@@ -60,8 +72,8 @@ function Fixture() {
   return <ProjectFrame route={route} name="Synthetic project" feed={undefined} projects={null}
     controls={{ viewerHandle: 'example-builder', onPicker() {}, onPalette() {}, onKeys() {} }}>
     <React.Suspense fallback={<h1>Loading</h1>}><PlanScreenView route={route} projectId="synthetic" projectName="Synthetic project" feed={undefined} read={read}
-      put={async () => undefined} run={run} reads={reads} query={query} go={go} viewer="example-builder"
-      closed={query.scope === 'open' ? undefined : settled} /></React.Suspense>
+      put={put} run={run} reads={reads} query={query} go={go} viewer="example-builder"
+      closed={query.scope === 'open' && !rest ? undefined : settled} showDone={id => window.doneFor.push(id)} /></React.Suspense>
   </ProjectFrame>;
 }
 createRoot(document.getElementById('root')).render(<Fixture />);
@@ -207,6 +219,144 @@ test('plan views and bulk bar: real components keep the view in the address and 
     assert.deepEqual(errors, []);
     await context.close();
   }
+
+  const launchId = '00000000-0000-4000-8000-000000000001';
+  const docsId = '00000000-0000-4000-8000-000000000002';
+  /** Every group header's roll and its words, as boxes; the roll's ticks must fit inside it. */
+  const headers = page =>
+    page.locator('.plan-gh').evaluateAll(heads =>
+      heads.flatMap(head => {
+        const roll = head.querySelector('.roll');
+        const words = head.querySelector('.plan-pl');
+        if (!roll || !words) return [];
+        const a = roll.getBoundingClientRect(),
+          b = words.getBoundingClientRect();
+        const ticks = [...roll.children].map(tick => tick.getBoundingClientRect());
+        return [
+          {
+            words: words.textContent,
+            meet: a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom,
+            spill: ticks.some(tick => tick.right > a.right + 0.5 || tick.left < a.left - 0.5),
+          },
+        ];
+      }),
+    );
+
+  // f49e3a5c: a header's roll and its "N of M done" never meet, at 3-digit counts too, at three widths, both themes.
+  for (const width of [1440, 1024, 390])
+    for (const theme of ['dark', 'light'])
+      await t.test(`group header ${width} ${theme}: the roll never draws over its words`, async () => {
+        const { page, errors, context } = await open(width, theme);
+        const boxes = await headers(page);
+        assert.ok(
+          boxes.some(box => /123 of 131 done, 7 dropped/.test(box.words)),
+          '3-digit counts are drawn',
+        );
+        for (const box of boxes) assert.deepEqual({ ...box, meet: false, spill: false }, box, box.words);
+        if (shots && width === 1024)
+          await page.screenshot({ path: join(shots, `plan-headers-${width}-${theme}.png`), fullPage: true });
+        assert.deepEqual(errors, []);
+        await context.close();
+      });
+
+  // Folds: per viewer on this browser, kept on reload; Collapse all is the Initiatives overview; moves are one write.
+  {
+    const { page, errors, context } = await open(1440, 'dark');
+    const main = page.locator('main');
+    await page.getByRole('button', { name: 'Items of Launch the parser' }).click();
+    assert.equal(
+      await page.getByRole('button', { name: 'Items of Launch the parser' }).getAttribute('aria-expanded'),
+      'false',
+    );
+    assert.doesNotMatch(await main.textContent(), /Stream parser/);
+    await page.reload();
+    await page.locator('.plan .ph').first().waitFor();
+    assert.doesNotMatch(await main.textContent(), /Stream parser/, 'the fold is remembered');
+    assert.match(await main.textContent(), /Write the recovery guide/);
+    // Moving an open Initiative's header: one put with only an order, before the Initiative above it.
+    await page.getByRole('button', { name: 'Move Documentation and recovery paths' }).click();
+    await page.getByRole('menuitem', { name: 'To the top' }).click();
+    await page.waitForFunction(() => window.puts.length === 1);
+    const [moved] = await page.evaluate(() => window.puts);
+    assert.deepEqual(Object.keys(moved).sort(), ['expectedVersion', 'itemId', 'order']);
+    assert.equal(moved.itemId, docsId);
+    assert.ok(moved.order < 'L000000V', 'ranks before Launch the parser, which was never moved');
+    await page.getByRole('button', { name: 'Collapse all' }).click();
+    assert.equal(await page.getByRole('grid', { name: 'Initiatives, in order' }).count(), 1, 'the overview');
+    assert.doesNotMatch(await main.textContent(), /Write the recovery guide/);
+    assert.equal(await page.getByRole('button', { name: 'Collapse all' }).isDisabled(), true);
+    if (shots) await page.screenshot({ path: join(shots, 'plan-overview-1440-dark.png'), fullPage: true });
+    await page.getByRole('button', { name: 'Expand all' }).click();
+    assert.match(await main.textContent(), /Stream parser/);
+    assert.match(await main.textContent(), /Write the recovery guide/);
+    assert.deepEqual(errors, []);
+    await context.close();
+  }
+  for (const width of [1440, 390])
+    for (const theme of ['dark', 'light'])
+      await t.test(`overview ${width} ${theme}: no clipping or axe violations`, async () => {
+        const { page, errors, context } = await open(width, theme);
+        await page.getByRole('button', { name: 'Collapse all' }).click();
+        await page.getByRole('grid', { name: 'Initiatives, in order' }).waitFor();
+        if (width === 390) {
+          // Phones move a row through its handle's menu.
+          await page.locator('.ds-move[aria-label="Move Documentation and recovery paths"]').click();
+          await page.getByRole('menuitem', { name: 'Down one' }).click();
+          await page.waitForFunction(() => window.puts.length === 1);
+          assert.equal((await page.evaluate(() => window.puts[0])).itemId, docsId);
+        }
+        await check(page, `overview ${width} ${theme}`);
+        if (shots)
+          await page.screenshot({ path: join(shots, `plan-overview-${width}-${theme}.png`), fullPage: true });
+        assert.deepEqual(errors, []);
+        await context.close();
+      });
+
+  // The Initiative page: its open Items, progress and About; an edit writes only what changed; done Items on request.
+  {
+    const { page, errors, context } = await open(1440, 'dark', `/${launchId}`);
+    const main = page.locator('main');
+    assert.match(await main.textContent(), /4 of 9 done, 1 in progress/);
+    assert.match(await main.textContent(), /Everything that must land before the parser ships\./);
+    assert.match(await main.textContent(), /Stream parser/);
+    assert.doesNotMatch(await main.textContent(), /Write the recovery guide/);
+    await page.getByRole('button', { name: 'Done and dropped Items' }).click();
+    await page.waitForFunction(id => window.doneFor.includes(id), launchId);
+    assert.match(await main.textContent(), /Old reader removed/);
+    assert.doesNotMatch(
+      await main.textContent(),
+      /Ship a second parser/,
+      'another Initiative’s Item is not listed',
+    );
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    const name = page.getByRole('textbox', { name: 'Name' });
+    await name.fill('Launch the streaming parser');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await page.waitForFunction(() => window.puts.length === 1);
+    assert.deepEqual(await page.evaluate(() => window.puts[0]), {
+      itemId: launchId,
+      expectedVersion: 3,
+      title: 'Launch the streaming parser',
+    });
+    await page.getByRole('button', { name: /^New Item here/ }).click();
+    assert.equal(await page.getByRole('combobox', { name: 'Initiative' }).inputValue(), launchId);
+    assert.deepEqual(errors, []);
+    await context.close();
+  }
+  for (const width of [1440, 390])
+    for (const theme of ['dark', 'light'])
+      await t.test(`initiative page ${width} ${theme}: no clipping or axe violations`, async () => {
+        const { page, errors, context } = await open(width, theme, `/${launchId}`);
+        await page.getByRole('button', { name: 'Done and dropped Items' }).click();
+        await check(page, `initiative ${width} ${theme}`);
+        if (shots)
+          await page.screenshot({
+            path: join(shots, `plan-initiative-${width}-${theme}.png`),
+            fullPage: true,
+          });
+        assert.deepEqual(errors, []);
+        await context.close();
+      });
 
   for (const [name, search] of [
     ['list', ''],
