@@ -23,17 +23,17 @@ function fixture({ projectVisibility = 'public', laneTitles, planVisibility, hid
       _id: 'project',
       _creationTime: NOW - 30 * 86_400_000,
       owner: 'owner',
-      name: 'marlin',
-      slug: 'marlin',
+      name: 'atlas',
+      slug: 'atlas',
       visibility: projectVisibility,
       work: { generationId: 'gen', backupId: 'backup', operationId: 'op', initialRevision: 0, revision: 0 },
     }),
   );
   // The planning contract's project setting (d3357f40); set past the schema until that field is on main.
   if (planVisibility) s.tables.hostedProjects.get('project').planVisibility = planVisibility;
-  s.tables.forgeAccounts.set('acct', { _id: 'acct', owner: 'owner', handle: 'orla' });
-  s.tables.accountHandles.set('alias', { _id: 'alias', owner: 'owner', handle: 'orla' });
-  s.tables.projectSlugs.set('slug', { _id: 'slug', owner: 'owner', slug: 'marlin', projectId: 'project' });
+  s.tables.forgeAccounts.set('acct', { _id: 'acct', owner: 'owner', handle: 'ada' });
+  s.tables.accountHandles.set('alias', { _id: 'alias', owner: 'owner', handle: 'ada' });
+  s.tables.projectSlugs.set('slug', { _id: 'slug', owner: 'owner', slug: 'atlas', projectId: 'project' });
   s.tables.projectWorkGenerations.set('gen', {
     _id: 'gen',
     projectId: 'project',
@@ -120,11 +120,11 @@ const refused = async (promise, code, message = /./) =>
     assert.match(body.message, message);
     return true;
   });
-const page = s => read.projectPage._handler(s.ctx, { handle: 'orla', slug: 'marlin', now: NOW });
+const page = s => read.projectPage._handler(s.ctx, { handle: 'ada', slug: 'atlas', now: NOW });
 const everyPublicRead = async s => [
   JSON.stringify(await page(s)),
   JSON.stringify(await read.explorePage._handler(s.ctx, { order: 'active', now: NOW })),
-  JSON.stringify(await read.profilePage._handler(s.ctx, { handle: 'orla', now: NOW })),
+  JSON.stringify(await read.profilePage._handler(s.ctx, { handle: 'ada', now: NOW })),
   JSON.stringify(await read.sitemapRows._handler(s.ctx, {})),
 ];
 
@@ -209,14 +209,14 @@ test('open Lane titles reach visitors only when the project opts in, and Lane id
 test('a private project answers exactly like a missing one on every public read', async () => {
   const s = fixture({ projectVisibility: 'private' });
   assert.equal(await page(s), null);
-  assert.equal(await read.projectPage._handler(s.ctx, { handle: 'orla', slug: 'nothing', now: NOW }), null);
-  for (const text of await everyPublicRead(s)) assert.doesNotMatch(text, /marlin|Secret/);
-  const profile = await read.profilePage._handler(s.ctx, { handle: 'orla', now: NOW });
+  assert.equal(await read.projectPage._handler(s.ctx, { handle: 'ada', slug: 'nothing', now: NOW }), null);
+  for (const text of await everyPublicRead(s)) assert.doesNotMatch(text, /atlas|Secret/);
+  const profile = await read.profilePage._handler(s.ctx, { handle: 'ada', now: NOW });
   assert.deepEqual(profile.projects, []);
   // The route gives both the same 404 body.
   const ctx = { runQuery: s.ctx.runQuery, runMutation: s.ctx.runMutation };
   const serve = route.serve._handler ?? route.serve;
-  for (const path of ['/public/v1/project/orla/marlin.json', '/public/v1/project/orla/nothing.json']) {
+  for (const path of ['/public/v1/project/ada/atlas.json', '/public/v1/project/ada/nothing.json']) {
     const response = await serve(ctx, new Request(`https://backend.test${path}`));
     assert.equal(response.status, 404);
     assert.equal(await response.text(), '{"found":false}');
@@ -282,7 +282,7 @@ test('one star per person: repeating it changes nothing, and the count moves wit
     starred: true,
     stars: 1,
   });
-  assert.deepEqual(await discovery.myStar._handler(s.ctx, { projectId: 'project' }), { starred: true });
+  assert.deepEqual(await discovery.myStars._handler(s.ctx, {}), ['project']);
   assert.equal((await page(s)).stars, 1);
   assert.deepEqual(await discovery.star._handler(s.ctx, { projectId: 'project', starred: false }), {
     starred: false,
@@ -293,7 +293,7 @@ test('one star per person: repeating it changes nothing, and the count moves wit
 
 test('only the owner person changes what visitors see, and only the owner sees who starred', async () => {
   const s = fixture();
-  s.tables.forgeAccounts.set('acct2', { _id: 'acct2', owner: 'reader', handle: 'teodor' });
+  s.tables.forgeAccounts.set('acct2', { _id: 'acct2', owner: 'reader', handle: 'wren' });
   s.caller('reader');
   await discovery.star._handler(s.ctx, { projectId: 'project', starred: true });
   await refused(
@@ -312,7 +312,7 @@ test('only the owner person changes what visitors see, and only the owner sees w
     projectId: 'project',
     paginationOpts: { numItems: 10, cursor: null },
   });
-  assert.deepEqual(gazers.page, [{ handle: 'teodor' }]);
+  assert.deepEqual(gazers.page, [{ handle: 'wren' }]);
   const settings = await discovery.setSettings._handler(s.ctx, { projectId: 'project', laneTitles: true });
   assert.deepEqual(settings, { laneTitles: true, stars: 1 });
   assert.equal((await page(s)).lanes.titles[0].title, 'Secret Lane title');
@@ -321,21 +321,21 @@ test('only the owner person changes what visitors see, and only the owner sees w
 });
 
 test('public addresses parse strictly and the sitemap escapes what it lists', () => {
-  assert.deepEqual(route.publicPath('/public/v1/project/orla/marlin.json'), {
+  assert.deepEqual(route.publicPath('/public/v1/project/ada/atlas.json'), {
     kind: 'project',
-    handle: 'orla',
-    slug: 'marlin',
+    handle: 'ada',
+    slug: 'atlas',
   });
   assert.deepEqual(route.publicPath('/public/v1/explore/stars.json'), { kind: 'explore', order: 'stars' });
   for (const bad of [
-    '/public/v1/project/orla/marlin',
+    '/public/v1/project/ada/atlas',
     '/public/v1/project/../x.json',
     '/public/v1/explore/all.json',
     '/public/v1/profile/a/b.json',
   ])
     assert.equal(route.publicPath(bad), null, bad);
-  const xml = route.sitemapXml('https://forge.test', [{ handle: 'orla', slug: 'a&b' }]);
-  assert.match(xml, /<loc>https:\/\/forge\.test\/-\/orla\/a%26b<\/loc>/);
+  const xml = route.sitemapXml('https://forge.test', [{ handle: 'ada', slug: 'a&b' }]);
+  assert.match(xml, /<loc>https:\/\/forge\.test\/-\/ada\/a%26b<\/loc>/);
   assert.match(xml, /<loc>https:\/\/forge\.test\/-\/explore<\/loc>/);
 });
 
@@ -344,25 +344,25 @@ test('share tags describe the page from the public read and add no script', () =
   const out = meta.withMeta(
     html,
     meta.projectMeta('https://forge.test', {
-      project: { handle: 'orla', slug: 'marlin', name: 'mar"lin' },
+      project: { handle: 'ada', slug: 'atlas', name: 'at"las' },
       stars: 3,
       activity: { landings: 12, main: 'passing' },
       plan: { shown: false },
       lanes: { open: 2 },
     }),
   );
-  assert.match(out, /<title>orla\/mar&quot;lin · Forge<\/title>/);
-  assert.match(out, /property="og:url" content="https:\/\/forge\.test\/-\/orla\/marlin"/);
+  assert.match(out, /<title>ada\/at&quot;las · Forge<\/title>/);
+  assert.match(out, /property="og:url" content="https:\/\/forge\.test\/-\/ada\/atlas"/);
   assert.match(out, /Main is passing\. 12 changes landed this week\. 2 Lanes open\. 3 stars\./);
   assert.doesNotMatch(out, /Items left/);
   assert.equal(out.match(/<script/g).length, 1);
 });
 
 test('profile and explore share tags count only what the public read lists', () => {
-  const profile = meta.profileMeta('https://forge.test', { handle: 'orla', projects: [{}, {}] });
+  const profile = meta.profileMeta('https://forge.test', { handle: 'ada', projects: [{}, {}] });
   assert.equal(profile.kind, 'profile');
-  assert.equal(profile.description, '2 public projects by @orla on Forge.');
-  assert.equal(profile.url, 'https://forge.test/-/orla');
+  assert.equal(profile.description, '2 public projects by @ada on Forge.');
+  assert.equal(profile.url, 'https://forge.test/-/ada');
   const explore = meta.exploreMeta('https://forge.test', { total: 1, more: true });
   assert.match(explore.description, /^1 public project and more on Forge/);
 });

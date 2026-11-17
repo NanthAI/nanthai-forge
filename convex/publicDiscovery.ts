@@ -56,18 +56,19 @@ export const star = mutation({
   },
 });
 
-/** The viewer's own star; signed out (or an agent) has none. One indexed read. */
-export const myStar = query({
-  args: { projectId: v.id('hostedProjects') },
-  returns: v.object({ starred: v.boolean() }),
-  handler: async (ctx, { projectId }) => {
+/** The projects the viewer starred, for the star toggles on explore and profile rows: one indexed read of at most
+ * 200 rows, asked once per page. Signed out (or an agent) has none. */
+export const myStars = query({
+  args: {},
+  returns: v.array(v.id('hostedProjects')),
+  handler: async ctx => {
     const user = await ctx.auth.getUserIdentity();
-    if (!user || isDeviceIdentity(user)) return { starred: false };
-    const row = await ctx.db
+    if (!user || isDeviceIdentity(user)) return [];
+    const rows = await ctx.db
       .query('projectStars')
-      .withIndex('by_project_and_account', q => q.eq('projectId', projectId).eq('account', user.subject))
-      .unique();
-    return { starred: Boolean(row) };
+      .withIndex('by_account', q => q.eq('account', user.subject))
+      .take(200);
+    return rows.map(row => row.projectId);
   },
 });
 

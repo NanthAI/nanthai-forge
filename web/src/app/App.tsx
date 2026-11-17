@@ -33,6 +33,8 @@ const loadingPlace = (
 );
 
 const Billing = lazy(() => import('../billing/Home'));
+// Explore, profiles and a public project's front page for visitors: one chunk, loaded with its route (Item 8947a779).
+const Discover = lazy(() => import('../public/Discover'));
 
 // Rebuilt places load with their route, never in the first paint.
 const Start = lazy(() => import('./start/Start'));
@@ -103,14 +105,29 @@ function Pages() {
   const search = useSearch();
   const { isLoading, isAuthenticated } = useConvexAuth();
   const viewer = useQuery(api.urlAccounts.current, isAuthenticated ? {} : 'skip');
+  // Anyone can browse signed out: explore, profiles and a project's front page (owner decision 2026-11-16).
+  const discovering =
+    route.frame === 'discover' ||
+    (route.frame === 'project' &&
+      !isAuthenticated &&
+      route.place === 'needs' &&
+      !route.section &&
+      !route.rest);
   const needsSignIn =
     !isLoading &&
     !isAuthenticated &&
+    !discovering &&
     !(route.frame === 'public' && ['signin', 'terms', 'privacy'].includes(route.page));
   useEffect(() => {
     if (needsSignIn) navigate(signInHref(location.pathname + location.search), { replace: true });
   }, [needsSignIn]);
   if (isLoading || needsSignIn) return null;
+  if (discovering)
+    return (
+      <Suspense fallback={null}>
+        <Discover route={route} signedIn={isAuthenticated} viewerHandle={viewer?.handle} />
+      </Suspense>
+    );
   if (route.frame === 'public') {
     if (route.page === 'terms' || route.page === 'privacy')
       return (

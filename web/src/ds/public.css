@@ -209,4 +209,6 @@
   .pstops .dots i.hold { background: transparent; border: 2px solid var(--waiting); }
   .row.item { grid-template-columns: 18px minmax(0, 1fr) auto; }
   .row.init { grid-template-columns: minmax(0, 1fr) minmax(80px, 200px) auto; }
+  /* The project table with only the signals the public read carries: project, landings this week, main, stars. */
+  @container (min-width: 821px) { .xrow.lean { grid-template-columns: minmax(0, 1fr) 150px 128px 92px; } }
 }

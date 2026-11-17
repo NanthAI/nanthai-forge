@@ -25,6 +25,9 @@ export const placeSections: Record<ProjectPlace, readonly string[]> = {
 export type AppRoute =
   | { frame: 'public'; page: 'signin' | 'passkey' | 'device' | 'terms' | 'privacy' }
   | { frame: 'bare'; page: 'new' }
+  /** Public discovery (Item 8947a779): readable signed out, served from the cached public read. */
+  | { frame: 'discover'; page: 'explore' }
+  | { frame: 'discover'; page: 'profile'; handle: string }
   | { frame: 'account'; place: AccountPlace }
   | {
       frame: 'project';
@@ -73,6 +76,8 @@ export function hrefFor(route: AppRoute): string {
       return `${ROOT}/${route.page === 'passkey' ? 'signin/passkey' : route.page}`;
     case 'bare':
       return `${ROOT}/new`;
+    case 'discover':
+      return route.page === 'explore' ? `${ROOT}/explore` : `${ROOT}/${enc(route.handle)}`;
     case 'account':
       return [`${ROOT}/account`, accountSegment[route.place]].filter(Boolean).join('/');
     case 'project': {
@@ -104,7 +109,9 @@ export function parseAppPath(pathname: string): AppRoute {
   if (first === 'device' && !second) return { frame: 'public', page: 'device' };
   if ((first === 'terms' || first === 'privacy') && !second) return { frame: 'public', page: first };
   if (first === 'new' && !second) return { frame: 'bare', page: 'new' };
-  if (!second) return { frame: 'missing', path: pathname };
+  if (first === 'explore')
+    return second ? { frame: 'missing', path: pathname } : { frame: 'discover', page: 'explore' };
+  if (!second) return { frame: 'discover', page: 'profile', handle: first };
   const [segment = '', ...tail] = more;
   const place =
     segment === 'needs-me'

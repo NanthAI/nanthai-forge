@@ -243,6 +243,7 @@ async function listedProjects(ctx: QueryCtx, rows: Doc<'projectPublic'>[]): Prom
 const entry = ({ row, project, handle }: Listed, now: number) => {
   const fresh = row.activity && now - row.activity.at < 7 * DAY ? row.activity : null;
   return {
+    id: project._id,
     handle,
     slug: project.slug!,
     name: project.name,

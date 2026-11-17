@@ -36,8 +36,7 @@ export const publicDiscoveryTables = {
     .index('by_listed_and_stars', ['listed', 'stars'])
     .index('by_owner_and_listed', ['owner', 'listed']),
   // A star is a person's, one per account and project; agents cannot star.
-  projectStars: defineTable({ projectId: v.id('hostedProjects'), account: v.string() }).index(
-    'by_project_and_account',
-    ['projectId', 'account'],
-  ),
+  projectStars: defineTable({ projectId: v.id('hostedProjects'), account: v.string() })
+    .index('by_project_and_account', ['projectId', 'account'])
+    .index('by_account', ['account']),
 };

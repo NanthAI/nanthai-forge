@@ -24,6 +24,8 @@ const everyRoute = [
   { frame: 'public', page: 'passkey' },
   { frame: 'public', page: 'device' },
   { frame: 'bare', page: 'new' },
+  { frame: 'discover', page: 'explore' },
+  { frame: 'discover', page: 'profile', handle: 'mara' },
   ...accountPlaces.map(place => ({ frame: 'account', place })),
   ...projectPlaces.flatMap(place => placeSections[place].map(section => project(place, section))),
   project('lanes', '', 'l-AbCdEfGhIjKlMnOpQrStUv'),
@@ -49,9 +51,11 @@ test('addresses outside the rebuilt app or with unknown places are not app pages
     `${ROOT}/mara/tide-pool/nope`,
     `${ROOT}/mara/tide-pool/stats/extra`,
     `${ROOT}/account/billing/x`,
-    `${ROOT}/mara`,
+    `${ROOT}/explore/x`,
   ])
     assert.equal(parseAppPath(path).frame, 'missing', path);
+  // A handle alone is that person's or organisation's public profile (Item 8947a779).
+  assert.deepEqual(parseAppPath(`${ROOT}/mara`), { frame: 'discover', page: 'profile', handle: 'mara' });
 });
 
 test('old supported destinations stay reachable from every place until stage C replaces them', () => {
