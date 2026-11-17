@@ -73,13 +73,14 @@
   /* who did it (Item 41514fee): run name or handle first and last to be cut; the model gives way first, never to a stub */
   .who { white-space: nowrap; font-size: var(--t-meta); line-height: 20px; color: var(--text-2); }
   .who a { color: inherit; position: relative; z-index: 1; }
-  .who .a-run { flex: 0 1 auto; min-width: 4ch; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: var(--w-strong); }
+  .who .a-run { flex: none; max-width: 24ch; min-width: 4ch; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: var(--w-strong); }
   .who .a-model { flex: 0 50 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .who .a-model.nd { font-family: var(--font-sans); color: var(--text-3); flex-shrink: 0; }
   .who .a-for { flex: 0 3 auto; min-width: 6ch; overflow: hidden; text-overflow: ellipsis; }
   .who .a-model::before, .who .a-for::before { content: "·"; color: var(--text-3); margin-right: 6px; font-family: var(--font-sans); }
-  .who.line { display: flex; vertical-align: baseline; container: who / inline-size; }
-  .who.line .a-model.long { min-width: 14ch; }
+  /* layout="line": one line. Not `.line`, the top bar's ruler in core.css. */
+  .who.one { display: flex; vertical-align: baseline; container: who / inline-size; }
+  .who.one .a-model.long { min-width: 10ch; }
   @container who (max-width: 300px) { .who .a-model { display: none; } }
   @container who (max-width: 190px) { .who .a-for .w { display: none; } }
   .who.a-md { font-size: var(--t-body); line-height: 22px; } .who.a-md .a-model, .who.a-md .a-for { font-size: var(--t-meta); }

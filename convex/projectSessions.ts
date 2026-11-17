@@ -12,21 +12,18 @@ export const read = query({
   args: {
     projectId: v.id('hostedProjects'),
     cursor: v.union(v.string(), v.null()),
-    person: v.optional(v.string()),
-    agent: v.optional(v.string()),
   },
   returns: v.string(),
-  handler: async (ctx, { projectId, cursor, person, agent }) => {
+  handler: async (ctx, { projectId, cursor }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'AUTH_REQUIRED', 'Sign in to see project sessions.');
       await memberProject(ctx, projectId, user.subject);
-      let selection = ctx.db
+      // One agent run's own page reads its Lanes from convex/projectAgentRun.ts.
+      const selection = ctx.db
         .query('projectHostedPresence')
         .withIndex('by_project_and_at', q => q.eq('projectId', projectId))
         .order('desc');
-      if (person) selection = selection.filter(q => q.eq(q.field('actor'), person));
-      if (agent) selection = selection.filter(q => q.eq(q.field('agent'), agent));
       const page = await selection.paginate({
         numItems: 25,
         cursor,

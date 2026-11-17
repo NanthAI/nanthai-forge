@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "personDays: one per-person per-active-day contributions row (Item 6a251b23), filled by the existing day close. No existing table is keyed by person and day: projectStatsDays is per project, so a profile would read every project's days (unbounded per person); the Item rules out a people-to-agents table. Nothing removed: Stats keeps its per-project rows",
+  "date": "2026-11-17"
+}

@@ -5,6 +5,7 @@ import { liveLineTables } from './projectLiveLineFields';
 import { publicDiscoveryTables } from './publicDiscoveryFields';
 import { landingReadTables } from './projectLandingReadFields';
 import { statsTables } from './projectStatsFields';
+import { personDayTables } from './personDayFields';
 import { finishReadTables } from './projectFinishReadFields';
 import { hostedOverlapTables } from './projectHostedOverlapFields';
 import { boardTables } from './projectBoardFields';
@@ -527,6 +528,7 @@ export default defineSchema({
   ...publicDiscoveryTables,
   ...landingReadTables,
   ...statsTables,
+  ...personDayTables,
   legacyStorageCleanupWindows: defineTable({
     operationId: v.string(),
     deployment: v.string(),

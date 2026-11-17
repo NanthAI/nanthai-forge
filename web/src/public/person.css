@@ -1,0 +1,46 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* A person's page (Item 6a251b23): the three figures that pick what the days count, the day grid (one square per day,
+   a column per week, Monday on top, ink only: more ink is more done) and the two small tables, agents and where.
+   Every value is a token from tokens.css. Rules: DESIGN.md. */
+[data-ds] {
+  .nums.pick { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .nums.pick > button { display: grid; align-content: start; gap: 2px; padding: var(--s-3) var(--gut); min-width: 0; border: 0; border-left: var(--rule) solid var(--line); border-radius: 0; background: transparent; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+  .nums.pick > button:first-child { border-left: 0; }
+  .nums.pick > button[aria-pressed="true"] { background: var(--surface-3); box-shadow: inset 0 -2px 0 var(--text); }
+  .nums.pick > button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  @media (hover: hover) and (pointer: fine) { .nums.pick > button:not([aria-pressed="true"]):hover { background: var(--hover); } }
+
+  .days { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-4) var(--s-8); align-items: start; padding: var(--s-4) var(--gut); }
+  .cal { --c: 11px; display: flex; gap: 2px; padding-bottom: 20px; min-width: 0; }
+  .cal .cw { position: relative; display: grid; grid-template-rows: repeat(7, var(--c)); gap: 2px; width: var(--c); flex: none; }
+  .cal i { display: block; border-radius: 1px; background: var(--rail-off); }
+  .cal i.x { background: transparent; }
+  .cal i[data-l="1"] { background: color-mix(in srgb, var(--text) 30%, var(--surface)); }
+  .cal i[data-l="2"] { background: color-mix(in srgb, var(--text) 52%, var(--surface)); }
+  .cal i[data-l="3"] { background: color-mix(in srgb, var(--text) 76%, var(--surface)); }
+  .cal i[data-l="4"] { background: var(--text); }
+  .cal .cw > b { position: absolute; top: calc(100% + 5px); left: 0; font: var(--w-regular) var(--t-micro)/1 var(--font-mono); color: var(--text-2); white-space: nowrap; }
+  .days .kv { padding: 0; align-content: start; max-width: 420px; }
+  .only-short { display: none; }
+  @container (max-width: 1040px) { .days { grid-template-columns: minmax(0, 1fr); } }
+  @container (max-width: 760px) { .cal .cw.old { display: none; } .only-short { display: inline; } .only-long { display: none; } }
+
+  .trow { grid-template-columns: minmax(0, 1fr) var(--cols); column-gap: var(--s-4); }
+  .trow.agt { --cols: 64px 84px 96px 96px; }
+  .trow.proj { --cols: 84px 64px 76px 110px; }
+  .row.trow { min-height: 46px; }
+  .row.trow > .c { color: var(--text-2); font-size: var(--t-small); white-space: nowrap; }
+  .row.trow > .c.num { color: var(--text); }
+  .row.trow > .c .k { display: none; }
+  .trow .pn { min-width: 0; display: grid; gap: 1px; }
+  .trow .pn a { font-weight: var(--w-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; color: inherit; }
+  .trow .pn .meta { color: var(--text-2); font-size: var(--t-meta); }
+  @container (max-width: 760px) {
+    .th.trow { display: none; }
+    .row.trow { display: flex; flex-wrap: wrap; gap: 2px var(--s-3); padding-block: 10px; }
+    .row.trow > :first-child { flex: 1 1 100%; }
+    .row.trow > .c { font-size: var(--t-meta); }
+    .row.trow > .c.r { text-align: left; }
+    .row.trow > .c .k { display: inline; color: var(--text-2); font-family: var(--font-sans); }
+  }
+}

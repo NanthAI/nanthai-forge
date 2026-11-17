@@ -1,0 +1,19 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* An agent run's page (Item 6a251b23): who it is and from when to when, in one band under the page sentence; the run's
+   work beside what it reported about itself. Every value is a token from tokens.css. */
+[data-ds] {
+  .idband { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-5); align-items: center; padding: 9px var(--gut-head); background: var(--surface); border-bottom: var(--rule) solid var(--line); color: var(--text-2); font-size: var(--t-meta); }
+  .idband .who { flex: 1 1 320px; }
+  .idband .when { white-space: nowrap; }
+  .idband .when b { color: var(--text); font-weight: var(--w-strong); }
+  .panes.agent { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr); align-items: start; }
+  .panes.agent .row.p2 { grid-template-columns: minmax(0, 1fr) auto; }
+  .panes.agent .row.p3 { grid-template-columns: 150px minmax(0, 1fr) auto; }
+  @media (max-width: 860px) {
+    .idband { padding-inline: var(--gut); }
+    .idband .who { flex-basis: 100%; }
+    .panes.agent { grid-template-columns: minmax(0, 1fr); }
+    .panes.agent .row.p3 { grid-template-columns: minmax(0, 1fr) auto; }
+    .panes.agent .row.p3 > .num { grid-column: 1 / -1; }
+  }
+}

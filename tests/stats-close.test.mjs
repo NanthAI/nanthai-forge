@@ -40,14 +40,43 @@ test('a closed day holds measured figures from receipts and landing rows, once',
   const before = f.counts.length;
   await f.tx('statsClose', statsApi.closeDay, { projectId: f.projectId, day });
   const close = f.counts.slice(before).find(c => c.name === 'statsClose');
-  // Per landing: its receipt, its request row and that row's two body pages; plus the day's own two lookups.
-  assert(close.documents <= 4 * receipts.length + 2, `four reads per landing: ${close.documents}`);
+  // Per landing: its receipt, its request row and that row's two body pages; plus the day's own two lookups. A person's
+  // day (Item 6a251b23) adds that day's Lanes once each and one row read and one write per active person.
+  const lanes = [...f.tables.projectHostedOverlapLanes.values()].filter(
+    lane => utcDay(lane._creationTime) === day,
+  );
+  const people = [...f.tables.personDays.values()];
+  assert(people.length >= 1, 'the submitter has a day row');
+  assert(
+    close.documents <= 4 * receipts.length + 2 + lanes.length + people.length,
+    `four reads per landing: ${close.documents}`,
+  );
   assert(
     close.readBytes < 16_000 * receipts.length,
     `bytes per landing: ${close.readBytes / receipts.length}`,
   );
-  assert.equal(close.writes, 1);
+  assert.equal(close.writes, 1 + people.length);
+  const counted = people.map(row => JSON.parse(row.value).p[f.projectId]);
+  assert.equal(
+    counted.reduce((n, entry) => n + entry.l, 0),
+    4,
+    'every landing counts once, for its submitter',
+  );
+  assert.equal(
+    counted.reduce((n, entry) => n + entry.n, 0),
+    lanes.length,
+    'every Lane started that day counts once',
+  );
+  assert(
+    people.every(row => row.value.length < 2_000),
+    'a person-day row stays small',
+  );
   await f.tx('statsClose', statsApi.closeDay, { projectId: f.projectId, day });
+  assert.equal(
+    [...f.tables.personDays.values()].length,
+    people.length,
+    'a repeated close writes no new person rows',
+  );
   const rows = [...f.tables.projectStatsDays.values()];
   assert.equal(rows.length, 1, 'a day closes once');
   const closed = JSON.parse(rows[0].value);

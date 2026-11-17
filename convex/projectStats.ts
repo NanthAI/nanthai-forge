@@ -10,6 +10,9 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
 import type { HostedLandingState } from '../src/hosted-landing';
 import { discardedRunnerSeconds } from '../src/cost-budgets';
+import type { Contribution } from '../src/person-days';
+import { landingAcceptedBySchema } from '../src/landing-accepted-by';
+import { recordPersonDays } from './personDays';
 import {
   STATS_COMPARE_MIN_LANDINGS,
   STATS_DAY_MAX_LANDINGS,
@@ -55,6 +58,39 @@ export function statsLanding(receipt: HostedAcceptance, state: HostedLandingStat
   };
 }
 
+/** Account ids never contain whitespace or ':'; other actors are system actors and count for no one. */
+const isAccount = (actor: string | undefined): actor is string => !!actor && !/[\s:]/.test(actor);
+
+/** What one accepted landing counts for: a landing for its submitter (by one of their agent runs when it names one,
+ * with the model the run declared), and a review for the person who accepted it after its check, unless that person
+ * landed it by hand themself. */
+export function landingContributions(
+  receipt: HostedAcceptance,
+  state: HostedLandingState | null,
+): Contribution[] {
+  const out: Contribution[] = [];
+  const at = ms(receipt.at) ?? 0;
+  const submitter = receipt.actor?.id;
+  if (isAccount(submitter)) {
+    const model = receipt.agentClient?.split(':')[1];
+    out.push({
+      kind: 'landing',
+      person: submitter,
+      at,
+      ...(receipt.agentRun ? { run: receipt.agentRun, ...(model ? { model } : {}) } : {}),
+    });
+  }
+  const stamped = landingAcceptedBySchema.safeParse(state?.acceptance?.acceptedBy);
+  const accepted = stamped.success ? stamped.data : undefined;
+  if (
+    accepted?.kind === 'person' &&
+    isAccount(accepted.actor) &&
+    !(receipt.actor?.kind === 'person' && accepted.actor === submitter && !receipt.agentRun)
+  )
+    out.push({ kind: 'review', person: accepted.actor, at: ms(accepted.at) ?? at });
+  return out;
+}
+
 export const closeDay = internalMutation({
   args: { projectId: v.id('hostedProjects'), day: v.string() },
   returns: v.null(),
@@ -77,13 +113,36 @@ export const closeDay = internalMutation({
       .order('asc')
       .take(Math.min(STATS_CLOSE_LANDINGS, STATS_DAY_MAX_LANDINGS) + 1);
     const landings: StatsLanding[] = [];
+    const contributions: Contribution[] = [];
     for (const row of receipts.slice(0, STATS_CLOSE_LANDINGS)) {
       const receipt = JSON.parse(row.value) as HostedAcceptance;
       const request = await landingRow(ctx, { projectId, submissionId: receipt.submissionId }, false);
-      landings.push(
-        statsLanding(receipt, request ? (JSON.parse(request.value) as HostedLandingState) : null),
-      );
+      const state = request ? (JSON.parse(request.value) as HostedLandingState) : null;
+      landings.push(statsLanding(receipt, state));
+      contributions.push(...landingContributions(receipt, state));
     }
+    // A person's day (Item 6a251b23): the Lanes started that day, open or not, from the same close.
+    for (const open of [true, false]) {
+      const lanes = await ctx.db
+        .query('projectHostedOverlapLanes')
+        .withIndex('by_project_and_open', q =>
+          q
+            .eq('projectId', projectId)
+            .eq('open', open)
+            .gte('_creationTime', from)
+            .lt('_creationTime', from + DAY_MS),
+        )
+        .take(STATS_CLOSE_LANDINGS);
+      for (const lane of lanes)
+        if (isAccount(lane.actor))
+          contributions.push({
+            kind: 'lane',
+            person: lane.actor,
+            at: lane._creationTime,
+            ...(lane.agent ? { run: lane.agent } : {}),
+          });
+    }
+    await recordPersonDays(ctx, projectId, day, contributions);
     // The replayed queue starts behind the newest closed day before this one.
     const before = await ctx.db
       .query('projectStatsDays')

@@ -233,7 +233,7 @@ export function Who({
         {text}
       </span>
     );
-  const cls = `who${layout === 'line' ? ' line' : ''}${size ? ` a-${size}` : ''}`;
+  const cls = `who${layout === 'line' ? ' one' : ''}${size ? ` a-${size}` : ''}`;
   if (!agent)
     return (
       <span className={cls} data-kind="person" title={person}>

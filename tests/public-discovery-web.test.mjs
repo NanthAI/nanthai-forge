@@ -83,11 +83,93 @@ const project = ({ plan = 'public', titles = false } = {}) => ({
           ],
         },
 });
+/** A year of a person's public work, as personDays.profile sends it signed out (Item 6a251b23). */
+const contributions = (() => {
+  const days = [];
+  let seed = 7;
+  const next = () => ((seed = (seed * 48271) % 2147483647) % 100) / 100;
+  for (let i = 300; i >= 1; i--) {
+    if (next() < 0.45) continue;
+    const landings = Math.round(next() * 9);
+    days.push([
+      new Date(NOW - i * DAY).toISOString().slice(0, 10),
+      landings,
+      1 + Math.round(next() * 3),
+      Math.round(next() * 2),
+      Math.round(landings * 0.7),
+    ]);
+  }
+  const sum = k => days.reduce((n, d) => n + d[k], 0);
+  const run = (run, model, lanes, landings, first, last, slug = 'atlas') => ({
+    run,
+    model,
+    lanes,
+    landings,
+    first,
+    last,
+    project: { handle: 'ada', slug },
+  });
+  return {
+    schema: 1,
+    handle: 'ada',
+    self: false,
+    scope: 'public',
+    through: days.at(-1)[0],
+    first: Date.parse(`${days[0][0]}T08:00:00Z`),
+    last: Date.parse(`${days.at(-1)[0]}T17:30:00Z`),
+    days,
+    totals: {
+      landings: sum(1),
+      lanes: sum(2),
+      reviews: sum(3),
+      landingsByAgents: sum(4),
+      lanesByAgents: Math.round(sum(2) * 0.6),
+    },
+    projects: [
+      {
+        visibility: 'public',
+        shared: false,
+        handle: 'ada',
+        slug: 'atlas',
+        landings: sum(1) - 40,
+        lanes: sum(2) - 20,
+        reviews: sum(3),
+        last: NOW - DAY,
+      },
+      {
+        visibility: 'public',
+        shared: false,
+        handle: 'ada',
+        slug: 'beacon',
+        landings: 40,
+        lanes: 20,
+        reviews: 0,
+        last: NOW - 9 * DAY,
+      },
+    ],
+    projectsLeftOut: 0,
+    agents: {
+      total: 31,
+      from: 0,
+      rows: [
+        run('amber-fox', 'sample-model-with-a-long-declared-name-1', 14, 11, days.at(-9)[0], days.at(-1)[0]),
+        run('copper-moth', '', 3, 1, days.at(-30)[0], days.at(-20)[0], 'beacon'),
+        run('keen-impala', 'sample-model-2', 6, 6, days.at(-60)[0], days.at(-41)[0]),
+      ],
+    },
+  };
+})();
 const reads = {
   '/-/public/v1/explore/active.json': explore('active'),
   '/-/public/v1/explore/stars.json': explore('stars'),
   '/-/public/v1/explore/newest.json': explore('newest'),
-  '/-/public/v1/profile/ada.json': { v: 1, asOf: NOW, handle: 'ada', projects: projects.slice(0, 2) },
+  '/-/public/v1/profile/ada.json': {
+    v: 1,
+    asOf: NOW,
+    handle: 'ada',
+    projects: projects.slice(0, 2),
+    contributions,
+  },
   '/-/public/v1/project/ada/atlas.json': project(),
   '/-/public/v1/project/ada/members.json': project({ plan: 'members' }),
   '/-/public/v1/project/ada/titled.json': project({ titles: true }),
@@ -257,13 +339,16 @@ test('public discovery screens signed out: explore, profile and a public project
   const nobody = await open('/-/nobody');
   assert.match(await nobody.locator('.empty h3').textContent(), /No one at @nobody/);
 
-  // A profile lists only public projects, with the counts its sentence states.
+  // A profile lists only public projects; its head says the first and last activity in them (Item 6a251b23).
   const pr = await open('/-/ada');
-  assert.match(
-    await pr.locator('.phead .say').textContent(),
-    /^2 public projects, 54 landings this week, 328 stars\.$/,
-  );
+  assert.match(await pr.locator('.phead .fl').textContent(), /^First activity .+Last activity .+$/);
   assert.equal(await pr.locator('.row.xrow').count(), 2);
+  // Its contributions come from the cached read: figures, a day grid, the agents with declared models, and where.
+  assert.match(await pr.locator('.nums.pick').textContent(), new RegExp(`${contributions.totals.landings}`));
+  assert.equal((await pr.locator('.cal .cw').count()) > 30, true);
+  assert.match(await pr.locator('[aria-label=Agents]').textContent(), /amber-fox[\s\S]*model not declared/);
+  assert.match(await pr.locator('[aria-label=Agents]').textContent(), /Sign in to page through the rest/);
+  assert.doesNotMatch(await pr.locator('main').textContent(), /private|Private/);
 
   for (const [name, path] of [
     ['explore', '/-/explore'],

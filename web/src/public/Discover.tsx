@@ -23,6 +23,7 @@ import {
   type ProfilePage,
   type ProjectPage,
 } from './read';
+import { Person } from './Person';
 
 type Props = { route: AppRoute; signedIn: boolean; viewerHandle: string | undefined };
 const DOCS = '/docs/';
@@ -464,36 +465,27 @@ function Profile({ handle, signedIn }: { handle: string; signedIn: boolean }) {
   if (read.state === 'missing') return <NotFound what={`No one at @${handle}`} />;
   if (read.state !== 'ok') return <Failed what={`@${handle}`} retry={retry} />;
   const { projects } = read.data;
-  const week = projects.reduce((n, project) => n + project.landings, 0);
-  const stars = projects.reduce((n, project) => n + project.stars, 0);
   return (
-    <>
-      <div className="phead">
-        <span className="av pro" aria-hidden="true">
-          {initials(`@${read.data.handle}`)}
-        </span>
-        <div className="id">
-          <h1 translate="no">@{read.data.handle}</h1>
-          <p className="say">
-            {projects.length
-              ? `${plural(projects.length, 'public project')}, ${plural(week, 'landing')} this week, ${plural(stars, 'star')}.`
-              : 'No public projects yet.'}
-          </p>
-        </div>
-      </div>
-      <section className="region" aria-label="Public projects">
-        <div className="ph">
-          <h2>Public projects</h2>
-          <span className="cnt">{projects.length}</span>
-          <span className="hint">most starred first</span>
-        </div>
-        {projects.length ? (
-          <Rows projects={projects} signedIn={signedIn} />
-        ) : (
-          <p className="quietline">Nothing public here yet. Private projects are never listed.</p>
-        )}
-      </section>
-    </>
+    <Person
+      handle={read.data.handle}
+      signedIn={signedIn}
+      publicRead={read.data.contributions}
+      projectCount={projects.length}
+      projects={
+        <section className="region" aria-label="Public projects">
+          <div className="ph">
+            <h2>Public projects</h2>
+            <span className="cnt">{projects.length}</span>
+            <span className="hint">most starred first</span>
+          </div>
+          {projects.length ? (
+            <Rows projects={projects} signedIn={signedIn} />
+          ) : (
+            <p className="quietline">Nothing public here yet. Private projects are never listed.</p>
+          )}
+        </section>
+      }
+    />
   );
 }
 

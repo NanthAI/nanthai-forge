@@ -11,15 +11,15 @@ import type { PlaceProps } from '../screens';
 import { seen, sessionGroups, distinctSessions, when, type SessionsRead, type SessionRow } from './model';
 import '../../ds/figures.css';
 import '../../ds/review.css';
-import { AgentView } from './Agent';
+import { AgentRun } from './Agent';
 export default function Sessions(props: PlaceProps) {
+  const [person, run] = props.route.rest.split('/').map(part => decodeURIComponent(part));
+  if (person && run) return <AgentRun {...props} person={person} run={run} />;
+  return <SessionList {...props} />;
+}
+function SessionList(props: PlaceProps) {
   const [cursor, setCursor] = useState<string | null>(null);
-  const [person, agent] = props.route.rest.split('/');
-  const result = useQuery(api.projectSessions.read, {
-    projectId: props.projectId,
-    cursor,
-    ...(person && agent ? { person, agent } : {}),
-  });
+  const result = useQuery(api.projectSessions.read, { projectId: props.projectId, cursor });
   const data = result ? (JSON.parse(result) as SessionsRead) : undefined;
   return (
     <SessionsView
@@ -48,32 +48,24 @@ export function SessionsView({
       (!person || row.person === person) &&
       (!app || row.app === app),
   );
-  const agent = route.rest ? decodeURIComponent(route.rest) : null;
-  const profile = agent
-    ? rows.filter(row => `${row.person}/${row.name}` === agent || row.name === agent)
-    : null;
-  const shown = profile ?? matches;
+  const shown = matches;
   const sessions = distinctSessions(shown);
   const groups = sessionGroups(sessions);
   const laneHref = (id: string) => hrefFor({ ...route, section: '', rest: `${id}/holder` });
   const sessionHref = (row: SessionRow) =>
     hrefFor({ ...route, section: 'sessions', rest: `${row.person}/${row.name}` });
   const name = (row: SessionRow) => row.name ?? 'Person';
-  const selected = peek ?? profile?.[0] ?? null;
-  if (profile) return <AgentView route={route} data={data} rows={profile} more={more} />;
+  const selected = peek;
   return (
     <>
       <Head
         trail={[
           { label: 'Lanes', href: hrefFor({ ...route, section: '', rest: '' }) },
-          { label: agent ?? 'Sessions' },
+          { label: 'Sessions' },
         ]}
         sentence={
           <>
-            <b>{agent ? 'A session acts for a person.' : 'Who is working here.'}</b>{' '}
-            {agent
-              ? 'Its name stays with its chat window.'
-              : 'By person, then device; most recently seen first.'}
+            <b>Who is working here.</b> By person, then device; most recently seen first.
           </>
         }
       >
@@ -93,7 +85,7 @@ export function SessionsView({
       )}
       <div className={peek ? 'panes access-frame' : 'panes access-single'}>
         <Region
-          title={agent ? 'Session' : 'Live sessions'}
+          title="Live sessions"
           count={sessions.length}
           hint={`${shown.length} Lane observations shown${data?.isDone === false ? ', more available' : ''}`}
         >

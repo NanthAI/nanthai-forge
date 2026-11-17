@@ -4,6 +4,7 @@
 // answers, and the backend sees at most one call per page per cache period (convex/publicHttp.ts). Read once when the
 // page mounts; no polling, no timer, nothing while the tab is idle.
 import { useEffect, useState } from 'react';
+import type { ProfileRead } from '../../../src/person-days';
 
 export type MainCheck = 'passing' | 'unchecked';
 export type ListedProject = {
@@ -25,7 +26,13 @@ export type ExplorePage = {
   more: boolean;
   projects: ListedProject[];
 };
-export type ProfilePage = { asOf: number; handle: string; projects: ListedProject[] };
+export type ProfilePage = {
+  asOf: number;
+  handle: string;
+  projects: ListedProject[];
+  /** Contributions on public projects (Item 6a251b23); absent from a page cached before it shipped. */
+  contributions?: ProfileRead;
+};
 export type PlanView =
   | { shown: false }
   | {

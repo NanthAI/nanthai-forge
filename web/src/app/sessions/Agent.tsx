@@ -1,127 +1,226 @@
 // SPDX-License-Identifier: Apache-2.0
+// One agent run's page in a project (Item 6a251b23): who it is (run · model · for @person), its first and last action,
+// its Lanes and what landed, and the identity it reported. One read per view (convex/projectAgentRun.ts), plus one per
+// "look further back"; it re-runs only when one of its Lanes changes. No timer.
 import '../access.css';
 import '../../ds/review.css';
-import { Band, CodeBox, Key, Region, Who } from '../../ds';
+import '../../ds/figures.css';
+import './agent.css';
+import { useState } from 'react';
+import { useQuery } from 'convex/react';
+import { api } from '../../../../convex/_generated/api';
+import { Key, Region, State, Who } from '../../ds';
 import { A } from '../frames';
 import { Head } from '../Place';
 import { hrefFor } from '../paths';
 import type { PlaceProps } from '../screens';
-import { when, type SessionRow, type SessionsRead } from './model';
 import { whoLinks } from '../who-links';
+import type { AgentLane, AgentRunRead } from '../../../../convex/projectAgentRun';
+
+const nf = new Intl.NumberFormat('en-US');
+const at = (ms: number) =>
+  new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
+export function AgentRun({ person, run, ...props }: PlaceProps & { person: string; run: string }) {
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [earlier, setEarlier] = useState<AgentLane[]>([]);
+  const result = useQuery(api.projectAgentRun.read, { projectId: props.projectId, person, run, cursor });
+  const data = result ? (JSON.parse(result) as AgentRunRead) : undefined;
+  const read = data?.schema === 1 ? { ...data, lanes: [...earlier, ...data.lanes] } : data;
+  return (
+    <AgentView
+      route={props.route}
+      person={person}
+      run={run}
+      data={read}
+      more={() => {
+        if (!data || data.isDone) return;
+        setEarlier(read!.lanes);
+        setCursor(data.continueCursor);
+      }}
+    />
+  );
+}
+
 export function AgentView({
   route,
+  person,
+  run,
   data,
-  rows,
   more,
-}: Pick<PlaceProps, 'route'> & { data?: SessionsRead; rows: SessionRow[]; more: () => void }) {
-  const current = rows[0],
-    at = (place: 'stats' | 'lanes') => hrefFor({ ...route, place, section: '', rest: '' });
+}: Pick<PlaceProps, 'route'> & {
+  person: string;
+  run: string;
+  data: AgentRunRead | undefined;
+  more: () => void;
+}) {
+  const by = `${person}/${run}`;
+  const project = { handle: route.handle, project: route.project };
+  const lanes = data?.lanes ?? [];
+  const landed = lanes.filter(lane => lane.landed).sort((a, b) => b.landed!.at.localeCompare(a.landed!.at));
+  const open = lanes.filter(lane => lane.open);
+  const first = lanes.length ? Math.min(...lanes.map(lane => lane.first)) : null;
+  const last = lanes.length ? Math.max(...lanes.map(lane => lane.last)) : null;
+  const laneHref = (id: string) => hrefFor({ ...route, section: '', rest: id });
+  const receiptHref = (id: string) => hrefFor({ ...route, place: 'code', section: '', rest: id });
+  const read = data
+    ? data.isDone
+      ? 'every Lane it started here'
+      : 'its newest Lanes here; more further back'
+    : '';
   return (
     <>
       <Head
-        trail={[{ label: 'Lanes', href: at('lanes') }, { label: route.rest }]}
+        trail={[{ label: 'Lanes', href: hrefFor({ ...route, section: '', rest: '' }) }, { label: run }]}
         sentence={
-          <>
-            <b>A session acts for a person.</b> Its Lanes and the identity it reported, with unknowns left
-            visible.
-          </>
+          !data ? (
+            'Loading this agent run…'
+          ) : !lanes.length ? (
+            <>
+              <b>Nothing from {run} here yet.</b> Its Lanes and landings show once it starts one.
+            </>
+          ) : (
+            <>
+              <b>
+                {run}{' '}
+                {open.length
+                  ? `has ${nf.format(open.length)} open ${open.length === 1 ? 'Lane' : 'Lanes'}`
+                  : 'has no open Lane'}
+              </b>{' '}
+              and landed {nf.format(landed.length)} of the {nf.format(lanes.length)}{' '}
+              {lanes.length === 1 ? 'Lane' : 'Lanes'} shown.
+            </>
+          )
         }
       />
-      <div className="panes access-frame">
-        <Region
-          title="Its Lanes"
-          count={rows.length}
-          hint={`${rows.length} shown${data?.isDone === false ? ', more available' : ''}`}
-        >
-          {!data ? (
-            <p className="pad" role="status">
-              Loading this session…
-            </p>
-          ) : !rows.length ? (
-            <div className="pad">
-              <p>Nothing from this session on this page yet.</p>
-              {!data.isDone && (
+      <div className="idband">
+        <Who
+          handle={by}
+          {...(data?.model == null ? {} : { model: data.model })}
+          layout="line"
+          size="md"
+          {...whoLinks(by, project)}
+        />
+        {first ? (
+          <span className="when">
+            First action <b>{at(first)}</b>
+          </span>
+        ) : null}
+        {last ? (
+          <span className="when">
+            Last action <b>{at(last)}</b>
+          </span>
+        ) : null}
+      </div>
+      <div className="panes agent">
+        <section className="pane">
+          <div className="nums" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+            <div>
+              <b>{nf.format(lanes.length)}</b>
+              <span>{lanes.length === 1 ? 'Lane' : 'Lanes'}</span>
+            </div>
+            <div>
+              <b>{nf.format(open.length)}</b>
+              <span>open</span>
+            </div>
+            <div>
+              <b>{nf.format(landed.length)}</b>
+              <span>landed</span>
+            </div>
+          </div>
+          <Region
+            title="Its Lanes"
+            count={lanes.length}
+            hint={data ? `open first, then newest · ${read}` : undefined}
+          >
+            {!data ? (
+              <p className="quietline" role="status">
+                Loading its Lanes…
+              </p>
+            ) : !lanes.length ? (
+              <p className="quietline">No Lane from this run in this project.</p>
+            ) : (
+              [...open, ...lanes.filter(lane => !lane.open)].map(lane => (
+                <A key={lane.laneId} className="row p2" href={laneHref(lane.laneId)}>
+                  <div>
+                    <div className="ttl" dir="auto">
+                      {lane.title}
+                    </div>
+                    <div className="meta">
+                      started {at(lane.first)} · last activity {at(lane.last)}
+                    </div>
+                  </div>
+                  {lane.landed ? (
+                    <State word="Landed" />
+                  ) : lane.open ? (
+                    <State word="In progress" />
+                  ) : (
+                    <State word="Set aside" />
+                  )}
+                </A>
+              ))
+            )}
+            {data && !data.isDone ? (
+              <div className="pad">
                 <Key size="sm" onClick={more}>
-                  Look on the next page
+                  Look further back
                 </Key>
-              )}
-            </div>
-          ) : (
-            rows.map(row => (
-              <A
-                key={row.laneId}
-                className="row p2"
-                href={hrefFor({ ...route, section: '', rest: `${row.laneId}/holder` })}
-              >
-                <div>
-                  <div className="ttl">{row.title}</div>
-                  <div className="meta">Last seen {when(row.lastSeen)}</div>
-                </div>
-                <span className="mono">Held</span>
-              </A>
-            ))
-          )}
-          {data && !data.isDone && (
-            <div className="pad">
-              <Key size="sm" onClick={more}>
-                More Lanes
-              </Key>
-            </div>
-          )}
-          <Band title="Asks of you" hint="not reported" />
-          <p className="pad">
-            <A className="lk" href={hrefFor({ ...route, place: 'needs', section: '', rest: '' })}>
-              See what needs you
-            </A>
-          </p>
-          <Band title="Landed today" hint="not reported" />
-          <p className="pad">
-            <A className="lk" href={at('stats')}>
-              See checked work and spending
-            </A>
-          </p>
-        </Region>
-        <Region title="About it">
-          <div>
+              </div>
+            ) : null}
+          </Region>
+          {landed.length ? (
+            <Region title="Landed" count={landed.length} hint="newest first">
+              {landed.map(lane => (
+                <A key={lane.laneId} className="row p3" href={receiptHref(lane.landed!.receiptId)}>
+                  <span className="num t3">{at(Date.parse(lane.landed!.at))}</span>
+                  <div className="ttl" dir="auto">
+                    {lane.title}
+                  </div>
+                  <span className="mono t3">receipt</span>
+                </A>
+              ))}
+            </Region>
+          ) : null}
+        </section>
+        <section className="pane">
+          <Region title="About it">
             <dl className="kv">
               <dt>Acts for</dt>
               <dd>
-                {current ? (
-                  <Who handle={`@${current.person}`} {...whoLinks(current.person)} />
-                ) : (
-                  'Not reported'
-                )}
+                <Who handle={`@${person}`} {...whoLinks(person)} />
               </dd>
               <dt>Agent app</dt>
               <dd>
-                {current?.app ?? 'Not reported'}
-                {current?.app && <span className="sub">reported by the agent</span>}
+                {data?.app ?? 'not reported'}
+                {data?.app ? <span className="sub"> reported by the agent</span> : null}
               </dd>
               <dt>Model</dt>
-              <dd>Not reported</dd>
-              <dt>Session</dt>
-              <dd className="mono">{current?.name ?? route.rest.split('/').at(-1)}</dd>
-              <dt>Identity from</dt>
-              <dd>{current?.identityFrom ?? 'Not reported'}</dd>
-              <dt>Device</dt>
               <dd>
-                {current?.device?.code ?? 'Not reported'}
-                {current?.device?.name && <span className="sub">“{current.device.name}”</span>}
+                {data?.model ? (
+                  <>
+                    <span className="mono">{data.model}</span>
+                    <span className="sub"> declared, not verified</span>
+                  </>
+                ) : data?.model === '' ? (
+                  'model not declared'
+                ) : (
+                  'nothing landed yet, so no declaration was read'
+                )}
               </dd>
-              <dt>First observed here</dt>
-              <dd>{current?.startedAt ? when(current.startedAt) : 'Not recorded'}</dd>
-              <dt>Last seen</dt>
-              <dd>{current ? when(current.lastSeen) : 'Not recorded'}</dd>
+              <dt>Identity from</dt>
+              <dd>{data?.identityFrom ?? 'not reported'}</dd>
+              <dt>Device</dt>
+              <dd className="mono">{data?.device ?? 'not reported'}</dd>
             </dl>
-          </div>
-          <Band title="Which chat window?" />
-          <div className="pad">
-            <CodeBox label="Run in that window">nforge agent . whoami</CodeBox>
-            <p className="sub">
-              Access is the person’s, narrowed by the device. A session name grants nothing.
-            </p>
-          </div>
-        </Region>
+          </Region>
+          <p className="quietline" data-weight="ref">
+            Crossings and waits are on{' '}
+            <A className="lk" href={hrefFor({ ...route, section: 'touching', rest: '' })}>
+              Who is touching what
+            </A>
+            , because they involve two agents.
+          </p>
+        </section>
       </div>
     </>
   );
