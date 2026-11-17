@@ -98,9 +98,12 @@ export class BrowserLanding {
     operationId: string,
     submission: HostedLandingState,
     check: import('../../../src/hosted-landing').HostedLandingAttempt['check'],
+    /** The cause's recorded reason (src/check-failure-cause.ts); absent keeps the submission's own. */
+    retryReason?: HostedLandingRequest['retryReason'],
   ) {
     const request: HostedLandingRequest = {
       ...submission.request,
+      ...(retryReason ? { retryReason } : {}),
       operationId,
       check: check
         ? {

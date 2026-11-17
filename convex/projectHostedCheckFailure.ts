@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './server';
+import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { failingStep } from '../src/hosted-landing-suspect';
 import { checkFailureDetail } from '../src/check-failure-detail';
@@ -12,7 +13,11 @@ type FailedRun = Parameters<typeof checkFailureDetail>[0] & {
 /** The failing job step of a run that names no test file, from the bounded job
  * summaries Actions already sealed. Failure settlements only: one indexed read in
  * the settling mutation, no extra Convex call and nothing on the passing path. */
-export async function checkFailureStep(ctx: MutationCtx, projectId: Id<'hostedProjects'>, run: FailedRun) {
+export async function checkFailureStep(
+  ctx: QueryCtx | MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  run: FailedRun,
+) {
   if (
     (run.testFiles?.counts?.failed ?? run.testFiles?.failed.length) ||
     Object.values(run.contractReports ?? {}).some(report => report.failed)

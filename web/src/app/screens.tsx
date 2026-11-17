@@ -6,6 +6,7 @@ import type { Id } from '../../../convex/_generated/dataModel';
 import type { LineFeed } from './Line';
 import type { AppRoute, ProjectPlace } from './paths';
 import { Placeholder } from './Place';
+import { checkLaneOf } from './check/route';
 
 /** What every rebuilt place screen gets from the project frame: the address, the project and the line it already reads. */
 export type PlaceProps = {
@@ -16,6 +17,9 @@ export type PlaceProps = {
   viewerHandle: string | undefined;
 };
 
+/** A Lane's landing check (/lanes/<laneId>/check) is its own screen, whichever screen the Lanes place has. */
+const CheckScreen = lazy(() => import('./check/CheckScreen'));
+
 const screens: Partial<Record<ProjectPlace, LazyExoticComponent<ComponentType<PlaceProps>>>> = {
   needs: lazy(() => import('./needs/NeedsMe')),
 };
@@ -24,6 +28,18 @@ const screens: Partial<Record<ProjectPlace, LazyExoticComponent<ComponentType<Pl
 export function PlaceScreen(
   props: Omit<PlaceProps, 'projectId'> & { projectId: PlaceProps['projectId'] | null },
 ) {
+  const checkLane = checkLaneOf(props.route);
+  if (checkLane && props.projectId)
+    return (
+      <Suspense fallback={<Placeholder route={props.route} projectName={props.projectName} />}>
+        <CheckScreen
+          route={props.route}
+          projectId={props.projectId}
+          projectName={props.projectName}
+          laneId={checkLane}
+        />
+      </Suspense>
+    );
   const Screen = screens[props.route.place];
   if (!Screen || !props.projectId) return <Placeholder route={props.route} projectName={props.projectName} />;
   return (

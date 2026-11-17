@@ -201,6 +201,7 @@ function SignedIn({
 }
 
 type ProjectRoute = Extract<AppRoute, { frame: 'project' }>;
+// A Lane's landing check (Item b030c3c5) loads with its route.
 type PickerEntry = { handle: string; slug: string; name: string };
 
 function ProjectView({

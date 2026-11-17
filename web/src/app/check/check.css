@@ -1,0 +1,14 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* The landing check page (Item b030c3c5): evidence on the left, the four suspects on the right; one column on a phone.
+   Every value is a design-system token; the parts (.sus, .kv, pre.out, .panes) come from web/src/ds. */
+[data-ds] {
+  .chk-p { grid-template: minmax(0, 1fr) / minmax(0, 1fr) 420px; }
+  /* The glyph stays beside the file at phone width, where plain rows wrap. */
+  .chk-p .row.ffile { display: grid; align-items: start; }
+  .chk-p .ffile .any { display: grid; gap: 2px; min-width: 0; }
+  .chk-p .ffile .meta { color: var(--text-2); font-size: var(--t-meta); overflow-wrap: anywhere; }
+  .chk-p .sus ul { margin: var(--s-2) 0 0; padding-left: var(--s-5); color: var(--text-2); font-size: var(--t-small); }
+  .chk-p .pane > .region:last-child { border-bottom: 0; }
+  @media (max-width: 1100px) { .chk-p { grid-template-columns: minmax(0, 1fr) 340px; } }
+  @media (max-width: 860px) { .chk-p { grid-template-columns: minmax(0, 1fr); } }
+}

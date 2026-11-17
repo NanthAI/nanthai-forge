@@ -237,10 +237,11 @@ export function failureCause(evidence: FailureEvidence): FailureCause | null {
   const known = new Set(run?.knownFlaky ?? []);
   const flakyBefore = failed.filter(item => known.has(item.file));
   const first = failed[0];
+  // The sentence names the file; its error is in `failing`, so the line stays one line.
   const firstLine = first
-    ? `${first.file}${first.firstError ? ` (${clip(first.firstError, 160)})` : ''}`
+    ? `${first.file} fails`
     : run?.step
-      ? `${run.step.job}: ${clip(run.step.excerpt, 160)}`
+      ? `${run.step.job}: ${clip(run.step.excerpt, 120)}`
       : 'no failing test or step was reported';
   const more = failingCount > 1 ? `; ${plural(failingCount - 1, 'more failing file')}` : '';
 
@@ -268,7 +269,7 @@ export function failureCause(evidence: FailureEvidence): FailureCause | null {
   if (mainRed && failed.length)
     return build(
       'main-failing',
-      `Not this change: main is failing too, and ${firstLine} does not touch this Lane's files.`,
+      `Not this change: main is failing too, and ${first!.file} does not cover this Lane's files.`,
       'wait-for-main',
       [
         {
