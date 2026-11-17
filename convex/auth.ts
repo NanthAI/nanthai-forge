@@ -7,6 +7,7 @@ import { getFunctionAddress, type DefaultFunctionArgs, type RegisteredMutation }
 import type { Validator } from 'convex/values';
 import { chargePasskey } from './authBudgets';
 import { accountFor, handleTaken } from './urlIdentity';
+import { syncTeamHandles } from './teamHandles';
 import { handleError } from '../src/readable-urls';
 import { invariant } from '../src/errors';
 import { ConvexError, v } from 'convex/values';
@@ -181,6 +182,7 @@ export const finishSignUpWithUsernamePasskey = protect(
       if (placeholder && account.handlePrompt) await ctx.db.delete(placeholder._id);
       await ctx.db.insert('accountHandles', { owner: user.accountKey, handle: args.username });
       await ctx.db.patch(account._id, { handle: args.username, handlePrompt: false });
+      await syncTeamHandles(ctx, user.accountKey, args.username);
     }
     return result;
   },

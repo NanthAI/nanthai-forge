@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Settings > People and access (the Settings place itself).
+// Settings > People and access (the Settings place itself); Account > People and teams (Item a841a76d).
 import type { ScreenRoutes } from '../screen-route';
 
 export default [
   { place: 'settings', section: '', load: () => import('./PeopleAccess') },
-  { place: 'people', load: () => import('./InvitationHome') },
+  { place: 'people', load: () => import('./AccountPeople') },
 ] satisfies ScreenRoutes;

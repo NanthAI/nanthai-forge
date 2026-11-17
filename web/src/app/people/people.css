@@ -11,4 +11,19 @@
   .people-role { display: grid; gap: 5px; font-size: var(--t-meta); color: var(--text-2); font-weight: var(--w-strong); }
   .people-quiet { grid-template-columns: minmax(0, 1fr) auto; }
   .people-quiet > .ttl { font-weight: var(--w-regular); color: var(--text-2); }
+  /* Account > People and teams: a team is its name and one line, its members as handles, then the owner's add form. */
+  .account-people .row.team { align-items: start; padding-block: 10px; }
+  .account-people .team-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-2); min-width: 0; }
+  .account-people .team-name { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; min-width: 0; }
+  .account-people .team-name .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--s-3); }
+  .account-people .team-name .ttl { overflow-wrap: anywhere; }
+  .account-people .team-owner { display: inline-flex; align-items: center; gap: var(--s-1); min-width: 0; max-width: 100%; }
+  .account-people .who { min-width: 0; max-width: 100%; }
+  .account-people .who .mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .account-people .team-members { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-3); margin: 0; padding: 0; list-style: none; }
+  .account-people .team-members li { display: inline-flex; align-items: center; gap: var(--s-1); min-width: 0; max-width: 100%; }
+  .account-people .team-add { display: grid; grid-template-columns: minmax(0, 28rem) auto; justify-content: start; align-items: end; gap: var(--s-2); }
+  .account-people .team-create { padding: 10px var(--gut) var(--s-4); }
+  .account-people .people-more { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2) var(--s-3); }
+  @container (max-width: 560px) { .account-people .team-add { grid-template-columns: minmax(0, 1fr) auto; justify-content: stretch; } }
 }

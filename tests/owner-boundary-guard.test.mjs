@@ -7,6 +7,7 @@ import { ownerBoundaryFindings } from '../scripts/check-owner-boundary.mjs';
 // explicit classification. Read-only metadata, reversible source/Work operations, project setup,
 // decisions and metrics retain device access. Existing person gates remain in their own handlers.
 const allowed = {
+  accountTeams: ['list'], // Read-only: the person's own teams, members by handle; keys to the owner only.
   accountProjects: ['list'], // Read-only: the person's own and member projects with role; grants no authority.
   sealedSecrets: ['write'], // Owner unrestricted stable device; readers enforce signed-roster authority.
   agentGuidance: ['setMaintainer'],

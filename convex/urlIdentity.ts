@@ -9,6 +9,7 @@ import {
   type HandleProfile,
 } from '../src/readable-urls';
 import { slug } from '../src/project-routes';
+import { syncTeamHandles } from './teamHandles';
 type Ctx = QueryCtx | MutationCtx;
 export const accountFor = (ctx: Ctx, owner: string) =>
   ctx.db
@@ -47,6 +48,8 @@ export async function ensureAccount(ctx: MutationCtx, owner: string, profile: Ha
   );
   const id = await ctx.db.insert('forgeAccounts', { owner, handle, handlePrompt: !base });
   await ctx.db.insert('accountHandles', { owner, handle });
+  // Memberships added before the account existed (legacy adds by user id) take its handle now.
+  await syncTeamHandles(ctx, owner, handle);
   return (await ctx.db.get(id))!;
 }
 export async function slugTaken(ctx: Ctx, owner: string, value: string, projectId?: string) {

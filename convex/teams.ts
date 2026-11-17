@@ -8,6 +8,7 @@ import type { Id } from './_generated/dataModel';
 import { isDeviceIdentity } from './cliServer';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { memberHandle } from './teamHandles';
 
 const item = v.object({ id: v.id('teams'), name: v.string(), owner: v.string() });
 export async function teamOwner(ctx: QueryCtx | MutationCtx, id: Id<'teams'>, owner: string | undefined) {
@@ -46,7 +47,11 @@ export const create = accountMutation('write')({
         return old._id;
       }
       const id = await ctx.db.insert('teams', { name: name.trim(), owner: user.subject, operationId });
-      await ctx.db.insert('teamMembers', { teamId: id, member: user.subject });
+      await ctx.db.insert('teamMembers', {
+        teamId: id,
+        member: user.subject,
+        handle: await memberHandle(ctx, user.subject),
+      });
       return id;
     } catch (error) {
       return report(error);
@@ -121,7 +126,8 @@ export const add = internalMutation({
       .query('teamMembers')
       .withIndex('by_teamId_and_member', q => q.eq('teamId', id).eq('member', member))
       .unique();
-    if (!old) await ctx.db.insert('teamMembers', { teamId: id, member });
+    if (!old)
+      await ctx.db.insert('teamMembers', { teamId: id, member, handle: await memberHandle(ctx, member) });
     return null;
   },
 });

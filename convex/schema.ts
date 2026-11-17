@@ -856,7 +856,13 @@ export default defineSchema({
   })
     .index('by_owner_and_operationId', ['owner', 'operationId'])
     .index('by_owner_and_name', ['owner', 'name']),
-  teamMembers: defineTable({ teamId: v.id('teams'), member: v.string() })
+  teamMembers: defineTable({
+    teamId: v.id('teams'),
+    member: v.string(),
+    /** The member's handle, kept current by convex/accountTeams.ts (Item a841a76d) so the account's team page reads
+     * handles with its rows; null for an account with no handle. Absent only until the one-time backfill. */
+    handle: v.optional(v.union(v.string(), v.null())),
+  })
     .index('by_teamId_and_member', ['teamId', 'member'])
     .index('by_member_and_teamId', ['member', 'teamId']),
   teamImports: defineTable({ teamId: v.id('teams'), importId: v.id('imports') })
