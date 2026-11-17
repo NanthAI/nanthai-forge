@@ -33,6 +33,9 @@ const relationWords = {
   none: 'No relations',
 } as const;
 
+/** The picker's Save choice; a saved view's name never starts with a NUL. */
+const SAVE = '\u0000save';
+
 export type ViewsProps = {
   projectId: string;
   query: PlanQuery;
@@ -105,19 +108,31 @@ export function ViewsColumn(props: ViewsProps) {
           Save this view
         </button>
       </nav>
+      {/* On a phone the views are one full-width native select (the phone's own picker), not a menu button. */}
       <div className="plan-picker">
-        <Menu
-          label={`View: ${on}`}
-          items={[
-            ...all.map(view => ({
-              id: `v:${view.name}`,
-              label: view.n === undefined ? view.name : `${view.name}, ${view.n.toLocaleString()}`,
-              onAction: () => props.go({ ...fromQuery(view.query), ...keep }),
-            })),
-            'separator' as const,
-            { id: 'save', label: 'Save this view…', onAction: () => setSaving(true) },
-          ]}
-        />
+        <select
+          className="inp"
+          aria-label="Plan view"
+          value={all.some(view => view.name === on) ? on : ''}
+          onChange={event => {
+            const name = event.target.value;
+            if (name === SAVE) return setSaving(true);
+            const view = all.find(each => each.name === name);
+            if (view) props.go({ ...fromQuery(view.query), ...keep });
+          }}
+        >
+          {all.some(view => view.name === on) ? null : (
+            <option value="" disabled>
+              {on}
+            </option>
+          )}
+          {all.map(view => (
+            <option key={view.name} value={view.name}>
+              {view.n === undefined ? view.name : `${view.name} · ${view.n.toLocaleString()}`}
+            </option>
+          ))}
+          <option value={SAVE}>Save this view…</option>
+        </select>
       </div>
       <SaveView
         open={saving}

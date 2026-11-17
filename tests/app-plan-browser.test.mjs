@@ -69,7 +69,9 @@ function Fixture() {
   const search = useSearch();
   const query = readQuery(search);
   const go = patch => navigate(location.pathname + writeQuery({ ...query, ...patch }), { replace: true });
-  return <ProjectFrame route={route} name="Synthetic project" feed={undefined} projects={null}
+  // A held Lane puts a count on the phone's Needs me tab (window.heldFeed, set before load).
+  const feed = window.heldFeed ? { lanes: [{ laneId: uuid(90), stage: 'ready', held: true, overlap: false, changedAt: 1 }], more: 0, moreIsLowerBound: false, main: null } : undefined;
+  return <ProjectFrame route={route} name="Synthetic project" feed={feed} projects={null}
     controls={{ viewerHandle: 'example-builder', onPicker() {}, onPalette() {}, onKeys() {} }}>
     <React.Suspense fallback={<h1>Loading</h1>}><PlanScreenView route={route} projectId="synthetic" projectName="Synthetic project" feed={undefined} read={read}
       put={put} run={run} reads={reads} query={query} go={go} viewer="example-builder"
@@ -111,8 +113,9 @@ test('plan views and bulk bar: real components keep the view in the address and 
     await browser.close();
     rmSync(temp, { recursive: true, force: true });
   });
-  const open = async (width, theme, search = '') => {
+  const open = async (width, theme, search = '', held = false) => {
     const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 } });
+    if (held) await context.addInitScript(() => (window.heldFeed = true));
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
@@ -358,6 +361,44 @@ test('plan views and bulk bar: real components keep the view in the address and 
         await context.close();
       });
 
+  // On a phone the views are one full-width native select, and the page's end clears the fixed tab bar even with a
+  // count on Needs me (the count sits on its icon; the bar keeps the height the shell leaves clear).
+  for (const theme of ['dark', 'light'])
+    await t.test(`phone ${theme}: view select and the end of the page above the tab bar`, async () => {
+      const { page, errors, context } = await open(390, theme, '', true);
+      const picker = page.getByRole('combobox', { name: 'Plan view' });
+      const [box, main] = await Promise.all([picker.boundingBox(), page.locator('main#main').boundingBox()]);
+      assert.ok(box.width >= main.width - 2 * 24, 'the view select spans the column');
+      await picker.selectOption('Closed');
+      await page.waitForFunction(() => location.search.includes('scope=closed'));
+      await picker.selectOption('Open work');
+      await page.waitForFunction(() => !location.search.includes('scope='));
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      const ends = await page.evaluate(() => {
+        const tabs = document.querySelector('.shell > .tabs').getBoundingClientRect();
+        const rows = [...document.querySelectorAll('main#main .row')].map(
+          row => row.getBoundingClientRect().bottom,
+        );
+        return {
+          tabsTop: tabs.top,
+          tabsHeight: tabs.height,
+          last: Math.max(...rows),
+          pad: parseFloat(getComputedStyle(document.querySelector('.shell')).paddingBottom),
+        };
+      });
+      assert.equal(await page.locator('.shell > .tabs .cnt').count(), 1, 'Needs me carries a count');
+      assert.ok(
+        Math.abs(ends.tabsHeight - ends.pad) < 1,
+        `tab bar ${ends.tabsHeight}px, page leaves ${ends.pad}px`,
+      );
+      assert.ok(
+        ends.last <= ends.tabsTop + 0.5,
+        `last row ends at ${ends.last}, tab bar starts at ${ends.tabsTop}`,
+      );
+      await check(page, `phone ${theme}`);
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
   for (const [name, search] of [
     ['list', ''],
     ['tree', '?view=tree'],

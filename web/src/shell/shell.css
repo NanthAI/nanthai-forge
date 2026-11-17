@@ -332,7 +332,7 @@
     font-size: 9.5px;
   }
   .fx-main {
-    padding-bottom: 64px;
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
   }
   .fx-sub {
     padding: 6px 12px;

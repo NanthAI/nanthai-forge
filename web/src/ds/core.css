@@ -188,7 +188,9 @@
     .shell > .rail, .shell > .top .line, .shell > .top .fill { display: none; }
     .shell > .line.phone { display: grid; }
     .shell { --stick-top: calc(var(--top-h) + env(safe-area-inset-top, 0px)); }
-    .shell > .tabs { display: grid; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; }
+    .shell > .tabs { display: grid; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; height: calc(var(--tabs-h) + env(safe-area-inset-bottom, 0px)); }
+    /* The bar is exactly the height the page leaves clear: a tab's count sits on its icon, never in a row of its own. */
+    .shell > .tabs a .cnt { position: absolute; top: 4px; left: calc(50% + 6px); }
     .shell > .top .brand { width: auto; padding: 0 var(--s-3) 0 var(--gut); }
     .shell > .top .proj, .shell > .top .owner { flex: 1 1 auto; min-width: 0; border-left: 0; padding-left: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
     .icb { width: var(--ctl-h-touch); height: var(--ctl-h-touch); }
