@@ -51,6 +51,12 @@ for (const { seed, profile } of cases) {
 test('5e3c3a3c: holder starts a new check while followers are parked; a parked entry with no alarm is detected', async t => {
   const { parkedIncident } = await import('./queue-sim/parked-incident.mjs');
   const { inspectQueue, requestRows } = await import('./queue-sim/invariants.mjs');
+  // The detector needs the pre-N1 counterexample: pin the new-run wake off.
+  const previous = process.env.FORGE_QUEUE_NEW_RUN_WAKE;
+  delete process.env.FORGE_QUEUE_NEW_RUN_WAKE;
+  t.after(() => {
+    if (previous !== undefined) process.env.FORGE_QUEUE_NEW_RUN_WAKE = previous;
+  });
   const { f, followers } = await parkedIncident(t);
   const before = JSON.stringify(
     Object.fromEntries(Object.entries(f.tables).map(([name, rows]) => [name, [...rows.values()]])),
@@ -119,8 +125,14 @@ test('S4 detector rejects the historical no-order-holding mutant without modifyi
 
 // Owner split: these assert the intended runtime contract and fail on current main.
 // The corresponding rule landing enables its test; detector-unit tests above stay live.
-test.skip('5e3c3a3c order-key wake: holder starts a new check while followers are parked', async t => {
+test('5e3c3a3c new-run wake: holder starts a new check while followers are parked', async t => {
   const { parkedIncident } = await import('./queue-sim/parked-incident.mjs');
+  const previous = process.env.FORGE_QUEUE_NEW_RUN_WAKE;
+  process.env.FORGE_QUEUE_NEW_RUN_WAKE = '1';
+  t.after(() => {
+    if (previous === undefined) delete process.env.FORGE_QUEUE_NEW_RUN_WAKE;
+    else process.env.FORGE_QUEUE_NEW_RUN_WAKE = previous;
+  });
   const { waiterReclaimed } = await parkedIncident(t);
   assert(waiterReclaimed, 'a new holder generation leaves its oldest parked follower a fresh claim');
 });

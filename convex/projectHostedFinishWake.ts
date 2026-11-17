@@ -11,6 +11,8 @@ import {
 } from '../src/hosted-landing';
 import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { armLandingAlarm } from './projectHostedLandingStallWake';
+import { overtakeOlder } from '../src/landing-overtake';
+import { HOSTED_ORDER_WAITS } from './projectHostedLandingOrder';
 import {
   HOSTED_FINISH_COMPOSE_WATCHDOG_MS,
   HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS,
@@ -105,6 +107,91 @@ export async function notifyFinish(ctx: MutationCtx, state: HostedLandingState) 
       makeFunctionReference<'mutation'>('projectHostedFinishDriver:dependents'),
       { projectId, submissionId: state.id },
     );
+}
+/** New-run wake (incident 5e3c3a3c, rule N1; temporary switch FORGE_QUEUE_NEW_RUN_WAKE=1,
+ * default off until the N=10 A/B). A passed follower parked behind an entry that was
+ * about to land waited out that entry's whole re-check: the entry kept its order, and
+ * no event re-ran the follower's claim. The wake fires in the one write where waiting
+ * stops being needed AND the overtake can be charged: the entry starts checking a run
+ * (entering `checking`, or binding a new run while checking) while it holds order and
+ * `overtakeOlder` says `spend` (not urgent, never overtaken). The woken claim then records
+ * the lifetime mark atomically, so this entry re-checks at most once for followers. A
+ * merely queued entry is `free` to overtake and records nothing (review c6953f0b), so it
+ * never wakes anyone; a carry re-pin, bookkeeping or parking write never enters
+ * `checking` with a run (G2, Rule 1: waking on those made extra proofs and a cascade). */
+export function bindsNewRun(
+  row: Doc<'projectHostedLandingRequests'>,
+  previous: Pick<HostedLandingState, 'phase'>,
+  state: Pick<HostedLandingState, 'phase' | 'attemptId'>,
+  runId: string | null,
+  orderLive: boolean,
+) {
+  return Boolean(
+    process.env.FORGE_QUEUE_NEW_RUN_WAKE === '1' &&
+    row.orderWaited &&
+    orderLive &&
+    runId &&
+    state.phase === 'checking' &&
+    (previous.phase !== 'checking' || runId !== row.runId) &&
+    overtakeOlder({
+      phase: 'checking',
+      priority: row.priority,
+      attemptId: state.attemptId,
+      runId,
+      admitted: Boolean(row.admission?.full && row.admission.status === 'passed' && !row.admission.reuse),
+      ...(row.overtaken !== undefined ? { overtaken: row.overtaken } : {}),
+    }) === 'spend',
+  );
+}
+/** A Ready follower whose latest recorded wait is on `holder` itself, held only because the
+ * holder was about to land, on footprints not known to overlap. A full receipt list stops
+ * recording (HOSTED_ORDER_WAITS), so its latest entry may name a former holder: skip it. */
+const passedFollower = (waiter: Doc<'projectHostedLandingRequests'>, holder: string) => {
+  const waits = waiter.orderWaits ?? [];
+  const last = waits[waits.length - 1];
+  return (
+    waiter.phase === 'ready' &&
+    waits.length < HOSTED_ORDER_WAITS &&
+    last?.submissionId === holder &&
+    (last.held === 'accepting' || last.held === 'unsealed') &&
+    last.footprints !== 'overlap'
+  );
+};
+/** N1 pass (see `bindsNewRun`): one finish drive per bound run. The oldest eligible follower
+ * on the first index page gets the drive and its stall alarm (c329d191); eligible younger
+ * ones are handed to it only while it holds order (it takes main before them and wakes them
+ * when it lands or leaves the order). Everything else stays parked on the holder, whose
+ * own exit wake still releases it. Bounded: one page of 32 rows per chargeable generation. */
+export async function wakeNewRunFollower(ctx: MutationCtx, row: Doc<'projectHostedLandingRequests'>) {
+  const waiters = await ctx.db
+    .query('projectHostedLandingRequests')
+    .withIndex('by_project_and_orderWait_and_sequence', q =>
+      q.eq('projectId', row.projectId).eq('orderWait', row.submissionId),
+    )
+    .order('asc')
+    .take(32);
+  let woken: Doc<'projectHostedLandingRequests'> | null = null;
+  for (const waiter of waiters) {
+    if (!passedFollower(waiter, row.submissionId)) continue;
+    if (woken) {
+      await ctx.db.patch(waiter._id, { orderWait: woken.submissionId });
+      if (!woken.orderWaited) await ctx.db.patch(woken._id, { orderWaited: (woken.orderWaited = true) });
+      continue;
+    }
+    const finish = await finishRow(ctx, { projectId: row.projectId, submissionId: waiter.submissionId });
+    if (!finish || JSON.parse(finish.value).pending) continue;
+    const alarm = waiter.alarm
+      ? undefined
+      : await armLandingAlarm(
+          ctx,
+          waiter,
+          hostedLandingProgressAt(hostedLandingStateSchema.parse(JSON.parse(waiter.value))),
+        );
+    await ctx.db.patch(waiter._id, { orderWait: undefined, ...(alarm ? { alarm } : {}) });
+    await scheduleFinish(ctx, finish, 0, true);
+    if (!waiter.orderLive) return;
+    woken = waiter;
+  }
 }
 /** An older submission stopped holding its place in the landing order: re-drive
  * the oldest passed entry that waited for it and hand the rest to that entry,

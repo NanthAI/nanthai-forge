@@ -7,7 +7,8 @@ const owner = (f, run) =>
     row => JSON.parse(row.value).check?.runId === run.id,
   )?.submissionId;
 const work = f => f.pending().find(task => !/MainAudit:start|LandingStall/.test(task.name));
-export async function parkedIncident(t) {
+// `seed(f, ids)` may reshape rows once every follower is parked, before the head passes.
+export async function parkedIncident(t, { seed } = {}) {
   const f = await batchesFixture(t, {
     count: 6,
     fileCount: 2,
@@ -47,6 +48,7 @@ export async function parkedIncident(t) {
     assert.equal(row.orderWait, holder);
     // The old code has no alarm here; the invariant inspector reports L1.
   }
+  await seed?.(f, { head, holder, followers });
   await f.rawChecks.pass(headRun);
   let holderRechecked = false,
     waiterReclaimed = false;
@@ -58,9 +60,12 @@ export async function parkedIncident(t) {
       }
       await f.rawChecks.pass(await f.rawChecks.activate(run.id));
     }
-    const oldest = rows(f).find(r => r.submissionId === followers[0]);
-    if (holderRechecked && oldest.orderWait !== holder && oldest.alarm) waiterReclaimed = true;
-    if (holderRechecked) break;
+    // The holder's re-check run is bound; stop once it is checking that run (the new-run wake).
+    if (holderRechecked && rows(f).find(r => r.submissionId === holder).phase === 'checking') {
+      const oldest = rows(f).find(r => r.submissionId === followers[0]);
+      waiterReclaimed = oldest.orderWait !== holder && Boolean(oldest.alarm);
+      break;
+    }
     if (followers.every(id => states(f).find(s => s.id === id).phase === 'landed')) break;
     const task = work(f);
     if (!task) break;

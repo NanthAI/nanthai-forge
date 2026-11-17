@@ -30,7 +30,12 @@ import {
   type HostedLandingAttempt,
 } from '../src/hosted-landing';
 import { hostedOperationRow } from './projectHostedOperations';
-import { notifyFinish, wakeLandingOrderWaiters } from './projectHostedFinishWake';
+import {
+  bindsNewRun,
+  notifyFinish,
+  wakeLandingOrderWaiters,
+  wakeNewRunFollower,
+} from './projectHostedFinishWake';
 import { notifyStackedLandingEnded } from './projectHostedStackNotice';
 import { recordLandingSpeed } from './projectLandingSpeed';
 import { recordFailure } from './projectFailureLog';
@@ -336,6 +341,7 @@ export async function writeLanding(
   if (row.deciding !== undefined && deciding === undefined) await releaseCohortHolds(ctx, row.projectId);
   if (row.orderWaited && ((!orderLive && !reserving && !admitting) || retiresSolo))
     await wakeLandingOrderWaiters(ctx, row, orderLive);
+  if (bindsNewRun(row, previous, state, runId, orderLive)) await wakeNewRunFollower(ctx, row);
   if (
     releaseRun &&
     row.runId &&
