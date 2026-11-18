@@ -12,8 +12,14 @@ import { moduleUrl } from './convex-module.mjs';
 const days = await import(moduleUrl('../src/person-days.ts'));
 const { readProfile, recordPersonDays } = await import(moduleUrl('../convex/personDays.ts'));
 const { landingContributions } = await import(moduleUrl('../convex/projectStats.ts'));
-const { planningContributions, planningPartialDays, PERSON_WORK_CHANGES, PERSON_WORK_COMMANDS } =
-  await import(moduleUrl('../convex/personWork.ts'));
+const {
+  planningContributions,
+  planningPartialDays,
+  PERSON_WORK_BYTES,
+  PERSON_WORK_CHANGES,
+  PERSON_WORK_COMMANDS,
+} = await import(moduleUrl('../convex/personWork.ts'));
+const { HOSTED_WORK_INDEX_FORMAT } = await import(moduleUrl('../src/work-hosted-summary.ts'));
 
 /** Just enough of ctx.db for these reads: index ranges (eq, gte, lt, lte), order, take, unique, get, insert, patch. */
 function fakeDb(tables) {
@@ -49,6 +55,7 @@ function fakeDb(tables) {
         reads.documents += rows.length ? 1 : 0;
         return Promise.resolve(rows[0] ?? null);
       },
+      first: async () => (await api.take(1))[0] ?? null,
     };
     return api;
   };
@@ -634,4 +641,128 @@ test('a close marks the days it could not count: past a cap, or older than the k
     now,
   });
   assert.deepEqual([capped.any, capped.has('2026-11-17'), capped.has('2026-11-18')], [true, false, true]);
+});
+
+/** One day's planning changes (one per n) and the Work events that hold their commands. */
+function planningDay(commands) {
+  const from = Date.parse('2026-11-16T00:00:00.000Z');
+  const rows = commands.map((command, n) => ({
+    projectId: 'p1',
+    actor: 'acct-a',
+    operationId: `work:o${n}`,
+    at: from + n * 1000,
+    _creationTime: from + n * 1000,
+    command: { kind: 'change', source: 'work', action: command.action },
+    kind: 'change',
+  }));
+  const events = commands.map((command, n) => ({
+    projectId: 'p1',
+    operationId: `o${n}`,
+    command: JSON.stringify(command),
+  }));
+  return { from, to: from + 86_400_000, rows, events };
+}
+const closePut = (n, itemId, expectedVersion) => ({
+  action: 'put-planning-item',
+  operationId: `put-${n}`,
+  itemId,
+  status: 'closed',
+  expectedVersion,
+});
+
+test('LATER-2: an edit that re-sends the closed status of a closed Item is no close (hosted record store)', async () => {
+  // The old WorkPlanning editor sends every field, status included, on each edit.
+  const day = planningDay([
+    closePut(0, 'item-closed', 4),
+    closePut(1, 'item-open', 2),
+    closePut(2, 'item-unknown', 7),
+  ]);
+  const version = (key, version, status) => ({
+    projectId: 'p1',
+    kind: 'issue',
+    key,
+    version,
+    status,
+    parent: '',
+    digest: 'd',
+    bytes: 1,
+  });
+  const { db } = fakeDb({
+    projectCoordinationEvents: day.rows,
+    projectWorkEvents: day.events,
+    projectHostedRecords: [version('item-closed', 4, 'closed'), version('item-open', 2, 'open')],
+  });
+  const { contributions } = await planningContributions({ db }, 'p1', day.from, day.to);
+  assert.deepEqual(
+    contributions.map(c => [c.kind, c.item]),
+    [
+      ['close', 'item-open'],
+      // Neither store has its version before: counted, as before.
+      ['close', 'item-unknown'],
+    ],
+    'an Item already closed at the version the put replaced is not closed again',
+  );
+});
+
+test('LATER-2: on a project whose planning is only in the journal index, the version before the put decides', async () => {
+  const day = planningDay([closePut(0, 'item-x', 3), closePut(1, 'item-y', 1)]);
+  const journal = (key, parent, position, value) => ({
+    projectId: 'p1',
+    generationId: 'g1',
+    collection: 'planningVersions',
+    key,
+    parent,
+    position,
+    _creationTime: position,
+    value: JSON.stringify(value),
+  });
+  const { db } = fakeDb({
+    hostedProjects: [{ _id: 'p1', work: { generationId: 'g1', backupId: 'bk' } }],
+    projectWorkGenerations: [
+      {
+        _id: 'g1',
+        projectId: 'p1',
+        backupId: 'bk',
+        status: 'ready',
+        format: HOSTED_WORK_INDEX_FORMAT,
+        metadata: '{}',
+      },
+    ],
+    projectCoordinationEvents: day.rows,
+    projectWorkEvents: day.events,
+    projectPlanningRecords: [
+      journal('x-v3', 'item-x', 5, { version: 3, status: 'closed' }),
+      journal('y-v1', 'item-y', 6, { version: 1, status: 'open' }),
+      // Another Item's version in between, and each put's own new version.
+      journal('z-v1', 'item-z', 7, { version: 1, status: 'closed' }),
+      journal('put-0', 'item-x', 9, { version: 4, status: 'closed' }),
+      journal('put-1', 'item-y', 10, { version: 2, status: 'closed' }),
+    ],
+  });
+  const { contributions } = await planningContributions({ db }, 'p1', day.from, day.to);
+  assert.deepEqual(
+    contributions.map(c => [c.kind, c.item]),
+    [['close', 'item-y']],
+  );
+});
+
+test('LATER-4: the close stops reading commands at its byte cap and marks the rest partial', async () => {
+  // Six comments of about 1.1 MB each: the close opens four (past 4 MiB), never the fifth or sixth.
+  const text = 'x'.repeat(1_100_000);
+  const day = planningDay(
+    Array.from({ length: 6 }, () => ({ action: 'comment-planning-item', itemId: 'item-1', text })),
+  );
+  const { db } = fakeDb({ projectCoordinationEvents: day.rows, projectWorkEvents: day.events });
+  const { contributions, cut } = await planningContributions({ db }, 'p1', day.from, day.to);
+  assert.deepEqual(
+    contributions.map(c => c.kind),
+    ['comment', 'comment', 'comment', 'comment', 'partial', 'partial'],
+  );
+  assert.equal(cut, day.from + 4000, 'the first change past the byte cap');
+  assert(PERSON_WORK_BYTES < 5 * 1_100_000);
+  assert.equal(
+    days.projectDays(contributions, true).get('acct-a').pp,
+    1,
+    'the day is marked, not undercounted silently',
+  );
 });

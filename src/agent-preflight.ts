@@ -435,6 +435,33 @@ export function orderByHistory<T extends { tier: string; tests: string[] }>(
   });
 }
 
+/** Declared guards run first, in declared order, ahead of every other mandatory test: a guard pins a
+ * contract the import graph cannot rank (an exact I/O count, a generated doc), so history, cost and
+ * name order never put it behind other files the wall clock may stop (537e73d9). */
+export function guardsFirst<T extends { tier: string; tests: string[] }>(
+  tiers: T[],
+  guardTests: string[],
+): T[] {
+  if (!guardTests.length) return tiers;
+  const guards = new Set(guardTests);
+  return tiers.map(item => {
+    if (item.tier !== 'mandatory') return item;
+    const present = new Set(item.tests);
+    const first = [...guards].filter(test => present.has(test));
+    return { ...item, tests: [...first, ...item.tests.filter(test => !guards.has(test))] };
+  });
+}
+
+/** The wall-time budget is spent: every queued declared guard still starts (the budget never cuts a
+ * guard), every other queued file is stopped and named. A run whose guards alone outlast the budget
+ * runs over it by those files, never past them. */
+export function budgetSpent(queue: string[], guards: ReadonlySet<string>) {
+  return {
+    start: queue.filter(test => guards.has(test)),
+    stopped: queue.filter(test => !guards.has(test)),
+  };
+}
+
 export function estimatePreflightMinutes(root: string, files: number) {
   return Math.ceil((files * preflightSecondsPerFile(root).secondsPerFile) / 60);
 }
@@ -901,12 +928,15 @@ function planTests(
       // Direct tests of the most specific changed modules are protected while they fit the budget.
       ...(trim ? { hubBudget: { seconds: budgetSeconds, secondsFor } } : {}),
     });
-    selection.tiers = orderByHistory(
-      selection.tiers,
-      stats,
-      timing.secondsPerFile * 1000,
-      selection.ranks,
-      selection.relevance,
+    selection.tiers = guardsFirst(
+      orderByHistory(
+        selection.tiers,
+        stats,
+        timing.secondsPerFile * 1000,
+        selection.ranks,
+        selection.relevance,
+      ),
+      guards.selected.flatMap(guard => guard.tests),
     );
     selection.tests = selection.tiers.flatMap(item => item.tests);
     let tests = [...new Set(selection.tests)];
@@ -1361,6 +1391,8 @@ export function runPreflight(
         // to one file, so the run ends within the budget plus about one file. Every file it did not
         // start is named in the receipt with a one-command rerun of exactly those.
         const queue = [...plan.tests];
+        // Declared guards are never stopped for time (docs/workflows.md#local-preflight-guards).
+        const guardTests = new Set(plan.local?.guards?.flatMap(guard => guard.tests) ?? []);
         let ran = 0;
         let index = 0;
         const runGroup = (group: string[]) => {
@@ -1468,8 +1500,10 @@ export function runPreflight(
             const remaining = (budgetMs - (Date.now() - testStarted)) / 1000;
             // The first group always runs (a budget of 0 still runs one file, the most relevant).
             if (remaining <= 0 && ran) {
-              notRun.push(...queue.splice(0));
-              break;
+              const spent = budgetSpent(queue.splice(0), guardTests);
+              notRun.push(...spent.stopped);
+              queue.push(...spent.start);
+              if (!queue.length) break;
             }
             const window = Math.max(0, Math.min(remaining, PREFLIGHT_GROUP_SECONDS));
             const group: string[] = [];

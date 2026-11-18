@@ -349,3 +349,52 @@ test('timing estimates average the last runs instead of trusting one sample', t 
   writeFileSync(join(agent, 'preflight-timings.json'), 'not json');
   assert.equal(preflightSecondsPerFile(f.root).basis, 'default');
 });
+
+test('537e73d9: declared guards run first and the wall-time budget never stops one', t => {
+  const f = fixture(t);
+  // Two exact-pin guards whose names sort after the changed test: name, history and cost order must
+  // not put them behind it, and a spent budget must still start both (incident e2572586, where the
+  // landing I/O pin files ran 40th and 94th and the 180 s wall clock stopped them).
+  const pin = name =>
+    f.put(`tests/${name}.test.mjs`, `import test from 'node:test'; test('${name}', () => {});`);
+  pin('y-pin');
+  pin('z-pin');
+  f.put(
+    'package.json',
+    JSON.stringify({
+      type: 'module',
+      scripts: {},
+      forge: {
+        preflight: {
+          guards: [
+            {
+              name: 'exact pins',
+              tests: ['tests/z-pin.test.mjs', 'tests/y-pin.test.mjs'],
+              inputs: ['src/b.ts'],
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const plan = f.plan(['tests/a.test.mjs']);
+  assert.deepEqual(plan.tests.slice(0, 3), [
+    'tests/z-pin.test.mjs',
+    'tests/y-pin.test.mjs',
+    'tests/a.test.mjs',
+  ]);
+  assert.deepEqual(
+    plan.local.guards.map(guard => guard.name),
+    ['exact pins'],
+  );
+  plan.local.budgetSeconds = 0;
+  const receipt = f.run(plan);
+  // Both guards ran although the budget was spent after the first file; the protected rest is
+  // stopped and named, so the run is NOT COMPLETE, never passed.
+  assert.equal(receipt.tests, 2);
+  assert.ok(!receipt.stopped.includes('tests/z-pin.test.mjs'));
+  assert.ok(!receipt.stopped.includes('tests/y-pin.test.mjs'));
+  assert.ok(receipt.stopped.includes('tests/a.test.mjs'));
+  assert.equal(receipt.passed, false);
+  assert.ok(receipt.incomplete.mustRun >= 1);
+});

@@ -30,8 +30,9 @@ export type PlanningPort = Pick<
   retainOperation?: (id: string) => void;
   /** Contract features the server advertised (a83b6fd5); unknown means none. */
   serverFeatures?: readonly string[];
-  /** This agent session's slug, recorded on its comments so they read `handle/slug` (Item 9a3d6f5f). */
-  agentSlug?: () => string | undefined;
+  /** This agent session's slug, recorded on its comments so they read `handle/slug` (Item 9a3d6f5f), with the client
+   * and model its launcher declared (`tool:model`, as on landing receipts), so the byline names it (Item 2fb69177). */
+  commentAgent?: () => { agent: string; agentClient?: string } | undefined;
 };
 type Workspace = {
   generationId: string;
@@ -777,7 +778,7 @@ export async function executeHostedPlanning(
         ...comment,
         itemId,
         authorLabel: comment.authorLabel || process.env.FORGE_AGENT_NAME || process.env.FORGE_ACTOR || '',
-        ...(port.agentSlug?.() ? { agent: port.agentSlug()! } : {}),
+        ...port.commentAgent?.(),
       },
       journal,
     ).catch(async error => {

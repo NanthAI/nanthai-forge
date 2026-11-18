@@ -38,8 +38,13 @@ only: the run's Lanes, how many of them it saved and landed, its planning commen
 - **Saves**: the save records on each of the run's Lanes (at most 200 counted per Lane, for at most 50 Lanes a read;
   past that the figure shows "+"). A save made after a holder handover still counts for the Lane's run.
 - **Comments**: the count the day close made for this run in this project, over the run's days, through the last
-  closed day. The list below it shows the run's own comments from the person's Work change rows of the last 14 days
-  (older ones are archived; the hint says so), each linking to its Item.
+  closed day, plus the listed comments on days not closed yet. The list below it shows the run's own comments from the
+  person's Work change rows of the last 14 days, each linking to its Item; its hint says how many older ones it does
+  not list (they are archived). The count shows "+" when it is a floor: a day's close stopped at a cap, the run has more
+  day rows than the page reads, it has older Lanes than the first page and no known session start, or the list stopped
+  before it reached the closed days.
+- The page reads comments up to the moment it opened, so the person's other Work writes never re-run it; a new comment
+  shows the next time the page opens. Its Lanes and saves stay live.
 
 ## Where the figures come from
 
@@ -48,11 +53,15 @@ Work change row (`projectCoordinationEvents`, `kind: 'change'`: actor, time, act
 and keeps its command (status, Item, text, the agent run that sent it) in `projectWorkEvents` or its retained body.
 Save records already name their Lane. `convex/personWork.ts` reads these.
 
-- **Items closed and comments per run** are counted by the project's day close, from that day's change rows.
+- **Items closed and comments per run** are counted by the project's day close, from that day's change rows. An Item
+  counts as closed only when its version before the put was not closed (one indexed read of that version's status in
+  the hosted record store, or, for a project whose planning is only in the Work journal index, the version row before
+  the put's own), so an edit that re-sends the closed status of a closed Item is never a close. When neither store has
+  that version, the put counts as a close.
 - **Latest** and the **agent page's saves and comment list** are read when the page is viewed.
 
-Limits: an Item closed again on a later day (after someone re-sent the closed status) counts again. Planning work is
-never undercounted silently: when a close stops at its cap (1,000 change rows or 400 commands), or its window reaches
+Limits: planning work is never undercounted silently: when a close stops at its cap (1,000 change rows, 400 commands
+or 4 MiB of command and Item-version reads), or its window reaches
 past the 14 days of change rows Convex keeps (a project with no landing for over 14 days), the days it could not fully
 count are marked partial on each person's day and on the project's Stats day, and the pages show the figure as "N+"
 (its hover says older days are counted from what is still kept; nothing else on the page). A partial close also marks
@@ -84,7 +93,10 @@ project (`src/person-days.ts`). The project's [Stats day close](run-evidence.md#
 reads the day's receipts and landing rows; it adds the Lanes started since the project's previous closed day (one read
 each, each filed under its own day, so a weekend or a Lane that crossed midnight UTC is counted) and one read and one
 write per person active on each of those days. In the same window it reads the Work change rows (at most 1,000, about
-0.3 KB each) and one command per planning edit or comment (at most 400) for Items closed and comments. A landing
+0.3 KB each) and one command per planning edit or comment (at most 400, and at most 4 MiB read: one document is at
+most 1 MiB, so very large Item bodies can never push the close past Convex's 16 MiB read limit) for Items closed and
+comments, plus one Item-version read per put that sets an Item closed (two, and one Work index lookup per close, on a
+project whose planning is only in the journal index). A landing
 writes nothing extra; an idle project writes nothing. A project's day is counted once that day closes, which the
 project's first landing of a later day triggers, so today shows from tomorrow. A close looks back at most 366 days and
 keeps the newest 1,000 open and 1,000 closed Lanes of its window. Days closed before this (Item a9ad21c9) are filled in
@@ -99,7 +111,10 @@ by the one-time `statsLanesBackfill` run.
   the viewer cannot see them). Latest adds, for each of at most two projects, three ranges of 15 rows (receipts, open
   Lanes, the person's change rows) and at most four command reads per project (eight a view).
 - Agent page: one save range per Lane shown (at most 50 Lanes, 200 rows each; about 15–50 KB a view at dogfood
-  scale), and on its first page at most 31 day rows, 200 change rows and 40 command reads for the comments.
+  scale), and on its first page at most 32 day rows, 200 change rows and 40 command reads for the comments. The page is
+  a live read: it re-runs when one of the run's Lanes or saves changes (as before), and on no other Work write, since
+  its comment ranges end when the page opened (before, every Work write by the person in the project re-ran it while
+  the run was active, each re-run reading up to about 100 KB).
 - Idle: zero calls. Nothing on the page polls or runs a timer.
 - Backfill (`convex/statsLanesBackfill.ts`, once per deployment, by hand): per project it reads its closed-day rows
   once (about 1–2 KB each, 40 per run) and only the Lanes of the gaps between them (never a closed day's own Lanes),

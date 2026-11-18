@@ -506,7 +506,8 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   then `near` consumers (two modules between). There is no file count. Mandatory, learned and direct
   tests are protected: the time budget never trims them (`local.protected`; `protectedOverBudget`
   says when they alone exceed it), and only the run's wall-time cap stops one, which makes the
-  run NOT COMPLETE (below).
+  run NOT COMPLETE (below). The cap never stops a guard: guards run first, and any left when it is
+  spent still start.
   A *direct* test runs a changed module: it loads it itself or through test fixtures (a helper
   under `tests/` adds no distance), or loads a module that imports it or dispatches it in process
   (*fixture-reached*: a fixture that loads `convex/a.ts` runs what `a.ts` imports for every test

@@ -854,7 +854,11 @@ export class HostedAgentTransport {
             query: this.query.bind(this),
             mutation: this.mutation.bind(this),
             serverFeatures: this.serverFeatures,
-            agentSlug: () => this.agentSlug() ?? undefined,
+            commentAgent: () => {
+              const agent = this.agentSlug();
+              const client = agent ? agentClient() : undefined;
+              return agent ? { agent, ...(client ? { agentClient: client } : {}) } : undefined;
+            },
             retainOperation: (id: string) => {
               this.callerOperationId ??= id;
             },

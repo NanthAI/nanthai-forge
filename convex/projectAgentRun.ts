@@ -6,9 +6,11 @@
 // - closed Lanes: one page of at most AGENT_CLOSED_READ rows (64 KB), newest activity first, filtered to this run;
 // - the newest landing's receipt, once, for the declared model;
 // - saves: one range of save records per Lane shown (at most AGENT_SAVE_LANES Lanes, AGENT_SAVES_READ rows each);
-// - comments (first page only): the person's day rows over the run's days (at most AGENT_COMMENT_DAYS rows) for the
-//   count the day close made, and the person's Work change rows in the run's window (at most AGENT_COMMENT_CHANGES)
-//   plus at most AGENT_COMMENT_COMMANDS command reads for the list (convex/personWork.ts).
+// - comments (first page only): the person's day rows over the run's days (at most AGENT_COMMENT_DAYS rows, newest
+//   first) for the count the day close made, and the person's Work change rows in the run's window (at most
+//   AGENT_COMMENT_CHANGES) plus at most AGENT_COMMENT_COMMANDS command reads for the list (convex/personWork.ts).
+//   Both ranges end at `asOf`, the time the page opened: the page is a live query, and a range reaching past now
+//   would re-run it on every Work write by the person in the project. New comments show on the next open.
 import { v } from 'convex/values';
 import { query, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -52,11 +54,12 @@ export type AgentRunRead = {
   app: string | null;
   device: string | null;
   identityFrom: string | null;
-  /** First page only: comments counted by the day close (through `commentsThrough`), and the ones still in the
-   * hot change feed, newest first. Null on later pages. */
+  /** First page only: the count is the day close's (through `through`) plus the listed comments after that day; the
+   * list is the ones still in the hot change feed, newest first. Null on later pages. */
   comments: {
     count: number;
-    /** A day in the run's window stopped counting planning work at a cap: `count` is a floor. */
+    /** `count` is a floor: a day stopped counting planning work at a cap, or the read could not cover the whole run
+     * (more day rows than it reads, older Lanes than the first page, or a list that stopped before the closed days). */
     partial: boolean;
     through: string | null;
     rows: AgentComment[];
@@ -72,9 +75,11 @@ export const read = query({
     person: v.string(),
     run: v.string(),
     cursor: v.union(v.string(), v.null()),
+    /** When the page opened (ms); the comment ranges end here. Older clients omit it. */
+    asOf: v.optional(v.number()),
   },
   returns: v.string(),
-  handler: async (ctx, { projectId, person, run, cursor }) => {
+  handler: async (ctx, { projectId, person, run, cursor, asOf }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'AUTH_REQUIRED', 'Sign in to see this agent run.');
@@ -138,7 +143,9 @@ export const read = query({
               ).length,
         );
       const comments =
-        cursor || !actor || !rows.length ? null : await runComments(ctx, projectId, actor, run, rows);
+        cursor || !actor || !rows.length
+          ? null
+          : await runComments(ctx, projectId, actor, run, rows, { asOf, allLanes: closed.isDone });
       const session = rows.find(lane => lane.session)?.session;
       const result: AgentRunRead = {
         schema: 1,
@@ -170,34 +177,40 @@ export const read = query({
 });
 
 /** The run's comments in this project: the count from the person's day rows over the run's days, and the list from
- * the person's Work change rows in the run's window (its first Lane or session start to a day after its last action),
- * keeping comments whose command names this run. */
+ * the person's Work change rows in the run's window (its first Lane or session start to a day after its last action,
+ * and never past `asOf`), keeping comments whose command names this run. Comments on days the close has not counted
+ * yet are counted from the list. */
 async function runComments(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
   actor: string,
   run: string,
   lanes: readonly { _creationTime: number; lastActivityAt?: number; session?: { startedAt: number } }[],
+  read: { asOf: number | undefined; allLanes: boolean },
 ) {
-  const start = Math.min(
-    ...lanes.map(lane => Math.min(lane._creationTime, lane.session?.startedAt ?? Infinity)),
+  const sessionStart = Math.min(...lanes.map(lane => lane.session?.startedAt ?? Infinity));
+  const start = Math.min(sessionStart, ...lanes.map(lane => lane._creationTime));
+  const end = Math.min(
+    Math.max(...lanes.map(lane => lane.lastActivityAt ?? lane._creationTime)) + DAY_MS,
+    read.asOf ?? Infinity,
   );
-  const end = Math.max(...lanes.map(lane => lane.lastActivityAt ?? lane._creationTime)) + DAY_MS;
   const days = await ctx.db
     .query('personDays')
     .withIndex('by_person_and_day', q =>
       q.eq('person', actor).gte('day', isoDay(start)).lte('day', isoDay(end)),
     )
-    .take(AGENT_COMMENT_DAYS);
+    .order('desc')
+    .take(AGENT_COMMENT_DAYS + 1);
+  // Older Lanes than the first page may start the run earlier, unless its session start is known.
   let count = 0,
-    partial = false,
+    partial = days.length > AGENT_COMMENT_DAYS || (!read.allLanes && sessionStart === Infinity),
     through: string | null = null;
-  for (const row of days) {
+  for (const row of days.slice(0, AGENT_COMMENT_DAYS)) {
     const entry = personDaySchema.parse(JSON.parse(row.value)).p[projectId];
     if (!entry) continue;
     count += entry.rc?.[run] ?? 0;
     if (entry.pp) partial = true;
-    through = row.day;
+    through ??= row.day;
   }
   const changes = await ctx.db
     .query('projectCoordinationEvents')
@@ -208,14 +221,19 @@ async function runComments(
     .take(AGENT_COMMENT_CHANGES);
   const rows: AgentComment[] = [];
   let opened = 0,
-    more = changes.length === AGENT_COMMENT_CHANGES;
+    more = changes.length === AGENT_COMMENT_CHANGES,
+    oldest = Infinity;
   for (const row of changes) {
     const change = planningChange(row);
-    if (change?.action !== 'comment-planning-item') continue;
+    if (change?.action !== 'comment-planning-item') {
+      oldest = row._creationTime;
+      continue;
+    }
     if (opened++ >= AGENT_COMMENT_COMMANDS) {
       more = true;
       break;
     }
+    oldest = row._creationTime;
     const command = await planningCommand(ctx, projectId, change.operationId);
     if (!command?.itemId || runOf(command) !== run) continue;
     rows.push({
@@ -224,5 +242,9 @@ async function runComments(
       text: firstLine(command.text, 'A comment').slice(0, 300),
     });
   }
-  return { count: Math.max(count, rows.length), partial, through, rows, more };
+  // The close counted every day through `through`; listed comments after it are not in its count yet.
+  const unclosed = rows.filter(row => through === null || isoDay(row.at) > through).length;
+  // A list cut short before it reached the closed days may have left later comments uncounted.
+  if (more && oldest !== Infinity && (through === null || isoDay(oldest) > through)) partial = true;
+  return { count: Math.max(count + unclosed, rows.length), partial, through, rows, more };
 }

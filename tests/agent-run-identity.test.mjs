@@ -401,3 +401,38 @@ test('the CLI sends the run with a landing only to a server that advertises land
     'a person sends no run',
   );
 });
+
+test('an agent comment sends its run and declared model on the one comment call; a person sends neither (Item 2fb69177)', async t => {
+  stateHome(t);
+  const s = agentFixture(t);
+  s.caps.features = ['agent-slug'];
+  const saved = Object.fromEntries(
+    ['CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID', 'FORGE_AGENT_MODEL', 'FORGE_AGENT_SESSION'].map(name => [
+      name,
+      process.env[name],
+    ]),
+  );
+  t.after(() => {
+    for (const [name, value] of Object.entries(saved))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  });
+  delete process.env.CLAUDE_CODE_SESSION_ID;
+  delete process.env.CODEX_THREAD_ID;
+  process.env.FORGE_AGENT_MODEL = 'model-test-1';
+  process.env.FORGE_AGENT_SESSION = 'session-alpha';
+  const sent = async session => {
+    const before = s.calls.length;
+    await s.transport(session).dispatch('comment-planning-item', { itemId: randomUUID(), text: 'Said.' });
+    const writes = s.calls.slice(before).filter(call => call.name === 'projectWorkCommand:command');
+    assert.equal(writes.length, 1, 'one comment write');
+    return JSON.parse(writes[0].args.command);
+  };
+  const agent = await sent('session-alpha');
+  assert.equal(agent.agent, agentSlug('session-alpha'));
+  assert.equal(agent.agentClient, 'agent:model-test-1');
+  delete process.env.FORGE_AGENT_SESSION;
+  const person = await sent(null);
+  assert.equal('agent' in person, false, 'a person sends no run');
+  assert.equal('agentClient' in person, false, 'a person sends no model');
+});

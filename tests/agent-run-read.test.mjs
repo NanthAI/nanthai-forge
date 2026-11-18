@@ -153,3 +153,89 @@ test('a reader, a stranger and a signed-out caller get nothing of the run', asyn
     });
   }
 });
+
+const DAY = 24 * HOUR;
+const today = new Date(NOW).toISOString().slice(0, 10);
+/** The run commented 3 times on a closed day 20 days ago (archived: no change rows left) and twice today (not closed). */
+function longRun() {
+  const s = world();
+  const old = NOW - 20 * DAY;
+  Object.assign(table(s, 'projectHostedOverlapLanes').get('lane-a'), {
+    _creationTime: old,
+    // Still working: its last action was an hour ago.
+    lastActivityAt: NOW - HOUR,
+  });
+  table(s, 'personDays').set('day', {
+    _id: 'day',
+    person: 'owner',
+    day: new Date(old).toISOString().slice(0, 10),
+    value: JSON.stringify({
+      p: { project: { l: 1, la: 0, n: 0, na: 0, v: 0, t: [old, old], r: {}, m: 3, rc: { 'amber-fox': 3 } } },
+    }),
+  });
+  return s;
+}
+
+test('LATER-1: a run older than 14 days counts its closed comments plus the listed ones not closed yet', async () => {
+  const data = await read(longRun(), 'owner');
+  assert.deepEqual(
+    data.comments.rows.map(row => row.text),
+    ['Second from amber-fox', 'First from amber-fox'],
+  );
+  // Before: max(closed 3, listed 2) = 3, so today's two were lost while the archived three hid them.
+  assert.equal(data.comments.count, 5, 'three counted by the close, two listed today');
+  assert.equal(data.comments.partial, false, 'every day and Lane of the run was read');
+  assert.equal(
+    data.comments.count - data.comments.rows.length,
+    3,
+    'the page says three older are not listed',
+  );
+});
+
+test('LATER-1: listed comments on a closed day are not counted twice', async () => {
+  const data = await read(world(), 'owner');
+  assert.equal(data.comments.through, today);
+  assert.equal(data.comments.count, 2, 'the close already counted both listed comments');
+});
+
+test('LATER-3: the comment ranges end when the page opened, so later Work writes never re-run the live read', async () => {
+  const s = longRun();
+  const asOf = NOW;
+  const upper = [];
+  const query = s.ctx.db.query.bind(s.ctx.db);
+  s.ctx.db.query = name => {
+    const q = query(name);
+    const withIndex = q.withIndex;
+    q.withIndex = (index, build) =>
+      withIndex(index, range => {
+        const spy = new Proxy(range, {
+          get: (target, key) =>
+            typeof target[key] !== 'function'
+              ? target[key]
+              : (...args) => {
+                  if (key === 'lt' || key === 'lte')
+                    upper.push({ name, key, field: args[0], value: args[1] });
+                  const out = target[key](...args);
+                  return out === target ? spy : out;
+                },
+        });
+        return build?.(spy);
+      });
+    return q;
+  };
+  s.caller('owner');
+  const data = JSON.parse(
+    await agentRun.read._handler(s.ctx, {
+      projectId: 'project',
+      person: 'owner',
+      run: 'amber-fox',
+      cursor: null,
+      asOf,
+    }),
+  );
+  assert.equal(data.comments.count, 5);
+  const changes = upper.find(r => r.name === 'projectCoordinationEvents' && r.field === '_creationTime');
+  const days = upper.find(r => r.name === 'personDays' && r.field === 'day');
+  assert(changes && changes.value <= asOf, `change rows read up to ${changes?.value}, past ${asOf}`);
+  assert(days && days.value <= today, `day rows read up to ${days?.value}`);
+});

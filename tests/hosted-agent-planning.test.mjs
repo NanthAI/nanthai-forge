@@ -43,6 +43,7 @@ const actionsV8 = await import(moduleUrl('../convex/projectWorkActionsV8.ts'));
 const commands = await import(moduleUrl('../convex/projectWorkCommand.ts'));
 const search = await import(moduleUrl('../convex/projectHostedPlanningSearch.ts'));
 const planningModule = await import(moduleUrl('../convex/projectHostedPlanning.ts'));
+const planningBatch = await import(moduleUrl('../convex/projectPlanningBatch.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 
 /** The agent's port over the real Convex handlers; Intent states are the one stub (tested with
@@ -75,6 +76,7 @@ function port(s, states = new Map(), serverFeatures = [...hostedContractFeatures
       projectWorkCommand: commands,
       projectHostedPlanningSearch: search,
       projectHostedPlanning: planningModule,
+      projectPlanningBatch: planningBatch,
     }[module][fn];
     const value = await handler._handler(s.ctx, args);
     // A server before flip 5 S4 (no planning-put-mutation) still sends the live revision on its workspace.
@@ -1544,6 +1546,46 @@ test('hosted planning CLI reads and writes from an explicitly addressed non-Git 
   assert(read.result.items.some(item => item.id === created.result.itemId));
   assert.equal(existsSync(join(current.p.root, '.git')), false);
   assert.equal(existsSync(join(current.p.root, '.forge')), false);
+});
+
+test('an agent comment from the CLI carries the model its session declared, single and in a batch (Item 2fb69177)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  // A device sign-in, as the CLI uses; the server keeps a declared model only beside a device's agent slug.
+  s.tables.cliCredentials.set('device', {
+    _id: 'device',
+    credentialId: 'credential-1',
+    owner: 'owner',
+    name: 'test',
+    tokenHash: 'synthetic-hash',
+    issuedAt: Date.now(),
+    expiresAt: Date.now() + 600000,
+    revoked: false,
+    scope: 'cli',
+  });
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner', forgeCredential: 'credential-1' });
+  p.commentAgent = () => ({ agent: 'keen-impala', agentClient: 'claude-code:synthetic-model-1' });
+  const issue = (await put(p, { kind: 'issue', title: 'Bylines', body: 'Done when:\n- [ ] x' })).result;
+  await run(p, 'comment-planning-item', { itemId: issue.itemId, text: 'single' });
+  await put(p, {
+    batch: [{ action: 'comment-planning-item', itemId: issue.itemId, text: 'batched' }],
+  });
+  // A session that declared no model still reads as an agent, with "model not declared".
+  p.commentAgent = () => ({ agent: 'amber-fox' });
+  await run(p, 'comment-planning-item', { itemId: issue.itemId, text: 'undeclared' });
+  const rows = Object.fromEntries(
+    (await list(p, { id: issue.itemId, reconcile: false })).comments.map(row => [row.text, row]),
+  );
+  for (const text of ['single', 'batched']) {
+    assert.equal(rows[text].agent, 'keen-impala', text);
+    assert.equal(
+      rows[text].agentClient,
+      'claude-code:synthetic-model-1',
+      `${text}: the declared model is stored`,
+    );
+  }
+  assert.equal(rows.undeclared.agent, 'amber-fox');
+  assert.equal(rows.undeclared.agentClient, undefined);
 });
 
 test('a unique 8+ character id prefix resolves in the same call; full ids stay byte-for-byte unchanged and add no call (ce863deb)', async t => {

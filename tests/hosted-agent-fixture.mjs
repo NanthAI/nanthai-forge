@@ -403,6 +403,7 @@ export function agentFixture(t, source) {
       };
     else if (name === 'projectHostedApprovals:withdraw')
       result = { laneId: args.laneId, status: 'requested', live: false, version: 2 };
+    else if (name === 'projectWorkCommand:command') result = { revision: 1 };
     else assert.fail(`Unexpected API call ${name}`);
     if (fail === name) {
       fail = null;

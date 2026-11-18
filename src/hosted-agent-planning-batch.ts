@@ -72,7 +72,7 @@ async function batchWrites(
         itemId: given,
         ...comment,
         authorLabel: comment.authorLabel || process.env.FORGE_AGENT_NAME || process.env.FORGE_ACTOR || '',
-        ...(port.agentSlug?.() ? { agent: port.agentSlug()! } : {}),
+        ...port.commentAgent?.(),
       } as BatchWrite);
       continue;
     }

@@ -14,6 +14,9 @@ import {
 } from '../scripts/test-impact.mjs';
 import { scanReaders } from '../scripts/test-tree-scanners.mjs';
 import { incompletePreflight, mustRunNotRun, preflightVerdict } from '../dist/agent-preflight-incomplete.js';
+import * as preflight from '../dist/agent-preflight.js';
+import { preflightGuards, selectGuards } from '../dist/agent-preflight-static.js';
+import { readFileSync } from 'node:fs';
 
 const files = sourceFiles(new URL('..', import.meta.url).pathname);
 // None of these paths is a script, so every case parses the same graph: one parse serves them all.
@@ -307,4 +310,48 @@ test('SM-C M4: an environment receipt reads ENVIRONMENT, never FAILED; the gate 
     assert.equal(preflightOutcome(receipt), outcome);
     assert.equal(preflightVerdict(receipt), word);
   }
+});
+
+test('3a733ee8 (Lane e2572586): a landing-transaction change runs the exact-I/O pins first and the budget never stops them', t => {
+  // The Lane's changed product paths at head 9a685268 (added files are not in this inventory).
+  const paths = [
+    ...[
+      'Acceptance',
+      'AcceptanceCompletion',
+      'AcceptanceFields',
+      'AcceptancePublish',
+      'LandingBatchPublish',
+      'ResolutionOrigin',
+      'RevertNotice',
+    ].map(name => at('convex', `projectHosted${name}.ts`)),
+    at('convex', 'projectPurgeInventory.ts'),
+    at('convex', 'projectWorkIndex.ts'),
+    at('convex', 'schema.ts'),
+    at('src', 'hosted-agent-planning.ts'),
+    at('src', 'member-data-notice.ts'),
+    at('src', 'speed-budgets.json'),
+  ];
+  // The files that pin landing calls, reads and writes; the landing check failed on the second.
+  const pins = [
+    'landing-cost-guard',
+    'hosted-early-resolution-speed',
+    'hosted-landing-admission-default',
+  ].map(name => at('tests', `${name}.test.mjs`));
+  const packageJson = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
+  const guardTests = selectGuards(
+    preflightGuards(packageJson, path => files.has(path)),
+    paths,
+  ).selected.flatMap(guard => guard.tests);
+  for (const pin of pins) assert.ok(guardTests.includes(pin), `${pin} is a guard this change triggers`);
+  const plan = select(paths, { guards: guardTests });
+  const queue = preflight.guardsFirst(plan.tiers, guardTests).flatMap(item => item.tests);
+  // The incident run: the 180 s wall clock was spent after 39 files had started.
+  const started = queue.slice(0, 39);
+  const spent = preflight.budgetSpent(queue.slice(39), new Set(guardTests));
+  for (const pin of pins)
+    assert.ok(started.includes(pin) || spent.start.includes(pin), `${pin} was stopped for time`);
+  assert.ok(!spent.stopped.some(test => guardTests.includes(test)), 'no guard is stopped for time');
+  const unique = [...new Set(guardTests)];
+  assert.deepEqual(queue.slice(0, unique.length).sort(), unique.sort(), 'guards run first');
+  t.diagnostic(`guards ${guardTests.length}; queue ${queue.length}; stopped ${spent.stopped.length}`);
 });

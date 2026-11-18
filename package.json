@@ -86,6 +86,24 @@
       ],
       "guards": [
         {
+          "name": "landing exact I/O",
+          "tests": [
+            "tests/landing-cost-guard.test.mjs",
+            "tests/hosted-early-resolution-speed.test.mjs",
+            "tests/hosted-landing-admission-default.test.mjs"
+          ],
+          "inputs": [
+            "convex/projectHosted*.ts",
+            "convex/projectLanding*.ts",
+            "convex/schema.ts",
+            "src/speed-budgets.json",
+            "src/cost-budgets.ts",
+            "tests/early-resolution-replay.mjs",
+            "tests/landing-admission-replay.mjs",
+            "tests/hosted-landing-batches-fixture.mjs"
+          ]
+        },
+        {
           "name": "account device registrations",
           "tests": [
             "tests/account-registration.test.mjs"

@@ -101,7 +101,7 @@ createRoot(document.getElementById('root')).render(<Fixture/>);
             [],
           );
           if (kind === 'agent') {
-            // Four figures: Lanes, saves, landings, comments; the comments list says older ones are archived.
+            // Four figures: Lanes, saves, landings, comments; the comments list says how many older ones it does not list.
             const figures = await page.locator('.nums > div').allInnerTexts();
             assert.deepEqual(
               figures.map(text => text.replace(/\s+/g, ' ').trim()),
@@ -113,7 +113,7 @@ createRoot(document.getElementById('root')).render(<Fixture/>);
             );
             await page.getByRole('heading', { name: 'Comments' }).waitFor();
             assert.equal(await page.locator('.row.cm').count(), 2);
-            await page.getByText('older comments are archived', { exact: false }).waitFor();
+            await page.getByText('1+ older not listed', { exact: false }).waitFor();
             await page.getByRole('link', { name: 'Item 6a251b23' }).waitFor();
           }
           if (kind === 'holder') {

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // One agent run's page in a project (Item 6a251b23): who it is (run · model · for @person), its first and last action,
 // its Lanes, saves, landings and comments, and the identity it reported. One read per view (convex/projectAgentRun.ts), plus one per
-// "look further back"; it re-runs only when one of its Lanes changes. No timer.
+// "look further back"; it re-runs only when one of its Lanes changes. Its comments are read up to when the page opened
+// (`asOf`), so the person's other Work writes never re-run it. No timer.
 import '../access.css';
 import '../../ds/review.css';
 import '../../ds/figures.css';
@@ -24,7 +25,14 @@ const at = (ms: number) =>
 export function AgentRun({ person, run, ...props }: PlaceProps & { person: string; run: string }) {
   const [cursor, setCursor] = useState<string | null>(null);
   const [earlier, setEarlier] = useState<AgentLane[]>([]);
-  const result = useQuery(api.projectAgentRun.read, { projectId: props.projectId, person, run, cursor });
+  const [asOf] = useState(() => Date.now());
+  const result = useQuery(api.projectAgentRun.read, {
+    projectId: props.projectId,
+    person,
+    run,
+    cursor,
+    asOf,
+  });
   const data = result ? (JSON.parse(result) as AgentRunRead) : undefined;
   const read = data?.schema === 1 ? { ...data, lanes: [...earlier, ...data.lanes] } : data;
   return (
@@ -61,6 +69,7 @@ export function AgentView({
   const saves = lanes.reduce((sum, lane) => sum + (lane.saves ?? 0), 0);
   const savesAll = lanes.every(lane => lane.saves !== null);
   const comments = data?.comments ?? null;
+  const unlisted = comments ? comments.count - comments.rows.length : 0;
   const itemHref = (id: string) => hrefFor({ ...route, place: 'plan', section: '', rest: id });
   const open = lanes.filter(lane => lane.open);
   const first = lanes.length ? Math.min(...lanes.map(lane => lane.first)) : null;
@@ -205,8 +214,8 @@ export function AgentView({
               title="Comments"
               count={comments.count}
               hint={
-                comments.rows.length < comments.count || comments.more
-                  ? 'newest first · older comments are archived; open the Item to read them'
+                unlisted > 0 || comments.more
+                  ? `newest first · ${unlisted > 0 ? `${nf.format(unlisted)}${comments.partial ? '+' : ''}` : 'more'} older not listed; open the Item to read them`
                   : 'newest first'
               }
             >
