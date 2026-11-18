@@ -62,6 +62,7 @@ test('split shared documents hold only headings and entries lines, so new entrie
       .some(line => ENTRIES_LINE.test(line)),
   );
   assert.ok(split.includes('docs/status.md'), 'docs/status.md is split into docs/status.d/');
+  assert.ok(split.includes('docs/security.md'), 'docs/security.md is split into docs/security.d/sections/');
   for (const path of split) {
     for (const block of raw(path)
       .trimEnd()

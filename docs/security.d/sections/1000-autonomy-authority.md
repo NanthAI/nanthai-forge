@@ -1,0 +1,20 @@
+## Autonomy authority
+
+Local CLI and MCP Channel acceptance, including the legacy Work command, is classified as an agent action. Embedded `WorkService` callers supply a trusted `AcceptanceActor` constructor context; command JSON cannot promote itself to a person. Direct native/Git acceptance uses the same policy checks. Local settings are owned by the OS user: any process with that user's filesystem authority can change them. `FORGE_ACTOR` is a self-declared label for local allowlists, not authentication or a sandbox. Use scoped device credentials for agents that require hosted policy enforcement.
+
+Hosted policy changes require the current project owner. Forge has no general project maintainer role today; a guidance-maintainer assignment authorizes guidance only. Contributors may read policy and propose Candidates. Checked publication follows the project automatic-acceptance and exact-check rules, or explicit approval by the owner person. The owner chooses unchecked person acceptance in **Settings → Landing & checks → Who can land without a check**: **Owner only** (default), **Owner and chosen people or teams**, or **Owner and all write members**. People are picked by Forge handle and stored by account; teams are existing owner-managed teams, picked by name. A newly picked person must have current project write membership. Being listed or joining a listed team never grants write access: the person must still be a project write member when the final landing transaction runs. Removing write access, downgrading to read, leaving the selected team, or removing that team takes effect immediately, with no cleanup job. Agent credentials never receive this bypass, including the owner's and a selected person's credentials. Protected-path review and other existing acceptance rules still apply. Changes use the existing policy history, with Undo in Landing & checks. Browser account sessions count as people. Forge device credentials with `cli` scope count as agents and follow the project policy; `coordination` scope can never accept or set policy. A client actor/session label is not authority. Existing browser account JWT overrides retain browser authority, so use scoped device login for agents that need policy enforcement.
+
+Private and public contributors follow the same check, review and protected-path rules.
+Unchecked person acceptance follows the owner's selection above; agent credentials
+always require an exact passing check. Explicit owner approval still reviews a
+contributor's exact attempt. Receipts mark checked contributor self-acceptance as
+automatic and permitted unchecked acceptance as a person's explicit action. An explicit owner-approval glob list replaces built-in
+globs while retaining every defined check and setup entry file.
+
+The server selects the landing check: the definition named `verify`, or the sole
+definition when there is only one. Check-based publication with multiple definitions without `verify` requires
+an explicit owner-person acceptance; unchecked person acceptance still follows
+the selection above. Both solo and shared-batch publication
+recheck this current selection; a submitted check id does not choose the gate.
+
+The final hosted mutation is the unchecked-landing authority for web, CLI, MCP and agents. It rechecks current policy, caller authority and credential scope after source/evidence preparation. Checked landings, including disjoint evidence reuse, skip unchecked membership/team lookups entirely: zero additional calls, reads or writes; idle cost remains zero. Exact-Candidate passing checks, protected-path review and accepted-head preservation apply to automatic acceptance even on existing custom projects. Records include actor, policy, checked Candidate/run, action summary and undo instructions. Hosted run evidence is local-owner provenance and can be forged by that execution owner; policy does not create an independent execution attestation. Uploaded local policy never replaces hosted settings. All writers must be upgraded before a restrictive local policy is stored; format 11 prevents an older writer from ignoring it.
