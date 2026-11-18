@@ -8,6 +8,9 @@
 
 /** Existing text files of the base tree used for clean same-file edits (top and bottom). */
 export const SHARED_DOCS = ['README.md', 'CONTRIBUTING.md'];
+/** An existing source file of the tested package, for a clean same-file code merge (top and
+ * bottom): a code overlap, so a check made before the other edit landed cannot carry across it. */
+export const SHARED_SOURCE = 'packages/shared/src/Array.ts';
 /** A package the bench check tests, where a scenario test file is picked up. */
 export const TEST_DIR = 'packages/shared/src';
 
@@ -44,10 +47,10 @@ export const SCENARIOS = Object.freeze({
   'parked-head': {
     paths: ['N1'],
     about:
-      'Position 1 lands first with a slow check (a test that takes 240 s in the landing check only) and a shared file; positions 2-4 share that file (dependent followers), positions 5-10 are independent. Followers start 20 s later, pass first and wait behind the head; independent landings move main under it.',
+      'v2 (2026-11-18). Position 1 lands first with a slow check (a test that takes 240 s in the landing check only) and edits the top of one existing source file; position 2 is the holder: it edits the bottom of that file (overlapping code, clean merge), so a check it passed before position 1 landed must run again on the new main. Positions 3-4 share a conflicting file with position 1 (dependent followers); positions 5-10 are independent. Followers start 20 s later. With pre-queue checks, independent followers pass on main while the head checks and wait behind the holder; the holder re-checks after the head lands (the N1 situation).',
     roles: () => ({
-      0: { slowSeconds: 240, group: 'parked' },
-      1: { group: 'parked' },
+      0: { slowSeconds: 240, group: 'parked', doc: { path: SHARED_SOURCE, at: 'top' } },
+      1: { group: '', doc: { path: SHARED_SOURCE, at: 'bottom' } },
       2: { group: 'parked' },
       3: { group: 'parked' },
       4: { group: '' },
@@ -87,12 +90,15 @@ export function scenarioTest(task, kind, seconds = 0) {
 
 export const scenarioTestPath = task => `${TEST_DIR}/benchScenario${task.replace(/[^a-z0-9]/gi, '')}.test.ts`;
 
-/** Insert one line at the top or bottom of an existing file (far apart: a clean merge). The top
- * marker is its own paragraph, as Markdown formatters keep it, so the edit passes the repo's
- * format check (land --save runs it inline). */
-export function docEdit(text, task, at) {
-  const line = `<!-- bench scenario ${task} -->`;
-  return at === 'top' ? `${line}\n\n${text}` : `${text.endsWith('\n') ? text : text + '\n'}${line}\n`;
+/** Insert one line at the top or bottom of an existing file (far apart: a clean merge). In
+ * Markdown the top marker is its own paragraph, as Markdown formatters keep it; in source files
+ * it is a line comment. Either way the edit passes the repo's format check (land --save runs it
+ * inline). */
+export function docEdit(text, task, at, path = '') {
+  const markdown = !/\.[cm]?[jt]sx?$/.test(path);
+  const line = markdown ? `<!-- bench scenario ${task} -->` : `// bench scenario ${task}`;
+  const top = markdown ? `${line}\n\n${text}` : `${line}\n${text}`;
+  return at === 'top' ? top : `${text.endsWith('\n') ? text : text + '\n'}${line}\n`;
 }
 
 /** Reading of a `landing {operationId}` reply for the withdraw role: the submission's identity,
@@ -111,6 +117,8 @@ export function landingReading(reply) {
   };
 }
 
-/** Withdraw request body: by submissionId when known (follows a resolution Lane), else by Lane. */
+/** Withdraw request body: by submissionId when known (follows a resolution Lane), else by Lane.
+ * The CLI records a reason only for a withdraw by Lane and refuses one with submissionId
+ * (src/hosted-agent-contract.ts, withdraw: BAD_ARGUMENT). */
 export const withdrawBody = (laneId, submissionId, reason) =>
-  submissionId ? { submissionId, reason } : { laneId, reason };
+  submissionId ? { submissionId } : { laneId, reason };

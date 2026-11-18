@@ -38,7 +38,7 @@ if (group) appendFileSync('.bench/dry/group-' + group + '.md', task + '\\n');
 const testPath = scenarioTestPath(task);
 if (role.failOnce) writeFileSync(testPath, scenarioTest(task, 'fail'));
 if (role.slowSeconds) writeFileSync(testPath, scenarioTest(task, 'slow', role.slowSeconds));
-if (role.doc) writeFileSync(role.doc.path, docEdit(readFileSync(role.doc.path, 'utf8'), task, role.doc.at));
+if (role.doc) writeFileSync(role.doc.path, docEdit(readFileSync(role.doc.path, 'utf8'), task, role.doc.at, role.doc.path));
 let fixed = false;
 const onFailure = role.failOnce
   ? async () => {

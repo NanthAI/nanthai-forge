@@ -9,6 +9,7 @@ import { mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { benchRootOrExit } from './bench-root.mjs';
+import { pathEvidence } from './path-evidence.mjs';
 
 const ms = value => Date.parse(value);
 export const quantile = (values, p) => {
@@ -55,6 +56,8 @@ export function summarizeCell(result, receipts) {
     convexUsd: result.convex?.costUsd ?? null,
     convexUsdPer1000:
       result.convex?.costUsd != null && own.length ? (1000 * result.convex.costUsd) / own.length : null,
+    // Per switch: was its queue path reached? A switch-on cell that missed it is 'path not reached'.
+    paths: pathEvidence(own, result.switches?.start ?? {}),
   };
 }
 
