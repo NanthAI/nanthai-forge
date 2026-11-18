@@ -15,6 +15,7 @@ import { moduleUrl } from './convex-module.mjs';
 const model = await import(moduleUrl('../web/src/app/lanes/model.ts'));
 const reads = await import(moduleUrl('../convex/projectLandingReads.ts'));
 const { successorIntentId } = await import(moduleUrl('../src/hosted-intent-chain.ts'));
+const { digest } = await import(moduleUrl('../src/state/hash.ts'));
 const { HistoryView, historyFilter } = await import(moduleUrl('../web/src/app/lanes/History.tsx'));
 const { parseAppPath, hrefFor, ROOT } = await import(moduleUrl('../web/src/app/paths.ts'));
 const { keptLayout } = await import(moduleUrl('../web/src/ds/interactive.tsx'));
@@ -288,10 +289,35 @@ function readsFixture() {
       recordId: `issue-record-${id}`,
       value: JSON.stringify({ id, kind: 'issue', title, status: 'open' }),
     });
+  /** An Intent record with its goal inline (a follow-up of a reopened Item, or unplanned work). */
+  const intent = (key, outcome) => {
+    const inline = JSON.stringify({ id: key, outcome });
+    const recordId = s.insert('projectHostedRecords', {
+      projectId,
+      kind: 'intent',
+      key,
+      parent: 'owner',
+      status: 'active',
+      version: 0,
+      inline,
+      bodyId: `intent-body-${key}`,
+      digest: digest(inline),
+      bytes: new TextEncoder().encode(inline).length,
+    });
+    s.insert('projectHostedRecordHeads', {
+      projectId,
+      kind: 'intent',
+      key,
+      version: 0,
+      parent: 'owner',
+      status: 'active',
+      recordId,
+    });
+  };
   const list = (actor, view, extra = {}) =>
     s.call('list', reads.list, { projectId, ...(view ? { view } : {}), ...extra }, actor).then(JSON.parse);
   const set = (actor, args) => s.call('mark', reads.mark, { projectId, ...args }, actor);
-  return { s, projectId, accept, plan, list, set };
+  return { s, projectId, accept, plan, intent, list, set };
 }
 
 test('To read keeps read state per account: one reader marking does not clear another', async () => {
@@ -417,6 +443,7 @@ test("History filters by person, by agent run and by Item, including the Item's 
     "a landing for an Item's first Intent carries the Item's title",
   );
   assert.equal(all.rows.find(row => row.sequence === 1).item, null, 'unplanned work has no Item');
+  assert.equal(all.rows.find(row => row.sequence === 2).goal, null, 'an Item row reads no Intent goal');
   const by = async filter => (await f.list('owner', 'recent', filter)).rows.map(row => row.sequence);
   assert.deepEqual(await by({ by: 'mara' }), [4, 3, 2], 'a person with the agents acting for them');
   assert.deepEqual(await by({ by: 'mara/amber-fox' }), [4, 2], 'one agent run');
@@ -458,6 +485,7 @@ const historyRow = (sequence, extra = {}) => ({
   title: `Landing ${sequence}`,
   message: `Landing ${sequence}\n\nWhy it changed.`,
   item: null,
+  goal: null,
   actor: 'mara',
   agent: true,
   agentRun: 'amber-fox',
@@ -554,4 +582,24 @@ test("a Lanes layout saved while it still had Landed today gives way to today's 
   const moved = { top: [], a: ['overlaps'], b: ['yard'] };
   assert.deepEqual(keptLayout(moved, now), moved, 'a layout of the same regions is kept');
   assert.deepEqual(keptLayout(null, now), now);
+});
+
+test("a landing from a reopened Item's follow-up Intent is titled with the goal its Intent was started with", async () => {
+  const f = readsFixture();
+  const itemId = randomUUID();
+  const followUp = successorIntentId(itemId);
+  f.plan(itemId, 'History replaces To read');
+  f.intent(followUp, 'History replaces To read');
+  f.accept(1, 'Follow-up: phone rows', { intentId: followUp });
+  const [row] = (await f.list('owner', 'recent')).rows;
+  assert.equal(row.item, null, 'a follow-up Intent has no stored link back to its Item');
+  assert.equal(row.goal, 'History replaces To read');
+  assert.match(
+    renderHistory(historyPage([historyRow(1, { goal: row.goal, title: row.title })])),
+    /History replaces To read/,
+  );
+  assert.deepEqual(
+    (await f.list('owner', 'recent', { item: itemId })).rows.map(r => r.sequence),
+    [1],
+  );
 });

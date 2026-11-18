@@ -6,13 +6,14 @@
 // list, one page of HISTORY_PAGE rows: 1 read-state row + one indexed range of receipts below the `before` cursor
 // (at most HISTORY_PAGE + 1, plus the few read one by one in the unread view; at most HISTORY_SCAN when filtered,
 // since receipts have no actor or Item index) + 3 indexed rows per listed landing (its finish, Lane head and Item
-// head) and, with the Item filter, 1 finish row per scanned receipt. It re-runs when a landing is accepted, the
+// head; up to 3 more for the Intent's goal when it is not an Item's first) and, with the Item filter, 1 finish row per
+// scanned receipt. It re-runs when a landing is accepted, the
 // reader marks, or a listed Item changes; never on a clock. mark: 1 read + 1 write, idempotent.
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
 import { finishRow } from './projectHostedFinishWake';
-import { recordHead } from './projectHostedRecords';
+import { hostedRecordBody, recordHead } from './projectHostedRecords';
 import { LANDING_READ_SET } from './projectLandingReadFields';
 import { report } from './errors';
 import { invariant } from '../src/errors';
@@ -98,6 +99,22 @@ async function itemOf(ctx: QueryCtx, projectId: Id<'hostedProjects'>, intentId: 
   return typeof item.title === 'string' ? { id: intentId, title: item.title } : null;
 }
 
+/** The goal an Intent was started with: an Item's title when started from one. Read only for a landing whose Intent
+ * is not an Item's first (a follow-up of a reopened Item, or unplanned work): head, record and, unless inline, body. */
+async function goalOf(ctx: QueryCtx, projectId: Id<'hostedProjects'>, intentId: string | null) {
+  if (!intentId) return null;
+  const head = await recordHead(ctx, projectId, 'intent', intentId);
+  const record = head ? await ctx.db.get(head.recordId) : null;
+  if (!record) return null;
+  try {
+    const outcome = (JSON.parse(await hostedRecordBody(ctx, record)) as { outcome?: unknown }).outcome;
+    return typeof outcome === 'string' ? outcome : null;
+  } catch {
+    // A record whose bytes cannot be proven leaves the landing's own first line as its title.
+    return null;
+  }
+}
+
 /** `recent` (History): the newest landings whatever their read state, each with `read`. `unread`: only those this
  * account has not read. `before` pages below a landing sequence; `by` and `item` filter (see HISTORY_SCAN). */
 export const list = query({
@@ -157,13 +174,15 @@ export const list = query({
               .first()
           : null;
         const message = (receipt.message ?? '').trim();
+        const item = await itemOf(ctx, projectId, intentId);
         rows.push({
           sequence: row.sequence,
           receiptId: receipt.id,
           at: receipt.at,
           title: firstLine(message),
           message: message ? message.slice(0, HISTORY_MESSAGE_CHARS) : null,
-          item: await itemOf(ctx, projectId, intentId),
+          item,
+          goal: item ? null : await goalOf(ctx, projectId, intentId),
           ...who,
           automatic: receipt.automatic === true,
           laneId: lane?.key ?? null,

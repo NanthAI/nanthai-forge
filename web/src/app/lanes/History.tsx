@@ -28,7 +28,7 @@ export const whoOf = (row: Pick<Landed, 'actor' | 'agent' | 'agentRun'>) =>
 /** The declared model for <Who>: a model, null ("model not declared"), or undefined for a person. */
 const modelOf = (row: Landed) =>
   !row.agent ? undefined : row.model === 'not-declared' || row.model === null ? null : row.model;
-const titleOf = (row: Landed) => row.item?.title ?? row.title ?? 'Untitled landing';
+const titleOf = (row: Landed) => row.item?.title ?? row.goal ?? row.title ?? 'Untitled landing';
 
 /** The filters in the address (`?unread=1&by=…&item=…`), so a link, a reload and Back show the same view. */
 export function historyFilter(search: URLSearchParams): HistoryFilter {

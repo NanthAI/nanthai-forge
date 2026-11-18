@@ -49,6 +49,8 @@ export type Landed = {
   message: string | null;
   /** The Item it landed for, when its Intent is an Item's first. */
   item: { id: string; title: string } | null;
+  /** Otherwise the goal its Intent was started with (a reopened Item's title, or unplanned work's outcome). */
+  goal: string | null;
   actor: string | null;
   agent: boolean;
   agentRun: string | null;

@@ -646,7 +646,9 @@ layer out of both first paints.
   each on request (a `before` sequence cursor). Filters (`?unread=1`,
   `?by=handle` or `handle/run`, `?item=`) live in the address; `by` and `item`
   look through at most 120 receipts per page, since receipts carry no actor
-  or Item index. Each row reads its finish, Lane head and Item head. The old
+  or Item index. Each row reads its finish, Lane head and Item head; a row
+  whose Intent is not an Item's first (a reopened Item's follow-up, or
+  unplanned work) also reads that Intent's goal for its title. The old
   `to-read` address opens History. `touching` shows shared saved files, who
   waits on whom and the queue with held Lanes apart, saved work only. Each
   wait is traced from the queue read alone: a Lane main moved under waits on
