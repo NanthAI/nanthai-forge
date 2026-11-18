@@ -29,6 +29,15 @@ export function hostedLandingStall(
             : 'landing / finish controller';
   return landingStall(step, owner, progressAt, now);
 }
+/** Incident 8c9b84fc: a cohort repair's owner outlives its stall, in later observations and the
+ * terminal receipt. A solo owner (Item 9a04d916) describes only the current stall: it goes with
+ * that stall once progress resumes, exactly like an owner-less stall. */
+export const COHORT_STALL_OWNER = 'cohort finish controller';
+type Stall = HostedLandingState['observation']['stall'];
+export const retainedStallOwner = (
+  stall: Stall,
+): stall is NonNullable<Stall> & { owner: NonNullable<NonNullable<Stall>['owner']> } =>
+  Boolean(stall?.owner && stall.missingOwner === COHORT_STALL_OWNER);
 /** A stalled goal has one reconciliation wake per hour (three controller calls),
  * while source completion still wakes it immediately. Alarm owns its own deadline. */
 export function desiredWatchdogMs(state: HostedLandingState, now = Date.now()) {

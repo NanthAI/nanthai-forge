@@ -21,6 +21,7 @@ Targets; violations remain.
 | L3 | Unblocked Ready: one 30-second slot per predecessor plus itself. |
 | L4 | Dependent waits end within remaining bounded generations and one slot. |
 | L5 | Scheduled driver, armed deadline, owned provider completion, or validated chain of ≤16 hops. |
+| L5b | Strict L5 (stale-check fixture, Item 9a04d916): the 15-minute stall alarm is no driver, and a finish wake counts only if due within one check wall (5 minutes). |
 | L6 | Admission/compose/reservation waits own wakes: train 5 minutes, reservation 30 minutes. |
 | L7 | Lease recovery finishes publication or releases it; terminal failures name a structured reason. |
 | L8 | One actionable root alert after 15 minutes without progress. |

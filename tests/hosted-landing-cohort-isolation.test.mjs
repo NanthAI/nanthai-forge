@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic, batchStore } from './hosted-landing-batches-fixture.mjs';
-import { landingApi } from './hosted-finish-fixture.mjs';
+import { landingApi, composeSettleSwitch } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { batchMemberDiagnostic, batchDiagnosticSchema } from '../dist/hosted-batch-diagnosis.js';
 const finishCompose = await import(moduleUrl('../convex/projectHostedFinishCompose.ts'));
@@ -188,73 +188,78 @@ for (const history of [0, 575, 1150])
     t.diagnostic(JSON.stringify(budget));
   });
 
-test('member precompose terminal before shared compose consumption keeps clean survivors grouped', async t => {
-  const f = await batchesFixture(t, {
-    count: 6,
-    batching: 'default',
-    batchMaxSize: 3,
-    memberPaths: [
-      'independent-0',
-      'collision',
-      'independent-2',
-      'collision',
-      'independent-4',
-      'independent-5',
-    ],
-  });
-  let cohort,
-    steps = 0;
-  // Stop exactly when the shared source result is durable, before its finish consumes it.
-  for (;;) {
-    assert(++steps < 500);
-    const task = f.pending().find(task => !task.name.startsWith('projectHostedLandingStall:'));
-    assert(task);
-    await f.execute(task);
-    cohort = batches(f).find(batch => batch.predecessor);
-    if (!cohort) continue;
-    const op = [...f.tables.projectHostedOperations.values()]
-      .map(row => JSON.parse(row.value))
-      .find(op => op.operationId === cohort.composeOperationId);
-    if (op?.terminal) break;
-  }
-  const leader = cohort.leaderId;
-  const sharedFinish = task =>
-    task.name === 'projectHostedFinishDriver:drive' && task.args[0].submissionId === leader;
-  await f.rawChecks.pass(await f.rawChecks.activate(f.runs()[0].id));
-  await drain(f, sharedFinish);
-  assert.equal(current(f, 1).phase, 'landed');
-  await f.transaction(
-    'member-probe-before-shared-result',
-    {
-      _handler: async ctx => {
-        const finish = await finishStore.loadFinish(ctx, { projectId: f.projectId, submissionId: leader });
-        if (!finish.value.pending)
-          await finishCompose.reserveFinishRetry(ctx, finish.row, finish.value, 'CHECK_EVIDENCE_REFRESH', {
-            peerLanes: [f.entries[1].lane.laneId],
-            paths: ['collision'],
-            runnable: false,
-          });
+// Item 9a04d916: with FORGE_QUEUE_COMPOSE_SETTLE on, the completed shared compose is consumed by
+// the leader's settle mutation, not the drive action, so the race holds both hops back.
+for (const on of [false, true])
+  test(`member precompose terminal before shared compose consumption keeps clean survivors grouped (compose settle ${on ? 'on' : 'off'})`, async t => {
+    composeSettleSwitch(t, on);
+    const f = await batchesFixture(t, {
+      count: 6,
+      batching: 'default',
+      batchMaxSize: 3,
+      memberPaths: [
+        'independent-0',
+        'collision',
+        'independent-2',
+        'collision',
+        'independent-4',
+        'independent-5',
+      ],
+    });
+    let cohort,
+      steps = 0;
+    // Stop exactly when the shared source result is durable, before its finish consumes it.
+    for (;;) {
+      assert(++steps < 500);
+      const task = f.pending().find(task => !task.name.startsWith('projectHostedLandingStall:'));
+      assert(task);
+      await f.execute(task);
+      cohort = batches(f).find(batch => batch.predecessor);
+      if (!cohort) continue;
+      const op = [...f.tables.projectHostedOperations.values()]
+        .map(row => JSON.parse(row.value))
+        .find(op => op.operationId === cohort.composeOperationId);
+      if (op?.terminal) break;
+    }
+    const leader = cohort.leaderId;
+    const sharedFinish = task =>
+      (task.name === 'projectHostedFinishDriver:drive' || task.name === 'projectHostedFinishDriver:settle') &&
+      task.args[0].submissionId === leader;
+    await f.rawChecks.pass(await f.rawChecks.activate(f.runs()[0].id));
+    await drain(f, sharedFinish);
+    assert.equal(current(f, 1).phase, 'landed');
+    await f.transaction(
+      'member-probe-before-shared-result',
+      {
+        _handler: async ctx => {
+          const finish = await finishStore.loadFinish(ctx, { projectId: f.projectId, submissionId: leader });
+          if (!finish.value.pending)
+            await finishCompose.reserveFinishRetry(ctx, finish.row, finish.value, 'CHECK_EVIDENCE_REFRESH', {
+              peerLanes: [f.entries[1].lane.laneId],
+              paths: ['collision'],
+              runnable: false,
+            });
+        },
       },
-    },
-    {},
-  );
-  await drain(f);
-  assert.equal(current(f, 3).phase, 'terminal-failed');
-  assert.equal(current(f, 4).phase, 'checking');
-  assert.equal(current(f, 5).phase, 'checking');
-  const retained = batches(f).find(batch => batch.id === cohort.id);
-  assert.equal(retained.phase, 'checking');
-  assert.equal(retained.composeOperationId, cohort.composeOperationId);
-  assert.equal(current(f, 4).batchSolo, undefined);
-  assert.equal(f.runs().length, 2);
-  assert.equal(
-    f.metrics.sourceJobs,
-    5,
-    'two shared jobs and three already-running legacy member probes, without fallback source',
-  );
-  await finish(f);
-  assert.equal(f.runs().length, 2);
-});
+      {},
+    );
+    await drain(f);
+    assert.equal(current(f, 3).phase, 'terminal-failed');
+    assert.equal(current(f, 4).phase, 'checking');
+    assert.equal(current(f, 5).phase, 'checking');
+    const retained = batches(f).find(batch => batch.id === cohort.id);
+    assert.equal(retained.phase, 'checking');
+    assert.equal(retained.composeOperationId, cohort.composeOperationId);
+    assert.equal(current(f, 4).batchSolo, undefined);
+    assert.equal(f.runs().length, 2);
+    assert.equal(
+      f.metrics.sourceJobs,
+      5,
+      'two shared jobs and three already-running legacy member probes, without fallback source',
+    );
+    await finish(f);
+    assert.equal(f.runs().length, 2);
+  });
 
 for (const outcome of ['passed', 'failed', 'cancelled'])
   test(`ready entries pipeline behind a fallback solo tail; ${outcome} preserves or invalidates exact successor evidence`, async t => {

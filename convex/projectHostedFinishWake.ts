@@ -27,6 +27,13 @@ export const finishRow = (
       q.eq('projectId', input.projectId).eq('submissionId', input.submissionId),
     )
     .unique();
+/** Item 9a04d916 (switch FORGE_QUEUE_COMPOSE_SETTLE, off by default): the step that
+ * submits a recompose and the step that consumes a completed compose run in a
+ * scheduled mutation, which Convex runs exactly once, instead of the drive action,
+ * which runs at most once. A lost drive there left a queued, non-runnable entry to
+ * its 15-minute stall alarm. Any IO the step needs still runs in the action, owned
+ * by the step's retained retry wake. */
+export const composeSettle = () => process.env.FORGE_QUEUE_COMPOSE_SETTLE === '1';
 /** Only pending work has a timer. Failed scheduling receipts can be repaired by
  * the original enqueue/resume; a running step retains its exact IO generation. */
 export async function scheduleFinish(
@@ -34,6 +41,7 @@ export async function scheduleFinish(
   row: Doc<'projectHostedFinishes'>,
   delay = 0,
   retainId = false,
+  settle = false,
 ) {
   let task;
   if (row.wake && !retainId) {
@@ -44,7 +52,9 @@ export async function scheduleFinish(
   const id = retainId && row.wake ? row.wake.id : crypto.randomUUID();
   const taskId = await ctx.scheduler.runAfter(
     delay,
-    makeFunctionReference<'action'>('projectHostedFinishDriver:drive'),
+    settle
+      ? makeFunctionReference<'mutation'>('projectHostedFinishDriver:settle')
+      : makeFunctionReference<'action'>('projectHostedFinishDriver:drive'),
     {
       projectId: row.projectId,
       submissionId: row.submissionId,
@@ -278,7 +288,8 @@ export async function notifyFinishCompose(
     )
     .unique();
   // Completion replaces the compose watchdog; no IO is in flight while it waits.
-  if (row) await scheduleFinish(ctx, row, 0, true);
+  const settle = composeSettle();
+  if (row) await scheduleFinish(ctx, row, 0, true, settle);
   const batch = await ctx.db
     .query('projectHostedLandingBatches')
     .withIndex('by_project_and_compose', q =>
@@ -293,6 +304,6 @@ export async function notifyFinishCompose(
       projectId,
       submissionId: JSON.parse(batch.value).leaderId ?? batch.batchId,
     });
-    if (leader) await scheduleFinish(ctx, leader, 0, true);
+    if (leader) await scheduleFinish(ctx, leader, 0, true, settle);
   }
 }

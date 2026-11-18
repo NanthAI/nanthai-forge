@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
-import { internalMutation, internalAction } from './server';
+import { internalMutation, internalAction, internalQuery } from './server';
 import { finishStep, resumeFinishIO, type FinishIdentity } from './projectHostedFinishControl';
 import { loadLanding } from './projectHostedLandingStore';
-import { scheduleFinish } from './projectHostedFinishWake';
+import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 import type { FinishCommand } from '../src/hosted-finish';
+import { composeRow, composeStateSchema, hostedComposeInput } from './projectHostedComposeStore';
 import { r2Config, r2Key, presignPut } from './r2';
 import { verifyArchiveUpload } from './archiveUpload';
 import { exchangeFetch } from '../src/exchange-request';
@@ -41,6 +42,45 @@ export const resume = internalMutation({
     return null;
   },
 });
+/** Item 9a04d916 (FORGE_QUEUE_COMPOSE_SETTLE): the finish step as a scheduled
+ * mutation (exactly once), for a completed compose and for the recompose submit.
+ * Only a step that needs IO hands its command to the drive action, untracked: the
+ * retained retry wake the step armed owns that IO. Task args never carry IO bytes
+ * or URLs: a solo plan travels as its pin and compose identity, and the action
+ * re-reads its bytes; a cohort plan or an acceptance page (rare here) goes to an
+ * immediate drive, as before the switch. */
+export const settle = internalMutation({
+  args: stepIdentity,
+  returns: v.null(),
+  handler: async (ctx, input) => {
+    const command = await finishStep(ctx, input);
+    if (!command) return null;
+    if (command.kind === 'page' || (command.kind === 'plan' && !command.source)) {
+      const row = await finishRow(ctx, input);
+      if (row) await scheduleFinish(ctx, row, 0, true);
+      return null;
+    }
+    await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedFinishDriver:drive'), {
+      ...input,
+      command: canonicalPayload(
+        command.kind === 'plan' ? { kind: 'plan', pin: command.pin, source: command.source } : command,
+      ),
+    });
+    return null;
+  },
+});
+/** The exact bytes of a settled solo plan: one indexed compose read, rebuilt the way
+ * the step built them. The action checks them against the pin; resume checks again. */
+export const planValue = internalQuery({
+  args: { projectId: v.id('hostedProjects'), actor: v.string(), operationId: v.string(), at: v.string() },
+  returns: v.union(v.string(), v.null()),
+  handler: async (ctx, { at, ...input }) => {
+    const row = await composeRow(ctx, input);
+    return row
+      ? canonicalPayload(hostedComposeInput(composeStateSchema.parse(JSON.parse(row.value)), at))
+      : null;
+  },
+});
 /** Consume terminal-parent events in finite windows; terminal history is never
  * scanned and an idle dependency owns neither a worker nor a polling timer. */
 export const dependents = internalMutation({
@@ -71,15 +111,32 @@ export const dependents = internalMutation({
 /** One short step, one bounded metadata transfer, one completion transaction.
  * Crashing anywhere retains the original generation's recovery wake. */
 export const drive = internalAction({
-  args: stepIdentity,
+  args: { ...stepIdentity, command: v.optional(v.string()) },
   returns: v.null(),
-  handler: async (ctx, input: FinishIdentity): Promise<null> => {
-    const raw: string | null = await ctx.runMutation(
-      makeFunctionReference<'mutation'>('projectHostedFinishDriver:step'),
-      input,
-    );
+  handler: async (
+    ctx,
+    { command: settled, ...input }: FinishIdentity & { command?: string },
+  ): Promise<null> => {
+    // A settle mutation already ran the step and passes its IO command.
+    let raw: string | null =
+      settled ??
+      (await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedFinishDriver:step'), input));
     if (!raw) return null;
-    const command = JSON.parse(raw) as FinishCommand;
+    let command = JSON.parse(raw) as FinishCommand;
+    if (command.kind === 'plan' && command.source) {
+      // Only a settled command arrives without its bytes; the drive's own step has them.
+      const { source, ...plan } = command;
+      const value: string | null =
+        (plan as { value?: string }).value ??
+        (await ctx.runQuery(makeFunctionReference<'query'>('projectHostedFinishDriver:planValue'), {
+          projectId: input.projectId,
+          ...source,
+        }));
+      if (value === null) return null;
+      // The same command bytes the drive's own step would have returned.
+      command = { ...plan, value };
+      raw = canonicalPayload(command);
+    }
     if (command.kind === 'reuse') {
       await ctx.runAction(makeFunctionReference<'action'>('projectHostedReuse:prove'), {
         projectId: input.projectId,

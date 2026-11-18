@@ -22,7 +22,7 @@ import { pinLandingAttempt } from './projectHostedLandingPins';
 import { wakeLandingQueue, releaseLandingQueue } from './projectHostedLandingWake';
 import { landingQueue } from './projectHostedLandingStore';
 import { writeFinish, failFinish } from './projectHostedFinishStore';
-import { scheduleFinish, wakeLandingOrderWaiters } from './projectHostedFinishWake';
+import { composeSettle, scheduleFinish, wakeLandingOrderWaiters } from './projectHostedFinishWake';
 import {
   HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS,
   hostedFinishBackoff,
@@ -140,11 +140,14 @@ export async function reserveFinishRetry(
   const current = (await ctx.db.get(row._id))!;
   // Solo fallback owns a new generation after the cohort retires. Replace its
   // old compose watch, while ordinary advisory work keeps its coalesced wake.
+  // Item 9a04d916 F2 (FORGE_QUEUE_COMPOSE_SETTLE): the step that submits this
+  // recompose runs in the exactly-once settle mutation, not the at-most-once drive.
   await scheduleFinish(
     ctx,
     current,
     precompose ? 0 : hostedFinishBackoff(pending.number),
     cause === 'BATCH_FALLBACK',
+    !precompose && composeSettle(),
   );
 }
 /** Why this re-check happens: the landings that moved main since the stale

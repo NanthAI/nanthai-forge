@@ -67,6 +67,8 @@ export type FinishCommand =
       pin: { sha256: string; size: number };
       batchId?: string;
       batchComposeOperationId?: string;
+      /** FORGE_QUEUE_COMPOSE_SETTLE only: the compose that rebuilds `value` in the action. */
+      source?: { actor: string; operationId: string; at: string };
     };
 
 /** Private probe scheduling is not a released pending-attempt protocol field. */

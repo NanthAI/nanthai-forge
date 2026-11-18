@@ -8,7 +8,7 @@ import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
 import { loadFinish, failFinish } from './projectHostedFinishStore';
 import { loadLanding, writeLanding, type LandingIdentity } from './projectHostedLandingStore';
-import { scheduleFinish, watchFinishCompose } from './projectHostedFinishWake';
+import { composeSettle, scheduleFinish, watchFinishCompose } from './projectHostedFinishWake';
 import { prepareFinishCompose, installFinishCompose, reserveFinishRetry } from './projectHostedFinishCompose';
 import { hostedComposeInput } from './projectHostedComposeStore';
 import { submitHostedCompose } from './projectHostedComposeJobs';
@@ -163,7 +163,17 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
         await ctx.db.patch((await objectRow(ctx, object))._id, { location: 'r2', r2Key: key });
       }
       await scheduleFinish(ctx, row, 30_000, true);
-      return { kind: 'plan', value: plan, pin };
+      // Item 9a04d916: a settle hands the action this compose, never the plan bytes.
+      const settled = composeSettle()
+        ? {
+            source: {
+              actor: state.actor,
+              operationId: value.pending.operations.compose,
+              at: source.operation.firstAttempt.at,
+            },
+          }
+        : {};
+      return { kind: 'plan', value: plan, pin, ...settled };
     }
     if (state.phase !== 'ready') return null; // H13's run/queue events resume it
     if (

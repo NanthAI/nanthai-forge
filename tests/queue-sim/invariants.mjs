@@ -11,6 +11,17 @@ export const pendingClaim = (f, id) =>
   [...f.tables.projectHostedFinishes.values()].some(
     row => row.submissionId === id && armed(f, row.wake?.taskId),
   );
+/** L5b's window (Item 9a04d916): one pre-queue check wall. A bench full check takes about
+ * 3 min (t27456: 163 s); 5 min leaves room for compose and dispatch and stays well under
+ * the 15-minute stall alarm, which is the silence L5b exists to reject. */
+export const CHECK_WALL_MS = 5 * 60_000;
+const dueBy = (f, id, by) => armed(f, id) && f.tables._scheduled_functions.get(id).scheduledTime <= by;
+/** A finish wake that will act within one check wall. A far-future wake (an
+ * order-hold expiry, a reuse lease) is as silent as the alarm. */
+const claimDue = (f, id, by) =>
+  [...f.tables.projectHostedFinishes.values()].some(
+    row => row.submissionId === id && dueBy(f, row.wake?.taskId, by),
+  );
 
 /** Run the production decision with mutation/scheduler access removed. Inspection
  * must never repair the state it is intended to check. Fixture reads are not
@@ -60,14 +71,19 @@ export async function inspectQueue(f) {
 }
 
 /** L5: a live row needs real scheduled work, a provider completion owned by the
- * test driver, or a freshly validated wait leading to one of those. */
+ * test driver, or a freshly validated wait leading to one of those.
+ * `alarmOwns: false` (L5b, Item 9a04d916): the 15-minute stall alarm is a
+ * backstop, not an owner, and a finish owner counts only if it is due within one
+ * check wall. A submitted landing whose only driver is the alarm, or a wake far
+ * in the future, would see no progress and no notice for longer than that. */
 export async function assertQueueProgress(
   f,
-  { externalRuns = new Set(), deliveredContinuations = new Set() } = {},
+  { externalRuns = new Set(), deliveredContinuations = new Set(), alarmOwns = true } = {},
 ) {
   const rows = requestRows(f),
     byId = new Map(rows.map(row => [row.submissionId, row]));
   const queue = [...f.tables.projectHostedLandingQueues.values()].find(row => row.projectId === f.projectId);
+  const claimed = alarmOwns ? id => pendingClaim(f, id) : id => claimDue(f, id, Date.now() + CHECK_WALL_MS);
   const waits = new Map();
   for (const row of rows.filter(row => row.orderWait && !terminal(row))) {
     const ahead = await decide(f, row);
@@ -82,7 +98,8 @@ export async function assertQueueProgress(
     const row = byId.get(id);
     if (!row || terminal(row)) return false;
     seen = new Set([...seen, id]);
-    if (deliveredContinuations.has(id) || pendingClaim(f, id) || armed(f, row.alarm?.taskId)) return true;
+    if (deliveredContinuations.has(id) || claimed(id) || (alarmOwns && armed(f, row.alarm?.taskId)))
+      return true;
     if (row.runnable && (armed(f, queue?.wake?.taskId) || queue?.lease?.until > Date.now())) return true;
     if (waits.has(id) && driven(waits.get(id), seen)) return true;
     const pending = finish(id);
@@ -107,7 +124,7 @@ export async function assertQueueProgress(
   for (const row of rows.filter(row => !terminal(row)))
     assert(
       driven(row.submissionId),
-      `L5: stranded ${row.submissionId}: ${row.phase}; stale wait is not a driver`,
+      `${alarmOwns ? 'L5' : 'L5b'}: stranded ${row.submissionId}: ${row.phase}; ${alarmOwns ? 'stale wait is not a driver' : 'no owner is due within one check wall (the stall alarm is not one)'}`,
     );
 }
 

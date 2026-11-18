@@ -59,6 +59,34 @@ function isTaskMutation(name) {
   }
   return taskMutations.get(name);
 }
+/** Item 9a04d916: run one test with FORGE_QUEUE_COMPOSE_SETTLE on or off, then restore it.
+ * The switch is read at call time, so a test can run both modes in one process. */
+export function composeSettleSwitch(t, on) {
+  const previous = process.env.FORGE_QUEUE_COMPOSE_SETTLE;
+  process.env.FORGE_QUEUE_COMPOSE_SETTLE = on ? '1' : '0';
+  t.after(() => {
+    if (previous === undefined) delete process.env.FORGE_QUEUE_COMPOSE_SETTLE;
+    else process.env.FORGE_QUEUE_COMPOSE_SETTLE = previous;
+  });
+}
+/** The IO hop of the pending finish attempt: with the switch on, the scheduled settle
+ * mutation runs the step and schedules the drive action with its command; off, the
+ * drive action runs the step itself. Returns the task that performs the IO, and the
+ * step's command when settle already ran it. */
+export async function finishIOTask(f, on) {
+  const drive = 'projectHostedFinishDriver:drive';
+  if (!on) {
+    const task = f.pending().find(task => task.name === drive);
+    assert(task, 'a pending drive');
+    return { task, command: null };
+  }
+  const settle = f.pending().find(task => task.name === 'projectHostedFinishDriver:settle');
+  assert(settle, 'a pending settle');
+  await f.execute(settle);
+  const task = f.pending().find(task => task.name === drive && task.args[0].command);
+  assert(task, 'settle handed its IO to a drive with the command');
+  return { task, command: JSON.parse(task.args[0].command) };
+}
 export const maxima = {};
 export const code = value => error => (error.data?.code ?? error.code) === value;
 export async function compose(c, selection) {
@@ -350,6 +378,8 @@ export async function finishFixture(
         await driver.drive._handler(
           {
             runAction: runReuseAction,
+            // Item 9a04d916: a settled solo plan re-reads its bytes in the action.
+            runQuery: (ref, args) => tx('finishPlanValue', driver.planValue, args),
             runMutation: async (ref, args) => {
               const name = getFunctionName(ref);
               calls.push(name);
@@ -383,6 +413,9 @@ export async function finishFixture(
           },
           input,
         );
+      } else if (task.name === 'projectHostedFinishDriver:settle') {
+        // Item 9a04d916: the exactly-once compose consumer (a mutation, retried by Convex).
+        await tx('finishSettle', driver.settle, input);
       } else if (task.name === 'projectHostedLandingStall:alarm') {
         await tx('landingAlarm', stallApi.alarm, input);
       } else if (task.name === 'projectHostedLandingStall:deadline') {

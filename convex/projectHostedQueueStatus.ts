@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { finishReadCheck } from './projectFinishReadPins';
 import { hostedCheckTerminal } from '../src/hosted-check';
-import { hostedLandingStall } from '../src/hosted-landing-stall';
+import { hostedLandingStall, retainedStallOwner } from '../src/hosted-landing-stall';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { HostedLandingState } from '../src/hosted-landing';
@@ -146,6 +146,6 @@ export function queueAwareLandingState(state: HostedLandingState, queue: HostedQ
   const observation = { ...state.observation };
   if (stall)
     observation.stall = { ...stall, ...(observation.stall?.owner ? { owner: observation.stall.owner } : {}) };
-  else if (!observation.stall?.owner) delete observation.stall;
+  else if (!retainedStallOwner(observation.stall)) delete observation.stall;
   return { ...state, observation };
 }

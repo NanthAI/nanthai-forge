@@ -7,7 +7,7 @@ import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 import { composeRow, composeStateSchema } from './projectHostedComposeStore';
 import { splitLandingBatch } from './projectHostedLandingBatchSplit';
 import { armLandingAlarm } from './projectHostedLandingStallWake';
-import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
+import { COHORT_STALL_OWNER, hostedLandingProgressAt } from '../src/hosted-landing-stall';
 import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import type { LandingStall } from '../src/landing-stall';
@@ -50,7 +50,7 @@ export async function repairComposingBatch(ctx: MutationCtx, input: BatchIdentit
   const stall: LandingStall = {
     code: 'LANDING_STALLED',
     step: 'composing',
-    missingOwner: 'cohort finish controller',
+    missingOwner: COHORT_STALL_OWNER,
     lastProgressAt: hostedLandingProgressAt(loaded.state),
     alarmAt: at,
     message: 'The cohort compose lost its drive; Forge is replaying the retained generation.',

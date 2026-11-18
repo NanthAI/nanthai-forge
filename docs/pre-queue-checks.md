@@ -423,7 +423,7 @@ Switching the mode never invalidates a queued landing: it is read when a proof i
 agent sign-in, switching fast on is held for the owner person, like any edit that changes what may
 land; switching back to strict applies at once.
 
-Three switches default to off while queue behavior is benchmarked. With
+Four switches default to off while queue behavior is benchmarked. With
 `FORGE_QUEUE_COHORT_KEEP_HEALTHY=1`, batch selection leaves running individual checks in
 place. Where admission checks are enabled, a member without a pass proceeds through the
 individual check path. After an attributed check failure or a withdrawal, healthy members can fall back to
@@ -435,6 +435,14 @@ With `FORGE_QUEUE_CANCEL_HONOURS_FAST=1`, cancellation considers the running che
 risk rules and the project's live fast-mode breaker and audit. It leaves possible package
 placement and Markdown merges for ordinary proof evaluation. Acceptance still decides on
 the completed run and exact composed source.
+
+With `FORGE_QUEUE_COMPOSE_SETTLE=1` (Item 9a04d916; 25666d9b deletes it after its A/B), a
+cancelled check's recompose cannot wait for the 15-minute stall alarm. The finish step that
+submits the recompose and the one that consumes its result run in a scheduled mutation, which
+Convex runs exactly once, rather than an action, which runs at most once. IO stays in the action,
+owned by the step's retained 30-second retry. Task arguments never hold plan bytes or URLs: a
+solo plan carries its pin and compose identity, and the action re-reads the bytes in one indexed
+query. A solo stall keeps its owner diagnosis only while it is current.
 
 With `FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT=1` (set on the deployment and in the client),
 a file main changed that already holds the queued Candidate's bytes is not `SYNC_REQUIRED`

@@ -20,7 +20,9 @@ import { loadBatch, writeBatch } from './projectHostedLandingBatchStore';
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
 import { splitLandingBatch } from './projectHostedLandingBatchSplit';
 import { wakeLandingQueue } from './projectHostedLandingWake';
-import { finishRow, scheduleFinish } from './projectHostedFinishWake';
+import { composeSettle, finishRow, scheduleFinish } from './projectHostedFinishWake';
+import { composeRow, composeStateSchema } from './projectHostedComposeStore';
+import { hostedFinishSchema } from '../src/hosted-finish';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
 import { holdsLandingOrder } from './projectHostedLandingOrder';
 import { reconcileUnacknowledgedCheck } from './projectHostedCheckReconcile';
@@ -168,7 +170,12 @@ export async function raiseLandingAlarm(ctx: MutationCtx, input: Stalled, now = 
     (canonical!.orderWait || (await redriveLanding(ctx, input, { row: canonical!, probe: true })).length)
       ? await scheduleRepair(ctx, token, 'alarm')
       : undefined;
-  const next = { ...state, version: state.version + 1, observation: { ...state.observation, stall } };
+  const owner = canonical ? await soloFinishOwner(ctx, input, state) : undefined;
+  const next = {
+    ...state,
+    version: state.version + 1,
+    observation: { ...state.observation, stall: owner ? { ...stall, owner } : stall },
+  };
   const project = await ctx.db.get(input.projectId);
   if (project) await scheduleStallAlert(ctx, token, project);
   if (canonical) {
@@ -192,6 +199,36 @@ export async function raiseLandingAlarm(ctx: MutationCtx, input: Stalled, now = 
   return null;
 }
 
+/** Item 9a04d916 (switch FORGE_QUEUE_COMPOSE_SETTLE): the receipt names which owner
+ * a solo queued entry had when its stall fired: its finish wake's task state (a
+ * failed drive, or none armed) and its pending compose. Read before the repair
+ * replays them. Cohorts record the same in repairComposingBatch. Stall path only. */
+async function soloFinishOwner(ctx: MutationCtx, input: LandingIdentity, state: HostedLandingState) {
+  if (!composeSettle() || state.phase !== 'queued' || state.batchId || state.batchOriginId) return undefined;
+  const finish = await finishRow(ctx, input);
+  if (!finish) return undefined;
+  const task = finish.wake ? await ctx.db.system.get(finish.wake.taskId) : null;
+  const value = hostedFinishSchema.parse(JSON.parse(finish.value));
+  const source = value.pending
+    ? await composeRow(ctx, {
+        projectId: input.projectId,
+        actor: state.actor,
+        operationId: value.pending.operations.compose,
+      })
+    : null;
+  const phase = source ? composeStateSchema.parse(JSON.parse(source.value)).status : null;
+  return {
+    finishWake: task?.state.kind ?? ('none' as const),
+    compose:
+      phase === null
+        ? ('none' as const)
+        : phase === 'submitted'
+          ? ('submitted' as const)
+          : phase === 'completed' || phase === 'failed'
+            ? ('terminal' as const)
+            : ('ready' as const),
+  };
+}
 async function aheadHoldsOrder(ctx: MutationCtx, row: LandingRow) {
   const ahead = await landingRow(ctx, { projectId: row.projectId, submissionId: row.orderWait! });
   return Boolean(ahead && holdsLandingOrder(ahead, hostedLandingStateSchema.parse(JSON.parse(ahead.value))));

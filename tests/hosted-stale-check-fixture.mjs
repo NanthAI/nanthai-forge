@@ -36,8 +36,9 @@ export async function fixture(t, { conflict = true, memberPaths, count = 2, runn
   return f;
 }
 /** The fixture driver owns completion of these exact fake-provider runs. */
-export async function assertProgressOwners(f) {
+export async function assertProgressOwners(f, { alarmOwns = false } = {}) {
   await assertQueueProgress(f, {
+    alarmOwns,
     externalRuns: new Set(
       f
         .runs()

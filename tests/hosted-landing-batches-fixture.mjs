@@ -227,6 +227,8 @@ export async function batchesFixture(
       await driver.drive._handler(
         {
           runAction: f.runReuseAction,
+          // Item 9a04d916: a settled solo plan re-reads its bytes in the action.
+          runQuery: (ref, args) => f.transaction('batch-planValue', driver.planValue, args),
           runMutation: (ref, args) => {
             const name = getFunctionName(ref).split(':')[1];
             if (name === 'resume' && stop === 'before-resume')

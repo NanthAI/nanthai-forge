@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { cancelPendingTask } from './schedulerCancel';
+import { retainedStallOwner } from '../src/hosted-landing-stall';
 import { exhaustFinishCompose } from './projectHostedComposeExhaustion';
 import { predecessorStatus } from './projectHostedLandingPipeline';
 import { settleBatchConflicts, retainSurvivorTrain } from './projectHostedLandingCohortConflicts';
@@ -64,7 +65,7 @@ export async function batchFinishStep(
   if (
     state.phase === 'queued' &&
     state.observation.stall &&
-    !state.observation.stall.owner &&
+    !retainedStallOwner(state.observation.stall) &&
     (batch.phase === 'composing' || batch.phase === 'checking')
   ) {
     // A pre-upgrade alarm may already be consumed. Resume/event repair must

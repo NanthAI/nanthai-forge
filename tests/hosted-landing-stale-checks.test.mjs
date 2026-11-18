@@ -14,6 +14,7 @@ import {
   settle,
   assertProgressOwners,
 } from './hosted-stale-check-fixture.mjs';
+import { CHECK_WALL_MS, assertQueueProgress } from './queue-sim/invariants.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const stale = await import(moduleUrl('../convex/projectHostedLandingStaleChecks.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
@@ -389,5 +390,170 @@ test('the acceptance cancellation pass stops at eight running entries', async t 
   await drain(f, () => f.runs().filter(r => r.status === 'cancelled').length > 0);
   assert.equal(f.runs().filter(r => r.status === 'cancelled').length, 8);
   assert.equal(current(f, 9).phase, 'checking', 'the ninth entry remains outside this finite look-ahead');
+  await assertProgressOwners(f);
+});
+
+/** Item 9a04d916 (bench cell cohort-fail 143142, t27456): three Lanes add the same
+ * file under a full pre-queue check. The first lands on its own run; the other two
+ * runs are cancelled and each recomposes on the new main (83e6d0d3). Both composes
+ * find the conflict at once. The entry is queued and not runnable, so the drive
+ * actions on that path (submit the recompose, then consume its result) are its only
+ * owners, and Convex runs a scheduled action at most once. When one was lost, only
+ * the 15-minute stall alarm was left: 921 s of silence. FORGE_QUEUE_COMPOSE_SETTLE
+ * runs both steps (submit, consume) in a scheduled mutation (exactly once); only
+ * their IO stays in an action, owned by the step's retained 30 s retry. Each replay drops the drive action the platform may lose and
+ * checks strict L5b (an owner due within one check wall) at every step, so on a
+ * build without the fix it fails because the entry is stranded. */
+function composeSettleSwitch(t, on) {
+  const previous = process.env.FORGE_QUEUE_COMPOSE_SETTLE;
+  process.env.FORGE_QUEUE_COMPOSE_SETTLE = on ? '1' : '0';
+  t.after(() => {
+    if (previous === undefined) delete process.env.FORGE_QUEUE_COMPOSE_SETTLE;
+    else process.env.FORGE_QUEUE_COMPOSE_SETTLE = previous;
+  });
+}
+async function threeWayOverlap(t) {
+  const f = await fixture(t, {
+    count: 3,
+    landingMode: 'fast',
+    memberPaths: ['src/shared.ts', 'src/shared.ts', 'src/shared.ts'],
+    memberContents: ['A\nb\nc\n', 'B\nb\nc\n', 'C\nb\nc\n'],
+  });
+  const [a, b, c] = f.runs();
+  await f.rawChecks.activate(b.id);
+  await f.rawChecks.activate(c.id);
+  await f.rawChecks.pass(await f.rawChecks.activate(a.id));
+  return f;
+}
+const recompose = f => {
+  const pending = JSON.parse(finishRow(f, 2).value).pending;
+  const row =
+    pending &&
+    [...f.tables.projectHostedComposes.values()].find(r => r.operationId === pending.operations.compose);
+  return { pending, status: row && JSON.parse(row.value).status };
+};
+const wakeTask = f => f.tables._scheduled_functions.get(finishRow(f, 2).wake?.taskId);
+/** Run every task (stall alarms included) until the third entry ends. `drop` picks the
+ * one pending task the platform loses; only an action can be lost (`failAny` also
+ * fails a mutation, as one that throws every time). Returns the drop time, the
+ * dropped task's name and the time the entry ended. */
+async function lossyRun(f, drop, { strict = true, failAny = false, onStep = () => {} } = {}) {
+  let lost = null;
+  for (let step = 0; !['landed', 'terminal-failed'].includes(current(f, 2).phase); step++) {
+    assert(step < 2000, JSON.stringify(states(f)));
+    const target = !lost && drop(f);
+    if (target) {
+      assert.equal(target.state.kind, 'pending');
+      if (failAny || target.name === 'projectHostedFinishDriver:drive')
+        f.patch('_scheduled_functions', target._id, { state: { kind: 'failed' } });
+      lost = { at: Date.now(), name: target.name };
+    }
+    const task = f.pending()[0];
+    if (!task) break;
+    await f.execute(task);
+    if (strict && lost) await assertProgressOwners(f);
+    onStep();
+  }
+  assert(lost, 'the dropped hop was reached');
+  return { ...lost, endedAt: Date.now() };
+}
+const terminalStatus = f => current(f, 2).phase === 'terminal-failed';
+async function assertConflictAtOnce(f, lost) {
+  assert.equal(current(f, 0).phase, 'landed');
+  assert.equal(current(f, 1).error?.code, 'COMPOSITION_CONFLICT');
+  assert(terminalStatus(f), JSON.stringify(current(f, 2)));
+  assert.equal(current(f, 2).error.code, 'COMPOSITION_CONFLICT');
+  assert(
+    lost.endedAt - lost.at < CHECK_WALL_MS,
+    `conflict delivered within one check wall, not by the stall alarm: ${lost.endedAt - lost.at} ms`,
+  );
+  assert.equal(current(f, 2).observation.stall, undefined, 'no stall raised');
+  assert.equal(f.runs().length, 3, 'no replacement check for a real conflict');
+}
+// The hop after the compose completed: the one wake owed to its result.
+const composeResultHop = f =>
+  recompose(f).status && ['completed', 'failed'].includes(recompose(f).status) && wakeTask(f);
+// The hop before it: the backoff drive that submits the recompose (F2).
+const recomposeSubmitHop = f => {
+  const { pending, status } = recompose(f);
+  return pending && !status && wakeTask(f)?.state.kind === 'pending' && wakeTask(f);
+};
+
+test("incident 9a04d916: a lost drive after a cancelled admission's recompose still delivers the conflict at once", async t => {
+  composeSettleSwitch(t, true);
+  const f = await threeWayOverlap(t);
+  await assertConflictAtOnce(f, await lossyRun(f, composeResultHop));
+});
+test("incident 9a04d916: a lost drive after a cancelled admission's recompose leaves only the stall alarm (switch off)", async t => {
+  composeSettleSwitch(t, false);
+  const f = await threeWayOverlap(t);
+  await assert.rejects(lossyRun(f, composeResultHop), /L5b: stranded/);
+  assert.equal(current(f, 2).phase, 'queued');
+  assert.equal(requestRow(f, 2).runnable, false);
+  await assertProgressOwners(f, { alarmOwns: true });
+});
+test('incident 9a04d916 F2: the step that submits the recompose cannot be lost', async t => {
+  composeSettleSwitch(t, true);
+  const f = await threeWayOverlap(t);
+  await assertConflictAtOnce(f, await lossyRun(f, recomposeSubmitHop));
+});
+test('incident 9a04d916 F2: a lost plan upload after a settled submit is owned by its 30 s retry', async t => {
+  composeSettleSwitch(t, true);
+  const f = await threeWayOverlap(t);
+  const id = current(f, 2).id;
+  const lost = await lossyRun(f, f =>
+    f
+      .pending()
+      .find(
+        task =>
+          task.name === 'projectHostedFinishDriver:drive' &&
+          task.args[0].submissionId === id &&
+          task.args[0].command,
+      ),
+  );
+  assert.equal(lost.name, 'projectHostedFinishDriver:drive');
+  // Task args never carry the plan bytes (they hold the landing message) or a URL.
+  for (const task of f.tables._scheduled_functions.values())
+    if (task.args?.[0]?.command)
+      assert.deepEqual(Object.keys(JSON.parse(task.args[0].command)).sort(), ['kind', 'pin', 'source']);
+  await assertConflictAtOnce(f, lost);
+  assert(lost.endedAt - lost.at >= 30_000, 'the retained retry, not a second consumer, ran the upload');
+});
+test('incident 9a04d916 F2: a lost recompose submit leaves only the stall alarm (switch off)', async t => {
+  composeSettleSwitch(t, false);
+  const f = await threeWayOverlap(t);
+  await assert.rejects(lossyRun(f, recomposeSubmitHop), /L5b: stranded/);
+});
+test('incident 9a04d916 F1: a solo stall that recovered leaves no stall in the terminal state (switch on)', async t => {
+  composeSettleSwitch(t, true);
+  const f = await threeWayOverlap(t);
+  // A settle that fails every time (a mutation is never lost, but it can throw).
+  let owner = null;
+  const lost = await lossyRun(f, composeResultHop, {
+    strict: false,
+    failAny: true,
+    onStep: () => (owner ??= current(f, 2).observation.stall?.owner ?? null),
+  });
+  assert.equal(lost.name, 'projectHostedFinishDriver:settle');
+  // The alarm's diagnosis is visible while the stall is current ...
+  assert.deepEqual(owner, { finishWake: 'failed', compose: 'terminal' });
+  // ... and goes with it once progress resumes, exactly as with the switch off.
+  assert.equal(current(f, 2).error?.code, 'COMPOSITION_CONFLICT');
+  assert.equal(current(f, 2).observation.stall, undefined);
+  assert.equal(requestRow(f, 2).phase, 'terminal-failed');
+});
+test('F3: strict L5b rejects a finish wake due later than one check wall', async t => {
+  composeSettleSwitch(t, false);
+  const f = await threeWayOverlap(t);
+  await assert.rejects(lossyRun(f, composeResultHop), /L5b: stranded/);
+  const task = wakeTask(f);
+  // The lost wake comes back as a pending wake, first far in the future, then due soon.
+  f.patch('_scheduled_functions', task._id, {
+    state: { kind: 'pending' },
+    scheduledTime: Date.now() + 14 * 60_000,
+  });
+  await assert.rejects(assertProgressOwners(f), /L5b: stranded/);
+  await assertQueueProgress(f, { alarmOwns: true });
+  f.patch('_scheduled_functions', task._id, { scheduledTime: Date.now() + CHECK_WALL_MS - 1 });
   await assertProgressOwners(f);
 });

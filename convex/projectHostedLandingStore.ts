@@ -11,7 +11,7 @@ import { invalidatePipeline } from './projectHostedLandingPipelineInvalidation';
 import { cancelUnneededHostedCheck } from './projectHostedCheckCancel';
 import { makeFunctionReference } from 'convex/server';
 import { semanticPayload } from '../src/semantic-payload';
-import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
+import { hostedLandingProgressAt, retainedStallOwner } from '../src/hosted-landing-stall';
 import { landingAlarmPatch } from './projectHostedLandingStallWake';
 import { releaseAdmissionWaiters } from './projectHostedLandingAdmissionWake';
 import { cohortHeld, decidingSince, releaseCohortHolds } from './projectHostedLandingCohortHold';
@@ -239,12 +239,12 @@ export async function writeLanding(
       entersReview,
     );
   if (previous.attemptId !== state.attemptId) await retainLandingProgress(ctx, previous, true, attempt.main);
-  // Retain a repaired owner's diagnosis in later observations and the terminal receipt.
+  // Retain a repaired cohort owner's diagnosis in later observations and the terminal receipt.
   // Its progress token distinguishes historical recovery from a current stall.
-  if (!state.observation.stall && previous.observation.stall?.owner)
+  if (!state.observation.stall && retainedStallOwner(previous.observation.stall))
     state.observation.stall = previous.observation.stall;
   if (
-    state.observation.stall?.owner &&
+    retainedStallOwner(state.observation.stall) &&
     (state.observation.state !== 'pending' ||
       hostedLandingProgressAt(state) !== state.observation.stall.lastProgressAt)
   )
@@ -254,7 +254,7 @@ export async function writeLanding(
     };
   if (
     state.observation.stall &&
-    !state.observation.stall.owner &&
+    !retainedStallOwner(state.observation.stall) &&
     (state.observation.state !== 'pending' ||
       hostedLandingProgressAt(state) !== state.observation.stall.lastProgressAt)
   )

@@ -50,6 +50,13 @@ export const PERMANENT = {
   // landing re-touches the rows, so a lost or failing touch ends nothing.
   'accountProjectOrder:touch@publish': [],
   'accountProjectOrder:touch@receipt': [],
+  // Item 9a04d916 (FORGE_QUEUE_COMPOSE_SETTLE): a completed compose is consumed by
+  // a scheduled mutation instead of the drive action. Convex retries a mutation's
+  // internal errors; one that still fails is re-driven by the stall alarm through
+  // the action path and lands. Deleted with the switch.
+  ...(process.env.FORGE_QUEUE_COMPOSE_SETTLE === '1'
+    ? { 'projectHostedFinishDriver:settle@compose': [] }
+    : {}),
 };
 
 /** Dogfood incidents, each replayed against the implementation (file, test name)
