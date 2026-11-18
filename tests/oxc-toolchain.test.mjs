@@ -64,7 +64,6 @@ test('Oxc selects source explicitly inside ignored native Lanes and preserves ex
   const { root, write } = fixture(t);
   for (const path of [
     'scripts/value.mjs',
-    'tests/value.test.mjs',
     'tests/fixtures/value.ts',
     'convex/_generated/value.ts',
     'dist/value.js',
@@ -75,11 +74,19 @@ test('Oxc selects source explicitly inside ignored native Lanes and preserves ex
     'README.md',
   ])
     write(path, 'preserve exact bytes');
-  const sources = ['convex/value.ts', 'netlify/functions/value.mts', 'src/value.ts', 'web/src/value.tsx'];
+  // tests/ is linted since guard 7 (Item 611a1795): its four test-hygiene rules run there.
+  write('tests/value.test.mjs', 'export const value = 1;\n');
+  const sources = [
+    'convex/value.ts',
+    'netlify/functions/value.mts',
+    'src/value.ts',
+    'tests/value.test.mjs',
+    'web/src/value.tsx',
+  ];
   assert.deepEqual(oxcFiles(root, true), sources);
   assert.deepEqual(
     oxcFiles(root, false),
-    [...sources, 'scripts/lint/forge-plugin.mjs', 'scripts/value.mjs', 'tests/value.test.mjs'].sort(),
+    [...sources, 'scripts/lint/forge-plugin.mjs', 'scripts/value.mjs'].sort(),
   );
   const result = run(root, 'oxlint', ['--threads', '2', '--debug', 'files', ...oxcFiles(root, true)]);
   assert.equal(result.status, 0, result.stdout + result.stderr);

@@ -28,7 +28,7 @@
         {
           "name": "lint",
           "script": "lint",
-          "inputs": ["src/**", "web/src/**", "convex/**", "netlify/functions/**", ".oxlintrc.json", "scripts/oxc.mjs", "scripts/lint/**", "package.json", "package-lock.json"]
+          "inputs": ["src/**", "web/src/**", "convex/**", "netlify/functions/**", "tests/**", ".oxlintrc.json", "scripts/oxc.mjs", "scripts/lint/**", "package.json", "package-lock.json"]
         },
         {
           "name": "documents",

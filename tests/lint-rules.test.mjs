@@ -8,15 +8,18 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import plugin from '../scripts/lint/forge-plugin.mjs';
+import { lower, serialize } from '../scripts/lint-test-hygiene.mjs';
+import { TEST_HYGIENE_CANDIDATE } from '../scripts/oxc.mjs';
+import { plants, sleeps } from './lint-test-hygiene-plants.mjs';
 
-function lint(t, files) {
+function lint(t, files, extra = {}) {
   const root = mkdtempSync(join(tmpdir(), 'forge-lint-rules-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (const path of ['.oxlintrc.json', 'scripts/lint/forge-plugin.mjs']) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), readFileSync(path));
   }
-  for (const [path, text] of Object.entries(files)) {
+  for (const [path, text] of Object.entries({ ...files, ...extra })) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), text);
   }
@@ -213,4 +216,93 @@ test('every product rule documents itself and names the incident it guards', () 
     assert.match(rule.meta.docs.description, /incident/, name);
     assert.ok(readFileSync('docs/agents/lint-rules.md', 'utf8').includes(`forge/${name}`), name);
   }
+});
+
+// Guard 7 (Item 611a1795): the four test-hygiene rules and their frozen-count allowlist. The planted
+// sources live in tests/lint-test-hygiene-plants.mjs, which the test-signal ratchet does not scan.
+test('forge/test-no-fixed-sleep rejects a fixed sleep used as a wait, accepts events and yields', t => {
+  assert.deepEqual(lint(t, plants.sleep), [
+    'tests/atomics.test.mjs:3:forge(test-no-fixed-sleep)',
+    'tests/callback.test.mjs:3:forge(test-no-fixed-sleep)',
+    'tests/helper.test.mjs:3:forge(test-no-fixed-sleep)',
+    'tests/promise.test.mjs:3:forge(test-no-fixed-sleep)',
+    'tests/spawned.test.mjs:3:forge(test-no-fixed-sleep)',
+    'tests/timers.test.mjs:3:forge(test-no-fixed-sleep)',
+  ]);
+});
+
+test('forge/test-no-retries rejects a retry option on a test, a suite or a hook', t => {
+  assert.deepEqual(lint(t, plants.retry), [
+    'tests/jest.test.mjs:2:forge(test-no-retries)',
+    'tests/option.test.mjs:2:forge(test-no-retries)',
+    'tests/suite.test.mjs:2:forge(test-no-retries)',
+  ]);
+});
+
+test('forge/test-no-raised-timeout rejects a per-test timeout over 10 s, accepts short ones and spawn options', t => {
+  assert.deepEqual(lint(t, plants.timeout), [
+    'tests/config.test.mjs:2:forge(test-no-raised-timeout)',
+    'tests/config.test.mjs:3:forge(test-no-raised-timeout)',
+    'tests/hook.test.mjs:2:forge(test-no-raised-timeout)',
+    'tests/raised.test.mjs:2:forge(test-no-raised-timeout)',
+  ]);
+});
+
+test('forge/test-no-unsignaled-polling rejects timer polling, a sleep in a loop and poll(fn) helpers', t => {
+  assert.deepEqual(lint(t, plants.poll), [
+    'tests/helper.test.mjs:2:forge(test-no-unsignaled-polling)',
+    'tests/interval.test.mjs:2:forge(test-no-unsignaled-polling)',
+    'tests/loop.test.mjs:2:forge(test-no-unsignaled-polling)',
+  ]);
+});
+
+test('test-hygiene allowlist: a file keeps its count and no more, and must shrink when it drops below', t => {
+  const files = {
+    'tests/same.test.mjs': sleeps(2),
+    'tests/more.test.mjs': sleeps(3),
+    'tests/less.test.mjs': sleeps(1),
+  };
+  const allowlist = {
+    version: 1,
+    files: {
+      'tests/same.test.mjs': { sleep: 2 },
+      'tests/more.test.mjs': { sleep: 2 },
+      'tests/less.test.mjs': { sleep: 2 },
+    },
+  };
+  assert.deepEqual(lint(t, files, { 'tests/test-hygiene-allowlist.json': JSON.stringify(allowlist) }), [
+    // The one that dropped below its allowance must shrink the entry; the extra sleep fails on its own line.
+    'tests/less.test.mjs:1:forge(test-no-fixed-sleep)',
+    'tests/more.test.mjs:4:forge(test-no-fixed-sleep)',
+  ]);
+  // Without an allowlist nothing is allowed.
+  assert.equal(lint(t, { 'tests/same.test.mjs': sleeps(2) }).length, 2);
+});
+
+test('the lint pre-filter keeps every planted test-hygiene example, so skipped test files cannot hide a hit', () => {
+  for (const [rule, files] of Object.entries(plants))
+    for (const [path, text] of Object.entries(files))
+      if (path.startsWith('tests/') && !path.endsWith('ok.test.mjs'))
+        assert.match(text, TEST_HYGIENE_CANDIDATE, `${rule}: ${path}`);
+});
+
+test('the allowlist updater only lowers: it drops deleted and cleared files and reports a file above its entry', () => {
+  const allowed = {
+    'tests/a.test.mjs': { sleep: 3, poll: 1 },
+    'tests/gone.test.mjs': { sleep: 1 },
+    'tests/clean.test.mjs': { retry: 1 },
+    'tests/up.test.mjs': { sleep: 1 },
+  };
+  const current = {
+    'tests/a.test.mjs': { sleep: 2, poll: 1 },
+    'tests/up.test.mjs': { sleep: 2 },
+    'tests/new.test.mjs': { timeout: 1 },
+  };
+  const { files, above } = lower(allowed, current);
+  assert.deepEqual(files, { 'tests/a.test.mjs': { sleep: 2, poll: 1 }, 'tests/up.test.mjs': { sleep: 1 } });
+  assert.deepEqual(above, [
+    'tests/up.test.mjs: 2 sleep, allowed 1',
+    'tests/new.test.mjs: not in the allowlist, {"timeout":1}',
+  ]);
+  assert.deepEqual(JSON.parse(serialize(files)), { version: 1, files });
 });

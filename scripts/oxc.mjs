@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Explicit files also work in native Lanes beneath an ignored .forge/ ancestor.
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -20,13 +20,36 @@ export function oxcFiles(root, lint) {
       else if (entry.isFile() && /\.(?:[cm]?[jt]s|[jt]sx)$/.test(path)) files.push(path);
     }
   }
-  for (const directory of lint ? ['src', 'web/src', 'convex', 'netlify/functions'] : ['']) walk(directory);
+  for (const directory of lint ? ['src', 'web/src', 'convex', 'netlify/functions', 'tests'] : [''])
+    if (existsSync(join(root, directory))) walk(directory);
   return files.sort();
 }
 
 // A change to the tools' own configuration, the ignore rules or the lint plugin can alter any file's result.
 const EVERY_FILE =
-  /^(?:\.oxfmtrc\.json|\.oxlintrc\.json|\.gitignore|package(?:-lock)?\.json|scripts\/oxc\.mjs|scripts\/lint\/)/;
+  /^(?:\.oxfmtrc\.json|\.oxlintrc\.json|\.gitignore|package(?:-lock)?\.json|scripts\/oxc\.mjs|scripts\/lint\/|tests\/test-hygiene-allowlist\.json)/;
+
+// The test-hygiene lint rules (scripts/lint/forge-plugin.mjs) run through the JS plugin, which costs far more
+// per file than the built-in rules. Only a test file that names something the rules look for can have a hit,
+// so the rest skip the plugin: about 320 of 1,470 files, a fraction of the lint time. The pattern is a superset
+// of what the rules match; tests/lint-rules.test.mjs checks every planted example against it.
+export const TEST_HYGIENE_CANDIDATE =
+  /setTimeout|setInterval|scheduler|Atomics|\bsleep\b|\b(?:sleepMs|delay|pause|nap|snooze|waitForTimeout|poll|pollUntil|eventually|retryTimes)\s*\(|\b(?:retry|retries|timeout)\b\s*[:,}]|testTimeout|hookTimeout|timers\/promises/;
+
+/** The lint files with the tests/ files that cannot trip a test-hygiene rule removed. A file with an entry in the
+ * allowlist stays: it may have dropped below its allowance. */
+export function withoutQuietTests(files, root = '.') {
+  let allowed = {};
+  try {
+    allowed = JSON.parse(readFileSync(join(root, 'tests/test-hygiene-allowlist.json'), 'utf8')).files ?? {};
+  } catch {}
+  return files.filter(
+    path =>
+      !path.startsWith('tests/') ||
+      path in allowed ||
+      TEST_HYGIENE_CANDIDATE.test(readFileSync(join(root, path), 'utf8')),
+  );
+}
 
 /** The saved changed paths local preflight names (FORGE_PREFLIGHT_CHANGED_FILE, NUL-terminated), or null
  * when unnamed, unreadable or when a change to tool configuration means every file may differ. Only the
@@ -55,6 +78,13 @@ export function runOxc(mode) {
       return 0;
     }
   }
+  if (lint) {
+    files = withoutQuietTests(files);
+    if (!files.length) {
+      console.log('Oxc lint: no changed file is in scope.');
+      return 0;
+    }
+  }
   const tool = lint ? 'oxlint' : 'oxfmt';
   const result = spawnSync(
     process.execPath,
@@ -72,7 +102,7 @@ export function runOxc(mode) {
 }
 
 export const OXC_USAGE = `Usage: node scripts/oxc.mjs lint | format | format:check
-  lint          oxlint over src, web/src, convex and netlify/functions (--deny-warnings)
+  lint          oxlint over src, web/src, convex, netlify/functions and tests (--deny-warnings)
   format        rewrite every formatted source file in the tree with oxfmt (writes files)
   format:check  report files oxfmt would change; writes nothing
   --help, -h    print this help and exit 0

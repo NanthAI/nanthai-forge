@@ -25,6 +25,7 @@ This page lists the guards and says where the next one goes.
 | `forge/no-raw-mode-bits` | lint, `src/` | `mode & 0o111` or `mode & 0o077` read straight from disk: Windows stores neither, so a save there recorded every executable file as plain and `import-native-git` refused every retained file (89460350); use `src/file-mode.ts` | `tests/lint-rules.test.mjs` |
 | `forge/raw-symlink` | lint, `src/` | `symlinkSync`/`symlink` outside `src/source-links.ts`: Windows refuses links without Developer Mode or administrator rights (89460350); source links fall back to a target file, directory links become junctions | `tests/lint-rules.test.mjs` |
 | `forge/rename-over-directory` | lint, `src/` | `mkdirSync(X)` to claim a name, then `renameSync(_, X)`: POSIX replaces the empty directory, Windows refuses (89460350: `import-native-git` failed on windows-latest); use `publishDirectory` | `tests/lint-rules.test.mjs` |
+| `forge/test-no-fixed-sleep`, `forge/test-no-retries`, `forge/test-no-raised-timeout`, `forge/test-no-unsignaled-polling` | lint, `tests/`, frozen-count allowlist | tests that wait on the clock, retry, raise a timeout over 10 s or poll on a timer flake on a loaded runner (ffbec6ef; guard 7, Item 611a1795; the ideas follow the MIT-licensed landmines testing rules, rewritten, no text reused) | `tests/lint-rules.test.mjs` |
 | Network boundary | check script `check-network-boundaries.mjs` | bare `fetch`, `AbortSignal.timeout` or network libraries bypass the shared deadline helper (06cfc7b7, aabe52a7) | `tests/network-boundaries-scripts.test.mjs` |
 | Env print | check script `check-env-print.mjs` | scripts, workflows and docs print environment values or full process listings (df2ba360; a dev key leaked 2026-10-22) | `tests/check-env-print.test.mjs` |
 | Idle queries | check script `check-idle-queries.mjs` | live query arguments derived from the clock, and `refreshKey`, re-run queries for idle tabs | `tests/idle-queries.test.mjs` |
@@ -42,6 +43,23 @@ This page lists the guards and says where the next one goes.
 | BYOCI parity | test | a landing fast path that works for Forge's check but not for a project's own command on a pnpm tree with a link and a submodule (05df5aed) | `tests/byoci-parity.test.mjs` |
 | Cross-head shared risk | test | identical-entry overlap removal also removed global/declared inputs and shared-folder risk (1018d0f8 review). Analysis and publication must judge the complete deltas; only an unchanged complete tree bypasses path risk | `tests/hosted-cross-head-reuse.test.mjs`, `tests/hosted-first-check-landing.test.mjs` |
 | Message mirror | test | the finish message dropped from the mirror commit (eacfdb6e, b30284de) | `tests/landing-message-mirror.test.mjs` |
+
+## Test hygiene allowlist
+
+The four `forge/test-no-*` rules run over `tests/` (the only place `oxlint` reads tests; it adds about 1 s to a
+full local lint, and none to a preflight that changed no test). Each `tests/` file may keep the count it had when
+the rules landed and no more, in [`tests/test-hygiene-allowlist.json`](../../tests/test-hygiene-allowlist.json) (one line per
+file, keys `sleep`, `retry`, `timeout`, `poll`). A new occurrence fails lint on the occurrence past the allowance. A file that
+drops below its allowance fails lint too, so a deletion is recorded:
+
+- `node scripts/lint-test-hygiene.mjs --update` lowers every entry to the current count and drops deleted files. It never raises one
+  and exits 1 while any file is above its entry. `--init` writes the first list and refuses to overwrite one.
+- A real exception: raise the entry by hand and say why in the landing note. The diff shows it to the reviewer.
+- What counts: a `setTimeout` inside `new Promise` that settles it (and a `timers/promises` wait, `sleep(...)`-style helper,
+  `Atomics.wait`, a spawned `sleep`) is a `sleep`; the same in a loop, a `setInterval`, and `poll(() => ...)` / `eventually(() => ...)` are a `poll`;
+  `retry`/`retries` in a test's options or `retryTimes` is a `retry`; a `timeout` option over 10 s (or not a plain number) on a test
+  or hook, `jest.setTimeout`, `testTimeout` is a `timeout`. `setTimeout(resolve, 0)` is a yield, not a sleep.
+- It overlaps the older [Test signal](#test-signal) ratchet below on sleeps; that ratchet stays until this one has covered every sleep it counts.
 
 ## Test signal
 

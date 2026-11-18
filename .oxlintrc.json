@@ -92,6 +92,17 @@
         "forge/raw-symlink": "error",
         "forge/rename-over-directory": "error"
       }
+    },
+    {
+      "files": [
+        "tests/**/*.{js,mjs,cjs,ts,mts,cts,tsx}"
+      ],
+      "rules": {
+        "forge/test-no-fixed-sleep": "error",
+        "forge/test-no-retries": "error",
+        "forge/test-no-raised-timeout": "error",
+        "forge/test-no-unsignaled-polling": "error"
+      }
     }
   ]
 }
