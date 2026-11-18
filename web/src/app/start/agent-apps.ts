@@ -2,7 +2,7 @@
 // Connecting the agent app a person already uses (Items c3e4a838, 6beca32b): the prompt that makes an agent explain
 // before it sets anything up, and the commands that connect each app today. Forge works with any agent app and any
 // CI and never starts an agent itself: these are words to paste and commands to run, nothing more. Every command here
-// is one the CLI ships now (tests/start-agent-apps.test.mjs checks each against the CLI's usage); the published package
+// is one the CLI ships now (tests/app-getting-started.test.mjs checks each against the CLI's usage); the published package
 // and the bare `nforge login` are Phase 8 and do not appear.
 import { hrefFor } from '../paths';
 
@@ -16,13 +16,19 @@ export const agentAppLabels: Record<AgentApp, string> = {
   other: 'Another app',
 };
 
-/** One step of a connection: what it does, the commands to run, who has to act, and where on the web they act. */
+/** A page of the docs that explains a step, so the step itself stays short (DESIGN.md rule 29). */
+export type DocsLink = { label: string; href: string };
+
+/** One step of a connection: the commands to run, who has to act, where on the web they act, and the docs that explain
+ * it. `detail` is kept for words that change what the person does (where an entry goes, how to undo it). */
 export type SetupStep = {
   title: string;
-  detail: string;
+  detail?: string;
   commands: readonly string[];
   needsPerson?: boolean;
+  optional?: boolean;
   link?: { label: string; href: string };
+  docs?: readonly DocsLink[];
 };
 
 /** The prompt the landing page copies, with this site's own discovery file. The agent explains first and installs
@@ -50,15 +56,23 @@ const INSTALL = [
   'npm ci --ignore-scripts && npm run build:core && npm link --ignore-scripts',
 ];
 
-/** The steps for one app. `deployment` is the backend address `nforge login` takes; `project` the project's address
- * when there is one (otherwise the agent imports first). */
-export function setupSteps(app: AgentApp, deployment: string, project?: string): SetupStep[] {
-  const steps: SetupStep[] = [
+const HOOKS: DocsLink = { label: 'Hooks', href: '/docs/agents/workflow/#overlap-before-the-first-write' };
+const MCP: DocsLink = { label: 'MCP', href: '/docs/agents/#connect-over-mcp' };
+/** What an agent reads before it starts: the repository's instructions, then project and personal guidance. */
+export const guidanceDocs: DocsLink = {
+  label: 'What your agent reads first',
+  href: '/docs/agents/#copy-prompts-and-briefings',
+};
+
+/** The steps every agent app shares: after these an agent runs nforge commands in its terminal and needs nothing
+ * more. `deployment` is the backend address `nforge login` takes; `project` the project's address when there is one
+ * (otherwise the agent imports first). */
+export function sharedSteps(deployment: string, project?: string): SetupStep[] {
+  return [
     {
       title: 'Install the command line',
-      detail:
-        'There is no published package yet: it installs from the source repository and updates itself to main.',
       commands: INSTALL,
+      docs: [{ label: 'Install guide', href: '/docs/quickstart/#install-the-development-cli' }],
     },
     {
       title: 'Sign this machine in',
@@ -67,62 +81,76 @@ export function setupSteps(app: AgentApp, deployment: string, project?: string):
       commands: [`nforge login ${deployment}`],
       needsPerson: true,
       link: { label: 'Account, Sign-in and devices.', href: hrefFor({ frame: 'account', place: 'devices' }) },
+      docs: [{ label: 'Devices and sign-ins', href: '/docs/guides/access/' }],
     },
     project
       ? {
           title: 'Clone the project',
-          detail: 'Each agent then starts its own Lane inside this folder.',
           commands: [`nforge clone ${project} ./${project.split('/').at(-1) ?? 'project'}`],
         }
       : {
           title: 'Bring the repository across',
-          detail: 'History comes with it and nothing changes on GitHub.',
           commands: ['nforge import https://github.com/OWNER/REPO'],
         },
   ];
-  if (app === 'claude-code')
-    steps.push({
-      title: 'Hooks and tools',
-      detail:
-        'The first nforge run adds advisory hooks to Claude Code and prints the undo. For tools as well as commands, add the printed forge entry to .mcp.json in the project folder.',
-      commands: ['nforge mcp-config . --agent'],
-    });
-  else if (app === 'codex')
-    steps.push({
-      title: 'Hooks and plugin',
-      detail:
-        'The first nforge run adds advisory hooks to Codex and prints the undo. The plugin holds Forge’s skill and agent tools.',
-      commands: ['nforge plugin-config . NEW_DIRECTORY'],
-    });
-  else if (app === 'cursor')
-    steps.push({
-      title: 'Tools over MCP',
-      detail:
-        'Cursor runs nforge agent commands in its terminal. For tools as well, add the printed forge entry to .cursor/mcp.json in the project folder; remove that entry to undo. Forge adds no hooks to Cursor.',
-      commands: ['nforge mcp-config . --agent'],
-    });
-  else
-    steps.push({
-      title: 'Commands, or tools over MCP',
-      detail:
-        'Any app with a terminal runs nforge agent commands; nothing else to install. An app that reads MCP takes the printed forge entry in its MCP settings. Hooks cover Claude Code and Codex only.',
-      commands: ['nforge mcp-config . --agent'],
-    });
-  return steps;
 }
+
+export const appStepTitle = 'Tools for your agent app';
+/** The last step before an app is picked: the choice itself, and the docs for every app. */
+export const appStepDocs: readonly DocsLink[] = [HOOKS, MCP];
+
+/** The one step that differs by app, and the only optional one: tools (MCP, or the Codex plugin) on top of the
+ * commands. Forge writes no client configuration; each line says where the entry goes and how to undo it. */
+export function appStep(app: AgentApp): SetupStep {
+  const step = { title: appStepTitle, optional: true, docs: appStepDocs };
+  if (app === 'claude-code')
+    return {
+      ...step,
+      detail:
+        'The first nforge run adds advisory hooks to Claude Code and prints the undo. For tools, add the printed forge entry to .mcp.json in the project folder; remove that entry to undo.',
+      commands: ['nforge mcp-config . --agent'],
+    };
+  if (app === 'codex')
+    return {
+      ...step,
+      detail:
+        'The first nforge run adds advisory hooks to Codex and prints the undo. For tools, this writes a plugin folder; its README says how to add it to Codex and how to remove it.',
+      commands: ['nforge plugin-config . NEW_DIRECTORY'],
+    };
+  if (app === 'cursor')
+    return {
+      ...step,
+      detail:
+        'Add the printed forge entry to .cursor/mcp.json in the project folder; remove that entry to undo. Forge adds no hooks to Cursor.',
+      commands: ['nforge mcp-config . --agent'],
+    };
+  return {
+    ...step,
+    detail:
+      'Add the printed forge entry to the app’s MCP settings; remove that entry to undo. Hooks cover Claude Code and Codex only.',
+    commands: ['nforge mcp-config . --agent'],
+  };
+}
+
+/** Every step for one app, in order. */
+export const setupSteps = (app: AgentApp, deployment: string, project?: string): SetupStep[] => [
+  ...sharedSteps(deployment, project),
+  appStep(app),
+];
 
 /** The address `nforge login` takes: this build's backend (public: the browser already talks to it). */
 export const deploymentUrl = () =>
   (import.meta.env?.VITE_CONVEX_URL as string | undefined) ?? 'https://YOUR_DEPLOYMENT.convex.cloud';
 
 const STORE = 'forge.start.app';
-/** The app this browser picked last; a per-viewer convenience that falls back to the first app. */
-export function rememberedApp(): AgentApp {
+/** The app this browser picked last, a per-viewer convenience. Nothing is picked until the person picks: every app is
+ * offered the same way. */
+export function rememberedApp(): AgentApp | null {
   try {
     const value = localStorage.getItem(STORE);
-    return (agentApps as readonly string[]).includes(value ?? '') ? (value as AgentApp) : 'claude-code';
+    return (agentApps as readonly string[]).includes(value ?? '') ? (value as AgentApp) : null;
   } catch {
-    return 'claude-code';
+    return null;
   }
 }
 export function rememberApp(app: AgentApp) {

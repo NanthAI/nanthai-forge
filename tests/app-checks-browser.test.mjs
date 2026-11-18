@@ -211,6 +211,10 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
 
   await page.goto('https://forge.test/-/new?start=1');
   await page.getByRole('button', { name: 'Connect your agent app yourself' }).click();
+  // Before a pick no app is pressed and the steps every app shares are already there.
+  await page.getByRole('list', { name: 'Steps for any agent app' }).waitFor();
+  assert.equal(await page.locator('[aria-label="Your agent app"] [aria-pressed="true"]').count(), 0);
+  await layouts('start-any');
   await page.getByRole('button', { name: 'Cursor', exact: true }).click();
   assert.match(
     await page.getByRole('list', { name: 'Steps for Cursor' }).textContent(),

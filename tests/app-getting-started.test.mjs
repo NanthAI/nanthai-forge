@@ -17,6 +17,7 @@ const ci = await import(moduleUrl('../web/src/app/checks/choose-ci.ts'));
 const { hostedCheckRunnerSchema } = await import(moduleUrl('../src/hosted-check.ts'));
 const { policyWriteSchema, legacyPolicy } = await import(moduleUrl('../src/autonomy-policy.ts'));
 const { default: Start } = await import(moduleUrl('../web/src/app/start/Start.tsx'));
+const { ConnectSteps } = await import(moduleUrl('../web/src/app/start/parts.tsx'));
 
 const cli = readFileSync(new URL('../src/cli.ts', import.meta.url), 'utf8');
 const verbs = readFileSync(new URL('../src/agent-verbs.ts', import.meta.url), 'utf8');
@@ -44,6 +45,60 @@ test('every step for every agent app runs a command the CLI ships, and nothing f
     }
   assert.ok(verbs.includes("'check-settings'"), 'the checks page names a verb agents have');
   assert.match(apps.setupSteps('other', DEPLOYMENT).at(-1).detail, /Hooks cover Claude Code and Codex only/);
+});
+
+test('no agent app is preselected: the shared steps show at once and the app is chosen in the last, optional step', () => {
+  const html = renderToStaticMarkup(h(ConnectSteps, { deployment: DEPLOYMENT }));
+  assert.equal([...html.matchAll(/aria-pressed="false"/g)].length, apps.agentApps.length);
+  assert.doesNotMatch(html, /aria-pressed="true"/, 'every app is offered the same way');
+  assert.ok(html.includes(`nforge login ${DEPLOYMENT}`), 'the steps every app shares need no choice');
+  assert.doesNotMatch(html, /mcp-config|plugin-config/, 'no app’s tools step before the person picks');
+  for (const app of apps.agentApps) {
+    assert.deepEqual(
+      apps.setupSteps(app, DEPLOYMENT).slice(0, -1),
+      apps.sharedSteps(DEPLOYMENT),
+      'apps differ only in the last step',
+    );
+    const last = apps.appStep(app);
+    assert.equal(last.optional, true, 'commands alone need nothing more than the shared steps');
+    assert.match(
+      last.detail,
+      /undo|remove/,
+      'Forge writes no client configuration; the step says how to undo',
+    );
+  }
+  assert.doesNotMatch(
+    JSON.stringify(apps.sharedSteps(DEPLOYMENT).filter(step => !step.needsPerson)),
+    /"detail"/,
+    'a step the person only copies carries no standing explainer; its docs link explains',
+  );
+});
+
+test('the steps link the install guide, hooks, MCP and guidance, each to a docs page and heading that exists', () => {
+  const html = renderToStaticMarkup(h(ConnectSteps, { deployment: DEPLOYMENT }));
+  const slug = text =>
+    text
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+      .replace(/\s/g, '-');
+  const hrefs = [...html.matchAll(/href="(\/docs\/[^"]*)"/g)].map(match => match[1]);
+  for (const wanted of [
+    '/docs/quickstart/#install-the-development-cli',
+    '/docs/agents/workflow/#overlap-before-the-first-write',
+    '/docs/agents/#connect-over-mcp',
+    '/docs/agents/#copy-prompts-and-briefings',
+    '/docs/guides/access/',
+  ])
+    assert.ok(hrefs.includes(wanted), `${wanted} is linked`);
+  for (const href of hrefs) {
+    const [page, anchor] = href.split('#');
+    const source = readFileSync(new URL(`..${page.replace(/\/$/, '')}.md`, import.meta.url), 'utf8');
+    if (anchor)
+      assert.ok(
+        [...source.matchAll(/^#{1,6} (.+)$/gm)].some(match => slug(match[1]) === anchor),
+        `${href} names a heading of that page`,
+      );
+  }
 });
 
 test('Cursor gets the steps that work today: its terminal and the MCP entry, with no hooks promised', () => {
