@@ -2,9 +2,9 @@
 // The Lanes yard in a real browser (Items 29671737, d9e1ac62, d4b68402), on synthetic data through its real model and
 // row (tests/browser/lanes-yard.tsx): a Lane held for approval reads Needs you, never Check failed; two rows of one
 // Item never look the same and a left-behind one says what replaced it, below the live one; a Ready Lane behind
-// another says what it waits on; in the dense yard the Lane mark is never cut (real case: Item 1dd4e095, whose two
-// Lanes read the same once the meta line was cut); axe is clean with no sideways scroll at desk and phone width in
-// both themes, plain and dense. Set
+// another says what it waits on; a Lane further back is traced to the front of the queue (9e748e41); in the dense
+// yard the Lane mark is never cut (real case: Item 1dd4e095, whose two Lanes read the same once the meta line was
+// cut); axe is clean with no sideways scroll at desk and phone width in both themes, plain and dense. Set
 // FORGE_LANE_SHOTS to a folder to also save the screenshots.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -125,6 +125,26 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
         'busy Lanes of one Item are only grouped',
       );
     });
+
+    await t.test(
+      'who waits on whom traces a Lane further back to the front of the queue (9e748e41)',
+      async t => {
+        const page = await open(t, DESK);
+        const lines = await page
+          .locator('.lanes-wait')
+          .evaluateAll(nodes => nodes.map(node => node.textContent.replace(/\s+/g, ' ').trim()));
+        assert.equal(lines.length, 3);
+        assert.match(lines[0], /^Public pages.* waits on a person/);
+        const back = lines.find(line => line.startsWith('Account Projects'));
+        assert.match(back, /waits on Stamp every save and landing with who made it/);
+        assert.match(
+          back,
+          /2 Lanes ahead; the queue moves when Hosted CLI and agent workflow papercuts lands \(its check restarted 3 times because main moved\)/,
+        );
+        const next = lines.find(line => line.startsWith('Stamp every save'));
+        assert.doesNotMatch(next, /Lanes ahead/, 'directly behind the front, the one hop is the whole path');
+      },
+    );
 
     await t.test(
       'dense yard: the Lane mark and the Item count are drawn, not cut (Item 1dd4e095)',

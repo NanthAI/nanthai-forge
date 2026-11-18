@@ -3,11 +3,14 @@
 // Lane held for approval whose record carries REVIEW_REQUIRED, two older Lanes of the same Item left behind, three
 // Lanes of another Item still busy, a Ready Lane waiting behind one whose check restarted, and (Item 1dd4e095's real
 // case) a quiet Lane beside its quiet resolution Lane. `?dense=1` draws the dense yard a long list uses.
+// Who waits on whom (Item 9e748e41) renders the same queue plus one Lane further back, so its wait is traced to the
+// front.
 import { createRoot } from 'react-dom/client';
 import { Region } from '../../web/src/ds';
 import '../../web/src/app/app.css';
 import '../../web/src/app/lanes/lanes.css';
-import { buildYard, type LaneMeta, type QueueEntry } from '../../web/src/app/lanes/model';
+import { buildYard, waits, type LaneMeta, type QueueEntry } from '../../web/src/app/lanes/model';
+import { WaitRow } from '../../web/src/app/lanes/Touching';
 import { Yard } from '../../web/src/app/lanes/Yard';
 import type { LineFeed } from '../../web/src/app/Line';
 
@@ -115,6 +118,15 @@ const entries: QueueEntry[] = [
   },
 ];
 const yard = buildYard(feed, lanes, { total: 2, held: 1, listed: 3, more: false, entries }, NOW);
+const titles = new Map(lanes.map(lane => [lane.laneId, lane.intent]));
+const titleOf = (laneId: string) => titles.get(laneId) ?? `Lane ${laneId.slice(0, 8)}`;
+const pairs = waits(
+  [
+    ...entries,
+    { position: 3, laneId: ids.acct1, phase: 'queued', submittedAt: at(9), lastProgressAt: at(9) },
+  ],
+  titleOf,
+);
 
 createRoot(document.getElementById('root')!).render(
   <main>
@@ -127,6 +139,18 @@ createRoot(document.getElementById('root')!).render(
       hint="stuck work first"
     >
       <Yard rows={yard.rows} hrefOf={id => `#${id}`} dense={params.get('dense') === '1'} />
+    </Region>
+    <Region title="Who waits on whom" weight="act" waiting={1} count={pairs.length}>
+      {pairs.map(pair => (
+        <WaitRow
+          key={pair.laneId}
+          pair={pair}
+          titleOf={titleOf}
+          laneHref={id => `#${id}`}
+          decideHref="#needs"
+          now={NOW}
+        />
+      ))}
     </Region>
   </main>,
 );

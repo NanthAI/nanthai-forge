@@ -6,7 +6,7 @@
 import type { LineFeed, LineStage } from '../Line';
 import type { StateKind, StateWord } from '../../ds';
 import { QUIET_MS } from '../../../../src/lane-quiet';
-import { currentEntries, landingOf, laneState, stopWords, waitLine } from '../lane-state';
+import { currentEntries, landingOf, laneState, notLandedWhy, stopWords, waitLine } from '../lane-state';
 
 /** One open Lane from `projectHostedLiveLanes:list` (the agent `lanes` page). */
 export type LaneMeta = {
@@ -39,6 +39,8 @@ export type QueueEntry = {
   error?: string;
   hold?: { kind: 'review' | 'dependency' | 'main-red'; reason: string; paths: string[] | null };
   waitingOn?: { kind: string };
+  /** Main already took files this entry changes, so its Lane must update from main before it can land. */
+  needsSync?: { paths: string[]; more?: number };
 };
 export type QueueView = {
   total: number;
@@ -338,16 +340,43 @@ export function sharedFiles(view: SharedFiles | undefined): { files: SharedFile[
   return { files, complete: view.complete };
 }
 
-export type Wait = { laneId: string; on: string; why: string; since: string | null; person: boolean };
+export type Wait = {
+  laneId: string;
+  on: string;
+  why: string;
+  since: string | null;
+  person: boolean;
+  /** The blocked path (Item 9e748e41): for a Lane two or more places back, the front of the queue, how many Lanes
+   * are ahead and why the front has not landed. Absent when the one hop above is the whole path. */
+  front?: { laneId: string; title: string; ahead: number; why: string };
+};
 
-/** Who waits on whom, from the queue alone: held entries wait on a person (or their dependency), each queued entry
- * waits on the one ahead of it. People first, then the longest wait. */
+/** "a.ts", "a.ts and b.ts", "a.ts, b.ts and 3 more of its files": the files main already took. */
+function taken({ paths, more = 0 }: { paths: readonly string[]; more?: number }) {
+  const shown = paths.slice(0, 2);
+  const rest = paths.length - shown.length + more;
+  if (rest > 0) return `${shown.join(', ')} and ${rest.toLocaleString()} more of its files`;
+  return shown.join(' and ');
+}
+
+/** Who waits on whom, from the queue alone: held entries wait on a person (or their dependency), an entry main has
+ * moved under waits on its own update, and each queued entry waits on the one ahead of it, traced to the front of
+ * the queue when Lanes stand between. People first, then the longest wait. */
 export function waits(entries: readonly QueueEntry[], titleOf: (laneId: string) => string): Wait[] {
   const queued = entries.filter(entry => entry.position !== null).sort((a, b) => a.position! - b.position!);
+  const head = queued[0];
   const out: Wait[] = [];
   for (const entry of entries) {
     if (!entry.laneId) continue;
-    if (entry.hold?.kind === 'review')
+    if (entry.phase === 'needs-sync' && entry.needsSync?.paths.length && !entry.hold)
+      out.push({
+        laneId: entry.laneId,
+        on: 'its own update from main',
+        why: `main already changed ${taken(entry.needsSync)}`,
+        since: entry.lastProgressAt,
+        person: false,
+      });
+    else if (entry.hold?.kind === 'review')
       out.push({
         laneId: entry.laneId,
         on: 'a person',
@@ -373,12 +402,27 @@ export function waits(entries: readonly QueueEntry[], titleOf: (laneId: string) 
       });
     else if (entry.position !== null && entry.position > 1) {
       const wait = waitLine(entry, queued, 0);
+      const ahead = queued.filter(other => other.position! < entry.position!).length;
+      const front =
+        head?.laneId && ahead > 1 && head.laneId !== wait?.aheadLaneId
+          ? {
+              laneId: head.laneId,
+              title: titleOf(head.laneId),
+              ahead,
+              why:
+                notLandedWhy(head) +
+                (head.phase === 'needs-sync' && head.needsSync?.paths.length && !head.recomposeCount
+                  ? `: main already changed ${taken(head.needsSync)}`
+                  : ''),
+            }
+          : undefined;
       out.push({
         laneId: entry.laneId,
         on: wait?.aheadLaneId ? titleOf(wait.aheadLaneId) : `number ${entry.position - 1} in the queue`,
         why: wait?.reason ?? 'next in the queue behind it',
         since: entry.submittedAt,
         person: false,
+        ...(front ? { front } : {}),
       });
     }
   }

@@ -229,6 +229,18 @@ type Queued = {
   batchId?: string | null;
   lastProgressAt: string;
 };
+/** Why a queued entry has not landed yet, in a few words, from the queue read alone. */
+export function notLandedWhy(entry: Pick<Queued, 'phase' | 'recomposeCount'>) {
+  const restarts = entry.recomposeCount ?? 0;
+  return restarts > 0
+    ? `its check restarted ${restarts === 1 ? 'once' : `${restarts.toLocaleString()} times`} because main moved`
+    : entry.phase === 'needs-sync'
+      ? 'it must update from main first'
+      : entry.phase === 'checking'
+        ? 'its check is running'
+        : 'it lands first';
+}
+
 /** What a queued Lane waits on (Item d4b68402), in one line, from the queue read alone: the entry ahead of it and why
  * that one has not landed. `long` when it has waited past a usual check. Nothing for the first in line. */
 export function waitLine(entry: Queued, entries: readonly Queued[], now: number) {
@@ -237,15 +249,7 @@ export function waitLine(entry: Queued, entries: readonly Queued[], now: number)
     .filter(other => other.position !== null && other.position < entry.position!)
     .sort((a, b) => b.position! - a.position!)[0];
   if (!ahead) return null;
-  const restarts = ahead.recomposeCount ?? 0;
-  const reason =
-    restarts > 0
-      ? `its check restarted ${restarts === 1 ? 'once' : `${restarts.toLocaleString()} times`} because main moved`
-      : ahead.phase === 'needs-sync'
-        ? 'it must be synced with main first'
-        : ahead.phase === 'checking'
-          ? 'its check is running'
-          : 'it lands first';
+  const reason = notLandedWhy(ahead);
   const together = entry.batchId && entry.batchId === ahead.batchId ? ', checked together' : '';
   const since = Date.parse(entry.lastProgressAt);
   return {

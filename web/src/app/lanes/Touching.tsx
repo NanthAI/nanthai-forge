@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Who is touching what (Item eb0bbb94): files saved in more than one Lane, who waits on whom and why, the landing
+// Who is touching what (Item eb0bbb94): files saved in more than one Lane, who waits on whom and why (traced to the
+// front of the queue, Item 9e748e41), the landing
 // queue in order with held Lanes apart, and who has what. Built only from the existing queue, hold and overlap
 // records the Lanes place already reads; saved work only, so no row here ever proves two Lanes independent.
 import { useMemo, type ReactNode } from 'react';
@@ -9,7 +10,7 @@ import { hrefFor } from '../paths';
 import { Head, crumbsFor } from '../Place';
 import type { LanesProps } from './common';
 import { currentEntries, queueEntryState, waitLine, type LaneMark } from '../lane-state';
-import { buildYard, sharedFiles, waits, yardReady, type QueueEntry, type YardRow } from './model';
+import { buildYard, sharedFiles, waits, yardReady, type QueueEntry, type Wait, type YardRow } from './model';
 import { useLaneMeta, useQueue, useSharedFiles } from './reads';
 
 const LAYOUT: DockLayout = { top: ['cross'], a: ['waits', 'queue'], b: ['has'] };
@@ -188,26 +189,14 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
           {queueError ? <p className="quietline">The landing queue could not be read.</p> : null}
           {queue && !pairs.length ? <p className="quietline">No Lane is waiting on another.</p> : null}
           {pairs.slice(0, CAP).map(pair => (
-            <div key={pair.laneId} className="row lanes-wait">
-              <span className="any">
-                <A className="ttl" href={laneHref(pair.laneId)} dir="auto">
-                  {titleOf(pair.laneId)}
-                </A>{' '}
-                <span className="t3">waits on</span>{' '}
-                <span className="ttl" dir="auto">
-                  {pair.on}
-                </span>
-                <span className="meta" style={{ display: 'block' }} dir="auto">
-                  {pair.why || 'no reason was recorded'}
-                  {pair.since ? ` · ${age(pair.since, now)}` : ''}
-                </span>
-              </span>
-              {pair.person ? (
-                <A className="btn sm rec" href={hrefFor({ ...route, place: 'needs', section: '', rest: '' })}>
-                  Decide
-                </A>
-              ) : null}
-            </div>
+            <WaitRow
+              key={pair.laneId}
+              pair={pair}
+              titleOf={titleOf}
+              laneHref={laneHref}
+              decideHref={hrefFor({ ...route, place: 'needs', section: '', rest: '' })}
+              now={now}
+            />
           ))}
           {more(pairs.length - CAP, 'more waits, none on a person')}
         </Region>
@@ -263,6 +252,54 @@ export function Touching({ route, projectId, projectName, feed }: LanesProps) {
         onReset={resetLayout}
       />
     </>
+  );
+}
+
+/** One wait: who waits on whom and why, and for a Lane further back, the front of the queue and why it has not
+ * landed (the blocked path, Item 9e748e41). */
+export function WaitRow({
+  pair,
+  titleOf,
+  laneHref,
+  decideHref,
+  now,
+}: {
+  pair: Wait;
+  titleOf: (laneId: string) => string;
+  laneHref: (laneId: string) => string;
+  decideHref: string;
+  now: number;
+}) {
+  return (
+    <div className="row lanes-wait">
+      <span className="any">
+        <A className="ttl" href={laneHref(pair.laneId)} dir="auto">
+          {titleOf(pair.laneId)}
+        </A>{' '}
+        <span className="t3">waits on</span>{' '}
+        <span className="ttl" dir="auto">
+          {pair.on}
+        </span>
+        <span className="meta" style={{ display: 'block' }} dir="auto">
+          {pair.why || 'no reason was recorded'}
+          {pair.since ? ` · ${age(pair.since, now)}` : ''}
+        </span>
+        {pair.front ? (
+          <span className="meta t3" style={{ display: 'block' }} dir="auto">
+            {pair.front.ahead.toLocaleString()} Lanes ahead; the queue moves when{' '}
+            <A className="lk lanes-inline" href={laneHref(pair.front.laneId)} dir="auto">
+              {pair.front.title}
+            </A>{' '}
+            lands ({pair.front.why})
+          </span>
+        ) : null}
+      </span>
+      {pair.person ? (
+        <A className="btn sm rec" href={decideHref}>
+          Decide
+        </A>
+      ) : null}
+    </div>
   );
 }
 

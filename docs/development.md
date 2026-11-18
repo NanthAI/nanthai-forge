@@ -648,7 +648,10 @@ layer out of both first paints.
   look through at most 120 receipts per page, since receipts carry no actor
   or Item index. Each row reads its finish, Lane head and Item head. The old
   `to-read` address opens History. `touching` shows shared saved files, who
-  waits on whom and the queue with held Lanes apart, saved work only.
+  waits on whom and the queue with held Lanes apart, saved work only. Each
+  wait is traced from the queue read alone: a Lane main moved under waits on
+  its own update (naming the files), and a Lane two or more places back names
+  the front of the queue and why it has not landed.
 - Stats (`web/src/app/stats/`): reads `projectStats.read`, the newest 92
   closed days of `projectStatsDays`, with each month and the whole read
   computed by `statsWindow` (`src/stats-estimate.ts`). A day closes once

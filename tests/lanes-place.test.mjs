@@ -181,6 +181,60 @@ test('who waits on whom puts waits on a person first and each queued Lane on the
   );
 });
 
+test('who waits on whom traces a stuck landing to what holds the front of the queue (9e748e41 blocked path)', () => {
+  const at = '2026-11-17T10:00:00Z';
+  const entries = [
+    { position: 1, laneId: 'q1', phase: 'checking', recomposeCount: 2, submittedAt: at, lastProgressAt: at },
+    { position: 2, laneId: 'q2', phase: 'queued', submittedAt: at, lastProgressAt: at },
+    { position: 3, laneId: 'q3', phase: 'queued', submittedAt: at, lastProgressAt: at },
+    {
+      position: 4,
+      laneId: 'q4',
+      phase: 'needs-sync',
+      needsSync: { paths: ['src/a.ts', 'src/b.ts'], more: 3 },
+      submittedAt: at,
+      lastProgressAt: at,
+    },
+  ];
+  const byLane = new Map(model.waits(entries, id => `T-${id}`).map(pair => [pair.laneId, pair]));
+  // Directly behind the front: the one hop is the whole path.
+  assert.equal(byLane.get('q2').on, 'T-q1');
+  assert.equal(byLane.get('q2').why, 'its check restarted 2 times because main moved');
+  assert.equal(byLane.get('q2').front, undefined);
+  // Further back: the Lanes ahead are counted and the front's own cause is named.
+  assert.equal(byLane.get('q3').on, 'T-q2');
+  assert.deepEqual(byLane.get('q3').front, {
+    laneId: 'q1',
+    title: 'T-q1',
+    ahead: 2,
+    why: 'its check restarted 2 times because main moved',
+  });
+  // A landing that must update from main waits on its own Lane, naming the files main already took.
+  assert.equal(byLane.get('q4').on, 'its own update from main');
+  assert.equal(byLane.get('q4').why, 'main already changed src/a.ts, src/b.ts and 3 more of its files');
+  assert.equal(byLane.get('q4').front, undefined);
+});
+
+test('a Lane behind one that must update from main names that, never the old sync wording', () => {
+  const at = '2026-11-17T10:00:00Z';
+  const entries = [
+    {
+      position: 1,
+      laneId: 'q1',
+      phase: 'needs-sync',
+      needsSync: { paths: ['x.ts'] },
+      submittedAt: at,
+      lastProgressAt: at,
+    },
+    { position: 2, laneId: 'q2', phase: 'queued', submittedAt: at, lastProgressAt: at },
+    { position: 3, laneId: 'q3', phase: 'queued', submittedAt: at, lastProgressAt: at },
+  ];
+  const byLane = new Map(model.waits(entries, id => `T-${id}`).map(pair => [pair.laneId, pair]));
+  assert.equal(byLane.get('q2').why, 'it must update from main first');
+  assert.equal(byLane.get('q3').front.why, 'it must update from main first: main already changed x.ts');
+  for (const pair of byLane.values()) assert.doesNotMatch(`${pair.why} ${pair.front?.why ?? ''}`, /sync/i);
+});
+
 function readsFixture() {
   const s = lanesFixture();
   const projectId = s.insert('hostedProjects', {
