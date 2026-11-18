@@ -594,9 +594,12 @@ test('a static refusal without a declared fix asks for source repair and a fresh
         ],
       },
     }),
+    // The failure names the file this change saves: the change's own, so it refuses (060fb653).
+    'src/a.ts': 'export const a = ;\n',
   });
   assert.throws(
-    () => finishGates(root, defaults({ preflightMaxMinutes: 0 }), lane, advice(), true),
+    () =>
+      finishGates(root, defaults({ preflightMaxMinutes: 0 }), lane, advice({ paths: ['src/a.ts'] }), true),
     error => {
       assert.equal(error.code, 'PREFLIGHT_REQUIRED');
       assert.equal(error.recovery.command, undefined);

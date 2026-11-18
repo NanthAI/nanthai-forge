@@ -41,7 +41,10 @@ import {
   staticChecks,
   type StaticCheckResult,
   type StaticCheck,
+  type StaticScope,
 } from './agent-preflight-static.js';
+import { baseStateFiles, cachedObject } from './hosted-changed-paths.js';
+import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import type { NativeFile } from './state/format.js';
 import { sourceTree } from './source-tree.js';
 import { incompletePreflight, preflightVerdict } from './agent-preflight-incomplete.js';
@@ -154,11 +157,13 @@ export const preflightReceiptSchema = z
         z
           .object({
             name: z.string(),
-            outcome: z.enum(['passed', 'failed', 'timed-out']),
+            outcome: z.enum(['passed', 'failed', 'timed-out', 'pre-existing', 'unjudged', 'forge-metadata']),
             ms: z.number().nonnegative(),
             command: z.array(z.string()).optional(),
             fix: z.array(z.string()).optional(),
             excerpt: z.string().max(700).optional(),
+            files: z.array(z.string()).max(200).optional(),
+            advisory: z.string().max(700).optional(),
           })
           .strict(),
       )
@@ -1108,6 +1113,32 @@ const rerunCommand = (root: string, laneId: string) =>
 const stoppedCommand = (root: string, laneId: string) =>
   `nforge agent ${shellQuote(root)} preflight ${shellQuote(JSON.stringify({ laneId, retry: true }))}`;
 
+/** What judges a static failure (src/agent-preflight-static.ts): the saved changed paths and, in a
+ * hosted Lane, each one's base bytes from the base State manifest and objects already on this machine
+ * (no server call). Elsewhere, or when they are not cached, there is no base copy to compare with. */
+function staticScope(root: string, changed: string[] | null): StaticScope {
+  let marker: ReturnType<typeof readHostedLaneCheckout> = null;
+  try {
+    marker = readHostedLaneCheckout(root);
+  } catch {
+    /* Not a hosted Lane: no base copy. */
+  }
+  const files = marker && changed ? baseStateFiles(root, marker) : null;
+  if (!files) return { changed };
+  const base = new Map(files.map(file => [file.path, file]));
+  return {
+    changed,
+    scratch: join(clientCacheRoot(root), 'static-base'),
+    base: path => {
+      const file = base.get(path);
+      if (!file) return null;
+      // A link or submodule entry has no file bytes to put back: the copy would not be base.
+      if (file.mode !== 'file' && file.mode !== 'executable') return undefined;
+      return cachedObject(root, file.blob) ?? undefined;
+    },
+  };
+}
+
 function planStatic(packageJson: string | undefined, paths: string[], forgeJson?: string) {
   try {
     return selectStaticChecks(staticChecks(packageJson, forgeJson), paths);
@@ -1234,6 +1265,9 @@ export function runPreflight(
   plan: PreflightPlan & { status: 'planned' },
   tree?: string,
   staticOnly = false,
+  /** The saved paths base to head (null: unknown). Given, a static failure blocks only when it is the
+   * change's (src/agent-preflight-static.ts); omitted, every static failure blocks. */
+  changed?: string[] | null,
 ) {
   const started = Date.now();
   // Before anything runs: a long run must never be silent about what it is doing and why.
@@ -1275,6 +1309,8 @@ export function runPreflight(
           source: 'declared' as const,
         })),
         cleanEnv(),
+        undefined,
+        changed === undefined ? undefined : staticScope(root, changed),
       );
       if (staticResults.some(result => result.outcome === 'failed')) exitCode = 1;
     }
@@ -1601,7 +1637,11 @@ function runSummary(receipt: PreflightReceipt, plan: PreflightPlan & { status: '
       }.` +
       (receipt.static.some(item => item.outcome === 'timed-out')
         ? ' A timed-out static check was not run here; the landing check runs it.'
-        : '')
+        : '') +
+      receipt.static
+        .filter(item => item.advisory)
+        .map(item => ` ${item.name}: ${item.advisory}`)
+        .join('')
     : '';
   const untouched = plan.static?.untouched.length
     ? ` Static checks not triggered by this change: ${plan.static.untouched.join(', ')}.`

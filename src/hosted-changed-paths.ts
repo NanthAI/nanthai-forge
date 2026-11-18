@@ -58,24 +58,46 @@ export async function savedChangedPaths(
   }
 }
 
-/** Paths the Lane's saved head changes against its base, from the base State manifest already on this
- * machine (the checkout's own cache or the machine object store). No server call. `null` when that
- * manifest is not cached: a missing observation never becomes "no changes" or a count. */
-export function pathsAgainstBase(root: string, marker: HostedLaneCheckoutMarker): string[] | null {
-  const base = marker.selection.base.head;
-  for (const directory of [join(clientCacheRoot(root), 'objects'), machineObjectsDirectory()]) {
-    if (!directory) continue;
+/** Where this machine keeps verified objects for a checkout: its own cache, then the machine store. */
+const objectDirectories = (root: string) =>
+  [join(clientCacheRoot(root), 'objects'), machineObjectsDirectory()].filter((dir): dir is string => !!dir);
+
+/** An object's bytes from this machine's caches, verified against its digest; null when not cached. */
+export function cachedObject(root: string, id: string): Buffer | null {
+  if (!/^[a-f0-9]{64}$/.test(id)) return null;
+  for (const directory of objectDirectories(root)) {
     try {
-      const bytes = readFileSync(join(directory, base));
-      if (digest(bytes) !== base) continue;
-      return reviewPaths(parseNativeState(bytes).files, marker.state.files)
-        .filter(item => item.status !== 'unchanged')
-        .map(item => item.path);
+      const bytes = readFileSync(join(directory, id));
+      if (digest(bytes) === id) return bytes;
     } catch {
       /* Not cached here: try the next place. */
     }
   }
   return null;
+}
+
+/** The Lane base's file entries from the base State manifest already on this machine; null when
+ * that manifest is not cached. No server call. */
+export function baseStateFiles(root: string, marker: HostedLaneCheckoutMarker) {
+  const bytes = cachedObject(root, marker.selection.base.head);
+  if (!bytes) return null;
+  try {
+    return parseNativeState(bytes).files;
+  } catch {
+    return null;
+  }
+}
+
+/** Paths the Lane's saved head changes against its base, from the base State manifest already on this
+ * machine (the checkout's own cache or the machine object store). No server call. `null` when that
+ * manifest is not cached: a missing observation never becomes "no changes" or a count. */
+export function pathsAgainstBase(root: string, marker: HostedLaneCheckoutMarker): string[] | null {
+  const base = baseStateFiles(root, marker);
+  return base
+    ? reviewPaths(base, marker.state.files)
+        .filter(item => item.status !== 'unchanged')
+        .map(item => item.path)
+    : null;
 }
 
 /** Local manifests only; missing coverage stays explicit and never adds a server call. */

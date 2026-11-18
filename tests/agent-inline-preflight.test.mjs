@@ -318,3 +318,121 @@ test('an over-budget static pass remains advised on land and replay, adding zero
   }
   assert.deepEqual(counts[1], counts[0], 'static checks add zero Convex calls');
 });
+
+// Incident 060fb653 (friction b7f029c5, 39e0a587): a whole-tree static check fails on a file no Lane
+// touches, or on Forge's own Lane metadata. Only the change's own failures may refuse a landing.
+const wholeTree = {
+  // A formatter run over the whole tree, as a repository's fmt:check would: every .md file, dot folders included.
+  'scripts/style.mjs': `import fs from 'node:fs'; import path from 'node:path';
+    const bad = [];
+    const walk = dir => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === 'node_modules') continue;
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (p.endsWith('.md')) { const t = fs.readFileSync(p, 'utf8'); if (t !== t.trimEnd() + '\\n') bad.push(p); }
+      else if (p.endsWith('.json') && fs.readFileSync(p, 'utf8') !== JSON.stringify(JSON.parse(fs.readFileSync(p, 'utf8')), null, 2) + '\\n') bad.push(p);
+    } };
+    walk('.');
+    for (const p of bad) console.error(p + ': format error');
+    process.exit(bad.length ? 1 : 0);`,
+};
+const pretty = value => `${JSON.stringify(value, null, 2)}\n`;
+const treeConfig = pretty({
+  preflight: { static: [{ name: 'style', command: ['node', 'scripts/style.mjs'] }] },
+});
+async function treeFixture(t, base, lane) {
+  const files = {
+    ...common,
+    'package.json': pretty({ type: 'module' }),
+    'forge.json': treeConfig,
+    ...wholeTree,
+  };
+  const s = agentFixture(t, { base: { ...files, ...base }, lane: { ...files, ...lane } });
+  s.caps.agentDefaults = effectiveAgentDefaults({ preflight: 'advise' });
+  s.caps.features = ['land-gates'];
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const mutate = s.exchange.client.mutation;
+  s.exchange.client.mutation = async (ref, args) => {
+    const text = await mutate(ref, args);
+    if (getFunctionName(ref) !== 'projectHostedLanding:enqueue') return text;
+    const state = JSON.parse(text);
+    state.phase = 'landed';
+    state.observation = { state: 'landed', pendingReason: null, cause: null };
+    state.acceptance = { receiptId: randomUUID(), head: s.lane.head };
+    return JSON.stringify(state);
+  };
+  return s;
+}
+const land = s =>
+  submitHostedLand(s.root, { operationId: randomUUID(), message: 'Change' }, s.address, s.transport());
+const refusedFor = files => error => {
+  assert.equal(error.code, 'PREFLIGHT_REQUIRED');
+  assert.deepEqual(error.recovery.static[0].files, files);
+  assert.equal(error.recovery.static[0].outcome, 'failed');
+  for (const file of files) assert.match(error.message, new RegExp(file.replace('.', '\\.')));
+  return true;
+};
+
+test('incident 060fb653: a clean change lands when main already fails the formatter on an untouched file', async t => {
+  const s = await treeFixture(
+    t,
+    { 'README.md': 'Before\n', 'legacy.md': 'Old  \n' },
+    { 'README.md': 'After\n', 'legacy.md': 'Old  \n' },
+  );
+  const result = await land(s);
+  assert.equal(result.result.submission.phase, 'landed');
+  const [style] = readPreflightReceipt(s.root, s.lane.laneId).static;
+  assert.equal(style.outcome, 'pre-existing');
+  assert.deepEqual(style.files, ['legacy.md']);
+  assert.match(
+    result.result.defaults.preflight.staticAdvisory,
+    /^style: fails only in files this Lane does not change \(legacy\.md\): pre-existing on main, not blocking/,
+  );
+});
+
+test('incident 060fb653: the same base still refuses a change whose own file is unformatted, without a base run', async t => {
+  const s = await treeFixture(
+    t,
+    { 'README.md': 'Before\n', 'legacy.md': 'Old  \n' },
+    { 'README.md': 'After  \n', 'legacy.md': 'Old  \n' },
+  );
+  await assert.rejects(land(s), refusedFor(['README.md']));
+  assert(!s.calls.some(c => /Compose|Landing/.test(c.name)), 'no compose or hosted check dispatched');
+});
+
+test("incident 060fb653: renaming an unformatted file into the Lane is the change's own failure", async t => {
+  const s = await treeFixture(
+    t,
+    { 'README.md': 'Same\n', 'legacy.md': 'Old  \n' },
+    { 'README.md': 'Same\n', 'moved.md': 'Old  \n' },
+  );
+  await assert.rejects(land(s), refusedFor(['moved.md']));
+});
+
+test("incident 060fb653: Forge's own Lane metadata failing the formatter never refuses a landing", async t => {
+  const s = await treeFixture(t, { 'README.md': 'Before\n' }, { 'README.md': 'After\n' });
+  const result = await land(s);
+  assert.equal(result.result.submission.phase, 'landed');
+  const [style] = readPreflightReceipt(s.root, s.lane.laneId).static;
+  assert.equal(style.outcome, 'forge-metadata');
+  assert(style.files.includes('.forge/hosted-lane.json'), 'the checkout marker Forge writes is what failed');
+  assert(style.files.every(file => file.startsWith('.forge/')));
+  assert.match(
+    result.result.defaults.preflight.staticAdvisory,
+    /files Forge writes into the Lane .*not blocking/,
+  );
+});
+
+// Review 3869594b: a changed name with a space is found whole, so old debt or Forge metadata beside it
+// never turns the change's own failure into an advisory.
+test('incident 060fb653: a new bad file with a space in its name refuses beside old debt and Forge metadata', async t => {
+  for (const debt of [{ 'legacy.md': 'Old  \n' }, {}]) {
+    const s = await treeFixture(
+      t,
+      { 'README.md': 'Same\n', ...debt },
+      { 'README.md': 'Same\n', ...debt, 'docs/bad name.md': 'New  \n' },
+    );
+    await assert.rejects(land(s), refusedFor(['docs/bad name.md']));
+    assert(!s.calls.some(c => /Compose|Landing/.test(c.name)), 'no compose or hosted check dispatched');
+  }
+});

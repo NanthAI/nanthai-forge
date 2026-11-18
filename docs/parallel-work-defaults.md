@@ -300,7 +300,16 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   change touches their inputs. Hosted `land --save` also runs them when tests are advised or
   deferred or their selection is unavailable (including estimates above `preflightMaxMinutes`); a failure refuses before compose
   or submission, naming the check, its diagnostics and its declared `fix` command (otherwise its
-  recheck command). After a static failure, fix the source, save, then use the same landing options
+  recheck command). Only the change's own static failures refuse: a failure that names a file the
+  Lane adds, edits or renames into, or one its run on a temporary local copy of the Lane's base does
+  not show (a whole-repo command that names no file is compared that way). A failure only in files
+  the Lane does not touch, or the same failure on base, is `pre-existing` (on main) and one advisory
+  line; a failure only on files Forge writes into the Lane (the root `.forge/` folder and root `node_modules` link) is
+  `forge-metadata` and never refuses, whatever the tool's configuration covers; when it cannot be
+  judged (unknown changed paths, no cached base bytes, program not installed) it is `unjudged` and
+  advisory. The land reply's `staticAdvisory` holds those lines; the landing check still runs every
+  check. A clean run costs nothing extra; only a failure naming no changed file pays one local base
+  run, and no server call is added. After a static failure, fix the source, save, then use the same landing options
   with a fresh operation id; the refused operation retains its original source pins. The receipt and land reply carry `static` results separately from test status;
   `staticOnly: true` records that no tests ran and never satisfies the test gate. A failure ends
   the run with that check's own output and no tests

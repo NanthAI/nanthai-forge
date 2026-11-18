@@ -3,6 +3,7 @@ import { closeSync, mkdtempSync, openSync, readSync, rmSync, writeSync } from 'n
 import { spawnSync, type SpawnSyncOptions } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { spawnMeasured } from './agent-preflight-measure.js';
 
 /** Bytes of a failed run's error output kept for the receipt and the refusal. */
@@ -27,8 +28,16 @@ export function failureExcerpt(tail: string) {
 }
 
 /** spawnMeasured with the child's output (stdout and stderr, which preflight sent to our stderr) copied
- * through to ours as before (not held in memory) and its last TAIL_BYTES returned, so a failed run can say why it failed. */
-export function spawnCaptured(command: string, args: string[], options: SpawnSyncOptions, measure = true) {
+ * through to ours as before (not held in memory) and its last TAIL_BYTES returned, so a failed run can say why it failed.
+ * `stream.echo: false` keeps a comparison run's output off our stderr; `stream.onText` sees the whole
+ * output as text, chunk by chunk (never held whole), so a caller can scan it past the kept tail. */
+export function spawnCaptured(
+  command: string,
+  args: string[],
+  options: SpawnSyncOptions,
+  measure = true,
+  stream: { echo?: boolean; onText?: (text: string) => void } = {},
+) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-preflight-err-'));
   const file = join(directory, 'stderr.txt');
   const fd = openSync(file, 'w', 0o600);
@@ -48,19 +57,23 @@ export function spawnCaptured(command: string, args: string[], options: SpawnSyn
     closeSync(fd);
     const reader = openSync(file, 'r');
     let tail = Buffer.alloc(0);
+    const decoder = stream.onText ? new StringDecoder('utf8') : undefined;
     try {
       const chunk = Buffer.alloc(64 * 1024);
       for (;;) {
         const read = readSync(reader, chunk, 0, chunk.length, null);
         if (!read) break;
-        try {
-          writeSync(2, chunk, 0, read);
-        } catch {
-          /* A closed stderr never fails the run. */
-        }
+        if (stream.echo !== false)
+          try {
+            writeSync(2, chunk, 0, read);
+          } catch {
+            /* A closed stderr never fails the run. */
+          }
+        if (decoder) stream.onText!(decoder.write(chunk.subarray(0, read)));
         tail = Buffer.concat([tail, chunk.subarray(0, read)]);
         if (tail.length > TAIL_BYTES * 2) tail = tail.subarray(tail.length - TAIL_BYTES);
       }
+      if (decoder) stream.onText!(decoder.end());
     } finally {
       closeSync(reader);
     }

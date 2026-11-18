@@ -1867,7 +1867,15 @@ export class HostedAgentTransport {
       'LANE_DIRTY',
       'Save first: preflight records a result for the saved head, and the files here differ from it.',
     );
-    const receipt = runPreflight(root, laneId, head, plan, marker.tree ?? sourceTree(marker.state.files));
+    const receipt = runPreflight(
+      root,
+      laneId,
+      head,
+      plan,
+      marker.tree ?? sourceTree(marker.state.files),
+      false,
+      changed?.complete ? changed.paths : null,
+    );
     const next = receipt.passed || receipt.environment ? landNext : planNext;
     return this.response(action, null, {
       laneId,

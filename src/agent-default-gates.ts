@@ -39,7 +39,7 @@ export function finishGates(
       const causes = failed
         .map(
           check =>
-            `${check.name}: ${check.excerpt || 'failed'}. ${check.fix ? `Fix: ${check.fix.map(shellQuote).join(' ')}` : `Fix the reported files, then rerun: ${(check.command ?? []).map(shellQuote).join(' ')}`}.`,
+            `${check.name}${check.files?.length ? ` (${check.files.slice(0, 5).join(', ')})` : ''}: ${check.excerpt || 'failed'}. ${check.fix ? `Fix: ${check.fix.map(shellQuote).join(' ')}` : `Fix the reported files, then rerun: ${(check.command ?? []).map(shellQuote).join(' ')}`}.`,
         )
         .join(' ');
       const fix = failed.find(check => check.fix)?.fix;
@@ -97,6 +97,8 @@ export function finishGates(
       };
     else {
       const plan = preflightPlan(root, advice?.changedPaths);
+      // A static failure blocks only when it is this change's; failures already on main advise.
+      const changed = advice?.changedPaths?.complete ? advice.changedPaths.paths : null;
       // Tests may be advised by policy, estimate or inferred setup. Their status must not
       // skip independent static commands, nor can a static-only pass satisfy the test gate.
       const gateMinutes =
@@ -134,7 +136,7 @@ export function finishGates(
         !(sameSource && receipt?.static?.length)
       ) {
         if (typeof runRequired === 'function') runRequired();
-        receipt = runPreflight(root, lane.laneId, lane.head, staticPlan, lane.tree, true);
+        receipt = runPreflight(root, lane.laneId, lane.head, staticPlan, lane.tree, true, changed);
         refuseStaticFailure(receipt);
       }
       if (plan.status === 'unavailable')
@@ -179,7 +181,7 @@ export function finishGates(
             if (typeof runRequired === 'function') runRequired();
             // Reuse this plan and its existing local wall-time budget. No hosted read, new
             // operation or recursive dispatch: the caller continues the original finish.
-            const result = runPreflight(root, lane.laneId, lane.head, plan, lane.tree);
+            const result = runPreflight(root, lane.laneId, lane.head, plan, lane.tree, false, changed);
             refuseStaticFailure(result);
             const next = result.incomplete?.finish ?? result.stoppedRerun ?? run;
             if (
@@ -221,9 +223,12 @@ export function finishGates(
       }
     }
     if (receipt?.static?.length && (sameSource || receipt.head === lane.head)) {
+      // A failure that is not this change's (pre-existing on main, or not judgeable here) is one line each.
+      const notes = receipt.static.filter(check => check.advisory).map(c => `${c.name}: ${c.advisory}`);
       advisories.preflight = {
         ...((advisories.preflight as Record<string, unknown> | undefined) ?? { status: 'none', tests: 0 }),
         static: receipt.static,
+        ...(notes.length ? { staticAdvisory: notes.join(' ') } : {}),
       };
     }
   }

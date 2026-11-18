@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { digest } from '../dist/state/hash.js';
@@ -16,6 +16,7 @@ import {
 import {
   globRegExp,
   preflightGuards,
+  forgeWritten,
   runStaticChecks,
   selectGuards,
   selectStaticChecks,
@@ -426,4 +427,155 @@ test('forge.json declares static checks and guards for any language; package.jso
     () => preflightGuards(undefined, () => false, neutral),
     /forge\.json preflight\.guards names a guard that cannot run/,
   );
+});
+
+// Incident 060fb653: a configured whole-repo command whose output names no file is judged against a
+// copy of the Lane's base; only a failure the base does not have refuses.
+test('a whole-repo command that names no file is advisory when base fails the same way, and refuses when base passes', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'forge-static-scope-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const root = join(dir, 'lane');
+  mkdirSync(join(root, 'notes'), { recursive: true });
+  writeFileSync(join(root, 'notes/debt.txt'), 'TODO: old debt\n');
+  writeFileSync(join(root, 'changed.txt'), 'new text\n');
+  const check = {
+    name: 'repo lint',
+    command: [
+      process.execPath,
+      '-e',
+      "if (require('fs').readFileSync('notes/debt.txt','utf8').includes('TODO')) { console.error('1 problem found'); process.exit(1) }",
+    ],
+    inputs: null,
+    source: 'declared',
+  };
+  const judge = (changed, base) =>
+    runStaticChecks(root, [check], process.env, 10_000, {
+      changed,
+      base: path => base[path],
+      scratch: join(dir, 'scratch'),
+    })[0];
+  const preExisting = judge(['changed.txt'], { 'changed.txt': Buffer.from('old text\n') });
+  assert.equal(preExisting.outcome, 'pre-existing');
+  assert.match(
+    preExisting.advisory,
+    /fails the same way on the Lane's base: pre-existing on main, not blocking/,
+  );
+  const added = judge(['notes/debt.txt'], { 'notes/debt.txt': Buffer.from('clean\n') });
+  assert.equal(added.outcome, 'failed');
+  assert.match(added.excerpt, /passes on the Lane's base: this change causes it/);
+  // A file the change added (absent on base) is removed from the copy; unknown base bytes cannot judge.
+  assert.equal(judge(['changed.txt'], { 'changed.txt': null }).outcome, 'pre-existing');
+  const unknown = judge(['changed.txt'], {});
+  assert.equal(unknown.outcome, 'unjudged');
+  assert.match(unknown.advisory, /no copy of the Lane's base/);
+  assert.deepEqual(readdirSync(join(dir, 'scratch')), [], 'the base copy is removed after the run');
+  // Unknown changed paths and a program that is not installed advise, never pass silently.
+  assert.equal(judge(null, {}).outcome, 'unjudged');
+  const missing = runStaticChecks(
+    root,
+    [{ ...check, command: ['sh', '-c', 'forge-no-such-program-060fb653'] }],
+    process.env,
+    10_000,
+    { changed: ['changed.txt'] },
+  )[0];
+  assert.equal(missing.outcome, 'unjudged');
+  assert.match(missing.advisory, /not installed here \(exit 127\)/);
+  // Without a scope (no change to judge against) every failure still refuses, as before.
+  assert.equal(runStaticChecks(root, [check], process.env, 10_000)[0].outcome, 'failed');
+});
+
+test('a failure naming an untouched file the base copy does not name is new: the change broke it', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'forge-static-scope-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const root = join(dir, 'lane');
+  mkdirSync(root, { recursive: true });
+  // b.txt imports a name a.txt exported; the change removed it from a.txt, so b.txt (untouched) breaks.
+  writeFileSync(join(root, 'a.txt'), 'defines: nothing\n');
+  writeFileSync(join(root, 'b.txt'), 'uses: x\n');
+  writeFileSync(join(root, 'c.txt'), 'debt\n');
+  const check = {
+    name: 'cross-file',
+    command: [
+      process.execPath,
+      '-e',
+      "const fs=require('fs'); const bad=['c.txt']; if (!fs.readFileSync('a.txt','utf8').includes('NAME')) bad.push('b.txt'); for (const f of bad) console.error(f + ': error'); process.exit(1)",
+    ],
+    inputs: null,
+    source: 'declared',
+  };
+  const [result] = runStaticChecks(root, [check], process.env, 10_000, {
+    changed: ['a.txt'],
+    base: () => Buffer.from('defines: NAME\n'),
+    scratch: join(dir, 'scratch'),
+  });
+  assert.equal(result.outcome, 'failed');
+  assert.deepEqual(result.files, ['b.txt']);
+  assert.match(result.excerpt, /new compared with the Lane's base: b\.txt/);
+});
+
+test('past the output scan cap a changed path is still found and refuses; a capped scan claims nothing', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'forge-static-scope-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const root = join(dir, 'lane');
+  mkdirSync(join(root, '.forge'), { recursive: true });
+  writeFileSync(join(root, '.forge/hosted-lane.json'), '{}');
+  writeFileSync(join(root, 'own.ts'), 'x');
+  const noisy = own => ({
+    name: 'noisy lint',
+    command: [
+      process.execPath,
+      '-e',
+      `console.error('.forge/hosted-lane.json: error'); for (let i = 0; i < 6000; i++) console.error('token' + i); ${own ? "console.error('own.ts: error');" : ''} process.exit(1)`,
+    ],
+    inputs: null,
+    source: 'declared',
+  });
+  const run = own => runStaticChecks(root, [noisy(own)], process.env, 10_000, { changed: ['own.ts'] })[0];
+  const refused = run(true);
+  assert.equal(refused.outcome, 'failed');
+  assert.deepEqual(refused.files, ['own.ts']);
+  const capped = run(false);
+  assert.equal(capped.outcome, 'unjudged', 'never forge-metadata from a capped scan');
+  assert.match(capped.advisory, /too long to scan in full/);
+});
+
+test('a changed path with spaces is matched whole in relative, ./, quoted and absolute output; a part of it is uncertain', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'forge-static-scope-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const root = join(dir, 'lane');
+  mkdirSync(join(root, 'docs'), { recursive: true });
+  writeFileSync(join(root, 'docs/bad name.md'), 'x');
+  writeFileSync(join(root, 'legacy.md'), 'x');
+  const said = text => ({
+    name: 'fmt',
+    command: [process.execPath, '-e', `console.error(${JSON.stringify(text)}); process.exit(1)`],
+    inputs: null,
+    source: 'declared',
+  });
+  const run = text =>
+    runStaticChecks(root, [said(text)], process.env, 10_000, { changed: ['docs/bad name.md'] })[0];
+  for (const text of [
+    'legacy.md\ndocs/bad name.md:3:1 trailing space',
+    '[warn] ./docs/bad name.md',
+    `"${join(root, 'docs/bad name.md')}" is not formatted`,
+    'legacy.md, docs/bad\\ name.md',
+  ]) {
+    const result = run(text);
+    assert.equal(result.outcome, 'failed', text);
+    assert.deepEqual(result.files, ['docs/bad name.md'], text);
+  }
+  // Named only in part (URL-encoded): not "only untouched files"; with no base copy, unjudged.
+  const part = run('legacy.md\ndocs/bad%20name.md');
+  assert.equal(part.outcome, 'unjudged');
+  assert.match(part.advisory, /only in part/);
+  // A longer name that contains it is a different file.
+  assert.equal(run('legacy.md\ndocs/bad name.md.bak').outcome, 'unjudged');
+});
+
+test('only the root .forge folder and root dependency link count as Forge-written in this check', () => {
+  assert.equal(forgeWritten('.forge/hosted-lane.json'), true);
+  assert.equal(forgeWritten('node_modules/pkg/index.js'), true);
+  assert.equal(forgeWritten('src/.forge/x.json'), false);
+  assert.equal(forgeWritten('web/node_modules/pkg/index.js'), false);
+  assert.equal(forgeWritten('.forgery/x.json'), false);
 });
