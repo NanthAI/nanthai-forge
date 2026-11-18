@@ -60,19 +60,21 @@ function LaneLine({ row, href, dense }: { row: YardRow; href: string; dense: boo
         <div className={dense ? 'ttl' : 'ttl wrap2'} dir="auto">
           {row.title}
         </div>
+        {/* The mark and the Item's Lane count come first: a dense row cuts this line at its end, and only the person
+            (also on the avatar) may be cut, never what tells two Lanes apart (real case: Item 1dd4e095). */}
         <div className="meta cut">
+          {mark ? (
+            <>
+              <span className="mono mk" translate="no" title={`Lane ${row.laneId}`}>
+                {mark}
+              </span>
+              {' · '}
+            </>
+          ) : null}
+          {row.lanes > 1 ? `${row.lanes.toLocaleString()} Lanes · ` : null}
           <span className="mono" translate="no" dir="auto">
             {who}
           </span>
-          {mark ? (
-            <>
-              {' · '}
-              <span className="mono" translate="no" title={`Lane ${row.laneId}`}>
-                {mark}
-              </span>
-            </>
-          ) : null}
-          {row.lanes > 1 ? ` · ${row.lanes.toLocaleString()} Lanes` : null}
         </div>
       </div>
       <div className="trk" style={{ '--p': place[row.stage] } as CSSProperties} aria-hidden="true">

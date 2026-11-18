@@ -34,8 +34,9 @@ import {
 import { BrowserLanding } from '../../lane/hosted-landing-client';
 import { landingBrowserIO } from '../../lane/landing-browser-io';
 import { takenOutText, useTakeOut } from '../take-out';
-import { laneState } from '../lane-state';
-import { LaneDecision } from '../needs/LaneDecision';
+import { heldWhyState, laneState } from '../lane-state';
+import { LaneDecision, useHeldView } from '../needs/LaneDecision';
+import { holdLine } from '../needs/model';
 import './lane.css';
 
 type ProjectRoute = Extract<AppRoute, { frame: 'project' }>;
@@ -197,6 +198,11 @@ export function ReviewPage({
   const [order, setOrder] = useState<'eyes' | 'path'>('eyes');
   const [cli, setCli] = useState(false);
   const stop = laneStop(reply, feed);
+  const isHeld = Boolean(stop?.held) && !lane.landed;
+  const heldView = useHeldView(projectId, isHeld);
+  const heldRow = heldView
+    ? [...heldView.view.now, ...heldView.view.fyi].find(row => row.laneId === lane.laneId)
+    : undefined;
   const client = useConvex();
   const landing = useMemo(() => new BrowserLanding(landingBrowserIO(client, projectId)), [client, projectId]);
   const takeOut = useTakeOut(landing);
@@ -214,7 +220,7 @@ export function ReviewPage({
         ? 'Started. Nothing saved yet.'
         : !reply.files.current
           ? 'Saved. The changed files of this save are not recorded yet.'
-          : `${stop?.held ? 'Held for you. ' : ''}${eyes.toLocaleString()} of ${
+          : `${isHeld ? `${holdLine(heldView?.view, lane.laneId, Date.now())} ` : ''}${eyes.toLocaleString()} of ${
               nextOffset === null ? '' : 'the first '
             }${plural(files.length, 'file')} need your eyes.`;
   const command = `nforge agent . diff ${q({ laneId: lane.laneId, summary: true })}`;
@@ -274,7 +280,7 @@ export function ReviewPage({
           </p>
         </div>
       ) : null}
-      <LaneDecision projectId={projectId} laneId={lane.laneId} held={Boolean(stop?.held) && !lane.landed} />
+      <LaneDecision projectId={projectId} laneId={lane.laneId} held={isHeld} read={heldView} />
       {cli ? (
         <pre className="cli-out mono" id="lane-cli">
           <b>$ {command}</b>
@@ -282,7 +288,7 @@ export function ReviewPage({
           {`nforge agent . diff ${q({ laneId: lane.laneId, paths: ['…'] })}`}
         </pre>
       ) : null}
-      <Stops reply={reply} stop={stop} />
+      <Stops reply={reply} stop={stop} heldWhy={heldRow?.why ?? null} />
       <div className="panes lane-p">
         <section className="pane" aria-label="The change">
           <div className="ph plain">
@@ -321,11 +327,23 @@ export function ReviewPage({
   );
 }
 
-function Stops({ reply, stop }: { reply: Reply; stop: ReturnType<typeof laneStop> }) {
+function Stops({
+  reply,
+  stop,
+  heldWhy,
+}: {
+  reply: Reply;
+  stop: ReturnType<typeof laneStop>;
+  heldWhy: keyof typeof heldWhyState | null;
+}) {
   if (!stop) return null;
   const at = STOPS.findIndex(entry => entry.stage === stop.stage);
-  // The same state the yard, Needs you and the queue say (lane-state.ts); this page holds the mark, not the queue.
-  const said = laneState({ ...stop, overlap: stop.overlap || reply.conflicts.length > 0 });
+  // The same state the yard, Needs you and the queue say (lane-state.ts); this page holds the mark, and while it is
+  // held, the reason Needs me's read gives (friction e2f436b6), never a guess.
+  const said = laneState(
+    { ...stop, overlap: stop.overlap || reply.conflicts.length > 0 },
+    heldWhy ? { state: heldWhyState[heldWhy] } : null,
+  );
   const tone = said.kind;
   const note: Partial<Record<string, string>> = {
     ...(said.note ? { [stop.stage]: said.note } : {}),

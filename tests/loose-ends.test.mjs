@@ -101,3 +101,34 @@ test('d9e1ac62: a quiet Lane whose Item has a live Lane says what replaced it an
   // A Lane alone on its Item is never called replaced.
   assert.equal(result.groups.idle.rows.find(row => row.laneId === 'dormant').replacedBy, undefined);
 });
+
+test('d9e1ac62 (real case, Item 1dd4e095): a quiet Lane whose quiet resolution Lane is listed reads replaced by it', async () => {
+  const s = fixture();
+  const now = Date.now();
+  // 'dormant' conflicted and 'quiet' is its resolution Lane; both are quiet, so the live-Lane rule names nobody.
+  s.tables.projectHostedPresence.get('presence-quiet').intentId = 'intent-dormant';
+  for (const laneId of ['quiet', 'dormant'])
+    s.tables.projectHostedRecordHeads.set(`head-${laneId}`, {
+      _id: `head-${laneId}`,
+      _creationTime: 2,
+      projectId: 'project',
+      kind: 'lane',
+      key: laneId,
+      parent: 'intent-dormant',
+      status: 'active',
+      recordId: `record-${laneId}`,
+      at: now,
+    });
+  s.tables.projectHostedOverlapLanes.set('overlap-quiet', {
+    _id: 'overlap-quiet',
+    _creationTime: 1,
+    projectId: 'project',
+    laneId: 'quiet',
+    resolutionOrigin: 'dormant',
+  });
+  const result = await read(s, 'owner');
+  const origin = result.groups.idle.rows.find(row => row.laneId === 'dormant');
+  assert.equal(origin.replacedBy, 'quiet');
+  assert.equal(origin.next, 'nforge x ROOT abandon {"laneId":"dormant","reason":"Replaced by Lane quiet"}');
+  assert.equal(result.groups.stopped.rows[0].replacedBy, undefined, 'the resolution Lane is not replaced');
+});

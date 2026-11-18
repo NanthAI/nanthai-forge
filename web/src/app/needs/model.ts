@@ -60,11 +60,9 @@ export type NeedsView = {
 };
 
 /** The held word is the one every screen says for this hold (lane-state.ts). */
-const wordOf = (why: HeldWhy): StateWord =>
-  heldState({
-    state:
-      (heldWhyState as Record<string, (typeof heldWhyState)[keyof typeof heldWhyState]>)[why] ?? 'unknown',
-  }).glyph;
+const stateOf = (why: HeldWhy) =>
+  (heldWhyState as Record<string, (typeof heldWhyState)[keyof typeof heldWhyState]>)[why] ?? 'unknown';
+const wordOf = (why: HeldWhy): StateWord => heldState({ state: stateOf(why) }).glyph;
 const tags: Record<HeldWhy, string> = {
   conflict: 'Conflict',
   'check-failed': 'Check failed',
@@ -249,4 +247,17 @@ export function waited(since: number, now: number) {
   const hours = Math.floor(minutes / 60);
   if (hours < 48) return `${hours} h ${minutes % 60 ? `${minutes % 60} min` : ''}`.trim();
   return `${Math.floor(hours / 24)} d`;
+}
+
+/** The Lane page's hold sentence (friction e2f436b6), from the same Needs me read: "for you" only when Needs me says
+ * this hold waits on the reader; otherwise why it is held, for how long, and who acts next. Before the read answers,
+ * or when the Lane is past its limit, only "Held.": never a guess at whom it waits on. */
+export function holdLine(view: NeedsView | undefined, laneId: string, now: number) {
+  const mine = view?.now.find(row => row.laneId === laneId);
+  if (mine) return `Held for your approval (${waited(mine.since, now)}).`;
+  const other = view?.fyi.find(row => row.laneId === laneId);
+  if (!other) return 'Held.';
+  if (other.why === 'unknown') return `Held (${waited(other.since, now)}). Why: not reported.`;
+  const next = other.next ? ` Next: ${other.next}.` : '';
+  return `Held (${waited(other.since, now)}): ${heldState({ state: stateOf(other.why) }).why}.${next}`;
 }

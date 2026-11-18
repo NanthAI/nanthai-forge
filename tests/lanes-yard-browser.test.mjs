@@ -2,7 +2,9 @@
 // The Lanes yard in a real browser (Items 29671737, d9e1ac62, d4b68402), on synthetic data through its real model and
 // row (tests/browser/lanes-yard.tsx): a Lane held for approval reads Needs you, never Check failed; two rows of one
 // Item never look the same and a left-behind one says what replaced it, below the live one; a Ready Lane behind
-// another says what it waits on; axe is clean with no sideways scroll at desk and phone width in both themes. Set
+// another says what it waits on; in the dense yard the Lane mark is never cut (real case: Item 1dd4e095, whose two
+// Lanes read the same once the meta line was cut); axe is clean with no sideways scroll at desk and phone width in
+// both themes, plain and dense. Set
 // FORGE_LANE_SHOTS to a folder to also save the screenshots.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -51,7 +53,7 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
   if (shots) mkdirSync(shots, { recursive: true });
   const html = await buildFixture(out);
   const browser = await chromium.launch();
-  async function open(t, viewport) {
+  async function open(t, viewport, query = '') {
     const context = await browser.newContext({ viewport });
     const page = await context.newPage();
     const errors = [];
@@ -71,7 +73,7 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
           : 'text/html';
       return route.fulfill({ contentType, body: readFileSync(file) });
     });
-    await page.goto('https://forge.test/yard.html');
+    await page.goto(`https://forge.test/yard.html${query}`);
     await page
       .locator('.yard a.ln')
       .first()
@@ -106,7 +108,7 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
         ],
       );
       assert.equal(new Set(pages.map(row => row.meta)).size, 3, 'three rows of one Item never look the same');
-      assert.match(pages[0].meta, /· 9e8e8826 · 3 Lanes$/);
+      assert.match(pages[0].meta, /^9e8e8826 · 3 Lanes · /);
       assert.ok(!all.some(row => row.word === 'Check failed'), 'nothing here failed a check');
       const waiting = all.find(row => row.title.startsWith('Stamp every save'));
       assert.deepEqual(
@@ -124,9 +126,47 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
       );
     });
 
-    await t.test('axe and widths: both themes, desk and phone', async t => {
-      for (const viewport of [DESK, PHONE]) {
-        const page = await open(t, viewport);
+    await t.test(
+      'dense yard: the Lane mark and the Item count are drawn, not cut (Item 1dd4e095)',
+      async t => {
+        for (const viewport of [DESK, PHONE]) {
+          const page = await open(t, viewport, '?dense=1');
+          const pair = (await rows(page)).filter(row => row.title.startsWith('Landing check'));
+          assert.deepEqual(
+            pair.map(row => row.why),
+            ['saved 21 h ago', 'replaced by c908b679'],
+            'the resolution Lane first, the Lane it resolves below it',
+          );
+          // textContent holds the whole line even when the row cuts it: measure what is drawn.
+          const cut = await page.locator('.yard a.ln .meta').evaluateAll(nodes =>
+            nodes.flatMap(meta => {
+              const box = meta.getBoundingClientRect();
+              const mark = meta.querySelector('.mk');
+              const lanes = [...meta.childNodes].find(
+                node => node.nodeType === 3 && /Lanes/.test(node.textContent),
+              );
+              const range = document.createRange();
+              if (lanes) range.selectNodeContents(lanes);
+              const ends = [
+                mark?.getBoundingClientRect().right,
+                lanes ? range.getBoundingClientRect().right : undefined,
+              ];
+              return ends.some(end => end !== undefined && end > box.right + 0.5) ? [meta.textContent] : [];
+            }),
+          );
+          assert.deepEqual(cut, [], `no Lane mark or Lane count cut at ${viewport.width}`);
+        }
+      },
+    );
+
+    await t.test('axe and widths: both themes, desk and phone, plain and dense', async t => {
+      for (const [viewport, query] of [
+        [DESK, ''],
+        [PHONE, ''],
+        [DESK, '?dense=1'],
+        [PHONE, '?dense=1'],
+      ]) {
+        const page = await open(t, viewport, query);
         await page.addScriptTag({ path: axePath });
         for (const theme of ['dark', 'light']) {
           await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
@@ -150,7 +190,7 @@ test('the Lanes yard: one state per Lane, grouped by Item, waits named, axe and 
           assert.deepEqual(violations, [], `axe at ${viewport.width} ${theme}`);
           if (shots)
             await page.screenshot({
-              path: join(shots, `lanes-yard-${viewport.width}-${theme}.png`),
+              path: join(shots, `lanes-yard-${viewport.width}-${theme}${query ? '-dense' : ''}.png`),
               fullPage: true,
             });
         }

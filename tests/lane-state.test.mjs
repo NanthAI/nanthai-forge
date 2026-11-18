@@ -115,7 +115,8 @@ test('29671737: after a refused submission and a passed, held resubmission, ever
   assert.equal(queueRow.word, 'Needs you');
   assert.equal(yardRow.word, 'Needs you');
   assert.equal(needsRow.word, 'Needs you');
-  assert.equal(lanePage.note, 'held for you', 'the Lane page knows the hold, not its reason');
+  // Friction e2f436b6: with the mark alone the Lane page knows the hold, not its reason or whom it waits on.
+  assert.equal(lanePage.note, 'held', "the Lane page never guesses the hold is the reader's");
   assert.ok(
     ![yardRow.word, queueRow.word, needsRow.word].includes('Check failed'),
     'the refusal is history only',
@@ -251,6 +252,100 @@ test('d9e1ac62: Lanes of one Item sit together in a band, live first; nothing is
     'a Lane saved 20 minutes ago is not left behind',
   );
   assert.deepEqual(state.laneState({ stage: 'saved', held: false }).word, 'Saved');
+});
+
+test('d9e1ac62 (real case, Item 1dd4e095): an open resolution Lane replaces the Lane it resolves even when both are quiet', () => {
+  // ac26ac6f conflicted; c908b679 is its resolution Lane. Both have been quiet for hours, so the quiet rule alone named
+  // no replacement and the two rows read the same.
+  const lanes = [
+    mark('ac26ac6f', 'saved', { changedAt: NOW - 25 * 3_600_000 }),
+    mark('c908b679', 'saved', { changedAt: NOW - 21 * 3_600_000 }),
+    mark('busy0001', 'editing', { changedAt: NOW - 60_000 }),
+  ];
+  const yard = model.buildYard(
+    feed(lanes),
+    [
+      meta('ac26ac6f', 'browser', 'Landing check: browser tests', iso(NOW - 25 * 3_600_000)),
+      {
+        ...meta('c908b679', 'browser', 'Landing check: browser tests', iso(NOW - 21 * 3_600_000)),
+        resolves: 'ac26ac6f',
+      },
+      meta('busy0001', 'other', 'Something else'),
+    ],
+    { total: 0, listed: 0, more: false, entries: [] },
+    NOW,
+  );
+  const of = id => yard.rows.find(row => row.laneId === id);
+  assert.equal(of('ac26ac6f').replacedBy, 'c908b679');
+  assert.equal(of('ac26ac6f').why, 'replaced by c908b679');
+  assert.equal(of('c908b679').replacedBy, null, 'the resolution Lane is the live one of the pair');
+  const order = yard.rows.map(row => row.laneId);
+  assert.ok(
+    order.indexOf('ac26ac6f') > order.indexOf('c908b679'),
+    'the replaced Lane sorts below its resolution',
+  );
+});
+
+test('d9e1ac62: a resolution never replaces a Lane whose landing is in flight, and a replaced Lane stands in for none', () => {
+  const now = NOW;
+  const quiet = now - QUIET_MS - 60_000;
+  const sib = (laneId, extra = {}) => ({ laneId, intentId: 'i', lastAt: quiet, inFlight: false, ...extra });
+  // The origin is checking: it keeps its own row (and the quiet resolution beside it is the one left behind).
+  const landing = model.replacedBy(
+    [sib('origin', { inFlight: true }), sib('res', { resolves: 'origin' })],
+    now,
+  );
+  assert.deepEqual([...landing], [['res', 'origin']]);
+  // The origin was saved again just now, its resolution is quiet: the origin is still the replaced one, never both.
+  const both = model.replacedBy([sib('origin', { lastAt: now }), sib('res', { resolves: 'origin' })], now);
+  assert.deepEqual([...both], [['origin', 'res']]);
+});
+
+test('e2f436b6: the Lane page says "for you" only when Needs me says the hold waits on the reader', () => {
+  const lane = (laneId, why, since) => ({
+    laneId,
+    intentId: 'i',
+    title: 'Landing check',
+    actor: 'mara',
+    agent: 'quiet-otter',
+    why,
+    note: null,
+    submissionId: null,
+    since,
+  });
+  const read = canDecide => ({
+    held: [
+      lane('review-1', 'review', NOW - 30 * 60_000),
+      lane('failed-1', 'check-failed', NOW - 21 * 3_600_000),
+    ],
+    more: 0,
+    moreIsLowerBound: false,
+    approvals: '{"requests":[]}',
+    canDecide,
+  });
+  const owner = needs.needsView(read(true));
+  assert.equal(needs.holdLine(owner, 'review-1', NOW), 'Held for your approval (30 min).');
+  // The real case: another's hold (a failed check the agent fixes) never reads as the owner's.
+  assert.equal(
+    needs.holdLine(owner, 'failed-1', NOW),
+    'Held (21 h): its check failed. Next: mara/quiet-otter fixes it in the same Lane.',
+  );
+  // A member who cannot decide sees the approval as someone else's.
+  assert.match(
+    needs.holdLine(needs.needsView(read(false)), 'review-1', NOW),
+    /^Held \(30 min\): waiting for approval\./,
+  );
+  // Before the read answers, or past its limit: no guess at whom it waits on.
+  assert.equal(needs.holdLine(undefined, 'review-1', NOW), 'Held.');
+  assert.equal(needs.holdLine(owner, 'not-listed', NOW), 'Held.');
+  assert.equal(
+    needs.holdLine(
+      needs.needsView({ ...read(true), held: [lane('u', 'unknown', NOW - 60 * 60_000)] }),
+      'u',
+      NOW,
+    ),
+    'Held (1 h). Why: not reported.',
+  );
 });
 
 // A check-failed sibling is the agent's to fix and goes to FYI (48049998), so both rows here wait on the person.

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Lanes yard (Items 29671737, d9e1ac62, d4b68402) on synthetic data, through its real model and row component: a
 // Lane held for approval whose record carries REVIEW_REQUIRED, two older Lanes of the same Item left behind, three
-// Lanes of another Item still busy, and a Ready Lane waiting behind one whose check restarted.
+// Lanes of another Item still busy, a Ready Lane waiting behind one whose check restarted, and (Item 1dd4e095's real
+// case) a quiet Lane beside its quiet resolution Lane. `?dense=1` draws the dense yard a long list uses.
 import { createRoot } from 'react-dom/client';
 import { Region } from '../../web/src/ds';
 import '../../web/src/app/app.css';
@@ -24,6 +25,8 @@ const ids = {
   acct1: '91767b23-6afd-47b1-a841-8a21c8546326',
   acct2: '10b90147-9c37-4221-8b7c-c4e86209c8a4',
   acct3: 'a1d903ed-cf63-4d65-80ee-4eb026539545',
+  origin: 'ac26ac6f-afcd-46f9-9637-cd543c51c900',
+  resolution: 'c908b679-0edc-4c3c-83cf-bc44468343e5',
 };
 const mark = (
   laneId: string,
@@ -47,11 +50,14 @@ const feed: LineFeed = {
     mark(ids.acct1, 'saved', 6),
     mark(ids.acct2, 'saved', 21),
     mark(ids.acct3, 'editing', 26),
+    mark(ids.origin, 'saved', 25 * 60),
+    mark(ids.resolution, 'saved', 21 * 60),
   ],
   more: 0,
   moreIsLowerBound: false,
   main: null,
 };
+const BROWSER = 'Landing check: browser tests skip silently (no browser installed), plus two L10 follow-ups';
 const meta = (
   laneId: string,
   intentId: string,
@@ -75,6 +81,8 @@ const lanes = [
   meta(ids.acct1, 'acct', 'Account Projects page in the redesign', 'mara/upbeat-stork', 6),
   meta(ids.acct2, 'acct', 'Account Projects page in the redesign', 'mara/wild-gecko', 21),
   meta(ids.acct3, 'acct', 'Account Projects page in the redesign', 'mara/calm-lynx', 26),
+  meta(ids.origin, 'browser', BROWSER, 'mara/true-petrel', 25 * 60),
+  { ...meta(ids.resolution, 'browser', BROWSER, 'mara/true-petrel', 21 * 60), resolves: ids.origin },
 ];
 const entries: QueueEntry[] = [
   {
@@ -118,7 +126,7 @@ createRoot(document.getElementById('root')!).render(
       count={yard.rows.length}
       hint="stuck work first"
     >
-      <Yard rows={yard.rows} hrefOf={id => `#${id}`} dense={false} />
+      <Yard rows={yard.rows} hrefOf={id => `#${id}`} dense={params.get('dense') === '1'} />
     </Region>
   </main>,
 );

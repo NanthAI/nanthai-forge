@@ -18,6 +18,8 @@ export type LaneMeta = {
   landing: { submissionId: string; state: string } | null;
   dormant?: boolean;
   lastActivityAt?: string;
+  /** A resolution Lane: the conflicted Lane of the same Item it continues. */
+  resolves?: string;
 };
 /** One entry from `projectHostedQueueView:read`. `landingState` is the server's one reading of this submission
  * (src/landing-state.ts); a Lane can have older entries too, and only its newest is current (lane-state.ts). */
@@ -126,22 +128,28 @@ export function yardReady(reads: {
   return !!reads.feed && (!!reads.lanes || !!reads.laneError) && (!!reads.queue || !!reads.queueError);
 }
 
-type Sibling = { laneId: string; intentId: string; lastAt: number; inFlight: boolean };
+type Sibling = { laneId: string; intentId: string; lastAt: number; inFlight: boolean; resolves?: string };
 /** Several open Lanes for one Item (Item d9e1ac62): one that has been quiet for QUIET_MS with no landing in flight is
- * replaced by the busiest other Lane of that Item (a landing in flight first, then the latest save). When every Lane of
- * the Item is quiet, or none is, nothing is called replaced: they are only grouped. */
+ * replaced by the busiest other Lane of that Item (a landing in flight first, then the latest save). An open resolution
+ * Lane replaces the conflicted Lane it continues even when both are quiet, unless that one has a landing in flight.
+ * Otherwise, when every Lane of the Item is quiet, or none is, nothing is called replaced: they are only grouped. */
 export function replacedBy(lanes: readonly Sibling[], now: number) {
   const byItem = new Map<string, Sibling[]>();
   for (const lane of lanes) byItem.set(lane.intentId, [...(byItem.get(lane.intentId) ?? []), lane]);
   const out = new Map<string, string>();
   for (const group of byItem.values()) {
     if (group.length < 2) continue;
+    for (const lane of group) {
+      const origin = lane.resolves ? group.find(other => other.laneId === lane.resolves) : undefined;
+      if (origin && !origin.inFlight) out.set(origin.laneId, lane.laneId);
+    }
     const quiet = (lane: Sibling) => !lane.inFlight && now - lane.lastAt >= QUIET_MS;
+    // A Lane already replaced by its resolution never stands in for another.
     const live = group
-      .filter(lane => !quiet(lane))
+      .filter(lane => !quiet(lane) && !out.has(lane.laneId))
       .sort((a, b) => Number(b.inFlight) - Number(a.inFlight) || b.lastAt - a.lastAt)[0];
     if (!live) continue;
-    for (const lane of group) if (quiet(lane)) out.set(lane.laneId, live.laneId);
+    for (const lane of group) if (quiet(lane) && !out.has(lane.laneId)) out.set(lane.laneId, live.laneId);
   }
   return out;
 }
@@ -175,6 +183,7 @@ export function buildYard(
           intentId: lane.intentId,
           lastAt: lastAt(mark.laneId, mark.changedAt),
           inFlight,
+          ...(lane.resolves ? { resolves: lane.resolves } : {}),
         },
       ];
     }),

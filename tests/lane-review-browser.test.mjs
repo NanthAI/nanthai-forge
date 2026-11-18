@@ -127,7 +127,8 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
         assert.equal(await page.locator('.lr-more').first().textContent(), 'Show 6 more');
         await page.locator('.lr-more').first().click();
         assert.equal(await page.locator('.lr-file').count(), 17);
-        assert.match(await page.locator('.head .sit').textContent(), /14 of 17 files need your eyes/);
+        // Friction e2f436b6: held, but Needs me has not said it waits on this reader, so never "Held for you".
+        assert.match(await page.locator('.head .sit').textContent(), /Held\. 14 of 17 files need your eyes/);
         await page.getByRole('button', { name: 'Files', exact: true }).click();
         const paths = await page.locator('.lr-file .path').allTextContents();
         assert.deepEqual(paths, [...paths].sort());

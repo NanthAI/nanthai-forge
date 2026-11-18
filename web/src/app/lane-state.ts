@@ -41,7 +41,8 @@ export const stopWords: Record<LineStage, string> = {
 };
 
 type Held = { glyph: StateWord; why: string; note: string; word?: string };
-/** Why a person holds it, by the current submission's state. Nothing known: "held for you", never a guess. */
+/** Why it is held, by the current submission's state. Nothing known: "held", never a guess at the reason or at
+ * whom it waits on (friction e2f436b6: "held for you" read as the viewer's own hold when it was another's). */
 function heldBy(landing: CurrentLanding | null | undefined, overlap: boolean): Held {
   const state = landing?.state;
   if (state === 'conflict' || (overlap && (!state || state === 'unknown')))
@@ -88,7 +89,7 @@ function heldBy(landing: CurrentLanding | null | undefined, overlap: boolean): H
     case 'held-main-red':
       return { glyph: 'Waiting its turn', why: 'held while main’s check is red', note: 'main is red' };
     default:
-      return { glyph: 'Needs you', why: 'held for you', note: 'held for you' };
+      return { glyph: 'Needs you', why: 'held, why not reported', note: 'held' };
   }
 }
 

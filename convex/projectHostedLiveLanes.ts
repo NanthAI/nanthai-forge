@@ -173,6 +173,8 @@ export const list = query({
           actor: lane.actor,
           state: lane.state,
           head: lane.head,
+          // A resolution Lane names the conflicted Lane it continues (Item d9e1ac62): from the record already read.
+          ...(lane.resolution?.origin ? { resolves: lane.resolution.origin.laneId } : {}),
           lastSaveAt: saved ? JSON.parse(await hostedRecordBody(ctx, saved)).at : null,
           landing: landing
             ? { submissionId: landing.submissionId, state: landing.phase, scope: 'intent' }
