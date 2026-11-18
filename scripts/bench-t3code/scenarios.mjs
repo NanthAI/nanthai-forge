@@ -71,12 +71,13 @@ export function scenarioRole(name, index) {
 }
 
 /** Text of a scenario test file: failing, passing (after the fix) or slow. The failure and the
- * slowness show only in the hosted landing check (GITHUB_ACTIONS, set on every Actions runner):
+ * slowness show only in the hosted landing check (CI: the hosted check keeps it in the project
+ * command's env and .bench/ci.sh exports it; GITHUB_ACTIONS is not passed through):
  * `land --save` runs a Lane's changed tests locally first, and a failure it catches there never
  * reaches the queue. A CI-only failure is the case the cohort and parking paths exist for. */
 export function scenarioTest(task, kind, seconds = 0) {
   const name = `bench scenario ${task} ${kind}`;
-  const hosted = 'process.env.GITHUB_ACTIONS === "true"';
+  const hosted = 'process.env.CI === "true"';
   if (kind === 'fail')
     return `import { expect, it } from "@effect/vitest";\n\nit(${JSON.stringify(name)}, () => {\n  expect(${hosted} ? "fails once" : "fixed").toBe("fixed");\n});\n`;
   if (kind === 'slow')

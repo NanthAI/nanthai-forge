@@ -34,7 +34,7 @@ test('scenario files: a failing test, its fix, a slow test, and far-apart same-f
   assert.match(scenarioTest('t1', 'slow', 240), /240000/);
   // Failure and slowness show only in the hosted landing check, never in the local preflight.
   for (const kind of ['fail', 'slow'])
-    assert.match(scenarioTest('t1', kind, 240), /process\.env\.GITHUB_ACTIONS === "true" \?/);
+    assert.match(scenarioTest('t1', kind, 240), /process\.env\.CI === "true" \?/);
   const text = 'a\nb\n';
   assert.equal(docEdit(text, 't1', 'top'), '<!-- bench scenario t1 -->\n\na\nb\n');
   assert.equal(docEdit(text, 't2', 'bottom'), 'a\nb\n<!-- bench scenario t2 -->\n');
