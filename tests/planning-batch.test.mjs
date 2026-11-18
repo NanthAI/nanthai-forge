@@ -278,6 +278,7 @@ test('agents send a batch as one put-planning-item call, get per-Item results an
   const invoke = async (name, args) => {
     calls.push(name);
     if (name === 'projectHostedPlanning:intentStates') return '{}';
+    if (name === 'projectItemWork:read') return { role: true, intent: null, lanes: [], total: 0 };
     const [module, fn] = name.split(':');
     const value = await handlers[module][fn]._handler(s.ctx, { ...args, projectId: s.projectId });
     return typeof value === 'string' ? JSON.parse(value) : value;

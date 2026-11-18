@@ -44,6 +44,7 @@ const actionsV8 = await import(moduleUrl('../convex/projectWorkActionsV8.ts'));
 const commands = await import(moduleUrl('../convex/projectWorkCommand.ts'));
 const search = await import(moduleUrl('../convex/projectHostedPlanningSearch.ts'));
 const planningModule = await import(moduleUrl('../convex/projectHostedPlanning.ts'));
+const itemWork = await import(moduleUrl('../convex/projectItemWork.ts'));
 const planningBatch = await import(moduleUrl('../convex/projectPlanningBatch.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 
@@ -62,6 +63,20 @@ function port(s, states = new Map(), serverFeatures = [...hostedContractFeatures
       return JSON.stringify(
         frictions.has(args.id) ? { found: true, ...frictions.get(args.id) } : { found: false },
       );
+    // The single-Item read takes its Intent state from the Item work read (1c2ab97a); stubbed like intentStates.
+    if (name === 'projectItemWork:read' && realIntentStates) return itemWork.read._handler(s.ctx, args);
+    if (name === 'projectItemWork:read') {
+      const intent = states.get(args.itemId) ?? null;
+      return JSON.stringify({
+        role: true,
+        intent,
+        intents: 1,
+        lanes: [],
+        total: 0,
+        atLeast: false,
+        nextCursor: null,
+      });
+    }
     if (name === 'projectHostedPlanning:intentStates' && realIntentStates)
       return planningModule.intentStates._handler(s.ctx, args);
     if (name === 'projectHostedPlanning:intentStates')

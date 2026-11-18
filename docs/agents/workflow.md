@@ -120,7 +120,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `provenance` | `candidateId, file?, lines?, cursor?` |
 | `records` | `collection, parentId?, status?, id?, version?, cursor?` |
 | `log` | `runId, tail?, stream?, shard?, attempt?, laneId?` |
-| `lanes` | `planningItemId?, id?, itemId?, intentId?, cursor?, limit?, view?` |
+| `lanes` | `planningItemId?, id?, itemId?, intentId?, state?, cursor?, limit?, view?` |
 | `diff` | `laneId?, paths?, byteBudget?, summary?, cursor?` |
 | `peers` | `laneId?, path?, detail?` |
 | `queue` | `limit?, laneId?` |
@@ -510,14 +510,31 @@ and fail locally before any call. `intentId` always means an execution Intent.
 `lanes {"planningItemId":"ISSUE_UUID","limit":50}` reads one bounded indexed page
 of open Lanes for the Issue’s current execution Intent, following the same successor
 chain as planned start. `lanes {"intentId":"INTENT_UUID"}` selects exactly that Intent.
-Both filters require full UUIDs; planning reads/writes and start also accept unique
-8+ character Issue prefixes. The returned `continueCursor` binds the filters and view;
+`planningItemId` takes the full UUID or the unique 8+ character prefix that planning
+reads/writes and start accept (one prefix query, only for a short id); `intentId` takes a
+full UUID. The returned `continueCursor` binds the filters and view;
 reuse those fields for the next page. One Convex query per page, zero client per-Lane
 reads, source downloads, writes or idle calls. The existing
 `by_project_and_kind_and_parent_and_status` index serves the filter: no schema change.
 Issue resolution adds at most 17 indexed Intent-head reads within that same query,
 independent of the project’s Lane count; result memory and joined reads stay O(page),
 with the existing page bound of 100.
+
+**What happened on an Issue: the live-state check.** `planning {"planningItemId":"ITEM_ID"}`
+returns `work`: the Issue's Lanes in every state (`open`, `queued`, `parked`,
+`landed`, `abandoned`), open first, each with its saved `head`, `lastActivityAt`, who
+(`actor`, `run`, `model`), the live submission for a queued or parked Lane, and for a
+Lane whose work landed its `receipt` (`receiptId`, `commit`, `at`, main `sequence`,
+`landedBy`). It shows 20 Lanes with `total`; `next` names the
+`lanes {"planningItemId":"ITEM_ID","state":"all","cursor":"…"}` read for the rest.
+`lanes {"planningItemId":"ITEM_ID","state":"all"}` pages the same read (20 per page by
+default, at most 50) with landed and abandoned Lanes. One shared server query,
+`projectItemWork:read`, serves both and the web Item page. It follows the Intent→Lane
+link (Intent chain heads, one Lane-head range per Intent, the Intent's landing notes),
+never a scan of the project's Lanes. It replaces the single-Item read's Intent-state
+call, so the read makes no extra call. About 30 documents and 8 KB for an Issue with
+four Lanes; nothing per landing; nothing idle. Signed-out readers get no Lanes, and
+people are named by the public identity rule.
 
 `planning {"counts":true,"initiativeId":"INITIATIVE_UUID"}` sums stored counts by status
 (`proposed`, `open`, `in-progress`, `closed`, `abandoned`) across up to 20 pages in one command
@@ -562,7 +579,7 @@ Hosted projects keep their backlog as planning: Initiatives group Issues, and an
 ```sh
 nforge agent ROOT planning '{"search":"sync source worker","limit":50}'    # ranked title/body search, active items by default
 nforge agent ROOT planning '{"status":"open","limit":50}'                 # one page; filters: kind, status, initiativeId, type, owner, relation; cursor continues
-nforge agent ROOT planning '{"planningItemId":"ITEM_ID"}'                             # one item, full body, newest 50 comments; ITEM_ID is the full UUID or a unique 8+ character prefix
+nforge agent ROOT planning '{"planningItemId":"ITEM_ID"}'                             # one item, full body, newest 50 comments, its Lanes and landing receipts (`work`); ITEM_ID is the full UUID or a unique 8+ character prefix
 nforge agent ROOT put-planning-item '{"kind":"initiative","title":"Phase 6","status":"open"}'
 nforge agent ROOT put-planning-item '{"kind":"issue","title":"Fix X","body":"Why and acceptance","status":"open","initiativeId":"INITIATIVE_ID"}'
 nforge agent ROOT comment-planning-item '{"planningItemId":"ITEM_ID","text":"Use A, because B","decision":true}'   # also adds a dated line to the body's Decisions

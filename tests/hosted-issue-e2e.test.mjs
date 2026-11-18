@@ -24,6 +24,7 @@ const actionsV8 = await import(moduleUrl('../convex/projectWorkActionsV8.ts'));
 const commands = await import(moduleUrl('../convex/projectWorkCommand.ts'));
 const search = await import(moduleUrl('../convex/projectHostedPlanningSearch.ts'));
 const planningModule = await import(moduleUrl('../convex/projectHostedPlanning.ts'));
+const itemWork = await import(moduleUrl('../convex/projectItemWork.ts'));
 const startModule = await import(moduleUrl('../convex/projectHostedStart.ts'));
 const keyId = process.env.FORGE_HOSTED_CHECK_KEY_ID;
 test.before(() => {
@@ -46,6 +47,8 @@ function port(s, f) {
         projectId: f.projectId,
         ids: args.ids,
       });
+    if (name === 'projectItemWork:read')
+      return f.transaction('itemWork', itemWork.read, { ...args, projectId: f.projectId });
     const [module, fn] = name.split(':');
     const handler = {
       projectWorkIndex: index,
@@ -181,8 +184,15 @@ test('closes + every Done-when box ticked: landing (completeOnAccept off) comple
   );
   assert.equal(first.reconciled.held, undefined);
   const events = w.s.tables.projectWorkEvents.size;
-  // The healthy path adds no Convex call beyond the read itself: workspace, item, comments, states, one write.
-  assert(w.p.calls.filter(name => name === 'projectHostedPlanning:intentStates').length === 1);
+  // The healthy path adds no Convex call beyond the read itself: workspace, item, comments, one Item work read (the
+  // Intent state and the Lanes, 1c2ab97a, in place of the states call), one write.
+  assert.equal(w.p.calls.filter(name => name === 'projectItemWork:read').length, 1);
+  assert.equal(w.p.calls.filter(name => name === 'projectHostedPlanning:intentStates').length, 0);
+  // Incident d4b68402/16093ed1: the Item read names the landed Lane and its receipt, not just a status.
+  assert.equal(first.work.total, 1);
+  assert.equal(first.work.lanes[0].laneId, started.laneId);
+  assert.equal(first.work.lanes[0].state, 'open', 'completeOnAccept off keeps the Lane open');
+  assert.equal(first.work.lanes[0].receipt.receiptId, receipt.id, 'and it still names its landing');
   // Idempotent: another read, and a replayed completion tick, change nothing.
   await w.f.materialize(receipt.id);
   const again = await read(w.p, { id: w.issue });
@@ -224,10 +234,16 @@ test('closes + open Done-when lines: the Issue holds, names the open lines and t
 test('completeOnAccept on: the Lane completes with the Intent and the Issue closes', async t => {
   const w = await world(t, { ticks: ['x'], completeOnAccept: true });
   const started = await w.begin();
-  await w.land(started.lane);
+  const receipt = await w.land(started.lane);
   assert.equal(await intentStatus(w, started.intentId), 'completed');
   assert.equal((await w.f.readLane(started.laneId)).state, 'completed');
-  assert.equal((await read(w.p, { id: w.issue })).item.status, 'closed');
+  const seen = await read(w.p, { id: w.issue });
+  assert.equal(seen.item.status, 'closed');
+  // The closed Item still names what landed (1c2ab97a): the Lane, landed, with its receipt.
+  assert.deepEqual(
+    seen.work.lanes.map(lane => [lane.laneId, lane.state, lane.receipt?.receiptId]),
+    [[started.laneId, 'landed', receipt.id]],
+  );
 });
 
 test('an active sibling Lane keeps the Intent and the Issue open until it lands too', async t => {

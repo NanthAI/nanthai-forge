@@ -110,13 +110,14 @@ permanent UI copy should help the current decision. Follow [DESIGN.md](../../DES
 Leading from Forge's own records is the point of dogfooding. Keep no private
 resume list, status file or scratch tracker of what has landed, what is pending or
 what comes next; Forge planning is that list. Before every brief, relay, status
-reply or "what next", read live state: the Issue and every comment, `lane-history`
-for each of its Lanes, their landing receipts and `queue`. A builder's last note,
+reply or "what next", read live state: `planning {"planningItemId":"ID"}` (the Issue,
+every comment, and `work`: each of its Lanes in any state with its landing receipt;
+`lanes {"planningItemId":"ID","state":"all"}` pages past 20), then `queue`.
+`lane-history` gives one Lane's full record when you need it. A builder's last note,
 an earlier read or a session handoff is history, not state: the queue can land a
 parked Lane after its builder has stopped (2bf85ddf, 2026-11-17, landed
 unobserved while notes still said "needs sync"). When a fact the lead needs is
-missing from Forge's reads (for example, which Lanes and receipts belong to an
-Issue), record friction and get it fixed in the product rather than keeping a side
+missing from Forge's reads, record friction and get it fixed in the product rather than keeping a side
 list. A Lane that needs review before acceptance stays out of the queue until the
 review is recorded on its Issue.
 

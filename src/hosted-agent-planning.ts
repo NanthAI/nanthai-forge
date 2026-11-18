@@ -623,7 +623,19 @@ async function readPlanning(
       parentId: id,
       newestFirst: true,
     });
-    const states = item.kind === 'issue' ? await intentStates(port, [item.id]) : {};
+    // One call for the Item's Intent state and its Lanes in any state (1c2ab97a); a server without the Item work
+    // read keeps the `intentStates` call and the reply has no `work`.
+    // Loaded only for a single-Item read, so the planning and status paths load no extra module (7b2ae8d8).
+    const { readItemWork, workSection } = await import('./item-work.js');
+    const work = item.kind === 'issue' ? await readItemWork(port, item.id) : null;
+    const states =
+      item.kind !== 'issue'
+        ? {}
+        : work?.role
+          ? work.intent
+            ? { [item.id]: work.intent }
+            : {}
+          : await intentStates(port, [item.id]);
     const sync = input.reconcile ? await reconcile(port, ws, [item], states) : undefined;
     // The item shows what the reconcile just wrote (the list read does the same): a closed Issue reads closed at its
     // new version, and a held one carries the version the printed close command names.
@@ -645,6 +657,7 @@ async function readPlanning(
         ...settled,
         ...(states[item.id] ? { intent: states[item.id] } : {}),
       }),
+      ...(work?.role ? { work: workSection(item.id, work) } : {}),
       comments: shown,
       ...(comments.isDone ? {} : { commentsMore: true }),
       ...(shown.some(comment => comment.system === true) ? { systemComments: systemCommentNotice } : {}),
