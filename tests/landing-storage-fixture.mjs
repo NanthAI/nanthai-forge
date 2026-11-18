@@ -2,11 +2,11 @@
 import assert from 'node:assert/strict';
 import { indexStorage } from './convex-index-cost.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
-import { readFileSync } from 'node:fs';
 import { finishFixture } from './hosted-finish-fixture.mjs';
 import { synthetic } from './hosted-landing-batches-fixture.mjs';
 import { capsuleMaintenanceFixture } from './landing-capsule-maintenance-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { readStorageBudgets } from './landing-storage-budget.mjs';
 export function inflateDogfoodChecks(f) {
   const reports = Object.fromEntries(
     Array.from({ length: 1000 }, (_, i) => [
@@ -59,9 +59,7 @@ const fixedProjectTables = new Set([
   'projectHostedLandingQueues',
   'projectHostedOverlapMain',
 ]);
-export const storageBudgets = JSON.parse(
-  readFileSync(new URL('./fixtures/landing-storage-budget.json', import.meta.url), 'utf8'),
-);
+export const storageBudgets = readStorageBudgets();
 export function fixedProjectStorage(f) {
   const bytes = storedBytes(f);
   return Object.fromEntries([

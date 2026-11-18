@@ -1359,7 +1359,7 @@ per table around one complete check/acceptance with a controlled clock and fixed
 a dogfood-shaped 4,096-file project with 128 changed files, a main-race
 recomposition and two checks with 1,000 reports/ten completed shards each. It compares
 immediate storage with the same landing after both retention windows. Its
-`tests/fixtures/landing-storage-budget.json` records every application table,
+`tests/landing-storage-budget.d/<table>.json` (one file per table, merged by `tests/landing-storage-budget.mjs`) records every application table,
 including zero-growth tables; new tables and a per-table rise fail the check.
 The `immediate` and `retained` maps count per-landing deltas. A separate
 `perProject` map ratchets full stored bytes and row counts for the three

@@ -1,0 +1,200 @@
+{
+  "fresh": {
+    "perProject": {
+      "immediate": {
+        "projectPlanProjects": {
+          "rows": 1,
+          "bytes": 300
+        },
+        "projectHostedChannels": {
+          "rows": 1,
+          "bytes": 638
+        },
+        "projectHostedLandingQueues": {
+          "rows": 1,
+          "bytes": 279
+        },
+        "projectHostedOverlapMain": {
+          "rows": 1,
+          "bytes": 153
+        },
+        "projectLandingCapsuleIndex": {
+          "rows": 0,
+          "bytes": 0
+        },
+        "projectJournalControls": {
+          "rows": 0,
+          "bytes": 0
+        },
+        "projectLiveLineSummary": {
+          "rows": 1,
+          "bytes": 934
+        }
+      },
+      "retained": {
+        "projectPlanProjects": {
+          "rows": 1,
+          "bytes": 300
+        },
+        "projectHostedChannels": {
+          "rows": 1,
+          "bytes": 638
+        },
+        "projectHostedLandingQueues": {
+          "rows": 1,
+          "bytes": 279
+        },
+        "projectHostedOverlapMain": {
+          "rows": 1,
+          "bytes": 153
+        },
+        "projectLandingCapsuleIndex": {
+          "rows": 1,
+          "bytes": 240
+        },
+        "projectJournalControls": {
+          "rows": 8,
+          "bytes": 4772
+        },
+        "projectLiveLineSummary": {
+          "rows": 1,
+          "bytes": 934
+        }
+      }
+    },
+    "indexes": {
+      "before": {
+        "entries": 225,
+        "keyBytes": 15819
+      },
+      "immediate": {
+        "entries": 416,
+        "keyBytes": 31502
+      },
+      "retained": {
+        "entries": 421,
+        "keyBytes": 31803
+      },
+      "written": 1539
+    }
+  },
+  "dogfood": {
+    "perProject": {
+      "immediate": {
+        "projectPlanProjects": {
+          "rows": 1,
+          "bytes": 302
+        },
+        "projectHostedChannels": {
+          "rows": 1,
+          "bytes": 668
+        },
+        "projectHostedLandingQueues": {
+          "rows": 1,
+          "bytes": 281
+        },
+        "projectHostedOverlapMain": {
+          "rows": 1,
+          "bytes": 96767
+        },
+        "projectLandingCapsuleIndex": {
+          "rows": 0,
+          "bytes": 0
+        },
+        "projectJournalControls": {
+          "rows": 0,
+          "bytes": 0
+        },
+        "projectLiveLineSummary": {
+          "rows": 1,
+          "bytes": 934
+        }
+      },
+      "retained": {
+        "projectPlanProjects": {
+          "rows": 1,
+          "bytes": 302
+        },
+        "projectHostedChannels": {
+          "rows": 1,
+          "bytes": 668
+        },
+        "projectHostedLandingQueues": {
+          "rows": 1,
+          "bytes": 281
+        },
+        "projectHostedOverlapMain": {
+          "rows": 1,
+          "bytes": 96767
+        },
+        "projectLandingCapsuleIndex": {
+          "rows": 1,
+          "bytes": 240
+        },
+        "projectJournalControls": {
+          "rows": 8,
+          "bytes": 4783
+        },
+        "projectLiveLineSummary": {
+          "rows": 1,
+          "bytes": 934
+        }
+      }
+    },
+    "indexes": {
+      "before": {
+        "entries": 24789,
+        "keyBytes": 1680083
+      },
+      "immediate": {
+        "entries": 25173,
+        "keyBytes": 1711234
+      },
+      "retained": {
+        "entries": 25206,
+        "keyBytes": 1713981
+      },
+      "written": 2884
+    }
+  },
+  "journal": {
+    "fresh": {
+      "bootstrapControls": {
+        "rows": 5,
+        "bytes": 2779
+      },
+      "beforeRetainedBytes": 30479,
+      "retainedBytes": 29780
+    },
+    "dogfood": {
+      "bootstrapControls": {
+        "rows": 5,
+        "bytes": 2787
+      },
+      "beforeRetainedBytes": 227216,
+      "retainedBytes": 217279
+    }
+  },
+  "tenLandingIndexes": {
+    "landings": 10,
+    "written": 11736,
+    "stored": [
+      {
+        "entries": 864,
+        "keyBytes": 52131
+      },
+      {
+        "entries": 1058,
+        "keyBytes": 67099
+      },
+      {
+        "entries": 2153,
+        "keyBytes": 150180
+      },
+      {
+        "entries": 2153,
+        "keyBytes": 150180
+      }
+    ]
+  }
+}

@@ -10,7 +10,7 @@ export function tableRegistrationFindings({ tables, placement, purge, budgets, o
     ))
       for (const phase of ['immediate', 'retained'])
         if (!(name in phases[phase]) && !(name in (phases.perProject?.[phase] ?? {})))
-          findings.push(`${name}: tests/fixtures/landing-storage-budget.json (${scenario}/${phase})`);
+          findings.push(`${name}: tests/landing-storage-budget.d/${name}.json (${scenario}/${phase})`);
   }
   findings.push(...owners.map(name => `owner-only guard: ${name}`));
   if (!helpCurrent)

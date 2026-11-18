@@ -44,7 +44,7 @@ The post-fix re-smoke had not posted when this review was written. Everything de
 
 ### 1. History in Convex is paid for every month, once per index
 
-One exhaust-free landing leaves this behind in Convex (measured, fixture, serialized JSON after both expiry windows, `tests/fixtures/landing-storage-budget.json`):
+One exhaust-free landing leaves this behind in Convex (measured, fixture, serialized JSON after both expiry windows, `tests/landing-storage-budget.d/`):
 
 | Landing shape | Retained JSON | With one copy per index and two built-in indexes (modelled) |
 | --- | ---: | ---: |
@@ -239,7 +239,7 @@ At a one-shot wake after a landing's terminal transition, scheduled the way oper
 
 Done when:
 
-- Retained Convex JSON per landing in `tests/fixtures/landing-storage-budget.json` ratchets from 50,417 to at most 15,000 B (fresh) and from 360,486 to at most 60,000 B (dogfood-shaped), together with S2.
+- Retained Convex JSON per landing in `tests/landing-storage-budget.d/` ratchets from 50,417 to at most 15,000 B (fresh) and from 360,486 to at most 60,000 B (dogfood-shaped), together with S2.
 - A byte-exact round trip: rows rebuilt from a capsule hash to the per-table digests in its pointer.
 - `landing`, `observe`, provenance, metrics and the recovery export return the same answers for a capsuled landing; the recovery drill restores from capsules.
 - Hot path: zero added calls. At terminal plus grace: one action and at most two mutations per page, one Class A request, under 100 KB of egress. Replay of an unknown outcome returns the original pointer.

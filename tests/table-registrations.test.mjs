@@ -7,6 +7,7 @@ import { ownerBoundaryFindings } from '../scripts/check-owner-boundary.mjs';
 import { tableRegistrationFindings } from '../scripts/table-registrations.mjs';
 import { hostedAgentHelpMarkdown } from '../dist/hosted-agent-help.js';
 import { temporaryDirectory } from '../scripts/test-temp.mjs';
+import { readStorageBudgets } from './landing-storage-budget.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -26,7 +27,7 @@ test('new tables report all five registration gaps together before a landing che
       ...Object.keys(inventory.projectPurgeTables),
       ...Object.keys(inventory.projectPurgeSpecial),
     ]),
-    budgets: JSON.parse(read('tests/fixtures/landing-storage-budget.json')),
+    budgets: readStorageBudgets(),
     owners: ownerBoundaryFindings(new URL('../convex/', import.meta.url)),
     helpCurrent: read('docs/agents/workflow.md').includes(hostedAgentHelpMarkdown()),
   });
@@ -48,11 +49,11 @@ test('one diagnostic includes every omitted table, budget phase, owner classific
   assert.deepEqual(gaps, [
     'syntheticA: docs/data-placement.md',
     'syntheticA: convex/projectPurgeInventory.ts',
-    'syntheticA: tests/fixtures/landing-storage-budget.json (fresh/immediate)',
-    'syntheticA: tests/fixtures/landing-storage-budget.json (fresh/retained)',
+    'syntheticA: tests/landing-storage-budget.d/syntheticA.json (fresh/immediate)',
+    'syntheticA: tests/landing-storage-budget.d/syntheticA.json (fresh/retained)',
     'syntheticB: docs/data-placement.md',
-    'syntheticB: tests/fixtures/landing-storage-budget.json (fresh/immediate)',
-    'syntheticB: tests/fixtures/landing-storage-budget.json (fresh/retained)',
+    'syntheticB: tests/landing-storage-budget.d/syntheticB.json (fresh/immediate)',
+    'syntheticB: tests/landing-storage-budget.d/syntheticB.json (fresh/retained)',
     'owner-only guard: synthetic.ts:write',
     'generated help: refresh docs/agents/workflow.md with hostedAgentHelpMarkdown()',
   ]);
