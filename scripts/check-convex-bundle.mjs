@@ -42,6 +42,8 @@ export async function checkConvexBundles(root, { registeredOnly = false } = {}) 
       logLevel: 'silent',
     };
     let result = await build(options);
+    // Every module any entry reaches: what a cached pass must watch (scripts/check-convex-runtime.mjs).
+    const inputs = Object.keys(result.metafile.inputs);
     let selectedEntries = entries;
     if (registeredOnly) {
       const discovered = isolatedImports(root, out, result, entries);
@@ -99,6 +101,7 @@ export async function checkConvexBundles(root, { registeredOnly = false } = {}) 
       modules: Object.keys(result.metafile.inputs).length,
       entries: entries.length,
       bytes: Object.values(result.metafile.outputs).reduce((total, output) => total + output.bytes, 0),
+      inputs,
     };
   } finally {
     rmSync(out, { recursive: true, force: true });

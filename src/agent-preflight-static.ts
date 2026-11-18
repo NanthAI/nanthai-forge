@@ -10,7 +10,9 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { spawnCaptured, failureExcerpt } from './agent-preflight-capture.js';
 import { safeRelative } from './safe-relative.js';
 import { linkDirectory, writeSourceLink } from './source-links.js';
@@ -59,8 +61,19 @@ export type StaticScope = {
   changed: string[] | null;
   base?: ((path: string) => Buffer | null | undefined) | undefined;
   scratch?: string | undefined;
+  /** A directory that outlives the run, for checks' own caches (each check gets a folder of its own). */
+  cache?: string | undefined;
 };
 export const STATIC_CHECK_TIMEOUT_MS = 120_000;
+/** What a static command may read to do less (all optional; a command that ignores them runs in full).
+ * FORGE_PREFLIGHT_CHANGED_FILE: a file of the saved paths base to head, each followed by a NUL byte
+ * (adds, edits, deletes and both sides of a rename). Absent when the paths are unknown: then check
+ * everything. FORGE_PREFLIGHT_CACHE_DIR: a folder this check may keep a cache in between runs.
+ * The landing check sets neither and runs in full. */
+const CHANGED_FILE_ENV = 'FORGE_PREFLIGHT_CHANGED_FILE';
+const CACHE_DIR_ENV = 'FORGE_PREFLIGHT_CACHE_DIR';
+const INFERRED_ADVICE =
+  'inferred from a conventional script name, not declared under preflight.static: advice only; the landing check still runs it. Declare it to make it block.';
 const CONVENTIONAL_FORMAT_SCRIPTS = ['format:check', 'check:format', 'fmt:check'];
 const CODE_INPUTS = ['**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx,json,css}'];
 
@@ -185,14 +198,20 @@ export function runStaticChecks(
     base === undefined ? (base = scope?.changed ? copyBase(root, scope.changed, scope) : null) : base;
   const changed = new Set(scope?.changed ?? []);
   const known = (dir: string) => (path: string) => isFile(join(dir, path));
+  const hints = scope?.changed ? changedHints(scope.changed, scope) : undefined;
   try {
     return checks.map(check => {
       const started = Date.now();
       const [command, ...args] = check.command as [string, ...string[]];
       const head = mentions(root, known(root), changed);
-      const run = spawnCaptured(command, args, { cwd: root, env, timeout: timeoutMs }, false, {
-        ...(scope ? { onText: head.push } : {}),
-      });
+      process.stderr.write(`preflight: static ${check.name}…\n`);
+      const run = spawnCaptured(
+        command,
+        args,
+        { cwd: root, env: hints ? hints(env, check.name) : env, timeout: timeoutMs },
+        false,
+        { ...(scope ? { onText: head.push } : {}) },
+      );
       const timedOut = run.errorCode === 'ETIMEDOUT';
       const outcome = timedOut ? 'timed-out' : run.status === 0 ? 'passed' : 'failed';
       const result: StaticCheckResult = {
@@ -203,7 +222,13 @@ export function runStaticChecks(
         ...(check.fix ? { fix: check.fix } : {}),
         ...(run.status !== 0 ? { excerpt: failureExcerpt(run.tail) } : {}),
       };
-      if (outcome === 'failed' && scope) {
+      if (outcome === 'failed' && check.source === 'conventional') {
+        // Nothing declared this command a gate: report it, never refuse on it.
+        result.outcome = 'unjudged';
+        result.advisory = INFERRED_ADVICE;
+        process.stderr.write(`preflight: ${check.name}: ${INFERRED_ADVICE}\n`);
+      } else if (outcome === 'failed' && scope) {
+        // The comparison run on the Lane's base gets no change hints: it answers whether base fails too.
         const verdict = judge(root, check, run, head.end(), scope, baseCopy, env, timeoutMs, known);
         Object.assign(result, verdict);
         if (verdict.advisory) process.stderr.write(`preflight: ${check.name}: ${verdict.advisory}\n`);
@@ -213,7 +238,30 @@ export function runStaticChecks(
     });
   } finally {
     if (base) rmSync(base, { recursive: true, force: true });
+    hints?.dispose();
   }
+}
+
+/** The saved paths as a NUL-terminated file plus the base and cache hints, for ENV per check. */
+function changedHints(paths: string[], scope: StaticScope) {
+  const directory = mkdtempSync(join(tmpdir(), 'forge-static-paths-'));
+  const file = join(directory, 'changed-paths');
+  writeFileSync(file, paths.map(path => `${path}\0`).join(''), { mode: 0o600 });
+  const hint = (env: NodeJS.ProcessEnv, name: string): NodeJS.ProcessEnv => {
+    const next: NodeJS.ProcessEnv = { ...env, [CHANGED_FILE_ENV]: file };
+    if (scope.cache) {
+      try {
+        const own = join(scope.cache, createHash('sha256').update(name).digest('hex').slice(0, 16));
+        mkdirSync(own, { recursive: true, mode: 0o700 });
+        next[CACHE_DIR_ENV] = own;
+      } catch {
+        /* No cache folder: the check runs in full. */
+      }
+    }
+    return next;
+  };
+  hint.dispose = () => rmSync(directory, { recursive: true, force: true });
+  return hint;
 }
 
 /** Files Forge itself writes into a Lane and never saves: its root `.forge/` folder (the checkout

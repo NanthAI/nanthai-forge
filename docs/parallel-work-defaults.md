@@ -321,8 +321,17 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   change triggers it, and a declared script the project no longer defines makes the plan
   unavailable instead of silently skipping. With no declaration only a conventionally named
   formatter script (`format:check`, `check:format`, `fmt:check`) runs; an unknown `check` script is
-  never guessed, because it may be a full verification. A check over its 120 s timeout is reported
-  `timed-out`, not passed: the landing check still runs it.
+  never guessed, because it may be a full verification. That inferred check is advice only: a failure
+  is reported `unjudged` and never refuses, while a declared check keeps its gate. A check over its
+  120 s timeout is reported `timed-out`, not passed: the landing check still runs it. A check's output
+  prints while it runs. **Doing less on a small change:** when the saved paths are known, each check
+  may read `FORGE_PREFLIGHT_CHANGED_FILE` (a file of the saved paths base to head, each followed by a
+  NUL byte; adds, edits, deletes and both sides of a rename) and `FORGE_PREFLIGHT_CACHE_DIR` (a folder
+  of its own that outlives the run). Neither is set when the paths are unknown, in the landing check or
+  in a direct run, so a command that ignores them still checks everything. Forge's own repository uses
+  them so that a source-only change skips the Convex runtime guard unless a changed path can touch its
+  graph and the graph's files still match the last full pass, scans only the changed files for the
+  per-file foundation rules and the format and lint tools, and runs the cross-file rules in full.
 - **Test runner, per project.** Preflight, the `tests` read, Intent contract tests and semantic
   union tests use the project's own runner. Declare it as `preflight.tests`:
   `{glob: string | [glob, ...], command: [program, ...args]}`, where an argument `{files}` becomes

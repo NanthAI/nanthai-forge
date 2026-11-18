@@ -24,12 +24,37 @@ export function oxcFiles(root, lint) {
   return files.sort();
 }
 
+// A change to the tools' own configuration, the ignore rules or the lint plugin can alter any file's result.
+const EVERY_FILE =
+  /^(?:\.oxfmtrc\.json|\.oxlintrc\.json|\.gitignore|package(?:-lock)?\.json|scripts\/oxc\.mjs|scripts\/lint\/)/;
+
+/** The saved changed paths local preflight names (FORGE_PREFLIGHT_CHANGED_FILE, NUL-terminated), or null
+ * when unnamed, unreadable or when a change to tool configuration means every file may differ. Only the
+ * read-only modes use it: both tools judge one file at a time, so the changed files give the same verdict
+ * on them as the whole tree. The hosted check and a direct run name none and cover the whole tree. */
+export function changedOxcPaths(env = process.env) {
+  try {
+    const changed = readFileSync(env.FORGE_PREFLIGHT_CHANGED_FILE, 'utf8').split('\0').filter(Boolean);
+    return changed.some(path => EVERY_FILE.test(path)) ? null : new Set(changed);
+  } catch {
+    return null;
+  }
+}
+
 export function runOxc(mode) {
   if (!['lint', 'format', 'format:check'].includes(mode))
     throw new Error('Expected lint, format or format:check.');
   const lint = mode === 'lint';
-  const files = oxcFiles('.', lint);
+  let files = oxcFiles('.', lint);
   if (!files.length) throw new Error('No source files selected for Oxc.');
+  const changed = mode === 'format' ? null : changedOxcPaths();
+  if (changed) {
+    files = files.filter(path => changed.has(path));
+    if (!files.length) {
+      console.log(`Oxc ${mode}: no changed file is in scope.`);
+      return 0;
+    }
+  }
   const tool = lint ? 'oxlint' : 'oxfmt';
   const result = spawnSync(
     process.execPath,

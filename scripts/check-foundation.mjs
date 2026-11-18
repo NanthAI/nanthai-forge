@@ -49,7 +49,24 @@ function walk(dir) {
 
 errors.push(...landingModelFindings(read));
 const files = walk(root);
+// Local preflight (Forge) names the saved changed paths in a file (src/agent-preflight-static.ts). Every
+// per-file scan below is a pure function of one file, so then only the changed files are scanned; the
+// cross-file checks further down always run in full. Never scoped when a scanner or its allowlist
+// (scripts/**) changed or a path is gone (a Markdown link to it elsewhere may now be dead); the hosted
+// check and a direct run name no paths and scan everything.
+const preflightChanged = (() => {
+  try {
+    const list = readFileSync(process.env.FORGE_PREFLIGHT_CHANGED_FILE, 'utf8').split('\0').filter(Boolean);
+    return list.some(path => path.startsWith('scripts/') || !existsSync(resolve(root, path))) ? null : list;
+  } catch {
+    return null;
+  }
+})();
+const scoped = preflightChanged && new Set(preflightChanged);
+let scanned = 0;
 for (const file of files) {
+  if (scoped && !scoped.has(relative(root, file).split(sep).join('/'))) continue;
+  scanned++;
   errors.push(...localPathFindings(relative(root, file), readFileSync(file)));
   if (isWorkflowPath(relative(root, file))) {
     errors.push(...actionPinFindings(relative(root, file), readFileSync(file, 'utf8')));
@@ -97,9 +114,9 @@ for (const file of files) {
 // Test-signal ratchet (ffbec6ef): only the changed test files are scanned when the check pins its
 // changes; a direct run, or a change to the baseline or the scanner, scans them all.
 {
-  const changed = process.env.FORGE_CHECK_CHANGES
-    ? ((await import('./test-impact.mjs')).pinnedPaths() ?? null)
-    : null;
+  const changed =
+    (process.env.FORGE_CHECK_CHANGES ? ((await import('./test-impact.mjs')).pinnedPaths() ?? null) : null) ??
+    preflightChanged;
   const known = new Map(
     files.map(file => relative(root, file).split(sep).join('/')).map(path => [path, path]),
   );
@@ -143,7 +160,7 @@ if (errors.length) {
   process.exitCode = 1;
 } else {
   console.log(
-    `Foundation checks passed: ${files.length} files; JSON parses, Markdown links resolve, license inventory is current, no machine-specific home paths, SPDX headers lead every source file, nothing prints environment values, no test file adds a real sleep, elapsed-time assert or docs read above its baseline, no growth count (tables, error codes, agent actions, CLI commands, glossary terms, machine dependencies, unreferenced exports) differs from its baseline, every public error code has a help topic and names only commands and topics that exist.`,
+    `Foundation checks passed: ${scoped ? `${scanned} changed of ${files.length}` : files.length} files; JSON parses, Markdown links resolve, license inventory is current, no machine-specific home paths, SPDX headers lead every source file, nothing prints environment values, no test file adds a real sleep, elapsed-time assert or docs read above its baseline, no growth count (tables, error codes, agent actions, CLI commands, glossary terms, machine dependencies, unreferenced exports) differs from its baseline, every public error code has a help topic and names only commands and topics that exist.`,
   );
   console.log(
     'Application behavior, external URLs and authenticated/local runtime integration are not tested by this command.',

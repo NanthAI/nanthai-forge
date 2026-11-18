@@ -245,7 +245,10 @@ export type LocalSelection = {
   deferredTo: 'pre-queue';
   summary: string;
 };
-type StaticSelection = { selected: Pick<StaticCheck, 'name' | 'command' | 'fix'>[]; untouched: string[] };
+type StaticSelection = {
+  selected: Pick<StaticCheck, 'name' | 'command' | 'fix' | 'source'>[];
+  untouched: string[];
+};
 export type PreflightPlan =
   | { static?: StaticSelection; status: 'unavailable'; reason: string }
   | {
@@ -498,10 +501,11 @@ function runnerPlan(
     checks.selected.length || checks.untouched.length
       ? {
           static: {
-            selected: checks.selected.map(({ name, command, fix }) => ({
+            selected: checks.selected.map(({ name, command, fix, source }) => ({
               name,
               command,
               ...(fix ? { fix } : {}),
+              source,
             })),
             untouched: checks.untouched,
           },
@@ -1035,10 +1039,11 @@ function planTests(
       ...(checks.selected.length || checks.untouched.length
         ? {
             static: {
-              selected: checks.selected.map(({ name, command, fix }) => ({
+              selected: checks.selected.map(({ name, command, fix, source }) => ({
                 name,
                 command,
                 ...(fix ? { fix } : {}),
+                source,
               })),
               untouched: checks.untouched,
             },
@@ -1124,10 +1129,13 @@ function staticScope(root: string, changed: string[] | null): StaticScope {
     /* Not a hosted Lane: no base copy. */
   }
   const files = marker && changed ? baseStateFiles(root, marker) : null;
-  if (!files) return { changed };
+  // A folder for checks that keep a cache, and (with CHANGED) hints so they do less on a small change.
+  const cache = join(clientCacheRoot(root), 'agent', 'preflight', 'static-cache');
+  if (!files) return { changed, cache };
   const base = new Map(files.map(file => [file.path, file]));
   return {
     changed,
+    cache,
     scratch: join(clientCacheRoot(root), 'static-base'),
     base: path => {
       const file = base.get(path);
@@ -1303,11 +1311,7 @@ export function runPreflight(
     if (plan.static?.selected.length) {
       staticResults = runStaticChecks(
         root,
-        plan.static.selected.map(check => ({
-          ...check,
-          inputs: null,
-          source: 'declared' as const,
-        })),
+        plan.static.selected.map(check => ({ ...check, inputs: null })),
         cleanEnv(),
         undefined,
         changed === undefined ? undefined : staticScope(root, changed),
