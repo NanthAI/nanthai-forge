@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { pendingRecordWriter } from './work-record-staging.js';
-import { existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync } from 'node:fs';
+import { mkdirBelow } from './mkdir-below.js';
 import { join } from 'node:path';
 import { readSource } from './files.js';
 import { digest } from './hash.js';
@@ -22,7 +23,8 @@ export function detailWriter(directory: string, pending = false) {
       release ??= pendingRecordWriter(directory);
       release.pin({ sha256, size: bytes.length });
     }
-    mkdirSync(join(directory, 'objects'), { recursive: true, mode: 0o700 });
+    // Never recreate a deleted Work directory from a late writer.
+    mkdirBelow(directory, join(directory, 'objects'));
     invariant(
       lstatSync(join(directory, 'objects')).isDirectory() &&
         !lstatSync(join(directory, 'objects')).isSymbolicLink() &&

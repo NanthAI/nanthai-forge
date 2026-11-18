@@ -2,7 +2,7 @@
 import { NativeSource } from '../dist/native-source.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,7 +18,8 @@ import {
   actionResult,
   compactDetailPage,
 } from '../dist/work-record-details.js';
-import { detailReader, runDetails } from '../dist/work-detail-store.js';
+import { detailReader, detailWriter, runDetails } from '../dist/work-detail-store.js';
+import { pendingRecordWriter } from '../dist/work-record-staging.js';
 import { migrateWorkDetails } from '../dist/work-detail-migration.js';
 import { writeRecords, readWorkFile } from '../dist/work-records.js';
 import { nativeReachable } from '../dist/native-reachable.js';
@@ -69,6 +70,17 @@ test('run summaries retain counts and bounded failure names; detail restores exa
   assert.equal(checkEvidenceFingerprint(hydrateRun(compact, io.read)), checkEvidenceFingerprint(original));
   assert.deepEqual(compactRun(compact, io.put), compact);
   assert.equal(io.objects.size, 1);
+});
+
+test('4a83a41f: a late detail or staging write never recreates a deleted owner', t => {
+  // A detached check controller can still commit after its owner (a test fixture or a removed
+  // checkout) was deleted; recreating the Work directory resurrected the whole owner path.
+  const { parent, store } = fixture(t);
+  const put = detailWriter(store.directory, true);
+  rmSync(parent, { recursive: true, force: true });
+  assert.throws(() => put(Buffer.from('late detail')), { code: 'ENOENT' });
+  assert.throws(() => pendingRecordWriter(store.directory), { code: 'ENOENT' });
+  assert.equal(existsSync(parent), false);
 });
 
 test('content verification rejects changed detail without affecting summary reads', () => {

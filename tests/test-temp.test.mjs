@@ -56,8 +56,14 @@ test('92f4bf04: an unowned Forge temp directory fails the file and is reclaimed 
   writeFileSync(
     file,
     `import test from 'node:test';
-    import { mkdtempSync, writeFileSync } from 'node:fs'; import { tmpdir } from 'node:os'; import { join } from 'node:path';
-    test('leaks', () => writeFileSync(${JSON.stringify(paths)}, JSON.stringify(${JSON.stringify(prefixes)}.map(prefix => mkdtempSync(join(tmpdir(), prefix))))));`,
+    import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'; import { tmpdir } from 'node:os'; import { join } from 'node:path';
+    test('leaks', () => {
+      const leaked = ${JSON.stringify(prefixes)}.map(prefix => mkdtempSync(join(tmpdir(), prefix)));
+      // A late writer recreated a fixture: the report must name what it wrote (4a83a41f).
+      mkdirSync(join(leaked[0], '.forge', 'work', 'record-staging'), { recursive: true });
+      writeFileSync(join(leaked[0], '.forge', 'work', 'record-staging', 'late.json'), '{}');
+      writeFileSync(${JSON.stringify(paths)}, JSON.stringify(leaked));
+    });`,
   );
   const result = spawnSync(process.execPath, ['--import', runtime, '--test', file], {
     encoding: 'utf8',
@@ -65,6 +71,15 @@ test('92f4bf04: an unowned Forge temp directory fails the file and is reclaimed 
   });
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout + result.stderr, /FORGE_TEMP_LEAK: 5/);
+  assert.match(
+    result.stdout + result.stderr,
+    /forge-batch-\w+ \(\.forge\/work\/record-staging\/late\.json\)/,
+  );
+  assert.match(
+    result.stdout + result.stderr,
+    /forge-machine-check-\w+(;|\n)/,
+    'an empty entry is named alone',
+  );
   assert(JSON.parse(readFileSync(paths, 'utf8')).every(path => !existsSync(path)));
   assert(existsSync(root), 'a parent/peer fixture remains untouched');
 });

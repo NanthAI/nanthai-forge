@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirBelow } from './mkdir-below.js';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -16,7 +17,8 @@ export function recordCollectionFence<T>(directory: string, run: () => T): T {
 }
 export function pendingRecordWriter(directory: string) {
   const staging = join(directory, 'record-staging');
-  mkdirSync(staging, { recursive: true, mode: 0o700 });
+  // A late writer (a detached check controller) must never recreate a deleted Work directory.
+  mkdirBelow(directory, staging);
   const path = join(staging, `${randomUUID()}.json`);
   const identity = { ...processIdentity(), host: hostname() };
   const details = new Map<string, { sha256: string; size: number }>();

@@ -26,6 +26,29 @@ const leaksIn = root =>
       })
     : [];
 
+/** Name a few paths inside each leaked entry: the top-level name alone cannot say which
+ * writer recreated a removed fixture (4a83a41f). Empty directories end in "/". */
+const leakDetail = (root, name, limit = 3) => {
+  const found = [];
+  const walk = (path, relative) => {
+    let entries;
+    try {
+      entries = readdirSync(path, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    if (!entries.length && relative) found.push(`${relative}/`);
+    for (const entry of entries) {
+      if (found.length >= limit) return;
+      const child = relative ? `${relative}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) walk(join(path, entry.name), child);
+      else found.push(child);
+    }
+  };
+  walk(join(root, name), '');
+  return found.length ? `${name} (${found.join(', ')})` : name;
+};
+
 const cleanups = new Set();
 const cleanup = (guard = true) => {
   for (const path of owned) remove(path);
@@ -82,7 +105,7 @@ export function installTestTemp() {
     const leaked = leaksIn(root);
     if (guard && leaked.length) {
       process.stderr.write(
-        `FORGE_TEMP_LEAK: ${leaked.length} Forge temporary entries left by this test file: ${leaked.join(', ')}\n`,
+        `FORGE_TEMP_LEAK: ${leaked.length} Forge temporary entries left by this test file: ${leaked.map(name => leakDetail(root, name)).join('; ')}\n`,
       );
       process.exitCode = 1;
     }
