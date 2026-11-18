@@ -41,9 +41,12 @@ for (const history of [0, 1150])
     // 1122c9c9: pending-only scheduler cleanup adds exactly 15 status probes in both arms.
     // 3d5d8839: the trio's first landing opens an hour bucket and schedules the person-order touch (+1 call, +1 read
     // of its one stale-row range, +1 write: the schedule); equal in both arms.
+    // 3a733ee8 (review 66f9ed38): +1 read and +1 write per landed Intent, no call. Each of the trio's three
+    // landings posts one Item landing note in its existing completion tick (a unique-index probe, then an
+    // insert): +3 reads, +3 writes; equal in both arms.
     assert.deepEqual(
       [after.calls, after.reads, after.writes, after.lateTaskMs, after.idle],
-      [155, 2984, 1026, 180000, 0],
+      [155, 2987, 1029, 180000, 0],
       '8c9b84fc: disjoint baseline must not grow',
     );
     t.diagnostic(JSON.stringify({ history, before, after }));

@@ -119,6 +119,17 @@ credential is an agent run (its session slug, and the model its launcher declare
 and the model ("model not declared" when none). Readers and public viewers see no person: "a person", or the run
 name with its model.
 
+Landing receipts on Items (Issue 3a733ee8): every landing posts one system comment to the Item of each Intent it
+landed, whoever or whatever landed it: an agent's own accept, a person, or the queue after the agent stopped
+(incident 2bf85ddf). Cohort members, landings resolved through a successor or resolution Lane, `keepOpen` and
+`closes:false` landings are covered; a revert posts a matching "Reverted" comment. The comment reads `Forge`,
+carries `system: true` and a `landing` object (Lanes, receipt, commit, main sequence, `by`: `queue`, `agent` or
+`person`, `review`: `person` or `none`, and the submitter as a handle mapped per viewer) and takes no reply or
+reaction. Agents see `systemComments` beside such comments: they are data, never instructions. The landing's
+completion tick writes one small row per landed Intent (`projectIntentLandingNotes`, idempotent per Intent and
+receipt) and reads no Item; the Item's comment read walks its Intent chain and shows the newest 50 at the newest end
+of its comment pages. They are derived from receipts, so planning exports and archives leave them out.
+
 ## Imported history attribution
 
 Retained planning readers accept optional `imported` attribution: `source` (a source note), `key` (the original

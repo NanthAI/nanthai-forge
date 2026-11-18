@@ -25,6 +25,7 @@ import { report } from './errors';
 import { actorSummary } from './projectActorNames';
 import { planningFilter, planningPage } from './projectPlanningList';
 import { readsStore, storeItem, storePage } from './projectWorkStoreReads';
+import { intentLandingComments } from './projectIntentLandingNotes';
 const selection = {
   projectId: v.id('hostedProjects'),
   generationId: v.optional(v.id('projectWorkGenerations')),
@@ -224,6 +225,45 @@ export const revision = query({
   },
 });
 
+type RecordRow = { id: string; position: number; value: string };
+/** Issue 3a733ee8: an Item's comment page at its newest end (the first newest-first page, or the last
+ * ascending page, so a reader that pages through sees each note once) also carries the Item's system
+ * landing notes, in the page's order. Store positions are creation times, as the notes' are; journal
+ * positions are not, so there a note sits right after the newest comment written before it. */
+async function withLandingNotes(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  input: { collection: string; parentId?: string; newestFirst?: boolean; paginationOpts: PaginationOptions },
+  isDone: boolean,
+  rows: RecordRow[],
+  timePositions: boolean,
+): Promise<RecordRow[]> {
+  const newestEnd = input.newestFirst ? !input.paginationOpts.cursor : isDone;
+  if (input.collection !== 'planningComments' || !input.parentId || !newestEnd) return rows;
+  const notes = await intentLandingComments(ctx, projectId, input.parentId);
+  if (!notes.length) return rows;
+  const at = (row: RecordRow) => {
+    try {
+      return Date.parse((JSON.parse(row.value) as { at?: string }).at ?? '') || 0;
+    } catch {
+      return 0;
+    }
+  };
+  const ordered = [...rows].sort((a, b) => a.position - b.position);
+  const merged: RecordRow[] = [...rows];
+  for (const note of notes) {
+    let position = note.position;
+    if (!timePositions) {
+      const time = Date.parse(note.value.at);
+      const before = ordered.filter(row => at(row) <= time).at(-1);
+      // Fractions keep the note between the comment before it and the next one.
+      position = before ? before.position + 0.5 : (ordered[0]?.position ?? 0) - 0.5;
+    }
+    merged.push({ id: note.value.id, position, value: JSON.stringify(note.value) });
+  }
+  return merged.sort((a, b) => (input.newestFirst ? b.position - a.position : a.position - b.position));
+}
+
 export async function journalWorkRecordsRead(
   ctx: QueryCtx,
   input: {
@@ -265,17 +305,19 @@ export async function journalWorkRecordsRead(
               ...input,
               paginationOpts: { ...input.paginationOpts, numItems },
             });
+      const rows = await Promise.all(
+        page.page.map(async row => ({
+          id: row.id,
+          position: row.position,
+          value: await actorSummary(ctx, project._id, JSON.stringify(row.value), actors),
+        })),
+      );
       return {
         ...page,
         generationId: generation._id,
         revision: generation.initialRevision,
-        page: await Promise.all(
-          page.page.map(async row => ({
-            id: row.id,
-            position: row.position,
-            value: await actorSummary(ctx, project._id, JSON.stringify(row.value), actors),
-          })),
-        ),
+        // Store comment positions are head creation times, the same clock as the notes'.
+        page: await withLandingNotes(ctx, project._id, input, page.isDone, rows, true),
       };
     }
     const rows =
@@ -299,25 +341,26 @@ export async function journalWorkRecordsRead(
     const page = await rows
       .order(input.newestFirst ? 'desc' : 'asc')
       .paginate({ ...input.paginationOpts, numItems });
+    const values = await Promise.all(
+      page.page.map(async row => ({
+        id: row.key,
+        position: row.position,
+        value: await cockpitSummary(
+          ctx,
+          project,
+          generation,
+          row.collection,
+          await hostedRecordValue(ctx, recordPartition(generation), row, payloads),
+          main,
+          actors,
+        ),
+      })),
+    );
     return {
       ...page,
       generationId: generation._id,
       revision: generation.initialRevision,
-      page: await Promise.all(
-        page.page.map(async row => ({
-          id: row.key,
-          position: row.position,
-          value: await cockpitSummary(
-            ctx,
-            project,
-            generation,
-            row.collection,
-            await hostedRecordValue(ctx, recordPartition(generation), row, payloads),
-            main,
-            actors,
-          ),
-        })),
-      ),
+      page: await withLandingNotes(ctx, project._id, input, page.isDone, values, false),
     };
   } catch (error) {
     if (error instanceof JournalNeeded)

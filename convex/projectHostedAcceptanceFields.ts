@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
+import { landingNoteBy } from './projectIntentLandingNoteFields';
 const identity = { projectId: v.id('hostedProjects'), receiptId: v.string() };
 const pin = v.object({ sha256: v.string(), size: v.number() });
 export const hostedAcceptanceTables = {
@@ -46,6 +47,9 @@ export const hostedAcceptanceTables = {
     root: v.string(),
     appliedPage: v.number(),
     appliedEntry: v.number(),
+    /** Who published it and whether a person reviewed it (Issue 3a733ee8), set with the completion tick
+     * from facts publication holds; the tick copies it into each Item's system landing note. */
+    landedBy: v.optional(landingNoteBy),
     /** The retained completion tick and its stall guard (Issue 13c63abe); absent once complete.
      * `replayed` is the position the guard last replayed from; `stalled` the typed end. */
     completion: v.optional(

@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "Issue 3a733ee8 adds projectIntentLandingNotes: the completion tick must post each landing's receipt to its Item without reading the Item (the Item->Intent link is a one-way chain), idempotent per Intent, receipt and kind. Planning comment records are keyed by Item and written through a planning operation, which would add reads and a second write to every landing; no existing table holds an Intent-keyed unique row, so nothing can merge without extra I/O per landing.",
+  "date": "2026-11-18"
+}

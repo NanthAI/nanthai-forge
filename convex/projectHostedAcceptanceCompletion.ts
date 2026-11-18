@@ -24,6 +24,8 @@ import { LANDING_STALL_MS } from '../src/landing-stall';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { effectiveAgentDefaults } from '../src/agent-parallel-defaults';
+import type { LandingNote } from '../src/intent-landing-note';
+import { postIntentLandingNote } from './projectIntentLandingNotes';
 type CompletionInput = ReceiptIdentity & {
   precompose?: { receiptIds: string[]; paths?: string[] };
 };
@@ -46,10 +48,13 @@ export async function scheduleAcceptanceCompletion(
   planId: Id<'projectHostedAcceptancePlans'>,
   input: CompletionInput,
   alarm?: Id<'_scheduled_functions'>,
+  landedBy?: LandingNote['landedBy'],
 ) {
   const tick = await ctx.scheduler.runAfter(0, COMPLETE, input);
   await ctx.db.patch(planId, {
     completion: { tick, guard: await armGuard(ctx, input), ...(alarm ? { alarm } : {}) },
+    // Issue 3a733ee8: in the same patch, so the Item notes cost publication no extra write.
+    ...(landedBy ? { landedBy } : {}),
   });
 }
 /** The plan's completion ended: cancel its pending guard and drop the retained
@@ -57,8 +62,15 @@ export async function scheduleAcceptanceCompletion(
 async function settleCompletion(ctx: MutationCtx, plan: Plan, patch: Partial<Plan> = {}) {
   if (plan.completion?.guard) await cancelPendingTask(ctx, plan.completion.guard);
   if (plan.capsuleWake) await wakeLandingCapsule(ctx, { projectId: plan.projectId, ...plan.capsuleWake });
-  if (plan.completion || plan.capsuleWake || Object.keys(patch).length)
-    await ctx.db.patch(plan._id, { ...patch, completion: undefined, capsuleWake: undefined });
+  // `landedBy` only carries the publisher to the notes of the completion ticks (Issue 3a733ee8); the
+  // landing capsule keeps the settled plan for good, so it leaves with the completion.
+  if (plan.completion || plan.capsuleWake || plan.landedBy || Object.keys(patch).length)
+    await ctx.db.patch(plan._id, {
+      ...patch,
+      completion: undefined,
+      capsuleWake: undefined,
+      landedBy: undefined,
+    });
   return { complete: true };
 }
 /** The stall guard (Issue 13c63abe), one stall window after publication or its
@@ -149,14 +161,19 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
   // Done-when lines are ticked. Refs-only landings and closeOnLand off leave the Intent alone.
   const lanesDone = receipt.completion.enabled,
     declares = receipt.completion.closeIntents ?? lanesDone;
-  if ((!lanesDone && !declares) || plan.appliedPage === plan.inputPages) return settleCompletion(ctx, plan);
+  if (plan.appliedPage === plan.inputPages) return settleCompletion(ctx, plan);
+  // A landing that neither completes Lanes nor declares Intents (closes:false) still tells its Items
+  // (Issue 3a733ee8): the same head-only walk as keepOpen, notes only, no record writes.
+  const notesOnly = !lanesDone && !declares;
   if (lanesDone && plan.appliedPage === 0 && plan.appliedEntry === 0)
     await retireLandedOverlapLanes(ctx, input, landed);
   const project = await ctx.db.get(input.projectId);
+  if (notesOnly && !project) return settleCompletion(ctx, plan);
   invariant(
     project &&
-      project.sourceAuthority?.mode === 'server' &&
-      project.sourceAuthority.epoch === receipt.authorityEpoch,
+      (notesOnly ||
+        (project.sourceAuthority?.mode === 'server' &&
+          project.sourceAuthority.epoch === receipt.authorityEpoch)),
     'SOURCE_AUTHORITY_CHANGED',
     'Retain pending completion across authority changes for reconciliation.',
   );
@@ -171,11 +188,21 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
   // The first landed Lane of each Intent: earlier quiet attempts of that Intent leave presence and
   // advisory notices when the Intent completion reads its sibling heads (friction b7f93deb).
   const supersededBy = new Map<string, string>();
+  // Issue 3a733ee8: the Intents this page landed, from the Lane reads below (no extra read), each with
+  // its Lanes and, for an original reached through another Intent's resolution Lane, that Lane.
+  const noted = new Map<string, { laneIds: string[]; viaLaneId?: string }>();
+  const note = (intentId: string, laneId: string, viaLaneId?: string) => {
+    const entry = noted.get(intentId) ?? { laneIds: [] };
+    if (!entry.laneIds.includes(laneId)) entry.laneIds.push(laneId);
+    if (viaLaneId && !entry.viaLaneId) entry.viaLaneId = viaLaneId;
+    noted.set(intentId, entry);
+  };
   for (const value of entries.slice(plan.appliedEntry, end)) {
     const entry = composeLaneSchema.parse(value);
     if (!lanesDone) {
       // Lanes stay as they are: the head row (parent, status, pin) is the whole read, no record body.
       const row = await recordHead(ctx, input.projectId, 'lane', entry.laneId);
+      if (row) note(row.parent, entry.laneId);
       if (row && row.status === 'active' && !row.pinned) finished.add(row.parent);
       continue;
     }
@@ -187,6 +214,8 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
     });
     invariant(current, 'SOURCE_UNAVAILABLE', 'An accepted Lane is unavailable.');
     const lane = hostedLaneSchema.parse(JSON.parse(current.value));
+    // The receipt carried this Lane's work whatever its record says now (pinned, saved again).
+    note(lane.intentId, lane.id);
     // The landed work is the saved head, its source version and its lifecycle (a reopened Lane stays open).
     // A later record write that carries none of those (a bare version bump) must not leave an accepted
     // Lane open forever, producing overlap notices.
@@ -226,9 +255,25 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
           at: receipt.at,
         },
         lane,
+        origin => note(origin.intentId, origin.id, origin.intentId === lane.intentId ? undefined : lane.id),
       ))
         finished.add(intentId);
   }
+  for (const [intentId, { laneIds, viaLaneId }] of noted)
+    await postIntentLandingNote(ctx, input.projectId, {
+      intentId,
+      receiptId: receipt.id,
+      kind: 'landed',
+      at: receipt.at,
+      laneIds,
+      commit: receipt.candidate.head,
+      sequence: receipt.snapshot.revision,
+      actor: receipt.actor.id,
+      agentRun: receipt.agentRun,
+      agentClient: receipt.agentClient,
+      landedBy: plan.landedBy,
+      viaLaneId,
+    });
   // The Intent completes with its last Lane, so the planning read can close its Issue.
   for (const intentId of declares ? finished : [])
     await completeIntentWhenLanesDone(ctx, {

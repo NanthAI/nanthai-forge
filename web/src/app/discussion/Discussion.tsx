@@ -86,7 +86,9 @@ export function Discussion({
             canWrite={canWrite}
             now={now}
             {...(onReact ? { onReact } : {})}
-            {...(canWrite && onPost ? { onReply: () => setReplying(thread.root.id) } : {})}
+            {...(canWrite && onPost && !thread.root.system
+              ? { onReply: () => setReplying(thread.root.id) }
+              : {})}
           />
           {thread.replies.map(reply => (
             <Comment
@@ -133,7 +135,11 @@ function Comment({
   const by = writer(comment);
   const review = readReview(comment.text);
   const counts = reactionsFor(reactions, comment.id);
-  const react = canWrite && onReact ? (kind: ReactionKind) => void onReact(comment.id, kind) : undefined;
+  // A system note (a landing receipt) takes no reaction or reply: nobody wrote it.
+  const react =
+    canWrite && onReact && !comment.system
+      ? (kind: ReactionKind) => void onReact(comment.id, kind)
+      : undefined;
   return (
     <article className={`cmt${reply ? ' re' : ''}`} id={`comment-${comment.id}`} data-kind={by.kind}>
       <div className="by">

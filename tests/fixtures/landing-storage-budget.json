@@ -100,6 +100,7 @@
       "projectHostedAcceptanceEvents": 2342,
       "projectHostedAcceptancePlans": 457,
       "projectHostedAcceptancePages": 1150,
+      "projectIntentLandingNotes": 435,
       "projectHostedLifecyclePlans": 0,
       "projectHostedLifecycleGuards": 0,
       "projectHostedLifecyclePointers": 0,
@@ -302,6 +303,7 @@
       "projectHostedAcceptanceEvents": 0,
       "projectHostedAcceptancePlans": 0,
       "projectHostedAcceptancePages": 0,
+      "projectIntentLandingNotes": 435,
       "projectHostedLifecyclePlans": 0,
       "projectHostedLifecycleGuards": 0,
       "projectHostedLifecyclePointers": 0,
@@ -473,7 +475,7 @@
         "entries": 421,
         "keyBytes": 31803
       },
-      "written": 1537
+      "written": 1539
     }
   },
   "dogfood": {
@@ -577,6 +579,7 @@
       "projectHostedAcceptanceEvents": 2373,
       "projectHostedAcceptancePlans": 916,
       "projectHostedAcceptancePages": 2310,
+      "projectIntentLandingNotes": 436,
       "projectHostedLifecyclePlans": 0,
       "projectHostedLifecycleGuards": 0,
       "projectHostedLifecyclePointers": 0,
@@ -779,6 +782,7 @@
       "projectHostedAcceptanceEvents": 0,
       "projectHostedAcceptancePlans": 0,
       "projectHostedAcceptancePages": 0,
+      "projectIntentLandingNotes": 436,
       "projectHostedLifecyclePlans": 0,
       "projectHostedLifecycleGuards": 0,
       "projectHostedLifecyclePointers": 0,
@@ -950,7 +954,7 @@
         "entries": 25206,
         "keyBytes": 1713981
       },
-      "written": 2882
+      "written": 2884
     }
   },
   "journal": {
@@ -973,23 +977,23 @@
   },
   "tenLandingIndexes": {
     "landings": 10,
-    "written": 11720,
+    "written": 11736,
     "stored": [
       {
-        "entries": 862,
-        "keyBytes": 51897
+        "entries": 864,
+        "keyBytes": 52131
       },
       {
-        "entries": 1056,
-        "keyBytes": 66865
+        "entries": 1058,
+        "keyBytes": 67099
       },
       {
-        "entries": 2147,
-        "keyBytes": 149478
+        "entries": 2153,
+        "keyBytes": 150180
       },
       {
-        "entries": 2147,
-        "keyBytes": 149478
+        "entries": 2153,
+        "keyBytes": 150180
       }
     ]
   }

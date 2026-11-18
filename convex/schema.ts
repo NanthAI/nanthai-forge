@@ -55,6 +55,7 @@ import { artifactBlobTables } from './artifactBlobFields';
 import { derivedFields } from './derivedArtifactFields';
 import { hostedLifecycleTables } from './projectHostedLifecycleFields';
 import { hostedAcceptanceTables } from './projectHostedAcceptanceFields';
+import { intentLandingNoteTables } from './projectIntentLandingNoteFields';
 import { deleteRequestTables } from './projectDeleteRequestFields';
 import { defineSchema, defineTable } from 'convex/server';
 import { accountFields, accountItemFields } from './accountTypes';
@@ -659,6 +660,7 @@ export default defineSchema({
   ...hostedFinishTables,
   ...hostedApprovalTables,
   ...hostedAcceptanceTables,
+  ...intentLandingNoteTables,
   ...deleteRequestTables,
   ...hostedLifecycleTables,
   ...hostedSnapshotTables,

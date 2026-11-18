@@ -5,6 +5,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { acceptancePage, acceptanceRow } from './projectHostedAcceptanceStore';
 import { readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { postSystemLaneNote } from './projectBoardSystem';
+import { postIntentLandingNote } from './projectIntentLandingNotes';
 import { hostedAcceptanceSchema, type HostedAcceptance } from '../src/hosted-acceptance';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { composeLaneSchema, validateComposePage } from '../src/hosted-compose';
@@ -37,7 +38,8 @@ type Revert = {
  *  - the reverted Intent gets a `reverted` needsFix notice (Now and CLI status), unless main-audit
  *    recovery already owns one for this receipt, or the Intent was abandoned.
  * Reads: project, both receipts, the reverted input page, then per Lane its overlap row and the board
- * note's own reads; the Candidate and Intent records. Replay-safe: every write is skipped when present.
+ * note's own reads; the Candidate and Intent records; one probe for the Item's system note (3a733ee8).
+ * Replay-safe: every write is skipped when present.
  */
 export async function noticeRevert(ctx: MutationCtx, input: Revert) {
   const project = await ctx.db.get(input.projectId);
@@ -83,7 +85,22 @@ export async function noticeRevert(ctx: MutationCtx, input: Revert) {
     });
     if (posted === 'posted') notes++;
   }
-  const needsFix = await markIntent(ctx, project, original, revert, lanes[0]);
+  const { needsFix, intentId } = await markIntent(ctx, project, original, revert, lanes[0]);
+  // Issue 3a733ee8: the reverted Intent's Item gets a system note matching its landing note.
+  if (intentId)
+    await postIntentLandingNote(ctx, input.projectId, {
+      intentId,
+      receiptId: revert.id,
+      kind: 'reverted',
+      at: revert.at,
+      laneIds: lanes,
+      commit: revert.candidate.head,
+      sequence: revert.snapshot.revision,
+      actor: revert.actor.id,
+      agentRun: revert.agentRun,
+      agentClient: revert.agentClient,
+      revertOf: original.id,
+    });
   return { lanes: lanes.length, notes, needsFix };
 }
 
@@ -103,13 +120,14 @@ async function markIntent(
 ) {
   const key = { projectId: project._id, actor: project.owner };
   const candidate = await readHostedRecord(ctx, { ...key, kind: 'candidate', key: original.candidate.id });
-  if (!candidate) return false;
+  if (!candidate) return { needsFix: false, intentId: null };
   const intentId = hostedRecordSchema.options[3].parse(JSON.parse(candidate.value)).intentId;
   const row = await readHostedRecord(ctx, { ...key, kind: 'intent', key: intentId });
-  if (!row) return false;
+  if (!row) return { needsFix: false, intentId };
   const intent = hostedRecordSchema.options[0].parse(JSON.parse(row.value));
   // Main-audit recovery already wrote its richer notice for this receipt; an abandoned Intent stays closed.
-  if (intent.status === 'abandoned' || intent.needsFix?.receiptId === original.id) return false;
+  if (intent.status === 'abandoned' || intent.needsFix?.receiptId === original.id)
+    return { needsFix: false, intentId };
   const notice = {
     state: 'reverted' as const,
     receiptId: original.id,
@@ -144,7 +162,7 @@ async function markIntent(
       }),
     },
   });
-  return true;
+  return { needsFix: true, intentId };
 }
 
 export const accepted = internalMutation({

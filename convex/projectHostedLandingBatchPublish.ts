@@ -30,6 +30,7 @@ import { hostedAcceptGate } from './projectHostedGate';
 import { cohortRecheckBasis } from './projectHostedScopedRecheck';
 import { scopedRecheckPairs } from '../src/scoped-recheck-policy';
 import { scheduleAcceptanceCompletion } from './projectHostedAcceptanceCompletion';
+import { landingPublisher } from './projectIntentLandingNotes';
 import { noteMainLanding } from './projectHostedMainAuditState';
 import { enqueueGithubMirror } from './projectGithubMirrorQueue';
 import { hostedMainV2Schema } from '../src/hosted-main';
@@ -64,7 +65,13 @@ import { landingDocsUndo } from '../src/docs-resolution';
 /** At most eight independently authorized members, one checked head, one main
  * CAS. All receipts, request settlements and completion activations commit with
  * that CAS. No intermediate/unchecked prefix is ever published. */
-export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim, now = Date.now()) {
+export async function publishLandingBatch(
+  ctx: MutationCtx,
+  claim: LandingClaim,
+  now = Date.now(),
+  /** Who drives this publication (Issue 3a733ee8): the queue unless an explicit accept or approval. */
+  by: 'queue' | 'agent' | 'person' = 'queue',
+) {
   const selected = await acceptanceSelection(ctx, claim);
   const old = await acceptanceRow(ctx, {
     projectId: claim.projectId,
@@ -322,6 +329,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
     identity: ReceiptIdentity;
     planId: Id<'projectHostedAcceptancePlans'>;
     alarm?: Id<'_scheduled_functions'>;
+    reviewed: boolean;
   }[] = [];
   const messages = [];
   for (const member of members) messages.push(await acceptedLandingMessage(ctx, member.state));
@@ -438,7 +446,12 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
     await writeLanding(ctx, currentRow, next, false, currentRow.runId !== run.id, completionAlarm);
     await settleLandingOperation(ctx, next);
     if (member.plan.inputPages)
-      completions.push({ identity, planId: member.plan._id, alarm: completionAlarm });
+      completions.push({
+        identity,
+        planId: member.plan._id,
+        alarm: completionAlarm,
+        reviewed: next.acceptance.acceptedBy.kind === 'person',
+      });
     receipts.push(receipt);
   }
   const last = receipts.at(-1)!;
@@ -457,12 +470,13 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
   const precompose = {
     receiptIds: receipts.map(receipt => receipt.id),
   };
-  for (const [index, { identity, planId, alarm }] of completions.entries())
+  for (const [index, { identity, planId, alarm, reviewed }] of completions.entries())
     await scheduleAcceptanceCompletion(
       ctx,
       planId,
       { ...identity, ...(index === 0 ? { precompose } : {}) },
       alarm,
+      landingPublisher(by, reviewed),
     );
   if (!completions.length) {
     await cancelStaleLandingChecks(ctx, {

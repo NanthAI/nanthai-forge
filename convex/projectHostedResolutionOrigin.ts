@@ -28,6 +28,9 @@ export async function completeResolutionOrigins(
     at: string;
   },
   lane: Lane,
+  /** Each origin Lane whose source reached main through this resolution, from the record already read
+   * (Issue 3a733ee8: its Item gets the landing note too). */
+  reached?: (origin: Lane) => void,
 ) {
   const intents = new Set<string>();
   let origin = lane.resolution?.origin;
@@ -40,6 +43,7 @@ export async function completeResolutionOrigins(
     });
     if (!row) break;
     const current = hostedLaneSchema.parse(JSON.parse(row.value));
+    reached?.(current);
     await supersedeLaneFinishes(ctx, {
       projectId: input.projectId,
       laneId: current.id,

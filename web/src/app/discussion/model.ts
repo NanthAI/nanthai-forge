@@ -16,6 +16,8 @@ export type DiscussionComment = {
   agentClient?: string;
   replyTo?: string;
   decision?: true;
+  /** Written by Forge from a landing receipt (Issue 3a733ee8), never by a member: no reply or reaction. */
+  system?: true;
 };
 export type Thread = { root: DiscussionComment; replies: DiscussionComment[] };
 
@@ -72,6 +74,7 @@ const modelOf = (client: string | undefined) => {
   return model ?? null;
 };
 export function writer(comment: DiscussionComment): Writer {
+  if (comment.system === true) return { kind: 'forge', label: 'Forge', model: null, verified: true };
   const agent = comment.agent && slug.test(comment.agent) ? comment.agent : undefined;
   const model = agent ? modelOf(comment.agentClient) : null;
   if (comment.author && handle.test(comment.author))

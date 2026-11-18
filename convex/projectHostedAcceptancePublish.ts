@@ -22,6 +22,7 @@ import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 import { saveObject } from './projectHostedSaveStore';
 import { scheduleAcceptanceCompletion } from './projectHostedAcceptanceCompletion';
+import { landingPublisher } from './projectIntentLandingNotes';
 import { hostedMainV2Schema } from '../src/hosted-main';
 import {
   hostedAcceptanceSchema,
@@ -56,6 +57,8 @@ export async function publishAcceptance(
   claim: LandingClaim,
   now = Date.now(),
   ownerApproval?: AcceptanceActor,
+  /** Who drives this publication (Issue 3a733ee8): the queue unless an explicit accept or approval. */
+  by: 'queue' | 'agent' | 'person' = 'queue',
 ) {
   const selected = await acceptanceSelection(ctx, claim);
   await activeProject(ctx, claim.projectId, selected.attempt.actor.id);
@@ -467,7 +470,13 @@ export async function publishAcceptance(
   // The completion tick also retires landed work from overlap, so it runs even when keepOpen or policy skips completion.
   const precompose = { receiptIds: [receipt.id] };
   if (plan.inputPages)
-    await scheduleAcceptanceCompletion(ctx, plan._id, { ...identity, precompose }, completionAlarm);
+    await scheduleAcceptanceCompletion(
+      ctx,
+      plan._id,
+      { ...identity, precompose },
+      completionAlarm,
+      landingPublisher(by, acceptedBy.kind === 'person' || Boolean(grant)),
+    );
   else {
     await cancelStaleLandingChecks(ctx, {
       projectId: claim.projectId,

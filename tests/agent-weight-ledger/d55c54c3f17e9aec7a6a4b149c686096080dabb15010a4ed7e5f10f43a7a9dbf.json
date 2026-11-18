@@ -1,0 +1,4 @@
+{
+  "issue": "3a733ee8",
+  "reason": "Landing receipts on Items (Issue 3a733ee8): the completion tick writes one system landing note per landed Intent and probes its unique index first, so a replayed or resumed tick writes nothing twice. The solo fixture lands one Intent: +1 document read (the empty probe), +0 calls (the note rides the existing completion tick), +1 insert of ~0.44 KB with 2 index entries. Six-landing mix: +408 B written and +36 B read per landing = +$0.0000888 per 1,000 landings at $0.20/GB ($1.682603 -> $1.682692). Idle cost unchanged: nothing runs without a landing."
+}

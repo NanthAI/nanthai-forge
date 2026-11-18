@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { memberDataNotice } from './member-data-notice.js';
+import { memberDataNotice, systemCommentNotice } from './member-data-notice.js';
 import { planningSummary, planningSearchTerms } from './planning-search.js';
 import { createHash } from 'node:crypto';
 import { makeFunctionReference } from 'convex/server';
@@ -637,14 +637,16 @@ async function readPlanning(
       : held
         ? { ...item, version: held.version, reason: holdMarker(held.openLines) }
         : item;
+    const shown = comments.page.map(row => JSON.parse(row.value) as { system?: boolean }).reverse();
     return {
       workRevision: ws.revision,
       item: withPlannedLink({
         ...settled,
         ...(states[item.id] ? { intent: states[item.id] } : {}),
       }),
-      comments: comments.page.map(row => JSON.parse(row.value)).reverse(),
+      comments: shown,
       ...(comments.isDone ? {} : { commentsMore: true }),
+      ...(shown.some(comment => comment.system === true) ? { systemComments: systemCommentNotice } : {}),
       ...(sync?.changed.length || sync?.failed || sync?.held?.length ? { reconciled: sync } : {}),
     };
   }

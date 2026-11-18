@@ -32,11 +32,12 @@ async function publishSelected(
   now = Date.now(),
   ownerApproval?: import('../src/autonomy-policy').AcceptanceActor,
   selectedState?: Awaited<ReturnType<typeof acceptanceSelection>>['state'],
+  by: 'queue' | 'agent' | 'person' = ownerApproval ? 'person' : 'queue',
 ) {
   const state = selectedState ?? (await acceptanceSelection(ctx, claim)).state;
   return state.batchId && !state.batchSolo
-    ? publishLandingBatch(ctx, claim, now)
-    : publishAcceptance(ctx, claim, now, ownerApproval);
+    ? publishLandingBatch(ctx, claim, now, by)
+    : publishAcceptance(ctx, claim, now, ownerApproval, by);
 }
 const selection = { projectId: v.id('hostedProjects'), submissionId: v.string(), attemptId: v.string() };
 async function caller(ctx: MutationCtx, input: AcceptanceIdentity) {
@@ -86,6 +87,8 @@ export const accept = mutation({
   handler: async (ctx, input) => {
     try {
       const { attempt, state } = await caller(ctx, input);
+      // An explicit accept: the accepting actor (an agent device or a person) drives this publication.
+      const by = attempt.actor.kind;
       if (await acceptanceRow(ctx, { projectId: input.projectId, receiptId: attempt.operations.accept }))
         return canonicalPayload(
           await publishSelected(
@@ -99,6 +102,7 @@ export const accept = mutation({
             Date.now(),
             undefined,
             state,
+            by,
           ),
         );
       const claim = await claimReadyLanding(
@@ -114,7 +118,7 @@ export const accept = mutation({
       // An older submission still holding its place takes main first.
       return canonicalPayload(
         claim && !('waitingFor' in claim)
-          ? await publishSelected(ctx, claim, Date.now(), undefined, state)
+          ? await publishSelected(ctx, claim, Date.now(), undefined, state, by)
           : { status: 'pending', reason: 'queued' },
       );
     } catch (error) {
