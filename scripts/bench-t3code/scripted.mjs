@@ -21,7 +21,7 @@ export function scriptedForge(binDir) {
     `import { mkdirSync, writeFileSync, appendFileSync, readFileSync } from 'node:fs';
 import { setTimeout as wait } from 'node:timers/promises';
 import { driveForge, callForge } from './forge-protocol.mjs';
-import { scenarioTest, scenarioTestPath, docEdit, landingReading, withdrawBody } from './scenarios.mjs';
+import { scenarioTest, scenarioTestPath, docEdit, landingReading, withdrawBody, failureReading } from './scenarios.mjs';
 const [task, defaultGroup, roleText] = process.argv.slice(2);
 const role = roleText ? JSON.parse(roleText) : {};
 const group = role.group ?? defaultGroup;
@@ -36,15 +36,18 @@ mkdirSync('.bench/dry', { recursive: true });
 writeFileSync('.bench/dry/' + task + '.md', 'dry run ' + task + ' ' + new Date().toISOString() + '\\n');
 if (group) appendFileSync('.bench/dry/group-' + group + '.md', task + '\\n');
 const testPath = scenarioTestPath(task);
-if (role.failOnce) writeFileSync(testPath, scenarioTest(task, 'fail'));
+if (role.failOnce) writeFileSync(testPath, scenarioTest(task, role.failOnce === 'semantic' ? 'semantic' : 'fail'));
 if (role.slowSeconds) writeFileSync(testPath, scenarioTest(task, 'slow', role.slowSeconds));
 if (role.doc) writeFileSync(role.doc.path, docEdit(readFileSync(role.doc.path, 'utf8'), task, role.doc.at, role.doc.path));
 let fixed = false;
 const onFailure = role.failOnce
-  ? async () => {
-      if (fixed) return false;
+  ? async response => {
+      // Only a failed check is the scenario's failure; any other end (a conflict) takes the
+      // ordinary protocol path, as for every other task.
+      const failure = failureReading(response);
+      if (fixed || failure.code !== 'CHECK_FAILED') return false;
       fixed = true;
-      log({ step: 'fix-after-failed-check' });
+      log({ step: 'fix-after-failed-check', code: failure.code, admission: failure.admission });
       writeFileSync(testPath, scenarioTest(task, 'fixed'));
       return true;
     }

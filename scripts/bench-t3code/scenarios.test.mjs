@@ -13,7 +13,12 @@ import {
 import { driveForge } from './forge-protocol.mjs';
 import { summarizeCell, passToLand } from './scenario-report.mjs';
 import { switchProblems } from './switches.mjs';
-import { pathEvidence } from './path-evidence.mjs';
+import { pathEvidence, cellLandings } from './path-evidence.mjs';
+import { scenarioEvidence as evidenceOf } from './scenario-evidence.mjs';
+import { SHARED_SOURCE, TEST_DIR, SOURCE_MARKER, failureReading } from './scenarios.mjs';
+import { mkdtempSync, writeFileSync as writeFile, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join as joinPath } from 'node:path';
 
 test('smoke keeps the unchanged dry run: no role at any position', () => {
   for (let i = 0; i < 10; i++) assert.deepEqual(scenarioRole('smoke', i), {});
@@ -221,7 +226,7 @@ test('scenario evidence voids a cell whose role did not fire and records group a
     jobs: [{ conclusion: 'success', startedAt: at(0), completedAt: at(400) }],
     events: {
       w: events([{ step: 'withdrawn', error: null }]),
-      f: events([{ step: 'fix-after-failed-check' }]),
+      f: events([{ step: 'fix-after-failed-check', code: 'CHECK_FAILED', admission: false }]),
     },
   });
   assert.deepEqual(good.problems, []);
@@ -296,7 +301,7 @@ test('N1 is reached only when a held, passed follower overtakes a holder that ch
   );
 });
 
-test('O3 keeps an admitted healthy member of a failed shared check; O4 carries a solo check', () => {
+test('O3 keeps an admitted healthy member of a failed shared check', () => {
   const member = (runs, extra = {}) => ({
     submissionId: 'm',
     admittedAt: '2026-01-01T00:01:00Z',
@@ -314,9 +319,194 @@ test('O3 keeps an admitted healthy member of a failed shared check; O4 carries a
     false,
     'the likely culprit is not a healthy member',
   );
-  const solo = extra => ({ submissionId: 's', batchId: null, mainMoved: true, ...extra });
-  const carried = pathEvidence([solo({ checkRunIds: ['r1'], firstCheck: { reused: true } })], allOn).O4;
-  assert.deepEqual([carried.precondition, carried.label], [true, 'on path']);
-  const retired = pathEvidence([solo({ checkRunIds: ['r1', 'r2'], costs: { runnerDiscarded: 3 } })], {}).O4;
-  assert.deepEqual([retired.precondition, retired.reached], [true, false]);
+  // O4 needs run windows and own files: see the O4 test below.
+  assert.equal(pathEvidence([member(['shared'])], allOn).O4.precondition, false);
+});
+
+// (a) O4. The A' smoke cell (2026-11-18, dogfood policy, switches off): every landing landed on
+// its admission run or on a queue check no overlapping landing committed under. The 70c7347c
+// rule read "main moved + first check" as O4 reached.
+test('O4 is reached only by a solo queue check still running when an overlapping landing committed', () => {
+  const t = s =>
+    `2026-11-18T14:00:00.000Z`.replace(
+      '00:00.000',
+      `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}.000`,
+    );
+  const receipt = (laneId, extra) => ({
+    laneId,
+    receiptId: `r-${laneId}`,
+    batchId: null,
+    checkRunIds: ['run'],
+    costs: { runnerDiscarded: 0 },
+    mainMoved: true,
+    ...extra,
+  });
+  const smoke = [
+    receipt('a', {
+      committedAt: t(247),
+      admissionBase: { receiptId: 'pre' },
+      firstCheck: { landedOn: 'admission-run', mainMoved: true, rule: 'clean-disjoint-v2' },
+    }),
+    receipt('b', { committedAt: t(529), admissionBase: { receiptId: 'r-a' }, firstCheck: null }),
+    receipt('c', {
+      committedAt: t(620),
+      admissionBase: { receiptId: 'r-a' },
+      firstCheck: { landedOn: 'admission-run', mainMoved: true, rule: 'clean-disjoint-v2' },
+    }),
+  ];
+  const cell = {
+    files: new Map([
+      ['a', new Set(['g.md'])],
+      ['b', new Set(['g.md'])],
+      ['c', new Set(['g.md'])],
+    ]),
+    windows: new Map([
+      ['a', [[Date.parse(t(41)), Date.parse(t(213))]]],
+      ['b', [[Date.parse(t(324)), Date.parse(t(495))]]],
+      ['c', [[Date.parse(t(454)), Date.parse(t(584))]]],
+    ]),
+  };
+  const fp = pathEvidence(smoke, { FORGE_QUEUE_CANCEL_HONOURS_FAST: true }, cell).O4;
+  assert.deepEqual([fp.precondition, fp.reached, fp.label], [false, false, 'path not reached']);
+  // b's queue check runs 324-495 s; an overlapping landing commits at 400 s, after b's base.
+  const under = receipt('d', { committedAt: t(400), admissionBase: { receiptId: 'pre' }, firstCheck: null });
+  cell.files.set('d', new Set(['g.md']));
+  const kept = pathEvidence([...smoke, under], { FORGE_QUEUE_CANCEL_HONOURS_FAST: true }, cell).O4;
+  assert.deepEqual([kept.precondition, kept.reached, kept.label], [true, true, 'on path']);
+  // Disjoint files, or a landing already in b's base, is not a main move under it.
+  cell.files.set('d', new Set(['other.md']));
+  assert.equal(pathEvidence([...smoke, under], {}, cell).O4.precondition, false);
+  cell.files.set('d', new Set(['g.md']));
+  const inBase = smoke.map(r => (r.laneId === 'b' ? { ...r, admissionBase: { receiptId: 'r-d' } } : r));
+  assert.equal(pathEvidence([...inBase, under], {}, cell).O4.precondition, false);
+  // Switch off: the sweep retired b's run (another run, runner time discarded).
+  const retired = smoke.map(r =>
+    r.laneId === 'b'
+      ? { ...r, checkRunIds: ['run', 'run2'], costs: { runnerDiscarded: 2 }, firstComposeStartedAt: t(300) }
+      : r,
+  );
+  const off = pathEvidence([...retired, under], {}, cell).O4;
+  assert.deepEqual([off.precondition, off.reached, off.label], [true, false, null]);
+});
+
+test("cellLandings keeps only a Lane's own files, never paths it synced from main", () => {
+  const result = {
+    order: ['t1', 't2'],
+    records: [
+      {
+        task: 't1',
+        laneId: 'l1',
+        overlap: 'same-file:x',
+        changes: { files: [{ path: '.bench/dry/t2.md' }] },
+        landing: {
+          operations: [
+            { timing: { checkReservedAt: '2026-01-01T00:00:10Z', ciEndedAt: '2026-01-01T00:01:00Z' } },
+          ],
+        },
+      },
+      { task: 't2', laneId: 'l2', overlap: 'disjoint:y' },
+    ],
+  };
+  const cell = cellLandings(result, {
+    roleOf: i => (i === 0 ? { doc: { path: 'README.md', at: 'top' } } : {}),
+    groupOf: r => (r.overlap.startsWith('disjoint') ? '' : 'x'),
+  });
+  assert.deepEqual([...cell.files.get('l1')], ['.bench/dry/t1.md', '.bench/dry/group-x.md', 'README.md']);
+  assert.deepEqual([...cell.files.get('l2')], ['.bench/dry/t2.md']);
+  assert.deepEqual(cell.windows.get('l1'), [
+    [Date.parse('2026-01-01T00:00:10Z'), Date.parse('2026-01-01T00:01:00Z')],
+  ]);
+});
+
+// (b) fail-once counts only a CHECK_FAILED reply. A' cohort-fail t27456 (2026-11-18): its land
+// ended COMPOSITION_CONFLICT and the old hook spent the fix on it; the 70c7347c guard counted it.
+test('fail-once fires only on a CHECK_FAILED reply; a conflict end does not count', () => {
+  assert.deepEqual(
+    failureReading({ error: { code: 'COMPOSITION_CONFLICT', message: 'retained source conflicts' } }),
+    {
+      code: 'COMPOSITION_CONFLICT',
+      admission: false,
+    },
+  );
+  assert.deepEqual(
+    failureReading({
+      error: {
+        code: 'CHECK_FAILED',
+        message: 'The admission check of this change alone failed; it did not join a batch.',
+      },
+    }),
+    { code: 'CHECK_FAILED', admission: true },
+  );
+  const roles = [{ task: 't', role: { failOnce: true } }];
+  const fired = events => evidenceOf({ roles, records: [], calls: [], events: { t: events } }).roles[0].fired;
+  assert.equal(fired([{ event: 'scenario', step: 'fix-after-failed-check' }]), false, 'old event, no code');
+  assert.equal(
+    fired([{ event: 'scenario', step: 'fix-after-failed-check', code: 'COMPOSITION_CONFLICT' }]),
+    false,
+  );
+  assert.equal(
+    fired([{ event: 'scenario', step: 'fix-after-failed-check', code: 'CHECK_FAILED', admission: false }]),
+    true,
+  );
+  const semantic = events =>
+    evidenceOf({
+      roles: [{ task: 't', role: { failOnce: 'semantic' } }],
+      records: [],
+      calls: [],
+      events: { t: events },
+    }).roles[0].fired;
+  assert.equal(
+    semantic([{ event: 'scenario', step: 'fix-after-failed-check', code: 'CHECK_FAILED', admission: true }]),
+    false,
+    'failed at admission',
+  );
+  assert.equal(
+    semantic([{ event: 'scenario', step: 'fix-after-failed-check', code: 'CHECK_FAILED', admission: false }]),
+    true,
+  );
+});
+
+// (c) cohort-fail v2: the semantic test passes on main and on its own change (admission), and
+// fails once position 1's edit of the shared source is under it (queue check); one culprit.
+test('cohort-fail v2: position 4 passes alone, fails with position 1 under it, passes after its fix', async () => {
+  const [first, culprit] = [0, 3].map(i => scenarioRole('cohort-fail', i));
+  assert.deepEqual(first.doc, { path: SHARED_SOURCE, at: 'top' });
+  assert.equal(culprit.failOnce, 'semantic');
+  assert.ok(culprit.releaseMs > 0, 'released after position 1, so its queue check is stacked on it');
+  assert.equal(joinPath(TEST_DIR, SHARED_SOURCE.slice(TEST_DIR.length + 1)), SHARED_SOURCE);
+  for (let i = 1; i < 10; i++)
+    if (i !== 3) assert.deepEqual(scenarioRole('cohort-fail', i), {}, `position ${i + 1}`);
+  // Run the generated test for real against the file before and after position 1's edit.
+  const dir = mkdtempSync(joinPath(tmpdir(), 'bench-semantic-'));
+  try {
+    writeFile(
+      joinPath(dir, 'vitest.mjs'),
+      'export const results = []; export const it = (name, fn) => { try { fn(); results.push(true); } catch { results.push(false); } }; export const expect = value => ({ not: { toContain: part => { if (String(value).includes(part)) throw Error("contains"); } }, toBe: other => { if (value !== other) throw Error("differs"); } });\n',
+    );
+    const file = SHARED_SOURCE.slice(TEST_DIR.length + 1);
+    const run = async (source, kind, n) => {
+      writeFile(joinPath(dir, file), source);
+      const test = scenarioTest('t4', kind).replace('"@effect/vitest"', '"./vitest.mjs"');
+      writeFile(joinPath(dir, `case${n}.mjs`), test);
+      const shim = await import(joinPath(dir, 'vitest.mjs'));
+      const before = shim.results.length;
+      await import(joinPath(dir, `case${n}.mjs`));
+      return shim.results.slice(before);
+    };
+    const main = 'export const a = 1;\n';
+    assert.deepEqual(await run(main, 'semantic', 1), [true], 'admission: passes on main');
+    assert.deepEqual(
+      await run(docEdit(main, 't1', 'top', SHARED_SOURCE), 'semantic', 2),
+      [false],
+      'queue: fails with position 1 under it',
+    );
+    assert.ok(docEdit(main, 't1', 'top', SHARED_SOURCE).startsWith(SOURCE_MARKER));
+    assert.deepEqual(
+      await run(docEdit(main, 't1', 'top', SHARED_SOURCE), 'fixed', 3),
+      [true],
+      'after the fix',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

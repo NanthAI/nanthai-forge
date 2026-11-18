@@ -9,7 +9,9 @@ import { mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { benchRootOrExit } from './bench-root.mjs';
-import { pathEvidence } from './path-evidence.mjs';
+import { pathEvidence, cellLandings } from './path-evidence.mjs';
+import { scenarioRole, scenarioTestPath } from './scenarios.mjs';
+import { dryGroup } from './scripted.mjs';
 
 const ms = value => Date.parse(value);
 export const quantile = (values, p) => {
@@ -57,7 +59,15 @@ export function summarizeCell(result, receipts) {
     convexUsdPer1000:
       result.convex?.costUsd != null && own.length ? (1000 * result.convex.costUsd) / own.length : null,
     // Per switch: was its queue path reached? A switch-on cell that missed it is 'path not reached'.
-    paths: pathEvidence(own, result.switches?.start ?? {}),
+    paths: pathEvidence(
+      own,
+      result.switches?.start ?? {},
+      cellLandings(result, {
+        roleOf: index => (index >= 0 ? scenarioRole(result.scenario?.name ?? 'smoke', index) : {}),
+        groupOf: dryGroup,
+        testPathOf: scenarioTestPath,
+      }),
+    ),
   };
 }
 

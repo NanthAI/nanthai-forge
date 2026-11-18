@@ -54,12 +54,17 @@ export function scenarioEvidence({ roles, records, calls, jobs = [], events = {}
       });
     }
     if (role.failOnce) {
-      const fixed = step('fix-after-failed-check').length;
+      // Only a CHECK_FAILED reply counts; the semantic role must also have passed its own
+      // admission check (the failure is the queue check's).
+      const fix = step('fix-after-failed-check').at(-1);
+      const queue = role.failOnce !== 'semantic' || fix?.admission === false;
       checks.push({
         task,
         kind: 'fail-once',
-        fired: fixed > 0,
-        evidence: fixed ? 'failed landing check seen, fix applied' : 'no failed landing check seen',
+        fired: fix?.code === 'CHECK_FAILED' && queue,
+        evidence: !fix
+          ? 'no failed landing check seen'
+          : `fix after ${fix.code ?? 'a reply with no code'}${fix.admission ? ' (admission check)' : ''}`,
       });
     }
     if (role.slowSeconds) {

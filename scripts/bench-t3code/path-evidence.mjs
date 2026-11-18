@@ -56,31 +56,88 @@ function o3(receipts) {
   };
 }
 
-/** O4: main moved under a running solo check. Retired (switch off): the landing discarded
- * runner time and checked again. Carried (switch on): it landed on its first check across the
- * move, with a cross-head proof and nothing discarded. */
-function o4(receipts) {
-  const solo = receipts.filter(r => !r.batchId || r.batchSolo);
-  const retired = solo.filter(r => runsOf(r).length > 1 && discarded(r) > 0);
-  const carried = solo.filter(r => r.mainMoved && r.firstCheck && runsOf(r).length === 1 && !discarded(r));
+/** O4: a landing that this landing's files overlap committed while this landing's queue check
+ * was still running, on a check that shares no batch and whose base did not already contain
+ * that landing. Without the switch the stale-check sweep retires the run (runner time
+ * discarded, another run); with it a run that may carry is kept and the landing lands on it.
+ * A landing that landed on its admission run is not a queue check the sweep can retire, and
+ * carrying a passed check across a later main move is ordinary reuse, not this path.
+ * `cell.files` (own changed paths) and `cell.windows` (check reserved -> CI ended, per
+ * attempt) are keyed by Lane and come from the cell's own records (cellLandings). */
+function o4(receipts, cell = {}) {
+  const files = r => cell.files?.get(r.laneId) ?? new Set();
+  const commitOf = new Map(receipts.map(r => [r.receiptId, ms(r.committedAt)]));
+  const batchSize = id => receipts.filter(r => r.batchId === id).length;
+  const met = receipts.flatMap(r => {
+    if ((r.batchId && batchSize(r.batchId) > 1) || r.firstCheck?.landedOn === 'admission-run') return [];
+    const mine = files(r);
+    const baseAt = commitOf.get(r.admissionBase?.receiptId) ?? -Infinity;
+    const retired = runsOf(r).length > 1 && discarded(r) > 0;
+    const spans = retired
+      ? [[ms(r.firstComposeStartedAt), ms(r.committedAt)]]
+      : (cell.windows?.get(r.laneId) ?? []);
+    const moved = receipts.filter(q => {
+      const at = ms(q.committedAt);
+      return (
+        q !== r &&
+        at > baseAt &&
+        [...files(q)].some(path => mine.has(path)) &&
+        spans.some(([from, to]) => at > from && at < to)
+      );
+    });
+    if (!moved.length) return [];
+    return [{ kept: runsOf(r).length === 1 && !discarded(r) }];
+  });
+  const kept = met.filter(m => m.kept).length;
   return {
-    precondition: retired.length + carried.length > 0,
-    reached: carried.length > 0,
-    evidence:
-      retired.length + carried.length
-        ? `${retired.length} solo check(s) retired by a main move, ${carried.length} carried across it`
-        : 'no solo check met a main move',
+    precondition: met.length > 0,
+    reached: kept > 0,
+    evidence: met.length
+      ? `${met.length} solo queue check(s) met an overlapping landing while running, ${kept} kept`
+      : 'no solo queue check met an overlapping landing while running',
   };
+}
+
+/** Own changed paths and check windows per Lane, from a cell result: the dry edit, its group
+ * file and the scenario role's files; never the paths a Lane synced from main. */
+export function cellLandings(
+  result,
+  { roleOf = () => ({}), groupOf = () => '', testPathOf = () => null } = {},
+) {
+  const files = new Map(),
+    windows = new Map();
+  for (const record of result.records ?? []) {
+    if (!record.laneId) continue;
+    const index = (result.order ?? []).indexOf(record.task);
+    const role = roleOf(index) ?? {};
+    const group = role.group ?? groupOf(record);
+    const own = new Set([`.bench/dry/${record.task}.md`]);
+    if (group) own.add(`.bench/dry/group-${group}.md`);
+    if (role.doc?.path) own.add(role.doc.path);
+    if ((role.failOnce || role.slowSeconds) && testPathOf(record.task)) own.add(testPathOf(record.task));
+    files.set(record.laneId, own);
+    windows.set(
+      record.laneId,
+      (record.landing?.operations ?? []).flatMap(operation => {
+        const t = operation.timing ?? {};
+        const from = ms(t.checkReservedAt),
+          to = ms(t.ciEndedAt ?? t.committedAt);
+        return from && to ? [[from, to]] : [];
+      }),
+    );
+  }
+  return { files, windows };
 }
 
 const RULES = { N1: n1, O3: o3, O4: o4 };
 
 /** Per switch: { on, precondition, reached, label, evidence }. `switches` maps env names to
- * the cell's recorded values. label is null for a switch that is off. */
-export function pathEvidence(receipts, switches = {}) {
+ * the cell's recorded values; `cell` is cellLandings(result) (O4 needs it). label is null for
+ * a switch that is off. */
+export function pathEvidence(receipts, switches = {}, cell = {}) {
   return Object.fromEntries(
     Object.entries(PATH_SWITCHES).map(([rule, env]) => {
-      const verdict = RULES[rule](receipts);
+      const verdict = RULES[rule](receipts, cell);
       const on = switches[env] === true;
       return [
         rule,

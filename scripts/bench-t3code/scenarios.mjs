@@ -23,8 +23,11 @@ export const SCENARIOS = Object.freeze({
   'cohort-fail': {
     paths: ['O3'],
     about:
-      'All ten released at once so checks can share a cohort; position 4 adds a test that passes locally and fails in the landing check (CI only), then fixes it and lands again.',
-    roles: () => ({ 3: { failOnce: true } }),
+      'v2 (2026-11-18). Released at once so checks can share a cohort. Position 1 edits the top of one existing source file; position 4, released 45 s later, adds a test that reads that file and expects it unchanged. Each change passes alone, so position 4 passes its own (admission) check on main, then fails in the queue check once position 1 is under it, with position 4 the one likely culprit (a semantic conflict between two changes); it fixes the test and lands again.',
+    roles: () => ({
+      0: { doc: { path: SHARED_SOURCE, at: 'top' } },
+      3: { failOnce: 'semantic', releaseMs: 45_000 },
+    }),
   },
   'withdraw-join': {
     paths: ['O3'],
@@ -78,11 +81,27 @@ export function scenarioRole(name, index) {
  * command's env and .bench/ci.sh exports it; GITHUB_ACTIONS is not passed through):
  * `land --save` runs a Lane's changed tests locally first, and a failure it catches there never
  * reaches the queue. A CI-only failure is the case the cohort and parking paths exist for. */
+/** The line a source-file docEdit adds; the semantic test of cohort-fail expects none. */
+export const SOURCE_MARKER = '// bench scenario ';
+
+/** The failure a land reply reports: its code, and whether it was the change's own admission
+ * check (pre-queue) rather than the queue check. */
+export function failureReading(response) {
+  const error = response?.error ?? response?.result?.submission?.error ?? response?.result?.error ?? null;
+  return { code: error?.code ?? null, admission: /admission check/i.test(error?.message ?? '') };
+}
+
 export function scenarioTest(task, kind, seconds = 0) {
   const name = `bench scenario ${task} ${kind}`;
   const hosted = 'process.env.CI === "true"';
   if (kind === 'fail')
     return `import { expect, it } from "@effect/vitest";\n\nit(${JSON.stringify(name)}, () => {\n  expect(${hosted} ? "fails once" : "fixed").toBe("fixed");\n});\n`;
+  if (kind === 'semantic') {
+    // Reads the shared source file next to it: passes on main, fails once another change has
+    // edited that file (no path overlap, so only a check of both together sees it).
+    const file = SHARED_SOURCE.slice(TEST_DIR.length + 1);
+    return `import { readFileSync } from "node:fs";\nimport { expect, it } from "@effect/vitest";\n\nit(${JSON.stringify(name)}, () => {\n  const source = readFileSync(new URL(${JSON.stringify(`./${file}`)}, import.meta.url), "utf8");\n  expect(source).not.toContain(${JSON.stringify(SOURCE_MARKER)});\n});\n`;
+  }
   if (kind === 'slow')
     return `import { expect, it } from "@effect/vitest";\n\nit(${JSON.stringify(name)}, async () => {\n  const ms = ${hosted} ? ${seconds * 1000} : 0;\n  await new Promise((done) => setTimeout(done, ms));\n  expect(true).toBe(true);\n}, ${(seconds + 60) * 1000});\n`;
   return `import { expect, it } from "@effect/vitest";\n\nit(${JSON.stringify(name)}, () => {\n  expect("fixed").toBe("fixed");\n});\n`;
@@ -96,7 +115,7 @@ export const scenarioTestPath = task => `${TEST_DIR}/benchScenario${task.replace
  * inline). */
 export function docEdit(text, task, at, path = '') {
   const markdown = !/\.[cm]?[jt]sx?$/.test(path);
-  const line = markdown ? `<!-- bench scenario ${task} -->` : `// bench scenario ${task}`;
+  const line = markdown ? `<!-- bench scenario ${task} -->` : `${SOURCE_MARKER}${task}`;
   const top = markdown ? `${line}\n\n${text}` : `${line}\n${text}`;
   return at === 'top' ? top : `${text.endsWith('\n') ? text : text + '\n'}${line}\n`;
 }
