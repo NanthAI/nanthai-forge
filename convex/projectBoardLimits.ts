@@ -6,6 +6,7 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { ForgeError, invariant } from '../src/errors';
 import { deliverStallAlert } from '../src/stall-alerts';
+import { budgetLeft, tightestBudget } from './abuseLimits';
 
 const minute = 60_000,
   day = 24 * 60 * minute;
@@ -61,12 +62,13 @@ function limited(message: string, retryAt: number): never {
   );
 }
 
-/** One point read and one write per window. Throws RATE_LIMITED; a rejected post writes nothing. */
+/** One point read and one write per window. Throws RATE_LIMITED; a rejected post writes nothing.
+ * Returns the window's remaining budget when under 20% is left. */
 export async function chargeWindow(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   key: string,
-  input: { ms: number; posts: number; now: number; aligned?: boolean; message: string },
+  input: { ms: number; posts: number; now: number; aligned?: boolean; message: string; limit: string },
 ) {
   const row = await ctx.db
     .query('projectBoardSenders')
@@ -77,14 +79,18 @@ export async function chargeWindow(
   if (current && row.count >= input.posts) limited(input.message, row.windowStart + input.ms);
   if (!row) await ctx.db.insert('projectBoardSenders', { projectId, key, windowStart: start, count: 1 });
   else await ctx.db.patch(row._id, current ? { count: row.count + 1 } : { windowStart: start, count: 1 });
+  return current
+    ? budgetLeft(input.limit, row.count + 1, input.posts, row.windowStart + input.ms)
+    : budgetLeft(input.limit, 1, input.posts, start + input.ms);
 }
 
 export type BoardAlert = { kind: string; text: string };
-/** Daily account totals across every project; returns the odd-pattern alerts this post raises. */
+/** Daily account totals across every project; returns the odd-pattern alerts this post raises and
+ * the account's remaining daily budget when under 20% is left. */
 export async function chargeAccount(
   ctx: MutationCtx,
   input: { author: string; projectId: string; bytes: number; youngProject: boolean; now: number },
-): Promise<BoardAlert[]> {
+) {
   const [row, account] = await Promise.all([
     ctx.db
       .query('boardAccounts')
@@ -151,7 +157,14 @@ export async function chargeAccount(
   };
   if (row) await ctx.db.patch(row._id, value);
   else await ctx.db.insert('boardAccounts', { author: input.author, ...value });
-  return raised;
+  const reset = today + day;
+  return {
+    alerts: raised,
+    budget: tightestBudget(
+      budgetLeft('board-account-notes', posts, caps.posts, reset),
+      budgetLeft('board-account-bytes', bytes, caps.bytes, reset),
+    ),
+  };
 }
 
 /** Alerts go to the deployment's Forge alert webhook (the operator topic), never to a project. */

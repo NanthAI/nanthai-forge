@@ -101,7 +101,7 @@ import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
 import { ConvexExchange } from './exchange-client.js';
 import { hostedActionError, hostedFailureDetail } from './hosted-action-error.js';
-import { refusedWait, retryableExchangeError } from './exchange-retry.js';
+import { limitRefusal, refusedWait, retryableExchangeError } from './exchange-retry.js';
 import { ForgeError, invariant } from './errors.js';
 import { hostedMainV2Schema } from './hosted-main.js';
 import { hostedRootLanePath, laneSiblingPath, openHostedRootLane } from './hosted-root-checkout.js';
@@ -1465,6 +1465,8 @@ export class HostedAgentTransport {
         safe.recovery?.outcome === 'refused';
       if (refused && safe.recovery?.retryable !== true)
         throw retryableExchangeError(safe, this.callerOperationId) ?? safe;
+      const limited = limitRefusal(safe, this.callerOperationId);
+      if (limited) throw limited;
       if (safe instanceof SourceAuthorityStaleError || safe.recovery) throw safe;
       // Version skew (either side) needs an upgrade, not a replay.
       if (
@@ -1988,7 +1990,11 @@ export class HostedAgentTransport {
           continue;
         const wait = refusedWait(typed, retry);
         if ((typed.code !== 'HOSTED_CONFLICT' && wait === null) || retry >= 3)
-          throw retryableExchangeError(typed, this.callerOperationId) ?? error;
+          throw (
+            retryableExchangeError(typed, this.callerOperationId) ??
+            limitRefusal(typed, this.callerOperationId) ??
+            error
+          );
         await new Promise(resolve => setTimeout(resolve, wait ?? 25 * 2 ** retry));
       }
     }
@@ -2013,7 +2019,11 @@ export class HostedAgentTransport {
       // The server's typed refusal (HISTORY_UNAVAILABLE, ...) reaches the caller with its code and
       // message; only a transient one gets the retry wording. Never the raw error: it prints as INTERNAL_ERROR.
       const typed = hostedActionError(error, name);
-      throw retryableExchangeError(typed, this.callerOperationId) ?? typed;
+      throw (
+        retryableExchangeError(typed, this.callerOperationId) ??
+        limitRefusal(typed, this.callerOperationId) ??
+        typed
+      );
     }
     return (typeof value === 'string' ? JSON.parse(value) : value) as T;
   }

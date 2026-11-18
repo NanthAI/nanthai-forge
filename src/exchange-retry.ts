@@ -39,6 +39,18 @@ export function retryableExchangeError(error: ForgeError, operationId?: string |
     { ...error.recovery, retryable: true, ...(retryAt ? { retryAt: new Date(retryAt).toISOString() } : {}) },
   );
 }
+/** A service limit refusal that names its reset (RATE_LIMITED): nothing was changed, so the same
+ * command and operation retry once it resets (Issue 93907d28). Returns null for any other error. */
+export function limitRefusal(error: ForgeError, operationId?: string | null) {
+  if (error.code !== 'RATE_LIMITED' || !error.retryAt || error.recovery) return null;
+  const retryAt = new Date(error.retryAt).toISOString();
+  return new ForgeError(
+    error.code,
+    `${error.message} Nothing was changed. Retry the same command after ${retryAt}${operationId ? ` (operation ${operationId})` : ''}.`,
+    error.retryAt,
+    { outcome: 'refused', retryable: true, retryAt },
+  );
+}
 /** Delay before resending a 429/503 refusal, or null when it is not one or its
  * Retry-After is too long to wait in this process (the caller reports it). */
 export function refusedWait(error: ForgeError, attempt: number, maxWaitMs = 60_000) {

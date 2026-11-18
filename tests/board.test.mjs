@@ -152,6 +152,43 @@ test('10 notes per 10 minutes per Lane and 300 a day per member per project', as
   );
 });
 
+test('Issue 93907d28: a post reply shows the remaining board budget only under 20%, from rows it already read', async () => {
+  const f = boardFixture();
+  for (let n = 0; n < 8; n++) {
+    const sent = await f.post({ to: 'project', text: `note ${n}`, laneId: f.lanes.B });
+    assert.equal(sent.budget, undefined, `note ${n}: 2 or more of 10 left is not shown`);
+  }
+  const reads = f.invoke.reads;
+  const ninth = await f.post({ to: 'project', text: 'note 8', laneId: f.lanes.B });
+  assert.equal(f.invoke.reads, reads, 'the budget adds no read');
+  const window = rows(f, 'projectBoardSenders').find(row => row.key === `lane:${f.lanes.B}`);
+  assert.deepEqual(ninth.budget, {
+    limit: 'board-10min',
+    left: 1,
+    of: limits.BOARD_LANE_WINDOW.posts,
+    resetAt: new Date(window.windowStart + limits.BOARD_LANE_WINDOW.ms).toISOString(),
+  });
+  assert(JSON.stringify(ninth.budget).length <= 90, 'compact: under 90 bytes per reply');
+  assert.equal((await f.post({ to: 'project', text: 'note 9', laneId: f.lanes.B })).budget.left, 0);
+  // The tightest limit wins: an account near its daily cap outranks a fresh window.
+  f.tables.forgeAccounts.get('acct-writer')._creationTime = Date.now() - day;
+  const caps = limits.BOARD_ACCOUNT_CAPS.new;
+  f.tables.boardAccounts.set('acc', {
+    _id: 'acc',
+    _creationTime: 1,
+    author: 'writer',
+    dayStart: Date.now() - (Date.now() % day),
+    posts: caps.posts - 3,
+    bytes: 0,
+    projects: [],
+    newProjects: 0,
+    alerted: [],
+  });
+  const near = await f.post({ to: 'project', text: 'writer note' }, 'writer');
+  assert.equal(near.budget.limit, 'board-account-notes');
+  assert.equal(near.budget.left, 2);
+});
+
 test('account caps hold across projects; new accounts start low; alerts fire once and name the handle', async () => {
   const f = boardFixture();
   f.tables.forgeAccounts.get('acct-writer')._creationTime = Date.now() - day; // new account

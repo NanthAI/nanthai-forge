@@ -24,6 +24,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { tightestBudget } from './abuseLimits';
 
 const day = 24 * 60 * 60 * 1000;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -174,17 +175,24 @@ export const post = mutation({
       // A withdrawn note does not block saying it again.
       if (same)
         return canonicalPayload({ status: 'duplicate', id: same.id, target: same.targetKey, at: same.at });
-      await chargeWindow(ctx, projectId, fromLaneId ? `lane:${fromLaneId}` : `member:${actor}`, {
-        ...BOARD_LANE_WINDOW,
-        now,
-        message: `${BOARD_LANE_WINDOW.posts} notes per 10 minutes per Lane.`,
-      });
-      await chargeWindow(ctx, projectId, `day:${actor}`, {
+      const window = await chargeWindow(
+        ctx,
+        projectId,
+        fromLaneId ? `lane:${fromLaneId}` : `member:${actor}`,
+        {
+          ...BOARD_LANE_WINDOW,
+          now,
+          message: `${BOARD_LANE_WINDOW.posts} notes per 10 minutes per Lane.`,
+          limit: 'board-10min',
+        },
+      );
+      const daily = await chargeWindow(ctx, projectId, `day:${actor}`, {
         ms: day,
         posts: BOARD_MEMBER_DAY_POSTS,
         now,
         aligned: true,
         message: `${BOARD_MEMBER_DAY_POSTS} notes a day per member per project.`,
+        limit: 'board-day',
       });
       const deleted = await cleanupExpired(ctx, projectId, now);
       const counter = await ctx.db
@@ -198,7 +206,7 @@ export const post = mutation({
         `This project holds ${BOARD_PROJECT_LIVE_CAP} live notes, the limit. Notes expire after 14 days.`,
       );
       const bytes = new TextEncoder().encode(input.text).length + JSON.stringify(input.paths ?? []).length;
-      const alerts = await chargeAccount(ctx, {
+      const { alerts, budget: account } = await chargeAccount(ctx, {
         author: actor,
         projectId,
         bytes,
@@ -243,12 +251,14 @@ export const post = mutation({
       if (counter) await ctx.db.patch(counter._id, { live: live + 1, lastAt: at });
       else await ctx.db.insert('projectBoardProjects', { projectId, live: 1, firstPostAt: now, lastAt: at });
       await sendBoardAlerts(ctx, alerts);
+      const budget = tightestBudget(window, daily, account);
       return canonicalPayload({
         status: 'posted',
         id,
         target: targetKey,
         at,
         ...(recipients !== null ? { recipients } : {}),
+        ...(budget ? { budget } : {}),
       });
     } catch (error) {
       return report(error);

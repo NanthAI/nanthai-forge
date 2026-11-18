@@ -2286,6 +2286,12 @@ submit another landing to replace its queue position. Existing service limits
 keep their recovery: use their reset time and retry the original command and
 operation id. Storage quotas have no time-based reset. Live plan metadata is P8.
 
+Pace on the live limits, not on refusals. A board note reply carries
+`budget {limit,left,of,resetAt}` for the tightest board limit once under 20% of
+it is left; slow down or batch notes until `resetAt`. A `RATE_LIMITED` refusal
+changed nothing: its `recovery.retryAt` is the reset and the CLI `next` is the
+exact command to rerun then. Never loop on it before the reset.
+
 Board note text accepts app route patterns such as `/-/{handle}/{project}/lanes`.
 Machine absolute, home, drive and file-URL paths are still refused; `paths` entries
 remain repository-relative source paths.

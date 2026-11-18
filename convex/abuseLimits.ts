@@ -25,6 +25,21 @@ export const STORAGE_QUOTA = {
   rollup: { objects: 1_000, bytes: 256 * MiB },
 } as const;
 
+/** The remaining budget an agent sees on a reply it already gets (Issue 93907d28), only when strictly
+ * under 20% of the cap is left, from counters the limiter already read: no added call or read. */
+export type BudgetLeft = { limit: string; left: number; of: number; resetAt: string };
+export function budgetLeft(limit: string, used: number, of: number, resetAt: number): BudgetLeft | undefined {
+  const left = Math.max(0, of - used);
+  return left * 5 < of ? { limit, left, of, resetAt: new Date(resetAt).toISOString() } : undefined;
+}
+/** The budget with the smallest share left, so one reply names the limit the agent hits first. */
+export const tightestBudget = (...budgets: (BudgetLeft | undefined)[]) =>
+  budgets.reduce<BudgetLeft | undefined>(
+    (tightest, budget) =>
+      budget && (!tightest || budget.left / budget.of < tightest.left / tightest.of) ? budget : tightest,
+    undefined,
+  );
+
 const pickShard = (shards: number) => Math.min(shards - 1, Math.floor(Math.random() * shards));
 const share = (total: number, shards: number) => Math.ceil(total / shards);
 const humanBytes = (bytes: number) =>
