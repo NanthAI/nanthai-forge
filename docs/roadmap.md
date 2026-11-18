@@ -136,7 +136,7 @@ See the [measured spike and streaming prototype](research/source-step-memory.md)
 
 ## Phase 9: grow (planned)
 
-Moves up only if the public beta needs it: open-source mode (proposal limits, anonymous visibility, an optional CLA), monetisation with a free core (any limit or price needs an owner decision), cross-repo coordination with shared usage pools, Git serving from hosted Forge with Lane refs, deploy after landing, per-path visibility, bring-your-own CI, the making-of view, a compute pool view and an extension framework.
+Moves up only if the public beta needs it: open-source mode (proposal limits, anonymous visibility, an optional CLA), monetisation with a free core (any limit or price needs an owner decision), cross-repo coordination with shared usage pools, deploy after landing, per-path visibility, bring-your-own CI, the making-of view, a compute pool view and an extension framework.
 
 ## Workflow friction
 
