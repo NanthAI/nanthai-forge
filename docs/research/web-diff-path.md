@@ -10,13 +10,13 @@ Pierre's default two-file diff computation: the 29k-line replacement took
 21–37 seconds before plain output. A faster tokenizer alone will not fix the
 measured 3.5–3.7-second dogfood read path.
 
-**Full Lane page timing is BLOCKED.** The reader bot reaches an error boundary in
-`HostedAttention` when `projectHostedOverlapAcks:list` returns
-`HOSTED_REQUEST_FAILED`. The owner approved measuring the unchanged
-`ChangesPanel`/`Diff` and real `readBrowserSource` in an isolated local route.
-Those results below exclude the surrounding Work/attention subscriptions and
-`HostedLaneChanges`' two source-pin queries. They are not successful full-page
-navigation measurements. The lead owns the separate reader-page bug.
+**Full Lane page timing was blocked** when this was measured: the reader bot hit an
+error boundary in `HostedAttention` (fixed since, Issue 168a52af). The owner
+approved measuring the unchanged `ChangesPanel`/`Diff` and real
+`readBrowserSource` in an isolated local route. Those results below exclude the
+surrounding Work/attention subscriptions and `HostedLaneChanges`' two source-pin
+queries. They are not full-page navigation measurements. The rebuilt Lane review
+screen's read path is measured in [its own section](#lane-review-screen-read-path).
 
 ## Measurement contract
 
@@ -168,6 +168,66 @@ the two compute-probe views add $0.0000863. These are attributed source-function
 estimates from numeric completion usage, not a complete session bill. R2 billing,
 actual billed Convex cost and deployed backend revision were not verified; the
 lead owns billing reconciliation. Bytes were observed coming directly from R2.
+
+## Lane review screen read path
+
+Item `4bc460aa`. The rebuilt Lane review screen (`web/src/app/lane/`) reads one
+bounded query, `projectLaneReview:read`, which names each changed path's exact
+before/after blobs from the Lane's overlap row. Opening a file makes one signed
+`describe`, GETs its two blobs from R2 and re-checks access with a second
+`describe`. No State object is read. Folded files read nothing.
+
+**Method.** A throwaway harness (not shipped) on the local hosted Vite development
+frontend at `localhost:5173` (the R2 CORS origin), against the dev deployment, as
+the read-only UI bot. Each sample uses a fresh browser context with the HTTP cache
+off. In the page it imports the real `readFileBody`, `readBrowserSource` and
+highlight worker, then times from demand to the first highlighted line of the first
+hunk plus one animation frame. React rendering of the surrounding screen is
+excluded (the bot signs in with the old auth, which the new screen does not
+accept). "Open connection" warms an authenticated Convex connection and the
+highlight worker before the clock starts. "New connection" includes both. 24
+samples per mode, interleaved, on Lane `70a53c8e` (21 changed files) opening
+`web/src/app/App.tsx` (11.8 KB, a 7-row first hunk). Chromium 156.0.8078.4,
+2026-11-18 20:12–20:14Z, other builders active. Intervals are 95% bootstrap
+intervals (10,000 resamples, seed 1). There were no voided samples.
+
+| | Open connection | New connection |
+| --- | ---: | ---: |
+| First highlighted hunk, p50 (95% interval), ms | 829 (806–994) | 1,188 (1,163–1,318) |
+| First highlighted hunk, p95 (95% interval), ms | 1,381 (1,008–1,432) | 1,794 (1,478–1,855) |
+| `read` query, p50 / p95 ms | 112 / 335 | 484 / 800 |
+| Signed `describe`, p50 / p95 ms | 258 / 430 | 252 / 398 |
+| R2 GETs (two, in parallel), p50 / p95 ms | 177 / 219 | 161 / 217 |
+| Re-check `describe`, p50 / p95 ms | 253 / 392 | 257 / 387 |
+| Diff, then highlight, p50 ms | 3, then 3 | 3, then 3 |
+| Convex calls / sequential round trips | 3 / 3 | 3 / 3 |
+| R2 requests / bytes | 2 / 20,675 | 2 / 20,675 |
+
+Calls and round trips met the target (13 calls before, now 3). Bytes are the
+opened file's two blobs, independent of repository size: the overlap row holds
+changed paths only, so a 3k-file and a 29k-file repository read the same bytes for
+the same file. Per-view database reads are bounded by `tests/lane-review-read.test.mjs`
+(7 documents, 2,566 bytes for the read). **Time does not meet the 1.0 s p95
+target.** The interval for the open-connection p95 excludes 1,000 ms. The two
+`describe` mutations take about 60% of the time. Diff and highlighting are
+negligible.
+
+Modelled from the same samples by removing or overlapping each measured step
+(not measured as builds): making the re-check a query gives p50/p95 about
+684/1,269 ms; overlapping it with the GETs gives 643/1,145 ms; drawing after the
+verified GET and re-checking after paint gives 574/922 ms. Only the last meets the
+target, and it changes the rule that private access is re-checked after a read
+before bytes are shown. That needs an owner decision.
+
+**The old Lane changes view** (`web/src/lane/HostedLaneChanges.tsx`, still served
+outside `/-`) reads both whole State objects. On the same Lane, one sample on
+main's reader made about 2,300 serial `describe` calls and about 1,160 R2 GETs
+in 9.5 minutes. It then failed with "This source object is not retained in the
+selected checkpoint", because the Lane's States are newer than the project's
+pinned checkpoint. The States are stored as recipes without a signed closure, and
+the reader walked their byte trees one node at a time. With the reader now
+batching each tree level, the same sample made 34 calls in 39 s before the same
+failure. Both are single observations.
 
 ## Rendering and highlighter comparison
 

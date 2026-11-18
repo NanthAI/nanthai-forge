@@ -237,40 +237,65 @@ export class ObjectDownloadReader {
     );
     const bytes = new Uint8Array(length);
     let copied = 0;
-    const visit = async (ref: DownloadTree, start: number): Promise<void> => {
-      if (start >= offset + length || start + ref.length <= offset) return;
-      invariant(
-        ref.size <= (ref.height ? 2 * 1024 * 1024 : 1024 * 1024),
-        'INVALID_WORK_BACKUP',
-        'Stored tree has an invalid node encoding.',
-      );
-      const [content] = await this.read([ref], ancestors);
-      if (ref.height === 0) {
-        invariant(
-          ref.length === ref.size,
-          'INVALID_WORK_BACKUP',
-          'Stored leaf has a different logical size.',
+    // One tree level per batch: every wanted node of a level is described, fetched (eight at a time) and re-checked
+    // together, so calls grow with the tree's height and width / 100, never with its leaf count (Item 4bc460aa: a
+    // node-at-a-time walk made two serial describes per leaf, hundreds of calls for one State).
+    let level: { ref: DownloadTree; start: number }[] = [{ ref: tree, start: 0 }];
+    while (level.length) {
+      const wanted = level.filter(({ ref, start }) => start < offset + length && start + ref.length > offset);
+      const next: typeof level = [];
+      // Batches of at most one describe page and the byte cache's budget, each copied out before the next is read.
+      for (let at = 0; at < wanted.length;) {
+        let end = at,
+          held = 0;
+        while (
+          end < wanted.length &&
+          end - at < 100 &&
+          (end === at || held + wanted[end]!.ref.size <= this.budget)
+        )
+          held += wanted[end++]!.ref.size;
+        const batch = wanted.slice(at, end);
+        at = end;
+        for (const { ref } of batch)
+          invariant(
+            ref.size <= (ref.height ? 2 * 1024 * 1024 : 1024 * 1024),
+            'INVALID_WORK_BACKUP',
+            'Stored tree has an invalid node encoding.',
+          );
+        const contents = await this.read(
+          batch.map(({ ref }) => ref),
+          ancestors,
         );
-        const from = Math.max(start, offset),
-          to = Math.min(start + ref.length, offset + length);
-        bytes.set(content!.subarray(from - start, to - start), from - offset);
-        copied += to - from;
-      } else {
-        const page = downloadPageSchema.parse(JSON.parse(new TextDecoder().decode(content)));
-        invariant(
-          page.children.every(child => child.height < ref.height) &&
-            page.children.reduce((sum, child) => sum + child.length, 0) === ref.length,
-          'INVALID_WORK_BACKUP',
-          'Stored tree has invalid ancestry or length.',
-        );
-        let position = start;
-        for (const child of page.children) {
-          await visit(child, position);
-          position += child.length;
-        }
+        batch.forEach(({ ref, start }, index) => {
+          const content = contents[index]!;
+          if (ref.height === 0) {
+            invariant(
+              ref.length === ref.size,
+              'INVALID_WORK_BACKUP',
+              'Stored leaf has a different logical size.',
+            );
+            const from = Math.max(start, offset),
+              to = Math.min(start + ref.length, offset + length);
+            bytes.set(content.subarray(from - start, to - start), from - offset);
+            copied += to - from;
+            return;
+          }
+          const page = downloadPageSchema.parse(JSON.parse(new TextDecoder().decode(content)));
+          invariant(
+            page.children.every(child => child.height < ref.height) &&
+              page.children.reduce((sum, child) => sum + child.length, 0) === ref.length,
+            'INVALID_WORK_BACKUP',
+            'Stored tree has invalid ancestry or length.',
+          );
+          let position = start;
+          for (const child of page.children) {
+            next.push({ ref: child, start: position });
+            position += child.length;
+          }
+        });
       }
-    };
-    await visit(tree, 0);
+      level = next;
+    }
     invariant(copied === length, 'INVALID_WORK_BACKUP', 'Stored tree range is incomplete.');
     return offset === 0 && length === pin.size ? verifiedBytes(bytes, pin.sha256) : bytes;
   }

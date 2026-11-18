@@ -268,7 +268,7 @@
       "metric": "laneFirstDiff",
       "unit": "ms",
       "max": 1000,
-      "source": "Existing harness budget (scripts/perf-harness.mjs --live); unchanged, moved into this file.",
+      "source": "Existing harness budget (scripts/perf-harness.mjs --live); unchanged, moved into this file. 2026-11-18 observation (Item 4bc460aa, docs/research/web-diff-path.md#lane-review-screen-read-path): the Lane review screen's real reader to first highlighted hunk on a 21-file dogfood Lane, 24 samples per mode, p50/p95 829/1,381 ms with an open connection and 1,188/1,794 ms with a new one; 3 Convex calls, 20,675 R2 bytes. Over budget: the two describe mutations take about 255 ms each at p50.",
       "reason": "Kept as set before this file existed; live run needed, unrun otherwise."
     },
     {
