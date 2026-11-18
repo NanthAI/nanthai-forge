@@ -10,11 +10,11 @@ import { benchRoot, benchRootOrExit } from './bench-root.mjs';
 import { coordinationBatches } from './cells.mjs';
 
 /** Forward terminal signals to the active stage and preserve its exit code. */
-export function executeStage(script, args, { root, output } = {}) {
+export function executeStage(script, args, { root, output, env = {} } = {}) {
   return new Promise((resolve, reject) => {
     const fd = output ? openSync(output, 'w', 0o600) : null;
     const child = spawn(process.execPath, [join(import.meta.dirname, script), ...args], {
-      env: { ...process.env, BENCH_ROOT: root },
+      env: { ...process.env, ...env, BENCH_ROOT: root },
       stdio: ['inherit', fd ?? 'inherit', 'inherit'],
     });
     const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];

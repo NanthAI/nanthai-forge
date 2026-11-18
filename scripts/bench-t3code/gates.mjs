@@ -25,15 +25,24 @@ export function diskFreeGb() {
   return Number(line[3]) / 1024 / 1024;
 }
 
+/** Free-disk floor kept under every cell (GiB). A bench may lower it in config.json
+ * (`diskFloorGb`), never below the owner's 10 GiB floor; anything else keeps the default. */
+export const DISK_FLOOR_GB = 15;
+export const OWNER_DISK_FLOOR_GB = 10;
+export function diskFloorOf(config) {
+  const v = config?.diskFloorGb;
+  return Number.isFinite(v) && v >= OWNER_DISK_FLOOR_GB ? v : DISK_FLOOR_GB;
+}
+
 /** Estimated peak disk of a cell: full-tree checkouts (.repos included, ~0.5 GB each). */
-export function diskNeed(arm, N, dry) {
+export function diskNeed(arm, N, dry, floorGb = DISK_FLOOR_GB) {
   const parts =
     arm === 'github'
       ? { hub: 0.6, checkouts: N * 0.5 }
       : { laneRoots: N * 0.5, resetVerifyAndOracleRoots: 1.5 };
   if (!dry) parts.buildAndTestCaches = N * 0.2;
   const needGb = Object.values(parts).reduce((a, b) => a + b, 0);
-  return { parts, needGb, floorGb: 15, requiredGb: 15 + needGb };
+  return { parts, needGb, floorGb, requiredGb: floorGb + needGb };
 }
 
 /** Usage windows of the run's agent provider (`codex-usage` / `claude-usage`). A window is gated
@@ -114,7 +123,7 @@ export async function gates(
   if (config.forge.mainBase !== config.github.mainBase)
     refusals.push('both arms must start from one base tree (config forge.mainBase = github.mainBase)');
   if (!existsSync(join(B, 'PLAN.md'))) refusals.push('PLAN.md missing in BENCH_ROOT');
-  const disk = { freeGb: diskProbe(), ...diskNeed(arm, N, dry) };
+  const disk = { freeGb: diskProbe(), ...diskNeed(arm, N, dry, diskFloorOf(config)) };
   if (disk.freeGb < disk.requiredGb)
     refusals.push(`disk ${disk.freeGb.toFixed(1)} GB free < ${disk.requiredGb.toFixed(1)} GB required`);
   return {

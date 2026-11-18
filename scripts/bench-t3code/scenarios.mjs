@@ -14,6 +14,40 @@ export const SHARED_SOURCE = 'packages/shared/src/Array.ts';
 /** A package the bench check tests, where a scenario test file is picked up. */
 export const TEST_DIR = 'packages/shared/src';
 
+/** Format debt (Item 368ac54f guard 1, incident 060fb653). A whole-tree format check that also
+ * covers .forge/: every file under .bench/ (outside the dry edits) and .forge/ must start with
+ * FORMAT_DEBT_HEADER. The base's own bench files and Forge's Lane metadata never do, so the debt
+ * is pre-existing in every Lane and never any landing's own change. It names each file on its own
+ * line, as a formatter does. */
+export const FORMAT_DEBT_HEADER = '# bench-formatted';
+export const FORMAT_DEBT_CHECK = Object.freeze({
+  name: 'bench-format-debt',
+  command: [
+    'node',
+    '-e',
+    `const fs=require('fs'),p=require('path');const bad=[];const walk=d=>{if(!fs.existsSync(d))return;for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(f===p.join('.bench','dry'))continue;if(e.isDirectory())walk(f);else if(e.isFile()&&!fs.readFileSync(f,'utf8').startsWith(${JSON.stringify(FORMAT_DEBT_HEADER + '\n')}))bad.push(f)}};walk('.bench');walk('.forge');for(const f of bad)console.error(f+': format error');process.exit(bad.length?1:0)`,
+  ],
+});
+const CONVENTIONAL_FORMAT = ['format:check', 'check:format', 'fmt:check'];
+
+/** forge.json text of the format-debt base: the existing file with FORMAT_DEBT_CHECK added to its
+ * preflight.static. With no declared list, the conventional format script the project already runs
+ * stays in it by name, so declaring the debt check takes nothing away. */
+export function formatDebtForgeJson(forgeJsonText, packageJsonText) {
+  const config = forgeJsonText ? JSON.parse(forgeJsonText) : {};
+  let declared = config.preflight?.static;
+  if (!Array.isArray(declared)) {
+    let scripts = {};
+    try {
+      scripts = JSON.parse(packageJsonText ?? '{}').scripts ?? {};
+    } catch {}
+    declared = CONVENTIONAL_FORMAT.filter(name => typeof scripts[name] === 'string').slice(0, 1);
+  }
+  const rest = declared.filter(entry => entry?.name !== FORMAT_DEBT_CHECK.name);
+  const next = { ...config, preflight: { ...config.preflight, static: [...rest, FORMAT_DEBT_CHECK] } };
+  return `${JSON.stringify(next, null, 2)}\n`;
+}
+
 export const SCENARIOS = Object.freeze({
   smoke: {
     paths: [],
@@ -28,6 +62,14 @@ export const SCENARIOS = Object.freeze({
       0: { doc: { path: SHARED_SOURCE, at: 'top' } },
       3: { failOnce: 'semantic', releaseMs: 45_000 },
     }),
+  },
+  'format-debt': {
+    paths: [],
+    about:
+      "v1 (2026-11-18). The smoke run on a base with pre-existing format debt. Before release, outside cell timing, one landing declares a whole-tree format check in forge.json that also covers .forge/; the bench files on main and Forge's Lane metadata already fail it. Every landing must still pass local preflight: a landing refused locally for a file it did not change fails the cell (Item 368ac54f guard 1, incident 060fb653).",
+    roles: () => ({}),
+    /** Files the base layer lands after the reset; `read(path)` reads the reset tree (null if absent). */
+    baseLayer: read => ({ 'forge.json': formatDebtForgeJson(read('forge.json'), read('package.json')) }),
   },
   'withdraw-join': {
     paths: ['O3'],

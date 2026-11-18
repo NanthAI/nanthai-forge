@@ -332,6 +332,22 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
         call: command => callForge(command, { executable: process.execPath, prefix: [cli], env }),
       });
     },
+    /** A scenario's base layer (scenarios.mjs baseLayer), landed on the reset main outside cell
+     * timing: one Lane writes `files(read)` and lands with the project's inline checks, as agents'
+     * landings do. A layer that does not land throws; the next reset removes it. */
+    async layer({ root, message, files, toolchain = null }) {
+      const laneId = await arm.startLane(root, message);
+      const read = path => (existsSync(join(root, path)) ? readFileSync(join(root, path), 'utf8') : null);
+      const written = files(read);
+      for (const [path, text] of Object.entries(written)) writeFileSync(join(root, path), text);
+      const env = toolchain ? await toolchain(root) : process.env;
+      const landed = await arm.landAnswering(root, laneId, message, env);
+      const phase = landed.submission?.phase ?? null;
+      await arm.abandon(root, laneId);
+      await arm.removeRoot(root);
+      if (phase !== 'landed') throw Error(`BENCH_SCENARIO_BASE_NOT_LANDED ${phase}`);
+      return { laneId, phase, paths: Object.keys(written) };
+    },
     /** Reset main to the base tree with one landing, then prove it on a fresh Lane of main:
      * refuses (throws) unless main equals the base exactly (S4). */
     /** `toolchain(root)` (optional) links the project's toolchain into the reset root and returns

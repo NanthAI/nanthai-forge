@@ -1094,8 +1094,9 @@ metrics are null and do not decide health. Linux has no fseventsd metrics.
 
 Bench preflight and every cell gate refuse unhealthy event delivery with
 `ENVIRONMENT FILESYSTEM_EVENTS_UNHEALTHY`. On macOS the refusal names fseventsd
-and the operator remedy `sudo killall fseventsd`; rerun the diagnostic afterwards.
-The diagnostic never restarts services itself. Linux operators should check local
+and says to wait: a large deletion or copy can keep it busy for about 20 minutes,
+and the gate retries by itself. Restarting it (`sudo killall fseventsd`) is never
+the first step. The diagnostic never restarts services itself. Linux operators should check local
 watcher resources and event delivery.
 
 `nforge doctor ROOT` also runs this finite target-volume diagnostic and returns

@@ -47,12 +47,13 @@ import { snapshot, snapshotProblems, moved, differences, benchFreeze, benchHoldT
 import { benchRootOrExit } from './bench-root.mjs';
 import { driverProgress } from './driver-progress.mjs';
 import { benchCli } from './cli-install.mjs';
-import { usageGate, usageProblems, weeklyStopOf, diskFreeGb, diskNeed } from './gates.mjs';
+import { usageGate, usageProblems, weeklyStopOf, diskFreeGb, diskNeed, diskFloorOf } from './gates.mjs';
 import { agentOf } from './agent.mjs';
 import { runnerFairness } from './runners.mjs';
 import { oracleBranchRecord } from './oracle-branches.mjs';
 import { parseReplayKey, replayBatch, replayBatches } from './replay-cells.mjs';
 import { coordinationBatch, coordinationBatches, parseCoordinationKey } from './cells.mjs';
+import { orphanResult } from './cell-outcome.mjs';
 
 let B, FREEZE;
 const flags = process.argv.slice(2);
@@ -170,12 +171,7 @@ async function main() {
     if (!existsSync(join(dir, 'cell.json'))) return null;
     const { pid, key } = readJson(join(dir, 'cell.json'));
     if (alive(pid)) return { running: pid };
-    const closed = {
-      cellId,
-      key,
-      interrupted: true,
-      voided: ['interrupted (process gone without a result)'],
-    };
+    const closed = orphanResult({ cellId, key });
     writeFileSync(file, JSON.stringify(closed, null, 1) + '\n', { flag: 'wx' });
     return closed;
   }
@@ -234,7 +230,7 @@ async function main() {
   async function batchRefusals(b) {
     const r = [];
     if (!dry && !replay) r.push(...usageProblems(usageGate(agentOf(config).provider), weeklyStopOf(config)));
-    const need = b.cells.reduce((sum, c) => sum + diskNeed(c.arm, b.N, dry).needGb, 0) + 15;
+    const need = b.cells.reduce((sum, c) => sum + diskNeed(c.arm, b.N, dry).needGb, 0) + diskFloorOf(config);
     const free = diskFreeGb();
     if (free < need) r.push(`disk ${free.toFixed(1)} GB free < ${need.toFixed(1)} GB for the batch`);
     if (forgeSpend() >= BUDGET_USD)
@@ -379,7 +375,7 @@ async function main() {
           runner: r?.runner ?? null,
           refused: r?.refused ?? null,
           // Crashed in setup: the cell wrote agentsStarted:false (run-cell.mjs).
-          setupCrash: Boolean(r?.crashed && r.agentsStarted === false),
+          setupCrash: Boolean((r?.crashed || r?.interrupted) && r.agentsStarted === false),
           voided: r?.voided ?? ['no result'],
           // A grading branch that could not be deleted is recorded here (02ee5788).
           oracleBranch: oracleBranchRecord(r),

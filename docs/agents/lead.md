@@ -235,6 +235,18 @@ harness and runtime pins before scored work. Dry findings become generic
 root-cause fixes for every project, never special cases for tasks or this repo.
 Re-pin and repeat dry qualification after a fix.
 
+Compare only like with like: the same N, scenario set (name, version, tasks),
+base and seed. The queue A/B report refuses any other comparison and names the
+matching accepted cell. Run one cell per background command with the runner's
+maximum timeout, through `scripts/bench-t3code/cell.mjs`. A cell stopped by a
+runner limit is void-infrastructure, not a crash, and is rerun once
+automatically. A second stop in a row is reported, not rerun.
+
+When the bench operator asks the lead a question, it also posts that question as
+a comment on the incident Item. Then the lead's self-check of that Item finds it,
+even if the message to the lead is missed. A decision the lead gives goes on the
+same Item.
+
 Honor the benchmark driver's freeze or landing hold before every submission. Wait
 until it is released; never remove or edit another operation's hold. Record and
 compare source, CLI, deployment, harness and runner versions at both ends of a

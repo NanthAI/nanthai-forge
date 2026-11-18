@@ -60,8 +60,11 @@ test('attempt errors count as environment failures, even when an event latency e
   assert.match(result.reason, /EMFILE/);
   assert.match(
     filesystemEventRefusal(result, 'darwin'),
-    /ENVIRONMENT FILESYSTEM_EVENTS_UNHEALTHY.*fseventsd.*sudo killall fseventsd.*rerun/,
+    /ENVIRONMENT FILESYSTEM_EVENTS_UNHEALTHY.*fseventsd.*wait, then rerun/,
   );
+  // Item 368ac54f: a busy fseventsd recovers by itself; the gate never suggests sudo first.
+  for (const platform of ['darwin', 'linux'])
+    assert.doesNotMatch(filesystemEventRefusal(result, platform), /sudo|killall/);
   assert.match(filesystemEventRefusal(result, 'linux'), /local filesystem watcher resources/);
   assert.equal(filesystemEventRefusal({ ok: true }), null);
 });

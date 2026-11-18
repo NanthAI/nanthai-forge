@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main as preflight } from '../scripts/bench-t3code/preflight.mjs';
-import { gates, filesystemEventGate } from '../scripts/bench-t3code/gates.mjs';
+import { gates, filesystemEventGate, diskNeed, diskFloorOf } from '../scripts/bench-t3code/gates.mjs';
 import { writeCellResult } from '../scripts/bench-t3code/result.mjs';
 
 const unhealthy = {
@@ -33,7 +33,7 @@ test('standalone bench preflight refuses before config, network probes or benchm
     assert.equal(code, 1);
     assert.match(
       lines.join('\n'),
-      /NO-GO.*ENVIRONMENT FILESYSTEM_EVENTS_UNHEALTHY.*fseventsd.*sudo killall fseventsd/,
+      /NO-GO.*ENVIRONMENT FILESYSTEM_EVENTS_UNHEALTHY.*fseventsd.*wait, then rerun/,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -54,7 +54,12 @@ test('per-cell gate refuses both arms, dry and scored, before any other start ch
       );
       assert.deepEqual(result.filesystemEvents, unhealthy);
       assert.equal(result.refusals.length, 1);
-      assert.match(result.refusals[0], /fseventsd.*sudo killall fseventsd/);
+      assert.match(result.refusals[0], /fseventsd.*wait, then rerun/);
+      assert.doesNotMatch(
+        result.refusals[0],
+        /sudo|killall/,
+        'the gate says to wait, never to restart first',
+      );
     }
 });
 
@@ -139,6 +144,49 @@ test('a dry cell without the shared dependency install is refused before it star
       },
     );
     assert.ok(result.refusals.includes('shared dependency install missing (deps.mjs)'));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the disk floor defaults to 15 GiB and config may lower it to the owner floor, never below', async () => {
+  assert.equal(diskFloorOf({}), 15);
+  assert.equal(diskFloorOf({ diskFloorGb: 10 }), 10);
+  for (const bad of [9.9, 0, -1, '10', null]) assert.equal(diskFloorOf({ diskFloorGb: bad }), 15);
+  assert.equal(diskNeed('forge', 10, true).requiredGb, 21.5);
+  assert.equal(diskNeed('forge', 10, true, 10).requiredGb, 16.5);
+  const root = mkdtempSync(join(tmpdir(), 'disk-floor-gate-'));
+  writeFileSync(join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+  try {
+    const refusalsAt = async config => {
+      const result = await gates(
+        {
+          arm: 'forge',
+          N: 10,
+          dry: true,
+          B: root,
+          flags: [],
+          config: {
+            forge: { mainBase: 'base' },
+            github: { mainBase: 'base' },
+            baseCheckout: root,
+            ...config,
+          },
+          start: { harness: { commit: 'harness' } },
+          pinProblems: async () => [],
+          snapshotProblems: () => [],
+          differences: () => [],
+        },
+        {
+          filesystemProbe: async () => healthy,
+          usageProbe: () => ({ provider: 'scripted' }),
+          diskProbe: () => 20,
+        },
+      );
+      return result.refusals.filter(r => r.startsWith('disk '));
+    };
+    assert.deepEqual(await refusalsAt({}), ['disk 20.0 GB free < 21.5 GB required']);
+    assert.deepEqual(await refusalsAt({ diskFloorGb: 10 }), []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

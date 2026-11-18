@@ -12,7 +12,7 @@ import { benchRoot as requiredBenchRoot } from './bench-root.mjs';
 import { benchCli } from './cli-install.mjs';
 import { checkPlan, DESIGN, batches, loadTasks, schedule, repNs } from './plan.mjs';
 import { snapshot, snapshotProblems, pinProblems, benchFreeze } from './versions.mjs';
-import { usageGate, weeklyStopOf, diskFreeGb, diskNeed, filesystemEventGate } from './gates.mjs';
+import { usageGate, weeklyStopOf, diskFreeGb, diskNeed, diskFloorOf, filesystemEventGate } from './gates.mjs';
 import { probeFilesystemEvents } from '../filesystem-event-health.mjs';
 import { pathToFileURL } from 'node:url';
 import { networkFetch } from '../../dist/network-fetch.js';
@@ -169,7 +169,7 @@ export async function main({ benchRoot, filesystemProbe = probeFilesystemEvents,
     dry,
   );
   const disk = diskFreeGb(),
-    need = diskNeed('github', 10, dry).requiredGb;
+    need = diskNeed('github', 10, dry, diskFloorOf(config)).requiredGb;
   check('disk', disk >= need, `${disk.toFixed(1)} GB free, largest cell needs ${need.toFixed(1)} GB`);
   await tryRun('memory', () => {
     const free = Number(sh('memory_pressure', ['-Q']).match(/(\d+)%/)?.[1]);

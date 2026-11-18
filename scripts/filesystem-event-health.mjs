@@ -129,12 +129,14 @@ export async function probeFilesystemEvents(
   };
 }
 
+/** The gate's refusal text. It says to wait: event delivery recovers by itself after a burst
+ * (Item 368ac54f: a large deletion kept the gate refusing for ~20 min); restarting is never step one. */
 export function filesystemEventRefusal(probe, platform = process.platform) {
   if (probe.ok) return null;
   return `ENVIRONMENT FILESYSTEM_EVENTS_UNHEALTHY: ${probe.reason}. ${
     platform === 'darwin'
-      ? 'Check fseventsd; remedy: sudo killall fseventsd, then rerun the probe.'
-      : 'Check local filesystem watcher resources and event delivery, then rerun the probe (on macOS check fseventsd; remedy: sudo killall fseventsd).'
+      ? 'fseventsd is busy (a large deletion or copy keeps it busy for up to about 20 minutes): wait, then rerun the probe. The gate retries by itself; nothing needs restarting.'
+      : 'Check local filesystem watcher resources and event delivery (on macOS, fseventsd); wait, then rerun the probe.'
   }`;
 }
 

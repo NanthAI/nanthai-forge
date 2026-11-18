@@ -51,7 +51,9 @@ import { replayPlan, replaySchedule } from './replay-schedule.mjs';
 import { REPLAY, replayBatch } from './replay-cells.mjs';
 import { replayAdapters } from './replay-adapters.mjs';
 import { scriptedForge, dryGroup } from './scripted.mjs';
-import { SCENARIOS, scenarioRole } from './scenarios.mjs';
+import { SCENARIOS, scenarioRole, scenarioTestPath } from './scenarios.mjs';
+import { cellLandings } from './path-evidence.mjs';
+import { cellChecks } from './cell-checks.mjs';
 import { scenarioEvents, scenarioEvidence } from './scenario-evidence.mjs';
 import { readSwitches, switchProblems } from './switches.mjs';
 import { removeWorkspace } from './evidence.mjs';
@@ -61,6 +63,7 @@ import { coordinationTasks, workspacePackages, scopeGrade, COORDINATION } from '
 import { sessionPhases } from './phases.mjs';
 import { taskLine, cellRework, checkWalls, orderWaits, convoyVerdict } from './rework.mjs';
 import { collectRunners } from './runners.mjs';
+import { signalVoid } from './cell-outcome.mjs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { rm } from 'node:fs/promises';
@@ -162,6 +165,8 @@ writeFileSync(
   }) + '\n',
 );
 if (batchDir) writeFileSync(join(batchDir, `${slot}.cell`), cellId + '\n');
+// cell.mjs (the one-cell runner) learns the id here, before anything can stop the cell.
+if (process.env.BENCH_CELL_ID_OUT) writeFileSync(process.env.BENCH_CELL_ID_OUT, cellId + '\n');
 const event = entry =>
   writeFileSync(
     join(dir, 'events.jsonl'),
@@ -180,6 +185,8 @@ const result = {
   extra,
   scenario: { name: scenario, paths: SCENARIOS[scenario].paths, about: SCENARIOS[scenario].about },
   seed: planned.seed,
+  // The base tree both arms start from; the compare guard (scenario-report.mjs) keys on it.
+  base: config.github.mainBase,
   order: tasks.map(t => t.id),
   ...(replayKind ? { diagnostic: { kind: cellKind, scored: false, plan: replay }, modelTokens: 0 } : {}),
   ...(cellKind && !replayKind
@@ -200,19 +207,19 @@ let agentsStarted = false;
 // checkouts, so the driver can re-run the cell from a clean state.
 // Agents run detached (own process groups) and are killed first; a Lane whose landing is
 // still in flight is left to finish, never abandoned (B7).
-async function crash(reason) {
+// A signal is a stop from outside (a runner limit), recorded as void-infrastructure (cell-outcome.mjs).
+async function crash(reason, signal = null) {
   if (forge) {
     if (crashing) return;
     crashing = true;
   }
-  event({ event: 'crash', reason });
+  event({ event: signal ? 'interrupted' : 'crash', reason });
   const killed = killAgents();
   writeResult({
-    crashed: reason,
+    ...(signal ? signalVoid(signal) : { crashed: reason, voided: [`harness crash: ${reason}`] }),
     agentsStarted,
     records,
     killedAgents: killed,
-    voided: [`harness crash: ${reason}`],
   });
   let retained = false;
   for (const [laneId, { root, task }] of lanes) {
@@ -231,7 +238,7 @@ async function crash(reason) {
 process.on('uncaughtException', e => crash(String(e?.stack ?? e).slice(0, 800)));
 process.on('unhandledRejection', e => crash(String(e?.stack ?? e).slice(0, 800)));
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'])
-  process.on(signal, () => crash(`interrupted by ${signal}`));
+  process.on(signal, () => crash(`interrupted by ${signal}`, signal));
 
 // The cell holds the CLI installation's measurement hold for its whole run (the product updater
 // would switch `current` mid-cell); the driver may already hold it. Released on every exit. The
@@ -316,6 +323,17 @@ if (forge) {
     await crash(`Lanes left open by an earlier cell would not close: ${stuck.map(l => l.laneId).join(',')}`);
 }
 event({ event: 'reset-start' });
+// Same toolchain as the agents (PATH, VP_HOME, linked install): the reset landing runs the
+// project's inline static checks too.
+const landingToolchain = shared
+  ? async root => {
+      await linkDepsAsync(shared, root);
+      return {
+        ...toolchainEnv(shared, vpHome),
+        PATH: `${bin}:${join(vpHome, 'bin')}:/usr/local/bin:${process.env.PATH}`,
+      };
+    }
+  : null;
 try {
   result.resetReceipt =
     arm === 'github'
@@ -324,22 +342,26 @@ try {
           meta: config.meta,
           baseCommit: base,
           root: join(ws, 'reset'),
-          // Same toolchain as the agents (PATH, VP_HOME, linked install): the reset landing runs
-          // the project's inline static checks too.
-          toolchain: shared
-            ? async root => {
-                await linkDepsAsync(shared, root);
-                return {
-                  ...toolchainEnv(shared, vpHome),
-                  PATH: `${bin}:${join(vpHome, 'bin')}:/usr/local/bin:${process.env.PATH}`,
-                };
-              }
-            : null,
+          toolchain: landingToolchain,
         });
 } catch (error) {
   await crash(`reset failed: ${String(error.message).slice(0, 400)}`);
 }
 event({ event: 'reset-done', resetReceipt: result.resetReceipt });
+// A scenario's base layer (format-debt: a format check main already fails), outside cell timing.
+if (forge && SCENARIOS[scenario].baseLayer) {
+  try {
+    result.scenarioBase = await forge.layer({
+      root: join(ws, 'scenario-base'),
+      message: `bench: ${scenario} base`,
+      files: SCENARIOS[scenario].baseLayer,
+      toolchain: landingToolchain,
+    });
+  } catch (error) {
+    await crash(`scenario base not landed: ${String(error.message).slice(0, 400)}`);
+  }
+  event({ event: 'scenario-base-done', scenarioBase: result.scenarioBase });
+}
 // Stacking A/B (overlap cell): the project's stacking setting for this arm, applied outside cell
 // timing. config.forge.stacking.<offer|auto> = { action, body } names the CLI action and body
 // that set it (D2, Issue 1eb42254), or { default: true } when the project default already is
@@ -835,6 +857,20 @@ const scenarioCheck =
       })
     : null;
 if (scenarioCheck) voided.push(...scenarioCheck.problems);
+// Guard 1 (Item 368ac54f, incident 060fb653): a scripted landing refused locally for a file it did
+// not change fails the cell. Scripted edits are format-clean, so any such refusal is the product's.
+if (dry && arm === 'forge' && !cellKind) {
+  const laneByTask = new Map(records.map(r => [r.task, r.laneId]));
+  const own = cellLandings(
+    { records, order: tasks.map(t => t.id) },
+    {
+      roleOf: index => (index >= 0 ? scenarioRole(scenario, index) : {}),
+      groupOf: dryGroup,
+      testPathOf: scenarioTestPath,
+    },
+  ).files;
+  voided.push(...cellChecks(calls, own, call => laneByTask.get(call.task)).localFailures);
+}
 const tokens =
   dry || replayKind
     ? null

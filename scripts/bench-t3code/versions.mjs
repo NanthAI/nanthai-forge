@@ -68,17 +68,47 @@ export async function harness(dir = HARNESS_DIR) {
   };
 }
 
-/** A pinned harness: a clean git checkout (never a Lane root) of a commit on GitHub main. */
-export async function pinProblems(h) {
+/** GitHub's answer on whether `commit` is on main: compare `commit...main` status, or a definite
+ * 'missing' (HTTP 404/422: GitHub does not know the commit), or null when the read failed or
+ * returned nothing (rate limit, network, auth, an empty reply). Only null is retried. */
+export async function compareOnMain(commit) {
+  try {
+    return (await out('gh', ['api', `repos/${FORGE}/compare/${commit}...main`, '--jq', '.status'])) || null;
+  } catch (error) {
+    return /HTTP (404|422)/.test(String(error?.stderr ?? error?.message ?? '')) ? 'missing' : null;
+  }
+}
+/** Waits between reads of an unreadable answer (s): bounded, about 1 min in all. */
+export const PIN_READ_BACKOFF_SECONDS = Object.freeze([5, 15, 40]);
+
+/** A pinned harness: a clean git checkout (never a Lane root) of a commit on GitHub main. An
+ * unreadable or null GitHub answer is read again with bounded backoff; only a definite answer
+ * ('behind', 'diverged', 'missing') refuses as not on main (cell withdraw-join 20261118T151002
+ * was refused on one null read). Still unreadable after the retries: refused as unverified, with
+ * its own reason, never as "not on main". */
+export async function pinProblems(
+  h,
+  {
+    compare = compareOnMain,
+    sleep = seconds => new Promise(done => setTimeout(done, seconds * 1000)),
+    backoff = PIN_READ_BACKOFF_SECONDS,
+  } = {},
+) {
   const problems = [];
   if (!h.commit) problems.push('harness is not a git checkout');
   if (h.laneRoot) problems.push('harness runs from a Lane root');
   if (h.commit && !h.clean) problems.push(`harness checkout is dirty: ${String(h.dirty).slice(0, 200)}`);
   if (h.commit) {
-    const status = await safe(() =>
-      out('gh', ['api', `repos/${FORGE}/compare/${h.commit}...main`, '--jq', '.status']),
-    );
-    if (!['identical', 'ahead'].includes(status))
+    let status = await compare(h.commit);
+    for (let i = 0; status == null && i < backoff.length; i++) {
+      await sleep(backoff[i]);
+      status = await compare(h.commit);
+    }
+    if (status == null)
+      problems.push(
+        `harness commit ${h.commit.slice(0, 12)} unverified: GitHub compare unreadable after ${backoff.length + 1} reads (not a "not on main" answer; the gate retries)`,
+      );
+    else if (!['identical', 'ahead'].includes(status))
       problems.push(`harness commit ${h.commit.slice(0, 12)} is not on GitHub main (${status})`);
   }
   return problems;
