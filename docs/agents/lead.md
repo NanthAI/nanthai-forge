@@ -103,6 +103,21 @@ those references. Review actual signed-in screenshots against them before
 acceptance. Keep explanations and reassurance in docs, hover or first-run help;
 permanent UI copy should help the current decision. Follow [DESIGN.md](../../DESIGN.md).
 
+## The board is the work list
+
+Leading from Forge's own records is the point of dogfooding. Keep no private
+resume list, status file or scratch tracker of what has landed, what is pending or
+what comes next; Forge planning is that list. Before every brief, relay, status
+reply or "what next", read live state: the Issue and every comment, `lane-history`
+for each of its Lanes, their landing receipts and `queue`. A builder's last note,
+an earlier read or a session handoff is history, not state: the queue can land a
+parked Lane after its builder has stopped (2bf85ddf, 2026-11-17, landed
+unobserved while notes still said "needs sync"). When a fact the lead needs is
+missing from Forge's reads (for example, which Lanes and receipts belong to an
+Issue), record friction and get it fixed in the product rather than keeping a side
+list. A Lane that needs review before acceptance stays out of the queue until the
+review is recorded on its Issue.
+
 ## Verify builders and keep work alive
 
 Before calling a builder running or stopped, inspect its actual thread/session,
