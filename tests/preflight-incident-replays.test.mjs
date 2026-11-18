@@ -355,3 +355,36 @@ test('3a733ee8 (Lane e2572586): a landing-transaction change runs the exact-I/O 
   assert.deepEqual(queue.slice(0, unique.length).sort(), unique.sort(), 'guards run first');
   t.diagnostic(`guards ${guardTests.length}; queue ${queue.length}; stopped ${spent.stopped.length}`);
 });
+
+test('b1e96c63: every landing replay test with an I/O step history is a landing-transaction guard', () => {
+  // A test that drives a landing fixture and records its read/write/call ceiling as a step history
+  // ("Reads 1352 -> 1354 (750c5929): ...") fails on the next +1 per landing. It must run first in
+  // preflight for any landing-transaction change, never after the wall clock stops it.
+  const fixture = new RegExp(
+    `from '\\./(?:hosted-landing[\\w-]*fixture|hosted-acceptance-fixture|hosted-finish-fixture|hosted-race-fixture|early-resolution-replay|landing-admission-replay)\\.mjs'`,
+  );
+  const history = /\b(?:[Rr]eads|[Ww]rites|[Cc]alls) \d+ -> \d+/;
+  const pins = [...files]
+    .filter(
+      ([path, text]) => /^tests\/[^/]+\.test\.mjs$/.test(path) && fixture.test(text) && history.test(text),
+    )
+    .map(([path]) => path);
+  assert.ok(pins.length >= 3, `found ${pins.length} landing step-history tests`);
+  const packageJson = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
+  const guardTests = selectGuards(
+    preflightGuards(packageJson, path => files.has(path)),
+    [at('convex', 'projectHostedAcceptanceCompletion.ts')],
+  ).selected.flatMap(guard => guard.tests);
+  for (const pin of pins) assert.ok(guardTests.includes(pin), `${pin} pins landing I/O but is not a guard`);
+});
+
+test('abfc9b96: a hosted agent schema change runs its generated-docs guard first', () => {
+  const packageJson = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
+  const guardTests = selectGuards(
+    preflightGuards(packageJson, path => files.has(path)),
+    [at('src', 'hosted-agent-contract.ts')],
+  ).selected.flatMap(guard => guard.tests);
+  // The help table in the agent workflow doc is generated from these schemas; the landing check
+  // failed on it after preflight stopped at 48 of 560 files.
+  assert.ok(guardTests.includes(at('tests', 'hosted-agent-help.test.mjs')));
+});

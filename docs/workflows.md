@@ -441,11 +441,11 @@ This project declares these:
 
 | Guard | Test | Runs when the change touches | Cost |
 | --- | --- | --- | --- |
-| landing exact I/O | `tests/landing-cost-guard.test.mjs`, `tests/hosted-early-resolution-speed.test.mjs`, `tests/hosted-landing-admission-default.test.mjs` (they pin the landing's calls, reads and writes) | the landing transaction (`convex/projectHosted*.ts`, `convex/projectLanding*.ts`, `convex/schema.ts`), the ledgers they read (`src/speed-budgets.json`, `src/cost-budgets.ts`) and their replay fixtures | about 35 s |
+| landing exact I/O | `tests/landing-cost-guard.test.mjs`, `tests/hosted-early-resolution-speed.test.mjs`, `tests/hosted-landing-admission-default.test.mjs`, `tests/hosted-landing-cohort-isolation.test.mjs`, `tests/hosted-precompose-ownership.test.mjs`, `tests/hosted-acceptance-scale.test.mjs` (they pin the landing's calls, reads and writes; a landing replay test with a `Reads N -> M` step history must be one of them) | the landing transaction (`convex/projectHosted*.ts`, `convex/projectLanding*.ts`, `convex/schema.ts`), the ledgers they read (`src/speed-budgets.json`, `src/cost-budgets.ts`) and their replay fixtures | about 45 s |
 | account device registrations | `tests/account-registration.test.mjs` | `convex/**`, its Convex module loader | about 20 s |
 | convex runtime imports | `tests/convex-runtime-imports.test.mjs` | `src/**`, `convex/**`, `scripts/check-convex-*.mjs`, `package.json` | about 28 s |
 | hot storage invariant | `tests/hot-storage-invariant.test.mjs` | `convex/**` | about 1 s |
-| agent response contract | `tests/hosted-response-contract.test.mjs` | hosted contract and response sources, `scripts/response-compat*` (release and main baselines), `convex/projectHostedAgent*.ts` | about 1 s |
+| agent response contract | `tests/hosted-response-contract.test.mjs`, `tests/hosted-agent-help.test.mjs` (help and docs generated from the schemas) | hosted contract and response sources, `scripts/response-compat*` (release and main baselines), `convex/projectHostedAgent*.ts` | about 2 s |
 | agent parent simulation | `tests/agent-parent-simulated.test.mjs` | the agent session, client process, wake and slug sources and their tests | about 5 s |
 | cleanup process coverage | `tests/clean-processes.test.mjs` | the process cleanup and prune sources and their fixtures | about 4 s |
 

@@ -90,7 +90,10 @@
           "tests": [
             "tests/landing-cost-guard.test.mjs",
             "tests/hosted-early-resolution-speed.test.mjs",
-            "tests/hosted-landing-admission-default.test.mjs"
+            "tests/hosted-landing-admission-default.test.mjs",
+            "tests/hosted-landing-cohort-isolation.test.mjs",
+            "tests/hosted-precompose-ownership.test.mjs",
+            "tests/hosted-acceptance-scale.test.mjs"
           ],
           "inputs": [
             "convex/projectHosted*.ts",
@@ -139,7 +142,8 @@
         {
           "name": "agent response contract",
           "tests": [
-            "tests/hosted-response-contract.test.mjs"
+            "tests/hosted-response-contract.test.mjs",
+            "tests/hosted-agent-help.test.mjs"
           ],
           "inputs": [
             "src/hosted-*contract*.ts",
