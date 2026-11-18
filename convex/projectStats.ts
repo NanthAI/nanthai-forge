@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
+import type { Doc } from './_generated/dataModel';
 import { internalMutation } from './server';
 import { query } from './cliServer';
 import { memberProject } from './projectAuthority';
@@ -14,6 +15,8 @@ import type { Contribution } from '../src/person-days';
 import { landingAcceptedBySchema } from '../src/landing-accepted-by';
 import { recordPersonDays } from './personDays';
 import { DAY_MS, isAccount, laneWindowStart, lanesByDay } from './statsLanes';
+import { PLANNING_HOT_MS, planningContributions, planningMembers, planningPartialDays } from './personWork';
+import { utcDay } from './projectStatsClose';
 import {
   STATS_COMPARE_MIN_LANDINGS,
   STATS_DAY_MAX_LANDINGS,
@@ -132,18 +135,45 @@ export const closeDay = internalMutation({
       .withIndex('by_project_and_day', q => q.eq('projectId', projectId).lt('day', day))
       .order('desc')
       .first();
-    // A person's day (Items 6a251b23, a9ad21c9): the Lanes started since the previous closed day, open or not, each
-    // filed under its own day. A day with Lanes but no landing here never closes, so this close counts it.
-    const lanes = await lanesByDay(ctx, projectId, laneWindowStart(before?.day, day), from + DAY_MS);
-    for (const [laneDay, list] of [...lanes.byDay].sort((a, b) => a[0].localeCompare(b[0])))
-      if (laneDay !== day) await recordPersonDays(ctx, projectId, laneDay, list);
-    contributions.push(...(lanes.byDay.get(day) ?? []));
-    await recordPersonDays(ctx, projectId, day, contributions);
+    // A person's day (Items 6a251b23, a9ad21c9): the Lanes started since the previous closed day, open or not, and the
+    // Items closed and planning comments in the same window (convex/personWork.ts), each filed under its own day. A
+    // day with work but no landing here never closes, so this close counts it.
+    const window = laneWindowStart(before?.day, day);
+    const lanes = await lanesByDay(ctx, projectId, window, from + DAY_MS);
+    const planning = await planningContributions(ctx, projectId, window, from + DAY_MS);
+    const byDay = new Map([...lanes.byDay].map(([d, list]) => [d, [...list]] as const));
+    for (const c of planning.contributions) byDay.set(utcDay(c.at), [...(byDay.get(utcDay(c.at)) ?? []), c]);
+    // Days whose planning work was not all counted: past a cap, or older than the change rows Convex still holds (only
+    // when the project is that old). Their entries are marked partial, and so is this close's day.
+    const now = Date.now();
+    let project: Doc<'hostedProjects'> | null | undefined;
+    const projectRow = async () =>
+      project === undefined ? (project = await ctx.db.get(projectId)) : project;
+    const partial = planningPartialDays({
+      window,
+      cut: planning.cut,
+      // Read only when the window reaches past the kept change rows (a first close, or one after a long gap).
+      projectCreated: window < now - PLANNING_HOT_MS ? ((await projectRow())?._creationTime ?? 0) : now,
+      now,
+    });
+    for (const [d, list] of [...byDay].sort((a, b) => a[0].localeCompare(b[0])))
+      if (d !== day) await recordPersonDays(ctx, projectId, d, list, { partial: partial.has(d) });
+    contributions.push(...(byDay.get(day) ?? []));
+    // A partial close may have left someone's only planning work unread (past the change-row cap, or archived), so
+    // nothing of theirs would carry the mark: everyone who can do planning work here gets it on this day (no counts,
+    // so no activity is shown for it). Read only on this rare path.
+    const row = partial.any ? await projectRow() : null;
+    if (row)
+      for (const person of await planningMembers(ctx, row))
+        if (!contributions.some(c => c.person === person))
+          contributions.push({ kind: 'partial', person, at: from });
+    await recordPersonDays(ctx, projectId, day, contributions, { partial: partial.has(day) });
     const freeAt = before ? statsDaySchema.parse(JSON.parse(before.value)).replay.freeAt : 0;
     const closed = statsDay(day, landings, freeAt);
-    const value = canonicalPayload(
-      receipts.length > STATS_CLOSE_LANDINGS ? { ...closed, partial: true } : closed,
-    );
+    const value = canonicalPayload({
+      ...(receipts.length > STATS_CLOSE_LANDINGS ? { ...closed, partial: true } : closed),
+      ...(partial.any ? { planningPartial: true as const } : {}),
+    });
     const reruns = rerunsWhileWaiting(landings);
     const runnerContributions = [...contributionIds].map(([i, submissionId]) => ({
       submissionId,

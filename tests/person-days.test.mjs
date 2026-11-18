@@ -3,6 +3,8 @@
 // the run declared), Lanes and reviews per person; a repeated close writes the same row; the profile reads at most 366
 // rows and sends only the projects the viewer may open: owner (everything), teammate (public plus shared private),
 // reader of a shared project, public and signed-out viewers (public only). A removed project is never sent.
+// Items closed and comments come from the day's Work change rows; Latest reads only projects the viewer may open, and a
+// visitor gets landings only (never a Lane title or a comment).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
@@ -10,8 +12,10 @@ import { moduleUrl } from './convex-module.mjs';
 const days = await import(moduleUrl('../src/person-days.ts'));
 const { readProfile, recordPersonDays } = await import(moduleUrl('../convex/personDays.ts'));
 const { landingContributions } = await import(moduleUrl('../convex/projectStats.ts'));
+const { planningContributions, planningPartialDays, PERSON_WORK_CHANGES, PERSON_WORK_COMMANDS } =
+  await import(moduleUrl('../convex/personWork.ts'));
 
-/** Just enough of ctx.db for these reads: eq-only index ranges, order, take, unique, get, insert, patch. */
+/** Just enough of ctx.db for these reads: index ranges (eq, gte, lt, lte), order, take, unique, get, insert, patch. */
 function fakeDb(tables) {
   let next = 0;
   const reads = { documents: 0 };
@@ -20,23 +24,23 @@ function fakeDb(tables) {
     let dir = 'asc';
     const api = {
       withIndex: (_name, range) => {
-        const eqs = [];
-        const lts = [];
+        const tests = [];
         const q = {
-          eq: (field, value) => (eqs.push([field, value]), q),
-          lt: (field, value) => (lts.push([field, value]), q),
+          eq: (field, value) => (tests.push(row => row[field] === value), q),
+          gte: (field, value) => (tests.push(row => row[field] >= value), q),
+          lt: (field, value) => (tests.push(row => row[field] < value), q),
+          lte: (field, value) => (tests.push(row => row[field] <= value), q),
         };
         range?.(q);
-        rows = rows.filter(
-          row =>
-            eqs.every(([field, value]) => row[field] === value) &&
-            lts.every(([field, value]) => row[field] < value),
-        );
+        rows = rows.filter(row => tests.every(test => test(row)));
         return api;
       },
       order: d => ((dir = d), api),
       take: n => {
-        const sorted = [...rows].sort((a, b) => (a.day ?? '').localeCompare(b.day ?? ''));
+        const key = row => row.day ?? row.at ?? row._creationTime ?? 0;
+        const sorted = [...rows].sort((a, b) =>
+          typeof key(a) === 'string' ? key(a).localeCompare(key(b)) : key(a) - key(b),
+        );
         const out = (dir === 'desc' ? sorted.reverse() : sorted).slice(0, n);
         reads.documents += out.length;
         return Promise.resolve(out);
@@ -134,7 +138,7 @@ test('a project-day entry sums per person, keeps the busiest runs, and a repeate
 /** Three projects: public, private with the teammate in it, private without; plus one removed. */
 function world() {
   const day = (d, p) => ({ person: 'acct-a', day: d, value: JSON.stringify({ p }) });
-  const entry = (l, run) => ({
+  const entry = (l, run, c) => ({
     l,
     la: run ? l : 0,
     n: 1,
@@ -142,6 +146,47 @@ function world() {
     v: 1,
     t: [at('2026-11-10'), at('2026-11-10', 18)],
     r: run ? { [run]: [1, l, 'sample-model-1'] } : {},
+    ...(c ? { c } : {}),
+  });
+  // Latest's sources: a receipt, an open Lane and a planning comment in each project.
+  const receipt = (projectId, message, hour) => ({
+    projectId,
+    _creationTime: at('2026-11-12', hour),
+    value: JSON.stringify({
+      id: `r-${projectId}`,
+      at: new Date(at('2026-11-12', hour)).toISOString(),
+      actor: { id: 'acct-a', kind: 'agent' },
+      agentRun: 'amber-fox',
+      agentClient: 'claude-code:sample-model-1',
+      message,
+    }),
+  });
+  const lane = (projectId, goal, hour) => ({
+    projectId,
+    laneId: `l-${projectId}`,
+    actor: 'acct-a',
+    agent: 'amber-fox',
+    goal,
+    at: at('2026-11-12', hour),
+  });
+  const comment = (projectId, text, hour) => ({
+    projectId,
+    actor: 'acct-a',
+    operationId: `work:o-${projectId}`,
+    at: at('2026-11-12', hour),
+    _creationTime: at('2026-11-12', hour),
+    command: { kind: 'change', source: 'work', action: 'comment-planning-item' },
+    kind: 'change',
+  });
+  const command = (projectId, text) => ({
+    projectId,
+    operationId: `o-${projectId}`,
+    command: JSON.stringify({
+      action: 'comment-planning-item',
+      itemId: `i-${projectId}`,
+      text,
+      agent: 'amber-fox',
+    }),
   });
   return {
     hostedProjects: [
@@ -154,9 +199,33 @@ function world() {
     projectReaders: [{ projectId: 'shared', reader: 'acct-reader' }],
     forgeAccounts: [{ owner: 'acct-a', handle: 'sample-one' }],
     personDays: [
-      day('2026-11-09', { pub: entry(2, 'amber-fox') }),
-      day('2026-11-10', { shared: entry(3, 'tawny-newt'), mine: entry(5, 'moss-pike'), gone: entry(7) }),
+      day('2026-11-09', { pub: entry(2, 'amber-fox', 1) }),
+      day('2026-11-10', {
+        shared: entry(3, 'tawny-newt', 4),
+        mine: entry(5, 'moss-pike', 2),
+        gone: entry(7, undefined, 8),
+      }),
       day('2026-11-11', { mine: entry(4) }),
+    ],
+    projectHostedAcceptances: [
+      receipt('pub', 'Public landing', 9),
+      receipt('shared', 'Team landing', 10),
+      receipt('mine', 'Secret landing', 11),
+    ],
+    projectHostedPresence: [
+      lane('pub', 'Public lane goal', 9),
+      lane('shared', 'Team lane goal', 10),
+      lane('mine', 'Secret lane goal', 11),
+    ],
+    projectCoordinationEvents: [
+      comment('pub', 'Public comment', 9),
+      comment('shared', 'Team comment', 10),
+      comment('mine', 'Secret comment', 11),
+    ],
+    projectWorkEvents: [
+      command('pub', 'Public comment'),
+      command('shared', 'Team comment'),
+      command('mine', 'Secret comment'),
     ],
   };
 }
@@ -176,6 +245,7 @@ test('signed out and public viewers get public projects only; nothing private is
       reviews: 1,
       landingsByAgents: 2,
       lanesByAgents: 0,
+      itemsClosed: 1,
     });
     assert.deepEqual(
       read.days.map(d => d[0]),
@@ -191,7 +261,15 @@ test('signed out and public viewers get public projects only; nothing private is
       ['amber-fox'],
     );
     assert.equal(read.projectsLeftOut, 0);
-    assert.doesNotMatch(JSON.stringify(read), /team-one|quiet-one|gone-one|tawny|moss/);
+    assert.deepEqual(
+      read.latest.map(row => [row.kind, row.title, row.project.slug]),
+      [['landed', 'Public landing', 'open-one']],
+      'a visitor gets landings only: never a Lane title or a comment, even on a public project',
+    );
+    assert.doesNotMatch(
+      JSON.stringify(read),
+      /team-one|quiet-one|gone-one|tawny|moss|Team |Secret|lane goal|comment"/,
+    );
   }
 });
 
@@ -207,7 +285,37 @@ test('a teammate and a reader of a shared private project also see that project,
       ],
     );
     assert.equal(read.totals.landings, 5);
-    assert.doesNotMatch(JSON.stringify(read), /quiet-one|gone-one|moss-pike/);
+    assert.equal(read.totals.itemsClosed, 5, 'Items closed in the public and the shared project');
+    assert.deepEqual(
+      read.projects.map(p => [p.slug, p.closed]),
+      [
+        ['team-one', 4],
+        ['open-one', 1],
+      ],
+    );
+    // A writer also sees the person's open Lanes and comments in the shared project; a reader gets landings only,
+    // as presence and the agent page give readers nothing of them (review 59bca412 MUST-1).
+    assert.deepEqual(
+      read.latest.map(row => [row.kind, row.title]),
+      viewer === 'acct-mate'
+        ? [
+            ['landed', 'Team landing'],
+            ['lane', 'Team lane goal'],
+            ['comment', 'Team comment'],
+            ['landed', 'Public landing'],
+          ]
+        : [
+            ['landed', 'Team landing'],
+            ['landed', 'Public landing'],
+          ],
+      'the public project gives landings only',
+    );
+    assert.doesNotMatch(
+      JSON.stringify(read),
+      viewer === 'acct-mate'
+        ? /quiet-one|gone-one|moss-pike|Secret|Public lane goal|Public comment/
+        : /quiet-one|gone-one|moss-pike|Secret|lane goal|Team comment|Public comment/,
+    );
   }
 });
 
@@ -216,6 +324,22 @@ test('the person themself sees every project they worked on, but never a removed
   assert.equal(read.self, true);
   assert.equal(read.scope, 'all');
   assert.equal(read.totals.landings, 14);
+  assert.equal(read.totals.itemsClosed, 7, 'every project but the removed one');
+  assert.deepEqual(
+    read.days.map(d => d[5]),
+    [1, 6, 0],
+    'Items closed per day',
+  );
+  assert.deepEqual(
+    read.latest.map(row => [row.kind, row.title, row.run, row.model]),
+    [
+      ['landed', 'Secret landing', 'amber-fox', 'sample-model-1'],
+      ['lane', 'Secret lane goal', 'amber-fox', null],
+      ['comment', 'Secret comment', 'amber-fox', ''],
+      ['landed', 'Team landing', 'amber-fox', 'sample-model-1'],
+    ],
+    'the newest two projects, newest first, at most four rows',
+  );
   assert.deepEqual(
     read.days.map(d => d[0]),
     ['2026-11-09', '2026-11-10', '2026-11-11'],
@@ -226,7 +350,8 @@ test('the person themself sees every project they worked on, but never a removed
     ['tawny-newt', 'sample-model-1', 'team-one'],
   ]);
   assert.doesNotMatch(JSON.stringify(read), /gone-one/);
-  assert(reads.documents <= 3 + 4 + 1, `rows, projects and one account: ${reads.documents}`);
+  // Rows, projects and one account, plus Latest: two projects of (receipt, Lane, change and one command).
+  assert(reads.documents <= 3 + 4 + 1 + 2 * 4, `bounded reads: ${reads.documents}`);
 });
 
 test('the profile reads at most a year of active days, however long the history', async () => {
@@ -334,4 +459,179 @@ test('a mostly-private history never makes the read unbounded: rows and project 
     0,
     'the public days lie past the scan, so they are left out, not read without bound',
   );
+});
+
+test('the close counts Items closed once each and comments per agent run, from the day’s Work change rows', async () => {
+  const change = (op, action, hour, extra = {}) => {
+    const row = {
+      projectId: 'p1',
+      actor: 'acct-a',
+      operationId: `work:${op}`,
+      at: at('2026-11-16', hour),
+      command: { kind: 'change', source: 'work', action },
+      kind: 'change',
+      ...extra,
+    };
+    return { ...row, _creationTime: row.at };
+  };
+  const event = (op, command) => ({ projectId: 'p1', operationId: op, command: JSON.stringify(command) });
+  const put = (op, fields) => event(op, { action: 'put-planning-item', itemId: 'item-1', ...fields });
+  const { db } = fakeDb({
+    projectCoordinationEvents: [
+      change('o1', 'put-planning-item', 9),
+      change('o2', 'put-planning-item', 10),
+      change('o3', 'put-planning-item', 11),
+      change('o4', 'put-planning-item', 12),
+      change('o5', 'put-planning-item', 13),
+      change('o6', 'comment-planning-item', 14),
+      change('o7', 'comment-planning-item', 15),
+      change('o8', 'comment-planning-item', 16, { actor: 'system:queue' }),
+      change('o9', 'message', 17, {
+        command: { kind: 'message' },
+        kind: 'message',
+        recipientActor: 'acct-b',
+      }),
+      change('o10', 'comment-planning-item', 9, { at: at('2026-11-15', 9) }),
+      change('o11', 'comment-planning-item', 18),
+      change('o12', 'put-planning-item', 19, { projectId: 'p2' }),
+    ],
+    projectWorkEvents: [
+      put('o1', { status: 'closed', expectedVersion: 3 }),
+      // Reopened and closed again the same day: one Item closed.
+      put('o2', { status: 'closed', expectedVersion: 5 }),
+      // Created closed (an import or a filed record) is not a close.
+      put('o3', { itemId: 'item-2', status: 'closed', expectedVersion: 0 }),
+      put('o4', { itemId: 'item-3', status: 'closed', expectedVersion: 2, imported: { source: 'x' } }),
+      put('o5', { status: 'open', expectedVersion: 6 }),
+      event('o7', { action: 'comment-planning-item', itemId: 'item-1', text: 'By hand' }),
+      event('o8', { action: 'comment-planning-item', itemId: 'item-1', text: 'System' }),
+      event('o10', { action: 'comment-planning-item', itemId: 'item-1', text: 'Yesterday' }),
+    ],
+    projectHostedRecordBodies: [
+      // A retained body still holds its command; one the journal took holds none and is skipped.
+      event('o6', {
+        action: 'comment-planning-item',
+        itemId: 'item-1',
+        text: 'From a run',
+        agent: 'amber-fox',
+      }),
+      { projectId: 'p1', operationId: 'o11', journalSegment: '1' },
+    ],
+  });
+  const from = Date.parse('2026-11-16T00:00:00.000Z');
+  const { contributions: found, cut } = await planningContributions({ db }, 'p1', from, from + 86_400_000);
+  assert.equal(cut, null, 'under both caps: nothing left uncounted');
+  assert.deepEqual(found, [
+    { kind: 'close', person: 'acct-a', at: at('2026-11-16', 9), item: 'item-1' },
+    { kind: 'close', person: 'acct-a', at: at('2026-11-16', 10), item: 'item-1' },
+    { kind: 'comment', person: 'acct-a', at: at('2026-11-16', 14), run: 'amber-fox' },
+    { kind: 'comment', person: 'acct-a', at: at('2026-11-16', 15) },
+  ]);
+  const entry = days.projectDays(found).get('acct-a');
+  assert.equal(entry.c, 1, 'an Item closed twice in a day counts once');
+  assert.equal(entry.m, 2);
+  assert.deepEqual(entry.rc, { 'amber-fox': 1 });
+  assert.deepEqual(entry.r, {}, 'a comment alone does not list a run under Agents');
+  // A row closed before this was counted reads as before: no Items closed, no comments.
+  const old = days.profileRead({
+    handle: 'sample-one',
+    self: true,
+    scope: 'all',
+    rows: [{ day: '2026-11-01', value: { p: { p1: { l: 1, la: 0, n: 0, na: 0, v: 0, t: [1, 1], r: {} } } } }],
+    seen: new Map([['p1', { visibility: 'public', shared: false, handle: 'sample-one', slug: 'open-one' }]]),
+    projectsLeftOut: 0,
+    agentsFrom: 0,
+  });
+  assert.equal(old.totals.itemsClosed, 0);
+  assert.deepEqual(old.days, [['2026-11-01', 1, 0, 0, 0, 0]]);
+});
+
+test('a close past either cap marks the days it could not fully count, never undercounting silently', async () => {
+  const from = Date.parse('2026-11-16T00:00:00.000Z');
+  const change = (n, actor, action = 'comment-planning-item') => ({
+    projectId: 'p1',
+    actor,
+    operationId: `work:o${n}`,
+    at: from + n * 1000,
+    _creationTime: from + n * 1000,
+    command: { kind: 'change', source: 'work', action },
+    kind: 'change',
+  });
+  const event = n => ({
+    projectId: 'p1',
+    operationId: `o${n}`,
+    command: JSON.stringify({ action: 'comment-planning-item', itemId: 'item-1', text: 'Hi' }),
+  });
+  // The command cap: the commands past it are not opened; their people still get a marked day.
+  const busy = Array.from({ length: PERSON_WORK_COMMANDS + 2 }, (_, n) =>
+    change(n, n < PERSON_WORK_COMMANDS ? 'acct-a' : 'acct-c'),
+  );
+  const commands = fakeDb({
+    projectCoordinationEvents: busy,
+    projectWorkEvents: busy.map((_, n) => event(n)),
+  });
+  const capped = await planningContributions({ db: commands.db }, 'p1', from, from + 86_400_000);
+  assert.equal(capped.cut, from + PERSON_WORK_COMMANDS * 1000, 'the first change not counted');
+  assert.equal(commands.reads.documents, busy.length + PERSON_WORK_COMMANDS, 'no command read past the cap');
+  const entries = days.projectDays(capped.contributions, true);
+  assert.equal(entries.get('acct-a').m, PERSON_WORK_COMMANDS);
+  assert.equal(entries.get('acct-a').pp, 1);
+  assert.deepEqual(
+    [entries.get('acct-c').m, entries.get('acct-c').pp],
+    [undefined, 1],
+    'seen but not counted: marked, not missing',
+  );
+  // The change-row cap: rows past it are not read; the close knows some were left.
+  const rows = Array.from({ length: PERSON_WORK_CHANGES + 5 }, (_, n) => change(n, 'acct-a', 'holder taken'));
+  const changes = fakeDb({ projectCoordinationEvents: rows });
+  const full = await planningContributions({ db: changes.db }, 'p1', from, from + 86_400_000);
+  assert.equal(full.cut, from + PERSON_WORK_CHANGES * 1000);
+  assert.equal(
+    changes.reads.documents,
+    PERSON_WORK_CHANGES + 1,
+    'one row past the cap, to know there are more',
+  );
+  // The profile says the figure is a floor.
+  const read = days.profileRead({
+    handle: 'sample-one',
+    self: true,
+    scope: 'all',
+    rows: [{ day: '2026-11-16', value: { p: { p1: entries.get('acct-a') } } }],
+    seen: new Map([['p1', { visibility: 'public', shared: false, handle: 'sample-one', slug: 'open-one' }]]),
+    projectsLeftOut: 0,
+    agentsFrom: 0,
+  });
+  assert.equal(read.closedPartial, true);
+  const clean = days.profileRead({
+    handle: 'sample-one',
+    self: true,
+    scope: 'all',
+    rows: [{ day: '2026-11-16', value: { p: { p1: days.projectDays(capped.contributions).get('acct-a') } } }],
+    seen: new Map([['p1', { visibility: 'public', shared: false, handle: 'sample-one', slug: 'open-one' }]]),
+    projectsLeftOut: 0,
+    agentsFrom: 0,
+  });
+  assert.equal(clean.closedPartial, false);
+});
+
+test('a close marks the days it could not count: past a cap, or older than the kept change rows of an old project', () => {
+  const now = Date.parse('2026-11-18T12:00:00.000Z');
+  const window = Date.parse('2026-11-01T00:00:00.000Z');
+  const young = planningPartialDays({ window, cut: null, projectCreated: now - 3 * 86_400_000, now });
+  assert.equal(young.any, false, 'a project younger than 14 days has archived nothing');
+  const old = planningPartialDays({ window, cut: null, projectCreated: 0, now });
+  assert.deepEqual(
+    ['2026-11-01', '2026-11-03', '2026-11-04', '2026-11-18'].map(old.has),
+    [true, true, false, false],
+    'only the days older than the kept 14 days',
+  );
+  const recent = planningPartialDays({ window: now - 86_400_000, cut: null, projectCreated: 0, now });
+  assert.equal(recent.any, false, 'a window inside the kept 14 days is whole');
+  const capped = planningPartialDays({
+    window: now - 86_400_000,
+    cut: Date.parse('2026-11-18T08:00:00.000Z'),
+    projectCreated: 0,
+    now,
+  });
+  assert.deepEqual([capped.any, capped.has('2026-11-17'), capped.has('2026-11-18')], [true, false, true]);
 });

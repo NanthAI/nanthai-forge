@@ -2,7 +2,9 @@
 // One-time backfill (Item a9ad21c9): before the fix, a day close counted only the Lanes started on its own day, so a
 // Lane started on a day with no landing in that project (a weekend, a Lane crossing midnight UTC) was never counted.
 // This files those Lanes under their own days. It reads only the gaps between a project's closed days (a closed day's
-// own Lanes are already counted) and replaces the project's entry for each gap day, so a rerun writes the same rows.
+// own Lanes are already counted) and replaces the Lane fields of the project's entry for each gap day, so a rerun writes
+// the same rows. It keeps the planning counts a close wrote there (Items closed, comments, partial marks; Item 6a251b23),
+// so it is safe to run at any time, before or after a close; it never writes a Stats day (planningPartial stays).
 // Cost: docs/data-placement.md#personDays. Run it by hand, one deployment at a time, with the lead's go.
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
@@ -48,7 +50,7 @@ export const project = internalMutation({
         const lanes = await lanesByDay(ctx, projectId, from, to);
         spent += lanes.read;
         for (const [day, list] of [...lanes.byDay].sort((a, b) => a[0].localeCompare(b[0]))) {
-          await recordPersonDays(ctx, projectId, day, list);
+          await recordPersonDays(ctx, projectId, day, list, { lanesOnly: true });
           gaps++;
         }
       }

@@ -8,11 +8,11 @@ import './person.css';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useConvex } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
-import { Who, initials } from '../ds';
+import { State, Who, initials } from '../ds';
 import { whoLinks } from '../app/who-links';
 import { followLink } from '../app/router';
 import { hrefFor } from '../app/paths';
-import type { ProfileRead } from '../../../src/person-days';
+import type { LatestAction, ProfileRead } from '../../../src/person-days';
 import type { ListedProject } from './read';
 import { OwnDevices, Starred } from './PersonOwn';
 
@@ -37,9 +37,10 @@ function ago(ms: number, now: number) {
   return dateOf(ms, new Date(ms).getUTCFullYear() !== new Date(now).getUTCFullYear());
 }
 
-/** What the days count. Items closed is not counted yet (no per-day source; see docs/people.md). */
+/** What the days count (docs/people.md). */
 const MEASURES = [
   { key: 'landings', at: 1, one: 'landing', many: 'landings', title: 'Landings' },
+  { key: 'items', at: 5, one: 'Item closed', many: 'Items closed', title: 'Items closed' },
   { key: 'lanes', at: 2, one: 'Lane', many: 'Lanes', title: 'Lanes' },
   { key: 'reviews', at: 3, one: 'review', many: 'reviews', title: 'Reviews' },
 ] as const;
@@ -194,7 +195,13 @@ function Contributions({
       </section>
     );
   const total = (m: Measure) =>
-    m.key === 'landings' ? read.totals.landings : m.key === 'lanes' ? read.totals.lanes : read.totals.reviews;
+    m.key === 'landings'
+      ? read.totals.landings
+      : m.key === 'items'
+        ? (read.totals.itemsClosed ?? 0)
+        : m.key === 'lanes'
+          ? read.totals.lanes
+          : read.totals.reviews;
   return (
     <>
       <section className="region" aria-label="Contributions">
@@ -210,13 +217,20 @@ function Contributions({
               aria-pressed={m.key === measure.key}
               onClick={() => onMeasure(m)}
             >
-              <b>{big(total(m))}</b>
+              <b>
+                {big(total(m))}
+                {/* A busy day stopped counting planning work at a cap: the figure is a floor. */}
+                {m.key === 'items' && read.closedPartial ? (
+                  <span title="At least this many: older days are counted from what is still kept">+</span>
+                ) : null}
+              </b>
               <span>{total(m) === 1 ? m.one : m.many}</span>
             </button>
           ))}
         </div>
         <Days read={read} measure={measure} scope={scope} now={now} />
       </section>
+      <Latest read={read} scope={scope} now={now} />
       <Agents read={read} scope={scope} onAgents={onAgents} />
       <Where read={read} self={self} />
     </>
@@ -234,7 +248,7 @@ function Days({
   scope: string;
   now: number;
 }) {
-  const counts = new Map(read.days.map(d => [d[0], d[measure.at]]));
+  const counts = new Map(read.days.map(d => [d[0], d[measure.at] ?? 0]));
   const end = utc(new Date(now).toISOString().slice(0, 10));
   // A new person gets a short grid from their first day; at most 53 weeks.
   const start = Math.max(utc(read.days[0]![0]), end - (53 * 7 - 1) * DAY);
@@ -301,7 +315,7 @@ function Days({
     </div>
   ));
   const byAgents =
-    measure.key === 'reviews'
+    measure.key === 'reviews' || measure.key === 'items'
       ? null
       : measure.key === 'landings'
         ? [read.totals.landingsByAgents, read.totals.landings]
@@ -350,6 +364,8 @@ function Days({
               ) : (
                 'none yet'
               )
+            ) : measure.key === 'items' ? (
+              'an Item records who closed it, not which agent'
             ) : (
               'a review is a person’s'
             )}
@@ -467,6 +483,7 @@ function Where({ read, self }: { read: ProfileRead; self: boolean }) {
       <div className="th trow proj">
         <span>Project</span>
         <span className="r">Landings</span>
+        <span className="r">Items closed</span>
         <span className="r">Lanes</span>
         <span className="r">Reviews</span>
         <span>Last activity</span>
@@ -500,6 +517,10 @@ function Where({ read, self }: { read: ProfileRead; self: boolean }) {
               <span className="k"> landed</span>
             </span>
             <span className="c num r">
+              {big(p.closed ?? 0)}
+              <span className="k"> Items closed</span>
+            </span>
+            <span className="c num r">
               {big(p.lanes)}
               <span className="k"> Lanes</span>
             </span>
@@ -511,6 +532,65 @@ function Where({ read, self }: { read: ProfileRead; self: boolean }) {
               <span className="k">last </span>
               {dateOf(p.last)}
             </span>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+const clock = (ms: number, now: number) =>
+  new Date(ms).toISOString().slice(0, 10) === new Date(now).toISOString().slice(0, 10)
+    ? new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })
+    : dateOf(ms);
+
+/** The newest few actions in projects the viewer may open (convex/personWork.ts latestActions). */
+function Latest({ read, scope, now }: { read: ProfileRead; scope: string; now: number }) {
+  const rows = read.latest ?? [];
+  if (!rows.length) return null;
+  const href = (row: LatestAction) =>
+    hrefFor({
+      frame: 'project',
+      handle: row.project.handle,
+      project: row.project.slug,
+      place: row.kind === 'landed' ? 'code' : row.kind === 'lane' ? 'lanes' : 'plan',
+      section: '',
+      rest: row.target,
+    });
+  return (
+    <section className="region" aria-label="Latest">
+      <div className="ph plain">
+        <h2>Latest</h2>
+        <span className="hint">{scope}</span>
+      </div>
+      {rows.map(row => {
+        const by = row.run ? `${read.handle}/${row.run}` : `@${read.handle}`;
+        const where = { handle: row.project.handle, project: row.project.slug };
+        return (
+          <div key={`${row.kind}:${row.target}:${row.at}`} className="row latest">
+            <span className="num" title={new Date(row.at).toISOString()}>
+              {clock(row.at, now)}
+            </span>
+            <div className="what">
+              <a className="ttl" href={href(row)} onClick={followLink} dir="auto">
+                {row.title}
+              </a>
+              <Who
+                handle={by}
+                {...(row.run && row.model !== null ? { model: row.model } : {})}
+                layout="line"
+                nofor
+                {...whoLinks(by, row.run ? where : undefined)}
+              />
+              <span className="meta" translate="no">
+                {row.project.handle}/{row.project.slug}
+              </span>
+            </div>
+            {row.kind === 'comment' ? (
+              <span className="tag t3">Commented</span>
+            ) : (
+              <State word={row.kind === 'landed' ? 'Landed' : 'In progress'} />
+            )}
           </div>
         );
       })}

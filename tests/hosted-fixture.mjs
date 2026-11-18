@@ -407,6 +407,13 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
               build({
                 field: name => row => field(row, name),
                 neq: (value, expected) => row => value(row) !== expected,
+                eq: (value, expected) => row =>
+                  (typeof value === 'function' ? value(row) : value) ===
+                  (typeof expected === 'function' ? expected(row) : expected),
+                and:
+                  (...tests) =>
+                  row =>
+                    tests.every(test => test(row)),
               }),
             );
             return query;

@@ -143,6 +143,9 @@ export const statsDaySchema = z
     day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     landings: z.number().int().nonnegative(),
     partial: z.boolean(),
+    /** The close stopped counting people's planning work (Items closed, comments) at a cap, or some was already
+     * archived (convex/personWork.ts); the person-day entries it touched are marked too. */
+    planningPartial: z.literal(true).optional(),
     runner: z
       .object({
         priced: z.number().int().nonnegative(),

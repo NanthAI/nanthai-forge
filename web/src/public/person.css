@@ -1,15 +1,20 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* A person's page (Item 6a251b23): the three figures that pick what the days count, the day grid (one square per day,
-   a column per week, Monday on top, ink only: more ink is more done), the two small tables, agents and where, and the
-   person's own devices and sign-ins.
+/* A person's page (Item 6a251b23): the four figures that pick what the days count, the day grid (one square per day,
+   a column per week, Monday on top, ink only: more ink is more done), Latest, the two small tables, agents and where,
+   and the person's own devices and sign-ins.
    Every value is a token from tokens.css. Rules: DESIGN.md. */
 [data-ds] {
-  .nums.pick { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .nums.pick { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .nums.pick > button { display: grid; align-content: start; gap: 2px; padding: var(--s-3) var(--gut); min-width: 0; border: 0; border-left: var(--rule) solid var(--line); border-radius: 0; background: transparent; color: inherit; text-align: left; font: inherit; cursor: pointer; }
   .nums.pick > button:first-child { border-left: 0; }
   .nums.pick > button[aria-pressed="true"] { background: var(--surface-3); box-shadow: inset 0 -2px 0 var(--text); }
   .nums.pick > button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   @media (hover: hover) and (pointer: fine) { .nums.pick > button:not([aria-pressed="true"]):hover { background: var(--hover); } }
+  @container (max-width: 640px) {
+    .nums.pick { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .nums.pick > button:nth-child(3) { border-left: 0; }
+    .nums.pick > button:nth-child(n+3) { border-top: var(--rule) solid var(--line); }
+  }
 
   .days { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-4) var(--s-8); align-items: start; padding: var(--s-4) var(--gut); }
   .cal { --c: 11px; display: flex; gap: 2px; padding-bottom: 20px; min-width: 0; }
@@ -28,7 +33,7 @@
 
   .trow { grid-template-columns: minmax(0, 1fr) var(--cols); column-gap: var(--s-4); }
   .trow.agt { --cols: 64px 84px 96px 96px; }
-  .trow.proj { --cols: 84px 64px 76px 110px; }
+  .trow.proj { --cols: 84px 104px 64px 76px 110px; }
   .row.trow { min-height: 46px; }
   .row.trow > .c { color: var(--text-2); font-size: var(--t-small); white-space: nowrap; }
   .row.trow > .c.num { color: var(--text); }
@@ -43,6 +48,21 @@
     .row.trow > .c { font-size: var(--t-meta); }
     .row.trow > .c.r { text-align: left; }
     .row.trow > .c .k { display: inline; color: var(--text-2); font-family: var(--font-sans); }
+  }
+
+  /* Latest: time, what, who did it under it, and the state word. */
+  .row.latest { grid-template-columns: 52px minmax(0, 1fr) auto; align-items: start; padding-block: 9px; color: inherit; }
+  .row.latest > .num:first-child { color: var(--text-3); font-size: var(--t-meta); padding-top: 2px; white-space: nowrap; }
+  .row.latest .what { min-width: 0; display: grid; gap: 3px; }
+  .row.latest .ttl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .row.latest .meta { color: var(--text-2); font-size: var(--t-meta); overflow-wrap: anywhere; }
+  .row.latest > .st, .row.latest > .tag { padding-top: 2px; font-size: var(--t-meta); white-space: nowrap; }
+  @container (max-width: 560px) {
+    /* Beats the design system's narrow flex rows (parts.css): this row keeps its grid. */
+    .region .row.latest { display: grid; grid-template-columns: minmax(0, 1fr) auto; row-gap: 3px; }
+    .row.latest .what { grid-column: 1; grid-row: 1; }
+    .row.latest > .st, .row.latest > .tag { grid-column: 2; grid-row: 1; }
+    .row.latest > .num:first-child { grid-column: 1 / -1; grid-row: 2; padding-top: 0; }
   }
 
   /* Devices and sign-ins: the person's own view only. */

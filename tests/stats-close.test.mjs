@@ -41,14 +41,18 @@ test('a closed day holds measured figures from receipts and landing rows, once',
   await f.tx('statsClose', statsApi.closeDay, { projectId: f.projectId, day });
   const close = f.counts.slice(before).find(c => c.name === 'statsClose');
   // Per landing: its receipt, its request row and that row's two body pages; plus the day's own two lookups. A person's
-  // day (Item 6a251b23) adds that day's Lanes once each and one row read and one write per active person.
+  // day (Item 6a251b23) adds that day's Lanes once each, one row read and one write per active person, and one range of
+  // the Work change rows since the previous closed day (planning closes and comments; empty here, billed as one read).
+  // A first close looks back past the 14 days of change rows Convex keeps, so it reads the project once to know
+  // whether it is old enough to have archived some (convex/personWork.ts). This fixture's project is that old (its clock
+  // starts at 1970), so the close is partial and reads the project's writers once to mark them (an empty range here).
   const lanes = [...f.tables.projectHostedOverlapLanes.values()].filter(
     lane => utcDay(lane._creationTime) === day,
   );
   const people = [...f.tables.personDays.values()];
   assert(people.length >= 1, 'the submitter has a day row');
   assert(
-    close.documents <= 4 * receipts.length + 2 + lanes.length + people.length,
+    close.documents <= 4 * receipts.length + 2 + lanes.length + people.length + 1 + 1 + 1,
     `four reads per landing: ${close.documents}`,
   );
   assert(

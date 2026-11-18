@@ -12,6 +12,7 @@ import { accountFor } from './urlIdentity';
 import { isPublicProject } from './publicVisibility';
 import { projectRole } from './projectRole';
 import { report } from './errors';
+import { latestActions } from './personWork';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import {
   PERSON_DAYS_PAGES,
@@ -22,26 +23,35 @@ import {
   profileRead,
   projectDays,
   withProjectDay,
+  keepPlanning,
   type Contribution,
   type PersonDay,
   type ProfileScope,
   type Seen,
 } from '../src/person-days';
 
-/** Called by the project's day close: replaces this project's entry in each active person's row for that day. */
+/** Called by the project's day close: replaces this project's entry in each active person's row for that day.
+ * `partial`: the close could not count all of the day's planning work. `lanesOnly`: the contributions are a Lanes-only
+ * recount (the Lane backfill), which keeps the planning counts already in the entry. */
 export async function recordPersonDays(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   day: string,
   contributions: readonly Contribution[],
+  options: { partial?: boolean; lanesOnly?: boolean } = {},
 ) {
-  for (const [person, entry] of projectDays(contributions)) {
+  for (const [person, entry] of projectDays(contributions, options.partial)) {
     const row = await ctx.db
       .query('personDays')
       .withIndex('by_person_and_day', q => q.eq('person', person).eq('day', day))
       .unique();
+    const current = row ? personDaySchema.parse(JSON.parse(row.value)) : null;
     const value = canonicalPayload(
-      withProjectDay(row ? personDaySchema.parse(JSON.parse(row.value)) : null, projectId, entry),
+      withProjectDay(
+        current,
+        projectId,
+        options.lanesOnly ? keepPlanning(current?.p[projectId], entry) : entry,
+      ),
     );
     if (row) await ctx.db.patch(row._id, { value });
     else await ctx.db.insert('personDays', { person, day, value });
@@ -59,6 +69,9 @@ export async function readProfile(
   // projects at most, however private the history.
   const seen = new Map<string, Seen>();
   const handles = new Map<string, string | null>();
+  // Private projects where the viewer may write (owner or writer): only there does Latest show the person's open Lanes
+  // and comments, as presence and the agent page do. A reader gets landings only.
+  const writes = new Set<string>();
   const tried = new Set<string>();
   let probed = 0,
     leftOut = 0;
@@ -74,14 +87,15 @@ export async function readProfile(
     const project = projectId ? await ctx.db.get(projectId) : null;
     if (!project || project.removal || !project.slug) return;
     const open = isPublicProject(project);
-    const shared =
-      !self && !open && input.viewer ? (await projectRole(ctx, project, input.viewer)) !== null : false;
+    const role = !self && !open && input.viewer ? await projectRole(ctx, project, input.viewer) : null;
+    const shared = role !== null;
     if (!self && !open && !shared) return;
     if (!handles.has(project.owner))
       handles.set(project.owner, (await accountFor(ctx, project.owner))?.handle ?? null);
     const handle = handles.get(project.owner);
     if (!handle) return;
     seen.set(id, { visibility: open ? 'public' : 'private', shared, handle, slug: project.slug });
+    if (role === 'owner' || role === 'write') writes.add(id);
   };
   // Newest day first, so a person on many projects keeps the ones they worked on lately.
   const parsed: { day: string; value: PersonDay }[] = [];
@@ -105,7 +119,19 @@ export async function readProfile(
     before = rows.at(-1)!.day;
   }
   const scope: ProfileScope = self ? 'all' : [...seen.values()].some(p => p.shared) ? 'shared' : 'public';
-  return profileRead({
+  // Latest reads only projects the viewer may open, newest activity first (`seen` fills in newest-row order); Lanes and
+  // comments only for the person themself or where the viewer may write.
+  const latest = await latestActions(
+    ctx,
+    input.owner,
+    [...seen].flatMap(([id, project]) => {
+      const projectId = ctx.db.normalizeId('hostedProjects', id);
+      return projectId
+        ? [{ id: projectId, handle: project.handle, slug: project.slug, member: self || writes.has(id) }]
+        : [];
+    }),
+  );
+  const read = profileRead({
     handle: input.handle,
     self,
     scope,
@@ -115,6 +141,7 @@ export async function readProfile(
     projectsLeftOut: self ? leftOut : 0,
     agentsFrom: input.agentsFrom,
   });
+  return { ...read, latest };
 }
 
 /** One read per profile view, asked once when the page opens (never a live subscription on the page). */

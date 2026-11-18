@@ -9,11 +9,18 @@
   .panes.agent { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr); align-items: start; }
   .panes.agent .row.p2 { grid-template-columns: minmax(0, 1fr) auto; }
   .panes.agent .row.p3 { grid-template-columns: 150px minmax(0, 1fr) auto; }
+  /* Its comments: time, the Item it is on, and the text. */
+  .panes.agent .row.cm { grid-template-columns: 150px minmax(0, 1fr); align-items: start; padding-block: 9px; }
+  .row.cm .what { min-width: 0; display: grid; gap: 3px; }
+  .row.cm .on { color: var(--text-2); font-size: var(--t-meta); }
+  .row.cm .q { font-size: var(--t-small); overflow-wrap: anywhere; }
   @media (max-width: 860px) {
     .idband { padding-inline: var(--gut); }
     .idband .who { flex-basis: 100%; }
     .panes.agent { grid-template-columns: minmax(0, 1fr); }
     .panes.agent .row.p3 { grid-template-columns: minmax(0, 1fr) auto; }
     .panes.agent .row.p3 > .num { grid-column: 1 / -1; }
+    .panes.agent .row.cm { grid-template-columns: minmax(0, 1fr); row-gap: 3px; }
+    .panes.agent .row.cm > .num { grid-row: 2; }
   }
 }

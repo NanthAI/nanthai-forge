@@ -522,13 +522,17 @@ async function resubmissionJourney(t, mode, failedSeconds) {
 
   assert(closes.length <= 2, 'at most one existing close for each crossed active day');
   // A person's day (Item 6a251b23) adds, once per project-day and never per landing: that day's Lanes (one read each)
-  // and one read and one write per person active that day. Here: one person, one Lane started on the closed day.
+  // and one read and one write per person active that day, plus one range of the day's Work change rows (planning
+  // closes and comments; empty here, billed as one read), and on a first close (its window reaches past the 14 days of
+  // change rows Convex keeps) one project read; when that project is older than those 14 days (this fixture's clock
+  // starts at 1970) the close is partial and reads the project's writers once to mark them (an empty range here).
+  // Here: one person, one Lane started on the closed day.
   const people = new Set([...f.tables.personDays.values()].map(row => row.person)).size;
   assert.equal(people, 1, 'one person landed here');
   for (const close of closes) {
     assert(
-      close.documents <= 6 + 1 + people && close.readBytes < 16_000,
-      'the close reads receipt and ticket/body pages, the Lane and the person row',
+      close.documents <= 6 + 1 + people + 1 + 1 + 1 && close.readBytes < 16_000,
+      'the close reads receipt and ticket/body pages, the Lane, the person row, the change range, the project and its writers',
     );
     assert.equal(close.writes, 1 + people);
   }

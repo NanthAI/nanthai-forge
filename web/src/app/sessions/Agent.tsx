@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // One agent run's page in a project (Item 6a251b23): who it is (run · model · for @person), its first and last action,
-// its Lanes and what landed, and the identity it reported. One read per view (convex/projectAgentRun.ts), plus one per
+// its Lanes, saves, landings and comments, and the identity it reported. One read per view (convex/projectAgentRun.ts), plus one per
 // "look further back"; it re-runs only when one of its Lanes changes. No timer.
 import '../access.css';
 import '../../ds/review.css';
@@ -58,6 +58,10 @@ export function AgentView({
   const project = { handle: route.handle, project: route.project };
   const lanes = data?.lanes ?? [];
   const landed = lanes.filter(lane => lane.landed).sort((a, b) => b.landed!.at.localeCompare(a.landed!.at));
+  const saves = lanes.reduce((sum, lane) => sum + (lane.saves ?? 0), 0);
+  const savesAll = lanes.every(lane => lane.saves !== null);
+  const comments = data?.comments ?? null;
+  const itemHref = (id: string) => hrefFor({ ...route, place: 'plan', section: '', rest: id });
   const open = lanes.filter(lane => lane.open);
   const first = lanes.length ? Math.min(...lanes.map(lane => lane.first)) : null;
   const last = lanes.length ? Math.max(...lanes.map(lane => lane.last)) : null;
@@ -114,18 +118,30 @@ export function AgentView({
       </div>
       <div className="panes agent">
         <section className="pane">
-          <div className="nums" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+          <div className="nums" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
             <div>
               <b>{nf.format(lanes.length)}</b>
               <span>{lanes.length === 1 ? 'Lane' : 'Lanes'}</span>
             </div>
             <div>
-              <b>{nf.format(open.length)}</b>
-              <span>open</span>
+              <b>
+                {nf.format(saves)}
+                {savesAll ? '' : '+'}
+              </b>
+              <span>{saves === 1 ? 'save' : 'saves'}</span>
             </div>
             <div>
               <b>{nf.format(landed.length)}</b>
-              <span>landed</span>
+              <span>{landed.length === 1 ? 'landing' : 'landings'}</span>
+            </div>
+            <div>
+              <b>
+                {comments ? nf.format(comments.count) : '–'}
+                {comments?.partial ? (
+                  <span title="At least this many: older days are counted from what is still kept">+</span>
+                ) : null}
+              </b>
+              <span>{comments?.count === 1 ? 'comment' : 'comments'}</span>
             </div>
           </div>
           <Region
@@ -147,6 +163,9 @@ export function AgentView({
                       {lane.title}
                     </div>
                     <div className="meta">
+                      {lane.saves === null
+                        ? ''
+                        : `${nf.format(lane.saves)} ${lane.saves === 1 ? 'save' : 'saves'} · `}
                       started {at(lane.first)} · last activity {at(lane.last)}
                     </div>
                   </div>
@@ -179,6 +198,42 @@ export function AgentView({
                   <span className="mono t3">receipt</span>
                 </A>
               ))}
+            </Region>
+          ) : null}
+          {comments ? (
+            <Region
+              title="Comments"
+              count={comments.count}
+              hint={
+                comments.rows.length < comments.count || comments.more
+                  ? 'newest first · older comments are archived; open the Item to read them'
+                  : 'newest first'
+              }
+            >
+              {comments.rows.length ? (
+                comments.rows.map(comment => (
+                  <div key={`${comment.itemId}:${comment.at}`} className="row cm">
+                    <span className="num t3">{at(comment.at)}</span>
+                    <div className="what">
+                      <div className="on">
+                        on{' '}
+                        <A className="lk mono" href={itemHref(comment.itemId)}>
+                          Item {comment.itemId.slice(0, 8)}
+                        </A>
+                      </div>
+                      <div className="q" dir="auto">
+                        {comment.text}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="quietline">
+                  {comments.count
+                    ? 'Its comments here are archived; open its Items to read them.'
+                    : 'No comments.'}
+                </p>
+              )}
             </Region>
           ) : null}
         </section>

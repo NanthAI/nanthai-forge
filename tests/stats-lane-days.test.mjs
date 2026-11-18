@@ -272,3 +272,131 @@ test('the backfill continues past a page of closed days from where it stopped', 
     'every gap day of the closed days is filed once',
   );
 });
+
+test('the backfill keeps the planning counts a close wrote on gap days, whenever it runs (review 59bca412 MUST-3)', async () => {
+  const change = (op, iso) => ({
+    _id: `change-${op}`,
+    _creationTime: Date.parse(iso),
+    projectId: PROJECT,
+    actor: 'acct-a',
+    operationId: `work:${op}`,
+    at: Date.parse(iso),
+    command: {
+      kind: 'change',
+      source: 'work',
+      action: op.startsWith('put') ? 'put-planning-item' : 'comment-planning-item',
+    },
+    kind: 'change',
+  });
+  const work = (op, command) => ({
+    _id: `work-${op}`,
+    projectId: PROJECT,
+    operationId: op,
+    command: JSON.stringify(command),
+  });
+  const tables = {
+    projectStatsDays: [closedDay('2026-11-06')],
+    projectHostedAcceptances: [receipt('2026-11-10T09:00:00.000Z')],
+    projectHostedOverlapLanes: [lane('2026-11-07T10:00:00.000Z'), lane('2026-11-08T10:00:00.000Z')],
+    // Gap-day planning work (no landing that day): an Item closed and a comment by a run on 11-08.
+    projectCoordinationEvents: [
+      change('put-1', '2026-11-08T11:00:00.000Z'),
+      change('comment-1', '2026-11-08T12:00:00.000Z'),
+    ],
+    projectWorkEvents: [
+      work('put-1', { action: 'put-planning-item', itemId: 'item-1', status: 'closed', expectedVersion: 2 }),
+      work('comment-1', {
+        action: 'comment-planning-item',
+        itemId: 'item-1',
+        text: 'Done',
+        agent: 'amber-fox',
+      }),
+    ],
+  };
+  await close(tables, '2026-11-10');
+  const closed = personRows(tables);
+  assert.deepEqual(
+    [closed['2026-11-08'].n, closed['2026-11-08'].c, closed['2026-11-08'].m, closed['2026-11-08'].rc],
+    [1, 1, 1, { 'amber-fox': 1 }],
+    'the close counts the gap day’s Lane and planning work',
+  );
+  // As a capped close would have left them: a partial mark on a gap day and on the Stats day.
+  const gap = tables.personDays.find(row => row.day === '2026-11-07' && row.person === 'acct-a');
+  const marked = JSON.parse(gap.value);
+  marked.p[PROJECT] = { ...marked.p[PROJECT], c: 2, pp: 1 };
+  gap.value = canonicalPayload(marked);
+  const statsRow = tables.projectStatsDays.find(row => row.day === '2026-11-10');
+  statsRow.value = canonicalPayload({ ...JSON.parse(statsRow.value), planningPartial: true });
+  const before = structuredClone(tables.personDays);
+  const stats = statsRow.value;
+  const { db } = fakeDb(tables);
+  const ctx = { db, scheduler: { runAfter: async () => {} } };
+  for (let run = 0; run < 2; run++) {
+    await handler(backfill.project)(ctx, { projectId: PROJECT });
+    assert.deepEqual(tables.personDays, before, `run ${run + 1}: every entry as the close wrote it`);
+    assert.equal(tables.projectStatsDays.find(row => row.day === '2026-11-10').value, stats);
+  }
+  // A backfill run before the close ever wrote planning (an older row with Lane counts only) still fills the Lanes.
+  const lanesOnly = JSON.parse(tables.personDays.find(row => row.day === '2026-11-08').value);
+  lanesOnly.p[PROJECT].n = 0;
+  tables.personDays.find(row => row.day === '2026-11-08').value = canonicalPayload(lanesOnly);
+  await handler(backfill.project)(ctx, { projectId: PROJECT });
+  assert.deepEqual(
+    [
+      personRows(tables)['2026-11-08'].n,
+      personRows(tables)['2026-11-08'].c,
+      personRows(tables)['2026-11-08'].m,
+    ],
+    [1, 1, 1],
+    'the Lane count is recounted; the planning counts stay',
+  );
+});
+
+test('past the change-row cap, everyone who can plan here is marked, even with no counted work (review 59bca412)', async () => {
+  const { PERSON_WORK_CHANGES } = await import(moduleUrl('../convex/personWork.ts'));
+  const { profileRead } = await import(moduleUrl('../src/person-days.ts'));
+  const iso = ms => new Date(ms).toISOString().slice(0, 10);
+  // Recent days, inside the 14 days of change rows Convex keeps, so only the cap makes this close partial.
+  const today = Date.parse(`${iso(Date.now())}T00:00:00.000Z`);
+  const day = iso(today - 86_400_000);
+  const start = Date.parse(`${day}T00:00:00.000Z`);
+  const change = (n, actor, action) => ({
+    _id: `change-${n}`,
+    _creationTime: start + 1000 + n,
+    projectId: PROJECT,
+    actor,
+    operationId: `work:op-${n}`,
+    at: start + 1000 + n,
+    command: { kind: 'change', source: 'work', action },
+    kind: 'change',
+  });
+  const tables = {
+    hostedProjects: [{ _id: PROJECT, _creationTime: 1, owner: 'acct-b' }],
+    projectContributors: [{ _id: 'c1', projectId: PROJECT, contributor: 'acct-c' }],
+    projectStatsDays: [closedDay(iso(today - 3 * 86_400_000))],
+    projectHostedAcceptances: [receipt(`${day}T09:00:00.000Z`)],
+    projectHostedOverlapLanes: [],
+    // The cap's worth of other changes, then acct-c's only planning work of the day: never read.
+    projectCoordinationEvents: [
+      ...Array.from({ length: PERSON_WORK_CHANGES }, (_, n) => change(n, 'acct-a', 'holder taken')),
+      change(PERSON_WORK_CHANGES, 'acct-c', 'comment-planning-item'),
+    ],
+  };
+  await close(tables, day);
+  const entry = person =>
+    JSON.parse(tables.personDays.find(row => row.person === person && row.day === day).value).p[PROJECT];
+  assert.equal(JSON.parse(tables.projectStatsDays.find(row => row.day === day).value).planningPartial, true);
+  for (const person of ['acct-a', 'acct-b', 'acct-c']) assert.equal(entry(person).pp, 1, person);
+  assert.equal(entry('acct-c').m, undefined, 'acct-c’s comment was never read, so not counted');
+  // acct-c's profile says its count is a floor, and shows no activity for a mark alone.
+  const read = profileRead({
+    handle: 'sample-c',
+    self: true,
+    scope: 'all',
+    rows: [{ day, value: { p: { [PROJECT]: entry('acct-c') } } }],
+    seen: new Map([[PROJECT, { visibility: 'public', shared: false, handle: 'sample-b', slug: 'open-one' }]]),
+    projectsLeftOut: 0,
+    agentsFrom: 0,
+  });
+  assert.deepEqual([read.closedPartial, read.days, read.projects, read.first], [true, [], [], null]);
+});

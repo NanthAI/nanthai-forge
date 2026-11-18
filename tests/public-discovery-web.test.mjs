@@ -98,6 +98,7 @@ const contributions = (() => {
       1 + Math.round(next() * 3),
       Math.round(next() * 2),
       Math.round(landings * 0.7),
+      Math.round(next() * 2),
     ]);
   }
   const sum = k => days.reduce((n, d) => n + d[k], 0);
@@ -125,6 +126,7 @@ const contributions = (() => {
       reviews: sum(3),
       landingsByAgents: sum(4),
       lanesByAgents: Math.round(sum(2) * 0.6),
+      itemsClosed: sum(5),
     },
     projects: [
       {
@@ -135,6 +137,7 @@ const contributions = (() => {
         landings: sum(1) - 40,
         lanes: sum(2) - 20,
         reviews: sum(3),
+        closed: sum(5),
         last: NOW - DAY,
       },
       {
@@ -145,10 +148,12 @@ const contributions = (() => {
         landings: 40,
         lanes: 20,
         reviews: 0,
+        closed: 0,
         last: NOW - 9 * DAY,
       },
     ],
     projectsLeftOut: 0,
+    closedPartial: false,
     agents: {
       total: 31,
       from: 0,
@@ -158,8 +163,52 @@ const contributions = (() => {
         run('keen-impala', 'sample-model-2', 6, 6, days.at(-60)[0], days.at(-41)[0]),
       ],
     },
+    // A visitor's Latest: landings only (convex/personWork.ts).
+    latest: [
+      {
+        kind: 'landed',
+        at: NOW - 40 * 60_000,
+        title:
+          'Planner: push predicates below joins, a landing message somebody wrote without ever looking at where it would be shown',
+        run: 'amber-fox',
+        model: 'sample-model-with-a-long-declared-name-1',
+        project: { handle: 'ada', slug: 'atlas' },
+        target: '00000000-0000-4000-8000-000000000001',
+      },
+      {
+        kind: 'landed',
+        at: NOW - 2 * DAY,
+        title: 'Types: infer nullable columns',
+        run: null,
+        model: null,
+        project: { handle: 'ada', slug: 'beacon' },
+        target: '00000000-0000-4000-8000-000000000002',
+      },
+    ],
   };
 })();
+/** The person's own Latest: also their open Lanes and comments. */
+const ownLatest = [
+  {
+    kind: 'lane',
+    at: NOW - 5 * 60_000,
+    title: 'Split the adapter tests',
+    run: 'copper-moth',
+    model: null,
+    project: { handle: 'ada', slug: 'ledger-private' },
+    target: '00000000-0000-4000-8000-000000000003',
+  },
+  {
+    kind: 'comment',
+    at: NOW - 20 * 60_000,
+    title: 'The join order flips when the left side is empty. Add that case before this lands.',
+    run: null,
+    model: null,
+    project: { handle: 'ada', slug: 'atlas' },
+    target: '00000000-0000-4000-8000-000000000004',
+  },
+  ...contributions.latest,
+];
 const nothing = {
   schema: 1,
   handle: 'kit',
@@ -169,10 +218,12 @@ const nothing = {
   first: null,
   last: null,
   days: [],
-  totals: { landings: 0, lanes: 0, reviews: 0, landingsByAgents: 0, lanesByAgents: 0 },
+  totals: { landings: 0, lanes: 0, reviews: 0, landingsByAgents: 0, lanesByAgents: 0, itemsClosed: 0 },
   projects: [],
   projectsLeftOut: 0,
+  closedPartial: false,
   agents: { total: 0, from: 0, rows: [] },
+  latest: [],
 };
 /** What a signed-in person's own reads answer (Item 6a251b23): `?as=self` renders with these, never the network. */
 const signed = {
@@ -185,6 +236,9 @@ const signed = {
         ...contributions.projects,
         { ...contributions.projects[1], visibility: 'private', slug: 'ledger-private', landings: 3 },
       ],
+      latest: ownLatest,
+      // A busy day stopped counting planning work at a cap: Items closed shows as a floor.
+      closedPartial: true,
     }),
     kit: JSON.stringify({ ...nothing, self: true, scope: 'all' }),
   },
@@ -451,6 +505,22 @@ test('public discovery screens: explore, a profile signed out and as its person,
   assert.equal((await pr.locator('.cal .cw').count()) > 30, true);
   assert.match(await pr.locator('[aria-label=Agents]').textContent(), /amber-fox[\s\S]*model not declared/);
   assert.match(await pr.locator('[aria-label=Agents]').textContent(), /Sign in to page through the rest/);
+  // Four figures, Items closed second; Latest shows the visitor's landings with who did it.
+  assert.deepEqual(
+    (await pr.locator('.nums.pick button span').allTextContents()).map(text => text.replace(/^\d.*? /, '')),
+    ['landings', 'Items closed', 'Lanes', 'reviews'],
+  );
+  await pr.locator('.nums.pick button').nth(1).click();
+  assert.match(await pr.locator('[aria-label=Contributions] h2').textContent(), /Items closed per day/);
+  const latest = await pr.getByRole('region', { name: 'Latest' }).textContent();
+  assert.match(latest, /Planner: push predicates[\s\S]*amber-fox[\s\S]*Landed/);
+  assert.doesNotMatch(latest, /In progress|Commented/);
+  assert.doesNotMatch(
+    await pr.locator('.nums.pick button').nth(1).textContent(),
+    /\+/,
+    'fully counted: no floor mark',
+  );
+  assert.match(await pr.getByRole('region', { name: 'Where' }).textContent(), /Items closed/);
   assert.doesNotMatch(await pr.locator('main').textContent(), /private|Private/);
 
   // The person's own page: their devices and browsers (codes, never device names, a device with no code reads "without a code"; removed devices gone), their
@@ -468,6 +538,18 @@ test('public discovery screens: explore, a profile signed out and as its person,
   assert.doesNotMatch(devices, /Build laptop|Old box|Legacy box|dv-gone00/);
   assert.match(await me.getByRole('region', { name: 'Starred' }).textContent(), /kestrel-works.*tern/s);
   assert.match(await me.getByRole('region', { name: 'Where' }).textContent(), /ledger-private.*Private/s);
+  const own = await me.getByRole('region', { name: 'Latest' }).textContent();
+  assert.match(own, /Split the adapter tests[\s\S]*In progress[\s\S]*The join order flips[\s\S]*Commented/);
+  assert.match(
+    await me.locator('.nums.pick button').nth(1).textContent(),
+    /\d\+Items? closed/,
+    'a capped day: a floor',
+  );
+  // Quiet: a hover on the "+" says why, nothing else on the page does.
+  assert.match(
+    (await me.locator('.nums.pick button').nth(1).locator('span[title]').getAttribute('title')) ?? '',
+    /older days are counted from what is still kept/,
+  );
   assert.deepEqual((await me.evaluate(() => window.asked)).sort(), [
     'authSessions:list',
     'personDays:profile',

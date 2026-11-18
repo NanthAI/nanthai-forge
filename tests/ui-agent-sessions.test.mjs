@@ -37,7 +37,7 @@ const now=1794873600000;
 const route={frame:'project',handle:'example-builder',project:'synthetic',place:'lanes',section:'sessions',rest:''};
 const data={ observedAt:now,continueCursor:'',isDone:true,rows:[{person:'example-builder',name:'amber-fox',sessionId:'a'.repeat(64),laneId:'lane-a',intentId:'item-a',title:'Stream parser: preserve split bytes across reads',lastSeen:now-20000,startedAt:now-3600000,app:'synthetic-app',identityFrom:'declared',device:{id:'device-a',code:'dv-synthetic',approvedAt:now-86400000,name:'Build laptop'}},{person:'peer-builder',name:'still-heron',sessionId:'b'.repeat(64),laneId:'lane-b',intentId:'item-b',title:'Document the parser interface and its recovery paths',lastSeen:now-600000,startedAt:now-7200000,app:'other-app',identityFrom:'app-thread',device:{id:'device-b',code:'dv-other',approvedAt:now-86400000}}]};
 const holder={laneId:'lane-a',title:data.rows[0].title,head:'a'.repeat(64),version:2,state:'active',authorityEpoch:1,at:now,canTake:true,needsReason:true,browserSessionId:'c'.repeat(64),enabled:true,holder:{actor:'example-builder',agent:'amber-fox',sessionId:'a'.repeat(64),since:now-3600000,lastSeen:now-20000,change:{by:'example-builder',kind:'takeover',previous:{actor:'example-builder',agent:'still-heron',since:now-7200000},reason:'Continue the saved parser change',savedHead:'a'.repeat(64)}},events:[],continueCursor:'',isDone:true};
-const agentRun={schema:1,person:'example-builder',run:'amber-fox',model:'synthetic-model-1',app:'synthetic-app',device:'dv-synthetic',identityFrom:'declared',continueCursor:'c',isDone:false,lanes:[{laneId:'lane-a',title:'Stream parser: preserve split bytes across reads',open:true,first:now-3600000,last:now-20000,landed:null},{laneId:'lane-b',title:'Types: narrow the read result so callers stop checking for a missing value that can no longer happen',open:false,first:now-86400000,last:now-80000000,landed:{at:new Date(now-80000000).toISOString(),receiptId:'00000000-0000-4000-8000-000000000001'}},{laneId:'lane-c',title:'Retry: jitter the first attempt',open:false,first:now-172800000,last:now-170000000,landed:null}]};
+const agentRun={schema:1,person:'example-builder',run:'amber-fox',model:'synthetic-model-1',app:'synthetic-app',device:'dv-synthetic',identityFrom:'declared',continueCursor:'c',isDone:false,lanes:[{laneId:'lane-a',title:'Stream parser: preserve split bytes across reads',open:true,first:now-3600000,last:now-20000,landed:null,saves:7},{laneId:'lane-b',title:'Types: narrow the read result so callers stop checking for a missing value that can no longer happen',open:false,first:now-86400000,last:now-80000000,landed:{at:new Date(now-80000000).toISOString(),receiptId:'00000000-0000-4000-8000-000000000001'},saves:5},{laneId:'lane-c',title:'Retry: jitter the first attempt',open:false,first:now-172800000,last:now-170000000,landed:null,saves:1}],comments:{count:3,partial:true,through:'2026-11-17',more:false,rows:[{at:now-30000,itemId:'6a251b23-8b49-4458-a10a-62fd7c8a4742',text:'The decoder keeps up to three bytes between chunks; a chunk that ends inside a four-byte sequence twice in a row is not tested yet, and this sentence runs long on purpose.'},{at:now-90000000,itemId:'7b251b23-8b49-4458-a10a-62fd7c8a4742',text:'Main moved while this was checking.'}]}};
 function Fixture(){ const [message,setMessage]=React.useState(''); const kind=params.get('page');return <ProjectFrame route={route} name="Synthetic project" feed={undefined} projects={null} controls={{viewerHandle:'example-builder',onPicker(){},onPalette(){},onKeys(){}}}>{kind==='holder'?<HolderView route={route} data={holder} busy={false} problem={null} offer={null} change={v=>setMessage(v.reason||'Holder changed')} more={()=>{}}/>:kind==='agent'?<AgentView route={{...route,rest:'example-builder/amber-fox'}} person="example-builder" run="amber-fox" data={agentRun} more={()=>{}}/>:<SessionsView route={route} data={data} more={()=>{}} first={()=>{}}/>}<p role="status">{message}</p></ProjectFrame>}
 createRoot(document.getElementById('root')).render(<Fixture/>);
 `,
@@ -100,6 +100,22 @@ createRoot(document.getElementById('root')).render(<Fixture/>);
             result.violations.map(v => ({ id: v.id, targets: v.nodes.map(n => n.target) })),
             [],
           );
+          if (kind === 'agent') {
+            // Four figures: Lanes, saves, landings, comments; the comments list says older ones are archived.
+            const figures = await page.locator('.nums > div').allInnerTexts();
+            assert.deepEqual(
+              figures.map(text => text.replace(/\s+/g, ' ').trim()),
+              ['3 Lanes', '13 saves', '1 landing', '3+ comments'],
+            );
+            assert.match(
+              (await page.locator('.nums > div').nth(3).locator('span[title]').getAttribute('title')) ?? '',
+              /older days are counted from what is still kept/,
+            );
+            await page.getByRole('heading', { name: 'Comments' }).waitFor();
+            assert.equal(await page.locator('.row.cm').count(), 2);
+            await page.getByText('older comments are archived', { exact: false }).waitFor();
+            await page.getByRole('link', { name: 'Item 6a251b23' }).waitFor();
+          }
           if (kind === 'holder') {
             await page.getByRole('button', { name: 'Take over here', exact: true }).click();
             const reason = page.getByRole('textbox', { name: 'Reason', exact: true });
