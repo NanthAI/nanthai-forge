@@ -497,11 +497,19 @@ for (const count of [560, 1120])
 
 /** Synthetic client capability: background wakes are explicit; native detection has subprocess guards. */
 function client(t, kind) {
-  const keys = ['CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID', 'FORGE_AGENT_WAKE', 'FORGE_CLIENT_SETTINGS'];
+  const keys = [
+    'CLAUDE_CODE_SESSION_ID',
+    'CODEX_THREAD_ID',
+    'FORGE_AGENT_WAKE',
+    'FORGE_CLIENT_SETTINGS',
+    'FORGE_HUMAN',
+  ];
   const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   for (const key of keys) delete process.env[key];
   // Default client settings (landWait true), never the developer's own file.
   process.env.FORGE_CLIENT_SETTINGS = join(tmpdir(), `forge-settings-${randomUUID()}.json`);
+  // 'plain' is a person: pin it, so a real agent parent (the test runner's) is never detected.
+  if (kind === 'plain') process.env.FORGE_HUMAN = '1';
   if (kind === 'background') process.env.FORGE_AGENT_WAKE = 'background-exit';
   if (kind === 'off') {
     process.env.CLAUDE_CODE_SESSION_ID = `synthetic-${randomUUID()}`;
