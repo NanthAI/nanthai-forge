@@ -351,6 +351,11 @@ export const page = query({
               // Second-check evidence for every entry, failed ones included (81d12a32): why its own
               // check did not carry it, a shared cohort check that failed, and the agent client.
               firstCheckRecheck: ('admission' in row ? row.admission?.recheck : undefined) ?? null,
+              // The admission run, when one ran: the submission's first check, decided by that run's row (9ce2ee79).
+              admissionRun:
+                'admission' in row && row.admission
+                  ? { runId: row.admission.runId, status: row.admission.status }
+                  : null,
               sharedBatch: request.batchDiagnostic?.sharedRunId
                 ? {
                     runId: request.batchDiagnostic.sharedRunId,

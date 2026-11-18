@@ -48,16 +48,26 @@ they cannot show anyone else's, whatever page asks.
 
 One `personDays` row per person per active UTC day ([data placement](data-placement.md)) holds that day's counts per
 project (`src/person-days.ts`). The project's [Stats day close](run-evidence.md#stats) writes it: the close already
-reads the day's receipts and landing rows; it adds the day's Lanes (one read each) and one read and one write per
-person active that day. A landing writes nothing extra; an idle project writes nothing. A project's day is counted
-once that day closes, which the project's first landing of a later day triggers, so today shows from tomorrow and a
-day with Lanes but no landing in that project is not counted.
+reads the day's receipts and landing rows; it adds the Lanes started since the project's previous closed day (one read
+each, each filed under its own day, so a weekend or a Lane that crossed midnight UTC is counted) and one read and one
+write per person active on each of those days. A landing writes nothing extra; an idle project writes nothing. A
+project's day is counted once that day closes, which the project's first landing of a later day triggers, so today
+shows from tomorrow. A close looks back at most 366 days and keeps the newest 1,000 open and 1,000 closed Lanes of its
+window. Days closed before this (Item a9ad21c9) are filled in by the one-time `statsLanesBackfill` run.
 
 - Row size: about 100 B per project-day plus about 40 B per agent run (at most 40 runs per project-day; more are
   counted, not listed).
-- Profile read: at most 366 rows and 50 projects (one project read, one role read and one account read each), once
-  per view. A person with a full year of daily work across a few projects reads about 100–300 KB.
+- Profile read: at most 366 days and 50 projects the viewer may see (one project read, one role read and one account
+  read each), once per view. Private-only days and private projects do not use those caps up; the read stays bounded
+  by scanning at most 3 pages of 366 rows and looking up at most 200 projects. A person with a full year of daily work
+  across a few projects reads about 100–300 KB (up to about three times that when most of their days are private and
+  the viewer cannot see them).
 - Idle: zero calls. Nothing on the page polls or runs a timer.
+- Backfill (`convex/statsLanesBackfill.ts`, once per deployment, by hand): per project it reads its closed-day rows
+  once (about 1–2 KB each, 40 per run) and only the Lanes of the gaps between them (never a closed day's own Lanes),
+  and per gap day with Lanes it reads and writes one row per person. So the cost is closed days + gap Lanes + gap-day
+  person rows, once; a rerun replaces the same entries and adds no rows. Each run spends at most about 6,000 Lane
+  documents and continues itself; it never touches the landing path.
 
 ## Who did it on every row
 

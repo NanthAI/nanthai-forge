@@ -4,15 +4,20 @@
 // A person's contributions (Item 6a251b23; docs/people.md): one summary row per person per active UTC day, holding
 // that day's counts per project. The project's day close (convex/projectStats.ts closeDay) writes its own entry into
 // each active person's row, so a landing writes nothing extra and an idle project writes nothing. The profile reads
-// at most PERSON_DAYS_READ rows and keeps only the projects the viewer may open.
+// at most PERSON_DAYS_READ visible days (scanning at most PERSON_DAYS_PAGES pages of rows) and keeps only the
+// projects the viewer may open.
 import { z } from 'zod';
 
-/** At most a year of active days per profile read (53 weeks of the day grid). */
+/** At most a year of active days the viewer may see per read (53 weeks of the day grid); also one page of rows. */
 export const PERSON_DAYS_READ = 366;
+/** Pages of PERSON_DAYS_READ rows one read scans looking for them, when private-only days are skipped. */
+export const PERSON_DAYS_PAGES = 3;
 /** Agent runs per page on the profile. */
 export const PERSON_AGENTS_PAGE = 25;
-/** Distinct projects one profile read resolves; more are left out and said so. */
+/** Projects the viewer may see that one profile read resolves; more are left out and said so (to the person only). */
 export const PERSON_PROJECTS_READ = 50;
+/** Projects one profile read looks up in all, seen or not, so private ones never make the read unbounded. */
+export const PERSON_PROJECTS_PROBE = 200;
 /** Runs one project entry keeps per day; a busier day keeps the most active and counts the rest. */
 export const PERSON_DAY_RUNS = 40;
 

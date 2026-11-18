@@ -63,6 +63,13 @@ export type MetricSubmission = {
   scopedFallback?: string | undefined;
   /** Why the entry's own first check did not carry it (`firstCheck` stage), failed entries included (81d12a32). */
   firstCheckRecheck?: string | null | undefined;
+  /** A revert submission: never a first submission (hosted requests). */
+  compensating?: boolean | undefined;
+  /** The admission run, when one ran: the submission's first check (9ce2ee79). */
+  admissionRun?:
+    | { runId: string; status: 'checking' | 'passed' | 'failed' | 'unavailable' }
+    | null
+    | undefined;
   /** The shared cohort check that failed before this member fell back to its own check. */
   sharedBatch?: { runId: string; individualPassed: boolean; likelyCulprit: boolean } | null | undefined;
   /** The submitting agent's declared client: harness, and model when declared. */
@@ -146,6 +153,8 @@ export type MetricRecords = {
   reuseUnprojected?: boolean;
   /** A hosted page predates the fallback-reason projection (7c2e69e1). */
   fallbacksUnprojected?: boolean;
+  /** Request pages predate the admission-run projection (9ce2ee79). */
+  admissionUnprojected?: boolean;
   /** Request pages predate the second-check projection (81d12a32). */
   secondChecksUnprojected?: boolean;
   gaps: string[];

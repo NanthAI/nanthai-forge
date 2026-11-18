@@ -710,9 +710,10 @@ crossovers near 15.6%, 27.9% and 28.0% respectively. These are sensitivity estim
 for these timelines, not universal thresholds: survivor-latency crossovers are
 different, and runner capacity, duration, overlap and queue depth change the cost.
 The historical dogfood prior in `src/hosted-landing-admission.ts` is about 30% first
-checks failing. Recent self-metrics expose failed attempts and total started runs,
-but do not supply a matching first-submission denominator; they cannot establish a
-new first-check red rate. Zero test failures in the three observed cells explain
+checks failing. Self-metrics now report the measured value
+(`totals.firstChecks`, [operations](operations.md#first-submission-check-red-rate)): red first checks over
+decided first checks per window, with flaky, cohort-failed, cancelled, runner-unavailable,
+pending and unresolved checks counted apart. Zero test failures in the three observed cells explain
 why their expensive red-isolation path supplies no measured benefit.
 
 Prefer a recommendation derived from the project's compatible measured checks,

@@ -62,6 +62,7 @@ export function formatMetricReport(current: MetricsSurface, before?: MetricsSurf
     '',
     ...formatFallbacks(current),
     ...formatSecondChecks(current),
+    ...formatFirstChecks(current),
     `Finish-to-main (trusted actors): ${finishToMain(current)}. ${cell(current.totals.finishToMain.gaps.join(' '))}`,
     '',
     ...speedBudgetTable(current.totals.speedBudgets.rows),
@@ -107,6 +108,21 @@ export function formatSecondChecks(current: MetricsSurface) {
         ]
       : []),
     ...value.byModel.map(row => `  ${row.model}: ${row.secondChecks} second checks, ${row.failed} failed`),
+    ...value.gaps.map(gap => `  ${gap}`),
+  ];
+}
+/** First-submission check red rate, with what was left out of it and the recent tails (9ce2ee79). */
+export function formatFirstChecks(current: MetricsSurface) {
+  const value = current.totals.firstChecks;
+  const percent = (rate: number | null) => (rate === null ? 'n/a' : `${(rate * 100).toFixed(1)}%`);
+  const x = value.excluded;
+  return [
+    `First-submission check red rate: ${percent(value.rate)} (${value.red} red of ${value.decided} decided, ${value.firstSubmissions} first submissions)${value.partial ? ' · partial' : ''}`,
+    `  left out: ${x.flaky} flaky, ${x.cohort} cohort-failed, ${x.cancelled} cancelled, ${x.runnerUnavailable} runner unavailable, ${x.pending} pending, ${x.noCheck} no check, ${x.unresolved} unresolved`,
+    ...value.recent.map(
+      row =>
+        `  last ${row.size}: ${percent(row.rate)} (${row.red}/${row.decided})${row.complete ? '' : ' · fewer than ' + row.size + ' in window'}`,
+    ),
     ...value.gaps.map(gap => `  ${gap}`),
   ];
 }
@@ -164,6 +180,7 @@ export function formatMetrics(current: MetricsSurface) {
     ...formatSpeedBudgets(current.totals.speedBudgets.rows),
     ...formatFallbacks(current),
     ...formatSecondChecks(current),
+    ...formatFirstChecks(current),
     ...formatFlakes(current),
     'Daily values and named gaps: --json; report: --report FILE.md',
   ].join('\n');

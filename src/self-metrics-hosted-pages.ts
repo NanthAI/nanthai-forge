@@ -68,6 +68,10 @@ const rowSchemas = {
     attemptId: z.string().optional(),
     endedAt: nullableStamp.optional(),
     firstCheckRecheck: z.string().min(1).max(64).nullable().optional(),
+    admissionRun: z
+      .object({ runId: z.string(), status: z.enum(['checking', 'passed', 'failed', 'unavailable']) })
+      .nullable()
+      .optional(),
     sharedBatch: z
       .object({ runId: z.string(), individualPassed: z.boolean(), likelyCulprit: z.boolean() })
       .nullable()
@@ -369,6 +373,7 @@ export async function readHostedMetricPages(
           } else if (stream === 'requests') {
             const row = rowSchemas.requests.parse(rawRow);
             if (row.firstCheckRecheck === undefined) records.secondChecksUnprojected = true;
+            if (row.admissionRun === undefined) records.admissionUnprojected = true;
             if (row.retry)
               retries.push({
                 schema: 1,

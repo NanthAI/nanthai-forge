@@ -6,7 +6,7 @@ import { calculateWaste } from './self-metrics-waste.js';
 import { observations, during, percentile } from './self-metrics-joins.js';
 import { flakeList } from './self-metrics-flakes.js';
 import { fallbackMetric } from './self-metrics-fallbacks.js';
-import { secondCheckMetric } from './self-metrics-second-checks.js';
+import { firstCheckMetric, secondCheckMetric } from './self-metrics-second-checks.js';
 import { z } from 'zod';
 import { invariant } from './errors.js';
 import type { MetricPeriod, MetricRecords } from './self-metrics-types.js';
@@ -195,6 +195,11 @@ export function metricTotals(
     secondChecks: (() => {
       const value = secondCheckMetric(records, period);
       return wrap(value, value.total);
+    })(),
+    // First-submission check red rate (9ce2ee79): the pre-queue check choice's measured input.
+    firstChecks: (() => {
+      const value = firstCheckMetric(records, period);
+      return wrap(value, value.firstSubmissions);
     })(),
     placement: wrap(result.placement, records.placement ? 1 : 0),
     disk: wrap(

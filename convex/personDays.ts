@@ -14,7 +14,9 @@ import { projectRole } from './projectRole';
 import { report } from './errors';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import {
+  PERSON_DAYS_PAGES,
   PERSON_DAYS_READ,
+  PERSON_PROJECTS_PROBE,
   PERSON_PROJECTS_READ,
   personDaySchema,
   profileRead,
@@ -52,33 +54,55 @@ export async function readProfile(
   input: { owner: string; handle: string; viewer: string | null; agentsFrom: number },
 ) {
   const self = input.viewer === input.owner;
-  const rows = await ctx.db
-    .query('personDays')
-    .withIndex('by_person_and_day', q => q.eq('person', input.owner))
-    .order('desc')
-    .take(PERSON_DAYS_READ);
-  const parsed = rows.map(row => ({
-    day: row.day,
-    value: personDaySchema.parse(JSON.parse(row.value)) as PersonDay,
-  }));
-  // Newest first, so a person on many projects keeps the ones they worked on lately.
-  const ids: string[] = [];
-  for (const row of parsed) for (const id of Object.keys(row.value.p)) if (!ids.includes(id)) ids.push(id);
+  // Caps count what the viewer may see (Item a9ad21c9): a person active mostly in private projects still shows a full
+  // year of days and 50 projects to a visitor. The scan stays bounded: PERSON_DAYS_SCAN rows and PERSON_PROJECTS_PROBE
+  // projects at most, however private the history.
   const seen = new Map<string, Seen>();
   const handles = new Map<string, string | null>();
-  for (const id of ids.slice(0, PERSON_PROJECTS_READ)) {
+  const tried = new Set<string>();
+  let probed = 0,
+    leftOut = 0;
+  const resolve = async (id: string) => {
+    if (tried.has(id)) return;
+    tried.add(id);
+    if (seen.size >= PERSON_PROJECTS_READ || probed >= PERSON_PROJECTS_PROBE) {
+      leftOut++;
+      return;
+    }
+    probed++;
     const projectId = ctx.db.normalizeId('hostedProjects', id);
     const project = projectId ? await ctx.db.get(projectId) : null;
-    if (!project || project.removal || !project.slug) continue;
+    if (!project || project.removal || !project.slug) return;
     const open = isPublicProject(project);
     const shared =
       !self && !open && input.viewer ? (await projectRole(ctx, project, input.viewer)) !== null : false;
-    if (!self && !open && !shared) continue;
+    if (!self && !open && !shared) return;
     if (!handles.has(project.owner))
       handles.set(project.owner, (await accountFor(ctx, project.owner))?.handle ?? null);
     const handle = handles.get(project.owner);
-    if (!handle) continue;
+    if (!handle) return;
     seen.set(id, { visibility: open ? 'public' : 'private', shared, handle, slug: project.slug });
+  };
+  // Newest day first, so a person on many projects keeps the ones they worked on lately.
+  const parsed: { day: string; value: PersonDay }[] = [];
+  let before: string | undefined;
+  scan: for (let page = 0; page < PERSON_DAYS_PAGES; page++) {
+    const rows = await ctx.db
+      .query('personDays')
+      .withIndex('by_person_and_day', q =>
+        before === undefined ? q.eq('person', input.owner) : q.eq('person', input.owner).lt('day', before),
+      )
+      .order('desc')
+      .take(PERSON_DAYS_READ);
+    for (const row of rows) {
+      const value = personDaySchema.parse(JSON.parse(row.value)) as PersonDay;
+      const ids = Object.keys(value.p);
+      for (const id of ids) await resolve(id);
+      if (ids.some(id => seen.has(id))) parsed.push({ day: row.day, value });
+      if (parsed.length >= PERSON_DAYS_READ) break scan;
+    }
+    if (rows.length < PERSON_DAYS_READ) break;
+    before = rows.at(-1)!.day;
   }
   const scope: ProfileScope = self ? 'all' : [...seen.values()].some(p => p.shared) ? 'shared' : 'public';
   return profileRead({
@@ -88,7 +112,7 @@ export async function readProfile(
     rows: parsed,
     seen,
     // Only the person themself is told about projects past the cap: for anyone else it could hint at a private one.
-    projectsLeftOut: self ? Math.max(0, ids.length - PERSON_PROJECTS_READ) : 0,
+    projectsLeftOut: self ? leftOut : 0,
     agentsFrom: input.agentsFrom,
   });
 }

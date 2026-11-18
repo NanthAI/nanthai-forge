@@ -13,6 +13,7 @@ import { discardedRunnerSeconds } from '../src/cost-budgets';
 import type { Contribution } from '../src/person-days';
 import { landingAcceptedBySchema } from '../src/landing-accepted-by';
 import { recordPersonDays } from './personDays';
+import { DAY_MS, isAccount, laneWindowStart, lanesByDay } from './statsLanes';
 import {
   STATS_COMPARE_MIN_LANDINGS,
   STATS_DAY_MAX_LANDINGS,
@@ -32,8 +33,6 @@ import {
 export const STATS_CLOSE_LANDINGS = 1_000;
 /** About three months of closed days; a busier project reads more bytes per day row, never more rows. */
 export const STATS_READ_DAYS = 92;
-
-const DAY_MS = 86_400_000;
 
 const ms = (iso: string | undefined) => {
   const value = iso === undefined ? NaN : Date.parse(iso);
@@ -64,9 +63,6 @@ export function statsLanding(
     ranInFull: Boolean(state?.ranInFull),
   };
 }
-
-/** Account ids never contain whitespace or ':'; other actors are system actors and count for no one. */
-const isAccount = (actor: string | undefined): actor is string => !!actor && !/[\s:]/.test(actor);
 
 /** What one accepted landing counts for: a landing for its submitter (by one of their agent runs when it names one,
  * with the model the run declared), and a review for the person who accepted it after its check, unless that person
@@ -130,34 +126,19 @@ export const closeDay = internalMutation({
       landings.push(statsLanding(receipt, state, request?.runnerAccounting?.pending));
       contributions.push(...landingContributions(receipt, state));
     }
-    // A person's day (Item 6a251b23): the Lanes started that day, open or not, from the same close.
-    for (const open of [true, false]) {
-      const lanes = await ctx.db
-        .query('projectHostedOverlapLanes')
-        .withIndex('by_project_and_open', q =>
-          q
-            .eq('projectId', projectId)
-            .eq('open', open)
-            .gte('_creationTime', from)
-            .lt('_creationTime', from + DAY_MS),
-        )
-        .take(STATS_CLOSE_LANDINGS);
-      for (const lane of lanes)
-        if (isAccount(lane.actor))
-          contributions.push({
-            kind: 'lane',
-            person: lane.actor,
-            at: lane._creationTime,
-            ...(lane.agent ? { run: lane.agent } : {}),
-          });
-    }
-    await recordPersonDays(ctx, projectId, day, contributions);
     // The replayed queue starts behind the newest closed day before this one.
     const before = await ctx.db
       .query('projectStatsDays')
       .withIndex('by_project_and_day', q => q.eq('projectId', projectId).lt('day', day))
       .order('desc')
       .first();
+    // A person's day (Items 6a251b23, a9ad21c9): the Lanes started since the previous closed day, open or not, each
+    // filed under its own day. A day with Lanes but no landing here never closes, so this close counts it.
+    const lanes = await lanesByDay(ctx, projectId, laneWindowStart(before?.day, day), from + DAY_MS);
+    for (const [laneDay, list] of [...lanes.byDay].sort((a, b) => a[0].localeCompare(b[0])))
+      if (laneDay !== day) await recordPersonDays(ctx, projectId, laneDay, list);
+    contributions.push(...(lanes.byDay.get(day) ?? []));
+    await recordPersonDays(ctx, projectId, day, contributions);
     const freeAt = before ? statsDaySchema.parse(JSON.parse(before.value)).replay.freeAt : 0;
     const closed = statsDay(day, landings, freeAt);
     const value = canonicalPayload(

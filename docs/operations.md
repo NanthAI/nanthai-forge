@@ -357,6 +357,27 @@ failure that every member survived left no failed entry. `byModel` splits second
 failures by the agent client each landing declared (`not recorded` when none). The
 [landing mode](pre-queue-checks.md#landing-modes) advice rests on these numbers.
 
+#### First-submission check red rate
+
+`totals.firstChecks` is the first-submission check red rate: of the changes first submitted in
+the window, the share whose first check (the admission run when one ran, else the first attempt's
+queue run) failed on the change itself. The rate is red over decided (green + red). Left out of it
+and reported apart: `flaky` (the run recovered flaky files, or it failed and the same Lane head
+landed later), `cohort` (a shared cohort check failed while this change passed alone), `cancelled`,
+`runnerUnavailable` (runner unavailable, budget exhausted or interrupted), `pending` (not ended, `unknown` included), `noCheck` and
+`unresolved` (the run row is outside the read). Retries (`supersedes`), reverts and later
+submissions of an Intent an earlier submission already carried are not first submissions; the
+count includes changes that never landed, since a red first check followed by abandonment is the
+cost the pre-queue choice is meant to weigh. `recent` gives the same rate over the newest 50 and
+200 decided first checks in the window, with `complete: false` when the window holds fewer.
+Compare it with the 16-28% CI break-even band in
+[Red-change sensitivity](pre-queue-checks.md#red-change-sensitivity); the band is an estimate for
+those timelines, not policy. The request page adds only the admission run id and status (two small
+fields on a row it already reads): one metrics call reads the same pages as before (about one call
+per 100 requests, attempts, runs and acceptances in the window plus its context days), no new
+stream, nothing on the landing path and nothing when idle. A request page from an older deployment
+makes the value `partial` and counts the first queue run instead.
+
 `landings {from,to,limit?,cursor?}` (`nforge agent ROOT landings`) is the cheap read for
 replays and cost capture: accepted landings in the UTC window [from,to) by commit time,
 oldest first, at most 30 per page (default 20) and under 64 KB, read in one query per page
