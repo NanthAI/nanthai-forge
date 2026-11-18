@@ -39,7 +39,7 @@ const args = {
   ),
   agentClient: v.optional(v.string()),
   noticeVersion: v.optional(v.literal(1)),
-  openLanesVersion: v.optional(v.literal(1)),
+  openLanesVersion: v.optional(v.union(v.literal(1), v.literal(2))),
   /** The calling agent session's slug (feature agent-slug, c29d0780); not part of the payload. */
   agent: v.optional(v.string()),
   session: v.optional(
@@ -71,7 +71,7 @@ type Input = {
   authorship?: AuthorshipClaim;
   agentClient?: string;
   noticeVersion?: 1;
-  openLanesVersion?: 1;
+  openLanesVersion?: 1 | 2;
   agent?: string;
   authorityEpoch: number;
   expectedMain: { head: string; receiptId: string };
@@ -84,10 +84,12 @@ type Input = {
     | { kind: 'planned'; intentId: string; outcome: string; constraints?: string };
 };
 
-function startReply(value: unknown, noticeVersion?: 1, openLanesVersion?: 1) {
+function startReply(value: unknown, noticeVersion?: 1, openLanesVersion?: 1 | 2) {
   const { openLanes, ...result } = hostedStartResultSchema.parse(value);
   // Older strict clients reject unknown reply fields: each one is sent only when the client asked.
-  const current = openLanesVersion === 1 && openLanes ? { ...result, openLanes } : result;
+  const listed =
+    openLanesVersion === 2 ? openLanes : openLanes?.map(({ resolves: _resolves, ...lane }) => lane);
+  const current = openLanesVersion && listed ? { ...result, openLanes: listed } : result;
   if (noticeVersion === 1) return current;
   const { fixBrief: brief, needsFix: notices, ...legacy } = current;
   void brief;

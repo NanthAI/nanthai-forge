@@ -107,7 +107,7 @@ import { hostedMainV2Schema } from './hosted-main.js';
 import { hostedRootLanePath, laneSiblingPath, openHostedRootLane } from './hosted-root-checkout.js';
 import { START_COMPLETION_SECONDS, boundedStep, startContinuation } from './hosted-start-continuation.js';
 import { gcNestedLanesHourly } from './client-cache-gc.js';
-import { hostedStartResultSchema } from './hosted-lane.js';
+import { hostedStartResultSchema, replacedOpenLanes } from './hosted-lane.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { HostedAgentJournal, agentSessionKey, hostedAgentRoot } from './hosted-agent-journal.js';
 import { sessionAgentSlug, sessionAgentIdentity } from './agent-slug-session.js';
@@ -1346,6 +1346,9 @@ export class HostedAgentTransport {
                 'no-placement',
               ),
             };
+          // An open resolution Lane beside the Lane it resolves: name both and the abandon command (d9e1ac62).
+          const replaced = replacedOpenLanes(started.openLanes);
+          if (replaced.length) result = { ...(result as object), replaced };
         }
         if (planning) result = { ...(result as object), planning };
         const startedIntent = (result as { intentId?: string }).intentId;

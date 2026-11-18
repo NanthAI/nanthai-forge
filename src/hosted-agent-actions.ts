@@ -544,7 +544,11 @@ export async function executeHostedAgent(
             }
           : {}),
         ...(session.capabilities.needsFix !== undefined ? { noticeVersion: 1 } : {}),
-        ...(session.capabilities.openLanesVersion === 1 ? { openLanesVersion: 1 } : {}),
+        ...(session.capabilities.openLanesVersion === 1
+          ? {
+              openLanesVersion: session.capabilities.features?.includes('start-open-lanes-resolves') ? 2 : 1,
+            }
+          : {}),
         ...(session.agent ? { agent: session.agent } : {}),
         ...(session.holderSessionId
           ? {

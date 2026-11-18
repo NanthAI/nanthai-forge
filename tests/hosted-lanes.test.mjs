@@ -6,6 +6,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { hostedLaneSelectionSchema } from '../dist/hosted-lane.js';
+import * as laneHint from '../dist/hosted-lane.js';
 import { successorIntentId } from '../dist/hosted-intent-chain.js';
 const start = await import(moduleUrl('../convex/projectHostedStart.ts'));
 const reads = await import(moduleUrl('../convex/projectHostedLanes.ts'));
@@ -442,6 +443,83 @@ test('a sibling start lists the other open Lanes newest first with public handle
   });
   assert(!later.openLanes.some(lane => lane.laneId === first.lane.laneId));
   assert.equal(later.openLanes.length, 3);
+});
+
+// Item d9e1ac62 (real case: Item 1dd4e095, Lanes ac26ac6f and c908b679): a start lists which open Lane is the resolution
+// of another, so the agent can be told which one is replaced. Only version 2 clients get the field, and the read
+// costs nothing extra: it comes from the Lane records the sibling list already parses.
+async function resolutionPair() {
+  const s = await setup();
+  s.insert('forgeAccounts', { owner: 'owner', handle: 'lead' });
+  const origin = await s.begin({ ...s.input(), openLanesVersion: 1 });
+  const sibling = () => s.input({ kind: 'existing', intentId: origin.intentId });
+  const resolution = await s.begin(sibling());
+  // Make the second Lane the resolution of the first, as a conflicted sync records it.
+  await s.call('resolve', {
+    _handler: async ctx => {
+      const row = await records.readHostedRecord(ctx, {
+        projectId: s.projectId,
+        actor: 'owner',
+        kind: 'lane',
+        key: resolution.lane.laneId,
+      });
+      const lane = JSON.parse(row.value);
+      await records.writeHostedRecord(ctx, {
+        projectId: s.projectId,
+        actor: 'owner',
+        authorityEpoch: 1,
+        expectedVersion: lane.version,
+        record: {
+          ...lane,
+          version: lane.version + 1,
+          resolution: {
+            candidateId: null,
+            conflicts: { sha256: 'c'.repeat(64), size: 1 },
+            left: lane.head,
+            right: lane.head,
+            draftHead: lane.head,
+            origin: { laneId: origin.lane.laneId, head: lane.head, sourceVersion: 0 },
+            status: 'pending',
+          },
+        },
+      });
+    },
+  });
+  return { s, origin, resolution, sibling };
+}
+test('d9e1ac62: a version 2 start names the Lane each open resolution Lane resolves, at the same read cost', async () => {
+  const one = await resolutionPair();
+  const v1 = await one.s.begin({ ...one.sibling(), openLanesVersion: 1 });
+  const v1Cost = one.s.counts.at(-1);
+  assert.equal(v1.openLanes.length, 2);
+  assert.ok(
+    v1.openLanes.every(lane => !('resolves' in lane)),
+    'a version 1 client never sees the field',
+  );
+  const { s, origin, resolution, sibling } = await resolutionPair();
+  const v2 = await s.begin({ ...sibling(), openLanesVersion: 2 });
+  const v2Cost = s.counts.at(-1);
+  assert.deepEqual(
+    v2.openLanes.map(lane => [lane.laneId, lane.resolves ?? null]),
+    [
+      [resolution.lane.laneId, origin.lane.laneId],
+      [origin.lane.laneId, null],
+    ],
+  );
+  assert.deepEqual(
+    { documents: v2Cost.documents, ranges: v2Cost.ranges },
+    { documents: v1Cost.documents, ranges: v1Cost.ranges },
+    'the start reads no more for the field',
+  );
+  assert.deepEqual(laneHint.replacedOpenLanes(v2.openLanes), [
+    {
+      laneId: origin.lane.laneId,
+      replacedBy: resolution.lane.laneId,
+      note: `Lane ${origin.lane.laneId} continues in its resolution Lane ${resolution.lane.laneId}. Once its work is confirmed there, abandon it.`,
+      next: `nforge x ROOT abandon {"laneId":"${origin.lane.laneId}","reason":"Replaced by Lane ${resolution.lane.laneId}"}`,
+    },
+  ]);
+  assert.deepEqual(laneHint.replacedOpenLanes(v1.openLanes), [], 'no hint without the field');
 });
 
 test('assigned contributors can start siblings; removing assignment revokes their completed retry', async () => {

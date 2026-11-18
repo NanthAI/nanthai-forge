@@ -131,6 +131,8 @@ function briefStart(result: Json): Json {
   if (dependencies && dependencies.status !== 'linked') out.dependencies = { status: dependencies.status };
   const planning = obj(result.planning);
   if (planning && planning.updated !== false) out.planning = planning;
+  // The replaced-Lane hint is the next step, so the compact reply keeps it (d9e1ac62).
+  if (Array.isArray(result.replaced)) out.replaced = result.replaced;
   return out;
 }
 

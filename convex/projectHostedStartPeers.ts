@@ -7,7 +7,14 @@ import { hostedRecordBody } from './projectHostedRecords';
 /** At most this many other open Lanes are shown; at most `SCANNED` newest Lane heads are read. */
 export const START_OPEN_LANES = 5;
 const SCANNED = 8;
-export type StartOpenLane = { laneId: string; owner: string | null; yours: boolean; lastActivityAt: string };
+export type StartOpenLane = {
+  laneId: string;
+  owner: string | null;
+  yours: boolean;
+  lastActivityAt: string;
+  /** From the Lane record this read already parses: no extra read (Item d9e1ac62). */
+  resolves?: string;
+};
 
 /** Other open Lanes on the Intent a start just joined, newest first, so a second agent sees who
  * already works on it (issue b6ba9219). Bounded indexed reads inside the start mutation: no extra
@@ -57,6 +64,7 @@ export async function openSiblingLanes(
       owner: handles.get(lane.actor) ?? null,
       yours: lane.actor === caller,
       lastActivityAt: lane.at,
+      ...(lane.resolution?.origin ? { resolves: lane.resolution.origin.laneId } : {}),
     });
   }
   return lanes;

@@ -56,8 +56,9 @@ export const hostedStartSchema = z
     authorship: authorshipFields.authorship,
     agentClient: authorshipFields.agentClient,
     noticeVersion: z.literal(1).optional(),
-    /** The client reads openLanes in the reply (capability openLanesVersion); never part of the payload hash. */
-    openLanesVersion: z.literal(1).optional(),
+    /** The client reads openLanes in the reply (capability openLanesVersion); 2 adds each Lane's `resolves`
+     * (feature start-open-lanes-resolves). Never part of the payload hash. */
+    openLanesVersion: z.union([z.literal(1), z.literal(2)]).optional(),
     /** The calling agent session's slug (feature agent-slug, c29d0780); never part of the payload hash. */
     agent: z.string().refine(isAgentSlug, 'agent must be a Forge agent slug').optional(),
     session: sessionClaimSchema.optional(),
@@ -103,6 +104,25 @@ export const hostedLaneSelectionSchema = z
   .refine(personStampValid, 'A person stamp has no model or run.');
 export type HostedLaneSelection = z.infer<typeof hostedLaneSelectionSchema>;
 
+type OpenLane = { laneId: string; resolves?: string | undefined };
+/** The start hint for replaced Lanes (Item d9e1ac62): an open resolution Lane listed beside the open Lane it resolves.
+ * Advice only: nothing is abandoned, and it is built from the reply's own list (no read). */
+export function replacedOpenLanes(openLanes: readonly OpenLane[] | undefined) {
+  const open = new Set((openLanes ?? []).map(lane => lane.laneId));
+  return (openLanes ?? []).flatMap(lane =>
+    lane.resolves && lane.resolves !== lane.laneId && open.has(lane.resolves)
+      ? [
+          {
+            laneId: lane.resolves,
+            replacedBy: lane.laneId,
+            note: `Lane ${lane.resolves} continues in its resolution Lane ${lane.laneId}. Once its work is confirmed there, abandon it.`,
+            next: `nforge x ROOT abandon ${JSON.stringify({ laneId: lane.resolves, reason: `Replaced by Lane ${lane.laneId}` })}`,
+          },
+        ]
+      : [],
+  );
+}
+
 export const hostedStartResultSchema = z
   .object({
     fixBrief: z.string().optional(),
@@ -122,6 +142,8 @@ export const hostedStartResultSchema = z
             owner: z.string().nullable(),
             yours: z.boolean(),
             lastActivityAt: z.iso.datetime(),
+            /** A resolution Lane: the conflicted Lane it continues (openLanesVersion 2 only). */
+            resolves: z.uuid().optional(),
           })
           .strict(),
       )

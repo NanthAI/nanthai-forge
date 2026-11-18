@@ -20,6 +20,7 @@ import {
 import { hostedAgentCommandSchemas, hostedAgentActions } from '../dist/hosted-agent-contract.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { hostedContractFeatures } from '../dist/hosted-contract-features.js';
+import { printedReceipt } from '../dist/receipt-slim.js';
 import { planningIssueArguments } from '../dist/planning-issue-arguments.js';
 import { z } from 'zod';
 import { ConvexError } from 'convex/values';
@@ -1386,6 +1387,47 @@ test('incident replay 20b91e86: an identical start from another agent session op
   assert.match(again.result.previousLane.note, /No agent session id/);
   assert.equal(again.result.previousLane.unscoped, undefined);
   assert.equal(reads().length, 2, 'only the two same-session retries read their Lane state');
+});
+
+// Item d9e1ac62 (real case: Item 1dd4e095): a start beside an open resolution Lane and the open Lane it resolves names
+// both and the one abandon command, as advice only; it asks for the field only from a server that offers it.
+test('d9e1ac62: start names the Lane an open resolution Lane replaces, with the abandon command, and keeps it compact', async t => {
+  const origin = randomUUID(),
+    resolution = randomUUID();
+  for (const offered of [false, true]) {
+    const { s, item, starts } = plannedStartFixture(t);
+    s.caps.openLanesVersion = 1;
+    if (offered) s.caps.features = ['start-open-lanes-resolves'];
+    const mutation = s.exchange.client.mutation;
+    s.exchange.client.mutation = async (ref, args) => {
+      const value = await mutation(ref, args);
+      if (getFunctionName(ref) !== 'projectHostedStart:start') return value;
+      const result = JSON.parse(value);
+      // Like the server: `resolves` only for version 2.
+      result.openLanes = [
+        { laneId: resolution, owner: 'lead', yours: true, lastActivityAt: '2026-01-01T00:00:00.000Z' },
+        { laneId: origin, owner: 'lead', yours: true, lastActivityAt: '2026-01-01T00:00:00.000Z' },
+      ];
+      if (args.openLanesVersion === 2) result.openLanes[0].resolves = origin;
+      return JSON.stringify(result);
+    };
+    const started = await s.transport('agent-a').dispatch('start', { planningItemId: item.id });
+    assert.equal(starts()[0].args.openLanesVersion, offered ? 2 : 1);
+    if (!offered) {
+      assert.equal(started.result.replaced, undefined, 'an older server: no hint, nothing guessed');
+      continue;
+    }
+    const hint = {
+      laneId: origin,
+      replacedBy: resolution,
+      note: `Lane ${origin} continues in its resolution Lane ${resolution}. Once its work is confirmed there, abandon it.`,
+      next: `nforge x ROOT abandon {"laneId":"${origin}","reason":"Replaced by Lane ${resolution}"}`,
+    };
+    assert.deepEqual(started.result.replaced, [hint]);
+    assert.equal(s.calls.filter(call => call.name.endsWith(':abandon')).length, 0, 'advice only');
+    const printed = printedReceipt(started, { agent: true, detail: false, landChild: false });
+    assert.deepEqual(printed.result.replaced, [hint], 'the compact reply keeps the hint');
+  }
 });
 
 // Follow-up 3676f3e1: native subagents of one client share its session id. No per-subagent identity
