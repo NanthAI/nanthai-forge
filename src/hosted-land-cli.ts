@@ -45,6 +45,7 @@ import { withLandWaitMetrics } from './land-wait-metrics.js';
 import { backgroundWake, wakeContinuation } from './agent-wake.js';
 import { landEditedResolution } from './hosted-land-resolution.js';
 import { LAND_CHILD_ENV } from './hosted-land-child-env.js';
+import { syncOnceRelanded, syncOnceStopped, syncRequiredOnce } from './hosted-land-sync-once.js';
 
 export { landPhase, landSummary };
 
@@ -116,6 +117,19 @@ export async function submitHostedLand(
       Math.min(60, remaining),
     );
     response = (await hostedAgentCli(root, 'finish', command, address, transport)) as HostedAgentResponse;
+  }
+  // FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT: a land that rejoined its own SYNC_REQUIRED entry syncs once.
+  const once = await syncRequiredOnce(
+    transport.root ?? root,
+    command,
+    response,
+    async (action, body) =>
+      (await hostedAgentCli(root, action, body, address, transport)) as HostedAgentResponse,
+    line => process.stderr.write(`${line}\n`),
+  );
+  if (once) {
+    response = once;
+    if (syncOnceRelanded(once)) announce(transport.root ?? root, command, response, wake);
   }
   // Where the time before submission went: in the receipt, and one line for people.
   const timing = landTiming();
@@ -327,7 +341,7 @@ export async function hostedLandCli(
         `land: ${resultOf(submitted).phase === 'finish' ? 'SUBMITTED' : 'IN PROGRESS'}; it settles without you. Run once in the background; its exit is your one wake (landed, failed or cancelled, with the receipt): ${awake.command}\n`,
       );
     else if (next) process.stderr.write(`Next: wait for the outcome with ${next}\n`);
-    if (landOutcomeKind(submitted) === 'failed') process.exitCode = 2;
+    if (landOutcomeKind(submitted) === 'failed' || syncOnceStopped(submitted)) process.exitCode = 2;
     else if (
       (wait || wake) &&
       !awake &&

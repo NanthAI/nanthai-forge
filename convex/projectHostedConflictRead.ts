@@ -20,7 +20,14 @@ import { FORGE_CONFIG_FILE } from '../src/project-config';
 
 /** Use the same verified raw/pack/nonce bindings as composition. Never treat a logical blob
  * digest as its physical R2 key: imported and saved files can live inside packs. */
-export function trialReader(ctx: ActionCtx, projectId: Id<'hostedProjects'>, plan: TrialPlan) {
+export function trialReader(
+  ctx: ActionCtx,
+  projectId: Id<'hostedProjects'>,
+  plan: TrialPlan,
+  /** Paths whose State entries (blob and mode, never bytes or bindings) `entries` returns; 'all'
+   * keeps every path of each State read. */
+  index: ReadonlySet<string> | 'all' = new Set(),
+) {
   const held = new Map<string, Buffer>();
   const objects = new Map(plan.objects.map(object => [object.digest, object]));
   const bindings = new Map<string, PhysicalEntry>();
@@ -45,16 +52,27 @@ export function trialReader(ctx: ActionCtx, projectId: Id<'hostedProjects'>, pla
     return value;
   };
   const states = new Map<string, Promise<Map<string, { blob: string; mode: string }>>>();
+  const indexed = new Map<string, Map<string, { blob: string; mode: string }>>();
   const paths = new Set([...plan.tasks.map(task => task.path), FORGE_CONFIG_FILE]);
   const state = (object: TrialObject) => {
     let pending = states.get(object.digest);
     if (!pending) {
       pending = (async () => {
+        const parsed = parseNativeState(await load(object)).files;
         const files = new Map(
-          parseNativeState(await load(object))
-            .files.filter(file => paths.has(file.path))
+          parsed
+            .filter(file => paths.has(file.path))
             .map(file => [file.path, { blob: file.blob, mode: file.mode }]),
         );
+        if (index === 'all' || index.size)
+          indexed.set(
+            object.digest,
+            new Map(
+              parsed
+                .filter(file => index === 'all' || index.has(file.path))
+                .map(file => [file.path, { blob: file.blob, mode: file.mode }]),
+            ),
+          );
         const missing = [...files.values()].filter(
           file => !objects.has(file.blob) && !bindings.has(file.blob),
         );
@@ -100,6 +118,9 @@ export function trialReader(ctx: ActionCtx, projectId: Id<'hostedProjects'>, pla
   return {
     state,
     blob,
+    /** The `index` entries of a State `state` already read (a path absent from them is not in that
+     * State); undefined for a State not read. */
+    entries: (digest: string) => indexed.get(digest),
     async prepare() {
       for (const source of plan.sources ?? []) {
         const base = await state(source.base),

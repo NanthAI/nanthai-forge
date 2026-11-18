@@ -20,6 +20,28 @@ export type TrialObject = {
   pack?: { digest: string; size: number; offset: number };
   statePhysical?: { sha256: string; size: number };
 };
+/** The location fields of a stored object row, as every trial or listing read takes them. */
+export function trialObject(row: {
+  digest: string;
+  size: number;
+  location?: string;
+  r2Key?: string;
+  r2Committed?: boolean;
+  storageId?: string;
+  pack?: { digest: string; size: number; offset: number };
+  statePhysical?: { sha256: string; size: number };
+}): TrialObject {
+  return {
+    digest: row.digest,
+    size: row.size,
+    ...(row.location ? { location: row.location } : {}),
+    ...(row.r2Key ? { r2Key: row.r2Key } : {}),
+    ...(row.r2Committed ? { r2Committed: true } : {}),
+    ...(row.storageId ? { storageId: row.storageId } : {}),
+    ...(row.pack ? { pack: row.pack } : {}),
+    ...(row.statePhysical ? { statePhysical: row.statePhysical } : {}),
+  };
+}
 export type TrialPlan = {
   laneId: string;
   head: string;

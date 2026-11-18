@@ -50,6 +50,32 @@ export const wouldConflictSchema = z.union([
     .strict(),
 ]);
 export type WouldConflict = z.infer<typeof wouldConflictSchema>;
+
+/** Temporary queue switch (Item 36fd3295, incident 5e3c3a3c; deleted after its bench A/B): a file main
+ * changed that holds the same bytes as the queued Candidate is not path advice, and land --save
+ * syncs main in once instead of rejoining a stale entry. Off unless exactly "1". */
+const SAME_BYTES_SWITCH = 'FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT';
+export const sameBytesNotConflict = () => process.env[SAME_BYTES_SWITCH] === '1';
+/** Largest Candidate file listing the would-conflict pass reads; a larger one keeps path advice. */
+export const SAME_BYTES_LISTING_BYTES = 1024 * 1024;
+type FileEntry = { blob: string; mode: string } | null;
+/** The paths whose bytes main holds now equal the Candidate's result bytes, from the Candidate's own
+ * file listing. A path the listing does not name stays advice: unknown is never "same". */
+export function sameBytesPaths(
+  paths: readonly string[],
+  main: ReadonlyMap<string, { blob: string; mode: string }>,
+  listing: { files: { path: string; after: FileEntry }[] },
+) {
+  const after = new Map(listing.files.map(file => [file.path, file.after]));
+  return paths.filter(path => {
+    if (!after.has(path)) return false;
+    const mine = after.get(path) ?? null,
+      theirs = main.get(path) ?? null;
+    return mine === null
+      ? theirs === null
+      : theirs !== null && mine.blob === theirs.blob && mine.mode === theirs.mode;
+  });
+}
 export type SyncRequiredAdvice = WouldConflict;
 
 /** The accepted-main variant on a still-queued entry: main already took files this entry changes, so

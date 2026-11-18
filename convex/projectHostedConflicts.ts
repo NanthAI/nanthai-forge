@@ -24,6 +24,7 @@ import {
   TRIAL_MAIN_STATE_BYTES,
   TRIAL_PATHS,
   TRIAL_PEERS,
+  trialObject,
   type TrialObject,
   type TrialPlan,
 } from '../src/hosted-trial-plan';
@@ -325,28 +326,6 @@ export async function mainStateObject(
   return selected?.success && state && state.size <= TRIAL_MAIN_STATE_BYTES && !state.recipe
     ? { head: selected.data.head, state: trialObject(state) }
     : undefined;
-}
-
-function trialObject(row: {
-  digest: string;
-  size: number;
-  location?: string;
-  r2Key?: string;
-  r2Committed?: boolean;
-  storageId?: Id<'_storage'>;
-  pack?: { digest: string; size: number; offset: number };
-  statePhysical?: { sha256: string; size: number };
-}): TrialObject {
-  return {
-    digest: row.digest,
-    size: row.size,
-    ...(row.location ? { location: row.location } : {}),
-    ...(row.r2Key ? { r2Key: row.r2Key } : {}),
-    ...(row.r2Committed ? { r2Committed: true } : {}),
-    ...(row.storageId ? { storageId: row.storageId } : {}),
-    ...(row.pack ? { pack: row.pack } : {}),
-    ...(row.statePhysical ? { statePhysical: row.statePhysical } : {}),
-  };
 }
 
 const rangeList = v.array(v.array(v.number()));

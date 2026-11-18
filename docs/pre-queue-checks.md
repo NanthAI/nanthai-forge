@@ -423,7 +423,7 @@ Switching the mode never invalidates a queued landing: it is read when a proof i
 agent sign-in, switching fast on is held for the owner person, like any edit that changes what may
 land; switching back to strict applies at once.
 
-Two server switches default to off while queue behavior is benchmarked. With
+Three switches default to off while queue behavior is benchmarked. With
 `FORGE_QUEUE_COHORT_KEEP_HEALTHY=1`, batch selection leaves running individual checks in
 place. Where admission checks are enabled, a member without a pass proceeds through the
 individual check path. After an attributed check failure or a withdrawal, healthy members can fall back to
@@ -435,6 +435,17 @@ With `FORGE_QUEUE_CANCEL_HONOURS_FAST=1`, cancellation considers the running che
 risk rules and the project's live fast-mode breaker and audit. It leaves possible package
 placement and Markdown merges for ordinary proof evaluation. Acceptance still decides on
 the completed run and exact composed source.
+
+With `FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT=1` (set on the deployment and in the client),
+a file main changed that already holds the queued Candidate's bytes is not `SYNC_REQUIRED`
+advice: an early resolution carries its predecessor's own files, and the recompose takes
+either side. The would-conflict pass compares main's blob with the Candidate's stored file
+listing in the action it already runs; a Candidate without a readable listing keeps path
+advice. In the client, a `land --save` that rejoins its own marked entry syncs main into the
+Lane once and lands the new head. A sync conflict returns that sync's resolve guidance, and a
+sync still running returns its own resume command (exit 3). If the sync completes without moving
+the Lane, or the landing rejoins the same entry, it stops (exit 2) with the reason instead of
+offering `land --save` again.
 
 ## Three test tiers
 

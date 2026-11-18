@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { syncRequiredAdvice, syncRequiredNext, wouldConflictSchema } from '../src/hosted-would-conflict';
+import {
+  SAME_BYTES_LISTING_BYTES,
+  sameBytesNotConflict,
+  syncRequiredAdvice,
+  syncRequiredNext,
+  wouldConflictSchema,
+} from '../src/hosted-would-conflict';
 export { wouldConflictSchema, type WouldConflict } from '../src/hosted-would-conflict';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
@@ -10,6 +16,13 @@ import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { conflictRule } from '../src/docs-resolution';
 import type { DeclaredMergePaths } from '../src/project-config';
+import { findObject } from './projectObjectFind';
+import { trialObject, type TrialObject } from '../src/hosted-trial-plan';
+
+/** One queued Candidate the config action compares bytes for: its shared paths and its file listing. */
+export type SameBytesCheck = { candidateId: string; paths: string[]; listing: TrialObject };
+/** The action's answer: per Candidate, the shared paths whose bytes main already holds. */
+export type SameBytes = { candidateId: string; paths: string[] }[];
 
 /** Queued rows scanned and Candidates read per land. Queues at dogfood scale hold a few tens of
  * entries, most already checked or batched; the rest stay unmarked. */
@@ -45,6 +58,8 @@ export const mark = internalMutation({
     ...markArgs,
     /** Main's forge.json merge lists, read by projectHostedConflictMerge:wouldConflictConfig. */
     declared: v.optional(v.object({ union: v.array(v.string()), fragments: v.array(v.string()) })),
+    /** FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT only: shared paths main already holds byte-for-byte. */
+    same: v.optional(v.array(v.object({ candidateId: v.string(), paths: v.array(v.string()) }))),
   },
   returns: v.number(),
   handler: (ctx, input) => markWouldConflict(ctx, input),
@@ -55,7 +70,14 @@ export const mark = internalMutation({
  * Path advice, not a proven text conflict. Cost: one bounded queue read plus at most
  * WOULD_CONFLICT_READS Candidate reads (record head + record). A mutation cannot read main's
  * forge.json, so the first entry that would be marked hands the pass once to a small action that
- * reads it (main's State, then forge.json) and calls back with `declared`. */
+ * reads it (main's State, then forge.json) and calls back with `declared`.
+ *
+ * With FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT=1 (Item 36fd3295), a shared path whose bytes main now holds
+ * is not advice: an early resolution carries its predecessor's own files, and the recompose takes
+ * either side. The first pass then collects every would-be-marked Candidate (still at most
+ * WOULD_CONFLICT_READS, plus one object-row read for each Candidate's file listing) and hands them to
+ * the same one action, which also compares main's blobs with each listing and calls back with `same`.
+ * A Candidate without a readable listing keeps path advice. */
 export async function markWouldConflict(
   ctx: MutationCtx,
   input: {
@@ -63,10 +85,16 @@ export async function markWouldConflict(
     paths: string[];
     landedSubmissionId: string;
     declared?: DeclaredMergePaths;
+    same?: SameBytes;
   },
   now = Date.now(),
 ) {
   const declared = input.declared;
+  const sameBytes = sameBytesNotConflict();
+  const same =
+    sameBytes && input.same ? new Map(input.same.map(entry => [entry.candidateId, entry.paths])) : null;
+  const checks: SameBytesCheck[] = [];
+  let handoff = false;
   if (!input.paths.length) return 0;
   const landed = new Set(input.paths);
   const queued = await ctx.db
@@ -100,17 +128,29 @@ export async function markWouldConflict(
     // Shared Markdown docs and declared lists need no sync: the queue's recompose merges them with
     // the same rules, and a conflict it cannot merge surfaces as an actual compose conflict
     // (Issues 561996ac, 853fcde3).
+    const equal = new Set(same?.get(row.candidateId) ?? []);
     const shared = (candidate.governance?.paths ?? [])
-      .filter(path => landed.has(path) && !conflictRule(path, declared ?? NO_MERGE_PATHS))
+      .filter(path => landed.has(path) && !conflictRule(path, declared ?? NO_MERGE_PATHS) && !equal.has(path))
       .sort();
     if (!shared.length) continue;
-    if (!declared) {
+    if (!declared && !sameBytes) {
       await ctx.scheduler.runAfter(
         0,
         makeFunctionReference<'action'>('projectHostedConflictMerge:wouldConflictConfig'),
         { projectId: input.projectId, paths: input.paths, landedSubmissionId: input.landedSubmissionId },
       );
       return 0;
+    }
+    if (!declared || (sameBytes && !same)) {
+      handoff = true;
+      const listing = record.candidateFiles;
+      const object =
+        listing && listing.size <= SAME_BYTES_LISTING_BYTES
+          ? await findObject(ctx, input.projectId, listing.sha256)
+          : null;
+      if (object && !object.recipe)
+        checks.push({ candidateId: row.candidateId, paths: shared, listing: trialObject(object) });
+      continue;
     }
     const paths = shared.slice(0, 10),
       more = shared.length - paths.length;
@@ -145,6 +185,17 @@ export async function markWouldConflict(
     });
     marked++;
   }
+  if (handoff)
+    await ctx.scheduler.runAfter(
+      0,
+      makeFunctionReference<'action'>('projectHostedConflictMerge:wouldConflictConfig'),
+      {
+        projectId: input.projectId,
+        paths: input.paths,
+        landedSubmissionId: input.landedSubmissionId,
+        checks: JSON.stringify(checks),
+      },
+    );
   return marked;
 }
 
