@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 // The Code place's source reads (Item 90e5bc9c): one folder, one file page, or what one landing changed, at an exact
-// State. Each read is the existing source reader (projectSourceReview, render path): the same access check before and
-// after the bytes (public projects included, signed-out reads charged), the same verified State and blob pins, and no
+// State; a folder read adds the first page of each subfolder (Item a3b55a6e). Each read is the existing source reader
+// (projectSourceReview, render path): the same access check before and after the bytes (public projects included, signed-out reads charged), the same verified State and blob pins, and no
 // signed URL or object key in the reply. The browser receives the folders it opened and 16,000-character file pages,
 // never the whole State.
 import { v } from 'convex/values';
@@ -16,6 +16,7 @@ import {
   changedPaths,
   folderPage,
   pathKind,
+  withChildren,
   CODE_DIR_DEPTH,
   CODE_TOUCHED_PAIRS,
 } from '../src/code-tree';
@@ -120,15 +121,22 @@ export const read = action({
       const files = (listed.paths ?? []).flatMap(entry =>
         entry.after ? [{ path: entry.path, mode: entry.after.mode }] : [],
       );
+      // A folder comes with its subfolders' first pages; `ahead` names the folder whose next level is listed.
       if (input.want === 'more')
-        return JSON.stringify({ state: input.state, dirs: [folderPage(files, path, input.cursor)] });
+        return JSON.stringify({
+          state: input.state,
+          dirs: withChildren(files, folderPage(files, path, input.cursor)),
+          ahead: path,
+        });
       const kind = pathKind(files, path);
       if (!kind) return JSON.stringify({ state: input.state, files: files.length, missing: path });
+      const way = ancestors(path, kind === 'dir').map(dir => folderPage(files, dir));
       return JSON.stringify({
         state: input.state,
         files: files.length,
         kind,
-        dirs: ancestors(path, kind === 'dir').map(dir => folderPage(files, dir)),
+        dirs: [...way.slice(0, -1), ...withChildren(files, way.at(-1)!)],
+        ahead: way.at(-1)!.path,
         ...(kind === 'file' ? { file: await page(path, input.offset) } : {}),
       });
     } catch (error) {

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Code place's file tree, one folder at a time (convex/projectCodeBrowse.ts): the server reads the State's path
-// list it already verifies for every source read and returns only the folders the reader opened, so the browser never
-// downloads a whole State. Pure; shared by the server action, the web screen and their tests.
+// list it already verifies for every source read and returns only the folders the reader opened, each with its
+// subfolders' first pages, so the browser never downloads a whole State and the next folder opens without a read.
+// Pure; shared by the server action, the web screen and their tests.
 
 /** Entries per folder page, folders per reply (the opened path's ancestors) and changed paths per comparison. */
 export const CODE_DIR_PAGE = 200;
@@ -59,6 +60,28 @@ export function folderPage(paths: readonly Path[], dir: string, cursor = 0, limi
     total: entries.length,
     next: end < entries.length ? end : null,
   };
+}
+
+/** Bytes of subfolder pages one folder read may add (Item a3b55a6e): the folders a reader can open next. */
+export const CODE_AHEAD_BYTES = 64 * 1024;
+
+/**
+ * `page`, then the first page of each folder it lists, in order, while those pages fit `budget` bytes. A reader who
+ * opens one of them needs no read; one level only, so the tree is still read one folder at a time, never whole.
+ */
+export function withChildren(paths: readonly Path[], page: CodeDir, budget = CODE_AHEAD_BYTES): CodeDir[] {
+  const prefix = page.path ? `${page.path}/` : '';
+  const inside = prefix ? paths.filter(entry => entry.path.startsWith(prefix)) : paths;
+  const out = [page];
+  let used = 0;
+  for (const entry of page.entries) {
+    if (entry.kind !== 'dir') continue;
+    const child = folderPage(inside, entry.path);
+    used += JSON.stringify(child).length;
+    if (used > budget) break;
+    out.push(child);
+  }
+  return out;
 }
 
 /** What a path names in this State: a file (with its mode), a folder, or nothing. */

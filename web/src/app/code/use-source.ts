@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The folders and the file the reader has opened at one exact State. A deep link asks once for the path with its
-// folders; after that a click in a known folder asks only for that file's first page, and a folder that is opened asks
-// only for itself. Nothing is read twice in a visit (code-data.ts keeps every answer) and the whole State never is.
+// folders; after that a click in a known folder asks only for that file's first page. Every folder read also lists its
+// subfolders (listing.ts), so a folder the reader can see opens with no read, and opening it fetches the level below in
+// the background. Nothing is read twice in a visit (code-data.ts keeps every answer) and the whole State never is.
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { useConvex } from 'convex/react';
 import {
@@ -13,6 +14,7 @@ import {
   type Opened,
   type ProjectId,
 } from './code-data';
+import { keepListing, listingNeed, type Listing } from './listing';
 
 export type Source = {
   dirs: ReadonlyMap<string, CodeDir>;
@@ -31,7 +33,7 @@ const parentOf = (path: string) => (path.includes('/') ? path.slice(0, path.last
 
 export function useSource(projectId: ProjectId, state: string | null, path: string): Source {
   const client = useConvex();
-  const dirs = useRef(new Map<string, CodeDir>());
+  const listing = useRef<Listing>({ dirs: new Map(), ahead: new Set() });
   const at = useRef<string | null>(null);
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   const [files, setFiles] = useState<number | null>(null);
@@ -43,13 +45,11 @@ export function useSource(projectId: ProjectId, state: string | null, path: stri
   const [attempt, retry] = useReducer((n: number) => n + 1, 0);
   if (at.current !== state) {
     at.current = state;
-    dirs.current = new Map();
+    listing.current = { dirs: new Map(), ahead: new Set() };
   }
-  const keep = (list: readonly CodeDir[] = [], append = false) => {
-    for (const dir of list) {
-      const was = append ? dirs.current.get(dir.path) : undefined;
-      dirs.current.set(dir.path, was ? { ...dir, entries: [...was.entries, ...dir.entries] } : dir);
-    }
+  const dirs = listing.current.dirs;
+  const keep = (reply: { dirs?: readonly CodeDir[]; ahead?: string }, append?: string) => {
+    keepListing(listing.current, reply, append);
     redraw();
   };
   const ask = <T>(args: Record<string, unknown>) => browse<T>(client, { projectId, state, ...args });
@@ -57,20 +57,23 @@ export function useSource(projectId: ProjectId, state: string | null, path: stri
   useEffect(() => {
     if (!state) return;
     let current = true;
-    const known = dirs.current.get(parentOf(path))?.entries.find(entry => entry.path === path);
+    const known = dirs.get(parentOf(path))?.entries.find(entry => entry.path === path);
     const fail = (caught: unknown) => current && (setLoading(false), setError(messageOf(caught)));
     setError('');
     if (path === '' || known?.kind === 'dir') {
       setKind('dir');
       setFile(null);
-      if (dirs.current.has(path)) return;
+      if (dirs.has(path)) {
+        if (listingNeed(listing.current, path) === 'ahead') openDir(path);
+        return;
+      }
       setLoading(true);
       void ask<Opened>({ want: path === '' ? 'open' : 'more', path, cursor: 0 }).then(reply => {
         if (!current) return;
         setLoading(false);
         if (reply.available === false) return setUnavailable(reply.reason ?? 'This source is not available.');
         if (reply.files !== undefined) setFiles(reply.files);
-        keep(reply.dirs);
+        keep(reply);
       }, fail);
       return () => void (current = false);
     }
@@ -87,7 +90,7 @@ export function useSource(projectId: ProjectId, state: string | null, path: stri
       const opened = value as Opened;
       if (opened.available === false) return setUnavailable(opened.reason ?? 'This source is not available.');
       if (opened.files !== undefined) setFiles(opened.files);
-      keep(opened.dirs);
+      keep(opened);
       if (opened.missing !== undefined) {
         setKind('missing');
         setFile(null);
@@ -102,13 +105,16 @@ export function useSource(projectId: ProjectId, state: string | null, path: stri
     return () => void (current = false);
   }, [state, path, attempt]);
 
-  const openDir = (dir: string, cursor = 0) => {
-    if (!state || (cursor === 0 && dirs.current.has(dir))) return;
+  // A listed folder shows at once; this only fetches what is not listed yet (the folder, or the level below it).
+  function openDir(dir: string, cursor = 0) {
+    const need = cursor > 0 ? 'read' : listingNeed(listing.current, dir);
+    if (!state || need === 'none') return;
     void ask<Opened>({ want: 'more', path: dir, cursor }).then(
-      reply => keep(reply.dirs, cursor > 0),
-      caught => setError(messageOf(caught)),
+      reply => keep(reply, cursor > 0 ? dir : undefined),
+      // A failed look ahead stays quiet: the folder is on screen, and the next open asks again.
+      caught => need === 'read' && setError(messageOf(caught)),
     );
-  };
+  }
   const morePage = () => {
     const last = file?.pages.at(-1);
     if (!state || !file || !last || last.nextOffset === null) return;
@@ -121,5 +127,5 @@ export function useSource(projectId: ProjectId, state: string | null, path: stri
       caught => setError(messageOf(caught)),
     );
   };
-  return { dirs: dirs.current, files, kind, file, loading, error, unavailable, openDir, morePage, retry };
+  return { dirs, files, kind, file, loading, error, unavailable, openDir, morePage, retry };
 }

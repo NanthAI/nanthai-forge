@@ -31,6 +31,8 @@ export type Opened = {
   files?: number;
   kind?: 'dir' | 'file';
   dirs?: CodeDir[];
+  /** The folder whose subfolders this reply also lists. */
+  ahead?: string;
   file?: CodeFile;
   missing?: string;
   available?: false;

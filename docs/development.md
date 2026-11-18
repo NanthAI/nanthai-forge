@@ -689,10 +689,12 @@ layer out of both first paints.
   receipts a page, receipt fields only); `code/{receiptId}` opens one receipt.
   `code/files/{path}` reads files at main, and `?at={64-hex State}` pins any
   landing; `#L42` selects a line. `projectCodeBrowse:read` returns one folder
-  page (200 entries), one 16,000-character file page, a landing's changed
-  paths, or which of up to 8 landings touched a file. All of these reads go
-  through the existing source reader, so a whole State never reaches the
-  browser. The views take only a project id and a route, so signed-out public
+  page (200 entries) with the first page of each of its subfolders (at most
+  64 KiB more), one 16,000-character file page, a landing's changed paths, or
+  which of up to 8 landings touched a file. All of these reads go through the
+  existing source reader, so a whole State never reaches the browser. The tab
+  keeps every folder it was sent (`code/listing.ts`): a folder you can see opens
+  with no read, and opening it fetches the level below in the background. The views take only a project id and a route, so signed-out public
   reading is a routing change.
 - `/-/new` (`web/src/app/start/Start.tsx`) is the first-project page: the
   explain-first prompt (the same words as `web/index.html`), import, and the

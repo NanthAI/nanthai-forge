@@ -9,7 +9,8 @@ import { moduleUrl } from './convex-module.mjs';
 const tree = await import(moduleUrl('../src/code-tree.ts'));
 const history = await import(moduleUrl('../src/code-history.ts'));
 const words = await import(moduleUrl('../web/src/app/code/code-words.ts'));
-const { folderPage, ancestors, pathKind, changedPaths, CODE_DIR_PAGE } = tree;
+const { folderPage, withChildren, ancestors, pathKind, changedPaths, CODE_DIR_PAGE, CODE_AHEAD_BYTES } = tree;
+const { keepListing, listingNeed } = await import(moduleUrl('../web/src/app/code/listing.ts'));
 
 const state = (...paths) =>
   paths.sort().map(path => ({ path, mode: path.endsWith('.lnk') ? 'symlink' : 'file' }));
@@ -47,6 +48,69 @@ test('a large folder is one bounded page at a time and the cursor resumes exactl
   const seen = [...first.entries, ...second.entries, ...third.entries].map(entry => entry.path);
   assert.equal(new Set(seen).size, 450, 'no entry is skipped or repeated across pages');
   assert.equal(third.next, null);
+});
+
+test('a folder read lists that folder and one level ahead, within a byte budget and never the whole tree', () => {
+  const files = state(
+    'README.md',
+    'src/a.ts',
+    'src/state/b.ts',
+    'src/state/deep/c.ts',
+    'tests/t.mjs',
+    'docs/d.md',
+  );
+  const dirs = withChildren(files, folderPage(files, ''));
+  assert.deepEqual(
+    dirs.map(dir => dir.path),
+    ['', 'docs', 'src', 'tests'],
+    'the folder first (the existing reply shape), then each folder it lists',
+  );
+  assert.deepEqual(
+    dirs[2].entries.map(entry => entry.path),
+    ['src/state', 'src/a.ts'],
+    'a child is its own one-level page: src/state/deep stays unread until src/state is opened',
+  );
+  assert.ok(!dirs.some(dir => dir.path === 'src/state'));
+  // Each child is a full first page; children that would cross the budget are left for their own read.
+  const wide = state(
+    ...Array.from({ length: 40 }, (_, i) => `f${String(i).padStart(2, '0')}/${'x'.repeat(60)}.ts`),
+  );
+  const one = JSON.stringify(folderPage(wide, 'f00')).length;
+  const bounded = withChildren(wide, folderPage(wide, ''), one * 3);
+  assert.equal(bounded.length, 1 + 3, 'stops at the byte budget');
+  const sent = bounded.slice(1).reduce((sum, dir) => sum + JSON.stringify(dir).length, 0);
+  assert.ok(sent <= one * 3);
+  assert.ok(JSON.stringify(withChildren(wide, folderPage(wide, ''))).length <= CODE_AHEAD_BYTES + 8_192);
+});
+
+test('a warm tab opens a folder it already listed without a read, and asks once for the next level', () => {
+  const files = state('src/a.ts', 'src/state/b.ts', 'src/state/deep/c.ts', 'tests/t.mjs');
+  const cache = { dirs: new Map(), ahead: new Set() };
+  keepListing(cache, { dirs: withChildren(files, folderPage(files, '')), ahead: '' });
+  assert.equal(
+    listingNeed(cache, 'src'),
+    'ahead',
+    'src is listed: it opens at once; only its children are fetched',
+  );
+  assert.equal(listingNeed(cache, ''), 'none');
+  keepListing(cache, { dirs: withChildren(files, folderPage(files, 'src')), ahead: 'src' });
+  assert.equal(listingNeed(cache, 'src'), 'none', 'the same folder is never read twice in a tab');
+  assert.equal(listingNeed(cache, 'src/state'), 'ahead');
+  assert.equal(listingNeed(cache, 'src/state/deep'), 'read', 'an unlisted folder is exactly one read');
+  // A later page of a folder appends to that folder only; an ahead listing never replaces a known folder.
+  const before = cache.dirs.get('src').entries.length;
+  keepListing(cache, { dirs: [{ ...folderPage(files, 'src'), entries: [] }, folderPage(files, 'tests')] });
+  assert.equal(cache.dirs.get('src').entries.length, before);
+  keepListing(
+    cache,
+    {
+      dirs: [
+        { path: 'src', entries: [{ name: 'z.ts', path: 'src/z.ts', kind: 'file' }], total: 3, next: null },
+      ],
+    },
+    'src',
+  );
+  assert.equal(cache.dirs.get('src').entries.at(-1).path, 'src/z.ts');
 });
 
 test('a deep link names exactly the folders on its way, and a path is a file, a folder or nothing', () => {
