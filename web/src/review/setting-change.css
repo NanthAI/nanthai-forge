@@ -29,5 +29,15 @@
 .sc-note { margin: 0; font-size: 12.5px; color: var(--text-2, var(--fx-text-2)); }
 .sc-details > summary { cursor: pointer; font-size: 12.5px; color: var(--text-2, var(--fx-text-2)); }
 .sc-details[open] > summary { margin-bottom: 6px; }
+.sc-hid { padding: 0 2px; border-radius: 3px; font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.9em; color: var(--text, var(--fx-text)); background: var(--del-bg, rgba(255, 111, 122, 0.12)); outline: 1px solid var(--failed, var(--fx-failed)); }
+/* Agent values keep their spaces as sent, so "clean" and "clean  x" never read alike. */
+.sc-row dd > span { white-space: pre-wrap; }
+.sc-uni { padding: 0 1px; border-radius: 3px; color: inherit; background: transparent; outline: 1px dashed var(--line-strong, var(--fx-line)); }
+.sc-cp { margin-left: 2px; font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.75em; color: var(--text-2, var(--fx-text-2)); }
+.sc-list { text-decoration: none; }
+.sc-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; vertical-align: top; min-width: 0; max-width: 100%; }
+.sc-chip { padding: 0 5px; border: 1px solid var(--line, var(--fx-line)); border-radius: 4px; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; max-width: 100%; color: var(--text, var(--fx-text)); }
+.sc-chip[data-mark='added'] { background: var(--add-bg, rgba(95, 211, 154, 0.12)); border-color: var(--passed, var(--fx-passed)); }
+.sc-chip[data-mark='dropped'] { background: var(--del-bg, rgba(255, 111, 122, 0.12)); text-decoration: line-through; }
 .sc-vh { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 @media (max-width: 520px) { .sc-row { grid-template-columns: minmax(0, 1fr); } }
