@@ -132,6 +132,27 @@
           ]
         },
         {
+          "name": "agent parent simulation",
+          "tests": [
+            "tests/agent-parent-simulated.test.mjs"
+          ],
+          "inputs": [
+            "src/agent-session*.ts",
+            "src/agent-client-process.ts",
+            "src/agent-wake.ts",
+            "src/agent-slug*.ts",
+            "src/hosted-agent-resolution.ts",
+            "tests/agent-parent-simulated.test.mjs",
+            "tests/agent-session*.test.mjs",
+            "tests/agent-client-process.test.mjs",
+            "tests/agent-run-identity.test.mjs",
+            "tests/agent-slug.test.mjs",
+            "tests/hosted-land-acceptance-wait.test.mjs",
+            "tests/lane-holder.test.mjs",
+            "tests/secret-run*.test.mjs"
+          ]
+        },
+        {
           "name": "cleanup process coverage",
           "tests": [
             "tests/clean-processes.test.mjs"

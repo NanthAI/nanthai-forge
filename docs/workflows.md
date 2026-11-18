@@ -437,13 +437,14 @@ retains each attempt and retries unfinished infrastructure jobs, not test failur
 
 `nforge agent ROOT preflight` runs a project's declared **guards** before its 180 s test budget applies, so the budget can never cut them. A guard is a cheap, broad test that catches a class of mistake the import graph cannot see. It is declared once as `preflight.guards` in a root `forge.json` (any language), or as `forge.preflight.guards` in `package.json`: `{name, tests: [path, ...], inputs?: [glob, ...]}`. A guard runs when the change touches its `inputs` (no `inputs`: every change), joins the protected mandatory tier, and is shown in the plan with its cost (`local.guards`, seconds measured on this machine where known). A guard naming a test the project lacks makes the plan unavailable instead of silently skipping. Static checks (`preflight.static`) run before any build or test and also on `land --save` when tests are advised or deferred, including over-budget plans. Static failures that are the change's own (in a file it adds, edits or renames into, or new compared with a local copy of its base) refuse before submission; a failure already on main, or only on Forge's own Lane metadata (`.forge/`), is a one-line advisory and never refuses. The receipt and land reply name each check and outcome separately from the test status. Entries may declare a `fix` command to include in a failure; otherwise Forge names the command to rerun after fixing the reported files. A static-only receipt does not claim test coverage. A guard is for tests that need the build.
 
-This project declares three:
+This project declares these:
 
 | Guard | Test | Runs when the change touches | Cost |
 | --- | --- | --- | --- |
 | convex runtime imports | `tests/convex-runtime-imports.test.mjs` | `src/**`, `convex/**`, `scripts/check-convex-*.mjs`, `package.json` | about 2 s |
 | hot storage invariant | `tests/hot-storage-invariant.test.mjs` | `convex/**` | about 1 s |
 | agent response contract | `tests/hosted-response-contract.test.mjs` | hosted contract and response sources, `scripts/response-compat*` (release and main baselines), `convex/projectHostedAgent*.ts` | about 1 s |
+| agent parent simulation | `tests/agent-parent-simulated.test.mjs` | the agent session, client process, wake and slug sources and their tests | about 5 s |
 
 The hosted check stays the full run. See [parallel work defaults](parallel-work-defaults.md#preflight) for the rest of the selection rule.
 

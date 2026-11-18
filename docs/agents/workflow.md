@@ -421,6 +421,12 @@ time, machine paths and account identity are never sent. PID reuse has a differe
 Native session IDs survive client restarts; a process fallback lasts for that process's
 lifetime. An explicit declaration also survives a relay that detaches from the client.
 
+The agent-session tests run once more under a simulated Claude Code parent and once under a
+simulated Codex parent (`tests/agent-parent-simulated.test.mjs`, in the full run and in the
+`agent parent simulation` preflight guard), so a test that only passes without an agent parent fails
+in CI, not on a builder's machine (Item b574ed11). A new test that reads the agent parent or session
+variables joins that run, or is listed there with the reason it is left out.
+
 The table is data-driven: adding an executable/session convention is one row in
 `AGENT_CLIENTS`. Names are matched case-insensitively, with `.exe` removed; `*` is a
 basename wildcard. The table below cites the primary interface used, rather than
