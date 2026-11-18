@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Lanes (Item e317b6ea): what needs the reader, then every open Lane on the shell's stops, the files Lanes share and
-// what landed today. The yard's stops and held marks are the line feed's, so the counts here are the top bar's.
+// Lanes (Item e317b6ea): what needs the reader, then every open Lane on the shell's stops and the files Lanes share.
+// What landed is History (c613e6bc). The yard's stops and held marks are the line feed's, so the counts here are
+// the top bar's.
 // Regions move with the dock; the deep regions read only while open. Filters live in the address, so a link, a
 // reload and browser Back show the same view.
 import { useMemo, type ReactNode } from 'react';
@@ -19,11 +20,12 @@ import {
   yardReady,
   type Filter,
 } from './model';
-import { useLaneMeta, useLandings, useQueue, useSharedFiles } from './reads';
+import { useLaneMeta, useQueue, useSharedFiles } from './reads';
 import { Yard } from './Yard';
 import { FirstRun, type LanesProps } from './common';
 
-const LAYOUT: DockLayout = { top: ['yard'], a: ['overlaps'], b: ['landed'] };
+// History (Item c613e6bc) replaced Landed today; a layout saved with it falls back to this one (useDockLayout).
+const LAYOUT: DockLayout = { top: ['yard', 'overlaps'], a: [], b: [] };
 const filters: readonly { id: Filter; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'needs', label: 'Held' },
@@ -37,9 +39,7 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
   const { lanes, error: laneError } = useLaneMeta(projectId);
   const { queue, error: queueError } = useQueue(projectId);
   const overlapsFold = useFold('lanes-overlaps', true);
-  const landedFold = useFold('lanes-landed', false);
   const shared = useSharedFiles(projectId, overlapsFold[0]);
-  const landed = useLandings(projectId, 'recent', landedFold[0]);
   const [layout, setLayout, resetLayout] = useDockLayout('lanes', LAYOUT);
   // Ages ("saved 4 min ago") are worked out when the data changes, never on a timer. Rows wait for all three reads, so
   // a reload never paints titles, people or states that change a moment later (Item 31328be4).
@@ -63,10 +63,6 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
   const files = sharedFiles(shared.view);
   const titleOf = new Map(yard?.rows.map(row => [row.laneId, row.title]));
   const touching = hrefFor({ ...route, section: 'touching', rest: '' });
-  const toRead = hrefFor({ ...route, section: 'to-read', rest: '' });
-  const today = new Date().toDateString();
-  const landedToday = (landed.page?.rows ?? []).filter(row => new Date(row.at).toDateString() === today);
-  const landedAll = !!landed.page && landedToday.length === landed.page.rows.length && landed.page.more;
   const moved = JSON.stringify(layout) !== JSON.stringify(LAYOUT);
 
   const regions = [
@@ -199,66 +195,6 @@ export function Overview({ route, projectId, projectName, feed, viewerHandle }: 
             Saved work only.{' '}
             <A className="lk" href={touching}>
               Who is touching what
-            </A>
-          </div>
-        </Region>
-      ),
-    },
-    {
-      id: 'landed',
-      title: 'Landed today',
-      render: (handle: ReactNode) => (
-        <Region
-          title="Landed today"
-          handle={handle}
-          weight="ref"
-          fold="lanes-landed"
-          foldState={landedFold}
-          foldedByDefault
-          count={landed.page ? landedToday.length : undefined}
-          sum={
-            landed.page && landedToday[0]
-              ? `the last at ${new Date(landedToday[0].at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-              : undefined
-          }
-        >
-          {landed.error ? (
-            <p className="quietline">What landed could not be read.</p>
-          ) : !landed.page ? (
-            <div className="sk-rows" aria-busy="true" aria-label="Loading what landed">
-              <div className="sk" />
-            </div>
-          ) : landedToday.length ? (
-            <ul className="lanes-files">
-              {landedToday.slice(0, 5).map(row => (
-                <li key={row.receiptId} className="row">
-                  <span className="num t3">
-                    {new Date(row.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                  {row.laneId ? (
-                    <A className="ttl cut" dir="auto" href={laneHref(row.laneId)}>
-                      {row.title ?? 'Untitled landing'}
-                    </A>
-                  ) : (
-                    <span className="ttl cut" dir="auto">
-                      {row.title ?? 'Untitled landing'}
-                    </span>
-                  )}
-                  <span className="meta t2 mono cut" translate="no">
-                    {row.actor ?? ''}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="quietline">Nothing has landed today.</p>
-          )}
-          <div className="pf">
-            {landedToday.length > 5
-              ? `${(landedToday.length - 5).toLocaleString()}${landedAll ? ' or more' : ''} earlier today. `
-              : null}
-            <A className="lk" href={toRead}>
-              To read
             </A>
           </div>
         </Region>

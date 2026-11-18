@@ -4,9 +4,10 @@
 // (live-reads.ts). The line feed is not read here: the project frame already holds it and passes it down.
 //
 // Per view, at 50 open Lanes: the Lane page (one execution, about 7 indexed reads per Lane), the queue view (at most
-// 20 entries, about 7 reads each) and, only while their regions are open, the overlap view (20 KB budget) and the
-// newest landings (one page of 30 receipts, 2 rows each for the Lane). Idle: zero.
-import { useMutation } from 'convex/react';
+// 20 entries, about 7 reads each) and, only while its region is open, the overlap view (20 KB budget); the
+// newest landings only on History (one page of 30 receipts, 3 rows each for the Lane and Item). Idle: zero.
+import { useState } from 'react';
+import { useConvex, useMutation } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { useSafeQuery } from '../../safe-query';
@@ -38,14 +39,21 @@ export function useSharedFiles(projectId: Id<'hostedProjects'>, open: boolean) {
   return { view: parse<{ signals: SharedFiles }>(read.value)?.signals, error: read.error };
 }
 
-/** One landing from `projectLandingReads:list`: its title is the landing message's first line. */
+/** One landing from `projectLandingReads:list` (History): the Item it landed for, who landed it and when. */
 export type Landed = {
   sequence: number;
   receiptId: string;
   at: string;
+  /** The landing message's first line; `message` is the message itself, shown on expand. */
   title: string | null;
+  message: string | null;
+  /** The Item it landed for, when its Intent is an Item's first. */
+  item: { id: string; title: string } | null;
   actor: string | null;
   agent: boolean;
+  agentRun: string | null;
+  /** The model the agent run declared ('not-declared' or 'unknown' when it did not); null for a person. */
+  model: string | null;
   automatic: boolean;
   laneId: string | null;
   read: boolean;
@@ -55,13 +63,69 @@ export type LandedPage = {
   through: number | null;
   newest: number | null;
   rows: Landed[];
-  more: boolean;
+  /** The `before` of the next page; null when nothing is left. */
+  next: number | null;
+  scanned: number;
 };
+/** History's filters, kept in the address: `by` a handle or handle/run, `item` an Item id. */
+export type HistoryFilter = { unread: boolean; by: string | null; item: string | null };
 
-/** `unread` for To read; `recent` (the newest 30, read or not) for Landed today, only while that region is open. */
-export function useLandings(projectId: Id<'hostedProjects'>, view: 'unread' | 'recent', open = true) {
-  const read = useSafeQuery(api.projectLandingReads.list, open ? { projectId, view } : 'skip');
-  return { page: parse<LandedPage>(read.value), error: read.error };
+/** History: the first page live (it re-runs when a landing is accepted or the reader marks), then earlier pages read
+ * once each on "Show earlier". Changing a filter starts again from the first page. */
+export function useHistoryPages(projectId: Id<'hostedProjects'>, filter: HistoryFilter) {
+  const client = useConvex();
+  const args = {
+    projectId,
+    view: filter.unread ? ('unread' as const) : ('recent' as const),
+    ...(filter.by ? { by: filter.by } : {}),
+    ...(filter.item ? { item: filter.item } : {}),
+  };
+  const key = JSON.stringify(args);
+  const read = useSafeQuery(api.projectLandingReads.list, args);
+  const first = parse<LandedPage>(read.value);
+  type Earlier = {
+    key: string;
+    rows: Landed[];
+    next: number | null;
+    loaded: boolean;
+    busy: boolean;
+    error: boolean;
+  };
+  const none: Earlier = { key, rows: [], next: null, loaded: false, busy: false, error: false };
+  const [earlier, setEarlier] = useState<Earlier>(none);
+  const mine = earlier.key === key ? earlier : none;
+  const seen = new Set(first?.rows.map(row => row.sequence));
+  const rows = [...(first?.rows ?? []), ...mine.rows.filter(row => !seen.has(row.sequence))];
+  const next = mine.loaded ? mine.next : (first?.next ?? null);
+  const showEarlier = () => {
+    if (next === null || mine.busy) return;
+    setEarlier({ ...mine, busy: true, error: false });
+    void client
+      .query(api.projectLandingReads.list, { ...args, before: next })
+      .then(text => {
+        const page = JSON.parse(text) as LandedPage;
+        setEarlier(was =>
+          was.key === key
+            ? {
+                key,
+                rows: [...was.rows, ...page.rows],
+                next: page.next,
+                loaded: true,
+                busy: false,
+                error: false,
+              }
+            : was,
+        );
+      })
+      .catch(() => setEarlier(was => (was.key === key ? { ...was, busy: false, error: true } : was)));
+  };
+  return {
+    page: first ? { ...first, rows, next } : undefined,
+    error: read.error,
+    showEarlier,
+    busy: mine.busy,
+    earlierFailed: mine.error,
+  };
 }
 
 export function useMarkRead() {

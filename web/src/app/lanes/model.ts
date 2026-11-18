@@ -394,11 +394,27 @@ export function groupByDay<T extends { at: string }>(rows: readonly T[], today: 
     const d = new Date(row.at).toDateString();
     const title =
       d === today
-        ? 'Landed today, not read'
-        : `Landed ${new Date(row.at).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}, not read`;
+        ? 'Today'
+        : new Date(row.at).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
     const last = groups.at(-1);
     if (last?.title === title) last.rows.push(row);
     else groups.push({ title, rows: [row] });
   }
   return groups;
+}
+
+/** Why History shows no rows, or null when it has rows or is still reading (Item 35f62c2c: an empty state only when
+ * the read came back with none). A filtered page that found none but has more to look through is not empty. */
+export function historyEmpty(
+  page:
+    | { rows: readonly unknown[]; next: number | null; newest: number | null; started: boolean }
+    | undefined,
+  filter: { unread: boolean; by: string | null; item: string | null },
+): 'nothing-landed' | 'all-read' | 'no-match' | 'look-further' | null {
+  if (!page || page.rows.length) return null;
+  if (page.next !== null) return 'look-further';
+  if (filter.by || filter.item) return 'no-match';
+  // The unread view reads only above the read line: with a line set, an empty answer means everything was read.
+  if (filter.unread) return page.started ? 'all-read' : 'nothing-landed';
+  return 'nothing-landed';
 }

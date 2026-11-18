@@ -1,22 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
-// To read (Item 9e748e41): what landed that this account has not read yet, newest first, and the one write that marks
-// it read. Read state is per account, so a browser, a phone and the CLI agree. Nothing here holds a landing or counts
-// toward Needs you.
+// History (Item c613e6bc, replacing To read 9e748e41 and Landed today): what landed, newest first, with this
+// account's read marks, and the one write that marks landings read. Read state is per account, so a browser, a phone
+// and the CLI agree. Nothing here holds a landing or counts toward Needs you.
 //
-// list: 1 read-state row + one indexed range of at most TO_READ_PAGE + 1 receipts above the read line (plus the few
-// read one by one) + 2 indexed rows per listed landing for its Lane. It re-runs when a landing is accepted or the
-// reader marks; never on a clock. mark: 1 read + 1 write, idempotent (marking twice is marking once).
+// list, one page of HISTORY_PAGE rows: 1 read-state row + one indexed range of receipts below the `before` cursor
+// (at most HISTORY_PAGE + 1, plus the few read one by one in the unread view; at most HISTORY_SCAN when filtered,
+// since receipts have no actor or Item index) + 3 indexed rows per listed landing (its finish, Lane head and Item
+// head) and, with the Item filter, 1 finish row per scanned receipt. It re-runs when a landing is accepted, the
+// reader marks, or a listed Item changes; never on a clock. mark: 1 read + 1 write, idempotent.
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
 import { finishRow } from './projectHostedFinishWake';
+import { recordHead } from './projectHostedRecords';
 import { LANDING_READ_SET } from './projectLandingReadFields';
 import { report } from './errors';
 import { invariant } from '../src/errors';
+import { maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
+import { readAuthorship } from '../src/work-actor-types';
 import type { MutationCtx, QueryCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 
-export const TO_READ_PAGE = 30;
+export const HISTORY_PAGE = 30;
+/** Receipts one filtered page looks through at most (a receipt is about 2 to 6 KB); `next` resumes below them. */
+export const HISTORY_SCAN = 120;
+/** The landing message shown on expand is cut at this many characters. */
+export const HISTORY_MESSAGE_CHARS = 600;
 
 async function readState(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>, account: string) {
   return ctx.db
@@ -25,55 +34,120 @@ async function readState(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProje
     .unique();
 }
 
-const titleOf = (message: unknown) =>
-  typeof message === 'string'
-    ? (message
-        .split('\n')
-        .find(line => line.trim())
-        ?.trim() ?? null)
-    : null;
+type Receipt = {
+  id: string;
+  at: string;
+  message?: string;
+  actor?: { id: string; kind: 'agent' | 'person' };
+  automatic?: boolean;
+  agentRun?: string;
+  agentClient?: string;
+  authorship?: { kind: 'agent' | 'person'; declaration?: 'unknown' | 'not-declared'; actor?: string };
+};
 
-/** `unread` (To read): landings this account has not read. `recent` (Landed today on Lanes): the newest landings
- * whatever their read state, each with `read`. */
+const firstLine = (message: string) =>
+  message
+    .split('\n')
+    .find(line => line.trim())
+    ?.trim() ?? null;
+
+/** Who a receipt names: the builder's account, and the agent run when an agent built it. */
+function whoOf(receipt: Receipt) {
+  const builder = readAuthorship(receipt);
+  const agent = builder.kind === 'agent';
+  return {
+    actor: builder.actor ?? null,
+    agent,
+    agentRun: agent ? (receipt.agentRun ?? null) : null,
+    // The model the run declared; 'not-declared' or 'unknown' when it did not; null for a person.
+    model: agent ? builder.model : null,
+  };
+}
+
+/** `by` is `handle` (a person and the agents acting for them) or `handle/run` (one agent run). */
+function byMatches(by: string, who: ReturnType<typeof whoOf>) {
+  const slash = by.indexOf('/');
+  if (slash < 0) return who.actor === by;
+  return who.actor === by.slice(0, slash) && who.agentRun === by.slice(slash + 1);
+}
+
+/** Every Intent an Item can land through: its first (the Item id) and each follow-up (derived, no read). */
+function intentChain(itemId: string) {
+  const ids = new Set([itemId]);
+  for (let id = itemId, hop = 0; hop < maxIntentChain; hop++) ids.add((id = successorIntentId(id)));
+  return ids;
+}
+
+const intentOf = async (
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  row: Doc<'projectHostedAcceptances'>,
+) => {
+  const finish = await finishRow(ctx, { projectId, submissionId: row.submissionId });
+  return finish
+    ? ((JSON.parse(finish.value) as { source?: { intentId?: string } }).source?.intentId ?? null)
+    : null;
+};
+
+/** The Item a landing's Intent belongs to, when the Intent is an Item's first: one head, its value inline. */
+async function itemOf(ctx: QueryCtx, projectId: Id<'hostedProjects'>, intentId: string | null) {
+  if (!intentId) return null;
+  const head = await recordHead(ctx, projectId, 'issue', intentId);
+  if (!head?.value) return null;
+  const item = JSON.parse(head.value) as { title?: unknown };
+  return typeof item.title === 'string' ? { id: intentId, title: item.title } : null;
+}
+
+/** `recent` (History): the newest landings whatever their read state, each with `read`. `unread`: only those this
+ * account has not read. `before` pages below a landing sequence; `by` and `item` filter (see HISTORY_SCAN). */
 export const list = query({
   args: {
     projectId: v.id('hostedProjects'),
     view: v.optional(v.union(v.literal('unread'), v.literal('recent'))),
+    before: v.optional(v.number()),
+    by: v.optional(v.string()),
+    item: v.optional(v.string()),
   },
   returns: v.string(),
-  handler: async (ctx, { projectId, view = 'unread' }) => {
+  handler: async (ctx, { projectId, view = 'unread', before, by, item }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read what landed.');
+      invariant(
+        (by === undefined || (by.length > 0 && by.length <= 200)) &&
+          (item === undefined || (item.length > 0 && item.length <= 64)),
+        'BAD_ARGUMENT',
+        'by: a handle or handle/run; item: an Item id.',
+      );
       await accessibleProject(ctx, projectId, user.subject);
       const state = await readState(ctx, projectId, user.subject);
       const through = state?.through ?? -1;
       const marked = new Set(state?.read ?? []);
       const isRead = (sequence: number) => sequence <= through || marked.has(sequence);
-      const extra = view === 'unread' ? Math.min(marked.size, TO_READ_PAGE) : 0;
+      const filtered = Boolean(by || item);
+      const extra = view === 'unread' ? Math.min(marked.size, HISTORY_PAGE) : 0;
+      const budget = filtered ? HISTORY_SCAN : HISTORY_PAGE + 1 + extra;
       const fetched = await ctx.db
         .query('projectHostedAcceptances')
-        .withIndex('by_project_and_sequence', q =>
-          view === 'unread'
-            ? q.eq('projectId', projectId).gt('sequence', through)
-            : q.eq('projectId', projectId),
-        )
+        .withIndex('by_project_and_sequence', q => {
+          const project = q.eq('projectId', projectId);
+          const low = view === 'unread' ? project.gt('sequence', through) : project;
+          return before === undefined ? low : low.lt('sequence', before);
+        })
         .order('desc')
-        .take(TO_READ_PAGE + 1 + extra);
-      const unread = view === 'unread' ? fetched.filter(row => !isRead(row.sequence)) : fetched;
+        .take(budget);
+      const chain = item ? intentChain(item) : null;
       const rows = [];
-      for (const row of unread.slice(0, TO_READ_PAGE)) {
-        const receipt = JSON.parse(row.value) as {
-          id: string;
-          at: string;
-          message?: string;
-          actor?: { id: string; kind: string };
-          automatic?: boolean;
-        };
-        const finish = await finishRow(ctx, { projectId, submissionId: row.submissionId });
-        const intentId = finish
-          ? ((JSON.parse(finish.value) as { source?: { intentId?: string } }).source?.intentId ?? null)
-          : null;
+      let last: number | null = null;
+      for (const row of fetched) {
+        if (rows.length === HISTORY_PAGE) break;
+        last = row.sequence;
+        if (view === 'unread' && isRead(row.sequence)) continue;
+        const receipt = JSON.parse(row.value) as Receipt;
+        const who = whoOf(receipt);
+        if (by && !byMatches(by, who)) continue;
+        const intentId = await intentOf(ctx, projectId, row);
+        if (chain && !(intentId && chain.has(intentId))) continue;
         const lane = intentId
           ? await ctx.db
               .query('projectHostedRecordHeads')
@@ -82,26 +156,33 @@ export const list = query({
               )
               .first()
           : null;
+        const message = (receipt.message ?? '').trim();
         rows.push({
           sequence: row.sequence,
           receiptId: receipt.id,
           at: receipt.at,
-          title: titleOf(receipt.message),
-          actor: receipt.actor?.id ?? null,
-          agent: receipt.actor?.kind === 'agent',
+          title: firstLine(message),
+          message: message ? message.slice(0, HISTORY_MESSAGE_CHARS) : null,
+          item: await itemOf(ctx, projectId, intentId),
+          ...who,
           automatic: receipt.automatic === true,
           laneId: lane?.key ?? null,
           read: isRead(row.sequence),
         });
       }
+      // Nothing is left when the range ended inside its budget and every row of it was looked at.
+      const exhausted = fetched.length < budget && last === (fetched.at(-1)?.sequence ?? null);
       return JSON.stringify({
         // A row made only by Needs me's FYI clear has marked nothing here.
         started: state !== null && (state.through >= 0 || state.read.length > 0),
         through: state?.through ?? null,
-        newest: fetched[0]?.sequence ?? null,
+        // The newest landing in this range: Mark all as read marks through it.
+        newest: before === undefined ? (fetched[0]?.sequence ?? null) : null,
         rows,
-        // More unread than listed: the count says "or more" and links the rest.
-        more: unread.length > TO_READ_PAGE || fetched.length === TO_READ_PAGE + 1 + extra,
+        /** Pass as `before` for the next page; null when nothing is left. */
+        next: exhausted ? null : last,
+        /** How far back a filtered page looked (receipts read), so the screen can say so when it found few. */
+        scanned: fetched.length,
       });
     } catch (error) {
       return report(error);

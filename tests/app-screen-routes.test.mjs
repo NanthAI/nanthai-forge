@@ -78,7 +78,7 @@ test('every address keeps the screen the shared registry gave it, and project ma
     [project('needs'), 'needs#0'],
     [project('needs', 'held'), 'needs#0'],
     [project('lanes'), 'lanes#0'],
-    [project('lanes', 'to-read'), 'lanes#0'],
+    [project('lanes', 'history'), 'lanes#0'],
     [project('lanes', 'touching'), 'lanes#0'],
     [project('lanes', 'sessions'), 'sessions#0'],
     [project('lanes', '', `${lane}/holder`), 'sessions#1'],

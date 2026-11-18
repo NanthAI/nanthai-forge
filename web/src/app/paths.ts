@@ -15,7 +15,7 @@ export type AccountPlace = (typeof accountPlaces)[number];
 /** Sections of one place: the section strip. The first is the place itself (no path segment). */
 export const placeSections: Record<ProjectPlace, readonly string[]> = {
   needs: ['', 'held', 'loose-ends'],
-  lanes: ['', 'to-read', 'touching', 'sessions'],
+  lanes: ['', 'history', 'touching', 'sessions'],
   plan: [''],
   code: ['', 'files'],
   stats: [''],
@@ -126,7 +126,9 @@ export function parseAppPath(pathname: string): AppRoute {
     if (tail.length === 1 && receiptShape.test(tail[0]!)) return project(first, second, 'code', '', tail[0]!);
     return project(first, second, 'code', tail.length ? 'files' : '', tail.join('/'));
   }
-  const [maybeSection = '', ...detail] = tail;
+  const [named = '', ...detail] = tail;
+  // History replaced To read (Item c613e6bc): the old address opens History, and the screen corrects the address.
+  const maybeSection = resolved === 'lanes' && named === 'to-read' ? 'history' : named;
   if (placeSections[resolved].includes(maybeSection))
     return project(first, second, resolved, maybeSection, detail.join('/'));
   // Needs me and Stats have no detail pages; anything else after them is not an address.

@@ -638,11 +638,17 @@ layer out of both first paints.
   Held (every held Lane, so its count is the line's; Needs me counts only what
   waits on the reader), the landing queue,
   being worked on and quiet. Folded regions read nothing until opened (Region
-  `foldState`). `to-read` lists what landed and is unread, from per-account
-  read state (`convex/projectLandingReads.ts`: one row per account and
+  `foldState`). `history` lists what landed, newest first, with per-account
+  read marks (`convex/projectLandingReads.ts`: one row per account and
   project, a read line plus at most 500 one-by-one reads); it never counts
-  toward Needs you. `touching` shows shared saved files, who waits on whom
-  and the queue with held Lanes apart, saved work only.
+  toward Needs you. Its first page is read when the page opens and its empty
+  state shows only when that read returned no rows. Earlier pages load once
+  each on request (a `before` sequence cursor). Filters (`?unread=1`,
+  `?by=handle` or `handle/run`, `?item=`) live in the address; `by` and `item`
+  look through at most 120 receipts per page, since receipts carry no actor
+  or Item index. Each row reads its finish, Lane head and Item head. The old
+  `to-read` address opens History. `touching` shows shared saved files, who
+  waits on whom and the queue with held Lanes apart, saved work only.
 - Stats (`web/src/app/stats/`): reads `projectStats.read`, the newest 92
   closed days of `projectStatsDays`, with each month and the whole read
   computed by `statsWindow` (`src/stats-estimate.ts`). A day closes once

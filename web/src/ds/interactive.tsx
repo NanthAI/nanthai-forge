@@ -207,6 +207,13 @@ export function Dock(props: DockProps) {
   );
 }
 
+/** A saved layout is kept only while it names exactly the screen's regions: one that names a removed region (or
+ * misses a new one) gives way to the screen's own layout. */
+export function keptLayout(saved: DockLayout | null, initial: DockLayout): DockLayout {
+  const ids = (l: DockLayout) => [...l.top, ...l.a, ...l.b].sort().join();
+  return saved && ids(saved) === ids(initial) ? saved : initial;
+}
+
 /** Layout of a dock kept on this browser per screen; written only when the reader moves a region. */
 export function useDockLayout(
   screen: string,
@@ -215,9 +222,7 @@ export function useDockLayout(
   const key = `forge.dock.${screen}`;
   const [layout, setLayout] = useState<DockLayout>(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem(key) ?? 'null') as DockLayout | null;
-      const ids = (l: DockLayout) => [...l.top, ...l.a, ...l.b].sort().join();
-      return saved && ids(saved) === ids(initial) ? saved : initial;
+      return keptLayout(JSON.parse(localStorage.getItem(key) ?? 'null') as DockLayout | null, initial);
     } catch {
       return initial;
     }
