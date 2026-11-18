@@ -1,5 +1,7 @@
 # Journey 12: importing a GitHub repository and migrating from GitHub
 
+> Superseded: plain `git clone` and `git fetch` of an imported project work from Forge over smart HTTP and serve its history, signed in; see [Git serving](../../git-serving.md) and the Git compatibility row in [status](../../status.md). Findings below are the walkthrough as recorded.
+
 Bringing an existing repository to Forge and moving a team's work with it: source, history, issues, CI and people. [Journey 1](01-first-value.md) covers the first import as a step on the way to first value; this file follows the migration to its end. [Journey 11](11-leaving.md) covers the way back.
 
 Walked: the import and new-project sources, `nforge --help`, `help github`, `help host`, the quickstart, the import reference, the GitHub App doc (two-way sync), the Git serving doc, the status doc and the open import Issues. **Not walked:** an import, a mirror connect, a two-way project and a pull request on the mirror (each creates or changes a project).
@@ -39,7 +41,7 @@ Walked: the import and new-project sources, `nforge --help`, `help github`, `hel
 | J12-10 | S2 | **The order of a safe migration is not written down.** Import, define the check, connect the mirror, turn two-way on, invite people, tell them to stop pushing to GitHub, switch two-way off. Each step is documented in a different file (quickstart, GitHub App doc, governance doc). | docs |
 | J12-11 | S3 | **The import report is JSON only.** A person at a terminal gets `githubRequests` and `phase` fields. The same pattern as journey 2 (replies are built for agents). | docs |
 | J12-12 | S3 | **Two imports with nearly the same name** (journey 1, J1-10): the editable import and "Import from GitHub · read-only analysis". | docs |
-| J12-13 | S3 | **Two docs disagree on plain Git.** The Git serving doc describes `git clone` and `git fetch` from Forge as working, with imported history. The status doc says "plain `git clone` of that history from Forge waits on hosted Git serving (Issue 09367fb2)". A migrating team reading both cannot tell whether their Git tools will keep working. Not walked. | docs |
+| J12-13 | S3 | **Two docs disagree on plain Git.** The Git serving doc describes `git clone` and `git fetch` from Forge as working, with imported history. The status doc says "plain `git clone` of that history from Forge waits on hosted Git serving (Issue 09367fb2)". A migrating team reading both cannot tell whether their Git tools will keep working. Not walked. Superseded: resolved in [status](../../status.md) and [Git serving](../../git-serving.md), which now agree (Issue 09367fb2, closed). | docs |
 
 ## Dead ends
 
