@@ -21,7 +21,7 @@ export function scriptedForge(binDir) {
     `import { mkdirSync, writeFileSync, appendFileSync, readFileSync } from 'node:fs';
 import { setTimeout as wait } from 'node:timers/promises';
 import { driveForge, callForge } from './forge-protocol.mjs';
-import { scenarioTest, scenarioTestPath, docEdit } from './scenarios.mjs';
+import { scenarioTest, scenarioTestPath, docEdit, landingReading, withdrawBody } from './scenarios.mjs';
 const [task, defaultGroup, roleText] = process.argv.slice(2);
 const role = roleText ? JSON.parse(roleText) : {};
 const group = role.group ?? defaultGroup;
@@ -54,13 +54,16 @@ try {
     // Submit without waiting, withdraw once the check is running, then land again.
     const submitted = await callForge({ root: process.cwd(), action: 'land', flags: ['--save', '--no-wait'], body: { laneId, message } });
     log({ step: 'submitted', error: submitted.error?.code ?? null });
-    for (let i = 0; i < 90; i++) {
-      const status = await callForge({ root: process.cwd(), action: 'status', flags: [], body: { laneId } });
-      const text = JSON.stringify(status.result ?? {});
-      if (/"phase":"checking"/.test(text) && /"runId":"[^"]+"/.test(text)) break;
-      await wait(5_000);
+    const operationId = submitted.operationId ?? submitted.result?.operationId ?? null;
+    let reading = { submissionId: null, running: false, over: false };
+    for (let i = 0; operationId && i < 60 && !reading.running && !reading.over; i++) {
+      if (i) await wait(5_000);
+      const reply = await callForge({ root: process.cwd(), action: 'landing', flags: [], body: { operationId } });
+      const next = landingReading(reply);
+      reading = { ...next, submissionId: next.submissionId ?? reading.submissionId };
     }
-    const withdrawn = await callForge({ root: process.cwd(), action: 'land', flags: ['--withdraw'], body: { laneId, reason: 'bench scenario withdraw-join' } });
+    log({ step: 'withdraw-at', running: reading.running, over: reading.over, bySubmission: Boolean(reading.submissionId) });
+    const withdrawn = await callForge({ root: process.cwd(), action: 'land', flags: ['--withdraw'], body: withdrawBody(laneId, reading.submissionId, 'bench scenario withdraw-join') });
     log({ step: 'withdrawn', error: withdrawn.error?.code ?? null });
     await wait(role.relandAfterMs ?? 30_000);
   }

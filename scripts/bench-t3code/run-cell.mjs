@@ -52,6 +52,7 @@ import { REPLAY, replayBatch } from './replay-cells.mjs';
 import { replayAdapters } from './replay-adapters.mjs';
 import { scriptedForge, dryGroup } from './scripted.mjs';
 import { SCENARIOS, scenarioRole } from './scenarios.mjs';
+import { scenarioEvents, scenarioEvidence } from './scenario-evidence.mjs';
 import { readSwitches, switchProblems } from './switches.mjs';
 import { removeWorkspace } from './evidence.mjs';
 import { gates as cellGates, diskFreeGb } from './gates.mjs';
@@ -813,6 +814,27 @@ if (!settled.settled) voided.push(`landing still in flight at grading: ${settled
 if (!oracle?.grade) voided.push(`grading failed: ${oracle?.error ?? oracle?.conclusion}`);
 const harnessErrors = records.filter(r => r.harnessError).map(r => r.task);
 if (harnessErrors.length) voided.push(`harness error on ${harnessErrors.join(',')}`);
+// Scripted cells prove each scenario role fired (withdraw accepted, failure and slow check seen,
+// releases spaced, doc edits landed); a role that did not fire voids the cell, mechanically.
+const scenarioCheck =
+  dry && arm === 'forge' && !cellKind
+    ? scenarioEvidence({
+        roles: tasks.map((task, index) => {
+          const role = scenarioRole(scenario, index);
+          return { task: task.id, role, group: role.group ?? dryGroup(task) };
+        }),
+        records,
+        calls,
+        jobs: ci?.jobRecords ?? [],
+        events: Object.fromEntries(
+          tasks.map(task => {
+            const file = join(dir, 'agents', `${task.id}.stdout.json`);
+            return [task.id, existsSync(file) ? scenarioEvents(readFileSync(file, 'utf8').split('\n')) : []];
+          }),
+        ),
+      })
+    : null;
+if (scenarioCheck) voided.push(...scenarioCheck.problems);
 const tokens =
   dry || replayKind
     ? null
@@ -869,6 +891,9 @@ writeResult({
       ? await github.upstreamAudit(new Date(cellStart).toISOString()).catch(e => ({ error: e.message }))
       : null,
   diskAfterGb: diskFreeGb(),
+  ...(scenarioCheck
+    ? { scenarioEvidence: { roles: scenarioCheck.roles, groupOrder: scenarioCheck.groupOrder } }
+    : {}),
   voided,
 });
 forge?.stopBroker();

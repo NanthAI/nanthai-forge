@@ -94,3 +94,23 @@ export function docEdit(text, task, at) {
   const line = `<!-- bench scenario ${task} -->`;
   return at === 'top' ? `${line}\n\n${text}` : `${text.endsWith('\n') ? text : text + '\n'}${line}\n`;
 }
+
+/** Reading of a `landing {operationId}` reply for the withdraw role: the submission's identity,
+ * whether its check is running (phase `checking`, or a reserved check), and whether it is over.
+ * A landing that moved to a resolution Lane keeps its submissionId, so the role withdraws by it
+ * (withdraw by Lane only reaches a landing still on the Lane). */
+export function landingReading(reply) {
+  const result = reply?.result ?? {};
+  const submission = result.submission ?? result.submissions?.[0]?.submission ?? null;
+  const phase = submission?.phase ?? null;
+  return {
+    submissionId: submission?.id ?? null,
+    running:
+      phase === 'checking' || Boolean(submission?.timing?.checkReservedAt && !submission?.timing?.ciEndedAt),
+    over: ['landed', 'failed', 'cancelled', 'withdrawn', 'terminal-failed'].includes(phase),
+  };
+}
+
+/** Withdraw request body: by submissionId when known (follows a resolution Lane), else by Lane. */
+export const withdrawBody = (laneId, submissionId, reason) =>
+  submissionId ? { submissionId, reason } : { laneId, reason };
