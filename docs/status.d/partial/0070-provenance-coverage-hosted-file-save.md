@@ -1,0 +1,1 @@
+- **Provenance coverage.** Hosted file/save metadata is derived from retained native States; exact counts and line ranges use on-demand native object reads. Archive and Git hosted checkpoints retain local review. Binary/large files and expensive alignments report attribution unavailable; renamed paths do not imply lineage. Older saves have unknown actors.

@@ -1,0 +1,1 @@
+GitHub analysis owners can remove public or private analyses from Projects with shared-access confirmation. Removal hides source and lists immediately, invalidates workers, and drains dependent records and unshared storage in bounded batches.

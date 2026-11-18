@@ -86,7 +86,7 @@ Agent replies are compact by default: conflict files report paths, kinds and hun
 
 ## Docs
 
-Docs describe the present. When behavior changes, update the doc that describes it and [status](docs/status.md) if a capability changed. History lives in version control — no dated docs, receipts or journals.
+Docs describe the present. When behavior changes, update the doc that describes it and [status](docs/status.md) if a capability changed: status entries are one file each under `docs/status.d/<section>/` (edit or add a file; never add text to `docs/status.md`). History lives in version control — no dated docs, receipts or journals.
 
 ## Handoff
 

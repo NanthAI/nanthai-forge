@@ -1,0 +1,1 @@
+Now and Work collapse large lists into Initiative or decision groups with counts and row continuation. Hosted presence continues beyond its initial page; Activity exposes earlier event pages. Cockpit saved filters, ownership areas, maintainer-specific queues and batch actions remain unavailable.

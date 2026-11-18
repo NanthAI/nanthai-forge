@@ -1,0 +1,1 @@
+Hosted project URLs use unique account handles and owner-scoped project slugs. Settings can edit both; retained aliases and old ID-based links resolve through current access checks before client replacement. Existing hosted data requires the [readable URL backfill](../../readable-urls.md).

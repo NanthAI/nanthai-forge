@@ -1,0 +1,1 @@
+Hosted compose parses every text-merged JS/TS, Python, Java, Rust and JSON file and reports a file that no longer parses (while each side does) as a composition conflict with the parser message, before any check runs; sync and local composition do not.

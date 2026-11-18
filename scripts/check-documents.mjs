@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { packageDocuments, packageDocumentData } from './package-documents.mjs';
+import { packageDocuments, packageDocumentData, packageDocumentFragments } from './package-documents.mjs';
 import { componentManifestSha256, backendLicenseSha256 } from './selfhost-notices.mjs';
 const manifest = JSON.parse(readFileSync('package.json', 'utf8'));
 for (const path of [...packageDocuments, ...packageDocumentData]) {
@@ -23,6 +23,8 @@ assert.equal(hash(readFileSync(`${root}/PARTIAL.md`)), components.disclosure.sha
 const expected = new Set([
   ...packageDocuments,
   ...packageDocumentData,
+  // Entry files of split documents ship as part of their document (src/doc-fragments.ts).
+  ...packageDocumentFragments('.'),
   'docs/vendor-notices/convex-backend-LICENSE.md',
   `${root}/manifest.json`,
   `${root}/PARTIAL.md`,

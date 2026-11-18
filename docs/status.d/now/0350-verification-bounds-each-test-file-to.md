@@ -1,0 +1,1 @@
+Verification bounds each test file to ten minutes by default (configurable), reports timed-out file names and terminates their process groups. Local presence contention no longer adds hosted-sync deferrals for unbound or opted-out owners.

@@ -1,0 +1,1 @@
+Canonical agent `abandon` closes Lanes or Intents with retained reason/actor/time, explicit save-first for dirty edits, optional Intent cascade and retry-safe operation ids. CLI and MCP share the behavior; exchange retains Work format 13 lifecycle history, hosted grey badges and closed filters. Reopen and capture-checked cleanup support abandoned Lanes.

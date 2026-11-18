@@ -1,0 +1,1 @@
+- **Autonomy UI and notifications.** Backend policy APIs and away-summary preference are available; dedicated policy controls and notification delivery are designed separately. Native object checkpoints support hosted protected-path checks; legacy archive/Git path coverage can require person review. Git updates preserve untracked/ignored obstructions rather than overwriting them.

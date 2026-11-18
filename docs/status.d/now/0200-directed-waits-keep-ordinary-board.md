@@ -1,0 +1,1 @@
+Directed waits keep ordinary board delivery independent. Servers advertising `board-lane-after` skip already-delivered Lane notes before filling ordinary pages, preserving older unread project and Issue notes. Exact-conflict generations distinguish changed source pairs while unchanged visible notices keep their identity; the CLI retains the latest 64 seen identities per Lane.

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
-import { packageDocuments, packageDocumentData } from '../scripts/package-documents.mjs';
+import { packageDocuments, packageDocumentData, readDocument } from '../scripts/package-documents.mjs';
 import {
   llmDocuments,
   llmsFullPaths,
@@ -93,7 +93,8 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
   }
   for (const path of packageDocuments) {
     assert.ok(llms.includes(`](/${path}): `), path);
-    assert.equal(readFileSync(join(output, path), 'utf8'), read(path));
+    // A split document (src/doc-fragments.ts) publishes assembled, as `nforge docs` prints it.
+    assert.equal(readFileSync(join(output, path), 'utf8'), readDocument(root, path));
   }
   for (const path of packageDocumentData) assert.equal(readFileSync(join(output, path), 'utf8'), read(path));
   let previous = -1;
@@ -101,7 +102,10 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
     const marker = `Source: ${path === 'README.md' ? `${githubBlob}README.md` : `/${path}`}\n\n`;
     const position = full.indexOf(marker);
     assert.ok(position > previous, `${path} follows list order`);
-    assert.ok(full.startsWith(read(path), position + marker.length), `${path} retains full text`);
+    assert.ok(
+      full.startsWith(readDocument(root, path), position + marker.length),
+      `${path} retains full text`,
+    );
     previous = position;
   }
   assert.equal((full.match(/^Source: /gm) ?? []).length, llmsFullPaths.length);

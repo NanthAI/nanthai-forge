@@ -2,13 +2,15 @@
 import { allHelpTopics, hostedAgentHelp, hostedAgentHelpMarkdown } from './hosted-agent-help.js';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { assembleDocument, isDocumentFragment } from './doc-fragments.js';
 import { invariant } from './errors.js';
 
 const packageRoot = new URL('../', import.meta.url);
 function documents(directory = 'docs'): string[] {
   return readdirSync(new URL(`${directory}/`, packageRoot), { withFileTypes: true }).flatMap(entry => {
     const path = `${directory}/${entry.name}`;
-    return entry.isDirectory() ? documents(path) : entry.isFile() && entry.name.endsWith('.md') ? [path] : [];
+    if (entry.isDirectory()) return documents(path);
+    return entry.isFile() && entry.name.endsWith('.md') && !isDocumentFragment(path) ? [path] : [];
   });
 }
 /** Prints only named files from the installed documentation inventory; no project required. */
@@ -36,6 +38,15 @@ export function docsCli(args: string[]): undefined {
     'BAD_ARGUMENT',
     'Unknown packaged document. Run nforge docs to list names.',
   );
-  process.stdout.write(readFileSync(fileURLToPath(new URL(selected, packageRoot)), 'utf8'));
+  const read = (path: string) => readFileSync(fileURLToPath(new URL(path, packageRoot)), 'utf8');
+  const list = (directory: string) => {
+    try {
+      return readdirSync(new URL(`${directory}/`, packageRoot));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
+    }
+  };
+  process.stdout.write(assembleDocument(selected, read(selected), { list, read }));
   return;
 }

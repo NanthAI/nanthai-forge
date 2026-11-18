@@ -23,7 +23,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { componentManifestSha256 } from './selfhost-notices.mjs';
-import { packageDocuments, packageDocumentData } from './package-documents.mjs';
+import { packageDocuments, packageDocumentData, packageDocumentFragments } from './package-documents.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const args = process.argv.slice(2);
@@ -102,6 +102,7 @@ try {
     'web/src/assets/NOTICE.md',
     ...packageDocuments,
     ...packageDocumentData,
+    ...packageDocumentFragments(root),
     'docs/vendor-notices/convex-backend-LICENSE.md',
     ...componentNotices,
     'package.json',

@@ -1,0 +1,1 @@
+The browser routes errors through a shared accessible toast stack in both shells, including forms, section reads and sign-in. Notifications deduplicate repeated messages, queue beyond three visible entries and preserve failed drafts. Acknowledge retries reuse the original operation id; connection loss produces one notification until recovery.

@@ -1,0 +1,1 @@
+Default agent replies have a per-action byte ratchet: compact conflict files, preflight plans and receipts, and one rendering per board list note (explicit note reads keep full bodies). CLI `--detail` and MCP `replyDetail:true` retain full replies; local actor cursors stop project notes repeating across Lanes ([reply budget](../../agents/workflow.md#default-reply-byte-budget)).

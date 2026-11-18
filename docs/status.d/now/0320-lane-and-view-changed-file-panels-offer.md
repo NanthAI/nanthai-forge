@@ -1,0 +1,1 @@
+Lane and View changed-file panels offer an on-demand Map using the shared Code renderer. It shows touched files and static relative JS/TS neighbours, diffstat sizing, open-Lane markers and expandable folders above 50 touched files. Hosted Maps require the Map-capable source-review action.

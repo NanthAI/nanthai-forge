@@ -1,0 +1,2 @@
+CLI presence observers report coalesced file edits and queued/running checks without source reads or repository scans. Home discovers owner, contributor and reader projects with role labels.
+On native owners, agent `link` (CLI/MCP) returns local cockpit and hosted save-pinned file URLs, including line selection. Saved-file readers use retained bytes without an index; checkpoint/finish receipts include Lane links.

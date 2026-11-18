@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Plugin } from 'vite';
-import { packageDocuments } from './package-documents.mjs';
+import { packageDocuments, readDocument } from './package-documents.mjs';
 import { generatedReferencePaths } from './docs-output-paths.mjs';
 import { docsReference } from './docs-reference.ts';
 import { DocsFrame, type DocsGroup } from '../web/src/ds/DocsFrame.tsx';
@@ -70,9 +70,7 @@ const textOf = (children: ReactNode): string =>
 
 export function docsSite(root: string): Plugin {
   function documents() {
-    const docs = new Map<string, string>(
-      packageDocuments.map(path => [path, readFileSync(join(root, path), 'utf8')]),
-    );
+    const docs = new Map<string, string>(packageDocuments.map(path => [path, readDocument(root, path)]));
     const reference = docsReference(root);
     for (const [path, key] of Object.entries(generatedReferencePaths))
       docs.set(path, reference[key as 'cli' | 'mcp' | 'errors']);

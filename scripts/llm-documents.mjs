@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { packageDocuments, packageDocumentData } from './package-documents.mjs';
+import { packageDocuments, packageDocumentData, readDocument } from './package-documents.mjs';
 import { AGENT_DEFAULTS, agentDefaultLines } from './agent-default-lines.mjs';
 
 import { lifecycleVerbs, landSaveForm } from './agent-verb-forms.mjs';
@@ -122,12 +122,12 @@ function describe(path, source) {
 // The packaged inventory is already public. Never scan the workspace: unlisted docs, private
 // output and vendor notice trees stay out. A missing listed file throws (ENOENT) and fails the build.
 export function llmDocuments(root) {
-  const documents = packageDocuments.map(path => describe(path, readFileSync(join(root, path), 'utf8')));
+  const documents = packageDocuments.map(path => describe(path, readDocument(root, path)));
   const known = new Set(packageDocuments);
   const full = llmsFullPaths.map(path => {
     if (path.startsWith('docs/') && !known.has(path))
       throw new Error(`llms-full source is not in packageDocuments: ${path}`);
-    return describe(path, readFileSync(join(root, path), 'utf8'));
+    return describe(path, readDocument(root, path));
   });
   const measuredSource = full.find(doc => doc.path === 'docs/why-forge.md').source;
   const measured = /<!-- agent-measurements:start -->\n([\s\S]*?)\n<!-- agent-measurements:end -->/.exec(
