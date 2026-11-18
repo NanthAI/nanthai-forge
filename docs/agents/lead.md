@@ -67,6 +67,8 @@ land a builder's unverified work for them. The builder rules replace older
 instructions to stop before landing, unless the brief explicitly requires review
 before acceptance.
 
+Follow-ups found during a slice join its Item's Done-when list and are done before the Item closes ([brief item 9](brief-template.md#standard-safety-and-delivery-block)). A new follow-up Item is the exception and names its reason: an owner decision, a dependency on another open Item, a different feature or area, or a dated re-check. When a review or report lists follow-ups, sort them into these two groups before accepting the work.
+
 Run independent ready slices in parallel within the authorized delegation scope.
 Serialize real dependencies and name them. Before launch, check shared model
 usage, memory pressure, swap and disk; all projects share these resources. Pace

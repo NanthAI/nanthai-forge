@@ -126,7 +126,8 @@ merges (or why nothing can go).
 14. Final report, short and plain: receipt and accepted State; files changed; what the
     change removes or merges, or why nothing can go; tests
     run with exact counts; per-operation call/byte budgets; friction filed; what stays
-    unverified. When the brief asks for measurement, add a **Run metrics** block: start
+    unverified; follow-ups found, each either done under the Item's Done-when list or
+    filed as its own Item with its reason ([brief item 9](brief-template.md#standard-safety-and-delivery-block)). When the brief asks for measurement, add a **Run metrics** block: start
     and landing times (UTC); hosted checks run and their minutes; overlap notices seen
     (advisory/blocking); conflicts and how resolved; time stranded or waiting on another
     Lane (minutes, why); duplicate work with another builder; rework after a failed check.
