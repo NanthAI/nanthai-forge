@@ -713,12 +713,18 @@ layer out of both first paints.
 - Settings > Landing and checks (`web/src/app/checks/LandingChecks.tsx`) reads
   three queries once when it opens and again only after its own write; choosing
   a CI file writes the same ci-status runner setting `configure-runner` does.
-  While the owner chooses a check (none chosen yet, or Change), it lists
-  `.github/workflows` at main's head with one `projectCodeBrowse.read` folder
-  read and reads the first page of at most six workflow files
-  (`checks/use-workflows.ts`), kept for the visit; `checks/workflows.ts` reads
-  only their `on:` key to say which can check a landing and to show the one
-  trigger change. Non-owners and a chosen check make none of these reads.
+  While the owner chooses a check (none chosen yet, or Change), it reads one
+  page of main's root folder with `projectCodeBrowse.read` to see which CI's
+  files the project has (`checks/ci.ts`), and only when the root has `.github`
+  it lists `.github/workflows` with one folder read and reads the first page of
+  at most six workflow files (`checks/use-workflows.ts`), kept for the visit;
+  `checks/workflows.ts` reads only their `on:` key to say which can check a
+  landing and to show the one trigger change. With a check chosen, the page
+  makes one `projectHostedLandings.read` (the first three landings since the
+  choice) to say whether a landing has been checked by it
+  (`checks/FirstLanding.tsx`); while none has and the check is a CI file, it
+  reads the first page of that one file. Non-owners make none of the chooser's
+  reads, and a check that has decided a landing reads no source.
 - Keys: `Mod+K` palette, `?` all keys, `1`–`6` project places; never inside
   fields or dialogs.
 - The top-bar mark (`web/src/app/mark.ts`) follows the line feed the project

@@ -2,9 +2,10 @@
 // Settings > Landing and checks (Items 871e9b73, 0c9207b8): which check decides a landing, who approves landings and
 // the landing mode in effect, with the one press that changes each. A fixed frame. It reads once when it opens (the
 // setup read, the policy and the main audit's landing view: three calls) and again only after its own write; an open
-// tab holds no subscription. While the owner chooses a check, CheckRoutes starts from the CI the project has and lists
-// the workflows on main (use-workflows.ts). Settings that have no effect are not offered as choices; Automatic
-// settings appear once their engine (Item bd0f850e) is on main.
+// tab holds no subscription. While the owner chooses a check, CheckRoutes starts from the CI the project has (the CI
+// files on main, use-workflows.ts). With a check chosen, one more read says whether it has decided a landing yet
+// (FirstLanding.tsx), because a saved setting alone is not a connected CI. Settings that have no effect are not
+// offered as choices; Automatic settings appear once their engine (Item bd0f850e) is on main.
 import { useEffect, useState } from 'react';
 import { useConvex } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
@@ -14,11 +15,11 @@ import type { LandingModeView } from '../../../../src/landing-mode';
 import { Key, Region, Row } from '../../ds';
 import { crumbsFor, Head } from '../Place';
 import { approvalWords, useApprovalWrite, type ApprovalMode } from '../start/approvals';
-import { CommandBlock } from '../start/parts';
+import { landedAt } from '../code/code-words';
 import { checkWords, type SetupView } from '../start/setup-model';
 import type { PlaceProps } from '../screen-route';
 import { CheckRoutes } from './CheckRoutes';
-import { triggerLine } from './choose-ci';
+import { AwaitingFirstLanding, useFirstChecked } from './FirstLanding';
 import '../start/start.css';
 
 type Facts = { setup: SetupView; policy: AutonomyPolicy; landing: LandingModeView | null };
@@ -133,6 +134,8 @@ export default function LandingChecks({ projectId, route, projectName, feed }: P
     setChanging(false);
     setRevision(value => value + 1);
   };
+  const chosen = facts && facts !== 'failed' ? facts.setup.check : null;
+  const first = useFirstChecked(projectId, chosen?.chosenAt, revision);
   const trail = crumbsFor(route, projectName);
   if (facts === 'failed')
     return (
@@ -182,6 +185,14 @@ export default function LandingChecks({ projectId, route, projectName, feed }: P
                   : setup.check.kind === 'machine'
                     ? 'It runs with that machine’s own rights.'
                     : 'Logs stay with GitHub, as visible as that repository.'}
+                {first && first !== 'failed' ? (
+                  <>
+                    {' '}
+                    First landing checked: <time dateTime={first.at}>{landedAt(first.at)}</time>.
+                  </>
+                ) : first === 'failed' ? (
+                  ' Forge could not read whether it has checked a landing.'
+                ) : null}
               </div>
             </div>
             {owner ? (
@@ -196,13 +207,13 @@ export default function LandingChecks({ projectId, route, projectName, feed }: P
             {owner ? '' : ' Only the owner chooses it.'}
           </p>
         )}
-        {setup.check?.kind === 'ci-file' && !changing ? (
-          <div className="pad gs-stack">
-            <div className="meta t2">
-              Its push branches need Forge’s branches. Your agent adds this in its first Lane:
-            </div>
-            <CommandBlock label="The trigger the CI file needs" text={triggerLine} />
-          </div>
+        {setup.check && first === null && !changing ? (
+          <AwaitingFirstLanding
+            projectId={projectId}
+            project={route.project}
+            check={setup.check}
+            feed={feed}
+          />
         ) : null}
         {owner && (!setup.check || changing) ? (
           <CheckRoutes

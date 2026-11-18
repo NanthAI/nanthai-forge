@@ -25,10 +25,33 @@ project setting.
    nforge agent ROOT configure-runner '{"configuration":{"provider":"ci-status","ci":{"adapter":"github-actions","repository":"OWNER/NAME","workflow":".github/workflows/test.yml"},"runtime":"0000000000000000000000000000000000000000000000000000000000000000","environmentFingerprint":"0000000000000000000000000000000000000000000000000000000000000000"}}'
    ```
 
-On the web, the owner does step 3 from Settings → Landing and checks: it lists the
-workflows on main, says which can check a landing (a tags-only, schedule-only or
-pull-request-only workflow cannot), shows the exact step 2 change for the chosen file (an agent lands it in a Lane), and
-selects it with one press; the server derives the pins, so there are no placeholder values.
+On the web, the owner starts from Settings → Landing and checks, which asks "Which CI do you
+have?": GitHub Actions, GitLab CI, another CI or your own machines, or no CI yet. The answer
+main's own files point to is chosen ahead (workflow files, `.gitlab-ci.yml`, or another CI's
+file in the root folder). Every answer leads to a route that works today: GitHub Actions to
+the steps below, any other CI to a [machine you run](self-hosted-runner.md) (Forge cannot
+publish to GitLab yet), and no CI to one command on that machine or on
+[Forge's check workflow](github-actions-checks.md).
+
+For GitHub Actions the page does step 3: it lists the workflows on main, says which can check
+a landing (a tags-only, schedule-only or pull-request-only workflow cannot), shows the exact
+step 2 change for the chosen file and selects it with one press; the server derives the pins,
+so there are no placeholder values.
+
+Choosing a file is not the end of setup. Until a landing has been checked by it, the page says
+"No landing checked yet" and what stands in the way: the file on main does not run on Forge's
+branches yet (with the exact change), the file is not on main, or nothing, in which case the
+next landing is its first run. **Give this to your agent** copies this prompt, with the
+project, file and line filled in:
+
+```text
+In the Forge project NAME, start a Lane and change .github/workflows/ci.yml: line 5 becomes:
+    branches: [main, 'forge/candidates/**']
+Change nothing else, then land it. This file decides the project's check, so the landing waits for the owner's approval.
+```
+
+Once a landing since the choice carries a check run, the page shows when that first landing was
+checked and drops the setup text.
 
 The setting is refused while the mirror is off or points at another repository.
 

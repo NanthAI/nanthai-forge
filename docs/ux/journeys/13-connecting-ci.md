@@ -19,7 +19,7 @@ Walked: `check-settings`, `help check`, `help wait`, `help limits`, the checks s
 | Where | What it shows |
 | --- | --- |
 | `check-settings '{}'` (ran) | `definitions` (three checks: `verify`, `measure-single-job-E`, `measure-web-typecheck`), `finishCheck` (an id), `runner.configuration` (`provider`, `repository`, `runsOn`, `publicLogs`, two fingerprints), `actions` (`mode:"app-direct"`, `workflow`, `concurrencyBudget:12`, `isolation:"user"`, `results:"OIDC session plus workflow_run webhook"`), `runnerGrant`, `mainAudit`. One plain sentence: "Check logs are public: this runner runs in OWNER/NAME, whose GitHub Actions logs, test names, paths and printed output anyone who can see that repository can read (the project owner set publicLogs:true)." |
-| Web → Settings → Checks (source) | A list of checks with runs and "Last run"; "No checks defined."; "Only owners can change this"; a disclosure "Define a check locally" that prints a `define-check` command (refused on hosted projects; journey 6, J6-12). No runner, provider or secret is shown. |
+| Web → Settings → Landing and checks | Opens on "Which CI do you have?" with four answers drawn alike (GitHub Actions, GitLab CI, another CI or your own machines, no CI yet); the one main's files point to is chosen ahead. GitHub Actions lists the workflows on main and chooses one with one press, with no placeholder values. Every other answer leads to a machine you run or to Forge's check workflow, set up from a terminal. After the choice the page says whether a landing has been checked by it yet, and until then shows the one trigger change with a prompt for an agent. Still from a terminal only: `configure-check`, a machine's registration, and choosing a CI file as an agent (`configure-runner` with two placeholder values). |
 
 ### Secrets for a check
 
@@ -49,9 +49,9 @@ below describes today's runner contract. See [current guidance](../../security.m
 
 | Id | Severity | Finding | Evidence |
 | --- | --- | --- | --- |
-| J13-1 | S1 | **The first check takes a repository, a workflow file, a GitHub App and two JSON commands, with no screen.** The web shows a list of checks and nothing about the runner. A person who imported a repository on the web has to leave for the terminal and the docs before anything can land. Onboarding pattern: the first value is behind the longest step. | source, docs |
-| J13-2 | S1 | **The simplest route is the hardest to find.** "Use the CI file you already have" is one trigger line. It lives in an operations doc, needs the mirror first, and its command asks for two 64-character placeholder values ("pass any 64-character hex value"). The quickstart teaches the other route. | docs |
-| J13-3 | S2 | **Three routes, and nothing helps choose.** Forge's runner gives selection and shards; your own CI file gives no setup; a machine gives control. Who pays, what a pass proves and what outside contributors get differ for each. No table compares them (the one above was assembled from four docs). | docs |
+| J13-1 | S1 | **The first check takes a repository, a workflow file, a GitHub App and two JSON commands, with no screen.** The web shows a list of checks and nothing about the runner. A person who imported a repository on the web has to leave for the terminal and the docs before anything can land. Onboarding pattern: the first value is behind the longest step. **On the web now:** Landing and checks starts from the CI the project has and ends in the first checked landing; a GitHub Actions file is chosen there, the other routes still finish in a terminal. | source, docs |
+| J13-2 | S1 | **The simplest route is the hardest to find.** "Use the CI file you already have" is one trigger line. It lives in an operations doc, needs the mirror first, and its command asks for two 64-character placeholder values ("pass any 64-character hex value"). The quickstart teaches the other route. **On the web now:** it is the first route offered when main has workflow files, with no placeholder values; the agent command still needs them. | docs |
+| J13-3 | S2 | **Three routes, and nothing helps choose.** Forge's runner gives selection and shards; your own CI file gives no setup; a machine gives control. Who pays, what a pass proves and what outside contributors get differ for each. No table compares them (the one above was assembled from four docs). **On the web now:** the question is the CI, and each answer states who pays and what a pass proves for its own route. | docs |
 | J13-4 | S2 | **Names for the runner differ by surface.** Runner, runner repository, provider, adapter, worker, "connected computer", machine, `runsOn`, `mode:"app-direct"`. The owner's phrase is "your own CI". | ran, docs, source |
 | J13-5 | S2 | **`check-settings` is a configuration dump.** Digests, fingerprints, cursors and an installation id surround the three facts an owner wants: which check decides a landing, where it runs, and whether its logs are public. `finishCheck` is an id, not a name. | ran |
 | J13-6 | S2 | **Secrets for checks have two unconnected systems.** Check declarations pass names through from the runner's own secret store. Forge's Secret Objects page looks like the place to put a CI secret and is not used by checks. Nothing on either says so. | source, docs |
@@ -65,7 +65,7 @@ below describes today's runner contract. See [current guidance](../../security.m
 
 ## Dead ends
 
-- A person on the web after an import: no control leads to a first check (J13-1).
+- A person on the web after an import whose CI is not GitHub Actions: the page names the route, and the setup itself is in a terminal (J13-1).
 - GitLab or any CI other than GitHub Actions.
 - An outside contributor's change on a project that uses its own CI file.
 - A Secret Object as a check secret (J13-6).

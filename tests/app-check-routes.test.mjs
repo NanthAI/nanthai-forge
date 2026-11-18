@@ -85,3 +85,103 @@ test('only top-level workflow files are listed, and the preselected one can deci
   );
   assert.equal(wf.preferred([{ path: '.github/workflows/a.yml', trigger: { kind: 'schedule' } }]), undefined);
 });
+
+const ci = await import(moduleUrl('../web/src/app/checks/ci.ts'));
+const first = await import(moduleUrl('../web/src/app/checks/first-landing.ts'));
+const dir = name => ({ name, kind: 'dir' });
+const file = name => ({ name, kind: 'file' });
+
+test('the CI question starts from the CI files on main, whichever provider they belong to', () => {
+  const github = ci.ciFiles([dir('.github'), dir('src'), file('README.md')]);
+  assert.equal(ci.ciPreferred(github, 2, true), 'github');
+  assert.equal(ci.ciFact('github', github, 2), '2 workflow files on main.');
+  assert.equal(ci.ciFact('github', github, 1), '1 workflow file on main.');
+
+  const gitlab = ci.ciFiles([dir('src'), file('.gitlab-ci.yml')]);
+  assert.equal(ci.ciPreferred(gitlab, 0, true), 'gitlab');
+  assert.equal(ci.ciFact('gitlab', gitlab, 0), '.gitlab-ci.yml on main.');
+
+  const other = ci.ciFiles([dir('.buildkite'), file('Jenkinsfile')]);
+  assert.equal(ci.ciPreferred(other, 0, true), 'other');
+  assert.equal(ci.ciFact('other', other, 0), '.buildkite on main.');
+});
+
+test('a .github folder with no workflow is not a CI, and nothing is preselected from a partial listing', () => {
+  const bare = ci.ciFiles([dir('.github'), file('LICENSE')]);
+  assert.equal(ci.ciPreferred(bare, 0, true), 'none', 'the whole root was read and holds no CI file');
+  assert.equal(ci.ciPreferred(bare, 0, false), undefined, 'more root entries than one page: not guessed');
+  assert.equal(ci.ciFact('github', bare, 0), '');
+  assert.equal(ci.ciFact('none', bare, 0), '');
+});
+
+test('every CI is a choice of the same shape, and each has a route that works today', () => {
+  assert.deepEqual(ci.CI_ORDER, ['github', 'gitlab', 'other', 'none']);
+  for (const id of ci.CI_ORDER) assert.ok(ci.ciTitles[id]);
+});
+
+test('setup is done only when a landing since the choice carries a check run', () => {
+  const landings = [
+    { title: 'Docs', committedAt: '2026-01-02T10:00:00.000Z', checkRunIds: [] },
+    { title: 'Add the trigger line', committedAt: '2026-01-02T11:00:00.000Z', checkRunIds: ['run-1'] },
+  ];
+  assert.deepEqual(first.firstChecked(landings), {
+    at: '2026-01-02T11:00:00.000Z',
+    title: 'Add the trigger line',
+  });
+  assert.equal(first.firstChecked([landings[0]]), null, 'a landing with no check run proves nothing');
+  assert.equal(first.firstChecked([]), null);
+});
+
+test('until a landing is checked, the page says what stands between the CI file and its first run', () => {
+  const check = { kind: 'ci-file', repository: 'example/parser', workflow: '.github/workflows/ci.yml' };
+  const change = {
+    line: 4,
+    before: '    branches: [main]',
+    after: "    branches: [main, 'forge/candidates/**']",
+  };
+  const needs = { kind: 'push', covers: false, change, paths: false };
+  assert.deepEqual(first.awaiting({ check, checking: 0, trigger: needs }), {
+    meta: 'ci.yml on main does not run on Forge’s branches yet.',
+    needsLine: true,
+  });
+  assert.equal(first.awaiting({ check, checking: 1, trigger: needs }).meta, '1 Lane is being checked now.');
+  assert.deepEqual(
+    first.awaiting({
+      check,
+      checking: 0,
+      trigger: { kind: 'push', covers: true, change: null, paths: false },
+    }),
+    { meta: 'Its first run is the next landing.', needsLine: false },
+  );
+  assert.equal(
+    first.awaiting({ check, checking: 0, trigger: null }).meta,
+    '.github/workflows/ci.yml is not on main, so no run can start.',
+  );
+  assert.match(
+    first.awaiting({ check, checking: 0, trigger: { kind: 'tags' } }).meta,
+    /cannot check a landing/,
+  );
+  assert.equal(
+    first.awaiting({ check: { kind: 'machine' }, checking: 0, trigger: undefined }).meta,
+    'Its first run is the next landing.',
+  );
+});
+
+test('the prompt for an agent names the file, the exact line and that the owner approves it', () => {
+  const prompt = first.firstRunPrompt('parser', '.github/workflows/ci.yml', {
+    line: 4,
+    before: '    branches: [main]',
+    after: "    branches: [main, 'forge/candidates/**']",
+  });
+  assert.match(prompt, /parser/);
+  assert.match(prompt, /\.github\/workflows\/ci\.yml/);
+  assert.match(prompt, /line 4/);
+  assert.match(prompt, /forge\/candidates\/\*\*/);
+  assert.match(prompt, /approv/);
+  const added = first.firstRunPrompt('parser', '.github/workflows/ci.yml', {
+    line: 5,
+    before: null,
+    after: "      - 'forge/candidates/**'",
+  });
+  assert.match(added, /below line 5/);
+});

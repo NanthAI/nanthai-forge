@@ -160,7 +160,8 @@ test('setup rows record who and when, and point at the one next step', () => {
     import: 'done',
     repository: 'next',
     mirror: 'later',
-    check: 'later',
+    // Choosing a check never waits for GitHub: a project whose CI is not on GitHub has no mirror to turn on.
+    check: 'next',
     agent: 'next',
     land: 'later',
   });

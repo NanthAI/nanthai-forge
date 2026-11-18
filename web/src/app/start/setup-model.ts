@@ -68,7 +68,7 @@ export function setupSteps(view: SetupView, project: string, lanes: number): Set
       : {
           id: 'repository',
           title: 'Connect the GitHub repository',
-          fact: 'Only you can allow Forge on GitHub. Your CI runs there.',
+          fact: 'Only you can allow Forge on GitHub.',
           state: 'next',
         },
     view.mirror
@@ -99,7 +99,8 @@ export function setupSteps(view: SetupView, project: string, lanes: number): Set
           id: 'check',
           title: 'Choose the check that decides a landing',
           fact: 'Nothing can land until a check is chosen.',
-          state: view.mirror ? 'next' : 'later',
+          // Not held behind the GitHub mirror: only a CI file on GitHub needs it, and any CI can decide a landing.
+          state: 'next',
         },
     lanes > 0 || landed
       ? { id: 'agent', title: 'Connect an agent', fact: 'An agent has started a Lane.', state: 'done' }
