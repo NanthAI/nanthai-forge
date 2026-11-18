@@ -324,17 +324,20 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
     },
     diffFromBase,
     /** Setup landings consume the same public continuation state machine as task agents. */
-    async landAnswering(root, laneId, message) {
+    async landAnswering(root, laneId, message, env = process.env) {
       return driveForge({
         root,
         laneId,
         message,
-        call: command => callForge(command, { executable: process.execPath, prefix: [cli] }),
+        call: command => callForge(command, { executable: process.execPath, prefix: [cli], env }),
       });
     },
     /** Reset main to the base tree with one landing, then prove it on a fresh Lane of main:
      * refuses (throws) unless main equals the base exactly (S4). */
-    async reset({ meta, baseCommit, root }) {
+    /** `toolchain(root)` (optional) links the project's toolchain into the reset root and returns
+     * the env for its landing: `land --save` runs the project's static checks inline (as agents'
+     * landings do), so the reset needs what they need. */
+    async reset({ meta, baseCommit, root, toolchain = null }) {
       const laneId = await arm.startLane(root, 'bench reset to base');
       const changes = await arm.diffFromBase(meta, baseCommit, root);
       const added = changes.filter(c => c.status === 'A').map(c => c.path);
@@ -355,7 +358,8 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
       }
       let phase = null;
       if (changes.length) {
-        const landed = await arm.landAnswering(root, laneId, 'bench: reset main to base');
+        const env = toolchain ? await toolchain(root) : process.env;
+        const landed = await arm.landAnswering(root, laneId, 'bench: reset main to base', env);
         phase = landed.submission.phase;
       }
       await arm.abandon(root, laneId);

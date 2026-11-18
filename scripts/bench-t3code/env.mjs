@@ -24,7 +24,8 @@ import { networkFetch } from '../../dist/network-fetch.js';
 import { dirname, join, relative, isAbsolute, resolve } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { checkPlan, planPath } from './plan.mjs';
-import { sharedDeps, buildSharedDeps } from './deps.mjs';
+import { sharedDeps, buildSharedDeps, linkDepsAsync, toolchainEnv } from './deps.mjs';
+import { baseStatic } from './base-static.mjs';
 import { repository, rulesetName } from './github-arm.mjs';
 import { pinHarness, existingPin, cliDonor, cliCommit, parseMirror } from './pin.mjs';
 import { benchCli, builderInstallations } from './cli-install.mjs';
@@ -689,6 +690,86 @@ export function buildSteps(ctx) {
     },
     blocking: true,
   });
+
+  step({
+    id: 'base-static',
+    title: "Base passes the repository's own format check (bench-owned files only)",
+    outward: false,
+    cost: {
+      ...COST0,
+      diskGb: 0.05,
+      minutes: 1,
+      note: 'one APFS clone of the base checkout with deps linked; the fixer touches only .bench/ and bench-* workflows',
+    },
+    commands: () => [
+      `npm run -s <fmt:check|format:check> in a clone of ${L().baseCheckout} (bench toolchain)`,
+      'if only bench-owned files fail: npm run -s <fmt|format>, then a derived base commit (parent = base) and config github/forge.mainBase = it',
+    ],
+    isDone: async () => {
+      const done = cfgSafe().baseStatic;
+      const fork = gitOk(L().meta, 'remote', 'get-url', 'fork') !== null;
+      return {
+        done:
+          Boolean(L().baseSha) &&
+          done?.sha === L().baseSha &&
+          (!fork || done.sha === done.from || Boolean(done.published)),
+      };
+    },
+    run: async () => {
+      const prior = cfgSafe().baseStatic;
+      if (prior?.sha === L().baseSha && prior.sha !== prior.from) {
+        publishDerived(prior);
+        return;
+      }
+      const shared = sharedDeps(B, L().baseCheckout);
+      if (!shared) throw Error('BENCH_SETUP_BASE_STATIC: the deps step must finish first');
+      const sha = L().baseSha;
+      const work = join(B, 'work');
+      const vpHome = mkdtempSync(join(work, 'base-static-vp-'));
+      try {
+        execFileSync('cp', ['-cR', shared.vpHome + '/', vpHome]);
+        const out = await baseStatic({
+          meta: L().meta,
+          baseCheckout: L().baseCheckout,
+          baseSha: sha,
+          work,
+          env: toolchainEnv(shared, vpHome),
+          prepare: root => linkDepsAsync(shared, root),
+        });
+        if (out.sha !== sha) {
+          git(L().meta, 'update-ref', `refs/bench/base-${out.sha.slice(0, 12)}`, out.sha);
+          git(L().baseCheckout, 'checkout', '-q', '--detach', out.sha);
+          patchConfig(ctx, 'base-static', {
+            'github.previousMainBase': sha,
+            'github.mainBase': out.sha,
+            'forge.previousMainBase': cfg().forge?.mainBase,
+            'forge.mainBase': out.sha,
+          });
+          record(B, {
+            step: 'base-static',
+            kind: 'git-ref',
+            ref: `${L().meta}#refs/bench/base-${out.sha.slice(0, 12)}`,
+            sha: out.sha,
+            at: ctx.now(),
+          });
+        }
+        patchConfig(ctx, 'base-static', { baseStatic: out });
+        if (out.sha !== sha) publishDerived(out);
+      } finally {
+        rmSync(vpHome, { recursive: true, force: true });
+      }
+    },
+    blocking: true,
+  });
+  /** The GitHub arm's reset moves fork main to the base and the version gate reads its workflow
+   * there, so a derived base must exist on the fork. A tag, not a branch: the reset refuses
+   * non-agent branches; teardown deletes the fork with it. */
+  function publishDerived(out) {
+    if (gitOk(L().meta, 'remote', 'get-url', 'fork') === null) return;
+    const ref = `refs/tags/bench-base-${out.sha.slice(0, 12)}`;
+    git(L().meta, 'push', '-q', 'fork', `${out.sha}:${ref}`);
+    patchConfig(ctx, 'base-static', { baseStatic: { ...out, published: ref } });
+  }
 
   step({
     id: 'fork',

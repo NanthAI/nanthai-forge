@@ -107,8 +107,10 @@ export async function gates(
       refusals.push(
         `no passing dry run of harness ${start.harness.commit?.slice(0, 12)} (config.qualifiedHarness)`,
       );
-    if (!sharedDeps(B, config.baseCheckout)) refusals.push('shared dependency install missing (deps.mjs)');
   }
+  // Dry cells need the toolchain too: a project that requires preflight runs its static checks
+  // (vp fmt:check) in every Lane, so without deps every landing fails before the queue.
+  if (!sharedDeps(B, config.baseCheckout)) refusals.push('shared dependency install missing (deps.mjs)');
   if (config.forge.mainBase !== config.github.mainBase)
     refusals.push('both arms must start from one base tree (config forge.mainBase = github.mainBase)');
   if (!existsSync(join(B, 'PLAN.md'))) refusals.push('PLAN.md missing in BENCH_ROOT');

@@ -128,6 +128,9 @@ export async function driveForge({
   edit = keepBoth,
   pause = () => wait(10_000),
   maxLandAttempts = 8,
+  // Scripted scenarios only: called with a failed landing's reply; returning true means the
+  // agent fixed its source, so it lands again (the prompt's "fix and run land --save again").
+  onFailure = null,
 }) {
   let command = { root, action: 'land', flags: ['--save'], body: { laneId, message } };
   let landAttempts = 0,
@@ -142,6 +145,23 @@ export async function driveForge({
     const state = result.submission?.observation?.state ?? result.submission?.phase ?? result.phase;
     if (state === 'landed') return { root: command.root, landAttempts, submission: result.submission };
     const code = response.error?.code;
+    const failedState =
+      ['terminal-failed', 'cancelled', 'superseded'].includes(state) ||
+      ['terminal', 'cancelled'].includes(result.status) ||
+      (result.terminal === true && result.complete !== true);
+    if (onFailure && (code === 'CHECK_FAILED' || (!response.error && failedState))) {
+      if (await onFailure(response)) {
+        command = {
+          root: command.root,
+          action: 'land',
+          flags: ['--save'],
+          body: { laneId: activeLaneId, message },
+        };
+        newLanding = true;
+        await pause();
+        continue;
+      }
+    }
     if (['OVERLAP_UNANSWERED', 'PREFLIGHT_REQUIRED'].includes(code)) {
       await call({
         root: command.root,

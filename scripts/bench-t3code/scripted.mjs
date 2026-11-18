@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // B1.5d no-model protocol/stress driver: dry edits exercise real coordination.
+// A scenario role (scenarios.mjs) adds fixed moves; with no role the driver is the smoke run.
 import { writeFileSync, chmodSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { overlapClass } from './coordination.mjs';
@@ -12,19 +13,58 @@ export const dryGroup = task =>
 
 export function scriptedForge(binDir) {
   const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
-  copyFileSync(new URL('./forge-protocol.mjs', import.meta.url), join(binDir, 'forge-protocol.mjs'));
+  for (const file of ['forge-protocol.mjs', 'scenarios.mjs'])
+    copyFileSync(new URL(`./${file}`, import.meta.url), join(binDir, file));
   const driver = join(binDir, 'scripted-forge.mjs');
   writeFileSync(
     driver,
     `import { mkdirSync, writeFileSync, appendFileSync, readFileSync } from 'node:fs';
-import { driveForge } from './forge-protocol.mjs';
-const [task, group] = process.argv.slice(2);
+import { setTimeout as wait } from 'node:timers/promises';
+import { driveForge, callForge } from './forge-protocol.mjs';
+import { scenarioTest, scenarioTestPath, docEdit } from './scenarios.mjs';
+const [task, defaultGroup, roleText] = process.argv.slice(2);
+const role = roleText ? JSON.parse(roleText) : {};
+const group = role.group ?? defaultGroup;
+const log = event => console.log(JSON.stringify({ event: 'scenario', task, ...event, at: new Date().toISOString() }));
 const laneId = JSON.parse(readFileSync('.forge/hosted-lane.json', 'utf8')).selection.laneId;
+const message = 'bench dry run: ' + task;
+if (role.releaseMs) {
+  log({ step: 'release-wait', ms: role.releaseMs });
+  await wait(role.releaseMs);
+}
 mkdirSync('.bench/dry', { recursive: true });
 writeFileSync('.bench/dry/' + task + '.md', 'dry run ' + task + ' ' + new Date().toISOString() + '\\n');
 if (group) appendFileSync('.bench/dry/group-' + group + '.md', task + '\\n');
+const testPath = scenarioTestPath(task);
+if (role.failOnce) writeFileSync(testPath, scenarioTest(task, 'fail'));
+if (role.slowSeconds) writeFileSync(testPath, scenarioTest(task, 'slow', role.slowSeconds));
+if (role.doc) writeFileSync(role.doc.path, docEdit(readFileSync(role.doc.path, 'utf8'), task, role.doc.at));
+let fixed = false;
+const onFailure = role.failOnce
+  ? async () => {
+      if (fixed) return false;
+      fixed = true;
+      log({ step: 'fix-after-failed-check' });
+      writeFileSync(testPath, scenarioTest(task, 'fixed'));
+      return true;
+    }
+  : null;
 try {
-  const result = await driveForge({ root: process.cwd(), laneId, message: 'bench dry run: ' + task });
+  if (role.withdrawOnce) {
+    // Submit without waiting, withdraw once the check is running, then land again.
+    const submitted = await callForge({ root: process.cwd(), action: 'land', flags: ['--save', '--no-wait'], body: { laneId, message } });
+    log({ step: 'submitted', error: submitted.error?.code ?? null });
+    for (let i = 0; i < 90; i++) {
+      const status = await callForge({ root: process.cwd(), action: 'status', flags: [], body: { laneId } });
+      const text = JSON.stringify(status.result ?? {});
+      if (/"phase":"checking"/.test(text) && /"runId":"[^"]+"/.test(text)) break;
+      await wait(5_000);
+    }
+    const withdrawn = await callForge({ root: process.cwd(), action: 'land', flags: ['--withdraw'], body: { laneId, reason: 'bench scenario withdraw-join' } });
+    log({ step: 'withdrawn', error: withdrawn.error?.code ?? null });
+    await wait(role.relandAfterMs ?? 30_000);
+  }
+  const result = await driveForge({ root: process.cwd(), laneId, message, onFailure });
   if (process.env.BENCH_SCRIPTED_RESULT) writeFileSync(process.env.BENCH_SCRIPTED_RESULT, JSON.stringify(result));
 } catch (error) {
   console.error(JSON.stringify({ event: 'product-friction', detail: error.message }));

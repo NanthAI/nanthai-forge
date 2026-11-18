@@ -30,7 +30,7 @@ import { landingFields, cellSummary } from './score.mjs';
 import { oracleCommit, runOracle, grade } from './oracle.mjs';
 import { cellFinished } from './oracle-branches.mjs';
 import { attribute, gitShow } from './attribution.mjs';
-import { sharedDeps, linkDepsAsync } from './deps.mjs';
+import { sharedDeps, linkDepsAsync, toolchainEnv } from './deps.mjs';
 import { loadTasks, schedule, cellKey } from './plan.mjs';
 import {
   snapshot,
@@ -51,6 +51,8 @@ import { replayPlan, replaySchedule } from './replay-schedule.mjs';
 import { REPLAY, replayBatch } from './replay-cells.mjs';
 import { replayAdapters } from './replay-adapters.mjs';
 import { scriptedForge, dryGroup } from './scripted.mjs';
+import { SCENARIOS, scenarioRole } from './scenarios.mjs';
+import { readSwitches, switchProblems } from './switches.mjs';
 import { removeWorkspace } from './evidence.mjs';
 import { gates as cellGates, diskFreeGb } from './gates.mjs';
 import { writeCellResult } from './result.mjs';
@@ -76,7 +78,12 @@ const N = Number(nText),
   extra = flags.includes('--extra'),
   taskLimit = flag('--tasks') ? Number(flag('--tasks')) : null,
   cellKind = flag('--cell'),
-  stack = flag('--stack');
+  stack = flag('--stack'),
+  // Scripted queue scenario (scenarios.mjs); `smoke` (the default) is the unchanged dry run.
+  scenario = flag('--scenario') ?? 'smoke';
+if (!SCENARIOS[scenario]) throw Error(`unknown --scenario ${scenario}`);
+if (scenario !== 'smoke' && !(dry && arm === 'forge' && !cellKind))
+  throw Error('--scenario applies to scripted (--dry) Forge ten-task cells only');
 const replayKind = REPLAY.kinds.includes(cellKind);
 const replay = replayKind
   ? replayPlan({ release: flag('--release') ?? 'late-third', independent: cellKind === 'replay-clean' })
@@ -131,7 +138,7 @@ const claudeToken =
     : null;
 const batchDir = flag('--batch');
 const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15);
-const cellId = `${planned.key}${dry ? '-dry' : modelCheck ? '-modelcheck' : ''}-a${attempt}-${stamp}`;
+const cellId = `${planned.key}${scenario === 'smoke' ? '' : `-${scenario}`}${dry ? '-dry' : modelCheck ? '-modelcheck' : ''}-a${attempt}-${stamp}`;
 const dir = join(B, 'runs', cellId),
   ws = join(B, 'ws', cellId);
 mkdirSync(join(B, 'runs'), { recursive: true });
@@ -147,6 +154,7 @@ writeFileSync(
     dry,
     modelCheck,
     extra,
+    ...(scenario === 'smoke' ? {} : { scenario }),
     seed: planned.seed,
     order: planned.order,
     startedAt: new Date().toISOString(),
@@ -169,6 +177,7 @@ const result = {
   dry,
   modelCheck,
   extra,
+  scenario: { name: scenario, paths: SCENARIOS[scenario].paths, about: SCENARIOS[scenario].about },
   seed: planned.seed,
   order: tasks.map(t => t.id),
   ...(replayKind ? { diagnostic: { kind: cellKind, scored: false, plan: replay }, modelTokens: 0 } : {}),
@@ -235,6 +244,7 @@ process.on('exit', () => {
 
 // ---- Gates (nothing has run yet; a refusal leaves no trace beyond result.json).
 const start = await snapshot(config);
+result.switches = { start: await readSwitches(config) };
 const gates = await cellGates({
   arm,
   N,
@@ -309,7 +319,22 @@ try {
   result.resetReceipt =
     arm === 'github'
       ? await github.reset(base, { finishedCell: id => cellFinished(join(B, 'runs'), id) })
-      : await forge.reset({ meta: config.meta, baseCommit: base, root: join(ws, 'reset') });
+      : await forge.reset({
+          meta: config.meta,
+          baseCommit: base,
+          root: join(ws, 'reset'),
+          // Same toolchain as the agents (PATH, VP_HOME, linked install): the reset landing runs
+          // the project's inline static checks too.
+          toolchain: shared
+            ? async root => {
+                await linkDepsAsync(shared, root);
+                return {
+                  ...toolchainEnv(shared, vpHome),
+                  PATH: `${bin}:${join(vpHome, 'bin')}:/usr/local/bin:${process.env.PATH}`,
+                };
+              }
+            : null,
+        });
 } catch (error) {
   await crash(`reset failed: ${String(error.message).slice(0, 400)}`);
 }
@@ -480,7 +505,12 @@ async function dispatch(task, k) {
       scripted: dry
         ? {
             command: scripted,
-            args: arm === 'github' ? [branch, task.id, dryGroup(task)] : [task.id, dryGroup(task)],
+            args:
+              arm === 'github'
+                ? [branch, task.id, dryGroup(task)]
+                : scenario === 'smoke'
+                  ? [task.id, dryGroup(task)]
+                  : [task.id, dryGroup(task), JSON.stringify(scenarioRole(scenario, tasks.indexOf(task)))],
           }
         : null,
     });
@@ -752,6 +782,7 @@ if (oracleReport.branch) oracle.branchCleanup = oracleReport.branch;
 
 // ---- Versions at the end, voids, result.
 const end = await snapshot(config);
+result.switches.end = await readSwitches(config);
 sampler.stop();
 result.load.after = {
   rateLimit: await rateLimit(),
@@ -770,6 +801,7 @@ const waivedChanges = trial
   : [];
 const voided = [];
 if (versionChanges.length) voided.push(`versions changed during cell: ${versionChanges.join('; ')}`);
+voided.push(...switchProblems(result.switches.start, result.switches.end));
 // A usage, rate or provider-capacity stop voids that task (listed in taskVoids), not the cell.
 const quotaTasks = dry || replayKind ? [] : records.filter(r => r.agent?.quotaHit).map(r => r.task);
 if (convex && !convex.valid) voided.push(`Convex meter under-reported: ${convex.problems.join(', ')}`);

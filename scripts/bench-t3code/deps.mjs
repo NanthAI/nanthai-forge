@@ -101,6 +101,19 @@ export function linkDeps(shared, checkout) {
   return { moduleDirs: dirs.length, clonedEntries, seconds: (Date.now() - started) / 1000 };
 }
 
+/** Env that puts the bench toolchain (vp, its Node, the pnpm store, the browser) in front of
+ * PATH, as agents get it: what a project's own scripts and inline preflight need. `vpHome` is a
+ * per-use copy of shared.vpHome so a run never writes into the shared toolchain. */
+export function toolchainEnv(shared, vpHome = shared.vpHome, base = process.env) {
+  return {
+    ...base,
+    VP_HOME: vpHome,
+    npm_config_store_dir: join(shared.home, 'Library/pnpm/store'),
+    PLAYWRIGHT_BROWSERS_PATH: shared.browsers,
+    PATH: `${join(vpHome, 'bin')}:/usr/local/bin:${base.PATH ?? '/usr/bin:/bin'}`,
+  };
+}
+
 /** linkDeps without blocking the harness's event loop (other workers keep running). */
 export async function linkDepsAsync(shared, checkout) {
   const run = promisify(execFile);

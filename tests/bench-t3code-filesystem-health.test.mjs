@@ -114,3 +114,32 @@ test('zero-model diagnostic keeps service/version gates without querying model u
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('a dry cell without the shared dependency install is refused before it starts', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'dry-deps-gate-'));
+  writeFileSync(join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+  try {
+    const result = await gates(
+      {
+        arm: 'forge',
+        N: 10,
+        dry: true,
+        B: root,
+        flags: ['--unpinned'],
+        config: { forge: { mainBase: 'base' }, github: { mainBase: 'base' }, baseCheckout: root },
+        start: { harness: { commit: null } },
+        pinProblems: async () => [],
+        snapshotProblems: () => [],
+        differences: () => [],
+      },
+      {
+        filesystemProbe: async () => healthy,
+        usageProbe: () => ({ provider: 'scripted' }),
+        diskProbe: () => 100,
+      },
+    );
+    assert.ok(result.refusals.includes('shared dependency install missing (deps.mjs)'));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
