@@ -18,10 +18,15 @@ follows GitHub's norms and the [public identity rule](../DESIGN.md): people are 
   not declared" when it named none), Lanes, landings, first and last day. 25 a page; the total is counted from the
   rows read. Each run opens its page in the project it last worked in.
 - **Where**: per project, landings, Lanes, reviews and the last activity, marked public or private.
-- **See it as others do** (the person themself): the public view.
+- **Only the person themself** sees **See it as others do** (the public view), **Devices and sign-ins** (each device
+  by its code, never its name ("Device without a code" when an old one has none), with when its sign-in ends; the browsers signed in, marking this one; at most 10 of
+  each, the rest on the Devices page, which "Manage" opens) and **Starred** (the newest 50 projects they starred that
+  are still public). A starred list is never public. There is no "Edit your profile" yet: a profile has no editable
+  field beyond the handle.
 
-Items closed and a "latest actions" list are not counted yet: no existing record says, per day, who closed an Item,
-and listing the newest actions across projects needs a cross-project read that does not exist.
+Not counted yet, because no existing record holds them and counting them would add a write on the save or comment
+path: Items closed per person per day (no record says who closed an Item, per day), a "latest actions" list (no
+cross-project read exists), and on the agent page the run's saves and its comments.
 
 ## Who sees what
 
@@ -31,11 +36,13 @@ The server filters; it never sends a row the viewer may not open.
 | --- | --- |
 | Signed out, a device credential, or a signed-in person with no project in common | Public projects only |
 | A teammate (owner, writer or reader of a private project the person worked in) | Public projects, plus the private projects both are in, named "Private, you are both in it" |
-| The person themself | Every project they worked in |
+| The person themself | Every project they worked in, their devices and sign-ins, and their stars |
 
 A removed project is never shown. A visitor's page comes from the cached public read (`/-/public/v1/profile/HANDLE.json`,
 `convex/publicRead.ts`) and opens no Convex connection; a signed-in viewer's page asks `personDays.profile` once when
-it opens (not a live subscription), and again only when they page through Agents.
+it opens (not a live subscription), and again only when they page through Agents. The person's own page also asks
+`authSessions.list` and `publicDiscovery.myStarred` once each. Both read only the signed-in person's own records, so
+they cannot show anyone else's, whatever page asks.
 
 ## Data and budgets
 

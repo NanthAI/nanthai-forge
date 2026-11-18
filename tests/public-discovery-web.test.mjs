@@ -2,7 +2,8 @@
 // The real public discovery screens (web/src/public/Discover.tsx) signed out, on synthetic cached public reads:
 // counts reconcile with lists, a members-only plan and Lane titles without the opt-in never appear, star and clone
 // ask for sign-in, a missing project and a private one look the same, and every page is axe-clean at 1440 and 390 in
-// both themes. FORGE_DISCOVERY_SHOTS=<dir> also writes the screenshots.
+// both themes. The person's own page, signed in, adds their devices, sign-ins and stars, read once each and gone when
+// they look at it as others do. FORGE_DISCOVERY_SHOTS=<dir> also writes the screenshots.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -159,7 +160,90 @@ const contributions = (() => {
     },
   };
 })();
+const nothing = {
+  schema: 1,
+  handle: 'kit',
+  self: false,
+  scope: 'public',
+  through: null,
+  first: null,
+  last: null,
+  days: [],
+  totals: { landings: 0, lanes: 0, reviews: 0, landingsByAgents: 0, lanesByAgents: 0 },
+  projects: [],
+  projectsLeftOut: 0,
+  agents: { total: 0, from: 0, rows: [] },
+};
+/** What a signed-in person's own reads answer (Item 6a251b23): `?as=self` renders with these, never the network. */
+const signed = {
+  'personDays:profile': {
+    ada: JSON.stringify({
+      ...contributions,
+      self: true,
+      scope: 'all',
+      projects: [
+        ...contributions.projects,
+        { ...contributions.projects[1], visibility: 'private', slug: 'ledger-private', landings: 3 },
+      ],
+    }),
+    kit: JSON.stringify({ ...nothing, self: true, scope: 'all' }),
+  },
+  'authSessions:list': {
+    sessions: [
+      { sessionId: 's1', creationTime: NOW - 3 * 3_600_000, lastRefreshedAt: NOW, current: true },
+      { sessionId: 's2', creationTime: NOW - 6 * DAY, lastRefreshedAt: NOW - DAY, current: false },
+    ],
+    passkeys: [],
+    devices: [
+      {
+        credentialId: 'c1',
+        name: 'Build laptop',
+        scope: 'cli',
+        issuedAt: NOW - 9 * DAY,
+        expiresAt: NOW + 400 * DAY,
+        revoked: false,
+        code: 'dv-7f3k9q',
+        approvedAt: NOW - 9 * DAY,
+      },
+      {
+        credentialId: 'c2',
+        name: 'Old box',
+        scope: 'cli',
+        issuedAt: NOW - 60 * DAY,
+        expiresAt: NOW - 30 * DAY,
+        revoked: false,
+        code: 'dv-9t1b6h',
+        approvedAt: NOW - 60 * DAY,
+      },
+      {
+        credentialId: 'c4',
+        name: 'Legacy box',
+        scope: 'cli',
+        issuedAt: NOW - 120 * DAY,
+        expiresAt: NOW + 200 * DAY,
+        revoked: false,
+      },
+      {
+        credentialId: 'c3',
+        name: 'Gone box',
+        scope: 'cli',
+        issuedAt: NOW - 90 * DAY,
+        expiresAt: NOW - 60 * DAY,
+        revoked: true,
+        removed: true,
+        code: 'dv-gone00',
+      },
+    ],
+    github: null,
+    notice: null,
+    isDone: true,
+    continueCursor: '',
+  },
+  'publicDiscovery:myStarred': { projects: [projects[2]], more: false },
+  'publicDiscovery:myStars': [projects[2].id],
+};
 const reads = {
+  '/-/public/v1/profile/kit.json': { v: 1, asOf: NOW, handle: 'kit', projects: [], contributions: nothing },
   '/-/public/v1/explore/active.json': explore('active'),
   '/-/public/v1/explore/stars.json': explore('stars'),
   '/-/public/v1/explore/newest.json': explore('newest'),
@@ -185,11 +269,30 @@ async function fixture(out) {
     import {createElement as h} from 'react';
     import {createRoot} from 'react-dom/client';
     import {ConvexProvider, ConvexReactClient} from 'convex/react';
+    import {getFunctionName} from 'convex/server';
     import Discover from ${JSON.stringify(join(root, 'web/src/public/Discover.tsx'))};
     import {useRoute} from ${JSON.stringify(join(root, 'web/src/app/router.ts'))};
     import ${JSON.stringify(join(root, 'web/src/app/app.css'))};
-    const client = new ConvexReactClient('https://example.convex.cloud', {skipConvexDeploymentUrlCheck: true});
-    function Root() { return h(Discover, {route: useRoute(), signedIn: false, viewerHandle: undefined}); }
+    const signed = ${JSON.stringify(signed)};
+    const self = new URLSearchParams(location.search).get('as') === 'self';
+    const answer = (name, args) => {
+      if (!(name in signed)) throw new Error('unexpected read ' + name);
+      return name === 'personDays:profile' ? signed[name][args.handle] : signed[name];
+    };
+    // Signed in as the person: every read is answered here and counted; nothing reaches a server.
+    window.asked = [];
+    const noop = () => {};
+    const fake = {
+      query: async (ref, args) => (window.asked.push(getFunctionName(ref)), answer(getFunctionName(ref), args)),
+      watchQuery: (ref, args) => ({ onUpdate: () => noop, localQueryResult: () => answer(getFunctionName(ref), args), journal: noop }),
+      mutation: async () => null,
+      action: async () => null,
+      logger: { warn: noop, log: noop, error: noop, logVerbose: noop },
+      connectionState: () => ({ isWebSocketConnected: true, hasInflightRequests: false }),
+      subscribeToConnectionState: () => noop,
+    };
+    const client = self ? fake : new ConvexReactClient('https://example.convex.cloud', {skipConvexDeploymentUrlCheck: true});
+    function Root() { return h(Discover, {route: useRoute(), signedIn: self, viewerHandle: self ? 'ada' : undefined}); }
     createRoot(document.getElementById('root')).render(h(ConvexProvider, {client}, h(Root)));`;
   const result = await build({
     configFile: join(root, 'web/vite.config.ts'),
@@ -220,7 +323,7 @@ async function fixture(out) {
   return `<!doctype html><html lang="en" data-ds><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Forge</title><style>body{margin:0}</style>${styles}</head><body><div id="root"></div><script type="module" src="/${script}"></script></body></html>`;
 }
 
-test('public discovery screens signed out: explore, profile and a public project page', async t => {
+test('public discovery screens: explore, a profile signed out and as its person, and a public project page', async t => {
   if (!existsSync(chromium.executablePath())) return t.skip('Playwright Chromium is not installed.');
   const out = mkdtempSync(join(tmpdir(), 'forge-discovery-'));
   const html = await fixture(out);
@@ -350,10 +453,41 @@ test('public discovery screens signed out: explore, profile and a public project
   assert.match(await pr.locator('[aria-label=Agents]').textContent(), /Sign in to page through the rest/);
   assert.doesNotMatch(await pr.locator('main').textContent(), /private|Private/);
 
+  // The person's own page: their devices and browsers (codes, never device names, a device with no code reads "without a code"; removed devices gone), their
+  // stars, and every project they worked on, each read asked once. Seen as others do, the private parts go.
+  const me = await open('/-/ada?as=self');
+  assert.match(await me.getByRole('link', { name: 'Manage' }).getAttribute('href'), /\/account\/devices$/);
+  const devices = await me
+    .getByRole('region', { name: 'Devices and places you are signed in' })
+    .textContent();
+  assert.match(devices, /Devices and sign-ins5only you see this/);
+  assert.match(devices, /dv-7f3k9qSigned in until/);
+  assert.match(devices, /dv-9t1b6hSign-in expired/);
+  assert.match(devices, /A browsersigned in .+ · this browser/);
+  assert.match(devices, /Devicewithout a codeSigned in until/);
+  assert.doesNotMatch(devices, /Build laptop|Old box|Legacy box|dv-gone00/);
+  assert.match(await me.getByRole('region', { name: 'Starred' }).textContent(), /kestrel-works.*tern/s);
+  assert.match(await me.getByRole('region', { name: 'Where' }).textContent(), /ledger-private.*Private/s);
+  assert.deepEqual((await me.evaluate(() => window.asked)).sort(), [
+    'authSessions:list',
+    'personDays:profile',
+    'publicDiscovery:myStarred',
+  ]);
+  await me.getByRole('button', { name: 'See it as others do' }).click();
+  assert.equal(await me.getByRole('region', { name: 'Devices and places you are signed in' }).count(), 0);
+  assert.equal(await me.getByRole('region', { name: 'Starred' }).count(), 0);
+  assert.doesNotMatch(await me.locator('main').textContent(), /ledger-private/);
+  // Your own page with nothing yet says what will show and how to start, and still lists your devices.
+  const fresh = await open('/-/kit?as=self');
+  assert.match(await fresh.getByRole('region', { name: 'Contributions' }).textContent(), /Nothing yet/);
+  await fresh.getByRole('link', { name: 'Import a repository' }).waitFor();
+  await fresh.getByRole('region', { name: 'Devices and places you are signed in' }).waitFor();
+
   for (const [name, path] of [
     ['explore', '/-/explore'],
     ['project', '/-/ada/atlas'],
     ['profile', '/-/ada'],
+    ['profile-self', '/-/ada?as=self'],
   ])
     for (const width of [1440, 390])
       for (const theme of ['dark', 'light']) {

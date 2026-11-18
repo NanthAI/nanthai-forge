@@ -13,6 +13,8 @@ import { whoLinks } from '../app/who-links';
 import { followLink } from '../app/router';
 import { hrefFor } from '../app/paths';
 import type { ProfileRead } from '../../../src/person-days';
+import type { ListedProject } from './read';
+import { OwnDevices, Starred } from './PersonOwn';
 
 const nf = new Intl.NumberFormat('en-US');
 const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
@@ -72,6 +74,7 @@ export function Person({
   publicRead,
   projects,
   projectCount,
+  rows,
 }: {
   handle: string;
   signedIn: boolean;
@@ -80,6 +83,8 @@ export function Person({
   /** The public projects list, drawn by the discovery page. */
   projects: ReactNode;
   projectCount: number;
+  /** Draws listed projects as the discovery page does (the person's own Starred list). */
+  rows: (projects: readonly ListedProject[]) => ReactNode;
 }) {
   const [agentsFrom, setAgentsFrom] = useState(0);
   const [asOthers, setAsOthers] = useState(false);
@@ -139,7 +144,9 @@ export function Person({
           onAgents={!asOthers && signed?.state === 'ok' ? setAgentsFrom : undefined}
         />
       ) : null}
+      {self ? <OwnDevices now={now} /> : null}
       {projects}
+      {self ? <Starred now={now} rows={rows} /> : null}
     </>
   );
 }
@@ -178,6 +185,11 @@ function Contributions({
               ? 'What you and your agents land shows here, day by day.'
               : `No contributions ${scope} yet.`}
           </p>
+          {self ? (
+            <a className="btn" href={hrefFor({ frame: 'bare', page: 'import' })} onClick={followLink}>
+              Import a repository
+            </a>
+          ) : null}
         </div>
       </section>
     );

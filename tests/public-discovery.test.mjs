@@ -210,6 +210,37 @@ test('one star per person: repeating it changes nothing, and the count moves wit
   assert.equal([...s.tables.projectStars.values()].length, 0);
 });
 
+test('a starred list is its person’s alone: own stars only, public projects only, none signed out or as an agent', async () => {
+  const s = fixture();
+  s.caller('reader');
+  await discovery.star._handler(s.ctx, { projectId: 'project', starred: true });
+  const mine = await discovery.myStarred._handler(s.ctx, { now: NOW });
+  assert.deepEqual(
+    mine.projects.map(p => `${p.handle}/${p.slug}`),
+    ['ada/atlas'],
+  );
+  assert.equal(mine.more, false);
+  // Someone else asking gets their own (none), never the reader's.
+  s.caller('someone-else');
+  assert.deepEqual(await discovery.myStarred._handler(s.ctx, { now: NOW }), { projects: [], more: false });
+  s.caller(null);
+  assert.deepEqual(await discovery.myStarred._handler(s.ctx, { now: NOW }), { projects: [], more: false });
+  s.tables.cliCredentials.set('cred', {
+    _id: 'cred',
+    credentialId: 'cred',
+    owner: 'reader',
+    scope: 'cli',
+    revoked: false,
+    expiresAt: NOW * 2,
+  });
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'reader', forgeCredential: 'cred' });
+  assert.deepEqual(await discovery.myStarred._handler(s.ctx, { now: NOW }), { projects: [], more: false });
+  // A starred project that turns private leaves the list (its star row stays; the read decides).
+  s.caller('reader');
+  s.tables.hostedProjects.get('project').visibility = 'private';
+  assert.deepEqual((await discovery.myStarred._handler(s.ctx, { now: NOW })).projects, []);
+});
+
 test('only the owner person changes what visitors see, and only the owner sees who starred', async () => {
   const s = fixture();
   s.tables.forgeAccounts.set('acct2', { _id: 'acct2', owner: 'reader', handle: 'wren' });

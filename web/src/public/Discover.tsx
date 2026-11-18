@@ -471,6 +471,7 @@ function Profile({ handle, signedIn }: { handle: string; signedIn: boolean }) {
       signedIn={signedIn}
       publicRead={read.data.contributions}
       projectCount={projects.length}
+      rows={listed => <Rows projects={listed} signedIn={signedIn} />}
       projects={
         <section className="region" aria-label="Public projects">
           <div className="ph">

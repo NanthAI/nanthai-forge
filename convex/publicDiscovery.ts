@@ -13,6 +13,7 @@ import { report } from './errors';
 import { invariant } from '../src/errors';
 import { isPublicProject } from './publicVisibility';
 import { ensurePublicRow, publicRow } from './publicListing';
+import { entry, listedProjects } from './publicRead';
 
 /** A star is a signed-in person's: no sign-in and agent credentials each get a structured refusal naming the step. */
 async function starringPerson(ctx: MutationCtx) {
@@ -69,6 +70,52 @@ export const myStars = query({
       .withIndex('by_account', q => q.eq('account', user.subject))
       .take(200);
     return rows.map(row => row.projectId);
+  },
+});
+
+export const STARRED_READ = 50;
+
+/** The viewer's own starred projects, for the Starred list on their own profile (Item 6a251b23). A starred list is
+ * never public (D.7): this reads only the signed-in person's stars, so it cannot show anyone else's. The newest
+ * STARRED_READ stars, each kept only while its project is still public, as the same rows explore lists. Asked once
+ * when the person opens their own profile, never subscribed. Reads at most 50 stars, and 50 listing rows, projects
+ * and owner handles. */
+export const myStarred = query({
+  args: { now: v.number() },
+  returns: v.object({
+    projects: v.array(
+      v.object({
+        id: v.id('hostedProjects'),
+        handle: v.string(),
+        slug: v.string(),
+        name: v.string(),
+        since: v.number(),
+        stars: v.number(),
+        landings: v.number(),
+        days: v.array(v.number()),
+        recordedSince: v.optional(v.number()),
+        main: v.union(v.literal('passing'), v.literal('unchecked')),
+      }),
+    ),
+    more: v.boolean(),
+  }),
+  handler: async (ctx, { now }) => {
+    const user = await ctx.auth.getUserIdentity();
+    if (!user || isDeviceIdentity(user)) return { projects: [], more: false };
+    const stars = await ctx.db
+      .query('projectStars')
+      .withIndex('by_account', q => q.eq('account', user.subject))
+      .order('desc')
+      .take(STARRED_READ + 1);
+    const rows = [];
+    for (const star of stars.slice(0, STARRED_READ)) {
+      const row = await publicRow(ctx, star.projectId);
+      if (row) rows.push(row);
+    }
+    return {
+      projects: (await listedProjects(ctx, rows)).map(item => entry(item, now)),
+      more: stars.length > STARRED_READ,
+    };
   },
 });
 

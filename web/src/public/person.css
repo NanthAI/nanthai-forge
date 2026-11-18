@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* A person's page (Item 6a251b23): the three figures that pick what the days count, the day grid (one square per day,
-   a column per week, Monday on top, ink only: more ink is more done) and the two small tables, agents and where.
+   a column per week, Monday on top, ink only: more ink is more done), the two small tables, agents and where, and the
+   person's own devices and sign-ins.
    Every value is a token from tokens.css. Rules: DESIGN.md. */
 [data-ds] {
   .nums.pick { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -43,4 +44,11 @@
     .row.trow > .c.r { text-align: left; }
     .row.trow > .c .k { display: inline; color: var(--text-2); font-family: var(--font-sans); }
   }
+
+  /* Devices and sign-ins: the person's own view only. */
+  .ph .lk.right { margin-left: auto; }
+  .row.dv { grid-template-columns: minmax(0, 1fr); min-height: 46px; }
+  .row.dv .who { font-size: var(--t-body); color: var(--text); }
+  .row.dv .who > span:nth-child(2) { font-weight: var(--w-strong); }
+  .row.dv .meta { display: block; padding-left: 26px; overflow-wrap: anywhere; }
 }

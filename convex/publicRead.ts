@@ -236,7 +236,7 @@ export const noteActivity = internalMutation({
 });
 
 type Listed = { row: Doc<'projectPublic'>; project: Doc<'hostedProjects'>; handle: string };
-async function listedProjects(ctx: QueryCtx, rows: Doc<'projectPublic'>[]): Promise<Listed[]> {
+export async function listedProjects(ctx: QueryCtx, rows: Doc<'projectPublic'>[]): Promise<Listed[]> {
   const shown: Listed[] = [];
   for (const row of rows) {
     const project = await ctx.db.get(row.projectId);
@@ -247,7 +247,7 @@ async function listedProjects(ctx: QueryCtx, rows: Doc<'projectPublic'>[]): Prom
   }
   return shown;
 }
-const entry = ({ row, project, handle }: Listed, now: number) => {
+export const entry = ({ row, project, handle }: Listed, now: number) => {
   const fresh = row.activity && now - row.activity.at < 7 * DAY ? row.activity : null;
   return {
     id: project._id,
