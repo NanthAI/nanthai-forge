@@ -14,8 +14,14 @@ export async function filesystemEventGate(targetDirectory, probe = probeFilesyst
   return { filesystemEvents, refusals: refusal ? [refusal] : [] };
 }
 
-/** GiB available on the data volume, the same figure `df -g /System/Volumes/Data` prints. */
-export function diskFreeGb() {
+const JXA_IMPORTANT_FREE = [
+  'ObjC.import("Foundation");',
+  'const out = Ref();',
+  '$.NSURL.fileURLWithPath("/System/Volumes/Data").getResourceValueForKeyError(out, $.NSURLVolumeAvailableCapacityForImportantUsageKey, null);',
+  'String(out[0].js)',
+].join(' ');
+
+function dfFreeGb() {
   const line = execFileSync('df', ['-k', '/System/Volumes/Data'], { encoding: 'utf8' })
     .trim()
     .split('\n')
@@ -32,6 +38,32 @@ export const OWNER_DISK_FLOOR_GB = 10;
 export function diskFloorOf(config) {
   const v = config?.diskFloorGb;
   return Number.isFinite(v) && v >= OWNER_DISK_FLOOR_GB ? v : DISK_FLOOR_GB;
+}
+
+function importantFreeGb() {
+  const bytes = Number(
+    execFileSync('osascript', ['-l', 'JavaScript', '-e', JXA_IMPORTANT_FREE], {
+      encoding: 'utf8',
+      timeout: 10_000,
+    }).trim(),
+  );
+  return Number.isFinite(bytes) && bytes > 0 ? bytes / 1024 ** 3 : null;
+}
+
+/** GiB free on the data volume. On macOS this is the volume's "available for important usage"
+ * capacity, which counts purgeable space that the system frees on demand (what Finder and disk
+ * tools show). `df` leaves purgeable space out and under-reports by tens of GB. Falls back to
+ * `df` when that read is unavailable. */
+export function diskFreeGb({ platform = process.platform, important = importantFreeGb, df = dfFreeGb } = {}) {
+  if (platform === 'darwin') {
+    try {
+      const gb = important();
+      if (gb !== null) return gb;
+    } catch {
+      // fall through to df
+    }
+  }
+  return df();
 }
 
 /** Estimated peak disk of a cell: full-tree checkouts (.repos included, ~0.5 GB each). */
