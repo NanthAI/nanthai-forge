@@ -6,8 +6,10 @@ import { ItemState, State, Who } from '../../ds';
 import { A } from '../frames';
 import { statusOf, type PlanLine } from './model';
 
-/** Columns after the handle: position, the name with its flags, done-when, owner, status. */
-export const COLS = '2.2em minmax(0, 1fr) auto auto auto';
+/** Columns after the handle: position, the name with its flags, done-when, owner, status. On a phone plan.css sets
+ * `--plan-cols` to the position and the name only; the name's cell then shows the status before the flags, on a line
+ * under the name. */
+export const COLS = 'var(--plan-cols, 2.2em minmax(0, 1fr) auto auto auto)';
 
 export function Status({ row }: { row: PlanRow }) {
   const status = statusOf(row);
@@ -59,6 +61,9 @@ export function Line({
         <A className="ttl" href={href} dir="auto" title={row.title}>
           {row.title}
         </A>
+        <span className="plan-st">
+          <Status row={row} />
+        </span>
         {line.next ? (
           <span
             className="nextmark"

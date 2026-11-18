@@ -99,6 +99,11 @@ export function ReorderList<T extends ReorderItem>({
         dragAndDropHooks={dragAndDropHooks}
         keyboardNavigationBehavior="tab"
         className="ds-list"
+        // The library paints the list empty first and its rows a render later (about 200 ms for 300 rows), which moved
+        // everything below it (Item 88c08511 trial: phone CLS 0.34). The list keeps its rows' room from the first paint:
+        // each row is at least --row-h tall, or the --ds-row-min a screen sets for taller rows (never more than the
+        // shortest row, or the room would outlast the rows as a gap).
+        style={{ minHeight: `calc(${items.length} * var(--ds-row-min, var(--row-h)))` }}
       >
         {item => {
           const index = order.indexOf(item.id);

@@ -43,10 +43,11 @@
   .m.gone { opacity: 0; }
   .m.aside i { transform: translateY(7px); }
   .line.instant .m, .line.instant .m i { transition: none; }
+  /* Narrow: each count sits right after its own word ("Saved 16"), never at the cell's far edge beside the next one. */
   @container (max-width: 560px) {
-    .line .stop { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 0; padding: 6px 4px 9px 9px; font-size: var(--t-micro); }
-    .line .stop .slot { width: 100%; } .line .tomain .lbl.t2 { display: none; }
-    .line .stop[data-stop] .n { position: absolute; right: 5px; top: 6px; font-size: var(--t-micro); }
+    .line .stop { flex-wrap: wrap; align-items: baseline; align-content: flex-start; gap: 0 var(--s-1); padding: 6px 4px 9px 9px; font-size: var(--t-micro); }
+    .line .stop .slot { display: none; } .line .tomain .lbl.t2 { display: none; }
+    .line .stop[data-stop] .n { order: 0; min-width: 0; text-align: left; font-size: var(--t-micro); }
   }
   .line.phone { height: 46px; border: 0; border-bottom: var(--rule) solid var(--line); background-color: var(--surface); background-size: 10px 4px; }
   .rail { background: var(--surface); border-right: var(--rule) solid var(--line); display: flex; flex-direction: column; padding: var(--s-2) 0; min-height: 0; }

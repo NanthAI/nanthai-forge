@@ -153,6 +153,14 @@ A brief or a lead comment on the Issue can override one for that slice.
   changes in any conflict, and post on the board when you change a shared budget file.
 - **Conditional slices.** When a slice runs only if evidence shows a pattern, the lead decides
   whether the evidence meets the trigger and records it on the Issue.
+- **Web UI checks.** Besides axe, screenshots at 390 and 1440 px in both themes and the eager
+  JavaScript budget, measure load layout shift on a local build before and after the change, at
+  phone and desk width: `agent-browser vitals URL --json` (pinned `agent-browser@0.43.0`, installed
+  with `--ignore-scripts` outside the repository, pointed at the Playwright Chromium with
+  `AGENT_BROWSER_EXECUTABLE_PATH`). A new sheet or dialog also gets its dialog check (background
+  inert, focus inside, Escape returns focus). Pin versions, never `@latest`; set
+  `DISABLE_TELEMETRY=1` for the `modern-web-guidance` CLI. Local only: never in the hosted check
+  (Item 88c08511 trial: it found the Plan list's load shift that axe, screenshots and tests missed).
 - **When to stop.** Stop at the evidence when a Done-when line cannot be met after a real attempt,
   not after a first naive probe: report what you tried, the measured breakdown, and the cheapest
   alternative you see. Never change scope, raise a budget, or add a job, service, poll or wait to

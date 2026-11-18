@@ -739,7 +739,10 @@ layer out of both first paints.
   versions sheet reads `planningVersions` pages only while open) and links to
   the current Item screen for the body and comments. The view (scope, type,
   owner, Initiative, relation, order, list / tree / board, find) lives in the
-  address; saved views are names for those addresses kept on one browser. The
+  address; saved views are names for those addresses kept on one browser. On a
+  phone the bar keeps Find and the filters already set, and one Filter and view
+  sheet holds the views, filters, order, layout and folds as native pickers; each
+  row shows its status under its name. The
   Closed and Everything scopes add `projectPlanSettled:page`, one page of 50
   done or dropped root rows each, subscribed only while that scope is shown.
   Ticked rows change together through `projectPlanningBatch:apply` with one

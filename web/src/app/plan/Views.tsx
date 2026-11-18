@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
-// Plan views and filters (Item e0a23825): the views column (a picker on a phone, DESIGN.md rule 8), the toolbar with
-// find, one chip per filter, sort and the List / Tree / Board choice (rule 7), all of it in the address. A saved view
+// Plan views and filters (Item e0a23825): the views column, the toolbar with find, one chip per filter, sort and the
+// List / Tree / Board choice (rule 7), all of it in the address; on a phone the views, filters, order and layout are
+// one Filter and view sheet (Tune.tsx, the phone's own pickers, DESIGN.md rule 8). A saved view
 // is a name for an address, kept on this browser only. Nothing here reads or writes Convex.
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import { Chip, CodeBox, Key, Menu, Sheet } from '../../ds';
 import { defaultItemTypes } from '../../../../src/planning-model';
 import type { PlanRow } from '../../../../src/planning-model';
 import { A } from '../frames';
+import { PlaceIcon } from '../places';
+import { Tune } from './Tune';
 import {
   agentRead,
   loadViews,
@@ -33,9 +36,6 @@ const relationWords = {
   none: 'No relations',
 } as const;
 
-/** The picker's Save choice; a saved view's name never starts with a NUL. */
-const SAVE = '\u0000save';
-
 export type ViewsProps = {
   projectId: string;
   query: PlanQuery;
@@ -49,12 +49,6 @@ export type ViewsProps = {
   counts: { open: number; mine: number; unowned: number };
 };
 
-/** The built-in views, then this browser's saved ones. */
-function useViews(projectId: string) {
-  const [views, setViews] = useState<SavedView[]>(() => loadViews(projectId));
-  return [views, setViews] as const;
-}
-
 function views(props: ViewsProps) {
   const mine = props.viewer ? `@${props.viewer.replace(/^@/, '')}` : undefined;
   return [
@@ -66,27 +60,61 @@ function views(props: ViewsProps) {
   ];
 }
 
-export function ViewsColumn(props: ViewsProps) {
-  const [saved, setSaved] = useViews(props.projectId);
+/** This browser's saved views and whether the Save sheet is open; held by the screen so the desk column and the
+ * phone's Filter and view sheet share them. */
+export function useSavedViews(projectId: string) {
+  const [saved, setSaved] = useState<SavedView[]>(() => loadViews(projectId));
   const [saving, setSaving] = useState(false);
+  return { saved, setSaved, saving, setSaving };
+}
+
+/** The built-in views, then the saved ones, and which one is on. */
+export function viewList(
+  props: ViewsProps,
+  { saved, setSaved, saving, setSaving }: ReturnType<typeof useSavedViews>,
+) {
   // A view is its scope and filters; the order, layout and find stay as the reader set them when switching.
   const filters = (query: Partial<PlanQuery>) =>
     writeQuery({ ...query, sort: 'hand', layout: 'list', find: '' });
   const current = filters(props.query);
   const keep = { sort: props.query.sort, layout: props.query.layout };
-  const href = (query: string) => props.base + writeQuery({ ...fromQuery(query), ...keep });
   const builtIn = views(props);
-  const all = [...builtIn, ...saved.map(view => ({ ...view, n: undefined }))];
-  const on = all.find(view => filters(fromQuery(view.query)) === current)?.name ?? 'This view';
+  const all = [...builtIn, ...saved.map(view => ({ ...view, n: undefined as number | undefined }))];
+  const isOn = (query: string) => filters(fromQuery(query)) === current;
+  return {
+    saved,
+    setSaved,
+    saving,
+    setSaving,
+    builtIn,
+    all,
+    isOn,
+    /** The view on now, or undefined when the filters match none. */
+    on: all.find(view => isOn(view.query))?.name,
+    href: (query: string) => props.base + writeQuery({ ...fromQuery(query), ...keep }),
+    choose: (name: string) => {
+      const view = all.find(each => each.name === name);
+      if (view) props.go({ ...fromQuery(view.query), ...keep });
+    },
+  };
+}
+export type ViewList = ReturnType<typeof viewList>;
+
+/** The desk's views column; on a phone the same views are the first choice in Filter and view. */
+export function ViewsColumn({
+  views: list,
+  ...props
+}: Pick<ViewsProps, 'projectId' | 'query'> & { views: ViewList }) {
+  const { saved, setSaved, saving, setSaving, isOn, href } = list;
   return (
     <>
       <nav className="pnav plan-views" aria-label="Plan views">
-        {builtIn.map(view => (
+        {list.builtIn.map(view => (
           <A
             key={view.name}
             href={href(view.query)}
-            className={filters(fromQuery(view.query)) === current ? 'on' : undefined}
-            aria-current={filters(fromQuery(view.query)) === current ? 'page' : undefined}
+            className={isOn(view.query) ? 'on' : undefined}
+            aria-current={isOn(view.query) ? 'page' : undefined}
           >
             <span>{view.name}</span>
             {view.n === undefined ? <span /> : <span className="num">{view.n.toLocaleString()}</span>}
@@ -97,8 +125,8 @@ export function ViewsColumn(props: ViewsProps) {
           <A
             key={view.name}
             href={href(view.query)}
-            className={filters(fromQuery(view.query)) === current ? 'on' : undefined}
-            aria-current={filters(fromQuery(view.query)) === current ? 'page' : undefined}
+            className={isOn(view.query) ? 'on' : undefined}
+            aria-current={isOn(view.query) ? 'page' : undefined}
           >
             <span dir="auto">{view.name}</span>
             <span />
@@ -108,32 +136,6 @@ export function ViewsColumn(props: ViewsProps) {
           Save this view
         </button>
       </nav>
-      {/* On a phone the views are one full-width native select (the phone's own picker), not a menu button. */}
-      <div className="plan-picker">
-        <select
-          className="inp"
-          aria-label="Plan view"
-          value={all.some(view => view.name === on) ? on : ''}
-          onChange={event => {
-            const name = event.target.value;
-            if (name === SAVE) return setSaving(true);
-            const view = all.find(each => each.name === name);
-            if (view) props.go({ ...fromQuery(view.query), ...keep });
-          }}
-        >
-          {all.some(view => view.name === on) ? null : (
-            <option value="" disabled>
-              {on}
-            </option>
-          )}
-          {all.map(view => (
-            <option key={view.name} value={view.name}>
-              {view.n === undefined ? view.name : `${view.name} · ${view.n.toLocaleString()}`}
-            </option>
-          ))}
-          <option value={SAVE}>Save this view…</option>
-        </select>
-      </div>
       <SaveView
         open={saving}
         onOpenChange={setSaving}
@@ -236,7 +238,18 @@ function SaveView({
   );
 }
 
-/** Find, one chip per filter (set ones solid and removable, the rest offered), sort, and the layout choice. */
+/** One filter: its name, the value set (as shown), the raw value in the address, and the choices. */
+export type Facet = {
+  label: string;
+  value: string | undefined;
+  raw: string | undefined;
+  clear: () => void;
+  items: { id: string; label: string; onAction: () => void }[];
+};
+
+/** Find, one chip per filter (set ones solid and removable, the rest offered), sort, and the layout choice. On a
+ * phone the offered filters, the order and the layout fold into one Filter and view sheet with the views; find and
+ * the filters already set stay on the bar. */
 export function Toolbar({
   query,
   go,
@@ -245,31 +258,69 @@ export function Toolbar({
   types,
   count,
   viewer,
-}: Pick<ViewsProps, 'query' | 'go' | 'initiatives' | 'owners' | 'types' | 'viewer'> & { count: string }) {
+  views: list,
+  folds,
+}: Pick<ViewsProps, 'query' | 'go' | 'initiatives' | 'owners' | 'types' | 'viewer'> & {
+  count: string;
+  views: ViewList;
+  /** Collapse all and Expand all, when the list has groups to fold. */
+  folds?: ReactNode;
+}) {
+  const [tuning, setTuning] = useState(false);
   const initiative = initiatives.find(row => row.id === query.initiative);
   const typeNames = [...new Set([...defaultItemTypes, ...types.map(type => type.toLowerCase())])];
   const mine = viewer ? `@${viewer.replace(/^@/, '')}` : undefined;
   const ownerNames = [...new Set([...(mine ? [mine] : []), ...owners])].slice(0, 12);
-  const facet = (
-    label: string,
-    value: string | undefined,
-    clear: () => void,
-    items: { id: string; label: string; onAction: () => void }[],
-  ) =>
-    value ? (
-      <Chip key={label} label={label} value={value} onRemove={clear} />
-    ) : (
-      <Menu key={label} label={`${label}: any`} className="chip off" items={items}>
-        <span>
-          {label}
-          <i>: any</i>
-        </span>
-      </Menu>
-    );
+  const facets: Facet[] = [
+    {
+      label: 'Type',
+      value: query.type,
+      raw: query.type,
+      clear: () => go({ type: undefined }),
+      items: typeNames.map(type => ({
+        id: type,
+        label: type[0]!.toUpperCase() + type.slice(1),
+        onAction: () => go({ type }),
+      })),
+    },
+    {
+      label: 'Owner',
+      value: query.owner === 'none' ? 'no one' : query.owner,
+      raw: query.owner,
+      clear: () => go({ owner: undefined }),
+      items: [
+        { id: 'none', label: 'No one yet', onAction: () => go({ owner: 'none' }) },
+        ...ownerNames.map(owner => ({ id: owner, label: owner, onAction: () => go({ owner }) })),
+      ],
+    },
+    {
+      label: 'Initiative',
+      value: initiative?.title ?? (query.initiative ? query.initiative.slice(0, 8) : undefined),
+      raw: query.initiative,
+      clear: () => go({ initiative: undefined }),
+      items: initiatives.map(row => ({
+        id: row.id,
+        label: row.title,
+        onAction: () => go({ initiative: row.id }),
+      })),
+    },
+    {
+      label: 'Relation',
+      value: query.relation ? relationWords[query.relation] : undefined,
+      raw: query.relation,
+      clear: () => go({ relation: undefined }),
+      items: (Object.keys(relationWords) as (keyof typeof relationWords)[]).map(kind => ({
+        id: kind,
+        label: relationWords[kind],
+        onAction: () => go({ relation: kind }),
+      })),
+    },
+  ];
   return (
     <div className="tbar plan-tbar" role="toolbar" aria-label="Find, filter and order">
       <label className="find">
         <span className="sr">Find in the plan</span>
+        <PlaceIcon name="find" size={14} />
         <input
           className="inp"
           name="find"
@@ -280,63 +331,65 @@ export function Toolbar({
           onChange={event => go({ find: event.target.value })}
         />
       </label>
-      {facet(
-        'Type',
-        query.type,
-        () => go({ type: undefined }),
-        typeNames.map(type => ({
-          id: type,
-          label: type[0]!.toUpperCase() + type.slice(1),
-          onAction: () => go({ type }),
-        })),
-      )}
-      {facet('Owner', query.owner === 'none' ? 'no one' : query.owner, () => go({ owner: undefined }), [
-        { id: 'none', label: 'No one yet', onAction: () => go({ owner: 'none' }) },
-        ...ownerNames.map(owner => ({ id: owner, label: owner, onAction: () => go({ owner }) })),
-      ])}
-      {facet(
-        'Initiative',
-        initiative?.title ?? (query.initiative ? query.initiative.slice(0, 8) : undefined),
-        () => go({ initiative: undefined }),
-        initiatives.map(row => ({
-          id: row.id,
-          label: row.title,
-          onAction: () => go({ initiative: row.id }),
-        })),
-      )}
-      {facet(
-        'Relation',
-        query.relation ? relationWords[query.relation] : undefined,
-        () => go({ relation: undefined }),
-        (Object.keys(relationWords) as (keyof typeof relationWords)[]).map(kind => ({
-          id: kind,
-          label: relationWords[kind],
-          onAction: () => go({ relation: kind }),
-        })),
+      <Key className="plan-phone" aria-haspopup="dialog" onClick={() => setTuning(true)}>
+        Filter and view
+      </Key>
+      {facets.map(facet =>
+        facet.value ? (
+          <Chip key={facet.label} label={facet.label} value={facet.value} onRemove={facet.clear} />
+        ) : (
+          <Menu key={facet.label} label={`${facet.label}: any`} className="chip off" items={facet.items}>
+            <span>
+              {facet.label}
+              <i>: any</i>
+            </span>
+          </Menu>
+        ),
       )}
       <Menu
         label={`Order: ${sortWords[query.sort]}`}
+        className="btn sm plan-desk"
         items={(Object.keys(sortWords) as Sort[]).map(sort => ({
           id: sort,
           label: sort === 'hand' ? 'By hand (shared)' : `By ${sortWords[sort]}`,
           onAction: () => go({ sort }),
         }))}
       />
-      <span className="seg" role="group" aria-label="Show as">
-        {(['list', 'tree', 'board'] as const).map(layout => (
-          <button
-            key={layout}
-            type="button"
-            aria-pressed={query.layout === layout}
-            onClick={() => go({ layout })}
-          >
-            {layout[0]!.toUpperCase() + layout.slice(1)}
-          </button>
-        ))}
-      </span>
-      <span className="n" aria-live="polite">
+      <Layouts query={query} go={go} className="seg plan-desk" />
+      {/* The region's head shows the count; this says it again only to assistive tech when a filter changes it. */}
+      <span className="sr" aria-live="polite">
         {count}
       </span>
+      {tuning ? (
+        <Tune
+          onOpenChange={setTuning}
+          views={list}
+          facets={facets}
+          query={query}
+          go={go}
+          sortWords={sortWords}
+          layouts={<Layouts query={query} go={go} className="seg" />}
+          folds={folds}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/** List, Tree or Board. */
+function Layouts({ query, go, className }: Pick<ViewsProps, 'query' | 'go'> & { className: string }) {
+  return (
+    <span className={className} role="group" aria-label="Show as">
+      {(['list', 'tree', 'board'] as const).map(layout => (
+        <button
+          key={layout}
+          type="button"
+          aria-pressed={query.layout === layout}
+          onClick={() => go({ layout })}
+        >
+          {layout[0]!.toUpperCase() + layout.slice(1)}
+        </button>
+      ))}
+    </span>
   );
 }

@@ -4,7 +4,6 @@
    capture form. Every value is a token; rows, bands, roll, shards, nextmark, flags and the turn mark are the design
    system's. */
 [data-ds] {
-  .plan .ph .find { flex: 0 1 280px; min-width: 0; }
   .plan .rk { color: var(--text-3); font: var(--w-medium) var(--t-meta)/1 var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
   .plan .tt { display: flex; gap: var(--s-2); align-items: baseline; min-width: 0; }
   .plan .tt.sub { padding-left: var(--s-4); }
@@ -12,6 +11,8 @@
   .plan .dw { display: inline-flex; gap: var(--s-1); align-items: center; font-size: var(--t-meta); white-space: nowrap; }
   .plan .dw .num { font-variant-numeric: tabular-nums; color: var(--text-2); }
   .plan .state { justify-self: end; white-space: nowrap; }
+  .plan .tt .plan-st { display: none; }
+  .plan .tt .flag { color: var(--text-3); font-size: var(--t-meta); white-space: nowrap; }
   /* Group header (Items 4df3ee17, f49e3a5c): the roll is sized from its ticks (rows.tsx bandRollWidth) and the words
      sit in their own box beside it, so neither ever draws over the other. */
   .plan .plan-gh .plan-gn { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: inherit; }
@@ -38,8 +39,13 @@
   .plan .plan-views { position: sticky; top: var(--s-2); display: grid; align-content: start; }
   .plan .plan-views-h { padding: var(--s-3) var(--gut) var(--s-1); color: var(--text-3); font-size: var(--t-meta); }
   .plan .plan-save { justify-self: start; margin: var(--s-2) var(--gut); }
-  .plan .plan-picker { display: none; }
+  .plan .plan-phone { display: none; }
   .plan .plan-tbar { padding: var(--s-2) var(--gut); }
+  /* The phone's Filter and view sheet: each choice named above its control, as in the capture form. */
+  .plan-tune { display: grid; gap: var(--s-3); }
+  .plan-tune label, .plan-tune-row { display: grid; gap: var(--s-1); font-size: var(--t-small); color: var(--text-2); }
+  .plan-tune-row { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-2); align-items: center; }
+  .plan-tune-row > span:first-child { flex: 1 0 100%; }
   .plan .plan-bulk .plan-why { flex: 1 1 160px; min-width: 120px; max-width: 280px; }
   .plan .plan-bulk .plan-why .inp { width: 100%; height: 28px; }
   .plan .plan-fold { margin: 0 var(--gut) var(--s-1); }
@@ -61,13 +67,29 @@
   @media (max-width: 860px) {
     .plan .plan-body { grid-template-columns: minmax(0, 1fr); }
     .plan .plan-views { display: none; }
-    .plan .plan-picker { display: block; padding: 0 var(--gut) var(--s-2); }
+    /* Phone (owner review 2026-11-17): one count (the region's), one gutter, one control height, and the first Item
+       close to the top. Find and Filter and view share a row at the touch height; filters already set stay as chips;
+       the views, the offered filters, the order, the layout and the folds are in the sheet. */
+    .plan .plan-phone { display: inline-flex; flex: none; }
+    .plan .plan-tbar :is(.plan-desk, .chip.off) { display: none; }
+    .plan .plan-tbar .find { flex: 1 1 0; }
+    .plan .plan-tbar .find .inp { height: var(--ctl-h-touch); }
+    .plan-with-views .plan-body .ph > .tools { display: none; }
+    /* An Item row: handle and tick, then its number and name; the status and the flags share one line under the name,
+       so the name keeps the width. Done-when and owner are on the Item page (plan-wide). Descendant selectors: a
+       reorderable row's cells sit in one display: contents cell. */
+    .plan { --plan-cols: 2.2em minmax(0, 1fr); }
+    .plan .row:has(.tt) { column-gap: var(--s-2); align-items: baseline; }
+    .plan .row:has(.tt) :is(.grip, .ckhit) { align-self: center; }
+    .plan .row:has(.tt) .state { display: none; }
+    .plan .tt .plan-st { display: inline-flex; }
+    /* With its status line a group's row is at least 55px tall: the list reserves 52px a row while its rows render. */
+    .plan .plan-grp .ds-list { --ds-row-min: calc(var(--row-h) + var(--s-3)); }
+    .plan .plan-gh .grip, .plan .plan-gh .plan-gsp { margin-left: 0; }
     .plan .plan-board { grid-auto-flow: row; grid-auto-columns: auto; overflow-x: visible; }
     .plan .plan-bulk .plan-why { flex-basis: 100%; max-width: none; }
     .plan .plan-wide { display: none; }
     .plan .ph { flex-wrap: wrap; }
-    .plan .ph .tools { flex-basis: 100%; display: flex; }
-    .plan .ph .find { flex: 1 1 100%; max-width: none; }
     .plan .tt { flex-wrap: wrap; row-gap: 2px; }
     .plan .tt .ttl { flex-basis: 100%; }
     .plan .plan-grp .band { flex-wrap: wrap; }

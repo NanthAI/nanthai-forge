@@ -46,7 +46,7 @@ import {
   type PlanView,
 } from './model';
 import { filtered, keeps, readQuery, sortRows, writeQuery, type PlanQuery } from './query';
-import { Toolbar, ViewsColumn } from './Views';
+import { Toolbar, useSavedViews, viewList, ViewsColumn } from './Views';
 import './plan.css';
 
 const planRead = makeFunctionReference<'query', { projectId: Id<'hostedProjects'> }, PlanRead>(
@@ -221,6 +221,7 @@ export function PlanScreenView({
   const [toast, setToast] = useState<{ outcome: BatchOutcome; words: string } | null>(null);
   const [message, announce] = useAnnounce();
   const { folds, toggle: toggleFold, setAll: setFolds } = usePlanFolds(projectId ?? '');
+  const savedViews = useSavedViews(projectId ?? '');
   const find = query.find;
   const keep = useMemo(() => (row: PlanRow) => keeps(row, query), [query]);
   const view = useMemo(
@@ -446,6 +447,22 @@ export function PlanScreenView({
     Boolean(view?.groups.length) &&
     (view?.groups ?? []).every(group => isShut(folds, group.initiative?.id ?? NO_INITIATIVE));
   const anyShut = (view?.groups ?? []).some(group => isShut(folds, group.initiative?.id ?? NO_INITIATIVE));
+  const views = viewList(
+    { projectId: projectId ?? '', query, base: at({}), go, viewer, initiatives, owners, types, counts },
+    savedViews,
+  );
+  /** Collapse all and Expand all: quiet in the region's head on a desk, solid keys in the phone's sheet. */
+  const foldKeys = (kind?: 'ghost') =>
+    view && openShown && query.layout !== 'board' && view.groups.length > 1 ? (
+      <>
+        <Key size="sm" kind={kind} disabled={allShut} onClick={() => setFolds('shut')}>
+          Collapse all
+        </Key>
+        <Key size="sm" kind={kind} disabled={!anyShut} onClick={() => setFolds('open')}>
+          Expand all
+        </Key>
+      </>
+    ) : undefined;
   const done = (outcome: BatchOutcome, extra: string) => {
     const text = [outcomeWords(outcome, byId), extra].filter(Boolean).join(' ');
     // Rows that changed leave the selection; refused rows stay ticked so they can be tried again.
@@ -487,17 +504,7 @@ export function PlanScreenView({
         })}
       />
       <div className="plan-body">
-        <ViewsColumn
-          projectId={projectId ?? ''}
-          query={query}
-          base={at({})}
-          go={go}
-          viewer={viewer}
-          initiatives={initiatives}
-          owners={owners}
-          types={types}
-          counts={counts}
-        />
+        <ViewsColumn projectId={projectId ?? ''} query={query} views={views} />
         <Region
           title={scopeWords[query.scope]}
           count={view ? shown : undefined}
@@ -512,18 +519,7 @@ export function PlanScreenView({
                   : `by ${query.sort}; order numbers and dragging are off`
               : undefined
           }
-          tools={
-            view && openShown && query.layout !== 'board' && view.groups.length > 1 ? (
-              <>
-                <Key size="sm" kind="ghost" disabled={allShut} onClick={() => setFolds('shut')}>
-                  Collapse all
-                </Key>
-                <Key size="sm" kind="ghost" disabled={!anyShut} onClick={() => setFolds('open')}>
-                  Expand all
-                </Key>
-              </>
-            ) : undefined
-          }
+          tools={foldKeys('ghost')}
         >
           <Toolbar
             query={query}
@@ -532,6 +528,8 @@ export function PlanScreenView({
             owners={owners}
             types={types}
             viewer={viewer}
+            views={views}
+            folds={foldKeys()}
             count={
               view
                 ? `${shown.toLocaleString()} ${shown === 1 ? 'Item' : 'Items'}${closed.more || dropped.more || view.more ? '+' : ''}`
