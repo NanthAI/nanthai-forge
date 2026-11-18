@@ -493,10 +493,24 @@ export function activeCliCanaryRefusal(installation: string, released: string, n
   return record && record.head === released && (record.hold || now < record.nextRetryAt) ? record : null;
 }
 const clock = (at: number) => new Date(at).toISOString().slice(11, 16) + ' UTC';
+/** Commands where an agent looks for the refusal: status, help and version. */
+export function cliNoticeAlways(args: readonly string[]) {
+  if (args.some(word => word === '--help' || word === '-h' || word === '--version' || word === '-v'))
+    return true;
+  if (['agent', 'x'].includes(args[0]!)) return ['status', 'help'].includes(args[2]?.toLowerCase() ?? '');
+  return ['status', 'help', 'doctor', 'cli'].includes(args[0]!);
+}
 /** While a refusal is active: the full notice once per head on this installation (the first
- * command to claim it), then a short one-line hint. The full reason stays in canary-refused.json
+ * command to claim it), then a short one-line hint only where an agent looks for it (status/help),
+ * nothing on other commands (5a22ee20). The full reason stays in canary-refused.json
  * and the updater's update.log (2a0557b6: 10 commands of one script printed it 10 times). */
-export function cliCanaryNotice(installation: string, record: CanaryRefusal, runningOn: string) {
+export function cliCanaryNotice(
+  installation: string,
+  record: CanaryRefusal,
+  runningOn: string,
+  /** Status, help and version commands keep the short line; every other command prints nothing after the first. */
+  always = false,
+) {
   const verdict = record.hold
     ? 'rolled back'
     : record.step === RELEASE_SIGNATURE_STEP
@@ -507,13 +521,14 @@ export function cliCanaryNotice(installation: string, record: CanaryRefusal, run
         ? 'held by its pre-switch canary'
         : 'refused by its pre-switch canary';
   const head = `Forge CLI main ${record.head.slice(0, 8)} was ${verdict}`;
-  if (!claimFullNotice(installation, record.head)) return `${head}; running on ${runningOn.slice(0, 8)}.`;
+  if (!claimFullNotice(installation, record.head))
+    return always ? `${head}; running on ${runningOn.slice(0, 8)}.` : '';
   const retry = record.hold
     ? 'held until main moves (explicit rollback)'
     : `next retry after ${clock(record.nextRetryAt)}`;
   return (
     `${head} (${record.reason}); running on ${runningOn.slice(0, 8)}, ${retry}.` +
-    ` Details: ${join(installation, 'canary-refused.json')} and update.log; later commands print one short line.` +
+    ` Details: ${join(installation, 'canary-refused.json')} and update.log; status and help repeat one short line, other commands stay quiet.` +
     ' Switch builds by hand: nforge cli rollback | nforge update.'
   );
 }

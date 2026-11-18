@@ -100,7 +100,7 @@ import { nativeOwner } from './native-source.js';
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
 import { ConvexExchange } from './exchange-client.js';
-import { hostedActionError } from './hosted-action-error.js';
+import { hostedActionError, hostedFailureDetail } from './hosted-action-error.js';
 import { refusedWait, retryableExchangeError } from './exchange-retry.js';
 import { ForgeError, invariant } from './errors.js';
 import { hostedMainV2Schema } from './hosted-main.js';
@@ -1470,7 +1470,7 @@ export class HostedAgentTransport {
         safe.code,
         gateCodes.has(safe.code)
           ? safe.message
-          : `${safe.code === 'HOSTED_ACTION_FAILED' ? `Hosted agent ${action} failed.` : safe.message} Retry the original hosted agent action and parameters to reconcile its retained operation.`,
+          : `${safe.code === 'HOSTED_ACTION_FAILED' ? `Hosted agent ${action} failed${hostedFailureDetail(safe.message)}.` : safe.message} Retry the original hosted agent action and parameters to reconcile its retained operation.`,
       );
     }
   }

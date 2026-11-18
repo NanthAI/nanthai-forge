@@ -30,6 +30,7 @@ NOT_FOUND names what was looked up: run from the Lane root start printed, or pas
   land: {
     title: 'Landing a Lane',
     text: `From the Lane folder: nforge agent . land --save '{"message":"what changed"}' saves, updates from main, runs the check and lands under the project policy.
+- To save without submitting (no check, no landing): nforge agent . save '{}'.
 - It waits by default; --no-wait returns after submission. Clients that wake on background exit (Claude Code; FORGE_AGENT_WAKE=background-exit|off) get result.wake.command at once: run it once in the background; it exits when the landing settles. --wait keeps the foreground wait. --check-only checks without landing.
 - land --withdraw {laneId?,reason?} ends this Lane's live landing when you know its check will fail; confirm with confirm.waitCommand (it returns LANDING_CANCELLED), then fix, save and land --save again.
 - NOTHING_TO_LAND: the Lane equals its base; save your edits first.

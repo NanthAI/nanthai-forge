@@ -88,7 +88,7 @@ const REMOVED: Record<string, string> = {
   'import-native-git': `nforge import-native-git ${HOSTED_ONLY}`,
   'export-native-git': `nforge export-native-git ${HOSTED_ONLY} A hosted project mirrors main to GitHub (nforge github connect).`,
   owner: `nforge owner refresh ${HOSTED_ONLY} Use nforge pull in a clone.`,
-  land: `nforge land ROOT LANE ${HOSTED_ONLY} Use nforge agent ROOT land --save in the Lane.`,
+  land: `nforge land ROOT LANE ${HOSTED_ONLY} Use nforge agent ROOT land --save in the Lane to submit, or nforge agent ROOT save to save without submitting.`,
   pr: `nforge pr ${HOSTED_ONLY} Use nforge agent ROOT status, diff and land --save.`,
   repo: `nforge repo ${HOSTED_ONLY} Use nforge agent ROOT status.`,
   improve: `nforge improve ${HOSTED_ONLY} Use nforge agent ROOT friction-list.`,

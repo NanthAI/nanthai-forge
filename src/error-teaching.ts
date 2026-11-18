@@ -107,6 +107,11 @@ export const teachingFamilies: readonly (readonly [RegExp, string])[] = [
   ],
 ];
 
+/** A refusal whose code is generic but whose message pins the one right command (5a22ee20). */
+const teachingByMessage: readonly (readonly [RegExp, Entry])[] = [
+  [/^cleanOnly restacks a stacked Lane/, { learn: 'lanes', next: `nforge agent <root> sync '<lane>'` }],
+];
+
 export function teachingEntry(code: string): Entry | undefined {
   const exact = teachingByCode[code];
   if (exact) return exact;
@@ -165,8 +170,9 @@ function fill(template: string, context: TeachContext): string | undefined {
 }
 
 /** The teaching part for one error: next (one runnable command) and learn (the help command for its topic). */
-export function teach(code: string, context: TeachContext = {}, recovery?: unknown) {
-  const entry = teachingEntry(code);
+export function teach(code: string, context: TeachContext = {}, recovery?: unknown, message?: string) {
+  const entry =
+    (message && teachingByMessage.find(([pattern]) => pattern.test(message))?.[1]) || teachingEntry(code);
   if (!entry) return {};
   let next = commandIn(recovery);
   if (!next && context.surface !== 'mcp')
@@ -216,7 +222,7 @@ export function cliTeachContext(argv: readonly string[]): TeachContext {
 }
 
 /** Add the teaching part to an error object that already has code and message; nothing is removed. */
-export function withTeaching<T extends { code: string; recovery?: unknown }>(
+export function withTeaching<T extends { code: string; message?: string; recovery?: unknown }>(
   error: T,
   context: TeachContext,
 ) {
@@ -227,6 +233,7 @@ export function withTeaching<T extends { code: string; recovery?: unknown }>(
       error.code,
       typeof recoveryLane === 'string' && !context.laneId ? { ...context, laneId: recoveryLane } : context,
       error.recovery,
+      error.message,
     ),
   };
 }

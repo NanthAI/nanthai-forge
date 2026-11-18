@@ -350,9 +350,9 @@ set the background updater's 10-minute failure mark, so reads also retry on the 
 refusal is active, reads and writes both run on the working build. The full notice (reason,
 next retry, `DIR/canary-refused.json`, `nforge cli rollback`) prints once per refused head on
 the installation: the first command claims it with an exclusive marker file
-(`DIR/canary-noticed-HEAD`), so concurrent commands cannot print it twice. Every later command
-prints one short line, `Forge CLI main HEAD was refused by its pre-switch canary; running on
-OLD.` The full reason stays in `DIR/canary-refused.json` and the updater's `DIR/update.log`. The alert goes out
+(`DIR/canary-noticed-HEAD`), so concurrent commands cannot print it twice. Later `status`, `help`,
+`--help` and `--version` commands print one short line, `Forge CLI main HEAD was refused by its
+pre-switch canary; running on OLD.`; every other command stays quiet (5a22ee20). The full reason stays in `DIR/canary-refused.json` and the updater's `DIR/update.log`. The alert goes out
 once per head: that notice plus one ntfy/Cloudflare message through the existing stall-alert
 transport, using `FORGE_ALERT_WEBHOOK_URL` or a private `$XDG_CONFIG_HOME/forge/alert-webhook-url`
 file. The message names the step and exit class only (no URLs, tokens, paths or child output).

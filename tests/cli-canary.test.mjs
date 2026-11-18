@@ -819,23 +819,28 @@ for (const outcome of ['fail', 'pass']) {
       // 10 commands of one script (reads and writes) with a standing refusal: all run on the working
       // build; the full notice prints at most once, then one short line each.
       const ten = [...writes, ...reads.slice(0, 4)];
-      const notices = [];
+      const notices = [],
+        ran = [];
       for (const args of ten) {
         const next = await launch(f, args);
         assert.equal(next.status, 0, next.stderr);
         assert.deepEqual(JSON.parse(next.stdout), { build: 'old', ran: args });
         notices.push(next.stderr.trim());
+        ran.push(args);
       }
       const full = notices.filter(line => line.includes('Details:'));
       assert.equal(full.length, 1, notices.join('\n'));
       assert.match(full[0], /refused by its pre-switch canary \(.+\); running on aaaaaaaa, next retry after/);
-      for (const line of notices.filter(line => !line.includes('Details:'))) {
+      // 5a22ee20: after the full notice, only status and help repeat the short line; every other
+      // command is silent.
+      notices.forEach((line, index) => {
+        if (line.includes('Details:')) return;
+        const status = ['status', 'help'].includes(ran[index][0] === 'agent' ? ran[index][2] : ran[index][0]);
         assert.equal(
           line,
-          'Forge CLI main bbbbbbbb was refused by its pre-switch canary; running on aaaaaaaa.',
+          status ? 'Forge CLI main bbbbbbbb was refused by its pre-switch canary; running on aaaaaaaa.' : '',
         );
-        assert.equal(line.split('\n').length, 1);
-      }
+      });
       assert.equal(runs().length, 1, 'commands never start a canary inside the back-off');
     } else {
       const next = await launch(f, ['agent', d, 'save']);
@@ -932,7 +937,8 @@ test('rollback switches atomically to the one previous build and holds main unti
   // the full notice prints once, then one short line.
   for (const [args, notice] of [
     [['agent', f.directory, 'status'], /was rolled back .*held until main moves/],
-    [['agent', f.directory, 'save'], /^Forge CLI main bbbbbbbb was rolled back; running on aaaaaaaa\.$/],
+    // A write after the full notice is silent (5a22ee20); status keeps the short line.
+    [['agent', f.directory, 'save'], /^$/],
   ]) {
     const reply = await launch(f, args);
     assert.equal(reply.status, 0, reply.stderr);

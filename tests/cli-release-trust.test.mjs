@@ -188,7 +188,7 @@ test('transition: an unsigned release still installs while not required; the com
   assert.equal(verdict.status, 'unsigned');
   assert.equal(verdict.required, true);
   assert.match(
-    cliCanaryNotice(f.installation, readCliCanaryRefusal(f.installation), a),
+    cliCanaryNotice(f.installation, readCliCanaryRefusal(f.installation), a, true),
     /held until its release signature is published/,
   );
 });
@@ -232,7 +232,7 @@ test('a bad signature is refused before download or build, even during the trans
     assert.equal(refusal.head, b);
     assert.equal(refusal.attempts, 2);
     assert.equal(refusal.signaturePending, undefined);
-    assert.match(cliCanaryNotice(f.installation, refusal, a), /refused by its release signature check/);
+    assert.match(cliCanaryNotice(f.installation, refusal, a, true), /refused by its release signature check/);
   }
 });
 
@@ -251,7 +251,10 @@ test('required: a missing signature holds on the current build without an alert 
   assert.equal(hold.attempts, 0);
   assert.ok(hold.nextRetryAt >= before + CLI_RELEASE_SIGNATURE_RETRY_MS);
   assert.deepEqual(seen.alerts, []);
-  assert.match(cliCanaryNotice(f.installation, hold, a), /held until its release signature is published/);
+  assert.match(
+    cliCanaryNotice(f.installation, hold, a, true),
+    /held until its release signature is published/,
+  );
   assert.equal(cliBuildCommit(join(f.installation, 'current')), a);
   // Unknown keys and a failed read are the same hold, never an install.
   signatures.push(signCliRelease(releaseKey().pem, address.projectId, b));

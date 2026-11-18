@@ -230,13 +230,14 @@ export async function cliStartup(
     );
     if (released === installed && !restoreMain) return true;
     // Current installations do not need the canary executor or its update-only dependencies.
-    const { activeCliCanaryRefusal, canaryCloneHint, cliCanaryNotice, rememberCanaryClone } =
+    const { activeCliCanaryRefusal, canaryCloneHint, cliCanaryNotice, cliNoticeAlways, rememberCanaryClone } =
       await import('./cli-canary.js');
     // A build the canary refused (or an owner rolled back) never strands anyone: reads and writes
     // keep running on the working build, with one notice line, until the back-off ends or main moves.
     const refused = activeCliCanaryRefusal(installation, released);
     if (refused) {
-      process.stderr.write(`${cliCanaryNotice(installation, refused, installed)}\n`);
+      const notice = cliCanaryNotice(installation, refused, installed, cliNoticeAlways(args));
+      if (notice) process.stderr.write(`${notice}\n`);
       return true;
     }
     // No command waits for an install or its canary (2a0557b6: a landing waited ~100 s on another
