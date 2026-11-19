@@ -10,8 +10,46 @@ import { report } from './errors';
 import { abandonClass, dormantCutoff, landedByReceipt, overlapEvidence } from './projectHostedDormancy';
 import { intentFinished, maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
 import { isPlanningUuid } from '../src/planning-id';
+import { presenceMayShare } from '../src/hosted-presence';
+import type { TreeOverlap } from '../src/lanes-tree';
 
 /** One bounded indexed page, selected metadata only; no source objects or idle work. */
+
+/** Overlap peers listed per Lane in `lanes {"view":"tree"}` (57c6f3ec), and shared paths named per peer. */
+const TREE_OVERLAPS = 5;
+const TREE_PATHS = 3;
+type TreeRow = {
+  laneId: string;
+  stackOn: string | null;
+  presence: { paths: string[]; pathCount: number; pathBloom?: string } | null;
+};
+
+/** Pairs the page's Lanes that share saved paths: exact on the listed paths, `maybe` when only a path
+ * filter matches. A Lane and the Lane it stacks on are one stack and never overlap. Uses only rows the
+ * query already read: no extra document. */
+function pageOverlaps(lanes: TreeRow[]) {
+  const overlaps = new Map<string, TreeOverlap[]>();
+  for (const lane of lanes) {
+    if (!lane.presence) continue;
+    const mine = new Set(lane.presence.paths);
+    const found: TreeOverlap[] = [];
+    for (const peer of lanes) {
+      if (found.length >= TREE_OVERLAPS) break;
+      if (peer === lane || !peer.presence || peer.stackOn === lane.laneId || lane.stackOn === peer.laneId)
+        continue;
+      const shared = peer.presence.paths.filter(path => mine.has(path)).slice(0, TREE_PATHS);
+      if (shared.length) found.push({ laneId: peer.laneId, paths: shared });
+      else if (
+        presenceMayShare(peer.presence, mine) ||
+        presenceMayShare(lane.presence, new Set(peer.presence.paths))
+      )
+        found.push({ laneId: peer.laneId, paths: [], maybe: true });
+    }
+    if (found.length) overlaps.set(lane.laneId, found);
+  }
+  return overlaps;
+}
+
 export const list = query({
   args: {
     projectId: v.id('hostedProjects'),
@@ -20,8 +58,10 @@ export const list = query({
     planningItemId: v.optional(v.string()),
     intentId: v.optional(v.string()),
     /** `live` leaves out dormant Lanes, `dormant` lists only them with whether each is abandonable;
-     * `all` (default) lists every open Lane and marks the dormant ones. */
-    view: v.optional(v.union(v.literal('all'), v.literal('live'), v.literal('dormant'))),
+     * `all` (default) lists every open Lane and marks the dormant ones; `tree` is `all` plus each
+     * Lane's stack parent, landing hold and overlaps with the page's other Lanes (Issue 57c6f3ec):
+     * one slim presence point read per Lane, no other read. */
+    view: v.optional(v.union(v.literal('all'), v.literal('live'), v.literal('dormant'), v.literal('tree'))),
   },
   returns: v.string(),
   handler: async (ctx, { projectId, cursor, limit, view, planningItemId, intentId }) => {
@@ -104,6 +144,8 @@ export const list = query({
         .order('desc')
         .paginate({ cursor: providerCursor, numItems: limit, maximumRowsRead: limit });
       const lanes = [];
+      const tree = view === 'tree',
+        treeRows: TreeRow[] = [];
       for (const head of page.page) {
         // Includes staged lifecycle overlays, so completed cascades never appear live.
         const row = await readHostedRecord(ctx, { projectId, actor, kind: 'lane', key: head.key });
@@ -181,7 +223,31 @@ export const list = query({
             ? { submissionId: landing.submissionId, state: landing.phase, scope: 'intent' }
             : null,
           ...stale,
+          ...(tree
+            ? {
+                stackOn: lane.stack && !lane.stack.detached ? lane.stack.laneId : null,
+                ...(landing?.hold || landing?.orderWait ? { held: landing.hold ?? 'order' } : {}),
+              }
+            : {}),
         });
+        if (tree) {
+          const presence = await ctx.db
+            .query('projectHostedPresence')
+            .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', lane.id))
+            .first();
+          treeRows.push({
+            laneId: lane.id,
+            stackOn: lane.stack && !lane.stack.detached ? lane.stack.laneId : null,
+            presence,
+          });
+        }
+      }
+      if (tree) {
+        const overlaps = pageOverlaps(treeRows);
+        for (const row of lanes) {
+          const found = overlaps.get(row.laneId);
+          if (found) Object.assign(row, { overlaps: found });
+        }
       }
       return canonicalPayload({
         page: lanes,

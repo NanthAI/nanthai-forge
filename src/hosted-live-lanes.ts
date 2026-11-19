@@ -34,8 +34,9 @@ export const liveLanesInput = z
     /** `live` hides dormant Lanes; `dormant` lists only them, each with `abandonable`; default lists all.
      * `loose-ends` is one compact read of five groups (dormant, stopped, checked never landed, leftover projects,
      * dated checks), each listed or marked not reported with the reason; a quiet Lane beside a live Lane of the same
-     * Issue carries `replacedBy` and the abandon command as `next`. */
-    view: z.enum(['all', 'live', 'dormant', 'loose-ends']).optional(),
+     * Issue carries `replacedBy` and the abandon command as `next`. `tree` adds a compact text `tree`: which Lanes
+     * stack on which, which overlap, and each Lane's state and next step, from the same one page read. */
+    view: z.enum(['all', 'live', 'dormant', 'loose-ends', 'tree']).optional(),
   })
   .strict()
   .refine(input => input.state !== 'all' || (input.planningItemId && !input.intentId && !input.view), {
@@ -76,6 +77,18 @@ async function itemLanes(
   };
 }
 
+/** The tree view: the same one `lanes` page with stack and overlap fields, rendered as text lines. */
+async function laneTree(transport: HostedAgentTransport, input: Record<string, unknown>) {
+  const reply = await transport.query<{ page: unknown[]; isDone: boolean; continueCursor: string | null }>(
+    'projectHostedLiveLanes:list',
+    { ...input, limit: input.limit ?? 50 },
+  );
+  // Loaded only for this view, like the Item work read: `lanes` sits on the status path (7b2ae8d8).
+  const { renderLaneTree } = await import('./lanes-tree.js');
+  const page = reply.page as Parameters<typeof renderLaneTree>[0];
+  return { tree: renderLaneTree(page), page, isDone: reply.isDone, continueCursor: reply.continueCursor };
+}
+
 export async function liveLanes(transport: HostedAgentTransport, input: Record<string, unknown>) {
   const parsed = liveLanesInput.safeParse(planningIssueArguments('lanes', input));
   invariant(
@@ -100,25 +113,31 @@ export async function liveLanes(transport: HostedAgentTransport, input: Record<s
           ? await itemLanes(transport, input.planningItemId!, input)
           : input.view === 'loose-ends'
             ? looseEnds(await transport.query('projectLooseEnds:read', {}))
-            : {
-                ...(await transport.query<Record<string, unknown>>('projectHostedLiveLanes:list', {
-                  ...input,
-                  limit: input.limit ?? 50,
-                })),
-                // A Lane whose folder or land operation id is gone recovers its landing by laneId (7da396ed).
-                recover: `nforge agent ${shellQuote(hostedAgentRoot(transport.root))} status '{"laneId":"LANE_ID"}' names a Lane's landing in flight and its wait, even without its folder.`,
-              },
+            : input.view === 'tree'
+              ? await laneTree(transport, input)
+              : {
+                  ...(await transport.query<Record<string, unknown>>('projectHostedLiveLanes:list', {
+                    ...input,
+                    limit: input.limit ?? 50,
+                  })),
+                  // A Lane whose folder or land operation id is gone recovers its landing by laneId (7da396ed).
+                  recover: `nforge agent ${shellQuote(hostedAgentRoot(transport.root))} status '{"laneId":"LANE_ID"}' names a Lane's landing in flight and its wait, even without its folder.`,
+                },
     };
   } catch (error) {
     if (
       error instanceof Error &&
-      /(?:Could not find (?:public )?function|No (?:public )?function found|Function .* not found)/i.test(
+      (/(?:Could not find (?:public )?function|No (?:public )?function found|Function .* not found)/i.test(
         error.message,
-      )
+      ) ||
+        (parsed.data.view === 'tree' &&
+          /ArgumentValidationError|Value does not match validator/i.test(error.message)))
     )
       throw new ForgeError(
         'HOSTED_ACTION_UNSUPPORTED',
-        'This deployment does not offer the live Lane list. Deploy the matching projectHostedLiveLanes API, then rerun nforge agent ROOT lanes {}.',
+        parsed.data.view === 'tree'
+          ? 'This deployment does not offer lanes view "tree" yet. Run nforge agent ROOT lanes {} for the flat list.'
+          : 'This deployment does not offer the live Lane list. Deploy the matching projectHostedLiveLanes API, then rerun nforge agent ROOT lanes {}.',
       );
     const failure = hostedActionError(error, 'live Lane read');
     if (failure.code === 'HOSTED_ACTION_FAILED')

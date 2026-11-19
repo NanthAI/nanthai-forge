@@ -11,6 +11,8 @@ Use ordinary file tools for source questions. For delivery, use the installed `n
 Lifecycle verbs: `start`, `save`, `land`. Use `land --save` to save, update from main, check and land under project policy. Run `preflight {laneId}` for affected checks of a saved Lane; `tests {candidateId}` reads a Candidate's test selection.
 <!-- agent-workflow:end -->
 
+Before picking what to land next, `lanes {"view":"tree"}` shows stacks, overlaps, each Lane's state and its next step in one read.
+
 ## Hosted checkouts
 
 - Start with a fresh operation id; edit only its returned Lane path. A new Lane that replaces one of the Issue's `openLanes` (for example a resolution Lane) abandons the old one: `x abandon {laneId,reason:"Replaced by Lane NEW"}`. Save after meaningful steps. Read `behindMain`, presence and `conflictNotice`: saves trial-merge against main and peers, but unsaved peer edits are excluded. `peers {laneId,path?,detail?}` reads saved overlap evidence; missing evidence never proves independence.

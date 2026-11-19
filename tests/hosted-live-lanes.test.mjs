@@ -447,3 +447,132 @@ test('the Lanes page reads one page as wide as the line feed: bytes at 60 and at
   );
   assert.ok(cost[LANE_PAGE].readBytes < 2 * 1024 * 1024, JSON.stringify(cost[LANE_PAGE]));
 });
+
+test('lanes tree view (57c6f3ec): stack parents, holds and overlaps from the one page read, at most one presence read per Lane', async t => {
+  const s = await fixture();
+  const intentId = randomUUID();
+  await s.put({
+    kind: 'intent',
+    id: intentId,
+    version: 0,
+    at,
+    outcome: 'Synthetic tree outcome',
+    constraints: '',
+    creatorAccountId: 'owner',
+    assigneeAccountIds: [],
+    base: { head: hash, receiptId: randomUUID() },
+    status: 'active',
+  });
+  const lane = (extra = {}) => ({
+    kind: 'lane',
+    id: randomUUID(),
+    version: 0,
+    at,
+    intentId,
+    actor: 'owner',
+    base: { head: hash, receiptId: randomUUID() },
+    head: hash,
+    sourceVersion: 0,
+    lifecycleVersion: 0,
+    state: 'active',
+    authorityEpoch: 1,
+    ...extra,
+  });
+  const parent = lane(),
+    child = lane({ stack: { laneId: parent.id, head: hash } }),
+    peer = lane(),
+    alone = lane();
+  for (const row of [parent, child, peer, alone]) await s.put(row);
+  // The Lane record write keeps each open Lane's slim presence row; give it saved paths.
+  const presence = async (laneId, paths) => {
+    const row = await s.ctx.db
+      .query('projectHostedPresence')
+      .withIndex('by_project_and_lane', q => q.eq('projectId', s.auth.projectId).eq('laneId', laneId))
+      .first();
+    if (row) await s.ctx.db.patch(row._id, { paths, pathCount: paths.length });
+    else
+      await s.ctx.db.insert('projectHostedPresence', {
+        projectId: s.auth.projectId,
+        laneId,
+        intentId,
+        actor: 'owner',
+        goal: 'Synthetic tree outcome',
+        paths,
+        pathCount: paths.length,
+        at: 1,
+      });
+  };
+  await presence(parent.id, ['src/shared.ts', 'src/parent.ts']);
+  await presence(child.id, ['src/shared.ts']);
+  await presence(peer.id, ['src/shared.ts', 'src/peer.ts']);
+  await presence(alone.id, ['src/alone.ts']);
+  const list = view =>
+    s.call(`list-${view}`, api.list, { projectId: s.auth.projectId, cursor: null, limit: 50, view });
+  const plain = JSON.parse(await list('all')),
+    plainCount = s.counts.at(-1);
+  const tree = JSON.parse(await list('tree')),
+    treeCount = s.counts.at(-1);
+  assert.equal(tree.page.length, plain.page.length);
+  const row = id => tree.page.find(entry => entry.laneId === id);
+  assert.equal(row(child.id).stackOn, parent.id);
+  assert.equal(row(parent.id).stackOn, null);
+  // A Lane and the Lane it stacks on never overlap; a peer sharing a saved path does.
+  assert.deepEqual(row(parent.id).overlaps, [{ laneId: peer.id, paths: ['src/shared.ts'] }]);
+  assert.deepEqual(
+    row(peer.id)
+      .overlaps.map(o => o.laneId)
+      .sort(),
+    [parent.id, child.id].sort(),
+  );
+  assert.equal(row(alone.id).overlaps, undefined);
+  // Cost guard: the same one query, no writes, at most one presence document per listed Lane.
+  assert.equal(treeCount.writes, 0);
+  assert(
+    treeCount.documents <= plainCount.documents + tree.page.length,
+    JSON.stringify({ plainCount, treeCount }),
+  );
+  t.diagnostic(JSON.stringify({ plainCount, treeCount }));
+  assert(!('stackOn' in plain.page[0]), 'the default page is unchanged');
+});
+
+test('the CLI lanes tree is one transport query, renders children under their parent and names overlaps (57c6f3ec)', async () => {
+  const { liveLanes } = await import('../dist/hosted-live-lanes.js');
+  const parent = '11111111-1111-4111-8111-111111111111',
+    child = '22222222-2222-4222-8222-222222222222',
+    peer = '33333333-3333-4333-8333-333333333333';
+  const page = [
+    {
+      laneId: parent,
+      intent: 'Parent work',
+      lastSaveAt: at,
+      landing: null,
+      stackOn: null,
+      overlaps: [{ laneId: peer, paths: ['src/shared.ts'] }],
+    },
+    { laneId: child, intent: 'Child work', lastSaveAt: at, landing: null, stackOn: parent },
+    {
+      laneId: peer,
+      intent: 'Peer work',
+      lastSaveAt: at,
+      landing: { state: 'checking' },
+      stackOn: null,
+      held: 'main-red',
+    },
+  ];
+  const calls = [];
+  const transport = {
+    root: '/synthetic',
+    query: async (name, args) => {
+      calls.push([name, args]);
+      return { page, isDone: true, continueCursor: null };
+    },
+  };
+  const { result } = await liveLanes(transport, { view: 'tree' });
+  assert.deepEqual(calls, [['projectHostedLiveLanes:list', { view: 'tree', cursor: null, limit: 50 }]]);
+  assert.deepEqual(result.tree, [
+    '11111111 [saved] Parent work · next: land --save',
+    '│  overlaps: 33333333 (src/shared.ts)',
+    '└─ 22222222 [saved] Child work · next: land after 11111111',
+    `33333333 [held] Peer work · next: status {"laneId":"${peer}"} names its wait`,
+  ]);
+});

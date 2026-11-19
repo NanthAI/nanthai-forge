@@ -1015,13 +1015,16 @@ test(
         stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
       },
     );
-    let errors = '';
+    let errors = '',
+      killed = false,
+      sendError;
     child.stderr.on('data', bytes => {
       errors += bytes;
     });
     t.after(async () => {
       if (child.exitCode === null && child.signalCode === null) {
         const exited = once(child, 'exit');
+        killed = true;
         child.kill('SIGKILL');
         await exited;
       }
@@ -1031,7 +1034,12 @@ test(
         if (message.subscribed) return resolve();
         try {
           const value = await s.transport.query(message.name, message.args);
-          if (child.connected) child.send({ id: message.id, value });
+          // A reply still in flight when the test SIGKILLs the wait fails with EPIPE: only that
+          // deliberate kill excuses a send error.
+          if (child.connected)
+            child.send({ id: message.id, value }, error => {
+              if (error && !killed) reject((sendError = error));
+            });
         } catch (error) {
           reject(error);
         }
@@ -1040,8 +1048,10 @@ test(
     });
     await subscribed;
     const exited = once(child, 'exit');
+    killed = true;
     child.kill('SIGKILL');
     assert.deepEqual(await exited, [null, 'SIGKILL']);
+    assert.equal(sendError, undefined, 'every reply before the kill reached the wait');
     const acceptance = { receiptId: randomUUID(), head: 'a'.repeat(64) };
     await s.update(a.state.id, 'landed', { acceptance });
     const resumed = await s.wait(input);
