@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { digest } from './state/hash.js';
-import { invariant } from './errors.js';
+import { invariant, tagShapeSource } from './errors.js';
 
 /** How long an operation receipt answers a retry of its operation id (same value as overlap answers).
  * Longer than any retry or dormant-Lane resume rule. */
@@ -79,7 +79,17 @@ export type HostedTerminalReceipt = z.infer<typeof hostedTerminalReceiptSchema>;
 const jsonValue = z.json();
 /** JSON values only: recursively sorted object keys, preserved array order and exact strings. */
 export function canonicalPayload(value: unknown, validated = false): string {
-  const parsed: unknown = validated ? value : jsonValue.parse(value);
+  try {
+    return encodeCanonical(validated ? value : jsonValue.parse(value));
+  } catch (error) {
+    // The shared JSON schema is a union: a bad nested value (undefined, a function, NaN) fails at the root path.
+    throw tagShapeSource(
+      error,
+      'canonical JSON payload (JSON values only: no undefined, function or non-finite number)',
+    );
+  }
+}
+function encodeCanonical(parsed: unknown): string {
   function encode(item: unknown): string {
     if (Array.isArray(item)) return `[${item.map(encode).join(',')}]`;
     if (item && typeof item === 'object') {

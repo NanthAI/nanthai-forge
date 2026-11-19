@@ -1537,7 +1537,7 @@ export class HostedAgentTransport {
       if (error instanceof z.ZodError)
         throw isHostedReplyError(error)
           ? protocolMismatchError(replyIssuePaths(error.issues))
-          : localShapeError(action, error.issues);
+          : localShapeError(action, error);
       const safe = hostedActionError(error, `agent ${action}`);
       // A write pause, OCC conflict or 429/503 refusal ran nothing: keep its structured
       // retryable flag and retryAt instead of rebuilding it from code and message (72d50375).

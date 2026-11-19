@@ -12,6 +12,19 @@ export class ForgeError extends Error {
     this.code = code;
   }
 }
+const shapeSource = Symbol.for('forge.shapeSource');
+/** Names the record or schema a local parse checked, so a shape error can say where it failed
+ * (the first, innermost name wins). Names only, never values. */
+export function tagShapeSource<T>(error: T, source: string): T {
+  if (error && typeof error === 'object' && Object.isExtensible(error) && !(shapeSource in error))
+    Object.defineProperty(error, shapeSource, { value: source });
+  return error;
+}
+export function shapeSourceOf(error: unknown): string | undefined {
+  const source =
+    error && typeof error === 'object' ? (error as Record<symbol, unknown>)[shapeSource] : undefined;
+  return typeof source === 'string' ? source : undefined;
+}
 export function invariant(condition: unknown, code: string, message: string): asserts condition {
   if (!condition) throw new ForgeError(code, message);
 }

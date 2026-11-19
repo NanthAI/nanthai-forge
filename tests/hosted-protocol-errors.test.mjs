@@ -95,6 +95,72 @@ test('only the reply boundary produces the version-skew message', async t => {
   assert.match(local.message, /at a\b/, 'names the failing path, never a value');
 });
 
+test('a root-level local shape failure names its source, field and issue code, never a value (bb486d05)', async t => {
+  const { canonicalPayload } = await import('../dist/hosted-source-operation.js');
+  const { localShapeError } = await import('../dist/hosted-agent-version.js');
+  const caught = run => {
+    try {
+      run();
+    } catch (error) {
+      return error;
+    }
+    assert.fail('expected a shape error');
+  };
+  // As an old preflight receipt left it: an undefined field deep in the retained land payload.
+  // z.json() is a union, so zod reports it at the root path: once printed as "at parameters".
+  const secret = 'value-that-must-not-print';
+  const payload = caught(() =>
+    canonicalPayload({
+      defaults: { preflight: { finish: undefined, reason: secret } },
+      files: { 'a/b.ts': 1n },
+    }),
+  );
+  assert.ok(payload instanceof z.ZodError);
+
+  // Through the CLI: the land path surfaces the named field, not "parameters".
+  const s = agentFixture(t);
+  const transport = s.transport(),
+    query = transport.query.bind(transport);
+  transport.query = async (name, args) => {
+    if (name === 'projectHostedChannels:current') throw payload;
+    return query(name, args);
+  };
+  const failure = await hostedAgentCli(s.root, 'start', { outcome: 'x' }, s.address, transport).then(
+    () => null,
+    error => error,
+  );
+  assert.equal(failure?.code, 'HOSTED_PROTOCOL_INVALID');
+  assert.match(
+    failure.message,
+    /canonical JSON payload \(.*\) at defaults\.preflight\.finish \(invalid_type/,
+  );
+
+  const message = localShapeError('finish', payload).message;
+  assert.doesNotMatch(message, /at parameters/);
+  assert.match(message, /in canonical JSON payload/);
+  assert.match(message, /defaults\.preflight\.finish \(invalid_type, received undefined\)/);
+  assert.match(message, /files\.\[key\] \(invalid_type, received bigint\)/, 'a record key is data: redacted');
+  assert.doesNotMatch(message, new RegExp(`${secret}|a/b\\.ts`));
+
+  // Unrecognized keys: their names (field names only), with no source tag.
+  const strict = z.object({ laneId: z.string() }).strict();
+  const keys = localShapeError(
+    'finish',
+    strict.safeParse({ laneId: secret, finsh: 1, 'a/b': 2 }).error,
+  ).message;
+  assert.match(keys, /in an unnamed local record at its root \(unrecognized_keys, keys finsh\)/);
+  assert.doesNotMatch(keys, new RegExp(`${secret}|a/b`));
+
+  // A plain union of objects: equally deep branches go to the closer match (fewer issues).
+  const either = z.union([
+    z.object({ kind: z.literal('a'), x: z.string() }),
+    z.object({ kind: z.literal('b'), y: z.string() }),
+  ]);
+  const tie = localShapeError('finish', either.safeParse({ kind: 'b', y: 1 }).error).message;
+  assert.match(tie, /at y \(invalid_type, received number\)/);
+  assert.doesNotMatch(tie, /\bx \(/);
+});
+
 test('an older-schema CLI reads a start reply with one extra field (top level and nested)', () => {
   const old = z.fromJSONSchema(released.schemas['hosted-lane#hostedStartResultSchema']);
   const extended = {
