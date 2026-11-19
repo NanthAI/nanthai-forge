@@ -276,6 +276,12 @@
       "what": "A parked Lane the queue landed after its agent stopped (receipt 1bc84170, 2026-11-17) told its Item nothing; the lead briefed a takeover for work already on main",
       "file": "tests/intent-landing-notes.test.mjs",
       "test": "incident replay 2bf85ddf: a parked Lane the queue lands after its agent stopped posts its receipt to its Item"
+    },
+    {
+      "incident": "687d1eda",
+      "what": "Main went red after a landing turned on browser tests its own check skipped (2026-11-19); a skip counted as a pass, two unrelated landings were blamed and reverted, and a docs-only audit cleared the red",
+      "file": "tests/hosted-culprit.test.mjs",
+      "test": "incident 687d1eda: a newly covered failure names the coverage landing, reverts nothing and keeps main red"
     }
   ]
 }

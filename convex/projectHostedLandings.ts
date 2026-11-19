@@ -58,6 +58,14 @@ function heldAfterCheck(attempts: HostedLandingAttempt[], progress: Array<Attemp
   return held;
 }
 const AUDIT_VERDICT: Record<string, string> = { green: 'passed', red: 'failed', stalled: 'stalled' };
+/** One culprit event names one receipt (Item 687d1eda): the landings below it are in the red range,
+ * never culprits themselves. */
+export const followingAuditVerdict = (audit: { kind: string; culprit?: string }, receiptId: string) =>
+  audit.kind === 'culprit'
+    ? audit.culprit === receiptId
+      ? 'culprit'
+      : 'in-red-range'
+    : (AUDIT_VERDICT[audit.kind] ?? audit.kind);
 const iso = (ms: number | undefined) => (ms === undefined ? null : new Date(ms).toISOString());
 /** One landing's evidence from rows already stored. Five indexed reads beyond the receipt itself. */
 async function evidence(
@@ -173,7 +181,11 @@ async function evidence(
       ...(runIds.length > LANDINGS_RUN_IDS ? { moreCheckRunIds: runIds.length - LANDINGS_RUN_IDS } : {}),
       ...(chain.length === LANDINGS_ATTEMPTS ? { checkRunIdsPartial: true } : {}),
       followingAudit: audit
-        ? { runId: audit.runId, verdict: AUDIT_VERDICT[audit.kind] ?? audit.kind, sequence: audit.sequence }
+        ? {
+            runId: audit.runId,
+            verdict: followingAuditVerdict(audit, receipt.id),
+            sequence: audit.sequence,
+          }
         : null,
       // A check binding replaces an attempt without composing again: count distinct Candidates.
       recomposeCount: recomposes(attempts, last?.number),

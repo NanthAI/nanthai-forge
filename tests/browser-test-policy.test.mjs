@@ -69,14 +69,28 @@ test('1dd4e095: browser selection reuses the existing graph when the selected te
   );
   assert.equal(browser.browser, true);
 });
-test('1dd4e095: non-web checks omit browser files while preserving static docs contracts', () => {
+test('1dd4e095: non-full non-web checks omit browser files while preserving static docs contracts', () => {
+  // An interaction selection can carry docs-site as fixed smoke; only full selections run every browser test.
   const selected = browserSelection(
-    { scope: 'full', tests: [...inventory.keys()] },
+    { scope: 'interaction', tests: [...inventory.keys()] },
     ['src/server.ts'],
     inventory,
   );
   assert.equal(selected.browser, false);
   assert.deepEqual(selected.tests, ['tests/docs-site.test.mjs', 'tests/server.test.mjs']);
+});
+test('687d1eda: full means full: a full selection runs every browser test whatever the changed paths', () => {
+  // Incident 687d1eda: a "full" audit after a docs-only landing left every browser test out and cleared red.
+  for (const paths of [['docs/status.md'], ['src/server.ts'], []]) {
+    const selected = browserSelection({ scope: 'full', tests: ['tests/server.test.mjs'] }, paths, inventory);
+    assert.equal(selected.browser, true, paths.join());
+    assert.deepEqual(
+      selected.tests,
+      browserFiles([...inventory.keys()])
+        .concat('tests/server.test.mjs')
+        .sort(),
+    );
+  }
 });
 test('1dd4e095: a web or design-system change selects every present browser fixture', () => {
   for (const path of ['web/src/app.tsx', 'web/src/ds/tokens.css', 'tests/ds-reference.test.mjs']) {
@@ -128,8 +142,13 @@ test('1dd4e095: a Candidate adding a -browser fixture gets browser coverage and 
     true,
   );
   assert(groups[browserShard(groups, true)].includes(added));
-  // Non-web changes leave the new named fixture out, like every registered one.
-  const ordinary = browserSelection({ scope: 'full', tests: [...files.keys()] }, ['src/server.ts'], files);
+  // Non-full non-web changes filter the new named fixture out, like every registered one.
+  const ordinary = browserSelection(
+    { scope: 'interaction', tests: [...files.keys()] },
+    ['src/server.ts'],
+    files,
+  );
+  assert.equal(ordinary.browser, false);
   assert.equal(ordinary.tests.includes(added), false);
   assert.equal(isBrowserTest('tests/browser-runtime.test.mjs'), false);
   assert.equal(isBrowserTest('tests/sub/x-browser.test.mjs'), false);

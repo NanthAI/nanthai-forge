@@ -91,6 +91,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `9829778c` | A stale conflict beside older board pages or a note already read in another Lane repeatedly interrupts a wait |
 | `aad45785` | Overlapping full admissions spend checks before composing against an earlier pending predecessor; failed predecessors must preserve follower source |
 | `2bf85ddf` | Core claim: the queue landed a parked Lane after its agent stopped and its Item heard nothing (2026-11-17); every landing now posts a system receipt comment to its Item |
+| `687d1eda` | Core claim: a landing turned on browser tests its own check skipped; the skip counted as a pass, unrelated landings were blamed and reverted, and a docs-only audit cleared red (2026-11-19). A skip is not a pass, full checks run every browser test, and a newly covered failure names the coverage landing and reverts nothing |
 
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.

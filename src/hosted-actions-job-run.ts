@@ -3,7 +3,8 @@ import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { childEnv, runnerEnvAllow, toolchainEnvAllow } from '../scripts/child-env.mjs';
-import { ContractTimingReader, unstoredReportsNote } from './contract-test-timings.js';
+import { ContractTimingReader, skippedReportsNote, unstoredReportsNote } from './contract-test-timings.js';
+import { isBrowserTest } from '../scripts/browser-test-policy.mjs';
 import { HostedOutputRedactor } from './hosted-output-redactor.js';
 import { semanticCheckCommand } from './semantic-check-command.js';
 import { semanticTests } from './intent-semantic-conflict.js';
@@ -337,6 +338,17 @@ async function executeActiveActionsJob(
     if (unstored) {
       note(unstored.line);
       if (unstored.failed && !exitCode) exitCode = 1;
+    }
+    // A skip is not a pass (Item 687d1eda): skipped files leave no evidence, and a skipped browser
+    // test under a plan that selected browser coverage fails this shard instead of passing it.
+    const skipped = skippedReportsNote(
+      reports,
+      Boolean(recipe.standard && recipe.selection?.browser),
+      isBrowserTest,
+    );
+    if (skipped) {
+      note(skipped.line);
+      if (skipped.browser && !exitCode) exitCode = 1;
     }
   } finally {
     if (isolation.mode === 'user') isolation.remove(junit.directory);

@@ -99,7 +99,9 @@ export const recoveryText: Record<FailureRecovery, { label: string; agent: strin
   },
   'wait-for-main': {
     label: 'Keep waiting',
-    agent: 'Do not change your code. Wait; Forge checks this Lane again when main passes.',
+    // Until fix D (Item 687d1eda) parks failed landings, only a main-red hold continues by itself.
+    agent:
+      "Do not change your code: a landing that fails only on main's failing tests is not at fault. A held landing continues once main passes; a failed one needs land --save again once main passes.",
   },
   wait: { label: 'Keep waiting', agent: 'Wait; Forge checks again by itself.' },
   'read-log': {

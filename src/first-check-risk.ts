@@ -150,6 +150,17 @@ function riskOf(
   );
 }
 
+/** Paths that change which tests a check runs or how it runs them (Item 687d1eda): the check's entry
+ * and contract files (with its selection inputs) and CI configuration. A landing with one does not
+ * earn main's green from its own check, which still ran under the old selection or executor. */
+export function coverageChangePaths(paths: readonly string[], checkEntries: readonly string[] = []) {
+  const entries = checkEntries.map(entryMatcher);
+  return paths.filter(path => {
+    const reason = riskOf(path, entries, FIRST_CHECK_RISK_RULE);
+    return reason === 'check script or check contract' || reason === 'CI configuration';
+  });
+}
+
 /** A folder whose files are applied in order, so two sides that each add one cannot both be right
  * without a look: Django/Rails/Flyway/Prisma `migrations`, `db/migrate`, Alembic `versions`.
  * The key is the folder itself; files below it (Prisma's one folder per migration) share it. */

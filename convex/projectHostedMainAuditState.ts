@@ -33,6 +33,8 @@ import {
   type AuditFreshness,
 } from '../src/landing-mode';
 import { effectivePolicy } from '../src/autonomy-policy';
+import { checkRunEntryPaths, coverageChangePaths } from '../src/first-check-risk';
+import { isStandardForgeCheck, STANDARD_SELECTION_INPUTS } from '../src/standard-check';
 
 export const auditRow = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) =>
   ctx.db
@@ -243,9 +245,27 @@ export async function releaseMainHolds(ctx: MutationCtx, projectId: Id<'hostedPr
       projectId,
     });
 }
+/** A landing that changes which tests run, or how (Item 687d1eda). Its own check ran under the old
+ * selection or executor, so it never earns main's green: the next full audit decides. Unknown paths
+ * (null) count as a change; `undefined` is a caller with exact full main evidence (seed). */
+export function coverageLanding(run: HostedCheckRun, paths: readonly string[] | null | undefined) {
+  if (paths === undefined) return false;
+  if (paths === null) return true;
+  const entries = [
+    ...checkRunEntryPaths(run.check),
+    ...(isStandardForgeCheck(run.check) ? STANDARD_SELECTION_INPUTS : []),
+  ];
+  return coverageChangePaths(paths, entries).length > 0;
+}
 export async function noteMainLanding(
   ctx: MutationCtx,
-  input: { project: Doc<'hostedProjects'>; receipt: HostedAcceptance; run: HostedCheckRun | null },
+  input: {
+    project: Doc<'hostedProjects'>;
+    receipt: HostedAcceptance;
+    run: HostedCheckRun | null;
+    /** The landed change's paths, already read by the caller; see coverageLanding. */
+    paths?: readonly string[] | null;
+  },
 ): Promise<void> {
   const { receipt, run } = input;
   if (!run || (!run.gate && !receipt.crossHeadProof) || run.status !== 'passed') return;
@@ -287,7 +307,9 @@ export async function noteMainLanding(
     await ctx.db.patch(row._id, patch);
     row = { ...row, ...patch };
   }
-  if (!receipt.crossHeadProof && fullGate(run) && !docsGate(run)) {
+  const coverage =
+    !receipt.crossHeadProof && fullGate(run) && !docsGate(run) && coverageLanding(run, input.paths);
+  if (!receipt.crossHeadProof && fullGate(run) && !docsGate(run) && !coverage) {
     if (row.wake) await cancelPendingTask(ctx, row.wake.taskId);
     const ended = await recovery(
       ctx,
@@ -356,7 +378,9 @@ export async function noteMainLanding(
   // A first-check landing (Issue 7fe54c7c) is verified promptly: one coalesced
   // full audit of the newest main head, never one per landing, instead of the
   // cadence that covers contract-gated landings.
-  const firstCheck = firstCheckProof(receipt.crossHeadProof) ? receipt.snapshot.revision : row.firstCheck;
+  // A coverage landing is audited just as promptly: the audit, not its own check, decides main's green.
+  const firstCheck =
+    firstCheckProof(receipt.crossHeadProof) || coverage ? receipt.snapshot.revision : row.firstCheck;
   await ctx.db.patch(row._id, {
     unaudited: { count, firstAt: count ? firstAt : null },
     debt: auditDebt(count, firstAt, settings),
@@ -368,6 +392,64 @@ export async function noteMainLanding(
       row,
       promptAudit({ ...row, firstCheck }) ? Date.now() : auditDue(count, firstAt, settings),
     );
+}
+/** Main red's failing files, from the failed audit's retained summary (Item 687d1eda): at most
+ * RED_TESTS names and how many more, so a landing that fails only on them can wait for green. */
+export const RED_TESTS = 20;
+export function redTests(run: HostedCheckRun) {
+  const files = [
+    ...new Set(
+      run.contractReports
+        ? Object.entries(run.contractReports).flatMap(([file, report]) => (report.failed ? [file] : []))
+        : (run.testFiles?.failed ?? []).map(item => item.file),
+    ),
+  ].sort();
+  const count = Math.max(files.length, run.testFiles?.counts.failed ?? 0);
+  return {
+    tests: files.slice(0, RED_TESTS),
+    ...(count > Math.min(files.length, RED_TESTS)
+      ? { moreTests: count - Math.min(files.length, RED_TESTS) }
+      : {}),
+  };
+}
+/** Main red in one reply (Item 687d1eda): since when, the failing files, why, the fix Intent, and the
+ * receipt named as culprit or as the change that made the tests run. */
+export function mainRedField(red: NonNullable<Doc<'projectHostedMainAudits'>['red']>) {
+  return {
+    since: red.since,
+    runId: red.runId,
+    tests: red.tests ?? [],
+    ...(red.moreTests ? { moreTests: red.moreTests } : {}),
+    reason: red.reason ?? 'Recovery is classifying the failed main audit.',
+    ...(red.intentId ? { fixIntentId: red.intentId } : {}),
+    ...(red.culprit ? { culprit: red.culprit } : {}),
+    ...(red.covered ? { newlyCoveredBy: red.covered } : {}),
+    next: 'A landing that fails only on these tests is not at fault; land it again once main passes.',
+  };
+}
+function withoutTests(red: Doc<'projectHostedMainAudits'>['red']) {
+  if (!red) return {};
+  const { tests: _tests, moreTests: _more, ...kept } = red;
+  void [_tests, _more];
+  return kept;
+}
+/** Records why main is red on the current episode's row, once recovery decides (Item 687d1eda). */
+export async function noteRedCause(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  episode: (red: NonNullable<Doc<'projectHostedMainAudits'>['red']>) => boolean,
+  cause: { reason: string; intentId?: string; covered?: string },
+) {
+  const row = await auditRow(ctx, projectId);
+  if (!row?.red || !episode(row.red)) return;
+  await ctx.db.patch(row._id, {
+    red: {
+      ...row.red,
+      reason: cause.reason.slice(0, 480),
+      ...(cause.intentId ? { intentId: cause.intentId } : {}),
+      ...(cause.covered ? { covered: cause.covered } : {}),
+    },
+  });
 }
 /** An unaudited first-check landing is newer than the last green main. */
 export const promptAudit = (row: { firstCheck?: number; lastGreen?: { sequence: number } }) =>
@@ -448,7 +530,14 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
     // An armed owner drill claims the first red in its window; a later red finds it expired (fe7d67a8).
     const claims = !row.red && drillClaims(row.drill, at);
     await ctx.db.patch(row._id, {
-      red: { ...row.red, since: row.red?.since ?? at, head: run.request.expectedHead, runId: run.id },
+      red: {
+        // A later failed audit of the episode replaces the failing files; the cause stays.
+        ...withoutTests(row.red),
+        since: row.red?.since ?? at,
+        head: run.request.expectedHead,
+        runId: run.id,
+        ...redTests(run),
+      },
       window: auditWindow(row.window, {
         verdict: claims || row.drill?.red ? 'drill' : 'red',
         landings: meta.count,

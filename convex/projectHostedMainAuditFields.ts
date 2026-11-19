@@ -54,7 +54,19 @@ export const mainAuditFields = {
     }),
   ),
   red: v.optional(
-    v.object({ since: v.string(), head: v.string(), runId: v.string(), culprit: v.optional(v.string()) }),
+    v.object({
+      since: v.string(),
+      head: v.string(),
+      runId: v.string(),
+      culprit: v.optional(v.string()),
+      /** Item 687d1eda: the latest failed audit's failing files (at most 20) and how many more, the
+       * recovery's reason and fix Intent, and the receipt that made newly covered tests run. */
+      tests: v.optional(v.array(v.string())),
+      moreTests: v.optional(v.number()),
+      reason: v.optional(v.string()),
+      intentId: v.optional(v.string()),
+      covered: v.optional(v.string()),
+    }),
   ),
   debt: v.optional(v.boolean()),
   /** Newest main revision that landed on its first check (7fe54c7c); audited promptly. */

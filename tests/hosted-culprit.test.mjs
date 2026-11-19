@@ -62,7 +62,17 @@ function seedRecord(f, record) {
   });
   f.insert('projectHostedRecordHeads', { ...indexed, recordId });
 }
-async function fixture(k = 5, { noop = false, addedAt = null, pairFlag = false } = {}) {
+async function fixture(
+  k = 5,
+  {
+    noop = false,
+    addedAt = null,
+    pairFlag = false,
+    coverageAt = null,
+    greenReports = null,
+    auditReports = null,
+  } = {},
+) {
   const f = await checksFixture();
   const original = await f.enqueue(f.selection());
   f.scheduled = [];
@@ -168,6 +178,18 @@ async function fixture(k = 5, { noop = false, addedAt = null, pairFlag = false }
         dependencies: receipt.candidate.dependencies,
         algorithm: receipt.candidate.algorithm,
         result: { status: 'clean', head: heads[index] },
+        ...(coverageAt !== null
+          ? {
+              governance: {
+                version: 1,
+                paths:
+                  index === coverageAt
+                    ? ['.github/workflows/forge-check.yml', 'scripts/browser-test-policy.mjs']
+                    : [`src/file-${index}.ts`],
+                ownerInputs: false,
+              },
+            }
+          : {}),
       };
       const { ref } = hostedRecordValue(candidate);
       receipt.candidate.digest = ref.digest;
@@ -202,7 +224,9 @@ async function fixture(k = 5, { noop = false, addedAt = null, pairFlag = false }
     status: 'failed',
     endedAt: at,
     terminalDigest: hash,
-    contractReports: { 'tests/red.test.mjs': { failed: true, firstError: 'synthetic failure' } },
+    contractReports: auditReports ?? {
+      'tests/red.test.mjs': { failed: true, firstError: 'synthetic failure' },
+    },
   });
   const green = hostedCheckRunSchema.parse({
     ...f.audit,
@@ -210,7 +234,7 @@ async function fixture(k = 5, { noop = false, addedAt = null, pairFlag = false }
     status: 'passed',
     gate: { mode: 'full', effective: 'full' },
     request: { ...f.audit.request, expectedHead: heads[0] },
-    contractReports: addedAt === null ? { 'tests/red.test.mjs': { failed: false } } : {},
+    contractReports: greenReports ?? (addedAt === null ? { 'tests/red.test.mjs': { failed: false } } : {}),
   });
   f.insert('projectHostedCheckRuns', {
     projectId: f.projectId,
@@ -435,6 +459,102 @@ test('missing green reports without source absence never blame a landing', async
   assert.equal(JSON.parse(f.recovery().recovery).stage, 'done');
   assert.equal(f.probes().length, 0);
   assert.equal(f.tables.projectHostedSyncs.size, 0);
+});
+
+test('incident 687d1eda: a newly covered failure names the coverage landing, reverts nothing and keeps main red', async t => {
+  // A coverage landing (index 1) turned on a test the last green main skipped; two unrelated landings follow.
+  const f = await fixture(3, {
+    addedAt: 0,
+    coverageAt: 1,
+    greenReports: {
+      'tests/other.test.mjs': { failed: false, durationMs: 1200 },
+      'tests/red.test.mjs': { failed: false, attempts: [] },
+    },
+  });
+  await f.runCulprit();
+  assert.equal(f.probes().length, 0, 'a skipped predecessor report is not pass evidence: no bisect probe');
+  await f.inspect();
+  const state = JSON.parse(f.recovery().recovery);
+  assert.equal(state.stage, 'done');
+  assert.equal(state.target.id, f.receipts[572].id, 'the landing that changed which tests run is named');
+  assert.match(state.reason, /^Newly covered: tests\/red\.test\.mjs/);
+  assert.match(state.reason, /nothing is reverted/);
+  assert.equal(f.probes().length, 0);
+  assert.equal(f.tables.projectHostedSyncs.size, 0, 'nothing is reverted');
+  const red = f.tables.projectHostedMainAudits.get(f.auditRow).red;
+  assert(red, 'main stays red');
+  assert.equal(red.culprit, undefined, 'a coverage change is not a revert culprit');
+  assert.equal(red.covered, f.receipts[572].id);
+  assert.equal(red.intentId, state.intentId);
+  assert.match(red.reason, /Newly covered/);
+  const intent = await f.readIntent(state.intentId);
+  assert.equal(intent.needsFix.state, 'needs-fix');
+  assert.equal(intent.needsFix.receiptId, f.receipts[572].id);
+  // Red-path cost: one Candidate read per receipt in range, no per-landing work.
+  const evidence = f.counts.filter(c => c.name === 'sourceEvidence');
+  t.diagnostic(JSON.stringify({ sourceEvidenceDocuments: evidence.reduce((n, c) => n + c.documents, 0) }));
+});
+
+test('687d1eda: newly covered without a coverage landing in range names none and still reverts nothing', async () => {
+  const f = await fixture(2, {
+    addedAt: 0,
+    coverageAt: 99,
+    greenReports: { 'tests/other.test.mjs': { failed: false, durationMs: 1200 } },
+  });
+  await f.runCulprit();
+  await f.inspect();
+  const state = JSON.parse(f.recovery().recovery);
+  assert.equal(state.target, undefined);
+  assert.match(state.reason, /No landing in the red range changed which tests run/);
+  assert.equal(f.tables.projectHostedSyncs.size, 0);
+  assert.equal(f.tables.projectHostedMainAudits.get(f.auditRow).red.covered, undefined);
+});
+
+test('687d1eda: a mixed red bisects the test that passed on green and names the skipped one newly covered', async () => {
+  // T1 skipped on the last green main (newly covered); T2 really passed there and a landing broke it.
+  const f = await fixture(5, {
+    auditReports: {
+      'tests/new-browser.test.mjs': { failed: true, firstError: 'browser now runs' },
+      'tests/red.test.mjs': { failed: true, firstError: 'synthetic failure' },
+    },
+    greenReports: {
+      'tests/new-browser.test.mjs': { failed: false, attempts: [] },
+      'tests/red.test.mjs': { failed: false, durationMs: 900 },
+    },
+  });
+  await f.runCulprit();
+  assert(f.probes().length > 0, 'the test that really passed on green is bisected');
+  for (;;) {
+    const queued = f.probes().find(r => r.status === 'queued');
+    if (!queued) break;
+    assert.deepEqual(queued.gate.tests, ['tests/red.test.mjs'], 'probes run only the bisected test');
+    await f.complete(queued, f.heads.indexOf(queued.request.expectedHead) >= 3);
+  }
+  const state = JSON.parse(f.recovery().recovery);
+  assert.equal(state.target.id, f.receipts[572].id, "T2's culprit is found");
+  assert.equal(state.stage, 'sync', 'and its reverse is prepared');
+  assert.equal(f.tables.projectHostedSyncs.size, 1);
+  assert.deepEqual(state.uncovered, ['tests/new-browser.test.mjs']);
+  const red = f.tables.projectHostedMainAudits.get(f.auditRow).red;
+  assert.equal(red.culprit, f.receipts[572].id);
+  assert.match(red.reason, /Newly covered: tests\/new-browser\.test\.mjs had no pass on the last green main/);
+});
+
+test('687d1eda: a skipped or missing report is never probe pass evidence', async () => {
+  const f = await fixture(1);
+  const passed = reports => ({ ...f.audit, status: 'passed', contractReports: reports });
+  const file = 'tests/red.test.mjs';
+  assert.equal(probeVerdict(passed({ [file]: { failed: false, durationMs: 900 } }), [file]), 'pass');
+  // Incident 687d1eda: the browser test skipped in 354 ms and this read it as a pass.
+  assert.equal(probeVerdict(passed({ [file]: { failed: false, attempts: [] } }), [file]), 'unclear');
+  assert.equal(probeVerdict(passed({}), [file]), 'unclear');
+  // The run summary probes read keeps the skip.
+  const { checkReportHeader } = await import('../dist/check-file-summary.js');
+  const summarized = { ...f.audit, gate: { mode: 'probe', tests: [file] } };
+  summarized.contractReports = { [file]: { failed: false, attempts: [] } };
+  checkReportHeader(summarized);
+  delete summarized.contractReports;
+  assert.equal(probeVerdict({ ...summarized, status: 'passed' }, [file]), 'unclear');
 });
 
 test('one of five culprits is named; bounded probes and one range page at dogfood scale', async t => {

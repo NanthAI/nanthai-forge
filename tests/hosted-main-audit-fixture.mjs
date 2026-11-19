@@ -139,7 +139,12 @@ export async function auditFixture() {
         sequence,
         value: canonicalPayload(receipt),
       });
-      await state.noteMainLanding(ctx, { project, receipt, run: selected });
+      await state.noteMainLanding(ctx, {
+        project,
+        receipt,
+        run: selected,
+        ...('paths' in options ? { paths: options.paths } : {}),
+      });
     });
     previousHead = head;
     return { receipt, run: selected };

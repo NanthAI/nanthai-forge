@@ -22,6 +22,8 @@ export class ContractTimingReader {
   readonly reports: z.infer<typeof semanticReportsSchema> = {};
   readonly timings: Record<string, number> = {};
   readonly unstored = { files: 0, failed: 0, names: [] as string[] };
+  /** Files whose every test skipped: reported as skipped with no timing, never pass evidence (Item 687d1eda). */
+  readonly skipped = new Set<string>();
   private readonly refused = new Map<string, boolean>();
   /** False (and counted) for a name the result schema refuses as a test path. */
   private storable(file: string, failed: boolean) {
@@ -53,16 +55,15 @@ export class ContractTimingReader {
     durationMs?: unknown;
     results?: unknown;
     failed?: unknown;
-    counts?: { failed?: number } | undefined;
+    counts?: { total?: number; failed?: number } | undefined;
     flaky?: unknown;
+    skipped?: unknown;
     firstError?: unknown;
     retry?: { durationMs?: unknown; firstError?: unknown; results?: { passed: boolean }[] } | undefined;
   }) {
     if (typeof report?.file !== 'string') return;
     const duration = (value: unknown): value is number =>
       typeof value === 'number' && Number.isFinite(value) && value > 0;
-    const measured = report.complete === true && duration(report.durationMs);
-    if (measured) this.timings[report.file] = report.durationMs as number;
     const results =
       Array.isArray(report.results) && report.results.every(item => typeof item?.passed === 'boolean')
         ? report.results
@@ -72,6 +73,21 @@ export class ContractTimingReader {
       report.complete === false ||
       !!report.counts?.failed ||
       !!results?.some(item => !item.passed);
+    // A skip is not a pass (Item 687d1eda): a file that ran no test is kept as `attempts: []`
+    // (src/intent-semantic-conflict.ts skippedReport), with no timing, so pools still see it reported
+    // and no reader takes it as pass evidence. Older Candidates' markers lack the flag; tests counted
+    // with no result line means every one skipped.
+    if (
+      !failed &&
+      (report.skipped === true || (results && !results.length && (report.counts?.total ?? 0) > 0))
+    ) {
+      if (!this.storable(report.file, false)) return;
+      this.skipped.add(report.file);
+      this.reports[report.file] = { failed: false, attempts: [] };
+      return;
+    }
+    const measured = report.complete === true && duration(report.durationMs);
+    if (measured) this.timings[report.file] = report.durationMs as number;
     if (!failed && !(measured && (results?.length || report.counts))) return;
     if (!this.storable(report.file, failed)) return;
     const firstError = report.retry?.firstError ?? report.firstError ?? this.reports[report.file]?.firstError;
@@ -110,6 +126,28 @@ export class ContractTimingReader {
       /* Malformed report is unknown timing. */
     }
   }
+}
+/** One log line naming files whose every test skipped, or null. `browser`: a skipped browser test while
+ * the plan selected browser coverage, which fails the shard (a skip is not a pass, Item 687d1eda). */
+export function skippedReportsNote(
+  reader: Pick<ContractTimingReader, 'skipped'>,
+  browserSelected: boolean,
+  isBrowserTest: (file: string) => boolean,
+) {
+  const files = reader.skipped.size;
+  if (!files) return null;
+  const all = [...reader.skipped].sort();
+  const browser = browserSelected && all.some(isBrowserTest);
+  const names = (browser ? all.filter(isBrowserTest) : all).slice(0, unstoredNames).map(n => n.slice(0, 200));
+  return {
+    browser,
+    line:
+      `Forge: ${files} test file${files === 1 ? '' : 's'} skipped every test ` +
+      `(${names.map(name => JSON.stringify(name)).join(', ')}${files > names.length ? ', …' : ''}); ` +
+      (browser
+        ? 'browser coverage was selected, so this shard fails: a skipped browser test is not a pass. Next: restore the pinned Playwright browser cache.'
+        : 'they are recorded as skipped, not as passes.'),
+  };
 }
 /** One log line for names a reader refused, or null; `failed` means the run must fail closed. */
 export function unstoredReportsNote(...readers: Pick<ContractTimingReader, 'unstored'>[]) {

@@ -267,6 +267,26 @@ test('landings: names the following main audit run and verdict, null when none i
   );
 });
 
+test('687d1eda: landings marks culprit only on the receipt the culprit event names', async () => {
+  const f = fixture();
+  for (let n = 1; n <= 3; n++) f.landing(n, { at: n * 10 });
+  // Incident 687d1eda: one culprit event at sequence 3 named receipt 3; receipt 2 below it also read "culprit".
+  f.tables.projectHostedMainAuditEvents.push({
+    projectId: 'project',
+    kind: 'culprit',
+    at: iso(minute(30)),
+    head: 'h3',
+    runId: 'audit-3',
+    sequence: 3,
+    culprit: id('receipt', 3),
+  });
+  const rows = (await f.read()).landings;
+  assert.deepEqual(
+    rows.map(row => row.followingAudit?.verdict),
+    ['in-red-range', 'in-red-range', 'culprit'],
+  );
+});
+
 test('landings: pages resume exactly, stay under limit, and read nothing outside indexed ranges', async () => {
   const f = fixture();
   for (let n = 1; n <= 45; n++) f.landing(n, { at: n * 10 });

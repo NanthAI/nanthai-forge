@@ -202,6 +202,11 @@ export async function runFiles(
           complete:
             !timedOut && !signal && (code === 0 || (code === 1 && results.some(item => !item.passed))),
         };
+        // A file whose every test skipped (or is todo) ran nothing: it is never pass evidence (Item 687d1eda).
+        if (!report.failed && counts.tests > 0 && !results.length) {
+          report.skipped = true;
+          process.stdout.write(`# Skipped test file: ${file}; every test skipped, so it is not a pass\n`);
+        }
         // Name the failing test with its message: `test name: message` (still the 2 KiB firstError).
         if (report.firstError && errorTest && !report.firstError.startsWith(`${errorTest}: `))
           report.firstError = errorExcerpt(`${errorTest}: ${report.firstError}`);

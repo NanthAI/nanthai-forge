@@ -4,7 +4,7 @@ import type { HostedCheckRun } from './hosted-check.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './state/hash.js';
 import { capCheckReports, encodedBytes } from './check-report-cap.js';
-import { semanticReportsSchema } from './intent-semantic-conflict.js';
+import { semanticReportsSchema, skippedReport } from './intent-semantic-conflict.js';
 const file = z.object({ file: z.string(), report: semanticReportsSchema.valueType }).strict();
 export const checkFileSummarySchema = z
   .object({
@@ -106,7 +106,13 @@ export function checkReportHeader(run: HostedCheckRun, summaryBudget = 8 * 1024)
           const { failed, durationMs, flaky } = reports[file]!;
           return [
             file,
-            { failed, ...(durationMs === undefined ? {} : { durationMs }), ...(flaky ? { flaky } : {}) },
+            {
+              failed,
+              ...(durationMs === undefined ? {} : { durationMs }),
+              ...(flaky ? { flaky } : {}),
+              // A skipped file stays skipped in the summary probes read (Item 687d1eda).
+              ...(skippedReport(reports[file]) ? { attempts: [] } : {}),
+            },
           ];
         }),
     ),

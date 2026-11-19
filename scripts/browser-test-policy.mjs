@@ -68,7 +68,10 @@ export function browserSelection(selection, paths, files, graphCache) {
   // the standard executor. Their ordinary selection and recipe stay unchanged.
   const present = browserFiles(files);
   if (!present.length) return selection;
+  // Full means full (Item 687d1eda): every full selection (full gates, audits, full-gated reverts)
+  // runs every browser test, so a pass can never stand on browser tests it left out.
   const enabled =
+    selection.scope === 'full' ||
     (selection.scope === 'scoped' && selection.tests.some(isBrowserTest)) ||
     browserChange(paths, files, graphCache);
   // docs-site also checks static generated contracts: retain that part on non-web changes.

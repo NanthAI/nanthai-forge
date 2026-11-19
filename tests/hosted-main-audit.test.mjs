@@ -173,6 +173,36 @@ test('red audit exposes hold and red minutes; passing full fix releases held row
   assert.equal(f.pending().length, 0);
 });
 
+test('687d1eda: a landing that changes which tests run never earns main green from its own full check', async () => {
+  const f = await auditFixture();
+  await f.land('full', { paths: ['src/server.ts'] });
+  const green = f.row().lastGreen;
+  assert.equal(green.sequence, 1, 'an ordinary full pass still earns green');
+  // Incident 687d1eda: this check ran under the old workflow, which skipped the browser tests it turned on.
+  const coverage = await f.land('full', {
+    paths: ['.github/workflows/forge-check.yml', 'scripts/browser-test-policy.mjs'],
+  });
+  assert.deepEqual(f.row().lastGreen, green, 'its own check is not main evidence');
+  assert.equal(f.row().unaudited.count, 1);
+  assert.equal(f.row().firstCheck, 2, 'audited promptly, like a first-check landing');
+  assert(f.pending()[0].scheduledTime <= Date.now() + 1000, 'the full audit is due now');
+  // Unknown paths are a change too; exact seed evidence (no paths) keeps its meaning.
+  assert.equal(state.coverageLanding(coverage.run, null), true);
+  assert.equal(state.coverageLanding(coverage.run, undefined), false);
+  assert.equal(state.coverageLanding(coverage.run, ['src/server.ts', 'docs/status.md']), false);
+  await f.tick(f.pending()[0]);
+  const failing = { 'tests/lane-review-browser.test.mjs': { failed: true, firstError: '398 > 390' } };
+  await f.terminal('failed', { ...f.currentRun(), contractReports: failing });
+  assert.deepEqual(
+    f.row().red.tests,
+    ['tests/lane-review-browser.test.mjs'],
+    'main red keeps its failing files',
+  );
+  // A coverage-changing fix forward does not clear red by its own check either; the next audit does.
+  await f.land('full', { paths: ['scripts/browser-test-policy.mjs'] });
+  assert(f.row().red, 'red stays until a full audit passes');
+});
+
 test('new landings during an audit are retained and do not cancel the pinned run', async () => {
   const f = await auditFixture();
   for (let i = 0; i < 10; i++) await f.land();

@@ -24,6 +24,13 @@ const scriptExtensions = '{js,cjs,mjs,ts,cts,mts,d.ts,d.mts}';
 /** Files besides its entry that Forge's standard check runs: its check scripts,
  * check contract and shared test runtime. Globs: `*` stays inside one path
  * segment, `{a,b}` is a choice. They are global-risk for this check only. */
+/** Files that decide which of the standard check's tests run (browser coverage): coverage inputs
+ * (src/first-check-risk.ts coverageChangePaths), not entries the governance list protects. */
+export const STANDARD_SELECTION_INPUTS: readonly string[] = [
+  'scripts/browser-test-policy.mjs',
+  'scripts/check-browser-runtime.mjs',
+  'tests/browser-runtime.mjs',
+];
 export const STANDARD_CHECK_INPUTS: readonly string[] = [
   `scripts/{forge-check,verify,verify-queue,github-actions-check,check-contract,check-path-scopes,check-foundation,test-*}.${scriptExtensions}`,
   'tests/{check-runtime,worker-budget}.mjs',

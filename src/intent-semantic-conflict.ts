@@ -92,6 +92,10 @@ export const semanticReportsSchema = z.record(
     })
     .strict(),
 );
+/** A file whose every test skipped ran zero attempts (`attempts: []`): no pass evidence (Item 687d1eda).
+ * Old readers still parse it (the shape is unchanged) and keep their previous reading. */
+export const skippedReport = (report: { attempts?: readonly unknown[] | undefined } | undefined) =>
+  Array.isArray(report?.attempts) && report.attempts.length === 0;
 export type SemanticPlan = z.infer<typeof semanticPlanSchema>;
 export type SemanticConflict = z.infer<typeof semanticConflictSchema>;
 

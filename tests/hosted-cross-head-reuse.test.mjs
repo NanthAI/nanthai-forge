@@ -646,6 +646,33 @@ test('a39b1cdb shape (disjoint paths, overlapping Convex impact) now lands on it
   assert.equal(audit.firstCheck, receipt.snapshot.revision);
   assert(audit.wake.at <= Date.now(), 'first-check landings arm the main audit at once');
 });
+test('687d1eda: a coverage landing on main is no reuse baseline until its prompt audit passes', async t => {
+  // Fix C: a landing that changed which tests run never earns main green from its own full check,
+  // so its run cannot vouch for main here either. The audit row pins firstCheck at its revision.
+  const { f, state, parent } = await readyRace(t);
+  const main = f.currentMain();
+  const audit = [...f.tables.projectHostedMainAudits.values()][0];
+  // An older green the coverage landing's own run does not replace (its head is not main's).
+  const older = { sequence: main.sourceRevision - 1, head: 'f'.repeat(64), runId: parent.id };
+  if (audit)
+    f.patch('projectHostedMainAudits', audit._id, { lastGreen: older, firstCheck: main.sourceRevision });
+  else
+    f.insert('projectHostedMainAudits', {
+      projectId: f.projectId,
+      lastGreen: older,
+      firstCheck: main.sourceRevision,
+    });
+  for (
+    let n = 0;
+    n < 80 && f.pending().length && (await f.current(state.id)).submission.phase !== 'landed';
+    n++
+  )
+    await f.execute();
+  // The decision refuses before any source analysis (audit-baseline): no proof, a replacement check.
+  assert.deepEqual(f.reuseDecisions, []);
+  assert.notEqual((await f.current(state.id)).submission.phase, 'landed');
+  assert(f.tables.projectHostedCheckRuns.size > 2, 'the Candidate is checked again on current main');
+});
 test('a text conflict with main never lands on the first check', async t => {
   const { f, state } = await readyRace(t, {
     mainFiles: [['convex/projectConvexSourceOutput.ts', 'export const cost = 3;']],

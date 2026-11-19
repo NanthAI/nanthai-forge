@@ -456,7 +456,7 @@ export async function publishAcceptance(
   await endLandedApprovals(ctx, approvals);
   await settleLandingOperation(ctx, next);
   await releaseLandingQueue(ctx, queue, now);
-  await noteMainLanding(ctx, { project, receipt, run });
+  await noteMainLanding(ctx, { project, receipt, run, paths: candidate.governance?.paths ?? null });
   await noteTrustLanding(ctx, {
     project,
     actor: attempt.actor.id,

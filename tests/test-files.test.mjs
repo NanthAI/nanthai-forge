@@ -133,6 +133,34 @@ test('machine reports keep file attribution and nested names despite concurrent 
   );
 });
 
+test('687d1eda: a file whose every test skipped is reported as skipped, not as a pass', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-test-skips-'));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const skipped = join(root, 'skipped.mjs'),
+    partial = join(root, 'partial.mjs');
+  // Incident 687d1eda: a browser test skipped (no browser) and the check counted it as passed.
+  writeFileSync(
+    skipped,
+    `import test from 'node:test'; test('a', t => t.skip('no browser')); test('b', t => t.skip('no browser'));`,
+  );
+  writeFileSync(
+    partial,
+    `import test from 'node:test'; test('a', t => t.skip('mac only')); test('b', () => {});`,
+  );
+  const result = await run([skipped, partial], { FORGE_TEST_EVENTS: '1' });
+  assert.equal(result.code, 0, result.output);
+  const reports = Object.fromEntries(
+    result.output
+      .split('\n')
+      .filter(line => line.startsWith('__FORGE_TESTS__'))
+      .map(line => JSON.parse(line.slice('__FORGE_TESTS__'.length)))
+      .map(report => [report.file, report]),
+  );
+  assert.equal(reports[skipped].skipped, true);
+  assert.equal(reports[partial].skipped, undefined, 'one test ran, so the file is evidence');
+  assert(result.output.includes(`# Skipped test file: ${skipped}; every test skipped, so it is not a pass`));
+});
+
 test('one isolated retry runs every failing file within budget and retains both named attempts', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-test-retry-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));

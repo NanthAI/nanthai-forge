@@ -18,6 +18,7 @@ import { landingStateField } from '../src/landing-state';
 import { invariant } from '../src/errors';
 import type { QueueStatusKey } from '../src/hosted-queue-status';
 import { QUEUE_VIEW_LIMIT, QUEUE_VIEW_PAGES } from '../src/hosted-queue-view';
+import { auditRow, mainRedField } from './projectHostedMainAuditState';
 
 /** One bounded read of the landing queue (09e637f7 minimal slice): who is in it,
  * in dispatch order, with Lane, Intent title, phase, last failing test files
@@ -173,9 +174,12 @@ export const read = query({
       const parked = entries.filter(entry => entry.hold?.kind === 'main-red').length;
       const held = (queue?.status ? (queue.status.held ?? 0) : keys.filter(key => key.held).length) + parked;
       const total = (queue?.status?.total ?? keys.length - held + parked) - parked;
+      // One indexed read: main red and why, in this reply (Item 687d1eda), so no landing is blamed by guess.
+      const red = (await auditRow(ctx, projectId))?.red;
       return JSON.stringify({
         total,
         ...(held ? { held } : {}),
+        ...(red ? { mainRed: mainRedField(red) } : {}),
         listed: entries.length + preparationEntries.length,
         preparing: preparing.length,
         more: total + held > entries.length || preparing.length > preparationEntries.length,

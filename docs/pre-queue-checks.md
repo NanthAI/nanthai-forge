@@ -391,6 +391,19 @@ fields have no readers and are removed by the next verdict write; their schema v
 only tolerates existing rows during deployment. Older CLIs' recount requests return an inert
 compatibility reply: nothing is scheduled and the window stays unchanged.
 
+**Coverage changes and newly covered tests.** A landing that changes which tests run (the
+check script or contract, CI configuration, or the standard browser-selection files) never
+earns main green from its own full check; its audit runs promptly. When a red audit's failing
+tests had no pass on the last green main (skipped or not run), recovery names the landing that
+changed coverage, reverts nothing and keeps main red until a fix lands: fix forward. In a
+mixed red, recovery bisects the failing tests that passed on the last green main and reports
+the rest as newly covered; a reverse that cannot pass while they fail is named, not widened.
+Until that coverage landing's prompt audit passes, its own run is no reuse baseline. A
+docs-only audit never clears red. While main is red, `queue` replies carry `mainRed`: the
+failing tests (first 20), the reason, the fix Intent, and the named culprit or coverage
+landing. Landing replies mark `culprit` only on the receipt the culprit event names; other
+receipts in the red range show `in-red-range`.
+
 **Optional red-audit drill.** To exercise detection and recovery, the owner can start a drill.
 It is advice, never an eligibility condition. From an agent sign-in, the existing owner
 approval still applies:

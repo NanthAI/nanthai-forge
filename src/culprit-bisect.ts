@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { HostedCheckRun } from './hosted-check.js';
 import { digest } from './state/hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
+import { skippedReport } from './intent-semantic-conflict.js';
 const checkPin = (value: unknown) => digest(canonicalPayload(value));
 
 /** Deterministic UUIDs keep every recovery stage in the existing operation journal. */
@@ -48,10 +49,12 @@ export function culpritFailures(run: HostedCheckRun): NeedsFix['failed'] {
       return { file, excerpt: decoder.decode(bytes.subarray(0, end)) };
     });
 }
+/** A skipped or missing file is never pass evidence (Item 687d1eda): it makes the verdict unclear. */
 export function probeVerdict(run: HostedCheckRun, tests: string[]): 'pass' | 'fail' | 'unclear' {
   if (!['passed', 'failed'].includes(run.status) || !run.terminalDigest || !run.endedAt) return 'unclear';
   const reports = run.contractReports ?? run.reportSummary?.semantic;
-  if (!reports || !tests.length || tests.some(file => !reports[file])) return 'unclear';
+  if (!reports || !tests.length || tests.some(file => !reports[file] || skippedReport(reports[file])))
+    return 'unclear';
   const failed = tests.filter(file => reports[file]!.failed);
   if (!failed.length && run.status === 'passed') return 'pass';
   if (failed.length === tests.length && run.status === 'failed') return 'fail';

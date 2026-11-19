@@ -9,13 +9,19 @@ import { makeFunctionReference } from 'convex/server';
 import { internalMutation, internalAction, internalQuery, type MutationCtx, type QueryCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { beginHostedOperation, finishHostedOperation, hostedOperationRow } from './projectHostedOperations';
-import { semanticReportsSchema } from '../src/intent-semantic-conflict';
+import { semanticReportsSchema, skippedReport } from '../src/intent-semantic-conflict';
 import { detachCheckReports, hydrateCheckReports } from './projectHostedCheckReports';
 import { beginCheckOperation, loadHostedCheck } from './projectHostedCheckStore';
 import { insertHostedCheckRun } from './projectHostedChecks';
 import { hostedWriteProject, readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { prepareHostedRevert } from './projectHostedRevert';
-import { armAudit, auditSettings, closeDrill } from './projectHostedMainAuditState';
+import {
+  armAudit,
+  auditSettings,
+  closeDrill,
+  coverageLanding,
+  noteRedCause,
+} from './projectHostedMainAuditState';
 import { auditMetadata, auditDebt, auditDue } from '../src/main-audit';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { autoRevertEnabled, autoRevertHold } from '../src/auto-revert-policy';
@@ -56,6 +62,10 @@ type Recovery = {
   recoveryId?: string;
   evidence?: NeedsFix['failed'];
   missing?: string[];
+  /** The last green run reported other test files, so these files' absence or skip is real (687d1eda). */
+  greenReported?: boolean;
+  /** Mixed red (687d1eda): failing files with no pass on the last green main; the bisect runs the rest. */
+  uncovered?: string[];
   greenPending?: boolean;
   addition?: number;
   pairUnclear?: boolean;
@@ -276,16 +286,40 @@ async function candidateRecord(ctx: MutationCtx, project: Doc<'hostedProjects'>,
 async function candidateIntent(ctx: MutationCtx, project: Doc<'hostedProjects'>, receipt: HostedAcceptance) {
   return (await candidateRecord(ctx, project, receipt))?.intentId ?? null;
 }
+/** The oldest receipt in the red range whose change alters which tests run (src/first-check-risk.ts
+ * coverageChangePaths), or null. Red path only: at most one Candidate read per receipt in range. */
+async function coverageReceipt(ctx: MutationCtx, project: Doc<'hostedProjects'>, state: Recovery) {
+  for (const { receipt } of state.range) {
+    const paths = (await candidateRecord(ctx, project, receipt))?.governance?.paths;
+    if (paths && coverageLanding(state.audit, paths)) return receipt;
+  }
+  return null;
+}
+const fileList = (files: readonly string[]) =>
+  files.slice(0, 3).join(', ') + (files.length > 3 ? ` (+${files.length - 3} more)` : '');
+/** The newly covered half of a mixed red, appended to every reason that recovery records for it. */
+const uncoveredNote = (state: Recovery) =>
+  state.uncovered?.length
+    ? ` Newly covered: ${fileList(state.uncovered)} had no pass on the last green main (skipped or not run); they stay red until fixed forward.`
+    : '';
 async function fixForward(
   ctx: MutationCtx,
   project: Doc<'hostedProjects'>,
   row: Doc<'projectHostedOperations'>,
   state: Recovery,
   reason: string,
+  covered?: string,
 ) {
   const intentId = culpritId({ fixMain: state.audit.id });
+  if (!reason.startsWith('Newly covered')) reason += uncoveredNote(state);
   state.reason = reason;
   state.intentId = intentId;
+  // The queue states why main is red from this one row (Item 687d1eda).
+  await noteRedCause(ctx, project._id, red => sameEpisode(red, state), {
+    reason,
+    intentId,
+    ...(covered ? { covered } : {}),
+  });
   const target = state.target ?? state.range.at(-1)?.receipt;
   const old = await readHostedRecord(ctx, {
     projectId: project._id,
@@ -456,7 +490,17 @@ export async function onCulpritRunTerminal(ctx: MutationCtx, run: HostedCheckRun
             state.reason = 'The red audit was superseded; no automatic reverse was landed.';
             await retain(ctx, row, state);
           } else if (!state.reverseRunId || state.reverseRunId === run.id) {
-            if (run.status === 'failed' && state.range.length >= 2) {
+            if (run.status === 'failed' && state.uncovered?.length && state.target)
+              // Mixed red: the newly covered files fail on every head that runs them, so a wider
+              // reverse fails the same way. Name the proven culprit; fix the new coverage first.
+              await fixForward(
+                ctx,
+                project,
+                row,
+                state,
+                `Receipt ${state.target.id} broke ${fileList(state.failed.map(f => f.file))}, but its reverse cannot pass a full check while the newly covered tests fail. Fix them forward, then revert it: nforge agent ROOT revert '${JSON.stringify({ target: { kind: 'receipt', receiptId: state.target.id } })}'.`,
+              );
+            else if (run.status === 'failed' && state.range.length >= 2) {
               if (state.reverseSubmissionId)
                 await cancelHostedLanding(ctx, {
                   projectId: project._id,
@@ -660,6 +704,14 @@ async function classify(
       'The original failure is a flake; later failed audits retain different failure or source evidence in this red episode.',
     );
   }
+  if (pending.flake && verdict === 'pass' && state.uncovered?.length)
+    return fixForward(
+      ctx,
+      project,
+      row!,
+      state,
+      `${fileList(state.failed.map(f => f.file))} passed on the audited head (a flake), so no landing is reverted.`,
+    );
   if (pending.flake && verdict === 'pass') {
     const auditRow = await ctx.db
       .query('projectHostedMainAudits')
@@ -799,7 +851,13 @@ async function classify(
     state.stage = 'done';
     return retain(ctx, row!, state);
   }
-  await ctx.db.patch(auditRow._id, { red: { ...auditRow.red, culprit: state.target.id } });
+  state.reason = state.addition
+    ? 'The failing test files were added by this acceptance; reverse it through the full gate.'
+    : 'A single failing boundary was proven; reverse only this accepted change.';
+  state.reason += uncoveredNote(state);
+  await ctx.db.patch(auditRow._id, {
+    red: { ...auditRow.red, culprit: state.target.id, reason: `Receipt ${state.target.id}: ${state.reason}` },
+  });
   await ctx.db.insert('projectHostedMainAuditEvents', {
     projectId: input.projectId,
     kind: 'culprit',
@@ -809,9 +867,6 @@ async function classify(
     sequence: state.range[state.high - 1]!.sequence,
     culprit: state.target.id,
   });
-  state.reason = state.addition
-    ? 'The failing test files were added by this acceptance; reverse it through the full gate.'
-    : 'A single failing boundary was proven; reverse only this accepted change.';
   await prepareSystemRevert(ctx, project, row!, state);
 }
 /** Red-only metadata selection. No new call on acceptance or while idle. */
@@ -860,9 +915,16 @@ async function widenRevert(
     .query('projectHostedMainAudits')
     .withIndex('by_project', q => q.eq('projectId', project._id))
     .unique();
-  if (audit?.red?.culprit) await ctx.db.patch(audit._id, { red: { ...audit.red, culprit: undefined } });
   state.target = state.targets[0];
   state.reason = `No single culprit is proven. Re-check the reverse of ${state.targets.length} interacting landings before accepting it.`;
+  if (audit?.red && (audit.red.culprit || sameEpisode(audit.red, state)))
+    await ctx.db.patch(audit._id, {
+      red: {
+        ...audit.red,
+        culprit: undefined,
+        ...(sameEpisode(audit.red, state) ? { reason: state.reason } : {}),
+      },
+    });
   // Reuse already prepared reverses; widening reads only the newly selected transition.
   delete state.reverseRunId;
   delete state.reverseSubmissionId;
@@ -1267,6 +1329,23 @@ async function beginGreenProbe(
       state,
       'Automatic probes require the configured free Actions runner.',
     );
+  // Mixed red (687d1eda review): when some failing files really passed on the last green main and
+  // the others only skipped or never ran there, bisect the passed ones; the rest are newly covered.
+  const greenReports = green.contractReports ?? green.reportSummary?.semantic;
+  const passedOnGreen = (file: string) => {
+    const report = greenReports?.[file];
+    return !!report && !report.failed && !skippedReport(report);
+  };
+  const unseenOnGreen = (file: string) => !greenReports?.[file] || skippedReport(greenReports[file]);
+  if (
+    !state.uncovered &&
+    state.failed.some(f => passedOnGreen(f.file)) &&
+    state.failed.every(f => passedOnGreen(f.file) || unseenOnGreen(f.file)) &&
+    state.failed.some(f => !passedOnGreen(f.file))
+  ) {
+    state.uncovered = state.failed.filter(f => !passedOnGreen(f.file)).map(f => f.file);
+    state.failed = state.failed.filter(f => passedOnGreen(f.file));
+  }
   if (
     probeVerdict(
       green,
@@ -1274,7 +1353,10 @@ async function beginGreenProbe(
     ) !== 'pass'
   ) {
     // Missing reports alone do not prove absence: inspect exact source manifests.
-    if (state.failed.some(f => green.contractReports?.[f.file]))
+    // A skipped report is no evidence either (Item 687d1eda); it reads like a missing one.
+    if (
+      state.failed.some(f => green.contractReports?.[f.file] && !skippedReport(green.contractReports[f.file]))
+    )
       return fixForward(
         ctx,
         project,
@@ -1284,6 +1366,7 @@ async function beginGreenProbe(
       );
     delete state.greenPending;
     state.missing = state.failed.map(f => f.file);
+    state.greenReported = (green.reportPointer?.files ?? Object.keys(green.contractReports ?? {}).length) > 0;
     await retain(ctx, row, state);
     await ctx.scheduler.runAfter(
       0,
@@ -1412,6 +1495,39 @@ export const sourceEvidence = internalMutation({
       return null;
     }
     if (!addition) {
+      const missing = state.missing;
+      // Newly covered (Item 687d1eda): the failing files existed on the last green main, which ran and
+      // reported other tests but has no pass for these. A change to what runs made them run; reverting
+      // it would only hide them again. Name it, keep main red and fix forward: no bisect, no reverse.
+      const covered =
+        !input.error &&
+        state.greenReported &&
+        presence?.length === state.range.length + 1 &&
+        missing.every(file => presence[0]!.includes(file))
+          ? await coverageReceipt(ctx, project, state)
+          : undefined;
+      if (covered !== undefined) {
+        if (covered) state.target = covered;
+        // One receipt in range: it is the only landing that could have changed these tests (review).
+        else if (state.range.length === 1) state.target = state.range[0]!.receipt;
+        const files =
+          missing.slice(0, 3).join(', ') + (missing.length > 3 ? ` (+${missing.length - 3} more)` : '');
+        await fixForward(
+          ctx,
+          project,
+          row,
+          state,
+          `Newly covered: ${files} had no pass on the last green main (skipped or not run). ${
+            covered
+              ? `Receipt ${covered.id} changed which tests run, so they ran for the first time.`
+              : state.target
+                ? `No landing in the red range changed which tests run; receipt ${state.target.id} is the only landing in it.`
+                : 'No landing in the red range changed which tests run.'
+          } Main stays red until they pass; fix forward, nothing is reverted.`,
+          covered?.id,
+        );
+        return null;
+      }
       await fixForward(
         ctx,
         project,

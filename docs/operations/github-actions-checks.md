@@ -1569,6 +1569,12 @@ or shared source in the web import closure (including type contracts) select the
 other changes omit browser execution and browser cache restores. The static
 contracts in `docs-site.test.mjs` remain applicable independently of its browser
 subtest. A missing changed-path comparison selects browser coverage conservatively.
+A full selection (main audits, full checks, culprit probes and revert checks) runs
+every browser test whatever the changed paths: full means full.
+
+A test file whose every test skipped is recorded as skipped (`attempts: []`), never
+as a pass or a timing, and is never culprit-probe pass evidence. When browser
+coverage was selected, a skipped browser test fails its shard.
 
 Browser fixtures stay together on one existing test job, which also carries ordinary
 tests to balance the critical path, without increasing the job or Convex-call budget. That job keeps its browser files out of the work-stealing pool.
