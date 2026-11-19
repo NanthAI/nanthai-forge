@@ -53,7 +53,7 @@ test('replay 19328518: a parked passed landing names the older submission it wai
           nextVersion: 0,
         }),
       );
-      seen = { status, landing, page, olderStatus: await f.current(older.id) };
+      seen = { status, landing, page, olderStatus: await f.current(older.id), row: structuredClone(parked) };
       // The older entry takes as long as the incident's recheck did.
       f.advanceClock(PARKED_MS);
     }
@@ -76,6 +76,14 @@ test('replay 19328518: a parked passed landing names the older submission it wai
   ]) {
     assert.equal(value.orderWait?.submissionId, older.id, `${name} names the older submission`);
     assert.match(value.orderWait.message, /waiting for older submission .* to take main first/);
+    // ad80e037: why it waits shows before it lands, as the receipt's orderWaits will record it.
+    const last = seen.row.orderWaits.at(-1);
+    assert.equal(last.submissionId, older.id);
+    assert.equal(value.orderWait.held, last.held, `${name} names the hold reason`);
+    assert.equal(value.orderWait.footprints, last.footprints, `${name} names the footprints`);
+    assert(['overlap', 'disjoint', 'unknown'].includes(value.orderWait.footprints));
+    assert.deepEqual(value.orderWait.waits, seen.row.orderWaits, `${name} lists the waits so far`);
+    assert(value.orderWait.waits.length <= 8, 'bounded');
   }
   assert.equal(seen.olderStatus.orderWait, undefined, 'an entry that is not parked shows no order wait');
   assert.deepEqual(

@@ -309,14 +309,23 @@ export function landingOrderWaitForReader(
   if (!row?.orderWait || row.phase !== 'ready' || state.phase !== 'ready') return null;
   if (state.observation.state !== 'pending') return null;
   const last = row.orderWaits?.at(-1);
+  // Why it waits now and every wait so far, as the receipt's `orderWaits` will record them: from the
+  // row already loaded (at most 8 entries), so a waiting entry shows its order reason before it lands
+  // (ad80e037: rebuilding it from receipts after the fact cost a builder about 15 minutes).
+  const why = {
+    ...(last?.submissionId === row.orderWait ? { held: last.held, footprints: last.footprints } : {}),
+    ...(row.orderWaits?.length ? { waits: row.orderWaits.slice(-8) } : {}),
+  };
   if (last?.submissionId === row.orderWait && last.held === 'reserved')
     return {
       submissionId: row.orderWait,
       reason: 'reservation' as const,
+      ...why,
       message: `Check passed; submission ${row.orderWait} holds a landing reservation on files this change touches (it was superseded after a passed check, Issue 10d253c6). This landing continues when that one lands or fails, or when its reservation ends (at most ${HOSTED_RESERVATION_MS / 60_000} minutes). observe {"submissionId":"${row.orderWait}"} follows it.`,
     };
   return {
     submissionId: row.orderWait,
+    ...why,
     message: `Check passed; waiting for older submission ${row.orderWait} to take main first (submission order). When it lands or leaves the order this landing continues; observe {"submissionId":"${row.orderWait}"} follows it.`,
   };
 }

@@ -39,6 +39,9 @@ export const finishReadFields = {
     'runId',
     // A passed entry parked behind an older submission: the observe page names it (19328518).
     'orderWait',
+    // ...and why: its hold reason and footprints, the waits so far (at most 8; written once per new
+    // wait, so an unchanged wait re-sends nothing; ad80e037).
+    'orderWaits',
   ],
   projectHostedFinishes: ['projectId', 'submissionId', 'value', 'composeOperationId', 'wake'],
   projectHostedLandingQueues: ['projectId', 'channel', 'status', 'lease', 'wake'],
