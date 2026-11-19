@@ -137,5 +137,13 @@ Days are additive, so a month is the merge of its days and medians stay exact.
 A day closes once, when the project's first landing of a later UTC day is recorded (`convex/projectStatsClose.ts`):
 one scheduled mutation per active project-day and nothing for an idle project, so the newest active day shows once the
 next one starts. The close reads each landing's receipt, landing row and body pages once (about four documents and
-10 KB per landing) and writes one `projectStatsDays` row. The Stats screen makes one query of at most 92 day rows,
-re-run only when a day closes; it takes no clock argument.
+10 KB per landing) and writes one `projectStatsDays` row.
+
+The Stats screen has one period picker (last 7 or 30 days, this month, last month, or a custom range of at most 92
+days), kept in the address. Opening the page makes one query (`projectStats.read`, part `head`) over the chosen
+period's day rows only: the headline figures and landings per day. Where work waited, By agent and By month are folds,
+shut by default; each reads its own part of the same rows only once opened, so an unopened fold costs nothing. A read
+re-runs only when a day inside its period closes; it takes no clock argument. Until a period has fully closed, the
+page names the closed days it covers ("over 17–18 Nov 2026 (2 closed days)"), never the whole month. By agent shows
+agents in four first-try buckets (100%, 75–99%, 50–74%, under 50%), never a list per agent; each landing's own
+time to main and stops are on its Lane page.

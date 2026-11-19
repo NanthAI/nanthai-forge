@@ -87,9 +87,21 @@ test('a closed day holds measured figures from receipts and landing rows, once',
   assert.equal(closed.day, day);
   assert.equal(closed.landings, 4);
   assert.equal(closed.firstTry.counted + closed.runner.unknown >= 4, true);
-  const read = JSON.parse(await f.tx('statsRead', statsApi.read, { projectId: f.projectId }));
+  // The screen reads one chosen range of closed days: its own month, never the whole table.
+  const [y, m] = day.split('-').map(Number);
+  const month = { from: `${day.slice(0, 7)}-01`, to: new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10) };
+  const read = JSON.parse(await f.tx('statsRead', statsApi.read, { projectId: f.projectId, ...month }));
   assert.equal(read.through, day);
   assert.deepEqual(read.perDay, [[day, 4]]);
-  assert.equal(read.months[0].landings, 4);
-  assert.equal(read.months[0].comparison, null, 'under 50 landings: measured only');
+  assert.equal(read.window.landings, 4);
+  assert.equal(read.window.comparison, null, 'under 50 landings: measured only');
+  const later = JSON.parse(
+    await f.tx('statsRead', statsApi.read, { projectId: f.projectId, from: '2099-01-01', to: '2099-01-31' }),
+  );
+  assert.deepEqual([later.through, later.perDay], [null, []], 'a period with no closed day reads none');
+  await assert.rejects(
+    f.tx('statsRead', statsApi.read, { projectId: f.projectId, from: '2026-01-01', to: '2026-12-31' }),
+    error => error.data?.code === 'BAD_ARGUMENT',
+    'a range past 92 days is refused',
+  );
 });

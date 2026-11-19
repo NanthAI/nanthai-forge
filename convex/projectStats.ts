@@ -18,24 +18,20 @@ import { DAY_MS, isAccount, laneWindowStart, lanesByDay } from './statsLanes';
 import { PLANNING_HOT_MS, planningContributions, planningMembers, planningPartialDays } from './personWork';
 import { utcDay } from './projectStatsClose';
 import {
-  STATS_COMPARE_MIN_LANDINGS,
   STATS_DAY_MAX_LANDINGS,
   statsDay,
   rerunsWhileWaiting,
   statsDaySchema,
-  statsWindow,
-  type StatsDay,
   type StatsLanding,
 } from '../src/stats-estimate';
+import { STATS_PARTS, STATS_RANGE_MAX_DAYS, statsRangeReply, validRange } from '../src/stats-period';
 
 /** Stats (Items a61d3c91, 2cf30e0a; docs/run-evidence.md#stats). A project's day closes once, when its
  * first landing of a later UTC day is recorded: one scheduled mutation per active project-day, nothing
  * for an idle project. The close reads each of that day's receipts and landing rows once (about four
- * documents and 10 KB per landing, tests/stats-close.test.mjs) and writes one row; the screen reads at
- * most STATS_READ_DAYS rows, re-run only by a close. */
+ * documents and 10 KB per landing, tests/stats-close.test.mjs) and writes one row; the screen reads the rows of
+ * one chosen range (at most STATS_RANGE_MAX_DAYS), re-run only by a close inside it. */
 export const STATS_CLOSE_LANDINGS = 1_000;
-/** About three months of closed days; a busier project reads more bytes per day row, never more rows. */
-export const STATS_READ_DAYS = 92;
 
 const ms = (iso: string | undefined) => {
   const value = iso === undefined ? NaN : Date.parse(iso);
@@ -189,31 +185,35 @@ export const closeDay = internalMutation({
   },
 });
 
-/** Stats for a project's members: the newest closed days, with each calendar month and the whole read
- * as windows. No clock argument: a new close is the only thing that re-runs it. */
+/** Stats for a project's members over one chosen range of closed UTC days (src/stats-period.ts): the day rows in
+ * that range only, at most STATS_RANGE_MAX_DAYS, re-aggregated into one part: the page's head, or one fold the reader
+ * opened. The screen passes the range, so a new close inside it is the only thing that re-runs a read; no clock
+ * argument. */
 export const read = query({
-  args: { projectId: v.id('hostedProjects') },
+  args: {
+    projectId: v.id('hostedProjects'),
+    from: v.string(),
+    to: v.string(),
+    part: v.optional(v.union(...STATS_PARTS.map(part => v.literal(part)))),
+  },
   returns: v.string(),
-  handler: async (ctx, { projectId }) => {
+  handler: async (ctx, { projectId, from, to, part = 'head' }) => {
     try {
+      invariant(
+        validRange({ from, to }),
+        'BAD_ARGUMENT',
+        `Choose a range of 1 to ${STATS_RANGE_MAX_DAYS} days.`,
+      );
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'AUTH_REQUIRED', 'Sign in to see Stats.');
       await memberProject(ctx, projectId, user.subject);
       const rows = await ctx.db
         .query('projectStatsDays')
-        .withIndex('by_project_and_day', q => q.eq('projectId', projectId))
-        .order('desc')
-        .take(STATS_READ_DAYS);
-      const days = rows.map(row => statsDaySchema.parse(JSON.parse(row.value))).reverse();
-      const months = new Map<string, StatsDay[]>();
-      for (const d of days) months.set(d.day.slice(0, 7), [...(months.get(d.day.slice(0, 7)) ?? []), d]);
+        .withIndex('by_project_and_day', q => q.eq('projectId', projectId).gte('day', from).lte('day', to))
+        .take(STATS_RANGE_MAX_DAYS);
+      const days = rows.map(row => statsDaySchema.parse(JSON.parse(row.value)));
       return canonicalPayload({
-        schema: 1,
-        compareFrom: STATS_COMPARE_MIN_LANDINGS,
-        through: days.at(-1)?.day ?? null,
-        perDay: days.map(d => [d.day, d.landings]),
-        months: [...months].reverse().map(([month, list]) => ({ month, ...statsWindow(list) })),
-        all: { from: days[0]?.day ?? null, ...statsWindow(days) },
+        ...statsRangeReply(days, { from, to }, part),
         bytesRead: rows.reduce((s, row) => s + row.value.length, 0),
       });
     } catch (error) {

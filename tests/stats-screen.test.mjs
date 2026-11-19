@@ -2,8 +2,10 @@
 // Stats screen (Items 2cf30e0a, a61d3c91): the real StatsView in the project frame with synthetic closed days built by
 // the real contract (src/stats-estimate.ts). Guards: the headline is the lower bound ("at least"), the replay states
 // its assumptions behind "How this is worked out", landings without runner minutes are named as left out, a window
-// under the minimum shows only measured figures, every chart has its table, and axe passes at 1440 and 390 in both
-// themes with no horizontal page scroll.
+// under the minimum shows only measured figures, every chart has its table and prints its values, the period picker
+// re-aggregates the page (this month, last month, a custom range), per-day bars keep a fixed width from the left at 1,
+// 2 and 31 days, an empty month says so, agents come in four first-try buckets, and axe passes at 1440 and 390 in
+// both themes with no horizontal page scroll.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -26,31 +28,51 @@ async function fixture(out) {
     import {ConvexProvider, ConvexReactClient} from 'convex/react';
     import {StatsView} from ${JSON.stringify(join(root, 'web/src/app/stats/Stats.tsx'))};
     import {ProjectFrame} from ${JSON.stringify(join(root, 'web/src/app/frames.tsx'))};
-    import {statsDay, statsWindow} from ${JSON.stringify(join(root, 'src/stats-estimate.ts'))};
+    import {statsDay} from ${JSON.stringify(join(root, 'src/stats-estimate.ts'))};
+    import {statsRangeReply} from ${JSON.stringify(join(root, 'src/stats-period.ts'))};
+    import {periodOf} from ${JSON.stringify(join(root, 'web/src/app/stats/model.ts'))};
+    import {useState} from 'react';
     import ${JSON.stringify(join(root, 'web/src/app/app.css'))};
-    const min = 60000, base = Date.UTC(2026, 10, 1);
+    const min = 60000, base = Date.UTC(2026, 10, 1), now = Date.UTC(2026, 10, 19, 12);
     const agents = ['amber-fox', 'still-heron', 'copper-moth', 'quiet-otter', 'by hand'];
-    function day(index, count) {
-      const start = base + index * 86400000 + 8 * 3600000;
+    function day(start, count) {
       return Array.from({length: count}, (_, i) => {
-        const at = start + i * 4 * min;
-        return {id: 'l' + index + '-' + i, who: agents[i % agents.length], submittedAt: at, landedAt: at + 6 * min + (i % 3) * min,
+        const at = start + 8 * 3600000 + i * 4 * min;
+        return {id: 'l' + start + '-' + i, who: agents[i % agents.length], submittedAt: at, landedAt: at + 6 * min + (i % 3) * min,
           checkStartedAt: at + 40000, checkEndedAt: at + 40000 + 302000, runnerSeconds: i % 17 === 0 ? null : 250,
           discardedRunnerSeconds: i % 17 === 0 ? null : (i % 11 === 0 ? 250 : 0), attempts: i % 11 === 0 ? 2 : 1, ranInFull: i % 4 === 0};
       });
     }
-    const counts = new URLSearchParams(location.search).get('sample') === 'early' ? [4, 5] : [22, 18, 14, 9, 21, 24, 19, 23, 20, 13, 11, 25, 27, 26, 14];
+    // Samples, as [UTC start of day, landings]: November so far with one October day; two days; one day; a full
+    // 31-day October; a few early landings; nothing closed at all (an empty month).
+    const sample = new URLSearchParams(location.search).get('sample');
+    const dayAt = (y, m, d) => Date.UTC(y, m, d);
+    const nov = [22, 18, 14, 9, 21, 24, 19, 23, 20, 13, 11, 25, 27, 26, 14].map((n, i) => [base + i * 86400000, n]);
+    const plan = {
+      now: [[dayAt(2026, 9, 20), 30], ...nov],
+      two: [[dayAt(2026, 10, 17), 31], [dayAt(2026, 10, 18), 128]],
+      one: [[dayAt(2026, 10, 18), 7]],
+      month31: Array.from({length: 31}, (_, i) => [dayAt(2026, 9, 1 + i), 5 + ((i * 37) % 120)]),
+      early: [[base, 4], [base + 86400000, 5]],
+      none: [],
+    }[sample ?? 'now'];
     let freeAt = 0;
-    const days = counts.map((n, i) => { const d = statsDay(new Date(base + i * 86400000).toISOString().slice(0, 10), day(i, n), freeAt); freeAt = d.replay.freeAt; return d; });
-    const october = new URLSearchParams(location.search).get('sample') === 'early' ? [] : [statsDay('2026-10-20', day(-12, 30), 0)];
-    const all = [...october, ...days];
-    const months = [...new Set(all.map(d => d.day.slice(0, 7)))].reverse().map(month => ({month, ...statsWindow(all.filter(d => d.day.startsWith(month)))}));
-    const data = {schema: 1, compareFrom: 50, through: all.at(-1).day, perDay: all.map(d => [d.day, d.landings]), months, all: {from: all[0].day, ...statsWindow(all)}};
+    const all = plan.map(([start, n]) => { const d = statsDay(new Date(start).toISOString().slice(0, 10), day(start, n), freeAt); freeAt = d.replay.freeAt; return d; });
     const client = new ConvexReactClient('https://forge.test.convex.cloud');
     const route = {frame: 'project', handle: 'example', project: 'tidepool', place: 'stats', section: '', rest: ''};
+    function Fixture() {
+      // The real period model and the real read reply, over the sample's day rows.
+      const [search, setSearch] = useState(location.search.slice(1).split('&').filter(p => !p.startsWith('sample=')).join('&'));
+      const period = periodOf(new URLSearchParams(search), now);
+      const days = all.filter(d => d.day >= period.from && d.day <= period.to);
+      const data = statsRangeReply(days, period);
+      // Each fold's part, recorded so the test can tell an unopened fold made no read.
+      const usePart = part => ((window.foldReads ??= new Set()).add(part), statsRangeReply(days, period, part));
+      return h(StatsView, {projectName: 'tidepool', data, period, usePart, historyHref: '/-/example/tidepool/lanes/history', onPeriod: setSearch});
+    }
     createRoot(document.getElementById('root')).render(h(ConvexProvider, {client},
       h(ProjectFrame, {route, name: 'tidepool', projects: [], controls: {onPalette(){}, onKeys(){}, onPicker(){}, viewerHandle: 'example'}},
-        h(StatsView, {projectName: 'tidepool', data: new URLSearchParams(location.search).get('sample') === 'none' ? {...data, through: null, perDay: [], months: [], all: {...data.all, days: 0}} : data}))));`;
+        h(Fixture))));`;
   const result = await build({
     configFile: join(root, 'web/vite.config.ts'),
     root: join(root, 'web'),
@@ -91,7 +113,7 @@ test('stats: own-history comparison headline, stated assumptions, left-out landi
     rmSync(out, { recursive: true, force: true });
   });
   const errors = [];
-  const open = async (width = 1440, sample = 'now', theme = 'dark') => {
+  const open = async (width = 1440, sample = 'now', theme = 'dark', query = '') => {
     const page = await browser.newPage({ viewport: viewport(width) });
     t.after(() => page.close());
     page.on('pageerror', error => errors.push(error.message));
@@ -112,58 +134,178 @@ test('stats: own-history comparison headline, stated assumptions, left-out landi
         body: asset ? readFileSync(file) : html,
       });
     });
-    await page.goto(`https://forge.test/-/example/tidepool/stats?sample=${sample}`);
+    await page.goto(
+      `https://forge.test/-/example/tidepool/stats?sample=${sample}${query ? `&${query}` : ''}`,
+    );
     await page.locator('h1').waitFor();
     await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
     return page;
   };
   const page = await open();
   const sentence = await page.locator('.sit').textContent();
-  assert.match(sentence, /^At least [\d,.]+ CI minutes fewer in November 2026\./, 'the lower bound leads');
+  assert.match(
+    sentence,
+    /^At least [\d,.]+ CI minutes fewer over 1–15 Nov 2026 \(15 closed days\)\./,
+    'the lower bound leads, over the closed days only',
+  );
   assert.match(sentence, /sooner than the same arrivals through a one-at-a-time merge queue/);
   const main = await page.locator('main').textContent();
   assert.match(main, /up to [\d,.]+ fewer/, 'the upper bound follows the lower bound');
   assert.match(main, /without runner minutes left out/, 'unknown runner minutes are named, not zero');
-  assert.match(main, /Not reported/, 'no token saving is claimed');
+  assert.doesNotMatch(main, /Agent tokens/, 'no token tile until there is measured data');
   await page.getByRole('button', { name: 'How this is worked out' }).click();
   const how = await page.locator('#stats-how').textContent();
   assert.match(how, /Nothing here comes from a benchmark/);
   assert.match(how, /once as a pull request and once in a merge queue/);
   assert.match(how, /landings without runner minutes are left out of both CI figures/);
-  await page.getByRole('button', { name: 'Table', exact: true }).click();
-  assert.equal(await page.getByRole('table', { name: 'Landings per day' }).count(), 1);
-  await page.getByRole('button', { name: 'Chart', exact: true }).click();
-  await page.getByLabel('Period').selectOption('2026-10');
+  // The page opens with the headline and landings per day; every other chart is a fold that reads only once opened.
+  const foldReads = () => page.evaluate(() => [...(window.foldReads ?? [])].sort());
+  assert.deepEqual(await foldReads(), [], 'an unopened fold reads nothing');
+  await page.getByRole('button', { name: 'Where work waited' }).click();
+  assert.deepEqual(await foldReads(), ['waited']);
+  await page.getByRole('button', { name: 'By agent' }).click();
+  assert.deepEqual(await foldReads(), ['agents', 'waited']);
+  // Every chart prints its values: each day's count on its bar, each stop's name and value, each bucket's count.
+  const values = await page.locator('.stats-days .v').allTextContents();
+  assert.deepEqual(values, [
+    '22',
+    '18',
+    '14',
+    '9',
+    '21',
+    '24',
+    '19',
+    '23',
+    '20',
+    '13',
+    '11',
+    '25',
+    '27',
+    '26',
+    '14',
+  ]);
+  const waited = await page.getByRole('region', { name: 'Where work waited' }).textContent();
+  assert.match(waited, /median of each stop, in minutes:seconds/, 'the unit is stated');
+  for (const name of [
+    'In queue \\d+:\\d\\d',
+    'Checking, on your CI \\d+:\\d\\d',
+    'Landing \\d+:\\d\\d',
+    'Total \\d+:\\d\\d',
+  ])
+    assert.match(waited, new RegExp(name), `${name} is labelled on the chart`);
+  const byAgent = await page.getByRole('region', { name: 'By agent' }).textContent();
+  assert.match(byAgent, /100%.*75–99%.*50–74%.*Under 50%/, 'four fixed first-try buckets');
+  assert.doesNotMatch(byAgent, /amber-fox|still-heron/, 'no list that grows with the agents');
+  assert.equal(await page.locator('.stats-buckets .val').count(), 4);
+  for (const caption of ['Landings per day', 'Agents by first-try rate']) {
+    await page.getByRole('button', { name: `Table: ${caption}` }).click();
+    assert.equal(await page.getByRole('table', { name: caption }).count(), 1, `${caption} has its table`);
+    await page.getByRole('button', { name: `Chart: ${caption}` }).click();
+  }
+  // The period picker re-aggregates every figure from the chosen days.
+  await page.getByLabel('Period').selectOption('last');
   assert.match(
     await page.locator('.sit').textContent(),
-    /^30 landings in October 2026\./,
+    /^30 landings on 20 Oct 2026 \(1 closed day\)\./,
     'under 50: measured only',
   );
   assert.match(await page.locator('main').textContent(), /20 landings to go/);
+  assert.equal(await page.locator('.stats-days button').count(), 1);
+  await page.getByLabel('Period').selectOption('custom');
+  await page.getByLabel('From', { exact: true }).fill('2026-10-01');
+  await page.getByLabel('To', { exact: true }).fill('2026-11-19');
+  await page.getByRole('button', { name: 'Show' }).click();
+  assert.match(await page.locator('.sit').textContent(), /over 20 Oct – 15 Nov 2026 \(16 closed days\)\./);
+  await page.getByRole('button', { name: 'By month' }).click();
+  assert.equal(await page.getByRole('table', { name: 'Stats by month' }).locator('tbody tr').count(), 2);
+  // October 20 to November 1 had no closed day: the gap draws as zero-landing days, not as nothing.
+  assert.equal(await page.locator('.stats-days button').count(), 27);
+  await page.getByLabel('Period').selectOption('this');
+  assert.match(await page.locator('.sit').textContent(), /over 1–15 Nov 2026/);
+  // Last 7 days ends today (19 Nov): its label names only the closed days in it.
+  await page.getByLabel('Period').selectOption('7');
+  assert.match(await page.locator('.sit').textContent(), /over 13–15 Nov 2026 \(3 closed days\)/);
+  await page.getByLabel('Period').selectOption('30');
+  assert.match(
+    await page.locator('.sit').textContent(),
+    /over 1–15 Nov 2026 \(15 closed days\)/,
+    '21 Oct to 19 Nov',
+  );
 
+  // Fixed-width bars fill from the left: two days stay two narrow bars, 31 days fit a phone.
+  const bars = async p =>
+    p
+      .locator('.stats-days button')
+      .evaluateAll(list =>
+        list.map(b => b.getBoundingClientRect()).map(r => ({ left: r.left, width: r.width })),
+      );
+  for (const width of [1440, 390]) {
+    const two = await open(width, 'two');
+    const [first, second] = await bars(two);
+    const plot = await two.locator('.stats-plot').evaluate(el => el.getBoundingClientRect().left);
+    assert(first.width <= 26 && second.width <= 26, `${width}: bars keep their width`);
+    assert(second.left + second.width - plot < 60, `${width}: two days sit at the left, not across the page`);
+    assert.deepEqual(await two.locator('.stats-days .v').allTextContents(), ['31', '128']);
+    const one = await open(width, 'one');
+    assert.equal((await bars(one)).length, 1);
+    assert.match(await one.locator('.sit').textContent(), /^7 landings on 18 Nov 2026 \(1 closed day\)\./);
+    const month = await open(width, 'month31', 'dark', 'period=last');
+    const list = await bars(month);
+    assert.equal(list.length, 31);
+    assert.match(
+      await month.locator('.sit').textContent(),
+      /in October 2026\./,
+      'a fully closed month is named',
+    );
+    assert(list.at(-1).left + list.at(-1).width <= width, `${width}: 31 days fit`);
+    const shown = await month
+      .locator('.stats-days .v')
+      .evaluateAll(list => list.filter(v => getComputedStyle(v).visibility !== 'hidden').length);
+    assert(
+      width === 1440 ? shown === 31 : shown >= 3 && shown < 31,
+      `${width}: ${shown} values shown on 31 bars`,
+    );
+  }
+  const empty = await open(390, 'none');
+  assert.match(await empty.locator('.sit').textContent(), /^No closed days in November 2026\./);
+  await empty.getByLabel('Period').selectOption('last');
+  assert.match(await empty.locator('.sit').textContent(), /^No closed days in October 2026\./);
   const early = await open(390, 'early');
-  assert.match(await early.locator('.sit').textContent(), /^9 landings in November 2026\. The comparison/);
-  const none = await open(390, 'none');
-  assert.match(await none.locator('.sit').textContent(), /No closed days yet/);
+  assert.match(
+    await early.locator('.sit').textContent(),
+    /^9 landings over 1–2 Nov 2026 \(2 closed days\)\. The comparison/,
+  );
 
-  for (const width of [1440, 390])
-    for (const theme of ['dark', 'light']) {
-      const draw = await open(width, 'now', theme);
-      await draw.evaluate(() => document.fonts.ready);
-      await draw.getByRole('button', { name: 'How this is worked out' }).click();
-      await draw.addScriptTag({ path: axe });
-      const violations = await draw.evaluate(async () =>
-        (await axe.run(document, { rules: { 'color-contrast': { enabled: true } } })).violations
-          // The shared top-bar line's known finding; the shell Lane fixes it.
-          .filter(v => v.id !== 'label-content-name-mismatch')
-          .map(v => ({ id: v.id, nodes: v.nodes.map(n => ({ target: n.target, why: n.failureSummary })) })),
-      );
-      assert.deepEqual(violations, [], `${width}/${theme}: axe`);
-      assert(
-        await draw.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
-        `${width}/${theme}: no horizontal page scroll`,
-      );
-      if (shots) await draw.screenshot({ path: join(shots, `stats-${width}-${theme}.png`), fullPage: true });
-    }
+  for (const [sample, query] of [
+    ['now', ''],
+    ['month31', 'period=last'],
+    ['two', ''],
+    ['none', ''],
+  ])
+    for (const width of [1440, 390])
+      for (const theme of ['dark', 'light']) {
+        const draw = await open(width, sample, theme, query);
+        await draw.evaluate(() => document.fonts.ready);
+        if (sample === 'now')
+          for (const name of ['How this is worked out', 'Where work waited', 'By agent'])
+            await draw.getByRole('button', { name }).click();
+        await draw.addScriptTag({ path: axe });
+        const violations = await draw.evaluate(async () =>
+          (await axe.run(document, { rules: { 'color-contrast': { enabled: true } } })).violations
+            // The shared top-bar line's known finding; the shell Lane fixes it.
+            .filter(v => v.id !== 'label-content-name-mismatch')
+            .map(v => ({ id: v.id, nodes: v.nodes.map(n => ({ target: n.target, why: n.failureSummary })) })),
+        );
+        assert.deepEqual(violations, [], `${sample} ${width}/${theme}: axe`);
+        assert(
+          await draw.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+          `${sample} ${width}/${theme}: no horizontal page scroll`,
+        );
+        if (shots)
+          await draw.screenshot({
+            path: join(shots, `stats-${sample}-${width}-${theme}.png`),
+            fullPage: true,
+          });
+      }
   assert.deepEqual(errors, []);
 });

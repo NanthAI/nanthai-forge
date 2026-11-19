@@ -661,9 +661,10 @@ layer out of both first paints.
   yard row says the same from the same read, and Needs me names it from
   `projectNeedsMe:read` `dependsOn {laneId, title}` (four point reads, only
   for a Lane held for a dependency).
-- Stats (`web/src/app/stats/`): reads `projectStats.read`, the newest 92
-  closed days of `projectStatsDays`, with each month and the whole read
-  computed by `statsWindow` (`src/stats-estimate.ts`). A day closes once
+- Stats (`web/src/app/stats/`): reads `projectStats.read` over the chosen
+  period's closed days of `projectStatsDays` (at most 92), one part at a
+  time (`src/stats-period.ts`): the head on open, each fold once opened,
+  all computed by `statsWindow` (`src/stats-estimate.ts`). A day closes once
   (`projectStats.closeDay`), scheduled by the project's first landing of a
   later UTC day, so the read re-runs once a day and an idle project costs
   nothing. See [Stats](run-evidence.md#stats).
