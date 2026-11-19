@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sourceTree } from '../dist/source-tree.js';
@@ -9,6 +9,8 @@ import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
 import { checkpointNudge, finishGates, unsavedMinutes } from '../dist/agent-default-gates.js';
 import { liveLanding, ownsLiveLanding } from '../dist/landing-freeze.js';
 import { digest } from '../dist/hash.js';
+import { clientCacheRoot } from '../dist/root-paths.js';
+import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { recordTurnWork, settleTurnWork } from '../dist/agent-turn-work.js';
 import {
   preflightPlan,
@@ -133,6 +135,16 @@ test('preflight: must-run files the budget stopped make the run NOT COMPLETE, sh
   assert.equal(gate.mustRunNotRun, 1);
   assert.equal(gate.finish, receipt.incomplete.finish);
   assert.match(gate.reason, /^NOT COMPLETE: 1 must-run test file/);
+  // Too long to finish in one agent wait: no finish command, and land must still proceed to the
+  // landing check (its retained payload rejects undefined fields).
+  const file = join(clientCacheRoot(root), 'agent', 'preflight', `${lane.laneId}.json`);
+  const stored = JSON.parse(readFileSync(file, 'utf8'));
+  delete stored.incomplete.finish;
+  writeFileSync(file, JSON.stringify(stored));
+  const long = finishGates(root, defaults({}), lane, changed);
+  assert.equal(long.preflight.status, 'incomplete');
+  assert.equal('finish' in long.preflight, false);
+  assert.doesNotThrow(() => canonicalPayload(long));
 });
 
 test('checkpoint nudge: unsavedFor from local file times, nudge past the threshold, none when off', t => {

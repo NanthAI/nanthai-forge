@@ -76,7 +76,9 @@ export function finishGates(
         status: 'incomplete',
         tests: receipt.tests,
         mustRunNotRun: receipt.incomplete.mustRun,
-        finish: receipt.incomplete.finish,
+        // Absent when the rest outlives one agent wait: an undefined field would fail the
+        // retained land payload, so land itself refused (friction ad80e037, 2026-11-19).
+        ...(receipt.incomplete.finish ? { finish: receipt.incomplete.finish } : {}),
         estimateMinutes: receipt.incomplete.estimateMinutes,
         reason: `NOT COMPLETE: ${receipt.incomplete.mustRun} must-run test file(s) did not run locally; only the landing check runs them unless you finish them first.`,
         deferredTests: receipt.deferredTests ?? 0,
