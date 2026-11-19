@@ -2,7 +2,8 @@
 // Needs me in a real browser (Item 48049998), on synthetic data through the real shell frame, screen and model
 // (tests/browser/needs-me.tsx): the shell's Needs you count equals the page's; an agent's conflict and a refusal are
 // FYI rows, never Needs you; a protected-path approval and a question stay in Needs you; Dismiss and Clear all write
-// once, on the click; Loose ends is folded and reads nothing until opened; nothing on the page sets a timer; axe is
+// once, on the click; Loose ends is open by default (77d2e8bc), says "No loose ends." on one line when it has no rows,
+// and a reader's fold is kept and reads nothing; nothing on the page sets a timer; axe is
 // clean with no sideways scroll at desk and phone width in both themes, busy and first-day. Set FORGE_NEEDS_SHOTS to a
 // folder to also save the screenshots.
 import test from 'node:test';
@@ -85,8 +86,10 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       return route.fulfill({ contentType, body: readFileSync(file) });
     });
     await page.goto(`https://forge.test/needs.html?data=${data}&theme=${theme}`);
+    // The behaviour layer's Dock (data-dock) replaces the static one and remounts every region: wait for it, so a
+    // test never holds a node the swap is about to detach.
     await page
-      .locator('.needs-me .region')
+      .locator('.dock[data-dock] .region')
       .first()
       .waitFor({ timeout: 10_000 })
       .catch(error => assert.fail(`${error.message}\n${errors.join('\n')}`));
@@ -137,7 +140,7 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
     });
 
     await t.test(
-      'filters, Dismiss and Clear all write once on the click; Loose ends opens on demand',
+      'filters, Dismiss and Clear all write once on the click; Loose ends is open by default',
       async t => {
         const page = await open(t, DESK);
         const fyi = region(page, 'FYI');
@@ -153,21 +156,83 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
         assert.match(writes[0][1].keys[0], /^[a-z]+:.+@.+$/, 'a dismissal names the row version');
         assert.deepEqual(writes[1], ['dismiss', { clearAll: true }]);
         const loose = region(page, 'Loose ends');
-        assert.equal(await loose.locator('.loose-row').count(), 0, 'folded by default, nothing read');
-        await loose.getByRole('button', { name: 'Loose ends', exact: true }).click();
+        const fold = loose.getByRole('button', { name: 'Loose ends', exact: true });
+        assert.equal(await fold.getAttribute('aria-expanded'), 'true', 'open by default');
         assert.equal(await loose.locator('.loose-row').count(), 1);
+        // Only groups with rows are listed; the groups not reported yet are named on hover, not as bands.
+        assert.deepEqual(
+          await loose
+            .locator('.band')
+            .allTextContents()
+            .then(t => t.map(x => x.split(/\d/)[0])),
+          ['Lanes nobody holds'],
+        );
+        assert.match(
+          await loose.getByRole('link', { name: 'All loose ends, with picking many' }).getAttribute('title'),
+          /^Not reported yet: .*leftover projects/,
+        );
         await loose.getByRole('button', { name: 'Ask an agent to tidy up' }).click();
         const copied = (await page.evaluate(() => window.writes)).at(-1);
         assert.equal(copied[0], 'copy');
         assert.match(copied[1], /nforge agent \. lanes '\{"view":"loose-ends"\}'/);
+        // A reader who folds it is remembered: the next visit starts folded and reads nothing.
+        await fold.click();
+        await page.reload();
+        await region(page, 'Loose ends').waitFor();
+        assert.equal(
+          await region(page, 'Loose ends')
+            .getByRole('button', { name: 'Loose ends', exact: true })
+            .getAttribute('aria-expanded'),
+          'false',
+        );
+        assert.equal(
+          await region(page, 'Loose ends').locator('.loose-row, .quietline').count(),
+          0,
+          'folded: nothing read',
+        );
       },
     );
+
+    await t.test('with no loose ends, the open panel says so on one line', async t => {
+      for (const [viewport, width] of [
+        [DESK, 1440],
+        [PHONE, 390],
+      ])
+        for (const theme of ['dark', 'light']) {
+          const page = await open(t, viewport, 'first', theme);
+          const loose = region(page, 'Loose ends');
+          assert.equal(
+            await loose
+              .getByRole('button', { name: 'Loose ends', exact: true })
+              .getAttribute('aria-expanded'),
+            'true',
+          );
+          const line = loose.locator('.quietline');
+          assert.equal((await line.textContent()).trim(), 'No loose ends.');
+          // One line: the words' boxes share one top (and the line is laid out: anything else fails with what was seen).
+          const seen = await line.evaluate(element => {
+            const range = document.createRange();
+            range.selectNodeContents(element);
+            const rects = [...range.getClientRects()];
+            const box = element.getBoundingClientRect();
+            return {
+              lines: new Set(rects.map(rect => Math.round(rect.top))).size,
+              rects: rects.length,
+              box: [Math.round(box.width), Math.round(box.height)],
+            };
+          });
+          assert.equal(seen.lines, 1, `one line at ${width} ${theme}: ${JSON.stringify(seen)}`);
+          assert.equal(await loose.locator('.band').count(), 0, 'no "not reported" bands');
+          if (shots) await loose.screenshot({ path: join(shots, `needs-loose-empty-${width}-${theme}.png`) });
+          if (shots)
+            await page.screenshot({ path: join(shots, `needs-first-${width}-${theme}.png`), fullPage: true });
+        }
+    });
 
     await t.test('axe and widths: busy and first day, both themes, desk and phone', async t => {
       for (const data of ['busy', 'first'])
         for (const viewport of [DESK, PHONE]) {
-          const page = await open(t, viewport, data);
-          await region(page, 'Loose ends').getByRole('button', { name: 'Loose ends', exact: true }).click();
+          const page = await open(t, viewport, data); // Loose ends is open by default
           await page.addScriptTag({ path: axePath });
           for (const theme of ['dark', 'light']) {
             await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
@@ -181,7 +246,7 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
               scroll <= inner,
               `no sideways scroll at ${viewport.width} ${theme} ${data}: ${scroll} > ${inner}`,
             );
-            // Opening the fold scrolls; axe reads from the top, where the shell's sticky bar covers nothing.
+            // Axe reads from the top, where the shell's sticky bar covers nothing.
             await page.evaluate(() => scrollTo(0, 0));
             const violations = await page.evaluate(async () => {
               const result = await window.axe.run(document, {

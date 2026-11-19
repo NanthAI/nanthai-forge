@@ -4,9 +4,10 @@
 //   requests asked ahead are listed under it and not counted. The count is the shell's (count.ts).
 // - FYI (watch weight): what the reader may want to know but need not act on, newest first, with figures for the
 //   window (since the reader's last Clear all, or today), filter chips, a dismiss per row and Clear all.
-// - Loose ends (reference weight), folded: what was started and left; read only once unfolded.
+// - Loose ends (reference weight), open by default (77d2e8bc): what was started and left; a reader may fold it, and a
+//   folded region reads nothing.
 // Reads, sent together: projectNeedsMe:read (shared with the shell's count), projectNeedsFyi:read and the planning
-// counts; Loose ends only while unfolded. All re-run only on server writes; idle and hidden tabs cost nothing.
+// counts; Loose ends while open. All re-run only on server writes; idle and hidden tabs cost nothing.
 import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
@@ -191,7 +192,8 @@ export function NeedsMeView({
   // Drawn times are relative to when the view was drawn; nothing ticks (idle costs nothing).
   const drawnAt = useMemo(() => now ?? Date.now(), [read, fyi, now]);
   const list = useMemo(() => (fyi && view ? fyiView(fyi, view.fyi, drawnAt) : null), [fyi, view, drawnAt]);
-  const looseFold = useFold('needs-loose', false);
+  // Open by default (owner 2026-11-19): a folded Loose ends left an empty-looking box beside FYI.
+  const looseFold = useFold('needs-loose', true);
   const at = (patch: Partial<ProjectRoute>) => hrefFor({ ...route, section: '', rest: '', ...patch });
   const sentence = view ? needsSentence(view) : null;
   const lanesOpen = feed ? feed.lanes.length + feed.more : null;

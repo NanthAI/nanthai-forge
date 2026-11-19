@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Needs me › Loose ends, folded (Items 48049998, fc1831eb): what was started and left, read from projectLooseEnds:read
-// only while the region is open (a folded region costs nothing). A Lane nobody holds can be set aside here, one at a
+// Needs me › Loose ends (Items 48049998, fc1831eb, 77d2e8bc): what was started and left, read from projectLooseEnds:read
+// while the region is open, which it is by default (a reader who folds it is remembered, and a folded region reads
+// nothing). Only groups with rows are listed; with none it says "No loose ends." on one line, and the groups not
+// reported yet are named on hover and in the full view. A Lane nobody holds can be set aside here, one at a
 // time, through the existing dormant sweep (which re-checks it: one that gained a save meanwhile is skipped). "Ask an
 // agent to tidy up" copies one instruction an agent can follow with the existing loose-ends read. The Loose ends
 // section stays as the expanded view, with picking many at once.
@@ -60,7 +62,12 @@ export function LooseFoldView({
       </div>
     );
   const view = looseEndsView(read, read.at);
-  const shown = view.groups.filter(group => !group.reported || group.rows.length);
+  const shown = view.groups.filter(group => group.reported && group.rows.length);
+  const unreported = view.groups.filter(group => !group.reported);
+  // The groups not reported yet are said on hover, never as always-on bands (the full view lists each with its reason).
+  const notYet = unreported.length
+    ? `Not reported yet: ${unreported.map(group => group.title.toLowerCase()).join(', ')}. The full view says why.`
+    : undefined;
   const one = async (laneId: string) => {
     if (!read.setAside) return;
     setBusy(laneId);
@@ -82,11 +89,7 @@ export function LooseFoldView({
       {shown.length ? (
         shown.map(group => (
           <div className="grp" key={group.key}>
-            <Band
-              title={group.title}
-              count={group.reported ? group.rows.length : undefined}
-              hint={group.reported ? group.hint : `not reported: ${group.why}`}
-            />
+            <Band title={group.title} count={group.rows.length} hint={group.hint} />
             {group.rows.slice(0, 3).map(row => {
               const result = outcome[row.laneId];
               const word = result ? setAsideWord(result) : null;
@@ -123,10 +126,12 @@ export function LooseFoldView({
           </div>
         ))
       ) : (
-        <div className="quietline">Nothing is loose.</div>
+        <div className="quietline" title={notYet}>
+          No loose ends.
+        </div>
       )}
       <div className="pf needs-fold">
-        <A href={allHref} className="lk">
+        <A href={allHref} className="lk" title={notYet}>
           All loose ends, with picking many
         </A>
         <Key
