@@ -236,6 +236,86 @@ test('a Lane behind one that must update from main names that, never the old syn
   for (const pair of byLane.values()) assert.doesNotMatch(`${pair.why} ${pair.front?.why ?? ''}`, /sync/i);
 });
 
+test('a Lane held for a dependency names the Lane it lands after and why that one has not landed (9e748e41)', () => {
+  const at = '2026-11-17T10:00:00Z';
+  const dep = (laneId, parent) => ({
+    position: null,
+    laneId,
+    phase: 'ready',
+    submittedAt: at,
+    lastProgressAt: at,
+    hold: { kind: 'dependency', reason: 'Waiting for a dependency to land', paths: null },
+    dependsOn: { submissionId: parent },
+  });
+  const entries = [
+    { position: 1, laneId: 'p1', submissionId: 's1', phase: 'checking', submittedAt: at, lastProgressAt: at },
+    {
+      position: null,
+      laneId: 'p2',
+      submissionId: 's2',
+      phase: 'ready',
+      submittedAt: at,
+      lastProgressAt: at,
+      hold: { kind: 'review', reason: 'A person approves each landing.', paths: null },
+    },
+    dep('d1', 's1'),
+    dep('d2', 's2'),
+    dep('d3', 'gone'),
+  ];
+  const byLane = new Map(model.waits(entries, id => `T-${id}`).map(pair => [pair.laneId, pair]));
+  assert.deepEqual(
+    [byLane.get('d1').on, byLane.get('d1').why],
+    ['T-p1', 'it lands after it; its check is running'],
+  );
+  assert.deepEqual(
+    [byLane.get('d2').on, byLane.get('d2').why],
+    ['T-p2', 'it lands after it; that one waits on a person'],
+  );
+  // The landing it depends on is not in the listed queue: say so, never guess a Lane.
+  assert.deepEqual(
+    [byLane.get('d3').on, byLane.get('d3').why],
+    ['the Lane it depends on', 'Waiting for a dependency to land'],
+  );
+});
+
+test('a Lane held for a queued dependency says where that one stands and what holds the front (9e748e41 review fix 1)', () => {
+  const at = '2026-11-17T10:00:00Z';
+  const q = (position, laneId, phase = 'queued') => ({
+    position,
+    laneId,
+    submissionId: `s-${laneId}`,
+    phase,
+    submittedAt: at,
+    lastProgressAt: at,
+  });
+  const entries = [
+    q(1, 'f', 'checking'),
+    q(2, 'a'),
+    q(3, 'b'),
+    q(4, 'p'),
+    {
+      position: null,
+      laneId: 'd',
+      phase: 'ready',
+      submittedAt: at,
+      lastProgressAt: at,
+      hold: { kind: 'dependency', reason: 'Waiting for a dependency to land', paths: null },
+      dependsOn: { submissionId: 's-p' },
+    },
+  ];
+  const d = model.waits(entries, id => `T-${id}`).find(pair => pair.laneId === 'd');
+  assert.equal(d.on, 'T-p');
+  assert.equal(d.why, 'it lands after it; that one is number 4 in the queue');
+  // Three Lanes stand ahead of the parent: the dependent is traced to the front, never told "it lands first".
+  assert.deepEqual(d.front, { laneId: 'f', title: 'T-f', ahead: 4, why: 'its check is running' });
+  // A parent at the front needs no front line.
+  const first = model
+    .waits([q(1, 'p', 'checking'), { ...entries[4] }], id => `T-${id}`)
+    .find(pair => pair.laneId === 'd');
+  assert.equal(first.why, 'it lands after it; its check is running');
+  assert.equal(first.front, undefined);
+});
+
 function readsFixture() {
   const s = lanesFixture();
   const projectId = s.insert('hostedProjects', {

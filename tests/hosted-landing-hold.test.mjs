@@ -215,6 +215,54 @@ test('landing B3: a main-red hold is listed as held with no position and names i
   assert.equal(line.hold.next, entry.hold.next);
 });
 
+// Item 9e748e41 (blocked path): a Lane held for a dependency said only "the Lane it depends on". The queue view now
+// names the submission it lands after, from the finish row it already reads: no extra read, and only held entries
+// grow.
+test('queue view: a dependency hold names the submission it lands after, from the row it already reads', async t => {
+  Object.assign(process.env, synthetic);
+  t.after(() => {
+    for (const [k, v] of Object.entries(prior)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+  const f = await batchesFixture(t, { count: 0, batching: false });
+  await f.add(0);
+  await f.add(1);
+  const read = async () => {
+    const text = await f.c.run('queueView', view.read, { projectId: f.projectId });
+    return { text, page: JSON.parse(text) };
+  };
+  const before = await read();
+  const [first, second] = before.page.entries;
+  assert.ok(first && second, JSON.stringify(before.page));
+  assert.equal(first.dependsOn, undefined, 'an entry with no dependency carries no field');
+  const row = [...f.tables.projectHostedLandingRequests.values()].find(
+    r => JSON.parse(r.value).id === second.submissionId,
+  );
+  const state = JSON.parse(row.value);
+  f.patch('projectHostedLandingRequests', row._id, {
+    value: JSON.stringify({
+      ...state,
+      observation: { state: 'pending', pendingReason: 'waiting-for-dependency', cause: null },
+    }),
+  });
+  const finish = [...f.tables.projectHostedFinishes.values()].find(
+    r => r.submissionId === second.submissionId,
+  );
+  assert.ok(finish, 'the dependent landing has its finish row');
+  f.patch('projectHostedFinishes', finish._id, { parentSubmissionId: first.submissionId, waiting: true });
+  const after = await read();
+  const held = after.page.entries.find(e => e.submissionId === second.submissionId);
+  assert.equal(held.hold.kind, 'dependency');
+  assert.equal(held.position, null);
+  assert.deepEqual(held.dependsOn, { submissionId: first.submissionId });
+  assert.equal(after.page.entries.find(e => e.submissionId === first.submissionId).dependsOn, undefined);
+  // Bytes per read: only the dependency-held entry carries the field; every other entry is unchanged.
+  const unheld = after.text.replace(`,"dependsOn":{"submissionId":"${first.submissionId}"}`, '');
+  assert.ok(!unheld.includes('dependsOn'), 'only the dependency-held entry carries the field');
+});
+
 test('status {laneId}: this machine remembers the last observed hold, and clears it once unheld', async t => {
   const state = mkdtempSync(join(tmpdir(), 'forge-hold-'));
   const previous = process.env.XDG_STATE_HOME;

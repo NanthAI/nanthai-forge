@@ -1455,7 +1455,9 @@ step, and their JSON carries `hold {kind,reason,paths,next}` (`paths` lists the
 protected paths the reason names, or null); `status`/`observe` on the operation and
 the wait line carry the same `hold`. `queue` keeps held entries after the dispatch
 order with `position:null` and `hold`, counts them in `held`, and never makes one a
-predecessor; `yourLane` shows the hold. `status {laneId}` shows `local.landingHold`,
+predecessor; `yourLane` shows the hold. A `dependency` hold's entry also carries
+`dependsOn {submissionId}`, the landing it lands after, from the finish record the
+read already loads. `status {laneId}` shows `local.landingHold`,
 the hold this machine's last `land` or `wait` saw (one local file, no call). A review
 hold does not time out and an agent cannot release it: tell the owner, or withdraw.
 A landing parked because main's full check is red (`MAIN_RED`) is the `main-red`

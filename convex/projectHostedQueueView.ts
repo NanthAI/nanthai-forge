@@ -131,6 +131,11 @@ export const read = query({
           ...(state.error ? { error: state.error.code } : {}),
           // Held entries stay listed, after dispatch order, naming what releases them (5c59940b).
           ...(hold ? { hold } : {}),
+          // The submission a dependency hold lands after (Item 9e748e41), from the finish row read above: no
+          // extra read, one fixed-size field on dependency-held entries only.
+          ...(hold?.kind === 'dependency' && finish?.parentSubmissionId
+            ? { dependsOn: { submissionId: finish.parentSubmissionId } }
+            : {}),
         });
       }
       // Preparation precedes admission: no dispatch rank or peer can block it.

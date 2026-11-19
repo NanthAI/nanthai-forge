@@ -39,6 +39,8 @@ export type QueueEntry = {
   error?: string;
   hold?: { kind: 'review' | 'dependency' | 'main-red'; reason: string; paths: string[] | null };
   waitingOn?: { kind: string };
+  /** For a dependency hold: the submission it lands after (`projectHostedQueueView:read`). */
+  dependsOn?: { submissionId: string };
   /** Main already took files this entry changes, so its Lane must update from main before it can land. */
   needsSync?: { paths: string[]; more?: number };
 };
@@ -359,6 +361,16 @@ function taken({ paths, more = 0 }: { paths: readonly string[]; more?: number })
   return shown.join(' and ');
 }
 
+/** Why the front of the queue has not landed, naming the files when main moved under it. */
+function frontWhy(head: QueueEntry) {
+  return (
+    notLandedWhy(head) +
+    (head.phase === 'needs-sync' && head.needsSync?.paths.length && !head.recomposeCount
+      ? `: main already changed ${taken(head.needsSync)}`
+      : '')
+  );
+}
+
 /** Who waits on whom, from the queue alone: held entries wait on a person (or their dependency), an entry main has
  * moved under waits on its own update, and each queued entry waits on the one ahead of it, traced to the front of
  * the queue when Lanes stand between. People first, then the longest wait. */
@@ -384,15 +396,43 @@ export function waits(entries: readonly QueueEntry[], titleOf: (laneId: string) 
         since: entry.lastProgressAt,
         person: true,
       });
-    else if (entry.hold?.kind === 'dependency')
+    else if (entry.hold?.kind === 'dependency') {
+      // The landing it lands after, when the queue read names it and lists it (Item 9e748e41).
+      const parent = entry.dependsOn
+        ? entries.find(other => other.submissionId === entry.dependsOn!.submissionId && other.laneId)
+        : undefined;
+      // A parent further back in the queue: say where it stands and trace to what holds the front (review fix 1).
+      const queuedBehind = parent && !parent.hold && parent.position !== null && parent.position > 1;
+      const front =
+        queuedBehind && head?.laneId && head.laneId !== parent.laneId
+          ? {
+              laneId: head.laneId,
+              title: titleOf(head.laneId),
+              ahead: queued.filter(other => other.position! <= parent.position!).length,
+              why: frontWhy(head),
+            }
+          : undefined;
       out.push({
         laneId: entry.laneId,
-        on: 'the Lane it depends on',
-        why: entry.hold.reason,
+        on: parent ? titleOf(parent.laneId!) : 'the Lane it depends on',
+        why: parent
+          ? `it lands after it; ${
+              parent.hold?.kind === 'review'
+                ? 'that one waits on a person'
+                : parent.hold?.kind === 'main-red'
+                  ? 'that one waits for main to be green'
+                  : parent.hold?.kind === 'dependency'
+                    ? 'that one waits on another Lane'
+                    : queuedBehind
+                      ? `that one is number ${parent.position!.toLocaleString()} in the queue`
+                      : notLandedWhy(parent)
+            }`
+          : entry.hold.reason,
         since: entry.lastProgressAt,
         person: false,
+        ...(front ? { front } : {}),
       });
-    else if (entry.hold?.kind === 'main-red')
+    } else if (entry.hold?.kind === 'main-red')
       out.push({
         laneId: entry.laneId,
         on: 'main',
@@ -409,11 +449,7 @@ export function waits(entries: readonly QueueEntry[], titleOf: (laneId: string) 
               laneId: head.laneId,
               title: titleOf(head.laneId),
               ahead,
-              why:
-                notLandedWhy(head) +
-                (head.phase === 'needs-sync' && head.needsSync?.paths.length && !head.recomposeCount
-                  ? `: main already changed ${taken(head.needsSync)}`
-                  : ''),
+              why: frontWhy(head),
             }
           : undefined;
       out.push({
