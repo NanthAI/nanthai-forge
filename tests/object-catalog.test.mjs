@@ -623,3 +623,79 @@ test('State logical dimensions survive catalog windows, page rewrites and row pr
     'callers cannot mutate stored dimensions',
   );
 });
+
+test('review b1448b61 N2: a source submit commits only uploads of the project it names', async () => {
+  const commit = await import(moduleUrl('../convex/projectObjectCommit.ts'));
+  const f = state([]);
+  // One owner, two projects: an upload prepared for `other` must never stand as verified for `project`.
+  for (const projectId of ['project', 'other'])
+    f.tables.hostedProjects.set(projectId, projectRow({ _id: projectId, r2Writes: true }));
+  const digest = hex('other-upload');
+  const id = await f.ctx.db.insert('projectObjects', {
+    projectId: 'other',
+    digest,
+    size: 12,
+    nonce: 'pending-upload',
+    removed: false,
+    location: 'r2',
+    r2Key: `v1/p/other/o/${digest}`,
+  });
+  const pending = args => commit.pendingRows._handler(f.ctx, { actor: 'owner', ids: [id], ...args });
+  await assert.rejects(pending({ projectId: 'project' }), error => error.data?.code === 'BAD_ARGUMENT');
+  // Its own project's submit, and the project-free commitBatch, still see the upload.
+  assert.deepEqual(
+    (await pending({ projectId: 'other' })).map(row => row.digest),
+    [digest],
+  );
+  assert.deepEqual(
+    (await pending({})).map(row => row.digest),
+    [digest],
+  );
+});
+
+test("review 1d69905b: projectSourceRun:submit naming another project's upload is refused; nothing is committed or submitted", async () => {
+  const commit = await import(moduleUrl('../convex/projectObjectCommit.ts'));
+  const { submit } = await import(moduleUrl('../convex/projectSourceRun.ts'));
+  const { getFunctionName } = await import('convex/server');
+  const f = state([]);
+  // Same owner, both projects writable: only the project match tells them apart.
+  for (const projectId of ['project', 'other'])
+    f.tables.hostedProjects.set(projectId, projectRow({ _id: projectId, r2Writes: true }));
+  const digest = hex('other-upload-at-submit');
+  const id = await f.ctx.db.insert('projectObjects', {
+    projectId: 'other',
+    digest,
+    size: 12,
+    nonce: 'pending-upload',
+    removed: false,
+    location: 'r2',
+    r2Key: `v1/p/other/o/${digest}`,
+  });
+  const before = structuredClone(f.tables.projectObjects.get(id));
+  const touched = [];
+  const ctx = {
+    auth: { getUserIdentity: async () => ({ subject: 'owner' }) },
+    runQuery: async (ref, args) => {
+      const name = getFunctionName(ref);
+      touched.push(name);
+      assert.equal(name, 'projectObjectCommit:pendingRows');
+      return commit.pendingRows._handler(f.ctx, args);
+    },
+    runMutation: async ref => touched.push(getFunctionName(ref)),
+    runAction: async ref => touched.push(getFunctionName(ref)),
+  };
+  await assert.rejects(
+    submit._handler(ctx, {
+      projectId: 'project',
+      operationId: '00000000-0000-4000-8000-0000000000d2',
+      kind: 'save',
+      objects: [{ id }],
+    }),
+    error =>
+      error.data?.code === 'BAD_ARGUMENT' &&
+      /prepared for the project this source submit names/.test(error.data?.message),
+  );
+  // Only the read ran: no commit mutation, no State submit, no step; the upload row is untouched.
+  assert.deepEqual(touched, ['projectObjectCommit:pendingRows']);
+  assert.deepEqual(f.tables.projectObjects.get(id), before);
+});

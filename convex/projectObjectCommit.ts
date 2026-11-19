@@ -23,11 +23,23 @@ const pending = v.object({
   /** An upload pack's members (feature upload-packs), checked by reading the pack. */
   members: v.optional(v.array(member)),
 });
-/** Rows of this caller's R2 uploads that still need a HEAD check. */
+/** Rows of this caller's R2 uploads that still need a HEAD check. With `projectId` (a source
+ * submit), every named upload must belong to that project: the pins a commit returns let the
+ * submit's step skip its own re-check, so they may never come from another project (N2). */
 export const pendingRows = internalQuery({
-  args: { actor: v.string(), ids: v.array(v.id('projectObjects')) },
+  args: {
+    actor: v.string(),
+    ids: v.array(v.id('projectObjects')),
+    projectId: v.optional(v.id('hostedProjects')),
+  },
   returns: v.array(pending),
-  handler: async (ctx, { actor, ids }) => {
+  handler: async (ctx, { actor, ids, projectId }) => {
+    const sameProject = (owner: Id<'hostedProjects'>) =>
+      invariant(
+        projectId === undefined || owner === projectId,
+        'BAD_ARGUMENT',
+        'Commit only uploads prepared for the project this source submit names.',
+      );
     try {
       const rows = [];
       for (const id of new Set(ids)) {
@@ -38,6 +50,7 @@ export const pendingRows = internalQuery({
             .withIndex('by_key', q => q.eq('key', id))
             .unique();
           invariant(receipt, 'PROJECT_UNAVAILABLE', 'This original upload is unavailable.');
+          sameProject(receipt.projectId);
           await activeProject(ctx, receipt.projectId, actor);
           const stored = receipt.sourceBinding
             ? pointObject(receipt, receipt.projectId, receipt.value)
@@ -52,6 +65,7 @@ export const pendingRows = internalQuery({
           );
           continue;
         }
+        sameProject(row.projectId);
         await activeProject(ctx, row.projectId, actor);
         invariant(
           row.location === 'r2' && row.r2Key,
@@ -199,6 +213,8 @@ export async function commitObjects(
     string,
     { sha256: string; size: number; r2Key: string; pack?: import('../src/object-pack-range').ObjectPack }
   >,
+  /** The project a source submit names: every upload must belong to it (pendingRows). */
+  projectId?: Id<'hostedProjects'>,
 ): Promise<{ sha256: string; size: number }[]> {
   invariant(objects.length <= 100, 'BAD_ARGUMENT', 'Commit content in pages of at most 100.');
   if (!objects.length) return [];
@@ -211,6 +227,7 @@ export async function commitObjects(
   }[] = await ctx.runQuery(internal.projectObjectCommit.pendingRows, {
     actor,
     ids: objects.map(object => object.id),
+    ...(projectId ? { projectId } : {}),
   });
   if (!rows.length) return [];
   const config = r2Config();

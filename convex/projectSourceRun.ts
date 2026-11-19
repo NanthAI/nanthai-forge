@@ -83,7 +83,9 @@ export const submit = action({
         string,
         { sha256: string; size: number; r2Key: string; pack?: import('../src/object-pack-range').ObjectPack }
       >();
-      const verified = objects?.length ? await commitObjects(ctx, user.subject, objects, held, bindings) : [];
+      const verified = objects?.length
+        ? await commitObjects(ctx, user.subject, objects, held, bindings, input.projectId)
+        : [];
       const measuredMs = saveDurationMs(clientMs, Math.max(0, Date.now() - receivedAt));
       const submitted: { payload: string; run: string | null } = JSON.parse(
         await ctx.runMutation(makeFunctionReference<'mutation'>('projectSourceRunStore:submit'), {
