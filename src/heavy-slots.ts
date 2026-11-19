@@ -95,10 +95,12 @@ export type HeavyWait = {
  * only the caller at the front tries the slots. Every change in the directory (a release, a new
  * or departed waiter) and a `tickMs` timer re-run one synchronous attempt; the timer also compares
  * start times, so a dead holder or waiter (even behind a reused PID) never blocks the queue.
+ * `slots` may be read again on every attempt, so a raised limit is used by the waiters already
+ * queued; `wakeHeavyWaiters` makes that attempt immediate (friction 25f56c0a).
  */
 export function acquireHeavySlot(
   directory: string,
-  slots: number,
+  slots: number | (() => number),
   onWait: (wait: HeavyWait) => void = () => {},
   info: {
     command?: string | null;
@@ -110,8 +112,17 @@ export function acquireHeavySlot(
 ): Promise<string> {
   mkdirSync(directory, { recursive: true });
   const holder = info.holder ?? process.pid;
+  let count = typeof slots === 'number' ? slots : slots();
+  const current = () => {
+    if (typeof slots === 'number') return count;
+    try {
+      return (count = slots());
+    } catch {
+      return count; // A settings file mid-edit keeps the last good limit.
+    }
+  };
   if (!queuedNames(directory).length) {
-    const slot = tryHeavySlot(directory, slots, holder);
+    const slot = tryHeavySlot(directory, count, holder);
     if (slot) return Promise.resolve(slot);
   }
   let ticket = joinQueue(directory, info),
@@ -135,13 +146,13 @@ export function acquireHeavySlot(
         const rank = queue.findIndex(item => item.name === ticket.name);
         if (rank < 0) ticket = joinQueue(directory, { ...info, seq: ticket.seq });
         else if (rank === 0) {
-          const slot = tryHeavySlot(directory, slots, holder, deep);
+          const slot = tryHeavySlot(directory, current(), holder, deep);
           if (slot) return finish(slot);
         }
         if (rank >= 0 && rank + 1 !== reported) {
           reported = rank + 1;
-          const running = heavyStatus(directory, slots).holders.map(holder => holder.elapsedMs);
-          const estimate = estimateWaitMs(readHolds(directory), running, slots, rank);
+          const running = heavyStatus(directory, count).holders.map(holder => holder.elapsedMs);
+          const estimate = estimateWaitMs(readHolds(directory), running, count, rank);
           onWait({
             position: reported,
             waiting: queue.length,
@@ -162,6 +173,17 @@ export function acquireHeavySlot(
     );
     handles.timer = setInterval(() => attempt(true), info.tickMs ?? 3000);
   });
+}
+
+const WAKE = 'slots-changed';
+/** Touch the slot directory so every waiter re-runs its attempt now (its watcher fires) and reads
+ * the slot count again; local only, nothing is created where no one has waited. */
+export function wakeHeavyWaiters(directory = heavySlotDirectory()) {
+  try {
+    writeFileSync(join(directory, WAKE), String(Date.now()));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
 }
 
 export const HEAVY_HELP = `nforge heavy [--] CMD [ARGS...]
@@ -393,7 +415,8 @@ export async function heavyCli(
     'BAD_ARGUMENT',
     'heavy: node --test received no test file paths, so Node would run the whole suite. Pass the selected files as separate arguments (zsh does not word-split a plain $VAR: use an array with "${files[@]}" or ${=VAR}), or run nforge heavy npm test for the full suite on purpose.',
   );
-  const slots = heavySlots(readClientSettings().localHeavySlots);
+  const slotLimit = () => heavySlots(readClientSettings().localHeavySlots);
+  const slots = slotLimit();
   if (!endOfOptions && args[0] === '--status') {
     await beforeLocal?.();
     process.stdout.write(`${JSON.stringify(heavyStatus(heavySlotDirectory(), slots))}\n`);
@@ -406,8 +429,8 @@ export async function heavyCli(
       ? null
       : await acquireHeavySlot(
           heavySlotDirectory(),
-          slots,
-          wait => process.stderr.write(waitingMessage(slots, heavySlotDirectory(), wait)),
+          slotLimit,
+          wait => process.stderr.write(waitingMessage(slotLimit(), heavySlotDirectory(), wait)),
           { command: args[0]!, cwd: process.cwd() },
         );
   const heldSince = Date.now();

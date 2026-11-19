@@ -181,7 +181,13 @@ async function main(args: string[]): Promise<unknown> {
     ).heavyCli(args.slice(1), beforeDispatch, beforeLocal);
     return undefined;
   }
-  if (args[0] === 'settings') return (await import('./client-settings.js')).clientSettingsCli(args.slice(1));
+  if (args[0] === 'settings') {
+    const result = (await import('./client-settings.js')).clientSettingsCli(args.slice(1));
+    // Waiting heavy runs take a raised slot now, not at the next release (friction 25f56c0a).
+    if (args[1] === 'localHeavySlots' && args[2] !== undefined)
+      (await import('./heavy-slots.js')).wakeHeavyWaiters();
+    return result;
+  }
   if (args[0] === 'prune') {
     const { pruneCli, convexLaneStates } = await import('./lane-prune.js');
     const { ConvexExchange } = await import('./exchange-client.js');

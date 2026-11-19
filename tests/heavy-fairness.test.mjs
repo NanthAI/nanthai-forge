@@ -6,7 +6,7 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync, existsSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { acquireHeavySlot, heavyStatus, tryHeavySlot } from '../dist/heavy-slots.js';
+import { acquireHeavySlot, heavyStatus, tryHeavySlot, wakeHeavyWaiters } from '../dist/heavy-slots.js';
 import {
   estimateWaitMs,
   joinQueue,
@@ -189,6 +189,47 @@ test('status names holders and waiters by Lane and command, never by folder or a
   const text = JSON.stringify(status);
   assert(!text.includes('/fixture/checkout') && !text.includes(directory) && !text.includes('/secret'), text);
   assert.deepEqual(slotFiles(directory), ['1'], 'status is read-only');
+});
+
+test('friction 25f56c0a: a raised slot limit is taken by the waiter already queued, at once on a wake', async t => {
+  const directory = isolated(t);
+  let limit = 1;
+  const held = tryHeavySlot(directory, 1);
+  let slot;
+  // No timer within the test: only the wake can make the waiter look again.
+  const waiting = acquireHeavySlot(directory, () => limit, undefined, { tickMs: 600_000 }).then(
+    value => (slot = value),
+  );
+  await until(() => queuedNames(directory).length === 1);
+  await new Promise(done => setImmediate(done));
+  assert.equal(slot, undefined, 'one slot, held');
+  limit = 2;
+  wakeHeavyWaiters(directory);
+  assert.equal(await waiting, join(directory, '2'));
+  assert(existsSync(held), 'the first holder still runs');
+  assert.deepEqual(queuedNames(directory), []);
+  // Without a wake (a settings file edited by hand), the periodic check reads the limit again.
+  const timed = acquireHeavySlot(directory, () => limit, undefined, { tickMs: 50 });
+  await until(() => queuedNames(directory).length === 1);
+  limit = 3;
+  assert.equal(await timed, join(directory, '3'));
+});
+
+test('friction 25f56c0a: nforge settings localHeavySlots wakes a queued nforge heavy while the slot holder still runs', async t => {
+  const directory = isolated(t),
+    settings = join(directory, 'settings.json');
+  writeFileSync(settings, JSON.stringify({ localHeavySlots: 1 }));
+  const held = tryHeavySlot(directory, 1);
+  const waiter = heavyProcess(directory, [process.execPath, '-e', printStart], settings);
+  await until(() => waiter.stderr.includes('Queue position 1 of 1'), 30_000);
+  const raised = spawn(process.execPath, [cli, 'settings', 'localHeavySlots', '2'], {
+    env: { ...process.env, FORGE_HEAVY_DIR: directory, FORGE_CLIENT_SETTINGS: settings },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  assert.equal(await new Promise(done => raised.once('exit', done)), 0);
+  await waiter.exited;
+  assert.match(waiter.stdout, /S\d+/, waiter.stderr);
+  assert(existsSync(held), 'the waiter ran in the new slot, not after a release');
 });
 
 function heavyProcess(directory, args, settings) {
