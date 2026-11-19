@@ -121,7 +121,8 @@ test('incident replay: B and C pass alone but fail together; both statuses name 
   if (process.env.FORGE_BATCH_CULPRIT_CHILD !== '1') {
     // Function references are not static imports. The validating scheduler loads
     // these targets lazily, so prepare their validators outside the measured child.
-    for (const name of ['projectConvexSource', 'projectOperationalExpiry']) moduleUrl(`../convex/${name}.ts`);
+    for (const name of ['projectConvexSource', 'projectOperationalExpiry', 'projectLandingCapsuleRun'])
+      moduleUrl(`../convex/${name}.ts`);
     const child = spawn(
       process.execPath,
       [

@@ -10,6 +10,8 @@ import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { legacyPolicy } from '../dist/autonomy-policy.js';
 import { ticketState } from './landing-ticket-fixture.mjs';
 export const api = await import(moduleUrl('../convex/projectHostedLanding.ts'));
+const { landingCapsuleGraceMs } = await import(moduleUrl('../convex/projectLandingCapsuleWake.ts'));
+const capsuleWakeAhead = landingCapsuleGraceMs - 3_600_000;
 export const driver = await import(moduleUrl('../convex/projectHostedLandingDriver.ts'));
 export const control = await import(moduleUrl('../convex/projectHostedLandingControl.ts'));
 export const store = await import(moduleUrl('../convex/projectHostedLandingStore.ts'));
@@ -177,7 +179,13 @@ export async function landingFixture(source = null) {
     [...f.tables.projectHostedLandingQueues.values()].find(r => r.projectId === f.projectId);
   const pendingTasks = () =>
     [...f.tables._scheduled_functions.values()].filter(
-      t => t.state.kind === 'pending' && !t.name.startsWith('projectOperationalExpiry:'),
+      // Retention and the terminal-plus-seven-day capsule wake run long after these landings; they have
+      // their own tests. Only a pack wake still a full grace away is hidden (an hour of slack covers the
+      // fixture clock against Date.now); an immediate Node, index or wake-check continuation stays visible.
+      t =>
+        t.state.kind === 'pending' &&
+        !t.name.startsWith('projectOperationalExpiry:') &&
+        !(t.name === 'projectLandingCapsuleRun:pack' && t.scheduledTime - now >= capsuleWakeAhead),
     );
   const nextTask = () => pendingTasks().sort((a, b) => a.scheduledTime - b.scheduledTime)[0];
   const claim = (task = nextTask()) =>

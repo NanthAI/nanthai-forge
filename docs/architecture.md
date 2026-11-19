@@ -1900,8 +1900,8 @@ capsule receives that error; uncapsuled reads and past-end current-state probes
 retain their existing calls. Attempt ordinal cursors remain stable across
 relocation.
 
-The writer is gated by the default-off server setting `FORGE_LANDING_CAPSULES=1`.
-Readers must be deployed before enabling it. A terminal transition schedules one
+The writer always runs; its server setting was removed after the live dev proof on
+Item b149b16b. A terminal transition schedules one
 wake at settlement plus seven days; mutable acceptance completion or shared checks
 retain an event-driven waiter, not a poll. Existing completion/expiry events wake
 those waiters. A bounded, resumable project bootstrap indexes compose identities

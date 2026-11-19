@@ -606,8 +606,9 @@ older supervisors. See [the CI request guard](operations/github-actions-checks.m
 
 ## Terminal landing capsules
 
-S1 (`bea7868d`) keeps the default-off writer separate from reader deployment.
-After the approved seven-day terminal grace, one complete private gzip object
+S1 (`bea7868d`) packs every landing that settles once the writer is deployed;
+earlier terminal landings are not backfilled. After the approved seven-day
+terminal grace, one complete private gzip object
 holds canonical observations, attempts, landing-owned finish projections,
 acceptance events/pages/plans/snapshots, compose pages and expired callback digest
 receipts. Relocated per-landing expiry receipts travel in that object too. A
@@ -620,10 +621,9 @@ Capsule objects use the private project `landing-capsules` namespace, outside th
 client-readable object namespace. Server actions alone open them, verify complete
 raw bytes/table hashes and return currently authorized, identity-mapped logical
 history. Recovery uses that path and retains the full raw server object; its
-fixture drill also restores hosted source. Disabling the writer stops future
-packing; existing capsules continue through the reader/recovery path. Logical
-history is preserved indefinitely. This does not enable a deployed setting or
-claim measured billing savings.
+fixture drill also restores hosted source. Logical history is preserved
+indefinitely. Live dev packing, cold reads and retained bytes are recorded on
+Item b149b16b; billed storage savings are not yet a dashboard reading.
 
 Landing request phase state lives in the indexed `projectHostedLandingRequests` ticket. Resolution-message inheritance follows existing compose, operation and submission indexes when a child attempt conflicted; older ordinary recomposes also read their landing attempt. New finish recomposes reserve the owning submission UUID in the existing operation-ID map, so cached precompose adoption preserves exact note choices. Their source job reuses the already unique Candidate UUID, replacing the redundant job-operation reservation (two fewer serialized bytes per operation). Healthy landing calls, writes and indexes stay unchanged; source bytes stay in R2.
 Its immutable request and larger batch selection live in separate rows of the unindexed

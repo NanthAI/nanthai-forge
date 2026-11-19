@@ -194,12 +194,8 @@ export async function landingStorage(
   caller = 'maintenance';
   let capsule = null;
   if (capsules) {
-    const previous = process.env.FORGE_LANDING_CAPSULES;
     const maintenance = await capsuleMaintenanceFixture(t, { f, state });
-    const packed = await maintenance.pack().finally(() => {
-      if (previous === undefined) delete process.env.FORGE_LANDING_CAPSULES;
-      else process.env.FORGE_LANDING_CAPSULES = previous;
-    });
+    const packed = await maintenance.pack();
     if (capsuleSample) await capsuleSample(maintenance, packed);
     capsule = {
       ...packed.metrics,

@@ -28,7 +28,7 @@ for (const dogfood of [false, true])
             encoding: 'utf8',
             env: childEnv({
               allow: ['FORGE_TEST_MODULE_DIRECTORY'],
-              extra: { ...synthetic, FORGE_LANDING_CAPSULES: '1' },
+              extra: synthetic,
             }),
             stdio: ['ignore', 'pipe', 'pipe'],
           },
@@ -70,7 +70,7 @@ test('b149b16b: a capsule just under the 1 MiB V8 bound packs in V8 within a 64 
       encoding: 'utf8',
       env: childEnv({
         allow: ['FORGE_TEST_MODULE_DIRECTORY'],
-        extra: { ...synthetic, FORGE_LANDING_CAPSULES: '1' },
+        extra: synthetic,
       }),
       stdio: ['ignore', 'pipe', 'pipe'],
     },

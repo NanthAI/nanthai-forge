@@ -23,13 +23,10 @@ const modules = Object.fromEntries(
 
 export async function capsuleMaintenanceFixture(
   t,
-  { f: provided, state: providedState, advance = true, enabled = false } = {},
+  { f: provided, state: providedState, advance = true } = {},
 ) {
-  const settings = { ...synthetic, FORGE_LANDING_CAPSULES: enabled ? '1' : undefined };
-  const prior = Object.fromEntries(Object.keys(settings).map(key => [key, process.env[key]]));
-  for (const [key, value] of Object.entries(settings))
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
+  const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
+  for (const [key, value] of Object.entries(synthetic)) process.env[key] = value;
   t.after(() => {
     for (const [key, value] of Object.entries(prior))
       if (value === undefined) delete process.env[key];
@@ -43,7 +40,6 @@ export async function capsuleMaintenanceFixture(
     await f.drain();
   }
   assert.equal((await f.current(state.id)).submission.phase, 'landed');
-  process.env.FORGE_LANDING_CAPSULES = '1';
   if (advance) f.advanceClock(8 * 86_400_000);
   const objects = new Map(),
     scheduled = [],
@@ -53,7 +49,8 @@ export async function capsuleMaintenanceFixture(
   let corrupt = false,
     losePublish = false,
     loseRemove = false,
-    losePutResponse = false;
+    losePutResponse = false,
+    replaced = null;
   const previousFetch = globalThis.fetch;
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     const path = new URL(url).pathname;
@@ -82,7 +79,11 @@ export async function capsuleMaintenanceFixture(
         [file, method] = name.split(':');
       assert(modules[file]?.[method], name);
       calls.push(name);
-      const value = await f.tx('capsuleWriterPage', modules[file][method], args);
+      let value = await f.tx('capsuleWriterPage', modules[file][method], args);
+      if (replaced?.name === name && replaced.nth-- === 0) {
+        value = replaced.reply(typeof value === 'string' ? JSON.parse(value) : value);
+        replaced = null;
+      }
       transcript.push({ name, args: structuredClone(args), value: structuredClone(value) });
       if (losePublish && name === 'projectLandingCapsulePublish:publish') {
         losePublish = false;
@@ -116,6 +117,8 @@ export async function capsuleMaintenanceFixture(
     scheduled,
     pack: () => run.pack._handler(ctx, input).then(JSON.parse),
     packNode: () => runNode.pack._handler(ctx, input).then(JSON.parse),
+    /** Answer the nth (0-based) call of `name` with reply(realValue), as another run racing it would. */
+    replaceReply: (name, nth, reply) => (replaced = { name, nth, reply }),
     /** Spread about `bytes` of schema-valid, incompressible historical error text over this landing's
      * observations, each row well under the 1 MiB document bound. Returns the added bytes. */
     inflate: bytes => {

@@ -11,7 +11,6 @@ export async function wakeLandingCapsule(
     dueAt: number;
   },
 ) {
-  if (process.env.FORGE_LANDING_CAPSULES !== '1') return;
   await ctx.scheduler.runAfter(
     Math.max(0, input.dueAt - Date.now()),
     makeFunctionReference<'action'>('projectLandingCapsuleRun:pack'),
@@ -48,7 +47,6 @@ export async function settleCapsuleCheck(
   ctx: MutationCtx,
   input: { projectId: Id<'hostedProjects'>; runId: string },
 ) {
-  if (process.env.FORGE_LANDING_CAPSULES !== '1') return;
   const waiting = await ctx.db
     .query('projectFinishReadRows')
     .withIndex('by_kind_and_project_and_run', q =>

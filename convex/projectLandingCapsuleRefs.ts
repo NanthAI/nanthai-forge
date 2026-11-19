@@ -19,7 +19,6 @@ export const wakeChecks = internalMutation({
   args: { projectId: v.id('hostedProjects'), runId: v.string() },
   returns: v.null(),
   handler: async (ctx, input) => {
-    if (process.env.FORGE_LANDING_CAPSULES !== '1') return null;
     const rows = await ctx.db
       .query('projectFinishReadRows')
       .withIndex('by_kind_and_project_and_run', q =>

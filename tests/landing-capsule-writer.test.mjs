@@ -79,23 +79,6 @@ test('S1 lost publication response resumes the same verified object without repe
   assert.equal(h.f.tables.projectHostedLandingAttempts.size, 0);
 });
 
-test('S1 default-off packer performs no function or R2 calls', async () => {
-  const previous = process.env.FORGE_LANDING_CAPSULES;
-  delete process.env.FORGE_LANDING_CAPSULES;
-  try {
-    const result = JSON.parse(
-      await run.pack._handler(
-        { runMutation: () => assert.fail('no function call') },
-        { projectId: 'synthetic', submissionId: 'synthetic', dueAt: 0 },
-      ),
-    );
-    assert.equal(result.reason, 'disabled');
-  } finally {
-    if (previous === undefined) delete process.env.FORGE_LANDING_CAPSULES;
-    else process.env.FORGE_LANDING_CAPSULES = previous;
-  }
-});
-
 test('S1 mutable acceptance completion defers packing and its existing completion event supplies the wake', async t => {
   const h = await fixture(t);
   const plan = [...h.f.tables.projectHostedAcceptancePlans.values()][0];
@@ -105,6 +88,10 @@ test('S1 mutable acceptance completion defers packing and its existing completio
   assert.equal(first.deferred, 'completion');
   assert.equal((await h.pack()).deferred, 'completion');
   assert.equal(h.requests.length, 0);
+  const wakes = () =>
+    [...h.f.tables._scheduled_functions.values()].filter(row => row.name === 'projectLandingCapsuleRun:pack')
+      .length;
+  assert.equal(wakes(), 1, 'settlement armed exactly one terminal wake');
   const acceptance = await import(moduleUrl('../convex/projectHostedAcceptance.ts'));
   await h.f.tx('capsuleExistingCompletion', acceptance.complete, {
     projectId: h.f.projectId,
@@ -113,10 +100,7 @@ test('S1 mutable acceptance completion defers packing and its existing completio
   const stored = h.f.tables.projectHostedAcceptancePlans.get(plan._id);
   assert.equal(stored.completion, undefined);
   assert.equal(stored.capsuleWake, undefined);
-  const wakes = [...h.f.tables._scheduled_functions.values()].filter(
-    row => row.name === 'projectLandingCapsuleRun:pack',
-  );
-  assert.equal(wakes.length, 1, 'completion event wakes once, without a poll or new user step');
+  assert.equal(wakes(), 2, 'completion event wakes once, without a poll or new user step');
 });
 
 test('S1 preserves landings evidence, original attempt metric timestamps and trusted acceptance costs after relocation', async t => {
@@ -153,7 +137,7 @@ test('S1 preserves landings evidence, original attempt metric timestamps and tru
 });
 
 test('S1 terminal transition arms exactly one seven-day wake without another controller call', async t => {
-  const h = await fixture(t, { enabled: true, advance: false });
+  const h = await fixture(t, { advance: false });
   const row = [...h.f.tables.projectHostedLandingRequests.values()][0];
   const state = JSON.parse(row.value);
   const wakes = [...h.f.tables._scheduled_functions.values()].filter(
@@ -322,6 +306,38 @@ test('S1 unknown PUT outcome reconciles the original complete content pin before
   assert.equal(replay.pointer.sha256, original);
   assert.equal(h.requests.filter(method => method === 'PUT').length, 1);
 });
+
+for (const [name, nth, label] of [
+  ['projectLandingCapsuleCapture:pages', 0, 'the first capture step'],
+  ['projectLandingCapsuleCapture:pages', 1, 'the second capture step'],
+  ['projectLandingCapsulePublish:publish', 0, 'a lost publish race'],
+])
+  test(`b149b16b: another run's capsule over the V8 bound, seen in ${label}, continues in Node without a V8 read`, async t => {
+    const h = await fixture(t);
+    const other = {
+      protocol: 1,
+      sha256: 'f'.repeat(64),
+      size: 600_000,
+      rawSize: run.capsuleV8RawBytes + 1,
+      version: 1,
+      tables: '[]',
+      summary: canonicalPayload({ removalDone: false }),
+    };
+    let before = null;
+    h.replaceReply(name, nth, () => {
+      before = h.requests.length;
+      return name.endsWith(':publish') ? other : { pointer: other };
+    });
+    const result = await h.pack();
+    assert.equal(result.continuing, 'node');
+    assert.deepEqual(
+      h.scheduled.map(task => task.name),
+      ['projectLandingCapsuleRunNode:pack'],
+    );
+    // A publish race has already put and verified its own copy; nothing is read after the other pointer.
+    assert.equal(h.requests.length, before, 'V8 never fetches the oversized stored capsule');
+    if (!name.endsWith(':publish')) assert.equal(before, 0);
+  });
 
 test('b149b16b: a landing over the V8 bound continues in the Node packer, which publishes one verified object and removes every copy', async t => {
   const h = await fixture(t);

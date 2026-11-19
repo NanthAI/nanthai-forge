@@ -174,8 +174,10 @@ for (const history of [0, 575, 1150])
     // landed member and retains it on that member's plan (cohort size bounds it).
     // Max writes 58 -> 60 (45f49fb7): each landed member of that publication also rewrites the
     // project's one landing-speed row (cohort size bounds it); max reads are unchanged.
+    // Max writes 60 -> 62 (b149b16b): the always-on S1 writer schedules one terminal-plus-seven-day
+    // capsule wake per landed member of that publication (cohort size bounds it); no read or call.
     assert(
-      Math.max(...source.map(c => c.documents)) <= 170 && Math.max(...source.map(c => c.writes)) <= 60,
+      Math.max(...source.map(c => c.documents)) <= 170 && Math.max(...source.map(c => c.writes)) <= 62,
       JSON.stringify({
         ...budget,
         maxSourceReads: Math.max(...source.map(c => c.documents)),

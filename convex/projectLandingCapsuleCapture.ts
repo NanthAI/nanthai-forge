@@ -261,8 +261,6 @@ export const begin = internalMutation({
   args: capsuleRunArgs,
   returns: v.string(),
   handler: async (ctx, input) => {
-    if (process.env.FORGE_LANDING_CAPSULES !== '1')
-      return canonicalPayload({ kept: true, reason: 'disabled' });
     const { row, state } = await loadLanding(ctx, input);
     if (row.capsule) return canonicalPayload({ pointer: row.capsule });
     if (!['landed', 'terminal-failed'].includes(state.phase))

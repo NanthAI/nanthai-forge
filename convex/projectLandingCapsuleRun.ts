@@ -82,7 +82,6 @@ export async function packLandingCapsule(
   input: ObjectType<typeof capsuleRunArgs>,
   runtime: Runtime,
 ) {
-  if (process.env.FORGE_LANDING_CAPSULES !== '1') return canonicalPayload({ kept: true, reason: 'disabled' });
   const identity = { projectId: input.projectId, submissionId: input.submissionId };
   const started = Date.now();
   let calls = 0,
@@ -103,6 +102,13 @@ export async function packLandingCapsule(
   const toNode = async () => {
     await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>(nodeRunName), input);
     return canonicalPayload({ continuing: 'node' });
+  };
+  /** Every read of a stored capsule: V8 never decodes one over its bound (null: continue in Node). */
+  const readStored = async (at: LandingCapsulePointer) => {
+    if (runtime === 'v8' && at.rawSize > capsuleV8RawBytes) return null;
+    const stored = await getLandingCapsule(input.projectId, input.submissionId, at);
+    invariant(stored, 'SOURCE_UNAVAILABLE', 'Original capsule bytes are unavailable.');
+    return stored;
   };
   const finish = async (capsule: LandingCapsule, published: LandingCapsulePointer) => {
     let pointer = published;
@@ -147,9 +153,8 @@ export async function packLandingCapsule(
   }
   if (pointer) {
     if (JSON.parse(pointer.summary!).removalDone) return canonicalPayload({ pointer, replayed: true });
-    if (runtime === 'v8' && pointer.rawSize > capsuleV8RawBytes) return await toNode();
-    const stored = await getLandingCapsule(input.projectId, input.submissionId, pointer);
-    invariant(stored, 'SOURCE_UNAVAILABLE', 'Original capsule bytes are unavailable.');
+    const stored = await readStored(pointer);
+    if (!stored) return await toNode();
     capsule = stored;
   } else {
     const tables: LandingCapsule['tables'] = {};
@@ -215,10 +220,9 @@ export async function packLandingCapsule(
     ]);
     if (tooLarge()) return await toNode();
     if (pointer) {
-      const stored = await getLandingCapsule(input.projectId, input.submissionId, pointer);
-      invariant(stored, 'SOURCE_UNAVAILABLE', 'Original capsule bytes are unavailable.');
-      capsule = stored;
-      return await finish(capsule, pointer);
+      const stored = await readStored(pointer);
+      if (!stored) return await toNode();
+      return await finish(stored, pointer);
     }
     const attempts = (tables.projectHostedLandingAttempts ?? []).map(text =>
       JSON.parse(JSON.parse(text).value),
@@ -291,8 +295,8 @@ export async function packLandingCapsule(
     await captureAll(scopes);
     if (tooLarge()) return await toNode();
     if (pointer) {
-      const stored = await getLandingCapsule(input.projectId, input.submissionId, pointer);
-      invariant(stored, 'SOURCE_UNAVAILABLE', 'Original capsule bytes are unavailable.');
+      const stored = await readStored(pointer);
+      if (!stored) return await toNode();
       capsule = stored;
     } else {
       capsule = {
@@ -325,8 +329,8 @@ export async function packLandingCapsule(
       });
       if (pointer!.sha256 !== encoded.pointer.sha256) {
         // Another run published first: remove against the copy its pointer names, never this run's.
-        const stored = await getLandingCapsule(input.projectId, input.submissionId, pointer!);
-        invariant(stored, 'SOURCE_UNAVAILABLE', 'Original capsule bytes are unavailable.');
+        const stored = await readStored(pointer!);
+        if (!stored) return await toNode();
         capsule = stored;
       }
     }

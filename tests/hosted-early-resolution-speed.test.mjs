@@ -44,9 +44,11 @@ for (const history of [0, 1150])
     // 3a733ee8 (review 66f9ed38): +1 read and +1 write per landed Intent, no call. Each of the trio's three
     // landings posts one Item landing note in its existing completion tick (a unique-index probe, then an
     // insert): +3 reads, +3 writes; equal in both arms.
+    // b149b16b: the always-on S1 writer arms one terminal-plus-seven-day capsule wake per landed
+    // member inside its existing settle mutation (+3 writes: the schedules; no call or read); equal in both arms.
     assert.deepEqual(
       [after.calls, after.reads, after.writes, after.lateTaskMs, after.idle],
-      [155, 2987, 1029, 180000, 0],
+      [155, 2987, 1032, 180000, 0],
       '8c9b84fc: disjoint baseline must not grow',
     );
     t.diagnostic(JSON.stringify({ history, before, after }));
