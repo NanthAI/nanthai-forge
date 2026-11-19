@@ -25,7 +25,8 @@ export function browserInstallEnv(home, cache, source = process.env) {
     },
   });
 }
-export function installBrowser(version, cache) {
+/** `timeout`: the same 5 minutes as the workflow's install step; the job runner's setup retry uses it too. */
+export function installBrowser(version, cache, { timeout = 300_000 } = {}) {
   if (!/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(version ?? '') || !cache)
     throw new Error('Browser cache install requires the exact pinned Playwright version and cache path.');
   const base = dirname(process.execPath);
@@ -52,6 +53,7 @@ export function installBrowser(version, cache) {
       {
         env: browserInstallEnv(home, cache),
         stdio: 'inherit',
+        timeout,
       },
     );
     if (child.status !== 0) throw new Error('Pinned browser cache installation failed.');

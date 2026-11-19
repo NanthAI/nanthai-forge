@@ -37,7 +37,7 @@ import {
 } from '../dist/hosted-actions-job-source.js';
 import { prepareActionsJob, actionsGateSelection } from '../dist/hosted-actions-job-plan.js';
 import { browserSelection } from '../scripts/browser-test-policy.mjs';
-import { executeActionsJob, isolateCandidates } from '../dist/hosted-actions-job-run.js';
+import { executeActionsJob, isolateCandidates, useBrowserInstaller } from '../dist/hosted-actions-job-run.js';
 import { directRequestSchema } from '../dist/hosted-actions-direct.js';
 import { savePin } from '../dist/hosted-save.js';
 import { digest } from '../dist/hash.js';
@@ -59,6 +59,8 @@ function fixture(
     capabilities = hostedActionsCapabilities,
     reader = false,
     submodule = null,
+    // A browser test plus a web change, so the standard plan selects browser coverage (pinned Playwright).
+    browser = false,
   } = {},
 ) {
   const directory = temporaryDirectory(t, 'forge-direct-job-');
@@ -73,7 +75,11 @@ function fixture(
   };
   const entry = (path, text, mode = 'file') => ({ path, blob: put(text).sha256, mode });
   const files = [
-    entry('package-lock.json', '{}'),
+    entry(
+      'package-lock.json',
+      browser ? JSON.stringify({ packages: { 'node_modules/playwright': { version: '1.2.3' } } }) : '{}',
+    ),
+    ...(browser ? [entry('tests/demo-browser.test.mjs', "import './browser-runtime.mjs';")] : []),
     entry('scripts/example.sh', '#!/bin/sh\nexit 0\n', 'executable'),
     entry('test-link', 'package-lock.json', 'symlink'),
     entry('README.md', 'synthetic before'),
@@ -100,9 +106,10 @@ function fixture(
       }),
     );
   const base = state(files),
-    candidate = state(
-      files.map(file => (file.path === 'README.md' ? entry(file.path, 'synthetic after') : file)),
-    );
+    candidate = state([
+      ...files.map(file => (file.path === 'README.md' ? entry(file.path, 'synthetic after') : file)),
+      ...(browser ? [entry('web/demo.ts', 'export const demo = 1;')] : []),
+    ]);
   const run = {
     id: randomUUID(),
     projectId: 'synthetic-project',
@@ -1671,6 +1678,142 @@ test('a failed report under a name Forge cannot store fails the shard closed and
   const [sent] = job.results();
   assert.equal(sent.result.exitCode, 1);
   assert.match(sent.result.log.failureSummary, /1 failed, so this run fails\. Next: fix the failing test/);
+});
+
+// Item 687d1eda: the job-run skip wiring end to end, on a real standard plan that selected browser
+// coverage. `cache`: the pinned browser cache folder's entries, or null for no folder at all.
+async function browserJob(t, program, { cache = ['chromium-1234'], install = null } = {}) {
+  const s = fixture(t, { browser: true }),
+    candidate = join(s.directory, 'candidate'),
+    prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+  assert.equal(prepared.recipe.selection.browser, true, 'the plan selected browser coverage');
+  assert.notEqual(prepared.browserShard, '');
+  const path = join(s.directory, 'plan.json');
+  writeFileSync(path, JSON.stringify(prepared.recipe));
+  const folder = join(s.directory, 'forge-browsers');
+  if (cache) {
+    fs.mkdirSync(folder);
+    for (const name of cache) fs.mkdirSync(join(folder, name));
+  }
+  const previous = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  process.env.PLAYWRIGHT_BROWSERS_PATH = folder;
+  const installs = [];
+  useBrowserInstaller(async (version, into) => {
+    installs.push({ version, into });
+    if (install) await install(into);
+  });
+  t.after(() => {
+    useBrowserInstaller(null);
+    if (previous === undefined) delete process.env.PLAYWRIGHT_BROWSERS_PATH;
+    else process.env.PLAYWRIGHT_BROWSERS_PATH = previous;
+  });
+  const posted = [];
+  const realRequest = s.client.request;
+  s.client.request = async (url, init) => {
+    const body = String(url).endsWith('/checks/actions') ? JSON.parse(init.body) : null;
+    if (!body || body.command.kind !== 'result') return realRequest(url, init);
+    posted.push(body.command);
+    assert(directRequestSchema.safeParse(body).success, 'the server schema accepts the result');
+    return Response.json({});
+  };
+  t.mock.method(process.stdout, 'write', () => true);
+  const exit = await executeActionsJob(s.client, candidate, path, prepared.browserShard, [
+    process.execPath,
+    '--eval',
+    program,
+  ]);
+  const [sent] = posted;
+  return { exit, sent, installs, folder, log: Buffer.from(sent.logBytes ?? '', 'base64').toString('utf8') };
+}
+const browserFile = 'tests/demo-browser.test.mjs';
+const browserMarker = passed =>
+  `console.log('__FORGE_TESTS__'+${JSON.stringify(
+    JSON.stringify(
+      passed
+        ? {
+            file: browserFile,
+            complete: true,
+            durationMs: 5,
+            results: [{ name: 'x', passed: true }],
+            counts: { total: 1, failed: 0 },
+          }
+        : {
+            file: browserFile,
+            complete: true,
+            durationMs: 5,
+            results: [],
+            counts: { total: 1, failed: 0 },
+            skipped: true,
+          },
+    ),
+  )});`;
+
+test('687d1eda: a skipped browser test fails the browser shard and arrives named, with its cause', async t => {
+  // The pinned browser is present, so the skip is the test's own: no setup retry, a named failure.
+  const job = await browserJob(t, browserMarker(false) + 'process.exitCode = 0;');
+  assert.equal(job.exit, 1, 'a skip is not a pass');
+  assert.equal(job.sent.result.exitCode, 1);
+  assert.deepEqual(job.installs, [], 'the cache was present: nothing to retry');
+  const report = job.sent.result.contractReports[browserFile];
+  assert.equal(report.failed, true);
+  assert.deepEqual(report.attempts, [], 'still skipped: never probe pass or fail evidence');
+  assert.match(report.firstError, /Cause: the test skipped itself while the pinned browser was present/);
+  assert.deepEqual(
+    job.sent.result.testFiles.failed.map(item => item.file),
+    [browserFile],
+  );
+  assert.match(
+    job.log,
+    /browser coverage was selected, so the check fails: a skipped browser test is not a pass/,
+  );
+});
+
+test('687d1eda: a skipped browser test outside browser coverage is recorded as skipped and passes the job', async t => {
+  // The default fixture is a docs change: no browser selection, so a skip is recorded, not failed.
+  const job = await validatedJob(t, browserMarker(false) + 'process.exitCode = 0;');
+  assert.equal(await job.exit, 0);
+  const [sent] = job.results();
+  assert.deepEqual(sent.result.contractReports[browserFile], { failed: false, attempts: [] });
+  assert.match(sent.result.log?.failureSummary ?? '', /^$/);
+});
+
+test('687d1eda: a missing browser cache is setup, so the job installs it once before the tests run', async t => {
+  // The test reads the cache when it runs: it passes only if the retry installed the browser first.
+  const program =
+    `const ok = require('node:fs').readdirSync(process.env.PLAYWRIGHT_BROWSERS_PATH).some(n => n.startsWith('chromium'));` +
+    `if (ok) { ${browserMarker(true)} } else { ${browserMarker(false)} }`;
+  const job = await browserJob(t, program, {
+    cache: [],
+    install: into => fs.mkdirSync(join(into, 'chromium-1234')),
+  });
+  assert.deepEqual(
+    job.installs,
+    [{ version: '1.2.3', into: job.folder }],
+    'exactly one install, pinned version',
+  );
+  assert.equal(job.exit, 0);
+  assert.equal(job.sent.result.contractReports[browserFile].failed, false);
+  assert.match(
+    job.log,
+    /pinned Chromium cache is missing on this runner \(cause: setup\); installing it once/,
+  );
+  assert.match(job.log, /the pinned Chromium is installed/);
+});
+
+test('687d1eda: when the one install fails, the skipped browser test names setup as the cause', async t => {
+  const job = await browserJob(t, browserMarker(false), {
+    cache: [],
+    install: () => {
+      throw new Error('synthetic download failure');
+    },
+  });
+  assert.equal(job.installs.length, 1, 'one retry, never more');
+  assert.equal(job.exit, 1);
+  assert.match(
+    job.sent.result.contractReports[browserFile].firstError,
+    /Cause: setup, the pinned Playwright browser cache is missing on this runner after one install\. Next: restore the pinned Playwright browser cache\./,
+  );
+  assert.match(job.log, /installing the pinned Chromium failed: synthetic download failure/);
 });
 
 test('a result Forge refuses as invalid is resent once with exit status and log, never as runner-unavailable', async t => {

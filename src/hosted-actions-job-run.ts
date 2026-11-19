@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { childEnv, runnerEnvAllow, toolchainEnvAllow } from '../scripts/child-env.mjs';
-import { ContractTimingReader, skippedReportsNote, unstoredReportsNote } from './contract-test-timings.js';
+import {
+  ContractTimingReader,
+  browserCacheNext,
+  failSkippedBrowserTests,
+  unstoredReportsNote,
+} from './contract-test-timings.js';
 import { isBrowserTest } from '../scripts/browser-test-policy.mjs';
 import { HostedOutputRedactor } from './hosted-output-redactor.js';
 import { semanticCheckCommand } from './semantic-check-command.js';
@@ -41,6 +46,53 @@ export function planErrorCommand(executable: string, error: { code: string; mess
     '--eval',
     `console.error(${JSON.stringify(`${error.code}: ${error.message}`)}); process.exitCode = 1;`,
   ];
+}
+/** The pinned browser cache holds a Chromium build. The workflow restores or installs it into an empty
+ * folder keyed by the exact Playwright version (forge-check.yml), so any Chromium entry is that version's. */
+export function browserCachePresent(path: string | undefined) {
+  if (!path) return false;
+  try {
+    return readdirSync(path).some(name => name.startsWith('chromium'));
+  } catch {
+    return false;
+  }
+}
+type BrowserInstaller = (version: string, cache: string) => void | Promise<void>;
+let browserInstaller: BrowserInstaller | null = null;
+/** Tests replace the pinned-cache installer (scripts/control-browser-cache.mjs); `null` restores it. */
+export function useBrowserInstaller(value: BrowserInstaller | null) {
+  browserInstaller = value;
+}
+/** One setup retry (Item 687d1eda): the supervisor, not Candidate code, installs the pinned Chromium
+ * when the browser shard starts without it. Returns what happened, for the cause a failure names. */
+async function retryBrowserSetup(directory: string, cache: string | undefined, note: (line: string) => void) {
+  if (!cache || browserCachePresent(cache)) return null;
+  note('Forge: the pinned Chromium cache is missing on this runner (cause: setup); installing it once.');
+  try {
+    // The same pinned version the plan read and the workflow's install step used.
+    const lock = JSON.parse(readFileSync(join(directory, 'package-lock.json'), 'utf8'));
+    const version = String(lock.packages?.['node_modules/playwright']?.version ?? '');
+    const install = browserInstaller ?? (await import('../scripts/control-browser-cache.mjs')).installBrowser;
+    await install(version, cache);
+  } catch (error) {
+    note(
+      `Forge: installing the pinned Chromium failed: ${String((error as Error)?.message ?? error).slice(0, 300)}`,
+    );
+  }
+  const installed = browserCachePresent(cache);
+  note(
+    installed
+      ? 'Forge: the pinned Chromium is installed; the browser tests run with it.'
+      : 'Forge: the pinned Chromium is still missing after one install.',
+  );
+  return installed ? 'installed' : 'failed';
+}
+/** Why a selected browser test did not run, and the next step. */
+function browserCacheCause(cache: string | undefined, retry: 'installed' | 'failed' | null) {
+  if (!cache) return `Cause: this runner names no pinned browser cache. ${browserCacheNext}`;
+  if (!browserCachePresent(cache))
+    return `Cause: setup, the pinned Playwright browser cache is missing on this runner${retry ? ' after one install' : ''}. ${browserCacheNext}`;
+  return `Cause: the test skipped itself while the pinned browser was present${retry === 'installed' ? ' (installed by the setup retry)' : ''}. Next: fix the test's skip condition.`;
 }
 import {
   candidateAccessNotes,
@@ -303,6 +355,14 @@ async function executeActiveActionsJob(
     for (const line of (recipe.selection?.notes as string[] | undefined) ?? []) note(line);
   let exitCode: number;
   let yielded: string[] | undefined;
+  // Browser setup (Item 687d1eda): the workflow restores or installs the pinned Chromium before this
+  // job. If it is still missing here, the cause is setup, not the Candidate: install it once.
+  const browserShard = Boolean(
+    recipe.standard && recipe.selection?.browser && recipe.groups[index]?.some(isBrowserTest),
+  );
+  const browserCache = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  const setupRetry =
+    browserShard && !setupFailed ? await retryBrowserSetup(directory, browserCache, note) : null;
   lap('setupMs');
   try {
     exitCode = await spawnPart(units ? 'kept' : undefined);
@@ -340,28 +400,20 @@ async function executeActiveActionsJob(
       if (unstored.failed && !exitCode) exitCode = 1;
     }
     // A skip is not a pass (Item 687d1eda): skipped files leave no evidence, and a skipped browser
-    // test under a plan that selected browser coverage fails this shard instead of passing it.
-    const skipped = skippedReportsNote(
+    // test under a plan that selected browser coverage fails this shard, named with its cause.
+    const cause = browserCacheCause(browserCache, setupRetry);
+    const skipped = failSkippedBrowserTests(
       reports,
       Boolean(recipe.standard && recipe.selection?.browser),
       isBrowserTest,
+      cause,
     );
     if (skipped) {
       note(skipped.line);
-      if (skipped.browser) {
-        if (!exitCode) exitCode = 1;
-        // Name the files (review follow-up): a failed shard with no failing file reads as an unnamed
-        // test failure. attempts: [] keeps them skipped, so they are never probe pass or fail evidence.
-        for (const file of reports.skipped)
-          if (isBrowserTest(file))
-            reports.reports[file] = {
-              failed: true,
-              attempts: [],
-              firstError:
-                'Every test skipped: browser coverage was selected but no browser ran. Next: restore the pinned Playwright browser cache.',
-            };
-      }
-    }
+      if (skipped.browser && !exitCode) exitCode = 1;
+    } else if (exitCode && browserShard && !browserCachePresent(browserCache))
+      // The provider-stage guard fails before any test reports: still say why.
+      note(`Forge: browser tests did not run. ${cause}`);
   } finally {
     if (isolation.mode === 'user') isolation.remove(junit.directory);
     else junit.remove();

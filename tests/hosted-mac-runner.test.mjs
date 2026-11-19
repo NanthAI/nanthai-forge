@@ -577,7 +577,7 @@ for (const [p, sha256, mode, target] of expected) {
 }
 console.log('exact source verified: ' + expected.length + ' entries on ' + process.platform + '/' + process.arch);
 `;
-async function exactSourceRun(t, files, serve = bytes => bytes) {
+async function exactSourceRun(t, files, serve = bytes => bytes, command = null) {
   const blobs = new Map(files.map(([, text]) => [digest(Buffer.from(text)), Buffer.from(text)]));
   const stateFiles = files
     .map(([path, text, mode]) => ({ path, blob: digest(Buffer.from(text)), mode }))
@@ -588,7 +588,7 @@ async function exactSourceRun(t, files, serve = bytes => bytes) {
     {
       kind: 'definition',
       checkId: f.checkId,
-      command: {
+      command: command ?? {
         name: 'exact-source',
         executable: process.execPath,
         args: ['-e', exactSourceCheck, JSON.stringify(expected)],
@@ -691,6 +691,51 @@ test('self-hosted runner checks one fixed commit exactly on this platform (14444
       ` container=${existsSync('/.dockerenv')} head ${run.request.expectedHead.slice(0, 12)}: passed in ${wallMs}ms`,
   );
 });
+
+// Item 687d1eda (line 12): this executor always runs the full selection, so Forge's standard check
+// selects every browser test here. A browser test that skipped (no local browser) used to pass the
+// run; now it fails it, named with its cause. Any other command's skips stay recorded only.
+const skippedBrowser = `console.log('__FORGE_TESTS__' + JSON.stringify({ file: 'tests/demo-browser.test.mjs', complete: true, durationMs: 5, results: [], counts: { total: 1, failed: 0 }, skipped: true }));`;
+for (const [name, standard] of [
+  ['the standard check fails the run and names the skipped browser test', true],
+  ['another command only records the skipped browser test', false],
+])
+  test(`687d1eda: on a machine runner ${name}`, async t => {
+    const files = [
+      ['README.md', 'Synthetic machine check.\n', 'file'],
+      ['scripts/forge-check.mjs', skippedBrowser, 'file'],
+    ];
+    const command = standard
+      ? {
+          name: 'forge',
+          executable: process.execPath,
+          args: ['scripts/forge-check.mjs'],
+          environmentLabel: 'clean',
+        }
+      : {
+          name: 'other',
+          executable: process.execPath,
+          args: ['-e', skippedBrowser],
+          environmentLabel: 'clean',
+        };
+    const { f, run, failure } = await exactSourceRun(t, files, undefined, command);
+    assert.equal(failure, null);
+    const completed = await f.status(run.id);
+    const report = completed.contractReports['tests/demo-browser.test.mjs'];
+    if (standard) {
+      assert.equal(completed.status, 'failed');
+      assert.deepEqual(
+        completed.testFiles.failed.map(item => item.file),
+        ['tests/demo-browser.test.mjs'],
+      );
+      assert.equal(report.failed, true);
+      assert.deepEqual(report.attempts, [], 'still skipped: never probe evidence');
+      assert.match(report.firstError, /no browser ran\. Cause: no test browser on this machine/);
+    } else {
+      assert.equal(completed.status, 'passed');
+      assert.deepEqual(report, { failed: false, attempts: [] });
+    }
+  });
 
 test('self-hosted runner refuses served bytes that differ from the fixed commit (1444471f)', async t => {
   const tampered = digest(Buffer.from(fixedCommit[0][1]));

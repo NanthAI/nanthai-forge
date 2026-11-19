@@ -70,6 +70,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `scripts/browser-test-policy.mjs` | `package-json-config` | 1 | a change to Forge's package manifest selects its browser coverage | their own configured command and setup |
 | `scripts/check-browser-runtime.mjs` | `package-json-config` | 1 | the standard executor resolves Forge's installed Playwright from the Candidate package context before browser fixtures run | their own configured check command; this probe is not run |
 | `src/hosted-actions-job-plan.ts` | `npm-lockfile` | 2 | reads the exact Playwright version and names a missing pin only for a standard-check browser job | their own declared toolchains and check command |
+| `src/hosted-actions-job-run.ts` | `npm-lockfile` | 1 | the standard-check browser shard's one setup retry installs the same pinned Playwright version when the cache is missing | their own declared toolchains and check command; no retry runs |
 | `scripts/test-import-graph.mjs` | `forge-folders` | 4 | Forge's import graph: its folders, Convex names and loaders | the generic JS/TS import graph |
 | `scripts/test-import-graph.mjs` | `tests-folder` | 4 | Forge's import graph: test-to-test edges in `tests/` | the generic JS/TS import graph |
 | `scripts/test-import-graph.mjs` | `npm-lockfile` | 4 | Forge's import graph: external packages from its npm lockfile | declared dependencies of every manifest |

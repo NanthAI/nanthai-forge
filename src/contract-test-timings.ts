@@ -127,12 +127,16 @@ export class ContractTimingReader {
     }
   }
 }
+/** Next step for a skipped browser test on a hosted runner, whose browser comes from the pinned cache. */
+export const browserCacheNext = 'Next: restore the pinned Playwright browser cache.';
 /** One log line naming files whose every test skipped, or null. `browser`: a skipped browser test while
- * the plan selected browser coverage, which fails the shard (a skip is not a pass, Item 687d1eda). */
+ * the plan selected browser coverage, which fails the shard (a skip is not a pass, Item 687d1eda).
+ * `next` names the cause and the step that fixes it on this executor. */
 export function skippedReportsNote(
   reader: Pick<ContractTimingReader, 'skipped'>,
   browserSelected: boolean,
   isBrowserTest: (file: string) => boolean,
+  next = browserCacheNext,
 ) {
   const files = reader.skipped.size;
   if (!files) return null;
@@ -145,9 +149,34 @@ export function skippedReportsNote(
       `Forge: ${files} test file${files === 1 ? '' : 's'} skipped every test ` +
       `(${names.map(name => JSON.stringify(name)).join(', ')}${files > names.length ? ', …' : ''}); ` +
       (browser
-        ? 'browser coverage was selected, so this shard fails: a skipped browser test is not a pass. Next: restore the pinned Playwright browser cache.'
+        ? `browser coverage was selected, so the check fails: a skipped browser test is not a pass. ${next}`
         : 'they are recorded as skipped, not as passes.'),
   };
+}
+/** A skip is not a pass (Item 687d1eda), shared by every executor: one note for files whose every test
+ * skipped and, when browser coverage was selected, each skipped browser test becomes a named failing
+ * file with its cause, so the failure names the file instead of reading as an unnamed test failure.
+ * attempts: [] keeps it skipped, so it is never probe pass or fail evidence. `browser` means the shard
+ * or run must fail. */
+export function failSkippedBrowserTests(
+  reader: Pick<ContractTimingReader, 'skipped' | 'reports'>,
+  browserSelected: boolean,
+  isBrowserTest: (file: string) => boolean,
+  next = browserCacheNext,
+) {
+  const note = skippedReportsNote(reader, browserSelected, isBrowserTest, next);
+  if (note?.browser)
+    for (const file of reader.skipped)
+      if (isBrowserTest(file))
+        reader.reports[file] = {
+          failed: true,
+          attempts: [],
+          firstError: `Every test skipped: browser coverage was selected but no browser ran. ${next}`.slice(
+            0,
+            2048,
+          ),
+        };
+  return note;
 }
 /** One log line for names a reader refused, or null; `failed` means the run must fail closed. */
 export function unstoredReportsNote(...readers: Pick<ContractTimingReader, 'unstored'>[]) {

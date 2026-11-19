@@ -1574,7 +1574,15 @@ every browser test whatever the changed paths: full means full.
 
 A test file whose every test skipped is recorded as skipped (`attempts: []`), never
 as a pass or a timing, and is never culprit-probe pass evidence. When browser
-coverage was selected, a skipped browser test fails its shard.
+coverage was selected, a skipped browser test fails its shard and is named as a
+failing file with its cause: a missing pinned browser cache (setup), or the test
+skipping itself while the browser was present. A machine runner always runs the full
+selection, so Forge's standard check fails the run there too. The contract gate never
+counts a skipped contract test as evidence: publication refuses the landing and names
+the test. Before the browser shard runs any Candidate code, the fixed supervisor
+checks the pinned cache; if it is still missing, that is a setup fault, and it
+installs the pinned Chromium once (the one retry) before the tests run, at the
+same pinned Playwright version the plan read.
 
 Browser fixtures stay together on one existing test job, which also carries ordinary
 tests to balance the critical path, without increasing the job or Convex-call budget. That job keeps its browser files out of the work-stealing pool.

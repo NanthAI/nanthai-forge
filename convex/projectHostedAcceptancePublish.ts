@@ -5,7 +5,7 @@ import { earlyPredecessor } from './projectHostedEarlyResolution';
 import { cancelStaleLandingChecks } from './projectHostedLandingStaleChecks';
 import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
 import { trackHostedOverlapMain } from './projectHostedOverlapStore';
-import { hostedAcceptGate, holdMainRed } from './projectHostedGate';
+import { hostedAcceptGate, holdMainRed, skippedContractTests } from './projectHostedGate';
 import { protectedGatePaths, protectedPathMatches, reducedEvidenceActor } from '../src/contract-gate-policy';
 import { noteMainLanding, mainGate, fastLanding } from './projectHostedMainAuditState';
 import { noteTrustLanding, trustGateReader } from './projectHostedTrust';
@@ -281,7 +281,17 @@ export async function publishAcceptance(
     await releaseLandingQueue(ctx, queue, now);
     return { status: 'pending' as const, reason, request: next };
   }
-  invariant(gate === 'pass', 'CHECK_NOT_PASSED', 'This Candidate requires an exact full check.');
+  if (gate !== 'pass') {
+    // A skip is not a pass (Item 687d1eda): name the contract tests that ran no test.
+    const skipped = run ? skippedContractTests(run) : [];
+    invariant(
+      false,
+      'CHECK_NOT_PASSED',
+      skipped.length
+        ? `Contract test${skipped.length === 1 ? '' : 's'} ${skipped.slice(0, 3).join(', ')}${skipped.length > 3 ? ', …' : ''} skipped every test on this check, and a skip is not a pass, so contract-only evidence cannot land this Candidate. Next: make the test run here (fix its skip condition or the setup it needs), then land again.`
+        : 'This Candidate requires an exact full check.',
+    );
+  }
   // Issue 93e14bb0: from the run plan and changed paths already loaded; no extra read.
   const secretAllowAdded = secretAllowMark(run?.plan?.secretAllow, candidate.governance?.paths ?? null);
   // Issue fe5bea80: a builder's approval request on a landed Lane holds it until the owner grants

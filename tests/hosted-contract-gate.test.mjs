@@ -95,6 +95,43 @@ test('trusted contract acceptance has no extra calls and bounded audit bookkeepi
   assert.equal(measured[1].writes, measured[0].writes + 2);
   t.diagnostic(JSON.stringify({ full: measured[0], contract: measured[1] }));
 });
+test('687d1eda: a skipped contract test is no contract evidence; publication refuses and names it', async () => {
+  // Same bug as fix A: the contract gate's only evidence is its declared tests. A file whose every
+  // test skipped (attempts: []) used to read as a pass, so a contract landing went through untested.
+  for (const where of ['contractReports', 'reportSummary']) {
+    const { f, state } = await ready();
+    const row = [...f.tables.projectHostedCheckRuns.values()][0],
+      run = JSON.parse(row.value);
+    const reports = { [leaf]: { failed: false, attempts: [] } };
+    if (where === 'contractReports') run.contractReports = reports;
+    // R2-backed runs drop contractReports and keep every gate test in the summary.
+    else run.reportSummary = { slowest: [], semantic: reports };
+    f.patch('projectHostedCheckRuns', row._id, { value: JSON.stringify(run) });
+    assert.deepEqual(gate.skippedContractTests(run), [leaf]);
+    const claim = await f.claimAcceptance(state);
+    await assert.rejects(f.commit(claim), error => {
+      assert.equal(error.data?.code ?? error.code, 'CHECK_NOT_PASSED', where);
+      const message = error.data?.message ?? error.message;
+      assert.match(message, /Contract test tests\/leaf\.test\.mjs skipped every test on this check/);
+      assert.match(message, /a skip is not a pass/);
+      return true;
+    });
+    assert.equal(f.tables.projectHostedAcceptances.size, 0, where);
+  }
+  // The same test with a real pass lands; a full-gated run ignores contract skip markers.
+  for (const [effective, report] of [
+    ['contract', { durationMs: 10, failed: false }],
+    ['full', { failed: false, attempts: [] }],
+  ]) {
+    const { f, state } = await ready();
+    const row = [...f.tables.projectHostedCheckRuns.values()][0],
+      run = JSON.parse(row.value);
+    run.contractReports = { [leaf]: report };
+    run.gate.effective = effective;
+    f.patch('projectHostedCheckRuns', row._id, { gate: run.gate, value: JSON.stringify(run) });
+    assert.equal((await f.commit(await f.claimAcceptance(state))).status, 'landed', effective);
+  }
+});
 test('supervised contract-only evidence cannot publish even with explicit person review', async () => {
   const { f, state } = await ready('supervised');
   const claim = await f.claimAcceptance(state);

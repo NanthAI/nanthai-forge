@@ -21,6 +21,7 @@ import type { HostedCheckRun } from '../src/hosted-check';
 import { acceptScopedRecheck, isScopedRecheck, scopedRecheckPolicy } from '../src/scoped-recheck-policy';
 import { GRAPH_FIRST_CONTRACT, acceptGraphFirst, isGraphFirstGate } from '../src/graph-first-check';
 import type { HostedRecord } from '../src/hosted-records';
+import { skippedReport } from '../src/intent-semantic-conflict';
 
 /** Behaviour-neutral S0 placeholder; the owning slice supplies the implementation. */
 export const noop = internalMutation({
@@ -97,6 +98,18 @@ export async function hostedGateForCandidates(
     })),
   );
 }
+/** Contract tests this run skipped (Item 687d1eda: a skip is not a pass). Contract evidence is those
+ * tests alone, so one whose every test skipped leaves the gate with no evidence for it. Reads the
+ * run's reports or, on R2-backed runs, the summary that keeps every gate test with its skip marker
+ * (src/check-file-summary.ts). A missing report keeps its old reading: runners store only failing and
+ * measured files. Zero reads. */
+export function skippedContractTests(
+  run: Pick<HostedCheckRun, 'gate' | 'contractReports' | 'reportSummary'>,
+) {
+  if (run.gate?.effective !== 'contract') return [];
+  const reports = run.contractReports ?? run.reportSummary?.semantic;
+  return (run.gate.tests ?? []).filter(test => skippedReport(reports?.[test]));
+}
 export async function hostedAcceptGate(
   ctx: MutationCtx,
   project: Doc<'hostedProjects'>,
@@ -117,6 +130,8 @@ export async function hostedAcceptGate(
       },
       run.gate,
     );
+  // A contract test that skipped is no evidence: the publication refusal names it.
+  if (skippedContractTests(run).length) return 'full-required';
   // A scoped main-race recheck is accepted on the contract gate's terms.
   if (isScopedRecheck(run.gate))
     return acceptScopedRecheck(

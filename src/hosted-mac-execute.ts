@@ -4,7 +4,13 @@ import { networkFetch } from './network-fetch.js';
 import { isMachineRunner } from './hosted-machine-runner.js';
 import { semanticCheckCommand } from './semantic-check-command.js';
 import { resolveTestRunner } from './project-test-runner.js';
-import { ContractTimingReader, unstoredReportsNote } from './contract-test-timings.js';
+import {
+  ContractTimingReader,
+  failSkippedBrowserTests,
+  unstoredReportsNote,
+} from './contract-test-timings.js';
+import { isBrowserTest } from '../scripts/browser-test-policy.mjs';
+import { isStandardForgeCheck } from './standard-check.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { localMacLogFiles } from './check-local-log-files.js';
 import { compactProviderOutput } from './check-compact-output.js';
@@ -46,6 +52,9 @@ import {
 import type { OutputRoot } from './hosted-check-output.js';
 import { stopProcessTree } from './local-process.js';
 
+/** A machine runner's browser is its own install, not a pinned cache. */
+export const macBrowserNext =
+  'Cause: no test browser on this machine. Next: install Playwright Chromium on it (npx playwright install chromium) or set FORGE_UI_BROWSER.';
 export type MacExecutionTransport = CheckoutObjectTransport & {
   upload(pin: { sha256: string; size: number }, bytes: Buffer): Promise<unknown>;
   callback(value: HostedCheckCallback, signature: string): Promise<HostedCheckRun>;
@@ -366,7 +375,17 @@ export async function executeHostedMacCheck(
           // A failed report under a name Forge cannot store still fails the run (Issue 7a0ccbef).
           const unstored = unstoredReportsNote(...readers, junitReader);
           if (unstored) console.error(unstored.line);
-          const exitCode = unstored?.failed && commandExit === 0 ? 1 : commandExit;
+          // A skip is not a pass (Item 687d1eda): this executor always runs the full selection, so
+          // Forge's standard check selects every browser test here and a skipped one fails the run,
+          // named with its cause, as on Actions. Any other command's skips are only recorded.
+          const skipped = failSkippedBrowserTests(
+            { skipped: new Set(readers.flatMap(reader => [...reader.skipped])), reports },
+            isStandardForgeCheck(run.check),
+            isBrowserTest,
+            macBrowserNext,
+          );
+          if (skipped) console.error(skipped.line);
+          const exitCode = (unstored?.failed || skipped?.browser) && commandExit === 0 ? 1 : commandExit;
           for (const artifact of await captureArtifacts(checkout, root, run.check.artifactPaths ?? [])) {
             if (artifact.status !== 'retained') continue;
             await collectHostedOutput(
