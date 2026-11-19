@@ -43,6 +43,8 @@ export const wakeChecks = internalMutation({
     return null;
   },
 });
+/** References per page; each reads one check or composition row. */
+export const capsuleRefsPage = 16;
 export const page = internalMutation({
   args: {
     ...capsuleRunArgs,
@@ -50,7 +52,7 @@ export const page = internalMutation({
   },
   returns: v.string(),
   handler: async (ctx, input) => {
-    invariant(input.refs.length <= 4, 'BAD_ARGUMENT', 'Read one capsule reference page.');
+    invariant(input.refs.length <= capsuleRefsPage, 'BAD_ARGUMENT', 'Read one capsule reference page.');
     const refs = [];
     for (const ref of input.refs) {
       if (ref.kind === 'check') {

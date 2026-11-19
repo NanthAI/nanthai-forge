@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-'use node';
+// Runtime-portable: the V8 packer and cold reader and the Node journal share this transport.
 import { r2Config, presignGet, presignPut } from './r2';
 import { exchangeRequest } from '../src/exchange-request';
 import { observeExchangeResponse } from '../src/exchange-observation-hooks';
-import { decodeLandingCapsule } from '../src/landing-capsule-bytes';
+import { decodeLandingCapsule } from './projectLandingCapsuleCodec';
 import type { LandingCapsulePointer } from '../src/hosted-landing';
 import type { LandingCapsule } from '../src/landing-capsule';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -32,7 +32,13 @@ async function readObject(response: Response, expected: number, progressed: () =
     reader.releaseLock();
   }
   invariant(size === expected, 'EVIDENCE_CHANGED', 'Landing capsule bytes differ from their verified size.');
-  return Buffer.concat(chunks, size);
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const part of chunks) {
+    body.set(part, offset);
+    offset += part.length;
+  }
+  return body;
 }
 export async function getLandingCapsule(
   projectId: string,

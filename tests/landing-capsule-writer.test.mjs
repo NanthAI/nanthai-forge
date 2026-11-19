@@ -13,7 +13,7 @@ import {
 import assert from 'node:assert/strict';
 import { capsuleMaintenanceFixture as fixture } from './landing-capsule-maintenance-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { decodeLandingCapsule } from '../dist/landing-capsule-bytes.js';
+const { decodeLandingCapsule } = await import(moduleUrl('../convex/projectLandingCapsuleCodec.ts'));
 const run = await import(moduleUrl('../convex/projectLandingCapsuleRun.ts'));
 const store = await import(moduleUrl('../convex/projectLandingCapsuleStore.ts'));
 const capture = await import(moduleUrl('../convex/projectLandingCapsuleCapture.ts'));
@@ -168,6 +168,12 @@ test('S1 terminal transition arms exactly one seven-day wake without another con
 
 test('S1 lost removal response resumes the committed offset without another object write or duplicate ledger pages', async t => {
   const h = await fixture(t);
+  // b149b16b: publish removes the first 64 rows or 128 KB itself; one schema-valid 147 KB historical
+  // error makes the history span a second, separately committed removal page.
+  const row = [...h.f.tables.projectHostedLandingObservations.values()][0];
+  const value = JSON.parse(row.value);
+  value.transition.error = { code: 'SYNTHETIC_ERROR', message: randomBytes(110_000).toString('base64') };
+  h.f.patch('projectHostedLandingObservations', row._id, { value: canonicalPayload(value) });
   h.loseRemove();
   await assert.rejects(h.pack(), /Synthetic lost removal response/);
   const pointer = JSON.parse(
@@ -315,4 +321,37 @@ test('S1 unknown PUT outcome reconciles the original complete content pin before
   const replay = await h.pack();
   assert.equal(replay.pointer.sha256, original);
   assert.equal(h.requests.filter(method => method === 'PUT').length, 1);
+});
+
+test('b149b16b: a landing over the V8 bound continues in the Node packer, which publishes one verified object and removes every copy', async t => {
+  const h = await fixture(t);
+  const added = h.inflate(1.1 * 1024 * 1024);
+  assert(added > run.capsuleV8RawBytes);
+  const first = await h.pack();
+  assert.equal(first.continuing, 'node');
+  assert.equal(h.requests.length, 0, 'the V8 packer hands over before any R2 request');
+  assert.deepEqual(
+    h.scheduled.map(task => task.name),
+    ['projectLandingCapsuleRunNode:pack'],
+  );
+  assert.deepEqual(h.scheduled[0].args, h.input);
+  assert(![...h.f.tables.projectFinishReadRows.values()].some(row => row.kind === store.capsuleKind));
+  const result = await h.packNode();
+  assert.equal(result.metrics.runtime, 'node');
+  assert(result.pointer.rawSize > run.capsuleV8RawBytes);
+  assert.equal(h.requests.filter(method => method === 'PUT').length, 1);
+  const capsule = decodeLandingCapsule(
+    h.objects.get(result.pointer.sha256),
+    result.pointer,
+    h.f.projectId,
+    h.state.id,
+  );
+  assert(capsule.tables.projectHostedLandingObservations.length > 0);
+  for (const table of ['projectHostedLandingObservations', 'projectHostedLandingAttempts'])
+    assert.equal(h.f.tables[table].size, 0, table);
+  // A later V8 wake replays the finished pointer without reading or handing over again.
+  const replay = await h.pack();
+  assert.equal(replay.pointer.sha256, result.pointer.sha256);
+  assert.equal(h.scheduled.length, 1);
+  t.diagnostic(JSON.stringify(result.metrics));
 });

@@ -20,6 +20,8 @@ import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 export const capsuleRows = v.array(v.object({ table: v.string(), row: v.string() }));
 export const capsuleProgressKind = 'projectLandingCapsuleProgress';
+/** Rows per publish or removal page; the packer also bounds each page to 128 KB of row bytes. */
+export const capsulePageRows = 64;
 type Part = { table: string; row: string };
 const totalRows = (pointer: LandingCapsulePointer) =>
   (JSON.parse(pointer.tables) as Array<[number, number]>).reduce((n, [, rows]) => n + rows, 0);
@@ -34,7 +36,7 @@ export async function removeVerifiedCapsuleRows(
   },
 ) {
   invariant(
-    input.rows.length > 0 && input.rows.length <= 8,
+    input.rows.length > 0 && input.rows.length <= capsulePageRows,
     'BAD_ARGUMENT',
     'Remove one verified capsule page.',
   );

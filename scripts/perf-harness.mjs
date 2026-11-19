@@ -11,6 +11,7 @@ import { agentCommands, firstNetworkSamples } from './perf/cli-first-network.mjs
 export const usage = `Usage: node scripts/perf-harness.mjs [--out private-artifacts/perf/result.json]
   [--bundle hosted-web-dist] [--build-hash SOURCE_OR_DEPLOYED_HASH] [--samples 3]
   [--work-owner OWNER --landing-id ACCEPTANCE_ID] [--cli-cold-start] [--snapshot-lane LANE_CHECKOUT]
+  [--capsule-cold-read LANE_CHECKOUT --submissions FILE]
   [--live --base DEV_URL --project ID --lane RETAINED_LANE_ID]
   [--credentials ~/.config/forge-ui-bot/credentials.json] [--timeout 60000]
 
@@ -24,7 +25,9 @@ which a loaded machine barely moves) against the cliColdStartCpu budget; it need
 same number of times against an address that never resolves and judges the CPU each spends before
 its first network call (the cliAgent*Cpu budgets); nothing leaves the machine. --snapshot-lane runs in a Lane checkout of a scratch project with
 policy autoSnapshot on (never a real project's Lane) and judges what a snapshot adds to a command
-against the snapshotAdded* budgets; it needs a network and is unrun otherwise. Budgets live in
+against the snapshotAdded* budgets; it needs a network and is unrun otherwise. --capsule-cold-read
+times read-only cold reads (status and attempts) of the packed landings listed one per line in
+--submissions, on that Lane checkout's deployment, against capsuleColdReadMs (p90). Budgets live in
 src/speed-budgets.json.
 Work timings read only existing records; this command never
 starts a check, finish, landing or backfill.
@@ -39,6 +42,8 @@ export function options(args) {
       live: { type: 'boolean', default: false },
       'cli-cold-start': { type: 'boolean', default: false },
       'snapshot-lane': { type: 'string' },
+      'capsule-cold-read': { type: 'string' },
+      submissions: { type: 'string' },
       base: { type: 'string' },
       project: { type: 'string' },
       lane: { type: 'string' },
@@ -63,6 +68,7 @@ export function options(args) {
       throw new Error('PERF_OPTIONS');
   }
   if (values['landing-id'] && !values['work-owner']) throw new Error('PERF_OPTIONS');
+  if (!values['capsule-cold-read'] !== !values.submissions) throw new Error('PERF_OPTIONS');
   return values;
 }
 
@@ -187,6 +193,31 @@ export async function main(args) {
     } catch {
       for (const name of ['snapshotAddedUnchangedMs', 'snapshotAddedChangedMs'])
         record.measurements[name] = measurement(name, [], 'Snapshot latency run failed; details redacted.');
+    }
+  }
+  record.measurements.capsuleColdReadMs = measurement(
+    'capsuleColdReadMs',
+    [],
+    'Pass --capsule-cold-read LANE_CHECKOUT --submissions FILE (packed landings, one id per line).',
+  );
+  if (config['capsule-cold-read']) {
+    try {
+      const { capsuleColdReadSamples } = await import('./perf/capsule-cold-read.mjs');
+      const observed = await capsuleColdReadSamples(
+        resolve(config['capsule-cold-read']),
+        resolve(config.submissions),
+      );
+      record.measurements.capsuleColdReadMs = {
+        ...measurement('capsuleColdReadMs', observed.samples),
+        notPacked: observed.notPacked,
+      };
+    } catch {
+      record.measurements.capsuleColdReadMs = measurement(
+        'capsuleColdReadMs',
+        [],
+        'Capsule cold-read run failed; details redacted.',
+      );
+      record.measurements.capsuleColdReadMs.status = 'failed';
     }
   }
   record.landing = {

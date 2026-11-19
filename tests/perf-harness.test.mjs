@@ -204,6 +204,8 @@ test('arguments keep live measurement explicit and reject invalid timing or cred
   assert.throws(() => options(['--samples', '1.5']));
   assert.throws(() => options(['--live', '--base', 'https://user:password@example.invalid']));
   assert.throws(() => options(['--landing-id', 'not-selected']));
+  assert.throws(() => options(['--capsule-cold-read', '.']), 'cold reads name their packed landings');
+  assert.throws(() => options(['--submissions', 'ids.txt']));
 });
 
 async function run(t, extra = []) {

@@ -1,25 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { gzipSync, gunzipSync } from 'node:zlib';
-import {
-  landingCapsuleText,
-  landingCapsuleTablePins,
-  readLandingCapsule,
-  type LandingCapsule,
-} from './landing-capsule.js';
 import type { LandingCapsulePointer } from './hosted-landing.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './state/hash.js';
 import { ForgeError, invariant } from './errors.js';
 
-export function encodeLandingCapsule(value: LandingCapsule) {
-  return encodeArchiveBytes(
-    landingCapsuleText(value),
-    value.anchor.version,
-    landingCapsuleTablePins(value.tables),
-  );
-}
-
-/** Shared complete-object codec for landing capsules and journal segments. */
+/** Node complete-object codec for journal segments (landing capsules use convex/projectLandingCapsuleCodec). */
 export function encodeArchiveBytes(text: string, version: number, tables: unknown) {
   const body = gzipSync(text, { level: 9 });
   const pointer: LandingCapsulePointer = {
@@ -31,15 +17,6 @@ export function encodeArchiveBytes(text: string, version: number, tables: unknow
     tables: canonicalPayload(tables),
   };
   return { body, pointer, logicalBytes: Buffer.byteLength(text) };
-}
-
-export function decodeLandingCapsule(
-  body: Uint8Array,
-  pointer: LandingCapsulePointer,
-  projectId: string,
-  submissionId: string,
-) {
-  return readLandingCapsule(decodeArchiveBytes(body, pointer), pointer, projectId, submissionId);
 }
 
 export function decodeArchiveBytes(body: Uint8Array, pointer: LandingCapsulePointer) {

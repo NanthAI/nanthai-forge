@@ -644,8 +644,10 @@ new table, and changes no source-byte or history placement.
 
 ## Work journal segment readers
 
-Journal history uses S1's private complete-object gzip codec, digest/size/table
-verification and server transport. `projectJournalSegments` holds one compact
+Journal history uses S1's digest/size/table verification and server transport.
+Its segments stay on the Node zlib gzip codec (`encodeArchiveBytes`) in Node
+actions; landing capsules moved to the portable V8 codec (Item b149b16b), and both
+are standard gzip. `projectJournalSegments` holds one compact
 range index per segment, separate from hot finish projections so its range indexes
 do not multiply every landing row's storage. Current heads and versions remain
 transaction-readable. `projectJournalReceipts` keeps compact deduplication facts

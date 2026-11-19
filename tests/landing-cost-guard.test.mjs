@@ -1238,6 +1238,10 @@ test('storage per landing ratchets every table on fresh and dogfood-shaped check
         );
     assert.equal(scenario.capsule.classA, 1, `${name}: one complete capsule PUT`);
     assert(scenario.capsule.compressedBytes < 100_000, `${name}: capsule egress budget`);
+    // b149b16b: batched capture, 64-row publish and the V8 runtime cut a pack from 28 serial
+    // mutations (live dev, Node) to 9 fresh / 10 dogfood here; a serial page loop must not return.
+    assert(scenario.capsule.calls <= 10, `${name}: ${scenario.capsule.calls} capsule pack calls > 10`);
+    assert.equal(scenario.capsule.runtime, 'v8', `${name}: the packer stays off the 0.5 GB Node runtime`);
     for (const [phase, tables] of Object.entries(scenario.perProject))
       assertFixedProjectStorage(tables, storageBudgets[name].perProject[phase], `${name}/${phase}`);
     for (const [phase, tables] of Object.entries(scenario.perLanding)) {

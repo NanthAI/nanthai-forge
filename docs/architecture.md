@@ -1908,14 +1908,19 @@ those waiters. A bounded, resumable project bootstrap indexes compose identities
 and original attempt creation times once. New writes maintain those fields in their
 existing transaction, adding no hot-path function call.
 
-The internal Node action captures canonical row strings in bounded pages, gzip
-encodes one complete content-addressed object, reconciles an unknown write by its
-content pin, and verifies a complete GET plus all table digests before publishing.
+The internal packer runs in the V8 runtime (64 MB; a landing whose captured history
+exceeds 1 MiB continues in a Node action of the same code). It captures canonical
+row strings, batching small scopes into one transaction of at most 128 KB of rows
+(a larger scope pages alone), gzip encodes one complete content-addressed object
+with a portable codec, reconciles an unknown write by its content pin, and verifies
+a complete GET plus all table digests before publishing.
 The pointer and original transaction pins live outside the request document in
 `projectFinishReadRows`, so adding metadata cannot overflow a formerly valid
 request. Oversized policy pins continue automatically through internal storage
-pages. Publication removes its first verified page atomically; later pages commit
-their original offset and return it on replay. A changed captured row is retained
+pages. Publication removes its first verified page (up to 64 rows and 128 KB, which is
+the whole history of a typical landing) atomically; later pages commit their
+original offset and return it on replay. Cold reads also run in V8, with the same
+Node continuation above 1 MiB. A changed captured row is retained
 with `WORK_STALE`. No history object or reuse alias is deleted.
 
 Canonical acceptance receipts and compose selections stay. Compact exact accepted

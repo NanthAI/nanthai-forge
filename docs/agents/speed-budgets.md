@@ -20,6 +20,7 @@ it was set from and why. Change a number there, with the new data, and nowhere e
 | R2 request dollars and bytes put by a landing's composes, mean (Issue 3e3f9fe6) | every recomposed landing | Latest 20 jointly stamped dev landings at 2026-11-12 23:20Z: 2.55 A / 1.00 B, or $0.000011835 per landing; request budget $0.000018 (about 1.5x, rounded up to a microdollar, absolute floor $0.000010). Separate bytes budget remains 1.35 MB; missing stamps are skipped |
 | GitHub runner minutes of a landing's checks, mean: accepted / discarded / audit (Issue 3e3f9fe6) | every landing | 54.4 / 4.7 / 18.8 shard minutes over the 36 landings of 2026-11-10 (rolling 20-landing means 49 to 57 / 2.5 to 5.9 / 13 to 23); budget 70 / 12 / 32 min |
 | Save / preflight, p90 | every landing with a recorded duration | initial budgets 30 / 120 s; sources and calibration below |
+| Cold read of a packed landing's history, p90 (marker query plus capsule history action) | `perf-harness --capsule-cold-read`, re-run after each packer or reader change | 2026-11-18, 46 cold reads through the Node history action: p50 749 ms, p90 1,024 ms (an earlier run's max 3.7 s was an isolate cold start); budget 2 s |
 
 ## How a budget breaks
 

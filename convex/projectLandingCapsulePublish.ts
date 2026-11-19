@@ -2,7 +2,12 @@
 import { v } from 'convex/values';
 import { internalMutation } from './server';
 import { landingCapsulePointer as pointerField } from './projectLandingCapsuleFields';
-import { capsuleRows, removeVerifiedCapsuleRows, capsuleProgressKind } from './projectLandingCapsuleRemove';
+import {
+  capsuleRows,
+  removeVerifiedCapsuleRows,
+  capsuleProgressKind,
+  capsulePageRows,
+} from './projectLandingCapsuleRemove';
 import { capsuleIndexKind } from './projectLandingCapsuleIndex';
 import { capsuleKind } from './projectLandingCapsuleStore';
 import { loadLanding } from './projectHostedLandingStore';
@@ -12,7 +17,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 
-/** The internal Node packer calls this only after a complete PUT/GET/table-hash verification. */
+/** The internal packer calls this only after a complete PUT/GET/table-hash verification. */
 export const publish = internalMutation({
   args: {
     projectId: v.id('hostedProjects'),
@@ -46,7 +51,7 @@ export const publish = internalMutation({
       0,
     );
     invariant(
-      input.rows.length > 0 && input.rows.length <= 8 && input.rows.length <= count,
+      input.rows.length > 0 && input.rows.length <= capsulePageRows && input.rows.length <= count,
       'EVIDENCE_CHANGED',
       'Select the first verified capsule page.',
     );

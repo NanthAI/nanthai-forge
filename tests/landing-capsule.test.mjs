@@ -2,20 +2,26 @@
 import test from 'node:test';
 import { ticketState } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID, createHash } from 'node:crypto';
+import { gzipSync, gunzipSync } from 'node:zlib';
 import { getFunctionName } from 'convex/server';
 import { finishFixture } from './hosted-finish-fixture.mjs';
 import { synthetic } from './hosted-landing-batches-fixture.mjs';
 import { landingFixture, api, code } from './hosted-landing-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+const { encodeLandingCapsule, decodeLandingCapsule } = await import(
+  moduleUrl('../convex/projectLandingCapsuleCodec.ts')
+);
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
-import { encodeLandingCapsule, decodeLandingCapsule } from '../dist/landing-capsule-bytes.js';
+import { landingCapsuleText } from '../dist/landing-capsule.js';
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 const capsuleStore = await import(moduleUrl('../convex/projectLandingCapsuleStore.ts'));
 const ledger = await import(moduleUrl('../convex/projectLandingCapsuleLedger.ts'));
 const acceptanceStore = await import(moduleUrl('../convex/projectHostedAcceptanceStore.ts'));
 const attemptStore = await import(moduleUrl('../convex/projectHostedLandingAttemptRead.ts'));
 const cold = await import(moduleUrl('../convex/projectLandingCapsuleRead.ts'));
+const coldNode = await import(moduleUrl('../convex/projectLandingCapsuleReadNode.ts'));
+const { capsuleV8RawBytes } = await import(moduleUrl('../convex/projectLandingCapsuleRun.ts'));
 const people = await import(moduleUrl('../convex/publicPeople.ts'));
 const finish = await import(moduleUrl('../convex/projectHostedFinish.ts'));
 const lanes = await import(moduleUrl('../convex/projectHostedLanes.ts'));
@@ -33,7 +39,7 @@ const queries = {
 const owner = 'user_syntheticOwnerAAAA',
   reader = 'user_syntheticReaderBBB';
 
-async function fixture(t) {
+async function fixture(t, { inflate = 0 } = {}) {
   const f = await landingFixture();
   f.patch('hostedProjects', f.projectId, { owner, visibility: 'public' });
   f.tables.forgeAccounts.set('forgeAccounts-synthetic', {
@@ -53,6 +59,24 @@ async function fixture(t) {
     owner,
   );
   const row = [...f.tables.projectHostedLandingRequests.values()].find(r => r.submissionId === state.id);
+  if (inflate) {
+    // Schema-valid, incompressible historical error text, each row under the 1 MiB document bound.
+    const selected = [...f.tables.projectHostedLandingObservations.values()].filter(
+      r => r.submissionId === state.id && JSON.parse(r.value).transition,
+    );
+    const per = Math.ceil(inflate / selected.length);
+    assert(selected.length && per < 768 * 1024);
+    for (const r of selected) {
+      const value = JSON.parse(r.value);
+      value.transition.error = {
+        code: 'SYNTHETIC_ERROR',
+        message: randomBytes(Math.ceil((per * 3) / 4))
+          .toString('base64')
+          .slice(0, per),
+      };
+      f.patch('projectHostedLandingObservations', r._id, { value: canonicalPayload(value) });
+    }
+  }
   const rows = [...f.tables.projectHostedLandingObservations.values()].filter(
     r => r.submissionId === state.id,
   );
@@ -78,18 +102,24 @@ async function fixture(t) {
       for (const row of [...f.tables.projectHostedLandingAttempts.values()])
         if (row.submissionId === state.id) f.tables.projectHostedLandingAttempts.delete(row._id);
   };
-  const run = (actor, query = 'projectHostedFinishObserve:page', selected = request) =>
-    cold.history._handler(
-      {
-        auth: { getUserIdentity: async () => ({ subject: actor }) },
-        runQuery: (ref, args) => {
-          const name = getFunctionName(ref);
-          assert(queries[name], name);
-          return f.call('capsuleNestedQuery', queries[name], args, actor);
-        },
+  const nodeReads = [];
+  const run = (actor, query = 'projectHostedFinishObserve:page', selected = request) => {
+    // Nested calls carry the caller's identity, as Convex runs them.
+    const ctx = {
+      auth: { getUserIdentity: async () => ({ subject: actor }) },
+      runQuery: (ref, args) => {
+        const name = getFunctionName(ref);
+        assert(queries[name], name);
+        return f.call('capsuleNestedQuery', queries[name], args, actor);
       },
-      { projectId: f.projectId, query, request: JSON.stringify(selected) },
-    );
+      runAction: (ref, args) => {
+        assert.equal(getFunctionName(ref), 'projectLandingCapsuleReadNode:history');
+        nodeReads.push(args);
+        return coldNode.history._handler(ctx, args);
+      },
+    };
+    return cold.history._handler(ctx, { projectId: f.projectId, query, request: JSON.stringify(selected) });
+  };
   const synthetic = {
     R2_ACCOUNT_ID: 'synthetic',
     R2_BUCKET: 'synthetic',
@@ -104,7 +134,7 @@ async function fixture(t) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
   });
-  return { f, state, row, capsule, encoded, request, query, relocate, run };
+  return { f, state, row, capsule, encoded, request, query, relocate, run, nodeReads };
 }
 
 test('landing capsule round trip preserves exact original row bytes and every table digest, excluding reuse aliases', async t => {
@@ -534,4 +564,50 @@ test('the separate capsule pointer preserves exact server transaction pins witho
   assert(!marker.includes(owner));
   t.mock.method(globalThis, 'fetch', async () => new Response(h.encoded.body));
   assert.equal(await h.run(owner, 'projectHostedLanding:status', { submissionId: h.state.id }), expected);
+});
+
+test('b149b16b: objects from the earlier Node zlib writer decode through the portable codec, and portable objects decode through Node zlib', async t => {
+  const h = await fixture(t);
+  const text = landingCapsuleText(h.capsule);
+  // The pre-V8 writer: node:zlib gzip level 9 over the same canonical text (objects already in R2).
+  const legacy = gzipSync(text, { level: 9 });
+  assert.notDeepEqual(Buffer.from(legacy), Buffer.from(h.encoded.body), 'two distinct writers');
+  const pointer = {
+    ...h.encoded.pointer,
+    sha256: createHash('sha256').update(legacy).digest('hex'),
+    size: legacy.length,
+  };
+  assert.deepEqual(decodeLandingCapsule(legacy, pointer, h.f.projectId, h.state.id), h.capsule);
+  // The portable writer's bytes stay standard gzip for any Node reader (recovery, export, tooling).
+  assert.equal(
+    gunzipSync(h.encoded.body, { maxOutputLength: h.encoded.pointer.rawSize }).toString('utf8'),
+    text,
+  );
+  assert.equal(h.encoded.pointer.rawSize, Buffer.byteLength(text));
+  // Equal text is one content pin: the portable writer is deterministic (zero mtime).
+  assert.equal(encodeLandingCapsule(h.capsule).pointer.sha256, h.encoded.pointer.sha256);
+});
+
+test('b149b16b: a capsule over the V8 bound reads through the Node history action with the same redacted bytes and access checks', async t => {
+  const h = await fixture(t, { inflate: 1.1 * 1024 * 1024 });
+  assert(h.encoded.pointer.rawSize > capsuleV8RawBytes);
+  // The live baseline is only the expected answer; its oversized rows exceed the per-call read bound.
+  const before = new Map();
+  for (const actor of [owner, reader])
+    before.set(actor, await h.f.transaction('capsuleObserve', observe.page, h.request, actor));
+  h.relocate();
+  let fetches = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    fetches++;
+    return new Response(h.encoded.body);
+  });
+  for (const actor of [owner, reader]) {
+    const result = await h.run(actor);
+    assert.equal(result, before.get(actor));
+    assert(!result.includes(owner));
+  }
+  assert.equal(h.nodeReads.length, 2, 'each oversized cold read continues in Node once');
+  assert.equal(fetches, 2, 'the V8 action fetches nothing before handing over');
+  h.f.patch('hostedProjects', h.f.projectId, { visibility: 'private' });
+  await assert.rejects(h.run(reader), code('PROJECT_UNAVAILABLE'));
 });

@@ -10,8 +10,10 @@ import { hostedRecoveryFixture } from './recovery-hosted-fixture.mjs';
 import { capsuleMaintenanceFixture } from './landing-capsule-maintenance-fixture.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+const { encodeLandingCapsule, decodeLandingCapsule } = await import(
+  moduleUrl('../convex/projectLandingCapsuleCodec.ts')
+);
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
-import { encodeLandingCapsule, decodeLandingCapsule } from '../dist/landing-capsule-bytes.js';
 import { restoreRecoverySource } from '../dist/recovery-source.js';
 import { hostedRecoveryRows } from '../dist/recovery-hosted.js';
 import { NativeSource } from '../dist/native-source.js';

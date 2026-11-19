@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
+import { randomBytes } from 'node:crypto';
+import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { finishFixture } from './hosted-finish-fixture.mjs';
 import { synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const run = await import(moduleUrl('../convex/projectLandingCapsuleRun.ts'));
+const runNode = await import(moduleUrl('../convex/projectLandingCapsuleRunNode.ts'));
 const modules = Object.fromEntries(
   await Promise.all(
     [
@@ -43,6 +46,7 @@ export async function capsuleMaintenanceFixture(
   process.env.FORGE_LANDING_CAPSULES = '1';
   if (advance) f.advanceClock(8 * 86_400_000);
   const objects = new Map(),
+    scheduled = [],
     calls = [],
     transcript = [],
     requests = [];
@@ -92,7 +96,13 @@ export async function capsuleMaintenanceFixture(
       }
       return value;
     },
-    scheduler: { runAfter: async () => assert.fail('small fixture needs no index continuation') },
+    scheduler: {
+      runAfter: async (_, ref, args) => {
+        // Only the Node continuation of an oversized history; a small fixture needs no index continuation.
+        assert.equal(getFunctionName(ref), 'projectLandingCapsuleRunNode:pack');
+        scheduled.push({ name: getFunctionName(ref), args: structuredClone(args) });
+      },
+    },
   };
   const input = { projectId: f.projectId, submissionId: state.id, dueAt: 0 };
   return {
@@ -103,7 +113,29 @@ export async function capsuleMaintenanceFixture(
     calls,
     transcript,
     requests,
+    scheduled,
     pack: () => run.pack._handler(ctx, input).then(JSON.parse),
+    packNode: () => runNode.pack._handler(ctx, input).then(JSON.parse),
+    /** Spread about `bytes` of schema-valid, incompressible historical error text over this landing's
+     * observations, each row well under the 1 MiB document bound. Returns the added bytes. */
+    inflate: bytes => {
+      const rows = [...f.tables.projectHostedLandingObservations.values()].filter(
+        row => row.submissionId === state.id && JSON.parse(row.value).transition,
+      );
+      const per = Math.ceil(bytes / rows.length);
+      assert(rows.length && per < 768 * 1024, `inflate ${bytes} bytes over ${rows.length} observations`);
+      for (const row of rows) {
+        const value = JSON.parse(row.value);
+        value.transition.error = {
+          code: 'SYNTHETIC_ERROR',
+          message: randomBytes(Math.ceil((per * 3) / 4))
+            .toString('base64')
+            .slice(0, per),
+        };
+        f.patch('projectHostedLandingObservations', row._id, { value: canonicalPayload(value) });
+      }
+      return per * rows.length;
+    },
     corrupt: () => {
       corrupt = true;
     },

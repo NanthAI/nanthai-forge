@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Isolated Node action qualification: V8 transaction replies come from a production-handler
+// Isolated packer qualification (the V8 action's handler, run here under Node for RSS): V8 transaction replies come from a production-handler
 // fixture transcript, so its DB fake/import heap does not get counted as action memory.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -10,8 +10,18 @@ const data = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 const baselineRssBytes = process.memoryUsage().rss;
 const run = await import(moduleUrl('../convex/projectLandingCapsuleRun.ts'));
 const loadedRssBytes = process.memoryUsage().rss;
+// Isolate-relevant memory: JS heap plus ArrayBuffers, sampled at every mutation reply and R2 request.
+const live = () => {
+  const m = process.memoryUsage();
+  return m.heapUsed + m.arrayBuffers;
+};
+globalThis.gc?.();
+const loadedLiveBytes = live();
+let peakLiveBytes = loadedLiveBytes;
+const sample = () => (peakLiveBytes = Math.max(peakLiveBytes, live()));
 const objects = new Map();
 globalThis.fetch = async (url, init) => {
+  sample();
   const parsed = new URL(url);
   assert.equal(parsed.hostname, 'synthetic.r2.cloudflarestorage.com');
   assert(parsed.pathname.includes('/landing-capsules/'));
@@ -29,6 +39,7 @@ const result = JSON.parse(
   await run.pack._handler(
     {
       runMutation: async (ref, args) => {
+        sample();
         const selected = data.transcript[index++];
         assert.equal(getFunctionName(ref), selected?.name);
         assert.equal(canonicalPayload(args), canonicalPayload(selected.args));
@@ -46,7 +57,9 @@ console.log(
     ...result.metrics,
     baselineRssBytes,
     loadedRssBytes,
+    loadedLiveBytes,
+    peakLiveBytes,
     peakProcessRssBytes: process.resourceUsage().maxRSS * 1024,
-    scope: 'isolated Node action with recorded V8 replies and local fake R2; not provider billing',
+    scope: 'isolated packer handler with recorded mutation replies and local fake R2; not provider billing',
   }),
 );

@@ -528,6 +528,18 @@
       "source": "Issue 8c9b84fc: failed, cancelled and completed-without-result drives in production controller fake-clock replay.",
       "reason": "Entering composing retains recovery within the existing train hold; no new timer survives settlement.",
       "issue": "8c9b84fc"
+    },
+    {
+      "id": "landing-capsule-cold-read-p90",
+      "area": "cold read of a packed landing's history: marker query plus capsule history action, client wall time",
+      "measuredBy": "perf-harness",
+      "metric": "capsuleColdReadMs",
+      "stat": "p90",
+      "unit": "ms",
+      "max": 2000,
+      "source": "Item b149b16b, 2026-11-18 22:10Z, dev deployment: node scripts/perf-harness.mjs --capsule-cold-read (read-only) over 23 packed landings, 46 status and attempts cold reads through the Node history action: p50 749 ms, p90 1,024 ms, max 1,832 ms. An earlier 40-read run gave p50 810, p90 972, max 3,723 ms (an isolate cold start).",
+      "reason": "Lead decision on b149b16b: a cold read must stay interactive. The p90 of a 40-read sample tolerates isolate cold starts. Nothing stamps cold reads on the landing path, so perf-harness --capsule-cold-read re-measures it after each packer or reader change.",
+      "issue": "b149b16b"
     }
   ],
   "costGuard": {
