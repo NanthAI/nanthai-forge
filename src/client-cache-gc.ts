@@ -14,6 +14,8 @@ const hour = 3_600_000;
 /** A copy touched this recently counts as in use by a running operation. */
 const GRACE_MS = 10 * 60_000;
 const BUDGET_MS = 15_000;
+/** An unfinished pass resumes this long after it stopped. */
+const RETRY_MS = 5 * 60_000;
 const exists = (path: string) => {
   try {
     return lstatSync(path);
@@ -53,12 +55,14 @@ export type CacheGcResult = {
 };
 /** Nested Lane copies under ROOT.forge-client/lanes are a cache: bounded by size and age, evicted
  * least recently used first. Never the caller's own Lane, a copy in use (lock or touched within
- * ten minutes), a copy a sibling symlink points at, or one with unsaved edits. Local only. */
+ * ten minutes), a copy a sibling symlink points at, an open Lane checkout this machine's registry
+ * records at that path, or one with unsaved edits. Local only. */
 export function gcNestedLanes(input: {
   root: string;
   /** The caller's own Lane, never evicted. */
   keepLaneIds?: string[];
-  settings?: Pick<ClientSettings, 'clientCacheMaxGB' | 'clientCacheMaxAgeHours'>;
+  settings?: Pick<ClientSettings, 'clientCacheMaxGB' | 'clientCacheMaxAgeHours'> &
+    Partial<Pick<ClientSettings, 'activeLanePruneHours'>>;
   now?: number;
   budgetMs?: number;
   isDirty?: (root: string) => boolean;
@@ -95,6 +99,16 @@ export function gcNestedLanes(input: {
   const registry = new Map(lanes.map(entry => [canonicalRoot(entry.root), entry.lastActionAt]));
   // Owner-pinned Lanes (this client's registry mirror of the server flag) are never evicted.
   const pinned = new Set(lanes.filter(entry => entry.pinned).map(entry => entry.laneId));
+  // A Lane this machine started, opened or resolved here and has not seen finish is a working folder,
+  // not a cache copy (7da396ed: evicted while its landing was in flight). lane-prune removes it once
+  // the server says it landed or was abandoned, or after the long active idle age; past that age (an
+  // entry prune cannot read, say) it is cache again, so every copy stays bounded.
+  const activeMs = (settings.activeLanePruneHours ?? 168) * hour;
+  const open = new Set(
+    lanes
+      .filter(entry => !entry.state && (activeMs === 0 || now - entry.lastActionAt < activeMs))
+      .map(entry => `${entry.laneId}\u0000${canonicalRoot(entry.root)}`),
+  );
   const keep = new Set(input.keepLaneIds ?? []);
   const copies = names.map(laneId => {
     const copy = join(directory, laneId);
@@ -134,12 +148,14 @@ export function gcNestedLanes(input: {
           ? 'in use'
           : linked.has(item.copy)
             ? 'linked from a sibling directory'
-            : (processBlocker(item.copy, (processes ??= (input.processes ?? workingProcesses)())) ??
-              (unknownCacheMetadata(item.copy)
-                ? 'unknown Forge metadata'
-                : isDirty(item.copy)
-                  ? 'unsaved edits'
-                  : null));
+            : open.has(`${item.laneId}\u0000${item.copy}`)
+              ? 'open Lane checkout'
+              : (processBlocker(item.copy, (processes ??= (input.processes ?? workingProcesses)())) ??
+                (unknownCacheMetadata(item.copy)
+                  ? 'unknown Forge metadata'
+                  : isDirty(item.copy)
+                    ? 'unsaved edits'
+                    : null));
     if (reason) {
       result.kept.push({ laneId: item.laneId, reason });
       continue;
@@ -167,7 +183,7 @@ export function gcNestedLanes(input: {
   result.totalBytes = total;
   return result;
 }
-/** Once an hour per client directory, from CLI start. The stamp is written only when the pass finished. */
+/** Once an hour per client directory, from CLI start; a pass that ran out of budget resumes five minutes later. */
 export function gcNestedLanesHourly(input: Parameters<typeof gcNestedLanes>[0]): CacheGcResult | null {
   const stamp = join(clientCacheRoot(resolve(input.root)), `gc-stamp`),
     now = input.now ?? Date.now();
@@ -178,13 +194,13 @@ export function gcNestedLanesHourly(input: Parameters<typeof gcNestedLanes>[0]):
     return null;
   }
   const result = gcNestedLanes(input);
-  if (result.finished) {
-    try {
-      writeFileSync(stamp, '');
-      utimesSync(stamp, now / 1000, now / 1000);
-    } catch {
-      /* A missing stamp only repeats the pass. */
-    }
+  // A pass cut short by its budget continues RETRY_MS later, not on every command (7da396ed F4).
+  const at = result.finished ? now : now - hour + RETRY_MS;
+  try {
+    writeFileSync(stamp, '');
+    utimesSync(stamp, at / 1000, at / 1000);
+  } catch {
+    /* A missing stamp only repeats the pass. */
   }
   return result;
 }

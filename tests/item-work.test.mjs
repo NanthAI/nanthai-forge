@@ -231,6 +231,8 @@ test('lanes {state:"all"} pages the same read and accepts the 8-character Item i
   const s = await fixture({ extra: 22 });
   const calls = [];
   const transport = {
+    // The open-Lane list names its recovery command from the transport's folder (7da396ed).
+    root: process.cwd(),
     query: async (name, args) => {
       calls.push(name);
       if (name === 'projectHostedPlanning:resolveId')

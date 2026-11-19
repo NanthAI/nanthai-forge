@@ -10,6 +10,7 @@ import {
   symlinkSync,
   mkdirSync,
   renameSync,
+  rmSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { runPreflight } from '../dist/agent-preflight.js';
@@ -20,8 +21,8 @@ import { hostedAgentAddress } from '../dist/hosted-agent-cli.js';
 import { hostedAgentActions } from '../dist/hosted-agent-contract.js';
 import { hostedAgentRoot } from '../dist/hosted-agent-journal.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
-import { recordLane } from '../dist/lane-registry.js';
-import { laneCheckoutRoot } from '../dist/hosted-lane-location.js';
+import { readLaneEntry, recordLane } from '../dist/lane-registry.js';
+import { laneCheckoutRoot, laneSuccessor } from '../dist/hosted-lane-location.js';
 const errorCode = expected => error => error.code === expected;
 
 test('fresh open uses only its two checkout authorization reads and replay rechecks Lane access', async t => {
@@ -478,6 +479,141 @@ test('a laneId from the project folder runs in the Lane folder this machine has 
     .dispatch('save', { laneId: s.lane.laneId })
     .catch(error => error);
   assert.notEqual(outcome?.code, 'HOSTED_CHECKOUT_REQUIRED');
+});
+
+// Friction 9bc3775b (Lane 423c7871 became 5500e06b; 15b05101 became 394b4647): a sync conflict turned the
+// folder into its resolution Lane in place, so preflight and save with the old id refused
+// HOSTED_CHECKOUT_REQUIRED without naming the new id, and a watcher of the old id waited forever.
+test('an old Lane id finds the resolution Lane that took over its folder in place', async t => {
+  const s = agentFixture(t),
+    previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = join(s.root, '..', 'registry');
+  t.after(() => {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+  });
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const origin = randomUUID();
+  // What in-place placement leaves: the origin's entry is gone, the resolution's names its origin.
+  recordLane({ laneId: s.lane.laneId, root: s.root, ...s.address, resolutionOf: origin });
+  const folder = join(s.root, '..', 'project-folder');
+  mkdirSync(folder, { recursive: true });
+  assert.deepEqual(laneSuccessor({ root: folder, address: s.address }, origin), {
+    laneId: s.lane.laneId,
+    root: s.root,
+  });
+  assert.equal(laneSuccessor({ root: folder, address: s.address }, s.lane.laneId), null, 'its own id');
+  for (const action of ['preflight', 'save', 'finish'])
+    assert.equal(laneCheckoutRoot(folder, action, origin, s.address), s.root, action);
+  for (const action of ['sync', 'abandon', 'status'])
+    assert.equal(
+      laneCheckoutRoot(folder, action, origin, s.address),
+      null,
+      `${action} keeps the old id's meaning`,
+    );
+  // Every refusal of the old id names the new id and its folder.
+  await assert.rejects(
+    new HostedAgentTransport(folder, s.address, s.exchange).dispatch('save', { laneId: origin }),
+    error => {
+      assert.equal(error.code, 'HOSTED_CHECKOUT_REQUIRED');
+      assert.deepEqual(error.recovery, { root: s.root, laneId: s.lane.laneId, resolutionOf: origin });
+      assert(error.message.includes(s.lane.laneId) && error.message.includes(s.root));
+      return true;
+    },
+  );
+});
+
+// Incident 7da396ed (People Lane be3c9d3d twice, Your data 080e5185): the Lane folder was removed while
+// its landing checked, the builder had lost the land operation id, saw "no landing" and landed again.
+test('incident replay 7da396ed: by laneId alone, status recovers the landing in flight and a second land points at it', async t => {
+  const s = agentFixture(t),
+    previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = join(s.root, '..', 'registry');
+  t.after(() => {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+  });
+  s.caps.features = ['lane-status-landing'];
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  recordLane({ laneId: s.lane.laneId, root: s.root, ...s.address });
+  const first = await s.transport().dispatch('finish', { laneId: s.lane.laneId, message: 'People page' });
+  assert.equal(first.result.next.action, 'wait');
+  rmSync(s.root, { recursive: true, force: true });
+  const folder = join(s.root, '..', 'project-folder');
+  mkdirSync(folder, { recursive: true });
+  const project = new HostedAgentTransport(folder, s.address, s.exchange);
+  const status = await project.dispatch('status', { laneId: s.lane.laneId });
+  assert.equal(status.result.inFlight.operationId, first.operationId);
+  assert(
+    status.result.next.includes(first.operationId) && status.result.next.includes('wait'),
+    status.result.next,
+  );
+  const submissions = () =>
+    s.calls.filter(call => /^projectHostedLanding(Desired)?:(enqueue|submit)$/.test(call.name)).length;
+  const before = submissions();
+  await assert.rejects(
+    project.dispatch('finish', { laneId: s.lane.laneId, message: 'People page, again' }),
+    error => {
+      assert.equal(error.code, 'LANE_FINISH_ACTIVE');
+      assert.equal(error.recovery.operationId, first.operationId);
+      assert.deepEqual(error.recovery.next.operationIds, [first.operationId]);
+      return true;
+    },
+  );
+  assert.equal(submissions(), before, 'no second landing was submitted');
+});
+
+for (const [label, settle] of [
+  ['landed', submission => Object.assign(submission, { phase: 'landed' })],
+  ['failed', submission => Object.assign(submission, { phase: 'terminal-failed' })],
+  ['withdrawn', submission => Object.assign(submission, { phase: 'withdrawn' })],
+  ['unreadable', submission => delete submission.observation],
+])
+  test(`7da396ed F3: land goes through when the recorded earlier landing is ${label}, and forgets it`, async t => {
+    const s = agentFixture(t),
+      previous = process.env.XDG_STATE_HOME;
+    process.env.XDG_STATE_HOME = join(s.root, '..', 'registry');
+    t.after(() => {
+      if (previous === undefined) delete process.env.XDG_STATE_HOME;
+      else process.env.XDG_STATE_HOME = previous;
+    });
+    s.caps.features = ['lane-status-landing'];
+    await s.transport().dispatch('open', { laneId: s.lane.laneId });
+    recordLane({ laneId: s.lane.laneId, root: s.root, ...s.address });
+    const first = await s.transport().dispatch('finish', { laneId: s.lane.laneId, message: 'People page' });
+    assert.equal(readLaneEntry(s.lane.laneId).landing.operationId, first.operationId);
+    settle(s.operations.get(first.operationId));
+    const submissions = () =>
+      s.calls.filter(call => /^projectHostedLanding(Desired)?:(enqueue|submit)$/.test(call.name)).length;
+    const before = submissions();
+    // Same saved source: without retry, land replays the earlier operation by design
+    // (selectHostedFinish); land --retry is how an agent submits that source again.
+    const second = await s.transport().dispatch('finish', {
+      laneId: s.lane.laneId,
+      message: 'People page, again',
+      retry: true,
+      reason: 'other',
+    });
+    assert.notEqual(second.operationId, first.operationId);
+    assert.equal(submissions(), before + 1, 'the new landing was submitted');
+    assert.notEqual(readLaneEntry(s.lane.laneId).landing?.operationId, first.operationId);
+  });
+
+test('7da396ed F2: a save that superseded the live finish forgets the recorded landing', async t => {
+  const s = agentFixture(t),
+    previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = join(s.root, '..', 'registry');
+  t.after(() => {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+  });
+  const operationId = randomUUID();
+  recordLane({ laneId: s.lane.laneId, root: s.root, ...s.address, landing: { operationId, at: Date.now() } });
+  const transport = s.transport();
+  transport.touchLane('save', { laneId: s.lane.laneId }, { result: { headWrittenAt: 'x' } });
+  assert.equal(readLaneEntry(s.lane.laneId).landing.operationId, operationId, 'a plain save keeps it');
+  transport.touchLane('save', { laneId: s.lane.laneId }, { result: { supersededFinish: operationId } });
+  assert.equal(readLaneEntry(s.lane.laneId).landing, null);
 });
 
 test('sync from the project folder refuses before any server call and names the Lane checkout (friction d467b644)', async t => {

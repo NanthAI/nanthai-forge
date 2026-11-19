@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { checkTerminal } from './check-run-state.js';
+import { basename, dirname } from 'node:path';
 import { shellQuote } from './shell-quote.js';
 import { resultOf, landTerminal } from './hosted-land-summary.js';
 import type { HostedAgentResponse } from './hosted-agent-transport.js';
@@ -32,6 +33,23 @@ export function landWaitContinuation(root: string, response: HostedAgentResponse
   return wait ? operationWait(root, wait) : undefined;
 }
 
+/** The project folder of a Lane folder at ROOT.forge-client/lanes/LANE_ID, where a command still runs
+ * after the Lane folder is gone; null for a Lane folder at a chosen path. Path text only. */
+function projectFolder(root: string) {
+  const lanes = dirname(root),
+    client = dirname(lanes);
+  return basename(lanes) === 'lanes' && client.endsWith('.forge-client')
+    ? client.slice(0, -'.forge-client'.length)
+    : null;
+}
+/** The one read that recovers a Lane's landing in flight by laneId, from the project folder (7da396ed). */
+export function landRecoveryLine(root: string, laneId: unknown) {
+  const project = projectFolder(root);
+  return project && typeof laneId === 'string'
+    ? `Lane folder gone? From the project folder: nforge agent ${shellQuote(project)} status ${shellQuote(JSON.stringify({ laneId }))} names this landing and its wait.`
+    : undefined;
+}
+
 /** Print the operation identity and its recovery command before blocking. */
 export function landAnnouncement(
   root: string,
@@ -42,8 +60,11 @@ export function landAnnouncement(
 ) {
   if (!response.operationId) return [];
   const wait = landWaitCommand(root, response);
+  const replay = (resultOf(response) as { replayParameters?: { laneId?: unknown } }).replayParameters;
+  const recovery = wait ? landRecoveryLine(root, command.laneId ?? replay?.laneId) : undefined;
+  const tail = recovery ? [recovery] : [];
   if (wake && wait)
-    return [`land: operationId ${response.operationId}; submitting, then it continues without you`];
+    return [`land: operationId ${response.operationId}; submitting, then it continues without you`, ...tail];
   const recoveryCommand = resultOf(response).command;
   // One first line carries the id and its exact resume command: a backgrounded,
   // redirected or killed client never loses either.
@@ -52,7 +73,7 @@ export function landAnnouncement(
     : !landTerminal(response)
       ? `; source preparation is unfinished, keep this turn active; ${recoveryCommand ? 'continue' : 'replay'}: ${landResumeCommand(root, command, response)}`
       : '';
-  return [`land: operationId ${response.operationId}${resume}`];
+  return [`land: operationId ${response.operationId}${resume}`, ...tail];
 }
 
 /** The one command that continues an unfinished land: its wait once submitted, else the source

@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import { hostedAgentHelp, hostedHelpFor } from './hosted-agent-help.js';
 import { helpTopicIndex, helpTopicText, isHelpTopic } from './help-topics.js';
 import { hostedAgentAddress } from './hosted-agent-address.js';
-import { laneCheckoutRoot } from './hosted-lane-location.js';
+import { FOLDER_ACTIONS, laneCheckoutRoot, laneSuccessor } from './hosted-lane-location.js';
 import { discoversCapabilitiesFirst, startEarlyCapabilities } from './hosted-capabilities-early.js';
 import { hostedAgentRoot } from './hosted-agent-journal.js';
 import { LAND_CHILD_ENV } from './hosted-land-child-env.js';
@@ -260,6 +260,17 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
     if (short.resolved) {
       process.stderr.write(`laneId ${String(selected.laneId)} resolved to ${short.resolved}\n`);
       selected = short.selected;
+    }
+    // An old Lane id whose folder became its resolution Lane after a sync conflict (9bc3775b): the
+    // folder's files are the resolution's now, so save and preflight run on it, and say so.
+    if (FOLDER_ACTIONS.has(action) && typeof selected.laneId === 'string') {
+      const moved = laneSuccessor({ root: hostedAgentRoot(root), address: hosted }, selected.laneId);
+      if (moved) {
+        process.stderr.write(
+          `Lane ${selected.laneId} continues as resolution Lane ${moved.laneId} in ${moved.root} after a sync conflict; ${action} runs on ${moved.laneId}. Use that id from now on.\n`,
+        );
+        selected = { ...selected, laneId: moved.laneId };
+      }
     }
     // A laneId given from another folder runs in that Lane's checkout when this machine has it open
     // (681ee3d4): the folder was the fix, so take it instead of refusing.

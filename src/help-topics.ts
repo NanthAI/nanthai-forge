@@ -90,7 +90,7 @@ CHECK_NOT_PASSED: acceptance needs a passed check for this exact head; land --sa
   hosted: {
     title: 'Hosted checkouts and actions',
     text: `Hosted actions run from a hosted checkout: a clone root (nforge clone) or a Lane folder that start printed.
-- HOSTED_CHECKOUT_REQUIRED: run the command from the folder the message names (a resolution runs in its resolution Lane folder). save, sync, preflight, ack and land with a laneId of a Lane open on this machine run in its folder by themselves.
+- HOSTED_CHECKOUT_REQUIRED: run the command from the folder the message names (a resolution runs in its resolution Lane folder). save, sync, preflight, ack and land with a laneId of a Lane open on this machine run in its folder by themselves. After a sync conflict made a folder its resolution Lane, the message names the new Lane id; save and preflight with the old id run on it.
 - HOSTED_ACTION_UNSUPPORTED: this CLI or deployment has no such action. The message names the supported alternative; nforge agent . help (no topic) lists every action with its parameters.
 - check-settings reports project-wide agent eligibility, not a Candidate's path review. Protected-path changes may still need approval under the policy.
 - New actions need a matching CLI: nforge status shows versions; the CLI updates to main.

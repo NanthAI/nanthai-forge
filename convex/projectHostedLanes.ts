@@ -14,6 +14,7 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { findObject } from './projectObjectFind';
 import { isStored } from './projectObjectFields';
+import { liveLaneFinish } from './projectHostedLaneFinish';
 
 const identity = { projectId: v.id('hostedProjects'), laneId: v.string() };
 async function caller(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
@@ -41,6 +42,8 @@ export const head = query({
     ...identity,
     includeHolder: v.optional(v.literal(true)),
     includeState: v.optional(v.literal(true)),
+    /** Feature lane-status-landing: also name an active Lane's landing still in flight (7da396ed). */
+    includeLanding: v.optional(v.literal(true)),
   },
   returns: v.object({
     state: v.optional(v.union(v.literal('active'), v.literal('completed'), v.literal('abandoned'))),
@@ -72,6 +75,16 @@ export const head = query({
         revertedBy: v.optional(v.object({ receiptId: v.string(), at: v.string() })),
       }),
     ),
+    /** The Lane's landing that is still composing, queued, checking or ready (includeLanding only), so an
+     * agent that lost its Lane folder or operation id recovers it by laneId alone. */
+    inFlight: v.optional(
+      v.object({
+        phase: v.string(),
+        submissionId: v.string(),
+        operationId: v.string(),
+        submittedAt: v.string(),
+      }),
+    ),
   }),
   handler: async (ctx, input) => {
     try {
@@ -92,6 +105,11 @@ export const head = query({
           )
           .unique()
       )?.landed;
+      // Bounded: the same compose-selection lookup a save's live-finish refusal makes (at most 8).
+      const live =
+        input.includeLanding && lane.state === 'active'
+          ? await liveLaneFinish(ctx, { projectId: input.projectId, laneId: input.laneId, headWrittenAt: '' })
+          : null;
       return {
         ...(input.includeState ? { state: lane.state } : {}),
         ...(lane.holder && holderVisible
@@ -115,6 +133,16 @@ export const head = query({
                 at: landed.at,
                 current: landed.laneHead === lane.head && !landed.revertedBy,
                 ...(landed.revertedBy ? { revertedBy: landed.revertedBy } : {}),
+              },
+            }
+          : {}),
+        ...(live
+          ? {
+              inFlight: {
+                phase: live.phase,
+                submissionId: live.submissionId,
+                operationId: live.state.operationId,
+                submittedAt: live.state.timing?.submittedAt ?? live.state.at,
               },
             }
           : {}),

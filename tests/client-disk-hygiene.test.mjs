@@ -202,7 +202,7 @@ test('cache GC never evicts the caller’s Lane, a locked or just-used copy, a l
   for (const item of [own, locked, justUsed, linked, edited]) assert(existsSync(item.path));
 });
 
-test('cache GC runs at most once an hour and only stamps a finished pass', t => {
+test('cache GC runs at most once an hour and an unfinished pass resumes after a short retry', t => {
   const directory = isolated(t),
     root = join(directory, 'main');
   assert.equal(
@@ -221,13 +221,26 @@ test('cache GC runs at most once an hour and only stamps a finished pass', t => 
   assert(existsSync(other.path), 'the second call within the hour did nothing');
   age(`${root}.forge-client/gc-stamp`, 2);
   assert.equal(gcNestedLanesHourly({ root, settings: settings(2, 24), isDirty: clean }).evicted.length, 1);
-  // An out-of-time pass leaves no stamp, so the next start continues.
+  // An out-of-time pass resumes five minutes later, not on every command (7da396ed F4).
   const late = copy(root, 10, 50);
   rmSync(`${root}.forge-client/gc-stamp`);
-  const partial = gcNestedLanesHourly({ root, settings: settings(2, 24), isDirty: clean, budgetMs: -1 });
+  const now = Date.now();
+  const partial = gcNestedLanesHourly({ root, settings: settings(2, 24), isDirty: clean, budgetMs: -1, now });
   assert.equal(partial.finished, false);
   assert(existsSync(late.path));
-  assert(!existsSync(`${root}.forge-client/gc-stamp`));
+  assert.equal(
+    gcNestedLanesHourly({ root, settings: settings(2, 24), isDirty: clean, now: now + 60_000 }),
+    null,
+    'the next command within the retry window does not rerun the pass',
+  );
+  const resumed = gcNestedLanesHourly({
+    root,
+    settings: settings(2, 24),
+    isDirty: clean,
+    now: now + 6 * 60_000,
+  });
+  assert.equal(resumed.finished, true, 'the pass resumes after the retry window');
+  assert(!existsSync(late.path));
 });
 
 test('prune removes a clean active Lane idle past the active age, and keeps an edited one listed', async t => {
@@ -463,6 +476,51 @@ test('GC protects relative sibling links and recent registry use through a symli
   assert.equal(result.kept.find(item => item.laneId === active.laneId)?.reason, 'in use');
   assert.equal(result.evicted.length, 0);
   assert(existsSync(linked.path) && existsSync(active.path));
+});
+
+test('incident replay 7da396ed: cache GC never evicts an open Lane checkout whose landing is in flight', t => {
+  // be3c9d3d (2026-11-17T17:29Z) and 15b05101 (2026-11-18): start puts a builder's own Lane under
+  // ROOT.forge-client/lanes. Everything was saved, land was submitted and 11 minutes passed; another
+  // builder's command ran the hourly pass with the directory over its size cap and removed the folder
+  // as "Unused Lane cache exceeded size cap" while the landing was still checking.
+  const directory = isolated(t),
+    root = join(directory, 'main'),
+    now = Date.now();
+  const landing = copy(root, 1e9, 0.18),
+    landed = copy(root, 1e9, 30),
+    cached = copy(root, 1e9, 20);
+  recordLane(
+    { laneId: landing.laneId, root: landing.path, ...address, lastActionAt: now - 0.18 * hour },
+    now,
+  );
+  recordLane({ laneId: landed.laneId, root: landed.path, ...address, state: 'completed' }, now - 30 * hour);
+  const result = gcNestedLanes({ root, settings: settings(0.5, 0), isDirty: clean, now });
+  assert(existsSync(landing.path), 'the open Lane folder survives the pass');
+  assert.equal(result.kept.find(item => item.laneId === landing.laneId)?.reason, 'open Lane checkout');
+  // A landed Lane and an unregistered copy are still cache: removed oldest first.
+  assert.deepEqual(result.evicted.map(item => item.laneId).sort(), [landed.laneId, cached.laneId].sort());
+});
+
+test('7da396ed F1: an open Lane entry idle past the active-prune age is cache again', t => {
+  // An entry lane-prune never settles (say its server read keeps failing) must not pin disk forever.
+  const directory = isolated(t),
+    root = join(directory, 'main'),
+    now = Date.now();
+  const forgotten = copy(root, 1e9, 200);
+  recordLane(
+    { laneId: forgotten.laneId, root: forgotten.path, ...address, lastActionAt: now - 200 * hour },
+    now,
+  );
+  const result = gcNestedLanes({
+    root,
+    settings: { ...settings(0.5, 0), activeLanePruneHours: 168 },
+    isDirty: clean,
+    now,
+  });
+  assert.deepEqual(
+    result.evicted.map(item => item.laneId),
+    [forgotten.laneId],
+  );
 });
 
 test('prune keeps a checkout excluded through an alias of its physical root', async t => {

@@ -29,7 +29,7 @@ import { networkFailure } from './network-fetch.js';
 import { networkContinuation } from './network-continuation.js';
 import { reconcileHostedSync, hasHostedSyncHandoff } from './hosted-sync-handoff.js';
 import { autoReplaySuperseded } from './hosted-replay-holds.js';
-import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
+import { AGENT_WAIT_SECONDS, operationWait } from './agent-operation-wait.js';
 import { sourceTree } from './source-tree.js';
 import { withSourceRecovery } from './hosted-agent-source-recovery.js';
 import { readHostedOverlapAdvice } from './hosted-overlap-client.js';
@@ -147,7 +147,7 @@ import { rememberSnapshotsKept } from './lane-snapshot-hint.js';
 import { launchSnapshotWorker } from './hosted-snapshot-worker.js';
 import { LANE_SNAPSHOT } from './lane-snapshot-contract.js';
 import { executeSnapshots } from './hosted-lane-snapshot-restore.js';
-import { openLaneRoot } from './hosted-lane-location.js';
+import { checkoutRequired, laneSuccessor, openLaneRoot } from './hosted-lane-location.js';
 /** Reads and checkout creation: they neither show a Lane as working nor count as its activity. */
 /** A boolean option as given, else unset. */
 const flag = (value: unknown) => (typeof value === 'boolean' ? value : undefined);
@@ -573,7 +573,66 @@ export class HostedAgentTransport {
         : action === 'complete' || (action === 'finish' && /"phase":"landed"/.test(text))
           ? ('completed' as const)
           : undefined;
-    recordLane({ laneId, ...(state ? { state } : {}) });
+    // A submitted landing stays recorded until a land or wait sees it settle, so a later land finds it by Lane.
+    const settled = /"phase":"(landed|terminal-failed)"/.test(text);
+    const recorded = action === 'wait' && settled ? readLaneEntry(laneId)?.landing : undefined;
+    // A save that replaced the live finish on purpose (supersedeFinish) ends that landing too (F2).
+    const superseded = ['save', 'checkpoint'].includes(action) && /"supersededFinish"/.test(text);
+    const landing =
+      superseded || (recorded && text.includes(recorded.operationId))
+        ? null
+        : action !== 'finish' || !response.operationId
+          ? undefined
+          : /"phase":"finish"/.test(text) && !settled
+            ? { operationId: response.operationId, at: Date.now() }
+            : null;
+    recordLane({ laneId, ...(state ? { state } : {}), ...(landing !== undefined ? { landing } : {}) });
+  }
+  /** status {laneId} reads the Lane's landing in flight only where this machine worked on the Lane
+   * and either recorded a landing or lost its folder (7da396ed). Any other status keeps its budget. */
+  private landingLookupDue(laneId: string) {
+    const entry = readLaneEntry(laneId);
+    return !!entry && (!!entry.landing || !existsSync(resolve(entry.root, '.forge/hosted-lane.json')));
+  }
+  /** A land for a Lane whose earlier landing from this machine is still live (7da396ed): a second
+   * submission would queue the same Lane twice. No call unless this machine recorded one; then one
+   * read of that operation, and a settled one is forgotten. */
+  private async refuseLandingInFlight(input: Record<string, unknown>, operationId: unknown) {
+    const laneId =
+      typeof input.laneId === 'string' ? input.laneId : (markerIdentity(this.root)?.laneId ?? undefined);
+    const recorded = laneId ? readLaneEntry(laneId)?.landing : undefined;
+    if (!laneId || !recorded || recorded.operationId === operationId) return;
+    // This folder's own finish selection already replays or retries an operation it retained.
+    if (
+      existsSync(
+        resolve(clientCacheRoot(hostedAgentRoot(this.root)), 'agent', `${recorded.operationId}.json`),
+      )
+    )
+      return;
+    let phase: unknown;
+    try {
+      const page = (await this.observe({ operationId: recorded.operationId } as never)) as {
+        submission?: { phase?: unknown };
+      };
+      phase = page?.submission?.phase;
+    } catch {
+      phase = undefined;
+    }
+    if (typeof phase !== 'string' || !['composing', 'queued', 'checking', 'ready'].includes(phase)) {
+      const lastActionAt = readLaneEntry(laneId)?.lastActionAt;
+      recordLane({ laneId, landing: null, ...(lastActionAt === undefined ? {} : { lastActionAt }) });
+      return;
+    }
+    const wait = operationWait(hostedAgentRoot(this.root), {
+      operationIds: [recorded.operationId],
+      until: 'acceptance',
+    });
+    throw new ForgeError(
+      'LANE_FINISH_ACTIVE',
+      `Lane ${laneId} already has a landing in flight (operation ${recorded.operationId}, ${phase}); this land would queue it a second time. Wait for it with: ${wait.command}. To replace it on purpose, land --withdraw first, then land again.`,
+      undefined,
+      { laneId, operationId: recorded.operationId, phase, next: wait.next, command: wait.command },
+    );
   }
   /** Record what the caller receives, locally; a later CLI mutation carries it. */
   private retainCaller(
@@ -991,31 +1050,32 @@ export class HostedAgentTransport {
           },
           capabilities.overlapVersion === 1 ? readHostedLaneCheckout(this.root)?.selection.laneId : undefined,
         );
-      if (observation)
+      if (observation) {
+        const observed = (await this.observe(
+          command.data as z.infer<typeof hostedAgentCommandSchemas.status>,
+        )) as Record<string, unknown>;
         return this.response(
           action,
           null,
           {
-            ...((await this.observe(
-              command.data as z.infer<typeof hostedAgentCommandSchemas.status>,
-            )) as Record<string, unknown>),
+            ...observed,
             ...(capabilities.needsFix ? { needsFix: capabilities.needsFix } : {}),
             ...(capabilities.githubMirror !== undefined ? { githubMirror: capabilities.githubMirror } : {}),
             // Liveness: lastActivityAt above is the server record; this is the command this machine runs now.
             ...(typeof (command.data as { laneId?: string }).laneId === 'string'
-              ? {
-                  local: laneLiveness((command.data as { laneId: string }).laneId),
-                }
+              ? this.localLane((command.data as { laneId: string }).laneId, observed)
               : {}),
           },
           capabilities.overlapVersion === 1 ? (command.data as { laneId?: string }).laneId : undefined,
         );
+      }
       const root = hostedAgentRoot(this.root);
       this.gcClientCache(root, [markerIdentity(root)?.laneId, (command.data as { laneId?: unknown }).laneId]);
       if (action === 'start' || action === 'open') hostedRootLanePath(root, this.address);
       const replaying =
         typeof operationId === 'string' &&
         existsSync(resolve(clientCacheRoot(root), 'agent', `${operationId}.json`));
+      if (action === 'finish' && !replaying) await this.refuseLandingInFlight(command.data, operationId);
       const pendingSync =
         action === 'finish' && !replaying ? await reconcileHostedSync(root, this.exchange) : null;
       if (pendingSync)
@@ -1542,7 +1602,14 @@ export class HostedAgentTransport {
         continuation: replay(opened.status === 'timeout' ? 'stalled' : 'failed'),
       };
     }
-    recordLane({ laneId, root: opened.value.root });
+    // The full identity, so a start-time entry housekeeping dropped mid-download comes back prunable (7da396ed F1).
+    recordLane({
+      laneId,
+      root: opened.value.root,
+      url: this.address.url,
+      projectId: this.address.projectId,
+      agent: this.agentSlug() ?? null,
+    });
     const shared = await boundedStep(
       this.shareDependencies(
         opened.value.root,
@@ -1820,11 +1887,12 @@ export class HostedAgentTransport {
     const laneId = (input.laneId as string | undefined) ?? marker?.selection.laneId;
     invariant(laneId, 'BAD_ARGUMENT', `Select laneId, or run ${action} inside the Lane directory.`);
     const command = hostedAgentCommandSchemas.preflight.parse(input);
-    invariant(
-      marker?.selection.laneId === laneId,
-      'HOSTED_CHECKOUT_REQUIRED',
-      'Run preflight with the Lane folder printed by start as ROOT (not the project folder): it tests the saved files there.',
-    );
+    if (marker?.selection.laneId !== laneId)
+      throw checkoutRequired(
+        { root: this.root, address: this.address },
+        laneId,
+        'Run preflight with the Lane folder printed by start as ROOT (not the project folder): it tests the saved files there.',
+      );
     await this.protectedNotice(marker);
     const { preflightPlan, readPreflightReceipt, runPreflight } = await import('./agent-preflight.js');
     const stopped = command.retry ? readPreflightReceipt(root, laneId)?.stopped : undefined;
@@ -2029,6 +2097,32 @@ export class HostedAgentTransport {
     }
     return (typeof value === 'string' ? JSON.parse(value) : value) as T;
   }
+  /** status {laneId}: this machine's liveness for the Lane and, when a sync conflict moved its folder
+   * to a resolution Lane in place, that Lane (9bc3775b). Local files only. */
+  private localLane(laneId: string, observed: unknown) {
+    const successor = laneSuccessor({ root: hostedAgentRoot(this.root), address: this.address }, laneId);
+    const inFlight = (observed as { inFlight?: { operationId?: unknown } } | null)?.inFlight;
+    return {
+      // The landing in flight resumes from this folder by its own id, with or without the Lane folder.
+      ...(typeof inFlight?.operationId === 'string'
+        ? {
+            next: operationWait(hostedAgentRoot(this.root), {
+              operationIds: [inFlight.operationId],
+              until: 'acceptance',
+            }).command,
+          }
+        : {}),
+      local: laneLiveness(laneId),
+      ...(successor
+        ? {
+            continuesAs: {
+              ...successor,
+              note: `A sync conflict moved this Lane's folder to resolution Lane ${successor.laneId}; save, preflight and land there.`,
+            },
+          }
+        : {}),
+    };
+  }
   private async observe(command: z.infer<typeof hostedAgentCommandSchemas.status>) {
     const { laneId, operationId, submissionId, runId, kind, version, summary, reports, cursor } = command;
     invariant(!summary || runId, 'BAD_ARGUMENT', 'summary:true reads one check run: pass runId.');
@@ -2064,6 +2158,9 @@ export class HostedAgentTransport {
       return this.query('projectHostedLanes:head', {
         laneId,
         ...(this.serverFeatures?.includes('lane-status-state') ? { includeState: true } : {}),
+        ...(this.serverFeatures?.includes('lane-status-landing') && this.landingLookupDue(laneId)
+          ? { includeLanding: true }
+          : {}),
         ...(command.whoami && this.serverFeatures?.includes('lane-holder-v1') ? { includeHolder: true } : {}),
       });
     if (!kind)

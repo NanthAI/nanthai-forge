@@ -175,8 +175,28 @@ export function agentFixture(t, source) {
           },
         })),
       };
-    else if (name === 'projectHostedLanes:head') result = { laneId: lane.laneId, head: lane.head };
-    else if (name === 'projectObjectDownloads:lanePage')
+    else if (name === 'projectHostedLanes:head') {
+      // As the server: with includeLanding, the Lane's landing still in flight (7da396ed).
+      const live = args.includeLanding
+        ? [...operations.values()].findLast(
+            value => value?.observation && ['composing', 'queued', 'checking', 'ready'].includes(value.phase),
+          )
+        : undefined;
+      result = {
+        laneId: lane.laneId,
+        head: lane.head,
+        ...(live
+          ? {
+              inFlight: {
+                phase: live.phase,
+                submissionId: live.id,
+                operationId: live.operationId,
+                submittedAt: live.at,
+              },
+            }
+          : {}),
+      };
+    } else if (name === 'projectObjectDownloads:lanePage')
       // This fixture supplies bytes through its legacy downloadBatch seam.
       return args.digests.map(digest => ({ digest, size: objects.get(digest).length }));
     else if (name === 'projectObjectDownloads:describe')

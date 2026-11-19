@@ -82,7 +82,11 @@ function fixture() {
   const put = (table, row, time = 0) =>
     tables[table].push({ ...row, _id: `${table}-${tables[table].length}`, _creationTime: time });
   const read = async (input = {}) => {
-    const args = { projectId: 'project', from: iso(minute(0)), to: iso(minute(600)), ...input };
+    const args = Object.fromEntries(
+      Object.entries({ projectId: 'project', from: iso(minute(0)), to: iso(minute(600)), ...input }).filter(
+        ([, value]) => value !== undefined,
+      ),
+    );
     checkArgs(api.read, args, 'projectHostedLandings:read');
     const raw = await api.read._handler(ctx, args);
     return { raw, ...JSON.parse(raw) };
@@ -481,4 +485,29 @@ test('landings title comes from the retained receipt message without additional 
   control.landing(2, { at: 90 });
   await control.read();
   assert.deepEqual(withTitles, control.meter);
+});
+
+test('frictions 659f23ba and c5e40b62: one landing by its receipt id or a unique 8+ character prefix, with no window', async () => {
+  const f = fixture();
+  for (const n of [1, 2, 3, 12]) f.landing(n, { at: 60 + n });
+  const byReceipt = async receiptId => f.read({ receiptId, from: undefined, to: undefined });
+  f.meter.queries = 0;
+  const exact = await byReceipt(id('receipt', 2));
+  assert.deepEqual(
+    exact.landings.map(row => row.receiptId),
+    [id('receipt', 2)],
+  );
+  assert.equal(exact.nextCursor, null);
+  assert(f.meter.queries <= 8, `one receipt lookup plus its evidence reads: ${f.meter.queries}`);
+  const [whole] = (await f.read()).landings.filter(row => row.receiptId === id('receipt', 2));
+  assert.deepEqual(
+    exact.landings[0],
+    whole,
+    'the same row the window read returns (agentClient, checks, costs)',
+  );
+  // A unique prefix finds its landing; an ambiguous one names candidates; an unknown one is NOT_FOUND.
+  assert.equal((await byReceipt('receipt-0000001')).landings[0].receiptId, id('receipt', 12));
+  await assert.rejects(byReceipt('receipt-0000000'), /AMBIGUOUS_ID[\s\S]*receipt-00000001/);
+  await assert.rejects(byReceipt('receipt-9'), /NOT_FOUND/);
+  await assert.rejects(byReceipt('rece'), /at least 8 characters/);
 });

@@ -23,6 +23,12 @@ export const laneRegistryEntrySchema = z.object({
   /** The agent run that started or resolved the Lane here (session slug, c29d0780); null for a person.
    * Absent on older entries and adopted or reopened checkouts: unknown run, never offered for abandon. */
   agent: z.string().max(64).nullable().optional(),
+  /** The Lane whose folder this resolution Lane took over in place after a sync conflict (9bc3775b):
+   * commands that still name that old id find this Lane and its folder. */
+  resolutionOf: z.uuid().optional(),
+  /** The last landing this machine submitted for the Lane and has not seen settle (7da396ed): a new land
+   * reads it once and points at it while it is still live instead of submitting a second one. */
+  landing: z.object({ operationId: z.uuid(), at: z.number() }).nullable().optional(),
   /** The Forge command this machine is running in the Lane now; a dead pid means it is stale. */
   running: z.object({ action: z.string(), pid: z.number(), since: z.number() }).nullable().optional(),
   /** The landing hold (review, dependency or main-red) a wait or land on this machine last observed (5c59940b);

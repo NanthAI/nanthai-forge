@@ -173,6 +173,8 @@ export const hostedContractFeatures = [
   /** start takes openLanesVersion 2: each listed open Lane carries `resolves` when it is a resolution Lane, and the
    * CLI names the Lane it replaces with the abandon command (d9e1ac62). Without it the CLI asks for version 1. */
   'start-open-lanes-resolves',
+  /** Optional in-flight landing (operation, phase) on the existing Lane head read (7da396ed). */
+  'lane-status-landing',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

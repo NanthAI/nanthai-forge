@@ -17,7 +17,7 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 | `localHeavySlots` | `auto` | About 20 agents shared a 16 GB laptop. Unlimited parallel builds and test runs swapped the machine; 3 at a time kept it responsive. `auto` allows one heavy command per 5 GB of RAM, capped at half the cores and never below 1 (16 GB with 8 cores gives 3). | A number sets the slots; `0` turns the limit off. |
 | `shareDependencies` | `true` | Each Lane needs `node_modules` (261 MB for Forge itself), and every agent ran the install. When a Lane opens, its `node_modules` becomes a link to one install per exact lockfile and package manager (npm, pnpm, yarn or bun). | `nforge settings shareDependencies false`. |
 | `installScripts` | `false` | A repository's own files could switch on dependency install scripts at `start`, so opening a Lane ran code its authors chose. A repository's declaration is a request: `start` shows it, and only you decide. | `nforge settings installScripts true` accepts repository requests on this machine; `start {"installScripts":true}` runs all scripts for one Lane. |
-| `clientCacheMaxGB` | `2` | `ROOT.forge-client/lanes` collected full ~100 MB copies of other Lanes that nothing removed (262 copies, 5.8 GB in one client directory). They are a cache now: past this size, the least recently used copies are removed. | `nforge settings clientCacheMaxGB 0` removes the size cap. |
+| `clientCacheMaxGB` | `2` | `ROOT.forge-client/lanes` collected full ~100 MB copies of other Lanes that nothing removed (262 copies, 5.8 GB in one client directory). They are a cache now: past this size, the least recently used copies are removed (never an open Lane checkout). | `nforge settings clientCacheMaxGB 0` removes the size cap. |
 | `clientCacheMaxAgeHours` | `24` | The same cache: a copy nobody used for this long is removed. | `nforge settings clientCacheMaxAgeHours 0` removes the age limit. |
 | `landWait` | `true` | Agents wrapped `land --save` in a polling loop to learn the outcome. `land --save` now waits by default and prints a compact summary. | `--no-wait` on one command, or `nforge settings landWait false`. |
 
@@ -73,8 +73,11 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   then least recently used copies until the directory is under the size cap. It reads no server
   and runs no timer. A pass that runs out of its 15-second budget continues on the next start.
 - A copy is kept when it is the caller's own Lane, holds the work lock or was used in the last ten
-  minutes, is the target of a symlink beside ROOT (conflict checkouts), has unsaved edits, or a live
-  local process works in it. Unknown process coverage also keeps it. Cache eviction and idle Lane
+  minutes, is the target of a symlink beside ROOT (conflict checkouts), is an open Lane checkout this
+  machine started, opened or resolved there (its registry entry has not seen it land or be abandoned,
+  so a folder whose landing is still checking is never cache), has unsaved edits, or a live
+  local process works in it. Open Lane roots are removed only by idle pruning above, after the
+  server's state read. Unknown process coverage also keeps it. Cache eviction and idle Lane
   pruning share explicit cleanup's one batched process-directory observation, only when a copy
   might be removed. Cache eviction records its path, reason and bytes in the existing local Lane
   prune log before removal; it adds no server calls or idle activity.

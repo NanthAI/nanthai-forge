@@ -13,8 +13,10 @@ export const hostedLandingsSchema = z
   .object(
     {
       /** UTC window [from,to) on commit time. */
-      from: instant,
-      to: instant,
+      from: instant.optional(),
+      to: instant.optional(),
+      /** One landing by its receipt id or a unique 8+ character prefix; no window then. */
+      receiptId: z.string().min(8).max(64).optional(),
       limit: z.number().int().min(1).max(LANDINGS_MAX_LIMIT).optional(),
       /** `nextCursor` of the previous page of the same window. */
       cursor: z.string().min(1).max(64).optional(),
@@ -24,19 +26,22 @@ export const hostedLandingsSchema = z
         issue.code === 'unrecognized_keys' && issue.keys.includes('path') ? fileHistoryHelp : undefined,
     },
   )
-  .strict();
+  .strict()
+  .refine(
+    input => (input.receiptId ? !input.from && !input.to && !input.cursor : input.from && input.to),
+    'Pass from and to for a window, or receiptId alone for one landing.',
+  );
 /** One bounded page of accepted landings (Issue b78ca196), read from rows already stored. */
 export async function landingsHostedSource(transport: HostedAgentTransport, input: unknown) {
   const parsed = hostedLandingsSchema.safeParse(input);
   invariant(
     parsed.success,
     'BAD_ARGUMENT',
-    `Invalid hosted landings parameters. Use landings --help. ${fileHistoryHelp}`,
+    `Invalid hosted landings parameters: ${parsed.success ? '' : parsed.error.issues.map(issue => issue.message).join('; ')}. Use landings --help. ${fileHistoryHelp}`,
   );
   const { from, to, ...rest } = parsed.data;
   return transport.query('projectHostedLandings:read', {
-    from: new Date(from).toISOString(),
-    to: new Date(to).toISOString(),
+    ...(from && to ? { from: new Date(from).toISOString(), to: new Date(to).toISOString() } : {}),
     ...rest,
   });
 }

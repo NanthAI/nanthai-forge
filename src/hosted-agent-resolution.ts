@@ -106,7 +106,13 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
   const { paths, reasons, kinds } = await listed;
   const { root } = placed;
   // The run that resolves owns the resolution Lane's idle listing (d730121f).
-  recordLane({ laneId: source.lane.laneId, root, ...session.address, agent: sessionAgentSlug() ?? null });
+  recordLane({
+    laneId: source.lane.laneId,
+    root,
+    ...session.address,
+    agent: sessionAgentSlug() ?? null,
+    ...(placed.origin ? { resolutionOf: placed.origin } : {}),
+  });
   const dependencies = await shareDependencies(root, {
     announce: announceRegistryHosts,
   }).catch((error: unknown) => ({

@@ -205,16 +205,54 @@ async function evidence(
     },
   };
 }
+/** One receipt: the exact id (one indexed read), else a unique prefix (one bounded range of
+ * two rows on the same index), then the same evidence rows as a window read. */
+async function oneLanding(ctx: QueryCtx, projectId: Id<'hostedProjects'>, receiptId: string) {
+  const wanted = receiptId.trim().toLowerCase();
+  invariant(
+    wanted.length >= 8 && wanted.length <= 64,
+    'BAD_ARGUMENT',
+    'Pass a receipt id or at least 8 characters of one.',
+  );
+  const exact = await ctx.db
+    .query('projectHostedAcceptances')
+    .withIndex('by_project_and_receipt', q => q.eq('projectId', projectId).eq('receiptId', wanted))
+    .unique();
+  const found = exact
+    ? [exact]
+    : await ctx.db
+        .query('projectHostedAcceptances')
+        .withIndex('by_project_and_receipt', q =>
+          q.eq('projectId', projectId).gte('receiptId', wanted).lt('receiptId', `${wanted}\uffff`),
+        )
+        .take(2);
+  invariant(found.length, 'NOT_FOUND', `No landing in this project has receipt id ${wanted}.`);
+  invariant(
+    found.length === 1,
+    'AMBIGUOUS_ID',
+    `Receipt prefix ${wanted} matches more than one landing (${found.map(row => row.receiptId).join(', ')}, ...); pass more characters.`,
+  );
+  const receipt = found[0]!;
+  const { row } = await evidence(
+    ctx,
+    projectId,
+    JSON.parse(receipt.value) as HostedAcceptance,
+    receipt.sequence,
+  );
+  return { schema: 1, landings: [row], nextCursor: null };
+}
 /** Accepted landings in [from,to) by commit time, oldest first, one query execution per page.
  * Reads the receipt index plus about four indexed rows per landing; no scan, no writes, no idle work.
  * A page ends early at the read or output byte budget; `nextCursor` resumes exactly there. */
 export const read = query({
   args: {
     projectId: v.id('hostedProjects'),
-    from: v.string(),
-    to: v.string(),
+    from: v.optional(v.string()),
+    to: v.optional(v.string()),
     limit: v.optional(v.number()),
     cursor: v.optional(v.union(v.string(), v.null())),
+    /** One landing by its receipt id or a unique 8+ character prefix, instead of a window. */
+    receiptId: v.optional(v.string()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -222,8 +260,10 @@ export const read = query({
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read landings.');
       await accessibleProject(ctx, input.projectId, user.subject);
-      const from = Date.parse(input.from),
-        to = Date.parse(input.to);
+      if (input.receiptId !== undefined)
+        return JSON.stringify(await oneLanding(ctx, input.projectId, input.receiptId));
+      const from = Date.parse(input.from ?? ''),
+        to = Date.parse(input.to ?? '');
       invariant(
         Number.isFinite(from) && Number.isFinite(to) && from < to,
         'BAD_ARGUMENT',

@@ -8,6 +8,8 @@ import { planningIssueArguments } from './planning-issue-arguments.js';
 import { resolvePlanningId } from './hosted-agent-planning.js';
 import { isPlanningRef, isPlanningUuid, planningIdHelp } from './planning-id.js';
 const issueRef = z.string().refine(isPlanningRef, `expected ${planningIdHelp}`);
+import { shellQuote } from './shell-quote.js';
+import { hostedAgentRoot } from './hosted-agent-journal.js';
 export const liveLanesInput = z
   .object({
     planningItemId: issueRef
@@ -98,7 +100,14 @@ export async function liveLanes(transport: HostedAgentTransport, input: Record<s
           ? await itemLanes(transport, input.planningItemId!, input)
           : input.view === 'loose-ends'
             ? looseEnds(await transport.query('projectLooseEnds:read', {}))
-            : await transport.query('projectHostedLiveLanes:list', { ...input, limit: input.limit ?? 50 }),
+            : {
+                ...(await transport.query<Record<string, unknown>>('projectHostedLiveLanes:list', {
+                  ...input,
+                  limit: input.limit ?? 50,
+                })),
+                // A Lane whose folder or land operation id is gone recovers its landing by laneId (7da396ed).
+                recover: `nforge agent ${shellQuote(hostedAgentRoot(transport.root))} status '{"laneId":"LANE_ID"}' names a Lane's landing in flight and its wait, even without its folder.`,
+              },
     };
   } catch (error) {
     if (
