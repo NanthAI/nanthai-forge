@@ -108,7 +108,7 @@ CHECK_NOT_PASSED: acceptance needs a passed check for this exact head; land --sa
   },
   review: {
     title: 'Reading source and changes',
-    text: `- diff {laneId?,paths?,byteBudget?,summary?,cursor?} compares pinned base to saved head; summary:true returns per changed path status plus main equal|absent|different (no hunks). nextCursor continues the same pair.
+    text: `- diff {laneId?,paths?,byteBudget?,summary?,cursor?} compares pinned base to saved head; summary:true returns per changed path status plus main equal|absent|different (no hunks). byteBudget (reply bytes, default 48000) below 1024 reads as 1024. nextCursor continues the same pair.
 - show {state?|candidateId?|laneId?|channel:"main"|at:"base"|"main",path} reads exact bytes; at:"base" is this Lane's pinned base, at:"main" is current main.
 - Saved Lane bytes exclude unsaved edits; show and diff never substitute another revision.
 - peers {laneId?,path?,detail?} reads saved overlap evidence (help overlap).

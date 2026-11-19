@@ -206,6 +206,12 @@ test('diff summary:true says equal/absent/different against main from manifests 
     await f.transport().dispatch('diff', { laneId: f.lane.laneId, summary: true, byteBudget: 1024 })
   ).result;
   assert.equal(page.items.length, 6, 'a small budget still fits these short rows');
+  // ad80e037: a paths-only read with a budget below the 1024-byte page minimum reads as that page,
+  // instead of failing (the queue-stall builder passed a small byteBudget for another Lane's paths).
+  const small = (
+    await f.transport().dispatch('diff', { laneId: f.lane.laneId, summary: true, byteBudget: 200 })
+  ).result;
+  assert.deepEqual(small.items, page.items);
   const only = (
     await f.transport().dispatch('diff', { laneId: f.lane.laneId, summary: true, paths: ['g.ts', 'e.ts'] })
   ).result;

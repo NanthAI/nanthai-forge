@@ -34,11 +34,21 @@ export const hostedPeersSchema = z
     detail: z.boolean().default(false),
   })
   .strict();
+/** The smallest diff page: a byteBudget below it reads as it. */
+export const DIFF_MIN_BYTE_BUDGET = 1024;
 export const hostedDiffSchema = z
   .object({
     laneId: z.uuid().optional(),
     paths: z.array(z.string().refine(safeRelative)).optional(),
-    byteBudget: z.number().int().min(1024).safe().default(48000),
+    /** Reply bytes for this page. Below 1024 (the smallest page, which still fits one path entry)
+     * reads as 1024, so a small paths-only budget works instead of failing (ad80e037). */
+    byteBudget: z
+      .number()
+      .int()
+      .min(1)
+      .safe()
+      .default(48000)
+      .transform(budget => Math.max(budget, DIFF_MIN_BYTE_BUDGET)),
     /** Per changed path: equal / absent / different against current main. No hunks, no blob reads. */
     summary: z.boolean().default(false),
     /** Compare from this State instead of the pinned base: a full id, or a unique 8+ character prefix of
