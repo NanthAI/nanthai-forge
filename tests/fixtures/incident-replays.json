@@ -318,6 +318,36 @@
       "what": "On 2026-11-17 main moves cancelled 57 running checks of landed work (2,977 job-min modelled) although some could still carry or seed a scoped recheck that pays; the 11-17 trace replays today's sweep against the keep rule with recorded queue waits kept",
       "file": "tests/keep-the-run-replay.test.mjs",
       "test": "incident fa2c1383: keeping runs where it pays cuts the 11-17 main-move waste by 30% or more without raising runner-minutes, run wall or time to main"
+    },
+    {
+      "incident": "70a9bd2f",
+      "what": "Zoo timing 70a9bd2f: a build input and disjoint source arrived together; the admission pipeline must check a follower with its predecessor on the exact combined head (the O3 switch broke this, Item 026ce0cf)",
+      "file": "tests/hosted-landing-overtake.test.mjs",
+      "test": "incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5x solo timing bar"
+    },
+    {
+      "incident": "70a9bd2f",
+      "what": "Zoo timing 70a9bd2f: a build input and disjoint source arrived together; the admission pipeline must check a follower with its predecessor on the exact combined head (the O3 switch broke this, Item 026ce0cf)",
+      "file": "tests/hosted-landing-overtake.test.mjs",
+      "test": "70a9bd2f: a follower that finishes before its predecessor keeps the exact combined pass"
+    },
+    {
+      "incident": "70a9bd2f",
+      "what": "Zoo timing 70a9bd2f: a build input and disjoint source arrived together; the admission pipeline must check a follower with its predecessor on the exact combined head (the O3 switch broke this, Item 026ce0cf)",
+      "file": "tests/hosted-landing-pipeline.test.mjs",
+      "test": "70a9bd2f: an admission platform retry keeps the exact combined successor"
+    },
+    {
+      "incident": "70a9bd2f",
+      "what": "Zoo timing 70a9bd2f: a build input and disjoint source arrived together; the admission pipeline must check a follower with its predecessor on the exact combined head (the O3 switch broke this, Item 026ce0cf)",
+      "file": "tests/hosted-landing-pipeline.test.mjs",
+      "test": "70a9bd2f: an owner-held admission releases its predicted successor onto surviving main"
+    },
+    {
+      "incident": "70a9bd2f",
+      "what": "Zoo timing 70a9bd2f: a build input and disjoint source arrived together; the admission pipeline must check a follower with its predecessor on the exact combined head (the O3 switch broke this, Item 026ce0cf)",
+      "file": "tests/byoci-parity.test.mjs",
+      "test": "parity: speculative slots check the changed entry and follower together for either command"
     }
   ]
 }

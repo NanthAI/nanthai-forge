@@ -28,7 +28,7 @@ test.after(() => {
   }
 });
 
-// O4 (FORGE_QUEUE_CANCEL_HONOURS_FAST) is deleted (lead decision on 026ce0cf): a main move
+// The O4 cancel-honours-fast switch is deleted (lead decision on 026ce0cf): a main move
 // retires an overlapping or global-risk running check in every landing mode, and the Lane gets
 // the ordinary exact recheck that holds queue order (incident replays 10d253c6, C1).
 for (const { name, paths, mode = 'fast', breaker = false, person = false } of [

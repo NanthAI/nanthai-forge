@@ -452,8 +452,6 @@ Switching the mode never invalidates a queued landing: it is read when a proof i
 agent sign-in, switching fast on is held for the owner person, like any edit that changes what may
 land; switching back to strict applies at once.
 
-Queue switches named below default to off while queue behavior is benchmarked.
-
 A file main changed that already holds the queued Candidate's bytes is not `SYNC_REQUIRED`
 advice: an early resolution carries its predecessor's own files, and the recompose takes
 either side. The would-conflict pass compares main's blob with the Candidate's stored file
