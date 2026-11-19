@@ -18,7 +18,7 @@ import { holdLines, landingHold } from './hosted-landing-hold.js';
 import { landingStateField } from './landing-state.js';
 import { learnFromLanding } from './preflight-learned.js';
 import { operationLine } from './hosted-land-wait.js';
-import { AGENT_WAIT_SECONDS, operationWait } from './agent-operation-wait.js';
+import { AGENT_WAIT_SECONDS, interruptedWait, operationWait } from './agent-operation-wait.js';
 import { recordTurnWait, settleTurnWork } from './agent-turn-work.js';
 import { HostedAgentTransport, type HostedAgentResponse } from './hosted-agent-transport.js';
 import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
@@ -200,8 +200,12 @@ async function dispatchHostedAgentCli(
         transport.waitBoard = previousBoard;
       }
     }
-    const controller = new AbortController(),
-      stop = () => controller.abort();
+    const controller = new AbortController();
+    let signalled: 'SIGINT' | 'SIGTERM' | undefined;
+    const stop = (signal: 'SIGINT' | 'SIGTERM') => {
+      signalled = signal;
+      controller.abort();
+    };
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
     try {
@@ -390,13 +394,16 @@ async function dispatchHostedAgentCli(
         };
       }
       if (status === 'timeout' || status === 'cancelled') {
-        process.exitCode = status === 'timeout' ? 3 : 130;
+        const interrupted = status === 'cancelled' ? interruptedWait(signalled) : undefined;
+        process.exitCode = interrupted?.exitCode ?? 3;
+        if (interrupted?.note) process.stderr.write(`${interrupted.note}\n${waitCommand}\n`);
         recordTurnWait(root, continuation.next, null);
         return {
           ...response,
           result: {
             status: 'IN_PROGRESS',
-            reason: status === 'timeout' ? 'budget' : 'cancelled',
+            reason: interrupted?.reason ?? 'budget',
+            ...(interrupted?.note ? { note: interrupted.note } : {}),
             budgetSeconds,
             ...(selectedWait.runId
               ? { runId: selectedWait.runId, phase: run?.status ?? 'unknown' }

@@ -32,3 +32,16 @@ export function operationWait(root: string, parameters: Record<string, unknown>)
       'Work is unfinished. Keep this turn active and run command to wait. It returns IN_PROGRESS within its budget; after that or a killed shell, run the same command again; do not submit a new operation. Follow the terminal result and its recovery command before reporting completion.',
   };
 }
+
+/** How a wait that a signal ended reports itself. Agent harnesses send SIGTERM when a background
+ * command reaches its time limit (Claude Code's default is 1,800 s, under the wake budget): the
+ * work goes on, so that stop is an ordinary IN_PROGRESS (exit 3) whose note names the cause and the
+ * same command, not a cancel. SIGINT is a person interrupting: exit 130 as before. No reads. */
+export function interruptedWait(signal: 'SIGINT' | 'SIGTERM' | undefined) {
+  if (signal !== 'SIGTERM') return { exitCode: 130, reason: 'cancelled' as const };
+  return {
+    exitCode: 3,
+    reason: 'stopped' as const,
+    note: `Stopped by SIGTERM, usually your harness's background time limit; the work goes on. Run the same command again (in the background, with a timeout above 7,080 s, for example 7200000 ms).`,
+  };
+}

@@ -36,6 +36,6 @@ export function wakeContinuation(root: string, next: Record<string, unknown>) {
       budgetSeconds: WAKE_BUDGET_SECONDS,
     },
     instruction:
-      'Submitted; the landing continues without you. Run command once as a background command (for example Bash run_in_background with a 7200000 ms timeout). It blocks without polling and exits once when the work settles (landed, failed or cancelled, with the receipt) or a note reaches this Lane. If ending your turn ends your task (a delegated or sub-agent run), block on that background command with your harness wait tool; otherwise end the turn or keep working, and its exit wakes you. Do not run status or wait in between. Then follow the receipt.',
+      'Submitted; the landing continues without you. Run command once as a background command with a 7200000 ms timeout (Bash run_in_background: the default 1800000 ms stops it early). It blocks without polling and exits once when the work settles (landed, failed or cancelled, with the receipt) or a note reaches this Lane. If ending your turn ends your task (a delegated or sub-agent run), block on that background command with your harness wait tool; otherwise end the turn or keep working, and its exit wakes you. Do not run status or wait in between. Then follow the receipt.',
   };
 }

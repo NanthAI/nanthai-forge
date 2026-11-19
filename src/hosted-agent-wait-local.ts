@@ -81,6 +81,9 @@ async function observeHostedSave(
   signal: AbortSignal | undefined,
   subscribe: () => HostedRunSubscription,
   board?: BoardWaitOption,
+  /** No local record names this id: a missing save is not this wait's answer (undefined), so the
+   * caller keeps the landing read's NOT_FOUND. */
+  unrecorded = false,
 ) {
   const boardWait = transport.advertisedFeatures?.includes('source-board-wait') ? board : undefined;
   const boardArgs = boardWait ? { board: { laneId: boardWait.laneId, after: boardWait.after } } : {};
@@ -101,12 +104,15 @@ async function observeHostedSave(
   const read = async () => {
     try {
       const value = await transport.query('projectHostedSaves:progress', { operationId, ...boardArgs });
+      // Every real save reply carries the save's own state; anything else is not this id's save.
+      if (unrecorded && !(value as { state?: unknown } | null)?.state) return undefined;
       const done = terminal(value);
       if (done) return done;
       const delivery = boardWait ? freshBoardDelivery(boardWait, value) : undefined;
       return delivery ? response({ status: 'message', board: delivery, inProgress: true }) : null;
     } catch (error) {
       if (hostedActionError(error, 'save observation').code !== 'NOT_FOUND') throw error;
+      if (unrecorded) return undefined;
       return response({
         status: 'terminal',
         successful: false,
@@ -117,7 +123,7 @@ async function observeHostedSave(
     }
   };
   const initial = await read();
-  if (initial) return initial;
+  if (initial !== null) return initial;
   const pending = (status: 'timeout' | 'cancelled') =>
     response({
       status,
@@ -242,7 +248,11 @@ export async function followLocalOperation(
     return undefined;
   const operationId = input.operationIds[0]!,
     local = localOperation(root, operationId);
-  if (!local) return undefined;
+  // Saves are keyed by project and operation, not by folder: from the project folder, or after the
+  // Lane's local marker settled and went away, the save's own record still answers (one read, on
+  // this NOT_FOUND path only).
+  if (!local)
+    return observeHostedSave(transport, operationId, input.timeoutSeconds, signal, subscribe, board, true);
   if (local.kind === 'check-run')
     return observeHostedRun(
       transport,
