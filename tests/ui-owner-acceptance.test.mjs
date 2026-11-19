@@ -14,8 +14,8 @@ for (const name of variants)
     assert.match(html, /fx-decide/);
     assert.doesNotMatch(html, /Connect owner|Waiting for .*Mac|Requested|<dialog|role="dialog"|[a-f0-9]{64}/);
     const expected = {
-      '01-ready': 'Accept into main',
-      '01b-viewer': 'A project owner or maintainer accepts',
+      '01-ready': 'Approve and land',
+      '01b-viewer': 'A project owner or maintainer approves',
       '02-queued': 'Queued',
       '02-accepting': '3 of 8 shards',
       '02b-behind': 'waits for Candidate 3',
@@ -34,7 +34,7 @@ for (const name of variants)
     }[name];
     assert.ok(html.includes(expected), expected);
     if (name === '01b-viewer') {
-      assert.doesNotMatch(html, /Accept into main/);
+      assert.doesNotMatch(html, /Approve and land/);
       assert.match(html, /Ask for changes/);
     }
     if (name === '02d-runner') {

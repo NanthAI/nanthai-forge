@@ -463,11 +463,14 @@ child processes and source loaded by path require conservative treatment; helper
 fixture and configuration paths without explicit ownership still take the full path. The full post-main
 check remains the safety net for runtime relationships static imports cannot express.
 
-Full standard runs record V8 coverage in a private temporary directory for each
-supervised test file, including inherited worker/child-process coverage. The
-supervisor emits compact `__FORGE_COVERAGE__` records into the retained check logs;
-native local and Actions runners reconstruct `coverage/test-impact.json` as a
-check artifact only when every selected file has a successful complete report.
+Full standard runs on native local and Actions runners record V8 coverage in a
+private temporary directory for each supervised test file, including inherited
+worker/child-process coverage. The supervisor emits compact `__FORGE_COVERAGE__`
+records into the retained check logs; those runners reconstruct
+`coverage/test-impact.json` as a check artifact only when every selected file has
+a successful complete report. Hosted checks collect none: their compact logs drop
+the records, and V8 block coverage made test files 0.93 to 2.83 times slower
+(median about 1.9) in an interleaved A/B.
 The artifact pins the checked head, source SHA-256 digests and the test-to-source
 execution map. Built core JavaScript maps to its TypeScript source by path.
 Files loaded by custom loaders or children that replace their environment may be

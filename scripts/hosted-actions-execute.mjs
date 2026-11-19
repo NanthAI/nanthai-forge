@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Fixed workflow checkout supplies this executor; candidate scripts run as project code.
-import { runActionsCheck } from './github-actions-check.mjs';
+import { hostedActionsCheck } from './github-actions-check.mjs';
 try {
-  runActionsCheck();
+  hostedActionsCheck();
 } catch (error) {
   // A failed child already printed its own output; a guard error (ZERO_SELECTION, CHECK_CONTRACT_MISMATCH) has no status and must say why.
   if (error.status == null && !error.signal) console.error(error.message ?? error);

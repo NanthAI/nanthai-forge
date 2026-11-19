@@ -70,7 +70,7 @@ export const needsMeResult = v.object({
   moreIsLowerBound: v.boolean(),
   /** Open approval requests (projectHostedApprovals:list), as its canonical payload. */
   approvals: v.string(),
-  /** Whether the viewer can grant or decline (the project owner). */
+  /** Whether the viewer can approve or decline (the project owner). */
   canDecide: v.boolean(),
   /** Questions with choices addressed to the viewer, unanswered, on an open Lane (Items 12fde646, 48049998). */
   asks: v.optional(

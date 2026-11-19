@@ -813,7 +813,7 @@ export class HostedAgentTransport {
           next: link.held
             ? link.url
               ? 'Hand this link to the project owner; they open it signed in and accept or decline. Your wait returns on their decision.'
-              : 'This deployment has no web address configured; the owner accepts on the review page.'
+              : 'This deployment has no web address configured; the owner approves on the review page.'
             : 'This landing is not waiting for review.',
         });
       }

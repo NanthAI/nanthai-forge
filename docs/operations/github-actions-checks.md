@@ -1568,6 +1568,9 @@ the fixed executor already enforces CI failure for a missing selected browser.
 Individual fixtures adopt the shared CI-failure/local-skip rule after that executor
 is accepted. The helper reads the pinned `FORGE_BROWSER_TESTS` flag; excluded
 coverage never probes a browser.
+Executor contract 6 stops the hosted executor (`scripts/hosted-actions-execute.mjs`) from
+collecting V8 coverage: hosted results keep none, and it made test files 0.93 to 2.83 times
+slower (median about 1.9). Native runners still collect it ([development](../development.md#scope-aware-standard-check)).
 Browser fixture tests use synthetic data and start no hosted service. Cache bytes
 are runner files, not CLI dependencies or Convex records. Timing qualification and
 cache-size evidence are recorded on planning Item `1dd4e095`; restoring a browser

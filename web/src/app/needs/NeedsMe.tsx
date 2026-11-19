@@ -146,7 +146,7 @@ function NeedsMeScreen({ route, projectId, projectName, feed }: PlaceProps) {
   );
 }
 
-/** Grant or decline: a Lane's request, or a landing held for review on its exact attempt (decide.ts). */
+/** Approve or decline: a Lane's request, or a landing held for review on its exact attempt (decide.ts). */
 export type { Decide } from './decide';
 /** Answer a question with one of its choices (a coordination acknowledgement the asker reads). */
 export type Answer = (ask: AskRow, choice: string) => Promise<void>;

@@ -15,7 +15,15 @@ import {
   CHECK_CONTRACT_ENV,
   CHECK_CONTRACT_PROVIDED,
 } from './check-contract.mjs';
-export function runActionsCheck(execute = execFileSync, { install = true, build = true } = {}) {
+/** The hosted supervisor's executor (scripts/hosted-actions-execute.mjs). Its results path keeps no
+ * coverage: compact hosted logs drop `__FORGE_COVERAGE__` records and only native runners retain the
+ * artifact. V8 block coverage made test files 0.93-2.83x slower (median ~1.9x), so it is not collected there. */
+export const hostedActionsCheck = (execute = execFileSync) => runActionsCheck(execute, { coverage: false });
+
+export function runActionsCheck(
+  execute = execFileSync,
+  { install = true, build = true, coverage = true } = {},
+) {
   // First, before install or build: the Candidate's scripts must not need more than this executor provides.
   assertCheckContract(
     { ...process.env, [CHECK_CONTRACT_ENV]: String(CHECK_CONTRACT_PROVIDED) },
@@ -120,8 +128,7 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
         );
       if (part !== undefined && part !== 'kept') {
         // A unit runs after this job's kept part: dependencies and build are already in place.
-        if (plan.selection.scope === 'full') env.FORGE_TEST_COVERAGE_HEAD = plan.head;
-        else delete env.FORGE_TEST_COVERAGE_HEAD;
+        coverageHead(env, plan, coverage);
         env.FORGE_TEST_RETRY_FILES = JSON.stringify(plan.retryFiles ?? []);
         phases.time('pool', () => run('node', ['scripts/test-files.mjs', ...files]));
         return;
@@ -136,15 +143,20 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
         // before tests invoke the deployment compiler directly.
         run('node', ['scripts/prepare-convex-api.mjs']);
       }
-      // Partial runs never claim coverage, even when the job inherits a coverage head.
-      if (plan.selection.scope === 'full') env.FORGE_TEST_COVERAGE_HEAD = plan.head;
-      else delete env.FORGE_TEST_COVERAGE_HEAD;
+      coverageHead(env, plan, coverage);
       env.FORGE_TEST_RETRY_FILES = JSON.stringify(plan.retryFiles ?? []);
       phases.time('tests', () => run('node', ['scripts/test-files.mjs', ...files]));
     }
   } finally {
     phases.report();
   }
+}
+
+/** Only a full run collects coverage, and only for an executor that retains it. Partial runs never
+ * claim coverage, even when the job inherits a coverage head. */
+function coverageHead(env, plan, coverage) {
+  if (coverage && plan.selection.scope === 'full') env.FORGE_TEST_COVERAGE_HEAD = plan.head;
+  else delete env.FORGE_TEST_COVERAGE_HEAD;
 }
 
 /** Files of one shard pool part, always taken from the pinned plan (never from the caller). */

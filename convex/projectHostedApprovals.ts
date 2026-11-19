@@ -122,7 +122,7 @@ function requestReply(
   return {
     ...approvalView(row, row.laneId),
     url,
-    next: `${url ? 'Hand this link to the project owner; they open it signed in and grant or decline. ' : ''}Landing this Lane holds for the owner until they grant it. Tell your user in your own app that it waits for the owner, then wait for the decision: nforge agent ROOT wait '{"approval":"${row.laneId}"}'.`,
+    next: `${url ? 'Hand this link to the project owner; they open it signed in and approve or decline. ' : ''}Landing this Lane holds for the owner until they approve it. Tell your user in your own app that it waits for the owner, then wait for the decision: nforge agent ROOT wait '{"approval":"${row.laneId}"}'.`,
   };
 }
 
@@ -147,7 +147,7 @@ export const decide = mutation({
       invariant(
         actor.kind === 'person',
         'PROJECT_UNAVAILABLE',
-        'Only the project owner, signed in as a person, can grant or decline approval.',
+        'Only the project owner, signed in as a person, can approve or decline.',
       );
       const row = await approvalRow(ctx, input.projectId, input.laneId);
       if (row?.setting && row.decision?.operationId === input.operationId)

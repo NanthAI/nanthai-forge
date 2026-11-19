@@ -22,7 +22,7 @@ export type ApprovalCommand = { laneId?: string; reason?: string; withdraw?: boo
  * `request-approval` (Issue fe5bea80): ask the project owner for a go on one saved Lane, with a
  * reason the owner and the board see. One mutation, no capability discovery; the operationId
  * (generated when omitted, printed in the reply) makes a lost reply's retry return the same request.
- * `withdraw:true` drops your own request. Agents can request, never grant.
+ * `withdraw:true` drops your own request. Agents can request, never approve.
  */
 export async function executeHostedApproval(
   port: ApprovalPort,
@@ -65,7 +65,7 @@ export const approvalWaitHooks: {
 
 /**
  * `wait {approval: LANE_ID}`: ONE live subscription to projectHostedApprovals:observe (one indexed
- * row) for the length of the wait. It re-runs only when the owner grants or declines (or the request
+ * row) for the length of the wait. It re-runs only when the owner approves or declines (or the request
  * is reopened or withdrawn), and returns on that write. No polling; nothing after the process exits.
  */
 export async function observeApproval(
@@ -143,7 +143,7 @@ export function approvalNext(outcome: ApprovalOutcome, laneId: string) {
       : `Lane ${lane} has no approval request. Ask with request-approval.`;
   if (outcome.status !== 'decided') return null;
   return outcome.approval?.status === 'granted'
-    ? `The owner granted Lane ${lane}. Land it now (land --save); a new save after the grant needs the owner again.`
+    ? `The owner approved Lane ${lane}. Land it now (land --save); a new save after the approval needs the owner again.`
     : `The owner declined Lane ${lane}. Read their reason, address it in this Lane, then request-approval again.`;
 }
 
@@ -156,7 +156,7 @@ function settingNext(outcome: ApprovalOutcome) {
       : 'No held settings change with that id.';
   if (outcome.status !== 'decided') return null;
   return outcome.approval?.status === 'granted'
-    ? `The owner granted the ${change} and it is applied. Rerun your original command (same operationId) to read its receipt.`
+    ? `The owner approved the ${change}; it is in effect. Rerun your original command (same operationId) to read its receipt.`
     : `The owner declined the ${change}; nothing changed. Read their reason before asking again.`;
 }
 
@@ -205,7 +205,7 @@ export function openApprovalsReply(value: unknown) {
       url: request.url ?? null,
     })),
     next: waiting.length
-      ? `${waiting.length} approval request${waiting.length === 1 ? ' waits' : 's wait'} for the project owner. Hand each url to them; only the owner grants or declines.`
+      ? `${waiting.length} approval request${waiting.length === 1 ? ' waits' : 's wait'} for the project owner. Hand each url to them; only the owner approves or declines.`
       : read.complete === false
         ? "No open request is waiting in the part of the list this read covered; it can't confirm there are none."
         : 'No approval request is waiting for the project owner.',

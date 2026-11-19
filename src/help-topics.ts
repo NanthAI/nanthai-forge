@@ -44,7 +44,7 @@ More: help wait, help conflict, help check, help overlap.`,
 - wait blocks up to 540 s (--budget SECONDS); transient observation failures retry inside it.
 - Exit 3 is IN PROGRESS: run the same wait again. Never sleep between waits.
 - Terminal failure follows its recovery command; LANDED is acceptance, CHECK PASSED alone is not.
-- wait takes exactly one of runId, operationIds, peer or approval. wait {approval:LANE_ID} blocks until the owner grants or declines request-approval. wait {peer:LANE_ID} blocks until that Lane lands, its latest landing fails or is cancelled, or the Lane closes (exit 0), or a note reaches your Lane (reason message, exit 3).
+- wait takes exactly one of runId, operationIds, peer or approval. wait {approval:LANE_ID} blocks until the owner approves or declines request-approval. wait {peer:LANE_ID} blocks until that Lane lands, its latest landing fails or is cancelled, or the Lane closes (exit 0), or a note reaches your Lane (reason message, exit 3).
 - status accepts laneId; observe/landing select operationId (the original landing UUID), submissionId or runId.
 - LANDING_STALLED: follow the receipt's exact repair command for the original operation; do not resubmit. Without a repair command, read queue '{}' and landing {operationId} first.`,
   },

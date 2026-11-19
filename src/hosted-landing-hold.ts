@@ -45,7 +45,7 @@ export function landingHold(state: HoldInput | null | undefined, laneId?: string
             .map(path => path.trim())
             .filter(Boolean)
         : null,
-      next: `Check passed; held until the project owner accepts ${state?.id ? `submission ${state.id}` : 'it'} as a person (agents cannot approve; it does not time out). Hand the owner the link from nforge agent ROOT approve-link '{"operationId":"${state?.operationId ?? 'ORIGINAL_UUID'}"}' and keep waiting: this wait returns on their decision. To drop it instead: nforge agent ROOT land --withdraw '${lane}'.`,
+      next: `Check passed; held until the project owner approves ${state?.id ? `submission ${state.id}` : 'it'} as a person (agents cannot approve; it does not time out). Hand the owner the link from nforge agent ROOT approve-link '{"operationId":"${state?.operationId ?? 'ORIGINAL_UUID'}"}' and keep waiting: this wait returns on their decision. To drop it instead: nforge agent ROOT land --withdraw '${lane}'.`,
     };
   }
   if (reason === 'waiting-for-dependency')

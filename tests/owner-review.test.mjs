@@ -276,9 +276,9 @@ test('the /approve card shows Accept and Decline only for a held landing', () =>
     observation: { state: 'pending', pendingReason: 'waiting-for-review' },
     error: { code: 'REVIEW_REQUIRED', message: 'needs owner approval: protected paths selected.txt' },
   });
-  assert.match(heldCard, /Accept into main/);
+  assert.match(heldCard, /Approve and land/);
   assert.match(heldCard, /protected paths selected\.txt/);
-  assert.doesNotMatch(render(base), /Accept into main/);
+  assert.doesNotMatch(render(base), /Approve and land/);
   assert.match(
     render({
       ...base,
@@ -597,17 +597,17 @@ test('the /approve?lane card offers Grant and Decline only for a live request', 
     landing: null,
   };
   const open = render({ ...base, status: 'requested' });
-  assert.match(open, />Grant</);
+  assert.match(open, />Approve</);
   assert.match(open, /touches billing/);
   assert.match(open, /@thevarsek\/ready-narwhal/);
-  assert.doesNotMatch(render({ ...base, status: 'granted' }), />Grant</);
+  assert.doesNotMatch(render({ ...base, status: 'granted' }), />Approve</);
   assert.match(render({ ...base, live: false, status: 'granted', ended: { kind: 'landed' } }), /Landed/);
   assert.match(render({ ...base, status: 'none', live: false }), /no approval request/);
   // Issue f7793473: a fork PR's run request names the PR and never promises a landing.
   const fork = { ...base, pullRequest: 7, requester: 'thevarsek', agent: undefined };
   const ask = render({ ...fork, status: 'requested' });
   assert.match(ask, /Run the check of fork PR #7\?/);
-  assert.match(ask, />Grant</);
+  assert.match(ask, />Approve</);
   assert.match(ask, /without private submodules/);
   assert.doesNotMatch(ask, /Landing it holds/);
   assert.match(render({ ...fork, status: 'granted' }), /forge\/verify on the PR/);
@@ -943,7 +943,7 @@ test('W7: the Lane, fork and setting pages decide in the same order and word eve
   for (const ended of ['settled', 'applied']) {
     const html = render(lane('granted', false, ended));
     assert.doesNotMatch(html, /withdrew/, `granted + ${ended}`);
-    assert.match(html, /Granted|Landed/);
+    assert.match(html, /Approved|Landed/);
   }
   assert.match(render(lane('declined', false, 'withdrawn')), /Declined/);
   assert.doesNotMatch(render(lane('declined', false, 'withdrawn')), /withdrew/);
@@ -954,15 +954,15 @@ test('W7: the Lane, fork and setting pages decide in the same order and word eve
   assert.match(render(lane('requested', false, 'settled')), /work it covered settled/);
   assert.match(render(lane('requested', false)), /cannot confirm/);
   assert.match(render(lane('surprising', true)), /cannot confirm/);
-  // The same row reads the same on the setting page: a grant is Applied whatever ended it.
+  // The same row reads the same on the setting page: an approval reads Approved whatever ended it.
   const setting = (status, live, ended) => ({ ...lane(status, live, ended), setting: { origin: 'policy' } });
-  assert.match(render(setting('granted', false, 'applied')), /Applied/);
-  assert.match(render(setting('granted', false)), /Applied/);
+  assert.match(render(setting('granted', false, 'applied')), /Approved/);
+  assert.match(render(setting('granted', false)), /Approved/);
   assert.match(render(setting('declined', false, 'withdrawn')), /Declined/);
   assert.match(render(setting('requested', false, 'withdrawn')), /withdrew or replaced/);
-  // And on the fork page: Granted beats ended, as on the Lane page.
+  // And on the fork page: Approved beats ended, as on the Lane page.
   const fork = (status, live, ended) => ({ ...lane(status, live, ended), pullRequest: 7 });
-  assert.match(render(fork('granted', false, 'settled')), /Granted/);
+  assert.match(render(fork('granted', false, 'settled')), /Approved/);
   assert.match(render(fork('requested', false, 'withdrawn')), /was withdrawn/);
 });
 

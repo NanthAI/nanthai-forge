@@ -34,7 +34,7 @@ export function OwnerReviewActions({ review }: { review: OwnerReview }) {
   return (
     <div className="fx-land-actions">
       <Button variant="primary" disabled={review.busy} onClick={review.accept}>
-        {review.labels?.accept ?? 'Accept into main'}
+        {review.labels?.accept ?? 'Approve and land'}
       </Button>
       <Button variant="ghost" disabled={review.busy} onClick={() => setDeclining(true)}>
         Decline…

@@ -14,7 +14,7 @@ export const hostedWaitSchema = z
       .string()
       .regex(/^[0-9a-fA-F]{8}[0-9a-fA-F-]{0,28}$/, 'a Lane id or 8+ character prefix')
       .optional(),
-    /** Wait for the project owner to grant or decline this Lane's approval request (fe5bea80), or a held
+    /** Wait for the project owner to approve or decline this Lane's approval request (fe5bea80), or a held
      * settings change's request (its `setting:` id, Issue 470ef29b). Exclusive with the others. */
     approval: z
       .string()

@@ -75,7 +75,7 @@ export function settingReply(row: ApprovalRow) {
     status: row.status,
     live: openSettingRequest(row),
     url,
-    next: `This settings change needs the project owner. ${url ? 'Hand them this link; they open it signed in and grant or decline. ' : 'Ask them to grant it on the approve page. '}The grant applies exactly this change. Wait for the decision: nforge agent ROOT wait '{"approval":"${row.laneId}"}'.`,
+    next: `This settings change needs the project owner. ${url ? 'Hand them this link; they open it signed in and approve or decline. ' : 'Ask them to approve it on the approve page. '}Approving applies exactly this change. Wait for the decision: nforge agent ROOT wait '{"approval":"${row.laneId}"}'.`,
   };
 }
 

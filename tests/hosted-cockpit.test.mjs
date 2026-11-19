@@ -398,7 +398,7 @@ test('SM-D M3: an open approval request is a Needs you item for the owner, with 
     state: 'requested',
     needsOwner: true,
     label: 'Held settings change waits for you',
-    nextStep: 'Open the approve link, then grant or decline the settings change.',
+    nextStep: 'Open the approve link, then approve or decline the settings change.',
     reason: 'tighten the landing gate',
     requester: 'builder',
     setting: { origin: 'policy' },

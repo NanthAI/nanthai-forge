@@ -39,7 +39,7 @@ test('a review hold names its reason, protected paths and next step from the sta
   assert.equal(hold.kind, 'review');
   assert.deepEqual(hold.paths, ['.github/workflows/forge-check.yml']);
   assert.match(hold.reason, /protected paths: \.github\/workflows\/forge-check\.yml/);
-  assert.match(hold.next, /owner accepts submission 24828b1f-9bc4-4fa6-815a-de200ecaa7d3 as a person/);
+  assert.match(hold.next, /owner approves submission 24828b1f-9bc4-4fa6-815a-de200ecaa7d3 as a person/);
   assert.match(hold.next, new RegExp(`land --withdraw '\\{"laneId":"${LANE}"\\}'`));
   // The owner's link comes from approve-link on this exact operation (fe5bea80).
   assert.match(hold.next, /approve-link '\{"operationId":"0d5394e3-4ccf-4cdc-964e-0df73decfacc"\}'/);
@@ -157,7 +157,7 @@ test('incident replay: a protected-path landing held for review stays listed in 
   assert.equal(entry.position, null);
   assert.equal(entry.hold.kind, 'review');
   assert.deepEqual(entry.hold.paths, ['.github/workflows/forge-check.yml']);
-  assert.match(entry.hold.next, /owner accepts/);
+  assert.match(entry.hold.next, /owner approves/);
   assert.equal(page.held, 1);
   // The builder's queue read: yourLane is listed and names the hold.
   const marked = markQueueLane(page, entry.laneId);

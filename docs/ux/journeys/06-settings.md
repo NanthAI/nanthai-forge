@@ -22,7 +22,7 @@ Walked: `policy`, `check-settings`, `capabilities`, `nforge settings`, the Setti
 2. The owner finds the command in the docs: `nforge x ROOT set-policy '{"acceptance":{"landingMode":"fast"}}'`.
 3. The CLI sign-in counts as an agent. A change that alters what a landing may accept is not written. The reply is `rule:"held"` with a link `/approve?project=…&lane=setting:policy`. (docs)
 4. The owner opens the link, signed in on the web: "Apply this policy change? Requested by HANDLE, signed in as an agent. Policy changes decide what every landing must pass, so they need you." The change is shown as the JSON that was sent (open Issue 16093ed1). (source)
-5. The owner grants it. The original command, replayed, returns the applied receipt; `wait '{"approval":"…"}'` returns on the decision.
+5. The owner approves it. The original command, replayed, returns the applied receipt; `wait '{"approval":"…"}'` returns on the decision.
 
 Changes toward more oversight (back to strict, alerts back on) and most `agentDefaults` apply at once. A project with no landing yet applies everything directly (`rule:"bootstrap"`).
 

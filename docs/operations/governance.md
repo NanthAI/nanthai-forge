@@ -58,7 +58,7 @@ request under Needs me, Asked ahead), reads one summary line and a before/after 
 changed field, with each script as a wrapped line diff; the request exactly as sent, internal
 ids included, stays behind Details. The owner's read (`observe {detail:1}`) adds the setting
 as it is now and as the grant would leave it, at most one indexed read and only for an
-open request. The owner grants or declines in one step (`projectHostedApprovals:decide`;
+open request. The owner approves or declines in one step (`projectHostedApprovals:decide`;
 agents, device sign-ins and contributors are refused). A grant applies exactly that
 request as the agent's own operation, so the agent's retry returns the applied
 receipt; a policy request applies only while the policy parts it would change are as
@@ -109,7 +109,7 @@ held landing stays listed in `queue` without a position, and `land`, `wait`, `qu
 and `status` name the hold, its paths and the next step (see
 [held landings](../agents/workflow.md)).
 
-A signed-in owner accepts or declines a held landing in one step: **Accept into main**
+A signed-in owner approves or declines a held landing in one step: **Approve and land**
 or **Decline** on its review page, or on `/approve?project=…&submission=…`. The agent
 gets that link from `nforge agent ROOT approve-link {"operationId":"…"}` (one query; the
 link carries no attempt id, the page reads the current attempt). Both call
@@ -152,7 +152,7 @@ A builder can also ask for the owner's go on any saved Lane, whatever the path r
 (`projectHostedApprovals:request`, the Lane author or the owner) and one project board
 note, and replies with `/approve?project=…&lane=…`. While the request is open, landing
 that Lane holds after its check with `REVIEW_REQUIRED` naming the reason (a batch member
-lands alone). The owner person grants or declines in one step on that page
+lands alone). The owner person approves or declines in one step on that page
 (`projectHostedApprovals:decide`, refused for agents, device sign-ins and contributors).
 A grant covers exactly the Lane head the owner saw (a stale head is refused); if the
 Lane's landing is already held, the grant is that landing's exact approval and a decline

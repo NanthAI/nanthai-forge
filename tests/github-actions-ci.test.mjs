@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { runActionsCheck } from '../scripts/github-actions-check.mjs';
+import { hostedActionsCheck, runActionsCheck } from '../scripts/github-actions-check.mjs';
 import { githubActionsWorkflow } from '../dist/github-actions-workflow.js';
 
 function fixture(t) {
@@ -86,6 +86,64 @@ for (const scope of ['partial', 'full'])
       tests: [],
     });
   });
+
+// d5de1c98: hosted results drop coverage records, and V8 block coverage made test files up to 2.8x
+// slower (median ~1.9x), so the hosted executor collects none, even for a full run with an inherited head.
+test('the hosted executor runs a full standard shard and its pool units without V8 coverage', t => {
+  const { root, write } = fixture(t);
+  const names = [
+    'FORGE_ACTIONS_PLAN',
+    'FORGE_ACTIONS_SHARD',
+    'FORGE_ACTIONS_POOL_PART',
+    'FORGE_TEST_COVERAGE_HEAD',
+  ];
+  const previous = {
+    cwd: process.cwd(),
+    env: Object.fromEntries(names.map(name => [name, process.env[name]])),
+  };
+  t.after(() => {
+    process.chdir(previous.cwd);
+    for (const [key, value] of Object.entries(previous.env))
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+  });
+  const files = ['tests/a.test.mjs', 'tests/b.test.mjs'];
+  write(
+    'plan.json',
+    JSON.stringify({
+      pin: 'a'.repeat(64),
+      head: 'b'.repeat(64),
+      standard: true,
+      selection: { scope: 'full', reason: 'Fixture selection', tests: files },
+      groups: [files],
+      pool: [[1]],
+    }),
+  );
+  process.chdir(root);
+  process.env.FORGE_ACTIONS_PLAN = join(root, 'plan.json');
+  process.env.FORGE_ACTIONS_SHARD = '0';
+  process.env.FORGE_TEST_COVERAGE_HEAD = 'c'.repeat(64);
+  const tests = [];
+  const execute = (_command, args, { env }) => {
+    if (args[0] === 'scripts/test-files.mjs') tests.push({ files: args.slice(1), env });
+  };
+  for (const part of [undefined, 'kept', '0']) {
+    if (part) process.env.FORGE_ACTIONS_POOL_PART = part;
+    else delete process.env.FORGE_ACTIONS_POOL_PART;
+    hostedActionsCheck(execute);
+  }
+  delete process.env.FORGE_ACTIONS_POOL_PART;
+  runActionsCheck(execute);
+  assert.deepEqual(
+    tests.map(run => run.files),
+    [files, ['tests/a.test.mjs'], ['tests/b.test.mjs'], files],
+  );
+  assert.deepEqual(
+    tests.map(run => run.env.FORGE_TEST_COVERAGE_HEAD),
+    [undefined, undefined, undefined, 'b'.repeat(64)],
+    'only the native executor, which retains coverage, collects it for the pinned head',
+  );
+});
 
 test('arbitrary Actions commands get npm ci only in npm-locked projects', t => {
   const { root, write } = fixture(t);

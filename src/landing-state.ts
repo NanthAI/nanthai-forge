@@ -54,10 +54,10 @@ const views = {
   },
   'held-review': {
     label: 'Waiting for review',
-    // Not green: the check passed, but nothing landed until a person accepts it.
+    // Not green: the check passed, but nothing lands until a person approves it.
     tone: 'waiting',
     pending: true,
-    nextStep: 'The check passed; a person accepts it. Hand the owner the approve link and keep waiting.',
+    nextStep: 'The check passed; a person approves it. Hand the owner the approve link and keep waiting.',
   },
   'held-dependency': {
     label: 'Waiting for parent',

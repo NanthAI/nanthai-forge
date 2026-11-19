@@ -12,17 +12,18 @@
 //   Lane A: change the executor, raise PROVIDED and update SURFACE_DIGEST. Check scripts must not use it yet.
 //   Lane B (after A is on main): the scripts that use it, and raise REQUIRED.
 // PROVIDED only grows and additions only; to remove something, first stop requiring it (Lane B), then remove (Lane A).
+// An optional input that no check script REQUIRES may be removed in one Lane A with a PROVIDED bump (contract 6).
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const CHECK_CONTRACT_ENV = 'FORGE_CHECK_CONTRACT';
 /** What this tree's executor (scripts/github-actions-check.mjs) gives the scripts it runs. */
-export const CHECK_CONTRACT_PROVIDED = 5;
+export const CHECK_CONTRACT_PROVIDED = 6;
 /** The lowest executor contract this tree's check scripts (verify.mjs, forge-check.mjs, ...) work with. */
 export const CHECK_CONTRACT_REQUIRED = 0;
 /** Digest of the executor's observable surface at PROVIDED (tests/check-contract.test.mjs recomputes it). */
-export const CHECK_CONTRACT_SURFACE_DIGEST = '9b1a9fa5df882748';
+export const CHECK_CONTRACT_SURFACE_DIGEST = 'b69d41a1589db16b';
 
 export class CheckContractError extends Error {
   code = 'CHECK_CONTRACT_MISMATCH';

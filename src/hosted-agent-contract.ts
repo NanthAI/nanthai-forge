@@ -469,7 +469,7 @@ export const hostedAgentCommandSchemas = {
   /** The approve link of a landing (operationId = its original landing UUID) for a signed-in owner. */
   'approve-link': z.object({}).strict(),
   /** Ask the project owner to approve a saved Lane (default: this checkout's Lane) with a reason;
-   * landing it holds until they grant it. withdraw:true drops your request. */
+   * landing it holds until they approve it. withdraw:true drops your request. */
   'request-approval': z
     .object({
       laneId: uuid.optional(),

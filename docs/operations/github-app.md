@@ -361,7 +361,7 @@ first pull request or push is seen at once; no landing has to come first.
   never `live`, so it holds no landing). `forge/verify` goes pending once with
   "Fork PR: a project owner must approve this run." and links to the approve page
   (`/approve?project=…&lane=…`); the project board gets one note with the same
-  link. Only the project owner, signed in as a person, can grant or decline; agents
+  link. Only the project owner, signed in as a person, can approve or decline; agents
   and device sign-ins cannot. A grant starts the run (status "Forge check started
   (fork PR approved by a project owner)."). A fork run never gets private
   submodule access: its run carries `origin: fork-pull` and the runner session

@@ -46,7 +46,7 @@ export async function requestMemberApproval(
   throw new ForgeError(
     'PROJECT_UNAVAILABLE',
     `Project membership ${reply.status === 'declined' ? 'was declined by' : 'needs'} the owner person. ` +
-      `Approval request ${reply.id}. ${reply.url ? `Open ${reply.url} in a browser to grant or decline. ` : 'Open the project approve page in a browser to grant or decline. '}` +
-      `Wait: nforge agent ROOT wait '${JSON.stringify({ approval: reply.id })}'. Retry the original command after a grant.`,
+      `Approval request ${reply.id}. ${reply.url ? `Open ${reply.url} in a browser to approve or decline. ` : 'Open the project approve page in a browser to approve or decline. '}` +
+      `Wait: nforge agent ROOT wait '${JSON.stringify({ approval: reply.id })}'. Retry the original command after approval.`,
   );
 }

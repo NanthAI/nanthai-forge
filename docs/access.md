@@ -46,7 +46,7 @@ Secret Objects values stay owner-person only until their retirement. Agent and
 non-interactive entry points can add new Development names in slice 1; changing
 or removing an existing name needs a person until proposals ship.
 
-"Held" means an agent's request opens an exact approval request that its person grants or declines in a browser; nothing changes until then. "Never" means an agent's credential is refused even when its person may.
+"Held" means an agent's request opens an exact approval request that its person approves or declines in a browser; nothing changes until then. "Never" means an agent's credential is refused even when its person may.
 
 ## Agents
 

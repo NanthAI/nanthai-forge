@@ -313,6 +313,42 @@ function briefObserved(result: Json, operationId: unknown): Json | undefined {
   return { status: 'terminal', successful: true, submissions: landed };
 }
 
+const age = (at: unknown, now: number) => {
+  const ms = now - Date.parse(String(at));
+  if (!Number.isFinite(ms)) return undefined;
+  const minutes = Math.max(0, Math.floor(ms / 60_000));
+  return minutes < 60
+    ? `${minutes}m`
+    : minutes < 2880
+      ? `${Math.floor(minutes / 60)}h`
+      : `${Math.floor(minutes / 1440)}d`;
+};
+/** A Lane's status leads with that Lane (Issue a8f93b5e): its state and local continuation first, then
+ * project-wide fix-needed notices, one short line each with receipt, age and tests (status --detail
+ * prints each notice with its fix command). Project status without a Lane keeps its notices in full. */
+function briefLaneStatus(result: Json, now = Date.now()): Json | undefined {
+  if (typeof result.state !== 'string' || typeof result.head !== 'string') return undefined;
+  const { needsFix, githubMirror, ...lane } = result;
+  const notices = Array.isArray(needsFix) ? needsFix.map(obj).filter(item => item !== undefined) : [];
+  return {
+    ...lane,
+    ...(githubMirror !== undefined ? { githubMirror } : {}),
+    ...(notices.length
+      ? {
+          projectNotices: {
+            scope: 'project',
+            needsFix: notices.map(item => ({
+              receiptId: String(item.receiptId ?? '').slice(0, 8),
+              ...(age(item.at, now) ? { age: age(item.at, now) } : {}),
+              ...(Array.isArray(item.tests) ? { tests: item.tests } : {}),
+            })),
+            detail: 'status --detail',
+          },
+        }
+      : {}),
+  };
+}
+
 function brief(out: Json): Json {
   // Constant per CLI: `nforge version` names it; the hosted wire contract keeps all three.
   delete out.cliCommit;
@@ -337,7 +373,9 @@ function brief(out: Json): Json {
             ? (briefLanded(result) ?? briefPending(result))
             : action === 'observe'
               ? briefObserved(result, out.operationId)
-              : undefined;
+              : action === 'status'
+                ? briefLaneStatus(result)
+                : undefined;
   out.result = compactReplyDetail(action, {
     ...(slim ?? result),
     ...(result.protectedPathNotice !== undefined ? { protectedPathNotice: result.protectedPathNotice } : {}),

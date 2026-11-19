@@ -200,7 +200,7 @@ export function LandingDecision(props: LandingDecisionProps) {
                 <span className="fx-gate-icon">
                   <Glyph name="info" size={11} />
                 </span>
-                <b>A project owner or maintainer accepts</b>
+                <b>A project owner or maintainer approves</b>
               </li>
             )}
           </ul>
@@ -212,7 +212,7 @@ export function LandingDecision(props: LandingDecisionProps) {
                 disabled={props.busy}
                 onClick={props.accept}
               >
-                Accept into main
+                Approve and land
               </Button>
               <p className="fx-decide-after">
                 Lands through the queue · checked again only if main moves first

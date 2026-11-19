@@ -75,10 +75,10 @@ const words = {
     tone: 'waiting' as const,
     nextStep:
       kind === 'setting'
-        ? 'Open the approve link, then grant or decline the settings change.'
+        ? 'Open the approve link, then approve or decline the settings change.'
         : kind === 'fork'
-          ? 'Open the approve link, then grant or decline the check run for this pull request.'
-          : 'Open the approve link, then grant or decline; a grant lets the Lane land.',
+          ? 'Open the approve link, then approve or decline the check run for this pull request.'
+          : 'Open the approve link, then approve or decline; approving lets the Lane land.',
   }),
   granted: (kind: ApprovalKind) => ({
     label: `${kinds[kind]} granted`,

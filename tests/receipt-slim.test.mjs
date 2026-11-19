@@ -503,3 +503,58 @@ test('CLI and MCP compact saves and landings keep early protected-path approval 
     assert.deepEqual(compact.result.protectedPathNotice, notice);
   }
 });
+
+test('Lane status leads with the Lane; project fix-needed notices follow with receipt, age and tests (Issue a8f93b5e)', () => {
+  const notice = (day, test) => ({
+    at: `2026-11-${day}T08:50:06.970Z`,
+    auditRunId: randomUUID(),
+    head: 'd'.repeat(64),
+    intentId: randomUUID(),
+    receiptId: `${day}aff2aac-f9ab-4192-8f90-585c8cbebb3a`,
+    state: 'needs-fix',
+    summary: `Fix needed for receipt ${day}aff2aac: ${test} failed on ${'d'.repeat(64)} (run …); passed on …`,
+    tests: [test],
+    undo: `nforge agent ROOT start '{"intentId":"${randomUUID()}"}'`,
+  });
+  const needsFix = [notice(10, 'tests/drill-red.test.mjs'), notice(17, 'tests/retired-tables.test.mjs')];
+  const lane = {
+    head: 'a'.repeat(64),
+    lastActivityAt: new Date().toISOString(),
+    lifecycleVersion: 0,
+    sourceVersion: 1,
+    state: 'active',
+    version: 1,
+  };
+  const receipt = {
+    schema: 1,
+    transport: 'hosted',
+    action: 'status',
+    operationId: null,
+    result: { ...lane, needsFix, githubMirror: { status: 'synced' }, local: { running: null } },
+  };
+  const printed = slimReceipt(structuredClone(receipt)).result;
+  const keys = Object.keys(printed);
+  assert.deepEqual(keys.slice(0, 6), Object.keys(lane), 'the Lane comes first');
+  assert(
+    keys.indexOf('local') < keys.indexOf('projectNotices'),
+    'its local continuation before project notices',
+  );
+  assert.equal(keys.at(-1), 'projectNotices');
+  assert.equal(printed.needsFix, undefined);
+  assert.equal(printed.projectNotices.scope, 'project');
+  assert.deepEqual(
+    printed.projectNotices.needsFix.map(item => [item.receiptId, /^\d+d$/.test(item.age), item.tests]),
+    [
+      ['10aff2aa', true, ['tests/drill-red.test.mjs']],
+      ['17aff2aa', true, ['tests/retired-tables.test.mjs']],
+    ],
+  );
+  assert(JSON.stringify(printed).length < JSON.stringify(receipt.result).length / 2);
+  // Every notice stays reachable in full with --detail, and project status (no Lane) keeps them in full.
+  assert.deepEqual(
+    printedReceipt(structuredClone(receipt), { agent: true, detail: true, landChild: false }).result.needsFix,
+    needsFix,
+  );
+  const project = { ...receipt, result: { needsFix, githubMirror: { status: 'synced' } } };
+  assert.deepEqual(slimReceipt(structuredClone(project)).result.needsFix, needsFix);
+});

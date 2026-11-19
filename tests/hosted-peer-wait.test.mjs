@@ -148,7 +148,7 @@ test('CLI wait {approval} is one subscription with no other call; it returns on 
     assert.equal(response.result.status, 'terminal');
     assert.equal(response.result.reason, 'approval');
     assert.equal(response.result.approval.status, decision);
-    assert.match(response.result.next, decision === 'granted' ? /granted.*land --save/ : /declined/);
+    assert.match(response.result.next, decision === 'granted' ? /approved.*land --save/ : /declined/);
     assert.equal(process.exitCode, 0);
     assert.deepEqual(s.calls.slice(before), [], 'no query or mutation: only the subscription');
   }
@@ -213,7 +213,7 @@ test('CLI approve-link with no operationId lists the open approval requests in o
     },
   ]);
   assert.equal(reply.result.requests[0].state, 'requested');
-  assert.match(reply.result.requests[0].nextStep, /grant or decline the settings change/);
+  assert.match(reply.result.requests[0].nextStep, /approve or decline the settings change/);
   assert.match(reply.result.next, /1 approval request waits for the project owner/);
 });
 

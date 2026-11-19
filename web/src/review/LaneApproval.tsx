@@ -34,11 +34,11 @@ export type LaneApprovalRead = {
 type Words = { title: string; lead: string; tone: 'passed' | 'plain' };
 /** Lane approval wording for every state that is not an open or granted request. */
 const LANE_WORDS = {
-  requested: { title: 'Grant this Lane?', lead: 'The request is open.', tone: 'plain' },
-  granted: { title: 'Granted', lead: 'This exact Lane work can land.', tone: 'passed' },
+  requested: { title: 'Approve this Lane?', lead: 'The request is open.', tone: 'plain' },
+  granted: { title: 'Approved', lead: 'This exact Lane work can land.', tone: 'passed' },
   declined: { title: 'Declined', lead: 'You declined this request.', tone: 'plain' },
   landed: { title: 'Landed', lead: 'This Lane landed with your approval.', tone: 'passed' },
-  applied: { title: 'Granted', lead: 'Your grant was applied.', tone: 'passed' },
+  applied: { title: 'Approved', lead: 'Your approval is in effect.', tone: 'passed' },
   withdrawn: { title: 'Request closed', lead: 'The builder withdrew this request.', tone: 'plain' },
   settled: {
     title: 'Request closed',
@@ -99,7 +99,7 @@ export function LaneApproval({
   else if (phase.kind === 'signed-out')
     body = (
       <>
-        {head('Approval request', 'Sign in as the project owner to grant or decline it.')}
+        {head('Approval request', 'Sign in as the project owner to approve or decline it.')}
         <div className="fx-dv-actions fx-dv-stack">{signIn}</div>
       </>
     );
@@ -124,7 +124,7 @@ export function LaneApproval({
         {approval.landing?.held && (
           <div>
             <dt>Landing</dt>
-            <dd>Its check passed and it waits for you; granting lands it.</dd>
+            <dd>Its check passed and it waits for you; approving lands it.</dd>
           </div>
         )}
       </dl>
@@ -136,20 +136,20 @@ export function LaneApproval({
       ) : state === 'requested' || (state === 'declined' && approval.live) ? (
         <>
           {head(
-            state === 'declined' ? 'Declined — grant instead?' : 'Grant this Lane?',
-            `Requested by ${who}. Landing it holds until you grant it.`,
+            state === 'declined' ? 'Declined — approve instead?' : 'Approve this Lane?',
+            `Requested by ${who}. Landing it holds until you approve it.`,
           )}
           {facts}
           {state === 'declined' && approval.decision?.reason && (
             <p className="fx-dv-lead fx-dv-untrusted">You said: {approval.decision.reason}</p>
           )}
-          <OwnerReviewActions review={{ ...review, labels: { accept: 'Grant', decline: 'Decline' } }} />
+          <OwnerReviewActions review={{ ...review, labels: { accept: 'Approve', decline: 'Decline' } }} />
           {full}
         </>
       ) : state === 'granted' ? (
         <>
           {head(
-            'Granted',
+            'Approved',
             'This exact Lane work can land. A later save needs your approval again.',
             'passed',
           )}
@@ -170,7 +170,7 @@ export function LaneApproval({
       : 'an agent';
     const state = deriveApproval(approval).state;
     if (state === 'granted' || state === 'applied' || state === 'landed')
-      return head('Applied', `You granted this ${what} change and it is in effect.`, 'passed');
+      return head('Approved', `You approved this ${what} change and it is in effect.`, 'passed');
     if (state === 'declined') return head('Declined', `The ${what} change was not applied.`, 'plain');
     if (state !== 'requested')
       return head(
@@ -195,7 +195,7 @@ export function LaneApproval({
             change={approval.change}
           />
         </div>
-        <OwnerReviewActions review={{ ...review, labels: { accept: 'Grant', decline: 'Decline' } }} />
+        <OwnerReviewActions review={{ ...review, labels: { accept: 'Approve', decline: 'Decline' } }} />
       </>
     );
   }
@@ -208,7 +208,7 @@ export function LaneApproval({
     </div>
   );
 }
-/** A fork PR head's run request: the owner grants or declines one check-only run on the project's
+/** A fork PR head's run request: the owner approves or declines one check-only run on the project's
  * runner; its result is the PR's forge/verify status. */
 function forkBody(
   approval: LaneApprovalRead,
@@ -223,7 +223,7 @@ function forkBody(
     return (
       <>
         {head(
-          'Granted',
+          'Approved',
           `The check of ${pr} runs on this project's runner; its result shows as forge/verify on the PR.`,
           'passed',
         )}
@@ -245,10 +245,10 @@ function forkBody(
     <>
       {head(
         `Run the check of ${pr}?`,
-        "A pull request from a fork waits for you. Granting runs the Forge check on this project's runner, without private submodules.",
+        "A pull request from a fork waits for you. Approving runs the Forge check on this project's runner, without private submodules.",
       )}
       {facts}
-      <OwnerReviewActions review={{ ...review, labels: { accept: 'Grant', decline: 'Decline' } }} />
+      <OwnerReviewActions review={{ ...review, labels: { accept: 'Approve', decline: 'Decline' } }} />
       {full}
     </>
   );

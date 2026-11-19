@@ -14,7 +14,7 @@ import {
   declaredRequirement,
   surfaceDigest,
 } from '../scripts/check-contract.mjs';
-import { runActionsCheck } from '../scripts/github-actions-check.mjs';
+import { hostedActionsCheck, runActionsCheck } from '../scripts/github-actions-check.mjs';
 
 const repo = process.cwd();
 const mismatch = { code: 'CHECK_CONTRACT_MISMATCH' };
@@ -232,27 +232,33 @@ function executorSurface(t) {
     process.env.FORGE_ACTIONS_SHARD = shard;
     if (part) process.env.FORGE_ACTIONS_POOL_PART = part;
     else delete process.env.FORGE_ACTIONS_POOL_PART;
-    const calls = [];
-    try {
-      runActionsCheck((command, args, options) => {
-        const env = Object.fromEntries(
-          Object.entries(options.env)
-            .filter(([name]) => /^FORGE_|^NODE_OPTIONS$|^PLAYWRIGHT_BROWSERS_PATH$/.test(name))
-            .map(([name, value]) => [name, variable.has(name) ? null : value])
-            .sort(([a], [b]) => (a < b ? -1 : 1)),
-        );
-        calls.push({
-          command: command === process.execPath ? 'node' : command,
-          args: args.map(arg =>
-            arg.endsWith('/scripts/check-browser-runtime.mjs') ? 'scripts/check-browser-runtime.mjs' : arg,
-          ),
-          env,
+    // The hosted supervisor's executor differs only in collecting no coverage (d5de1c98).
+    for (const [name, check] of [
+      [mode, runActionsCheck],
+      ...(mode.startsWith('standard-shard') ? [[`hosted-${mode}`, hostedActionsCheck]] : []),
+    ]) {
+      const calls = [];
+      try {
+        check((command, args, options) => {
+          const env = Object.fromEntries(
+            Object.entries(options.env)
+              .filter(([name]) => /^FORGE_|^NODE_OPTIONS$|^PLAYWRIGHT_BROWSERS_PATH$/.test(name))
+              .map(([name, value]) => [name, variable.has(name) ? null : value])
+              .sort(([a], [b]) => (a < b ? -1 : 1)),
+          );
+          calls.push({
+            command: command === process.execPath ? 'node' : command,
+            args: args.map(arg =>
+              arg.endsWith('/scripts/check-browser-runtime.mjs') ? 'scripts/check-browser-runtime.mjs' : arg,
+            ),
+            env,
+          });
         });
-      });
-    } catch (error) {
-      if (mode !== 'docs-static') throw error;
+      } catch (error) {
+        if (mode !== 'docs-static') throw error;
+      }
+      surface[name] = calls;
     }
-    surface[mode] = calls;
   }
   delete process.env.FORGE_ACTIONS_POOL_PART;
   delete process.env.FORGE_JUNIT_DIR;
