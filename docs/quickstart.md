@@ -27,7 +27,13 @@ release. Keep that checkout to update it from GitHub. `nforge docs quickstart`
 opens this guide from the installed source.
 
 The first `nforge` run installs advisory Claude Code/Codex hooks for every Lane
-and prints changed files plus the exact undo command. To remove Forge hooks and
+and prints changed files plus the exact undo command. It edits two files,
+`~/.claude/settings.json` and `~/.codex/hooks.json`, and in each adds two hook
+entries: a `PreToolUse` first-write notice for file edits (`Edit`, `Write`,
+`MultiEdit`, `NotebookEdit`, `apply_patch`) and a `Stop` turn-end guard. It also
+removes an older Forge `UserPromptSubmit` entry. Other settings and other hooks
+stay as they are. Only the installed CLI writes them, never a dev build, and a
+run leaves alone hooks that point at another valid Forge install. To remove Forge hooks and
 persist user off: `nforge x . uninstall-hooks '{}'`; `install-hooks` reverses it.
 `nforge settings firstWriteHooks false` disables installed hooks too. For one
 project on this machine, use `nforge x ROOT uninstall-hooks '{"scope":"project"}'`.

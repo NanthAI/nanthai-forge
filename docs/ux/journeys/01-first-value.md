@@ -54,6 +54,6 @@ Walked: the public landing source, `nforge --help`, `nforge docs`, `nforge statu
 
 1. What is the activation moment: the first landing, or the first time two agents land in parallel without a conflict?
 2. Will there be a default hosted service, so `nforge login` needs no address?
-3. Should the hooks be installed on the first command (today), or offered at the first `start` with a yes or no?
+3. Answered 2026-11-19 (C15, option A): keep installing the hooks on the first command. The [quickstart](../../quickstart.md#install-the-development-cli) lists the exact edits and the undo. The planned `nforge connect` preview (Item 7b74e67b) will list them too, with a backup and undo.
 4. Should the public preview show a landing (a recorded or simulated one) instead of, or before, the code map?
 5. Which first-ideas list is the canonical one for newcomers: Issue, Lane, landing (concepts) or Intent, Lane, Check, Channel (README)? The answer depends on the planned Item rename.
