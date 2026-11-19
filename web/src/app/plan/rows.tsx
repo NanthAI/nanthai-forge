@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // The cells of one plan row and the Initiative roll-up (Items d3357f40, b7a0dff1, f49e3a5c), shared by the backlog
 // and the Initiative page. Pure drawing: no reads, no state.
+import { Fragment } from 'react';
 import type { PlanRow } from '../../../../src/planning-model';
 import { ItemState, State, Who } from '../../ds';
 import { A } from '../frames';
+import { breakdownTotal, breakdownWords, type Breakdown } from '../progress';
 import { statusOf, type PlanLine } from './model';
 
 /** Columns after the handle: position, the name with its flags, done-when, owner, status. On a phone plan.css sets
@@ -93,8 +95,6 @@ export function Line({
   );
 }
 
-export type Counted = { done: number; inProgress: number; total: number };
-
 /** Ticks a roll draws for `total` Items, at most `cap`: past the cap one tick stands for several Items. */
 export const rollTicks = (total: number, cap: number) => Math.max(0, Math.min(total, cap));
 
@@ -104,24 +104,50 @@ export const rollTicks = (total: number, cap: number) => Math.max(0, Math.min(to
 export const BAND_TICKS = 24;
 export const bandRollWidth = (ticks: number) => Math.min(120, Math.max(0, ticks * 16 - 2));
 
-/** One tick per Item: done, in progress, not started (DESIGN.md roll-up; no typed percentage). `large` is the
- * Initiative page's: it takes the width it is given. */
-export function Roll({ counted, large = false }: { counted: Counted; large?: boolean }) {
-  const { total, done, inProgress } = counted;
+/** One tick per Item, in the breakdown's order and colours (web/src/app/progress.ts): done, in progress, open,
+ * proposed, removed (DESIGN.md roll-up; no typed percentage). Past the cap one tick stands for several Items and
+ * takes the colour of the part it falls in. `large` is the Initiative page's: it takes the width it is given. */
+export function Roll({ breakdown, large = false }: { breakdown: Breakdown; large?: boolean }) {
+  const { total, parts } = breakdown;
   const ticks = rollTicks(total, large ? 60 : BAND_TICKS);
   const step = total / (ticks || 1);
+  const tickAt = (at: number) => {
+    let end = 0;
+    for (const part of parts) {
+      end += part.n;
+      if (at < end) return part.tick;
+    }
+    return parts.at(-1)?.tick;
+  };
   return (
     <span
       className={large ? 'roll lg' : 'roll'}
       role="img"
-      aria-label={`${done.toLocaleString()} of ${total.toLocaleString()} done, ${inProgress.toLocaleString()} in progress`}
+      aria-label={`${breakdownTotal(breakdown)}: ${breakdownWords(breakdown)}`}
       style={large ? undefined : { width: `${bandRollWidth(ticks)}px` }}
     >
       {Array.from({ length: ticks }, (_, index) => (
-        <i
-          key={index}
-          className={index * step < done ? 'ok' : index * step < done + inProgress ? 'run' : undefined}
-        />
+        <i key={index} className={tickAt(index * step)} />
+      ))}
+    </span>
+  );
+}
+
+/** The breakdown in words, each part after a swatch of its tick's colour, in the roll's order. */
+export function BreakdownWords({ breakdown }: { breakdown: Breakdown }) {
+  return (
+    <span className="plan-bd" title={breakdownTotal(breakdown)}>
+      {breakdown.parts.map((part, index) => (
+        // The separator sits outside the part, so a narrow box breaks between parts, never inside one.
+        <Fragment key={part.key}>
+          {/* The dot keeps to the end of a line when the words wrap. */}
+          {index ? <span aria-hidden="true">{'\u00a0· '}</span> : null}
+          <span className="plan-bp">
+            <i className={part.tick} aria-hidden="true" />
+            {part.n.toLocaleString()}
+            {part.atLeast ? '+' : ''} {part.word}
+          </span>
+        </Fragment>
       ))}
     </span>
   );

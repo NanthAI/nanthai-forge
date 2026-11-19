@@ -13,9 +13,10 @@ import { Head, crumbsFor } from '../Place';
 import type { PlaceProps } from '../screens';
 import type { FullItem } from './batch';
 import type { Reads } from './Bulk';
-import { initiativeWords, statusOf, type PlanGroup, type PlanView } from './model';
+import { groupBreakdown, statusOf, type PlanGroup, type PlanView } from './model';
+import { breakdownTotal, breakdownWords } from '../progress';
 import type { Put, Settled } from './Plan';
-import { COLS, Line, Roll, Status } from './rows';
+import { BreakdownWords, COLS, Line, Roll, Status } from './rows';
 
 type At = (patch: Partial<PlaceProps['route']>) => string;
 const statuses: StoredStatus[] = ['proposed', 'open', 'in-progress', 'closed', 'abandoned'];
@@ -35,8 +36,9 @@ export function initiativeSentence(group: PlanGroup) {
       rest: 'Close the Initiative, or keep it open for what comes next.',
     };
   const next = group.lines.find(line => line.next);
+  const breakdown = groupBreakdown(group);
   return {
-    bold: `${group.done.toLocaleString()}${group.atLeast ? '+' : ''} of ${group.total.toLocaleString()} done${group.inProgress ? `, ${group.inProgress.toLocaleString()} in progress` : ''}.`,
+    bold: `${breakdownTotal(breakdown)}: ${breakdownWords(breakdown)}.`,
     rest: next ? `The next free one is ${next.row.title}.` : '',
   };
 }
@@ -82,6 +84,8 @@ export function InitiativePage({
       lines: [],
       live: 0,
       inProgress: 0,
+      open: 0,
+      proposed: 0,
       done: 0,
       dropped: 0,
       total: 0,
@@ -225,11 +229,12 @@ export function InitiativePage({
         <Region title="Progress" quiet>
           <div className="fig">
             <div className="big">
-              {group.done.toLocaleString()}
-              {group.atLeast ? '+' : ''} of {group.total.toLocaleString()}
-              <small>{group.total ? initiativeWords(group) : 'nothing to count yet'}</small>
+              {breakdownTotal(groupBreakdown(group))}
+              <small>
+                {group.total ? <BreakdownWords breakdown={groupBreakdown(group)} /> : 'nothing to count yet'}
+              </small>
             </div>
-            {group.total ? <Roll counted={group} large /> : null}
+            {group.total ? <Roll breakdown={groupBreakdown(group)} large /> : null}
           </div>
           <dl className="kv">
             <dt>Status</dt>

@@ -9,9 +9,9 @@ import type { PlanRow } from '../../../../src/planning-model';
 import { A } from '../frames';
 import type { PlaceProps } from '../screens';
 import { isShut, NO_INITIATIVE, type Folds } from './fold';
-import type { PlanGroup, PlanView } from './model';
+import { groupBreakdown, type PlanGroup, type PlanView } from './model';
 import { filtered, sortRows, type PlanQuery } from './query';
-import { COLS, Line, Roll } from './rows';
+import { BreakdownWords, COLS, Line, Roll } from './rows';
 import { Tick, type Ticker } from './Tick';
 
 type At = (patch: Partial<PlaceProps['route']>) => string;
@@ -95,7 +95,7 @@ function moveItems(
   ];
 }
 
-/** A group's name, its count of open Items and its roll-up with "N of M done": the header open or folded. */
+/** A group's name, its count of every Item and its roll-up with the breakdown (b7a0dff1): the header open or folded. */
 function Head({
   group,
   at,
@@ -111,6 +111,7 @@ function Head({
   controls?: string;
 }) {
   const name = group.initiative?.title ?? 'No Initiative';
+  const breakdown = groupBreakdown(group);
   return (
     <>
       {group.initiative ? (
@@ -120,14 +121,12 @@ function Head({
       ) : (
         <span className="plan-gn">{name}</span>
       )}
-      <Count n={group.live} />
+      <Count n={breakdown.total} />
       {group.initiative ? (
         <span className="plan-prog">
-          <Roll counted={group} />
+          <Roll breakdown={breakdown} />
           <span className="plan-pl">
-            {group.done.toLocaleString()}
-            {group.atLeast ? '+' : ''} of {group.total.toLocaleString()} done
-            {group.dropped ? `, ${group.dropped.toLocaleString()} dropped` : ''}
+            <BreakdownWords breakdown={breakdown} />
             {group.initiative.hidden ? ', hidden from the public plan' : ''}
           </span>
         </span>

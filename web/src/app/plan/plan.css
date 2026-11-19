@@ -21,6 +21,14 @@
   .plan .plan-prog { display: inline-flex; flex: none; gap: var(--s-2); align-items: center; min-width: 0; }
   .plan .plan-prog .roll { flex: none; }
   .plan .plan-pl { flex: none; font-weight: var(--w-regular); color: var(--text-3); white-space: nowrap; }
+  /* The breakdown (b7a0dff1): the roll's ticks and the words' swatches share one colour per part, in one order
+     (web/src/app/progress.ts): done green, in progress blue, open the unreached rail, proposed a ring, removed grey. */
+  .plan .roll i.prop, .plan .plan-bp i.prop { background: transparent; box-shadow: inset 0 0 0 1px var(--text-3); }
+  .plan .roll i.gone, .plan .plan-bp i.gone { background: var(--text-3); }
+  .plan .plan-bp { white-space: nowrap; }
+  .plan .plan-bp i { display: inline-block; width: 8px; height: 8px; margin-inline-end: 4px; border-radius: 1px; background: var(--rail-off); }
+  .plan .plan-bp i.ok { background: var(--passed); }
+  .plan .plan-bp i.run { background: var(--active); }
   .plan .plan-grp.shut > .band { padding-bottom: var(--s-3); }
   .plan .plan-over .plan-gh { padding: 0; min-width: 0; }
   .plan .plan-over .plan-gn { font-size: var(--t-small); color: var(--text); }
@@ -95,7 +103,7 @@
     .plan .plan-grp .band { flex-wrap: wrap; }
     .plan .plan-grp .band .hint { white-space: normal; flex-basis: 100%; }
     .plan .plan-gh .plan-prog, .plan .plan-gh > .plan-pl { order: 1; flex: 1 1 100%; flex-wrap: wrap; row-gap: 2px; }
-    .plan .plan-gh .plan-pl { white-space: normal; }
+    .plan .plan-gh .plan-pl { white-space: normal; flex: 1 1 0; min-width: 0; }
     .plan .plan-gh { flex-wrap: wrap; row-gap: 2px; }
     .plan .plan-gh .plan-gn { flex: 1 1 0; }
     .plan-ini .plan-ini-body { grid-template-columns: minmax(0, 1fr); }

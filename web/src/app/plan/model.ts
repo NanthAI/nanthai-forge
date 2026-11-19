@@ -11,6 +11,7 @@ import {
   rankBetween,
   type PlanRow,
 } from '../../../../src/planning-model';
+import { initiativeBreakdown } from '../progress';
 
 export type PlanRead = {
   rows: string;
@@ -26,9 +27,12 @@ export type PlanGroup = {
   lines: PlanLine[];
   live: number;
   inProgress: number;
+  /** Planned (stored `open`) and proposed Items: with inProgress they make up `live`. */
+  open: number;
+  proposed: number;
   done: number;
   dropped: number;
-  /** Live + done + dropped: what "N of M done" counts. */
+  /** Live + done + dropped: every Item, the header's chip. */
   total: number;
   atLeast: boolean;
 };
@@ -106,6 +110,8 @@ export function planView(
       lines,
       live,
       inProgress: rows.filter(({ row }) => row.status === 'in-progress').length,
+      open: rows.filter(({ row }) => row.status === 'open').length,
+      proposed: rows.filter(({ row }) => row.status === 'proposed').length,
       done,
       dropped,
       total: live + done + dropped,
@@ -189,20 +195,18 @@ export function movedInitiativeRank(
   return rankBetween(rank(ids[at - 1]), rank(ids[at + 1]));
 }
 
-/** An Initiative's own progress line: done of all, then what is moving and what is left. */
-export function initiativeWords(
-  group: Pick<PlanGroup, 'done' | 'total' | 'inProgress' | 'live' | 'dropped' | 'atLeast'>,
-) {
-  const notStarted = group.live - group.inProgress;
-  return [
-    `${group.done.toLocaleString()}${group.atLeast ? '+' : ''} of ${group.total.toLocaleString()} done`,
-    group.inProgress ? `${group.inProgress.toLocaleString()} in progress` : '',
-    notStarted ? `${notStarted.toLocaleString()} not started` : '',
-    group.dropped ? `${group.dropped.toLocaleString()} dropped` : '',
-  ]
-    .filter(Boolean)
-    .join(', ');
-}
+/** An Initiative's breakdown from the one progress definition (web/src/app/progress.ts). */
+export const groupBreakdown = (
+  group: Pick<PlanGroup, 'done' | 'inProgress' | 'open' | 'proposed' | 'dropped' | 'atLeast'>,
+) =>
+  initiativeBreakdown({
+    done: group.done,
+    inProgress: group.inProgress,
+    open: group.open,
+    proposed: group.proposed,
+    removed: group.dropped,
+    atLeast: group.atLeast,
+  });
 
 /** Done-when lines written in capture become the body's task lines (docs/planning.md, Status). */
 export function captureBody(doneWhen: string) {

@@ -13,12 +13,13 @@ import { moduleUrl } from './convex-module.mjs';
 
 const read = await import(moduleUrl('../convex/projectPlanView.ts'));
 const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
-const { planView, planSentence, movedRank, movedInitiativeRank, initiativeWords, captureBody, matches } =
+const { planView, planSentence, movedRank, movedInitiativeRank, groupBreakdown, captureBody, matches } =
   await import(moduleUrl('../web/src/app/plan/model.ts'));
 const { isShut, toggled, allFolds, readFolds, FOLD_FLIPS } = await import(
   moduleUrl('../web/src/app/plan/fold.ts')
 );
 const { bandRollWidth, rollTicks, BAND_TICKS } = await import(moduleUrl('../web/src/app/plan/rows.tsx'));
+const { breakdownWords, breakdownTotal } = await import(moduleUrl('../web/src/app/progress.ts'));
 const { encodePlanPage, planParent, planPageKey, PLAN_ROWS } = await import(
   moduleUrl('../convex/projectPlanRows.ts')
 );
@@ -131,6 +132,12 @@ test('the plan read lists live work and counts settled Items of live Initiatives
   assert.equal(group.total, 6, 'every Item of the Initiative counts once');
   assert.equal(group.done, 1);
   assert.equal(group.lines.length, group.live, 'the band count matches its rows');
+  assert.equal(
+    groupBreakdown(group).total,
+    group.total,
+    'the breakdown parts (done, in progress, open, proposed, removed) add up to the chip',
+  );
+  assert.equal(group.open + group.inProgress + group.proposed, group.live);
   assert.equal(none.initiative, null);
   assert.deepEqual(
     none.lines.map(line => line.row.id),
@@ -227,8 +234,51 @@ test('a band roll is always wide enough for its ticks, so it never draws over it
     assert.ok(bandRollWidth(ticks) >= ticks * 4 - 2, `${total} Items`);
     assert.ok(bandRollWidth(ticks) <= 120);
   }
+});
+
+test('an Initiative breakdown counts every Item once, in one fixed order, and its parts add up to the chip (b7a0dff1)', () => {
+  const counted = groupBreakdown({
+    done: 30,
+    inProgress: 12,
+    open: 58,
+    proposed: 0,
+    dropped: 1,
+    atLeast: false,
+  });
+  assert.equal(breakdownWords(counted), '30 done · 12 in progress · 58 open · 1 removed');
+  assert.equal(breakdownTotal(counted), '101 Items');
   assert.equal(
-    initiativeWords({ done: 123, total: 131, inProgress: 1, live: 1, dropped: 7, atLeast: false }),
-    '123 of 131 done, 1 in progress, 7 dropped',
+    counted.parts.reduce((sum, part) => sum + part.n, 0),
+    counted.total,
   );
+  const proposed = groupBreakdown({
+    done: 4,
+    inProgress: 1,
+    open: 2,
+    proposed: 1,
+    dropped: 1,
+    atLeast: false,
+  });
+  assert.deepEqual(
+    proposed.parts.map(part => [part.key, part.tick]),
+    [
+      ['done', 'ok'],
+      ['inProgress', 'run'],
+      ['open', 'open'],
+      ['proposed', 'prop'],
+      ['removed', 'gone'],
+    ],
+    'proposed appears only when there is one, between open and removed',
+  );
+  assert.equal(proposed.total, 9);
+  const capped = groupBreakdown({
+    done: 1000,
+    inProgress: 0,
+    open: 3,
+    proposed: 0,
+    dropped: 2,
+    atLeast: true,
+  });
+  assert.equal(breakdownWords(capped), '1,000+ done · 0 in progress · 3 open · 2+ removed');
+  assert.equal(breakdownTotal(capped), '1,005+ Items');
 });

@@ -3,8 +3,9 @@
 // lives in the address, list / tree / board show the same rows, only ticked rows change, a batch reply names a row
 // changed meanwhile and offers one Undo, and every state passes axe with no sideways scroll at desk and phone width in
 // both themes. Initiative groups (Item 4df3ee17) fold and stay folded on reload, Collapse all gives the Initiatives
-// overview, an Initiative moves with one order write, a group header's roll never draws over its "N of M done" words
-// (f49e3a5c, 3-digit counts at 1440, 1024 and 390), and the Initiative page edits its title and asks for its done
+// overview, an Initiative moves with one order write, a group header's roll never draws over its breakdown words
+// (f49e3a5c, 3-digit counts at 1440, 1024 and 390), the header's chip is every Item and its breakdown parts come in
+// one order, add up to the chip and match the roll's ticks (b7a0dff1), and the Initiative page edits its title and asks for its done
 // Items. On a phone (owner review 2026-11-17) the list shows one count, Find and one Filter and view key at one height,
 // each row's status on the line under its name, and the line's counts beside their own words; the views, filters,
 // order, layout and folds are in the sheet. Set FORGE_PLAN_SHOTS to a folder to also save the screenshots.
@@ -248,9 +249,19 @@ test('plan views and bulk bar: real components keep the view in the address and 
         const a = roll.getBoundingClientRect(),
           b = words.getBoundingClientRect();
         const ticks = [...roll.children].map(tick => tick.getBoundingClientRect());
+        // b7a0dff1: the chip, the words in order and the roll's ticks, read off the screen.
+        const chip = head.querySelector('.cnt');
+        const parts = [...words.querySelectorAll('.plan-bp')].map(part => ({
+          swatch: part.querySelector('i').className,
+          n: Number(part.textContent.replace(/[^0-9]/g, '')),
+          word: part.textContent.replace(/^[\s·]*[0-9,]+\+?\s*/, ''),
+        }));
         return [
           {
-            words: words.textContent,
+            chip: Number(chip?.textContent.replace(/[^0-9]/g, '')),
+            parts,
+            ticks: [...roll.children].map(tick => tick.className),
+            words: words.textContent.replace(/\u00a0/g, ' '), // the dot is held to its line by a no-break space
             meet: a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom,
             spill: ticks.some(tick => tick.right > a.right + 0.5 || tick.left < a.left - 0.5),
           },
@@ -265,10 +276,37 @@ test('plan views and bulk bar: real components keep the view in the address and 
         const { page, errors, context } = await open(width, theme);
         const boxes = await headers(page);
         assert.ok(
-          boxes.some(box => /123 of 131 done, 7 dropped/.test(box.words)),
+          boxes.some(
+            box => box.chip === 131 && box.words === '123 done · 1 in progress · 0 open · 7 removed',
+          ),
           '3-digit counts are drawn',
         );
-        for (const box of boxes) assert.deepEqual({ ...box, meet: false, spill: false }, box, box.words);
+        for (const box of boxes) {
+          assert.deepEqual({ ...box, meet: false, spill: false }, box, box.words);
+          // b7a0dff1: the chip is every Item; the parts come in one order and add up to it; the roll's ticks run
+          // in the same order and colours as the words' swatches.
+          const order = ['done', 'in progress', 'open', 'proposed', 'removed'];
+          assert.deepEqual(
+            box.parts.map(part => part.word),
+            order.filter(word => word !== 'proposed' || box.parts.some(part => part.word === word)),
+            box.words,
+          );
+          assert.equal(
+            box.parts.reduce((sum, part) => sum + part.n, 0),
+            box.chip,
+            `${box.words}: the parts add up to the chip`,
+          );
+          const runs = box.ticks.filter((tick, index) => tick !== box.ticks[index - 1]);
+          const swatches = box.parts.map(part => part.swatch);
+          assert.deepEqual(
+            runs,
+            swatches.filter(swatch => runs.includes(swatch)),
+            `${box.words}: the roll runs in the words' order`,
+          );
+        }
+        const launch = boxes.find(box => box.chip === 9);
+        assert.equal(launch?.words, '4 done · 1 in progress · 2 open · 1 proposed · 1 removed');
+        assert.deepEqual(launch.ticks, ['ok', 'ok', 'ok', 'ok', 'run', 'open', 'open', 'prop', 'gone']);
         if (shots && width === 1024)
           await page.screenshot({ path: join(shots, `plan-headers-${width}-${theme}.png`), fullPage: true });
         assert.deepEqual(errors, []);
@@ -359,7 +397,10 @@ test('plan views and bulk bar: real components keep the view in the address and 
   {
     const { page, errors, context } = await open(1440, 'dark', `/${launchId}`);
     const main = page.locator('main');
-    assert.match(await main.textContent(), /4 of 9 done, 1 in progress/);
+    assert.match(
+      await main.textContent(),
+      /9 Items: 4 done · 1 in progress · 2 open · 1 proposed · 1 removed\./,
+    );
     assert.match(await main.textContent(), /Everything that must land before the parser ships\./);
     assert.match(await main.textContent(), /Stream parser/);
     assert.doesNotMatch(await main.textContent(), /Write the recovery guide/);
