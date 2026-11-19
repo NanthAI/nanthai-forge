@@ -42,6 +42,7 @@ import { clientCacheRoot } from './root-paths.js';
 import { processAlive } from './local-process.js';
 import { cliPackageRoot } from './cli-installation.js';
 import { shellQuote } from './shell-quote.js';
+import { mkdirBelow } from './mkdir-below.js';
 import {
   activeCliCanaryRefusal,
   cliCanaryPreSwitch,
@@ -152,12 +153,16 @@ export async function updateCli(
     /** Background updates: the head the starting read saw. When an earlier updater already
      * selected it, finish without a release read. */
     skipIfCurrent?: string;
+    /** The installation already exists (a background updater inside it): never recreate it. A
+     * detached updater outliving its deleted installation then fails with ENOENT. */
+    installed?: boolean;
   } = {},
 ) {
   let expectedCurrent =
     options.expectedCurrent !== undefined ? options.expectedCurrent : cliCurrentCommit(installation);
   address = sourceSchema.parse(address);
-  mkdirSync(join(installation, 'builds'), { recursive: true, mode: 0o700 });
+  if (options.installed) mkdirBelow(installation, join(installation, 'builds'));
+  else mkdirSync(join(installation, 'builds'), { recursive: true, mode: 0o700 });
   invariant(
     !existsSync(join(installation, '.freeze')),
     'CLI_UPDATE_FROZEN',
@@ -417,6 +422,7 @@ export async function cliUpdateCli(args: string[]) {
     try {
       return await updateCli(installation, readCliSource(installation), undefined, undefined, {
         lockWaitMs: 0,
+        installed: true,
         ...(expected ? { skipIfCurrent: expected } : {}),
       });
     } catch (error) {

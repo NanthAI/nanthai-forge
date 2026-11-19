@@ -249,6 +249,18 @@ test('freeze and concurrent updater refuse explicitly without any release read',
   assert.equal(realpathSync(join(f.installation, 'current')), f.old);
 });
 
+test('a background updater outliving its deleted installation never recreates it', async t => {
+  const f = fixture(t);
+  const dependencies = { source: { current: async () => assert.fail('unexpected read') } };
+  // A detached updater reads source.json, then its installation is deleted (a test's cleanup, an
+  // uninstall) before it creates builds/: it fails instead of recreating the whole tree.
+  rmSync(f.installation, { recursive: true, force: true });
+  await assert.rejects(updateCli(f.installation, address, undefined, dependencies, { installed: true }), {
+    code: 'ENOENT',
+  });
+  assert.equal(existsSync(f.installation), false, 'the deleted installation stays deleted');
+});
+
 test('no-op update does not prune retained builds or rewrite hooks', async t => {
   const f = fixture(t);
   f.build(b);
