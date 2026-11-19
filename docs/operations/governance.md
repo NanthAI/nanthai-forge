@@ -62,7 +62,13 @@ open request. The owner grants or declines in one step (`projectHostedApprovals:
 agents, device sign-ins and contributors are refused). A grant applies exactly that
 request as the agent's own operation, so the agent's retry returns the applied
 receipt; a policy request applies only while the policy parts it would change are as
-they were when it was asked. The agent's `wait {approval}` returns on the decision.
+they were when it was asked. A check import names its Work check by name or id only, so
+holding it reads that check from hosted Work once and stores its definition with the
+request (`pinned`): the page compares that definition and shows it under Details apart
+from what the agent sent, and the grant applies it without
+reading Work again, even if Work has changed since. An agent cannot supply `pinned`
+itself, and an import held before definitions were stored is refused at grant
+(`WORK_STALE`; decline it and ask again). The agent's `wait {approval}` returns on the decision.
 
 Two cases apply directly and say so: an agent's writes on a project with no accepted
 landing yet (`rule:"bootstrap"`, so scratch, zoo and bench setup keep working), and

@@ -254,3 +254,24 @@ test('the summary says a list was reordered even when it also adds or drops', ()
   });
   assert.match(view.summary, /drops b from args and reorders it/);
 });
+
+test('Details marks the check Forge read from Work when the import was held apart from what the agent sent', () => {
+  const pinned = { id: 'c', name: 'verify', executable: 'bash', args: ['ci.sh'], definition: 'd'.repeat(64) };
+  const html = renderToStaticMarkup(
+    createElement(SettingChange, {
+      origin: 'check-import',
+      compare: {
+        subject: 'verify',
+        before: null,
+        after: { name: 'verify', executable: 'bash', args: ['ci.sh'] },
+      },
+      change: { operationId: 'op', authorityEpoch: 1, expected: null, select: { checkId: 'c' }, pinned },
+    }),
+  );
+  const details = html.split('<details')[1];
+  const [sent, read] = details.split('Read by Forge from Work');
+  assert.ok(read, 'the stored check has its own label');
+  assert.match(sent, /&quot;select&quot;/);
+  assert.ok(!sent.includes('&quot;pinned&quot;'), 'what the agent sent does not include the stored check');
+  assert.match(read, /&quot;definition&quot;: &quot;d{64}&quot;/);
+});

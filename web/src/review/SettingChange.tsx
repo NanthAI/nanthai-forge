@@ -64,6 +64,12 @@ export function SettingChange({
   change: unknown;
 }) {
   const view = useMemo(() => settingChangeView(origin, compare), [origin, compare]);
+  // A held check import carries the check Forge read from Work (`pinned`): drawn apart from what the agent sent.
+  const held = useMemo(() => {
+    if (!change || typeof change !== 'object' || Array.isArray(change) || !('pinned' in change)) return null;
+    const { pinned, ...sent } = change as Record<string, unknown>;
+    return { pinned, sent };
+  }, [change]);
   return (
     <div className="sc">
       <p className="sc-sum" dir="auto">
@@ -159,10 +165,27 @@ export function SettingChange({
       ) : null}
       {/* With no comparison the request is all there is to read, so it starts open. */}
       <details className="sc-details" open={view.unavailable}>
-        <summary>Details: the request as sent</summary>
+        <summary>
+          {held
+            ? 'Details: the request as sent, and the check Forge read for it'
+            : 'Details: the request as sent'}
+        </summary>
+        {held ? <p className="sc-note">Sent by the agent</p> : null}
         <pre className="sc-raw" tabIndex={0} aria-label="The request as sent">
-          {requestJson(change)}
+          {requestJson(held ? held.sent : change)}
         </pre>
+        {held ? (
+          <>
+            {/* Item 16093ed1: a check import names its check only; Forge read this from Work when it held the
+                request, and the grant applies exactly it. */}
+            <p className="sc-note">
+              Read by Forge from Work when the request was held; granting applies this check
+            </p>
+            <pre className="sc-raw" tabIndex={0} aria-label="The check Forge read from Work">
+              {requestJson(held.pinned)}
+            </pre>
+          </>
+        ) : null}
       </details>
     </div>
   );

@@ -55,7 +55,20 @@ const requestSchema = z
 type CheckSettingRequest = { operationId: string; authorityEpoch: number; expected: string | null };
 type CheckSettingChange = { kind: 'runner' | 'definition'; key: string; value: unknown; digest: string };
 /** Which held-settings row a write belongs to, and whether the owner person granted it (Issue 470ef29b). */
-export type CheckSettingHold = { origin: SettingOrigin; key: string; approved?: boolean };
+export type CheckSettingHold = {
+  origin: SettingOrigin;
+  key: string;
+  approved?: boolean;
+  /** Item 16093ed1 F3: what the request resolves to, stored with a held request so the owner sees it and the grant
+   * applies exactly it (a check import names its Work check by id or name only). */
+  pin?: (project: Doc<'hostedProjects'>) => Promise<unknown>;
+};
+/** A held request with a stored `pinned` value is the agent's request plus that value: retries compare without it. */
+const sameAsked = (text: string) => (stored: string) => {
+  const asked = JSON.parse(stored) as Record<string, unknown>;
+  delete asked.pinned;
+  return canonicalPayload(asked) === text;
+};
 /** One owner-only, operation-idempotent, digest-CAS settings write. The change is
  * resolved only for a new operation, so a replay never rereads its inputs. Issue 470ef29b: from an
  * agent (device) sign-in after the project's first accepted landing it is held for the owner person
@@ -80,7 +93,13 @@ export async function saveCheckSetting(
     !(await hostedOperationRow(ctx, projectId, actor, request.operationId))
   ) {
     const text = canonicalPayload(payload);
-    const pending = await heldReplay(ctx, projectId, hold.key, request.operationId, text);
+    const pending = await heldReplay(
+      ctx,
+      projectId,
+      hold.key,
+      request.operationId,
+      hold.pin ? sameAsked(text) : text,
+    );
     if (pending)
       return canonicalPayload({
         operationId: request.operationId,
@@ -89,13 +108,14 @@ export async function saveCheckSetting(
       });
     rule = await agentSettingRule(ctx, projectId, user);
     if (rule === 'held') {
+      const pinned = hold.pin ? await hold.pin(project) : undefined;
       const row = await holdSetting(ctx, {
         projectId,
         key: hold.key,
         origin: hold.origin,
         operationId: request.operationId,
         requester: actor,
-        request: text,
+        request: pinned === undefined ? text : canonicalPayload({ ...(payload as object), pinned }),
         summary: `${settingLabel[hold.origin]} change from an agent sign-in.`,
       });
       return canonicalPayload({

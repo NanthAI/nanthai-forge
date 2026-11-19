@@ -2,6 +2,7 @@
 import type { QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { checkSetting } from './projectHostedCheckStore';
+import { auditSettings } from './projectHostedMainAuditState';
 import { settingChange, type ApprovalRow } from './projectHostedApprovalStore';
 import { effectivePolicy, editedPolicy, policyReadView, policyWriteSchema } from '../src/autonomy-policy';
 
@@ -23,6 +24,8 @@ const parsed = (text: string | undefined) => {
 };
 const without = (fields: Record<string, unknown>, drop: readonly string[]) =>
   Object.fromEntries(Object.entries(fields).filter(([key]) => !drop.includes(key)));
+/** The thing changed, by name; absent rather than undefined, since the reply is canonical JSON. */
+const named = (name: unknown) => (typeof name === 'string' ? { subject: name } : {});
 /** A stored or imported check minus its identity fields, so it compares with a command. */
 function checkFields(value: unknown) {
   const fields = record(value);
@@ -59,7 +62,7 @@ export async function settingCompare(
         const check = record(asked.check);
         const id = typeof check?.id === 'string' ? check.id : '';
         return {
-          subject: typeof check?.name === 'string' ? check.name : undefined,
+          ...named(check?.name),
           before: id ? checkFields(await stored('definition', id)) : null,
           after: checkFields(check),
         };
@@ -67,7 +70,7 @@ export async function settingCompare(
       const command = record(asked?.command);
       const id = typeof asked?.checkId === 'string' ? asked.checkId : '';
       return {
-        subject: typeof command?.name === 'string' ? command.name : undefined,
+        ...named(command?.name),
         before: id ? checkFields(await stored('definition', id)) : null,
         after: command,
       };
@@ -77,15 +80,19 @@ export async function settingCompare(
       return { before: await stored('runner', 'runner'), after: asked?.configuration ?? null };
     }
     case 'main-audit':
-      return { before: await stored('runner', 'main-audit'), after: change.settings ?? null };
+      // Item 16093ed1 L5: the cadence in force (its defaults while none is stored), not "not set"; the request is
+      // stored parsed, so the asked side already carries its defaults.
+      return { before: await auditSettings(ctx, project._id), after: change.settings ?? null };
     case 'check-import': {
-      // The imported definition is read from Work only when the grant runs; the page shows what is selected.
-      const select = record(change.select);
-      const id = typeof select?.checkId === 'string' ? select.checkId : '';
+      // Item 16093ed1 F3: the definition resolved from Work when the request was held, which is what the grant
+      // applies. A request held before definitions were stored cannot be compared; the page shows the request.
+      const pinned = record(change.pinned);
+      if (!pinned) return null;
+      const id = typeof pinned.id === 'string' ? pinned.id : '';
       return {
-        subject: typeof select?.name === 'string' ? select.name : undefined,
+        ...named(pinned.name),
         before: id ? checkFields(await stored('definition', id)) : null,
-        after: select,
+        after: checkFields(pinned),
       };
     }
     case 'membership': {

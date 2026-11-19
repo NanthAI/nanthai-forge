@@ -21,6 +21,7 @@ import { hostedCheckKey } from '../dist/worker-cli.js';
 const definitions = await import(moduleUrl('../convex/projectHostedCheckDefinitions.ts'));
 const imports = await import(moduleUrl('../convex/projectHostedCheckImport.ts'));
 const autonomy = await import(moduleUrl('../convex/projectAutonomy.ts'));
+const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
 const actionsConfigure = await import(moduleUrl('../convex/projectHostedActionsConfigure.ts'));
 const visibilities = await import(moduleUrl('../convex/githubRepositoryVisibility.ts'));
 
@@ -255,6 +256,187 @@ test('fromWork enforces the expected digest and imports by checkId', async () =>
     await s.call('fromWork', imports.fromWork, { projectId, request: importRequest({ checkId: older.id }) }),
   );
   assert.deepEqual(byId.value, older);
+});
+
+// Item 16093ed1 F3: an agent's held import names a Work check by id or name only. The owner must see the definition
+// the grant applies, and Work changing between hold and grant must not change what is applied.
+const DEVICE = { subject: 'owner', forgeCredential: 'synthetic-owner-device' };
+function landedWithDevice(s, projectId) {
+  s.insert('cliCredentials', {
+    credentialId: DEVICE.forgeCredential,
+    owner: 'owner',
+    name: 'Synthetic owner device',
+    tokenHash: 'synthetic-owner-hash',
+    issuedAt: Date.now(),
+    scope: 'cli',
+    expiresAt: Date.now() + 600_000,
+    revoked: false,
+  });
+  // After the first accepted landing an agent's settings change is held for the owner person.
+  s.insert('projectHostedAcceptances', {
+    projectId,
+    receiptId: 'receipt',
+    submissionId: 'submission',
+    attemptId: 'attempt',
+    sequence: 1,
+    value: '{}',
+  });
+}
+/** Work redefines a check under the same id in a fresh records partition (a later Work generation). */
+function redefineInWork(s, projectId, check) {
+  const projectRow = s.tables.hostedProjects.get(projectId);
+  const { _id, _creationTime, ...generation } = s.tables.projectWorkGenerations.get(
+    projectRow.work.generationId,
+  );
+  const next = s.insert('projectWorkGenerations', generation);
+  for (const entry of indexedRecord('checks', check.id, '', 0, check, {
+    id: check.id,
+    name: check.name,
+    definition: check.definition,
+  }))
+    s.insert(fixtureWorkRecordTable(entry.collection), { projectId, generationId: next, ...entry });
+  s.patch('hostedProjects', projectId, { work: { ...projectRow.work, generationId: next } });
+}
+const workTables = ['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords'];
+
+test('a held check import shows the Work definition and the grant applies that one, even after Work changes', async () => {
+  const { s, projectId, newer } = project();
+  landedWithDevice(s, projectId);
+  const operationId = randomUUID();
+  const ask = () =>
+    s
+      .call(
+        'fromWork',
+        imports.fromWork,
+        { projectId, request: importRequest({ checkId: newer.id }, null, operationId) },
+        DEVICE,
+      )
+      .then(JSON.parse);
+  const held = await ask();
+  assert.equal(held.rule, 'held');
+  const hold = s.counts.at(-1);
+  // The hold resolves the one selected check: the reads the grant used to do, bounded the same way.
+  assert(hold.documents <= 20 && hold.ranges <= 20, JSON.stringify(hold));
+  assert.deepEqual(await ask(), held, 'a retry returns the same request');
+  const observe = () =>
+    s.call('observe', approvals.observe, { projectId, laneId: held.approval.id, detail: 1 }).then(JSON.parse);
+  const page = await observe();
+  assert.equal(page.compare.subject, 'verify');
+  assert.deepEqual(page.compare.after.args, newer.args, 'the page shows the definition, not only its id');
+  assert.equal(page.compare.before, null, 'nothing is stored for this check yet');
+  assert.equal(page.change.pinned.definition, newer.definition, 'Details shows the definition granted');
+
+  const swapped = hostedCheckDefinition(
+    { ...command, args: ['skip-the-tests.mjs'] },
+    newer.id,
+    '2026-03-01T00:00:00.000Z',
+  );
+  redefineInWork(s, projectId, swapped);
+  const granted = JSON.parse(
+    await s.call('decide', approvals.decide, {
+      projectId,
+      operationId: randomUUID(),
+      laneId: held.approval.id,
+      decision: 'grant',
+      head: page.currentHead,
+    }),
+  );
+  assert.equal(granted.applied.rule, 'owner-approved');
+  assert.deepEqual(
+    granted.applied.value,
+    newer,
+    'the grant applies what the owner saw, not what Work holds now',
+  );
+  const grant = s.counts.at(-1);
+  assert.equal(
+    grant.touched.filter(table => workTables.includes(table)).length,
+    0,
+    'the grant reads no Work',
+  );
+  const current = JSON.parse(await s.call('current', definitions.current, { projectId, checkId: newer.id }));
+  assert.equal(current.check.definition, newer.definition);
+  const replay = await ask();
+  assert.equal(replay.rule, 'owner-approved', "the agent's retry returns the applied receipt");
+  assert.deepEqual(replay.value, newer);
+});
+
+test('a stored definition that no longer parses at grant is refused as stale, not as a retryable failure', async () => {
+  const { s, projectId, newer } = project();
+  landedWithDevice(s, projectId);
+  const held = JSON.parse(
+    await s.call(
+      'fromWork',
+      imports.fromWork,
+      { projectId, request: importRequest({ checkId: newer.id }) },
+      DEVICE,
+    ),
+  );
+  // A check shape that changed since the hold (here: a required field gone) cannot be applied as stored.
+  const row = [...s.tables.projectHostedApprovals.values()].find(entry => entry.laneId === held.approval.id);
+  const stored = JSON.parse(row.setting.request);
+  delete stored.pinned.executable;
+  s.patch('projectHostedApprovals', row._id, {
+    setting: { ...row.setting, request: JSON.stringify(stored) },
+  });
+  await assert.rejects(
+    s.call('decide', approvals.decide, {
+      projectId,
+      operationId: randomUUID(),
+      laneId: held.approval.id,
+      decision: 'grant',
+      head: row.head,
+    }),
+    error =>
+      code('WORK_STALE')(error) && /ask the agent to import again/.test(error.data?.message ?? error.message),
+  );
+  assert.equal(settings(s).length, 0);
+});
+
+test('an agent cannot supply the stored definition itself, and a request held without one is not granted blind', async () => {
+  const { s, projectId, newer } = project();
+  landedWithDevice(s, projectId);
+  await assert.rejects(
+    s.call(
+      'fromWork',
+      imports.fromWork,
+      {
+        projectId,
+        request: JSON.stringify({ ...JSON.parse(importRequest({ checkId: newer.id })), pinned: newer }),
+      },
+      DEVICE,
+    ),
+    code('BAD_ARGUMENT'),
+  );
+  const held = JSON.parse(
+    await s.call(
+      'fromWork',
+      imports.fromWork,
+      { projectId, request: importRequest({ name: 'verify' }) },
+      DEVICE,
+    ),
+  );
+  // A request held before definitions were stored with it: the page cannot compare, and a grant is refused.
+  const row = [...s.tables.projectHostedApprovals.values()].find(entry => entry.laneId === held.approval.id);
+  const { pinned, ...legacy } = JSON.parse(row.setting.request);
+  assert.ok(pinned);
+  s.patch('projectHostedApprovals', row._id, {
+    setting: { ...row.setting, request: JSON.stringify(legacy) },
+  });
+  const page = JSON.parse(
+    await s.call('observe', approvals.observe, { projectId, laneId: held.approval.id, detail: 1 }),
+  );
+  assert.equal(page.compare, null);
+  await assert.rejects(
+    s.call('decide', approvals.decide, {
+      projectId,
+      operationId: randomUUID(),
+      laneId: held.approval.id,
+      decision: 'grant',
+      head: page.currentHead,
+    }),
+    code('WORK_STALE'),
+  );
+  assert.equal(settings(s).length, 0);
 });
 
 test('fromWork fails cleanly when verify or hosted Work is missing, and refuses non-owners', async () => {

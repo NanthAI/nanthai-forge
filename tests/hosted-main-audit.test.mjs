@@ -304,6 +304,33 @@ async function red(f) {
   await f.terminal('failed');
 }
 
+test('a held cadence change compares with the cadence in force, defaults included, not "not set" (Item 16093ed1 L5)', async () => {
+  const { moduleUrl } = await import('./convex-module.mjs');
+  const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
+  const f = await auditFixture();
+  await counted(f);
+  const request = { operationId: randomUUID(), authorityEpoch: 1, expected: null, settings: { landings: 3 } };
+  const held = JSON.parse(
+    await f.call(
+      'configureAudit',
+      audit.configure,
+      { projectId: f.projectId, request: JSON.stringify(request) },
+      device,
+    ),
+  );
+  assert.equal(held.rule, 'held');
+  const page = JSON.parse(
+    await f.call('observe', approvals.observe, {
+      projectId: f.projectId,
+      laneId: held.approval.id,
+      detail: 1,
+    }),
+  );
+  assert.deepEqual(page.compare.after, { landings: 3, minutes: 24 * 60 });
+  // Nothing is stored yet, so the cadence in force is the default one.
+  assert.deepEqual(page.compare.before, { landings: 10, minutes: 24 * 60 });
+});
+
 test('an optional owner drill retains its approval and recovery evidence without gating fast mode', async () => {
   const { moduleUrl } = await import('./convex-module.mjs');
   const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
