@@ -592,55 +592,16 @@ export async function executeHostedAgent(
   }
   if (action === 'open') {
     const command = hostedAgentCommandSchemas.open.parse(input);
-    const { takeover, reason, handoff, acceptHandoff, ...checkoutCommand } = command;
-    let prepared: { selection?: import('./hosted-lane.js').HostedLaneSelection } = {};
-    if (session.holderSessionId) {
-      const observed = await session.mutation<{
-        status: string;
-        result: { lane: unknown };
-        observedLane?: unknown;
-      }>('projectHostedHolders:take', {
-        request: canonicalPayload({
-          operationId,
-          laneId: command.laneId,
-          authorityEpoch: epoch,
-          sessionId: session.holderSessionId,
-          ...(session.sessionClaim ? { session: session.sessionClaim } : {}),
-          ...(session.agent ? { agent: session.agent } : {}),
-          ...(command.expected
-            ? { expected: { head: command.expected.head, version: command.expected.version } }
-            : {}),
-          ...(takeover ? { takeover } : {}),
-          ...(acceptHandoff ? { acceptHandoff } : {}),
-          ...(reason ? { reason } : {}),
-          ...(handoff ? { handoff } : {}),
-        }),
-      });
-      invariant(
-        observed.status === 'completed',
-        'WORK_STALE',
-        'The holder change did not complete. Your local work remains.',
-      );
-      prepared = {
-        selection: parseHostedResponse(
-          hostedLaneSelectionSchema,
-          observed.observedLane ?? observed.result.lane,
-        ),
-      };
-      // A handover gives the Lane away; it never opens or rewrites the recipient's local directory.
-      if (handoff) return observed.result;
-    } else {
-      invariant(
-        !takeover && !handoff && !acceptHandoff,
-        'CLI_UPGRADE_REQUIRED',
-        'Explicit Lane holders are not enabled by this server/project.',
-      );
-      if (
-        session.journal.get('open-result') !== undefined ||
-        readLaneEntry(command.laneId)?.root.endsWith(`.forge-client${sep}lanes${sep}${command.laneId}`)
-      )
-        await session.query('projectHostedLanes:select', { laneId: command.laneId });
-    }
+    const holder = await openLaneHolder(session, operationId, epoch, command);
+    // A handover gives the Lane away; it never opens or rewrites the recipient's local directory.
+    if ('handedOff' in holder) return holder.handedOff;
+    const { checkoutCommand, prepared } = holder;
+    if (
+      !session.holderSessionId &&
+      (session.journal.get('open-result') !== undefined ||
+        readLaneEntry(command.laneId)?.root.endsWith(`.forge-client${sep}lanes${sep}${command.laneId}`))
+    )
+      await session.query('projectHostedLanes:select', { laneId: command.laneId });
     return session.journal
       .retain('open-result', async () => {
         const movedFrom = adoptNestedLaneCopy(session.root, command.laneId, session.address);
@@ -654,18 +615,7 @@ export async function executeHostedAgent(
         return movedFrom ? { ...opened, movedFrom } : opened;
       })
       .catch(error => {
-        if (session.holderSessionId && prepared.selection) {
-          const safe = hostedActionError(error, 'Lane checkout');
-          // Only the sanitized failure and this locally known committed operation cross the
-          // transport boundary. Unknown checkout errors can contain source or credentials.
-          throw new ForgeError(
-            safe.code,
-            `${safe.message} The holder operation was recorded before checkout failed. Saved work remains on Forge. Retry this open with operationId ${operationId}; to return the Lane, open it explicitly from the former session.`,
-            safe.retryAt,
-            { ...safe.recovery, outcome: 'committed', operationId },
-          );
-        }
-        throw error;
+        throw holderOpenFailure(session, prepared, operationId, error);
       });
   }
   if (action === 'save') {
@@ -1078,4 +1028,87 @@ async function awaitSaveOutcome(
     return observed;
   }
   return observed ?? saved;
+}
+
+type OpenCommand = z.infer<(typeof hostedAgentCommandSchemas)['open']>;
+type PreparedOpen = { selection?: import('./hosted-lane.js').HostedLaneSelection };
+/** The holder step of `open`, shared by a Lane-folder open and an open from the project folder
+ * (openHostedRootLane), before any checkout. Without explicit holders (the server does not offer
+ * lane-holder-v1) no session holds a Lane, so `takeover` and its `reason` open it as usual
+ * (friction 1d784a4a); a handover needs holders and still refuses. */
+export async function openLaneHolder(
+  session: HostedAgentSession,
+  operationId: string,
+  epoch: number,
+  command: OpenCommand,
+): Promise<
+  | { handedOff: unknown }
+  | {
+      checkoutCommand: Omit<OpenCommand, 'takeover' | 'reason' | 'handoff' | 'acceptHandoff'>;
+      prepared: PreparedOpen;
+    }
+> {
+  const { takeover, reason, handoff, acceptHandoff, ...checkoutCommand } = command;
+  if (!session.holderSessionId) {
+    invariant(
+      !handoff && !acceptHandoff,
+      'CLI_UPGRADE_REQUIRED',
+      'Explicit Lane holders are not enabled by this server/project, so there is no holder to hand over.',
+    );
+    return { checkoutCommand, prepared: {} };
+  }
+  const observed = await session.mutation<{
+    status: string;
+    result: { lane: unknown };
+    observedLane?: unknown;
+  }>('projectHostedHolders:take', {
+    request: canonicalPayload({
+      operationId,
+      laneId: command.laneId,
+      authorityEpoch: epoch,
+      sessionId: session.holderSessionId,
+      ...(session.sessionClaim ? { session: session.sessionClaim } : {}),
+      ...(session.agent ? { agent: session.agent } : {}),
+      ...(command.expected
+        ? { expected: { head: command.expected.head, version: command.expected.version } }
+        : {}),
+      ...(takeover ? { takeover } : {}),
+      ...(acceptHandoff ? { acceptHandoff } : {}),
+      ...(reason ? { reason } : {}),
+      ...(handoff ? { handoff } : {}),
+    }),
+  });
+  invariant(
+    observed.status === 'completed',
+    'WORK_STALE',
+    'The holder change did not complete. Your local work remains.',
+  );
+  if (handoff) return { handedOff: observed.result };
+  return {
+    checkoutCommand,
+    prepared: {
+      selection: parseHostedResponse(
+        hostedLaneSelectionSchema,
+        observed.observedLane ?? observed.result.lane,
+      ),
+    },
+  };
+}
+/** A checkout that failed after the holder change committed: say so, with the safe retry. */
+export function holderOpenFailure(
+  session: HostedAgentSession,
+  prepared: PreparedOpen,
+  operationId: string,
+  error: unknown,
+) {
+  if (!session.holderSessionId || !prepared.selection) return error;
+  const safe = hostedActionError(error, 'Lane checkout');
+  // Only the sanitized failure and this locally known committed operation cross the
+  // transport boundary. Unknown checkout errors can contain source or credentials.
+  return new ForgeError(
+    safe.code,
+    `${safe.message} The holder operation was recorded before checkout failed. Saved work remains on Forge. Retry this open with operationId ${operationId}; to return the Lane, open it explicitly from the former session.`,
+    safe.retryAt,
+    { ...safe.recovery, outcome: 'committed', operationId },
+  );
 }

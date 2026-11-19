@@ -124,7 +124,12 @@ import {
   type HostedAgentAction,
   type HostedAgentCapabilities,
 } from './hosted-agent-contract.js';
-import { executeHostedAgent, hostedCheckSettings } from './hosted-agent-actions.js';
+import {
+  executeHostedAgent,
+  holderOpenFailure,
+  hostedCheckSettings,
+  openLaneHolder,
+} from './hosted-agent-actions.js';
 import { executeHostedApproval, openApprovalsReply, type ApprovalCommand } from './hosted-agent-approval.js';
 import { savedChangedPaths, checkoutProtectedPathNotice } from './hosted-changed-paths.js';
 import { publishClientSourcePack } from './source-pack-client.js';
@@ -1327,10 +1332,21 @@ export class HostedAgentTransport {
         hostedRootLanePath(root, this.address, (command.data as { laneId: string }).laneId) !== root
       ) {
         const open = hostedAgentCommandSchemas.open.parse(command.data);
-        result = await openHostedRootLane(root, this.address, this.exchange, {
-          ...open,
-          operationId: journal.operationId,
-        });
+        // The same holder step as an open in the Lane folder; the checkout never sees its fields.
+        const holder = await openLaneHolder(session, journal.operationId, capabilities.authority.epoch, open);
+        result =
+          'handedOff' in holder
+            ? holder.handedOff
+            : await openHostedRootLane(
+                root,
+                this.address,
+                this.exchange,
+                { ...holder.checkoutCommand, operationId: journal.operationId },
+                undefined,
+                holder.prepared,
+              ).catch(error => {
+                throw holderOpenFailure(session, holder.prepared, journal.operationId, error);
+              });
       } else {
         if (action === 'finish') markLandStep('ready');
         result = await executeHostedAgent(session, action, command.data);

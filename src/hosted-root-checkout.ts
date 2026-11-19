@@ -61,9 +61,14 @@ export async function openHostedRootLane(
   root: string,
   address: HostedAgentAddress,
   exchange: HostedAgentExchange,
-  command: z.infer<typeof hostedAgentCommandSchemas.open> & { operationId: string },
+  command: Omit<
+    z.infer<typeof hostedAgentCommandSchemas.open>,
+    'takeover' | 'reason' | 'handoff' | 'acceptHandoff'
+  > & { operationId: string },
   /** Open here instead of the default placement; objects still come from ROOT's cache. */
   path = hostedRootLanePath(root, address, command.laneId),
+  /** The Lane a holder change already read (openLaneHolder), so the checkout needs no select. */
+  prepared: Parameters<typeof checkoutHostedLane>[4] = undefined,
 ) {
   const downloads = new HostedCheckoutDownloads(exchange);
   const opened = await checkoutHostedLane(
@@ -86,6 +91,7 @@ export async function openHostedRootLane(
       },
     },
     join(clientCacheRoot(root), 'objects'),
+    prepared,
   );
   touchNestedLane(path);
   return opened;

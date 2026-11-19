@@ -166,3 +166,40 @@ test('start from inside a Lane root places the new Lane beside it, never nested 
   assert(!existsSync(join(first + '.forge-client', 'lanes', s.lane.laneId)), 'not nested');
   assert(existsSync(join(sibling, '.forge', 'hosted-lane.json')));
 });
+
+for (const holders of [false, true])
+  test(`1d784a4a: open with takeover from another folder ${holders ? 'takes the Lane once, then checks out' : 'opens it as usual when the server has no Lane holders'}`, async t => {
+    stateHome(t);
+    const s = agentFixture(t);
+    signedDownloads(t, s);
+    const clone = join(s.root, '..', 'clone.forge-client', 'lanes'),
+      first = join(clone, s.lane.laneId);
+    await s.transport().dispatch('start', { outcome: 'First Lane', path: first });
+    // An earlier builder's Lane, opened from this Lane's folder (the project folder takes the same path).
+    s.lane.laneId = randomUUID();
+    let takes = 0;
+    if (holders) {
+      s.caps.features = [...(s.caps.features ?? []), 'lane-holder-v1'];
+      const original = s.exchange.client.mutation.bind(s.exchange.client);
+      s.exchange.client.mutation = async (ref, args) => {
+        if (getFunctionName(ref) !== 'projectHostedHolders:take') return original(ref, args);
+        takes++;
+        const request = JSON.parse(args.request);
+        assert.equal(request.takeover, true);
+        assert.equal(request.reason, 'The previous builder finished');
+        return JSON.stringify({ status: 'completed', result: { lane: s.lane }, observedLane: s.lane });
+      };
+    }
+    const inside = Object.assign(new HostedAgentTransport(first, s.address, s.exchange), {
+      agentSession: 'fixture-agent-session',
+    });
+    const response = await inside.dispatch('open', {
+      laneId: s.lane.laneId,
+      takeover: true,
+      reason: 'The previous builder finished',
+    });
+    const sibling = join(realpathSync(clone), s.lane.laneId);
+    assert.equal(response.result.root, sibling);
+    assert(existsSync(join(sibling, '.forge', 'hosted-lane.json')));
+    assert.equal(takes, holders ? 1 : 0);
+  });
