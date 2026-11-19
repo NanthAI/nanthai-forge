@@ -21,10 +21,9 @@ export function waitForState(store, read, timeoutMs, signal, { idle = false } = 
       clearTimeout(deadline);
       clearInterval(fallback);
       clearImmediate(scheduled);
-      void watcher?.close();
       signal?.removeEventListener('abort', aborted);
-      if (error) reject(error);
-      else resolve(value);
+      // Settle after the watcher closes: a helper it elected is gone with its socket directory.
+      void Promise.resolve(watcher?.close()).then(() => (error ? reject(error) : resolve(value)));
     };
     const aborted = () => close(signal.reason);
     const check = () => {

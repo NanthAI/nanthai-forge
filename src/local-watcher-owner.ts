@@ -107,6 +107,12 @@ export function startSharedWatcher(directory: string) {
     });
   });
   const startup = setTimeout(() => process.exit(0), 3000);
+  // The electing client left before attaching: exit unless a peer attached meanwhile.
+  process.on('message', (message: { type?: string }) => {
+    if (message?.type !== 'abandon') return;
+    if (!clients.size) process.exit(0);
+    else process.disconnect();
+  });
   process.once('exit', () => {
     rmSync(dirname(lease.socket), { recursive: true, force: true });
     // Retain the dead identity for safe takeover; no exiting process can delete

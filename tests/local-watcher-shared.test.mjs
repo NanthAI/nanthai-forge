@@ -16,7 +16,8 @@ import {
   existsSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { processAlive } from '../dist/local-process.js';
 import { fileURLToPath } from 'node:url';
 import { eventually, processes } from './mcp-lifecycle-fixture.mjs';
 
@@ -194,6 +195,22 @@ test(
     );
   },
 );
+
+test('closing before attaching releases the elected helper and its socket directory at once', async t => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-watch-abandon-')));
+  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const directory = join(root, '.forge', 'work');
+  mkdirSync(directory, { recursive: true });
+  const watcher = watchLocal(root, {}, () => {});
+  // The helper has been forked but cannot have booted, elected itself and replied yet.
+  await new Promise(resolve => setImmediate(resolve));
+  await watcher.close();
+  const lease = JSON.parse(readFileSync(join(directory, 'local-watcher.json'), 'utf8'));
+  assert(Number.isInteger(lease.pid) && lease.pid > 0, 'the helper elected itself');
+  // Before 4a83a41f it served nobody for 3 s after close, leaving its socket directory.
+  assert.equal(existsSync(dirname(lease.socket)), false, 'socket directory removed before close returns');
+  assert.equal(processAlive(lease), false, 'elected helper exited before close returns');
+});
 
 test('closing the last subscription joins an in-flight helper election without killing peer service', async t => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-watch-startup-close-')));

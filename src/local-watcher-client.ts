@@ -66,6 +66,14 @@ export function sharedWatcher(directory: string) {
     });
     current.once('message', (value: WatchLease) => {
       received = true;
+      if (stopped && value.pid === current.pid && current.connected) {
+        // This client elected the owner and left before attaching. Release it now, not
+        // after its startup window; startup completes when it has exited (removing its
+        // socket directory) or stayed for a peer that attached meanwhile.
+        current.once('disconnect', started);
+        current.send({ type: 'abandon' }, error => error && started());
+        return;
+      }
       started();
       if (current.connected) current.disconnect();
       current.unref();
