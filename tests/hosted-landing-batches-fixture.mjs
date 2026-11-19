@@ -187,7 +187,8 @@ export async function batchesFixture(
         : {}),
       ...member.request,
     });
-    const state = await f.enqueue(request);
+    // `member.enqueue(lane)`: extra enqueue arguments a CLI sends beside the request (land gates).
+    const state = await f.enqueue(request, member.enqueue?.(lane));
     entries.push({ lane, selection, candidate, request, state });
     return state;
   };

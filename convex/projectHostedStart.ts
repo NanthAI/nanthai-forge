@@ -41,6 +41,8 @@ const args = {
   agentClient: v.optional(v.string()),
   noticeVersion: v.optional(v.literal(1)),
   openLanesVersion: v.optional(v.union(v.literal(1), v.literal(2))),
+  /** The guard-set revision the caller holds (feature preflight-guard-set, 13ea93bf). */
+  guardRevision: v.optional(v.string()),
   /** The calling agent session's slug (feature agent-slug, c29d0780); not part of the payload. */
   agent: v.optional(v.string()),
   session: v.optional(
@@ -73,6 +75,7 @@ type Input = {
   agentClient?: string;
   noticeVersion?: 1;
   openLanesVersion?: 1 | 2;
+  guardRevision?: string;
   agent?: string;
   authorityEpoch: number;
   expectedMain: { head: string; receiptId: string };
@@ -127,6 +130,7 @@ async function execute(
   const {
     noticeVersion,
     openLanesVersion,
+    guardRevision,
     agent,
     agentClient,
     authorship,
@@ -134,6 +138,8 @@ async function execute(
     holderSessionId,
     ...semanticRequest
   } = validated.data;
+  // Never part of the payload hash: a retried start is the same start (13ea93bf).
+  void guardRevision;
   void agentClient;
   void authorship;
   const payload = { action, ...semanticRequest };

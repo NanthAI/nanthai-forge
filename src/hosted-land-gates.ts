@@ -28,6 +28,13 @@ export const preflightResult = (advisory: unknown): PreflightResult => {
   const status = (advisory as { status?: unknown } | undefined)?.status;
   return PREFLIGHT_RESULTS.includes(status as PreflightResult) ? (status as PreflightResult) : 'none';
 };
+/** Files a gate's `ran` can name: a preflight over this sends no `ran` (13ea93bf). */
+const RAN_MAX_FILES = 256;
+/** Four base64url characters (24 bits of FNV-1a) per test file preflight ran, sorted. */
+const ranSchema = z
+  .string()
+  .max(RAN_MAX_FILES * 4)
+  .regex(/^(?:[A-Za-z0-9_-]{4})*$/);
 export const landGateEntrySchema = z
   .object({
     laneId: z.uuid(),
@@ -35,6 +42,11 @@ export const landGateEntrySchema = z
     preflight: z.enum(PREFLIGHT_RESULTS),
     saveMs: z.number().int().nonnegative().optional(),
     preflightMs: z.number().int().nonnegative().optional(),
+    /** Test files this head's preflight ran or reused, as 4-character keys (feature
+     * preflight-guard-set, 13ea93bf); absent when unknown. Only a failed check will read it. */
+    ran: ranSchema.optional(),
+    /** Local preflight runs of this Lane: the cost side (r) of the guard-set formula. */
+    runs: z.number().int().nonnegative().max(999).optional(),
   })
   .strict();
 /** Landings of more Lanes than this are judged on their first 20 (an Intent rarely has more). */

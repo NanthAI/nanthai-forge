@@ -85,6 +85,9 @@ export const hostedLandingTables = {
     agentRun: v.optional(v.string()),
     /** Its client: harness and declared model (81d12a32); copied to the landing row. */
     agentClient: v.optional(v.string()),
+    /** Guard-set evidence from the land gate (13ea93bf); copied to the landing row. */
+    preflightRan: v.optional(v.string()),
+    preflightRuns: v.optional(v.number()),
     wake: v.union(v.object({ id: v.string(), taskId: v.id('_scheduled_functions') }), v.null()),
   })
     .index('by_project_and_actor_and_operation', ['projectId', 'actor', 'operationId'])
@@ -167,6 +170,10 @@ export const hostedLandingTables = {
     agentRun: v.optional(v.string()),
     /** Its client: harness and declared model (81d12a32); the receipt records it. */
     agentClient: v.optional(v.string()),
+    /** Test files the landing's preflight ran (`ranKey`s) and its local runs (land gate, 13ea93bf);
+     * server-only, read once if its check fails, to learn the preflight guard set. */
+    preflightRan: v.optional(v.string()),
+    preflightRuns: v.optional(v.number()),
     batchSelection: v.optional(v.string()),
     batchable: v.optional(v.boolean()),
     /** Server-only admission run of this submission's own Candidate (not in the state body). */

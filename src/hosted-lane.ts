@@ -6,6 +6,7 @@ import { sourceAuthoritySchema } from './hosted-source-authority.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { intentCreateSchema } from './work-intent-types.js';
 import { isAgentSlug } from './agent-slug.js';
+import { safeRelative } from './safe-relative.js';
 
 /** Display provenance is a client claim, never an access grant. */
 export const sessionClaimSchema = z
@@ -59,6 +60,9 @@ export const hostedStartSchema = z
     /** The client reads openLanes in the reply (capability openLanesVersion); 2 adds each Lane's `resolves`
      * (feature start-open-lanes-resolves). Never part of the payload hash. */
     openLanesVersion: z.union([z.literal(1), z.literal(2)]).optional(),
+    /** The learned guard-set revision the client caches (feature preflight-guard-set, 13ea93bf); the
+     * reply carries `guardSet` only when the server's differs. Never part of the payload hash. */
+    guardRevision: z.string().max(16).optional(),
     /** The calling agent session's slug (feature agent-slug, c29d0780); never part of the payload hash. */
     agent: z.string().refine(isAgentSlug, 'agent must be a Forge agent slug').optional(),
     session: sessionClaimSchema.optional(),
@@ -123,6 +127,37 @@ export function replacedOpenLanes(openLanes: readonly OpenLane[] | undefined) {
   );
 }
 
+/** The learned preflight guard set's candidates (Item 13ea93bf): what a Lane start reply may carry
+ * when the caller sent another guardRevision. The CLI picks the set with its own seconds and budget. */
+const guardFileName = z
+  .string()
+  .max(300)
+  .regex(/^[\w.@+\-/]+$/)
+  .refine(safeRelative);
+const guardCandidatesSchema = z
+  .object({
+    rev: z.string().max(16),
+    outcomes: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+    /** Median builder seconds a failed landing in the window cost (submit to verdict). */
+    C: z.number().nonnegative(),
+    /** Local preflight runs per landing, from the failed Lanes that reported them (at least 1). */
+    r: z.number().min(1),
+    runnerMinutes: z.number().nonnegative().nullable(),
+    files: z
+      .array(
+        z
+          .object({
+            file: guardFileName,
+            failures: z.number().int().positive(),
+            /** Median seconds the check spent on the file, when it reported one. */
+            checkSeconds: z.number().nonnegative().nullable(),
+          })
+          .strict(),
+      )
+      .max(20),
+  })
+  .strict();
 export const hostedStartResultSchema = z
   .object({
     fixBrief: z.string().optional(),
@@ -148,5 +183,7 @@ export const hostedStartResultSchema = z
           .strict(),
       )
       .optional(),
+    /** The learned preflight guard-set candidates, when the caller sent another guardRevision. */
+    guardSet: guardCandidatesSchema.optional(),
   })
   .strict();
