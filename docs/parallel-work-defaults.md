@@ -91,7 +91,8 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 ### localHeavySlots
 
 - `nforge heavy CMD [ARGS...]` runs one heavy local command (build, typecheck, lint, tests). It
-  waits for a free slot, which every Lane and agent on the machine shares.
+  waits for a free slot, which every Lane and agent on the machine shares. A leading `--`
+  (`nforge heavy -- CMD`) ends heavy's own options.
 - Slots are granted first come, first served. A caller that finds anyone waiting joins the back of
   the queue (one small ticket file per waiter); only the caller at the front tries the slots, so a
   newer short command never overtakes an older waiter. Waiters are woken by every release and

@@ -157,8 +157,8 @@ export function acquireHeavySlot(
   });
 }
 
-export const HEAVY_HELP = `nforge heavy CMD [ARGS...]
-nforge heavy --no-build CMD [ARGS...]
+export const HEAVY_HELP = `nforge heavy [--] CMD [ARGS...]
+nforge heavy --no-build [--] CMD [ARGS...]
 nforge heavy --status
 nforge heavy --help | -h
 Run bounded builds and test batches under the machine-wide slot limit.
@@ -340,18 +340,28 @@ export async function heavyCli(
 ): Promise<number> {
   const noBuild = args[0] === '--no-build';
   if (noBuild) args = args.slice(1);
-  if (!args.length || (args.length === 1 && ['--help', '-h'].includes(args[0]!))) {
+  // A leading -- ends heavy's own options, as in most CLIs; everything after it is the command.
+  const endOfOptions = args[0] === '--';
+  if (endOfOptions) {
+    args = args.slice(1);
+    invariant(
+      args.length > 0,
+      'BAD_ARGUMENT',
+      'heavy -- needs a command after it: nforge heavy -- CMD [ARGS...].',
+    );
+  }
+  if (!endOfOptions && (!args.length || (args.length === 1 && ['--help', '-h'].includes(args[0]!)))) {
     await beforeLocal?.();
     process.stdout.write(HEAVY_HELP);
     return 0;
   }
   invariant(
-    !args[0]!.startsWith('-') || args[0] === '--status',
+    endOfOptions || !args[0]!.startsWith('-') || args[0] === '--status',
     'BAD_ARGUMENT',
     'Unknown heavy option. Run nforge heavy --help; use heavy CMD [ARGS...] for a bounded batch.',
   );
   invariant(
-    args[0] !== '--status' || args.length === 1,
+    endOfOptions || args[0] !== '--status' || args.length === 1,
     'BAD_ARGUMENT',
     'heavy --status takes no command. Run nforge heavy --status.',
   );
@@ -361,7 +371,7 @@ export async function heavyCli(
     'heavy: node --test received no test file paths, so Node would run the whole suite. Pass the selected files as separate arguments (zsh does not word-split a plain $VAR: use an array with "${files[@]}" or ${=VAR}), or run nforge heavy npm test for the full suite on purpose.',
   );
   const slots = heavySlots(readClientSettings().localHeavySlots);
-  if (args[0] === '--status') {
+  if (!endOfOptions && args[0] === '--status') {
     await beforeLocal?.();
     process.stdout.write(`${JSON.stringify(heavyStatus(heavySlotDirectory(), slots))}\n`);
     return 0;

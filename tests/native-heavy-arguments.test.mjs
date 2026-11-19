@@ -29,6 +29,31 @@ test('native heavy preserves whitespace, quotes and multiline arguments without 
   assert.deepEqual(JSON.parse(result.stdout), args);
 });
 
+test('friction 7ea3a168: heavy treats a leading -- as the end of its own options', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'forge-heavy-dashdash-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const heavy = (...args) =>
+    spawnSync(process.execPath, ['dist/cli-entry.js', 'heavy', ...args], {
+      encoding: 'utf8',
+      env: { ...process.env, FORGE_HEAVY_DIR: directory },
+    });
+  const echo = [
+    process.execPath,
+    '-e',
+    'process.stdout.write(JSON.stringify(process.argv.slice(1)))',
+    'plain',
+    'two words',
+  ];
+  for (const prefix of [['--'], ['--no-build', '--']]) {
+    const result = heavy(...prefix, ...echo);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), ['plain', 'two words']);
+  }
+  const bare = heavy('--');
+  assert.notEqual(bare.status, 0);
+  assert.match(bare.stderr + bare.stdout, /heavy -- needs a command/);
+});
+
 test('native save distinguishes completed receipts from pending exact-operation replay without extra calls', async () => {
   const operationId = 'a8526d55-dada-4c33-a1a4-c00f9b25ef70';
   const command = {
