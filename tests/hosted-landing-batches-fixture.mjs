@@ -44,9 +44,14 @@ export async function batchesFixture(
     runAudits = false,
     // Any configured check command (BYOCI), e.g. `{ executable: 'bash', args: ['ci/check.sh'] }`.
     checkCommand,
+    startAt,
   } = {},
 ) {
-  const f = await finishFixture(t, { fileCount, ...(baselineFiles ? { baselineFiles } : {}) });
+  const f = await finishFixture(t, {
+    fileCount,
+    ...(baselineFiles ? { baselineFiles } : {}),
+    ...(startAt === undefined ? {} : { startAt }),
+  });
   {
     const policy = policyPreset('trusted');
     f.patch('hostedProjects', f.projectId, {

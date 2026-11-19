@@ -126,9 +126,13 @@ export async function finishFixture(
     mainFiles = null,
     beforeSourceMutation = null,
     admission = false,
+    // The fake clock's first instant. Replays whose costs are compared start at the same one.
+    startAt,
   } = {},
 ) {
   const clock = testClock(t);
+  // A fixture that names its first instant starts the test's one clock there.
+  if (startAt !== undefined) clock.now = startAt;
   const c = await composeFixture({ baselineFiles });
   const extraBase = JSON.parse(c.objects.get(c.baseline.sha256)).files.filter(
     file => !['a.txt', 'hidden.bin'].includes(file.path),

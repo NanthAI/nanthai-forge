@@ -44,6 +44,10 @@ export async function conflictTrio(
   } = {},
 ) {
   const f = await batchesFixture(t, {
+    // Every trio starts at noon UTC today. A replay's simulated minutes then never cross midnight,
+    // where daily rows add one call: compared replays (small vs large history, before vs after)
+    // differed by that call when a check started near 00:00 UTC.
+    startAt: new Date().setUTCHours(12, 0, 0, 0),
     count: 0,
     batchMaxSize: 1,
     fileCount: 2,
