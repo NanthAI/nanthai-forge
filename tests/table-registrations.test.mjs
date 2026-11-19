@@ -8,11 +8,13 @@ import { tableRegistrationFindings } from '../scripts/table-registrations.mjs';
 import { hostedAgentHelpMarkdown } from '../dist/hosted-agent-help.js';
 import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import { readStorageBudgets } from './landing-storage-budget.mjs';
+import { readDocument } from '../scripts/package-documents.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const inventory = await import(moduleUrl('../convex/projectPurgeInventory.ts'));
+const repo = fileURLToPath(new URL('..', import.meta.url));
 const read = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
 
 test('new tables report all five registration gaps together before a landing check is spent', () => {
@@ -29,7 +31,7 @@ test('new tables report all five registration gaps together before a landing che
     ]),
     budgets: readStorageBudgets(),
     owners: ownerBoundaryFindings(new URL('../convex/', import.meta.url)),
-    helpCurrent: read('docs/agents/workflow.md').includes(hostedAgentHelpMarkdown()),
+    helpCurrent: readDocument(repo, 'docs/agents/workflow.md').includes(hostedAgentHelpMarkdown()),
   });
   assert.deepEqual(findings, [], `Complete all missing registrations:\n${findings.join('\n')}`);
 });
@@ -55,7 +57,7 @@ test('one diagnostic includes every omitted table, budget phase, owner classific
     'syntheticB: tests/landing-storage-budget.d/syntheticB.json (fresh/immediate)',
     'syntheticB: tests/landing-storage-budget.d/syntheticB.json (fresh/retained)',
     'owner-only guard: synthetic.ts:write',
-    'generated help: refresh docs/agents/workflow.md with hostedAgentHelpMarkdown()',
+    'generated help: refresh docs/agents/workflow.d/sections/0310-generated-contract.md with hostedAgentHelpMarkdown()',
   ]);
 });
 

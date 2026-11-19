@@ -14,6 +14,8 @@ export function tableRegistrationFindings({ tables, placement, purge, budgets, o
   }
   findings.push(...owners.map(name => `owner-only guard: ${name}`));
   if (!helpCurrent)
-    findings.push('generated help: refresh docs/agents/workflow.md with hostedAgentHelpMarkdown()');
+    findings.push(
+      'generated help: refresh docs/agents/workflow.d/sections/0310-generated-contract.md with hostedAgentHelpMarkdown()',
+    );
   return findings;
 }

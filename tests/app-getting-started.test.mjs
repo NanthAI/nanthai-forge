@@ -5,9 +5,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { moduleUrl } from './convex-module.mjs';
+import { readDocument } from '../scripts/package-documents.mjs';
 
 globalThis.location ??= { origin: 'https://forge.example' };
 const apps = await import(moduleUrl('../web/src/app/start/agent-apps.ts'));
@@ -19,6 +21,7 @@ const { policyWriteSchema, legacyPolicy } = await import(moduleUrl('../src/auton
 const { default: Start } = await import(moduleUrl('../web/src/app/start/Start.tsx'));
 const { ConnectSteps } = await import(moduleUrl('../web/src/app/start/parts.tsx'));
 
+const root = fileURLToPath(new URL('..', import.meta.url));
 const cli = readFileSync(new URL('../src/cli.ts', import.meta.url), 'utf8');
 const verbs = readFileSync(new URL('../src/agent-verbs.ts', import.meta.url), 'utf8');
 const commands = new Set([...cli.matchAll(/^ {2}nforge ([a-z][a-z-]*)/gm)].map(match => match[1]));
@@ -92,7 +95,8 @@ test('the steps link the install guide, hooks, MCP and guidance, each to a docs 
     assert.ok(hrefs.includes(wanted), `${wanted} is linked`);
   for (const href of hrefs) {
     const [page, anchor] = href.split('#');
-    const source = readFileSync(new URL(`..${page.replace(/\/$/, '')}.md`, import.meta.url), 'utf8');
+    // Split documents (docs/agents/workflow.md) keep their headings in entry files; read the assembled page.
+    const source = readDocument(root, `${page.replace(/^\//, '').replace(/\/$/, '')}.md`);
     if (anchor)
       assert.ok(
         [...source.matchAll(/^#{1,6} (.+)$/gm)].some(match => slug(match[1]) === anchor),

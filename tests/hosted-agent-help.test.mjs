@@ -2,7 +2,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
 import {
   allHelpTopics,
@@ -20,6 +19,10 @@ import { canonicalRoot } from '../dist/root-paths.js';
 import { agentCli } from '../dist/agent-cli.js';
 import { docsCli } from '../dist/docs-cli.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
+import { readDocument } from '../scripts/package-documents.mjs';
+import { fileURLToPath } from 'node:url';
+
+const repo = fileURLToPath(new URL('..', import.meta.url));
 
 async function output(call) {
   const previous = process.stdout.write;
@@ -64,7 +67,7 @@ test('hosted help and packaged docs are generated from every enforced schema', a
       entry.parameters.map(p => p.replace(/\?$/, '')),
       Object.keys(entry.schema.properties),
     );
-  const doc = readFileSync(new URL('../docs/agents/workflow.md', import.meta.url), 'utf8');
+  const doc = readDocument(repo, 'docs/agents/workflow.md');
   assert.equal(
     doc.match(/<!-- hosted-agent-contract:start -->[\s\S]*?<!-- hosted-agent-contract:end -->/)[0],
     hostedAgentHelpMarkdown(),
@@ -92,7 +95,7 @@ test('hosted help and packaged docs are generated from every enforced schema', a
 
 test('hosted coordination entry points retain supported reads and their coverage limits', () => {
   for (const path of ['AGENTS.md', 'skills/forge-agent/SKILL.md', 'docs/agents/workflow.md']) {
-    const text = readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+    const text = readDocument(repo, path);
     for (const field of ['conflictNotice', 'behindMain'])
       assert(text.includes(field), `${path}: use the supported receipt fields`);
     assert.match(text, /unsaved/i, `${path}: saved-path coverage limit`);

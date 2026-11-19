@@ -1,0 +1,64 @@
+<!-- hosted-agent-contract:start -->
+| Hosted command | Accepted parameters (`?` = optional) |
+| --- | --- |
+| `pull` | `operationId?` |
+| `save --friction` | `laneId?, title, detail, area, cost?, workaround?, evidence?, operationId?` |
+| `friction-list` | `id?, status?, area?, laneId?, search?, limit?, cursor?` |
+| `x friction-triage` | `frictionIds, status, reason?, laneId?, planningItemId?, id?, itemId?, operationId?` |
+| `save --decision` | `conversation?, target, decidedBy, what, why, decidedAt?, overrides?, supersedes?, delegation?, actor?, tool?, operationId?` |
+| `decisions` | `target?, cursor?, operationId?` |
+| `tests` | `candidateId, runId?, timingBasis?, tests?, expectedHead?, expectedVersion?, operationId?` |
+| `save --contract` | `candidateId, runId?, timingBasis?, tests?, expectedHead?, expectedVersion?, operationId?` |
+| `start` | `model?, outcome?, constraints?, intentId?, initialHead?, stackOn?, stackEntry?, planningItemId?, id?, itemId?, scope?, path?, open?, installScripts?, operationId?` |
+| `start --open` | `laneId, takeover?, acceptHandoff?, reason?, handoff?, expected?, paths?, operationId?` |
+| `save` | `laneId?, message?, model?, supersedeFinish?, operationId?` |
+| `save --candidate` | `laneId?, message?, intentId?, inputs?, dependencies?, operationId?` |
+| `save --sync` | `laneId?, message?, candidateId?, target?, ontoMain?, stackOn?, predecessor?, apply?, cleanOnly?, operationId?` |
+| `recover-apply` | `applyOperationId, operationId?` |
+| `resolve` | `laneId?, message?, keep?, operationId?` |
+| `save --check` | `checkId, expectedDefinition?, expectedConfiguration?, expectedEnvironment?, candidateId, expectedHead?, operationId?` |
+| `land --save` | `model?, laneId?, message?, intentId?, inputs?, dependencies?, check?, candidateId?, composeOperationId?, after?, accept?, keepOpen?, closes?, priority?, allowEmpty?, retry?, reason?, operationId?` |
+| `x prioritize` | `submissionId, priority, asOwner?, operationId?` |
+| `preflight` | `laneId?, run?, budgetSeconds?, trim?, retry?, message?, operationId?` |
+| `x source-pack` | `operationId?` |
+| `x snapshots` | `laneId?, undo?, redo?, restore?, purge?, operationId?` |
+| `x cancel` | `submissionId, operationId?` |
+| `land --withdraw` | `laneId?, submissionId?, reason?, operationId?` |
+| `x revert` | `message?, target, operationId?` |
+| `x abandon` | `laneId?, reason, saveFirst?, keepPatch?, target?, operationId?` |
+| `x complete` | `laneId?, operationId?` |
+| `x pin` | `laneId?, pinned?, operationId?` |
+| `x complete-merged` | `operationId?` |
+| `x abandon-dormant` | `apply?, limit?, operationId?` |
+| `start --reopen` | `laneId?, target?, operationId?` |
+| `status` | `laneId?, whoami?, kind?, operationId?, submissionId?, runId?, version?, summary?, reports?, cursor?` |
+| `observe` | `kind?, operationId?, submissionId?, runId?, version?` |
+| `metrics` | `from?, to?, limit?, cursor?, contextDays?, operationId?` |
+| `capabilities` | `operationId?` |
+| `x configure-check` | `name?, checkId?, command?, expected?, operationId?` |
+| `x configure-runner` | `provider?, runsOn?, concurrencyBudget?, publicLogs?, submodules?, isolation?, machineId?, labels?, repository?, configuration?, expected?, mainAudit?, operationId?` |
+| `check-settings` | `operationId?` |
+| `policy` | `operationId?` |
+| `approve-link` | `operationId?` |
+| `request-approval` | `laneId?, reason?, withdraw?, operationId?` |
+| `x set-policy` | `governanceVersion?, expectedPolicy?, preset?, acceptance?, checks?, integrationPreview?, ownerRootUpdates?, accessIdentities?, autoSnapshot?, autoSnapshotIntervalMinutes?, checkLogs?, laneUpdates?, lifecycle?, notify?, githubMirror?, trust?, agentDefaults?, autoExchange?, operationId?` |
+| `planning` | `planningItemId?, id?, itemId?, transfer?, search?, kind?, status?, initiativeId?, type?, owner?, relation?, counts?, limit?, cursor?, reconcile?, schedule?, operationId?` |
+| `put-planning-item` | `expectedVersion?, kind?, title?, body?, status?, reason?, intentIds?, initiativeId?, planningItemId?, id?, itemId?, fields?, batch?, operationId?` |
+| `comment-planning-item` | `itemId?, authorLabel?, text, replyTo?, decision?, planningItemId?, id?, operationId?` |
+| `provenance` | `candidateId, file?, lines?, cursor?` |
+| `records` | `collection, parentId?, status?, id?, version?, cursor?` |
+| `log` | `runId, tail?, stream?, shard?, attempt?, laneId?` |
+| `lanes` | `planningItemId?, id?, itemId?, intentId?, state?, cursor?, limit?, view?` |
+| `diff` | `laneId?, paths?, byteBudget?, summary?, from?, cursor?` |
+| `peers` | `laneId?, path?, detail?` |
+| `queue` | `limit?, laneId?` |
+| `landings` | `from?, to?, receiptId?, limit?, cursor?` |
+| `lane-history` | `laneId?` |
+| `wait` | `runId?, operationIds?, cursor?, until?, timeoutSeconds?, peer?, approval?` |
+| `show` | `laneId?, state?, candidateId?, expected?, channel?, at?, path, force?` |
+| `board` | `id?, laneId?, all?` |
+| `board --post` | `text, laneId?, operationId?, to, paths?` |
+| `board --reply` | `text, laneId?, operationId?, id` |
+| `board --resolve` | `id, text?` |
+| `history` | `action?, op?, commit?, path?, limit?, skip?, start?, end?, bytes?, force?, laneId?` |
+<!-- hosted-agent-contract:end -->

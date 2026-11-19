@@ -54,6 +54,34 @@ test('a split document assembles its entries in file-name order with links relat
   );
 });
 
+test('table-row entries continue the table before them, so a table keeps one row per file', t => {
+  const directory = fixture(t, {
+    'docs/t.md': '# T\n\nEntries: [t.d/rows](t.d/rows/)\n',
+    'docs/t.d/rows/0000-header.md': '| Table | Holds |\n| --- | --- |\n',
+    'docs/t.d/rows/0020-b.md': '| `b` | Second. |\n',
+    'docs/t.d/rows/0010-a.md': '| `a` | First, see [x](../../x.md). |\n',
+    'docs/t.d/rows/9010-note.md': 'A note after the table.\n',
+    'docs/t.d/rows/9020-more.md': '| `c` | A new table after prose. |\n',
+  });
+  assert.equal(
+    readDocument(directory, 'docs/t.md'),
+    '# T\n\n| Table | Holds |\n| --- | --- |\n| `a` | First, see [x](x.md). |\n| `b` | Second. |\n\n' +
+      'A note after the table.\n\n| `c` | A new table after prose. |\n',
+  );
+});
+
+test('entry links resolve like the foundation link check: fenced ones stay as written, wrapped ones move', t => {
+  const directory = fixture(t, {
+    'docs/ref.md': '# Ref\n\nEntries: [ref.d/a](ref.d/a/)\n',
+    'docs/ref.d/a/0010-x.md':
+      'See [guide](../../guide.md).\n\n```md\n[literal](../../guide.md)\n```\n\nThen [a wrapped\nlink](../../more.md).\n',
+  });
+  assert.equal(
+    readDocument(directory, 'docs/ref.md'),
+    '# Ref\n\nSee [guide](guide.md).\n\n```md\n[literal](../../guide.md)\n```\n\nThen [a wrapped\nlink](more.md).\n',
+  );
+});
+
 test('split shared documents hold only headings and entries lines, so new entries get their own file', () => {
   const raw = path => readFileSync(join(root, path), 'utf8');
   const split = packageDocuments.filter(path =>
@@ -61,8 +89,8 @@ test('split shared documents hold only headings and entries lines, so new entrie
       .split('\n')
       .some(line => ENTRIES_LINE.test(line)),
   );
-  assert.ok(split.includes('docs/status.md'), 'docs/status.md is split into docs/status.d/');
-  assert.ok(split.includes('docs/security.md'), 'docs/security.md is split into docs/security.d/sections/');
+  for (const path of ['docs/status.md', 'docs/security.md', 'docs/agents/workflow.md'])
+    assert.ok(split.includes(path), `${path} is split`);
   for (const path of split) {
     for (const block of raw(path)
       .trimEnd()

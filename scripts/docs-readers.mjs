@@ -31,9 +31,21 @@ const mentions = doc => {
  * (one hop, by file name; a doubtful match selects the test). Product code that names a document
  * links to it in a message; it does not read its text. Returns test -> the document and the file that
  * names it (`scan` holds the folder when the test reads it by scanning that folder). */
-export function docsReaders(files, docs) {
+export function docsReaders(files, changed) {
   const found = new Map();
-  if (!docs.length) return found;
+  if (!changed.length) return found;
+  // An entry of a split document (`NAME.d/…/x.md`, src/doc-fragments.ts) is read through `NAME.md`.
+  const docs = [
+    ...new Set(
+      changed.flatMap(doc => [
+        doc,
+        ...(/^(.+)\.d\/.+\.md$/
+          .exec(doc)
+          ?.slice(1)
+          .map(stem => `${stem}.md`) ?? []),
+      ]),
+    ),
+  ];
   const patterns = docs.map(doc => [doc, mentions(doc)]);
   const tests = [...files.keys()].filter(testFile).sort();
   const carriers = [];

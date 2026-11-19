@@ -63,6 +63,12 @@ test('a document is read where its path is named, directly or through a test hel
     'tests/root.test.mjs',
   ]);
   assert.equal(docsReaders(files, []).size, 0);
+  // An entry of a split document is read by whatever reads the assembled document (Item 491ddd77).
+  assert.deepEqual([...docsReaders(files, ['docs/x/guide.d/now/0010-entry.md']).keys()].sort(), [
+    'tests/reads-guide.test.mjs',
+    'tests/via-helper.test.mjs',
+    'tests/via-script.test.mjs',
+  ]);
 });
 
 test('a docs-only change plans only its readers; beside code they are mandatory', () => {
