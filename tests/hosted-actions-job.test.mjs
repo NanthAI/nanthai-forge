@@ -915,6 +915,47 @@ test('shard count keeps Convex calls per check within the budget for old and inl
   }
 });
 
+test('Issue 0ea17a29: the shard pool has one path; a leftover pool switch value never turns it off', async t => {
+  const tests = Array.from({ length: 24 }, (_, i) => `tests/pool-${i}.test.mjs`);
+  const timingHistory = {
+    version: 1,
+    runs: [],
+    files: Object.fromEntries(tests.map(file => [file, { durationMs: 45000, updatedAt: '2026-01-01' }])),
+  };
+  const saved = process.env.FORGE_ACTIONS_POOL_MODE;
+  t.after(() => {
+    if (saved === undefined) delete process.env.FORGE_ACTIONS_POOL_MODE;
+    else process.env.FORGE_ACTIONS_POOL_MODE = saved;
+  });
+  // The A/B switch is deleted: neither its old values nor the old default change the plan.
+  for (const mode of ['off', 'ab', undefined]) {
+    if (mode === undefined) delete process.env.FORGE_ACTIONS_POOL_MODE;
+    else process.env.FORGE_ACTIONS_POOL_MODE = mode;
+    for (const capabilities of [
+      hostedActionsCapabilities,
+      hostedActionsCapabilities.filter(cap => cap !== 'checks.pool'),
+    ]) {
+      const s = fixture(t, { timingHistory, capabilities });
+      s.run.request.expectedHead = s.state([
+        s.entry('package-lock.json', '{}'),
+        ...tests.map(file => s.entry(file, '// synthetic')),
+      ]).sha256;
+      const prepared = await prepareActionsJob(
+        s.client,
+        join(s.directory, 'candidate'),
+        join(s.directory, 'cache'),
+      );
+      assert(prepared.recipe.groups.length >= 2);
+      // An old server (no checks.pool) still keeps the static groups.
+      assert.equal(
+        prepared.recipe.pool !== undefined,
+        capabilities.includes('checks.pool'),
+        `mode ${mode} with${capabilities.includes('checks.pool') ? '' : 'out'} checks.pool`,
+      );
+    }
+  }
+});
+
 test('planner consumes session timing history for balanced LPT shards; empty and corrupt history preserve round-robin', async t => {
   const tests = Array.from(
     { length: 80 },

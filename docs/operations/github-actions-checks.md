@@ -1029,10 +1029,11 @@ runner's tail. The static LPT groups stay the plan of record; the pool only deci
   shards; yielded Z; D run without a confirmed claim; P claim writes, H claim reads, R lost races`
   and its phase lines show `pool` for unit time. The plan job prints `Shard pool: on|off`.
 - **Any CI.** Plain HTTPS PUT and HEAD, the plan bundle and N workers running the Forge supervisor. An
-  adapter that hands the bundle to its shard workers gets stealing; one that does not, an old server
-  (no `checks.pool` capability) or `FORGE_ACTIONS_POOL_MODE=off` keeps the static groups.
+  adapter that hands the bundle to its shard workers gets stealing; one that does not, or an old
+  server (no `checks.pool` capability), keeps the static groups.
 - **Budgets.** Convex calls per check unchanged. R2 per 11-shard check: about one PUT per unit plus a
-  few lost races (Class A, ~35-50) and a few hundred HEADs at most (Class B), ~35 objects of 18 bytes.
+  few lost races (Class A, ~35-50) and about 400-600 HEADs (Class B, 382-566 measured on dogfood),
+  ~35 objects of 18 bytes.
   Runner minutes stay flat (the same work, plus about one second of process start per unit).
 - **Cleanup.** Forge deletes its own claims; no bucket lifecycle rule is needed. When a check's final
   result is recorded (any shard ran the pool, `poolClaimed`), the same HTTP action lists and deletes
@@ -1041,11 +1042,10 @@ runner's tail. The static LPT groups stay the plan of record; the pool only deci
   cancelled or crashed checks go with later checks. That is 2-3 R2 lists plus one DELETE per claim,
   no Convex call, beside the output manifest work, best effort and capped at 10 seconds: cleanup never
   fails or holds a result. Expired claims are harmless meanwhile (18 bytes each, never read).
-- **Measurement.** `forge-check.yml` sets `FORGE_ACTIONS_POOL_MODE: 'ab'`: the pool runs on checks whose
-  random run id ends in an odd hex digit. `node scripts/actions-cache-report.mjs NanthAI/nanthai-forge
-  80 --pool-since DEPLOY_TIME` labels runs the same way, pairs each pool run with its nearest static run
-  and prints bootstrap intervals ([perf claims](../agents/perf-claims.md)). Set the mode to `on` once
-  the interval excludes zero.
+- **Measurement.** Decided on 34 interleaved A/B pairs of dogfood checks (static groups vs pool):
+  wall p50 -44.5 s (95% interval -54 to -28), slowest shard -47 s (-54 to -33.5), runner minutes
+  +1.3 (-0.3 to +2.4) per check ([perf claims](../agents/perf-claims.md)). The pool is the one path;
+  the A/B switch is deleted.
 
 When the pinned recipe has exactly one execution job (no test groups plus the
 static execution), that execution runs in `hosted-plan` after planning. This includes

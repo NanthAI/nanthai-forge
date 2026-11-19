@@ -27,7 +27,7 @@ import {
   actionsPoolCapability,
   actionsToolchainsCapability,
 } from './hosted-actions-capabilities.js';
-import { planPool, poolArm, poolUnits } from '../scripts/shard-pool.mjs';
+import { planPool, poolUnits } from '../scripts/shard-pool.mjs';
 import { poolClaimsSchema, type PoolClaim } from './hosted-actions-pool.js';
 import { invariant } from './errors.js';
 import { materializeActionsSource } from './hosted-actions-job-source.js';
@@ -231,12 +231,8 @@ export async function prepareActionsJob(
         : `Command shards: ${groups.length} (declared ${run.check.selection?.shards})`,
     );
   // Shard pool (scripts/shard-pool.mjs): only servers that sign claims receive one.
-  const poolMode = process.env.FORGE_ACTIONS_POOL_MODE;
   let pool =
-    standard &&
-    groups.length >= 2 &&
-    client.capabilities.includes(actionsPoolCapability) &&
-    poolArm(poolMode, run.id)
+    standard && groups.length >= 2 && client.capabilities.includes(actionsPoolCapability)
       ? planPool(groups, client.timings)
       : undefined;
   // A browser fixture cannot migrate onto a runner without its cache.
@@ -245,11 +241,7 @@ export async function prepareActionsJob(
     if (!pool.some(cuts => cuts.length)) pool = undefined;
   }
   if (standard && groups.length >= 2)
-    console.log(
-      pool
-        ? `Shard pool: on${poolMode === 'ab' ? ' (ab arm B)' : ''}; ${poolUnits(groups, pool).length} units`
-        : `Shard pool: off${poolMode === 'ab' && client.capabilities.includes(actionsPoolCapability) ? ' (ab arm A)' : ''}`,
-    );
+    console.log(pool ? `Shard pool: on; ${poolUnits(groups, pool).length} units` : 'Shard pool: off');
   const declaration = actionsDeclaration(run.check);
   // A server that cannot pin the declaration would plan the check without its toolchains.
   invariant(

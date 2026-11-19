@@ -1,17 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Dependency-cache hit rate and check wall time from completed Forge check runs.
-//   node scripts/actions-cache-report.mjs OWNER/REPO [runs=40] [--pool-since ISO_TIME]
+//   node scripts/actions-cache-report.mjs OWNER/REPO [runs=40]
 // Reads the GitHub API through the owner's gh login (one list call plus one call per run).
 // A job missed the cache when its `npm ci` step ran; a hit skips it. Wall time is created to updated.
 // `breakdown` splits the successful runs' wall time into queue, plan job, slowest shard and tail,
 // with shard balance and runner minutes. It uses only the jobs API (run logs are deleted within
 // about an hour), so a before/after pair can be taken any time after a run ends.
-// `--pool-since` adds the shard pool A/B measurement (FORGE_ACTIONS_POOL_MODE=ab): successful
-// multi-shard runs since that time, labelled by run id like the planner does, paired in time
-// order, with bootstrap intervals (docs/agents/perf-claims.md).
 import { execFileSync } from 'node:child_process';
-import { poolArm } from './shard-pool.mjs';
-import { bootstrapInterval } from './bootstrap-interval.mjs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 
@@ -83,62 +78,6 @@ export function summarizeWallBreakdown(runs) {
   };
 }
 
-/** Shard pool A/B pairs. A = static plan, B = pool, decided by the run id in the run name
- * (`forge-check/RUN_ID`) exactly as the planner's `ab` mode does. Each B run pairs with the
- * nearest unpaired A run before it, or the next A after it, so pairs share load and time of day.
- * Runs without a run id, test shards or success are listed as voided, never dropped silently. */
-export function poolPairs(runs, since) {
-  const rows = [],
-    voided = [];
-  for (const run of [...runs].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))) {
-    if (Date.parse(run.createdAt) < Date.parse(since)) continue;
-    const runId = /^forge-check\/([0-9a-f-]{36})$/i.exec(run.displayTitle ?? '')?.[1];
-    const [summary] = runId ? [summarizeWallBreakdown([run])] : [];
-    if (!runId || !summary?.successRuns || summary.shardCount.p50 < 2) {
-      voided.push({
-        id: run.databaseId ?? null,
-        reason: !runId ? 'no run id' : 'not a successful multi-shard check',
-      });
-      continue;
-    }
-    rows.push({
-      id: run.databaseId ?? null,
-      arm: poolArm('ab', runId) ? 'B' : 'A',
-      wall: summary.wallSeconds.p50,
-      slowest: summary.slowestShardSeconds.p50,
-      runnerMinutes: summary.runnerMinutes.p50,
-    });
-  }
-  const pairs = [],
-    open = { A: [], B: [] };
-  for (const row of rows) {
-    const other = open[row.arm === 'A' ? 'B' : 'A'];
-    if (other.length) {
-      const match = other.shift();
-      pairs.push(row.arm === 'B' ? [match, row] : [row, match]);
-    } else open[row.arm].push(row);
-  }
-  const interval = key => (pairs.length ? bootstrapInterval(pairs.map(([a, b]) => [a[key], b[key]])) : null);
-  return {
-    since,
-    pairs: pairs.map(([a, b]) => ({
-      a: a.id,
-      b: b.id,
-      wall: [a.wall, b.wall],
-      runnerMinutes: [a.runnerMinutes, b.runnerMinutes],
-    })),
-    unpaired: [...open.A, ...open.B].map(row => ({ id: row.id, arm: row.arm })),
-    voided,
-    wallSeconds: interval('wall'),
-    slowestShardSeconds: interval('slowest'),
-    runnerMinutes: interval('runnerMinutes'),
-    armWallSeconds: {
-      A: spread(rows.filter(row => row.arm === 'A').map(row => row.wall)),
-      B: spread(rows.filter(row => row.arm === 'B').map(row => row.wall)),
-    },
-  };
-}
-
 /** `runs`: [{createdAt, updatedAt, conclusion?, jobs: [{name, conclusion, startedAt?, completedAt?, steps: [{name, conclusion, startedAt, completedAt}]}]}] */
 export function summarizeCacheRuns(runs) {
   let jobs = 0,
@@ -170,11 +109,6 @@ export function summarizeCacheRuns(runs) {
 
 const gh = (...args) => JSON.parse(execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 64 << 20 }));
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const flag = process.argv.indexOf('--pool-since');
-  const since = flag > 0 ? process.argv[flag + 1] : undefined;
-  if (flag > 0) process.argv.splice(flag, 2);
-  if (since !== undefined && Number.isNaN(Date.parse(since)))
-    throw new Error('--pool-since needs an ISO time.');
   const [repository, count = '40'] = process.argv.slice(2);
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository ?? ''))
     throw new Error('Usage: actions-cache-report OWNER/REPO [runs]');
@@ -188,7 +122,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     '--limit',
     count,
     '--json',
-    'databaseId,status,conclusion,createdAt,updatedAt,displayTitle',
+    'databaseId,status,conclusion,createdAt,updatedAt',
   );
   const runs = listed
     .filter(run => run.status === 'completed')
@@ -196,11 +130,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       ...run,
       jobs: gh('run', 'view', String(run.databaseId), '-R', repository, '--json', 'jobs').jobs,
     }));
-  console.log(
-    JSON.stringify(
-      { ...summarizeCacheRuns(runs), ...(since ? { pool: poolPairs(runs, since) } : {}) },
-      null,
-      2,
-    ),
-  );
+  console.log(JSON.stringify(summarizeCacheRuns(runs), null, 2));
 }

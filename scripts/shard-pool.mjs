@@ -74,12 +74,3 @@ export function poolUnits(groups, pool) {
 
 export const keptFiles = (groups, pool, index) =>
   groups[index].slice(0, pool[index][0] ?? groups[index].length);
-
-/** FORGE_ACTIONS_POOL_MODE: on (default), off, or ab (interleaved measurement: the pool runs
- * when the run id's last hex digit is odd; run ids are random UUIDs). Unknown values are off. */
-export function poolArm(mode, runId) {
-  if (mode === undefined || mode === '' || mode === 'on') return true;
-  if (mode !== 'ab') return false;
-  const last = /([0-9a-f])$/i.exec(String(runId))?.[1];
-  return last !== undefined && parseInt(last, 16) % 2 === 1;
-}

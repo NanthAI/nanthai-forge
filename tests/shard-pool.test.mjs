@@ -10,7 +10,6 @@ import {
   poolUnits,
   keptFiles,
   validPool,
-  poolArm,
   maxPoolUnits,
   poolUnitMs,
 } from '../scripts/shard-pool.mjs';
@@ -83,18 +82,6 @@ test('the recipe schema refuses pools that leave a group, empty a kept front or 
   assert(hostedActionsRecipeSchema.safeParse(recipe([[1], []])).success);
   for (const bad of [[[0], []], [[2], []], [[1]], [[1, 1], []], [[], []], [['1'], []]])
     assert(!hostedActionsRecipeSchema.safeParse(recipe(bad)).success, JSON.stringify(bad));
-});
-
-test('pool arm: on by default, off on request, ab splits random run ids about evenly', () => {
-  assert.equal(poolArm(undefined, 'x'), true);
-  assert.equal(poolArm('on', 'x'), true);
-  assert.equal(poolArm('off', 'x'), false);
-  assert.equal(poolArm('typo', 'x'), false);
-  assert.equal(poolArm('ab', '00000000-0000-4000-8000-000000000001'), true);
-  assert.equal(poolArm('ab', '00000000-0000-4000-8000-00000000000a'), false);
-  let on = 0;
-  for (let i = 0; i < 1000; i++) on += poolArm('ab', crypto.randomUUID()) ? 1 : 0;
-  assert(on > 400 && on < 600);
 });
 
 test('claim keys are run scoped under one lifecycle prefix', () => {

@@ -14,4 +14,3 @@ export function poolUnits(
   pool: number[][],
 ): { unit: number; home: number; files: string[] }[];
 export function keptFiles(groups: string[][], pool: number[][], index: number): string[];
-export function poolArm(mode: string | undefined, runId: string): boolean;
