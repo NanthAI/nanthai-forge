@@ -15,6 +15,18 @@ import { sourceAuthority } from '../src/hosted-source-authority';
 import { invariant } from '../src/errors';
 import { QUIET_MS } from '../src/lane-quiet';
 import { report } from './errors';
+import { hostedRecordBody } from './projectHostedRecords';
+
+/** The Lane a resolution Lane continues, from its record; nothing for any other Lane or an unreadable record. */
+const resolutionOrigin = (value: string): string | undefined => {
+  try {
+    const origin = (JSON.parse(value) as { resolution?: { origin?: { laneId?: unknown } } }).resolution
+      ?.origin?.laneId;
+    return typeof origin === 'string' ? origin : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 /** Rows per group; a group with more says how many more were seen (at least one). */
 export const LOOSE_ENDS_LIMIT = 25;
@@ -51,7 +63,8 @@ const listed = (rows: Presence[], replacedBy: ReadonlyMap<string, string>) => ({
 /** A quiet Lane is replaced when its Item has another open Lane that is not quiet, or when a listed quiet Lane of the
  * same Item is its resolution Lane (the same rule as the Lanes yard, web/src/app/lanes/model.ts `replacedBy`). One
  * indexed read of at most SIBLINGS_PER_ITEM Lane heads per Item among the listed rows, and, only for an Item with
- * several open Lanes, one overlap-row point read per listed quiet Lane (its `resolutionOrigin`); otherwise an Item
+ * several open Lanes and several listed quiet Lanes, one Lane-record point read per listed quiet Lane (its
+ * `resolution.origin`, through the head already read); otherwise an Item
  * whose Lanes are all quiet names no replacement. */
 async function replacements(
   ctx: QueryCtx,
@@ -73,13 +86,13 @@ async function replacements(
         .take(SIBLINGS_PER_ITEM);
       const mine = quiet.filter(presence => presence.intentId === intentId);
       // A quiet resolution Lane replaces the quiet Lane it resolves (real case: Item 1dd4e095).
-      if (heads.length > 1)
+      // The origin is on the Lane record the head points at (about 1 KB, fixed at the resolve), not on the overlap row,
+      // whose `changes` grow with the Lane's edits (Item 77d2e8bc).
+      if (heads.length > 1 && mine.length > 1)
         for (const presence of mine) {
-          const overlap = await ctx.db
-            .query('projectHostedOverlapLanes')
-            .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', presence.laneId))
-            .unique();
-          const origin = overlap?.resolutionOrigin;
+          const head = heads.find(candidate => candidate.key === presence.laneId);
+          const record = head ? await ctx.db.get(head.recordId) : null;
+          const origin = record ? resolutionOrigin(await hostedRecordBody(ctx, record)) : undefined;
           if (origin && origin !== presence.laneId && mine.some(other => other.laneId === origin))
             out.set(origin, presence.laneId);
         }
@@ -121,8 +134,8 @@ async function presenceBetween(
 }
 
 /** Any member's read. Costs: the project row, then at most two indexed presence ranges of 26 rows each (oldest first),
- * and per distinct Item among them one Lane-head read of at most 6 rows, an overlap-row point read per listed quiet
- * Lane of an Item with several open Lanes (at most 52), plus a presence point read per other Lane until a live one is
+ * and per distinct Item among them one Lane-head read of at most 6 rows, a Lane-record point read per listed quiet
+ * Lane of an Item with several open Lanes and several listed quiet Lanes (at most 52, about 1 KB each), plus a presence point read per other Lane until a live one is
  * found. Re-runs only when a Lane in those ranges, or
  * an open Lane of their Items, is written; nothing polls and nothing is scheduled. */
 export const read = query({
