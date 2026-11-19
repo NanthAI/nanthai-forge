@@ -178,7 +178,8 @@ export function checkAgentWeight(prefix, { measure = measureAgentWeight, log = c
   const { packages, samples, moduleInventory: inventories, ...summary } = report;
   log(`Agent weight: ${JSON.stringify(summary)}`);
   if (findings.exact.length || findings.cpu.length)
-    throw new Error([...findings.exact, ...findings.cpu, ...moduleFindings(report, baseline)].join('\n'));
+    // Added modules first: a cut receipt excerpt still names them (ad80e037).
+    throw new Error([...moduleFindings(report, baseline), ...findings.exact, ...findings.cpu].join('\n'));
   return report;
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -85,3 +85,15 @@ test('a7073c8d: a real heavy eager import fails the deterministic module guard w
   );
   assert.equal(attempts, 1);
 });
+
+test('ad80e037: an over-ceiling module count names the added module on the first line', () => {
+  const report = clean();
+  const names = Object.keys(report.moduleInventory);
+  for (const name of names)
+    report.moduleInventory[name] = [...report.moduleInventory[name], 'dist/new-HASH.js'];
+  report.actual.cliAgentLandCpuModules++;
+  assert.throws(
+    () => checkAgentWeight('synthetic', { measure: () => report, log() {} }),
+    error => error.message.split('\n')[0] === `${names.join(', ')}: added modules/chunks: dist/new-HASH.js`,
+  );
+});

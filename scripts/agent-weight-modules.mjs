@@ -26,14 +26,27 @@ export function moduleInventory(urls, root) {
 }
 
 export function moduleFindings(report, baseline) {
-  const findings = [];
+  const added = new Map(),
+    unknown = [];
   for (const [path, modules] of Object.entries(report.moduleInventory ?? {})) {
     const reference = baseline.report?.moduleInventory?.[path];
-    const added = reference ? modules.filter(name => !reference.includes(name)) : modules;
-    if (added.length)
-      findings.push(
-        `${path}: ${reference ? 'added' : 'loaded (reference inventory unavailable)'} modules/chunks: ${added.join(', ')}`,
-      );
+    if (!reference) {
+      if (modules.length)
+        unknown.push(
+          `${path}: loaded (reference inventory unavailable) modules/chunks: ${modules.join(', ')}`,
+        );
+      continue;
+    }
+    for (const name of modules)
+      if (!reference.includes(name)) added.set(name, [...(added.get(name) ?? []), path]);
   }
-  return findings;
+  // Each added module is named once, with every command that loads it, so a receipt excerpt keeps the whole
+  // list even when one new import reaches all of them (ad80e037).
+  const byPaths = new Map();
+  for (const [name, paths] of added)
+    byPaths.set(paths.join(', '), [...(byPaths.get(paths.join(', ')) ?? []), name]);
+  return [
+    ...[...byPaths].map(([paths, names]) => `${paths}: added modules/chunks: ${names.join(', ')}`),
+    ...unknown,
+  ];
 }

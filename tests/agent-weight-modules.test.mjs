@@ -89,3 +89,18 @@ test('large MCP-sized module inventories are complete even when stderr cannot ho
   assert.equal(JSON.parse(readFileSync(output)).length, 1001);
   assert(!child.stderr.includes('synthetic-module-'), 'URLs stay in the private inventory file');
 });
+
+test('ad80e037: a module added to every command is named once, before the counts, with the commands that load it', () => {
+  const reference = { report: { moduleInventory: { version: ['a.js'], help: ['a.js'], status: ['a.js'] } } };
+  const report = {
+    moduleInventory: {
+      version: ['a.js', 'new.js'],
+      help: ['a.js', 'new.js'],
+      status: ['a.js', 'new.js', 'own.js'],
+    },
+  };
+  assert.deepEqual(moduleFindings(report, reference), [
+    'version, help, status: added modules/chunks: new.js',
+    'status: added modules/chunks: own.js',
+  ]);
+});

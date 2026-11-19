@@ -24,6 +24,8 @@ synthetic release service. No command contacts hosted services. Module counts
 include only file modules, not Node builtins. Failed guards also list added module
 and chunk names against the recorded inventory. Paths are relative and chunk
 content hashes are normalized, so a rebuilt chunk is not reported as a new one.
+The added names come first in the failure, each named once with every command
+that loads it, so a landing receipt's cut excerpt still lists them all (ad80e037).
 An older baseline without an inventory prints the loaded graph and labels the
 missing reference; `--record` includes inventories for later comparisons. The MCP fixture boots the installed
 ESM SDK server and real hosted agent registration, connects an in-memory client
