@@ -177,7 +177,9 @@ export const hostedContractFeatures = [
   'lane-status-landing',
   /** The learned preflight guard set (13ea93bf): land gates take `ran` and `runs`, a failed check
    * learns from them, and start takes `guardRevision` and replies `guardSet` when it differs.
-   * Without it the CLI sends neither and preflight runs no learned guards. */
+   * The capability read takes and replies the same (sent by `open`, `preflight` and `land`; an
+   * older server's refusal of the argument drops it). Without the feature the CLI sends no gate
+   * fields and preflight runs no learned guards. */
   'preflight-guard-set',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];

@@ -28,6 +28,7 @@ import {
   storageBudgets,
 } from './landing-storage-fixture.mjs';
 import { speedBudgets } from '../dist/speed-budgets.js';
+import { addGuardFailure, ranEvidence } from '../dist/preflight-guard-learning.js';
 import { formatCostVerdicts, judgeCost, judgeCosts } from '../dist/cost-budgets.js';
 
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
@@ -321,6 +322,11 @@ function meter(
         v8Actions: runtimes.filter(r => r === 'v8').length + (f.reuseDecisions?.length ?? 0) - reuseFrom,
         nodeActions: runtimes.filter(r => r === 'node').length,
         readBytes: sum('readBytes') - observers.reduce((n, c) => n + c.readBytes, 0),
+        readBytesByTable: counts.reduce((tables, c) => {
+          for (const [table, bytes] of Object.entries(c.readBytesByTable ?? {}))
+            tables[table] = (tables[table] ?? 0) + bytes;
+          return tables;
+        }, {}),
         writeBytes: sum('writeBytes'),
         indexEntriesWritten: sum('indexEntriesWritten'),
         indexEntriesRemoved: sum('indexEntriesRemoved'),
@@ -597,33 +603,50 @@ for (const mode of ['direct', 'desired']) {
   });
 }
 
+/** The land gate an agent CLI sends: save and preflight timing (`durations`) and the guard-set
+ * evidence (`guard`, 13ea93bf): `ran` at the measured median of 34 test files, and the Lane's runs. */
+const GATE_RAN = ranEvidence(Array.from({ length: 34 }, (_, i) => `tests/synthetic-${i}.test.mjs`));
+const landGate = (lane, { durations = false, guard = false }) =>
+  JSON.stringify({
+    lanes: [
+      {
+        laneId: lane.laneId,
+        head: lane.head,
+        preflight: 'passed',
+        ...(durations ? { saveMs: 15000, preflightMs: 49779 } : {}),
+        ...(guard ? { ran: GATE_RAN, runs: 2 } : {}),
+      },
+    ],
+  });
+
 /** One accepted-Candidate submission through check and acceptance; `moveMain` moves main during
  * the check, so it recomposes on a source job and checks again (the common dogfood case). */
 async function solo(
   t,
-  { moveMain = false, extraQuery = false, durations = false, indexExports = false, ...runner } = {},
+  {
+    moveMain = false,
+    extraQuery = false,
+    durations = false,
+    guard = false,
+    guards,
+    indexExports = false,
+    ...runner
+  } = {},
 ) {
   const f = await finishFixture(t);
   seedOrder(f);
+  // A project that has learned: its speed row carries a guard document (13ea93bf).
+  if (guards)
+    f.insert('projectLandingSpeed', {
+      projectId: f.projectId,
+      value: '{"schema":2,"samples":[],"broken":{}}',
+      guards,
+    });
   const m = meter(f, runner);
   if (indexExports) await measureIndexExportClaims(f);
   const state = await f.enqueue(
     f.request(),
-    durations
-      ? {
-          gates: JSON.stringify({
-            lanes: [
-              {
-                laneId: f.lane.laneId,
-                head: f.lane.head,
-                preflight: 'passed',
-                saveMs: 15000,
-                preflightMs: 49779,
-              },
-            ],
-          }),
-        }
-      : {},
+    durations || guard ? { gates: landGate(f.lane, { durations, guard }) } : {},
   );
   if (extraQuery) {
     // The seeded regression: one more query per landing (a status read on the landing path).
@@ -649,10 +672,16 @@ async function solo(
   };
 }
 /** Four queued landings composed and checked together under the default batching policy. */
-async function batch(t, { extraQuery = false, indexExports = false, ...runner } = {}) {
+async function batch(t, { extraQuery = false, guard = false, indexExports = false, ...runner } = {}) {
   const f = await batchesFixture(t, { count: 0, batching: 'default', batchMaxSize: null });
   const entries = [];
-  for (let i = 0; i < 4; i++) entries.push(await f.add(i));
+  for (let i = 0; i < 4; i++)
+    entries.push(
+      await f.add(
+        i,
+        guard ? { enqueue: lane => ({ gates: landGate(lane, { durations: true, guard }) }) } : {},
+      ),
+    );
   seedOrder(f);
   // Measured after enqueue: Candidate composition and the four enqueue mutations are outside it.
   const m = meter(f, runner);
@@ -695,6 +724,8 @@ async function batch(t, { extraQuery = false, indexExports = false, ...runner } 
 
 /** The scripted mix in `costGuard.scenario`, per accepted landing. */
 async function measureLandingCosts(t, { extraR2Read = false, ...options } = {}) {
+  // Agent landings carry the guard-set gate evidence: the ledger sees its bytes (13ea93bf).
+  options = { guard: true, ...options };
   const scenarios = {
     solo: await solo(t, { ...options, extraR2Read }),
     mainMoved: await solo(t, { ...options, moveMain: true }),
@@ -1109,6 +1140,55 @@ test('save/preflight timing keeps landing cost guard bytes within one percent wi
   t.diagnostic(
     `duration bytes: read ${after.readBytes - before.readBytes}, write ${after.writeBytes - before.writeBytes}; baseline ${before.readBytes}/${before.writeBytes}`,
   );
+});
+
+test('guard-set gate evidence (ran, runs) adds no call and a bounded, measured read cost', async t => {
+  const before = await solo(t, { moveMain: true, durations: true });
+  const after = await solo(t, { moveMain: true, durations: true, guard: true });
+  for (const key of ['queries', 'observerQueries', 'mutations', 'v8Actions', 'nodeActions'])
+    assert.equal(after[key], before[key], `${key}: no new call`);
+  assert(after.writeBytes > before.writeBytes, 'the ledger sees the ran bytes on the landing rows');
+  // About 170 B on the landing row (34 files), read about 100 and rewritten about 25 times per
+  // main-moved landing: about 18 KB read and 4.4 KB written, +$0.0045 per 1,000 landings at $0.20/GB
+  // (13ea93bf). The bounds catch a wider row or more touches.
+  assert(after.readBytes - before.readBytes <= 24_000, `read +${after.readBytes - before.readBytes} B`);
+  assert(after.writeBytes - before.writeBytes <= 6_000, `write +${after.writeBytes - before.writeBytes} B`);
+  assert(after.observerReadBytes <= before.observerReadBytes * 1.01, 'observers do not read it');
+  t.diagnostic(
+    `guard-set gate bytes: read ${after.readBytes - before.readBytes}, write ${after.writeBytes - before.writeBytes}; baseline ${before.readBytes}/${before.writeBytes}; by table ${JSON.stringify(
+      Object.fromEntries(
+        Object.entries(after.readBytesByTable)
+          .map(([table, bytes]) => [table, bytes - (before.readBytesByTable[table] ?? 0)])
+          .filter(([, delta]) => delta),
+      ),
+    )}`,
+  );
+});
+
+test('a learned guard document rides on the speed row at a measured cost', async t => {
+  // The window's 50 failures, each with 8 skipped files: the document at its 4 KB bound.
+  let guards;
+  for (let i = 0; i < 50; i++)
+    guards = addGuardFailure(
+      guards,
+      {
+        id: randomUUID(),
+        testFiles: {
+          failed: Array.from({ length: 8 }, (_, n) => ({ file: `tests/guard-${i}-${n}.test.mjs` })),
+        },
+      },
+      { ran: '' },
+      Date.now() - i,
+    );
+  const empty = '{"v":1,"failures":[]}';
+  const before = await solo(t, { moveMain: true, durations: true, guard: true, guards: empty });
+  const after = await solo(t, { moveMain: true, durations: true, guard: true, guards });
+  for (const key of ['queries', 'observerQueries', 'mutations', 'v8Actions', 'nodeActions'])
+    assert.equal(after[key], before[key], `${key}: no new call`);
+  const read = after.readBytes - before.readBytes;
+  const write = after.writeBytes - before.writeBytes;
+  t.diagnostic(`guard document ${guards.length} B: read +${read} B, write +${write} B per landing`);
+  assert(read <= 8_000 && write <= 8_000, `read +${read} B, write +${write} B`);
 });
 
 test('overlap driver bytes include changed peers, presence, board and public identity mapping', async t => {

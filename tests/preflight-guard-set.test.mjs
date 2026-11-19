@@ -4,14 +4,19 @@
 // the candidates; every preflight runs the picked set first, inside its budget.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { digest } from '../dist/state/hash.js';
 import { addGuardFailure, guardCandidates, ranEvidence, ranKey } from '../dist/preflight-guard-learning.js';
 import { guardGateFields, learnGuardSet, recordPreflightRun } from '../dist/preflight-guard-set.js';
-import { cachedGuardRevision, storeGuardCandidates } from '../dist/preflight-guard-cache.js';
+import {
+  cachedGuardRevision,
+  guardCachePath,
+  guardRevisionToAsk,
+  storeGuardCandidates,
+} from '../dist/preflight-guard-cache.js';
 import {
   landGateGuardEvidence,
   landGatesSchema,
@@ -62,7 +67,7 @@ test('a failed check records only failing test files its preflight did not run, 
   // outcome, but teaches no file.
   const unknown = JSON.parse(addGuardFailure(doc, check(GUARD), {}, now + 2)).failures.at(-1);
   assert.deepEqual(unknown[5], []);
-  // Bounded: the last 50 failures, at most 8 files each and 8 KB in all; older than 7 days drops.
+  // Bounded: the last 50 failures, at most 8 files each and 4 KB in all; older than 7 days drops.
   let big;
   for (let i = 0; i < 60; i++)
     big = addGuardFailure(
@@ -72,7 +77,7 @@ test('a failed check records only failing test files its preflight did not run, 
       now + i,
     );
   const kept = JSON.parse(big).failures;
-  assert.ok(big.length <= 8 * 1024 && kept.length < 50 && kept.every(f => f[5].length === 8));
+  assert.ok(big.length <= 4 * 1024 && kept.length < 50 && kept.every(f => f[5].length === 8));
   const aged = addGuardFailure(doc, check(GUARD), { ran: '' }, now + 8 * 24 * 3600 * 1000);
   assert.equal(JSON.parse(aged).failures.length, 1, 'a week-old failure leaves');
 });
@@ -222,12 +227,52 @@ test("learned guards get only what declared guards and the change's own tests le
   assert.ok(plan({ budgetSeconds: reserved + 3 }, changed).local.guardSet.tests.includes(GUARD));
 });
 
+test('every checkout of a project finds its set: the clone, its Lanes and a Lane at a custom path', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'forge-guard-cache-'));
+  const state = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = join(dir, 'state');
+  t.after(() => {
+    if (state === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = state;
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const projectId = `p${process.pid}x${Date.now()}`;
+  const checkout = (path, marker, selection) => {
+    mkdirSync(join(dir, path, '.forge'), { recursive: true });
+    writeFileSync(join(dir, path, '.forge', marker), JSON.stringify({ selection }));
+    return join(dir, path);
+  };
+  const clone = checkout('clone', 'hosted-main.json', { projectId, channel: 'main' });
+  const custom = checkout('elsewhere/my-lane', 'hosted-lane.json', { projectId, laneId: 'l' });
+  const other = checkout('other', 'hosted-main.json', { projectId: `${projectId}y` });
+  storeGuardCandidates(clone, candidates([{ file: GUARD, failures: 2, checkSeconds: 2 }]));
+  assert.equal(cachedGuardRevision(custom), 'r1', 'a Lane outside <clone>.forge-client/lanes finds it');
+  assert.equal(guardCachePath(custom), guardCachePath(clone));
+  assert.equal(cachedGuardRevision(other), '', 'another project never reads it');
+  // No marker names a project: beside the checkout, as before.
+  assert.match(guardCachePath(join(dir, 'bare')), /bare\.forge-client/);
+  // A Lane folder open has no marker yet: the command's project names the same copy.
+  assert.equal(guardCachePath(join(dir, 'bare'), projectId), guardCachePath(clone));
+  // open, preflight and land ask only when this machine's copy is over an hour old; a reply saying
+  // it is current marks it fresh again. No copy at all: ask with the empty revision.
+  assert.equal(guardRevisionToAsk(clone, projectId), undefined, 'just written: fresh');
+  const old = new Date(Date.now() - 2 * 3600_000);
+  utimesSync(guardCachePath(clone), old, old);
+  assert.equal(guardRevisionToAsk(clone, projectId), 'r1');
+  storeGuardCandidates(clone, null, projectId);
+  assert.equal(guardRevisionToAsk(clone, projectId), undefined);
+  assert.equal(guardRevisionToAsk(join(dir, 'bare'), `${projectId}z`), '');
+});
+
 test('a delivered guard runs first in every preflight, inside the budget, with why', t => {
   const { root, plan } = lane(t);
   assert.ok(!plan().tests.includes(GUARD), 'the import graph never selects it');
   // Before any start delivered the project set (a fresh sandbox's very first plan): empty.
   assert.deepEqual(plan().local.guardSet.tests, []);
-  assert.match(plan().local.guardSet.reason, /no Lane start here has delivered/);
+  assert.match(
+    plan().local.guardSet.reason,
+    /no start, open, preflight or land on this machine has fetched .*\(looked in /,
+  );
   assert.equal(cachedGuardRevision(root), '');
   storeGuardCandidates(root, candidates([{ file: GUARD, failures: 2, checkSeconds: 2 }]));
   assert.equal(cachedGuardRevision(root), 'r1');
@@ -310,7 +355,7 @@ test('manual pins only pinned files and names what Automatic would pick; off run
   assert.equal(plan.tests[0], pinned);
   assert.match(
     plan.local.summary,
-    /Guard set manual: 1 pinned file\(s\); Automatic would pick tests\/schema-guard/,
+    /Guard set manual \(forge\.preflight\.guardSet\): 1 pinned file\(s\); Automatic would pick tests\/schema-guard/,
   );
   const off = make({ mode: 'off' });
   assert.deepEqual(off.plan().local.guardSet.tests, []);
@@ -319,6 +364,26 @@ test('manual pins only pinned files and names what Automatic would pick; off run
   // A malformed setting or a pin the project lacks fails the plan loudly, naming the setting.
   for (const bad of [{ mode: 'sometimes' }, { pin: ['tests/gone.test.mjs'] }, { extra: true }, []])
     assert.match(make(bad).plan().reason, /forge\.preflight\.guardSet/);
+  // One environment's override (the bench pins comparison cells off) wins over the file, names
+  // itself and keeps the declared pins; a value it does not know fails the plan the same way.
+  const prior = process.env.FORGE_PREFLIGHT_GUARD_SET;
+  t.after(() => {
+    if (prior === undefined) delete process.env.FORGE_PREFLIGHT_GUARD_SET;
+    else process.env.FORGE_PREFLIGHT_GUARD_SET = prior;
+  });
+  process.env.FORGE_PREFLIGHT_GUARD_SET = 'off';
+  const forced = make({ pin: [pinned] }).plan();
+  assert.deepEqual(forced.local.guardSet.tests, []);
+  assert.ok(!forced.tests.includes(GUARD));
+  assert.match(
+    forced.local.guardSet.reason,
+    /Guard set off \(FORGE_PREFLIGHT_GUARD_SET\); Automatic would pick tests\/schema-guard/,
+  );
+  process.env.FORGE_PREFLIGHT_GUARD_SET = 'manual';
+  assert.deepEqual(make({ pin: [pinned] }).plan().local.guardSet.tests, [pinned]);
+  process.env.FORGE_PREFLIGHT_GUARD_SET = 'sometimes';
+  assert.match(make({}).plan().reason, /FORGE_PREFLIGHT_GUARD_SET must be automatic, manual or off/);
+  delete process.env.FORGE_PREFLIGHT_GUARD_SET;
 });
 
 test('any declared runner gets the learned set too, and runs are counted per Lane for the gate', t => {

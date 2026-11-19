@@ -278,6 +278,15 @@ if (gates.refusals.length) {
 const shared = sharedDeps(B, config.baseCheckout);
 const objectCache = join(B, 'forge-cache', 'objects');
 if (arm === 'forge') process.env.FORGE_OBJECT_CACHE = objectCache;
+// The bench project is shared by every cell, so a learned preflight guard set (Item 13ea93bf) would
+// make a cell depend on the cells before it. Comparison cells pin it off (the relay and the agents'
+// CLI calls inherit this env); config.forge.preflightGuardSet may name another mode for a cell that
+// measures the set itself. The cell records which.
+const guardSet = config.forge?.preflightGuardSet ?? 'off';
+if (!['automatic', 'manual', 'off'].includes(guardSet))
+  throw Error('config.forge.preflightGuardSet must be automatic, manual or off');
+if (arm === 'forge') process.env.FORGE_PREFLIGHT_GUARD_SET = guardSet;
+result.preflightGuardSet = arm === 'forge' ? guardSet : null;
 const bin = join(ws, 'bin');
 mkdirSync(bin, { recursive: true });
 if (forge) await forge.binDir(bin);

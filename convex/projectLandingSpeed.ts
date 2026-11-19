@@ -108,6 +108,17 @@ export async function guardSetReply(ctx: QueryCtx, projectId: Id<'hostedProjects
   }
 }
 
+/** The capability reply's field for a caller that sent revision `known`: nothing when it sent
+ * none or already holds the project's. */
+export async function guardSetField(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  known: string | undefined,
+) {
+  const guardSet = known === undefined ? null : await guardSetReply(ctx, projectId, known);
+  return guardSet ? { guardSet } : {};
+}
+
 async function applyLandingSample(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,

@@ -24,6 +24,7 @@ import { requireCutoverVersion } from '../src/cutover-version';
 import { effectivePolicy, snapshotIntervalMinutes } from '../src/autonomy-policy';
 import { effectiveAgentDefaults, wireAgentDefaults } from '../src/agent-parallel-defaults';
 import { advertisedFeatures, MAX_CONTRACT_FEATURES } from '../src/hosted-contract-features';
+import { guardSetField } from './projectLandingSpeed';
 /** Discovery is a current-authority read, never a worker wake or an availability promise. */
 /** The caller's own save outcome by operation id, or null terminal when it is still settling or
  * cannot be read here (the client then reads its progress as before). */
@@ -76,6 +77,9 @@ export const capabilities = query({
     /** Split save (save-settle-background): the caller's save that returned before its settle; the
      * reply carries its outcome, so the next command needs no separate progress read. */
     settling: v.optional(v.string()),
+    /** The learned preflight guard-set revision the caller holds (13ea93bf): the reply carries the
+     * candidates only when the project's differ. Sent by `open`, `preflight` and `land`. */
+    guardRevision: v.optional(v.string()),
   },
   returns: v.string(),
   handler: async (
@@ -97,6 +101,7 @@ export const capabilities = query({
       features,
       boardVersion,
       settling,
+      guardRevision,
     },
   ) => {
     try {
@@ -181,6 +186,7 @@ export const capabilities = query({
           ...(settling !== undefined
             ? { settledSave: await settledSave(ctx, projectId, user.subject, settling) }
             : {}),
+          ...(await guardSetField(ctx, projectId, guardRevision)),
           schema: 1,
           projectId,
           actor: user.subject,

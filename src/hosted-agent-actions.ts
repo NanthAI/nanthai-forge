@@ -557,7 +557,12 @@ export async function executeHostedAgent(
           : {}),
         // The project's learned preflight guard set comes back only when it changed (13ea93bf).
         ...(session.capabilities.features?.includes('preflight-guard-set')
-          ? { guardRevision: (await import('./preflight-guard-cache.js')).cachedGuardRevision(session.root) }
+          ? {
+              guardRevision: (await import('./preflight-guard-cache.js')).cachedGuardRevision(
+                session.root,
+                session.address.projectId,
+              ),
+            }
           : {}),
         ...(session.agent ? { agent: session.agent } : {}),
         ...(session.holderSessionId
@@ -594,7 +599,12 @@ export async function executeHostedAgent(
       }
     });
     const { guardSet, ...result } = parseHostedResponse(hostedStartResultSchema, started);
-    if (guardSet) (await import('./preflight-guard-cache.js')).storeGuardCandidates(session.root, guardSet);
+    if (session.capabilities.features?.includes('preflight-guard-set'))
+      (await import('./preflight-guard-cache.js')).storeGuardCandidates(
+        session.root,
+        guardSet ?? null,
+        session.address.projectId,
+      );
     return result;
   }
   if (action === 'open') {

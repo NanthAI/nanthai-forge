@@ -8,7 +8,7 @@ import { clientCacheRoot } from './root-paths.js';
 import { declaredPreflight } from './project-config.js';
 import { GUARD_MIN_FAILURES, ranEvidence } from './preflight-guard-learning.js';
 import { type GuardCandidates, guardFileName as name } from './hosted-lane.js';
-import { cachedGuardCandidates as cached } from './preflight-guard-cache.js';
+import { cachedGuardCandidates as cached, guardCachePath } from './preflight-guard-cache.js';
 
 /** The learned preflight guard set (Item 13ea93bf): test files every preflight runs first, whatever
  * changed, because they keep failing landing checks that preflight's selection skipped. An Automatic
@@ -17,13 +17,13 @@ const GUARD_SET_SETTING = {
   setting: 'forge.json preflight.guardSet',
   default: 'automatic',
   signal:
-    "The project's landing outcomes, held on the server: each land gate says which test files its preflight ran and how many local runs its Lane had; a failed check records the failing test files that preflight did not run (written only then). Lane start replies deliver the candidates, cached here by revision; planning makes no call.",
+    "The project's landing outcomes, held on the server: each land gate says which test files its preflight ran and how many local runs its Lane had; a failed check records the failing test files that preflight did not run (written only then). Lane start replies, and the capability read of open, preflight and land, deliver the candidates when their revision changed; cached per project on this machine, so planning makes no call.",
   formula:
     'saving per preflight = p x C / r - t: p = share of the last 50 landing outcomes where the file failed the landing check while preflight skipped it; C = median builder wait (submit to verdict) of the failed landings in that window; r = local preflight runs per landing, from the failed Lanes in that window (at least 1); t = the file seconds measured here (else in the check, else the per-file estimate).',
   bounds:
     "A file joins at saving > 0 and at least 2 such failures (no one-off flakes) and leaves when either stops holding. Files join in order of saving until their seconds would pass what the declared guards and the change's own tests leave of the run local time budget (180 s by default), so the change's tests are never pushed out and the 600 s ceiling holds; slower files shrink the set.",
   override:
-    'forge.json preflight.guardSet {"mode":"automatic"|"manual"|"off","pin":[test],"unpin":[test]}: pin always runs a file, unpin never learns it, manual runs only pinned files and shows what Automatic would pick, off runs none.',
+    'forge.json preflight.guardSet {"mode":"automatic"|"manual"|"off","pin":[test],"unpin":[test]}: pin always runs a file, unpin never learns it, manual runs only pinned files and shows what Automatic would pick, off runs none. FORGE_PREFLIGHT_GUARD_SET=automatic|manual|off sets the mode for one environment (the bench pins off, so cells never inherit a set from earlier cells).',
   reason:
     'Repo-wide guard tests that import-based selection never picks cause most landing-check test failures; each costs a median 14 min of builder wait and about 60 runner minutes.',
   judgedOn:
@@ -181,7 +181,16 @@ function guardSetConfig(
   isTest: Options['isTest'],
 ) {
   const found = declaredPreflight('guardSet', packageJson, forgeJson);
-  if (found === undefined) return { mode: 'automatic' as const, pin: [], unpin: [] };
+  const forced = process.env.FORGE_PREFLIGHT_GUARD_SET;
+  if (forced !== undefined && forced !== 'automatic' && forced !== 'manual' && forced !== 'off')
+    throw new Error('FORGE_PREFLIGHT_GUARD_SET must be automatic, manual or off');
+  const declared = guardSetDeclared(found, isTest);
+  return forced === undefined
+    ? { ...declared, source: found ? found.label : 'default' }
+    : { ...declared, mode: forced as GuardSetReport['mode'], source: 'FORGE_PREFLIGHT_GUARD_SET' };
+}
+function guardSetDeclared(found: ReturnType<typeof declaredPreflight>, isTest: Options['isTest']) {
+  if (found === undefined) return { mode: 'automatic' as const, pin: [] as string[], unpin: [] as string[] };
   const value = found.value as Record<string, unknown> | null;
   const list = (field: unknown) =>
     field === undefined
@@ -211,7 +220,7 @@ export function planGuardSet(
   config: { packageJson: string | undefined; forgeJson: string | undefined },
   options: Options,
 ): GuardSetReport {
-  const { mode, pin, unpin } = guardSetConfig(config.packageJson, config.forgeJson, options.isTest);
+  const { mode, pin, unpin, source } = guardSetConfig(config.packageJson, config.forgeJson, options.isTest);
   const { picked, window } = learnGuardSet(cached(root), options, new Set(unpin));
   const pinned = pin.filter(test => !unpin.includes(test));
   const tests =
@@ -242,13 +251,13 @@ export function planGuardSet(
   const auto = picked.map(row => row.file);
   const reason =
     mode === 'off'
-      ? `Guard set off (${GUARD_SET_SETTING.setting}); Automatic would pick ${auto.length ? auto.join(', ') : 'nothing'}.`
+      ? `Guard set off (${source}); Automatic would pick ${auto.length ? auto.join(', ') : 'nothing'}.`
       : mode === 'manual'
-        ? `Guard set manual: ${pinned.length} pinned file(s); Automatic would pick ${auto.length ? auto.join(', ') : 'nothing'}.`
+        ? `Guard set manual (${source}): ${pinned.length} pinned file(s); Automatic would pick ${auto.length ? auto.join(', ') : 'nothing'}.`
         : window.outcomes
           ? `Guard set Automatic from the project's last ${window.outcomes} landing outcome(s) (${window.failed} failed the check): ${tests.length} file(s), about ${total} s of the ${options.capSeconds} s budget.`
           : window.revision === null
-            ? 'Guard set Automatic: no Lane start here has delivered the project set yet, so it is empty.'
+            ? `Guard set Automatic: no start, open, preflight or land on this machine has fetched the project set yet (looked in ${guardCachePath(root)}), so it is empty.`
             : 'Guard set Automatic: the project has no landing outcomes in its window yet, so the set is empty.';
   return {
     mode,

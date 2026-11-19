@@ -158,6 +158,8 @@ import { checkoutRequired, laneSuccessor, openLaneRoot } from './hosted-lane-loc
 const flag = (value: unknown) => (typeof value === 'boolean' ? value : undefined);
 /** Actions that capture the working files themselves (a save) or snapshot them as part of their
  * own move (`snapshots`) take no snapshot first. */
+/** Commands whose capability read carries the learned guard-set revision (13ea93bf). */
+const guardAsking = new Set(['open', 'preflight', 'land']);
 /** Actions whose first main read follows capability discovery at once (capabilities-main). */
 const mainFirstActions = new Set(['start', 'sync', 'compose']);
 const snapshotSkips = new Set(['save', 'checkpoint', 'finish', 'compose', 'snapshots']);
@@ -851,8 +853,15 @@ export class HostedAgentTransport {
         );
       const settling = backgroundSaveOperation(this.root);
       let discovery: unknown;
+      let guardAsked = false;
       try {
         let options = capabilityOptions(this.root);
+        // The project's learned preflight guard set (13ea93bf) rides on this read for the commands
+        // that preflight a checkout a start may not have reached on this machine; fresh copies skip it.
+        const guardRevision = guardAsking.has(action)
+          ? (await import('./preflight-guard-cache.js')).guardRevisionToAsk(this.root, this.address.projectId)
+          : undefined;
+        if (guardRevision !== undefined) options = { ...options, guardRevision };
         // The CLI may have started this exact read alongside its release check: take it once.
         let early = takeEarlyCapabilities(this.address, { clientVersion: CUTOVER_CLI_VERSION, ...options });
         for (;;) {
@@ -862,6 +871,7 @@ export class HostedAgentTransport {
                 clientVersion: CUTOVER_CLI_VERSION,
                 ...options,
               }));
+            guardAsked = 'guardRevision' in options;
             break;
           } catch (error) {
             early = undefined;
@@ -872,7 +882,7 @@ export class HostedAgentTransport {
             )
               throw error;
             const field =
-              /extra field\s+[`'"]?(features|noticeVersion|resolveVersion|overlapVersion|overlapEvidenceVersion|mirrorVersion|metricReceiptVersion|planningVersion|defaultsVersion|landingMessageVersion|openLanesVersion|presenceVersion|boardVersion|settling)\b/i.exec(
+              /extra field\s+[`'"]?(features|noticeVersion|resolveVersion|overlapVersion|overlapEvidenceVersion|mirrorVersion|metricReceiptVersion|planningVersion|defaultsVersion|landingMessageVersion|openLanesVersion|presenceVersion|boardVersion|settling|guardRevision)\b/i.exec(
                 error.message,
               )?.[1];
             // Preserve independently supported features, and never repeat a
@@ -898,6 +908,12 @@ export class HostedAgentTransport {
         hostedAgentCapabilitiesSchema,
         knownCapabilities(hostedAgentRoot(this.root), discovery),
       );
+      if (guardAsked)
+        (await import('./preflight-guard-cache.js')).storeGuardCandidates(
+          this.root,
+          capabilities.guardSet ?? null,
+          this.address.projectId,
+        );
       this.protectedPolicy = capabilities.protectedPathPolicy;
       this.callerActor = capabilities.actor;
       this.serverFeatures = capabilities.features ?? [];

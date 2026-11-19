@@ -24,7 +24,7 @@ const MAX_CANDIDATES = 20;
 // the CLI's eager chunks, since this one loads lazily.
 const RAN_MAX_FILES = 256;
 const ranKeys = (ran: string) => ran.match(/.{4}/g) ?? [];
-const MAX_DOC_CHARS = 8 * 1024;
+const MAX_DOC_CHARS = 4 * 1024;
 const HORIZON_MS = 7 * 24 * 3600 * 1000;
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
@@ -74,7 +74,7 @@ export type FailedCheck = {
   testFiles?: { failed: { file: string; report?: { durationMs?: number | undefined } }[] } | undefined;
 };
 /** A check failure joins the document; null when nothing changes (already recorded). Files go in
- * only when the landing said what its preflight ran. Bounded to the last 50 failures and 8 KB. */
+ * only when the landing said what its preflight ran. Bounded to the last 50 failures and 4 KB: it rides on every speed-row touch. */
 export function addGuardFailure(
   text: string | undefined,
   state: FailedCheck,

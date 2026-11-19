@@ -8,7 +8,7 @@ export const landingSpeedTables = {
     projectId: v.id('hostedProjects'),
     value: v.string(),
     /** The learned preflight guard set's check failures (Item 13ea93bf):
-     * written only by a landing whose check failed, at most 8 KB. */
+     * written only by a landing whose check failed, at most 4 KB. */
     guards: v.optional(v.string()),
   }).index('by_project', ['projectId']),
 };

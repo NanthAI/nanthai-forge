@@ -14,6 +14,7 @@ import { revertTargetSchema } from './hosted-sync.js';
 import { saveExpectedSchema } from './hosted-save.js';
 import { snapshotsCommandSchema } from './lane-snapshot-contract.js';
 import { safeRelative } from './safe-relative.js';
+import { guardCandidatesSchema } from './hosted-lane.js';
 import {
   planningCommentCommandSchema,
   planningModelPutKeys,
@@ -154,6 +155,9 @@ export const hostedAgentCapabilitiesSchema = z
     /** Split save (save-settle-background, fea47345 C): the outcome of the save the client named in
      * `settling`, read in this same call (`terminal` null while it is still settling). */
     settledSave: z.object({ operationId: z.string(), terminal: z.unknown().nullable() }).strict().optional(),
+    /** The learned preflight guard-set candidates (13ea93bf), when the caller sent another
+     * `guardRevision`. A hint: an unreadable one is dropped, never a failed command. */
+    guardSet: guardCandidatesSchema.optional().catch(undefined),
   })
   .strict();
 export type HostedAgentCapabilities = z.infer<typeof hostedAgentCapabilitiesSchema>;

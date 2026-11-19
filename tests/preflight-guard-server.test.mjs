@@ -208,9 +208,26 @@ test('a Lane start delivers the project candidates only to a CLI that asks, and 
   );
   // The CLI holds that revision now: the next start carries nothing.
   assert.equal((await begin({ guardRevision: first.guardSet.rev })).guardSet, undefined);
+  // open, preflight and land ask on the capability read every command already makes: the same
+  // field when the revision differs, nothing when it is current or when the caller sends none.
+  const agent = await import(moduleUrl('../convex/projectHostedAgent.ts'));
+  const { hostedAgentCapabilitiesSchema } = await import('../dist/hosted-agent-contract.js');
+  const caps = extra =>
+    s
+      .call('capabilities', agent.capabilities, { projectId, features: ['preflight-guard-set'], ...extra })
+      .then(JSON.parse);
+  const asked = await caps({ guardRevision: 'stale' });
+  assert.ok(hostedAgentCapabilitiesSchema.safeParse(asked).success);
+  assert.deepEqual(asked.guardSet, first.guardSet);
+  assert.equal((await caps({ guardRevision: first.guardSet.rev })).guardSet, undefined);
+  assert.equal((await caps({})).guardSet, undefined);
   // A garbage guard document never fails a start: the reply carries an empty set.
   s.patch('projectLandingSpeed', speed, { guards: '{not json' });
   const garbage = await begin({ guardRevision: first.guardSet.rev });
   assert.ok(hostedStartResultSchema.safeParse(garbage).success);
   assert.deepEqual(garbage.guardSet.files, []);
+  // Nor a capability read.
+  assert.deepEqual((await caps({ guardRevision: first.guardSet.rev })).guardSet.files, []);
+  // A reply this CLI cannot read is dropped, never a failed command.
+  assert.equal(hostedAgentCapabilitiesSchema.shape.guardSet.parse({ rev: 1 }), undefined);
 });
