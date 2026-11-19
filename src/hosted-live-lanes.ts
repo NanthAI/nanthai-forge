@@ -36,7 +36,14 @@ export const liveLanesInput = z
      * dated checks), each listed or marked not reported with the reason; a quiet Lane beside a live Lane of the same
      * Issue carries `replacedBy` and the abandon command as `next`. `tree` adds a compact text `tree`: which Lanes
      * stack on which, which overlap, and each Lane's state and next step, from the same one page read. */
-    view: z.enum(['all', 'live', 'dormant', 'loose-ends', 'tree']).optional(),
+    // A checked string, not an enum, so the per-session MCP tool listing names `view` without its values
+    // (tests/mcp-tool-list.test.mjs budget); help and docs list them.
+    view: z
+      .string()
+      .refine(value => ['all', 'live', 'dormant', 'loose-ends', 'tree'].includes(value), {
+        message: 'view: all, live, dormant, loose-ends or tree.',
+      })
+      .optional(),
   })
   .strict()
   .refine(input => input.state !== 'all' || (input.planningItemId && !input.intentId && !input.view), {

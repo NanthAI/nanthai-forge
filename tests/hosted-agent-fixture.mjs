@@ -424,6 +424,24 @@ export function agentFixture(t, source) {
     else if (name === 'projectHostedApprovals:withdraw')
       result = { laneId: args.laneId, status: 'requested', live: false, version: 2 };
     else if (name === 'projectWorkCommand:command') result = { revision: 1 };
+    else if (name === 'projectHostedLiveLanes:list')
+      result = {
+        page: [
+          {
+            laneId: lane.laneId,
+            intentId: lane.intentId,
+            intent: 'Fixture outcome',
+            actor: 'fixture-agent',
+            state: 'active',
+            head: lane.head,
+            lastSaveAt: at,
+            lastActivityAt: at,
+            landing: null,
+          },
+        ],
+        isDone: true,
+        continueCursor: null,
+      };
     else assert.fail(`Unexpected API call ${name}`);
     if (fail === name) {
       fail = null;

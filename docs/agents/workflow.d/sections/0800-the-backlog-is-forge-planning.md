@@ -19,7 +19,7 @@ independent of the project’s Lane count; result memory and joined reads stay O
 with the existing page bound of 100. Each row names the Lane's `intent`, `actor`,
 `lastSaveAt`, `lastActivityAt` (the Lane record's last change: start, save, sync or
 landing, from the record the row already reads; Item f0d0fdd6) and its latest `landing`.
-Completed and abandoned Lanes are not listed; `state:"all"` with `planningItemId` shows them.
+Completed and abandoned Lanes are not listed; `state:"all"` with `planningItemId` shows them. MCP: `forge_work_overview` with `action:"lanes"` (Issue key `id`, plus `intentId`, `cursor`, `limit`, `view`; same rows, same one query; `state:"all"` is CLI only).
 
 **What happened on an Issue: the live-state check.** `planning {"planningItemId":"ITEM_ID"}`
 returns `work`: the Issue's Lanes in every state (`open`, `queued`, `parked`,

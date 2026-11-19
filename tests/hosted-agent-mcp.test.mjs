@@ -594,3 +594,21 @@ test('MCP lists history log/blame/show and dispatches the same read-only project
   for (const op of ['limit', 'retry'])
     assert(!z.object(review.inputSchema).safeParse({ command: { action: 'history', op, bytes: 0 } }).success);
 });
+
+test('MCP forge_work_overview lanes lists open Lanes with lastActivityAt through the CLI read (f0d0fdd6)', async t => {
+  const s = agentFixture(t),
+    tools = registry(t, s);
+  const tool = tools.get('forge_work_overview');
+  const parsed = z.object(tool.inputSchema).parse({ command: { action: 'lanes', limit: 5 } }).command;
+  const before = s.calls.length;
+  const response = await tool.call({ command: parsed });
+  assert(!response.isError, response.content[0].text);
+  const lanesCalls = s.calls.slice(before).filter(call => call.name === 'projectHostedLiveLanes:list');
+  assert.equal(lanesCalls.length, 1, 'one bounded lanes query, as from the CLI');
+  const actual = body(response);
+  assert.equal(actual.result.page[0].laneId, s.lane.laneId);
+  assert.equal(typeof actual.result.page[0].lastActivityAt, 'string');
+  const { action: _, ...input } = parsed;
+  void _;
+  assert.deepEqual(actual.result, (await s.transport().dispatch('lanes', input)).result);
+});
