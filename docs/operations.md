@@ -329,11 +329,17 @@ The list of codes and their kind lives in `src/fallback-reasons.ts`:
 | `contract-gate` | the run's server gate (`gate.reason` when the contract gate went full) | `contract-supervised`, `contract-actor`, `contract-protected-paths`, `contract-trust`, `contract-none`, `main-red`, `audit-debt`, `contract-other` |
 | `selection` | check run `fallback`, from the runner's pinned selection | `contract-full`, `docs-paths-undeclared`, `test-runner-unavailable`, `scoped-base-unavailable`, `scoped-root-config`, `scoped-unclassified`, `graph-full` (a [package-graph first check](workflows.md#check-command-scope) ran full: majority, unplaced path, flags Forge cannot place or nothing to run; the run's `fallbackReason` says which) |
 
-Reuse codes: `not-eligible`, `not-tried`, `cohort`, `reuse-policy`, `main-red`,
+Reuse codes: `not-tried`, `cohort` (a batch member: the batch keeps one shared exact
+recheck), `retired-running` (main moved under a running check and Forge retired it),
+`no-check` (main moved before the landing had a check), `semantic-plan` (the composition
+carries semantic merge members), `recovery` (culprit recovery or its fix Lane), `revert`,
+`reuse-policy`, `main-red`,
 `audit-debt`, `text-conflict`, `check-evidence`, `audit-baseline`, `path-overlap`,
 `tested-doc`, `global-risk`, `order-sensitive` (global risk that the
 [fast landing mode](pre-queue-checks.md#landing-modes) never relaxes), `composition-not-exact`, `unsupported-mode`,
 `checked-not-full`, `audit-not-full`, `source-unavailable`, `analysis-expired`.
+`not-eligible` remains only for a finish with no pending recompose, which no current caller
+reaches, and on records written before these codes split.
 
 A **limitation** is a fallback where Forge could not use its fast path for this repository
 or change shape (for example `unsupported-mode`: a changed symlink or submodule;

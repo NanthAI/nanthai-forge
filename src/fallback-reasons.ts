@@ -27,6 +27,11 @@ const REUSE = {
   'not-eligible': L,
   'not-tried': L,
   cohort: L,
+  'retired-running': L,
+  'no-check': G,
+  'semantic-plan': L,
+  recovery: G,
+  revert: G,
   'reuse-policy': G,
   'main-red': G,
   'audit-debt': G,
@@ -93,6 +98,40 @@ export function runFallback(selection: { fallback?: unknown; reason?: unknown })
 /** An unknown code is a limitation: Forge fell back without saying why. */
 export const fallbackKind = (stage: FallbackStage, reason: string): FallbackKind =>
   FALLBACK_REASONS[stage][reason] ?? 'limitation';
+
+/** Why a landing cannot carry its check across a main move, decided before any proof read
+ * (Item c3c69c57), instead of the catch-all `not-eligible` (no pending recompose, older records). The
+ * landing's own state comes first, the parent attempt (read after the policy bound) second. */
+export function landingCarryRefusal(
+  state: {
+    phase: string;
+    batchId?: string | undefined;
+    batchSolo?: true | undefined;
+    batchNeedsSoloCompose?: true | undefined;
+    request: { revertOf?: string | undefined };
+  },
+  finish: { recoveryRunId?: string | undefined; restoreBases?: unknown },
+) {
+  // Culprit recovery and its restore-base fix Lanes always take an exact full check.
+  if (finish.recoveryRunId || finish.restoreBases) return 'recovery';
+  if (state.request.revertOf) return 'revert';
+  // A batch publishes several same-head snapshots. The audit culprit range does not prove a
+  // single-member reverse across them, so its one shared exact recheck stays.
+  if (state.batchId && !state.batchSolo) return 'cohort';
+  // A passed entry may still carry, including an exact-tree carry after an owner hold.
+  if (state.phase === 'ready') return undefined;
+  // Main moved under a running check and Forge retired it (solo, predicted-head or released batch run).
+  return state.phase === 'checking' || state.batchNeedsSoloCompose ? 'retired-running' : 'no-check';
+}
+export function attemptCarryRefusal(previous: {
+  check: unknown;
+  candidate: { head: string | null };
+  semanticPlan?: { members: readonly unknown[] } | undefined;
+}) {
+  if (!previous.check || !previous.candidate.head) return 'no-check';
+  if (previous.semanticPlan?.members.length) return 'semantic-plan';
+  return undefined;
+}
 
 /** Runner side, on the selection it already pins: why the configured command could not be
  * narrowed or skipped. Explicit codes from the selector win; the rest follow from the gate. */

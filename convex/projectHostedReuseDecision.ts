@@ -18,9 +18,13 @@ import { checkRunEntryPaths } from '../src/first-check-risk';
 import { reducedEvidenceActor } from '../src/contract-gate-policy';
 import { trustGateReader } from './projectHostedTrust';
 import type { HostedCheckRun } from '../src/hosted-check';
-/** Why the first check cannot carry this landing before any analysis (receipt field). */
+import { landingCarryRefusal, attemptCarryRefusal } from '../src/fallback-reasons';
+/** Why the first check cannot carry this landing before any analysis (receipt field). Each cause
+ * has its own code (Item c3c69c57); `not-eligible` remains only for a finish with no pending
+ * recompose, which no current caller reaches, and on records written before the split. */
 export type ReuseIneligible =
   | 'not-eligible'
+  | NonNullable<ReturnType<typeof landingCarryRefusal> | ReturnType<typeof attemptCarryRefusal>>
   | 'reuse-policy'
   | 'main-red'
   | 'audit-debt'
@@ -39,18 +43,10 @@ export type ReuseReads = {
 export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingIdentity, reads?: ReuseReads) {
   const { value } = reads?.finish ?? (await loadFinish(ctx, input));
   const { row: landing, state } = reads?.landing ?? (await loadLanding(ctx, input));
-  // A batch publishes multiple same-head snapshots. The existing audit culprit
-  // range does not prove a single-member reverse across those snapshots; retain
-  // its one shared exact recheck rather than inventing recovery evidence.
-  if (
-    !value.pending ||
-    state.phase !== 'ready' ||
-    (state.batchId && !state.batchSolo) ||
-    value.recoveryRunId ||
-    value.restoreBases ||
-    state.request.revertOf
-  )
-    return no('not-eligible');
+  // Recovery, revert, batch, retired and unchecked landings keep the exact recheck, each named.
+  if (!value.pending) return no('not-eligible');
+  const refused = landingCarryRefusal(state, value);
+  if (refused) return no(refused);
   const previous = await loadLandingAttempt(ctx, {
     projectId: input.projectId,
     attemptId: value.pending.parentAttemptId,
@@ -65,8 +61,9 @@ export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingI
     !reducedEvidenceActor(policy, project, previous.actor, policy.trust?.enabled ? bestTrust : null)
   )
     return no('reuse-policy');
-  if (!previous.check || !previous.candidate.head || previous.semanticPlan?.members.length)
-    return no('not-eligible');
+  // The explicit null checks only narrow types; attemptCarryRefusal names the reason.
+  const unchecked = attemptCarryRefusal(previous);
+  if (unchecked || !previous.check || !previous.candidate.head) return no(unchecked ?? 'no-check');
   const checked = previous.crossHeadProof?.checked ?? {
     id: previous.candidate.id,
     head: previous.candidate.head,
