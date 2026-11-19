@@ -11,7 +11,7 @@ import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 import { laneSiblingPath } from '../dist/hosted-root-checkout.js';
 import { canonicalRoot } from '../dist/root-paths.js';
 import { submitHostedLand } from '../dist/hosted-land-cli.js';
-import { keptCopies } from '../dist/hosted-resolution-placement.js';
+import { keptCopies, resolutionFolderReason, workInLine } from '../dist/hosted-resolution-placement.js';
 
 const strip = ({ action, ...parameters }) => [action, parameters];
 
@@ -112,6 +112,45 @@ test('ad80e037: an unsaved deletion of a file the merge changed is reported as r
   assert(existsSync(join(root, 'a.txt')), 'the merge put the file back');
   assert.match(conflict.workIn, /Restored: the unsaved deletion of a\.txt was undone/);
   assert.equal(conflict.kept, undefined, 'nothing to set aside: the file was deleted');
+});
+
+test('ad80e037: a new resolution folder names which side moved and says what is saved and what stays behind', () => {
+  const lane = 'a1b2c3d4';
+  // The folder is behind the Lane's save: never the backwards "saved again" reason.
+  const behind = resolutionFolderReason(
+    { laneId: lane, sourceVersion: 3 },
+    { laneId: lane, sourceVersion: 4 },
+    false,
+  );
+  assert.match(behind, /^the Lane has a newer save \(source version 4\) than this folder holds \(3\)/);
+  assert.doesNotMatch(behind, /saved again/);
+  assert.match(
+    resolutionFolderReason({ laneId: lane, sourceVersion: 5 }, { laneId: lane, sourceVersion: 4 }, false),
+    /^this folder was saved again after the conflict/,
+  );
+  assert.equal(
+    resolutionFolderReason(undefined, { laneId: lane, sourceVersion: 4 }, false),
+    'this folder is not a Lane checkout',
+  );
+  assert.equal(
+    resolutionFolderReason({ laneId: lane, sourceVersion: 4 }, { laneId: lane, sourceVersion: 4 }, true),
+    'this folder holds another unresolved draft',
+  );
+  assert.equal(
+    resolutionFolderReason({ laneId: 'other', sourceVersion: 1 }, { laneId: lane, sourceVersion: 4 }, false),
+    'this folder holds another Lane',
+  );
+  const head = 'f'.repeat(64);
+  const line = workInLine('/new', 'res', false, undefined, behind, head, undefined, '/old');
+  assert.match(line, /^WORK IN \/new \(new folder for resolution Lane res\): the Lane has a newer save/);
+  assert.match(
+    line,
+    new RegExp(`Saved: the new folder holds the Lane's saved head ${head.slice(0, 12)} merged with main\\.`),
+  );
+  assert.match(
+    line,
+    /NOT carried: \/old is unchanged and its unsaved edits stay there; copy any the resolution needs into the new folder\./,
+  );
 });
 
 test('a new land naming the origin Lane after an edited, unresolved in-place resolution refuses before composing (41fc0c29)', async t => {

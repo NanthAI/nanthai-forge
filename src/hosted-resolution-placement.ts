@@ -80,20 +80,29 @@ export async function placeResolution(
     },
     hostedRootLanePath(session.root, session.address, laneId),
   );
-  const why = !marker
-    ? 'this folder is not a Lane checkout'
-    : draftHere
-      ? 'this folder holds another unresolved draft'
-      : marker.selection.laneId === origin?.laneId
-        ? 'this folder was saved again after the conflict, so its newer work stays here'
-        : 'this folder holds another Lane';
+  const why = resolutionFolderReason(marker?.selection, origin, draftHere);
   return {
     root: opened.root,
     inPlace: false,
-    workIn: workInLine(opened.root, laneId, false, undefined, why),
+    workIn: workInLine(opened.root, laneId, false, undefined, why, origin?.head, undefined, session.root),
   };
 }
-function workInLine(
+/** Why the resolution opens in a new folder. Which side moved matters: a folder behind the Lane's
+ * save (a save made elsewhere, or one whose reply this folder lost) was not "saved again"; the
+ * conflict was made from that newer save (ad80e037). */
+export function resolutionFolderReason(
+  folder: { laneId: string; sourceVersion: number } | undefined,
+  origin: { laneId: string; sourceVersion: number } | undefined,
+  draftHere: boolean,
+) {
+  if (!folder) return 'this folder is not a Lane checkout';
+  if (draftHere) return 'this folder holds another unresolved draft';
+  if (folder.laneId !== origin?.laneId) return 'this folder holds another Lane';
+  return folder.sourceVersion < origin.sourceVersion
+    ? `the Lane has a newer save (source version ${origin.sourceVersion}) than this folder holds (${folder.sourceVersion}), made elsewhere or by a save whose reply this folder lost, so the conflict was made from that save, not from these files`
+    : 'this folder was saved again after the conflict, so its newer work stays here';
+}
+export function workInLine(
   root: string,
   laneId: string,
   inPlace: boolean,
@@ -103,6 +112,8 @@ function workInLine(
   savedHead?: string,
   /** Unsaved deletions the merge changed: the file is back with the merged bytes. */
   restored?: string[],
+  /** A new folder: the folder the sync ran from, left as it was. */
+  from?: string,
 ) {
   const list = (paths: string[]) =>
     `${paths.slice(0, 3).join(', ')}${paths.length > 3 ? ` and ${paths.length - 3} more` : ''}`;
@@ -116,9 +127,16 @@ function workInLine(
     ? ` Restored: the unsaved deletion of ${list(restored)} was undone (main changed the file); delete it again if you still want it gone.`
     : '';
   const restNote = savedHead || kept ? ' Other unsaved edits stay in place, still unsaved.' : '';
-  return inPlace
-    ? `WORK IN ${root} (same folder): it is now resolution Lane ${laneId}; resolve and land from here.${savedNote}${keptNote}${restoredNote}${restNote}`
-    : `WORK IN ${root} (new folder for resolution Lane ${laneId}): ${why}.`;
+  if (inPlace)
+    return `WORK IN ${root} (same folder): it is now resolution Lane ${laneId}; resolve and land from here.${savedNote}${keptNote}${restoredNote}${restNote}`;
+  // A new folder holds the saved head merged with main; nothing from the old folder moves (ad80e037).
+  const siblingSaved = savedHead
+    ? ` Saved: the new folder holds the Lane's saved head ${savedHead.slice(0, 12)} merged with main.`
+    : '';
+  const left = from
+    ? ` NOT carried: ${from} is unchanged and its unsaved edits stay there; copy any the resolution needs into the new folder.`
+    : '';
+  return `WORK IN ${root} (new folder for resolution Lane ${laneId}): ${why}.${siblingSaved}${left}`;
 }
 /** Copies of unsaved edits an in-place resolution set aside for this Lane, read from the folder that
  * holds them (rebaseHostedCheckout's keptAt), at most 100 paths. Undefined when there are none. */
