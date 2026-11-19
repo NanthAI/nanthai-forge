@@ -28,6 +28,7 @@ import { ForgeError } from '../dist/errors.js';
 import { namedPaths, suggestSchedule } from '../dist/work-schedule.js';
 import { speedBudgets } from '../dist/speed-budgets.js';
 import { judgeCosts } from '../dist/cost-budgets.js';
+import { checkArgs } from './convex-args.mjs';
 
 /** Judge planning write costs against the ledger (src/speed-budgets.json, flip 5): any rise fails. */
 const withinLedger = measured =>
@@ -46,6 +47,7 @@ const search = await import(moduleUrl('../convex/projectHostedPlanningSearch.ts'
 const planningModule = await import(moduleUrl('../convex/projectHostedPlanning.ts'));
 const itemWork = await import(moduleUrl('../convex/projectItemWork.ts'));
 const planningBatch = await import(moduleUrl('../convex/projectPlanningBatch.ts'));
+const { move, startMoveOperationId } = await import(moduleUrl('../convex/projectPlanningStart.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 
 /** The agent's port over the real Convex handlers; Intent states are the one stub (tested with
@@ -953,9 +955,14 @@ test('builders claim the Item they start (d3357f40): an unowned Item takes the s
     movedBy: 'server',
     claimed: false,
   });
-  const { move } = await import(moduleUrl('../convex/projectPlanningStart.ts'));
   const serverMove = (itemId, id = startOperationId) =>
-    move._handler(s.ctx, { projectId: s.projectId, owner: 'owner', itemId, startOperationId: id });
+    move._handler(s.ctx, {
+      projectId: s.projectId,
+      owner: 'owner',
+      itemId,
+      actor: 'member',
+      startOperationId: id,
+    });
   await serverMove(open);
   const moved = (await list(p, { id: open, reconcile: false })).item;
   assert.equal(moved.status, 'in-progress');
@@ -972,6 +979,62 @@ test('builders claim the Item they start (d3357f40): an unowned Item takes the s
   await serverMove(randomUUID(), randomUUID());
   assert.equal((await list(p, { id: closed, reconcile: false })).item.status, 'closed');
   assert.equal(s.tables.projectWorkEvents.size, before);
+  // A proposed Item stays proposed for a member: the start says it waits for the owner (lead 2026-11-19).
+  const proposal = (await put(p, { kind: 'issue', title: 'Proposed, contributor start', status: 'proposed' }))
+    .result.itemId;
+  assert.deepEqual(await markPlanningStarted(refused, proposal, randomUUID(), 'synthetic-owner/amber-fox'), {
+    updated: false,
+    status: 'proposed',
+    claimed: false,
+    waitsFor: 'owner',
+    note: 'Still proposed: it shows as in progress once the project owner approves it.',
+  });
+  // A server that does not move it (older, without planning-start-move): the refusal is reported as before.
+  const unmoved = {
+    ...refused,
+    serverFeatures: refused.serverFeatures.filter(name => name !== 'planning-start-move'),
+  };
+  const before4 = (await put(p, { kind: 'issue', title: 'Open, older server' })).result.itemId;
+  const reported = await markPlanningStarted(unmoved, before4, randomUUID(), 'synthetic-owner/amber-fox');
+  assert.equal(reported.updated, false);
+  assert.equal(reported.movedBy, undefined);
+  assert.equal(reported.error?.code, 'PROJECT_UNAVAILABLE');
+  // The proposed reply is that server's too: an older server moves a proposed Item, so the refusal is reported.
+  const proposedOld = (await put(p, { kind: 'issue', title: 'Proposed, older server', status: 'proposed' }))
+    .result.itemId;
+  const proposedReported = await markPlanningStarted(unmoved, proposedOld, randomUUID(), 'synthetic-owner');
+  assert.equal(proposedReported.waitsFor, undefined);
+  assert.equal(proposedReported.error?.code, 'PROJECT_UNAVAILABLE');
+  // Only the owner-only refusal is quiet: any other PROJECT_UNAVAILABLE (for example an owner's write refused for
+  // another reason, which schedules no server move) is reported, for an open and a proposed Item alike.
+  const otherRefusal = {
+    ...refused,
+    mutation: async () => {
+      throw new ConvexError({
+        code: 'PROJECT_UNAVAILABLE',
+        message: 'Project is unavailable with the current account.',
+      });
+    },
+  };
+  for (const status of ['open', 'proposed']) {
+    const id = (await put(p, { kind: 'issue', title: `Other refusal, ${status}`, status })).result.itemId;
+    const result = await markPlanningStarted(otherRefusal, id, randomUUID(), 'synthetic-owner');
+    assert.equal(result.movedBy, undefined, status);
+    assert.equal(result.waitsFor, undefined, status);
+    assert.equal(result.error?.code, 'PROJECT_UNAVAILABLE', status);
+  }
+  // The server moves an open Issue only: a member's start of a closed or abandoned Issue, or of an Initiative, is
+  // reported, not shown as moved.
+  for (const fields of [
+    { kind: 'issue', status: 'closed' },
+    { kind: 'issue', status: 'abandoned' },
+    { kind: 'initiative' },
+  ]) {
+    const id = (await put(p, { ...fields, title: `Not moved ${JSON.stringify(fields)}` })).result.itemId;
+    const result = await markPlanningStarted(refused, id, randomUUID(), 'synthetic-owner');
+    assert.equal(result.movedBy, undefined, JSON.stringify(fields));
+    assert.equal(result.error?.code, 'PROJECT_UNAVAILABLE', JSON.stringify(fields));
+  }
   // Any other failure of the status write is still reported.
   const broken = {
     ...refused,
@@ -987,6 +1050,102 @@ test('builders claim the Item they start (d3357f40): an unowned Item takes the s
   const old = { ...p, serverFeatures: p.serverFeatures.filter(name => name !== 'planning-model') };
   const legacy = (await put(p, { kind: 'issue', title: 'Old server' })).result.itemId;
   assert.equal((await markPlanningStarted(old, legacy, randomUUID(), 'synthetic-owner')).owner, undefined);
+});
+
+// Review 76a40609 of the server move (receipt f0893386): only an open Issue of this project moves, as the current
+// owner, once per start and caller; an Item the owner edits meanwhile is read again, not dropped.
+test('the server move after a member start: open Issues only, this project, the current owner, and a racing edit', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const serverMove = (itemId, input = {}) =>
+    move._handler(s.ctx, {
+      projectId: s.projectId,
+      owner: 'owner',
+      itemId,
+      actor: 'member',
+      startOperationId: randomUUID(),
+      ...input,
+    });
+  const status = async id => (await list(p, { id, reconcile: false })).item.status;
+  const events = () => s.tables.projectWorkEvents.size;
+  // Proposed waits for the owner; abandoned stays; an Initiative (any kind but issue) never moves.
+  const proposed = (await put(p, { kind: 'issue', title: 'Proposed', status: 'proposed' })).result.itemId;
+  const abandoned = (await put(p, { kind: 'issue', title: 'Dropped', status: 'abandoned' })).result.itemId;
+  const initiative = (await put(p, { kind: 'initiative', title: 'Group' })).result.itemId;
+  const before = events();
+  for (const id of [proposed, abandoned, initiative]) await serverMove(id);
+  assert.deepEqual(
+    [await status(proposed), await status(abandoned), await status(initiative)],
+    ['proposed', 'abandoned', 'open'],
+  );
+  assert.equal(events(), before, 'nothing written');
+  // An Item of another project: the lookup is scoped to the start's project, so nothing there is found or written.
+  const issue = (await put(p, { kind: 'issue', title: 'Open here' })).result.itemId;
+  s.tables.hostedProjects.set('other', {
+    ...s.tables.hostedProjects.get(s.projectId),
+    _id: 'other',
+    key: randomUUID(),
+  });
+  await serverMove(issue, { projectId: 'other' }).catch(() => undefined);
+  assert.equal(await status(issue), 'open');
+  assert.equal(events(), before + 1, 'only the put above');
+  // The owner changed before the action ran: the write as the old owner is refused, and the Item stays open.
+  const owner = s.tables.hostedProjects.get(s.projectId).owner;
+  s.tables.hostedProjects.get(s.projectId).owner = 'new-owner';
+  await assert.rejects(serverMove(issue), /unavailable with the current account/);
+  s.tables.hostedProjects.get(s.projectId).owner = owner;
+  assert.equal(await status(issue), 'open');
+  // The owner edits the Item between the action's lookup and its write (ITEM_CHANGED): the action reads it again and
+  // moves it, keeping the edit.
+  const query = s.ctx.runQuery;
+  const racing = async (id, edit) => {
+    let raced = false;
+    s.ctx.runQuery = async (ref, args) => {
+      const result = await query(ref, args);
+      if (!raced && getFunctionName(ref) === 'projectWorkIndexStore:lookups') {
+        raced = true;
+        const item = (await list(p, { id, reconcile: false })).item;
+        await put(p, { itemId: id, expectedVersion: item.version, ...edit });
+      }
+      return result;
+    };
+    try {
+      await serverMove(id);
+    } finally {
+      s.ctx.runQuery = query;
+    }
+    assert.equal(raced, true);
+    return (await list(p, { id, reconcile: false })).item;
+  };
+  const moved = await racing(issue, { title: 'Edited meanwhile' });
+  assert.deepEqual([moved.status, moved.title], ['in-progress', 'Edited meanwhile']);
+  // The owner changes the status meanwhile (closes it, or sends it back to proposed): the read-again sees it, and the
+  // move writes nothing over the owner's choice.
+  for (const status of ['closed', 'proposed']) {
+    const id = (await put(p, { kind: 'issue', title: `Raced to ${status}` })).result.itemId;
+    const raced = await racing(id, { status });
+    assert.equal(raced.status, status);
+    assert.equal(raced.version, 2, `${status}: only the owner's edit`);
+  }
+  // A move scheduled by a server deployed before the actor was passed still validates, and moves the Item.
+  const early = (await put(p, { kind: 'issue', title: 'Scheduled before the deploy' })).result.itemId;
+  const earlyArgs = { projectId: s.projectId, owner: 'owner', itemId: early, startOperationId: randomUUID() };
+  checkArgs(move, earlyArgs, 'projectPlanningStart:move');
+  await move._handler(s.ctx, earlyArgs);
+  assert.equal(await status(early), 'in-progress');
+  // The operation id names the project, the Item and the caller, not only the start's id.
+  const base = { projectId: 'project', itemId: issue, actor: 'member', startOperationId: randomUUID() };
+  const ids = new Set(
+    [
+      base,
+      { ...base, projectId: 'other' },
+      { ...base, itemId: randomUUID() },
+      { ...base, actor: 'other-member' },
+      { ...base, startOperationId: randomUUID() },
+    ].map(startMoveOperationId),
+  );
+  assert.equal(ids.size, 5);
+  assert.equal(startMoveOperationId(base), startMoveOperationId({ ...base }), 'stable across retries');
 });
 
 test('start from an Issue: planned Intent shares the Issue id, the Issue becomes in-progress once', async t => {

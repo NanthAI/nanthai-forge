@@ -430,13 +430,15 @@ async function execute(
     operationId,
     receipt: { attemptId: first.id, at: first.at, outcome: { status: 'completed', result } },
   });
-  // A member's start of a planned Item: planning writes are the owner's, so the server moves the Item to in progress
-  // (projectPlanningStart.ts), after this start commits. The owner's client does it, with the claim, in one write.
+  // A member's start of a planned Item: planning writes are the owner's, so the server moves an open Issue to in
+  // progress (projectPlanningStart.ts checks the kind and status), after this start commits. The owner's client does
+  // it, with the claim, in one write.
   if (action === 'start' && lane && payload.intent.kind === 'planned' && project.owner !== actor)
     await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectPlanningStart:move'), {
       projectId,
       owner: project.owner,
       itemId: payload.intent.intentId,
+      actor,
       startOperationId: operationId,
     });
   return canonicalPayload(startReply(result, noticeVersion, openLanesVersion, guardSet));

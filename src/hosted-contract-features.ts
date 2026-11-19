@@ -181,6 +181,10 @@ export const hostedContractFeatures = [
    * older server's refusal of the argument drops it). Without the feature the CLI sends no gate
    * fields and preflight runs no learned guards. */
   'preflight-guard-set',
+  /** A member's start of an open Issue has the server move it to in progress (convex/projectPlanningStart.ts, Item
+   * d3357f40). The CLI then reports the member's refused status write as moved by the server; without it the
+   * refusal is reported as before. */
+  'planning-start-move',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

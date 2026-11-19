@@ -6,16 +6,22 @@ import { runWorkCommand } from './projectWorkCommandRun';
 import { indexedCommand, NodeCommandRequired } from './projectWorkIndexedCommand';
 
 const ATTEMPTS = 3;
-const retryable = (error: unknown) => /WORK_STALE|WORK_CONFLICT/.test(String(error));
+// ITEM_CHANGED: the item moved between the lookup and the write (a person edited it); the loop reads it again.
+const retryable = (error: unknown) => /WORK_STALE|WORK_CONFLICT|ITEM_CHANGED/.test(String(error));
 const finished = (error: unknown) => /WORK_OPERATION_CHANGED/.test(String(error));
 
 /** The stored planning item a server write builds on, or null when it does not exist yet. */
-export type StoredPlanningItem = { version: number; status?: string; owner?: string | null };
+export type StoredPlanningItem = {
+  version: number;
+  kind?: string;
+  status?: string;
+  owner?: string | null;
+};
 
 /** One planning write by the server as the project owner, through the same Work command path as
  * `put-planning-item` (speed-budget Issues, a member's start). `build` sees the stored item and returns the
  * command, or null to write nothing. Operation ids name the transition, so a retry reconciles instead of
- * repeating; a stale revision is re-read and retried. */
+ * repeating; a stale revision, or an item changed meanwhile, is re-read and retried. */
 export async function ownerPlanningCommand(
   ctx: ActionCtx,
   projectId: Id<'hostedProjects'>,

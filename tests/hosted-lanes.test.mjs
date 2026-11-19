@@ -836,7 +836,15 @@ test('a member start of a planned Item schedules the server status move once; th
   assert.equal(started.intentId, issue);
   assert.deepEqual(
     moves().map(task => task.args),
-    [{ projectId: s.projectId, owner: 'owner', itemId: issue, startOperationId: input.operationId }],
+    [
+      {
+        projectId: s.projectId,
+        owner: 'owner',
+        itemId: issue,
+        actor: 'member',
+        startOperationId: input.operationId,
+      },
+    ],
   );
   assert.deepEqual(await s.begin(input, 'member'), started, 'the replay returns the original start');
   assert.equal(moves().length, 1, 'and schedules nothing again');

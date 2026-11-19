@@ -938,6 +938,9 @@ export async function plannedIntent(port: PlanningPort, itemId: string) {
 }
 /** A public identity a start may claim an Item for: a Forge handle, or `handle/agent` (the session's word-pair slug). */
 const claimShape = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])(?:\/[a-z]+-[a-z]+)?$/;
+/** The server's refusal of a planning write by anyone but the project owner (convex/projectWorkCommand.ts and
+ * convex/projectWork.ts): the one refusal after which the server itself moves a member's started Issue. */
+const ownerOnlyPlanning = 'Project planning is available to its current owner.';
 /** After a start, the Issue shows the work as in progress, and an Issue nobody owns is claimed for the starter
  * (owner 2026-11-19, Item d3357f40): `claimAs` is the session's public identity (`handle/agent`, or a handle), stored
  * as the owner `@handle/agent`. Both ride the one write the start already makes; an Issue already in progress and
@@ -967,8 +970,9 @@ export async function markPlanningStarted(
         : undefined;
     if (item.status === 'in-progress' && !claim) return { updated: false, status: item.status };
     // A member who cannot edit the plan (planning writes are the project owner's) gets no error to act on: with only the
-    // claim left to write (the Issue is already in progress) the start stays as it was (review 3f84a176), and an open
-    // Issue is moved to in progress by the server itself after the start (convex/projectPlanningStart.ts).
+    // claim left to write (the Issue is already in progress) the start stays as it was (review 3f84a176), an open
+    // Issue is moved to in progress by the server itself after the start (convex/projectPlanningStart.ts), and a
+    // proposed Issue waits for the owner to accept it.
     const claimOnly = item.status === 'in-progress';
     try {
       await writePlanning(
@@ -983,7 +987,26 @@ export async function markPlanningStarted(
       );
     } catch (error) {
       if (claimOnly) return { updated: false, status: item.status, claimed: false };
-      if (hostedActionError(error, 'planning start').code === 'PROJECT_UNAVAILABLE')
+      // Only the owner-only planning refusal, and only on a server that moves the Issue itself (planning-start-move):
+      // any other refusal (for example an owner's write refused for another reason) is reported as before. The server
+      // moves an open Issue only (convex/projectPlanningStart.ts), so nothing else is reported as moved.
+      const safe = hostedActionError(error, 'planning start');
+      const memberRefused =
+        safe.code === 'PROJECT_UNAVAILABLE' &&
+        safe.message === ownerOnlyPlanning &&
+        port.serverFeatures?.includes('planning-start-move') &&
+        item.kind === 'issue';
+      // A proposed Issue stays proposed for a member: approving a proposal is the owner's call (lead 2026-11-19).
+      if (memberRefused && item.status === 'proposed')
+        return {
+          updated: false,
+          status: 'proposed',
+          claimed: false,
+          waitsFor: 'owner',
+          note: 'Still proposed: it shows as in progress once the project owner approves it.',
+        };
+      // An open Issue: the server moves it after the start.
+      if (memberRefused && (item.status ?? 'open') === 'open')
         return { updated: false, status: 'in-progress', movedBy: 'server', claimed: false };
       throw error;
     }
