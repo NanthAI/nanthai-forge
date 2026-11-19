@@ -79,7 +79,7 @@ export default function HostedCode({
   const read = useSourceReview();
   const client = useConvex();
   const [index, setIndex] = useState<Index | null>(null);
-  const [content, setContent] = useState<File | null>(null);
+  const [loaded, setContent] = useState<{ key: string; value: File } | null>(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useDestination('fileFilter');
   const [offset, setOffset] = useState(0);
@@ -117,6 +117,10 @@ export default function HostedCode({
       ? index.paths
       : [];
   const selected = params.get('file') || defaultFile(paths.map(path => path.path));
+  // Content belongs to the file, page and head it was read for. Until the new read arrives the
+  // previous file's text is not shown under the new file's header and Lane strip.
+  const contentKey = `${head}:${selected}:${offset}`;
+  const content = loaded?.key === contentKey ? loaded.value : null;
   usePageCritical('Code', {
     tree: treeAvailable || index !== null,
     selectedFile: !selected || content !== null,
@@ -268,7 +272,7 @@ export default function HostedCode({
         afterOffset: offset,
       }).then(
         value => {
-          if (current) setContent(JSON.parse(value));
+          if (current) setContent({ key: `${head}:${selected}:${offset}`, value: JSON.parse(value) });
         },
         error => {
           if (current) setError(hostedError(error));

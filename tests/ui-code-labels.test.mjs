@@ -82,9 +82,10 @@ test('Code labels and activity follow file selection; work-map counts use singul
       await files.locator('.code-folder > summary').click();
       await files.locator('button[title="src/export.ts"]').click();
       const changing = page.getByLabel('Changing this file', { exact: true });
-      await changing.waitFor();
-      // The strip renders before its Lane link under load; wait for it, then require exactly one.
-      await changing.getByRole('link').first().waitFor();
+      // README.md's strip (the docs Lane) stays on screen until src/export.ts renders, so a bare
+      // link wait could pass on it and the count below then ran in the gap between the two strips.
+      // Ready is this file's own strip link, which renders with its strip; then require exactly one.
+      await changing.locator('a[href*="diffFile=src%2Fexport.ts"]').waitFor();
       assert.equal(await page.getByLabel('Changing now', { exact: true }).count(), 0);
       assert.equal(await changing.getByRole('link').count(), 1);
       assert.match(await changing.innerText(), /claude-exports/);
