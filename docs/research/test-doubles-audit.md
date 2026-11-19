@@ -121,7 +121,7 @@ Each batch's files are in Appendix A. Builder briefs:
 
 ## Contract suites, one per outside system
 
-Each outside fake gets one suite that runs the same cases against the real thing. Place: `tests/contracts/<system>.contract.test.mjs`, each case written once and run twice (fake and real). Real runs go on a schedule unless fast and free.
+Each outside fake gets one suite that runs the same cases against the real thing. Place: `tests/contracts/<system>.contract.test.mjs`, each case written once and run twice (fake and real). Real runs go on a schedule unless fast and free. The R2 and GitHub suites, their nightly workflow, resources, cost and teardown are in [contract suites](../operations/contract-suites.md).
 
 | System | Fakes it checks | Real target | Key cases | When | Cost (E) |
 | --- | --- | --- | --- | --- | --- |

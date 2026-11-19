@@ -107,6 +107,7 @@ export async function deferSpeculativeConflict(
           paths,
           more,
           at: batch.at,
+          operationId: state.operationId,
         }),
       );
       if (row.wouldConflict !== advice) {

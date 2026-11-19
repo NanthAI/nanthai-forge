@@ -109,7 +109,9 @@ export function hostedAgentHelp(action?: string) {
       entry =>
         `  ${entry.command}: ${entry.parameters.join(', ') || '{}'}${entry.action === 'history' ? ' — log, blame, show' : ''}`,
     ),
-    ...(canonical ? entries.map(entry => JSON.stringify(entry.schema, null, 2)) : []),
+    ...(canonical
+      ? entries.flatMap(entry => [helpExample(entry), JSON.stringify(entry.schema, helpSchemaField, 2)])
+      : []),
     ...(topic
       ? [helpTopicText(topic)]
       : canonical
@@ -124,6 +126,39 @@ export function hostedAgentHelp(action?: string) {
             '',
           ]),
   ].join('\n');
+}
+
+/** Journey 61 (Issue 47558a99): an action's help leads with a runnable short form, and its schema prints
+ * a uuid as `format: uuid` without the 180-character pattern Zod repeats for every id field. */
+function helpSchemaField(key: string, value: unknown) {
+  if (key !== '' && value && typeof value === 'object' && (value as { format?: unknown }).format === 'uuid') {
+    return Object.fromEntries(Object.entries(value).filter(([name]) => name !== 'pattern'));
+  }
+  return value;
+}
+const placeholder = (field: string, schema: Record<string, unknown> | undefined): unknown =>
+  schema?.format === 'uuid'
+    ? `${field
+        .replace(/Id$/, '')
+        .replace(/[A-Z]/g, c => `_${c}`)
+        .toUpperCase()}_ID`
+    : schema?.type === 'boolean'
+      ? true
+      : schema?.type === 'number' || schema?.type === 'integer'
+        ? 1
+        : schema?.type === 'array'
+          ? []
+          : Array.isArray(schema?.enum)
+            ? schema.enum[0]
+            : '…';
+function helpExample(entry: (typeof hostedAgentHelpEntries)[number]) {
+  const properties = (entry.schema.properties ?? {}) as Record<string, Record<string, unknown>>;
+  const required = (entry.schema.required ?? []) as string[];
+  const example = Object.fromEntries(required.map(field => [field, placeholder(field, properties[field])]));
+  const command = entry.command.startsWith('x ')
+    ? `nforge x ROOT ${entry.command.slice(2)}`
+    : `nforge agent ROOT ${entry.command}`;
+  return `Example: ${command} '${JSON.stringify(example)}'`;
 }
 
 /** `help TOPIC`: one topic; an action name prints that action's help. No network. */

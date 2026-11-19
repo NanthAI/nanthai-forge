@@ -24,7 +24,7 @@ Receipts are brief: ids, heads, counts and next commands. CLI --detail returns e
 - JSON must be one object. Field names are exact; unknown fields are refused with their name.
 - Ids are full 36-character UUIDs. A unique 8+ character laneId prefix of a Lane this machine opened is resolved for you; other short ids are refused with where to find the full one.
 - lanes '{}' lists your live Lanes with full ids; planning '{"search":"words"}' returns full Issue ids; operation ids come from the receipt that printed them.
-- nforge agent ROOT ACTION --help prints that action's exact schema; message text with quotes or newlines goes through --message-file FILE.
+- nforge agent ROOT ACTION --help prints a runnable example, then that action's schema (ids as format uuid); message text with quotes or newlines goes through --message-file FILE.
 NOT_FOUND names what was looked up: run from the Lane root start printed, or pass the full id.`,
   },
   land: {

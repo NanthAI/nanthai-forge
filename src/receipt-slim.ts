@@ -141,6 +141,14 @@ function briefSave(result: Json): Json | undefined {
   const outcome = obj(result.outcome),
     saved = obj(outcome?.result),
     totalMs = obj(result.timing)?.totalMs;
+  // A split save the server is still settling (the common path): its note and total; the operation id is
+  // the receipt's own and the agent holds the Lane, so neither repeats; the step split is --detail.
+  if (result.status === 'settling' && !outcome)
+    return {
+      status: 'settling',
+      ...(typeof result.note === 'string' ? { note: result.note } : {}),
+      ...(typeof totalMs === 'number' ? { totalMs } : {}),
+    };
   if (!outcome || outcome.status !== 'completed' || !saved || typeof saved.head !== 'string')
     return undefined;
   return {
@@ -276,20 +284,40 @@ function briefPending(result: Json): Json | undefined {
     // Who may accept and what is checked are authority facts; the rest of the request is --detail.
     ...(request ? { request: { agent: request.agent, check: { kind: obj(request.check)?.kind } } } : {}),
   };
-  const preflight = obj(obj(result.defaults)?.preflight);
-  if (preflight)
-    slim.defaults = {
-      preflight: omit(
-        preflight,
-        'at',
-        'rule',
-        'peakRssMb',
-        'testSeconds',
-        'trimmedTiers',
-        'reusedTests',
-        'deferredTo',
-      ),
+  // A finished compose step is a record id, pins and a path list: its candidate State and status say enough.
+  const terminal = obj(obj(result.progress)?.terminal),
+    composed = obj(obj(terminal?.outcome)?.result);
+  if (terminal && obj(terminal.outcome)?.status === 'completed' && composed)
+    slim.progress = {
+      composed: { status: obj(composed.result)?.status, head: obj(composed.result)?.head },
     };
+  const preflight = obj(obj(result.defaults)?.preflight);
+  if (preflight) {
+    const checks = Array.isArray(preflight.static) ? preflight.static.map(obj) : undefined;
+    slim.defaults = {
+      preflight: {
+        ...omit(
+          preflight,
+          'at',
+          'rule',
+          'peakRssMb',
+          'testSeconds',
+          'trimmedTiers',
+          'reusedTests',
+          'deferredTo',
+          'static',
+        ),
+        // Passed static checks by name; a check that did not pass keeps its command and output.
+        ...(checks
+          ? {
+              static: checks.every(check => check?.outcome === 'passed')
+                ? `passed: ${checks.map(check => check?.name).join(', ')}`
+                : preflight.static,
+            }
+          : {}),
+      },
+    };
+  }
   const ahead = obj(result.queueAheadSelection);
   if (ahead)
     slim.queueAheadSelection = {

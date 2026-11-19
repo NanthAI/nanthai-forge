@@ -141,12 +141,23 @@ for (const outcome of ['failed', 'withdrawn', 'head-change', 'receipt-change'])
   });
 
 test('setting off reports exact conflict and optional pinned sync and an optional resolve without changing the canonical wait', async t => {
-  const { f, advice } = await conflictTrio(t, { earlyResolve: 'off' });
+  const { f, advice, lateEntry } = await conflictTrio(t, { earlyResolve: 'off' });
   assert.equal(advice.resolution.early, false);
   assert.equal(syncRequiredAdvice(advice), undefined);
   assert.match(advice.next, /off.*choose sync/s);
   assert(advice.next.includes(`predecessor Lane ${f.entries[1].lane.laneId}`), 'name the conflicting Lane');
   assert(!/No agent action/i.test(advice.next));
+  // 577927f1: the recommended wait is a command an agent can run, on this landing's own operation.
+  const wait = `Run: nforge agent . wait '{"operationIds":["${lateEntry.state.operationId}"]}'.`;
+  assert(advice.next.includes(`keep waiting: if it lands`) && advice.next.includes(wait), advice.next);
+  assert(advice.next.indexOf(wait) < advice.next.indexOf('Or choose sync'), 'the recommendation comes first');
+  // ...and what waiting leads to either way (a failed predecessor releases the follower: queued-conflict-precheck C1).
+  assert(advice.next.includes('if it fails, this landing goes on without it.'), advice.next);
+  // Line 1: the provisional source, the exact predecessor and what happens if it fails.
+  const { head, receiptId } = advice.predecessor;
+  assert(advice.next.includes(`A resolution made now is provisional: it is built on predecessor Lane`));
+  assert(advice.next.includes(`(State ${head}, receipt ${receiptId}) and lands only after that lands`));
+  assert(advice.next.includes('If it fails or is replaced, this Lane goes back to its own last save'));
   for (const run of f.runs().filter(r => r.status === 'queued')) {
     await f.rawChecks.pass(await f.rawChecks.activate(run.id));
     await drainReady(f);

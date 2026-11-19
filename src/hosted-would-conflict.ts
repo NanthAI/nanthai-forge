@@ -159,6 +159,8 @@ export function predecessorConflictAdvice(input: {
   more: number;
   at: string;
   early: boolean;
+  /** The waiting landing's own operation: early resolution off recommends waiting on it. */
+  operationId?: string;
 }) {
   const { groupId: _group, ...pin } = input.predecessor;
   void _group;
@@ -189,7 +191,11 @@ export function predecessorConflictAdvice(input: {
         `Recommended: Resolve now against this exact predecessor, so both land without waiting for it. Run: ${command}. ${provisional}`
       : `Conflict: ${files} also changed in ${target}, which is ahead of this Lane and not on main yet. ` +
         'Early resolution is off for this project, so the recommended action is to keep waiting: if it lands, ' +
-        'this landing stops with COMPOSITION_CONFLICT and land --save syncs main in and lands again. Or choose sync ' +
-        `to resolve now: ${command}. ${provisional}`,
+        'this landing stops with COMPOSITION_CONFLICT and land --save syncs main in and lands again; if it fails, ' +
+        'this landing goes on without it.' +
+        (input.operationId
+          ? ` Run: nforge agent . wait ${shellQuote(JSON.stringify({ operationIds: [input.operationId] }))}.`
+          : '') +
+        ` Or choose sync to resolve now: ${command}. ${provisional}`,
   });
 }

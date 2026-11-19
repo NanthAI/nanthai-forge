@@ -359,3 +359,26 @@ test('landings directs unsupported file filters to history log and blame without
     error => error.code === 'BAD_ARGUMENT' && /history.*log.*path.*history.*blame/.test(error.message),
   );
 });
+
+test('journey 61 (Issue 47558a99): action help leads with a runnable example and prints ids as format uuid, without the pattern', () => {
+  for (const [action, example] of [
+    ['lane-history', `Example: nforge agent ROOT lane-history '{}'`],
+    ['records', `Example: nforge agent ROOT records '{"collection":"intents"}'`],
+    ['comment-planning-item', `Example: nforge agent ROOT comment-planning-item '{"text":"…"}'`],
+    ['configure-check', `Example: nforge x ROOT configure-check '{}'`],
+  ]) {
+    const text = hostedAgentHelp(action);
+    const lines = text.split('\n');
+    const at = lines.indexOf(example);
+    assert(at > 0, `${action}: ${example}`);
+    assert(at < lines.findIndex(line => line === '{'), 'the example comes before the schema');
+    assert.doesNotMatch(text, /"pattern": "\^\(\[0-9a-fA-F\]\{8\}/, 'no uuid regex in printed help');
+  }
+  // The printed schema keeps every field and its uuid format; only the repeated regex goes.
+  const schema = hostedAgentHelpEntries.find(entry => entry.action === 'lane-history').schema;
+  assert.equal(schema.properties.laneId.format, 'uuid');
+  assert.match(
+    hostedAgentHelp('lane-history'),
+    /"laneId": \{\n\s+"type": "string",\n\s+"format": "uuid"\n\s+\}/,
+  );
+});

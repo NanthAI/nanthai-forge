@@ -17,6 +17,7 @@ import { unexpectedMirrorFailure } from '../dist/hosted-github-retry.js';
 import { hostedMirrorStatusText } from '../dist/hosted-github-mirror-status.js';
 import { readHostedCliStatus } from '../dist/hosted-cli-status.js';
 import { interceptDefaultR2 } from './default-r2.mjs';
+import { workflowTreeRefusal } from './github-api-fake.mjs';
 const queue = await import(moduleUrl('../convex/projectGithubMirrorQueue.ts'));
 const store = await import(moduleUrl('../convex/projectGithubMirrorStore.ts'));
 const action = await import(moduleUrl('../convex/projectGithubMirror.ts'));
@@ -128,15 +129,11 @@ async function fixture(t, fail, source, respond = () => undefined) {
       tokenPermissions.push(permissions);
       return Response.json({ token: `synthetic-token-${tokenPermissions.length - 1}` });
     }
-    // GitHub's own rule (incident 708b6943): a tree touching .github/workflows/
-    // needs the workflows permission, else 403 on POST git/trees.
+    // GitHub's own rule (incident 708b6943), checked against GitHub by its contract suite.
     if (url.endsWith('/git/trees') && init.method === 'POST') {
       const granted = tokenPermissions[Number(init.headers.Authorization.split('-').at(-1))];
-      if (
-        !granted?.workflows &&
-        JSON.parse(init.body).tree.some(entry => entry.path.startsWith('.github/workflows/'))
-      )
-        return Response.json({ message: 'Resource not accessible by integration' }, { status: 403 });
+      const refused = workflowTreeRefusal(granted, JSON.parse(init.body));
+      if (refused) return refused;
     }
     const response = respond(url, init);
     if (response) return response;

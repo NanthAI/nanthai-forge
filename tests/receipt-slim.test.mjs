@@ -453,6 +453,67 @@ test('anything that is not a healthy outcome keeps its detail', t => {
   );
 });
 
+test('a submitted landing names its composed State and passed static checks, not their records (Issue 47558a99)', () => {
+  const queued = structuredClone(healthy.land);
+  queued.result.submission.phase = 'composing';
+  delete queued.result.submission.acceptance;
+  const check = (name, outcome = 'passed') => ({
+    command: ['npm', 'run', '-s', name],
+    ms: 400,
+    name,
+    outcome,
+  });
+  Object.assign(queued.result, {
+    inProgress: true,
+    command: `nforge agent '${laneRoot}' wait '{"operationIds":["${opId}"],"until":"acceptance"}'`,
+    progress: {
+      state: {},
+      terminal: {
+        at: '2026-11-19T12:42:11.236Z',
+        attemptId: randomUUID(),
+        outcome: {
+          status: 'completed',
+          result: {
+            algorithm: `forge-native-compose-v1@${sha}`,
+            base: { head: sha, receiptId: randomUUID() },
+            governance: {
+              ownerInputs: true,
+              paths: ['src/a.ts', 'src/b.ts', 'tests/a.test.mjs'],
+              version: 1,
+            },
+            inputs: { sha256: sha, size: 371 },
+            kind: 'candidate',
+            result: { head: sha, status: 'clean' },
+            version: 0,
+          },
+        },
+      },
+    },
+    defaults: {
+      preflight: { status: 'incomplete', tests: 31, static: [check('check'), check('lint')], at: 'x' },
+    },
+  });
+  const before = chars(queued),
+    pending = slimReceipt(queued).result;
+  assert.deepEqual(pending.progress, { composed: { status: 'clean', head: sha } });
+  assert.equal(pending.defaults.preflight.static, 'passed: check, lint');
+  assert.equal(pending.defaults.preflight.tests, 31);
+  assert(
+    chars(slimReceipt(queued)) < before - 600,
+    'the compose record and check commands leave the brief copy',
+  );
+  const failing = structuredClone(queued);
+  failing.result.defaults.preflight.static[1].outcome = 'failed';
+  failing.result.progress.terminal.outcome.status = 'failed';
+  const kept = slimReceipt(failing).result;
+  assert.equal(kept.defaults.preflight.static[1].outcome, 'failed', 'a failed check keeps its command');
+  assert.equal(
+    kept.progress.terminal.outcome.status,
+    'failed',
+    'an unfinished or failed compose keeps its record',
+  );
+});
+
 test('--detail data is only dropped from the printed copy', () => {
   const before = JSON.stringify(healthy.save);
   slimReceipt(healthy.save);
@@ -467,6 +528,36 @@ test('the land submitter prints the full receipt its parent process parses', () 
   assert.equal(printedReceipt(full, { agent: false, detail: false, landChild: false }), full);
   const printed = printedReceipt(full, { agent: true, detail: false, landChild: false });
   assert.notEqual(printed, full);
+});
+
+test('a settling save prints its note and total only: the common split-save path stays inside the budget (Issue 47558a99)', () => {
+  const operationId = randomUUID(),
+    laneId = randomUUID();
+  const receipt = {
+    schema: 1,
+    transport: 'hosted',
+    action: 'save',
+    operationId,
+    resolved: null,
+    result: {
+      status: 'settling',
+      operationId,
+      laneId,
+      note: 'Saved: the server is finishing this save now. Your next command here reports its outcome, including any failure.',
+      timing: {
+        totalMs: 2659,
+        stepsMs: { settle: 90, capture: 460, prepare: 458, upload: 374, submit: 1277 },
+      },
+    },
+  };
+  const printed = slimReceipt(structuredClone(receipt));
+  assert.deepEqual(printed.result, { status: 'settling', note: receipt.result.note, totalMs: 2659 });
+  assert.equal(printed.operationId, operationId, 'the replay key stays');
+  assert(JSON.stringify(printed).length <= 300, `${JSON.stringify(printed).length} characters`);
+  assert.deepEqual(
+    printedReceipt(structuredClone(receipt), { agent: true, detail: true, landChild: false }).result,
+    receipt.result,
+  );
 });
 
 test('a timed save keeps its total and drops the split, as sync does (friction f15db544)', () => {
