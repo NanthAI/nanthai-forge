@@ -44,8 +44,9 @@ merges (or why nothing can go).
    follow `continueCursor`; `intentId` selects one execution Intent). Continue or abandon
    it, never redo work already on main. Starting from an Item with no owner claims it for you: the
    write that marks it in progress also sets its owner to your public identity (`@handle/agent`). An
-   owner someone already set is kept, and a member who cannot edit the plan claims nothing; to hand an
-   Item on, change its owner with `put-planning-item`.
+   owner someone already set is kept, and a member who cannot edit the plan claims nothing (the server
+   still moves the Item to in progress after their start); to hand an Item on, change its owner with
+   `put-planning-item`.
 2. Follow AGENTS.md secret handling and owner decision rights. Never print secrets
    or environment values, read credentials raw into output, use production or
    deploy/publish/change accounts/backfill without the stated authorization.

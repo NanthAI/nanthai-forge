@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
@@ -816,6 +817,29 @@ test('a planned start pins an Intent copied from the journal: same id, active, r
       .length,
     2,
   );
+});
+
+// Lead 2026-11-19 (Item d3357f40): planning writes are the owner's, so a member's start of a planned Item has the
+// server move it to in progress (convex/projectPlanningStart.ts), scheduled once after the start commits. The owner's
+// own client does it with the claim, so the owner's start schedules nothing; a replayed start schedules nothing again.
+test('a member start of a planned Item schedules the server status move once; the owner start does not', async () => {
+  const s = await setup();
+  s.insert('projectContributors', { projectId: s.projectId, contributor: 'member' });
+  const moves = () => s.scheduled.filter(task => getFunctionName(task.fn) === 'projectPlanningStart:move');
+  const planned = intentId => ({ kind: 'planned', intentId, outcome: 'Planned Issue', constraints: '' });
+  await s.begin(s.input(planned(randomUUID())));
+  await s.begin(s.input({ kind: 'new', outcome: 'Unplanned work' }), 'member');
+  assert.deepEqual(moves(), [], 'an owner start, or a start with no Item, moves nothing on the server');
+  const issue = randomUUID();
+  const input = s.input(planned(issue));
+  const started = await s.begin(input, 'member');
+  assert.equal(started.intentId, issue);
+  assert.deepEqual(
+    moves().map(task => task.args),
+    [{ projectId: s.projectId, owner: 'owner', itemId: issue, startOperationId: input.operationId }],
+  );
+  assert.deepEqual(await s.begin(input, 'member'), started, 'the replay returns the original start');
+  assert.equal(moves().length, 1, 'and schedules nothing again');
 });
 
 test('incident 5c26c2ed: negotiated status names completed Lanes from the existing head read; legacy replies keep their shape', async () => {

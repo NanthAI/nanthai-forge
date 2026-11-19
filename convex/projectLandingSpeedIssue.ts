@@ -1,63 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { internal } from './_generated/api';
 import type { ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { internalAction } from './server';
-import { runWorkCommand } from './projectWorkCommandRun';
-import { indexedCommand, NodeCommandRequired } from './projectWorkIndexedCommand';
+import { ownerPlanningCommand } from './projectOwnerPlanning';
 import { speedBudgetIssueSchema } from '../src/landing-speed-alerts';
-
-const ATTEMPTS = 3;
-const retryable = (error: unknown) => /WORK_STALE|WORK_CONFLICT/.test(String(error));
-const finished = (error: unknown) => /WORK_OPERATION_CHANGED/.test(String(error));
 
 /** Write one budget transition to the board: open or reopen the budget's single P0 Issue (fixed id) on a
  * break, comment on it on a break and on recovery. Runs only when a budget breaks or recovers, as the
- * project owner, through the same Work command path as `put-planning-item`. Operation ids name the
- * transition, so a retry reconciles instead of repeating; a stale revision is re-read and retried. */
-async function command(
+ * project owner (projectOwnerPlanning.ts). */
+const command = (
   ctx: ActionCtx,
   projectId: Id<'hostedProjects'>,
   owner: string,
   build: (version: number) => ({ operationId: string } & Record<string, unknown>) | null,
   itemId: string,
-) {
-  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
-    const generation = await ctx.runQuery(internal.projectWorkIndexStore.current, { projectId, owner });
-    if (!generation) return false;
-    const [row] = await ctx.runQuery(internal.projectWorkIndexStore.lookups, {
-      projectId,
-      owner,
-      generationId: generation._id,
-      keys: [{ collection: 'planningItems', key: itemId }],
-    });
-    const version = row ? (JSON.parse(row.value) as { version: number }).version : 0;
-    const body = build(version);
-    if (!body) return false;
-    const input = {
-      projectId,
-      operationId: body.operationId,
-      revision: generation.revision,
-      command: JSON.stringify(body),
-    };
-    try {
-      try {
-        await runWorkCommand(ctx, input, owner, (parsed, request) =>
-          indexedCommand(ctx, input, owner, parsed, request),
-        );
-      } catch (error) {
-        if (!(error instanceof NodeCommandRequired)) throw error;
-        await ctx.runAction(internal.projectWorkActions.commandNode, { ...input, owner });
-      }
-      return true;
-    } catch (error) {
-      if (finished(error)) return true;
-      if (!retryable(error) || attempt === ATTEMPTS - 1) throw error;
-    }
-  }
-  return false;
-}
+) => ownerPlanningCommand(ctx, projectId, owner, item => build(item?.version ?? 0), itemId);
 
 export const write = internalAction({
   args: { projectId: v.id('hostedProjects'), owner: v.string(), issue: v.string() },

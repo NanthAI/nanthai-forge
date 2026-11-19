@@ -929,7 +929,10 @@ test('builders claim the Item they start (d3357f40): an unowned Item takes the s
     ...p,
     serverFeatures: [...new Set([...p.serverFeatures, 'planning-put-mutation'])],
     mutation: async () => {
-      throw Object.assign(new Error('Project unavailable.'), { data: { code: 'PROJECT_UNAVAILABLE' } });
+      throw new ConvexError({
+        code: 'PROJECT_UNAVAILABLE',
+        message: 'Project planning is available to its current owner.',
+      });
     },
   };
   const theirs = (await put(p, { kind: 'issue', title: 'Started by a contributor', status: 'in-progress' }))
@@ -940,10 +943,46 @@ test('builders claim the Item they start (d3357f40): an unowned Item takes the s
     claimed: false,
   });
   assert.equal((await list(p, { id: theirs })).item.owner ?? null, null);
+  // An open Item: the member's own write is refused quietly, and the server moves it to in progress after the start
+  // (convex/projectPlanningStart.ts, scheduled by the start; lead 2026-11-19). It claims nothing.
   const open = (await put(p, { kind: 'issue', title: 'Open, contributor start' })).result.itemId;
-  const failed = await markPlanningStarted(refused, open, randomUUID(), 'synthetic-owner/amber-fox');
+  const startOperationId = randomUUID();
+  assert.deepEqual(await markPlanningStarted(refused, open, startOperationId, 'synthetic-owner/amber-fox'), {
+    updated: false,
+    status: 'in-progress',
+    movedBy: 'server',
+    claimed: false,
+  });
+  const { move } = await import(moduleUrl('../convex/projectPlanningStart.ts'));
+  const serverMove = (itemId, id = startOperationId) =>
+    move._handler(s.ctx, { projectId: s.projectId, owner: 'owner', itemId, startOperationId: id });
+  await serverMove(open);
+  const moved = (await list(p, { id: open, reconcile: false })).item;
+  assert.equal(moved.status, 'in-progress');
+  assert.equal(moved.owner ?? null, null, 'the server move claims nothing');
+  // Once only: a retried move, or a later start's, writes nothing more.
+  const writes = s.tables.projectWorkEvents.size;
+  await serverMove(open);
+  await serverMove(open, randomUUID());
+  assert.equal(s.tables.projectWorkEvents.size, writes);
+  // A closed Item, or one that does not exist, is never moved.
+  const closed = (await put(p, { kind: 'issue', title: 'Done already', status: 'closed' })).result.itemId;
+  const before = s.tables.projectWorkEvents.size;
+  await serverMove(closed, randomUUID());
+  await serverMove(randomUUID(), randomUUID());
+  assert.equal((await list(p, { id: closed, reconcile: false })).item.status, 'closed');
+  assert.equal(s.tables.projectWorkEvents.size, before);
+  // Any other failure of the status write is still reported.
+  const broken = {
+    ...refused,
+    mutation: async () => {
+      throw new ConvexError({ code: 'WORK_STALE', message: 'Hosted Work changed.' });
+    },
+  };
+  const other = (await put(p, { kind: 'issue', title: 'Open, failed write' })).result.itemId;
+  const failed = await markPlanningStarted(broken, other, randomUUID(), 'synthetic-owner/amber-fox');
   assert.equal(failed.updated, false);
-  assert.ok(failed.error, 'the status write a contributor cannot make is still reported');
+  assert.ok(failed.error, 'a failed status write is still reported');
   // A server without the planning model would drop the field, so nothing is claimed there.
   const old = { ...p, serverFeatures: p.serverFeatures.filter(name => name !== 'planning-model') };
   const legacy = (await put(p, { kind: 'issue', title: 'Old server' })).result.itemId;

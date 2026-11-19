@@ -966,8 +966,9 @@ export async function markPlanningStarted(
         ? `@${claimAs}`
         : undefined;
     if (item.status === 'in-progress' && !claim) return { updated: false, status: item.status };
-    // Only the claim is left to write (the Issue is already in progress): a member who cannot edit the plan (planning
-    // writes are the project owner's) keeps the start as it was, with no error to act on (review 3f84a176).
+    // A member who cannot edit the plan (planning writes are the project owner's) gets no error to act on: with only the
+    // claim left to write (the Issue is already in progress) the start stays as it was (review 3f84a176), and an open
+    // Issue is moved to in progress by the server itself after the start (convex/projectPlanningStart.ts).
     const claimOnly = item.status === 'in-progress';
     try {
       await writePlanning(
@@ -982,6 +983,8 @@ export async function markPlanningStarted(
       );
     } catch (error) {
       if (claimOnly) return { updated: false, status: item.status, claimed: false };
+      if (hostedActionError(error, 'planning start').code === 'PROJECT_UNAVAILABLE')
+        return { updated: false, status: 'in-progress', movedBy: 'server', claimed: false };
       throw error;
     }
     return {
