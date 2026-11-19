@@ -16,8 +16,19 @@ export async function executeHostedRecords(
   transport: HostedAgentTransport,
   action: keyof typeof hostedRecordCommands,
   input: Record<string, unknown>,
+  /** Resolves a short Issue id (the transport passes its planning resolver, so this module loads nothing). */
+  resolveItemId?: (prefix: string) => Promise<string>,
 ): Promise<HostedAgentResponse> {
   const { operationId, ...parameters } = planningIssueArguments(action, input);
+  // A short Issue id resolves to its full id before validation, so the record stores the full id.
+  if (
+    action === 'friction-triage' &&
+    typeof parameters.planningItemId === 'string' &&
+    resolveItemId &&
+    // A short hex prefix (a full id is 36 characters); checked inline so this module loads nothing new.
+    /^[0-9a-f]{8}[0-9a-f-]{0,27}$/i.test(parameters.planningItemId)
+  )
+    parameters.planningItemId = await resolveItemId(parameters.planningItemId);
   if (
     (action === 'friction' || (action === 'friction-triage' && parameters.status === 'fixed')) &&
     parameters.laneId === undefined

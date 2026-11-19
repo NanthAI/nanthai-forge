@@ -58,7 +58,7 @@ import {
   hostedAgentReviewActions,
 } from './hosted-agent-contract.js';
 import { executeHostedPolicy } from './hosted-agent-policy.js';
-import { executeHostedPlanning, markPlanningStarted } from './hosted-agent-planning.js';
+import { executeHostedPlanning, markPlanningStarted, resolvePlanningId } from './hosted-agent-planning.js';
 import { isPlanningPrefix } from './planning-id.js';
 import { planningIssueArguments } from './planning-issue-arguments.js';
 import { executeHostedMetrics, METRICS_DEADLINE_MS, metricsDeadline } from './hosted-agent-metrics.js';
@@ -723,7 +723,12 @@ export class HostedAgentTransport {
     );
     try {
       if ((hostedAgentRecordActions as readonly string[]).includes(action))
-        return await executeHostedRecords(this, action as (typeof hostedAgentRecordActions)[number], input);
+        return await executeHostedRecords(
+          this,
+          action as (typeof hostedAgentRecordActions)[number],
+          input,
+          prefix => resolvePlanningId(this, prefix),
+        );
       const dispatchedAt = Date.now();
       const observation = action === 'status' || action === 'observe';
       const { operationId, ...parameters } = input;

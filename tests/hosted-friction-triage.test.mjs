@@ -13,19 +13,19 @@ const code = expected => error => error.code === expected;
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-friction-triage-'));
   t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  const s = recordsFixture(),
-    calls = [];
+  const calls = [],
+    s = { ...recordsFixture(), calls };
   const call = async (ref, args) => {
     const name = getFunctionName(ref);
     calls.push(name);
     return s.invoke(name, args);
   };
-  const transport = new HostedAgentTransport(
+  s.transport = new HostedAgentTransport(
     join(directory, 'checkout'),
     { url: 'https://fixture.invalid', projectId: 'project' },
     { projectId: 'project', client: { query: call, mutation: call } },
   );
-  return { ...s, transport, calls };
+  return s;
 }
 const file = (s, title, extra = {}) =>
   s.transport.dispatch('friction', { title, detail: `${title} detail`, area: 'cli', ...extra });
@@ -210,4 +210,35 @@ test('legacy uppercase friction UUIDs resolve and triage through lowercase full 
   });
   assert.deepEqual(triage.result.frictionIds, [row.id]);
   assert.equal(JSON.parse(row.triage).status, 'planned');
+});
+
+test('2026-11-18 lead: triage links an Issue by a unique 8-character prefix under planningItemId, id or itemId', async t => {
+  const s = fixture(t);
+  const issue = randomUUID();
+  const resolved = [];
+  const invoke = s.invoke;
+  s.invoke = async (name, args) => {
+    if (name !== 'projectHostedPlanning:resolveId') return invoke(name, args);
+    resolved.push(args.prefix);
+    return issue.startsWith(args.prefix) ? { ids: [issue] } : { ids: [] };
+  };
+  for (const key of ['planningItemId', 'id', 'itemId']) {
+    const friction = (await file(s, `short ${key}`)).result.id;
+    await s.transport.dispatch('friction-triage', {
+      frictionIds: [friction],
+      status: 'planned',
+      [key]: issue.slice(0, 8),
+    });
+    const [row] = (await s.transport.dispatch('friction-list', { id: friction })).result.items;
+    assert.equal(row.planningItemId, issue, `${key} stores the full Issue id`);
+  }
+  assert.deepEqual(resolved, Array(3).fill(issue.slice(0, 8)));
+  // A full id adds no resolve call.
+  const friction = (await file(s, 'full')).result.id;
+  await s.transport.dispatch('friction-triage', {
+    frictionIds: [friction],
+    status: 'planned',
+    planningItemId: issue,
+  });
+  assert.equal(resolved.length, 3);
 });

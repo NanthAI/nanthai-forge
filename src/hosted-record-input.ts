@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { decideInputSchema, decisionsInputSchema, decisionRecordSchema } from './decision-types.js';
 import {
+  frictionRef,
   frictionInputSchema,
   frictionEventSchema,
   frictionListSchema,
@@ -10,9 +11,12 @@ import {
 export const hostedRecordCommands = {
   friction: frictionInputSchema.omit({ operationId: true }).strict(),
   'friction-list': frictionListSchema,
+  // The Issue a planned record points at: a full id or a unique 8+ hex prefix, resolved by the CLI.
+  // frictionRef is the same id-or-prefix rule as planning ids, from a module this file already loads.
   'friction-triage': hostedFrictionTriageSchema.extend({
-    id: z.uuid().describe('Alias for planningItemId (Issue).').optional(),
-    itemId: z.uuid().describe('Alias for planningItemId (Issue).').optional(),
+    planningItemId: frictionRef.describe('Issue a planned record points at.').optional(),
+    id: frictionRef.describe('Alias for planningItemId (Issue).').optional(),
+    itemId: frictionRef.describe('Alias for planningItemId (Issue).').optional(),
   }),
   decide: decideInputSchema.omit({ operationId: true }).strict(),
   decisions: decisionsInputSchema.extend({ cursor: z.string().nullable().default(null) }).strict(),

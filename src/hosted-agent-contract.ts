@@ -19,11 +19,12 @@ import {
   planningModelPutKeys,
   planningPutAgentFields,
   planningPutSchema,
+  relationKinds,
 } from './work-planning-types.js';
 const omitKeys = <K extends string>(keys: readonly K[]) =>
   Object.fromEntries(keys.map(key => [key, true])) as Record<K, true>;
 import { invariant } from './errors.js';
-import { planningIssueFields } from './planning-issue-arguments.js';
+import { planningIssueFields, planningRef } from './planning-issue-arguments.js';
 import { autonomyPolicySchema, policyWriteObject } from './autonomy-policy.js';
 import { hostedCheckCommandSchema, hostedCheckRunnerSchema } from './hosted-check.js';
 import { submoduleAllowChangesSchema } from './submodule-allowlist.js';
@@ -493,7 +494,7 @@ export const hostedAgentCommandSchemas = {
       search: z.string().trim().min(1).optional(),
       kind: z.enum(['issue', 'initiative']).optional(),
       status: z.enum([...planningStatuses, 'active', 'all']).optional(),
-      initiativeId: uuid.optional(),
+      initiativeId: planningRef.optional(),
       /** Same filters as the web Plan views (src/planning-filter.ts); owner/relation "none" = without one. */
       type: z.string().trim().min(1).max(32).optional(),
       owner: z.string().trim().min(1).max(200).optional(),
@@ -536,7 +537,16 @@ export const hostedAgentCommandSchemas = {
     .omit({ action: true, operationId: true, itemId: true, ...omitKeys(planningModelPutKeys) })
     .extend({
       ...planningIssueFields,
-      fields: planningPutAgentFields.optional(),
+      initiativeId: planningRef.nullable().optional(),
+      fields: planningPutAgentFields
+        .extend({
+          parentId: planningRef.nullable().optional(),
+          relations: z
+            .array(z.object({ kind: z.enum(relationKinds), id: planningRef }))
+            .max(20)
+            .optional(),
+        })
+        .optional(),
       /** One backlog batch (src/hosted-agent-planning-batch.ts): up to 100 puts or comments, one call, one Undo. */
       batch: z.array(z.record(z.string(), z.unknown())).min(1).max(100).optional(),
     })

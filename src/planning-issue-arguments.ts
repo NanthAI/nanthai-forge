@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { invariant } from './errors.js';
 import { isPlanningRef, planningIdHelp } from './planning-id.js';
 
+/** An Item id a command accepts: a complete UUID or a unique 8+ hex prefix the CLI resolves. */
+export const planningRef = z.string().refine(isPlanningRef, `expected ${planningIdHelp}`);
 const ref = z.string().refine(isPlanningRef, `planningItemId: expected ${planningIdHelp}`);
 /** Public Issue key, with the legacy spellings retained in help and MCP input schemas. */
 export const planningIssueFields = {

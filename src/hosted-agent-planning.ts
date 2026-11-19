@@ -306,6 +306,8 @@ export async function resolvePlanningId(
   port: Pick<PlanningPort, 'query'>,
   id: string,
   journal?: HostedAgentJournal,
+  /** Journal key: the default for the item itself (replay-stable); one per other id field. */
+  key = 'planning-id-prefix',
 ): Promise<string> {
   if (!isPlanningPrefix(id)) return id;
   const prefix = id.toLowerCase();
@@ -330,7 +332,7 @@ export async function resolvePlanningId(
     }
     return found;
   };
-  const { ids, more } = journal ? await journal.retain('planning-id-prefix', find) : await find();
+  const { ids, more } = journal ? await journal.retain(key, find) : await find();
   invariant(ids.length > 0, 'NOT_FOUND', `No planning item starts with "${prefix}".`);
   if (ids.length > 1 || more)
     throw new ForgeError(
@@ -533,6 +535,8 @@ async function readPlanning(
   port: PlanningPort,
   input: ReturnType<typeof hostedAgentCommandSchemas.planning.parse>,
 ) {
+  if (input.initiativeId)
+    input = { ...input, initiativeId: await resolvePlanningId(port, input.initiativeId) };
   if (input.search !== undefined) {
     const terms = planningSearchTerms(input.search);
     try {
@@ -833,6 +837,15 @@ export async function executeHostedPlanning(
     'Creating a planning item (expectedVersion 0) needs a complete itemId UUID, or none.',
   );
   const itemId = put.itemId ? await resolvePlanningId(port, put.itemId, journal) : await journal.id('item');
+  // Other Item id fields take the same short ids; full ids make no call.
+  const ref = (value: string, field: string) =>
+    resolvePlanningId(port, value, journal, `planning-id-prefix:${field}:${value.toLowerCase()}`);
+  if (typeof put.initiativeId === 'string') put.initiativeId = await ref(put.initiativeId, 'initiativeId');
+  if (typeof put.parentId === 'string') put.parentId = await ref(put.parentId, 'parentId');
+  if (put.relations)
+    put.relations = await Promise.all(
+      put.relations.map(async relation => ({ ...relation, id: await ref(relation.id, 'relations') })),
+    );
   const hints: { likelyDuplicates?: unknown } = {};
   const revision = await writePlanning(
     port,

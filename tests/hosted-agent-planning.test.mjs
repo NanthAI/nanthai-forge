@@ -2318,3 +2318,41 @@ test('3fa3187d: the stored counter and the CLI count the same Issues past 1,000,
   await put(p, { itemId: made[1], expectedVersion: item.version, title: 'Renamed synthetic Item' });
   assert.equal(counter().value, before);
 });
+
+test('2026-11-18 lead: every Item id field of a put and the initiativeId filter take a unique 8-character prefix; an ambiguous one is refused', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const initiative = (await put(p, { kind: 'initiative', title: 'Group' })).result.itemId;
+  const parent = (await put(p, { kind: 'issue', title: 'Parent' })).result.itemId;
+  const blocker = (await put(p, { kind: 'issue', title: 'Blocker' })).result.itemId;
+  const short = id => id.slice(0, 8);
+  const child = (
+    await put(p, {
+      kind: 'issue',
+      title: 'Child',
+      initiativeId: short(initiative),
+      fields: { parentId: short(parent), relations: [{ kind: 'depends-on', id: short(blocker) }] },
+    })
+  ).result.itemId;
+  const stored = (await list(p, { id: child, reconcile: false })).item;
+  assert.equal(stored.initiativeId, initiative, 'stored as the full id');
+  assert.equal(stored.parentId, parent);
+  assert.deepEqual(stored.relations, [{ kind: 'depends-on', id: blocker }]);
+  const filtered = await list(p, { initiativeId: short(initiative) });
+  assert.deepEqual(
+    filtered.items.map(item => item.id),
+    [child],
+  );
+  // Full ids add no resolve call.
+  p.calls.length = 0;
+  await put(p, { itemId: child, expectedVersion: 1, initiativeId: initiative });
+  assert(!p.calls.includes('projectHostedPlanning:resolveId'));
+  // An ambiguous prefix is refused with its candidates and writes nothing.
+  for (const n of [1, 2])
+    await put(p, { itemId: `feedface-000${n}-4000-8000-000000000000`, kind: 'issue', title: `Twin ${n}` });
+  await assert.rejects(
+    put(p, { itemId: child, expectedVersion: 2, fields: { parentId: 'feedface' } }),
+    error => error.code === 'AMBIGUOUS_ID' && /feedface-0001/.test(error.message),
+  );
+  assert.equal((await list(p, { id: child, reconcile: false })).item.version, 2);
+});
