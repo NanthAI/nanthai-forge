@@ -76,6 +76,14 @@ usage to avoid exhausting a short window in one burst. Use the owner's chosen
 models and approved fallback policy; retry transient capacity failures on the
 same provider up to three times before an authorized fallback. Never silently
 switch models.
+
+A queue alarm stops wide fan-out (Guard 6, after incident 5e3c3a3c). While a
+queue speed budget is broken, start no new builders and fix the queue first. Today
+that is the landing-to-main budget; the pass-to-land alarm (Item 42200ce4) joins it
+when it lands. Each break sends one alert and opens its P0 Issue ([speed budgets](speed-budgets.md#how-a-budget-breaks)),
+so check the board for an open budget Issue before launching several builders.
+Builders already checking or queued finish their work; never withdraw a landing
+to make room.
 Prefer a builder with available capacity for specified implementation, and reserve
 design judgment for the designated reviewer. Exact providers and machine budgets belong in the current brief, not a permanent phase assumption.
 
