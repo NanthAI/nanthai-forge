@@ -252,3 +252,28 @@ test('0cb9b064: a landing its agent withdrew is FYI, labelled withdrawn, and nev
   assert.doesNotMatch(fyi.head, /refused/i);
   assert.equal(needsSentence(needsView(read([held('l1', 'withdrawn', 30)], []))).bold, 'Nothing needs you.');
 });
+
+test('a Lane held for a dependency names the Lane it lands after when the read names it (9e748e41)', () => {
+  const view = needsView({
+    held: [
+      held('d1', 'dependency', 1, { dependsOn: { laneId: 'p1-lane-0000', title: 'Parent work' } }),
+      held('d2', 'dependency', 2, {
+        dependsOn: { laneId: 'abcdef12-0000-4000-8000-000000000000', title: null },
+      }),
+      held('d3', 'dependency', 3),
+    ],
+    more: 0,
+    moreIsLowerBound: false,
+    approvals: '{"requests":[]}',
+    canDecide: true,
+  });
+  assert.equal(view.count, 0, 'a dependency asks nobody');
+  assert.deepEqual(
+    view.fyi.map(row => [row.head, row.next]),
+    [
+      ['Title d1 waits for Parent work to land.', 'it lands after Parent work'],
+      ['Title d2 waits for Lane abcdef12 to land.', 'it lands after Lane abcdef12'],
+      ['Title d3 waits for the Lane it depends on.', 'it lands after the Lane it depends on'],
+    ],
+  );
+});

@@ -32,6 +32,8 @@ export type HeldLane = {
   /** The held attempt of a landing held for review (the owner decides that exact attempt). */
   attemptId?: string;
   since: number;
+  /** A Lane held for a dependency: the Lane it lands after, when the records name it. */
+  dependsOn?: { laneId: string; title: string | null };
 };
 /** One question with choices addressed to the reader (convex/projectNeedsFyi.ts `messagesTo`). */
 export type Ask = {

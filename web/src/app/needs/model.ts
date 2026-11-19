@@ -171,13 +171,20 @@ export function needsView(read: NeedsRead): NeedsView {
       const why: HeldWhy = lane.why === 'unknown' && approval ? 'review' : lane.why;
       const who = whoOf(lane.actor, lane.agent);
       const waits = waitsOnPerson({ why }, asked.has(lane.laneId), read.canDecide);
+      // A dependency the read names: the Lane it lands after, by name (Item 9e748e41).
+      const after =
+        why === 'dependency' && lane.dependsOn
+          ? laneTitle({ laneId: lane.dependsOn.laneId, title: lane.dependsOn.title })
+          : null;
       return {
         ...lane,
         why,
         waits,
         word: wordOf(why),
         tag: tags[why],
-        head: (waits ? questions : facts)[why](laneTitle(lane)),
+        head: after
+          ? `${laneTitle(lane)} waits for ${after} to land.`
+          : (waits ? questions : facts)[why](laneTitle(lane)),
         who,
         approval,
         landing:
@@ -186,7 +193,7 @@ export function needsView(read: NeedsRead): NeedsView {
             : null,
         mark: lane.laneId.slice(0, 8),
         siblings: lane.intentId ? (perItem.get(lane.intentId) ?? 1) : 1,
-        next: waits ? null : nextStep(why, who),
+        next: waits ? null : after ? `it lands after ${after}` : nextStep(why, who),
       };
     })
     // Longest held first (Item 9e748e41, I41); ties keep the read's order.

@@ -278,6 +278,48 @@ test('a Lane held for a dependency names the Lane it lands after and why that on
   );
 });
 
+test('the yard names the Lane a dependency-held Lane lands after, from the queue read alone (9e748e41)', () => {
+  const lanes = [
+    mark('p', 'checking'),
+    mark('d', 'ready', { held: true }),
+    mark('g', 'ready', { held: true }),
+  ];
+  const held = (laneId, parent) => ({
+    position: null,
+    laneId,
+    submissionId: `s-${laneId}`,
+    phase: 'ready',
+    landingState: { state: 'held-dependency' },
+    submittedAt: '',
+    lastProgressAt: '',
+    hold: { kind: 'dependency', reason: 'Waiting for a dependency to land', paths: null },
+    dependsOn: { submissionId: parent },
+  });
+  const queue = {
+    total: 1,
+    listed: 3,
+    more: false,
+    entries: [
+      {
+        position: 1,
+        laneId: 'p',
+        submissionId: 's-p',
+        phase: 'checking',
+        submittedAt: '',
+        lastProgressAt: '',
+      },
+      held('d', 's-p'),
+      held('g', 'gone'),
+    ],
+  };
+  const yard = model.buildYard(feed(lanes), [meta('p', 'Parent work'), meta('d', 'Child work')], queue, 0);
+  const row = id => yard.rows.find(r => r.laneId === id);
+  assert.equal(row('d').band, 'needs');
+  assert.equal(row('d').why, 'waits for Parent work to land');
+  // The landing it depends on is not listed: the shared words, never a guessed Lane.
+  assert.equal(row('g').why, 'waits for the Lane it depends on');
+});
+
 test('a Lane held for a queued dependency says where that one stands and what holds the front (9e748e41 review fix 1)', () => {
   const at = '2026-11-17T10:00:00Z';
   const q = (position, laneId, phase = 'queued') => ({

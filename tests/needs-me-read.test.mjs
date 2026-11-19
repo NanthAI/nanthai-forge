@@ -81,6 +81,33 @@ test('Needs me lists the line’s held Lanes with the recorded reason, and an id
   assert.equal(unchanged(), true, 'thirty idle minutes change nothing this read depends on');
 });
 
+test('a Lane held for a dependency names the Lane it lands after; other rows carry no field (9e748e41)', async t => {
+  const f = await finishFixture(t);
+  const parent = await f.enqueue(f.request());
+  await f.drain();
+  const child = await f.enqueue(
+    f.request({ finish: { composeOperationId: f.selection.request.operationId, after: parent.id } }),
+  );
+  await f.drain();
+  assert.equal((await f.current(child.id)).submission.observation.pendingReason, 'waiting-for-dependency');
+  const shell = await f.tx('lineRead', line.read, { projectId: f.projectId });
+  const view = await read(f);
+  t.diagnostic(JSON.stringify({ needsMeDependencyRead: f.counts.at(-1) }));
+  assert.equal(view.held.length, shell.lanes.filter(lane => lane.held).length, 'same set as the top bar');
+  const row = view.held.find(r => r.submissionId === child.id);
+  assert.ok(row, JSON.stringify(view.held));
+  assert.equal(row.why, 'dependency');
+  // The fixture stacks both landings on one Lane: the parent's Lane and its title come from its own records.
+  assert.deepEqual(row.dependsOn, { laneId: f.lane.laneId, title: row.title });
+
+  await observe(f, child.id, before => ({
+    observation: { ...before.observation, pendingReason: 'waiting-for-review' },
+  }));
+  const review = await read(f);
+  assert.equal(review.held[0].why, 'review');
+  assert.equal(review.held[0].dependsOn, undefined, 'only a dependency hold carries the field');
+});
+
 test('open approval requests are the same payload projectHostedApprovals:list returns', async t => {
   const f = await finishFixture(t);
   const [mine, list] = [

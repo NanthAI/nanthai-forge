@@ -11,6 +11,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
 import { lineOwner, type LineOwnerValue } from './projectLiveLineOwners';
 import { landingRow } from './projectHostedLandingStore';
+import { finishRow } from './projectHostedFinishWake';
 import { openApprovalRequests } from './projectHostedApprovals';
 import { messagesTo } from './projectNeedsFyi';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
@@ -59,6 +60,9 @@ export const needsMeResult = v.object({
       attemptId: v.optional(v.string()),
       /** When the hold began, as far as the records say (ms). */
       since: v.number(),
+      /** A Lane held for a dependency: the Lane it lands after, and its title, when the records name it (Item
+       * 9e748e41). Only such a row carries it, read from its finish row and the parent's landing. */
+      dependsOn: v.optional(v.object({ laneId: v.string(), title: v.union(v.string(), v.null()) })),
     }),
   ),
   /** Held Lanes past the limit. With `moreIsLowerBound`, at least this many. */
@@ -110,13 +114,37 @@ async function reason(ctx: QueryCtx, projectId: Id<'hostedProjects'>, mark: Held
               ? 'dependency'
               : 'unknown';
   const ended = state?.timing?.ciEndedAt ?? state?.timing?.settledAt;
+  const parentLaneId = why === 'dependency' && state ? await dependencyLane(ctx, projectId, state.id) : null;
   return {
     why,
     note: state?.error?.message ? state.error.message.replace(/\s+/g, ' ').slice(0, NOTE_CHARS) : null,
     submissionId: state?.id ?? null,
     ...(why === 'review' && state?.attemptId ? { attemptId: state.attemptId } : {}),
     since: ended ? Date.parse(ended) : mark.changedAt,
+    parentLaneId,
   } as const;
+}
+
+/** The Lane a dependency-held landing lands after: its finish row names the parent landing, whose compose selection
+ * names its Lane (as projectHostedQueueView does). Three point reads, only for a Lane held for a dependency. */
+async function dependencyLane(ctx: QueryCtx, projectId: Id<'hostedProjects'>, submissionId: string) {
+  const parentId = (await finishRow(ctx, { projectId, submissionId }))?.parentSubmissionId;
+  const row = parentId ? await landingRow(ctx, { projectId, submissionId: parentId }) : null;
+  const parsed = row ? hostedLandingStateSchema.safeParse(JSON.parse(row.value)) : null;
+  const parent = parsed?.success ? parsed.data : null;
+  const operationId = parent?.request.finish?.composeOperationId;
+  if (!parent || !operationId) return null;
+  const composed = await ctx.db
+    .query('projectHostedComposeSelections')
+    .withIndex('by_project_and_actor_and_operation_and_kind_and_key', q =>
+      q
+        .eq('projectId', projectId)
+        .eq('actor', parent.actor)
+        .eq('operationId', operationId)
+        .eq('kind', 'inputs'),
+    )
+    .take(2);
+  return composed.length === 1 ? composed[0]!.key : null;
 }
 
 export const read = query({
@@ -151,13 +179,15 @@ export const read = query({
         const title = root ? (JSON.parse(root.value) as { title?: unknown }).title : null;
         return typeof title === 'string' && title.trim() ? title.replace(/\s+/g, ' ').trim() : null;
       };
+      const presenceOf = (laneId: string) =>
+        ctx.db
+          .query('projectHostedPresence')
+          .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
+          .unique();
       const held = await Promise.all(
         shown.map(async mark => {
-          const [presence, why] = await Promise.all([
-            ctx.db
-              .query('projectHostedPresence')
-              .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', mark.laneId))
-              .unique(),
+          const [presence, { parentLaneId, ...why }] = await Promise.all([
+            presenceOf(mark.laneId),
             reason(ctx, projectId, mark),
           ]);
           return {
@@ -167,6 +197,9 @@ export const read = query({
             actor: presence?.actor ?? null,
             agent: presence?.agent ?? null,
             ...why,
+            ...(parentLaneId
+              ? { dependsOn: { laneId: parentLaneId, title: await titleOf(await presenceOf(parentLaneId)) } }
+              : {}),
           };
         }),
       );

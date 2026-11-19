@@ -654,7 +654,10 @@ layer out of both first paints.
   wait is traced from the queue read alone: a Lane main moved under waits on
   its own update (naming the files), a Lane two or more places back names
   the front of the queue and why it has not landed, and a Lane held for a
-  dependency names the Lane it lands after when the queue lists it.
+  dependency names the Lane it lands after when the queue lists it. The
+  yard row says the same from the same read, and Needs me names it from
+  `projectNeedsMe:read` `dependsOn {laneId, title}` (four point reads, only
+  for a Lane held for a dependency).
 - Stats (`web/src/app/stats/`): reads `projectStats.read`, the newest 92
   closed days of `projectStatsDays`, with each month and the whole read
   computed by `statsWindow` (`src/stats-estimate.ts`). A day closes once

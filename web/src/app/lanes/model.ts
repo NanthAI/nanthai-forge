@@ -220,7 +220,19 @@ export function buildYard(
       longWait: false,
     };
     const left = by ? { why: `replaced by ${short(by)}`, detail: said.why || null } : {};
-    if (mark.held) return { ...base, band: 'needs', ...left };
+    // Held for a dependency the queue read names: the Lane it lands after, by name (Item 9e748e41).
+    const parent =
+      entry?.hold?.kind === 'dependency' && entry.dependsOn
+        ? (queue?.entries ?? []).find(
+            other => other.submissionId === entry.dependsOn!.submissionId && other.laneId,
+          )
+        : undefined;
+    const after = parent?.laneId
+      ? {
+          why: `waits for ${meta.get(parent.laneId)?.intent ?? parent.intentTitle ?? `Lane ${short(parent.laneId)}`} to land`,
+        }
+      : {};
+    if (mark.held) return { ...base, band: 'needs', ...after, ...left };
     if (entry && entry.position !== null) {
       const wait = mark.stage === 'ready' ? waitLine(entry, queue?.entries ?? [], now) : null;
       return {
