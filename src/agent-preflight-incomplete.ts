@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import { protectedTiers } from '../scripts/test-impact.mjs';
+import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { shellQuote } from './shell-quote.js';
 
 /** A run that did not start every must-run file: not passed, not failed. */
 export type PreflightIncomplete = {
   /** Must-run (protected: changed, learned, direct) files the wall-time budget did not start. */
   mustRun: number;
-  /** The one command that runs exactly the files this run did not start, with no time budget. */
-  finish: string;
+  /** The one command that runs exactly the files this run did not start, with no time budget;
+   * offered only when its estimate fits one agent wait (otherwise the landing check runs them). */
+  finish?: string | undefined;
   /** About how long `finish` takes here, at the speed this run observed. */
   estimateMinutes: number;
 };
@@ -27,22 +29,30 @@ export function mustRunNotRun(tierTests: Record<string, string[]> | undefined, n
 
 /** NOT COMPLETE details when a clean run left must-run files unstarted; undefined otherwise, so a
  * run whose protected tier fits its budget is unchanged. The finish command is `retry` (exactly the
- * stopped files, passes reused) with `trim:false` (no wall-time cap), so one run finishes them. */
+ * stopped files, passes reused) with `trim:false` (no wall-time cap), so one run finishes them. It is
+ * offered only when it fits one agent wait (`waitSeconds`): a longer one outlives the agent's own
+ * command timeout, so the next step is to land and let the landing check run them. */
 export function incompletePreflight(input: {
   root: string;
   laneId: string;
   tierTests: Record<string, string[]> | undefined;
   notRun: string[];
   secondsPerFile: number;
+  waitSeconds?: number;
 }): PreflightIncomplete | undefined {
   const mustRun = mustRunNotRun(input.tierTests, input.notRun).length;
   if (!mustRun) return undefined;
+  const seconds = input.notRun.length * input.secondsPerFile;
   return {
     mustRun,
-    finish: `nforge agent ${shellQuote(input.root)} preflight ${shellQuote(
-      JSON.stringify({ laneId: input.laneId, retry: true, trim: false }),
-    )}`,
-    estimateMinutes: Math.max(1, Math.ceil((input.notRun.length * input.secondsPerFile) / 60)),
+    ...(seconds <= (input.waitSeconds ?? AGENT_WAIT_SECONDS)
+      ? {
+          finish: `nforge agent ${shellQuote(input.root)} preflight ${shellQuote(
+            JSON.stringify({ laneId: input.laneId, retry: true, trim: false }),
+          )}`,
+        }
+      : {}),
+    estimateMinutes: Math.max(1, Math.ceil(seconds / 60)),
   };
 }
 
@@ -62,6 +72,11 @@ export const preflightOutcome = (receipt: {
       : receipt.passed
         ? 'passed'
         : 'failed';
+/** The process exit status of a run with this outcome: 0 passed, 2 failed (as a failed landing),
+ * 3 NOT COMPLETE (nothing failed; the reply names what is left, as IN PROGRESS does), 4 environment
+ * (this machine, not the change). A script can branch on it without reading the receipt. */
+export const preflightExitStatus = (outcome: PreflightOutcome) =>
+  ({ passed: 0, failed: 2, incomplete: 3, environment: 4 })[outcome];
 const verdictWords = {
   passed: 'passed',
   incomplete: 'NOT COMPLETE',

@@ -410,6 +410,45 @@ test('537e73d9: declared guards run first and the wall-time budget never stops o
   assert.ok(receipt.incomplete.mustRun >= 1);
 });
 
+test('537e73d9: every run names one outcome and its failed count; the exit status follows it (7ef4a55e)', async t => {
+  const { incompletePreflight, preflightExitStatus } = await import('../dist/agent-preflight-incomplete.js');
+  const failing = fixture(t, true);
+  const failed = failing.run(failing.plan());
+  assert.equal(failed.outcome, 'failed');
+  assert.equal(failed.failed, 1);
+  const f = fixture(t);
+  const plan = f.plan();
+  plan.local.budgetSeconds = 0;
+  const cut = f.run(plan);
+  // Cut short by its budget: not passed, not failed, and nothing failed.
+  assert.equal(cut.outcome, 'incomplete');
+  assert.equal(cut.failed, 0);
+  assert.equal(cut.passed, false);
+  const passed = f.run(f.plan());
+  assert.equal(passed.outcome, 'passed');
+  assert.equal(passed.failed, 0);
+  assert.deepEqual(['passed', 'failed', 'incomplete', 'environment'].map(preflightExitStatus), [0, 2, 3, 4]);
+  // The no-budget finish is offered only when it fits one agent wait (540 s): the d9e1ac62 run left
+  // 402 must-run files at about 27 s each (~181 min), so it names landing instead.
+  const tierTests = { direct: Array.from({ length: 402 }, (_, i) => `tests/t${i}.test.mjs`) };
+  const long = incompletePreflight({
+    root: '/lane',
+    laneId: 'L',
+    tierTests,
+    notRun: tierTests.direct,
+    secondsPerFile: 27,
+  });
+  assert.deepEqual(long, { mustRun: 402, estimateMinutes: 181 });
+  const short = incompletePreflight({
+    root: '/lane',
+    laneId: 'L',
+    tierTests,
+    notRun: tierTests.direct.slice(0, 20),
+    secondsPerFile: 27,
+  });
+  assert.equal(short.finish, `nforge agent '/lane' preflight '{"laneId":"L","retry":true,"trim":false}'`);
+});
+
 /** A fixture test that records the heavy lease it runs under (c180152a). */
 function heavyEvidence(f, t, slots) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-preflight-heavy-'));

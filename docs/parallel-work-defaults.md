@@ -594,12 +594,26 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   failed (`exitCode: 0`). An environment result (a program missing here, a wedged tool) reads
   `ENVIRONMENT (not a failed run)` in the summary and `status: "environment"` in the land
   advisory, never FAILED. `incomplete` counts those files (`mustRun`, listed first in `stopped`)
-  and gives the one command that finishes them, `finish`:
-  `preflight '{"laneId":"…","retry":true,"trim":false}'`, the stopped files with no wall-time cap,
-  priced in `estimateMinutes` at this run's speed. `land --save` reports it as
+  and, priced in `estimateMinutes` at this run's speed, the one command that finishes them,
+  `finish`: `preflight '{"laneId":"…","retry":true,"trim":false}'`, the stopped files with no
+  wall-time cap. `finish` is offered only when it fits one agent wait (540 s); a longer one would
+  outlive the agent's own command timeout, so the reply names landing alone. `land --save` reports it as
   `status: "incomplete"` with the same count and command; it advises and never refuses, since the
   landing check runs those files. A protected tier that fits the budget changes nothing. A failure ends the run the same way (`stoppedForFailure`): the rest
-  is not started, passes are kept, fix and run again. A cut trims the farthest
+  is not started, passes are kept, fix and run again.
+  Every run's reply and receipt carry one `outcome` (`passed`, `incomplete`, `environment` or
+  `failed`) and `failed`, the test files plus static checks that failed (0 unless `failed`). When
+  nothing failed, `next` is `land --save`; only a failure names preflight again. The process exit
+  status follows the outcome: 0 passed, 2 failed (as a failed landing), 3 NOT COMPLETE, 4
+  environment.
+  Why a small change can leave 100+ must-run files: tests one module away (they load a module that
+  imports the changed one) are protected, and the modules that carry them (landing and transport hubs)
+  have about 85 to 220 consumers each. In replays of five NOT COMPLETE runs (2026-11-18), budgeting those consumers cut
+  the protected sets of 110 to 428 files to 24 to 93 (a 61-file set kept 60), but dropped tests that
+  failed landing checks after a passed preflight (incidents 8809fba5, e5e6fca8): those tests reach
+  the change only through the same hubs, so no size cut separates them. The set stays whole; the
+  cost is a NOT COMPLETE run whose next step is to land.
+  A cut trims the farthest
   tier first, never leaves a nearer consumer out while a farther one runs, and never touches
   protected tests. The plan's `local.summary` and the receipt
   (`rule`, `budgetSeconds`, `trimmedTiers`, `deferredTests`, `deferredTo: "pre-queue"`, `slowest`)

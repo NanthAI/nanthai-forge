@@ -1955,13 +1955,17 @@ export class HostedAgentTransport {
       // Preflight takes its own `nforge heavy` slot; wrapped in `nforge heavy`, it reuses that one.
       { heavySlot: true },
     );
-    const next = receipt.passed || receipt.environment ? landNext : planNext;
+    // Nothing failed (passed, NOT COMPLETE, or this machine's environment): the next step is to land,
+    // since the landing check runs every test; only a failure sends the agent back to fix and rerun.
+    const outcome = receipt.outcome ?? 'failed';
     return this.response(action, null, {
       laneId,
       head,
+      outcome,
+      failed: receipt.failed ?? 0,
       plan,
       receipt,
-      ...next,
+      ...(outcome === 'failed' ? planNext : landNext),
     });
   }
   async query<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {

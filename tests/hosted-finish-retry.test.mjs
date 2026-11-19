@@ -388,6 +388,10 @@ test('preflight settles a completed pending checkpoint by its original operation
   assert.equal(receipt.result.receipt.head, head);
   assert.equal(receipt.result.receipt.tree, marker().tree ?? receipt.result.receipt.tree);
   assert.equal(s.calls.filter(c => c.name === 'projectHostedSaves:progress').length, 1);
+  // One top-level outcome with its failed count; nothing failed, so the next step is to land (537e73d9).
+  assert.equal(receipt.result.outcome, 'passed');
+  assert.equal(receipt.result.failed, 0);
+  assert.equal(receipt.result.next.action, 'land');
 });
 
 test('preflight keeps current edits and refuses a receipt when the files differ from the settled head', async t => {

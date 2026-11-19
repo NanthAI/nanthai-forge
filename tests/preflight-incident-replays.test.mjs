@@ -199,8 +199,19 @@ test('e5e6fca8: the four files a wide source change broke are selected and prote
     secondsPerFile: 4,
   });
   assert.equal(incomplete.mustRun, missed.length);
+  // Finishing them takes longer than one 540 s agent wait, so no finish is offered: landing runs them.
+  assert.ok(notRun.length * 4 > 540);
+  assert.equal(incomplete.finish, undefined);
+  // Within the wait, the finish runs exactly the stopped files with no time cap.
   assert.equal(
-    incomplete.finish,
+    incompletePreflight({
+      root: '/lane',
+      laneId: 'L',
+      tierTests,
+      notRun,
+      secondsPerFile: 4,
+      waitSeconds: notRun.length * 4,
+    }).finish,
     `nforge agent '/lane' preflight '{"laneId":"L","retry":true,"trim":false}'`,
   );
   assert.equal(preflightVerdict({ passed: false, incomplete }), 'NOT COMPLETE');

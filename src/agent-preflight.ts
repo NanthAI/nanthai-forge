@@ -17,6 +17,7 @@ import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recordHold } from './heavy-queue.js';
 import { safeRelative } from './files.js';
+import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { z } from 'zod';
 import {
   documentation,
@@ -49,7 +50,7 @@ import { baseStateFiles, cachedObject } from './hosted-changed-paths.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import type { NativeFile } from './state/format.js';
 import { sourceTree } from './source-tree.js';
-import { incompletePreflight, preflightVerdict } from './agent-preflight-incomplete.js';
+import { incompletePreflight, preflightOutcome, preflightVerdict } from './agent-preflight-incomplete.js';
 import {
   deltaPaths,
   preflightDefinition,
@@ -135,6 +136,10 @@ export const preflightReceiptSchema = z
     selection: z.string(),
     exitCode: z.number().int().nullable(),
     passed: z.boolean(),
+    /** What the run means, one word (preflightOutcome): passed, incomplete, environment or failed. */
+    outcome: z.enum(['passed', 'incomplete', 'environment', 'failed']).optional(),
+    /** Test files plus static checks that failed: 0 for every outcome but `failed`. */
+    failed: z.number().int().nonnegative().optional(),
     durationMs: z.number().nonnegative(),
     at: z.string(),
     environment: z
@@ -201,7 +206,7 @@ export const preflightReceiptSchema = z
     incomplete: z
       .object({
         mustRun: z.number().int().positive(),
-        finish: z.string(),
+        finish: z.string().optional(),
         estimateMinutes: z.number().int().positive(),
       })
       .strict()
@@ -1674,6 +1679,16 @@ export function runPreflight(
     durationMs: Date.now() - started,
     at: new Date().toISOString(),
   };
+  receipt.outcome = preflightOutcome(receipt);
+  // A failed run names at least one failing unit (a build or runner failure names no file).
+  receipt.failed =
+    receipt.outcome === 'failed'
+      ? Math.max(
+          1,
+          staticResults.filter(result => result.outcome === 'failed').length +
+            (failedFiles.length || failingGroup.length),
+        )
+      : 0;
   writePreflightReceipt(root, receipt);
   process.stderr.write(`${runSummary(receipt, plan)}\n`);
   // An incomplete run is still a clean timing sample; only a pass seeds the fallback estimate.
@@ -1703,8 +1718,11 @@ function runSummary(receipt: PreflightReceipt, plan: PreflightPlan & { status: '
   ].filter(Boolean);
   const deferred = receipt.deferredTests ?? 0;
   const stopped = receipt.incomplete
-    ? ` Not passed, not failed: ${receipt.incomplete.mustRun} must-run test file(s) (changed, learned or direct) did not start in the ${receipt.budgetSeconds} s local budget` +
-      ` (receipt.stopped names them, first). Finish them (about ${receipt.incomplete.estimateMinutes} min): ${receipt.incomplete.finish}; otherwise only the landing check runs them.`
+    ? ` ${receipt.incomplete.mustRun} must-run test file(s) (changed, learned or direct) not started, 0 failed: the ${receipt.budgetSeconds} s local budget ran out` +
+      ` (receipt.stopped names them, first). Next: land --save; the landing check runs them.` +
+      (receipt.incomplete.finish
+        ? ` To finish them here first (about ${receipt.incomplete.estimateMinutes} min): ${receipt.incomplete.finish}.`
+        : ` Finishing them here takes about ${receipt.incomplete.estimateMinutes} min, longer than one agent wait (${AGENT_WAIT_SECONDS / 60} min).`)
     : receipt.stoppedForTime
       ? ` The ${receipt.budgetSeconds} s local budget ran out, so ${receipt.stoppedForTime} planned test file(s) were not started` +
         ` (receipt.stopped names them${
