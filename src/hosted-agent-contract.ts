@@ -316,6 +316,9 @@ export const hostedAgentCommandSchemas = {
       /** true: run exactly the files the last run stopped for time (receipt `stopped`, its
        * stoppedRerun). Named like finish's retry so the compact tool list stays in budget. */
       retry: z.literal(true).optional(),
+      /** The landing message this Lane will land with: checked against the landing limit before any
+       * test runs (ad80e037); preflight never lands or stores it. */
+      message: z.string().optional(),
     })
     .strict(),
   /** Client-composed operator repair: pack the current hosted main and publish it to R2. */

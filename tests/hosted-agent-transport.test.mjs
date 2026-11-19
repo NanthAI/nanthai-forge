@@ -17,8 +17,8 @@ import { runPreflight } from '../dist/agent-preflight.js';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
 import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
-import { hostedAgentAddress } from '../dist/hosted-agent-cli.js';
-import { hostedAgentActions } from '../dist/hosted-agent-contract.js';
+import { hostedAgentAddress, hostedAgentCli } from '../dist/hosted-agent-cli.js';
+import { hostedAgentActions, hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
 import { hostedAgentRoot } from '../dist/hosted-agent-journal.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { readLaneEntry, recordLane } from '../dist/lane-registry.js';
@@ -660,6 +660,56 @@ test('an over-long landing message is refused before any server call (friction d
       return true;
     });
   assert.equal(s.calls.length, before, 'no capability read, save or compose');
+});
+
+test('ad80e037: preflight given the landing message refuses an over-long one before any call or test', async t => {
+  const s = agentFixture(t);
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const before = s.calls.length;
+  // The incident: a 2,279-byte note was refused only at submit, after the whole preflight and save.
+  await assert.rejects(
+    s.transport().dispatch('preflight', { laneId: s.lane.laneId, message: 'm'.repeat(2279) }),
+    error => {
+      assert.equal(error.code, 'LANDING_MESSAGE_TOO_LARGE');
+      assert.match(error.message, /has 2279 UTF-8 bytes; the limit is 1024/);
+      return true;
+    },
+  );
+  assert.equal(s.calls.length, before, 'no capability read, save or test run');
+  // A message within the limit is a valid preflight parameter (never landed or stored by preflight).
+  assert.equal(hostedAgentCommandSchemas.preflight.parse({ message: 'fits', run: false }).message, 'fits');
+});
+
+test('friction d6378866: a preflight that ran no test because a save is settling exits 3 and names the wait', async t => {
+  const s = agentFixture(t);
+  const save = randomUUID();
+  const lines = [];
+  const quiet = t.mock.method(process.stderr, 'write', line => (lines.push(String(line)), true));
+  process.exitCode = 0;
+  const response = await hostedAgentCli(
+    s.root,
+    'preflight',
+    {},
+    { url: 'https://fixture.invalid', projectId: 'unused' },
+    {
+      dispatch: async () => ({
+        schema: 1,
+        transport: 'hosted',
+        action: 'preflight',
+        operationId: null,
+        result: { phase: 'save', saveOperationId: save, progress: { status: 'submitted', jobId: 'job' } },
+      }),
+    },
+  );
+  quiet.mock.restore();
+  assert.equal(process.exitCode, 3, 'IN PROGRESS, never a passed-looking 0');
+  process.exitCode = 0;
+  assert.equal(response.result.saveOperationId, save);
+  assert.match(
+    lines.join(''),
+    new RegExp(`preflight: IN PROGRESS; no test ran: save ${save} is still settling`),
+  );
+  assert.match(lines.join(''), new RegExp(`wait '\\{"operationIds":\\["${save}"\\]\\}'`));
 });
 
 test('an empty supplied landing message is refused before any server call (friction 737e85cb)', async t => {

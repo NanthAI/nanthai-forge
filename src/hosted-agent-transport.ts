@@ -494,8 +494,12 @@ export class HostedAgentTransport {
     input: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<HostedAgentResponse> {
-    // The landing message limit is local knowledge: refuse before any server call (friction d8d357c2).
-    if (requestedAction === 'finish' && typeof input.message === 'string')
+    // The landing message limit is local knowledge: refuse before any server call (friction d8d357c2),
+    // and before preflight runs a test when it is given the message it will land with (ad80e037).
+    if (
+      (requestedAction === 'finish' || requestedAction === 'preflight') &&
+      typeof input.message === 'string'
+    )
       suppliedLandingMessage(input.message);
     const replay =
       typeof input.operationId === 'string' &&

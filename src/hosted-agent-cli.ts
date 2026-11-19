@@ -466,6 +466,18 @@ async function dispatchHostedAgentCli(
       // The exit status matches the run's outcome (friction 7ef4a55e); the module is already loaded.
       const { preflightExitStatus } = await import('./agent-preflight-incomplete.js');
       process.exitCode = preflightExitStatus(preflight.outcome as Parameters<typeof preflightExitStatus>[0]);
+    } else if (
+      action === 'preflight' &&
+      typeof (result.result as { saveOperationId?: unknown } | undefined)?.saveOperationId === 'string'
+    ) {
+      // An earlier save of this Lane is still settling, so no test ran: IN PROGRESS, never a
+      // passed-looking exit 0 (friction d6378866). Wait on it, then run preflight again.
+      const save = (result.result as { saveOperationId: string }).saveOperationId;
+      const resume = operationWait(root, { operationIds: [save] });
+      process.stderr.write(
+        `preflight: IN PROGRESS; no test ran: save ${save} is still settling. Wait with: ${resume.waitCommand}, then run preflight again.\n`,
+      );
+      process.exitCode = 3;
     } else if (isNetworkPending(result)) {
       const pending = result.result as { command: string };
       process.stderr.write(`IN PROGRESS; network response unavailable. Continue: ${pending.command}\n`);

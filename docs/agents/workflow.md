@@ -91,7 +91,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `save --check` | `checkId, expectedDefinition?, expectedConfiguration?, expectedEnvironment?, candidateId, expectedHead?, operationId?` |
 | `land --save` | `model?, laneId?, message?, intentId?, inputs?, dependencies?, check?, candidateId?, composeOperationId?, after?, accept?, keepOpen?, closes?, priority?, allowEmpty?, retry?, reason?, operationId?` |
 | `x prioritize` | `submissionId, priority, asOwner?, operationId?` |
-| `preflight` | `laneId?, run?, budgetSeconds?, trim?, retry?, operationId?` |
+| `preflight` | `laneId?, run?, budgetSeconds?, trim?, retry?, message?, operationId?` |
 | `x source-pack` | `operationId?` |
 | `x snapshots` | `laneId?, undo?, redo?, restore?, purge?, operationId?` |
 | `x cancel` | `submissionId, operationId?` |
