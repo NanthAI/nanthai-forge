@@ -7,6 +7,10 @@ const testPath = path => /^tests\/[^/\\]+\.test\.mjs$/.test(path) && path.length
 const encoder = new TextEncoder();
 const utf8Bytes = text => encoder.encode(text).length;
 export const emptyHistory = () => ({ version: 1, files: {}, runs: [] });
+/** A file is young while fewer than this many runs have timed it: its entry carries `n` until then, so
+ * check-time attribution can tell a change's own new file (timed only by its earlier attempts) from
+ * one main already runs (Issue a217b83e). Entries without `n` are established. */
+export const YOUNG_RUNS = 4;
 
 /** Corrupt or oversized history means round-robin. */
 export function parseTimingHistory(text) {
@@ -40,6 +44,7 @@ export function parseTimingHistory(text) {
               durationMs: item.durationMs,
               updatedAt: item.updatedAt,
               ...(Number.isSafeInteger(item.sourceRun) ? { sourceRun: item.sourceRun } : {}),
+              ...(Number.isSafeInteger(item.n) && item.n > 0 && item.n < YOUNG_RUNS ? { n: item.n } : {}),
             },
           ]),
       ),
@@ -63,10 +68,12 @@ export function updateTimingHistory(history, { runId, endedAt, files, durations,
   for (const [file, durationMs] of Object.entries(durations)) {
     if (!inventory.has(file) || !testPath(file) || !positive(durationMs)) continue;
     const previous = entries.get(file);
+    const n = previous ? (previous.n === undefined ? YOUNG_RUNS : previous.n + 1) : 1;
     entries.set(file, {
       durationMs: previous ? previous.durationMs * 0.7 + durationMs * 0.3 : durationMs,
       updatedAt: endedAt,
       ...(sourceRun ? { sourceRun } : {}),
+      ...(n < YOUNG_RUNS ? { n } : {}),
     });
   }
   const retained = [...entries]

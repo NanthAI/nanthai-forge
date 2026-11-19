@@ -3,6 +3,7 @@ import type { MetricPeriod, MetricRecords } from './self-metrics-types.js';
 import { during } from './self-metrics-joins.js';
 import {
   landingBudgets,
+  ratchetStatus,
   windowValue,
   type LandingMetric,
   type LandingSpeedState,
@@ -18,6 +19,8 @@ export type SpeedBudgetRow = {
   unit: SpeedBudget['unit'];
   max: number | null;
   value: number | null;
+  /** The automatic (ratcheted) line the live row judges, when it is under the file max. */
+  line?: number;
   status: 'pass' | 'fail' | 'unrun' | 'guarded';
   /** Why a row is unrun or guarded, or which landings the value covers. */
   note: string;
@@ -78,6 +81,7 @@ export function speedBudgetRows(
           c?.runnerAccepted == null ? null : c.runnerAccepted * 60,
           c?.runnerDiscarded == null ? null : c.runnerDiscarded * 60,
           c?.runnerAccepted == null || !auditsProjected ? null : (audits.get(row.id) ?? 0),
+          c?.runnerFull == null ? null : c.runnerFull * 60,
         ],
         row.saveMs ?? null,
         row.preflightMs ?? null,
@@ -117,28 +121,59 @@ export function speedBudgetRows(
         note: WHERE[b.measuredBy as keyof typeof WHERE],
       };
     const rows = samples(b.metric as LandingMetric);
+    // The automatic setting beside the file line (Issue a217b83e): live ratchet state, hosted only.
+    const live = records.landingSpeed;
+    const auto =
+      live && b.stat !== 'mean' ? ratchetStatus(live.ratchet?.[b.id], b.max, b.ratchet === false) : null;
+    const ratchetNote = !auto
+      ? ''
+      : (auto.line < b.max
+          ? `; automatic line ${auto.line} (ratcheted ${auto.since?.slice(0, 10) ?? ''})`
+          : '') +
+        (auto.pinned
+          ? `; pinned to the file max${auto.automatic !== null ? `, automatic would pick ${auto.automatic}` : ''}`
+          : auto.daysLeft
+            ? `; next ratchet check in ${auto.daysLeft} held day${auto.daysLeft === 1 ? '' : 's'}`
+            : '; next ratchet check at the next UTC day');
+    const shortNote = live?.short?.[b.id]
+      ? `; live row: too few stamped landings since ${live.short[b.id]!.slice(0, 10)}, no alert can fire`
+      : '';
+    const stamped =
+      b.metric === 'runnerFull'
+        ? 'full checks'
+        : b.metric === 'check'
+          ? 'passed check runs'
+          : 'landings with this stamp';
     const value = windowValue(rows, b.metric as LandingMetric, b.stat!, budgets.window.landings);
     const unknown = rows
       .slice(-budgets.window.landings)
       .filter(row => windowValue([row], b.metric as LandingMetric, b.stat!, 1) === null).length;
     const coverage = unknown ? `; ${unknown} newest landings have unknown stamps (excluded, never zero)` : '';
+    const have = rows.filter(
+      row => windowValue([row], b.metric as LandingMetric, b.stat!, 1) !== null,
+    ).length;
+    const line = auto && auto.line < b.max ? { line: auto.line } : {};
     return value === null
       ? {
           ...base,
+          ...line,
           value,
           status: 'unrun',
-          note: `fewer than ${budgets.window.landings} ${b.metric === 'check' ? 'passed check runs' : 'landings with this stamp'} in the period${coverage}`,
+          note: `not enough data: ${have} ${stamped} in the period, the window needs ${budgets.window.landings}${coverage}${shortNote}${ratchetNote}`,
         }
       : {
           ...base,
+          ...line,
           value,
+          // Only the file max is a P0: a window over a ratcheted line undoes the ratchet instead.
           status: value > b.max ? 'fail' : 'pass',
-          note: `last ${budgets.window.landings} ${b.metric === 'check' ? 'passed check runs' : 'landings with this stamp'} in the period${coverage}${b.metric === 'runnerAudit' ? '; audit seconds attributed by run end (delayed reports can shift the live stamp)' : ''}`,
+          note: `last ${budgets.window.landings} ${stamped} in the period${coverage}${shortNote}${ratchetNote}${b.metric === 'runnerAudit' ? '; audit seconds attributed by run end (delayed reports can shift the live stamp)' : ''}`,
         };
   });
 }
 
-const cell = (row: SpeedBudgetRow) => `${row.value ?? 'unrun'} / ${row.max ?? '-'} ${row.unit}`;
+const cell = (row: SpeedBudgetRow) =>
+  `${row.value ?? 'unrun'} / ${row.max ?? '-'} ${row.unit}${row.line === undefined ? '' : ` (automatic ${row.line})`}`;
 /** Text lines for `metrics --text`. */
 export function formatSpeedBudgets(rows: SpeedBudgetRow[]) {
   return [

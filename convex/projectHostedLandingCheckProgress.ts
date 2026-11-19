@@ -35,8 +35,18 @@ export function retainCheckProgress(state: HostedLandingState, run: HostedCheckR
       : {}),
   };
   // Shard execution seconds of the ended run, from the run row already in hand (Issue 3e3f9fe6).
-  if (run.status !== 'cancelled' && run.endedAt && run.execution)
-    state.counts = { ...state.counts, runnerSeconds: Math.round(run.execution.seconds) };
+  if (run.status !== 'cancelled' && run.endedAt && run.execution) {
+    const counts = { ...state.counts };
+    delete counts.runnerFull;
+    // The whole-run predicate of projectHostedScopedRecheck: no gate (no configured contract gate,
+    // BYOCI) or an effective full gate, and not a scoped recheck.
+    const full = (run.gate === undefined || run.gate.effective === 'full') && !run.plan?.scoped;
+    state.counts = {
+      ...counts,
+      runnerSeconds: Math.round(run.execution.seconds),
+      ...(full ? { runnerFull: true as const } : {}),
+    };
+  }
   if (run.testFiles) state.testFiles = run.testFiles;
   if (run.fallbackReason) state.ranInFull = run.fallbackReason;
 }

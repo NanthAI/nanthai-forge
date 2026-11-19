@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { attributeCheckTime } from '../src/check-time-added';
 import { requireLandingCheck } from './projectHostedCheckEntries';
 import { earlyPredecessor } from './projectHostedEarlyResolution';
 import { cancelStaleLandingChecks } from './projectHostedLandingStaleChecks';
@@ -323,6 +324,9 @@ export async function publishLandingBatch(
   };
   // Issue 93e14bb0: the shared run diffed the whole stacked change; main's (last) receipt carries it.
   const secretAllowAdded = secretAllowMark(run.plan?.secretAllow, candidate.governance?.paths ?? null);
+  // Issue a217b83e: the shared run timed the whole stacked change, so main's (last) receipt names it.
+  const batchTime = attributeCheckTime(run.checkTime, candidate.governance?.paths ?? null);
+  const checkTime = batchTime ? { ...batchTime, batch: true as const } : null;
   let previousSnapshot = main.snapshotId;
   const receipts = [];
   const completions: {
@@ -388,6 +392,7 @@ export async function publishLandingBatch(
       },
       automatic: true,
       ...(secretAllowAdded && index === members.length - 1 ? { secretAllowAdded } : {}),
+      ...(checkTime && index === members.length - 1 ? { checkTime } : {}),
       undo: { kind: 'revert', receiptId: member.attempt.operations.accept },
       // The shared State's docs merges (Issue 561996ac), like secretAllowAdded on the last receipt.
       ...(candidate.docs && index === members.length - 1
@@ -432,6 +437,7 @@ export async function publishLandingBatch(
         ...(run.proofOnLanding ? { proofRunId: run.id } : {}),
         ...(receipt.docsResolution ? { docsResolution: receipt.docsResolution } : {}),
         acceptedBy: landingAcceptedBy({ actor: receipt.actor, at: receipt.at }),
+        ...(receipt.checkTime ? { checkTime: receipt.checkTime } : {}),
       },
       observation: landingObservation('accepted'),
       error: null,

@@ -12,7 +12,8 @@ with the harness wait tool if ending the turn ends the task, else stop again. Wi
 `FORGE_AGENT_WAKE=background-exit` (the owner says turn end never ends the task) a live
 settle wait covers the stop and the hook allows it. After a Forge
 wait, the next stop counts as a first attempt again. `nforge wait ID [--budget S]`
-runs the canonical wait for that session's recorded work. Each stop costs one
+runs the canonical wait for that session's recorded work; a full operation id it did not
+record (a save, or work from another shell) runs `nforge agent . wait '{"operationIds":[ID]}'`. Each stop costs one
 local read. A hosted query runs only when no live or recent (30 s) observation
 exists. Idle costs nothing, and any failure allows the stop, including a hosted query that
 cannot confirm the work (no hosted address, an error or its 2.5 s deadline). Entries whose

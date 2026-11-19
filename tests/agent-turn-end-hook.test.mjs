@@ -355,9 +355,22 @@ test('nforge wait ID accepts a unique prefix and refuses unknown work or a missi
     work = landing(s.root);
   recordTurnWork(work);
   assert.deepEqual(resolveTurnWait([work.id.slice(0, 8), '--budget', '90']).slice(-2), ['--budget', '90']);
-  assert.throws(() => resolveTurnWait([randomUUID()]), { code: 'NOT_FOUND' });
+  assert.throws(() => resolveTurnWait([randomUUID().slice(0, 8)]), { code: 'NOT_FOUND' });
   assert.throws(() => resolveTurnWait(['../etc']), { code: 'BAD_ARGUMENT' });
-  assert.throws(() => resolveTurnWait([work.id], ''), { code: 'TURN_WORK_UNAVAILABLE' });
+  assert.throws(() => resolveTurnWait([work.id.slice(0, 8)], ''), { code: 'TURN_WORK_UNAVAILABLE' });
+  // A recorded full id still resumes its own root and input.
+  assert.equal(resolveTurnWait([work.id])[1], s.root);
+});
+
+test('ad80e037: nforge wait with a full operation id this session did not record runs the agent wait form', t => {
+  session(t);
+  const id = randomUUID();
+  const expected = ['agent', '.', 'wait', JSON.stringify({ operationIds: [id] }), '--budget', '60'];
+  // A save (never in the turn ledger) resolves exactly as `nforge agent . wait {"operationIds":[ID]}`.
+  assert.deepEqual(resolveTurnWait([id, '--budget', '60']), expected);
+  assert.deepEqual(resolveTurnWait([id.toUpperCase(), '--budget', '60']), expected);
+  // Same with no agent session in the shell.
+  assert.deepEqual(resolveTurnWait([id, '--budget', '60'], ''), expected);
 });
 
 test('wait budget: agent mode defaults under 10 minutes; --budget forms parse strictly', () => {

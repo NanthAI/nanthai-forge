@@ -111,7 +111,7 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
     root,
     ...session.address,
     agent: sessionAgentSlug() ?? null,
-    ...(placed.origin ? { resolutionOf: placed.origin } : {}),
+    ...('origin' in placed && placed.origin ? { resolutionOf: placed.origin } : {}),
   });
   const dependencies = await shareDependencies(root, {
     announce: announceRegistryHosts,
@@ -155,11 +155,19 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
   rememberConflictFinishOptions(root, source.lane.laneId, session.journal.get('resolution-finish-options'));
   const shown = reasons.slice(0, 100);
   const origin = source.resolution.origin?.laneId;
+  const finished = resolvedFinishContinuation(root, source.lane.laneId);
+  const continuation =
+    finished ??
+    resolutionContinuation(root, source.lane.laneId, paths.slice(0, 100), command.operationId, shown);
+  // Unsaved edits the resolution also changes were moved aside: the one next step names them
+  // before the command, so the recovery never needs a hand-rebuilt patch hunt (ad80e037). An
+  // already-resolved conflict lands next, so the merged copies must be saved first.
+  if (placed.kept && 'instruction' in continuation && typeof continuation.instruction === 'string')
+    continuation.instruction = `Unsaved edits to ${placed.kept.paths.slice(0, 3).join(', ')}${placed.kept.paths.length > 3 ? ` and ${placed.kept.paths.length - 3} more` : ''} were not saved; copies are in ${placed.kept.at}. Merge each back into the same path${finished ? ' and save before landing' : ' first'}. ${continuation.instruction}`;
   return {
     source: value,
     conflict: {
-      ...(resolvedFinishContinuation(root, source.lane.laneId) ??
-        resolutionContinuation(root, source.lane.laneId, paths.slice(0, 100), command.operationId, shown)),
+      ...continuation,
       laneId: source.lane.laneId,
       head: source.lane.head,
       paths: paths.slice(0, 100),
@@ -169,6 +177,7 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
       dependencies,
       workIn: placed.workIn,
       ...(placed.kept ? { kept: placed.kept } : {}),
+      ...('restored' in placed && placed.restored ? { restored: placed.restored } : {}),
       automatic: {
         summary: placed.inPlace
           ? `This folder now holds resolution Lane ${source.lane.laneId} (main merged into your saved work, conflict markers in the listed files); only those files need edits.`

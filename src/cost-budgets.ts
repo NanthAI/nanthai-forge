@@ -174,6 +174,12 @@ export function sharedCheckCounts(
   passed: boolean,
 ): HostedLandingState['counts'] {
   if (!(members > 0)) return counts;
+  // A member's share, or a stale earlier run, is not a whole full check: it leaves the per-full-check
+  // budget (Issue a217b83e), on every branch.
+  if (counts?.runnerFull) {
+    counts = { ...counts };
+    delete counts.runnerFull;
+  }
   if (seconds === undefined) {
     if (passed) return counts;
     const { runnerSeconds: earlier, ...rest } = counts ?? {};

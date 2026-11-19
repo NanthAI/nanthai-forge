@@ -19,6 +19,7 @@ import { hostedCallerReceipts } from './self-metrics-hosted-receipts.js';
 import { readPlacement } from './self-metrics-placement.js';
 import { METRICS_CONTEXT_DAYS_DEFAULT, METRICS_CONTEXT_DAYS_MAX } from './self-metrics-page.js';
 import { landingCostsSchema } from './hosted-landings-view.js';
+import { landingSpeedSummarySchema } from './landing-speed-alerts.js';
 export type MetricQuery = ((name: string, args: Record<string, unknown>) => Promise<unknown>) & {
   objects?: MetricObjects;
 };
@@ -163,6 +164,7 @@ const pageSchema = (stream: keyof typeof rowSchemas) =>
     authority: sourceAuthoritySchema,
     coverage: z.record(z.string(), nullableStamp).optional(),
     audits: audits.optional(),
+    landingSpeed: landingSpeedSummarySchema.optional(),
     contextFrom: stamp.optional(),
     runProjectionVersion: z.literal(1).optional(),
     inputReferencesVersion: z.literal(1).optional(),
@@ -423,6 +425,7 @@ export async function readHostedMetricPages(
         }
         if (page.coverage) receiptCoverage = page.coverage;
         if (page.audits) records.mainAudits = page.audits;
+        if (page.landingSpeed) records.landingSpeed = page.landingSpeed;
         if (summary && !page.isDone) {
           records.surfaceGaps!.push(
             `Status read one hosted ${stream} page; use metrics for the remaining records.`,

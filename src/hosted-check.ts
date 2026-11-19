@@ -15,6 +15,45 @@ import { contractTestPath } from './intent-test-contract.js';
 import { secretAllowEvidenceSchema } from './secret-allow.js';
 import { submoduleAllowListSchema } from './submodule-allowlist.js';
 
+/** Check-time evidence and the receipt line (src/check-time-added.ts, Issue a217b83e). They live here, not
+ * there, so CLI and MCP schemas do not load that module (agent-weight ceilings). */
+const checkSeconds = z.number().finite();
+export const checkTimeEvidenceSchema = z
+  .object({
+    /** ln of the run's speed against history: the median ln(seconds / history seconds). */
+    factor: checkSeconds,
+    /** Per-file timing noise in the same log units: 1.4826 x the median absolute deviation. */
+    spread: z.number().finite().nonnegative(),
+    /** The median history seconds of the run's timed files. */
+    typical: z.number().finite().nonnegative(),
+    /** [path, seconds added after removing the run speed, null] for a file new to the history (the
+     * largest first), then [path, minus its history seconds, history seconds] for a file a whole run no
+     * longer runs (the most recently timed first). At most 12 of each. */
+    files: z
+      .array(
+        z.tuple([z.string().min(1).max(1024), checkSeconds, z.number().finite().nonnegative().nullable()]),
+      )
+      .max(24),
+  })
+  .strict();
+export type CheckTimeEvidence = z.infer<typeof checkTimeEvidenceSchema>;
+
+/** What the receipt says. `seconds` is runner seconds per check summed over shards; negative saves time. */
+export const checkTimeSchema = z
+  .object({
+    seconds: checkSeconds,
+    /** One standard deviation of that estimate; naming needs three. */
+    noise: z.number().finite().nonnegative(),
+    tests: z
+      .array(z.tuple([z.string().min(1).max(1024), checkSeconds]))
+      .min(1)
+      .max(5),
+    /** A batch's shared run: main's receipt carries the whole stacked change. */
+    batch: z.literal(true).optional(),
+  })
+  .strict();
+export type CheckTime = z.infer<typeof checkTimeSchema>;
+
 export const checkHash = z.string().regex(/^[0-9a-f]{64}$/);
 export const checkNumber = z.number().safe().nonnegative();
 export const checkObject = z.object({ sha256: checkHash, size: checkNumber }).strict();
@@ -332,6 +371,9 @@ export const hostedCheckRunSchema = z
     counts: z.object({ completed: checkNumber, passed: checkNumber, failed: checkNumber }).strict(),
     terminalDigest: checkHash.nullable(),
     macEvidence: hostedMacEvidenceSchema.optional(),
+    /** Per-file timing against the planner's history, for naming a landing that adds check time
+     * (src/check-time-added.ts, Issue a217b83e). Absent when timings arrived in parts or before it. */
+    checkTime: checkTimeEvidenceSchema.optional(),
     // Running sum of retained shard execution intervals; shard rows keep each interval.
     execution: z
       .object({ seconds: z.number().finite().nonnegative(), shards: checkNumber })

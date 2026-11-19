@@ -20,6 +20,7 @@ it was set from and why. Change a number there, with the new data, and nowhere e
 | Attempts and landing-state writes per landing, mean (cost drift, Issue 3e3f9fe6) | every landing | attempts 1.6 over the 36 landings of 2026-11-10 (2.3 over 285 landings 11-08 to 11-10; worst 20-landing window 3.55); writes 11.1 live (8, 12, 20 to 22 for one, two, three attempts); budget 4 / 22 |
 | R2 request dollars and bytes put by a landing's composes, mean (Issue 3e3f9fe6) | every recomposed landing | Latest 20 jointly stamped dev landings at 2026-11-12 23:20Z: 2.55 A / 1.00 B, or $0.000011835 per landing; request budget $0.000018 (about 1.5x, rounded up to a microdollar, absolute floor $0.000010). Separate bytes budget remains 1.35 MB; missing stamps are skipped |
 | GitHub runner minutes of a landing's checks, mean: accepted / discarded / audit (Issue 3e3f9fe6) | every landing | 54.4 / 4.7 / 18.8 shard minutes over the 36 landings of 2026-11-10 (rolling 20-landing means 49 to 57 / 2.5 to 5.9 / 13 to 23); budget 70 / 12 / 32 min |
+| Runner minutes per full check, p50 (shard execution of the accepted run when it ran in full) | every landing with a full check | 76.4 min over the first 8 full checks after d5de1c98 (121.6 over 34 before it); budget 92 min |
 | Save / preflight, p90 | every landing with a recorded duration | initial budgets 30 / 120 s; sources and calibration below |
 | Cold read of a packed landing's history, p90 (marker query plus capsule history action) | `perf-harness --capsule-cold-read`, re-run after each packer or reader change | 2026-11-18, 46 cold reads through the Node history action: p50 749 ms, p90 1,024 ms (an earlier run's max 3.7 s was an isolate cold start); budget 2 s |
 
@@ -122,6 +123,82 @@ usage unknown. No polling, new timer or pass-path reads/calls are added. Private
 closed-day contribution metadata reuse existing records, with one indexed supersession root
 on each landing request/desired table.
 
+
+## Runner minutes per full check
+
+`check-runner-full-p50` judges the shard execution minutes of the accepted check, only for landings whose
+accepted run selected the whole test set: no gate (no configured contract gate, BYOCI) or gate effective
+`full`, and not a scoped recheck (the whole-run predicate of `projectHostedScopedRecheck`). Parallel shards
+hid coverage collection from check wall time: Issue d5de1c98 cut the slowest shard by about 256 s but shard
+runner-minutes by a third. The accepted-run seconds are already on the landing (`counts.runnerSeconds`);
+`counts.runnerFull` marks a full run, and the sample keeps the value in one more `counts` slot. A batch
+member's share, a stale earlier run and a scoped check leave it null, so the window is the last 20 full
+checks among the 40 retained landings. When fewer than half the landings are full checks the row cannot fill
+the window: the budget sends one "not enough data" message (no Issue) and `nforge metrics` notes it on the
+row; it clears silently once it can be judged. It fires only once full-check stamps reach the oldest quarter
+of the row, so a row written before the stamp existed never reads as short and no extra field is stored. The landings reply's `costs.runnerFull` gives the same minutes.
+
+## Check time per landing
+
+When a whole check run's per-file timings join the planner's timing history (`projectHostedTestTimings`, the
+same mutation that already reads and writes that row), the run keeps a small `checkTime` record
+([`src/check-time-added.ts`](../../src/check-time-added.ts)): its speed against history (the median log ratio of
+each established file's seconds to its history EWMA), the per-file spread around it (1.4826 × MAD), up to 12
+test files new to the history with the seconds each takes after dividing out the run's speed, and up to 12
+files the history has but the run no longer ran (deleted or renamed), most recently timed first.
+
+Only new test files are named. Acceptance already holds the run and the change's paths. When the change's new
+test files, net of the test files it deletes or renames, move the check by more than three standard
+deviations of their timing noise and by more than three typical files' noise, the receipt and the land reply
+carry `checkTime`:
+`CHECK TIME: this landing adds about 90 runner seconds to every check (tests/new.test.mjs +90 s), noise ±5 s.`
+It never blocks. A rename or a split of the same total names nothing; a change that only deletes tests names
+nothing. Edited files are never named: with 30 or 100 edited files some are always the run's random
+outliers (the review simulated a 44% false-name rate at 30 files with a contention tail; the fixture's 200
+seeded runs at 30 and 100 edited files name 0). A file the history has timed in fewer than 4 runs still counts
+as new (the history entry carries `n` until then), so the change's own failed or discarded attempts, which
+also feed the history, do not hide it.
+
+Only whole runs are judged. A contract-selected or scoped run skips files on purpose, so it cannot tell a
+deleted file from an unselected one; a landing accepted on one is not named, and the runner-minutes budget
+still sees its class. A batch's shared run names the stacked change on main's (last) receipt. Timings that
+arrive in several argument pages, or through the scheduled legacy timing path, leave the run without the
+record. The seconds are runner seconds summed over shards, the unit of the budget above; wall time is about
+that divided by the shard count. A docs-only change is never named.
+
+A whole-check shift is not named at landing. The hosted executor runs from main's control checkout, so a change
+to it shows first in checks dispatched after it lands: the replay over 60 landing receipts on Item a217b83e found
+receipt 378ab39b's own check still collected coverage (14,468 file-seconds), and the first check dispatched after
+it 9,111. Blaming the landing whose check saw a shift would name the wrong landing. The runner-minutes-per-full-check
+budget catches that class.
+
+Cost: no new call, read or write. The run record grows by at most about 1.5 KB (24 paths), the timing history
+by a few bytes per young file, and the receipt and landing state by a few hundred bytes for a named landing only.
+
+## Ratchet
+
+The landing-judged percentile budgets (time to main, check, check to commit, save, preflight and runner
+minutes per full check) tighten by themselves; cost means keep the cost ledger's own ratchet
+([`src/landing-speed-alerts.ts`](../../src/landing-speed-alerts.ts)). The rule, judged inside the landing that
+already writes the budget row:
+
+| Part | Setting |
+| --- | --- |
+| Signal | the worst window value of the budget on each UTC day with landings |
+| Formula | after 7 closed days, every one at or under the line: max(worst day, the value judged now, median + band), rounded up to two significant figures; band = max(3 × 1.4826 × MAD of the 7 days, 15% of the line) |
+| Bounds | never above the file `max`; never below the worst held day or the value judged now |
+| Undo | a window over a ratcheted line but at or under the file `max` undoes the ratchet (back to the line before it, or the file `max`) with a reason and one message; only the file `max` opens the P0 Issue |
+| Override | `"ratchet": false` pins a budget to its file `max` and drops any ratcheted line; editing its `max` in `src/speed-budgets.json`, with data and reason, drops the ratcheted line and restarts the hold |
+| Record | the row keeps the line, the file `max` it tightened, the line before it, the landing, the time and a one-line reason; the stall-alert channels get one message; no Issue opens |
+| Report | `nforge metrics` prints `value / file max (automatic line)`, the date it ratcheted, the held days left before the next ratchet check, and for a pinned budget what the automatic rule would pick |
+
+The band floor exists because the signal is a smoothed rolling percentile: on a quiet week its day-to-day MAD
+is near 0 and a pure MAD band would set a line a normal day breaks. Check time and runner minutes also grow
+with every test added, so the undo keeps ordinary growth from turning a tight line into a standing P0. A closed
+day over the line restarts the hold, so a line moves at most once a week. The row gains about 200 bytes per
+percentile budget (about 1.6 KB with full holds), read and written by the landing that already reads and
+writes it: about 3 KB more DB I/O per landing, about $0.0006 per 1,000 landings at $0.20/GB. `nforge metrics`
+reads it once per metrics call (one indexed read of a few KB, on the first acceptances page).
 
 ## Drill
 

@@ -117,7 +117,17 @@ test('accepted bench 8c9b84fc: the pass-to-land alarm stays quiet on every retai
   rows.sort((a, b) => a.at - b.at);
   assert(rows.length >= 100, `${rows.length} bench landings`);
   const { state, events } = replay(rows);
-  assert.deepEqual(events, []);
+  // Quiet: no break, recovery or undo. Twelve bench days hold the line for the ratchet's seven closed
+  // days, so the one message is the automatic tighten (a217b83e), and its line keeps the F1 floors:
+  // never under the band (15% of the line it replaced) nor the value judged then.
+  assert.deepEqual(
+    events.map(e => e.kind),
+    ['ratcheted'],
+  );
+  const [tighten] = events;
+  assert.equal(tighten.from, budget.max);
+  assert(tighten.line < budget.max && tighten.line >= 0.15 * budget.max, `ratcheted line ${tighten.line}`);
+  assert(tighten.line >= tighten.value, `line ${tighten.line} under its own value ${tighten.value}`);
   // Far from the bar: the bench lands within seconds of its pass.
   const p90 = windowValue(state.samples, 'passToLand', 'p90', WINDOW);
   assert(p90 < 1, `bench pass-to-land p90 ${p90} min`);

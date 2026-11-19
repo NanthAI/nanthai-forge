@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { attributeCheckTime } from '../src/check-time-added';
 import { writeLineMain } from './projectLiveLineStore';
 import { requireLandingCheck } from './projectHostedCheckEntries';
 import { earlyPredecessor } from './projectHostedEarlyResolution';
@@ -294,6 +295,8 @@ export async function publishAcceptance(
   }
   // Issue 93e14bb0: from the run plan and changed paths already loaded; no extra read.
   const secretAllowAdded = secretAllowMark(run?.plan?.secretAllow, candidate.governance?.paths ?? null);
+  // Issue a217b83e: from the run's timing evidence and the same changed paths; no extra read.
+  const checkTime = attributeCheckTime(run?.checkTime, candidate.governance?.paths ?? null);
   // Issue fe5bea80: a builder's approval request on a landed Lane holds it until the owner grants
   // that exact Lane head (or accepts the held landing as a person). One read, normally empty.
   const approvals = await attemptApprovals(ctx, claim.projectId, attempt.operations.accept);
@@ -377,6 +380,7 @@ export async function publishAcceptance(
     },
     automatic: actor.kind === 'agent' || (Boolean(check) && actor.id !== project.owner),
     ...(secretAllowAdded ? { secretAllowAdded } : {}),
+    ...(checkTime ? { checkTime } : {}),
     undo: { kind: 'revert', receiptId: identity.receiptId },
     ...(candidate.docs
       ? { docsResolution: { ...candidate.docs, undo: landingDocsUndo(identity.receiptId) } }
@@ -453,6 +457,7 @@ export async function publishAcceptance(
       ...(run?.proofOnLanding ? { proofRunId: run!.id } : {}),
       ...(receipt.docsResolution ? { docsResolution: receipt.docsResolution } : {}),
       acceptedBy,
+      ...(checkTime ? { checkTime } : {}),
     },
     observation: landingObservation('accepted'),
     error: null,

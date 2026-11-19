@@ -13,7 +13,7 @@ import { proofSummarySchema } from './landing-proof.js';
 import { landingMessageSchema } from './landing-message.js';
 import { landingStallSchema } from './landing-stall-schema.js';
 import { mainExpectationSchema } from './hosted-main.js';
-import { hostedCheckRequestSchema, checkNumber } from './hosted-check.js';
+import { hostedCheckRequestSchema, checkNumber, checkTimeSchema } from './hosted-check.js';
 import { autonomyPolicySchema } from './autonomy-policy.js';
 import { composeRequestSchema } from './hosted-compose.js';
 import { submissionOutcome } from './landing-submission-state.js';
@@ -209,6 +209,9 @@ export const hostedLandingStateSchema = z
       .object({
         r2: z.tuple([checkNumber, checkNumber, checkNumber]).optional(),
         runnerSeconds: z.number().min(0).optional(),
+        /** That run selected the whole test set (gate effective full, not a scoped recheck): its seconds
+         * also judge the runner-minutes-per-full-check budget (Issue a217b83e). */
+        runnerFull: z.literal(true).optional(),
         discardedRunnerSeconds: z.number().min(0).optional(),
         /** A superseded check had no execution report. Known seconds remain a lower bound. */
         discardedRunnerUnknown: z.literal('superseded-check-execution-unreported').optional(),
@@ -225,6 +228,8 @@ export const hostedLandingStateSchema = z
         docsResolution: docsResolutionSchema.optional(),
         /** Who accepted it: a person, or policy with no person (fe5bea80). Absent on older landings. */
         acceptedBy: landingAcceptedBySchema.optional(),
+        /** The receipt's `checkTime`, for the land reply (Issue a217b83e). */
+        checkTime: checkTimeSchema.optional(),
       })
       .strict()
       .optional(),

@@ -2,6 +2,7 @@
 import type { DiskSample } from './self-metrics-disk.js';
 import type { MetricObservation } from './self-metrics-observation-schema.js';
 import type { SelfMetricReceipt } from './self-metrics-journal.js';
+import type { LandingSpeedState } from './landing-speed-alerts.js';
 export type MetricInput = {
   laneId: string;
   head: string;
@@ -151,6 +152,8 @@ export type MetricRecords = {
   flakesUnprojected?: boolean;
   /** Hosted main-audit events; `complete` once the page reached a green before the window. */
   mainAudits?: { events: MetricMainAuditEvent[]; complete: boolean };
+  /** The live speed-budget row's ratchet and too-little-data state (hosted only). */
+  landingSpeed?: Pick<LandingSpeedState, 'ratchet' | 'short'>;
   /** A hosted acceptances page predates the reuse projection. */
   reuseUnprojected?: boolean;
   /** A hosted page predates the fallback-reason projection (7c2e69e1). */

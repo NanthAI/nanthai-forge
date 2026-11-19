@@ -20,7 +20,7 @@ import { metricRunsPage } from './projectMetricReadRuns';
 import { report } from './errors';
 import { metricReceiptCoverage } from '../src/self-metric-receipts';
 import { landingCosts } from '../src/hosted-landings-view';
-import { landingSpeedSample } from '../src/landing-speed-alerts';
+import { landingSpeedSample, landingSpeedStateSchema } from '../src/landing-speed-alerts';
 
 const tables = {
   acceptances: 'projectHostedAcceptances',
@@ -56,6 +56,23 @@ const mainAuditEventLimit = 100;
  * bounded read rides on the first acceptances page, so it adds no call. Newest
  * first, down to the first green or flake before the window: that event bounds
  * the range the earliest in-window failure audited. */
+/** The live speed-budget row's ratchet and too-little-data state (Issue a217b83e): one indexed read of a
+ * row of a few KB, on the first acceptances page of a metrics read only. */
+async function landingSpeedSummary(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
+  const row = await ctx.db
+    .query('projectLandingSpeed')
+    .withIndex('by_project', q => q.eq('projectId', projectId))
+    .unique();
+  const parsed = row ? landingSpeedStateSchema.safeParse(JSON.parse(row.value)) : null;
+  if (!parsed?.success || (!parsed.data.ratchet && !parsed.data.short)) return {};
+  return {
+    landingSpeed: {
+      ...(parsed.data.ratchet ? { ratchet: parsed.data.ratchet } : {}),
+      ...(parsed.data.short ? { short: parsed.data.short } : {}),
+    },
+  };
+}
+
 async function mainAuditEvents(ctx: QueryCtx, projectId: Id<'hostedProjects'>, from: number, to: number) {
   const rows = await ctx.db
     .query('projectHostedMainAuditEvents')
@@ -413,7 +430,10 @@ export const page = query({
         inputReferencesVersion: 1,
         runProjectionVersion: 1,
         ...(input.stream === 'acceptances' && input.cursor === null
-          ? { audits: await mainAuditEvents(ctx, input.projectId, from, to) }
+          ? {
+              audits: await mainAuditEvents(ctx, input.projectId, from, to),
+              ...(await landingSpeedSummary(ctx, input.projectId)),
+            }
           : {}),
         contextFrom: new Date(context).toISOString(),
         isDone: rows.isDone,

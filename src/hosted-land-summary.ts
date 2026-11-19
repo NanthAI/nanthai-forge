@@ -9,6 +9,18 @@ import { retryableFinishSource } from './hosted-agent-finish-result.js';
 import { holdLines, landingHold } from './hosted-landing-hold.js';
 import { syncRequiredSummary } from './hosted-would-conflict.js';
 import { acceptedByLine } from './landing-accepted-by.js';
+import type { CheckTime } from './hosted-check.js';
+
+/** The land reply's line for a named landing. */
+/* Kept here so the CLI loads no schema module for it. */
+function checkTimeLine(time: CheckTime) {
+  const effect = time.seconds >= 0 ? 'adds about %s runner seconds to' : 'saves about %s runner seconds on';
+  const parts = time.tests.map(([file, s]) => `${file} ${s >= 0 ? '+' : ''}${s} s`);
+  return (
+    `CHECK TIME: this ${time.batch ? 'batch' : 'landing'} ${effect.replace('%s', String(Math.abs(time.seconds)))} every check` +
+    ` (${parts.join('; ')}), noise ±${time.noise} s. It does not block.`
+  );
+}
 
 export const terminalPhases = new Set(['landed', 'terminal-failed']);
 type Result = {
@@ -25,6 +37,7 @@ type Result = {
       head: string;
       proof?: z.infer<typeof proofSummarySchema>;
       acceptedBy?: { kind: 'person' | 'auto'; actor?: string; note: string };
+      checkTime?: CheckTime;
     };
     testFiles?: {
       counts?: { failed: number };
@@ -100,6 +113,7 @@ function classifyLand(response: HostedAgentResponse): { kind: LandOutcomeKind; l
       // A person's acceptance or policy's, never inferred from the submitter (fe5bea80).
       ...(submission?.acceptance?.proof ? [proofLine(submission.acceptance.proof)] : []),
       ...(submission?.acceptance?.acceptedBy ? [acceptedByLine(submission.acceptance.acceptedBy)] : []),
+      ...(submission?.acceptance?.checkTime ? [checkTimeLine(submission.acceptance.checkTime)] : []),
     ]);
   if (submission?.observation?.state === 'superseded' || phase === 'superseded')
     return out('superseded', [

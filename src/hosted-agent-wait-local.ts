@@ -11,6 +11,7 @@ import {
   retainedHostedOperation,
 } from './hosted-agent-journal.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
+import { ForgeError } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { finishRefusedKey } from './hosted-agent-finish-identity.js';
 import { preparingFinishSource } from './hosted-agent-finish-result.js';
@@ -305,6 +306,15 @@ export async function observeOperations(
       board,
     );
     if (followed) return followed;
+    // Name where the wait looked: an id from another project's folder is NOT_FOUND here (ad80e037).
+    const failure = hostedActionError(error, 'observation');
+    if (failure.code === 'NOT_FOUND')
+      throw new ForgeError(
+        'NOT_FOUND',
+        `${failure.message} This wait looked in the project of ${root}; run it from the Lane or project folder that started the operation.`,
+        failure.retryAt,
+        failure.recovery,
+      );
     throw error;
   }
 }

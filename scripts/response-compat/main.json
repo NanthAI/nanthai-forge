@@ -4408,6 +4408,60 @@
           ],
           "additionalProperties": false
         },
+        "checkTime": {
+          "type": "object",
+          "properties": {
+            "factor": {
+              "type": "number"
+            },
+            "spread": {
+              "type": "number",
+              "minimum": 0
+            },
+            "typical": {
+              "type": "number",
+              "minimum": 0
+            },
+            "files": {
+              "maxItems": 24,
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                ],
+                "items": false,
+                "minItems": 3,
+                "maxItems": 3
+              }
+            }
+          },
+          "required": [
+            "factor",
+            "spread",
+            "typical",
+            "files"
+          ],
+          "additionalProperties": false
+        },
         "execution": {
           "type": "object",
           "properties": {
@@ -5905,6 +5959,10 @@
               "type": "number",
               "minimum": 0
             },
+            "runnerFull": {
+              "type": "boolean",
+              "const": true
+            },
             "discardedRunnerSeconds": {
               "type": "number",
               "minimum": 0
@@ -6176,6 +6234,49 @@
                 "kind",
                 "at",
                 "note"
+              ],
+              "additionalProperties": false
+            },
+            "checkTime": {
+              "type": "object",
+              "properties": {
+                "seconds": {
+                  "type": "number"
+                },
+                "noise": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "tests": {
+                  "minItems": 1,
+                  "maxItems": 5,
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "prefixItems": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1024
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ],
+                    "items": false,
+                    "minItems": 2,
+                    "maxItems": 2
+                  }
+                },
+                "batch": {
+                  "type": "boolean",
+                  "const": true
+                }
+              },
+              "required": [
+                "seconds",
+                "noise",
+                "tests"
               ],
               "additionalProperties": false
             }

@@ -2,7 +2,12 @@
 import { z } from 'zod';
 import { authorshipFields, authorshipSchema, personStampValid } from './work-actor-types.js';
 import { landingMessageSchema, cohortMessagesSchema } from './landing-message.js';
-import { candidateIsolationModeSchema, checkSkippedSchema, hostedMacEvidenceSchema } from './hosted-check.js';
+import {
+  candidateIsolationModeSchema,
+  checkSkippedSchema,
+  checkTimeSchema,
+  hostedMacEvidenceSchema,
+} from './hosted-check.js';
 import { hostedLandingAttemptSchema } from './hosted-landing.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './state/hash.js';
@@ -115,6 +120,8 @@ export const hostedAcceptanceSchema = z
     automatic: z.boolean(),
     /** The landing added or edited a secret-scan allow entry; project owners were alerted (Issue 93e14bb0). */
     secretAllowAdded: secretAllowMarkSchema.optional(),
+    /** The landing adds (or saves) runner seconds on every check beyond timing noise (Issue a217b83e). */
+    checkTime: checkTimeSchema.optional(),
     undo: z.object({ kind: z.literal('revert'), receiptId: z.uuid() }).strict(),
     /** Markdown-only conflicts merged automatically with the docs rule, and how to undo that. */
     docsResolution: docsResolutionSchema.optional(),

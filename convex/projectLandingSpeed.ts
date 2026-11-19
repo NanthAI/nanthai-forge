@@ -92,12 +92,15 @@ async function deliverBudgetEvents(
   if (!project) return events;
   const settings = effectiveAgentDefaults(effectivePolicy(project).agentDefaults).stallAlerts;
   for (const event of events) {
-    // The Issue is the durable record, so it is written whether or not owner channels are on.
-    await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectLandingSpeedIssue:write'), {
-      projectId,
-      owner: project.owner,
-      issue: canonicalPayload(speedBudgetIssue(event, projectId, speedBudgets)),
-    });
+    // The Issue is the durable record of a break, so it is written whether or not owner channels are on.
+    // A ratchet, its undo and a too-little-data note are recorded in this row (line, landing, reason)
+    // and open no Issue: only the file max breaking is a P0.
+    if (event.kind === 'broken' || event.kind === 'recovered')
+      await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectLandingSpeedIssue:write'), {
+        projectId,
+        owner: project.owner,
+        issue: canonicalPayload(speedBudgetIssue(event, projectId, speedBudgets)),
+      });
     if (settings.enabled)
       await ctx.scheduler.runAfter(
         0,

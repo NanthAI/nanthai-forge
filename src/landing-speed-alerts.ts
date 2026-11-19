@@ -5,6 +5,192 @@ import { digest } from './state/hash.js';
 import { percentile } from './self-metrics-joins.js';
 import { costGuardSchema, costBudgetSchema, discardedRunnerSeconds } from './cost-budgets.js';
 
+/** Speed budget ratchet (Issue a217b83e), an automatic setting judged inside the landing that already
+ * writes the budget row (below); no call, read or timer of its own. It lives in this module so CLI and MCP
+ * load no extra module for it (agent-weight ceilings).
+ * - Signal: the worst rolling-window value of each landing-judged percentile budget per UTC day.
+ * - Formula: after RATCHET_DAYS closed days with landings, every one at or under the line, the line
+ *   becomes max(worst held day, today's value so far, median of the held days + band), rounded up to
+ *   two significant figures. The band is 3 x 1.4826 x the held days' MAD, never under 15% of the line:
+ *   the signal is a smoothed rolling percentile, so its day-to-day MAD understates real spread.
+ * - Bounds: never above the file's `max` (a line never loosens past it by itself), never below the
+ *   value judged now or the worst held day, so the data that set a line cannot break it.
+ * - Undo: a window over a ratcheted line but at or under the file `max` is not a P0. The ratchet is
+ *   undone (back to the line before it, or the file `max` when the value is over that too) with a
+ *   recorded reason and one message. Only the file `max` opens the P0 Issue.
+ * - Override: `"ratchet": false` pins a budget to its file `max` (any ratcheted line is dropped; held
+ *   days still count, so the report shows what the automatic line would be); editing `max` in
+ *   src/speed-budgets.json, with the data and reason, replaces any ratcheted line and restarts the hold.
+ * - Top metric: the budget's own statistic; it interacts with its own break and recovery only. */
+const RATCHET_DAYS = 7;
+/** The band's floor as a share of the current line. */
+const MIN_BAND = 0.15;
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+export const ratchetEntrySchema = z
+  .object({
+    /** Today's worst window value so far; it joins `days` once a later day's landing closes it. */
+    open: z.tuple([day, z.number()]).optional(),
+    /** The worst value of each closed day with landings while the line held, oldest first. */
+    days: z.array(z.tuple([day, z.number()])).max(RATCHET_DAYS),
+    /** The ratcheted line, the file `max` it tightened (a different file `max` drops it), and the
+     * line it replaced (an undo returns there). */
+    line: z.number().nonnegative().optional(),
+    fromMax: z.number().nonnegative().optional(),
+    from: z.number().nonnegative().optional(),
+    at: z.iso.datetime().optional(),
+    landing: z.string().optional(),
+    reason: z.string().max(400).optional(),
+  })
+  .strict();
+type RatchetEntry = z.infer<typeof ratchetEntrySchema>;
+
+/** The line a budget is judged against: the file `max` when pinned, else the ratcheted line while the
+ * file `max` it came from stands. */
+export const ratchetedLine = (max: number, entry?: RatchetEntry, pinned = false) =>
+  !pinned && entry?.line !== undefined && entry.fromMax === max ? Math.min(entry.line, max) : max;
+
+/** Round up to two significant figures, so a line reads as a plain number in any unit. */
+function roundUp2(value: number) {
+  if (!(value > 0)) return 0;
+  const step = 10 ** (Math.floor(Math.log10(value)) - 1);
+  return Number((Math.ceil(value / step - 1e-9) * step).toPrecision(2));
+}
+const ratchetMedian = (values: number[]) => {
+  const sorted = [...values].sort((a, b) => a - b),
+    middle = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+};
+const round3 = (n: number) => Number(n.toPrecision(3));
+/** The line the held days support: their median plus the noise band, never below the worst held day
+ * or the value judged now. */
+function ratchetTarget(days: number[], line: number, now: number) {
+  const mid = ratchetMedian(days),
+    band = Math.max(3 * 1.4826 * ratchetMedian(days.map(value => Math.abs(value - mid))), MIN_BAND * line),
+    floor = Math.max(...days, now);
+  return { median: mid, band, floor, line: roundUp2(Math.max(floor, mid + band)) };
+}
+
+type RatchetStep = {
+  entry: RatchetEntry;
+  /** The line judged after this landing. */
+  line: number;
+  /** Set when this landing tightened the line. */
+  ratcheted?: { from: number; to: number; reason: string };
+  /** Set when this landing's value broke a ratcheted line at or under the file max. */
+  undone?: { from: number; to: number; reason: string };
+};
+const isoDay = (at: number) => new Date(at).toISOString().slice(0, 10);
+/** Pure: fold one landing's window value into the budget's entry. `at` is the landing's time. */
+export function stepRatchet(
+  previous: RatchetEntry | undefined,
+  value: number,
+  max: number,
+  at: number,
+  landing: string,
+  pinned = false,
+): RatchetStep {
+  // A changed file line is a manual override: drop the old ratchet and start a new hold.
+  const kept =
+    previous && (previous.fromMax === undefined || previous.fromMax === max) ? previous : undefined;
+  let line = ratchetedLine(max, kept, pinned);
+  const today = isoDay(at);
+  let open = kept?.open,
+    days: [string, number][] = [...(kept?.days ?? [])];
+  if (open && open[0] < today) {
+    // A closed day over the line breaks the hold.
+    days = open[1] <= line ? [...days, open].slice(-RATCHET_DAYS) : [];
+    open = undefined;
+  }
+  open = open && open[0] === today ? [today, Math.max(open[1], value)] : [today, value];
+  // Pinned: judged at the file max; held days still count for the report's automatic line.
+  if (pinned) return { entry: { open, days }, line };
+  if (kept?.line !== undefined && line < max && value > line) {
+    // Over a ratcheted line: undo the ratchet, never a P0 unless the file max breaks too.
+    const back = kept.from !== undefined && kept.from <= max && value <= kept.from ? kept.from : max;
+    const since = kept.at ? Math.max(0, Math.floor((at - Date.parse(kept.at)) / 86_400_000)) : null;
+    const reason =
+      `Ratchet undone: the window reached ${value}, over the ratcheted line ${line}` +
+      (since === null ? '' : ` ${since} day${since === 1 ? '' : 's'} after it tightened`) +
+      `; line back to ${back}${back === max ? ' (the file max)' : ''}.`;
+    const undone = { from: line, to: back, reason };
+    line = back;
+    return {
+      entry:
+        back < max
+          ? {
+              open,
+              days: [],
+              line: back,
+              fromMax: max,
+              from: max,
+              at: new Date(at).toISOString(),
+              landing,
+              reason,
+            }
+          : { open, days: [] },
+      line,
+      ...(value <= max ? { undone } : {}),
+    };
+  }
+  const base = {
+    ...(kept?.line !== undefined ? { line: kept.line, fromMax: kept.fromMax } : {}),
+    ...(kept?.from !== undefined ? { from: kept.from } : {}),
+    ...(kept?.at ? { at: kept.at, landing: kept.landing, reason: kept.reason } : {}),
+  };
+  const entry: RatchetEntry = { ...base, open, days };
+  if (days.length < RATCHET_DAYS) return { entry, line };
+  const target = ratchetTarget(
+    days.map(d => d[1]),
+    line,
+    open[1],
+  );
+  if (!(target.line < line)) return { entry, line };
+  const reason =
+    `Held at or under ${line} for ${RATCHET_DAYS} closed days, ${days[0]![0]} to ${days.at(-1)![0]}: worst ${round3(target.floor)}, ` +
+    `median ${round3(target.median)}, band ${round3(target.band)} (3 x 1.4826 x MAD, at least ${MIN_BAND * 100}% of the line); line ${line} -> ${target.line}.`;
+  return {
+    entry: {
+      open,
+      days: [],
+      line: target.line,
+      fromMax: max,
+      from: line,
+      at: new Date(at).toISOString(),
+      landing,
+      reason,
+    },
+    line: target.line,
+    ratcheted: { from: line, to: target.line, reason },
+  };
+}
+
+/** For the report: the line judged now, what the automatic rule would pick from the held days (a pinned
+ * budget included), and the closed held days still needed before the next ratchet can happen. */
+export function ratchetStatus(entry: RatchetEntry | undefined, max: number, pinned = false) {
+  const line = ratchetedLine(max, entry, pinned);
+  const days = entry?.days ?? [];
+  const automatic =
+    days.length >= RATCHET_DAYS
+      ? Math.min(
+          ratchetTarget(
+            days.map(d => d[1]),
+            line,
+            entry?.open?.[1] ?? 0,
+          ).line,
+          line,
+        )
+      : null;
+  return {
+    line,
+    pinned,
+    automatic,
+    daysLeft: Math.max(0, RATCHET_DAYS - days.length),
+    ...(entry?.line !== undefined && entry.fromMax === max && !pinned
+      ? { since: entry.at ?? null, reason: entry.reason ?? null }
+      : {}),
+  };
+}
+
 /** Speed budgets (b7851c44). The numbers, their sources and reasons live in
  * src/speed-budgets.json; this module only judges landings against them. A budget is
  * judged on the last `window.landings` landings, never on one outlier. */
@@ -28,6 +214,9 @@ export const speedBudgetSchema = z
       .string()
       .regex(/^[0-9a-f]{8}$/)
       .optional(),
+    /** false pins the budget to its file max: the ratchet (stepRatchet above) never tightens it,
+     * and any line it tightened before is dropped. */
+    ratchet: z.literal(false).optional(),
   })
   .strict();
 export const speedBudgetsSchema = z
@@ -60,7 +249,8 @@ export type LandingMetric =
   | 'r2BytesPut'
   | 'runnerAccepted'
   | 'runnerDiscarded'
-  | 'runnerAudit';
+  | 'runnerAudit'
+  | 'runnerFull';
 type Stat = 'p50' | 'p90' | 'mean';
 const INDEX: Partial<Record<LandingMetric, number>> = {
   toMain: 1,
@@ -80,6 +270,7 @@ const COUNT: Partial<Record<LandingMetric, [number, number]>> = {
   runnerAccepted: [3, 60],
   runnerDiscarded: [4, 60],
   runnerAudit: [5, 60],
+  runnerFull: [6, 60],
 };
 const METRICS = [...Object.keys(INDEX), ...Object.keys(COUNT), 'r2RequestUsd'] as LandingMetric[];
 const isLanding = (b: SpeedBudget): b is SpeedBudget & { metric: LandingMetric; stat: Stat; max: number } =>
@@ -91,7 +282,9 @@ const minute = 60_000;
 /** Retained samples per project (about 3.7 KB with counts): the window plus gaps where a stamp was missing. */
 const MAX_SAMPLES = 40;
 /** R2 requests signed by its composes (class A, class B, bytes put), then the shard execution seconds of
- * the accepted check run, of the runs its attempts discarded, and of the main audit run that followed it. */
+ * the accepted check run, of the runs its attempts discarded, and of the main audit run that followed it;
+ * last, the accepted run's seconds again when it was a full check (null for a scoped check), absent on
+ * rows written before that budget (Issue a217b83e). */
 const countsSchema = z.tuple([
   z.number().int().min(0).nullable(),
   z.number().int().min(0).nullable(),
@@ -99,6 +292,7 @@ const countsSchema = z.tuple([
   z.number().min(0).nullable(),
   z.number().min(0).nullable(),
   z.number().min(0).nullable(),
+  z.number().min(0).nullable().optional(),
 ]);
 export type LandingCounts = z.infer<typeof countsSchema>;
 const sampleSchema = z.tuple([
@@ -134,9 +328,15 @@ export const landingSpeedStateSchema = z
     samples: z.array(sampleSchema),
     /** Budgets over their limit now, by budget id: one entry means one alert and one Issue. */
     broken: z.record(z.string(), brokenSchema),
+    /** Ratchet state by budget id (stepRatchet above); absent on rows written before it. */
+    ratchet: z.record(z.string(), ratchetEntrySchema).optional(),
+    /** Budgets that cannot be judged although the row is full (too few stamped landings): since when. */
+    short: z.record(z.string(), z.iso.datetime()).optional(),
   })
   .strict();
 export type LandingSpeedState = z.infer<typeof landingSpeedStateSchema>;
+/** What `nforge metrics` reads of the live row: ratcheted lines, held days and too-little-data notes. */
+export const landingSpeedSummarySchema = landingSpeedStateSchema.pick({ ratchet: true, short: true });
 export type LandingSpeedSample = {
   at: number;
   saveMs?: number | null;
@@ -159,10 +359,20 @@ export type LandingSpeedSample = {
   stages: { queue: number | null; check: number | null; settle: number | null };
 };
 export type SpeedBudgetEvent = {
-  kind: 'broken' | 'recovered';
+  /** `undone`: a ratcheted line broke at or under the file max and went back (no P0). `short`: the full
+   * row holds too few stamped landings to judge the budget (no P0). */
+  kind: 'broken' | 'recovered' | 'ratcheted' | 'undone' | 'short';
   budget: SpeedBudget;
   /** The statistic over the window now. */
   value: number;
+  /** The line judged: the file `max`, or its ratcheted line. */
+  line: number;
+  /** Ratcheted and undone: the line before, and the recorded one-line reason. */
+  from?: number;
+  reason?: string;
+  /** Short only: stamped landings in the retained row, and how many it holds. */
+  stamped?: number;
+  retained?: number;
   landing: string;
   since: string;
   /** The longest stage of the landing that crossed (broken only). */
@@ -235,7 +445,9 @@ export function landingSpeedSample(
       state.counts?.runnerSeconds ?? null,
       discardedRunnerSeconds(state),
       0,
-    ],
+      // Only a full check adds the seventh slot, so other samples keep their shape and bytes.
+      ...(state.counts?.runnerFull ? [state.counts.runnerSeconds ?? null] : []),
+    ] as LandingCounts,
     stages: {
       queue: span(timing.submittedAt, timing.checkReservedAt),
       check: span(timing.checkReservedAt, timing.ciEndedAt),
@@ -328,41 +540,107 @@ export function observeLandingSpeed(
     );
   const judged = landingBudgets(budgets);
   const ids = new Set(judged.map(b => b.id));
-  const broken = Object.fromEntries(Object.entries(previous?.broken ?? {}).filter(([id]) => ids.has(id)));
+  const keep = <T>(record?: Record<string, T>) =>
+    Object.fromEntries(Object.entries(record ?? {}).filter(([id]) => ids.has(id)));
+  const broken = keep(previous?.broken),
+    ratchet = keep(previous?.ratchet),
+    short = keep(previous?.short);
   const events: SpeedBudgetEvent[] = [];
+  const since = new Date(sample.at).toISOString();
   for (const budget of judged) {
     const value = windowValue(samples, budget.metric, budget.stat, budgets.window.landings);
-    if (value === null) continue;
+    if (value === null) {
+      // Runner minutes per full check skip batch members and scoped rechecks by design, so a full row
+      // can hold too few to judge: it says so once (F5), never silence. Other budgets report missing
+      // stamps as `unknown` on their own events. A stamp among the oldest quarter of the full row shows
+      // stamps span the whole row, so a row written before the stamp existed never reads as short.
+      const has = (row: Row) => windowValue([row], budget.metric, budget.stat, 1) !== null;
+      const stamped = samples.filter(has).length;
+      if (
+        budget.metric === 'runnerFull' &&
+        samples.length === MAX_SAMPLES &&
+        samples.slice(0, MAX_SAMPLES / 4).some(has) &&
+        !short[budget.id]
+      ) {
+        short[budget.id] = since;
+        events.push({
+          kind: 'short',
+          budget,
+          value: stamped,
+          line: budget.max,
+          stamped,
+          retained: samples.length,
+          landing: sample.id,
+          since,
+        });
+      }
+      continue;
+    }
+    delete short[budget.id];
+    // A scoped check is not missing a full-check stamp; only an unknown runner count is.
     const unknown = samples
       .slice(-budgets.window.landings)
-      .filter(row => windowValue([row], budget.metric, budget.stat, 1) === null).length;
+      .filter(row =>
+        budget.metric === 'runnerFull'
+          ? row[7]?.[3] == null
+          : windowValue([row], budget.metric, budget.stat, 1) === null,
+      ).length;
+    // Speed budgets (percentiles) ratchet here; cost means keep the cost ledger's own ratchet.
+    const step =
+      budget.stat === 'mean'
+        ? null
+        : stepRatchet(ratchet[budget.id], value, budget.max, sample.at, sample.id, budget.ratchet === false);
+    const line = step?.line ?? budget.max;
+    if (step) ratchet[budget.id] = step.entry;
+    const change = step?.ratcheted ?? step?.undone;
+    if (change)
+      events.push({
+        kind: step?.ratcheted ? 'ratcheted' : 'undone',
+        budget,
+        value,
+        line: change.to,
+        from: change.from,
+        reason: change.reason,
+        landing: sample.id,
+        since,
+      });
     const open = broken[budget.id];
-    if (value > budget.max && !open) {
+    if (value > line && !open) {
       const stage = longestStage(sample.stages);
-      const since = new Date(sample.at).toISOString();
       broken[budget.id] = { since, landing: sample.id, value, ...(stage ? { stage } : {}) };
       events.push({
         kind: 'broken',
         budget,
         value,
+        line,
         landing: sample.id,
         since,
         ...(stage ? { stage } : {}),
         ...(unknown ? { unknown } : {}),
       });
-    } else if (value <= budget.max && open) {
+    } else if (value <= line && open) {
       delete broken[budget.id];
       events.push({
         kind: 'recovered',
         budget,
         value,
+        line,
         landing: open.landing,
         since: open.since,
         ...(unknown ? { unknown } : {}),
       });
     }
   }
-  return { state: { schema: 2, samples, broken }, events };
+  return {
+    state: {
+      schema: 2,
+      samples,
+      broken,
+      ...(Object.keys(ratchet).length ? { ratchet } : {}),
+      ...(Object.keys(short).length ? { short } : {}),
+    },
+    events,
+  };
 }
 type Row = [
   number,
@@ -398,6 +676,7 @@ const NAME: Record<LandingMetric, string> = {
   runnerAccepted: 'runner minutes of the accepted check per landing',
   runnerDiscarded: 'runner minutes of discarded checks per landing',
   runnerAudit: 'runner minutes of main audits per landing',
+  runnerFull: 'runner minutes per full check',
 };
 const describe = (b: SpeedBudget) => `${NAME[b.metric as LandingMetric]} ${b.stat}`;
 const NEXT: Record<LandingMetric, string> = {
@@ -441,17 +720,45 @@ const NEXT: Record<LandingMetric, string> = {
     'each main race that cannot reuse its check costs a whole run (incident 10d253c6).',
   runnerAudit:
     'Next: audits ran longer or more often: read the main audit state (`nforge agent ROOT status`, audit) and the audit cadence setting.',
+  runnerFull:
+    "Next: full checks burn more runner minutes: read the `checkTime` line of the window's receipts (`nforge agent ROOT landings`), which names " +
+    'a landing whose new test files added seconds to every check (whole runs only; edited files and runner or executor changes are never named), ' +
+    'then compare `status {"runId":"RUN","summary":true}` slowest files and executionSeconds on a full check before and after the crossing landing. ' +
+    'A shift on every file points at the check runner or executor, which shows first on checks dispatched after its landing. ' +
+    'Parallel shards hide this from check wall time (Issue d5de1c98: coverage collection on every shard).',
 };
 const lastLandings = (budgets: SpeedBudgets) => `the last ${budgets.window.landings} landings`;
 
 /** The owner-facing message: which budget, which landing crossed it, where to look, the next step. */
 export function speedBudgetMessage(event: SpeedBudgetEvent, project: string, budgets: SpeedBudgets) {
   const b = event.budget;
+  const line = event.line ?? b.max;
   const head =
-    `${describe(b)} over ${lastLandings(budgets)} is ${event.value} ${b.unit}; budget ${b.max} ${b.unit}.` +
+    `${describe(b)} over ${lastLandings(budgets)} is ${event.value} ${b.unit}; budget ${line} ${b.unit}` +
+    (line < (b.max ?? line) ? ` (ratcheted from ${b.max})` : '') +
+    '.' +
     (event.unknown
       ? ` ${event.unknown} of the newest ${budgets.window.landings} landings have an unknown ${b.metric} stamp; excluded, never counted as zero.`
       : '');
+  if (event.kind === 'ratcheted')
+    return {
+      subject: `[Forge] Speed budget tightened: ${describe(b)}: ${project}`,
+      text: `Speed budget ${b.id} ratcheted on ${project}: ${event.from} -> ${event.line} ${b.unit} at landing ${event.landing.slice(0, 8)}. ${event.reason} A window over it but at or under the file max ${b.max} undoes it (a message, not a P0). To opt out, pin the budget to its file max with "ratchet": false in src/speed-budgets.json.`,
+    };
+  if (event.kind === 'undone')
+    return {
+      subject: `[Forge] Speed budget ratchet undone: ${describe(b)}: ${project}`,
+      text: `Speed budget ${b.id} ratchet undone on ${project} at landing ${event.landing.slice(0, 8)}: ${event.reason} Still within the file max ${b.max} ${b.unit}, so no P0 Issue; the hold restarts.`,
+    };
+  if (event.kind === 'short')
+    return {
+      subject: `[Forge] Speed budget has too little data: ${describe(b)}: ${project}`,
+      text:
+        `Speed budget ${b.id} cannot be judged on ${project}: only ${event.stamped} of the ${event.retained} retained landings carry its ${b.metric} stamp` +
+        (b.metric === 'runnerFull' ? ' (full checks; batch members and scoped rechecks do not count)' : '') +
+        `, and its window needs ${budgets.window.landings}. Not enough data: it cannot break or recover until ${budgets.window.landings} do. ` +
+        'This message does not repeat until the budget has been judged again.',
+    };
   return event.kind === 'broken'
     ? {
         subject: `[Forge] Speed budget broken: ${describe(b)}: ${project}`,
@@ -498,7 +805,7 @@ export function speedBudgetIssue(event: SpeedBudgetEvent, projectId: string, bud
     commentOperationId: operation('comment'),
     title: `P0 speed budget broken: ${describe(b)} (${b.area})`,
     body: [
-      `Opened by Forge. Budget \`${b.id}\`: ${describe(b)} over ${lastLandings(budgets)} must stay at or under ${b.max} ${b.unit}.`,
+      `Opened by Forge. Budget \`${b.id}\`: ${describe(b)} over ${lastLandings(budgets)} must stay at or under ${event.line ?? b.max} ${b.unit}${(event.line ?? b.max) < (b.max ?? event.line) ? ` (ratcheted from ${b.max})` : ''}.`,
       '',
       `Crossed by landing \`${event.landing}\` at ${event.since}. Area: ${b.area}.`,
       `Budget source: ${b.source}`,
@@ -528,7 +835,9 @@ export function carriedCostCounts(
     discarded = (counts?.discardedRunnerSeconds ?? 0) + (reused ? 0 : (counts?.runnerSeconds ?? 0));
   const carried = {
     ...(r2.some(Boolean) ? { r2 } : {}),
-    ...(reused && counts?.runnerSeconds !== undefined ? { runnerSeconds: counts.runnerSeconds } : {}),
+    ...(reused && counts?.runnerSeconds !== undefined
+      ? { runnerSeconds: counts.runnerSeconds, ...(counts.runnerFull ? { runnerFull: true as const } : {}) }
+      : {}),
     ...(discarded > 0 || (keepKnownDiscardZero && counts?.discardedRunnerSeconds === 0)
       ? { discardedRunnerSeconds: discarded }
       : {}),

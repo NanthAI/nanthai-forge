@@ -17,6 +17,7 @@ import type { Id } from './_generated/dataModel';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { hostedCheckRunSchema } from '../src/hosted-check';
 import { parseTimingHistory, updateHostedTimingHistory } from '../src/hosted-test-timings';
+import { checkTimeEvidence } from '../src/check-time-added';
 
 /** Same advisory JSON/EWMA as the native owner's .forge/work/test-timings.json.
  * One indexed document, read/written inside existing authorized transactions.
@@ -63,6 +64,13 @@ export async function hostedTimingHistory(
   return { row, history };
 }
 
+const reportDurations = (run: HostedCheckRun) =>
+  Object.fromEntries(
+    Object.entries(run.contractReports ?? {}).flatMap(([file, report]) =>
+      report.durationMs === undefined ? [] : [[file, report.durationMs]],
+    ),
+  );
+
 export async function recordHostedTestTimings(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
@@ -108,6 +116,14 @@ export async function recordHostedTestTimings(
       'Timing history changed during its argument pages.',
     );
   }
+  // Check-time evidence (Issue a217b83e): this whole run's files against the history already read, once,
+  // for a run whose timings arrive in one final part. The caller's existing run write keeps it.
+  const whole = (run.gate === undefined || run.gate.effective === 'full') && !run.plan?.scoped;
+  const evidence =
+    whole && final && !transport?.timingParts?.length
+      ? checkTimeEvidence(history.files, durations ?? reportDurations(run))
+      : null;
+  if (evidence) run.checkTime = evidence;
   const value = {
     projectId,
     history: updateHostedTimingHistory(JSON.stringify(history), run, durations, stamp?.sequence, final),

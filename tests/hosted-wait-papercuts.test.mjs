@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { followLocalOperation } from '../dist/hosted-agent-wait-local.js';
+import { followLocalOperation, observeOperations } from '../dist/hosted-agent-wait-local.js';
 import { ForgeError } from '../dist/errors.js';
 import { interruptedWait } from '../dist/agent-operation-wait.js';
 import { wakeContinuation } from '../dist/agent-wake.js';
@@ -71,6 +71,23 @@ test('an operation id that is neither a landing nor a save keeps the original NO
   );
   assert.equal(reply, undefined, 'the caller rethrows the landing NOT_FOUND');
   assert.equal(server.queries.length, 1);
+});
+
+test('ad80e037: a wait whose id is in no landing or save says which project folder it looked in', async t => {
+  const root = projectFolder(t);
+  const server = {
+    ...transport(() => {
+      throw new ForgeError('NOT_FOUND', 'Prepare this original hosted save first.');
+    }),
+    dispatch: async () => ({ result: { actor: 'owner', features: [] } }),
+  };
+  await assert.rejects(
+    observeOperations(server, root, { operationIds: [randomUUID()], timeoutSeconds: 1 }),
+    error =>
+      error.code === 'NOT_FOUND' &&
+      error.message.includes(`This wait looked in the project of ${root}`) &&
+      /run it from the Lane or project folder that started the operation/.test(error.message),
+  );
 });
 
 test('2026-11-18 lead: a wake wait stopped at the harness background limit (SIGTERM) resumes like a budget return', () => {
