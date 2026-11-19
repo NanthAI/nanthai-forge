@@ -9,9 +9,35 @@
 
 export const PATH_SWITCHES = Object.freeze({
   N1: 'FORGE_QUEUE_NEW_RUN_WAKE',
-  O3: 'FORGE_QUEUE_COHORT_KEEP_HEALTHY',
-  O4: 'FORGE_QUEUE_CANCEL_HONOURS_FAST',
 });
+
+/** Deleted switches whose path was dropped (lead decision on Item 026ce0cf): the switch-off
+ * behaviour is the only one, so these rules are always off, whatever a cell recorded. Their
+ * precondition and reached verdicts stay, to show how often the dropped path would apply. */
+export const ALWAYS_OFF = Object.freeze(['O3', 'O4']);
+
+/** Deleted switches (owner decision 2fdc7e4b on Item 4647d45b): each rule's path became the only
+ * path at its deletion's main commit (mirrored to GitHub with the same SHA). The env name above
+ * stays only to label cells on older code. */
+export const DELETED_SWITCHES = Object.freeze({
+  N1: Object.freeze({
+    receiptId: '0d6c3f62-dece-4454-a4a3-9def7a941fb4',
+    commit: 'b99013d8e08bff982c3644e8ad5480f4dcb9c7ed',
+  }),
+});
+
+/** Rules a cell runs as permanent: those whose deletion commit its deployed code contains.
+ * `code` is the deployed commit the cell ran on (result.versions.start.deploy.headSha).
+ * `contains(deletion, code)` answers true, false or null (unknown). A cell with no recorded
+ * code, or an unknown answer, keeps its recorded switch values: past cells keep their labels. */
+export function permanentRules(code, contains, deleted = DELETED_SWITCHES) {
+  if (typeof code !== 'string' || !code) return new Set();
+  return new Set(
+    Object.entries(deleted)
+      .filter(([, d]) => d.commit === code || contains(d.commit, code) === true)
+      .map(([rule]) => rule),
+  );
+}
 const ms = at => Date.parse(at ?? '');
 const runsOf = r => r.checkRunIds ?? [];
 const discarded = r => r.costs?.runnerDiscarded ?? r.runnerDiscarded ?? 0;
@@ -131,17 +157,25 @@ export function cellLandings(
 
 const RULES = { N1: n1, O3: o3, O4: o4 };
 
-/** Per switch: { on, precondition, reached, label, evidence }. `switches` maps env names to
- * the cell's recorded values; `cell` is cellLandings(result) (O4 needs it). label is null for
- * a switch that is off. */
-export function pathEvidence(receipts, switches = {}, cell = {}) {
+/** Per rule: { on, permanent, precondition, reached, label, evidence }. `switches` maps env
+ * names to the cell's recorded values; `cell` is cellLandings(result) (O4 needs it);
+ * `permanent` is permanentRules(...) for the cell's code: such a rule is on whatever its env
+ * name records. An ALWAYS_OFF rule is permanent and off. label is null for a rule that is off. */
+export function pathEvidence(receipts, switches = {}, cell = {}, permanent = new Set()) {
   return Object.fromEntries(
-    Object.entries(PATH_SWITCHES).map(([rule, env]) => {
+    Object.keys(RULES).map(rule => {
       const verdict = RULES[rule](receipts, cell);
-      const on = switches[env] === true;
+      const off = ALWAYS_OFF.includes(rule);
+      const fixed = off || permanent.has(rule);
+      const on = !off && (permanent.has(rule) || switches[PATH_SWITCHES[rule]] === true);
       return [
         rule,
-        { on, ...verdict, label: on ? (verdict.reached ? 'on path' : 'path not reached') : null },
+        {
+          on,
+          permanent: fixed,
+          ...verdict,
+          label: on ? (verdict.reached ? 'on path' : 'path not reached') : null,
+        },
       ];
     }),
   );

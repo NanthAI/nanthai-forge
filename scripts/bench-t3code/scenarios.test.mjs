@@ -13,7 +13,7 @@ import {
 import { driveForge } from './forge-protocol.mjs';
 import { summarizeCell, passToLand } from './scenario-report.mjs';
 import { switchProblems } from './switches.mjs';
-import { pathEvidence, cellLandings } from './path-evidence.mjs';
+import { pathEvidence, cellLandings, permanentRules, DELETED_SWITCHES } from './path-evidence.mjs';
 import { scenarioEvidence as evidenceOf } from './scenario-evidence.mjs';
 import { SHARED_SOURCE, TEST_DIR, SOURCE_MARKER, failureReading } from './scenarios.mjs';
 import { mkdtempSync, writeFileSync as writeFile, rmSync } from 'node:fs';
@@ -262,19 +262,22 @@ const parkedHeadV1 = [
   firstCheck: null,
   costs: { runnerDiscarded: 0 },
 }));
-const allOn = {
-  FORGE_QUEUE_NEW_RUN_WAKE: true,
-  FORGE_QUEUE_COHORT_KEEP_HEALTHY: true,
-  FORGE_QUEUE_CANCEL_HONOURS_FAST: true,
-};
+const allOn = { FORGE_QUEUE_NEW_RUN_WAKE: true };
 
 test('the parked-head v1 cell did not reach any switch path: switch-on means path not reached', () => {
   const paths = pathEvidence(parkedHeadV1, { FORGE_QUEUE_NEW_RUN_WAKE: true });
   assert.equal(paths.N1.label, 'path not reached');
   assert.equal(paths.N1.precondition, false);
-  assert.equal(paths.O3.label, null, 'a switch that is off gets no label');
-  for (const rule of ['N1', 'O3', 'O4'])
-    assert.equal(pathEvidence(parkedHeadV1, allOn)[rule].label, 'path not reached', rule);
+  assert.equal(pathEvidence(parkedHeadV1, {}).N1.label, null, 'a switch that is off gets no label');
+  assert.equal(pathEvidence(parkedHeadV1, allOn).N1.label, 'path not reached');
+  for (const rule of ['O3', 'O4']) {
+    const always = pathEvidence(parkedHeadV1, allOn)[rule];
+    assert.deepEqual(
+      [always.on, always.permanent, always.reached, always.label],
+      [false, true, false, null],
+      rule,
+    );
+  }
 });
 
 test('N1 is reached only when a held, passed follower overtakes a holder that checks again', () => {
@@ -301,7 +304,7 @@ test('N1 is reached only when a held, passed follower overtakes a holder that ch
   );
 });
 
-test('O3 keeps an admitted healthy member of a failed shared check', () => {
+test('O3 finds an admitted healthy member of a failed shared check; the rule is always off', () => {
   const member = (runs, extra = {}) => ({
     submissionId: 'm',
     admittedAt: '2026-01-01T00:01:00Z',
@@ -310,9 +313,10 @@ test('O3 keeps an admitted healthy member of a failed shared check', () => {
     batchId: 'b',
     ...extra,
   });
-  assert.equal(pathEvidence([member(['shared'])], allOn).O3.label, 'on path');
+  const kept = pathEvidence([member(['shared'])], allOn).O3;
+  assert.deepEqual([kept.precondition, kept.reached, kept.on, kept.label], [true, true, false, null]);
   const rechecked = pathEvidence([member(['shared', 'solo'])], allOn).O3;
-  assert.deepEqual([rechecked.precondition, rechecked.label], [true, 'path not reached']);
+  assert.deepEqual([rechecked.precondition, rechecked.reached, rechecked.label], [true, false, null]);
   assert.equal(
     pathEvidence([member(['shared'], { sharedBatch: { runId: 'shared', likelyCulprit: true } })], allOn).O3
       .precondition,
@@ -323,10 +327,61 @@ test('O3 keeps an admitted healthy member of a failed shared check', () => {
   assert.equal(pathEvidence([member(['shared'])], allOn).O4.precondition, false);
 });
 
+// Deleted switches (owner decision 2fdc7e4b, Item 4647d45b): a cell on code that contains a
+// switch's deletion runs that rule as the only path; a cell on older code keeps its recorded arm.
+test('a deleted switch is permanent for cells whose deployed code contains its deletion commit', () => {
+  const deletion = DELETED_SWITCHES.N1.commit;
+  const later = 'a'.repeat(40),
+    older = 'b'.repeat(40);
+  const contains = (from, code) => (code === later ? true : code === older ? false : null);
+  assert.deepEqual([...permanentRules(deletion, contains)], ['N1'], 'the deletion commit itself');
+  assert.ok(permanentRules(later, contains).has('N1'), 'code after the deletion');
+  assert.equal(permanentRules(older, contains).size, 0, 'code before the deletion');
+  assert.equal(permanentRules('c'.repeat(40), contains).size, 0, 'an unknown answer keeps the record');
+  assert.equal(permanentRules(undefined, () => true).size, 0, 'no recorded code keeps the record');
+  for (const [rule, d] of Object.entries(DELETED_SWITCHES)) {
+    assert.ok(rule in { N1: 1, O3: 1, O4: 1 }, rule);
+    assert.match(d.commit, /^[0-9a-f]{40}$/, rule);
+    assert.match(d.receiptId, /^[0-9a-f-]{36}$/, rule);
+  }
+
+  // The env name is gone from the deployment (recorded false): the permanent rule is still on.
+  const holder = { submissionId: 'h', committedAt: '2026-01-01T00:10:00Z', checkRunIds: ['r1', 'r2'] };
+  const follower = {
+    submissionId: 'f',
+    committedAt: '2026-01-01T00:06:00Z',
+    checkRunIds: ['r3'],
+    heldAfterCheck: [{ from: '2026-01-01T00:04:00Z', to: '2026-01-01T00:06:00Z' }],
+    orderWaits: [{ submissionId: 'h', held: 'accepting', footprints: 'disjoint' }],
+  };
+  const removed = { FORGE_QUEUE_NEW_RUN_WAKE: false };
+  const now = pathEvidence([holder, follower], removed, {}, new Set(['N1'])).N1;
+  assert.deepEqual([now.on, now.permanent, now.label], [true, true, 'on path']);
+  const missed = pathEvidence(parkedHeadV1, {}, {}, new Set(['N1'])).N1;
+  assert.deepEqual([missed.on, missed.permanent, missed.label], [true, true, 'path not reached']);
+  // Past cells keep their recorded labels: off stays unlabelled, on stays as reached.
+  const pastOff = pathEvidence([holder, follower], removed).N1;
+  assert.deepEqual([pastOff.on, pastOff.permanent, pastOff.label], [false, false, null]);
+  assert.equal(pathEvidence(parkedHeadV1, { FORGE_QUEUE_NEW_RUN_WAKE: true }).N1.label, 'path not reached');
+
+  // The report reads the code from the cell's version record.
+  const result = code => ({
+    cellId: 'c',
+    records: [{ laneId: 'a' }],
+    switches: { start: removed },
+    ...(code ? { versions: { start: { deploy: { headSha: code } } } } : {}),
+  });
+  const receipts = [{ laneId: 'a', committedAt: '2026-01-01T00:01:00Z' }];
+  assert.equal(summarizeCell(result(later), receipts, [], contains).paths.N1.permanent, true);
+  assert.equal(summarizeCell(result(later), receipts, [], contains).paths.N1.on, true);
+  assert.equal(summarizeCell(result(older), receipts, [], contains).paths.N1.on, false);
+  assert.equal(summarizeCell(result(null), receipts, [], () => true).paths.N1.on, false, 'past cell');
+});
+
 // (a) O4. The A' smoke cell (2026-11-18, dogfood policy, switches off): every landing landed on
 // its admission run or on a queue check no overlapping landing committed under. The 70c7347c
 // rule read "main moved + first check" as O4 reached.
-test('O4 is reached only by a solo queue check still running when an overlapping landing committed', () => {
+test('O4 is reached only by a solo queue check still running when an overlapping landing committed; the rule is always off', () => {
   const t = s =>
     `2026-11-18T14:00:00.000Z`.replace(
       '00:00.000',
@@ -366,20 +421,20 @@ test('O4 is reached only by a solo queue check still running when an overlapping
       ['c', [[Date.parse(t(454)), Date.parse(t(584))]]],
     ]),
   };
-  const fp = pathEvidence(smoke, { FORGE_QUEUE_CANCEL_HONOURS_FAST: true }, cell).O4;
-  assert.deepEqual([fp.precondition, fp.reached, fp.label], [false, false, 'path not reached']);
+  const fp = pathEvidence(smoke, allOn, cell).O4;
+  assert.deepEqual([fp.precondition, fp.reached, fp.label], [false, false, null]);
   // b's queue check runs 324-495 s; an overlapping landing commits at 400 s, after b's base.
   const under = receipt('d', { committedAt: t(400), admissionBase: { receiptId: 'pre' }, firstCheck: null });
   cell.files.set('d', new Set(['g.md']));
-  const kept = pathEvidence([...smoke, under], { FORGE_QUEUE_CANCEL_HONOURS_FAST: true }, cell).O4;
-  assert.deepEqual([kept.precondition, kept.reached, kept.label], [true, true, 'on path']);
+  const kept = pathEvidence([...smoke, under], allOn, cell).O4;
+  assert.deepEqual([kept.precondition, kept.reached, kept.on, kept.label], [true, true, false, null]);
   // Disjoint files, or a landing already in b's base, is not a main move under it.
   cell.files.set('d', new Set(['other.md']));
   assert.equal(pathEvidence([...smoke, under], {}, cell).O4.precondition, false);
   cell.files.set('d', new Set(['g.md']));
   const inBase = smoke.map(r => (r.laneId === 'b' ? { ...r, admissionBase: { receiptId: 'r-d' } } : r));
   assert.equal(pathEvidence([...inBase, under], {}, cell).O4.precondition, false);
-  // Switch off: the sweep retired b's run (another run, runner time discarded).
+  // The sweep retired b's run (another run, runner time discarded).
   const retired = smoke.map(r =>
     r.laneId === 'b'
       ? { ...r, checkRunIds: ['run', 'run2'], costs: { runnerDiscarded: 2 }, firstComposeStartedAt: t(300) }

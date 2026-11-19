@@ -13,7 +13,7 @@ import { mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { benchRootOrExit } from './bench-root.mjs';
-import { pathEvidence, cellLandings } from './path-evidence.mjs';
+import { pathEvidence, cellLandings, permanentRules } from './path-evidence.mjs';
 import { scenarioRole, scenarioTestPath } from './scenarios.mjs';
 import { dryGroup } from './scripted.mjs';
 import { cellChecks } from './cell-checks.mjs';
@@ -95,8 +95,9 @@ export function comparisonRefusal(cells, candidates = [], acceptedIds = null) {
 }
 
 /** Pure per-cell summary of a result and the receipts of its own Lanes; `calls` is the cell's
- * nforge-calls.jsonl (the guard checks read it). */
-export function summarizeCell(result, receipts, calls = []) {
+ * nforge-calls.jsonl (the guard checks read it); `contains(deletion, code)` says whether the
+ * cell's deployed code holds a switch deletion (path-evidence.mjs permanentRules). */
+export function summarizeCell(result, receipts, calls = [], contains = () => null) {
   const lanes = new Set(result.records.map(r => r.laneId).filter(Boolean));
   const own = receipts.filter(r => lanes.has(r.laneId));
   const accepted = own.reduce((a, r) => a + (r.costs?.runnerAccepted ?? 0), 0);
@@ -133,7 +134,13 @@ export function summarizeCell(result, receipts, calls = []) {
     convexUsdPer1000:
       result.convex?.costUsd != null && own.length ? (1000 * result.convex.costUsd) / own.length : null,
     // Per switch: was its queue path reached? A switch-on cell that missed it is 'path not reached'.
-    paths: pathEvidence(own, result.switches?.start ?? {}, landingsOf),
+    // A deleted switch is on for a cell whose deployed code contains its deletion.
+    paths: pathEvidence(
+      own,
+      result.switches?.start ?? {},
+      landingsOf,
+      permanentRules(result.versions?.start?.deploy?.headSha, contains),
+    ),
     syncRequired: {
       replies: checks.sync.replies,
       perLanding: checks.sync.perLanding,
@@ -183,6 +190,22 @@ function landings(config, root, from, to) {
   return out;
 }
 
+/** Whether GitHub's Forge mirror has `code` at or after `deletion` (true/false), or null when
+ * the read failed. */
+function containsOnGitHub(deletion, code) {
+  if (![deletion, code].every(c => /^[0-9a-f]{40}$/.test(c ?? ''))) return null;
+  try {
+    const status = execFileSync(
+      'gh',
+      ['api', `repos/NanthAI/nanthai-forge/compare/${deletion}...${code}`, '--jq', '.status'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    ).trim();
+    return status === 'ahead' || status === 'identical' ? true : status ? false : null;
+  } catch {
+    return null;
+  }
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const B = benchRootOrExit();
   const config = JSON.parse(readFileSync(join(B, 'config.json'), 'utf8'));
@@ -217,7 +240,12 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   };
   const rows = cells.map(result => {
     const to = new Date(ms(result.endedAt) + 600_000).toISOString();
-    return summarizeCell(result, landings(config, root, result.startedAt, to), calls(result.cellId));
+    return summarizeCell(
+      result,
+      landings(config, root, result.startedAt, to),
+      calls(result.cellId),
+      containsOnGitHub,
+    );
   });
   console.log(JSON.stringify(rows, null, 2));
   if (rows.some(r => r.failed.length)) process.exitCode = 1;
