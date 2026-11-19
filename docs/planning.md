@@ -130,6 +130,11 @@ completion tick writes one small row per landed Intent (`projectIntentLandingNot
 receipt) and reads no Item; the Item's comment read walks its Intent chain and shows the newest 50 at the newest end
 of its comment pages. They are derived from receipts, so planning exports and archives leave them out.
 
+An Item read (`planning {planningItemId}`) returns its newest 50 comments, oldest first. When more exist it adds
+`commentsMore: true` and `commentsCursor`; `planning {planningItemId, cursor: commentsCursor}` returns the next 50
+older comments (one bounded page read, no Item, work or reconcile read) and its own `commentsCursor` until none are
+left. The cursor names its Item and Work generation, so another Item's id or a list cursor is refused.
+
 ## Imported history attribution
 
 Retained planning readers accept optional `imported` attribution: `source` (a source note), `key` (the original

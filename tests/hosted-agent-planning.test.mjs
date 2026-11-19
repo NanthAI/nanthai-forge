@@ -296,6 +296,32 @@ test('agents create an Initiative and Issue, comment, and read them filtered and
   assert.equal(work.planningItems.filter(item => item.kind === 'issue').length, 3);
 });
 
+test('a planning detail past 50 comments continues with commentsCursor, one bounded page per call, every comment once (f0d0fdd6)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const issue = (await put(p, { kind: 'issue', title: 'Many comments', body: 'Body' })).result;
+  const other = (await put(p, { kind: 'issue', title: 'Other', body: 'Body' })).result;
+  for (let i = 0; i < 60; i++)
+    await run(p, 'comment-planning-item', { itemId: issue.itemId, text: `comment ${i}` });
+  const detail = await list(p, { id: issue.itemId, reconcile: false });
+  assert.equal(detail.comments.length, 50);
+  assert.equal(detail.commentsMore, true);
+  assert.equal(detail.comments.at(-1).text, 'comment 59', 'the detail keeps the newest 50, oldest first');
+  p.calls.length = 0;
+  const older = await list(p, { id: issue.itemId, cursor: detail.commentsCursor });
+  assert(p.calls.filter(name => name === 'projectWorkIndex:records').length === 1, `one page: ${p.calls}`);
+  assert(p.calls.length <= 2, `bounded continuation, no item or work read: ${p.calls}`);
+  assert.equal(older.commentsMore, undefined);
+  assert.deepEqual(
+    [...older.comments, ...detail.comments].map(comment => comment.text),
+    Array.from({ length: 60 }, (_, i) => `comment ${i}`),
+  );
+  // The cursor names its Item: another Item's id or a list cursor is refused.
+  await assert.rejects(list(p, { id: other.itemId, cursor: detail.commentsCursor }), code('BAD_ARGUMENT'));
+  const page = await list(p, { limit: 1 });
+  await assert.rejects(list(p, { id: issue.itemId, cursor: page.nextCursor }), code('BAD_ARGUMENT'));
+});
+
 // Issue aa9fb5b1 part 3: a suggested schedule from the files each Issue names. Advice only.
 test('the files an Issue names group open Issues into stacks and parallel work, with reasons', () => {
   assert.deepEqual(

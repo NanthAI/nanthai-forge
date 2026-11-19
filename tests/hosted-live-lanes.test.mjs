@@ -125,6 +125,51 @@ test('live Lanes are paged with joined Intent, actor, save and landing metadata;
   assert.equal(new Set(seen.map(row => row.laneId)).size, 104);
   assert(!seen.some(row => row.laneId === lanes[0].id));
 });
+test('a live Lane row carries lastActivityAt from the Lane record, with no extra read (f0d0fdd6)', async () => {
+  const s = await fixture();
+  const recent = new Date().toISOString();
+  const intentId = randomUUID();
+  await s.put({
+    kind: 'intent',
+    id: intentId,
+    version: 0,
+    at: recent,
+    outcome: 'Synthetic live outcome',
+    constraints: '',
+    creatorAccountId: 'owner',
+    assigneeAccountIds: [],
+    base: { head: hash, receiptId: randomUUID() },
+    status: 'active',
+  });
+  const lane = {
+    kind: 'lane',
+    id: randomUUID(),
+    version: 0,
+    at: recent,
+    intentId,
+    actor: 'owner',
+    base: { head: hash, receiptId: randomUUID() },
+    head: hash,
+    sourceVersion: 0,
+    lifecycleVersion: 0,
+    state: 'active',
+    authorityEpoch: 1,
+  };
+  await s.put(lane);
+  const plain = JSON.parse(
+    await s.call('list', api.list, { projectId: s.auth.projectId, cursor: null, limit: 50 }),
+  );
+  const live = JSON.parse(
+    await s.call('live', api.list, { projectId: s.auth.projectId, cursor: null, limit: 50, view: 'live' }),
+  );
+  for (const page of [plain, live]) {
+    const [row] = page.page.filter(item => item.laneId === lane.id);
+    assert.equal(row.dormant, undefined);
+    assert.equal(row.lastActivityAt, recent);
+  }
+  assert.equal(s.counts.at(-1).writes, 0);
+});
+
 test('a public reader of a public project sees live Lanes with no person', async () => {
   const s = await fixture();
   const intentId = randomUUID();

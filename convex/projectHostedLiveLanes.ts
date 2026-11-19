@@ -129,7 +129,6 @@ export const list = query({
         const stale = dormant
           ? {
               dormant: true,
-              lastActivityAt: lane.at,
               ...(view === 'dormant'
                 ? {
                     abandonable: receipt ? ('landed' as const) : stamped,
@@ -176,6 +175,8 @@ export const list = query({
           // A resolution Lane names the conflicted Lane it continues (Item d9e1ac62): from the record already read.
           ...(lane.resolution?.origin ? { resolves: lane.resolution.origin.laneId } : {}),
           lastSaveAt: saved ? JSON.parse(await hostedRecordBody(ctx, saved)).at : null,
+          // Last Lane-record change (save, start, sync, landing), from the record already read (f0d0fdd6).
+          lastActivityAt: lane.at,
           landing: landing
             ? { submissionId: landing.submissionId, state: landing.phase, scope: 'intent' }
             : null,

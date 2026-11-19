@@ -171,6 +171,37 @@ function decodeBound(cursor: string, ws?: Workspace): { generationId: string; cu
 const encode = (ws: Workspace, cursor: string) =>
   cursorPrefix + Buffer.from(JSON.stringify({ generationId: ws.generationId, cursor })).toString('base64url');
 
+/** A planning detail lists the newest 50 comments; older ones continue with `commentsCursor`, which
+ * names its Item, so a list cursor or another Item's cursor is refused (f0d0fdd6). */
+const commentsContinue = (ws: Workspace, id: string, cursor: string) => ({
+  commentsMore: true as const,
+  commentsCursor:
+    cursorPrefix +
+    Buffer.from(JSON.stringify({ generationId: ws.generationId, cursor, comments: id })).toString(
+      'base64url',
+    ),
+});
+async function olderComments(port: PlanningPort, ws: Workspace, id: string, cursor: string) {
+  const bound = decodeBound(cursor, ws) as { cursor: string | null; comments?: unknown };
+  invariant(
+    bound.comments === id,
+    'BAD_ARGUMENT',
+    'cursor: with planningItemId, pass the commentsCursor that planning returned for this Item.',
+  );
+  const comments = await page(port, ws, 'planningComments', bound.cursor, 50, {
+    parentId: id,
+    newestFirst: true,
+  });
+  const shown = comments.page.map(row => JSON.parse(row.value) as { system?: boolean }).reverse();
+  return {
+    workRevision: ws.revision,
+    planningItemId: id,
+    comments: shown,
+    ...(comments.isDone ? {} : commentsContinue(ws, id, comments.continueCursor)),
+    ...(shown.some(comment => comment.system === true) ? { systemComments: systemCommentNotice } : {}),
+  };
+}
+
 /** The put a server can apply safely (a83b6fd5). A server that does not advertise
  * planning-put-keeps-omitted (deployed before c0255160) needs kind and title and turns an omitted
  * body into "", status into open, links into [] and group into none; it gets the stored values for
@@ -621,6 +652,8 @@ async function readPlanning(
   const ws = await workspace(port);
   if (input.id) {
     const id = await resolvePlanningId(port, input.id);
+    // Older comments (f0d0fdd6): the detail's commentsCursor as cursor, one bounded page per call.
+    if (input.cursor !== null) return await olderComments(port, ws, id, input.cursor);
     const item = await fullItem(port, ws, id);
     invariant(item, 'NOT_FOUND', 'Planning item not found.');
     const comments = await page(port, ws, 'planningComments', null, 50, {
@@ -663,7 +696,7 @@ async function readPlanning(
       }),
       ...(work?.role ? { work: workSection(item.id, work) } : {}),
       comments: shown,
-      ...(comments.isDone ? {} : { commentsMore: true }),
+      ...(comments.isDone ? {} : commentsContinue(ws, id, comments.continueCursor)),
       ...(shown.some(comment => comment.system === true) ? { systemComments: systemCommentNotice } : {}),
       ...(sync?.changed.length || sync?.failed || sync?.held?.length ? { reconciled: sync } : {}),
     };

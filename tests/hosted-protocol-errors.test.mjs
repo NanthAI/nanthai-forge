@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { parseHostedResponse, isHostedReplyError } from '../dist/hosted-response.js';
-import { protocolMismatchError } from '../dist/hosted-agent-version.js';
+import { protocolMismatchError, unknownActionError } from '../dist/hosted-agent-version.js';
 import { responseSnapshotPath } from '../scripts/response-compat.mjs';
 
 const released = JSON.parse(readFileSync(new URL(`../${responseSnapshotPath}`, import.meta.url), 'utf8'));
@@ -140,5 +140,29 @@ test('mixed planned-start variants fail before retaining a start operation or ma
   assert.match(
     hostedAgentHelpEntries.find(entry => entry.action === 'finish').schema.properties.closes.description,
     /not a list/,
+  );
+});
+
+test('an unknown intents action names the supported read, lanes (f0d0fdd6, 274859d9)', () => {
+  for (const action of ['intents', 'intent']) {
+    const error = unknownActionError('/synthetic-root-never-created', action);
+    assert.equal(error.code, 'HOSTED_ACTION_UNSUPPORTED');
+    assert.match(error.message, /Use lanes \{\} for open Lanes with their Intents/);
+  }
+});
+
+test('status with a list key names the working list call, lanes (f0d0fdd6: a brief documented status {limit})', async () => {
+  const { validateHostedCliCommand } = await import('../dist/hosted-cli-validation.js');
+  for (const input of [{ limit: 5 }, { view: 'live' }])
+    assert.throws(
+      () => validateHostedCliCommand('/synthetic-root-never-created', 'status', input),
+      error =>
+        error.code === 'BAD_ARGUMENT' &&
+        error.message.includes(`To list open Lanes, run nforge agent ROOT lanes '{"limit":20}'.`),
+    );
+  // A status error without a list key keeps its plain text.
+  assert.throws(
+    () => validateHostedCliCommand('/synthetic-root-never-created', 'status', { waitMs: 'soon' }),
+    error => error.code === 'BAD_ARGUMENT' && !error.message.includes('To list open Lanes'),
   );
 });

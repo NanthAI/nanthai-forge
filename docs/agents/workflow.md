@@ -524,7 +524,10 @@ reads, source downloads, writes or idle calls. The existing
 `by_project_and_kind_and_parent_and_status` index serves the filter: no schema change.
 Issue resolution adds at most 17 indexed Intent-head reads within that same query,
 independent of the project’s Lane count; result memory and joined reads stay O(page),
-with the existing page bound of 100.
+with the existing page bound of 100. Each row names the Lane's `intent`, `actor`,
+`lastSaveAt`, `lastActivityAt` (the Lane record's last change: start, save, sync or
+landing, from the record the row already reads; Item f0d0fdd6) and its latest `landing`.
+Completed and abandoned Lanes are not listed; `state:"all"` with `planningItemId` shows them.
 
 **What happened on an Issue: the live-state check.** `planning {"planningItemId":"ITEM_ID"}`
 returns `work`: the Issue's Lanes in every state (`open`, `queued`, `parked`,
