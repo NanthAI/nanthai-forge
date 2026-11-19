@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { hostedRootRequired } from './agent-root.js';
-import { hostedAgentAddress } from './hosted-agent-address.js';
+import { addressOnlyRoot, hostedAgentAddress } from './hosted-agent-address.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { McpStdioTransport } from './mcp-stdio.js';
@@ -19,6 +19,7 @@ export async function startMcp(
   addressing: Record<string, unknown> = {},
 ): Promise<McpServer> {
   const address = agentMode ? hostedAgentAddress(root, addressing) : null;
+  if (address) root = addressOnlyRoot(root, address);
   if ((agentMode && !address) || (workEnabled && !agentMode)) throw hostedRootRequired(root);
   const hosted = address ? new HostedAgentTransport(root, address) : undefined;
   const workspace = hosted ? undefined : new Workspace(root);

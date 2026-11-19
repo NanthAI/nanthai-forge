@@ -3,8 +3,18 @@ import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { existsSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import {
+  existsSync,
+  writeFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { hostedAgentAddress, hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { canonicalRoot } from '../dist/root-paths.js';
 import { ForgeError } from '../dist/errors.js';
@@ -52,6 +62,35 @@ function http(t, s) {
     });
   });
 }
+test('an address-only call whose ROOT does not exist writes nothing beside ROOT and keeps its address in Forge state (59f0e296)', async t => {
+  const s = agentFixture(t);
+  http(t, s);
+  agentSession(t, 'address-only-session');
+  const state = realpathSync(mkdtempSync(join(tmpdir(), 'forge-addressed-state-'))),
+    previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = state;
+  t.after(() => {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+    rmSync(state, { recursive: true, force: true });
+  });
+  const folder = dirname(s.root),
+    before = readdirSync(folder).sort();
+  assert(!existsSync(s.root));
+  const first = await agentCli([s.root, 'start', JSON.stringify({ ...s.address, outcome: 'Address only' })]);
+  assert.equal(first.action, 'start');
+  assert.deepEqual(readdirSync(folder).sort(), before, 'no ROOT.forge-client beside the missing ROOT');
+  const addressed = readdirSync(join(state, 'forge', 'addressed'));
+  assert(
+    addressed.some(name => name.endsWith('.forge-client')),
+    'client state lives in Forge state',
+  );
+  // The retained address still serves a later call without url + projectId from the same ROOT.
+  const next = await agentCli([s.root, 'start', JSON.stringify({ outcome: 'Address only' })]);
+  assert.equal(next.operationId, first.operationId);
+  assert.deepEqual(readdirSync(folder).sort(), before);
+});
+
 test('the actual agent CLI routes explicit hosted addressing before native owner construction and retains the address', async t => {
   const s = agentFixture(t);
   http(t, s);

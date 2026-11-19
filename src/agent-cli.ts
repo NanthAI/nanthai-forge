@@ -5,7 +5,7 @@ import { actionableNotFound, resolveShortLaneId } from './argument-errors.js';
 import { resolve } from 'node:path';
 import { hostedAgentHelp, hostedHelpFor } from './hosted-agent-help.js';
 import { helpTopicIndex, helpTopicText, isHelpTopic } from './help-topics.js';
-import { hostedAgentAddress } from './hosted-agent-address.js';
+import { addressOnlyRoot, hostedAgentAddress } from './hosted-agent-address.js';
 import { FOLDER_ACTIONS, laneCheckoutRoot, laneSuccessor } from './hosted-lane-location.js';
 import { discoversCapabilitiesFirst, startEarlyCapabilities } from './hosted-capabilities-early.js';
 import { hostedAgentRoot } from './hosted-agent-journal.js';
@@ -66,7 +66,9 @@ function readInput(path: string, name: string): string {
 /** Alias notices print only after the command succeeds, so error stderr stays one JSON object. */
 export async function agentCli(args: string[], options: AgentCliOptions = {}): Promise<unknown> {
   const notices: string[] = [];
-  const result = await runAgentCli(args, options, notices);
+  // An address-only call runs in Forge's own state folder (59f0e296); the turn hook reads it there.
+  const effective: { root?: string } = {};
+  const result = await runAgentCli(args, options, notices, effective);
   for (const notice of notices) process.stderr.write(notice);
   const pending = (
     result as
@@ -92,7 +94,7 @@ export async function agentCli(args: string[], options: AgentCliOptions = {}): P
     process.stderr.write(`Forge work is unfinished; keep this turn active and run: ${pending.waitCommand}\n`);
   // Unfinished work this agent session owns, for its turn-end hook (one local write).
   if (options.process && pending?.inProgress && args[0] && ['land', 'finish', 'wait'].includes(args[1] ?? ''))
-    recordTurnWait(resolve(args[0]), pending.next, null);
+    recordTurnWait(resolve(effective.root ?? args[0]), pending.next, null);
   return result;
 }
 
@@ -109,7 +111,12 @@ function helpText(topic: string | undefined) {
   return text;
 }
 
-async function runAgentCli(args: string[], options: AgentCliOptions, notices: string[]): Promise<unknown> {
+async function runAgentCli(
+  args: string[],
+  options: AgentCliOptions,
+  notices: string[],
+  effective: { root?: string },
+): Promise<unknown> {
   let stdin: string | undefined;
   const read = (path: string, name: string) => {
     const value = readInput(path, name);
@@ -123,7 +130,8 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   }
   const textMode = args[1] === 'wait' && args.includes('--text');
   if (textMode) args = args.filter(arg => arg !== '--text');
-  const [root, requestedAction, ...rawTail] = args;
+  const [rootArg, requestedAction, ...rawTail] = args;
+  let root = rootArg ?? '';
   const client = clientOptions(rawTail),
     tail = client.rest;
   if (requestedAction === 'help' || requestedAction === '--help') {
@@ -214,6 +222,7 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
     return configureEditHooks(resolve(root), selected, action === 'uninstall-hooks');
   }
   const hosted = hostedAgentAddress(root, selected);
+  if (hosted) effective.root = root = addressOnlyRoot(root, hosted);
   action = canonical(lowerVerb(form!, Boolean(hosted)));
   if (action === 'history') {
     invariant(
@@ -252,7 +261,7 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
     )
       return;
     const current = newForm(requestedAction!, command, Boolean(hosted));
-    if (current) notices.push(aliasNotice(root, requestedAction!, current));
+    if (current) notices.push(aliasNotice(rootArg ?? root, requestedAction!, current));
   };
   if (hosted) {
     // A unique short laneId of a Lane this machine opened resolves locally (no network).

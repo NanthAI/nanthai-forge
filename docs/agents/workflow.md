@@ -2154,7 +2154,10 @@ nforge agent ROOT friction '{"title":"…","detail":"…","area":"cli"}'
 ```
 
 Recording uses one mutation; field errors use zero network calls. Hosted roots
-need no Git; explicit `url` plus `projectId` works from any folder.
+need no Git; explicit `url` plus `projectId` works from any folder. When ROOT does
+not exist (a project id typed as ROOT), its client state lives in Forge's state folder
+(`$XDG_STATE_HOME/forge/addressed`, default `~/.local/state`), never beside ROOT, and
+later calls with the same ROOT still find the address.
 `FORGE_ROOT_UNAVAILABLE` names an unaddressed root and next steps.
 
 `heavy --help`, `-h`, no command and `--status` acquire no slot and use no network.
