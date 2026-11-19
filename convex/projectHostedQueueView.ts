@@ -15,6 +15,7 @@ import { hostedRecordSchema } from '../src/hosted-records';
 import { landingSuspect } from '../src/hosted-landing-suspect';
 import { landingHold } from '../src/hosted-landing-hold';
 import { landingStateField } from '../src/landing-state';
+import { urgentNotApplied } from '../src/receipt-slim';
 import { invariant } from '../src/errors';
 import type { QueueStatusKey } from '../src/hosted-queue-status';
 import { QUEUE_VIEW_LIMIT, QUEUE_VIEW_PAGES } from '../src/hosted-queue-view';
@@ -123,6 +124,8 @@ export const read = query({
               }
             : {}),
           priority: state.priority ?? 'normal',
+          // An urgent request queued at normal says so (friction 596b75a3); from the row already read.
+          ...(urgentNotApplied(state) ? { urgentNotApplied: urgentNotApplied(state) } : {}),
           batchId: state.batchId ?? null,
           inTrain: train.has(state.id),
           suspect: landingSuspect(state),

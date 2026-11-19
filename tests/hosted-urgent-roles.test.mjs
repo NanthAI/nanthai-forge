@@ -57,6 +57,55 @@ test('an agent on the owner login asking for urgent stays normal and is told why
   assert.match(state.priorityReason, /urgentRoles/);
 });
 
+test('596b75a3: an urgent request queued at normal says so on land, observe and queue', async () => {
+  const { urgentNotApplied, slimReceipt } = await import('../dist/receipt-slim.js');
+  const { landAnnouncement } = await import('../dist/hosted-land-wait.js');
+  const view = await import(moduleUrl('../convex/projectHostedQueueView.ts'));
+  const f = await landingFixture();
+  const state = await f.enqueue(f.request({ priority: 'urgent' }));
+  const line = urgentNotApplied(state);
+  assert.match(
+    line,
+    /^Urgent not applied; landing at normal priority\. Urgent priority is limited to owner by/,
+  );
+  assert.match(
+    line,
+    /asOwner:true, or change agentDefaults\.urgentRoles with set-policy/,
+    'names how the owner grants it',
+  );
+  // Arrival order and an owner's prioritize are not downgrades.
+  assert.equal(urgentNotApplied((await f.enqueue()) ?? {}), undefined);
+  assert.equal(
+    urgentNotApplied({
+      priority: 'normal',
+      priorityReason: 'Priority changed to normal by the project owner',
+    }),
+    undefined,
+  );
+  const operationId = randomUUID();
+  const land = {
+    schema: 1,
+    transport: 'hosted',
+    action: 'land',
+    operationId,
+    result: { submission: state, inProgress: true, waitCommand: 'nforge wait x' },
+  };
+  assert.equal(slimReceipt(structuredClone(land)).result.urgentNotApplied, line, 'land JSON');
+  assert(landAnnouncement('/synthetic', {}, land).includes(line), 'land stderr');
+  const observed = slimReceipt({
+    schema: 1,
+    transport: 'hosted',
+    action: 'observe',
+    operationId: null,
+    result: { status: 'timeout', inProgress: true, submissions: [{ submission: state }] },
+  });
+  assert.equal(observed.result.urgentNotApplied, line, 'observe/wait');
+  const queue = JSON.parse(await f.call('queueView', view.read, { projectId: f.projectId }));
+  const entry = queue.entries.find(item => item.submissionId === state.id);
+  assert.equal(entry.urgentNotApplied, line, 'queue');
+  assert.equal(queue.entries.filter(item => item.urgentNotApplied).length, 1);
+});
+
 test('prioritize urgent from the owner CLI is refused with URGENT_NOT_ALLOWED unless asOwner says the owner asked', async () => {
   const f = await landingFixture();
   const state = await f.enqueue();

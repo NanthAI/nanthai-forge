@@ -5,6 +5,7 @@ import { shellQuote } from './shell-quote.js';
 import { resultOf, landTerminal } from './hosted-land-summary.js';
 import type { HostedAgentResponse } from './hosted-agent-transport.js';
 import { operationWait } from './agent-operation-wait.js';
+import { urgentNotApplied } from './receipt-slim.js';
 import { preparingFinishSource, retryableFinishSource } from './hosted-agent-finish-result.js';
 
 /** The single command that resumes the existing selected-target observer without
@@ -62,7 +63,8 @@ export function landAnnouncement(
   const wait = landWaitCommand(root, response);
   const replay = (resultOf(response) as { replayParameters?: { laneId?: unknown } }).replayParameters;
   const recovery = wait ? landRecoveryLine(root, command.laneId ?? replay?.laneId) : undefined;
-  const tail = recovery ? [recovery] : [];
+  const urgent = urgentNotApplied((resultOf(response) as { submission?: unknown }).submission);
+  const tail = [...(recovery ? [recovery] : []), ...(urgent ? [urgent] : [])];
   if (wake && wait)
     return [`land: operationId ${response.operationId}; submitting, then it continues without you`, ...tail];
   const recoveryCommand = resultOf(response).command;

@@ -6,6 +6,16 @@ const omit = (value: Json, ...keys: string[]): Json =>
 const obj = (value: unknown): Json | undefined =>
   value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : undefined;
 
+/** A landing that asked for urgent and was queued at normal says so where the agent reads it (land,
+ * observe, queue; friction 596b75a3). A downgrade's stored priorityReason starts "Normal: "
+ * (landingPriority); arrival order and an owner's prioritize do not. Formatting only, no read; kept here, on the CLI's minimal import path, so it adds no module (381c62df). */
+export function urgentNotApplied(submission: unknown): string | undefined {
+  const { priority, priorityReason } = (submission ?? {}) as { priority?: unknown; priorityReason?: unknown };
+  if (priority !== 'normal' || typeof priorityReason !== 'string' || !priorityReason.startsWith('Normal: '))
+    return undefined;
+  return `Urgent not applied; landing at normal priority. ${priorityReason.slice('Normal: '.length)}`;
+}
+
 /**
  * The receipt an agent reads, without the parts it already holds (Issue 47558a99). Every field removed
  * here is derivable from a kept field or one follow-up read: a checkout repeats its Lane, a clean
@@ -412,8 +422,18 @@ function brief(out: Json): Json {
               : action === 'status'
                 ? briefLaneStatus(result)
                 : undefined;
+  // An urgent request queued at normal: the stored reason is dropped above, so say it (596b75a3).
+  const urgent = [
+    result.submission,
+    ...(Array.isArray(result.submissions) ? result.submissions.map(entry => obj(entry)?.submission) : []),
+  ]
+    .map(urgentNotApplied)
+    .find(Boolean);
   out.result = compactReplyDetail(action, {
     ...(slim ?? result),
+    ...(urgent && ['finish', 'land', 'wait', 'observe'].includes(String(action))
+      ? { urgentNotApplied: urgent }
+      : {}),
     ...(result.protectedPathNotice !== undefined ? { protectedPathNotice: result.protectedPathNotice } : {}),
   });
   // Board lists keep one rendering per note; a read-more by id keeps full notes and replies.
