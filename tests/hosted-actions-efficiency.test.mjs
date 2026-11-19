@@ -4,7 +4,10 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { childEnv } from '../scripts/child-env.mjs';
 import { SourceWorkerReader } from '../dist/hosted-source-worker-reader.js';
 import { buildObjectRecipe } from '../dist/object-chunks.js';
 import { performance } from 'node:perf_hooks';
@@ -50,7 +53,50 @@ async function selected(s) {
   };
 }
 
-test('3000-file export uses bounded job-authorized source windows and streams actual Git bytes', async t => {
+const exportTest = '3000-file export uses bounded job-authorized source windows and streams actual Git bytes';
+test(exportTest, async t => {
+  // The 512 MiB bound covers the fixture, the export and its Git parent, not the test
+  // harness: a cold module cache loads the TypeScript compiler (about 200 MiB RSS) into
+  // whichever file compiles first. Measure in a fresh process over the modules compiled
+  // above, as hosted-batch-culprit does; a missing module fails instead of compiling.
+  if (process.env.FORGE_ACTIONS_EXPORT_CHILD !== '1') {
+    const child = spawn(
+      process.execPath,
+      [
+        '--import',
+        fileURLToPath(new URL('./check-runtime.mjs', import.meta.url)),
+        '--test',
+        '--test-reporter=tap',
+        `--test-name-pattern=^${exportTest}$`,
+        fileURLToPath(import.meta.url),
+      ],
+      {
+        env: childEnv({
+          allow: ['FORGE_TEST_SOURCE_PATCHES'],
+          extra: {
+            FORGE_TEST_MODULE_DIRECTORY: dirname(
+              fileURLToPath(moduleUrl('../convex/projectHostedActionsReadBatch.ts')),
+            ),
+            FORGE_TEST_PRECOMPILED: '1',
+            FORGE_ACTIONS_EXPORT_CHILD: '1',
+          },
+        }),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    const output = [];
+    child.stdout.on('data', bytes => output.push(bytes));
+    child.stderr.on('data', bytes => output.push(bytes));
+    const code = await new Promise((resolve, reject) => {
+      child.on('error', reject);
+      child.on('close', resolve);
+    });
+    const result = Buffer.concat(output).toString();
+    assert.equal(code, 0, result);
+    assert.match(result, /^# pass 1$/m, result);
+    t.diagnostic(result.match(/^\s*# (\{"files".*)$/m)?.[1] ?? result);
+    return;
+  }
   environment(t);
   const files = Array.from({ length: 3000 }, (_, i) => ({ path: `src/${i}.txt`, bytes: `synthetic ${i}\n` }));
   // Repeated hashes exercise deduplication before either describing or reading.
