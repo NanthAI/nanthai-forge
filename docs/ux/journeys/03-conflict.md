@@ -24,7 +24,7 @@ The advice field `wouldConflict.next` (built on the server, `predecessorConflict
 - **Early resolution on**: "Recommended: Resolve now against this exact predecessor, so both land without waiting for it. Run: `nforge agent . sync '{"predecessor":{…}}'`."
 - **Off**: "the recommended action is to keep waiting: if it lands, this landing stops with COMPOSITION_CONFLICT and land --save syncs main in and lands again. Or choose sync to resolve now: `COMMAND`."
 
-Both end with the provisional rule: a resolution is built on that Lane exactly as saved (State, receipt) and lands only after it lands; if it fails or is replaced, this Lane goes back to its own last save, the combined save stays in history, and the agent resolves again. The web Lane page shows the same recommendation and command, and marks a combined result Provisional with the save it is pinned to. Reason enums are no longer printed (J3-3). Question E20 (the journey Lane's open question on the recommended action) was not landed; the recommendation follows the existing rule: wait when the owner turned early resolution off, resolve now when it is on.
+Both end with the provisional rule: a resolution is built on that Lane exactly as saved (State, receipt) and lands only after it lands; if it fails or is replaced, this Lane goes back to its own last save, the combined save stays in history, and the agent resolves again. The web Lane page shows the same recommendation and command, and marks a combined result Provisional with the save it is pinned to. Reason enums are no longer printed (J3-3). The owner kept this rule on 2026-11-19 (question E20, option A): resolve now unless early resolution is switched off, wait when it is off, and the reply says which it chose and why. The generated agent rule now reads "follow the reply's Recommended command", so the rule and the reply no longer disagree (J3-2).
 
 The setting is `acceptance.earlyResolve`: `"automatic"` (also when absent), `"on"` or `"off"`, changed with `nforge x ROOT set-policy '{"acceptance":{"earlyResolve":"off"}}'`.
 
@@ -59,7 +59,7 @@ The setting is `acceptance.earlyResolve`: `"automatic"` (also when absent), `"on
 
 ## Questions for the owner
 
-1. When early resolve is not favoured, should the reply recommend one action (wait), with resolving now as the stated alternative?
+1. Answered 2026-11-19 (E20, option A): yes; see [the early-resolve reply](#the-early-resolve-reply).
 2. Should every early-resolve reply state that the resolution is redone if the change ahead does not land?
 3. Should a person be able to resolve a small text conflict in the browser, or is "hand to an agent" the only route by design?
 4. Is "early resolve" the name people will see in settings? The reply needs a plain phrase for "the change ahead of yours".

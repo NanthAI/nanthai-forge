@@ -40,7 +40,7 @@ Read `capabilities` for current rules and `policy` for settings; projects may ch
 - Never request urgent priority; it is owner-only.
 - After land is submitted, do not save, sync or edit that Lane until it lands or fails.
 - If a landing fails, fix it in the same Lane and land again; never cancel and start a new Lane.
-- If a queued landing reports wouldConflict, sync and land the same Lane again.
+- If a queued landing reports wouldConflict, follow the reply's Recommended command.
 - A LANDING_STALLED receipt names its repair command; run that, do not resubmit.
 <!-- agent-defaults:end -->
 
