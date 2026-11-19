@@ -54,7 +54,7 @@ More: help wait, help conflict, help check, help overlap.`,
 - The folder it names (workIn on stderr) holds main's lines under <<<<<<< main, yours after =======, closed by >>>>>>> lane (a sync is the other way round); the lines under ||||||| base are what both started from. A label ending 'Suggested resolution: keep the lane side' means your Lane removed the region the other side edited.
 - Edit every listed file free of markers, keeping both intents, then land --save from that folder: it saves the resolution and lands it. Forge completes the original Lane.
 - Exact predecessor conflicts offer pinned sync while checks run. Early resolution defaults on; acceptance.earlyResolve:"off" waits instead.
-- RESOLUTION_REQUIRED: a direct finish of the original Lane was refused; run the one resolve command it prints.
+- RESOLUTION_REQUIRED (land, sync): run the resolve it prints; resolve only completes the sync, so land --save after.
 - CONFLICT_MARKERS: a saved file still has markers; remove them and save again.
 - CONFLICT_SIDE_REQUIRED: a binary or one-sided file is unchanged; edit it, or keep it with resolve '{"laneId":"LANE_ID","keep":["PATH"]}'.
 - WORK_CONFLICT: local files changed under a retained apply; nothing was overwritten. Move the named path aside, then rerun the command it names (often recover-apply).

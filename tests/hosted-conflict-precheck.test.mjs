@@ -103,6 +103,23 @@ for (const cell of ['n10-r1', 'n5-r1'])
     await assert.rejects(s.transport(conflict.root).dispatch('finish', { laneId: conflict.laneId }), {
       code: 'RESOLUTION_REQUIRED',
     });
+    // ad80e037: a plain sync (save --sync) is refused the same way, and says what to run and what
+    // resolve does: it completes the sync, it does not land.
+    for (const [action, refused] of [
+      ['sync', /sync \(and save --sync\) is refused/],
+      ['finish', /land is refused/],
+    ])
+      await assert.rejects(
+        s.transport(conflict.root).dispatch(action, { laneId: conflict.laneId }),
+        error => {
+          assert.equal(error.code, 'RESOLUTION_REQUIRED');
+          assert.equal(error.recovery.next.action, 'resolve');
+          assert.match(error.message, refused);
+          assert.match(error.message, /: nforge agent .* resolve '/);
+          assert.match(error.message, /it does not land, so run land --save after it/);
+          return true;
+        },
+      );
     const subdir = join(conflict.root, 'nested', 'deep');
     mkdirSync(subdir, { recursive: true });
     assert.deepEqual(hostedAgentAddress(subdir, {}), s.address, 'CLI discovers address from ancestor Lane');

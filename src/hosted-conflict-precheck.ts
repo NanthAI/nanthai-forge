@@ -173,10 +173,13 @@ export function resolutionContinuation(
     instruction: `Edit ${paths.join(', ')} in ${root} to resolve each conflict hunk, then run: ${command}${why}`,
   };
 }
-export function requireResolution(root: string, laneId: string) {
+export function requireResolution(root: string, laneId: string, refused: string = 'finish') {
   if (!pendingConflictPaths(root, laneId).length) return;
   const recovery = resolutionContinuation(root, laneId, []);
-  recovery.instruction = `Complete the edited resolution before landing: ${recovery.command}`;
+  // Name what was refused and what resolve does, so a sync or save --sync refusal is no dead end
+  // (ad80e037): resolve completes the conflicted sync; it never lands.
+  const what = refused === 'finish' ? 'land' : refused === 'sync' ? 'sync (and save --sync)' : refused;
+  recovery.instruction = `Complete the edited resolution first (${what} is refused until then): ${recovery.command}. resolve saves the edited files and completes the sync; it does not land, so run land --save after it.`;
   throw new ForgeError('RESOLUTION_REQUIRED', recovery.instruction, undefined, recovery);
 }
 /** The command follows the edit, never advertises another compose/check as recovery. */

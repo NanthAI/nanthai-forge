@@ -536,7 +536,8 @@ export class HostedAgentTransport {
           marker.projectId === this.address.projectId
         ) {
           precheckPendingConflicts(this.root, laneId);
-          if (['finish', 'sync', 'compose'].includes(requestedAction)) requireResolution(this.root, laneId);
+          if (['finish', 'sync', 'compose'].includes(requestedAction))
+            requireResolution(this.root, laneId, requestedAction);
         }
       }
     }
