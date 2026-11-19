@@ -6,6 +6,13 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
 const root = fileURLToPath(new URL('..', import.meta.url));
+/** Exactly one match, once it has rendered: Lane activity loads after the frame, so wait for the
+ * first match (a DOM event, not a timer), then require exactly one. */
+async function one(locator, message) {
+  await locator.first().waitFor({ state: 'attached' });
+  assert.equal(await locator.count(), 1, message);
+}
+
 test('Code labels and activity follow file selection; work-map counts use singular and plural', async t => {
   if (!existsSync(chromium.executablePath())) return t.skip('Playwright Chromium is not installed.');
   const server = await createServer({
@@ -56,14 +63,14 @@ test('Code labels and activity follow file selection; work-map counts use singul
       assert.equal(await page.locator('vite-error-overlay').count(), 0);
       assert.equal(await page.getByLabel('Changing now', { exact: true }).count(), 0);
       assert.equal(await page.locator('.code-file-path').innerText(), 'README.md');
-      assert.equal(await page.locator('button[title="README.md"][aria-current="page"]').count(), 1);
+      await one(page.locator('button[title="README.md"][aria-current="page"]'));
       assert.equal(await page.getByText('Select a file').count(), 0);
       assert.equal(await page.locator('.code-main-pin').count(), 0);
       assert.match(await page.getByRole('button', { name: 'Source: main' }).innerText(), /main/);
       if (output)
         await page.screenshot({ path: `${output}/code-default-${width}-${theme}.png`, fullPage: true });
       // The collapsed src folder carries the dot of the Lane touching a file beneath it.
-      assert.equal(await page.locator('.code-folder > summary .code-touched').count(), 1);
+      await one(page.locator('.code-folder > summary .code-touched'));
       // Up to 1059 px the tree lives behind `Files`; choosing a file closes the sheet.
       const narrow = width <= 1059;
       const tree = async () => {
@@ -88,9 +95,9 @@ test('Code labels and activity follow file selection; work-map counts use singul
         /\/lanes\/exports\?.*diffFile=src%2Fexport\.ts/,
       );
       // The tree dot, the strip, the gutter mark and the This file panel agree on the same Lane.
-      assert.equal(await page.locator('button[title="src/export.ts"] .code-touched').count(), 1);
-      assert.equal(await page.locator('.source-pane .lane-touched-line').count(), 1);
-      assert.equal(await page.locator('.code-this-file .code-lane-row').count(), 1);
+      await one(page.locator('button[title="src/export.ts"] .code-touched'));
+      await one(page.locator('.source-pane .lane-touched-line'));
+      await one(page.locator('.code-this-file .code-lane-row'));
       assert.match(await page.locator('.code-this-file .code-lane-row').innerText(), /Working[\s\S]*L1/);
       assert.match(await page.locator('.code-this-file .code-symbol').innerText(), /const\s*filename\s*L1/);
       assert.equal(await page.getByText('Imports', { exact: true }).count(), 0);
@@ -111,10 +118,7 @@ test('Code labels and activity follow file selection; work-map counts use singul
       assert.equal(await page.locator('.code-changing-strip, .code-lane-row, .lane-touched-line').count(), 0);
       await page.goto(`${base}?theme=${theme}&map=1`);
       await page.getByText('Work map', { exact: true }).waitFor();
-      assert.equal(
-        await page.locator('svg title').filter({ hasText: 'Export filenames · 1 save' }).count(),
-        1,
-      );
+      await one(page.locator('svg title').filter({ hasText: 'Export filenames · 1 save' }));
       assert.match(await page.locator('svg').textContent(), /Explain exports · 2 saves/);
       assert.doesNotMatch(await page.locator('svg').textContent(), /1 saves/);
       if (output)
