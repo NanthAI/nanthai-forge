@@ -572,6 +572,28 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   a test-environment or JSX pragma, an encoding or `frozen_string_literal` line, a Dockerfile parser
   directive, a YAML schema line or a build tag. The base bytes come from this machine's object stores; without
   them a path counts as changed.
+  A *weakened test* is flagged in the preflight and land replies (`weakenedTests`), never refused.
+  For each changed existing JS/TS test file (under a `test`, `tests`, `__tests__`, `spec` or `e2e`
+  folder, or named `*.test.*`/`*.spec.*`; fixtures excluded) the saved version is parsed against the
+  Lane base's and compared test by test: fewer assertion calls (`assertions-removed`, with counts), a
+  check that pins less (`assertion-loosened`: strict to loose equality, an exact value to a bound,
+  a pattern or a truthiness, a negation, `throws` without its matcher), a removed test
+  (`test-removed`), a new skip (`skip-added`: `.skip`, `.todo`, `skipIf`, a `skip` option, a skip
+  call or a guarded early `return`), a name filter written into a test (`name-pattern-narrowed`:
+  `--test-name-pattern` and the like), `.only` (`only-added`), and, as a hint, a test whose input
+  changed under the same assertions (`input-changed`). A skip, early return or `.only` inside a file
+  helper counts for each test that calls it; aliased test functions (`const it = baseIt.skip`,
+  `test.extend`) and tests that pass their body by reference (`test('t', runCase)`) are read too.
+  Formatting (layout, comments, quote style, semicolons, trailing commas, a lone arrow parameter's
+  parentheses), order, renamed locals, a renamed test with the same body, a renamed or moved
+  `describe` block, a test moved into another changed file, subtests added or reordered under a
+  parent, assertions moved into a file helper the test calls, and new tests are not flagged. Flags
+  name the file, the test and the kind, never values. Put one line `Weakened-tests: <why>` in the
+  `land --save` message to clear them (`cleared` in the reply). Local and static: the base bytes
+  come from this machine's object stores (no server call, no test run); without them nothing is
+  flagged. A Lane over the check's bound (200 changed test files, 8 MiB read or 1.5 s; one file
+  over 1 MiB is skipped unread) reports the rest as `notChecked: "not checked: N files"` and claims
+  no removed test, so the check stays under about 2 s on a codemod Lane.
   A *docs-only* change (Markdown under `docs/` or at the root) parses no import graph: it runs only
   the tests that read a changed document, beside the static checks it triggers. A test reads a
   document when it names its path (`docs/a.md`, `../docs/a.md`; a root document needs a `./` or

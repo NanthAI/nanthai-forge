@@ -88,7 +88,12 @@ merges (or why nothing can go).
    Hosted preflight can take a few minutes; when your shell stops commands after
    120 s, run it in the background and wait for it, never re-run it in a loop.
 9. Never weaken, skip or quarantine tests or raise timeouts to hide races. Explain
-   any correction to an impossible assertion. Report observed commands, exit codes
+   any correction to an impossible assertion. Preflight and `land --save` flag a
+   changed existing test (`weakenedTests`: removed or loosened assertions, added skips
+   or name filters, a removed test, a changed input under the same assertions) by file
+   and test; a flag never fails the Lane. Fix it, or put one line
+   `Weakened-tests: <why>` in the `land --save` message to clear it
+   ([how](../parallel-work-defaults.md#preflight)). Report observed commands, exit codes
    and counts; label unrun work. Runtime/storage changes also need real billed
    usage and byte-placement evidence; otherwise that acceptance stays open.
    Perf/cost claims: [perf-claims](perf-claims.md).

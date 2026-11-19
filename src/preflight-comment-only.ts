@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import type ts from 'typescript';
 import { loadTypescript } from './lazy-typescript.js';
 import { digest } from './state/hash.js';
-import { machineObjectsDirectory } from './machine-object-store.js';
+import { localObjects } from './machine-object-store.js';
 import { parseNativeState, type NativeFile } from './state/format.js';
-import { clientCacheRoot } from './root-paths.js';
 
 const scriptKind = (path: string) =>
   /\.[cm]?tsx$/.test(path)
@@ -83,19 +80,7 @@ export function commentOnlyPaths(
 ): string[] {
   const candidates = paths.filter(path => scriptKind(path) !== null || hashHeader(path));
   if (!candidates.length) return [];
-  const stores = [join(clientCacheRoot(root), 'objects'), machineObjectsDirectory()].filter(
-    (dir): dir is string => !!dir,
-  );
-  const object = (id: string) => {
-    for (const dir of stores)
-      try {
-        const bytes = readFileSync(join(dir, id));
-        if (digest(bytes) === id) return bytes;
-      } catch {
-        /* Try the next store. */
-      }
-    return null;
-  };
+  const object = localObjects(root);
   try {
     const state = object(base);
     if (!state) return [];

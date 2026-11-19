@@ -649,3 +649,40 @@ test('Lane status leads with the Lane; project fix-needed notices follow with re
   const project = { ...receipt, result: { needsFix, githubMirror: { status: 'synced' } } };
   assert.deepEqual(slimReceipt(structuredClone(project)).result.needsFix, needsFix);
 });
+
+test('compact landings keep weakened-test flags, pending (preflight on) and landed (Issue 11901a0c)', () => {
+  const weakenedTests = {
+    count: 1,
+    flags: [
+      {
+        file: 'tests/a.test.mjs',
+        test: 't',
+        kind: 'assertions-removed',
+        assertions: { before: 2, after: 1 },
+      },
+    ],
+    cleared: 'b moved to c.test.mjs',
+  };
+  const pending = slimReceipt({
+    transport: 'hosted',
+    action: 'land',
+    result: {
+      inProgress: true,
+      command: 'nforge agent . wait',
+      submission: { phase: 'checking' },
+      defaults: { preflight: { status: 'incomplete', tests: 3, at: 'x' }, weakenedTests },
+    },
+  }).result;
+  assert.deepEqual(pending.defaults.weakenedTests, weakenedTests);
+  assert.equal(pending.defaults.preflight.tests, 3);
+  const landed = slimReceipt({
+    transport: 'hosted',
+    action: 'land',
+    result: {
+      submission: { phase: 'landed', acceptance: { receiptId: opId, head: sha } },
+      defaults: { preflight: { status: 'incomplete', tests: 3 }, weakenedTests },
+    },
+  }).result;
+  assert.deepEqual(landed.defaults.weakenedTests, weakenedTests);
+  assert.equal(landed.defaults.preflight, undefined, 'a landed brief still drops the preflight record');
+});

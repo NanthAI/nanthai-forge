@@ -473,6 +473,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         selection.laneId,
         selection.head,
         savedMarker?.selection.head === selection.head ? savedMarker.tree : undefined,
+        command.message,
       );
       if (Object.keys(advice).length) await session.journal.retain('finish-defaults', () => advice);
     }

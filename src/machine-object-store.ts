@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import { constants, existsSync, mkdirSync } from 'node:fs';
+import { constants, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { copyFile, rename, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { inTestProcess } from './test-isolation.js';
 import { neverIndex } from './forge-disk.js';
+import { clientCacheRoot } from './root-paths.js';
+import { digest } from './state/hash.js';
 
 /** One content-addressed object directory per OS user, shared by every checkout root on
  * this machine. Disposable bytes only: readers verify each digest before use, and access
@@ -46,3 +48,23 @@ export async function rememberObject(machine: string | null, source: string, id:
   }
 }
 const created = new Set<string>();
+
+/** Reads a content-addressed object (a State or a blob) from this machine's stores: the Lane
+ * checkout's cache, then the machine cache. Never a server call; null when absent or corrupt, or
+ * larger than `maxBytes` (checked before it is read). */
+export function localObjects(root: string, maxBytes = Infinity) {
+  const stores = [join(clientCacheRoot(root), 'objects'), machineObjectsDirectory()].filter(
+    (dir): dir is string => !!dir,
+  );
+  return (id: string) => {
+    for (const dir of stores)
+      try {
+        if (maxBytes !== Infinity && statSync(join(dir, id)).size > maxBytes) return null;
+        const bytes = readFileSync(join(dir, id));
+        if (digest(bytes) === id) return bytes;
+      } catch {
+        /* Try the next store. */
+      }
+    return null;
+  };
+}

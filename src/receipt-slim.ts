@@ -429,8 +429,12 @@ function brief(out: Json): Json {
   ]
     .map(urgentNotApplied)
     .find(Boolean);
+  const kept = slim ?? result;
+  // Weakened-test flags advise the agent before review (Issue 11901a0c): never --detail only.
+  const weakenedTests = obj(result.defaults)?.weakenedTests;
   out.result = compactReplyDetail(action, {
-    ...(slim ?? result),
+    ...kept,
+    ...(weakenedTests !== undefined ? { defaults: { ...obj(kept.defaults), weakenedTests } } : {}),
     ...(urgent && ['finish', 'land', 'wait', 'observe'].includes(String(action))
       ? { urgentNotApplied: urgent }
       : {}),

@@ -153,6 +153,16 @@ import { launchSnapshotWorker } from './hosted-snapshot-worker.js';
 import { LANE_SNAPSHOT } from './lane-snapshot-contract.js';
 import { executeSnapshots } from './hosted-lane-snapshot-restore.js';
 import { checkoutRequired, laneSuccessor, openLaneRoot } from './hosted-lane-location.js';
+import { localObjects } from './machine-object-store.js';
+import { digest } from './state/hash.js';
+import { parseNativeState } from './state/format.js';
+
+/** The weakened-test check's local reads (Issue 11901a0c), passed in so its lazy chunk stays small. */
+const weakenedReads = {
+  objects: localObjects,
+  digest,
+  files: (state: Buffer) => parseNativeState(state).files,
+};
 /** Reads and checkout creation: they neither show a Lane as working nor count as its activity. */
 /** A boolean option as given, else unset. */
 const flag = (value: unknown) => (typeof value === 'boolean' ? value : undefined);
@@ -1286,7 +1296,7 @@ export class HostedAgentTransport {
             state: { ...capture.marker.state, files: [...files.values()] },
           });
         },
-        finishGates: async (laneId: string, head: string, tree?: string) => {
+        finishGates: async (laneId: string, head: string, tree?: string, message?: string) => {
           await this.protectedNotice(readHostedLaneCheckout(root));
           const read = await this.overlapAdvice(laneId, capabilities.agentDefaults?.preflight !== 'off');
           const selected = readHostedLaneCheckout(root)?.selection;
@@ -1324,6 +1334,19 @@ export class HostedAgentTransport {
                   )
               : false,
           );
+          // Weakened-test flags advise (never refuse); a reason line in the message clears them.
+          const checkout = readHostedLaneCheckout(root);
+          if (checkout?.selection.laneId === laneId && checkout.selection.head === head) {
+            const { laneWeakenedTestsReply } = await import('./preflight-weakened-tests.js');
+            const weakened = laneWeakenedTestsReply(
+              weakenedReads,
+              root,
+              checkout.selection.base.head,
+              checkout.state.files,
+              message,
+            );
+            if (weakened) gates.weakenedTests = weakened;
+          }
           // The server requires this preflight result again at enqueue (Issue 029138ef).
           gatedLane = { laneId, head, preflight: preflightResult(gates.preflight) };
           if (this.serverFeatures?.includes('save-preflight-timing')) {
@@ -1988,6 +2011,15 @@ export class HostedAgentTransport {
       { budgetSeconds: command.budgetSeconds, trim: command.trim, only: stopped },
     );
     const head = marker.selection.head;
+    // Removed or loosened assertions, added skips, changed inputs: flags by file and test, local only.
+    const { laneWeakenedTestsReply } = await import('./preflight-weakened-tests.js');
+    const weakened = laneWeakenedTestsReply(
+      weakenedReads,
+      root,
+      marker.selection.base.head,
+      marker.state.files,
+    );
+    const weakenedTests = weakened ? { weakenedTests: weakened } : {};
     const landNext = {
       next: { action: 'land', mode: 'save', laneId },
       command: hostedRecoveryCommand(root, 'land --save', { laneId }),
@@ -2001,6 +2033,7 @@ export class HostedAgentTransport {
         laneId,
         head,
         plan,
+        ...weakenedTests,
         ...(plan.status === 'unavailable' ? landNext : planNext),
       });
     // The Lane state is read when the run starts, after any `nforge heavy` queue wait; edits made
@@ -2041,6 +2074,7 @@ export class HostedAgentTransport {
       failed: receipt.failed ?? 0,
       plan,
       receipt,
+      ...weakenedTests,
       ...(outcome === 'failed' ? planNext : landNext),
     });
   }
@@ -2296,7 +2330,12 @@ export type HostedAgentSession = {
   saveNotice?: SaveContract['onCapture'];
   holderSessionId?: string;
   sessionClaim?: import('zod').infer<typeof import('./hosted-lane.js').sessionClaimSchema>;
-  finishGates?: (laneId: string, head: string, tree?: string) => Promise<Record<string, unknown>>;
+  finishGates?: (
+    laneId: string,
+    head: string,
+    tree?: string,
+    message?: string,
+  ) => Promise<Record<string, unknown>>;
   /** The `gates` argument for this finish's landing (feature land-gates); undefined when not sent. */
   landGates?: (composeOperationId: string) => string | undefined;
 };
