@@ -129,6 +129,92 @@ test('a Lane with no save is never "Saved": its row says editing, no save yet (o
   );
 });
 
+test('a running check says its time against the usual check, overdue past the slowest, with a bounded clock (ecd6e610)', () => {
+  const start = Date.parse('2026-11-19T10:00:00Z');
+  const min = 60_000;
+  const time = ms => new Date(ms).toISOString().slice(11, 16);
+  const clock = { startedAt: start, usualMs: 10 * min, slowMs: 18 * min, note: null };
+  const at = elapsed => model.checkProgress(clock, start + elapsed, time);
+  assert.deepEqual(
+    [at(20_000).why, at(20_000).detail, at(20_000).nextAt],
+    ['under 1 min so far', 'usually about 10 min', start + min],
+  );
+  const six = at(6.5 * min);
+  assert.deepEqual([six.why, six.overdue, six.nextAt], ['6 min so far', false, start + 7 * min]);
+  assert.ok(Math.abs(six.at - (model.CHECK_FROM + (model.CHECK_TO - model.CHECK_FROM) * 0.65)) < 1e-9);
+  // Between the usual and the slowest it holds at the end of the stop, still counting; the clock stops at overdue.
+  const twelve = at(12 * min);
+  assert.deepEqual([twelve.at, twelve.overdue, twelve.why], [model.CHECK_TO, false, '12 min so far']);
+  assert.equal(at(17.5 * min).nextAt, start + 18 * min);
+  assert.equal(
+    at(18 * min).nextAt,
+    start + 18 * min + 1,
+    'at the slowest, the next change is the overdue moment',
+  );
+  const late = at(40 * min);
+  assert.deepEqual(
+    [late.why, late.detail, late.overdue, late.at, late.nextAt],
+    ['overdue: over 18 min', 'usually about 10 min', true, model.CHECK_TO, Infinity],
+  );
+  // No usual time reported: the start's clock time, the middle of the stop, and no timer at all.
+  const bare = model.checkProgress({ ...clock, usualMs: null, slowMs: null }, start + 5 * min, time);
+  assert.deepEqual(
+    [bare.why, bare.detail, bare.at, bare.nextAt],
+    ['started 10:00', 'usual time not reported yet', 2.5, Infinity],
+  );
+  // Waiting for a runner is said first, the time beside it.
+  const runner = model.checkProgress({ ...clock, note: 'waiting for a runner' }, start + 3 * min, time);
+  assert.deepEqual(
+    [runner.why, runner.detail],
+    ['waiting for a runner', '3 min so far · usually about 10 min'],
+  );
+});
+
+test('the yard gives a clock only to a Lane whose check is running, from the queue read alone (ecd6e610)', () => {
+  const started = '2026-11-19T10:00:00.000Z';
+  const entry = (laneId, phase, extra = {}) => ({
+    position: 1,
+    laneId,
+    landingState: { state: phase === 'checking' ? 'checking' : 'landing' },
+    phase,
+    submittedAt: started,
+    lastProgressAt: started,
+    ...extra,
+  });
+  const feed = {
+    lanes: [mark('a', 'checking'), mark('b', 'checking'), mark('c', 'ready')],
+    more: 0,
+    main: null,
+  };
+  const queue = {
+    total: 3,
+    listed: 3,
+    more: false,
+    usualCheck: { seconds: 600, slowSeconds: 1080, landings: 12 },
+    entries: [
+      entry('a', 'checking', { checkStartedAt: started }),
+      entry('b', 'checking', { position: 2 }),
+      entry('c', 'ready', { position: 3, checkStartedAt: started }),
+    ],
+  };
+  const rows = new Map(
+    model.buildYard(feed, [], queue, Date.parse(started)).rows.map(row => [row.laneId, row]),
+  );
+  assert.deepEqual(rows.get('a').check, {
+    startedAt: Date.parse(started),
+    usualMs: 600_000,
+    slowMs: 1_080_000,
+    note: null,
+  });
+  assert.equal(rows.get('b').check, null, 'no recorded start: no clock, never a guess');
+  assert.equal(rows.get('c').check, null, 'a Lane ready to land has no running check');
+  const unreported = model.buildYard(feed, [], { ...queue, usualCheck: null }, Date.parse(started));
+  assert.deepEqual(
+    [unreported.rows.find(row => row.laneId === 'a').check.usualMs, unreported.rows[0].check?.slowMs ?? null],
+    [null, null],
+  );
+});
+
 test('the yard says when the line feed holds more open Lanes than it lists', () => {
   const yard = model.buildYard(
     { ...feed([mark('a', 'editing')], 41), moreIsLowerBound: true },

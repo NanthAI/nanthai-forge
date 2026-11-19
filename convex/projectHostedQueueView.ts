@@ -19,13 +19,16 @@ import { invariant } from '../src/errors';
 import type { QueueStatusKey } from '../src/hosted-queue-status';
 import { QUEUE_VIEW_LIMIT, QUEUE_VIEW_PAGES } from '../src/hosted-queue-view';
 import { auditRow, mainRedField } from './projectHostedMainAuditState';
+import { usualCheck } from './projectFailureCause';
 
 /** One bounded read of the landing queue (09e637f7 minimal slice): who is in it,
  * in dispatch order, with Lane, Intent title, phase, last failing test files
  * and how many generations each entry went through. Reads the maintained queue
  * directory (at most QUEUE_VIEW_PAGES pages) plus about seven indexed rows per
  * listed entry; no queue scan, history, source bytes, scheduler or idle work. Entries held
- * for a person or a dependency follow the dispatch order with no position and a `hold`. */
+ * for a person or a dependency follow the dispatch order with no position and a `hold`.
+ * A checking entry carries its check's start (from the landing row already read); while any does, the reply carries
+ * the project's usual check times, one more indexed read of the landing-speed row (Item ecd6e610). */
 export const read = query({
   args: { projectId: v.id('hostedProjects'), limit: v.optional(v.number()) },
   returns: v.string(),
@@ -129,6 +132,10 @@ export const read = query({
           recomposeCount: Math.max(0, attempt.number - 1),
           submittedAt: state.at,
           lastProgressAt: state.timing?.ciProgressAt ?? state.timing?.selectedAt ?? state.at,
+          // When its check was reserved: the start the usual check time counts from (Item ecd6e610).
+          ...(state.phase === 'checking' && state.timing?.checkReservedAt
+            ? { checkStartedAt: state.timing.checkReservedAt }
+            : {}),
           ...(state.error ? { error: state.error.code } : {}),
           // Held entries stay listed, after dispatch order, naming what releases them (5c59940b).
           ...(hold ? { hold } : {}),
@@ -176,8 +183,12 @@ export const read = query({
       const total = (queue?.status?.total ?? keys.length - held + parked) - parked;
       // One indexed read: main red and why, in this reply (Item 687d1eda), so no landing is blamed by guess.
       const red = (await auditRow(ctx, projectId))?.red;
+      const usual = entries.some(entry => entry.checkStartedAt)
+        ? await usualCheck(ctx, projectId)
+        : undefined;
       return JSON.stringify({
         total,
+        ...(usual !== undefined ? { usualCheck: usual } : {}),
         ...(held ? { held } : {}),
         ...(red ? { mainRed: mainRedField(red) } : {}),
         listed: entries.length + preparationEntries.length,

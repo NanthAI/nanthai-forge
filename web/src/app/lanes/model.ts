@@ -43,6 +43,8 @@ export type QueueEntry = {
   dependsOn?: { submissionId: string };
   /** Main already took files this entry changes, so its Lane must update from main before it can land. */
   needsSync?: { paths: string[]; more?: number };
+  /** A checking entry: when its check was reserved (Item ecd6e610). */
+  checkStartedAt?: string;
 };
 export type QueueView = {
   total: number;
@@ -50,6 +52,9 @@ export type QueueView = {
   listed: number;
   more: boolean;
   entries: QueueEntry[];
+  /** While an entry is checking: the project's usual (p50) and usual slowest (p90) check, or null when fewer than three
+   * landings reported one. Scoped and full checks are not told apart in the window it comes from. */
+  usualCheck?: { seconds: number; slowSeconds: number; landings: number } | null;
 };
 /** The overlap view's shared saved paths (`projectNowOverlaps:now`, src/now-overlap-view.ts). */
 export type SharedFiles = {
@@ -99,7 +104,73 @@ export type YardRow = {
   replacedBy: string | null;
   /** Waiting in the queue for longer than a usual check. */
   longWait: boolean;
+  /** A running check: when it started and how long checks here usually take (ms), worked into words at draw time. */
+  check: CheckClock | null;
 };
+
+/** A checking Lane's clock (Item ecd6e610): its check's start and the project's usual (p50) and usual slowest (p90)
+ * check times, or null when not reported. Shards report together at the end, so there is no shard count. */
+export type CheckClock = {
+  startedAt: number;
+  usualMs: number | null;
+  slowMs: number | null;
+  /** What it waits on before it runs ("waiting for a runner"), said first; null while it runs. */
+  note: string | null;
+};
+
+/** Where on the Checking stop a running check sits (the track runs 0 to 4, main at 4): from just inside its start
+ * to just inside its end, so the mark never sits on a stop's edge. */
+export const CHECK_FROM = 2.1;
+export const CHECK_TO = 2.9;
+const MINUTE = 60_000;
+const minutes = (ms: number) => Math.max(1, Math.round(ms / MINUTE));
+
+/** A running check, as its row says it now: the elapsed and usual time, overdue past the usual slowest (the server's
+ * stall alarm and watchdog still end a dead check; the page never decides that), where its mark sits, and the one
+ * moment its words next change by themselves. `nextAt` is Infinity once overdue or with no usual time: the words then
+ * stay true without a clock ("over 18 min", the start's clock time), so no timer runs past the usual slowest. Pure. */
+export function checkProgress(check: CheckClock, now: number, time: (ms: number) => string) {
+  const said = clockWords(check, now, time);
+  return check.note && !said.overdue
+    ? { ...said, why: check.note, detail: `${said.why} · ${said.detail}` }
+    : said;
+}
+function clockWords(check: CheckClock, now: number, time: (ms: number) => string) {
+  const elapsed = Math.max(0, now - check.startedAt);
+  const usual = check.usualMs;
+  const slow = check.slowMs === null ? null : Math.max(check.slowMs, usual ?? 0);
+  const fraction = usual ? Math.min(1, elapsed / usual) : 0.5;
+  const at = CHECK_FROM + (CHECK_TO - CHECK_FROM) * fraction;
+  if (!usual || slow === null)
+    return {
+      why: `started ${time(check.startedAt)}`,
+      detail: 'usual time not reported yet',
+      overdue: false,
+      fraction,
+      at,
+      nextAt: Infinity,
+    };
+  const usually = `usually about ${minutes(usual)} min`;
+  if (elapsed > slow)
+    return {
+      why: `overdue: over ${minutes(slow)} min`,
+      detail: usually,
+      overdue: true,
+      fraction,
+      at,
+      nextAt: Infinity,
+    };
+  const whole = Math.floor(elapsed / MINUTE);
+  return {
+    why: whole < 1 ? 'under 1 min so far' : `${whole} min so far`,
+    detail: usually,
+    overdue: false,
+    fraction,
+    at,
+    // The next whole minute, or the moment it becomes overdue, whichever is first.
+    nextAt: Math.min(check.startedAt + (whole + 1) * MINUTE, check.startedAt + slow + 1),
+  };
+}
 
 export type Yard = {
   rows: YardRow[];
@@ -223,6 +294,7 @@ export function buildYard(
       lanes: lane ? (perItem.get(lane.intentId) ?? 1) : 1,
       replacedBy: by,
       longWait: false,
+      check: null,
     };
     const left = by ? { why: `replaced by ${short(by)}`, detail: said.why || null } : {};
     // Held for a dependency the queue read names: the Lane it lands after, by name (Item 9e748e41).
@@ -238,6 +310,18 @@ export function buildYard(
         }
       : {};
     if (mark.held) return { ...base, band: 'needs', ...after, ...left };
+    // A running check counts from its reservation, as the usual check time does (Item ecd6e610).
+    const started =
+      mark.stage === 'checking' && entry?.phase === 'checking' ? Date.parse(entry.checkStartedAt ?? '') : NaN;
+    const usual = queue?.usualCheck;
+    const check: CheckClock | null = Number.isFinite(started)
+      ? {
+          startedAt: started,
+          usualMs: usual ? usual.seconds * 1000 : null,
+          slowMs: usual ? usual.slowSeconds * 1000 : null,
+          note: said.why === 'its check is running' ? null : said.why || null,
+        }
+      : null;
     if (entry && entry.position !== null) {
       const wait = mark.stage === 'ready' ? waitLine(entry, queue?.entries ?? [], now) : null;
       return {
@@ -247,6 +331,7 @@ export function buildYard(
         why: wait?.line ?? (entry.position === 1 ? 'lands next' : `position ${entry.position}`),
         detail: wait?.long ? 'longer than a usual check' : null,
         longWait: wait?.long ?? false,
+        check,
       };
     }
     if (lane?.dormant)
@@ -259,6 +344,7 @@ export function buildYard(
       };
     return {
       ...base,
+      check,
       band: mark.stage === 'checking' || mark.stage === 'ready' ? 'queue' : 'work',
       // "no save yet" only when the Lane read says so; a Lane outside that read says nothing it does not know.
       why:

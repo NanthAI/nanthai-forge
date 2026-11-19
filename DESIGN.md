@@ -284,6 +284,7 @@ Flat: four surface steps and one-pixel seams. A shadow only on a menu, a sheet, 
 - **Curves:** `--ease-out` for everything in the app; `--ease-in-out` for public-page scenes only. No bounce, no overshoot, no shake.
 - **Never in the app:** entrances, staggered lists, counting numbers, skeleton shimmer past 600 ms, or any animation on a key press that repeats all day.
 - **Only transforms and opacity** are animated, as CSS transitions; no script per frame and no motion library. No request is caused by motion.
+- **A running check's progress** is the one linear motion: on the Lanes yard its mark glides along the Checking stop from the check's recorded start over the project's usual check time (a CSS animation with a negative delay, transform only), holds at the end of the stop, and turns to the waiting tone past the usual slowest. The words beside it ("6 min so far, usually about 11 min") redraw once a minute at most and stop at overdue; asleep (hidden or idle tab) the mark rests where it is.
 - **Interruptible:** anything that gets a new target while moving turns toward it from where it is.
 - **Reduced motion:** every change is instant; shape and word still carry the state (`base.css` removes every transition and animation under `[data-ds]`). On the public page the hero shows one still and charts are drawn complete.
 - **Hidden tab:** nothing is drawn. On return there is one catch-up to the current state.

@@ -34,3 +34,16 @@
     .row.hv { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; }
   }
 }
+/* A running check's mark glides along the Checking stop (Item ecd6e610): one linear run over the usual check time,
+   started in the past by the check's elapsed time, holding at the end of the stop. Transform only, so the compositor
+   draws it; reduced motion removes the animation (ds base.css) and the mark rests at its place now. */
+[data-ds] .yard .trk.going .nw { animation: yard-check var(--run) linear var(--from) both; }
+[data-ds] .yard .trk.going .fl { animation: yard-fill var(--run) linear var(--from) both; }
+@keyframes yard-check {
+  from { transform: translateX(calc(var(--p0) * 25cqw)); }
+  to { transform: translateX(calc(var(--p1) * 25cqw)); }
+}
+@keyframes yard-fill {
+  from { transform: scaleX(calc(var(--p0) / 4)); }
+  to { transform: scaleX(calc(var(--p1) / 4)); }
+}

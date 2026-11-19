@@ -2,11 +2,24 @@
 // The yard (DESIGN.md figures): every open Lane on the shell's four stops and main, in bands, stuck work first. The
 // counts per stop are the shell strip's alone, never repeated here (owner dogfood 2026-11-17). Each
 // row is a link to its Lane; the band that waits on the reader is the first stop. Static markup: no behaviour layer.
-import type { CSSProperties } from 'react';
+// A running check (Item ecd6e610) says how long it has run against the project's usual check, and its mark glides
+// along the Checking stop by a CSS animation drawn from the check's start: the browser moves it with no script per
+// frame and no server call. One timer at most, for the whole yard, armed only for the next minute its words change and
+// never past the usual slowest check, none while live reads sleep (hidden or idle tab), when the mark rests in place.
+import { useEffect, useState, type CSSProperties } from 'react';
 import { Avatar, Band, State } from '../../ds';
+import { useReadsAsleep } from '../../live-reads';
 import { A } from '../frames';
 import type { LineStage } from '../Line';
-import { bandTitles, stopWords, type Band as BandName, type YardRow } from './model';
+import {
+  CHECK_FROM,
+  CHECK_TO,
+  bandTitles,
+  checkProgress,
+  stopWords,
+  type Band as BandName,
+  type YardRow,
+} from './model';
 
 /** Where on the track a Lane sits: the middle of its stop (0 to 4, main at 4). */
 const place: Record<LineStage, number> = { editing: 0.5, saved: 1.5, checking: 2.5, ready: 3.5 };
@@ -21,6 +34,7 @@ export function Yard({
   hrefOf: (laneId: string) => string;
   dense: boolean;
 }) {
+  const { now, asleep } = useCheckClock(rows);
   return (
     <div className={dense ? 'yard dense' : 'yard'}>
       {order.map(band => {
@@ -36,7 +50,7 @@ export function Yard({
             />
             {inBand.map(row => (
               <div role="listitem" key={row.laneId} style={{ display: 'contents' }}>
-                <LaneLine row={row} href={hrefOf(row.laneId)} dense={dense} />
+                <LaneLine row={row} href={hrefOf(row.laneId)} dense={dense} now={now} glide={!asleep} />
               </div>
             ))}
           </div>
@@ -46,15 +60,64 @@ export function Yard({
   );
 }
 
-function LaneLine({ row, href, dense }: { row: YardRow; href: string; dense: boolean }) {
+const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+/** The render time for the yard's running checks, redrawn once at the next moment any of their words change by
+ * themselves; asleep, nothing is armed and the marks rest. Server writes redraw it as they always do. */
+function useCheckClock(rows: readonly YardRow[]) {
+  const [tick, redraw] = useState(0);
+  const asleep = useReadsAsleep();
+  const now = Date.now();
+  const next = Math.min(
+    ...rows.map(row => (row.check ? checkProgress(row.check, now, clock).nextAt : Infinity)),
+  );
+  useEffect(() => {
+    if (asleep || next === Infinity || document.hidden) return;
+    const timer = setTimeout(() => redraw(n => n + 1), Math.max(0, next - Date.now()));
+    return () => clearTimeout(timer);
+  }, [asleep, next, tick]); // tick: a timer that fired a moment early arms again for the same moment.
+  return { now, asleep };
+}
+
+function LaneLine({
+  row,
+  href,
+  dense,
+  now,
+  glide,
+}: {
+  row: YardRow;
+  href: string;
+  dense: boolean;
+  now: number;
+  glide: boolean;
+}) {
   const who = row.actor ?? 'not reported';
+  const progress = row.check ? checkProgress(row.check, now, clock) : null;
+  // Past the usual slowest check: the warning tone. The server's deadline still ends a dead check.
+  const state = progress?.overdue ? 'waiting' : row.state;
+  const why = progress ? progress.why : row.why;
+  const detail = progress ? progress.detail : row.detail;
+  // From where it is now to the end of the stop, over what is left of the usual check; overdue it holds at the end.
+  const going = !!progress && glide && progress.fraction < 1 && row.check!.usualMs !== null;
+  const track = {
+    '--p': progress ? progress.at : place[row.stage],
+    ...(going
+      ? {
+          '--p0': CHECK_FROM,
+          '--p1': CHECK_TO,
+          '--run': `${row.check!.usualMs}ms`,
+          '--from': `${-(now - row.check!.startedAt)}ms`,
+        }
+      : {}),
+  } as CSSProperties;
   const where = `${stopWords[row.stage]}${row.position ? `, number ${row.position} in the queue` : ''}`;
   // Two open Lanes of one Item must never look the same: the short Lane mark, and how many the Item has.
   const mark = row.untitled ? null : row.mark;
   return (
     // The visible text is the link's name, in reading order (no hand-made label to drift from it); the stop and queue
     // place, drawn on the track, are spoken from a hidden line at the end.
-    <A className="ln" href={href} data-st={row.state}>
+    <A className="ln" href={href} data-st={state}>
       <div className="lab">
         <Avatar handle={row.actor ?? '?'} />
         <div className={dense ? 'ttl' : 'ttl wrap2'} dir="auto">
@@ -77,7 +140,7 @@ function LaneLine({ row, href, dense }: { row: YardRow; href: string; dense: boo
           </span>
         </div>
       </div>
-      <div className="trk" style={{ '--p': place[row.stage] } as CSSProperties} aria-hidden="true">
+      <div className={going ? 'trk going' : 'trk'} style={track} aria-hidden="true">
         <div className="rl">
           <i className="fl" />
           <div className="nw">
@@ -88,12 +151,12 @@ function LaneLine({ row, href, dense }: { row: YardRow; href: string; dense: boo
         </div>
       </div>
       <div className="actn">
-        <State word={row.glyph} state={row.state}>
+        <State word={row.glyph} state={state}>
           {row.word}
         </State>
         <span className="why">
-          <b>{row.why}</b>
-          {row.detail ? <> {row.detail}</> : null}
+          <b>{why}</b>
+          {detail ? <> {detail}</> : null}
         </span>
         <span className="sr">. {where}</span>
       </div>

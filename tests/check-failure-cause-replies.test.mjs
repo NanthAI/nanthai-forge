@@ -100,3 +100,24 @@ test('the usual check time is the median of reported check minutes and needs thr
     landings: 4,
   });
 });
+
+test('the Lanes page reads the usual check (median) and the usual slowest (p90, nearest rank) from the same window', () => {
+  const { usualFromSamples } = screen;
+  const sample = minutes => [0, 1, minutes, 'id'];
+  assert.equal(
+    usualFromSamples([sample(5), sample(null), sample(7)]),
+    null,
+    'three reported checks or nothing',
+  );
+  assert.deepEqual(usualFromSamples([sample(9), sample(5), sample(6)]), {
+    seconds: 360,
+    slowSeconds: 540,
+    landings: 3,
+  });
+  const ten = [3, 4, 5, 6, 7, 8, 9, 10, 11, 30].map(sample);
+  assert.deepEqual(
+    usualFromSamples(ten),
+    { seconds: 450, slowSeconds: 660, landings: 10 },
+    'one outlier is not p90',
+  );
+});

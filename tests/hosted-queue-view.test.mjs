@@ -27,6 +27,21 @@ test('queue view: one bounded read lists entries with Lane, Intent, phase, faili
     if (!task) break;
     await f.execute(task);
   }
+  // Item ecd6e610: while checks run, each checking entry carries its check's start (the run's reservation) and the
+  // reply carries the project's usual check times, null here because no landing has settled yet.
+  let running = await read();
+  // The queue's next wake sees each reserved run and moves its landing to checking, stamping the reservation.
+  for (let i = 0; i < 400 && !running.entries.some(entry => entry.phase === 'checking'); i++) {
+    const task = f.pending().find(task => !task.name.startsWith('projectHostedLandingStall'));
+    if (!task) break;
+    await f.execute(task);
+    running = await read();
+  }
+  const checking = running.entries.filter(entry => entry.phase === 'checking');
+  assert(checking.length >= 1, JSON.stringify(running.entries.map(entry => entry.phase)));
+  const reserved = new Set(f.runs().map(run => run.at));
+  for (const entry of checking) assert(reserved.has(entry.checkStartedAt), JSON.stringify(entry));
+  assert.equal(running.usualCheck, null);
   const first = f.runs()[0];
   await f.fail(first.id, 'tests/member-0.test.mjs');
   const before = await read();
@@ -39,7 +54,15 @@ test('queue view: one bounded read lists entries with Lane, Intent, phase, faili
     assert(['composing', 'queued', 'checking', 'ready', 'landed', 'terminal-failed'].includes(entry.phase));
     assert(Number.isInteger(entry.recomposeCount) && entry.recomposeCount >= 0);
     assert(Array.isArray(entry.lastFailingTests));
+    // Item ecd6e610: only a checking entry carries its check's start, as an ISO time.
+    if (entry.checkStartedAt !== undefined) {
+      assert.equal(entry.phase, 'checking');
+      assert.equal(new Date(entry.checkStartedAt).toISOString(), entry.checkStartedAt);
+    }
   }
+  // The usual check times come with a checking entry only (one more indexed read); none reported here yet.
+  if (before.entries.some(entry => entry.checkStartedAt)) assert.equal(before.usualCheck, null);
+  else assert.equal('usualCheck' in before, false);
   // Positions come back in dispatch order and the limit bounds the listing.
   const positions = before.entries.map(e => e.position ?? Infinity);
   assert.deepEqual(
