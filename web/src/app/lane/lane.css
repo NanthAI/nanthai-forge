@@ -15,6 +15,9 @@
     .lane-p > .side > * { order: 2; background: var(--surface); }
     .lane-p > .side > .lr-lead { order: -1; border-bottom: var(--rule) solid var(--line); }
   }
+  /* The recommendation names the Lane ahead, of any length: its header wraps instead of widening a phone page. */
+  .lr-lead > .ph { flex-wrap: wrap; row-gap: var(--s-0); padding-block: var(--s-1); }
+  .lr-lead > .ph > .st { flex: 0 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
   .lr-file { position: relative; }
   .lr-file > .file > summary { padding-right: calc(var(--gut) + 30px); cursor: pointer; }
   .lr-file > .tick { position: absolute; top: 0; right: calc(var(--gut) - 6px); width: 28px; height: var(--row-h); display: grid; place-items: center; border: 0; background: transparent; padding: 0; }

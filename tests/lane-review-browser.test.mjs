@@ -213,6 +213,17 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
           }
         }
     });
+
+    await t.test('phone width holds with a wider fallback font (Linux CI metrics)', async t => {
+      // 1dd4e095: Linux's fallback glyphs are wider than macOS's; the recommendation header once overflowed to 398 px.
+      const page = await open(t, PHONE, 's=review');
+      await page.addStyleTag({ content: '* { font-family: Verdana, monospace !important; }' });
+      const [scroll, inner] = await page.evaluate(() => [document.documentElement.scrollWidth, innerWidth]);
+      assert.ok(
+        scroll <= inner,
+        `no sideways scroll at ${PHONE.width} with a wide font: ${scroll} > ${inner}`,
+      );
+    });
   } finally {
     await browser.close();
     rmSync(out, { recursive: true, force: true });
