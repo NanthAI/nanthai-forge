@@ -178,16 +178,10 @@ export async function formLandingBatch(
     );
   }
   const ordered = orderHostedLandingRows([...new Map(windows.map(row => [row.submissionId, row])).values()]);
-  const keepHealthy = process.env.FORGE_QUEUE_COHORT_KEEP_HEALTHY === '1';
   const members = ordered
     .flatMap(row => {
       const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
       if (!row.batchSelection || state.batchId || state.batchSolo || state.request.finish?.after) return [];
-      // A later arrival can join a deferred generation, but an individual
-      // check already owns its exact Candidate and keeps its own completion.
-      // Projects with admission already enabled use its pass as entry
-      // evidence. An unavailable admission falls through to the solo check.
-      if (keepHealthy && (row.runId || (admission && row.admission?.status !== 'passed'))) return [];
       const attempt = hostedLandingAttemptSchema.parse(JSON.parse(row.batchSelection));
       return attempt.id === row.attemptId &&
         attempt.actor.id === own.actor.id &&

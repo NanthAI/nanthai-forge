@@ -70,7 +70,6 @@ export async function splitLandingBatch(
   batch: LandingBatch,
   failure?: BatchFailure,
   transition?: LandingBatch['transition'],
-  withdrawn = false,
 ) {
   const pending = await pendingMembers(ctx, input, batch);
   const cause =
@@ -87,17 +86,6 @@ export async function splitLandingBatch(
   if (batch.included) await settleBatchConflicts(ctx, input, { ...batch, phase: 'split' });
   const at = new Date(Date.now()).toISOString();
   const likely = new Set(failure?.suspects ?? []);
-  const keepHealthy =
-    process.env.FORGE_QUEUE_COHORT_KEEP_HEALTHY === '1' &&
-    (withdrawn || (likely.size > 0 && !failure?.pairs.length && !failure?.overBudgetPairs.length));
-  const remaining = [];
-  for (const member of pending)
-    if (
-      !keepHealthy ||
-      likely.has(member.state.id) ||
-      !(await adoptAdmission(ctx, input, batch, member, true))
-    )
-      remaining.push(member);
   const singles: typeof pending = [];
   const child = (members: typeof pending, phase: 'composing' | 'checking'): LandingBatch => ({
     id: crypto.randomUUID(),
@@ -131,14 +119,10 @@ export async function splitLandingBatch(
         false,
       );
   };
-  const groups = withdrawn
-    ? remaining.length
-      ? [remaining]
-      : []
-    : splitGroups(remaining, member => likely.has(member.state.id));
+  const groups = splitGroups(pending, member => likely.has(member.state.id));
   for (const group of groups) {
     if (group.length === 1) {
-      if (keepHealthy || !(await adoptAdmission(ctx, input, batch, group[0]!))) singles.push(group[0]!);
+      if (!(await adoptAdmission(ctx, input, batch, group[0]!))) singles.push(group[0]!);
       continue;
     }
     const cohort = child(group, 'composing');
@@ -229,14 +213,8 @@ async function adoptAdmission(
   input: BatchIdentity,
   batch: LandingBatch,
   member: Awaited<ReturnType<typeof pendingMembers>>[number],
-  retained = false,
 ) {
-  if (retained && member.row.admission?.status !== 'passed') return false;
-  const original =
-    retained && member.state.firstAttemptId !== member.original.id
-      ? await loadLandingAttempt(ctx, { projectId: input.projectId, attemptId: member.state.firstAttemptId })
-      : member.original;
-  const proof = await admissionProof(ctx, input.projectId, member.row, original);
+  const proof = await admissionProof(ctx, input.projectId, member.row, member.original);
   if (!proof) return false;
   const { batchId: _batch, batchNeedsSoloCompose: _needs, ...rest } = member.state;
   void _batch;
@@ -248,7 +226,7 @@ async function adoptAdmission(
   await bindAdmissionProof(
     ctx,
     { row: member.row, state: { ...rest, batchOriginId: batch.id, batchSolo: true }, attempt },
-    original,
+    member.original,
     proof,
   );
   return true;
