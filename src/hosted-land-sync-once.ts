@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomUUID } from 'node:crypto';
 import type { HostedAgentResponse } from './hosted-agent-transport.js';
-import { sameBytesNotConflict } from './hosted-would-conflict.js';
 import { shellQuote } from './shell-quote.js';
 
 type Call = (action: string, body: Record<string, unknown>) => Promise<HostedAgentResponse>;
@@ -32,7 +31,7 @@ function syncOutcome(response: HostedAgentResponse): SyncOutcome {
 
 /** A land whose finish rejoined a queued entry main already marked SYNC_REQUIRED (Item 36fd3295):
  * landing the same Lane head again only joins that same entry, so `land --save` looped until the
- * rest of an early-resolution stack landed. Behind FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT=1, land syncs
+ * rest of an early-resolution stack landed. Now land syncs
  * main into the Lane once and lands its new head, which supersedes the entry. Never more than one
  * sync per land. Every outcome is a reply land already knows, never a landing to observe:
  * - merged: the new landing (tagged `syncOnce.relanded`);
@@ -50,7 +49,7 @@ export async function syncRequiredOnce(
   log: (line: string) => void,
 ): Promise<HostedAgentResponse | undefined> {
   const first = resultOf(response);
-  if (!sameBytesNotConflict() || first.code !== 'SYNC_REQUIRED' || !first.submission?.id) return undefined;
+  if (first.code !== 'SYNC_REQUIRED' || !first.submission?.id) return undefined;
   const stale = first.submission.id;
   const laneId =
     first.syncRequired?.laneId ?? (typeof command.laneId === 'string' ? command.laneId : undefined);

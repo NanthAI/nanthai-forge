@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   SAME_BYTES_LISTING_BYTES,
-  sameBytesNotConflict,
   syncRequiredAdvice,
   syncRequiredNext,
   wouldConflictSchema,
@@ -58,7 +57,7 @@ export const mark = internalMutation({
     ...markArgs,
     /** Main's forge.json merge lists, read by projectHostedConflictMerge:wouldConflictConfig. */
     declared: v.optional(v.object({ union: v.array(v.string()), fragments: v.array(v.string()) })),
-    /** FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT only: shared paths main already holds byte-for-byte. */
+    /** Shared paths main already holds byte-for-byte, compared by the same action. */
     same: v.optional(v.array(v.object({ candidateId: v.string(), paths: v.array(v.string()) }))),
   },
   returns: v.number(),
@@ -72,9 +71,8 @@ export const mark = internalMutation({
  * forge.json, so the first entry that would be marked hands the pass once to a small action that
  * reads it (main's State, then forge.json) and calls back with `declared`.
  *
- * With FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT=1 (Item 36fd3295), a shared path whose bytes main now holds
- * is not advice: an early resolution carries its predecessor's own files, and the recompose takes
- * either side. The first pass then collects every would-be-marked Candidate (still at most
+ * A shared path whose bytes main now holds is not advice (Item 36fd3295): an early resolution
+ * carries its predecessor's own files, and the recompose takes either side. The first pass collects every would-be-marked Candidate (still at most
  * WOULD_CONFLICT_READS, plus one object-row read for each Candidate's file listing) and hands them to
  * the same one action, which also compares main's blobs with each listing and calls back with `same`.
  * A Candidate without a readable listing keeps path advice. */
@@ -90,9 +88,7 @@ export async function markWouldConflict(
   now = Date.now(),
 ) {
   const declared = input.declared;
-  const sameBytes = sameBytesNotConflict();
-  const same =
-    sameBytes && input.same ? new Map(input.same.map(entry => [entry.candidateId, entry.paths])) : null;
+  const same = input.same ? new Map(input.same.map(entry => [entry.candidateId, entry.paths])) : null;
   const checks: SameBytesCheck[] = [];
   let handoff = false;
   if (!input.paths.length) return 0;
@@ -133,15 +129,7 @@ export async function markWouldConflict(
       .filter(path => landed.has(path) && !conflictRule(path, declared ?? NO_MERGE_PATHS) && !equal.has(path))
       .sort();
     if (!shared.length) continue;
-    if (!declared && !sameBytes) {
-      await ctx.scheduler.runAfter(
-        0,
-        makeFunctionReference<'action'>('projectHostedConflictMerge:wouldConflictConfig'),
-        { projectId: input.projectId, paths: input.paths, landedSubmissionId: input.landedSubmissionId },
-      );
-      return 0;
-    }
-    if (!declared || (sameBytes && !same)) {
+    if (!declared || !same) {
       handoff = true;
       const listing = record.candidateFiles;
       const object =

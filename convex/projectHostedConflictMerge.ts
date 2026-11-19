@@ -12,7 +12,7 @@ import { type TrialObject, type TrialPlan } from '../src/hosted-trial-plan';
 import { rawContent } from './projectObjectContent';
 import type { ObjectView } from './projectObjectFind';
 import { candidateFileListSchema } from '../src/hosted-compose';
-import { sameBytesNotConflict, sameBytesPaths } from '../src/hosted-would-conflict';
+import { sameBytesPaths } from '../src/hosted-would-conflict';
 import type { SameBytes, SameBytesCheck } from './projectHostedLandingWouldConflict';
 
 const mainStateOf = (ctx: ActionCtx, projectId: Id<'hostedProjects'>) =>
@@ -25,9 +25,9 @@ const mainStateOf = (ctx: ActionCtx, projectId: Id<'hostedProjects'>) =>
     { projectId },
   );
 /** Warm action processes keep the last main head's merge lists: main moves a few times an hour, so
- * most conflicts reuse them without re-reading main's State (megabytes at dogfood scale). With
- * FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT the same entry also keeps that head's path entries (blob and
- * mode per path, no bytes), so a main State is fetched at most once per head per process. */
+ * most conflicts reuse them without re-reading main's State (megabytes at dogfood scale). The same
+ * entry also keeps that head's path entries (blob and mode per path, no bytes) for the same-bytes
+ * comparison, so a main State is fetched at most once per head per process. */
 let lastMain:
   | {
       projectId: string;
@@ -51,30 +51,27 @@ async function mainMergeLists(ctx: ActionCtx, projectId: Id<'hostedProjects'>): 
   if (!main) return mergePathsOf(undefined);
   const cached = cachedMain(projectId, main.head)?.declared;
   if (cached) return cached;
-  // With the switch on, this read also keeps the head's entries for the same-bytes comparison,
-  // under the same cap (no paths asked: past it, none are kept).
-  if (sameBytesNotConflict()) return (await mainEntries(ctx, projectId, main, new Set())).declared;
-  return (await readMain(ctx, projectId, main, new Set())).declared;
+  // This read also keeps the head's entries for the same-bytes comparison, under the same cap (no
+  // paths asked: past it, none are kept).
+  return (await mainEntries(ctx, projectId, main, new Set())).declared;
 }
-/** One read of main's State: its forge.json merge lists, plus its path entries when `index` asks
- * (blob and mode only; no file bytes). Both are kept for this head. */
+/** One read of main's State: its forge.json merge lists and its path entries (blob and mode only; no
+ * file bytes). Both are kept for this head. */
 async function readMain(
   ctx: ActionCtx,
   projectId: Id<'hostedProjects'>,
   main: { head: string; state: TrialObject },
-  index: ReadonlySet<string> | 'all',
 ) {
   const head = main.head;
-  const reader = trialReader(ctx, projectId, { laneId: '', head, peers: [], tasks: [], objects: [] }, index);
+  const reader = trialReader(ctx, projectId, { laneId: '', head, peers: [], tasks: [], objects: [] }, 'all');
   const files = await reader.state(main.state).catch(() => null);
   if (!files) return { declared: mergePathsOf(undefined), entries: undefined };
   const config = files.get(FORGE_CONFIG_FILE);
   const bytes = config?.mode === 'file' ? await reader.blob(config.blob).catch(() => undefined) : undefined;
   const declared = mergePathsOf(bytes);
   const readable = config?.mode !== 'file' || bytes !== undefined;
-  const entries = index === 'all' || index.size ? reader.entries(main.state.digest) : undefined;
-  // A forge.json that could not be read is not remembered as "no lists". Without entries (switch
-  // off) the cache is written exactly as before: only for readable lists.
+  const entries = reader.entries(main.state.digest);
+  // A forge.json that could not be read is not remembered as "no lists".
   if (readable || entries)
     lastMain = { projectId, head, ...(readable ? { declared } : {}), ...(entries ? { entries } : {}) };
   return { declared, entries };
@@ -90,7 +87,7 @@ async function mainEntries(
   const cached = cachedMain(projectId, main.head);
   if (cached?.declared && cached.entries && [...paths].every(path => !cached.known || cached.known.has(path)))
     return { declared: cached.declared, entries: cached.entries };
-  const read = await readMain(ctx, projectId, main, 'all');
+  const read = await readMain(ctx, projectId, main);
   if (read.entries && read.entries.size > CACHED_MAIN_PATHS && lastMain?.entries === read.entries)
     lastMain = {
       ...lastMain,
@@ -102,7 +99,7 @@ async function mainEntries(
   return read;
 }
 
-/** FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT: main's lists and path entries (one State read per head per
+/** Same bytes are not a conflict (Item 36fd3295): main's lists and path entries (one State read per head per
  * warm process, shared with the lists cache), then each queued Candidate's own file listing (one
  * small R2 object each) against main's blobs at its shared paths. Unreadable keeps the advice. */
 async function sameBytesOnMain(ctx: ActionCtx, projectId: Id<'hostedProjects'>, checks: SameBytesCheck[]) {
@@ -140,12 +137,13 @@ export const wouldConflictConfig = internalAction({
     projectId: v.id('hostedProjects'),
     paths: v.array(v.string()),
     landedSubmissionId: v.string(),
-    /** FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT only: JSON SameBytesCheck[] from the first pass. */
+    /** JSON SameBytesCheck[] from the first pass. Absent: main's lists only, and the pass hands off
+     * once more with its checks. */
     checks: v.optional(v.string()),
   },
   returns: v.null(),
   handler: async (ctx, { checks, ...input }) => {
-    if (checks !== undefined && sameBytesNotConflict()) {
+    if (checks !== undefined) {
       const found = await sameBytesOnMain(ctx, input.projectId, JSON.parse(checks) as SameBytesCheck[]);
       await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedLandingWouldConflict:mark'), {
         ...input,

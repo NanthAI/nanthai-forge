@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Item 36fd3295 (incident 5e3c3a3c, section B): an early-resolution Lane carries its predecessor's
-// files; when that predecessor lands, the same bytes on main are not SYNC_REQUIRED. Behind
-// FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT (default off). The land --save half: hosted-land-sync-once.test.mjs.
+// files; when that predecessor lands, the same bytes on main are not SYNC_REQUIRED. The land --save
+// half: hosted-land-sync-once.test.mjs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -13,9 +13,7 @@ import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import * as advice from '../dist/hosted-would-conflict.js';
 
 const wouldConflict = await import(moduleUrl('../convex/projectHostedLandingWouldConflict.ts'));
-const SWITCH = 'FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT';
-const keys = [...Object.keys(synthetic), SWITCH];
-const prior = Object.fromEntries(keys.map(k => [k, process.env[k]]));
+const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
   for (const [k, v] of Object.entries(prior)) {
@@ -23,15 +21,6 @@ test.after(() => {
     else process.env[k] = v;
   }
 });
-const withSwitch = (on, run) => async () => {
-  if (on) process.env[SWITCH] = '1';
-  else delete process.env[SWITCH];
-  try {
-    await run();
-  } finally {
-    delete process.env[SWITCH];
-  }
-};
 
 const blob = name => digest(Buffer.from(name));
 const file = name => ({ blob: blob(name), mode: 'file' });
@@ -143,79 +132,47 @@ async function incident() {
   return { f, landedPaths, predecessor, carried, different, main };
 }
 
-test(
-  'incident 5e3c3a3c t22302, switch on: the follower carrying the landed bytes gets no SYNC_REQUIRED; different bytes still do',
-  withSwitch(true, async () => {
-    const { f, landedPaths, predecessor, carried, different, main } = await incident();
-    const before = f.counts.length;
-    // First pass: nothing marked yet; one handoff carrying both would-be-marked Candidates' listings.
-    assert.equal(await pass(f, { paths: landedPaths, landedSubmissionId: predecessor.id }), 0);
-    const [task] = handoffs(f);
-    assert.ok(task, 'one config handoff');
-    const checks = JSON.parse(task.args[0].checks);
-    assert.deepEqual(
-      checks.map(check => check.paths),
-      [landedPaths, ['.bench/dry/group-same-package-shared.md']],
-    );
-    const first = f.counts.slice(before).find(c => c.name === 'wouldConflict');
-    // Bounded: one queue range, three reads per Candidate plus one listing row each.
-    assert(first.documents <= wouldConflict.WOULD_CONFLICT_SCAN + 4 * 2, `documents ${first.documents}`);
-    // Second pass with main's lists and the byte answer.
-    const same = actionAnswer(f, checks, main);
-    assert.equal(
-      await pass(f, { paths: landedPaths, landedSubmissionId: predecessor.id, declared, same }),
-      1,
-    );
-    assert.equal(rowOf(f, carried.id).wouldConflict, undefined, 'same bytes: no SYNC_REQUIRED');
-    assert.equal((await f.status(carried.id)).wouldConflict, undefined);
-    const marked = JSON.parse(rowOf(f, different.id).wouldConflict);
-    assert.deepEqual(marked.paths, ['.bench/dry/group-same-package-shared.md']);
-    assert.match(marked.next, /^SYNC_REQUIRED/);
-    assert.equal(handoffs(f).length, 1, 'the second pass hands off nothing more');
-  }),
-);
+test('incident 5e3c3a3c t22302: the follower carrying the landed bytes gets no SYNC_REQUIRED; different bytes still do', async () => {
+  const { f, landedPaths, predecessor, carried, different, main } = await incident();
+  const before = f.counts.length;
+  // First pass: nothing marked yet; one handoff carrying both would-be-marked Candidates' listings.
+  assert.equal(await pass(f, { paths: landedPaths, landedSubmissionId: predecessor.id }), 0);
+  const [task] = handoffs(f);
+  assert.ok(task, 'one config handoff');
+  const checks = JSON.parse(task.args[0].checks);
+  assert.deepEqual(
+    checks.map(check => check.paths),
+    [landedPaths, ['.bench/dry/group-same-package-shared.md']],
+  );
+  const first = f.counts.slice(before).find(c => c.name === 'wouldConflict');
+  // Bounded: one queue range, three reads per Candidate plus one listing row each.
+  assert(first.documents <= wouldConflict.WOULD_CONFLICT_SCAN + 4 * 2, `documents ${first.documents}`);
+  // Second pass with main's lists and the byte answer.
+  const same = actionAnswer(f, checks, main);
+  assert.equal(await pass(f, { paths: landedPaths, landedSubmissionId: predecessor.id, declared, same }), 1);
+  assert.equal(rowOf(f, carried.id).wouldConflict, undefined, 'same bytes: no SYNC_REQUIRED');
+  assert.equal((await f.status(carried.id)).wouldConflict, undefined);
+  const marked = JSON.parse(rowOf(f, different.id).wouldConflict);
+  assert.deepEqual(marked.paths, ['.bench/dry/group-same-package-shared.md']);
+  assert.match(marked.next, /^SYNC_REQUIRED/);
+  assert.equal(handoffs(f).length, 1, 'the second pass hands off nothing more');
+});
 
-test(
-  'switch on: a Candidate without a listing keeps path advice; a partly equal Candidate is marked only for the differing file',
-  withSwitch(true, async () => {
-    const f = await landingFixture();
-    const landing = await f.enqueue(f.request({ candidateId: candidate(f, ['a.ts', 'b.ts']) }));
-    const unlisted = await f.enqueue(f.request({ candidateId: candidate(f, ['a.ts']) }));
-    const partial = await f.enqueue(
-      f.request({ candidateId: candidate(f, ['a.ts', 'b.ts'], { 'a.ts': 'a1', 'b.ts': 'b-mine' }) }),
-    );
-    await pass(f, { paths: ['a.ts', 'b.ts'], landedSubmissionId: landing.id });
-    const checks = JSON.parse(handoffs(f)[0].args[0].checks);
-    assert.equal(checks.length, 1, 'only the listed Candidate is compared');
-    const same = actionAnswer(f, checks, { 'a.ts': 'a1', 'b.ts': 'b-main' });
-    assert.equal(
-      await pass(f, { paths: ['a.ts', 'b.ts'], landedSubmissionId: landing.id, declared, same }),
-      2,
-    );
-    assert.deepEqual(JSON.parse(rowOf(f, unlisted.id).wouldConflict).paths, ['a.ts']);
-    assert.deepEqual(JSON.parse(rowOf(f, partial.id).wouldConflict).paths, ['b.ts']);
-  }),
-);
-
-test(
-  'switch off: byte answers are ignored and the first pass hands off exactly as before',
-  withSwitch(false, async () => {
-    const { f, landedPaths, predecessor, carried, main } = await incident();
-    assert.equal(await pass(f, { paths: landedPaths, landedSubmissionId: predecessor.id }), 0);
-    const [task] = handoffs(f);
-    assert.deepEqual(task.args[0], {
-      projectId: f.projectId,
-      paths: landedPaths,
-      landedSubmissionId: predecessor.id,
-    });
-    const same = [{ candidateId: rowOf(f, carried.id).candidateId, paths: Object.keys(main) }];
-    assert.equal(
-      await pass(f, { paths: landedPaths, landedSubmissionId: predecessor.id, declared, same }),
-      2,
-    );
-    assert.deepEqual(JSON.parse(rowOf(f, carried.id).wouldConflict).paths, landedPaths);
-  }),
-);
+test('a Candidate without a listing keeps path advice; a partly equal Candidate is marked only for the differing file', async () => {
+  const f = await landingFixture();
+  const landing = await f.enqueue(f.request({ candidateId: candidate(f, ['a.ts', 'b.ts']) }));
+  const unlisted = await f.enqueue(f.request({ candidateId: candidate(f, ['a.ts']) }));
+  const partial = await f.enqueue(
+    f.request({ candidateId: candidate(f, ['a.ts', 'b.ts'], { 'a.ts': 'a1', 'b.ts': 'b-mine' }) }),
+  );
+  await pass(f, { paths: ['a.ts', 'b.ts'], landedSubmissionId: landing.id });
+  const checks = JSON.parse(handoffs(f)[0].args[0].checks);
+  assert.equal(checks.length, 1, 'only the listed Candidate is compared');
+  const same = actionAnswer(f, checks, { 'a.ts': 'a1', 'b.ts': 'b-main' });
+  assert.equal(await pass(f, { paths: ['a.ts', 'b.ts'], landedSubmissionId: landing.id, declared, same }), 2);
+  assert.deepEqual(JSON.parse(rowOf(f, unlisted.id).wouldConflict).paths, ['a.ts']);
+  assert.deepEqual(JSON.parse(rowOf(f, partial.id).wouldConflict).paths, ['b.ts']);
+});
 
 test('byte comparison: equal blob and mode, or both deleted, is the same; anything unknown is not', () => {
   const main = new Map([

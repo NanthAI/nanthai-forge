@@ -431,10 +431,14 @@ export async function finishFixture(
       } else if (task.name === 'projectHostedLandingWouldConflict:mark') {
         await tx('wouldConflict', wouldConflictApi.mark, input);
       } else if (task.name === 'projectHostedConflictMerge:wouldConflictConfig') {
-        // The action reads main's forge.json from R2; the fixture's main declares no merge lists.
+        // The action reads main's forge.json and compares listed bytes from R2; the fixture's main
+        // declares no merge lists and no bytes are claimed equal (path advice stays).
+        const { checks: _checks, ...rest } = input;
+        void _checks;
         await tx('wouldConflict', wouldConflictApi.mark, {
-          ...input,
+          ...rest,
           declared: { union: [], fragments: [] },
+          same: [],
         });
       } else if (task.name === 'projectHostedLandingStallAlert:deliver') {
         // Owner channels are faked: record what would be sent, never call a network.

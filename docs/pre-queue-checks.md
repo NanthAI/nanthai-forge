@@ -423,7 +423,7 @@ Switching the mode never invalidates a queued landing: it is read when a proof i
 agent sign-in, switching fast on is held for the owner person, like any edit that changes what may
 land; switching back to strict applies at once.
 
-Four switches default to off while queue behavior is benchmarked. With
+Queue switches named below default to off while queue behavior is benchmarked. With
 `FORGE_QUEUE_COHORT_KEEP_HEALTHY=1`, batch selection leaves running individual checks in
 place. Where admission checks are enabled, a member without a pass proceeds through the
 individual check path. After an attributed check failure or a withdrawal, healthy members can fall back to
@@ -444,8 +444,7 @@ owned by the step's retained 30-second retry. Task arguments never hold plan byt
 solo plan carries its pin and compose identity, and the action re-reads the bytes in one indexed
 query. A solo stall keeps its owner diagnosis only while it is current.
 
-With `FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT=1` (set on the deployment and in the client),
-a file main changed that already holds the queued Candidate's bytes is not `SYNC_REQUIRED`
+A file main changed that already holds the queued Candidate's bytes is not `SYNC_REQUIRED`
 advice: an early resolution carries its predecessor's own files, and the recompose takes
 either side. The would-conflict pass compares main's blob with the Candidate's stored file
 listing in the action it already runs; a Candidate without a readable listing keeps path

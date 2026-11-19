@@ -118,7 +118,7 @@ export async function submitHostedLand(
     );
     response = (await hostedAgentCli(root, 'finish', command, address, transport)) as HostedAgentResponse;
   }
-  // FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT: a land that rejoined its own SYNC_REQUIRED entry syncs once.
+  // Item 36fd3295: a land that rejoined its own SYNC_REQUIRED entry syncs once.
   const once = await syncRequiredOnce(
     transport.root ?? root,
     command,

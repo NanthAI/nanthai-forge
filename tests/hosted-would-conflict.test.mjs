@@ -58,13 +58,15 @@ function candidateWithPaths(f, paths) {
 }
 const stripSystem = row => Object.fromEntries(Object.entries(row).filter(([k]) => !k.startsWith('_')));
 const rowOf = (f, id) => [...f.tables.projectHostedLandingRequests.values()].find(r => r.submissionId === id);
-/** One pass with main's merge lists already read (main declares none unless given). */
+/** One pass with the config action's answer: main's merge lists (none unless given) and the
+ * same-bytes comparison (Item 36fd3295; these Candidates store no file listing, so nothing is equal). */
 const mark = (f, paths, landedSubmissionId, declared = { union: [], fragments: [] }) =>
   f.run('wouldConflict', (ctx, input) => wouldConflict.markWouldConflict(ctx, input), {
     projectId: f.projectId,
     paths,
     landedSubmissionId,
     declared,
+    same: [],
   });
 
 test('incident replay 2026-10-30 cost builder: a stale queued Candidate is marked wouldConflict when main lands its file', async () => {
@@ -142,7 +144,13 @@ test("files main's forge.json declares as merged lists are not sync-required adv
   assert.equal(first, 0, 'nothing marked before the config read');
   const handoff = f.pendingTasks().filter(t => t.name === 'projectHostedConflictMerge:wouldConflictConfig');
   assert.equal(handoff.length, 1);
-  assert.deepEqual(handoff[0].args[0], { projectId: f.projectId, paths, landedSubmissionId: landing.id });
+  // No Candidate here stores a file listing, so the handoff carries no byte comparison.
+  assert.deepEqual(handoff[0].args[0], {
+    projectId: f.projectId,
+    paths,
+    landedSubmissionId: landing.id,
+    checks: '[]',
+  });
   assert.equal(rowOf(f, mixed.id).wouldConflict, undefined);
   // The action calls back with main's merge lists.
   const marked = await mark(f, paths, landing.id, { union: ['lists/*.txt'], fragments: [] });

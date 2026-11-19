@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Item 36fd3295, cost: with FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT the would-conflict config action
-// compares Candidate listings against main's path entries. Main's State (up to 16 MiB) is fetched
+// Item 36fd3295, cost: the would-conflict config action compares Candidate listings against main's path entries. Main's State (up to 16 MiB) is fetched
 // at most once per main head per warm process, shared with the forge.json lists cache.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,7 +9,6 @@ import { moduleUrl } from './convex-module.mjs';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 
 const merge = await import(moduleUrl('../convex/projectHostedConflictMerge.ts'));
-const SWITCH = 'FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT';
 const R2 = ['R2_ACCOUNT_ID', 'R2_BUCKET', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'];
 
 const located = (s, pin) => ({
@@ -21,10 +19,10 @@ const located = (s, pin) => ({
   r2Committed: true,
 });
 
-/** The real config action with a counting R2 fetch, the switch on, and one queued Candidate whose
+/** The real config action with a counting R2 fetch and one queued Candidate whose
  * listing carries main's own bytes at a.txt. */
 async function cacheFixture(t) {
-  const prior = Object.fromEntries([SWITCH, ...R2].map(key => [key, process.env[key]]));
+  const prior = Object.fromEntries(R2.map(key => [key, process.env[key]]));
   t.after(() => {
     for (const [key, value] of Object.entries(prior)) {
       if (value === undefined) delete process.env[key];
@@ -32,7 +30,6 @@ async function cacheFixture(t) {
     }
   });
   for (const key of R2) process.env[key] = 'synthetic';
-  process.env[SWITCH] = '1';
 
   const s = await saveFixture(`cache ${t.name} ${Date.now()}\n`);
   const fetched = [];
@@ -84,7 +81,7 @@ async function cacheFixture(t) {
   };
 }
 
-test('switch on: two config passes on the same main head fetch its State once; a new head once more', async t => {
+test('two config passes on the same main head fetch its State once; a new head once more', async t => {
   const { s, checks, marks, input, pass, setMain, fetchesOf } = await cacheFixture(t);
   let head = s.baseline.sha256;
   const states = () => fetchesOf(head);
@@ -113,7 +110,7 @@ test('switch on: two config passes on the same main head fetch its State once; a
   assert.deepEqual(marks[4].same, [{ candidateId: 'carried', paths: ['a.txt'] }]);
 });
 
-test('switch on: a lists-only read of a main past the path cap keeps no entries either', async t => {
+test('a lists-only read of a main past the path cap keeps no entries either', async t => {
   const { s, checks, marks, input, pass, setMain, fetchesOf } = await cacheFixture(t);
   // A main of 20,001 paths: past CACHED_MAIN_PATHS (20,000), well under the 16 MiB State cap.
   const files = [

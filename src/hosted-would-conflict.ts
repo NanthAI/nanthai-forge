@@ -51,12 +51,10 @@ export const wouldConflictSchema = z.union([
 ]);
 export type WouldConflict = z.infer<typeof wouldConflictSchema>;
 
-/** Temporary queue switch (Item 36fd3295, incident 5e3c3a3c; deleted after its bench A/B): a file main
- * changed that holds the same bytes as the queued Candidate is not path advice, and land --save
- * syncs main in once instead of rejoining a stale entry. Off unless exactly "1". */
-const SAME_BYTES_SWITCH = 'FORGE_QUEUE_SAME_BYTES_NOT_CONFLICT';
-export const sameBytesNotConflict = () => process.env[SAME_BYTES_SWITCH] === '1';
-/** Largest Candidate file listing the would-conflict pass reads; a larger one keeps path advice. */
+/** Same bytes are not a conflict (Item 36fd3295, incident 5e3c3a3c): a file main changed that holds
+ * the same bytes as the queued Candidate is not path advice, and land --save syncs main in once
+ * instead of rejoining a stale entry. This is the largest Candidate file listing the would-conflict
+ * pass reads; a larger one keeps path advice. */
 export const SAME_BYTES_LISTING_BYTES = 1024 * 1024;
 type FileEntry = { blob: string; mode: string } | null;
 /** The paths whose bytes main holds now equal the Candidate's result bytes, from the Candidate's own
