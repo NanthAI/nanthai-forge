@@ -69,11 +69,13 @@ export function packageScriptGraph(files, edge) {
       }
     }
   };
-  const roots = new Set([
-    'scripts/forge-check.mjs',
-    'scripts/test-impact.mjs',
-    'scripts/check-path-scopes.mjs',
-  ]);
+  // The check runner and the selector are roots by name. Comparing a literal observes its name, so
+  // the graph never reads this module as a runner of forge-check.mjs (5dcfce75: a Set of these paths
+  // escaped, and every test loading the selector sat behind every product file verify reads).
+  const named = path =>
+    ['scripts/forge-check.mjs', 'scripts/test-impact.mjs', 'scripts/check-path-scopes.mjs'].includes(path);
+  const added = new Set();
+  const roots = { add: path => added.add(path), has: path => named(path) || added.has(path) };
   for (const [name, command] of Object.entries(scripts)) {
     const node = commandNode(name);
     reference(command, node, true);

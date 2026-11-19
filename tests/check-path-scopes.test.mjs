@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { readdirSync, readFileSync } from 'node:fs';
 import { selectTests, standardSelection } from '../scripts/test-impact.mjs';
+import { topLevelFolders } from '../scripts/check-path-scopes.mjs';
 
 const files = new Map(
   Object.entries({
@@ -576,4 +578,25 @@ test('computed roots and matching expressions do not read every JSON in a folder
     assert(selected.tests.includes('tests/direct-json.test.mjs'));
     assert(!selected.tests.includes('tests/indirect-json.test.mjs'));
   }
+});
+
+test('every top-level folder of this repository has a classification (5dcfce75)', () => {
+  const root = new URL('..', import.meta.url);
+  // Ignored top-level folders (`name/` lines) are build output or local state, never a change path.
+  const ignored = new Set(
+    readFileSync(new URL('.gitignore', root), 'utf8')
+      .split('\n')
+      .map(line => /^([^/*!#\s]+)\/$/.exec(line.trim())?.[1])
+      .filter(Boolean),
+  );
+  const folders = readdirSync(root, { withFileTypes: true })
+    .filter(entry => entry.isDirectory() && entry.name !== '.git' && !ignored.has(entry.name))
+    .map(entry => entry.name);
+  const missing = folders.filter(name => !Object.hasOwn(topLevelFolders, name));
+  assert.deepEqual(missing, [], 'list each new folder in topLevelFolders, scripts/check-path-scopes.mjs');
+  // A path in an unlisted folder keeps the full suite, and the receipt names the folder.
+  const unknown = select(['newfolder/data.bin']);
+  assert.equal(unknown.scope, 'full');
+  assert.match(unknown.reason, /Unclassified top-level folder newfolder\/ \(list it in topLevelFolders/);
+  assert.match(select(['docs/diagram.png']).reason, /^Unclassified or deleted path: docs\/diagram\.png/);
 });

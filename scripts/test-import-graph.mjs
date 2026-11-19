@@ -121,6 +121,11 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
       jsonFolders.get(folder).add(file);
     }
 
+  const definedLoaders = new Map();
+  const definesLoader = home => {
+    if (!definedLoaders.has(home)) definedLoaders.set(home, definedLoaderNames(home, files.get(home) ?? ''));
+    return definedLoaders.get(home);
+  };
   const convexModules = [...files.keys()]
     .map(file => file.match(/^convex\/(?!_generated\/)(.+)\.[jt]s$/)?.[1])
     .filter(name => name && !name.endsWith('.d'));
@@ -158,24 +163,59 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
       ? ['moduleUrl', 'moduleSource']
       : ['require', 'moduleUrl', 'moduleSource'];
     // The generated API is anyApi itself; its own changes widen to the namespace.
+    // moduleUrl/moduleSource imported from a helper resolve a relative path from the helper's folder
+    // (`new URL(path, import.meta.url)` there), not the caller's: tests/sub/x.mjs passing
+    // '../convex/a.ts' to the tests/ helper loads convex/a.ts. A locally defined one keeps this file.
+    // The helper must define the loader itself; a re-export, a namespace member we cannot follow or a
+    // local declaration shadowing the import has an unknown home, so its paths widen.
+    const loaderHome = new Map();
+    for (const statement of ast.statements) {
+      const bindings = ts.isImportDeclaration(statement) ? statement.importClause?.namedBindings : null;
+      const home = bindings && ts.isNamedImports(bindings) && resolve(path, statement.moduleSpecifier.text);
+      for (const item of home ? bindings.elements : [])
+        if (loaderNames.includes((item.propertyName ?? item.name).text))
+          loaderHome.set(
+            item.name.text,
+            definesLoader(home).has((item.propertyName ?? item.name).text) ? home : unknownHome,
+          );
+    }
+    if (loaderHome.size) for (const name of redeclared(ast, loaderHome)) loaderHome.set(name, unknownHome);
+    const loaderFrom = call => {
+      if (!ts.isCallExpression(call)) return null;
+      const callee = call.expression;
+      if (ts.isIdentifier(callee)) return loaderHome.get(callee.text) ?? null;
+      if (!ts.isPropertyAccessExpression(callee) || !loaderNames.includes(callee.name.text)) return null;
+      // `(await import('./convex-module.mjs')).moduleUrl(...)`: that module's own loader.
+      let object = callee.expression;
+      while (ts.isParenthesizedExpression(object) || ts.isAwaitExpression(object)) object = object.expression;
+      const specifier =
+        ts.isCallExpression(object) &&
+        object.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        ts.isStringLiteralLike(object.arguments[0])
+          ? resolve(path, object.arguments[0].text)
+          : null;
+      return specifier && definesLoader(specifier).has(callee.name.text) ? specifier : unknownHome;
+    };
     const apiNames = path.startsWith('convex/_generated/')
       ? new Set()
       : convexApiBindings(ast, value => resolve(path, value));
     // A template widens only to files its literal skeleton can name, as itself or as a
     // folder: `src/file-${i}.ts` names no source file, `../dist/${name}.js` every module.
-    const widen = (prefix, detail = 'Computed module path') => {
+    const widen = (prefix, detail = 'Computed module path', kind = 'dynamic') => {
       if (prefix?.suffix) {
         for (const candidate of files.keys())
           if (
             builtNames(candidate).some(name => name === prefix.suffix || name.endsWith(`/${prefix.suffix}`))
           )
-            edge(candidate, path, 'dynamic', detail);
+            edge(candidate, path, kind, detail);
         return;
       }
-      const template = typeof prefix === 'string' ? null : prefix;
+      // A template inside an imported loader's argument resolves from that loader's folder.
+      const from = prefix?.from ?? path;
+      const template = typeof prefix === 'string' ? null : (prefix.template ?? prefix);
       if (template) prefix = template.head.text;
       const normalized = prefix.startsWith('.')
-        ? posix.normalize(posix.join(posix.dirname(path), prefix))
+        ? posix.normalize(posix.join(posix.dirname(from), prefix))
         : prefix;
       const domain = normalized.startsWith('dist/')
         ? 'src/'
@@ -194,8 +234,9 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
           (domain ? candidate.startsWith(domain) : domains.some(dir => candidate.startsWith(dir))) &&
           (!pattern || builtNames(candidate).some(name => pattern.test(name)))
         )
-          edge(candidate, path, 'dynamic', detail);
+          edge(candidate, path, kind, detail);
     };
+    let loaded = [];
     function visit(node) {
       // Browser coverage also follows web-facing type contracts. Keep ordinary
       // runtime test selection unchanged (type-only edits still have static checks).
@@ -275,7 +316,8 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
         if (name && convexModule(name)) functionReference(path, [name], 'Convex function name');
         else if (makeReferenceArgument(node) && !name)
           widenFunctions(path, '', `Unknown Convex function name: ${value}`);
-        const target = resolve(path, value);
+        const from = loaderFrom(node.parent);
+        const target = from === unknownHome ? undefined : resolve(from ?? path, value);
         if (
           (ts.isImportDeclaration(node.parent) ||
             ts.isExportDeclaration(node.parent) ||
@@ -299,7 +341,12 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
           if (importing || directoryDependency(node, ast, true))
             edge(target, path, importing ? 'import' : pathKind(path, value));
         }
-        if (path.startsWith('tests/') || path.startsWith('scripts/')) packageGraph.reference?.(value, path);
+        // A script path or command name that is only compared (`path === 'scripts/x.mjs'`) runs nothing.
+        if (
+          (path.startsWith('tests/') || path.startsWith('scripts/')) &&
+          directoryDependency(node, ast, true)
+        )
+          packageGraph.reference?.(value, path);
         // Built web bundles, directory enumeration and generated CLI module paths.
         if (
           /^(?:\.\.\/)?web-dist(?:\/|$)/.test(value) &&
@@ -339,7 +386,16 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
           const targets = enumerated?.map(value => resolve(path, value));
           if (targets?.every(Boolean))
             for (const [i, target] of targets.entries()) edge(target, path, pathKind(path, enumerated[i]));
-          else widen(node);
+          // Not a loader call: a computed path names files the way a literal does. In product code a
+          // non-relative one is a path in the user's workspace (`pathKind`), not a load of this
+          // repository (5dcfce75: `dist/${built[1]}.js` in a list of failure-text aliases made every
+          // src file reach the tests of every module that imports it).
+          else
+            widen(
+              node,
+              undefined,
+              pathKind(path, prefix) === 'workspace-path' ? 'workspace-path' : 'dynamic',
+            );
         }
       }
       // A literal Vite glob (`import.meta.glob('./*/route.ts')`) loads exactly the files it matches.
@@ -362,9 +418,24 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
             node.expression.name.text === 'glob' &&
             ts.isMetaProperty(node.expression.expression)))
       ) {
+        const home = loaderFrom(node);
+        // Every value the loader is proven to load becomes an edge (below, after the literals' own
+        // edges), so a branch, cast or enumerated template that loadingPrefixes accepts can never be
+        // missing from the graph.
+        const known = (value, from = home) => {
+          if (from === unknownHome) return false;
+          const target = resolve(from ?? path, value);
+          if (target) loaded.push(target);
+          return target || external(value) || installedPath(value);
+        };
+        // Node internals are bare only straight inside require or a dynamic import; a wrapper's argument
+        // (`moduleUrl('internal/x')`) is a name the wrapper turns into a path.
+        const direct =
+          node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+          (ts.isIdentifier(node.expression) && node.expression.text === 'require');
         const prefixes = viteGlob
           ? ['']
-          : loadingPrefixes(node.arguments[0], value => resolve(path, value) || external(value));
+          : loadingPrefixes(node.arguments[0], known, loaderFrom, direct ? nodeInternal : null, home);
         if (prefixes.length) {
           // Packagers load installed artifacts, not repository sources. A literal ending is bounded.
           if (
@@ -379,12 +450,16 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
               prefix.suffix
                 ? `Computed loader path ending: ${prefix.suffix}`
                 : typeof prefix !== 'string' || prefix
-                  ? `Computed loader domain: ${typeof prefix === 'string' ? prefix : prefix.head.text}`
+                  ? `Computed loader domain: ${typeof prefix === 'string' ? prefix : (prefix.template ?? prefix).head.text}`
                   : 'Unknown module loader',
             );
         }
       }
+      const proven = loaded;
+      loaded = [];
       ts.forEachChild(node, visit);
+      // After the children: a literal's own (narrower) evidence kind is recorded first and kept.
+      for (const target of proven) edge(target, path, 'import');
     }
     // convex-module is a known test loader: its moduleUrl callers contribute literal
     // edges above; its recursive resolver is represented by transitive source imports.
@@ -439,20 +514,86 @@ function literalGlobTargets(path, args, files) {
   return [...files.keys()].filter(candidate => matchers.some(matcher => matcher.test(candidate)));
 }
 
-function loadingPrefixes(node, known) {
+const loaderNames = ['moduleUrl', 'moduleSource'];
+const unknownHome = Symbol('unknown loader home');
+/** The loader names a module defines and exports itself (not a re-export or an imported binding). */
+function definedLoaderNames(path, text) {
+  const names = new Set();
+  if (text && loaderNames.some(name => text.includes(name))) {
+    const ast = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
+    const local = new Set();
+    const exported = node => node.modifiers?.some(item => item.kind === ts.SyntaxKind.ExportKeyword);
+    for (const statement of ast.statements) {
+      if (ts.isFunctionDeclaration(statement) && statement.name) {
+        local.add(statement.name.text);
+        if (exported(statement)) names.add(statement.name.text);
+      }
+      if (ts.isVariableStatement(statement))
+        for (const item of statement.declarationList.declarations)
+          if (ts.isIdentifier(item.name)) {
+            local.add(item.name.text);
+            if (exported(statement)) names.add(item.name.text);
+          }
+    }
+    for (const statement of ast.statements)
+      if (ts.isExportDeclaration(statement) && !statement.moduleSpecifier && statement.exportClause)
+        for (const item of ts.isNamedExports(statement.exportClause) ? statement.exportClause.elements : [])
+          if (local.has((item.propertyName ?? item.name).text)) names.add(item.name.text);
+    for (const name of [...names]) if (!loaderNames.includes(name)) names.delete(name);
+  }
+  return names;
+}
+/** Names declared anywhere in a file other than by an import: a local `moduleUrl` may shadow the
+ * imported one at some call sites, and scope is not worth proving here, so every call widens. */
+function redeclared(ast, names) {
+  const found = new Set();
+  const visit = node => {
+    if (
+      (ts.isVariableDeclaration(node) ||
+        ts.isParameter(node) ||
+        ts.isBindingElement(node) ||
+        ts.isFunctionDeclaration(node) ||
+        ts.isFunctionExpression(node) ||
+        ts.isClassDeclaration(node) ||
+        ts.isClassExpression(node)) &&
+      node.name &&
+      ts.isIdentifier(node.name) &&
+      names.has(node.name.text)
+    )
+      found.add(node.name.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  return found;
+}
+
+/** A path into an installed package's folder loads no repository source: the lockfile owns it. */
+const installedPath = value => /(?:^|\/)node_modules\//.test(value);
+/** A Node internal given straight to require or a dynamic import loads no repository source (for
+ * example 'internal/fs/watchers', only loadable under --expose-internals). Only there: a wrapper's argument
+ * (`moduleUrl('file-mode')`) is a name the wrapper turns into a path. Any other unlocked bare
+ * specifier may be a local alias (`@local/leaf`), so it still widens. */
+const nodeInternal = value => /^internal\/[\w/-]+$/.test(value);
+
+function loadingPrefixes(node, known, loaderFrom = () => null, bare = null, home = null) {
   if (!node) return [''];
-  if (ts.isStringLiteralLike(node)) return known(node.text) ? [] : [''];
+  if (ts.isStringLiteralLike(node)) return known(node.text) || bare?.(node.text) ? [] : [''];
   if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node))
-    return loadingPrefixes(node.expression, known);
+    return loadingPrefixes(node.expression, known, loaderFrom, bare, home);
   if (ts.isConditionalExpression(node))
-    return [...loadingPrefixes(node.whenTrue, known), ...loadingPrefixes(node.whenFalse, known)];
+    return [
+      ...loadingPrefixes(node.whenTrue, known, loaderFrom, bare, home),
+      ...loadingPrefixes(node.whenFalse, known, loaderFrom, bare, home),
+    ];
   if (ts.isTemplateExpression(node)) {
     const values = templateStrings(node);
     // A by-name loader's modules are added from dispatched names (byNameDispatch).
-    return values?.every(known) || functionNameLoader(node, node.getSourceFile().fileName) ? [] : [node];
+    if (values?.every(value => known(value)) || functionNameLoader(node, node.getSourceFile().fileName))
+      return [];
+    return home === unknownHome ? [''] : home ? [{ template: node, from: home }] : [node];
   }
   if (ts.isPropertyAccessExpression(node) && node.name.text === 'href')
-    return loadingPrefixes(node.expression, known);
+    return loadingPrefixes(node.expression, known, loaderFrom, null, home);
   if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
     const expression = node.expression;
     const name = ts.isIdentifier(expression)
@@ -460,8 +601,16 @@ function loadingPrefixes(node, known) {
       : ts.isPropertyAccessExpression(expression)
         ? expression.name.text
         : '';
-    if (['moduleUrl', 'moduleSource', 'URL', 'pathToFileURL', 'fileURLToPath'].includes(name))
-      return loadingPrefixes(node.arguments?.[0], known);
+    if (['moduleUrl', 'moduleSource', 'URL', 'pathToFileURL', 'fileURLToPath'].includes(name)) {
+      const inner = loaderFrom(node);
+      return loadingPrefixes(
+        node.arguments?.[0],
+        inner ? value => known(value, inner) : known,
+        loaderFrom,
+        null,
+        inner ?? home,
+      );
+    }
     // createRequire(...).resolve('pkg'), import.meta.resolve('pkg'): a literal specifier.
     if (
       name === 'resolve' &&

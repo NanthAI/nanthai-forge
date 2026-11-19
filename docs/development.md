@@ -398,15 +398,38 @@ A bare repository path in product source (`'convex/schema.ts'`, not `./worker.js
 `workspace-path` edge: product code resolves it in a caller's workspace, so the chain
 counts only when it reaches a test or script that makes this repository the workspace
 (`process.cwd()`, the repo root from `import.meta.url`, or a child process spawned without
-`cwd`). Any stronger edge between the same files replaces it, and by-name Convex loader
-closures ignore it. The existing `tests/convex-module.mjs` adapter is modelled
+`cwd`). A path template in product source (`` `dist/${name}.js` ``) is a `workspace-path`
+edge too; a template in a test or script stays a dynamic load. Any stronger edge between the
+same files replaces it, and by-name Convex loader closures ignore it. A by-name Convex
+reference whose module is a template (`` `${kind}:listRows` ``) names only the modules its
+values can take: a conditional of literals, or a handler argument whose `args` validator
+(from `convex/values`) is `v.literal`, a `v.union` of them or `v.optional` of those. The
+definition must be the only argument of an imported Convex builder, with plain, unique `args`
+and `handler` keys. A spread, computed or duplicate key, a default, a TS `this` parameter, any
+write to the name (including destructuring, parenthesised and for-in/of targets), another
+declaration of it in the handler, or a local declaration named like `v` or the builder makes
+the value unknown, and any other value names every Convex module. A test calling
+`fn._handler(ctx, args)` directly skips the validator; the narrowing still holds, since a
+value the validator refuses is a call Convex never makes. A `moduleUrl`-style helper imported
+from another test file resolves paths from that helper's folder, and every path the selector
+accepts in its argument (branches, casts, enumerated templates) is an edge. A helper that only
+re-exports the loader, a namespace member it cannot follow, or a local declaration that may
+shadow the import leaves the home unknown, so the call widens. Node internals
+(`require('internal/fs/watchers')`, only straight inside `require()` or `import()`) and paths
+into `node_modules/` load no repository source; any other bare name the lockfile does not list
+may be a local alias and still widens.
+A script path or package command name that tests or scripts only compare
+(`path === 'scripts/x.mjs'`, `[...].includes(name)`) runs nothing, so it adds no edge. The existing `tests/convex-module.mjs` adapter is modelled
 through its callers' paths and the loaded sources' imports. Its recursive moduleUrl
 implementation does not imply every module depends on every other module.
 
 A `scoped` selection names its domain (`web`, `convex`, `core`, `netlify`, `tests`,
 `scripts`, `tooling`, or `mixed`) and prints its reason and complete file list before tests.
 Root non-Markdown files, non-Markdown `docs/` files and non-Markdown `evals/` files
-select full coverage. Markdown-only docs keep the fast path. Markdown in a top-level
+select full coverage. Every top-level folder is listed, with its rule, in `topLevelFolders`
+(`scripts/check-path-scopes.mjs`). A path in an unlisted folder keeps full coverage with the
+reason `Unclassified top-level folder NAME/`, and `tests/check-path-scopes.test.mjs` fails
+until the folder is listed. Markdown-only docs keep the fast path. Markdown in a top-level
 folder without code (such as `evals/`) selects the code naming its path, or its folder
 and file name; product code or the package manifest naming it or its folders keeps full. Nested TypeScript and Vite
 configuration widen to their domain; every static check still runs. Convex functions, schema and generated API files widen to backend

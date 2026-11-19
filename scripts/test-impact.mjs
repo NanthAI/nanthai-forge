@@ -6,7 +6,7 @@ import { watchRanking } from './test-name-watchers.mjs';
 import { closenessIndex, compareRank } from './test-closeness.mjs';
 import { changeSalt, compareRelevance, relevanceFor, stableKey } from './test-tiebreak.mjs';
 import { coverageShadow } from './test-coverage.mjs';
-import { classifyCheckPath, webTest } from './check-path-scopes.mjs';
+import { classifyCheckPath, unclassifiedFolder, webTest } from './check-path-scopes.mjs';
 import { guardSelection } from './selection-guard.mjs';
 import { coreQueuePath, coreQueueReason, coreQueueTests } from './core-queue-paths.mjs';
 import { docsPackager, docsWrapper, scriptPath, scriptSelectionReason } from './script-impact.mjs';
@@ -413,7 +413,14 @@ function selectWithGraph(
   for (const path of [...new Set(paths)].sort()) {
     if (documentation(path)) continue;
     const classification = classifyCheckPath(path, files);
-    if (!classification) return full(`Unclassified or deleted path: ${path}`);
+    if (!classification) {
+      const folder = unclassifiedFolder(path);
+      return full(
+        folder
+          ? `Unclassified top-level folder ${folder}/ (list it in topLevelFolders, scripts/check-path-scopes.mjs): ${path}`
+          : `Unclassified or deleted path: ${path}`,
+      );
+    }
     classifications.push({
       path,
       ...classification,

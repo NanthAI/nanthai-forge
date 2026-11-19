@@ -99,6 +99,31 @@ const manualFixture = path =>
   /^tests\/browser\/.+\.(?:html|tsx?)$/.test(path) ||
   /^tests\/fixtures\/(?:qa-|k-|s1b-|settings-polish\.|readable-url-settings\.|hosted-tree\/)/.test(path);
 
+/** Every top-level folder of this repository, and how its paths are classified (5dcfce75). A folder
+ * missing here fails tests/check-path-scopes.test.mjs, and its paths' full-suite reason names it as
+ * unclassified, so a new folder never costs every check without anyone noticing. */
+export const topLevelFolders = {
+  src: 'Product source: import graph',
+  web: 'Web source: import graph; build config by its rules',
+  convex: 'Convex functions: import graph and by-name function references',
+  netlify: 'Netlify functions: import graph',
+  tests: 'Tests: import graph; fixtures and data by their readers',
+  scripts: 'Scripts: import graph; assets and data by their readers',
+  skills: 'Agent skill Markdown: the code naming it',
+  plans: 'Planning Markdown: the tests and scripts reading plans',
+  models: 'Landing queue model: the guards reading it',
+  docs: 'Markdown is docs-only; any other file keeps the full suite',
+  evals: 'Markdown by its named readers; data keeps the full suite',
+  design: 'Markdown by its named readers; other files keep the full suite',
+  '.github': 'Workflows outside the landing check by their readers; Markdown by its named readers',
+  '.cursor': 'Markdown by its named readers; other files keep the full suite',
+  '.impeccable': 'Markdown by its named readers; other files keep the full suite',
+  '.nforge': 'Markdown by its named readers; other files keep the full suite',
+};
+/** The top-level folder of a path that `topLevelFolders` does not list, else null. */
+export const unclassifiedFolder = path =>
+  path.includes('/') && !Object.hasOwn(topLevelFolders, path.split('/')[0]) ? path.split('/')[0] : null;
+
 export function classifyCheckPath(path, files) {
   const domain = (name, prefixes, reason) => ({
     domain: name,

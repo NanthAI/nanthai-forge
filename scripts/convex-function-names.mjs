@@ -192,8 +192,41 @@ function arrayValues(expression, ast) {
 let indexed = { ast: null, index: null };
 function fileIndex(ast) {
   if (indexed.ast === ast) return indexed.index;
-  const index = { declarations: new Map(), written: new Set(), mutated: new Set(), aliases: new Map() };
+  const index = {
+    declarations: new Map(),
+    named: new Set(),
+    written: new Set(),
+    mutated: new Set(),
+    aliases: new Map(),
+  };
   const target = node => (ts.isIdentifier(node) ? node.text : null);
+  // Every name an assignment target writes: `(a) = x`, `({ a, b: c = 1, ...d } = x)`, `[a, ...b] = x`.
+  const writes = node => {
+    if (!node) return;
+    if (ts.isIdentifier(node)) index.written.add(node.text);
+    else if (
+      ts.isParenthesizedExpression(node) ||
+      ts.isAsExpression(node) ||
+      ts.isSatisfiesExpression(node) ||
+      ts.isNonNullExpression(node) ||
+      ts.isTypeAssertionExpression(node) ||
+      ts.isSpreadElement(node) ||
+      ts.isSpreadAssignment(node)
+    )
+      writes(node.expression);
+    else if (ts.isObjectLiteralExpression(node))
+      for (const property of node.properties)
+        writes(
+          ts.isShorthandPropertyAssignment(property)
+            ? property.name
+            : ts.isPropertyAssignment(property)
+              ? property.initializer
+              : property,
+        );
+    else if (ts.isArrayLiteralExpression(node)) node.elements.forEach(writes);
+    else if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken)
+      writes(node.left);
+  };
   (function scan(node) {
     if (ts.isTypeAliasDeclaration(node)) index.aliases.set(node.name.text, node.type);
     if (
@@ -203,15 +236,30 @@ function fileIndex(ast) {
       if (!index.declarations.has(node.name.text)) index.declarations.set(node.name.text, []);
       index.declarations.get(node.name.text).push(node);
     }
+    // Hoisted and named function or class bindings shadow too; they are never a literal's binding.
+    if (
+      (ts.isFunctionDeclaration(node) ||
+        ts.isFunctionExpression(node) ||
+        ts.isClassDeclaration(node) ||
+        ts.isClassExpression(node)) &&
+      node.name
+    )
+      index.named.add(node.name.text);
     if (
       ts.isBinaryExpression(node) &&
       node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
       node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
     ) {
-      if (target(node.left)) index.written.add(node.left.text);
+      writes(node.left);
       if (ts.isElementAccessExpression(node.left) && target(node.left.expression))
         index.mutated.add(node.left.expression.text);
     }
+    // for (name of list) / for (name in object) without a declaration writes name.
+    if (
+      (ts.isForOfStatement(node) || ts.isForInStatement(node)) &&
+      !ts.isVariableDeclarationList(node.initializer)
+    )
+      writes(node.initializer);
     if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) && target(node.operand))
       index.written.add(node.operand.text);
     if (
@@ -258,9 +306,15 @@ function literalValues(expression, ast) {
   if (ts.isStringLiteralLike(expression)) return [expression.text];
   if (ts.isParenthesizedExpression(expression)) return literalValues(expression.expression, ast);
   if (ts.isElementAccessExpression(expression)) return objectValues(expression);
+  // `a ? 'x' : b ? 'y' : 'z'`: the values of every branch (the condition only picks one).
+  if (ts.isConditionalExpression(expression)) {
+    const values = [expression.whenTrue, expression.whenFalse].map(branch => literalValues(branch, ast));
+    return values.every(Boolean) ? [...new Set(values.flat())] : null;
+  }
   if (!ts.isIdentifier(expression) || fileIndex(ast).written.has(expression.text)) return null;
   const declaration = bindingOf(expression, ast);
-  if (!declaration || ts.isBindingElement(declaration)) return null;
+  if (declaration && ts.isBindingElement(declaration)) return validatorValues(declaration, ast);
+  if (!declaration) return null;
   const aliases = fileIndex(ast).aliases;
   const typeValues = type => {
     if (!type) return null;
@@ -301,6 +355,129 @@ function literalValues(expression, ast) {
     return arrayValues(call.expression.expression, ast);
   return null;
 }
+// A Convex handler's destructured argument (`handler: async (ctx, { kind }) => …`) takes the values its
+// `args` validator allows: v.literal('a'), v.union of those, v.optional of either (which adds
+// 'undefined', the text an absent value gives a template). The definition must be the only argument
+// of an imported Convex builder (query, internalMutation, a convex/ wrapper such as cliServer's
+// query) with plain, unique `args` and `handler` keys. Unknown (null), so every module: any other
+// validator; a spread, computed or duplicate key in the definition or its `args`; a default on the
+// element or the whole parameter; a TS `this` parameter; a rest element or nested pattern; any write
+// to the name (plain, destructuring, parenthesised, for-in/of) or another declaration of it in the
+// handler (a hoisted `var` rebinds it); or a `v` not imported from convex/values or shadowed where
+// the validator is built.
+// A direct `fn._handler(ctx, args)` call in a test skips the args validator. The narrowing still
+// holds for it: a value the validator refuses is a call Convex never makes, so a test passing one
+// tests nothing production can reach (5dcfce75 review 02c2111d; decided not to widen for it).
+function validatorValues(element, ast) {
+  const pattern = element.parent;
+  if (!ts.isObjectBindingPattern(pattern) || element.dotDotDotToken || element.initializer) return null;
+  const key = element.propertyName ?? element.name;
+  if (!ts.isIdentifier(key) && !ts.isStringLiteralLike(key)) return null;
+  const parameter = pattern.parent;
+  const handler = parameter.parent;
+  if (!ts.isParameter(parameter) || parameter.initializer || parameter.dotDotDotToken) return null;
+  if (!handler || handler.parameters?.[1] !== parameter) return null;
+  const first = handler.parameters[0];
+  if (ts.isIdentifier(first.name) && first.name.text === 'this') return null;
+  const index = fileIndex(ast);
+  const local = element.name.text;
+  if (
+    index.named.has(local) ||
+    (index.declarations.get(local) ?? []).some(
+      item => item !== element && item.pos >= handler.pos && item.end <= handler.end,
+    )
+  )
+    return null;
+  const keyName = node =>
+    node.name && (ts.isIdentifier(node.name) || ts.isStringLiteralLike(node.name)) ? node.name.text : null;
+  // Plain keys only: a spread or computed key may replace or add any field.
+  const plain = object =>
+    object.properties.every(
+      item => !ts.isSpreadAssignment(item) && item.name && !ts.isComputedPropertyName(item.name),
+    );
+  const definition = ts.isMethodDeclaration(handler)
+    ? handler
+    : (ts.isArrowFunction(handler) || ts.isFunctionExpression(handler)) &&
+        ts.isPropertyAssignment(handler.parent) &&
+        handler.parent.initializer === handler
+      ? handler.parent
+      : null;
+  if (!definition || keyName(definition) !== 'handler' || !ts.isObjectLiteralExpression(definition.parent))
+    return null;
+  const object = definition.parent;
+  if (!plain(object) || !convexBuilder(object, ast)) return null;
+  const entries = name => object.properties.filter(item => keyName(item) === name);
+  if (entries('handler').length !== 1) return null;
+  const [args, ...more] = entries('args');
+  if (
+    !args ||
+    more.length ||
+    !ts.isPropertyAssignment(args) ||
+    !ts.isObjectLiteralExpression(args.initializer)
+  )
+    return null;
+  if (!plain(args.initializer)) return null;
+  const fields = args.initializer.properties.filter(item => keyName(item) === key.text);
+  if (fields.length !== 1 || !ts.isPropertyAssignment(fields[0])) return null;
+  const validators = new Set();
+  for (const statement of ast.statements) {
+    if (!ts.isImportDeclaration(statement) || statement.moduleSpecifier.text !== 'convex/values') continue;
+    const bindings = statement.importClause?.isTypeOnly ? null : statement.importClause?.namedBindings;
+    for (const item of bindings && ts.isNamedImports(bindings) ? bindings.elements : [])
+      if (!item.isTypeOnly && (item.propertyName ?? item.name).text === 'v') validators.add(item.name.text);
+  }
+  const values = node => {
+    if (
+      !ts.isCallExpression(node) ||
+      !ts.isPropertyAccessExpression(node.expression) ||
+      !ts.isIdentifier(node.expression.expression) ||
+      !validators.has(node.expression.expression.text) ||
+      index.written.has(node.expression.expression.text) ||
+      shadowed(node.expression.expression, ast)
+    )
+      return null;
+    const [first] = node.arguments;
+    switch (node.expression.name.text) {
+      case 'literal':
+        return node.arguments.length === 1 && ts.isStringLiteralLike(first) ? [first.text] : null;
+      case 'optional': {
+        const inner = node.arguments.length === 1 ? values(first) : null;
+        return inner && [...inner, 'undefined'];
+      }
+      case 'union': {
+        const all = node.arguments.map(values);
+        return all.length && all.every(Boolean) ? [...new Set(all.flat())] : null;
+      }
+      default:
+        return null;
+    }
+  };
+  return values(fields[0].initializer);
+}
+// The object is the only argument of a call to an imported Convex function builder: one from
+// convex/server, the generated server or a convex/ module (custom wrappers keep the args validator).
+const builderName = /^(?:(?:internal)?(?:query|mutation|action)|[a-z]\w*(?:Query|Mutation|Action))$/;
+function convexBuilder(object, ast) {
+  const call = object.parent;
+  if (!ts.isCallExpression(call) || call.arguments.length !== 1 || call.arguments[0] !== object) return false;
+  if (!ts.isIdentifier(call.expression) || !builderName.test(call.expression.text)) return false;
+  const name = call.expression.text;
+  if (shadowed(call.expression, ast) || fileIndex(ast).written.has(name)) return false;
+  return ast.statements.some(
+    statement =>
+      ts.isImportDeclaration(statement) &&
+      !statement.importClause?.isTypeOnly &&
+      (statement.moduleSpecifier.text === 'convex/server' ||
+        (statement.moduleSpecifier.text.startsWith('.') && ast.fileName.startsWith('convex/'))) &&
+      statement.importClause?.namedBindings &&
+      ts.isNamedImports(statement.importClause.namedBindings) &&
+      statement.importClause.namedBindings.elements.some(item => !item.isTypeOnly && item.name.text === name),
+  );
+}
+// Any declaration of the name other than an import, anywhere in the file: it may shadow the import at
+// this use (scope is not worth proving here, so any such declaration counts).
+const shadowed = (identifier, ast) =>
+  fileIndex(ast).named.has(identifier.text) || fileIndex(ast).declarations.has(identifier.text);
 function objectValues(access) {
   let target = access.expression;
   while (ts.isParenthesizedExpression(target) || ts.isAsExpression(target)) target = target.expression;
