@@ -444,11 +444,6 @@ their own admission evidence on the exact main receipt. Withdrawal groups the ot
 into one replacement check with the withdrawn source excluded. A replacement cohort can still
 use the existing scoped gate when every member has a valid full-pass basis.
 
-With `FORGE_QUEUE_CANCEL_HONOURS_FAST=1`, cancellation considers the running check's own
-risk rules and the project's live fast-mode breaker and audit. It leaves possible package
-placement and Markdown merges for ordinary proof evaluation. Acceptance still decides on
-the completed run and exact composed source.
-
 With `FORGE_QUEUE_COMPOSE_SETTLE=1` (Item 9a04d916; 25666d9b deletes it after its A/B), a
 cancelled check's recompose cannot wait for the 15-minute stall alarm. The finish step that
 submits the recompose and the one that consumes its result run in a scheduled mutation, which

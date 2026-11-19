@@ -28,22 +28,18 @@ test.after(() => {
   }
 });
 
-for (const { name, paths, enabled, mode = 'fast', breaker = false, keep = false, person = false } of [
-  { name: 'switch off', paths: ['package.json', 'src/b.ts'], enabled: false },
-  { name: 'effective fast mode', paths: ['package.json', 'src/b.ts'], enabled: true, keep: true },
-  { name: 'person in fast mode', paths: ['package.json', 'src/b.ts'], enabled: true, person: true },
-  { name: 'strict mode', paths: ['package.json', 'src/b.ts'], enabled: true, mode: 'strict' },
-  { name: 'open fast breaker', paths: ['package.json', 'src/b.ts'], enabled: true, breaker: true },
-  { name: 'order-sensitive mover', paths: ['convex/schema.ts', 'src/b.ts'], enabled: true },
-  { name: 'overlapping code', paths: ['src/shared.ts', 'src/shared.ts'], enabled: true },
+// O4 (FORGE_QUEUE_CANCEL_HONOURS_FAST) is deleted (lead decision on 026ce0cf): a main move
+// retires an overlapping or global-risk running check in every landing mode, and the Lane gets
+// the ordinary exact recheck that holds queue order (incident replays 10d253c6, C1).
+for (const { name, paths, mode = 'fast', breaker = false, person = false } of [
+  { name: 'effective fast mode', paths: ['package.json', 'src/b.ts'] },
+  { name: 'person in fast mode', paths: ['package.json', 'src/b.ts'], person: true },
+  { name: 'strict mode', paths: ['package.json', 'src/b.ts'], mode: 'strict' },
+  { name: 'open fast breaker', paths: ['package.json', 'src/b.ts'], breaker: true },
+  { name: 'order-sensitive mover', paths: ['convex/schema.ts', 'src/b.ts'] },
+  { name: 'overlapping code', paths: ['src/shared.ts', 'src/shared.ts'] },
 ])
-  test(`O4: ${name} ${keep ? 'preserves' : 'cancels'} the running check`, async t => {
-    const previous = process.env.FORGE_QUEUE_CANCEL_HONOURS_FAST;
-    process.env.FORGE_QUEUE_CANCEL_HONOURS_FAST = enabled ? '1' : '0';
-    t.after(() => {
-      if (previous === undefined) delete process.env.FORGE_QUEUE_CANCEL_HONOURS_FAST;
-      else process.env.FORGE_QUEUE_CANCEL_HONOURS_FAST = previous;
-    });
+  test(`main move: ${name} cancels the running check`, async t => {
     const f = await fixture(t, {
       memberPaths: paths,
       landingMode: mode,
@@ -59,7 +55,7 @@ for (const { name, paths, enabled, mode = 'fast', breaker = false, keep = false,
       assert.equal(attempt.actor.kind, 'person');
     }
     const [a, b] = f.runs();
-    const running = await f.rawChecks.activate(b.id);
+    await f.rawChecks.activate(b.id);
     await f.rawChecks.pass(await f.rawChecks.activate(a.id));
     await drain(f, task => task.name === 'projectHostedAcceptance:complete');
     if (breaker) {
@@ -71,30 +67,17 @@ for (const { name, paths, enabled, mode = 'fast', breaker = false, keep = false,
     }
     await drain(f);
     assert.equal(current(f, 0).phase, 'landed');
-    assert.equal(f.runs().find(run => run.id === b.id).status, keep ? 'running' : 'cancelled');
-    if (keep) {
-      assert.equal(requestRow(f, 1).runId, b.id);
-      await f.rawChecks.pass(running);
-      await drain(f);
-      assert.equal(current(f, 1).phase, 'landed');
-      assert.equal(f.runs().length, 2);
-      const receipt = [...f.tables.projectHostedAcceptances.values()].find(
-        row => row.receiptId === current(f, 1).acceptance.receiptId,
-      );
-      assert.equal(JSON.parse(receipt.value).crossHeadProof.algorithm, 'fast-first-check-v1');
-    } else if (name === 'switch off') {
-      await settle(f);
-      assert.equal(current(f, 1).phase, 'landed');
-      assert.equal(f.runs().length, 3);
-    }
-    if (keep || name === 'switch off')
-      t.diagnostic(
-        JSON.stringify({
-          calls: f.counts.length,
-          readBytes: f.counts.reduce((sum, cost) => sum + cost.readBytes, 0),
-          writeBytes: f.counts.reduce((sum, cost) => sum + cost.writeBytes, 0),
-        }),
-      );
+    assert.equal(f.runs().find(run => run.id === b.id).status, 'cancelled');
+    await settle(f);
+    assert.equal(current(f, 1).phase, 'landed');
+    assert.equal(f.runs().length, 3, 'one cancelled run plus the ordinary exact recheck');
+    t.diagnostic(
+      JSON.stringify({
+        calls: f.counts.length,
+        readBytes: f.counts.reduce((sum, cost) => sum + cost.readBytes, 0),
+        writeBytes: f.counts.reduce((sum, cost) => sum + cost.writeBytes, 0),
+      }),
+    );
   });
 
 for (const conflict of [true, false])
