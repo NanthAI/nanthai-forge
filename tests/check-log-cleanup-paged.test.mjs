@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { atOneInstant } from './still-clock.mjs';
 import { testDeploymentOrigin } from './trusted-origin.mjs';
 import { captureNativeArchive } from './native-archive-fixture.mjs';
 import test from 'node:test';
@@ -205,9 +206,10 @@ async function drive(s, input) {
     maxActionMs = 0,
     maxHeapDelta = 0;
   do {
-    const before = process.memoryUsage().heapUsed;
-    result = JSON.parse(await cleanup.clean._handler(s.ctx, input));
-    maxActionMs = Math.max(maxActionMs, result.actionMs);
+    const before = process.memoryUsage().heapUsed,
+      started = performance.now();
+    result = JSON.parse(await atOneInstant(() => cleanup.clean._handler(s.ctx, input)));
+    maxActionMs = Math.max(maxActionMs, performance.now() - started);
     maxHeapDelta = Math.max(maxHeapDelta, process.memoryUsage().heapUsed - before);
     assert(++calls < 10000, 'requested operation advances finitely');
   } while (result.pending);

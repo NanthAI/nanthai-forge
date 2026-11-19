@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { atOneInstant } from './still-clock.mjs';
 import { getWorkRecord } from './hosted-fixture.mjs';
 // Producer and consumer are separate processes. The measured consumer reads
 // immutable object files on demand, matching an action's external object store.
@@ -279,11 +280,13 @@ do {
   const started = performance.now();
   stepStarted = started;
   calls++;
-  result = await actions.ensure._handler(s.ctx, {
-    rebuild: true,
-    projectId: 'project',
-    continuation: calls > 1,
-  });
+  result = await atOneInstant(() =>
+    actions.ensure._handler(s.ctx, {
+      rebuild: true,
+      projectId: 'project',
+      continuation: calls > 1,
+    }),
+  );
   longestActionMs = Math.max(longestActionMs, performance.now() - started);
 } while (typeof result !== 'string');
 console.log(
