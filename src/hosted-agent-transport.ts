@@ -501,6 +501,17 @@ export class HostedAgentTransport {
       typeof input.message === 'string'
     )
       suppliedLandingMessage(input.message);
+    // A failed check's reply names its retry reason `next.retryReason`; land takes it as `reason`.
+    // Either name lands the same request (ad80e037): one name reaches the journal and the server.
+    if (requestedAction === 'finish' && Object.hasOwn(input, 'retryReason')) {
+      const { retryReason, ...rest } = input;
+      invariant(
+        rest.reason === undefined || rest.reason === retryReason,
+        'BAD_ARGUMENT',
+        'Pass the retry reason once, as "reason" (the reply\'s next.retryReason value).',
+      );
+      input = { ...rest, reason: retryReason };
+    }
     const replay =
       typeof input.operationId === 'string' &&
       z.uuid().safeParse(input.operationId).success &&
@@ -1964,11 +1975,14 @@ export class HostedAgentTransport {
         plan,
         ...(plan.status === 'unavailable' ? landNext : planNext),
       });
+    // The Lane state is read when the run starts, after any `nforge heavy` queue wait; edits made
+    // during that wait are named as such, with the save and the same preflight to run (ad80e037).
+    const rerun = `Save, then run the same preflight again${heavyWaitWords()}: ${hostedRecoveryCommand(root, 'save', {})}, then ${hostedRecoveryCommand(root, 'preflight', { ...command, laneId })}.`;
     const minutes = unsavedMinutes(root);
     invariant(
       minutes === null,
       'LANE_DIRTY',
-      'Save first: preflight records a result for the saved head, and these files have unsaved edits.',
+      `Save first: preflight records a result for the saved head, and these files have unsaved edits. ${rerun}`,
     );
     // File times can miss an edit made while a save was uploading (the marker is rewritten after it).
     // The receipt must name the bytes under test, so confirm them against the saved baseline: a local
@@ -1976,7 +1990,7 @@ export class HostedAgentTransport {
     invariant(
       !hostedLaneDirty(root, { refresh: true }),
       'LANE_DIRTY',
-      'Save first: preflight records a result for the saved head, and the files here differ from it.',
+      `Save first: preflight records a result for the saved head, and the files here differ from it. ${rerun}`,
     );
     const receipt = runPreflight(
       root,
@@ -2256,6 +2270,20 @@ export type HostedAgentSession = {
   /** The `gates` argument for this finish's landing (feature land-gates); undefined when not sent. */
   landGates?: (composeOperationId: string) => string | undefined;
 };
+
+/** How long the enclosing `nforge heavy` queued for its slot, as words for a LANE_DIRTY refusal:
+ * edits made during that wait are why the saved head no longer matches (ad80e037). Env read only. */
+function heavyWaitWords() {
+  try {
+    const waitedMs = (JSON.parse(process.env.FORGE_HEAVY_PARENT || 'null') as { waitedMs?: unknown } | null)
+      ?.waitedMs;
+    if (typeof waitedMs !== 'number' || waitedMs < 1000) return '';
+    const seconds = Math.round(waitedMs / 1000);
+    return ` (this preflight waited ${seconds < 120 ? `${seconds} s` : `${Math.round(seconds / 60)} min`} for a heavy slot; the edits came during that wait, and the new run waits again)`;
+  } catch {
+    return '';
+  }
+}
 
 /** Most candidate ids an ambiguous prefix lists; the server read returns one more to say "more". Same
  * value as planningIdMaxCandidates, kept local: this module already sits on every hosted command path.

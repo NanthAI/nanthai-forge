@@ -296,7 +296,10 @@ export const hostedAgentCommandSchemas = {
       reason: finishRetryReasonSchema.optional(),
     })
     .strict()
-    .refine(command => !command.retry || Boolean(command.reason), 'A retry records its reason.'),
+    .refine(
+      command => !command.retry || Boolean(command.reason),
+      'A retry records its reason: add "reason" (flake, main-moved, infra or other; a failed check names it next.retryReason).',
+    ),
   /** asOwner: the project owner is issuing this, not an agent acting alone (urgentRoles). */
   prioritize: z
     .object({

@@ -1507,7 +1507,7 @@ on `status {submissionId}` and on the `land`/`wait` reply (in `submissions[]`):
 same reading the web's Failed check screen shows. `cause` is `change`, `flaky-test`,
 `main-failing`, `main-moved`, `ci-not-started`, `ci-stopped` or `unknown`;
 `recovery` is `fix-in-lane`, `retry` (replay `land --save` with `"retry":true` and
-the given `retryReason`), `wait-for-main`, `wait` or `read-log`; `suspects` judges
+`"reason"` set to the given `retryReason`; land also takes it as `retryReason`), `wait-for-main`, `wait` or `read-log`; `suspects` judges
 the change, the test, main and your CI. Forge never guesses: an unknown cause says
 so. Other states carry no `failureCause` and read nothing extra for it.
 

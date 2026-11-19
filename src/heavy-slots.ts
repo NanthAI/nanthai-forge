@@ -424,6 +424,7 @@ export async function heavyCli(
   }
   if (beforeRun && !(await beforeRun())) return Number(process.exitCode ?? 0);
   const inherited = inheritedHeavySlot(heavySlotDirectory());
+  const queuedAt = Date.now();
   const slot =
     slots === 0 || inherited || (await staticHeavyCommand(args, process.cwd()))
       ? null
@@ -463,6 +464,9 @@ export async function heavyCli(
                 directory: canonicalRoot(heavySlotDirectory()),
                 slot: basename(held),
                 pid: Number(readFileSync(join(held, 'pid'), 'utf8')),
+                // How long this command queued for its slot: a preflight refused for edits made
+                // meanwhile says so (ad80e037). A nested heavy reuses the slot and adds no wait.
+                ...(slot ? { waitedMs: heldSince - queuedAt } : {}),
               })
             : '',
         },

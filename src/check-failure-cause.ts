@@ -95,7 +95,8 @@ export const recoveryText: Record<FailureRecovery, { label: string; agent: strin
   },
   retry: {
     label: 'Retry the check',
-    agent: 'Run land --save again with "retry":true and the recorded reason; the code does not change.',
+    agent:
+      'Run land --save again with "retry":true and "reason" set to next.retryReason; the code does not change.',
   },
   'wait-for-main': {
     label: 'Keep waiting',
