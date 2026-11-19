@@ -13,7 +13,9 @@ import {
 } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join, posix } from 'node:path';
+import { dirname, join, posix } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { recordHold } from './heavy-queue.js';
 import { safeRelative } from './files.js';
 import { z } from 'zod';
 import {
@@ -1296,6 +1298,40 @@ const observationSchema = z.union([
  * static job would reject, and a failure there ends the run before any build or test. Tests then
  * run mandatory first in groups sized from the speed already observed; an earlier failure or the
  * spent time budget stops later groups and names them. */
+type HeldHeavySlot = { env: Record<string, string>; release(): void };
+/** One `nforge heavy` slot for this preflight's build and tests, held for this process (c180152a). The
+ * synchronous run waits for it in a child (FIFO with every other heavy command); a preflight inside
+ * `nforge heavy` reuses that slot. Null when slots are off or the claim fails (the run goes on, said once). */
+function holdHeavySlot(cwd: string): HeldHeavySlot | null {
+  const claim = spawnSync(
+    process.execPath,
+    [fileURLToPath(new URL('./preflight-heavy-claim.js', import.meta.url)), String(process.pid), cwd],
+    { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] },
+  );
+  let held: { slot: string | null; parent: string | null } | undefined;
+  try {
+    held = claim.status === 0 ? JSON.parse(claim.stdout) : undefined;
+  } catch {}
+  if (!held) {
+    process.stderr.write('preflight: could not take an nforge heavy slot; running without one.\n');
+    return null;
+  }
+  if (!held.parent) return null;
+  const since = Date.now();
+  const { slot } = held;
+  return {
+    env: {
+      FORGE_HEAVY_PARENT: held.parent,
+      ...(process.env.FORGE_HEAVY_DIR ? { FORGE_HEAVY_DIR: process.env.FORGE_HEAVY_DIR } : {}),
+    },
+    release() {
+      if (!slot) return;
+      rmSync(slot, { recursive: true, force: true });
+      recordHold(dirname(slot), Date.now() - since);
+    },
+  };
+}
+
 export function runPreflight(
   root: string,
   laneId: string,
@@ -1306,6 +1342,9 @@ export function runPreflight(
   /** The saved paths base to head (null: unknown). Given, a static failure blocks only when it is the
    * change's (src/agent-preflight-static.ts); omitted, every static failure blocks. */
   changed?: string[] | null,
+  /** Hold one `nforge heavy` slot for the build and tests (c180152a). The preflight action and the
+   * land gate's inline run set it; a fixture run inside a test (already in its runner's slot) does not. */
+  options: { heavySlot?: boolean } = {},
 ) {
   const started = Date.now();
   // Before anything runs: a long run must never be silent about what it is doing and why.
@@ -1337,6 +1376,7 @@ export function runPreflight(
   // variables only. Built only when something runs; removed when the run ends.
   let clean: ReturnType<typeof cleanCommandEnvironment> | undefined;
   const cleanEnv = () => (clean ??= cleanCommandEnvironment('preflight')).env;
+  let heavy: HeldHeavySlot | null = null;
   try {
     if (plan.static?.selected.length) {
       staticResults = runStaticChecks(
@@ -1349,6 +1389,10 @@ export function runPreflight(
       if (staticResults.some(result => result.outcome === 'failed')) exitCode = 1;
     }
     if (!staticOnly && plan.tests.length && exitCode === 0) {
+      // The build and tests count against the machine-wide `nforge heavy` limit (c180152a); their own
+      // nested `nforge heavy` calls inherit this lease instead of waiting for a second slot.
+      heavy = options.heavySlot ? holdHeavySlot(root) : null;
+      if (heavy) Object.assign(cleanEnv(), heavy.env);
       // Only Forge's own Node layout (no project runner) builds first; another project's script of
       // that name is not Forge's to run, and its runner builds what it needs.
       const scripts = (() => {
@@ -1530,6 +1574,7 @@ export function runPreflight(
       }
     }
   } finally {
+    heavy?.release();
     clean?.dispose();
   }
   if (!environment && missingPrograms.length)

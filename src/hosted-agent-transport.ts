@@ -1884,6 +1884,8 @@ export class HostedAgentTransport {
       marker.tree ?? sourceTree(marker.state.files),
       false,
       changed?.complete ? changed.paths : null,
+      // Preflight takes its own `nforge heavy` slot; wrapped in `nforge heavy`, it reuses that one.
+      { heavySlot: true },
     );
     const next = receipt.passed || receipt.environment ? landNext : planNext;
     return this.response(action, null, {

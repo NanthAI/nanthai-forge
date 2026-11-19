@@ -181,7 +181,9 @@ export function finishGates(
             if (typeof runRequired === 'function') runRequired();
             // Reuse this plan and its existing local wall-time budget. No hosted read, new
             // operation or recursive dispatch: the caller continues the original finish.
-            const result = runPreflight(root, lane.laneId, lane.head, plan, lane.tree, false, changed);
+            const result = runPreflight(root, lane.laneId, lane.head, plan, lane.tree, false, changed, {
+              heavySlot: true,
+            });
             refuseStaticFailure(result);
             const next = result.incomplete?.finish ?? result.stoppedRerun ?? run;
             if (

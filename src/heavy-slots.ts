@@ -2,7 +2,7 @@
 import { canonicalRoot } from './root-paths.js';
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { constants, tmpdir } from 'node:os';
+import { availableParallelism, constants, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { heavySlots, readClientSettings } from './client-settings.js';
 import { watchLocal, type LocalWatcher } from './local-watcher.js';
@@ -100,11 +100,18 @@ export function acquireHeavySlot(
   directory: string,
   slots: number,
   onWait: (wait: HeavyWait) => void = () => {},
-  info: { command?: string | null; cwd?: string | null; tickMs?: number } = {},
+  info: {
+    command?: string | null;
+    cwd?: string | null;
+    tickMs?: number;
+    /** The process the slot is held for (default this one): preflight claims it through a child. */
+    holder?: number;
+  } = {},
 ): Promise<string> {
   mkdirSync(directory, { recursive: true });
+  const holder = info.holder ?? process.pid;
   if (!queuedNames(directory).length) {
-    const slot = tryHeavySlot(directory, slots);
+    const slot = tryHeavySlot(directory, slots, holder);
     if (slot) return Promise.resolve(slot);
   }
   let ticket = joinQueue(directory, info),
@@ -128,7 +135,7 @@ export function acquireHeavySlot(
         const rank = queue.findIndex(item => item.name === ticket.name);
         if (rank < 0) ticket = joinQueue(directory, { ...info, seq: ticket.seq });
         else if (rank === 0) {
-          const slot = tryHeavySlot(directory, slots, process.pid, deep);
+          const slot = tryHeavySlot(directory, slots, holder, deep);
           if (slot) return finish(slot);
         }
         if (rank >= 0 && rank + 1 !== reported) {
@@ -216,7 +223,7 @@ export function heavyStatus(directory: string, slots: number, cwd = process.cwd(
 }
 const minutes = (ms: number) =>
   ms >= 90_000 ? `${Math.round(ms / 60_000)} min` : `${Math.max(1, Math.round(ms / 1000))} s`;
-const waitingMessage = (slots: number, directory: string, wait: HeavyWait) => {
+export const waitingMessage = (slots: number, directory: string, wait: HeavyWait) => {
   const { holders } = heavyStatus(directory, slots);
   const who = holders
     .map(holder =>
@@ -282,8 +289,24 @@ export function nodeTestPathCount(args: string[]): number | null {
   return testing ? paths : null;
 }
 
+/** Test files one `node --test` in a slot may run at once: the cores shared by the slots, at least
+ * one. A slot limits jobs, not CPU; without this each job ran up to cores - 1 files (load 165 on 10
+ * cores with 3 slots). */
+export const testWorkersPerSlot = (cores: number, slots: number) =>
+  Math.max(1, Math.floor(cores / Math.max(1, slots)));
+/** `node --test` with the per-slot worker cap added, unless it sets its own `--test-concurrency`.
+ * Other commands (npm scripts, shells) are returned unchanged: their own `node --test` is not ours to
+ * rewrite. */
+export function capTestWorkers(args: string[], cores: number, slots: number): string[] {
+  if (slots <= 0 || nodeTestPathCount(args) === null) return args;
+  const end = args.indexOf('--');
+  const options = end < 0 ? args : args.slice(0, end);
+  if (options.some(arg => arg === '--test-concurrency' || arg.startsWith('--test-concurrency='))) return args;
+  return [args[0]!, `--test-concurrency=${testWorkersPerSlot(cores, slots)}`, ...args.slice(1)];
+}
+
 /** An inherited holder is a scheduling lease, never source or user authority. */
-function inheritedHeavySlot(directory: string): string | null {
+export function inheritedHeavySlot(directory: string): string | null {
   try {
     const inherited = JSON.parse(process.env.FORGE_HEAVY_PARENT ?? 'null');
     if (
@@ -407,7 +430,8 @@ export async function heavyCli(
     }
     return await new Promise<number>((resolve, reject) => {
       const held = slot ?? inherited;
-      const child = spawn(args[0]!, args.slice(1), {
+      const command = capTestWorkers(args, availableParallelism(), slots);
+      const child = spawn(command[0]!, command.slice(1), {
         stdio: 'inherit',
         env: {
           ...process.env,

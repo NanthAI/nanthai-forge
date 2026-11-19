@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { digest } from '../dist/state/hash.js';
@@ -12,7 +12,8 @@ import {
   preflightRuntime,
   preflightSecondsPerFile,
 } from '../dist/agent-preflight.js';
-import { clientCacheRoot } from '../dist/root-paths.js';
+import { canonicalRoot, clientCacheRoot } from '../dist/root-paths.js';
+import { tryHeavySlot } from '../dist/heavy-slots.js';
 import { parsePeakRssMb } from '../dist/agent-preflight-measure.js';
 import { deltaPaths, savedInventory } from '../dist/agent-preflight-evidence.js';
 const laneId = '11111111-1111-4111-8111-111111111111';
@@ -60,7 +61,17 @@ function fixture(t, fail = false) {
       { laneId, files: files() },
       options,
     );
-  const run = p => runPreflight(root, laneId, digest(JSON.stringify(files())), p, sourceTree(files()));
+  const run = (p, options) =>
+    runPreflight(
+      root,
+      laneId,
+      digest(JSON.stringify(files())),
+      p,
+      sourceTree(files()),
+      false,
+      undefined,
+      options,
+    );
   return { root, files, bytes, put, plan, run };
 }
 test('a small saved delta reruns its consumers and reuses passes for the unchanged tree', t => {
@@ -397,4 +408,85 @@ test('537e73d9: declared guards run first and the wall-time budget never stops o
   assert.ok(receipt.stopped.includes('tests/a.test.mjs'));
   assert.equal(receipt.passed, false);
   assert.ok(receipt.incomplete.mustRun >= 1);
+});
+
+/** A fixture test that records the heavy lease it runs under (c180152a). */
+function heavyEvidence(f, t, slots) {
+  const dir = mkdtempSync(join(tmpdir(), 'forge-preflight-heavy-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const slotsDir = join(dir, 'slots');
+  const settings = join(dir, 'client.json');
+  writeFileSync(settings, JSON.stringify({ localHeavySlots: slots }));
+  for (const [key, value] of [
+    ['FORGE_HEAVY_DIR', slotsDir],
+    ['FORGE_CLIENT_SETTINGS', settings],
+  ]) {
+    const prior = process.env[key];
+    process.env[key] = value;
+    t.after(() => (prior === undefined ? delete process.env[key] : (process.env[key] = prior)));
+  }
+  const evidence = join(dir, 'evidence.json');
+  f.put(
+    'tests/a.test.mjs',
+    `import test from 'node:test'; import { readdirSync, readFileSync, writeFileSync } from 'node:fs'; import {n} from '../src/a.ts';
+test('a', () => {
+  const parent = JSON.parse(process.env.FORGE_HEAVY_PARENT || 'null');
+  const held = readdirSync(${JSON.stringify(slotsDir)}).filter(name => /^[0-9]+$/.test(name))
+    .map(name => ({ slot: name, pid: Number(readFileSync(${JSON.stringify(slotsDir)} + '/' + name + '/pid', 'utf8')) }));
+  writeFileSync(${JSON.stringify(evidence)}, JSON.stringify({ parent, held, n }));
+});`,
+  );
+  return { slotsDir, read: () => JSON.parse(readFileSync(evidence, 'utf8')) };
+}
+
+test('c180152a: a preflight run holds one heavy slot for its build and tests and releases it', t => {
+  const f = fixture(t);
+  const heavy = heavyEvidence(f, t, 2);
+  const receipt = f.run(f.plan(), { heavySlot: true });
+  assert.equal(receipt.passed, true);
+  const seen = heavy.read();
+  // The test ran inside exactly one slot, held by the preflight process, and inherited its lease.
+  assert.deepEqual(seen.held, [{ slot: '1', pid: process.pid }]);
+  assert.equal(seen.parent?.slot, '1');
+  assert.equal(seen.parent?.pid, process.pid);
+  assert.deepEqual(
+    readdirSync(heavy.slotsDir).filter(name => /^[0-9]+$/.test(name)),
+    [],
+  );
+});
+
+test('c180152a: a preflight inside nforge heavy reuses the parent slot instead of waiting for another', t => {
+  const f = fixture(t);
+  // One slot, already held by this process as an nforge heavy parent would hold it.
+  const heavy = heavyEvidence(f, t, 1);
+  const slot = tryHeavySlot(heavy.slotsDir, 1, process.pid);
+  assert.ok(slot);
+  const prior = process.env.FORGE_HEAVY_PARENT;
+  process.env.FORGE_HEAVY_PARENT = JSON.stringify({
+    directory: canonicalRoot(heavy.slotsDir),
+    slot: '1',
+    pid: process.pid,
+  });
+  t.after(() =>
+    prior === undefined ? delete process.env.FORGE_HEAVY_PARENT : (process.env.FORGE_HEAVY_PARENT = prior),
+  );
+  const receipt = f.run(f.plan(), { heavySlot: true });
+  assert.equal(receipt.passed, true);
+  const seen = heavy.read();
+  assert.deepEqual(seen.held, [{ slot: '1', pid: process.pid }]);
+  assert.equal(seen.parent?.slot, '1');
+  // The parent's slot is the parent's to release.
+  assert.ok(readdirSync(heavy.slotsDir).includes('1'));
+});
+
+test('c180152a: a fixture run inside a test takes no slot, so a full machine never stalls it', t => {
+  const f = fixture(t);
+  const heavy = heavyEvidence(f, t, 1);
+  // Every slot is held and no lease is inherited: a run that claimed one would wait for this process.
+  tryHeavySlot(heavy.slotsDir, 1, process.pid);
+  const receipt = f.run(f.plan());
+  assert.equal(receipt.passed, true);
+  const seen = heavy.read();
+  assert.equal(seen.parent, null);
+  assert.deepEqual(seen.held, [{ slot: '1', pid: process.pid }]);
 });

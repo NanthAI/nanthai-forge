@@ -102,6 +102,17 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   for each waiter ahead. It is a rough guide, not a promise.
 - A slot or ticket whose process died is reclaimed at the next check. Liveness compares the
   process start time as well as the pid, so a reused pid cannot hold a slot or a place in line.
+- A slot limits jobs, not CPU, so heavy also caps test workers. A `node --test` command run in a
+  slot that sets no `--test-concurrency` of its own gets `--test-concurrency=N`, with N =
+  max(1, floor(cores / slots)): 3 on 10 cores with 3 slots, 5 with 2. Without it, each slot's
+  `node --test` ran up to 9 files at once (load 165 on 10 cores). A command's own
+  `--test-concurrency` wins. npm scripts and shells are not rewritten: run the `node --test` itself
+  under heavy (the full `npm test` is the landing check's).
+- Preflight takes a slot itself for its build and tests (c180152a): `nforge agent . preflight`
+  waits for one like any heavy command, and its build and tests inherit it, so their own
+  `nforge heavy` calls reuse it. Wrapped in `nforge heavy`, it reuses that slot instead of taking a
+  second one. Its tests run `--test-concurrency=1`, one group at a time, under the cap. A preflight
+  that a test runs on a fixture takes no slot (the test already runs in one).
 - `nforge heavy --status` lists holders and waiters by Lane id, executable name and time; it never
   prints folders, arguments or environment.
 - The exit code is the command's exit code. The slots, tickets and hold-time history live in
