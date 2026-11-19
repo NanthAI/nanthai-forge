@@ -1,0 +1,6 @@
+{
+  "actions": [
+    "head"
+  ],
+  "reason": "Read-only source pins and opt-in member-only holder metadata; grants no authority."
+}

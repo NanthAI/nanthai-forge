@@ -1,0 +1,6 @@
+{
+  "actions": [
+    "resume"
+  ],
+  "reason": "Owner device recovery only; policy.set keeps Pause/un-pause person-only."
+}

@@ -1,0 +1,6 @@
+{
+  "actions": [
+    "pickPerson"
+  ],
+  "reason": "Read-only current-writer picker; grants no authority."
+}

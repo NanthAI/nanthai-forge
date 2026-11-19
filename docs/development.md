@@ -73,9 +73,12 @@ for concurrency, read-only removal, download-cache scope and private-install det
 data placement, project purge inventory, owner entry-point classification, every
 storage-budget phase and the generated agent-help block. It reads the existing
 registries; it adds no runtime table or permission rule. The individual guards
-still check their detailed contracts. Owner registrations remain in
-`tests/owner-boundary-guard.test.mjs`; the combined guard parses their literal data
-without importing or executing that module.
+still check their detailed contracts. Owner registrations are one JSON file per
+Convex module in `tests/owner-boundary-guard.d/` (`actions` plus an optional review
+`reason`); both guards read them as data and take no other permission input. A
+permission map added back to `tests/owner-boundary-guard.test.mjs` is refused,
+dotfiles in the folder are ignored, and an entry whose Convex module no longer
+exists is a finding.
 
 ### Shared schema compatibility
 

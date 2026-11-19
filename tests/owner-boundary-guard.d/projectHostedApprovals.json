@@ -1,0 +1,7 @@
+{
+  "actions": [
+    "decide",
+    "observe"
+  ],
+  "reason": "decide already requires a person."
+}

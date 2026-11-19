@@ -1,0 +1,7 @@
+{
+  "actions": [
+    "teams",
+    "history"
+  ],
+  "reason": "Owner-only metadata, no source authority."
+}

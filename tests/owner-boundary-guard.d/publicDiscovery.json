@@ -1,0 +1,7 @@
+{
+  "actions": [
+    "stargazers",
+    "settings"
+  ],
+  "reason": "Owner-only read-only metadata: who starred, the Lane-title opt-in."
+}

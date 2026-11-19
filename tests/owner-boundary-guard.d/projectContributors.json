@@ -1,0 +1,9 @@
+{
+  "actions": [
+    "remove",
+    "list",
+    "handles",
+    "pending",
+    "cancelInvite"
+  ]
+}

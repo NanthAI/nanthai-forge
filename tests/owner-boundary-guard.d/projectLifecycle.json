@@ -1,0 +1,6 @@
+{
+  "actions": [
+    "rename"
+  ],
+  "reason": "A device's rename is held for the owner person (Item eb631a53); the person's applies."
+}

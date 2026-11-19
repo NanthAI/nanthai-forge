@@ -1,0 +1,6 @@
+{
+  "actions": [
+    "list"
+  ],
+  "reason": "Read-only: the person's own teams, members by handle; keys to the owner only."
+}

@@ -1,0 +1,6 @@
+{
+  "actions": [
+    "read"
+  ],
+  "reason": "Read-only: says whether the viewer may decide; decide keeps its own person gate."
+}

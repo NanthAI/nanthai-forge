@@ -59,20 +59,37 @@ test('one diagnostic includes every omitted table, budget phase, owner classific
   ]);
 });
 
-test('the combined guard reads owner registrations in place as data without executing their module', t => {
+test('the combined guard reads owner registrations as data, one file per module, without executing the guard', t => {
   const root = temporaryDirectory(t, 'forge-owner-inventory-');
   mkdirSync(join(root, 'convex'));
-  mkdirSync(join(root, 'tests'));
+  mkdirSync(join(root, 'tests/owner-boundary-guard.d'), { recursive: true });
   writeFileSync(
     join(root, 'convex/synthetic.ts'),
     'export const read = query({handler: async ctx => ownedProject(ctx, "synthetic")});',
   );
-  const inventory = join(root, 'tests/owner-boundary-guard.test.mjs');
+  const guard = join(root, 'tests/owner-boundary-guard.test.mjs');
+  const entry = join(root, 'tests/owner-boundary-guard.d/synthetic.json');
   const directory = pathToFileURL(join(root, 'convex') + sep);
-  writeFileSync(inventory, 'throw Error("must not execute"); const allowed = { synthetic: ["read"] };');
+  writeFileSync(guard, 'throw Error("must not execute");');
+  writeFileSync(entry, '{"actions": ["read"], "reason": "Read-only."}');
   assert.deepEqual(ownerBoundaryFindings(directory), []);
-  writeFileSync(inventory, 'const allowed = { synthetic: [] };');
+  writeFileSync(entry, '{"actions": []}');
   assert.match(ownerBoundaryFindings(directory)[0], /^synthetic.ts:read: classify/);
-  writeFileSync(inventory, 'const allowed = computePermissions();');
-  assert.throws(() => ownerBoundaryFindings(directory), /literal allowed object/);
+  writeFileSync(entry, '{"actions": "read"}');
+  assert.throws(() => ownerBoundaryFindings(directory), /synthetic\.json: must be/);
+  // A permission map added back to the shared guard file is refused, so entries keep their own files.
+  writeFileSync(entry, '{"actions": ["read"]}');
+  writeFileSync(guard, 'const allowed = { synthetic: ["read"] };');
+  assert.throws(() => ownerBoundaryFindings(directory), /one file per module/);
+  // The folder is the only input: no caller can hand the guard its own permission map.
+  assert.equal(ownerBoundaryFindings.length, 1);
+  writeFileSync(guard, 'throw Error("must not execute");');
+  // A Finder .DS_Store in the folder is not an entry.
+  writeFileSync(join(root, 'tests/owner-boundary-guard.d/.DS_Store'), '\0binary');
+  assert.deepEqual(ownerBoundaryFindings(directory), []);
+  // An entry for a deleted module is stale: it would revive if a module of that name came back.
+  writeFileSync(join(root, 'tests/owner-boundary-guard.d/removed.json'), '{"actions": ["write"]}');
+  assert.deepEqual(ownerBoundaryFindings(directory), [
+    'tests/owner-boundary-guard.d/removed.json: convex/removed.ts no longer exists; delete the stale entry',
+  ]);
 });

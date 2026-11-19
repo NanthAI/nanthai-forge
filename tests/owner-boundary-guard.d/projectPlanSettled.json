@@ -1,0 +1,6 @@
+{
+  "actions": [
+    "page"
+  ],
+  "reason": "Read-only done and dropped plan rows, one bounded page; no write."
+}

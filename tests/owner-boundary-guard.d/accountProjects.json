@@ -1,0 +1,6 @@
+{
+  "actions": [
+    "list"
+  ],
+  "reason": "Read-only: the person's own and member projects with role; grants no authority."
+}
