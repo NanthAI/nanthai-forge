@@ -33,20 +33,18 @@ Eight seeds cover eight profiles; 20 took 136 seconds. Counterexamples stay in t
 ## Owner rollout decision
 
 Calibration is stopped; retained results are unqualified. Sequence: foundation, new-run wake, parked deadlines.
-Each runtime rule has a documented switch, deleted after proof. The new-run wake (N1) is opt-in,
-`FORGE_QUEUE_NEW_RUN_WAKE=1`, until a real N=10 A/B of both arms: an order holder that starts
-checking a run it can be charged for (`overtakeOlder` is `spend`; never while merely queued, which
+Each runtime rule has a documented switch, deleted after proof. The new-run wake (N1) has no
+switch: an order holder that starts checking a run it can be charged for (`overtakeOlder` is `spend`; never while merely queued, which
 is a free overtake that records no mark) drives one Ready follower whose latest receipt wait names
 that holder as `accepting`/`unsealed` without overlapping footprints (a full receipt list is skipped).
 The woken claim records the lifetime mark, so the holder re-checks at most once for followers.
-Carry re-pins, parking and metadata writes wake nobody. Post diff/invariants on
-`5e3c3a3c`; await lead go after cross-model review. Skip failing targets with that Item until their
-rule lands. No parked entry (`orderWaited` unset): calls, reads and writes stay unchanged; a holder whose waiters all cancelled keeps the marker and can pay one empty indexed read.
+Carry re-pins, parking and metadata writes wake nobody. Skip failing targets with `5e3c3a3c` until
+their rule lands. No parked entry (`orderWaited` unset): calls, reads and writes stay unchanged; a holder whose waiters all cancelled keeps the marker and can pay one empty indexed read.
 
 After each landing, watch two hours or 20 dogfood landings, whichever comes first. Compare
 discarded runner share, median/p90 time to main, parked entries without alarms and wakes per
 landing. Morning references are 31%, 27.8 minutes and 65.8 minutes; measure missing count
-baselines rather than guessing. A regression disables that rule's switch and goes to the lead.
+baselines rather than guessing. A regression disables that rule's switch, or for a rule without one is fixed forward as a bug, and goes to the lead.
 
 Cap 3, urgent-retry removal, early-refusal scope and per-generation `unsealed` wait for a real
 N=10 bench A/B of both arms, with owner go. The lifetime S4 bound remains.

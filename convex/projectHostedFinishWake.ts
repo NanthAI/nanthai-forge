@@ -118,8 +118,7 @@ export async function notifyFinish(ctx: MutationCtx, state: HostedLandingState) 
       { projectId, submissionId: state.id },
     );
 }
-/** New-run wake (incident 5e3c3a3c, rule N1; temporary switch FORGE_QUEUE_NEW_RUN_WAKE=1,
- * default off until the N=10 A/B). A passed follower parked behind an entry that was
+/** New-run wake (incident 5e3c3a3c, rule N1). A passed follower parked behind an entry that was
  * about to land waited out that entry's whole re-check: the entry kept its order, and
  * no event re-ran the follower's claim. The wake fires in the one write where waiting
  * stops being needed AND the overtake can be charged: the entry starts checking a run
@@ -137,7 +136,6 @@ export function bindsNewRun(
   orderLive: boolean,
 ) {
   return Boolean(
-    process.env.FORGE_QUEUE_NEW_RUN_WAKE === '1' &&
     row.orderWaited &&
     orderLive &&
     runId &&

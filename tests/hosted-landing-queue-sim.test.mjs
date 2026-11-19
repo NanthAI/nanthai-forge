@@ -48,38 +48,39 @@ for (const { seed, profile } of cases) {
   });
 }
 
+// The detector needs the pre-N1 counterexample: the parked incident runs in a child process on the
+// historical no-new-run-wake mutant (source patched for that compile only, as for S4 below).
+const PRE_N1 = [
+  {
+    file: 'convex/projectHostedFinishWake.ts',
+    find: '    row.orderWaited &&',
+    replace: '    false &&\n    row.orderWaited &&',
+  },
+];
 test('5e3c3a3c: holder starts a new check while followers are parked; a parked entry with no alarm is detected', async t => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
   const { parkedIncident } = await import('./queue-sim/parked-incident.mjs');
-  const { inspectQueue, requestRows } = await import('./queue-sim/invariants.mjs');
-  // The detector needs the pre-N1 counterexample: pin the new-run wake off.
-  const previous = process.env.FORGE_QUEUE_NEW_RUN_WAKE;
-  delete process.env.FORGE_QUEUE_NEW_RUN_WAKE;
-  t.after(() => {
-    if (previous !== undefined) process.env.FORGE_QUEUE_NEW_RUN_WAKE = previous;
-  });
+  const { inspectQueue } = await import('./queue-sim/invariants.mjs');
+  const environment = {
+    ...process.env,
+    FORGE_TEST_SOURCE_PATCHES: JSON.stringify(PRE_N1),
+    FORGE_TEST_PRECOMPILED: '0',
+  };
+  delete environment.NODE_TEST_CONTEXT;
+  // The mutant child asserts L1/L2 on the stored chain and that the detector left it unchanged.
+  await promisify(execFile)(
+    process.execPath,
+    ['--import', './tests/check-runtime.mjs', '--test', 'tests/queue-sim/parked-mutant-runner.mjs'],
+    { env: environment, maxBuffer: 4 * 1024 * 1024 },
+  );
+  // Current code: the new-run wake gives the oldest parked follower a fresh claim, so this
+  // incident leaves no stale edge (L2) on its followers.
   const { f, followers } = await parkedIncident(t);
-  const before = JSON.stringify(
-    Object.fromEntries(Object.entries(f.tables).map(([name, rows]) => [name, [...rows.values()]])),
-  );
   const issues = await inspectQueue(f);
-  assert.equal(
-    JSON.stringify(
-      Object.fromEntries(Object.entries(f.tables).map(([name, rows]) => [name, [...rows.values()]])),
-    ),
-    before,
-    'the detector cannot repair its counterexample',
-  );
-  for (const id of ['L1', 'L2']) {
-    if (known[id])
-      assert(
-        issues.some(issue => issue.id === id && followers.includes(issue.submission)),
-        `retained incident demonstrates ${id}`,
-      );
-    else assert(!issues.some(issue => issue.id === id), `${id} must remain fixed`);
-  }
   assert(
-    requestRows(f).some(row => row.orderWait),
-    'exercise real persisted wait edges',
+    !issues.some(issue => issue.id === 'L2' && followers.includes(issue.submission)),
+    JSON.stringify(issues.filter(issue => issue.id === 'L2')),
   );
 });
 
@@ -127,12 +128,6 @@ test('S4 detector rejects the historical no-order-holding mutant without modifyi
 // The corresponding rule landing enables its test; detector-unit tests above stay live.
 test('5e3c3a3c new-run wake: holder starts a new check while followers are parked', async t => {
   const { parkedIncident } = await import('./queue-sim/parked-incident.mjs');
-  const previous = process.env.FORGE_QUEUE_NEW_RUN_WAKE;
-  process.env.FORGE_QUEUE_NEW_RUN_WAKE = '1';
-  t.after(() => {
-    if (previous === undefined) delete process.env.FORGE_QUEUE_NEW_RUN_WAKE;
-    else process.env.FORGE_QUEUE_NEW_RUN_WAKE = previous;
-  });
   const { waiterReclaimed } = await parkedIncident(t);
   assert(waiterReclaimed, 'a new holder generation leaves its oldest parked follower a fresh claim');
 });

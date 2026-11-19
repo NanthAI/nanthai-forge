@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Incident 5e3c3a3c, rule N1: the new-run wake (switch FORGE_QUEUE_NEW_RUN_WAKE=1, default off).
+// Incident 5e3c3a3c, rule N1: the new-run wake.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
@@ -16,21 +16,6 @@ test.after(() => {
     else process.env[key] = value;
   }
 });
-// The caller's switch is captured once per test and restored after it, however often a test flips it.
-const callers = new WeakSet();
-function arm(t, on) {
-  if (!callers.has(t)) {
-    callers.add(t);
-    const previous = process.env.FORGE_QUEUE_NEW_RUN_WAKE;
-    t.after(() => {
-      if (previous === undefined) delete process.env.FORGE_QUEUE_NEW_RUN_WAKE;
-      else process.env.FORGE_QUEUE_NEW_RUN_WAKE = previous;
-    });
-  }
-  if (on) process.env.FORGE_QUEUE_NEW_RUN_WAKE = '1';
-  else delete process.env.FORGE_QUEUE_NEW_RUN_WAKE;
-}
-
 const holder = {
   phase: 'queued',
   priority: 'normal',
@@ -38,8 +23,7 @@ const holder = {
   runId: 'r2',
   orderWaited: true,
 };
-test('new-run wake fires only when an order holder starts checking a run it can be charged for', t => {
-  arm(t, true);
+test('new-run wake fires only when an order holder starts checking a run it can be charged for', () => {
   const queued = { phase: 'queued' },
     checking = { phase: 'checking' },
     ready = { phase: 'ready' };
@@ -57,14 +41,11 @@ test('new-run wake fires only when an order holder starts checking a run it can 
   assert(!bindsNewRun({ ...holder, overtaken: 'a0:r0' }, queued, next, 'r2', true), 'lifetime bound');
   assert(!bindsNewRun({ ...holder, overtaken: 'a2:r2' }, queued, next, 'r2', true), 'already charged');
   assert(!bindsNewRun({ ...holder, priority: 'urgent' }, queued, next, 'r2', true), 'urgent keeps order');
-  arm(t, false);
-  assert(!bindsNewRun(holder, queued, next, 'r2', true), 'switch off restores the previous wake');
 });
 
 // The incident shape: H checking; A (overlaps H) passed and parked on H; four disjoint
 // passed followers parked on A ('accepting'). H passes and lands; A must re-check.
-async function settleIncident(t, on) {
-  arm(t, on);
+async function settleIncident(t) {
   const { f, followers, holder: a } = await parkedIncident(t);
   const passedRuns = Object.fromEntries(
     followers.map(id => [
@@ -115,22 +96,22 @@ async function settleIncident(t, on) {
     idle: f.pending().length,
   };
 }
+// The same replay before N1 (measured on the last code with the wake off, Item 48697ee7): every
+// follower waited out the head's 10-minute re-check, the head landed at 10 minutes, 4 proofs and
+// 110 Convex calls. The wake's bounds are stated against those numbers.
+const BEFORE_N1 = { holder: 10, proofs: 4, calls: 110 };
 test('5e3c3a3c new-run wake: disjoint passed followers take main while the head re-checks', async t => {
-  const off = await settleIncident(t, false);
-  const on = await settleIncident(t, true);
-  t.diagnostic(JSON.stringify({ off, on }));
-  for (const run of [off, on]) {
-    assert(run.ownPass, 'every follower lands on its own passed run');
-    assert.equal(run.newRuns, 0, 'no follower or holder check is added');
-    assert.equal(run.unsettled, 0);
-    assert.equal(run.idle, 0, 'idle after settling: no timers or polling');
-  }
-  assert(Math.min(...off.followers) >= 10, 'switch off: followers wait out the head re-check');
-  assert(Math.max(...on.followers) <= 0.1, `followers within 0.1 min: ${on.followers}`);
-  assert(on.holder <= off.holder + 0.1, 'the overtaken head is not delayed');
+  const run = await settleIncident(t);
+  t.diagnostic(JSON.stringify({ before: BEFORE_N1, run }));
+  assert(run.ownPass, 'every follower lands on its own passed run');
+  assert.equal(run.newRuns, 0, 'no follower or holder check is added');
+  assert.equal(run.unsettled, 0);
+  assert.equal(run.idle, 0, 'idle after settling: no timers or polling');
+  assert(Math.max(...run.followers) <= 0.1, `followers within 0.1 min: ${run.followers}`);
+  assert(run.holder <= BEFORE_N1.holder + 0.1, 'the overtaken head is not delayed');
   // The head checked while main moved: it carries its pass with one proof (7d98c7da price).
-  assert(on.proofs <= off.proofs + 1, `proofs ${off.proofs} -> ${on.proofs}`);
-  assert(on.calls <= off.calls * 1.25, `calls ${off.calls} -> ${on.calls}`);
+  assert(run.proofs <= BEFORE_N1.proofs + 1, `proofs ${BEFORE_N1.proofs} -> ${run.proofs}`);
+  assert(run.calls <= BEFORE_N1.calls * 1.25, `calls ${BEFORE_N1.calls} -> ${run.calls}`);
 });
 
 const requests = f => [...f.tables.projectHostedLandingRequests.values()];
@@ -142,7 +123,6 @@ const drives = f =>
 // each count toward its one lifetime re-check. Exact re-checks (no cross-head proof), so any
 // follower landing ahead of A makes A's run stale. Followers' finish drives run first.
 test('5e3c3a3c new-run wake: overtakes in successive generations re-check the holder once', async t => {
-  arm(t, true);
   const f = await batchesFixture(t, {
     count: 0,
     fileCount: 2,
@@ -233,7 +213,6 @@ test('5e3c3a3c new-run wake: overtakes in successive generations re-check the ho
 // Review c6953f0b finding 2: the follower's evidence must name this holder. The oldest follower's
 // latest receipt names a former holder; the next one's receipt list is full (stops recording).
 test('5e3c3a3c new-run wake: only followers whose latest wait names this holder are woken', async t => {
-  arm(t, true);
   const {
     f,
     followers,
@@ -262,7 +241,6 @@ test('5e3c3a3c new-run wake: only followers whose latest wait names this holder 
 // its place (Ready, parked, no orderLive): it cannot release younger ones, so they stay on the
 // holder, which can.
 test('5e3c3a3c new-run wake: a bound run drives exactly one follower', async t => {
-  arm(t, true);
   let known;
   const {
     f,

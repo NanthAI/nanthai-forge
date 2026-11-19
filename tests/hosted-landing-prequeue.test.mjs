@@ -284,30 +284,19 @@ async function ownCommandWave(t, reuse) {
 }
 // Compared waves do equal work only from equal clocks: each runs in its own subtest from the same
 // fixed instant (scheduler time and ISO timestamps), never from the previous wave's end time, which
-// could cross an hour boundary and add a call to one arm (GPT re-check d9320762). The new-run wake
-// switch is set explicitly per arm; the caller's value is restored once, after the test.
+// could cross an hour boundary and add a call to one arm (GPT re-check d9320762).
 const WAVE_CLOCK = Date.parse('2026-01-01T12:00:00.000Z');
-async function clockedWave(t, reuse, newRunWake) {
+async function clockedWave(t, reuse) {
   let result;
-  await t.test(
-    `${reuse ? 'cross-head reuse' : 'exact rechecks'}${newRunWake ? ', new-run wake' : ''}`,
-    async st => {
-      st.mock.timers.enable({ apis: ['Date'], now: WAVE_CLOCK });
-      if (newRunWake) process.env.FORGE_QUEUE_NEW_RUN_WAKE = '1';
-      else delete process.env.FORGE_QUEUE_NEW_RUN_WAKE;
-      result = await ownCommandWave(st, reuse);
-    },
-  );
+  await t.test(reuse ? 'cross-head reuse' : 'exact rechecks', async st => {
+    st.mock.timers.enable({ apis: ['Date'], now: WAVE_CLOCK });
+    result = await ownCommandWave(st, reuse);
+  });
   return result;
 }
 test('own-command 5-change wave: clean overtakes keep their passed Lane run; the real overlap rechecks once', async t => {
-  const wake = process.env.FORGE_QUEUE_NEW_RUN_WAKE;
-  t.after(() => {
-    if (wake === undefined) delete process.env.FORGE_QUEUE_NEW_RUN_WAKE;
-    else process.env.FORGE_QUEUE_NEW_RUN_WAKE = wake;
-  });
-  const before = await clockedWave(t, false, false);
-  const after = await clockedWave(t, true, false);
+  const before = await clockedWave(t, false);
+  const after = await clockedWave(t, true);
   t.diagnostic(JSON.stringify({ before, after }));
   for (const run of [before, after]) {
     assert.equal(run.landed, 5);
@@ -328,6 +317,11 @@ test('own-command 5-change wave: clean overtakes keep their passed Lane run; the
     `calls per landing ${before.convexCallsPerLanding} -> ${after.convexCallsPerLanding}`,
   );
   // 5e3c3a3c new-run wake: this wave re-pins carried passes (same run) behind landing
-  // entries; waking there cost a proof and calls (G2, Rule 1). The switch changes nothing.
-  assert.deepEqual(await clockedWave(t, true, true), after, 'new-run wake: same work on carry re-pins');
+  // entries; waking there cost a proof and calls (G2, Rule 1). The wake adds no work here: the
+  // same wave measured with the wake off (Item 48697ee7) ran 6 checks, 7 proofs, 64 calls a landing.
+  assert.deepEqual(
+    { runs: after.runs, proofs: after.proofs, calls: after.convexCallsPerLanding },
+    { runs: 6, proofs: 7, calls: 64 },
+    'new-run wake: same work on carry re-pins',
+  );
 });

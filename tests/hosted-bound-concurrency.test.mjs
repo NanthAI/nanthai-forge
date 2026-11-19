@@ -20,19 +20,10 @@ const synthetic = {
   R2_SECRET_ACCESS_KEY: 'synthetic',
 };
 // 5e3c3a3c: the new-run wake must not turn waiter handoffs into a claim cascade.
-for (const [count, newRun] of [
-  [2, false],
-  [8, false],
-  [8, true],
-])
-  test(`${count} concurrent finishes on one main settle through hosted CAS with no native owner${newRun ? ' (new-run wake)' : ''}`, async t => {
-    const previous = Object.fromEntries(
-      [...Object.keys(synthetic), 'FORGE_QUEUE_NEW_RUN_WAKE'].map(k => [k, process.env[k]]),
-    );
+for (const count of [2, 8])
+  test(`${count} concurrent finishes on one main settle through hosted CAS with no native owner`, async t => {
+    const previous = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
     Object.assign(process.env, synthetic);
-    // Both arms are explicit: never inherit the caller's switch.
-    if (newRun) process.env.FORGE_QUEUE_NEW_RUN_WAKE = '1';
-    else delete process.env.FORGE_QUEUE_NEW_RUN_WAKE;
     t.after(() => {
       for (const [k, v] of Object.entries(previous)) {
         if (v === undefined) delete process.env[k];
