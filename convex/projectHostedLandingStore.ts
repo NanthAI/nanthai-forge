@@ -40,6 +40,7 @@ import {
 } from './projectHostedFinishWake';
 import { notifyStackedLandingEnded } from './projectHostedStackNotice';
 import { recordLandingSpeed } from './projectLandingSpeed';
+import { PASS_HELD, keepsPassStamp } from '../src/landing-speed-alerts';
 import { recordFailure } from './projectFailureLog';
 import { bindRunnerAccounting, bindSupersededCheck } from './projectHostedLandingRunnerCosts';
 import { invariant } from '../src/errors';
@@ -319,9 +320,23 @@ export async function writeLanding(
     row.unsealed === undefined && (attempt.recheckReason !== undefined || attempt.recheck)
       ? unsealedBy({ reason: attempt.recheckReason, scoped: Boolean(attempt.recheck) })
       : null;
+  // Pass-to-land alarm (42200ce4): the first time this submission is ready, kept across recompositions.
+  // The clock check ends are stamped with. Rides this one write; no read. At landing the row keeps
+  // it only when the landed state alone would misstate the wait (a held, re-checked landing).
+  // A person's review or a dependency holding a passed landing marks it PASS_HELD for good: that wait is
+  // not queue health (663e89b0). A dependency wait before any pass leaves the stamp to its first ready.
+  const holdsPass =
+    (state.observation.pendingReason === 'waiting-for-review' ||
+      state.observation.pendingReason === 'waiting-for-dependency') &&
+    (row.passedAt !== undefined || state.phase === 'ready');
+  const firstPass = holdsPass
+    ? PASS_HELD
+    : (row.passedAt ?? (state.phase === 'ready' ? Date.now() : undefined));
+  const passedAt = state.phase === 'landed' && !keepsPassStamp(state, firstPass) ? undefined : firstPass;
   await ctx.db.patch(row._id, {
     ...(alarm && alarm.id === row._id ? { alarm: alarm.alarm } : {}),
     ...(unsealed ? { unsealed } : {}),
+    ...(passedAt !== row.passedAt ? { passedAt } : {}),
     attemptId: state.attemptId,
     pipelineRetiredAttemptId:
       previous.attemptId === state.attemptId ? row.pipelineRetiredAttemptId : undefined,
@@ -387,6 +402,7 @@ export async function writeLanding(
       row.projectId,
       pendingRunnerState(state, row.runnerAccounting?.pending),
       attempt.number + 1,
+      firstPass,
     );
     const project = await ctx.db.get(row.projectId);
     if (project?.needsFix)

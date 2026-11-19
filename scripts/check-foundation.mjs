@@ -19,6 +19,7 @@ import { readBaseline, scanSet, testSignalFindings } from './check-test-signal.m
 import { statusListFindings } from './check-status-lists.mjs';
 import { currentCounts, growthFindings, readBaseline as readGrowthBaseline } from './check-growth.mjs';
 import { errorTeachingFindings } from './check-error-teaching.mjs';
+import { dsClassClashFindings } from './check-ds-class-clash.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const errors = [];
@@ -128,6 +129,8 @@ for (const file of files) {
 errors.push(...growthFindings(currentCounts(root), readGrowthBaseline(root)));
 // Every public error code teaches: a learn topic, and next/topic commands that exist (Issue 0a7d6f56).
 errors.push(...(await errorTeachingFindings(root)));
+// No page stylesheet redefines a design-system class name (e2347b1c); local, reads CSS only.
+errors.push(...dsClassClashFindings(root));
 
 check(
   read('docs/dependency-licenses.md') === renderDependencyLicenses(json('package-lock.json')),
@@ -160,7 +163,7 @@ if (errors.length) {
   process.exitCode = 1;
 } else {
   console.log(
-    `Foundation checks passed: ${scoped ? `${scanned} changed of ${files.length}` : files.length} files; JSON parses, Markdown links resolve, license inventory is current, no machine-specific home paths, SPDX headers lead every source file, nothing prints environment values, no test file adds a real sleep, elapsed-time assert or docs read above its baseline, no growth count (tables, error codes, agent actions, CLI commands, glossary terms, machine dependencies, unreferenced exports) differs from its baseline, every public error code has a help topic and names only commands and topics that exist.`,
+    `Foundation checks passed: ${scoped ? `${scanned} changed of ${files.length}` : files.length} files; JSON parses, Markdown links resolve, license inventory is current, no machine-specific home paths, SPDX headers lead every source file, nothing prints environment values, no test file adds a real sleep, elapsed-time assert or docs read above its baseline, no growth count (tables, error codes, agent actions, CLI commands, glossary terms, machine dependencies, unreferenced exports) differs from its baseline, every public error code has a help topic and names only commands and topics that exist, no page stylesheet redefines a design-system class.`,
   );
   console.log(
     'Application behavior, external URLs and authenticated/local runtime integration are not tested by this command.',

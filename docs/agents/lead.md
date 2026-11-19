@@ -78,12 +78,25 @@ same provider up to three times before an authorized fallback. Never silently
 switch models.
 
 A queue alarm stops wide fan-out (Guard 6, after incident 5e3c3a3c). While a
-queue speed budget is broken, start no new builders and fix the queue first. Today
-that is the landing-to-main budget; the pass-to-land alarm (Item 42200ce4) joins it
-when it lands. Each break sends one alert and opens its P0 Issue ([speed budgets](speed-budgets.md#how-a-budget-breaks)),
+queue speed budget is broken, start no new builders and fix the queue first: the
+landing-to-main budget and the [queue health alarm](#queue-health-alarm) (pass to land,
+Item 42200ce4). Each break sends one alert and opens its P0 Issue ([speed budgets](speed-budgets.md#how-a-budget-breaks)),
 so check the board for an open budget Issue before launching several builders.
 Builders already checking or queued finish their work; never withdraw a landing
 to make room.
+
+### Queue health alarm
+
+Before any wide launch (more than one new builder at once), read the queue health alarm:
+`nforge metrics ROOT --text` lists `pass-to-land-p90` in its Speed budgets block, and a break
+also opens the fixed-id P0 Issue "P0 speed budget broken: first passed check to commit p90
+(landing queue health: first passed check to commit)"
+and sends one message on the project's alert channels. It is the p90, over the last 20 landings,
+of the time from a landing's first passed check to its commit ([rung 1](regression-ladder.md#rung-1-landing-speed-budgets);
+incident 5e3c3a3c). While it is broken the Guard 6 rule above applies (863c85ab); its break
+alert says so and names the next commands. Resume launches after the recovery message, or once
+the Speed budgets block shows it passing.
+
 Prefer a builder with available capacity for specified implementation, and reserve
 design judgment for the designated reviewer. Exact providers and machine budgets belong in the current brief, not a permanent phase assumption.
 
@@ -174,6 +187,9 @@ Each check-in runs `nforge metrics ROOT --failures --from <previous check-in>` a
 reports the top failure codes with counts, any code not seen in the previous report
 and any landing failure an agent could not recover from. A rising or new code gets a
 planning search and a comment or new Issue, like a flaky file.
+Before launching more than one test-heavy builder, a check-in also reads the
+[queue health alarm](#queue-health-alarm) state (`pass-to-land-p90` in `nforge metrics ROOT --text`);
+if it is breaking, fix the queue first and launch after it recovers (Guard 6, 863c85ab).
 At stage close, list evidence and every open acceptance line, including the Issue
 that owns a moved line. Never silently carry incomplete work forward.
 

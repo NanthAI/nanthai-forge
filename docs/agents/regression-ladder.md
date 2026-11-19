@@ -19,7 +19,14 @@ Source: `src/landing-speed-alerts.ts`, called from the landing's own accept muta
 data and the break, recovery and Issue rules are in [speed budgets](speed-budgets.md).
 
 - **Metrics.** Time to main: submit to commit. Check minutes: the accepted attempt's check, reserved to
-  ended. Check-to-commit gap: check result to commit, in seconds (Issue 03a749a5). A missing stamp (for example a reused check) leaves that metric unknown for the landing.
+  ended. Check-to-commit gap: check result to commit, in seconds (Issue 03a749a5). Pass to land (queue
+  health, Issue 42200ce4): the first time the submission was ready (its check passed) to commit, in minutes;
+  the request row keeps that first-ready time across recompositions in the write it makes anyway, so a pass
+  discarded by a main move or held behind an older entry still counts. A landing that never waited ready
+  counts from its accepted check's end, never from before its own submission (a reused check). At landing
+  the row keeps the stamp only when it is over a minute before that end (a held, re-checked landing), so a
+  landing that went straight in stores nothing extra. A landing that a person's review or a dependency held
+  after it passed gives no pass-to-land sample: that wait is not queue health.
 - **Budgets.** p50 and p90 of each metric over the last 20 landings that know it, against the numbers in
   `src/speed-budgets.json`. Fewer than 20 landings: no verdict.
 - **Delivery.** One alert when a budget breaks and one when it recovers, through the project's
@@ -29,7 +36,9 @@ data and the break, recovery and Issue rules are in [speed budgets](speed-budget
 - **Next step, named in the alert.** Time to main: `nforge metrics ROOT --text` for waste by cause and
   main-race re-checks, then the rung 2 micro-bench on the latest landing-loop change. Check minutes:
   `nforge metrics ROOT --text` for check minutes and flaky files, then compare the slowest test files with the
-  previous week and the latest verify script or runner change.
+  previous week and the latest verify script or runner change. Pass to land: the alert carries the
+  [queue health alarm](lead.md#queue-health-alarm) rule (no new builders while broken), then `queue`
+  (what each ready entry waits on) and `landings` (held after check, order waits) for the window.
 - **Cost drift.** Attempts, landing-state writes, the R2 requests its composes signed and the runner
   minutes of its accepted, discarded and audit checks are stamped in the same row and judged as a
   20-landing mean ([cost budgets](../operations.md#cost-budgets)). Dollars and billed usage are not
@@ -117,6 +126,7 @@ Every queue incident becomes a permanent gate (Guard 2, Item 2873b486), in the L
 
 `238b3573`: accepted dispatch startup failure with a lost webhook, and twelve signed passing shards whose provider run and eleven jobs remain in progress after every step completes; both replays are registered in `tests/fixtures/incident-replays.json`.
 
-Queue incidents `5e3c3a3c` and `e4aee4fe` run in `hosted-landing-queue-sim.test.mjs`.
+Queue incidents `5e3c3a3c` and `e4aee4fe` run in `hosted-landing-queue-sim.test.mjs`; the 5e3c3a3c
+pass-to-land alarm replay runs in `landing-pass-to-land-alarm.test.mjs`.
 The [invariant reference](../operations/landing-queue-invariants.md) states known violations;
 the retained bench model is unqualified. The owner rollout decision requires switched rules and a live watch.

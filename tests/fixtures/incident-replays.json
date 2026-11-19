@@ -266,6 +266,12 @@
       "test": "e4aee4fe: a slow older entry keeps its lifetime generation budget as newer passes arrive"
     },
     {
+      "incident": "5e3c3a3c",
+      "what": "Passed landings waited p50 79 / p90 101 min for hours before anyone acted; the pass-to-land alarm must break on the 2026-11-17 landings and stay quiet on the accepted bench.",
+      "file": "tests/landing-pass-to-land-alarm.test.mjs",
+      "test": "incident replay 5e3c3a3c: the pass-to-land alarm breaks on the 2026-11-17 dogfood landings before the diagnosis"
+    },
+    {
       "incident": "9a04d916",
       "what": "Bench cohort-fail 143142 t27456: a conflict found at once after a cancelled full-admission recompose waited 921 s for the stall alarm because its one drive was lost",
       "file": "tests/hosted-landing-stale-checks.test.mjs",

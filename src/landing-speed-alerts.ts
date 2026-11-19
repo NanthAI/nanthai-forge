@@ -51,6 +51,7 @@ export type LandingMetric =
   | 'toMain'
   | 'check'
   | 'settle'
+  | 'passToLand'
   | 'attempts'
   | 'writes'
   | 'r2ClassA'
@@ -69,6 +70,7 @@ const INDEX: Partial<Record<LandingMetric, number>> = {
   settle: 4,
   attempts: 5,
   writes: 6,
+  passToLand: 10,
 };
 /** Position in a sample's `counts` and the divisor into the metric's unit: runner seconds become minutes. */
 const COUNT: Partial<Record<LandingMetric, [number, number]>> = {
@@ -113,6 +115,8 @@ const sampleSchema = z.tuple([
   countsSchema.nullable().optional(),
   z.number().nonnegative().nullable().optional(),
   z.number().nonnegative().nullable().optional(),
+  // Minutes from the first passed check to the commit; absent on rows written before it (42200ce4).
+  z.number().nonnegative().nullable().optional(),
 ]);
 const brokenSchema = z
   .object({
@@ -126,7 +130,7 @@ export const landingSpeedStateSchema = z
   .object({
     schema: z.literal(2),
     /** [settled at ms, time-to-main minutes, check minutes, landing id, settle seconds, attempts,
-     * landing-state writes, counts], oldest first. */
+     * landing-state writes, counts, save ms, preflight ms, pass-to-land minutes], oldest first. */
     samples: z.array(sampleSchema),
     /** Budgets over their limit now, by budget id: one entry means one alert and one Issue. */
     broken: z.record(z.string(), brokenSchema),
@@ -143,6 +147,9 @@ export type LandingSpeedSample = {
   check: number | null;
   /** Seconds from the check result (ciEndedAt) to the commit: the gap the landing supervisor must keep short. */
   settle: number | null;
+  /** Minutes from its first passed check to the commit (queue health alarm, 42200ce4): unlike `settle`,
+   * a pass discarded by a main move or held behind an older entry still counts from its first pass. */
+  passToLand?: number | null;
   /** Attempts this landing took (1 when nothing recomposed or re-ran), and its landing-state writes. */
   attempts?: number | null;
   writes?: number | null;
@@ -169,15 +176,45 @@ const span = (from?: string, to?: string, unit = minute) => {
   const value = (Date.parse(to) - Date.parse(from)) / unit;
   return Number.isFinite(value) && value >= 0 ? Math.round(value * 10) / 10 : null;
 };
+type LandingTiming = NonNullable<HostedLandingState['timing']>;
+/** The first pass the landed state alone gives: its accepted check's end, never before its own
+ * submission (a reused check). */
+function stampedPass(timing: LandingTiming): string | undefined {
+  return timing.ciEndedAt && Date.parse(timing.ciEndedAt) < Date.parse(timing.submittedAt)
+    ? timing.submittedAt
+    : timing.ciEndedAt;
+}
+/** The first-ready stamp of a landing that a person's review or a dependency held after its check
+ * passed (review 663e89b0). That wait is not queue health: such a landing gives no pass-to-land
+ * sample, and the stamp stays this value through every later write. */
+export const PASS_HELD = 0;
+/** At landing the request row keeps its first-ready stamp only when that pass came over a minute
+ * before what the landed state alone gives (it was held and re-checked after passing); a landing
+ * that went straight in drops it, so its stored row does not grow (42200ce4). */
+export function keepsPassStamp(state: HostedLandingState, passedAt?: number): boolean {
+  if (passedAt === undefined) return false;
+  if (passedAt === PASS_HELD) return true;
+  const stamped = Date.parse((state.timing && stampedPass(state.timing)) ?? '');
+  return !Number.isFinite(stamped) || passedAt < stamped - 60_000;
+}
 /** Data already on the landed state: no extra read. Missing stamps leave that metric unknown.
- * `attempts` comes from the accepted attempt the accept mutation already holds. */
+ * `attempts` comes from the accepted attempt the accept mutation already holds; `passedAt` from the
+ * request row it already holds (first ready, ms). Without it, a landing that never waited ready
+ * counts from its accepted check's end, and never from before its own submission (a reused check). */
 export function landingSpeedSample(
   state: HostedLandingState,
   attempts: number | null = null,
+  passedAt?: number,
 ): LandingSpeedSample | null {
   const timing = state.timing;
   const at = Date.parse(timing?.committedAt ?? timing?.settledAt ?? '');
   if (!timing || !Number.isFinite(at)) return null;
+  const firstPass =
+    passedAt === PASS_HELD
+      ? undefined
+      : passedAt !== undefined
+        ? new Date(passedAt).toISOString()
+        : stampedPass(timing);
   return {
     at,
     saveMs: timing.ms?.[0] ?? null,
@@ -186,6 +223,7 @@ export function landingSpeedSample(
     toMain: span(timing.submittedAt, timing.committedAt),
     check: span(timing.checkReservedAt, timing.ciEndedAt),
     settle: span(timing.ciEndedAt, timing.committedAt, 1000),
+    passToLand: span(firstPass, timing.committedAt),
     attempts,
     // The landing state starts at version 0 and every write adds one (projectHostedLandingStore).
     writes: Number.isSafeInteger(state.version) ? state.version + 1 : null,
@@ -265,9 +303,11 @@ export function observeLandingSpeed(
       sample.attempts ?? null,
       sample.writes ?? null,
       sample.counts ?? null,
-      ...(sample.saveMs == null && sample.preflightMs == null
-        ? []
-        : [sample.saveMs ?? null, sample.preflightMs ?? null]),
+      ...(sample.passToLand != null
+        ? [sample.saveMs ?? null, sample.preflightMs ?? null, sample.passToLand]
+        : sample.saveMs == null && sample.preflightMs == null
+          ? []
+          : [sample.saveMs ?? null, sample.preflightMs ?? null]),
     ] as const,
   ]
     .sort((a, b) => a[0] - b[0])
@@ -335,6 +375,7 @@ type Row = [
   LandingCounts | null,
   (number | null)?,
   (number | null)?,
+  (number | null)?,
 ];
 
 const R2_NEXT =
@@ -347,6 +388,7 @@ const NAME: Record<LandingMetric, string> = {
   preflightMs: 'preflight',
   check: 'check',
   settle: 'check result to commit',
+  passToLand: 'first passed check to commit',
   attempts: 'attempts per landing',
   writes: 'landing-state writes per landing',
   r2ClassA: 'R2 class A requests per landing',
@@ -370,6 +412,12 @@ const NEXT: Record<LandingMetric, string> = {
     'Next: read the landing supervisor path (settle step, finish wake, order waits) on the crossing landing with ' +
     '`nforge agent ROOT landings` (heldAfterCheck) and compare with the latest change to convex/projectHostedLanding* ' +
     'or the acceptance publish; the gap was 300 s before fix caa934a7 and about 8.5 s after.',
+  passToLand:
+    'Queue health alarm: pause new landings until pass-to-land recovers, and fix the queue first; ' +
+    'let landings already checking finish (withdrawing them only loses their checks). ' +
+    'Next: run `nforge agent ROOT queue` for ready entries and what each waits on (orderWait), and ' +
+    '`nforge agent ROOT landings` for the window (heldAfterCheck, orderWaits, recomposeCount); compare with the latest change ' +
+    'to queue, wake or acceptance paths and the queue incident replays (tests/hosted-landing-queue-sim.test.mjs; incident 5e3c3a3c).',
   attempts:
     'Next: run `nforge agent ROOT landings` for the window and look at recomposeCount and checkRunIds; ' +
     'more attempts per landing means recompose or re-check loops (incident 10d253c6), each a compose and a check.',

@@ -211,6 +211,8 @@ test('samples come from the landed state only; missing stamps leave a metric unk
     toMain: 12,
     check: 3.5,
     settle: 210,
+    // From the accepted check's end: no first-ready stamp was passed (42200ce4).
+    passToLand: 3.5,
     saveMs: null,
     preflightMs: null,
     attempts: null,

@@ -400,7 +400,10 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // the live arm still guards latency, one exact check and zero idle work below.
   // DB reads 1,822,710 -> 1,896,315 (Item 9a04d916, compose settle; owner-approved +$0.02/1k): a settle mutation runs each finish wake with no
   // IO in flight, and an acceptance page it cannot hand out is stepped once more by its drive.
-  const baseline = { calls: 121, readBytes: 1_896_315, writeBytes: 676_662 };
+  // DB reads 1,896,315 -> 1,897,683 (Item 42200ce4, pass-to-land stamp): every landing row read after its first
+  // pass now carries passedAt (about 17 B), the only state the queue health alarm needs. About 700 B per landing,
+  // under $0.001 per 1,000 landings; no new call or write.
+  const baseline = { calls: 121, readBytes: 1_897_683, writeBytes: 676_662 };
   assert(pair.calls <= baseline.calls, `Convex transactions ${baseline.calls} -> ${pair.calls}`);
   assert(pair.readBytes <= baseline.readBytes, `DB reads ${baseline.readBytes} -> ${pair.readBytes}`);
   assert(pair.writeBytes <= baseline.writeBytes, `DB writes ${baseline.writeBytes} -> ${pair.writeBytes}`);
@@ -429,7 +432,8 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // Same pre-cancellation control ceiling as the small replay, measured at 4000
   // files. The live unknown-risk arm now benefits from early retirement too.
   // DB reads 1,827,467 -> 1,901,561 (Item 9a04d916, compose settle; owner-approved +$0.02/1k), as in the small replay.
-  const baseline = { calls: 121, readBytes: 1_901_561, writeBytes: 679_017 };
+  // DB reads 1,901,561 -> 1,902,948 (Item 42200ce4, pass-to-land stamp on landing rows), as in the small replay.
+  const baseline = { calls: 121, readBytes: 1_902_948, writeBytes: 679_017 };
   assert(after.calls <= baseline.calls, `transactions ${baseline.calls} -> ${after.calls}`);
   assert(after.readBytes <= baseline.readBytes, `DB reads ${baseline.readBytes} -> ${after.readBytes}`);
   assert(after.writeBytes <= baseline.writeBytes, `DB writes ${baseline.writeBytes} -> ${after.writeBytes}`);

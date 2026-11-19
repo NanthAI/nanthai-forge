@@ -116,6 +116,8 @@ export type MetricRecords = {
     onAdmissionRun?: boolean | null;
     costs?: import('zod').infer<typeof import('./hosted-landings-view.js').landingCostsSchema>;
     settleSeconds?: number;
+    /** First passed check to commit, minutes (queue health alarm, 42200ce4). */
+    passToLandMinutes?: number;
     saveMs?: number;
     preflightMs?: number;
   }[];

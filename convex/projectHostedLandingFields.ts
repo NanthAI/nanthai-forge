@@ -237,6 +237,9 @@ export const hostedLandingTables = {
     /** Why this entry's pass cannot be carried across a moved main (scoped re-check, or a proof
      * refused for a reason no dependent change caused); set once, it stops graph-sealed overtakes. */
     unsealed: v.optional(v.string()),
+    /** When this submission first became ready (its check passed), in ms; set once and kept across
+     * recompositions, so the landing's pass-to-land time starts at its first pass (42200ce4). */
+    passedAt: v.optional(v.number()),
     /** Each older submission this passed entry waited for, why, and whether the two changes'
      * footprints overlapped (receipt `orderWaits`, Issue c6b81429). At most HOSTED_ORDER_WAITS. */
     orderWaits: v.optional(

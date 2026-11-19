@@ -81,6 +81,7 @@ export function speedBudgetRows(
         ],
         row.saveMs ?? null,
         row.preflightMs ?? null,
+        row.passToLandMinutes ?? null,
       ];
     })
     .sort((a, b) => a[0] - b[0]);

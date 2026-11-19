@@ -50,6 +50,7 @@ const rowSchemas = {
     agentClient: z.string().max(100).nullable().optional(),
     costs: landingCostsSchema.optional(),
     settleSeconds: z.number().nonnegative().nullable().optional(),
+    passToLandMinutes: z.number().nonnegative().nullable().optional(),
     saveMs: z.number().nonnegative().optional(),
     preflightMs: z.number().nonnegative().optional(),
   }),
@@ -341,6 +342,7 @@ export async function readHostedMetricPages(
               ...(row.saveMs === undefined ? {} : { saveMs: row.saveMs }),
               ...(row.preflightMs === undefined ? {} : { preflightMs: row.preflightMs }),
               ...(row.settleSeconds != null ? { settleSeconds: row.settleSeconds } : {}),
+              ...(row.passToLandMinutes != null ? { passToLandMinutes: row.passToLandMinutes } : {}),
             });
           } else if (stream === 'runs') {
             const row = rowSchemas.runs.parse(rawRow);

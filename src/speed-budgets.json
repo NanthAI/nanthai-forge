@@ -170,6 +170,18 @@
       "reason": "The lead's bar: at most 30 s, per landing. Judged as the p90 of the last 20 landings, so the second slowest of 20 must be within 30 s and one stall cannot hide, but one outlier does not break it alone. A repeat of the 300 s gap breaks it within three landings."
     },
     {
+      "id": "pass-to-land-p90",
+      "area": "landing queue health: first passed check to commit",
+      "measuredBy": "landing-record",
+      "metric": "passToLand",
+      "stat": "p90",
+      "unit": "min",
+      "max": 20,
+      "source": "Item 42200ce4 (incident 5e3c3a3c): on 2026-11-17 passed landings waited p50 79 / p90 101 min before anyone acted. Replayed in tests/landing-pass-to-land-alarm.test.mjs: the 2026-11-17 dogfood landings break it at 09:42Z (diagnosis 11:32Z); the accepted bench 8c9b84fc traces (120 landings, every N) pass to land in 2 to 13 s and never come near it. Dogfood 2026-11-16 to 11-19 (held-only lower bound, review holds excluded): broken 11-17 03:25Z, 11-17 09:42Z (the incident) and 11-18 20:49Z, each a real queue wait (passed landings held behind older overlapping entries, then re-checked after main moved, 20 to 73 min), each recovered. An 11-16 17:05Z break came from two person-reviewed landings and no longer fires: a review or dependency hold after the pass gives no sample.",
+      "reason": "The owner's proposed bar, 20 min, judged like every rung 1 budget on the last 20 landings (the second slowest of 20). A passed landing waiting behind the queue is the incident's signature; unlike check-to-commit it counts from the first pass, so a pass discarded by a main move or held behind an older entry still shows.",
+      "issue": "42200ce4"
+    },
+    {
       "id": "cli-cold-start",
       "area": "CLI cold start",
       "measuredBy": "perf-harness",

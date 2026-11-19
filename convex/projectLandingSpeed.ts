@@ -31,8 +31,9 @@ export async function recordLandingSpeed(
   projectId: Id<'hostedProjects'>,
   state: HostedLandingState,
   attempts: number | null = null,
+  passedAt?: number,
 ) {
-  const sample = landingSpeedSample(state, attempts);
+  const sample = landingSpeedSample(state, attempts, passedAt);
   return sample ? applyLandingSample(ctx, projectId, sample) : [];
 }
 

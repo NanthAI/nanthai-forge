@@ -327,6 +327,10 @@ export const page = query({
               ...(submitted?.timing?.ms?.[0] == null ? {} : { saveMs: submitted.timing.ms[0] }),
               ...(submitted?.timing?.ms?.[1] == null ? {} : { preflightMs: submitted.timing.ms[1] }),
               settleSeconds: submitted ? (landingSpeedSample(submitted)?.settle ?? null) : null,
+              // First ready (row stamp) to commit, as the accept mutation judges it (42200ce4).
+              passToLandMinutes: submitted
+                ? (landingSpeedSample(submitted, null, request?.passedAt)?.passToLand ?? null)
+                : null,
             };
           }
           if (input.stream === 'runs')
