@@ -59,9 +59,10 @@ merges (or why nothing can go).
    regenerable roots. Live processes, unknown coverage, pins and unresolved state
    retain their copies; the result explains unresolved state and recovery. Never
    remove another builder's files to meet the floor. Run builds and test batches
-   through `nforge heavy`; start servers or browsers only when needed and stop them
-   afterwards. Slot count, disk reserve and builder count come from local machine
-   setup and the brief, not from the repo. Format only with `npm run format` (oxfmt);
+   through `nforge heavy`, with `--test-concurrency` on any `node --test` inside `sh -c` or an
+   npm script ([why](../parallel-work-defaults.md#localheavyslots)); start servers or
+   browsers only when needed and stop them afterwards. Slot count, disk reserve and
+   builder count come from local machine setup and the brief, not from the repo. Format only with `npm run format` (oxfmt);
    never `npx prettier`, which rewrites files in another style.
 6. Save after each meaningful step (at least every ~30 minutes): each save runs the exact conflict check; read the head and capture coverage. Use `mktemp`
    logs, never shared fixed paths. Keep a private handoff with observation time,

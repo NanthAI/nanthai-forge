@@ -109,8 +109,10 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   slot that sets no `--test-concurrency` of its own gets `--test-concurrency=N`, with N =
   max(1, floor(cores / slots)): 3 on 10 cores with 3 slots, 5 with 2. Without it, each slot's
   `node --test` ran up to 9 files at once (load 165 on 10 cores). A command's own
-  `--test-concurrency` wins. npm scripts and shells are not rewritten: run the `node --test` itself
-  under heavy (the full `npm test` is the landing check's).
+  `--test-concurrency` wins. Heavy rewrites only the command it starts: an npm script or a shell
+  (`nforge heavy sh -c 'npm run build:core && node --test …'`) runs its `node --test` uncapped. Put
+  `--test-concurrency=N` in that `node --test` yourself (slots from `nforge heavy --status`), or run
+  the build and the tests as two heavy commands. The full `npm test` is the landing check's.
 - Preflight takes a slot itself for its build and tests (c180152a): `nforge agent . preflight`
   waits for one like any heavy command, and its build and tests inherit it, so their own
   `nforge heavy` calls reuse it. Wrapped in `nforge heavy`, it reuses that slot instead of taking a
