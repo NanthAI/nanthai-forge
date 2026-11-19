@@ -165,7 +165,7 @@ export const releaseHeld = internalMutation({
   args: identity,
   returns: v.null(),
   handler: async (ctx, input) => {
-    if (!(await auditRow(ctx, input.projectId))?.red) await releaseMainHolds(ctx, input.projectId);
+    if (!(await auditRow(ctx, input.projectId))?.red) await releaseMainHolds(ctx, input.projectId, true);
     return null;
   },
 });
@@ -188,6 +188,11 @@ export const stallHeld = internalMutation({
       .withIndex('by_project_and_hold', q => q.eq('projectId', input.projectId).eq('hold', 'main-red'))
       .paginate({ cursor: input.cursor, numItems: 100, maximumRowsRead: 100, maximumBytesRead: 512 * 1024 });
     for (const held of page.page) {
+      // An ended entry is not waiting on main: drop its stale hold, no stall note on its outcome.
+      if (held.phase === 'landed' || held.phase === 'terminal-failed') {
+        await ctx.db.patch(held._id, { hold: undefined });
+        continue;
+      }
       const state = hostedLandingStateSchema.parse(JSON.parse(held.value));
       state.version++;
       state.error = {

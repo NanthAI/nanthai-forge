@@ -137,6 +137,7 @@ export function firstCheckRisk(
 ): string | null {
   return riskOf(path, checkEntries.map(entryMatcher), rule);
 }
+const CI_CONFIGURATION = patterns.find(pattern => pattern.reason === 'CI configuration')!.test;
 function riskOf(
   path: string,
   entries: ((path: string) => boolean)[],
@@ -156,8 +157,11 @@ function riskOf(
 export function coverageChangePaths(paths: readonly string[], checkEntries: readonly string[] = []) {
   const entries = checkEntries.map(entryMatcher);
   return paths.filter(path => {
-    const reason = riskOf(path, entries, FIRST_CHECK_RISK_RULE);
-    return reason === 'check script or check contract' || reason === 'CI configuration';
+    if (riskOf(path, entries, FIRST_CHECK_RISK_RULE) === 'check script or check contract') return true;
+    // CI configuration on any provider, even where a root-config rule names it first. Under .github/
+    // only workflows and actions run checks; templates or CODEOWNERS change no test (review 3287896a).
+    if (!CI_CONFIGURATION.test(path)) return false;
+    return !path.startsWith('.github/') || /^\.github\/(?:workflows|actions)\//.test(path);
   });
 }
 

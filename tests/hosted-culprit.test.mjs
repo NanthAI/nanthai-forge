@@ -611,6 +611,64 @@ test('one of five culprits is named; bounded probes and one range page at dogfoo
     assert(count.ranges < 50);
 });
 
+// Review 7 (1762cc64): a later failed audit of the same red episode replaces red.runId while the first
+// audit's recovery runs; the reason recovery writes is the first audit's, and the queue says so.
+const laterRunId = f => {
+  const current = f.tables.projectHostedMainAudits.get(f.auditRow);
+  f.patch('projectHostedMainAudits', f.auditRow, { red: { ...current.red, runId: 'later-audit' } });
+};
+const redRow = f => f.tables.projectHostedMainAudits.get(f.auditRow).red;
+const mainAuditState = await import(moduleUrl('../convex/projectHostedMainAuditState.ts'));
+test('687d1eda review 7: a named culprit keeps the id of the audit it was decided for', async () => {
+  const f = await fixture();
+  const first = f.audit.id;
+  await f.runCulprit();
+  laterRunId(f);
+  for (;;) {
+    const queued = f.probes().find(r => r.status === 'queued');
+    if (!queued) break;
+    await f.complete(queued, f.heads.indexOf(queued.request.expectedHead) >= 3);
+  }
+  assert.match(redRow(f).reason, /^Receipt /);
+  assert.equal(redRow(f).reasonRunId, first);
+  assert.match(
+    mainAuditState.mainRedField(redRow(f)).reason,
+    new RegExp(`^Decided for the earlier failed audit ${first}`),
+  );
+});
+
+test('687d1eda review 7: a fix-forward reason keeps the id of the audit it was decided for', async () => {
+  const f = await fixture(3, {
+    addedAt: 0,
+    coverageAt: 1,
+    greenReports: {
+      'tests/other.test.mjs': { failed: false, durationMs: 1200 },
+      'tests/red.test.mjs': { failed: false, attempts: [] },
+    },
+  });
+  const first = f.audit.id;
+  await f.runCulprit();
+  laterRunId(f);
+  await f.inspect();
+  assert.match(redRow(f).reason, /Newly covered/);
+  assert.equal(redRow(f).reasonRunId, first);
+});
+
+test('687d1eda review 7: a widened reverse records the id of the audit it was decided for', async () => {
+  const f = await fixture(5);
+  const first = f.audit.id;
+  await f.runCulprit();
+  await f.complete(f.probes()[0], true);
+  laterRunId(f);
+  const probe = f.probes().find(r => r.status === 'queued');
+  const run = { ...probe, status: 'failed', endedAt: at, terminalDigest: hash, contractReports: {} };
+  const row = [...f.tables.projectHostedCheckRuns.values()].find(r => r.runId === run.id);
+  f.patch('projectHostedCheckRuns', row._id, { status: run.status, value: JSON.stringify(run) });
+  await f.transaction('inconclusiveProbe', culprit.terminal, { projectId: f.projectId, runId: run.id });
+  assert.match(redRow(f).reason, /No single culprit is proven/);
+  assert.equal(redRow(f).reasonRunId, first);
+});
+
 test('seeded flake never prepares a reverse and six replays reserve exactly one run', async () => {
   const f = await fixture();
   for (let i = 0; i < 6; i++) await f.runCulprit();

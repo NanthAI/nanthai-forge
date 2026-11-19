@@ -317,6 +317,7 @@ async function fixForward(
   // The queue states why main is red from this one row (Item 687d1eda).
   await noteRedCause(ctx, project._id, red => sameEpisode(red, state), {
     reason,
+    runId: state.audit.id,
     intentId,
     ...(covered ? { covered } : {}),
   });
@@ -856,7 +857,12 @@ async function classify(
     : 'A single failing boundary was proven; reverse only this accepted change.';
   state.reason += uncoveredNote(state);
   await ctx.db.patch(auditRow._id, {
-    red: { ...auditRow.red, culprit: state.target.id, reason: `Receipt ${state.target.id}: ${state.reason}` },
+    red: {
+      ...auditRow.red,
+      culprit: state.target.id,
+      reason: `Receipt ${state.target.id}: ${state.reason}`,
+      reasonRunId: state.audit.id,
+    },
   });
   await ctx.db.insert('projectHostedMainAuditEvents', {
     projectId: input.projectId,
@@ -922,7 +928,7 @@ async function widenRevert(
       red: {
         ...audit.red,
         culprit: undefined,
-        ...(sameEpisode(audit.red, state) ? { reason: state.reason } : {}),
+        ...(sameEpisode(audit.red, state) ? { reason: state.reason, reasonRunId: state.audit.id } : {}),
       },
     });
   // Reuse already prepared reverses; widening reads only the newly selected transition.

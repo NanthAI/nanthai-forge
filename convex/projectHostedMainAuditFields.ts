@@ -66,6 +66,8 @@ export const mainAuditFields = {
       reason: v.optional(v.string()),
       intentId: v.optional(v.string()),
       covered: v.optional(v.string()),
+      /** The failed audit the reason was decided for; a later failed audit in the episode marks it older. */
+      reasonRunId: v.optional(v.string()),
     }),
   ),
   debt: v.optional(v.boolean()),

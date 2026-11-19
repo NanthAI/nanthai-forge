@@ -300,6 +300,12 @@
       "what": "Same incident, compose double loss (review d4f55e9f F1): the recompose's source action and then its 120 s compose watchdog action both lost left the entry to the 15-minute stall alarm",
       "file": "tests/landing-failure-injection.test.mjs",
       "test": "incident 9a04d916 F1: a lost source action and its lost 120 s watchdog resume without the stall supervisor"
+    },
+    {
+      "incident": "687d1eda",
+      "what": "While main was red on a browser test (2026-11-19), every landing whose check ran browser tests failed on main's own red test and was not re-queued once main was repaired (fix D, switch FORGE_QUEUE_PARK_ON_MAIN_RED)",
+      "file": "tests/hosted-landing-park.test.mjs",
+      "test": "incident 687d1eda D: a landing failing only on main red tests parks, then re-lands once main is green"
     }
   ]
 }

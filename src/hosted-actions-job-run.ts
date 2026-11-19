@@ -348,7 +348,19 @@ async function executeActiveActionsJob(
     );
     if (skipped) {
       note(skipped.line);
-      if (skipped.browser && !exitCode) exitCode = 1;
+      if (skipped.browser) {
+        if (!exitCode) exitCode = 1;
+        // Name the files (review follow-up): a failed shard with no failing file reads as an unnamed
+        // test failure. attempts: [] keeps them skipped, so they are never probe pass or fail evidence.
+        for (const file of reports.skipped)
+          if (isBrowserTest(file))
+            reports.reports[file] = {
+              failed: true,
+              attempts: [],
+              firstError:
+                'Every test skipped: browser coverage was selected but no browser ran. Next: restore the pinned Playwright browser cache.',
+            };
+      }
     }
   } finally {
     if (isolation.mode === 'user') isolation.remove(junit.directory);

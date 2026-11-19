@@ -6,6 +6,7 @@ import type { LandingClaim, requireLandingLease } from './projectHostedLandingCo
 import { enqueueHostedCheck } from './projectHostedChecks';
 import { checkSetting, loadHostedCheck, writeHostedCheck } from './projectHostedCheckStore';
 import { hostedAcceptGate } from './projectHostedGate';
+import { parkLanding, parkOnMainRed, parkedMessage, redOnlyFailure } from './projectHostedLandingPark';
 import { hostedStartMain } from './projectHostedChannels';
 import { readHostedRecord } from './projectHostedRecords';
 import { describeCheckFailure } from './projectHostedCheckFailure';
@@ -102,14 +103,19 @@ async function recordFirstCheck(ctx: MutationCtx, projectId: Id<'hostedProjects'
     });
 }
 /** Check-completion wake for an admission run. A failing test ejects only this
- * member; a run without a failing test (platform) lets it join unadmitted. */
-export async function settleLandingAdmission(ctx: MutationCtx, original: LandingRow, run: HostedCheckRun) {
+ * member; a run without a failing test (platform) lets it join unadmitted. False only when it
+ * parked the entry (fix D): nothing became runnable, so the queue needs no wake for it. */
+export async function settleLandingAdmission(
+  ctx: MutationCtx,
+  original: LandingRow,
+  run: HostedCheckRun,
+): Promise<boolean> {
   const { row, state } = await loadLanding(ctx, {
     projectId: original.projectId,
     submissionId: original.submissionId,
   });
   if (row.admission?.status !== 'checking' || row.admission.runId !== run.id || state.phase !== 'checking')
-    return;
+    return true;
   const kind = checkFailureKind(run, { conflicts: [] });
   const retries = row.admission.retries ?? 0;
   if (row.admission.full && kind === 'platform' && retries < HOSTED_PLATFORM_RETRIES) {
@@ -143,8 +149,39 @@ export async function settleLandingAdmission(ctx: MutationCtx, original: Landing
         },
         false,
       );
-      return;
+      return true;
     }
+  }
+  // Fix D (Item 687d1eda, FORGE_QUEUE_PARK_ON_MAIN_RED): failing only on main's own red tests is
+  // not this change's failure. Unjudged, like a platform result, it waits under the main-red hold;
+  // releaseMainHolds puts it back in the queue on green, where its ordinary check runs.
+  const parked =
+    kind === 'tests' && parkOnMainRed()
+      ? await redOnlyFailure(
+          ctx,
+          row.projectId,
+          await loadLandingAttempt(ctx, { projectId: row.projectId, attemptId: state.attemptId }),
+          run,
+        )
+      : null;
+  if (parked) {
+    const admission = {
+      ...(row.admission.full ? { full: true as const, ...(retries ? { retries } : {}) } : {}),
+      runId: run.id,
+      status: 'unavailable' as const,
+      endedAt: Date.now(),
+    };
+    await ctx.db.patch(row._id, { admission });
+    const next = {
+      ...state,
+      version: state.version + 1,
+      phase: 'queued' as const,
+      ...(run.testFiles ? { testFiles: run.testFiles } : {}),
+      observation: landingObservation('queued'),
+      error: { code: 'MAIN_RED', message: parkedMessage(parked) },
+    };
+    await parkLanding(ctx, { ...row, admission }, next);
+    return false;
   }
   const admission = {
     ...(row.admission.full ? { full: true as const, ...(retries ? { retries } : {}) } : {}),
@@ -182,6 +219,7 @@ export async function settleLandingAdmission(ctx: MutationCtx, original: Landing
         };
   await writeLanding(ctx, { ...row, admission }, next, kind !== 'tests');
   if (kind === 'tests') await settleLandingOperation(ctx, next);
+  return true;
 }
 /** The exact admission run, when it is still acceptance evidence for this
  * attempt on current main. Never re-runs admission. `movedMain` keeps a run

@@ -15,6 +15,7 @@ import { checkWakeRow, scheduleCheckWake } from './projectHostedLandingCheckWake
 import { activeStoragePause } from './legacyStoragePause';
 import { loadBatch } from './projectHostedLandingBatchState';
 import { redriveCohortHold } from './projectHostedLandingCohortHold';
+import { auditRow } from './projectHostedMainAuditState';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { report } from './errors';
@@ -49,6 +50,8 @@ export async function redriveLanding(
     queueChecked?: boolean;
     /** Report the lost drivers without replaying them (the supervisor tick, 19328518). */
     probe?: boolean;
+    /** One sweep transaction's main-red release check: one audit read and one release per project. */
+    mainRed?: { green?: boolean; scheduled?: boolean };
   } = {},
 ) {
   const done: string[] = [];
@@ -76,6 +79,24 @@ export async function redriveLanding(
     const alarm = await armLandingAlarm(ctx, input, row.alarm.lastProgressAt);
     await ctx.db.patch(row._id, { alarm });
     done.push('alarm');
+  }
+  // Fix D backstop (Item 687d1eda): a parked entry has no alarm and no finish wake; only a
+  // releaseHeld page moves it. When that page was lost (a failed task) and main is green, release
+  // again. Held queued rows only: one audit-row read; every other row reads nothing more.
+  if (row.phase === 'queued' && row.hold === 'main-red') {
+    const memo = options.mainRed ?? {};
+    memo.green ??= !(await auditRow(ctx, row.projectId))?.red;
+    if (memo.green) {
+      if (act && !memo.scheduled) {
+        await ctx.scheduler.runAfter(
+          0,
+          makeFunctionReference<'mutation'>('projectHostedMainAudit:releaseHeld'),
+          { projectId: row.projectId },
+        );
+        memo.scheduled = true;
+      }
+      done.push('main-red');
+    }
   }
   const finish = await finishRow(ctx, input);
   if (finish && row.phase === 'queued' && (await idleCohortLeader(ctx, row, finish))) {
@@ -216,6 +237,7 @@ export const sweep = internalMutation({
       .paginate({ cursor, numItems: 1 });
     for (const queue of page.page) {
       await redriveQueue(ctx, queue.projectId);
+      const mainRed = {};
       for (const phase of ['ready', 'checking', 'queued'] as const) {
         const rows = await ctx.db
           .query('projectHostedLandingRequests')
@@ -223,7 +245,7 @@ export const sweep = internalMutation({
             q.eq('projectId', queue.projectId).eq('channel', 'main').eq('phase', phase),
           )
           .take(REDRIVE_SWEEP_ENTRIES);
-        for (const row of rows) await redriveLanding(ctx, row, { row, queueChecked: true });
+        for (const row of rows) await redriveLanding(ctx, row, { row, queueChecked: true, mainRed });
       }
     }
     if (!page.isDone)

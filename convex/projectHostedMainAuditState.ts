@@ -22,6 +22,8 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { firstCheckProof } from '../src/hosted-cross-head-proof';
 import { recordLandingObservation, wakeLandingQueue } from './projectHostedLandingEvents';
 import { holdsLandingOrder } from './projectHostedLandingOrder';
+import { armLandingAlarm } from './projectHostedLandingStallWake';
+import { withQueueStatusBatch } from './projectHostedQueueStatusWrite';
 import { recordAuditRunnerSeconds } from './projectLandingSpeed';
 import {
   drillClaims,
@@ -220,31 +222,91 @@ async function recovery(
     record: await closeDrill(ctx, row, at),
   };
 }
-/** Bounded fan-out; removing hold advances the indexed window without a collection scan. */
-export async function releaseMainHolds(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
-  const page = await ctx.db
-    .query('projectHostedLandingRequests')
-    .withIndex('by_project_and_hold', q => q.eq('projectId', projectId).eq('hold', 'main-red'))
-    .paginate({ cursor: null, numItems: 100, maximumRowsRead: 100, maximumBytesRead: 512 * 1024 });
-  for (const row of page.page) {
-    const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
-    state.version++;
-    state.error = null;
-    state.observation = landingObservation('queued');
-    await recordLandingObservation(ctx, state, null);
-    await ctx.db.patch(row._id, {
-      hold: undefined,
-      runnable: true,
-      orderLive: holdsLandingOrder({ phase: row.phase, hold: undefined }, state) ? true : undefined,
-      value: canonicalPayload(state),
-    });
+/** Bounded fan-out; removing hold advances the indexed window without a collection scan.
+ * Switch off (FORGE_QUEUE_PARK_ON_MAIN_RED): main's release, inline in the mutation that turned
+ * main green, 100 rows a page. Switch on: parking can hold many entries, so the green mutation
+ * only checks that one is held (the same one indexed read as an empty page) and releases them in
+ * scheduled pages of 25 under one queue-status flush, so publication never carries the fan-out.
+ * Every released row is one direct patch plus one observation, never a full landing write. */
+export async function releaseMainHolds(ctx: MutationCtx, projectId: Id<'hostedProjects'>, scheduled = false) {
+  const held = () =>
+    ctx.db
+      .query('projectHostedLandingRequests')
+      .withIndex('by_project_and_hold', q => q.eq('projectId', projectId).eq('hold', 'main-red'));
+  const park = parkOnMainRed();
+  if (park && !scheduled) {
+    if (await held().first())
+      await ctx.scheduler.runAfter(
+        0,
+        makeFunctionReference<'mutation'>('projectHostedMainAudit:releaseHeld'),
+        {
+          projectId,
+        },
+      );
+    return;
   }
-  if (page.page.length) await wakeLandingQueue(ctx, { projectId, channel: 'main' });
-  if (!page.isDone)
-    await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedMainAudit:releaseHeld'), {
-      projectId,
+  const release = async () => {
+    const page = await held().paginate({
+      cursor: null,
+      numItems: park ? 25 : 100,
+      maximumRowsRead: 100,
+      maximumBytesRead: 512 * 1024,
     });
+    let released = false;
+    for (const row of page.page) {
+      // An ended entry never resumes (a withdrawn or superseded park must not land): drop its hold.
+      if (row.phase === 'landed' || row.phase === 'terminal-failed') {
+        await ctx.db.patch(row._id, { hold: undefined });
+        continue;
+      }
+      released = true;
+      const state = hostedLandingStateSchema.parse(JSON.parse(row.value));
+      state.version++;
+      state.error = null;
+      state.observation = landingObservation('queued');
+      // A parked admission (fix D: queued, no alarm; parkLanding cancelled it) gets back what
+      // parking took: its cohort window place and a stall alarm. Release is progress, so the
+      // alarm counts 15 min from now, not from before the red episode (no false stall at once).
+      // With the switch on a publication hold gets its alarm back too.
+      const parked = row.phase === 'queued' && !row.alarm;
+      const rearm = parked || (park && row.phase === 'ready');
+      const now = new Date().toISOString();
+      if (rearm) state.timing = { submittedAt: state.at, ...state.timing, ciProgressAt: now };
+      await recordLandingObservation(ctx, state, null);
+      await ctx.db.patch(row._id, {
+        hold: undefined,
+        runnable: true,
+        orderLive: holdsLandingOrder({ phase: row.phase, hold: undefined }, state) ? true : undefined,
+        ...(rearm ? { alarm: await armLandingAlarm(ctx, row, now) } : {}),
+        ...(parked ? { batchable: cohortPlace(row, state) } : {}),
+        value: canonicalPayload(state),
+      });
+    }
+    if (released) await wakeLandingQueue(ctx, { projectId, channel: 'main' });
+    if (!page.isDone)
+      await ctx.scheduler.runAfter(
+        0,
+        makeFunctionReference<'mutation'>('projectHostedMainAudit:releaseHeld'),
+        {
+          projectId,
+        },
+      );
+  };
+  await (park ? withQueueStatusBatch(ctx, release) : release());
 }
+/** writeLanding's cohort window rule for a queued entry, from the row in hand (0 reads): parking
+ * kept `batchSelection`, which writeLanding sets whenever the attempt defers its check. */
+const cohortPlace = (
+  row: Doc<'projectHostedLandingRequests'>,
+  state: { batchId?: string; batchSolo?: unknown },
+) =>
+  Boolean(
+    row.batchSelection &&
+    !state.batchId &&
+    !state.batchSolo &&
+    row.admission?.status !== 'failed' &&
+    !(row.admission?.full && row.admission.status === 'passed' && !row.admission.reuse),
+  );
 /** A landing that changes which tests run, or how (Item 687d1eda). Its own check ran under the old
  * selection or executor, so it never earns main's green: the next full audit decides. Unknown paths
  * (null) count as a change; `undefined` is a caller with exact full main evidence (seed). */
@@ -420,11 +482,17 @@ export function mainRedField(red: NonNullable<Doc<'projectHostedMainAudits'>['re
     runId: red.runId,
     tests: red.tests ?? [],
     ...(red.moreTests ? { moreTests: red.moreTests } : {}),
-    reason: red.reason ?? 'Recovery is classifying the failed main audit.',
+    reason: !red.reason
+      ? 'Recovery is classifying the failed main audit.'
+      : red.reasonRunId && red.reasonRunId !== red.runId
+        ? `Decided for the earlier failed audit ${red.reasonRunId} in this red episode: ${red.reason}`
+        : red.reason,
     ...(red.intentId ? { fixIntentId: red.intentId } : {}),
     ...(red.culprit ? { culprit: red.culprit } : {}),
     ...(red.covered ? { newlyCoveredBy: red.covered } : {}),
-    next: 'A landing that fails only on these tests is not at fault; land it again once main passes.',
+    next: parkOnMainRed()
+      ? 'A landing that fails only on these tests is not at fault; it waits and joins the queue again once main passes.'
+      : 'A landing that fails only on these tests is not at fault; land it again once main passes.',
   };
 }
 function withoutTests(red: Doc<'projectHostedMainAudits'>['red']) {
@@ -433,12 +501,16 @@ function withoutTests(red: Doc<'projectHostedMainAudits'>['red']) {
   void [_tests, _more];
   return kept;
 }
+/** Switch FORGE_QUEUE_PARK_ON_MAIN_RED (Item 687d1eda fix D, off by default; queue-regression guard). */
+export const parkOnMainRed = () => process.env.FORGE_QUEUE_PARK_ON_MAIN_RED === '1';
 /** Records why main is red on the current episode's row, once recovery decides (Item 687d1eda). */
 export async function noteRedCause(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   episode: (red: NonNullable<Doc<'projectHostedMainAudits'>['red']>) => boolean,
-  cause: { reason: string; intentId?: string; covered?: string },
+  /** `runId`: the failed audit recovery decided this reason for; a later failed audit of the same
+   * episode may already have replaced `red.runId`. */
+  cause: { reason: string; runId: string; intentId?: string; covered?: string },
 ) {
   const row = await auditRow(ctx, projectId);
   if (!row?.red || !episode(row.red)) return;
@@ -446,6 +518,7 @@ export async function noteRedCause(
     red: {
       ...row.red,
       reason: cause.reason.slice(0, 480),
+      reasonRunId: cause.runId,
       ...(cause.intentId ? { intentId: cause.intentId } : {}),
       ...(cause.covered ? { covered: cause.covered } : {}),
     },

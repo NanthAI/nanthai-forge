@@ -404,6 +404,22 @@ failing tests (first 20), the reason, the fix Intent, and the named culprit or c
 landing. Landing replies mark `culprit` only on the receipt the culprit event names; other
 receipts in the red range show `in-red-range`.
 
+With `FORGE_QUEUE_PARK_ON_MAIN_RED=1` (Item 687d1eda fix D, off by default), a landing whose
+admission check fails only on tests main's red audit fails too, none of them explained by its own
+paths or its own contract tests, is not failed: it waits under the main-red hold (`MAIN_RED`) and
+joins the queue again when main passes, where its ordinary check runs. It parks only under Forge's
+standard check, when the run finished with exactly one failed test job and a separate static job (so a
+static, cancelled, interrupted or incomplete run, or a project's own check command, never parks), and
+neither failing list is clipped. A parked landing holds no stall alarm, cohort place or reservation;
+withdrawing or superseding it ends it for good. Release counts as progress: a released landing's stall
+alarm runs 15 minutes from release, however long main was red. With the switch on, the change that
+turns main green only schedules the release (one indexed read when nothing is held), and scheduled
+pages of 25 release held landings, publication holds included, with one row patch, one observation
+and one stall alarm each (about 6 document reads, 5 writes and 6 KB written per landing). If a release page is lost (a failed task), the redrive sweep or a same-Lane re-submit releases
+again once main is green (one audit-row read, only for a held entry). A failed
+admission costs one audit-row read, plus one Candidate read when its files match main's; parking
+writes less than failing. Idle and passing landings cost nothing more.
+
 **Optional red-audit drill.** To exercise detection and recovery, the owner can start a drill.
 It is advice, never an eligibility condition. From an agent sign-in, the existing owner
 approval still applies:

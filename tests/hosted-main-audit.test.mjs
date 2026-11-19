@@ -190,6 +190,13 @@ test('687d1eda: a landing that changes which tests run never earns main green fr
   assert.equal(state.coverageLanding(coverage.run, null), true);
   assert.equal(state.coverageLanding(coverage.run, undefined), false);
   assert.equal(state.coverageLanding(coverage.run, ['src/server.ts', 'docs/status.md']), false);
+  // Review follow-up: only workflows and actions under .github/ change what runs.
+  assert.equal(state.coverageLanding(coverage.run, ['.github/workflows/check.yml']), true);
+  assert.equal(
+    state.coverageLanding(coverage.run, ['.github/ISSUE_TEMPLATE/bug.md', '.github/CODEOWNERS']),
+    false,
+  );
+  assert.equal(state.coverageLanding(coverage.run, ['.gitlab-ci.yml']), true);
   await f.tick(f.pending()[0]);
   const failing = { 'tests/lane-review-browser.test.mjs': { failed: true, firstError: '398 > 390' } };
   await f.terminal('failed', { ...f.currentRun(), contractReports: failing });
@@ -896,4 +903,28 @@ test('a start that fails for any other reason cannot leave a finished wake that 
   assert.equal(pending.length, 1, 'the next landing re-arms past a finished wake');
   assert.notEqual(pending[0]._id, task._id);
   assert.equal(f.row().wake.taskId, pending[0]._id);
+});
+
+test('687d1eda: a red reason decided for an earlier failed audit says so; the next step follows the park switch', async () => {
+  const { moduleUrl } = await import('./convex-module.mjs');
+  const state = await import(moduleUrl('../convex/projectHostedMainAuditState.ts'));
+  const red = {
+    since: '2026-11-19T12:00:00.000Z',
+    runId: 'audit-2',
+    tests: ['tests/a.test.mjs'],
+    reason: 'Receipt r: x',
+    reasonRunId: 'audit-1',
+  };
+  assert.match(
+    state.mainRedField(red).reason,
+    /^Decided for the earlier failed audit audit-1 in this red episode: Receipt r: x$/,
+  );
+  assert.equal(state.mainRedField({ ...red, reasonRunId: 'audit-2' }).reason, 'Receipt r: x');
+  assert.match(state.mainRedField(red).next, /land it again once main passes/);
+  process.env.FORGE_QUEUE_PARK_ON_MAIN_RED = '1';
+  try {
+    assert.match(state.mainRedField(red).next, /waits and joins the queue again once main passes/);
+  } finally {
+    delete process.env.FORGE_QUEUE_PARK_ON_MAIN_RED;
+  }
 });

@@ -557,6 +557,8 @@ export async function liveOwner(
   state: HostedLandingState,
 ) {
   if (row.runnable) return 'the landing queue';
+  // A parked entry (Item 687d1eda fix D) waits for main to pass; releaseMainHolds resumes it.
+  if (row.hold === 'main-red') return 'the main-red hold';
   if (row.orderWait) {
     const ahead = await landingRow(ctx, { ...input, submissionId: row.orderWait });
     if (ahead && holdsLandingOrder(ahead, hostedLandingStateSchema.parse(JSON.parse(ahead.value))))

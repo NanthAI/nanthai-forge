@@ -13,6 +13,7 @@ import { makeFunctionReference } from 'convex/server';
 import { semanticPayload } from '../src/semantic-payload';
 import { hostedLandingProgressAt, retainedStallOwner } from '../src/hosted-landing-stall';
 import { landingAlarmPatch } from './projectHostedLandingStallWake';
+import { cancelPendingTask } from './schedulerCancel';
 import { releaseAdmissionWaiters } from './projectHostedLandingAdmissionWake';
 import { cohortHeld, decidingSince, releaseCohortHolds } from './projectHostedLandingCohortHold';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -149,6 +150,8 @@ export async function writeLanding(
   runnable: boolean,
   releaseRun = true,
   consumedAlarm?: Id<'_scheduled_functions'>,
+  /** Fix D (Item 687d1eda): only parkLanding passes 'main-red'. Never inferred from the row. */
+  hold?: 'main-red',
 ) {
   invariant(
     input.phase !== 'composing',
@@ -200,6 +203,15 @@ export async function writeLanding(
     'The selected attempt must belong to this original request.',
   );
   const admitting = row.admission?.status === 'checking' && state.phase === 'checking';
+  // Fix D (Item 687d1eda): a queued entry parked under the main-red hold waits for one event
+  // (releaseMainHolds). It never runs, holds no stall alarm, cohort window place or reservation.
+  // Only the explicit `hold` parks: every other write keeps main's behaviour for a held row
+  // (publication holds stay `ready` with their own writer, holdMainRed). Any end clears a hold,
+  // so a withdrawn or superseded entry can never be released onto main.
+  invariant(!hold || state.phase === 'queued', 'WORK_OPERATION_CHANGED', 'Only a queued entry parks.');
+  const parked = hold === 'main-red';
+  const ended = state.phase === 'landed' || state.phase === 'terminal-failed';
+  if (parked) runnable = false;
   const runId = attempt.check?.runId ?? (admitting ? row.admission!.runId : null);
   const carried = bindSupersededCheck(state.counts, row.supersededCheck, runId);
   if (carried.counts) state.counts = carried.counts;
@@ -260,7 +272,13 @@ export async function writeLanding(
   )
     delete state.observation.stall;
   // Folded into this row's single write below (c329d191 kept waiter alarms).
-  const alarm = await landingAlarmPatch(ctx, state, consumedAlarm, row);
+  if (parked && row.alarm && row.alarm.taskId !== consumedAlarm)
+    await cancelPendingTask(ctx, row.alarm.taskId);
+  const alarm = parked
+    ? row.alarm
+      ? { id: row._id, alarm: null }
+      : null
+    : await landingAlarmPatch(ctx, state, consumedAlarm, row);
   if (alarm && alarm.id !== row._id) await ctx.db.patch(alarm.id, { alarm: alarm.alarm });
   await retainLandingProgress(ctx, state);
   const advice = row.wouldConflict ? JSON.parse(row.wouldConflict) : undefined;
@@ -279,11 +297,15 @@ export async function writeLanding(
   const orderLive =
     !admitting &&
     !cohortHeld(row, state, runnable) &&
-    holdsLandingOrder({ phase: state.phase as LandingRow['phase'], hold: row.hold }, state);
+    holdsLandingOrder(
+      { phase: state.phase as LandingRow['phase'], hold: parked ? 'main-red' : row.hold },
+      state,
+    );
   const deciding = decidingSince(row, state, attempt, orderLive);
   // A landing reservation (10d253c6) lasts until this landing lands or fails; while it lasts its
   // waiters stay parked on it even during the pre-queue check, and its exit wakes them once.
   const reserving =
+    !parked &&
     row.reservedUntil !== undefined &&
     state.phase !== 'landed' &&
     state.phase !== 'terminal-failed' &&
@@ -316,6 +338,7 @@ export async function writeLanding(
         ? canonicalPayload(attempt)
         : undefined,
     batchable: Boolean(
+      !parked &&
       !state.batchId &&
       !state.batchSolo &&
       !admitting &&
@@ -327,6 +350,7 @@ export async function writeLanding(
     ),
     phase: state.phase as LandingRow['phase'],
     runnable,
+    ...(parked ? { hold: 'main-red' as const } : ended && row.hold ? { hold: undefined } : {}),
     wouldConflict,
     orderLive: orderLive ? true : undefined,
     reservedUntil: reserving ? row.reservedUntil : undefined,
