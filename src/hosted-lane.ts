@@ -127,14 +127,15 @@ export function replacedOpenLanes(openLanes: readonly OpenLane[] | undefined) {
   );
 }
 
-/** The learned preflight guard set's candidates (Item 13ea93bf): what a Lane start reply may carry
- * when the caller sent another guardRevision. The CLI picks the set with its own seconds and budget. */
-const guardFileName = z
+/** A test file a learned preflight guard set may name (Item 13ea93bf). */
+export const guardFileName = z
   .string()
   .max(300)
   .regex(/^[\w.@+\-/]+$/)
   .refine(safeRelative);
-const guardCandidatesSchema = z
+/** What a Lane start reply may carry when the caller sent another guardRevision: the window's p, C,
+ * r inputs and the files that could join. The CLI picks the set with its own seconds and budget. */
+export const guardCandidatesSchema = z
   .object({
     rev: z.string().max(16),
     outcomes: z.number().int().nonnegative(),
@@ -158,6 +159,7 @@ const guardCandidatesSchema = z
       .max(20),
   })
   .strict();
+export type GuardCandidates = z.infer<typeof guardCandidatesSchema>;
 export const hostedStartResultSchema = z
   .object({
     fixBrief: z.string().optional(),
@@ -184,6 +186,7 @@ export const hostedStartResultSchema = z
       )
       .optional(),
     /** The learned preflight guard-set candidates, when the caller sent another guardRevision. */
-    guardSet: guardCandidatesSchema.optional(),
+    // A hint: a malformed one is dropped, never fails the start.
+    guardSet: guardCandidatesSchema.optional().catch(undefined),
   })
   .strict();

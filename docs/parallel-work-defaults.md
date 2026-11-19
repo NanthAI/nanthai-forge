@@ -518,7 +518,9 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   smoke and the project's declared *guards* (`preflight.guards` in `forge.json`, or
   `forge.preflight.guards` in `package.json`, filtered by
   path rules, protected like mandatory tests, cost in `local.guards`; see
-  [workflows](workflows.md#local-preflight-guards)); then *learned* tests; then *direct* tests; then direct consumers
+  [workflows](workflows.md#local-preflight-guards)) and the *learned guard set* (repo-wide tests
+  that failed landing checks preflight skipped, by the saving formula in the same section; first,
+  inside the budget, `local.guardSet`); then *learned* tests; then *direct* tests; then direct consumers
   of hub modules (`wide`); then *recent* failers; then tests that watch a distinctive name in a changed source (any import distance);
   then `near` consumers (two modules between). There is no file count. Mandatory, learned and direct
   tests are protected: the time budget never trims them (`local.protected`; `protectedOverBudget`

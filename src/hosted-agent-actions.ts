@@ -554,6 +554,10 @@ export async function executeHostedAgent(
               openLanesVersion: session.capabilities.features?.includes('start-open-lanes-resolves') ? 2 : 1,
             }
           : {}),
+        // The project's learned preflight guard set comes back only when it changed (13ea93bf).
+        ...(session.capabilities.features?.includes('preflight-guard-set')
+          ? { guardRevision: (await import('./preflight-guard-cache.js')).cachedGuardRevision(session.root) }
+          : {}),
         ...(session.agent ? { agent: session.agent } : {}),
         ...(session.holderSessionId
           ? {
@@ -588,7 +592,9 @@ export async function executeHostedAgent(
         throw error;
       }
     });
-    return parseHostedResponse(hostedStartResultSchema, started);
+    const { guardSet, ...result } = parseHostedResponse(hostedStartResultSchema, started);
+    if (guardSet) (await import('./preflight-guard-cache.js')).storeGuardCandidates(session.root, guardSet);
+    return result;
   }
   if (action === 'open') {
     const command = hostedAgentCommandSchemas.open.parse(input);

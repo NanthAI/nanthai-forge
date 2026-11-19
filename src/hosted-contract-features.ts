@@ -175,6 +175,10 @@ export const hostedContractFeatures = [
   'start-open-lanes-resolves',
   /** Optional in-flight landing (operation, phase) on the existing Lane head read (7da396ed). */
   'lane-status-landing',
+  /** The learned preflight guard set (13ea93bf): land gates take `ran` and `runs`, a failed check
+   * learns from them, and start takes `guardRevision` and replies `guardSet` when it differs.
+   * Without it the CLI sends neither and preflight runs no learned guards. */
+  'preflight-guard-set',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

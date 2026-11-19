@@ -33,7 +33,7 @@ import { startLandingAdmission } from './projectHostedLandingAdmission';
 import { pipelineAdmission } from './projectHostedLandingAdmissionPipeline';
 import { submissionReservation, landingReservationForReader } from './projectHostedLandingReservation';
 import { preQueueCheck } from '../src/hosted-landing-admission';
-import { landGateTiming } from '../src/hosted-land-gates';
+import { landGateGuardEvidence, landGateTiming } from '../src/hosted-land-gates';
 import { v } from 'convex/values';
 import { mutation, query, receiptMutation } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';
@@ -303,6 +303,9 @@ export async function enqueueHostedLanding(
     projectId: import('./_generated/dataModel').Id<'hostedProjects'>;
     agentRun?: string | undefined;
     agentClient?: string | undefined;
+    /** Guard-set evidence a desired landing kept from its gate (13ea93bf). */
+    preflightRan?: string | undefined;
+    preflightRuns?: number | undefined;
     /** Public entry point only: judge the project land gates (internal re-landings are not). */
     gates?: { value: string | undefined };
   },
@@ -479,6 +482,12 @@ export async function enqueueHostedLanding(
     candidateId: request.candidateId,
     ...(input.agentRun ? { agentRun: input.agentRun } : {}),
     ...(input.agentClient ? { agentClient: input.agentClient } : {}),
+    ...(input.gates
+      ? landGateGuardEvidence(input.gates.value)
+      : {
+          ...(input.preflightRan === undefined ? {} : { preflightRan: input.preflightRan }),
+          ...(input.preflightRuns === undefined ? {} : { preflightRuns: input.preflightRuns }),
+        }),
     ...(attempt.deferredCheck ? { batchSelection: canonicalPayload(attempt), batchable: !admission } : {}),
     ...(admission
       ? {

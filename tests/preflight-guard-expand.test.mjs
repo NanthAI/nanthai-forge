@@ -53,10 +53,14 @@ test('the land gate and start formats accept the guard-set fields and work witho
   };
   const guardSet = hostedStartResultSchema.shape.guardSet;
   assert.ok(guardSet.safeParse(set).success && guardSet.safeParse(undefined).success);
-  assert.ok(!guardSet.safeParse({ ...set, files: [{ file: '../x', failures: 2, checkSeconds: 1 }] }).success);
+  // A malformed hint is dropped (the writer landing made this lenient), never trusted.
+  assert.equal(
+    guardSet.parse({ ...set, files: [{ file: '../x', failures: 2, checkSeconds: 1 }] }),
+    undefined,
+  );
 });
 
-test('a start that names a guard revision is the same start, and its reply carries no new field yet', async () => {
+test('a start that names a guard revision is the same start; only its reply carries the set', async () => {
   const channels = await import(moduleUrl('../convex/projectHostedChannels.ts'));
   const start = await import(moduleUrl('../convex/projectHostedStart.ts'));
   const s = lanesFixture();
@@ -94,7 +98,8 @@ test('a start that names a guard revision is the same start, and its reply carri
   };
   const first = JSON.parse(await s.call('start', start.start, { ...input, guardRevision: '' }));
   assert.ok(hostedStartResultSchema.safeParse(first).success);
-  assert.equal(first.guardSet, undefined);
+  // A project with no landing outcomes yet: an empty set, still a revision to cache.
+  assert.deepEqual(first.guardSet.files, []);
   // A retry of the same operation without the revision replays the same Lane: not in the payload hash.
   const retry = JSON.parse(await s.call('start', start.start, input));
   assert.equal(retry.lane.laneId, first.lane.laneId);
@@ -134,6 +139,12 @@ test('rows holding the new fields pass through landings, check failures and the 
   const row = [...f.tables.projectHostedLandingRequests.values()][1];
   f.patch('projectHostedLandingRequests', row._id, { preflightRan: 'AAAA', preflightRuns: 2 });
   await settle(GUARD);
+  // The failure joins the document the rolled-back deployment left (preflight ran 'AAAA', not GUARD).
+  const failed = [...f.tables.projectLandingSpeed.values()][0].guards;
+  assert.deepEqual(
+    JSON.parse(failed).failures.map(failure => failure[5].map(([file]) => file)),
+    [[GUARD]],
+  );
   assert.deepEqual(
     states(f).map(s => [s.phase, s.error?.code ?? null]),
     [
@@ -145,6 +156,6 @@ test('rows holding the new fields pass through landings, check failures and the 
   await f.add(2);
   await settle();
   const after = [...f.tables.projectLandingSpeed.values()][0];
-  assert.equal(after.guards, guards, 'the accept path keeps the field');
+  assert.equal(after.guards, failed, 'the accept path keeps the field');
   assert.equal([...f.tables.projectHostedLandingRequests.values()][1].preflightRan, 'AAAA');
 });

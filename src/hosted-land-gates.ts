@@ -29,12 +29,19 @@ export const preflightResult = (advisory: unknown): PreflightResult => {
   return PREFLIGHT_RESULTS.includes(status as PreflightResult) ? (status as PreflightResult) : 'none';
 };
 /** Files a gate's `ran` can name: a preflight over this sends no `ran` (13ea93bf). */
-const RAN_MAX_FILES = 256;
+export const RAN_MAX_FILES = 256;
 /** Four base64url characters (24 bits of FNV-1a) per test file preflight ran, sorted. */
 const ranSchema = z
   .string()
   .max(RAN_MAX_FILES * 4)
   .regex(/^(?:[A-Za-z0-9_-]{4})*$/);
+export const ranKeys = (ran: string) => ran.match(/.{4}/g) ?? [];
+/** Several gated Lanes: a file any of them ran counts as run. Unknown if any Lane's is unknown. */
+export function mergeRan(values: (string | undefined)[]): string | undefined {
+  if (!values.length || values.some(value => value === undefined)) return undefined;
+  const keys = [...new Set(values.flatMap(value => ranKeys(value!)))].sort();
+  return keys.length <= RAN_MAX_FILES ? keys.join('') : undefined;
+}
 export const landGateEntrySchema = z
   .object({
     laneId: z.uuid(),
@@ -43,7 +50,7 @@ export const landGateEntrySchema = z
     saveMs: z.number().int().nonnegative().optional(),
     preflightMs: z.number().int().nonnegative().optional(),
     /** Test files this head's preflight ran or reused, as 4-character keys (feature
-     * preflight-guard-set, 13ea93bf); absent when unknown. Only a failed check will read it. */
+     * preflight-guard-set, 13ea93bf); absent when unknown. Only a failed check reads it. */
     ran: ranSchema.optional(),
     /** Local preflight runs of this Lane: the cost side (r) of the guard-set formula. */
     runs: z.number().int().nonnegative().max(999).optional(),
@@ -83,6 +90,25 @@ export function landGateTiming(text: string | undefined) {
   return Object.keys(timing).length
     ? { ms: [timing.saveMs ?? null, timing.preflightMs ?? null] as [number | null, number | null] }
     : {};
+}
+
+/** The guard-set evidence a landing keeps on its row until its check settles: the files its Lanes'
+ * preflights ran (unknown if any Lane's is unknown) and their most local runs. No I/O. */
+export function landGateGuardEvidence(text: string | undefined) {
+  let gates: LandGates | null;
+  try {
+    gates = parseLandGates(text);
+  } catch {
+    return {};
+  }
+  const lanes = gates?.lanes ?? [];
+  if (!lanes.length || lanes.every(lane => lane.ran === undefined && lane.runs === undefined)) return {};
+  const ran = mergeRan(lanes.map(lane => lane.ran));
+  const runs = lanes.flatMap(lane => (lane.runs === undefined ? [] : [lane.runs]));
+  return {
+    ...(ran === undefined ? {} : { preflightRan: ran }),
+    ...(runs.length ? { preflightRuns: Math.max(...runs) } : {}),
+  };
 }
 
 /** The refusal finishGates would give, for the Lanes and heads the landing composed (none: the

@@ -7,7 +7,7 @@ import { landingPriority } from './projectHostedLandingOrder';
 import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
 import { desiredWatchdogMs } from '../src/hosted-landing-stall';
 import { desiredLanding, scheduleDesired as schedule } from './projectHostedLandingDesiredWake';
-import { landGateTiming } from '../src/hosted-land-gates';
+import { landGateGuardEvidence, landGateTiming } from '../src/hosted-land-gates';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { receiptMutation, internalMutation, internalAction, type MutationCtx } from './cliServer';
@@ -285,6 +285,7 @@ export async function submitDesiredLanding(
     // The enqueue below receives this row as its input and copies the run to the landing row.
     ...landingAgentRun(input.agent),
     ...landingAgentClient(input.agentClient),
+    ...landGateGuardEvidence(gates?.value),
     wake: null,
   });
   // A source job still running cannot finish this goal: its completion wakes

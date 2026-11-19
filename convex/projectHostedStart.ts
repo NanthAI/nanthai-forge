@@ -19,6 +19,8 @@ import {
 } from '../src/hosted-lane';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
+import type { GuardCandidates } from '../src/hosted-lane';
+import { guardSetReply } from './projectLandingSpeed';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { sessionIdentity as provenance } from './projectSessionIdentity';
 import { digest } from '../src/state/hash';
@@ -88,8 +90,15 @@ type Input = {
     | { kind: 'planned'; intentId: string; outcome: string; constraints?: string };
 };
 
-function startReply(value: unknown, noticeVersion?: 1, openLanesVersion?: 1 | 2) {
-  const { openLanes, ...result } = hostedStartResultSchema.parse(value);
+function startReply(
+  value: unknown,
+  noticeVersion?: 1,
+  openLanesVersion?: 1 | 2,
+  guardSet?: GuardCandidates | null,
+) {
+  const { openLanes, ...parsed } = hostedStartResultSchema.parse(value);
+  // Reply-only: never part of the stored result a replayed start returns.
+  const result = guardSet ? { ...parsed, guardSet } : parsed;
   // Older strict clients reject unknown reply fields: each one is sent only when the client asked.
   const listed =
     openLanesVersion === 2 ? openLanes : openLanes?.map(({ resolves: _resolves, ...lane }) => lane);
@@ -130,6 +139,7 @@ async function execute(
   const {
     noticeVersion,
     openLanesVersion,
+    // Never part of the payload hash: a retried start is the same start (13ea93bf).
     guardRevision,
     agent,
     agentClient,
@@ -138,10 +148,11 @@ async function execute(
     holderSessionId,
     ...semanticRequest
   } = validated.data;
-  // Never part of the payload hash: a retried start is the same start (13ea93bf).
-  void guardRevision;
   void agentClient;
   void authorship;
+  // The learned preflight guard set rides on the reply the CLI gets anyway (13ea93bf): one indexed
+  // read, sent only when the caller's revision differs, so a fresh sandbox learns on its first start.
+  const guardSet = guardRevision === undefined ? null : await guardSetReply(ctx, projectId, guardRevision);
   const payload = { action, ...semanticRequest };
   invariant(action === 'start' || payload.intent.kind === 'new', 'BAD_ARGUMENT', 'Create a new Intent.');
   let overlapIntent = payload.intent.kind === 'existing' ? payload.intent.intentId : payload.intent.outcome;
@@ -239,7 +250,7 @@ async function execute(
       'WORK_OPERATION_CHANGED',
       'The original operation did not complete.',
     );
-    return canonicalPayload(startReply(terminal.result, noticeVersion, openLanesVersion));
+    return canonicalPayload(startReply(terminal.result, noticeVersion, openLanesVersion, guardSet));
   }
   const main = await hostedStartMain(ctx, projectId);
   invariant(
@@ -428,7 +439,7 @@ async function execute(
       itemId: payload.intent.intentId,
       startOperationId: operationId,
     });
-  return canonicalPayload(startReply(result, noticeVersion, openLanesVersion));
+  return canonicalPayload(startReply(result, noticeVersion, openLanesVersion, guardSet));
 }
 
 export const start = receiptMutation({

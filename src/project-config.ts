@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 /** A project's Forge settings for preflight, for any language. A root `forge.json` holds them:
- * `{"preflight": {"tests": {…}, "static": […], "guards": […]}}`. The same `preflight` object under
+ * `{"preflight": {"tests": {…}, "static": […], "guards": […], "guardSet": {…}}}`. The same `preflight` object under
  * `forge` in package.json is the fallback, so Node projects keep working unchanged. Each key is read
  * from one file: declaring it in both is an error, never a silent pick. Unknown keys are ignored, so
  * later settings can join the file. Reading never runs repository code. */
 export const FORGE_CONFIG_FILE = 'forge.json';
-export type PreflightKey = 'tests' | 'static' | 'guards' | 'wrappers';
+export type PreflightKey = 'tests' | 'static' | 'guards' | 'guardSet' | 'wrappers';
 export type DeclaredPreflight = {
   value: unknown;
   /** The file that declares it. */

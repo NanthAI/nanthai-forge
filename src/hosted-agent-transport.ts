@@ -1321,6 +1321,16 @@ export class HostedAgentTransport {
             )
               gatedLane.preflightMs = Math.round(receipt.durationMs);
           }
+          if (this.serverFeatures?.includes('preflight-guard-set')) {
+            // What this head's preflight ran, so a failed check teaches the project's guard set (13ea93bf).
+            // One lazy chunk: a second dynamic import would split shared modules out of the eager graph.
+            const { guardGateFields, readPreflightReceipt } = await import('./agent-preflight.js');
+            const receipt = readPreflightReceipt(root, laneId);
+            const current = Boolean(
+              receipt && (receipt.tree && tree ? receipt.tree === tree : receipt.head === head),
+            );
+            Object.assign(gatedLane, guardGateFields(root, laneId, receipt, current));
+          }
           return gates;
         },
         landGates: (composeOperationId: string) => {

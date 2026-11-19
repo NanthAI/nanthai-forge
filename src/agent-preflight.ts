@@ -29,6 +29,8 @@ import {
   selectionSourcePath,
 } from '../scripts/test-impact.mjs';
 import { learnFailures, learnedTests, recentFailedTests } from './preflight-learned.js';
+import { type GuardSetReport, planGuardSet, recordPreflightRun } from './preflight-guard-set.js';
+export { guardGateFields } from './preflight-guard-set.js';
 import { commentOnlyPaths } from './preflight-comment-only.js';
 import { spawnCaptured, failureExcerpt } from './agent-preflight-capture.js';
 import {
@@ -247,6 +249,8 @@ export type LocalSelection = {
   /** Declared guards this change triggered: always run first, never trimmed; `seconds` is the cost
    * (measured on this machine where known, else the per-file estimate). */
   guards?: { name: string; tests: string[]; seconds: number }[];
+  /** The learned guard set (Automatic, manual or off) and why each file is in: p, C, r, t, saving. */
+  guardSet?: GuardSetReport;
   /** Cheap tests an earlier run timed, added last with budget the ranked tiers left over. */
   filler?: number;
   deferredTo: 'pre-queue';
@@ -607,7 +611,31 @@ function runnerPlan(
     preflightGuards(packageJson, path => every.has(path), forgeJson),
     paths,
   ).selected;
-  const mandatory = [...new Set([...guards.flatMap(guard => guard.tests), ...selection.changedTests])];
+  const timing = preflightSecondsPerFile(root);
+  const stats = preflightFileStats(root);
+  const secondsFor = (test: string) => (stats[test] ? stats[test].ms / 1000 : timing.secondsPerFile);
+  const budgetSeconds = options.budgetSeconds ?? PREFLIGHT_LOCAL_BUDGET_SECONDS;
+  const declaredTests = new Set(guards.flatMap(guard => guard.tests));
+  // The learned guard set joins the declared guards for every runner (13ea93bf), inside what they and
+  // the change's own tests leave of the budget.
+  const guardSet = only
+    ? undefined
+    : planGuardSet(
+        root,
+        { packageJson, forgeJson },
+        {
+          isTest: test => present.has(test),
+          localSeconds: test => (stats[test] ? stats[test].ms / 1000 : undefined),
+          defaultSeconds: timing.secondsPerFile,
+          capSeconds: learnedGuardCap(
+            budgetSeconds,
+            [...declaredTests, ...selection.changedTests],
+            secondsFor,
+          ),
+        },
+      );
+  const learnedGuards = (guardSet?.tests ?? []).filter(test => !declaredTests.has(test));
+  const mandatory = [...new Set([...declaredTests, ...learnedGuards, ...selection.changedTests])];
   const named = new Set([...mandatory, ...selection.namedTests, ...learned]);
   const tiers = [
     { tier: 'mandatory', tests: keep(mandatory) },
@@ -633,10 +661,6 @@ function runnerPlan(
   ].filter(item => item.tests.length);
   if (inPackages.reason) selection.reason = `${selection.reason}; ${inPackages.reason}`;
   const tests = tiers.flatMap(item => item.tests);
-  const timing = preflightSecondsPerFile(root);
-  const stats = preflightFileStats(root);
-  const secondsFor = (test: string) => (stats[test] ? stats[test].ms / 1000 : timing.secondsPerFile);
-  const budgetSeconds = options.budgetSeconds ?? PREFLIGHT_LOCAL_BUDGET_SECONDS;
   const trim = options.trim !== false;
   const seconds = tests.reduce((sum, test) => sum + secondsFor(test), 0);
   const label = runnerLabel(runner);
@@ -660,16 +684,20 @@ function runnerPlan(
     ...(trim ? {} : { trim: false as const }),
     ...(only ? { only: 'stopped' as const } : {}),
     deferredTo: 'pre-queue',
-    summary: `Local rule: ${rule}. ${reason}.`,
-    ...(guards.length
+    summary: `Local rule: ${rule}. ${reason}.${guardSet ? ` ${guardSetLine(guardSet)}` : ''}`,
+    ...(guards.length || learnedGuards.length
       ? {
-          guards: guards.map(guard => ({
+          guards: [
+            ...guards,
+            ...(learnedGuards.length ? [{ name: LEARNED_GUARD_NAME, tests: learnedGuards }] : []),
+          ].map(guard => ({
             name: guard.name,
             tests: guard.tests,
             seconds: Math.round(guard.tests.reduce((sum, test) => sum + secondsFor(test), 0) * 10) / 10,
           })),
         }
       : {}),
+    ...(guardSet ? { guardSet } : {}),
   };
   const plan: PreflightPlan = {
     status: 'planned',
@@ -820,6 +848,10 @@ const testArgs = (root: string, tests: string[]) => {
 
 /** The landing check's shared selector over the saved changes (base to head). Unknown paths mean
  * no plan: missing observations never block a landing. */
+/** Learned guards get only what declared guards and the change's own tests leave of the budget. */
+const learnedGuardCap = (budget: number, reserved: string[], secondsFor: (test: string) => number) =>
+  Math.max(0, budget - [...new Set(reserved)].reduce((sum, test) => sum + secondsFor(test), 0));
+
 export function preflightPlan(...args: Parameters<typeof planTests>): PreflightPlan {
   const plan = planTests(...args);
   if (plan.status !== 'unavailable') return plan;
@@ -912,8 +944,31 @@ function planTests(
     const budgetSeconds = options?.budgetSeconds ?? PREFLIGHT_LOCAL_BUDGET_SECONDS;
     const trim = options?.trim !== false;
     const secondsFor = (test: string) => (stats[test] ? stats[test].ms / 1000 : timing.secondsPerFile);
-    const declaredGuards = preflightGuards(files.get('package.json'), path => files.has(path), forgeJson);
+    const packageJson = files.get('package.json');
+    const declaredGuards = preflightGuards(packageJson, path => files.has(path), forgeJson);
     const guards = selectGuards(declaredGuards, changed.paths);
+    const declaredTests = new Set(guards.selected.flatMap(guard => guard.tests));
+    const isTest = (test: string) => files.has(test) && runnerTestPath(resolved.runner, test);
+    // The learned guard set runs first with the declared guards (13ea93bf), inside what they and the
+    // change's own tests leave of the budget, so it never pushes the change's tests out.
+    const guardSet = options?.only
+      ? undefined
+      : planGuardSet(
+          root,
+          { packageJson, forgeJson },
+          {
+            isTest,
+            localSeconds: test => (stats[test] ? stats[test].ms / 1000 : undefined),
+            defaultSeconds: timing.secondsPerFile,
+            capSeconds: learnedGuardCap(
+              budgetSeconds,
+              [...declaredTests, ...changed.paths.filter(isTest)],
+              secondsFor,
+            ),
+          },
+        );
+    const learnedGuards = (guardSet?.tests ?? []).filter(test => !declaredTests.has(test));
+    const guardTests = [...declaredTests, ...learnedGuards];
     // Comment-only edits (an SPDX header, a reworded comment) run the same program: they rank only the
     // tests that read the file. Needs the base bytes on this machine; otherwise nothing is skipped.
     const commentOnly = context?.base
@@ -928,7 +983,7 @@ function planTests(
     const selection = selectPreflightTests({
       files,
       paths: changed.paths,
-      guards: guards.selected.flatMap(guard => guard.tests),
+      guards: guardTests,
       learned: learnedTests(root, changed.paths, undefined, test => runnerTestPath(resolved.runner, test)),
       recent: recentFailedTests(root),
       ...(commentOnly.length ? { commentOnly } : {}),
@@ -943,7 +998,7 @@ function planTests(
         selection.ranks,
         selection.relevance,
       ),
-      guards.selected.flatMap(guard => guard.tests),
+      guardTests,
     );
     selection.tests = selection.tiers.flatMap(item => item.tests);
     let tests = [...new Set(selection.tests)];
@@ -989,6 +1044,8 @@ function planTests(
         // A guard whose inputs the delta touches runs again: its passes are not reused across them.
         for (const guard of selectGuards(declaredGuards, delta).selected)
           for (const test of guard.tests) impacted.add(test);
+        // Learned guards are the tests the import graph misses: their passes are never reused.
+        for (const test of learnedGuards) impacted.add(test);
         const covered = new Set(previous.covered);
         reusedTests = tests.filter(test => covered.has(test) && !impacted.has(test));
         tests = tests.filter(test => !reusedTests.includes(test));
@@ -1053,11 +1110,23 @@ function planTests(
       mandatory: tests.filter(test => selection.tiers[0]?.tests.includes(test)).length,
       protected: tests.filter(test => guarded.has(test)).length,
       deferred: deferredTests.length,
-      guards: guards.selected.map(guard => ({
-        name: guard.name,
-        tests: guard.tests,
-        seconds: Math.round(guard.tests.reduce((sum, test) => sum + secondsFor(test), 0) * 10) / 10,
-      })),
+      guards: [
+        ...guards.selected.map(guard => ({
+          name: guard.name,
+          tests: guard.tests,
+          seconds: Math.round(guard.tests.reduce((sum, test) => sum + secondsFor(test), 0) * 10) / 10,
+        })),
+        ...(learnedGuards.length
+          ? [
+              {
+                name: LEARNED_GUARD_NAME,
+                tests: learnedGuards,
+                seconds: Math.round(learnedGuards.reduce((sum, test) => sum + secondsFor(test), 0) * 10) / 10,
+              },
+            ]
+          : []),
+      ],
+      ...(guardSet ? { guardSet } : {}),
       filler: filler.length,
       trimmedTests: only ? [] : cut.filter(test => !filled.has(test)).sort(),
       rerun: context ? rerunCommand(root, context.laneId) : undefined,
@@ -1120,6 +1189,20 @@ function planTests(
       reason: `test selection failed: ${(error as Error).message.slice(0, 200)}`,
     };
   }
+}
+
+/** The guard entry the learned set adds to `local.guards`. */
+const LEARNED_GUARD_NAME = 'learned guard set';
+/** The guard set's reason and, per file, why it is in: p x C / r - t = saving (seconds). */
+function guardSetLine(report: GuardSetReport) {
+  const why = report.files
+    .filter(file => report.tests.includes(file.file))
+    .map(file =>
+      file.pinned && !file.failures
+        ? `${file.file} (pinned)`
+        : `${file.file} (${file.failures} landing failures, p ${file.p} x C ${file.C} s / r ${file.r} - t ${file.t} s = +${file.saving} s${file.pinned ? ', pinned' : ''})`,
+    );
+  return `${report.reason}${why.length ? ` First: ${why.join('; ')}.` : ''}`;
 }
 
 /** One line naming what a run will do: scope, file counts, budget, estimate, static checks and why. */
@@ -1205,6 +1288,7 @@ function localSelection(input: {
   protected: number;
   deferred: number;
   guards: { name: string; tests: string[]; seconds: number }[];
+  guardSet?: GuardSetReport;
   filler: number;
   trimmedTests: string[];
   rerun: string | undefined;
@@ -1256,6 +1340,7 @@ function localSelection(input: {
     protected: input.protected,
     deferred: input.deferred,
     ...(input.guards.length ? { guards: input.guards } : {}),
+    ...(input.guardSet ? { guardSet: input.guardSet } : {}),
     ...(input.filler ? { filler: input.filler } : {}),
     ...(input.trimmedTests.length ? { trimmedTests: input.trimmedTests } : {}),
     ...(input.trimmedTests.length && input.rerun ? { rerun: input.rerun } : {}),
@@ -1268,6 +1353,7 @@ function localSelection(input: {
       (input.guards.length
         ? ` Guards always run first, never trimmed: ${input.guards.map(guard => `${guard.name} ~${guard.seconds} s`).join(', ')}.`
         : '') +
+      (input.guardSet ? ` ${guardSetLine(input.guardSet)}` : '') +
       `${cutNote}${over}${skippedNote}` +
       (input.commentOnly.length
         ? ` ${input.commentOnly.length} comment-only path(s) add only the tests that read them.`
@@ -1605,6 +1691,8 @@ export function runPreflight(
   }
   if (plan.tests.length && (Object.keys(fileMs).length || failedFiles.length))
     recordFileStats(root, { passed: passedTests, failed: failedFiles, ms: fileMs });
+  // Every executed run counts on the guard set's cost side (r), test files or not: the land gate sends it.
+  recordPreflightRun(root, laneId);
   // A failure here is evidence that these tests matter for these paths: the next plan protects them.
   const paths = plannedPaths.get(plan);
   if (paths && failedFiles.length) {

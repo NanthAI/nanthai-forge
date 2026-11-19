@@ -53,14 +53,14 @@ export async function recordFailure(
     startedAt?: string | undefined;
   },
 ) {
-  if (chosenEndings.has(input.error.code)) return;
+  if (chosenEndings.has(input.error.code)) return false;
   const old = await ctx.db
     .query('projectFailures')
     .withIndex('by_project_and_operation', q =>
       q.eq('projectId', input.projectId).eq('operationId', input.operationId),
     )
     .first();
-  if (old) return;
+  if (old) return false;
   const started = input.startedAt ? Date.parse(input.startedAt) : NaN;
   const record: FailureRecord = {
     schema: 1,
@@ -74,4 +74,5 @@ export async function recordFailure(
     operationId: input.operationId,
     value: JSON.stringify(record),
   });
+  return true;
 }

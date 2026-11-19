@@ -2,7 +2,7 @@
 import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
 import { internalMutation } from './server';
-import type { MutationCtx } from './_generated/server';
+import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { HostedLandingState } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -21,6 +21,7 @@ import {
 import { speedBudgets } from '../src/speed-budgets';
 import { discardedRunnerSeconds } from '../src/cost-budgets';
 import { scheduleStatsClose } from './projectStatsClose';
+import { addGuardFailure, guardCandidates } from '../src/preflight-guard-learning';
 
 /** Speed and cost budgets, judged inside the mutation that lands: one indexed read and one write of a
  * row of about 3.5 KB; no new Convex call. `attempts` is the accepted attempt's ordinal plus one, from
@@ -54,6 +55,56 @@ export async function recordAuditRunnerSeconds(
     await ctx.db.patch(row._id, { value: canonicalPayload(next) });
   } catch {
     // A metric never fails the audit: an unreadable row is replaced by the next landing's fresh window.
+  }
+}
+
+/** A failed check teaches the preflight guard set (13ea93bf): the landing row's gate evidence (what
+ * its preflight ran) and one patch of this row's `guards`. Check failures only, about 1 landing in
+ * 10: two indexed reads and one write. A project with no landed sample yet learns nothing (no window
+ * to read p against). A metric: it never fails the landing. */
+export async function recordGuardFailure(ctx: MutationCtx, state: HostedLandingState) {
+  try {
+    const projectId = state.projectId as Id<'hostedProjects'>;
+    const landing = await ctx.db
+      .query('projectHostedLandingRequests')
+      .withIndex('by_project_and_submission', q => q.eq('projectId', projectId).eq('submissionId', state.id))
+      .unique();
+    const row = await ctx.db
+      .query('projectLandingSpeed')
+      .withIndex('by_project', q => q.eq('projectId', projectId))
+      .unique();
+    if (!row) return;
+    const guards = addGuardFailure(
+      row.guards,
+      state,
+      { ran: landing?.preflightRan, runs: landing?.preflightRuns },
+      Date.now(),
+    );
+    if (guards !== null) await ctx.db.patch(row._id, { guards });
+  } catch {
+    // The failure is already recorded; learning waits for the next one.
+  }
+}
+
+/** The guard-set candidates for a start reply, or null when the caller already holds revision
+ * `known`. One indexed read of this row (about 4 KB); no write. */
+export async function guardSetReply(ctx: QueryCtx, projectId: Id<'hostedProjects'>, known: string) {
+  // A hint: nothing here may fail the start that carries it.
+  try {
+    const row = await ctx.db
+      .query('projectLandingSpeed')
+      .withIndex('by_project', q => q.eq('projectId', projectId))
+      .unique();
+    let at: number[] = [];
+    try {
+      at = row ? landingSpeedStateSchema.parse(JSON.parse(row.value)).samples.map(sample => sample[0]) : [];
+    } catch {
+      at = [];
+    }
+    const set = guardCandidates(row?.guards, at, Date.now());
+    return set.rev === known ? null : set;
+  } catch {
+    return null;
   }
 }
 

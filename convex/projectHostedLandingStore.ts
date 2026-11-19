@@ -39,7 +39,7 @@ import {
   wakeNewRunFollower,
 } from './projectHostedFinishWake';
 import { notifyStackedLandingEnded } from './projectHostedStackNotice';
-import { recordLandingSpeed } from './projectLandingSpeed';
+import { recordGuardFailure, recordLandingSpeed } from './projectLandingSpeed';
 import { PASS_HELD, keepsPassStamp } from '../src/landing-speed-alerts';
 import { recordFailure } from './projectFailureLog';
 import { bindRunnerAccounting, bindSupersededCheck } from './projectHostedLandingRunnerCosts';
@@ -494,14 +494,16 @@ export async function settleLandingOperation(ctx: MutationCtx, state: HostedLand
 }
 /** One failure-log row for a landing that ended failed with an error (Item 2c420916). */
 export async function failedLanding(ctx: MutationCtx, state: HostedLandingState) {
-  if (state.error)
-    await recordFailure(ctx, {
-      projectId: state.projectId as Id<'hostedProjects'>,
-      operationId: state.operationId,
-      kind: 'landing',
-      error: state.error,
-      startedAt: state.timing?.submittedAt ?? state.at,
-    });
+  if (!state.error) return;
+  const recorded = await recordFailure(ctx, {
+    projectId: state.projectId as Id<'hostedProjects'>,
+    operationId: state.operationId,
+    kind: 'landing',
+    error: state.error,
+    startedAt: state.timing?.submittedAt ?? state.at,
+  });
+  // Once per failed check (the failure row dedupes): it teaches the preflight guard set (13ea93bf).
+  if (recorded && state.error.code === 'CHECK_FAILED') await recordGuardFailure(ctx, state);
 }
 
 /** Mutable evidence is separate from immutable attempt/source/operation pins. A
