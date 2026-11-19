@@ -76,6 +76,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `scripts/test-directory-path.mjs` | `forge-folders` | 2 | Forge's selector: directory reads in its tests and scripts | the generic JS/TS import graph |
 | `scripts/check-path-scopes.mjs` | `docs-folder` | 1 | Forge's own repository path-scope check treats `docs/` as documentation | not run |
 | `scripts/check-path-scopes.mjs` | `js-extension` | 1 | Forge's own JSON asset readers are JS/TS modules; unknown or unobserved data stays full | each project's own test runner and generic import graph |
+| `scripts/core-queue-paths.mjs` | `tests-folder` | 5 | Forge's own Guard 4 (6abdde40): its queue simulation, cost guard, core-path drift check and incident replay registry run for every change to its own queue paths | not run; their own configured command and test runner |
 | `scripts/control-build-key.mjs` | `package-json-config` | 1 | the build key of Forge's own CLI | not used |
 | `scripts/docs-readers.mjs` | `js-extension` | 1 | Forge's tested-docs reader scan matches JS/TS importers | declared `docsPaths` on their check definition |
 | `scripts/script-impact.mjs` | `tests-folder` | 4 | Forge's selector maps scripts to named tests in `tests/` | the project runner and the generic import graph |

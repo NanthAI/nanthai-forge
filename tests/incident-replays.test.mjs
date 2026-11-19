@@ -64,3 +64,18 @@ test('guard fixture: a renamed, skipped or moved replay fails the guard', () => 
     /outside the normal suite/,
   );
 });
+
+test('Guard 4 (6abdde40): a core queue change runs every registered replay, the queue simulation and the cost guard', async () => {
+  const { coreQueueTests } = await import('../scripts/core-queue-paths.mjs');
+  const fixed = [
+    'tests/core-queue-paths.test.mjs',
+    'tests/hosted-landing-queue-sim.test.mjs',
+    'tests/incident-replays.test.mjs',
+    'tests/landing-cost-guard.test.mjs',
+  ];
+  const listed = registry.replays.map(entry => entry.file);
+  // Every listed file exists (the first test), so the guard set is the whole registry, never fewer.
+  const files = new Map([...fixed, ...listed].filter(path => existsSync(path)).map(path => [path, '']));
+  files.set('tests/fixtures/incident-replays.json', JSON.stringify(registry));
+  assert.deepEqual(coreQueueTests(files), [...new Set([...fixed, ...listed])].sort());
+});

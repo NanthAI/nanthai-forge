@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { posix } from 'node:path';
+import { coreQueuePath, coreQueueReason, coreQueueTests } from './core-queue-paths.mjs';
 // Explicit infrastructure/fixture ownership supplements the import graph. Unknown
 // paths stay unknown: a filename resemblance is never an independence proof.
 export const webTest = path => /^(?:tests\/ui-|tests\/.*-ui\.test)/.test(path);
@@ -239,6 +240,16 @@ export function classifyCheckPath(path, files) {
   }
   if (!files.has(path)) return null;
   if (/^scripts\/.+\.(?:mjs|js|ts)$/.test(path)) return { domain: 'scripts', seeds: [path] };
+  // Guard 4: classified by path, never by the change's stated intent; `guard` adds the queue
+  // guard set to every check; local preflight still ranks it like any test (test-impact.mjs, eb0491bb).
+  if (coreQueuePath(path))
+    return {
+      domain: path.startsWith('src/') ? 'core' : 'convex',
+      seeds: [path],
+      tests: coreQueueTests(files),
+      guard: true,
+      reason: coreQueueReason,
+    };
   if (/^src\/.+\.ts$/.test(path)) return { domain: 'core', seeds: [path] };
   if (/^web\/src\/.+\.(?:tsx?|css|svg)$/.test(path)) return { domain: 'web', seeds: [path] };
   // Schema and deployment config shape every function; other modules are graphed

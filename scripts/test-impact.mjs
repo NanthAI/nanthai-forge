@@ -8,6 +8,7 @@ import { changeSalt, compareRelevance, relevanceFor, stableKey } from './test-ti
 import { coverageShadow } from './test-coverage.mjs';
 import { classifyCheckPath, webTest } from './check-path-scopes.mjs';
 import { guardSelection } from './selection-guard.mjs';
+import { coreQueuePath, coreQueueReason, coreQueueTests } from './core-queue-paths.mjs';
 import { docsPackager, docsWrapper, scriptPath, scriptSelectionReason } from './script-impact.mjs';
 import { docsReaders } from './docs-readers.mjs';
 import { scanDetail, scanReaders } from './test-tree-scanners.mjs';
@@ -555,6 +556,13 @@ function selectWithGraph(
         const scan = scans.get(test);
         if (scan && affected.get(test)?.kind !== 'changed')
           return [test, { kind: 'explicit', changedPath: scan.path, detail: scanDetail(scan) }];
+        // A core queue guard test (Guard 4) always runs in the landing check, even when an import
+        // reaches it. Its own kind keeps it out of local preflight's mandatory tier: there it ranks by
+        // its import distance like any test, so a changed module's direct importers still run first
+        // (eb0491bb), and the pre-queue check runs the rest.
+        const guard = classifications.find(item => item.guard && item.tests?.includes(test));
+        if (guard && affected.get(test)?.kind !== 'changed')
+          return [test, { kind: 'guard', changedPath: guard.path, detail: guard.reason }];
         return [
           test,
           affected.get(test) ??
@@ -817,15 +825,20 @@ export function interactionSelection({ paths, files, mainCheck, interaction, env
     ? selectTests({ files, paths: interaction.overlap })
     : { tests: [] };
   if (overlap.scope === 'full') return full(overlap.reason);
+  // Guard 4: the Lane's own core queue change keeps the queue simulation and incident replays. Main's
+  // core change already ran them in its own check, and a real interaction is already in the
+  // left/right intersection (review afa5e865).
+  const core = interaction.lanePaths.some(coreQueuePath);
   return explainAll(
     {
       scope: 'interaction',
-      reason: 'Impacted-test intersection plus overlap and fixed smoke',
+      reason: `Impacted-test intersection plus overlap and fixed smoke${core ? `; ${coreQueueReason}` : ''}`,
       tests: [
         ...new Set([
           ...left.tests.filter(path => right.tests.includes(path)),
           ...overlap.tests,
           ...smokeTests.filter(path => files.has(path)),
+          ...(core ? coreQueueTests(files) : []),
         ]),
       ].sort(),
     },

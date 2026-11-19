@@ -328,6 +328,7 @@
     "scripts/test-timings-file.mjs",
     "scripts/test-timings-file.d.mts",
     "scripts/check-path-scopes.mjs",
+    "scripts/core-queue-paths.mjs",
     "dist",
     "README.md",
     "LICENSE.md",

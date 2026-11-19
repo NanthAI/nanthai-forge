@@ -147,6 +147,19 @@ A brief or a lead comment on the Issue can override one for that slice.
   dogfood-shaped fixture as well as the small one, and count worst-case rows whole, not averaged.
   A budget below one operation, or worth a fraction of a cent, flips on one landing: make it a
   ratchet with an absolute floor, and weight request classes by price when they differ.
+- **Core queue paths (Guard 4).** A change to queue, admission, acceptance, check, wake or
+  scheduler code is core whatever it claims to do, including a cost-only change. It gets the same
+  proof as any queue change: its tests, the queue simulation and incident replays, and a
+  cross-model review before landing. The landing check classifies these paths by path alone
+  (`scripts/core-queue-paths.mjs`) and always runs `tests/hosted-landing-queue-sim.test.mjs`,
+  the cost guard and every file in `tests/fixtures/incident-replays.json` for them, in scoped checks
+  and in re-checks of that change (a core change on main alone ran them in main's own check).
+  Local preflight ranks those tests like any other, so a changed module's own importers still run
+  first, and the pre-queue check runs what it leaves; run the queue simulation yourself in
+  `nforge heavy` before you save a queue change. A new core module outside those patterns joins
+  the list in the same landing: `tests/core-queue-paths.test.mjs`, also in that set, fails when the
+  queue simulation reaches a queue module that is neither core nor a listed exception with its
+  reason (the 2026-11-17 wake cut saved a little and cost hours of landing time; incident 5e3c3a3c).
 - **Data access.** History and evidence objects in R2 are server-only. Clients read them through
   a server action that checks current access and redacts; no client-readable raw object or signed
   URL unless the design proves it safe. Replies never contain object keys or signed URLs.
