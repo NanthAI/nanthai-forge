@@ -6,7 +6,7 @@
 // (one-shot, re-read only when the live row's version changes); done and dropped Items of this Initiative, one page
 // of 50 each, subscribed only while that fold is open. Writes: projectWorkCommand:command, retry-safe by operation id.
 import { useEffect, useState, type FormEvent } from 'react';
-import { Band, Count, Key, Region, ReorderList, Sheet, Who } from '../../ds';
+import { Band, Count, Key, Region, ReorderList, Sheet } from '../../ds';
 import { itemStatus, itemStatusLabel, type PlanRow, type StoredStatus } from '../../../../src/planning-model';
 import { A } from '../frames';
 import { Head, crumbsFor } from '../Place';
@@ -16,7 +16,8 @@ import type { Reads } from './Bulk';
 import { groupBreakdown, statusOf, type PlanGroup, type PlanView } from './model';
 import { breakdownTotal, breakdownWords } from '../progress';
 import type { Put, Settled } from './Plan';
-import { BreakdownWords, COLS, Line, Roll, Status } from './rows';
+import { BreakdownWords, COLS, Line, Owner, Roll, Status } from './rows';
+import { workersOf, type Workers } from './workers';
 
 type At = (patch: Partial<PlaceProps['route']>) => string;
 const statuses: StoredStatus[] = ['proposed', 'open', 'in-progress', 'closed', 'abandoned'];
@@ -48,6 +49,7 @@ export function InitiativePage({
   projectName,
   initiative,
   view,
+  workers,
   at,
   put,
   reads,
@@ -63,6 +65,8 @@ export function InitiativePage({
   projectName: string;
   initiative: PlanRow;
   view: PlanView;
+  /** Who works on this Initiative's Items now (workers.ts): its Owner when it has none. */
+  workers?: Workers | undefined;
   at: At;
   put: Put;
   reads?: Reads | undefined;
@@ -165,7 +169,7 @@ export function InitiativePage({
               disabled={!view.canEdit}
               cols={COLS}
             >
-              {({ line }) => <Line line={line} href={at({ rest: line.row.id })} />}
+              {({ line }) => <Line line={line} href={at({ rest: line.row.id })} workers={workers} />}
             </ReorderList>
           ) : (
             <div className="quietline">
@@ -243,7 +247,17 @@ export function InitiativePage({
             </dd>
             <dt>Owner</dt>
             <dd>
-              {initiative.owner ? <Who handle={initiative.owner} /> : <span className="t3">no one yet</span>}
+              <Owner
+                owner={initiative.owner}
+                workers={
+                  workers
+                    ? workersOf(
+                        workers,
+                        group.lines.map(line => line.row.id),
+                      )
+                    : []
+                }
+              />
             </dd>
             {initiative.hidden ? (
               <>

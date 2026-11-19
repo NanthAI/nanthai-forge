@@ -2,12 +2,13 @@
 // The plan as a board (Item e0a23825): the same rows as the list, one column per status. Order inside a column is
 // the plan order (or the chosen sort); the board never drags, so the shared hand order changes only in the list.
 import type { PlanRow } from '../../../../src/planning-model';
-import { Who } from '../../ds';
 import { A } from '../frames';
 import type { PlaceProps } from '../screens';
 import { statusOf } from './model';
 import { sortRows, type Sort } from './query';
+import { Owner } from './rows';
 import { Tick, type Ticker } from './Tick';
+import type { Workers } from './workers';
 
 const columns = [
   { status: 'proposed', title: 'Proposed' },
@@ -24,6 +25,7 @@ export function Board({
   at,
   ticker,
   settled,
+  workers,
 }: {
   rows: readonly PlanRow[];
   sort: Sort;
@@ -31,6 +33,8 @@ export function Board({
   at: (patch: Partial<PlaceProps['route']>) => string;
   ticker: Ticker | undefined;
   settled: boolean;
+  /** Who works on each unowned Item now (workers.ts). */
+  workers?: Workers | undefined;
 }) {
   const shown = columns.filter(
     column => settled || (column.status !== 'done' && column.status !== 'abandoned'),
@@ -58,7 +62,7 @@ export function Board({
                   {row.initiativeId ? (byId.get(row.initiativeId)?.title ?? 'Initiative') : 'No Initiative'}
                   {row.type ? `, ${row.type}` : ''}
                 </span>
-                {row.owner ? <Who handle={row.owner} /> : <span className="t3">no one yet</span>}
+                <Owner owner={row.owner} workers={workers ? workers.get(row.id) : []} />
               </div>
             ))}
             {cards.length ? null : <div className="quietline">None</div>}

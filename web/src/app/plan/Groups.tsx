@@ -13,6 +13,7 @@ import { groupBreakdown, type PlanGroup, type PlanView } from './model';
 import { filtered, sortRows, type PlanQuery } from './query';
 import { BreakdownWords, COLS, Line, Roll } from './rows';
 import { Tick, type Ticker } from './Tick';
+import type { Workers } from './workers';
 
 type At = (patch: Partial<PlaceProps['route']>) => string;
 const groupId = (group: PlanGroup) => group.initiative?.id ?? NO_INITIATIVE;
@@ -33,6 +34,7 @@ export function Groups({
   at,
   ticker,
   folds,
+  workers,
   onToggle,
   onMove,
   onMoveInitiative,
@@ -43,6 +45,8 @@ export function Groups({
   at: At;
   ticker: Ticker | undefined;
   folds: Folds;
+  /** Who works on each unowned Item now (workers.ts). */
+  workers?: Workers | undefined;
   onToggle: (id: string) => void;
   onMove: (group: PlanGroup, id: string, toIndex: number) => void;
   /** Absent when the order cannot change here (not the owner, sorted or filtered). */
@@ -63,6 +67,7 @@ export function Groups({
           byHand={byHand}
           at={at}
           ticker={ticker}
+          workers={workers}
           shut={isShut(folds, groupId(group))}
           onToggle={() => onToggle(groupId(group))}
           onMove={(id, toIndex) => onMove(group, id, toIndex)}
@@ -200,6 +205,7 @@ function Group({
   byHand,
   at,
   ticker,
+  workers,
   shut,
   onToggle,
   onMove,
@@ -212,6 +218,7 @@ function Group({
   byHand: boolean;
   at: At;
   ticker: Ticker | undefined;
+  workers?: Workers | undefined;
   shut: boolean;
   onToggle: () => void;
   onMove: (id: string, toIndex: number) => void;
@@ -253,6 +260,7 @@ function Group({
                   href={at({ rest: line.row.id })}
                   ranked={query.sort === 'hand'}
                   flat={!tree}
+                  workers={workers}
                 />
               </>
             )}

@@ -171,6 +171,12 @@
       "test": "incident stucktrain: ending a reservation accepts a passed three-Lane cohort before its expiry timer (${ending})"
     },
     {
+      "incident": "5e3c3a3c",
+      "what": "Core claim: passed landings waited 60-100 min behind a holder that started a new check (2026-11-17); the queue simulation gates followers' pass-to-land and fails on the pre-N1 code",
+      "file": "tests/hosted-landing-queue-sim.test.mjs",
+      "test": "incident 5e3c3a3c: passed followers land within the pass-to-land ceiling while the holder re-checks"
+    },
+    {
       "incident": "5d690345",
       "what": "Core claim: docs-only main advanced the green head without its full run, discarding a passed check with audit-baseline",
       "file": "tests/hosted-first-check-landing.test.mjs",

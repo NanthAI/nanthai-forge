@@ -67,6 +67,14 @@ const put = async command => { window.puts.push(command); };
 const reads = {
   items: async ids => ids.map(id => (id === launch.id ? { ...launch, body: 'Everything that must land before the parser ships.' } : { id, version: 1, kind: 'issue', title: id, body: '' })),
   comments: async () => ({ comments: [], more: [] }),
+  // Open Lanes active in the last 48 hours (d3357f40): three on the unowned in-progress Item, one on an owned
+  // in-progress Item. The page asks by Intent: each in-progress Item and two follow-ups (window.workerAsked).
+  workers: async ids => (window.workerReads = (window.workerReads ?? 0) + 1, window.workerAsked = [...ids], { lanes: [
+    { intentId: uuid(17), actor: 'example-builder/amber-fox', at: 30 },
+    { intentId: uuid(17), actor: 'peer-builder', at: 20 },
+    { intentId: uuid(17), actor: 'peer-builder/copper-moth', at: 10 },
+    { intentId: uuid(11), actor: 'peer-builder/ocean-lark', at: 5 },
+  ] }),
 };
 function Fixture() {
   const search = useSearch();
@@ -236,6 +244,79 @@ test('plan views and bulk bar: real components keep the view in the address and 
     assert.deepEqual(errors, []);
     await context.close();
   }
+
+  // d3357f40 (owner 2026-11-19): with no owner the Owner column shows who works on the Item now, newest first with
+  // "+N"; "no one yet" only with neither; a set owner wins; an Item with no checklist shows no "none". One read.
+  for (const theme of ['dark', 'light'])
+    await t.test(`owner and progress cells 1440 ${theme}`, async () => {
+      const { page, errors, context } = await open(1440, theme);
+      const row = title =>
+        page.locator('.plan .row').filter({ has: page.getByRole('link', { name: title }) });
+      const owner = title => row(title).locator('.plan-wide').nth(1);
+      await owner('Last open step of the long release').getByText('amber-fox').waitFor();
+      assert.match(await owner('Last open step of the long release').textContent(), /amber-fox.*\+2/);
+      assert.equal(
+        await owner('Last open step of the long release').locator('.plan-who').getAttribute('title'),
+        'Working on it now: example-builder/amber-fox, peer-builder, peer-builder/copper-moth',
+      );
+      // An owned in-progress Item with an active Lane shows its owner, never the Lane.
+      const owned = 'Recover from a truncated frame without losing the next one';
+      assert.match(await owner(owned).textContent(), /amber-fox/);
+      assert.doesNotMatch(await owner(owned).textContent(), /ocean-lark/);
+      assert.equal((await owner('Tidy the old notes').textContent()).trim(), 'no one yet');
+      const checklist = row('Bench the parser against the old reader').locator('.dw');
+      assert.equal(await checklist.getAttribute('title'), 'no checklist');
+      // Nothing is drawn: the words are for a screen reader (and the hover) only.
+      assert.equal(
+        await checklist.evaluate(node =>
+          [...node.childNodes]
+            .filter(child => !child.classList?.contains('sr'))
+            .map(child => child.textContent)
+            .join('')
+            .trim(),
+        ),
+        '',
+        'nothing is drawn',
+      );
+      assert.equal(await checklist.locator('.sr').textContent(), 'no checklist');
+      assert.equal(
+        await page
+          .locator('.plan .dw')
+          .filter({ hasText: /^none$/ })
+          .count(),
+        0,
+      );
+      assert.equal(await page.evaluate(() => window.workerReads), 1, 'one read for the whole page');
+      const asked = await page.evaluate(() => window.workerAsked);
+      assert.ok(
+        asked.includes('00000000-0000-4000-8000-000000000017'),
+        'the in-progress Item is asked about',
+      );
+      assert.ok(
+        !asked.includes('00000000-0000-4000-8000-000000000016'),
+        'an Item not started is never asked about',
+      );
+      assert.ok(
+        asked.includes('00000000-0000-4000-8000-000000000011'),
+        'an owned in-progress Item is asked too',
+      );
+      assert.equal(asked.length % 3, 0, 'each Item with its first two follow-up Intents');
+      // A hidden tab reads nothing; shown again, it reads once more (Lanes may have started meanwhile).
+      const show = state =>
+        page.evaluate(value => {
+          Object.defineProperty(document, 'visibilityState', { value, configurable: true });
+          document.dispatchEvent(new Event('visibilitychange'));
+        }, state);
+      await show('hidden');
+      assert.equal(await page.evaluate(() => window.workerReads), 1, 'hidden: no read');
+      await show('visible');
+      await page.waitForFunction(() => window.workerReads === 2);
+      await check(page, `owner cells ${theme}`);
+      if (shots)
+        await page.screenshot({ path: join(shots, `plan-owners-1440-${theme}.png`), fullPage: true });
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
 
   const launchId = '00000000-0000-4000-8000-000000000001';
   const docsId = '00000000-0000-4000-8000-000000000002';

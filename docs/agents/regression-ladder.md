@@ -96,6 +96,24 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.
 
+### Adding an incident replay
+
+Every queue incident becomes a permanent gate (Guard 2, Item 2873b486), in the Lane that fixes it:
+
+1. Rebuild the incident in the normal suite from its real shape: for queue incidents a scenario in
+   `tests/queue-sim/` driven through the real landing code (`parked-incident.mjs` is the model),
+   with a measurable ceiling on what went wrong (for `5e3c3a3c`, each passed follower's pass-to-land
+   while its holder re-checks, `FOLLOWER_CEILING_MINUTES`).
+2. Prove the gate catches the regression: run the pre-fix code in a child process with
+   `FORGE_TEST_SOURCE_PATCHES` (and `FORGE_TEST_PRECOMPILED=0`), and assert there that the ceiling
+   breaks; then assert in the main test that current code stays within it. Run the child with the
+   TAP reporter and assert its output names the mutant test as `ok`: a name filter that matches
+   nothing still exits 0.
+3. Register the test in `tests/fixtures/incident-replays.json` and name the incident on this page.
+   The landing check then runs every registered replay, the queue simulation and the cost guard for
+   any change to a core queue path, whatever the change claims
+   ([Guard 4](briefings.md#builder-decision-rules)).
+
 `238b3573`: accepted dispatch startup failure with a lost webhook, and twelve signed passing shards whose provider run and eleven jobs remain in progress after every step completes; both replays are registered in `tests/fixtures/incident-replays.json`.
 
 Queue incidents `5e3c3a3c` and `e4aee4fe` run in `hosted-landing-queue-sim.test.mjs`.

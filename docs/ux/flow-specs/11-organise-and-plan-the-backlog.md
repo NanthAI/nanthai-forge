@@ -18,7 +18,7 @@
 
 **What they want:** To see the whole plan and where it stands.
 
-**What they see:** Plan as one hand-ordered list grouped by Initiative (No Initiative last). Each group shows its roll-up ("2 of 9 done" (draft copy)) and folds to one line. Each row: title, status, the "next" marker where set, blocked-by titles, Done-when progress, owner or "no one yet". Views: List, Tree, Board; grouping by Initiative, owner, type or none.
+**What they see:** Plan as one hand-ordered list grouped by Initiative (No Initiative last). Each group shows its roll-up ("2 of 9 done" (draft copy)) and folds to one line. Each row: title, status, the "next" marker where set, blocked-by titles, Done-when progress (empty, "no checklist" on hover, when the Item has none), the owner or, with none set, who works on it now (open Lanes active in the last 48 hours, "+N" for more), else "no one yet". Views: List, Tree, Board; grouping by Initiative, owner, type or none.
 
 **What they do:** Fold groups they are not working on.
 

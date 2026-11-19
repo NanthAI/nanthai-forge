@@ -57,22 +57,41 @@ const PRE_N1 = [
     replace: '    false &&\n    row.orderWaited &&',
   },
 ];
+/** One pre-N1 mutant child runs both mutant tests (one uncompiled build). Each caller asserts its own
+ * test passed by name: a renamed or missing test must not pass as a proof (review 3c9fed74). */
+let mutant;
+function mutantChild() {
+  mutant ??= (async () => {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const environment = {
+      ...process.env,
+      FORGE_TEST_SOURCE_PATCHES: JSON.stringify(PRE_N1),
+      FORGE_TEST_PRECOMPILED: '0',
+    };
+    delete environment.NODE_TEST_CONTEXT;
+    const { stdout } = await promisify(execFile)(
+      process.execPath,
+      [
+        '--import',
+        './tests/check-runtime.mjs',
+        '--test',
+        '--test-reporter=tap',
+        'tests/queue-sim/parked-mutant-runner.mjs',
+      ],
+      { env: environment, maxBuffer: 4 * 1024 * 1024 },
+    );
+    return stdout;
+  })();
+  return mutant;
+}
 test('5e3c3a3c: holder starts a new check while followers are parked; a parked entry with no alarm is detected', async t => {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
   const { parkedIncident } = await import('./queue-sim/parked-incident.mjs');
   const { inspectQueue } = await import('./queue-sim/invariants.mjs');
-  const environment = {
-    ...process.env,
-    FORGE_TEST_SOURCE_PATCHES: JSON.stringify(PRE_N1),
-    FORGE_TEST_PRECOMPILED: '0',
-  };
-  delete environment.NODE_TEST_CONTEXT;
   // The mutant child asserts L1/L2 on the stored chain and that the detector left it unchanged.
-  await promisify(execFile)(
-    process.execPath,
-    ['--import', './tests/check-runtime.mjs', '--test', 'tests/queue-sim/parked-mutant-runner.mjs'],
-    { env: environment, maxBuffer: 4 * 1024 * 1024 },
+  assert.match(
+    await mutantChild(),
+    /^ok \d+ - pre-N1 parked incident: the detector exposes the stale chain$/m,
   );
   // Current code: the new-run wake gives the oldest parked follower a fresh claim, so this
   // incident leaves no stale edge (L2) on its followers.
@@ -82,6 +101,21 @@ test('5e3c3a3c: holder starts a new check while followers are parked; a parked e
     !issues.some(issue => issue.id === 'L2' && followers.includes(issue.submission)),
     JSON.stringify(issues.filter(issue => issue.id === 'L2')),
   );
+});
+
+// Guard 2 (2873b486): the incident is a permanent gate on pass-to-land. The holder's re-check takes
+// 30 simulated minutes; each passed follower must land within the ceiling meanwhile. The pre-N1
+// mutant (child process, as above) must break the ceiling for every follower, so the gate is known
+// to catch the regression it exists for.
+test('incident 5e3c3a3c: passed followers land within the pass-to-land ceiling while the holder re-checks', async t => {
+  const { followerPassToLand, overCeiling } = await import('./queue-sim/parked-incident.mjs');
+  assert.match(
+    await mutantChild(),
+    /^ok \d+ - pre-N1 parked incident: every passed follower waits out the holder re-check, over the ceiling$/m,
+  );
+  const result = await followerPassToLand(t);
+  assert.deepEqual(overCeiling(result), [], JSON.stringify(result.passToLand));
+  assert(result.holderLanded, 'the holder lands after its re-check');
 });
 
 test('e4aee4fe: a slow older entry keeps its lifetime generation budget as newer passes arrive', async t => {

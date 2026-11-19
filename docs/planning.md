@@ -58,7 +58,7 @@ All are optional and absent on older records. A put that omits a field keeps it;
 | `order` | Hand-order rank, 1 to 64 letters and digits, never ending in `0` |
 | `type` | Type label |
 | `parentId` | Parent Item (Items only) |
-| `owner` | Who has the Item before a Lane: a Forge handle or `handle/agent` |
+| `owner` | Who has the Item: a Forge handle or `handle/agent`. A start from an Item with no owner sets it to the starter's public identity; a set owner is kept |
 | `relations` | Up to 20 of `{kind, id}`, kind `depends-on`, `duplicate-of` or `related`; the other side is derived (`depends-on` shows as Blocks on its target) |
 | `hidden` | Hidden from public reads of the plan |
 

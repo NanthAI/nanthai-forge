@@ -27,6 +27,13 @@ export async function parkedIncident(t, { seed } = {}) {
   });
   f.rawChecks.setPlanSelection(JSON.stringify({ scope: 'full', tests: [] }));
   const [head, holder, ...followers] = f.entries.map(e => e.state.id);
+  // First time each follower is ready (its check passed), on the fixture's simulated clock.
+  const readyAt = {};
+  const noteReady = () => {
+    for (const s of states(f))
+      if (followers.includes(s.id) && readyAt[s.id] == null && s.phase === 'ready')
+        readyAt[s.id] = Date.now();
+  };
   let headRun;
   for (let tick = 0; tick < 250; tick++) {
     const a = rows(f).find(r => r.submissionId === holder);
@@ -36,11 +43,13 @@ export async function parkedIncident(t, { seed } = {}) {
       if (owner(f, run) === head) headRun = active;
       else await f.rawChecks.pass(active);
     }
+    noteReady();
     if (followers.every(id => rows(f).find(r => r.submissionId === id)?.orderWait === holder)) break;
     const task = work(f);
     if (!task) break;
     await f.execute(task);
   }
+  noteReady();
   assert(headRun);
   assert.equal(rows(f).find(r => r.submissionId === holder).orderWait, head);
   for (const id of followers) {
@@ -60,6 +69,7 @@ export async function parkedIncident(t, { seed } = {}) {
       }
       await f.rawChecks.pass(await f.rawChecks.activate(run.id));
     }
+    noteReady();
     // The holder's re-check run is bound; stop once it is checking that run (the new-run wake).
     if (holderRechecked && rows(f).find(r => r.submissionId === holder).phase === 'checking') {
       const oldest = rows(f).find(r => r.submissionId === followers[0]);
@@ -72,5 +82,58 @@ export async function parkedIncident(t, { seed } = {}) {
     await f.execute(task);
   }
   assert(holderRechecked);
-  return { f, followers, holder, head, waiterReclaimed };
+  return { f, followers, holder, head, waiterReclaimed, readyAt };
+}
+
+/** Guard 2 (2873b486): the most a passed follower may wait, in simulated minutes, while the holder
+ * it is parked behind starts a new check. Before N1 each one waited out that whole re-check. */
+export const FOLLOWER_CEILING_MINUTES = 5;
+/** Followers over the ceiling, or never landed. */
+export const overCeiling = ({ passToLand }) =>
+  Object.entries(passToLand)
+    .filter(([, minutes]) => minutes == null || minutes > FOLLOWER_CEILING_MINUTES)
+    .map(([id, minutes]) => ({ id, minutes }));
+
+/** Runs the parked incident on until every follower lands while the holder's re-check takes
+ * `holderCheckMs` of simulated time (every other check passes at once). Returns each follower's
+ * minutes from its first passed check to its landing (null: never landed) and the holder's. */
+export async function followerPassToLand(t, { holderCheckMs = 30 * 60_000 } = {}) {
+  const incident = await parkedIncident(t);
+  const { f, followers, holder, readyAt } = incident;
+  const landedAt = {};
+  let release = null,
+    holderRun = null,
+    holderLandedAt = null;
+  for (let tick = 0; tick < 600; tick++) {
+    for (const run of f.runs().filter(r => r.status === 'queued' && r.gate?.mode !== 'audit')) {
+      const active = await f.rawChecks.activate(run.id);
+      if (owner(f, run) === holder && release == null) {
+        holderRun = active;
+        release = Date.now() + holderCheckMs;
+      } else await f.rawChecks.pass(active);
+    }
+    if (holderRun && Date.now() >= release) {
+      await f.rawChecks.pass(holderRun);
+      holderRun = null;
+    }
+    for (const s of states(f)) {
+      if (followers.includes(s.id)) {
+        if (readyAt[s.id] == null && s.phase === 'ready') readyAt[s.id] = Date.now();
+        if (landedAt[s.id] == null && s.phase === 'landed') landedAt[s.id] = Date.now();
+      }
+      if (s.id === holder && s.phase === 'landed' && holderLandedAt == null) holderLandedAt = Date.now();
+    }
+    if (followers.every(id => landedAt[id] != null) && holderLandedAt != null) break;
+    const task = work(f);
+    if (task) await f.execute(task);
+    else if (holderRun) f.advanceClock(Math.max(1, release - Date.now()));
+    else break;
+  }
+  const minutes = (from, to) => (from == null || to == null ? null : Math.max(0, to - from) / 60_000);
+  return {
+    ...incident,
+    holderCheckMinutes: holderCheckMs / 60_000,
+    passToLand: Object.fromEntries(followers.map(id => [id, minutes(readyAt[id], landedAt[id])])),
+    holderLanded: holderLandedAt != null,
+  };
 }

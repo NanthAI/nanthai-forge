@@ -7,6 +7,7 @@ import { ItemState, State, Who } from '../../ds';
 import { A } from '../frames';
 import { breakdownTotal, breakdownWords, type Breakdown } from '../progress';
 import { statusOf, type PlanLine } from './model';
+import type { Workers } from './workers';
 
 /** Columns after the handle: position, the name with its flags, done-when, owner, status. On a phone plan.css sets
  * `--plan-cols` to the position and the name only; the name's cell then shows the status before the flags, on a line
@@ -21,7 +22,13 @@ export function Status({ row }: { row: PlanRow }) {
 }
 
 export function DoneWhen({ row }: { row: PlanRow }) {
-  if (!row.doneWhen) return <span className="dw t3">none</span>;
+  // No checklist: the cell stays empty, and says so on hover and to assistive tech (owner 2026-11-19).
+  if (!row.doneWhen)
+    return (
+      <span className="dw none" title="no checklist">
+        <span className="sr">no checklist</span>
+      </span>
+    );
   const [ticked, total] = row.doneWhen;
   return (
     <span className="dw" title={`${ticked} of ${total} done-when lines ticked`}>
@@ -39,6 +46,30 @@ export function DoneWhen({ row }: { row: PlanRow }) {
   );
 }
 
+/** The set owner; with none, who works on it now (open Lanes active in the last 48 hours, newest first, "+N" for
+ * more); "no one yet" only when there is neither (owner 2026-11-19). */
+export function Owner({
+  owner,
+  workers,
+}: {
+  owner?: string | null | undefined;
+  /** Public labels of the Item's active Lanes; empty when nobody; undefined when not known. */
+  workers?: readonly string[] | undefined;
+}) {
+  if (owner) return <Who handle={owner} />;
+  // Not asked about (past the read's cap, or before its answer): say nothing rather than a "no one yet" that may be
+  // wrong.
+  if (!workers) return null;
+  if (!workers.length) return <span className="t3">no one yet</span>;
+  const [first, ...rest] = workers;
+  return (
+    <span className="plan-who" title={`Working on it now: ${workers.join(', ')}`}>
+      <Who handle={first!} />
+      {rest.length ? <span className="t3 num"> +{rest.length}</span> : null}
+    </span>
+  );
+}
+
 /** One row's cells after the tick box. `ranked` is false under any order other than by hand, so no order number
  * suggests a hand order that is not shown. */
 export function Line({
@@ -46,10 +77,13 @@ export function Line({
   href,
   ranked = true,
   flat = false,
+  workers,
 }: {
   line: PlanLine;
   href: string;
   ranked?: boolean;
+  /** Who works on each Item now (workers.ts), shown when the Item has no owner. */
+  workers?: Workers | undefined;
   /** List layout: sub-items sit at their parent's place without the tree's indent. */
   flat?: boolean;
 }) {
@@ -86,7 +120,7 @@ export function Line({
         <DoneWhen row={row} />
       </span>
       <span className="plan-wide">
-        {row.owner ? <Who handle={row.owner} /> : <span className="t3">no one yet</span>}
+        <Owner owner={row.owner} workers={workers ? workers.get(row.id) : []} />
       </span>
       <span className="state">
         <Status row={row} />

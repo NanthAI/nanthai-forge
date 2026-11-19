@@ -884,6 +884,72 @@ test('an Issue whose Intent completed is closed by the next read, with undo name
   });
 });
 
+test('builders claim the Item they start (d3357f40): an unowned Item takes the starter’s public identity once; a set owner is kept', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const issue = (await put(p, { kind: 'issue', title: 'Nobody owns it' })).result.itemId;
+  const first = await markPlanningStarted(p, issue, randomUUID(), 'synthetic-owner/amber-fox');
+  assert.deepEqual(first, {
+    updated: true,
+    status: 'in-progress',
+    version: 2,
+    owner: '@synthetic-owner/amber-fox',
+  });
+  assert.equal((await list(p, { id: issue })).item.owner, '@synthetic-owner/amber-fox');
+  // A second builder on the same Item keeps the first one's claim, and writes nothing.
+  const events = s.tables.projectWorkEvents.size;
+  assert.deepEqual(await markPlanningStarted(p, issue, randomUUID(), 'synthetic-owner/ocean-moth'), {
+    updated: false,
+    status: 'in-progress',
+  });
+  assert.equal(s.tables.projectWorkEvents.size, events);
+  assert.equal((await list(p, { id: issue })).item.owner, '@synthetic-owner/amber-fox');
+
+  // Already in progress with no owner (started before claims existed): one write sets the owner, once.
+  const running = (await put(p, { kind: 'issue', title: 'Running, unowned', status: 'in-progress' })).result
+    .itemId;
+  assert.equal(
+    (await markPlanningStarted(p, running, randomUUID(), 'synthetic-owner')).owner,
+    '@synthetic-owner',
+  );
+  assert.equal((await markPlanningStarted(p, running, randomUUID(), 'synthetic-owner')).updated, false);
+
+  // Only a public identity is ever stored: an unmapped account id or a name claims nothing.
+  for (const claim of ['user_2AbCdEf', 'Ada Lovelace', 'synthetic-owner/../x', undefined]) {
+    const item = (await put(p, { kind: 'issue', title: `Unclaimed ${claim}` })).result.itemId;
+    const marked = await markPlanningStarted(p, item, randomUUID(), claim);
+    assert.equal(marked.updated, true);
+    assert.equal(marked.owner, undefined, String(claim));
+    assert.equal((await list(p, { id: item })).item.owner ?? null, null, String(claim));
+  }
+  // A member who cannot edit the plan (planning writes are the project owner's) starts an Item already in progress:
+  // the claim is refused, and the start reports nothing to act on (review 3f84a176). An Item not yet in progress
+  // still reports its failed status write, as before.
+  const refused = {
+    ...p,
+    serverFeatures: [...new Set([...p.serverFeatures, 'planning-put-mutation'])],
+    mutation: async () => {
+      throw Object.assign(new Error('Project unavailable.'), { data: { code: 'PROJECT_UNAVAILABLE' } });
+    },
+  };
+  const theirs = (await put(p, { kind: 'issue', title: 'Started by a contributor', status: 'in-progress' }))
+    .result.itemId;
+  assert.deepEqual(await markPlanningStarted(refused, theirs, randomUUID(), 'synthetic-owner/amber-fox'), {
+    updated: false,
+    status: 'in-progress',
+    claimed: false,
+  });
+  assert.equal((await list(p, { id: theirs })).item.owner ?? null, null);
+  const open = (await put(p, { kind: 'issue', title: 'Open, contributor start' })).result.itemId;
+  const failed = await markPlanningStarted(refused, open, randomUUID(), 'synthetic-owner/amber-fox');
+  assert.equal(failed.updated, false);
+  assert.ok(failed.error, 'the status write a contributor cannot make is still reported');
+  // A server without the planning model would drop the field, so nothing is claimed there.
+  const old = { ...p, serverFeatures: p.serverFeatures.filter(name => name !== 'planning-model') };
+  const legacy = (await put(p, { kind: 'issue', title: 'Old server' })).result.itemId;
+  assert.equal((await markPlanningStarted(old, legacy, randomUUID(), 'synthetic-owner')).owner, undefined);
+});
+
 test('start from an Issue: planned Intent shares the Issue id, the Issue becomes in-progress once', async t => {
   const s = await setup(t),
     p = port(s);

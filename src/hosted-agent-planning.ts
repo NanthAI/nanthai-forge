@@ -936,9 +936,19 @@ export async function plannedIntent(port: PlanningPort, itemId: string) {
     ...(item.body ? { constraints: item.body.slice(0, 4000) } : {}),
   };
 }
-/** After a start, the Issue shows the work as in progress. A failure here never fails the start,
- * which already holds the Lane: it is reported, and running the same start again retries it. */
-export async function markPlanningStarted(port: PlanningPort, itemId: string, startOperationId: string) {
+/** A public identity a start may claim an Item for: a Forge handle, or `handle/agent` (the session's word-pair slug). */
+const claimShape = /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])(?:\/[a-z]+-[a-z]+)?$/;
+/** After a start, the Issue shows the work as in progress, and an Issue nobody owns is claimed for the starter
+ * (owner 2026-11-19, Item d3357f40): `claimAs` is the session's public identity (`handle/agent`, or a handle), stored
+ * as the owner `@handle/agent`. Both ride the one write the start already makes; an Issue already in progress and
+ * unowned takes one write once, then never again. An owner set by anyone is never replaced. A failure here never
+ * fails the start, which already holds the Lane: it is reported, and running the same start again retries it. */
+export async function markPlanningStarted(
+  port: PlanningPort,
+  itemId: string,
+  startOperationId: string,
+  claimAs?: string,
+) {
   try {
     const ws = await workspace(port);
     const item = await fullItem(port, ws, itemId);
@@ -947,15 +957,39 @@ export async function markPlanningStarted(port: PlanningPort, itemId: string, st
         updated: false,
         error: { code: 'NOT_FOUND', message: 'Planning item not found.' },
       };
-    if (item.status === 'in-progress') return { updated: false, status: item.status };
-    await writePlanning(
-      port,
-      putFrom(item, uuidFrom(`${startOperationId}:planning-start`), 'in-progress'),
-      undefined,
-      undefined,
-      item,
-    );
-    return { updated: true, status: 'in-progress', version: item.version + 1 };
+    const claim =
+      !item.owner &&
+      claimAs &&
+      claimShape.test(claimAs) &&
+      // A server without the planning model would drop the field (docs/planning.md, Fields).
+      port.serverFeatures?.includes('planning-model')
+        ? `@${claimAs}`
+        : undefined;
+    if (item.status === 'in-progress' && !claim) return { updated: false, status: item.status };
+    // Only the claim is left to write (the Issue is already in progress): a member who cannot edit the plan (planning
+    // writes are the project owner's) keeps the start as it was, with no error to act on (review 3f84a176).
+    const claimOnly = item.status === 'in-progress';
+    try {
+      await writePlanning(
+        port,
+        {
+          ...putFrom(item, uuidFrom(`${startOperationId}:planning-start`), 'in-progress'),
+          ...(claim ? { owner: claim } : {}),
+        },
+        undefined,
+        undefined,
+        item,
+      );
+    } catch (error) {
+      if (claimOnly) return { updated: false, status: item.status, claimed: false };
+      throw error;
+    }
+    return {
+      updated: true,
+      status: 'in-progress',
+      version: item.version + 1,
+      ...(claim ? { owner: claim } : {}),
+    };
   } catch (error) {
     const safe = hostedActionError(error, 'planning start');
     return {

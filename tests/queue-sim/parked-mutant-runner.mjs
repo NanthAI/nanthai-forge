@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { synthetic } from '../hosted-landing-batches-fixture.mjs';
-import { parkedIncident } from './parked-incident.mjs';
+import { followerPassToLand, overCeiling, parkedIncident } from './parked-incident.mjs';
 import { inspectQueue, requestRows } from './invariants.mjs';
 const environment = { ...synthetic, FORGE_HOSTED_CHECK_KEY_SYNTHETIC: 'synthetic-queue-mutant' };
 const prior = Object.fromEntries(Object.keys(environment).map(k => [k, process.env[k]]));
@@ -39,4 +39,16 @@ test('pre-N1 parked incident: the detector exposes the stale chain', async t => 
     requestRows(f).some(row => row.orderWait),
     'exercise real persisted wait edges',
   );
+});
+
+test('pre-N1 parked incident: every passed follower waits out the holder re-check, over the ceiling', async t => {
+  const result = await followerPassToLand(t);
+  assert.deepEqual(
+    overCeiling(result).map(entry => entry.id),
+    result.followers,
+    JSON.stringify(result.passToLand),
+  );
+  for (const minutes of Object.values(result.passToLand))
+    // A follower that never landed is no proof: the fixture broke, not the queue (review 3c9fed74).
+    assert(minutes != null && minutes >= result.holderCheckMinutes, String(minutes));
 });

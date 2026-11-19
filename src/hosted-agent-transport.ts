@@ -1382,6 +1382,8 @@ export class HostedAgentTransport {
               },
               planningItemId,
               journal.operationId,
+              // Builders claim the Item they start (d3357f40): this session's public identity, `handle/agent`.
+              this.claimIdentity(),
             )
           : undefined;
         if (action === 'finish') result = await recoverHostedFinish(session, result);
@@ -1818,6 +1820,12 @@ export class HostedAgentTransport {
       ...this.identity(action),
       ...(missing.length ? { serverContract: { missing } } : {}),
     };
+  }
+  /** The public identity a start claims an unowned Item for: `handle/agent`, or the handle for a person. */
+  private claimIdentity(): string | undefined {
+    if (!this.callerActor) return undefined;
+    const slug = this.sentAgent();
+    return slug ? `${this.callerActor}/${slug}` : this.callerActor;
   }
   /** Who this session shows as to other agents (c29d0780), on Lane-changing receipts only. */
   private identity(action: string): { as?: string } {

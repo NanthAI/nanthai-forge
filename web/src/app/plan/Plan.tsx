@@ -4,7 +4,9 @@
 // (src/planning-model.ts nextItem), never stored. The view (scope, filters, order, list / tree / board, find) lives
 // in the address; ticked rows change together in one batch with one Undo. Loaded with its route only.
 // Reads: projectPlanView:read, one subscription, re-run only by planning writes in the ranges it read; the Closed and
-// Everything scopes add one bounded page each of done and dropped Items (projectPlanSettled:page). Writes:
+// Everything scopes add one bounded page each of done and dropped Items (projectPlanSettled:page); who works on an
+// unowned Item is one bounded one-shot read by Intent (projectPlanWorkers:read, workers.ts), again only when the
+// in-progress Items change or a hidden tab is shown again. Writes:
 // projectWorkCommand:command for one row, projectPlanningBatch:apply for a selection, each retry-safe by its
 // operation id.
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -12,7 +14,7 @@ import { useConvex, useMutation } from 'convex/react';
 import { makeFunctionReference, type PaginationResult } from 'convex/server';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
-import { Band, Key, Region, Row, Standing, Who } from '../../ds';
+import { Band, Key, Region, Row, Standing } from '../../ds';
 import { Announcer, useAnnounce } from '../../ds/behaviour/announce';
 import { inverseRelationLabel, isLive, itemStatusLabel } from '../../../../src/planning-model';
 import type { PlanRow } from '../../../../src/planning-model';
@@ -30,7 +32,8 @@ import { Capture } from './Capture';
 import { isShut, NO_INITIATIVE, usePlanFolds } from './fold';
 import { Groups } from './Groups';
 import { InitiativePage } from './Initiative';
-import { COLS, DoneWhen, Line, Status } from './rows';
+import { COLS, DoneWhen, Line, Owner, Status } from './rows';
+import { useWorkers, type ActiveLane, type Workers } from './workers';
 import { Tick, type Ticker } from './Tick';
 import { Versions } from './Versions';
 import { BulkBar, SplitSheet, UndoToast, outcomeWords, type Reads } from './Bulk';
@@ -52,6 +55,12 @@ import './plan.css';
 const planRead = makeFunctionReference<'query', { projectId: Id<'hostedProjects'> }, PlanRead>(
   'projectPlanView:read',
 );
+/** Open Lanes active in the last 48 hours (convex/projectPlanWorkers.ts), read once, never subscribed. */
+const planWorkers = makeFunctionReference<
+  'query',
+  { projectId: Id<'hostedProjects'>; intentIds: string[] },
+  string
+>('projectPlanWorkers:read');
 const settledPage = makeFunctionReference<
   'query',
   {
@@ -137,6 +146,13 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
   const reads: Reads = {
     items: ids => readItems(client, projectId, ids),
     comments: ids => readComments(client, projectId, ids),
+    workers: async intentIds => {
+      const reply = JSON.parse(await client.query(planWorkers, { projectId, intentIds: [...intentIds] })) as {
+        lanes?: ActiveLane[];
+        withheld?: boolean;
+      };
+      return { lanes: Array.isArray(reply.lanes) ? reply.lanes : [], withheld: reply.withheld === true };
+    },
   };
   const go = (patch: Partial<PlanQuery>) => {
     const next = { ...query, ...patch };
@@ -252,6 +268,8 @@ export function PlanScreenView({
   // A changed view keeps no hidden selection: only rows that can be seen stay ticked.
   useEffect(() => setPicked(new Set()), [writeQuery({ ...query, find: '' })]);
   const whole = useMemo(() => (read ? planView(read, '', orders) : null), [read, orders]);
+  const allRows = useMemo(() => (whole ? [...whole.byId.values()] : undefined), [whole]);
+  const workers = useWorkers(reads?.workers, allRows);
   const settledRows = useMemo(
     () =>
       [...closed.rows, ...dropped.rows].filter(
@@ -270,6 +288,7 @@ export function PlanScreenView({
         route={route}
         projectName={projectName}
         view={whole}
+        workers={workers}
         at={at}
         projectId={projectId}
         onSplit={whole?.canEdit && reads && run ? () => setSplit(true) : undefined}
@@ -428,6 +447,7 @@ export function PlanScreenView({
           projectName={projectName}
           initiative={initiativeRow}
           view={whole}
+          workers={workers}
           at={at}
           put={put}
           reads={reads}
@@ -576,6 +596,7 @@ export function PlanScreenView({
               at={at}
               ticker={ticker}
               settled={query.scope !== 'open'}
+              workers={workers}
             />
           ) : (
             <>
@@ -587,6 +608,7 @@ export function PlanScreenView({
                   at={at}
                   ticker={ticker}
                   folds={folds}
+                  workers={workers}
                   onToggle={toggleFold}
                   onMove={move}
                   onMoveInitiative={view.canEdit && byHand ? moveInitiative : undefined}
@@ -725,6 +747,7 @@ function ItemPage({
   route,
   projectName,
   view,
+  workers,
   at,
   projectId,
   onSplit,
@@ -736,6 +759,7 @@ function ItemPage({
   route: PlaceProps['route'];
   projectName: string;
   view: PlanView | null;
+  workers: Workers;
   at: (patch: Partial<PlaceProps['route']>) => string;
   projectId: Id<'hostedProjects'> | undefined;
   onSplit?: (() => void) | undefined;
@@ -767,8 +791,8 @@ function ItemPage({
             ? `${group.initiative.title}${line && !line.depth ? `, ${line.rank} of ${group.lines.filter(entry => !entry.depth).length} in order` : ''}`
             : 'No Initiative',
         ],
-        ['Owner', row.owner ? <Who key="o" handle={row.owner} /> : 'no one yet'],
-        ['Done when', <DoneWhen key="d" row={row} />],
+        ['Owner', <Owner key="o" owner={row.owner} workers={workers.get(row.id)} />],
+        ['Done when', row.doneWhen ? <DoneWhen key="d" row={row} /> : 'no checklist'],
         ...(row.type ? ([['Type', row.type]] as [string, ReactNode][]) : []),
         ...(row.hidden ? ([['Public plan', 'hidden']] as [string, ReactNode][]) : []),
       ]
