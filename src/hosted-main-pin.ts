@@ -19,6 +19,21 @@ export function mainPinRefusal(error: unknown, phase: string) {
   return hostedActionError(error, phase).code === 'CHANNEL_CHANGED';
 }
 
+/** The server refused a request's source authority epoch while beginning its operation. It checks
+ * the epoch only for an operation id it has not seen (beginHostedOperation), in that transaction, so
+ * nothing began. The project moved to a new epoch (a source cutover) after the request was built. */
+export class AuthorityPinRefused extends Error {
+  constructor(readonly refusal: unknown) {
+    super(refusal instanceof Error ? refusal.message : String(refusal));
+  }
+}
+
+/** True for an authority-epoch refusal of a prepare (review b1448b61 N3). */
+export function authorityPinRefusal(error: unknown, phase: string) {
+  const code = hostedActionError(error, phase).code;
+  return code === 'SOURCE_AUTHORITY_CHANGED' || code === 'SOURCE_AUTHORITY_STALE';
+}
+
 /**
  * Start, sync and compose retain their request per operation so a replay sends the exact same
  * bytes. Those requests pin the main head observed when they were built. The server checks that

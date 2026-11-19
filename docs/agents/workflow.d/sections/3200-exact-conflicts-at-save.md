@@ -16,7 +16,10 @@ Hidden or automatic snapshots never run it; only Lane-record head moves do.
 Save publication does not wait for its advisory trial. When a trial records a new or changed
 notice, that same mutation advances the Lane's existing inbox clock. The running wait's existing
 subscription delivers the notice as `conflictNotice` and returns `IN_PROGRESS`, reason `message`,
-with its original resume command. The existing two-second batching timer applies; exact conflicts
+with its original resume command. An acceptance wait on a landing is the exception for a conflict
+with another open Lane: that flag cannot change the landing waited on, so the wait keeps waiting and
+the flag rides its eventual reply as `conflictNotice`; a conflict with main and a note addressed to
+the Lane still wake it. The existing two-second batching timer applies; exact conflicts
 bypass the member-note cooldown. Run waits negotiate `run-board-wait` on their existing
 capability read before sending the Lane cursor to the existing check-status subscription.
 Source-operation waits negotiate `source-board-wait` for save, sync and compose progress.

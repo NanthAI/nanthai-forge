@@ -58,11 +58,15 @@ const preparedObject = v.object({
    * the first member carries the pack's one PUT target. */
   pack: v.optional(v.object({ digest: v.string(), size: v.number(), offset: v.number() })),
 });
+/** Object rows this transaction already looked up by digest (null: none), so preparing their
+ * targets does not look them up again. A prepared digest is removed: a repeat reads it fresh. */
+export type KnownObjects = Map<string, Awaited<ReturnType<typeof findObject>>>;
 async function prepareObject(
   ctx: MutationCtx,
   { projectId, digest, size }: { projectId: Id<'hostedProjects'>; digest: string; size: number },
   authorized = false,
   r2?: R2Config,
+  known?: KnownObjects,
 ): Promise<Infer<typeof preparedObject>> {
   try {
     if (!authorized) {
@@ -72,7 +76,9 @@ async function prepareObject(
       r2 ??= r2Config();
     }
     invariant(valid(digest, size), 'BAD_ARGUMENT', 'Use the exact content digest and size.');
-    const found = await findObject(ctx, projectId, digest);
+    const cached = known?.get(digest);
+    known?.delete(digest);
+    const found = cached !== undefined ? cached : await findObject(ctx, projectId, digest);
     let row = found && (await objectRow(ctx, found));
     invariant(
       !row || (row.size === size && !row.removed),
@@ -175,6 +181,7 @@ export async function prepareObjectTargets(
   actor: string,
   objects: readonly { digest: string; size: number }[],
   pack?: UploadPackProposal,
+  known?: KnownObjects,
 ): Promise<PreparedObject[]> {
   invariant(
     objects.length <= 100 && objects.every(p => valid(p.digest, p.size)),
@@ -196,7 +203,7 @@ export async function prepareObjectTargets(
       result.push(result.some(prior => prior.pack) ? member : { ...member, target: packed!.target });
       continue;
     }
-    const prepared = await prepareObject(ctx, { projectId, ...pin }, true, r2);
+    const prepared = await prepareObject(ctx, { projectId, ...pin }, true, r2, known);
     if (prepared.created) reserved.push(pin.size);
     result.push(prepared);
   }

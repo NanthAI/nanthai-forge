@@ -1,0 +1,4 @@
+{
+  "issue": "1d69905b",
+  "reason": "Review b1448b61 N5a: a direct save prepare now hands the object rows its recipe check read to target preparation in the same transaction, instead of looking each upload up twice. saveChanged reads 285 -> 263 (-22: 11 uploads x 2 lookups each on the 10-file fixture; projectHostedSaves:prepare 91 -> 69 range reads, read bytes unchanged at 13,366 because new blobs have no rows). Calls, writes, startup, modules and installed bytes are unchanged. The ceiling is lowered so the duplicate lookup cannot return unnoticed."
+}

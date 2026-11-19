@@ -115,7 +115,7 @@ async function changedSave(
   scale = false,
   provider = 'synthetic',
   contract = false,
-  { baselineGeneration, wrap, retryLost = false } = {},
+  { baselineGeneration, wrap, retryLost = false, retryContract } = {},
 ) {
   environment(t);
   const now = Date.now();
@@ -166,8 +166,8 @@ async function changedSave(
     pending = await saveHostedLane(root, command, transport, contract);
   } catch (error) {
     if (!retryLost) throw error;
-    // The CLI retries the same save operation after an unknown reply.
-    pending = await saveHostedLane(root, command, transport, contract);
+    // The CLI retries the same save operation after an unknown reply (possibly upgraded since).
+    pending = await saveHostedLane(root, command, transport, retryContract ?? contract);
   }
   const args = { projectId: s.projectId, jobId: pending.jobId };
   if (provider === 'convex') {
@@ -814,4 +814,42 @@ test('a hinted small save gives its State the baseline generation plus one (revi
   const row = [...run.s.tables.projectObjects.values()].find(row => row.digest === head);
   assert.equal(row.stateGeneration, 8);
   assert.deepEqual(row.stateParents, [JSON.parse(run.s.objects.get(head)).parents[0]]);
+});
+
+test('a direct save prepare looks each upload row up once: the recipe check hands its rows to target preparation (review b1448b61 N5a)', async t => {
+  const run = await changedSave(t, false, true, 'convex', directContract);
+  const [prepare] = run.s.counts.filter(row => row.name === 'projectHostedSaves:prepare');
+  // 11 uploads (10 new blobs and the delta page) plus the input: on main each upload was looked up
+  // twice, by the recipe check and again by its target (91 range reads; now 69).
+  assert(prepare.ranges <= 69, `projectHostedSaves:prepare read ${prepare.ranges} ranges`);
+});
+
+test('a described save retried after the CLI gains prepare-upload-targets stays described: no raw re-upload (review b1448b61 N5b)', async t => {
+  let crashed = 0;
+  const prepares = [];
+  const described = { ...directContract, prepareTargets: false };
+  const run = await changedSave(t, false, true, 'convex', described, {
+    retryLost: true,
+    retryContract: directContract,
+    wrap: client => ({
+      ...client,
+      mutation: async (ref, args) => {
+        if (getFunctionName(ref) === 'projectHostedSaves:prepare') prepares.push(args);
+        return client.mutation(ref, args);
+      },
+      action: async (ref, args) => {
+        if (getFunctionName(ref) === 'projectSourceRun:submit' && !crashed++)
+          throw new Error('Synthetic crash before the submit ran');
+        return client.action(ref, args);
+      },
+    }),
+  });
+  assert.equal(run.first.outcome.status, 'completed');
+  assert.equal(prepares.length, 2);
+  // On main the retry ran direct: its prepare named all 11 uploads again and PUT the blobs raw.
+  assert.deepEqual(
+    prepares.map(args => args.uploads?.length ?? 0),
+    [0, 0],
+    'the retry replays the described request, uploading nothing again',
+  );
 });

@@ -33,7 +33,7 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { findObject } from './projectObjectFind';
 import { isR2Object, isStored } from './projectObjectFields';
-import { prepareObjectTargets } from './projectObjects';
+import { prepareObjectTargets, type KnownObjects } from './projectObjects';
 import { uploadPackProposal } from './projectObjectPacks';
 import type { UploadPackProposal } from '../src/object-pack-upload';
 
@@ -56,14 +56,20 @@ async function refuseRecipeUploads(
   projectId: Id<'hostedProjects'>,
   uploads: readonly { digest: string; size: number }[],
 ) {
+  // The rows read here are handed to the target preparation in this transaction, which would
+  // otherwise look up each one again (review b1448b61 N5a).
+  const known: KnownObjects = new Map();
   for (const pin of uploads) {
+    if (known.has(pin.digest)) continue;
     const row = await findObject(ctx, projectId, pin.digest);
+    known.set(pin.digest, row);
     invariant(
       !row || !isStored(row) || row.removed || isR2Object(row) || !!row.storageId,
       'SAVE_CONTENT_RECIPE',
       'A changed file is stored as a recipe; describe it before saving.',
     );
   }
+  return known;
 }
 /** Each upload's target (`projectObjects:prepareBatch` rows), the save input's last. */
 async function saveTargets(
@@ -72,6 +78,7 @@ async function saveTargets(
   uploads: readonly { digest: string; size: number }[],
   input: { sha256: string; size: number } | null,
   pack: UploadPackProposal | undefined,
+  known?: KnownObjects,
 ) {
   return prepareObjectTargets(
     ctx,
@@ -79,6 +86,7 @@ async function saveTargets(
     auth.actor,
     [...uploads, ...(input ? [{ digest: input.sha256, size: input.size }] : [])],
     pack,
+    known,
   );
 }
 export const prepare = mutation({
@@ -165,7 +173,9 @@ export const prepare = mutation({
         });
       }
       // A refusal throws, and the whole transaction (this operation included) rolls back.
-      if (input.uploads) await refuseRecipeUploads(ctx, input.projectId, input.uploads);
+      const known = input.uploads
+        ? await refuseRecipeUploads(ctx, input.projectId, input.uploads)
+        : undefined;
       const lane = await saveLane(ctx, { ...auth, laneId: request.laneId });
       requireLaneHolder(lane, auth.actor, holderSessionId);
       // Only the Lane author or the project owner saves over a Lane (Issue 8809fba5).
@@ -209,6 +219,7 @@ export const prepare = mutation({
                 input.uploads,
                 saveInput && savePin(saveInput),
                 input.uploadPack,
+                known,
               ),
             }
           : {}),

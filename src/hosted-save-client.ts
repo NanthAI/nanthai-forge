@@ -45,6 +45,9 @@ import type { SaveChange, SaveRequest } from './hosted-save.js';
 import type { ContentPin } from './native-exchange.js';
 import { markLandStep, saveTimingMs } from './land-timing.js';
 import { buildUploadPack, uploadPackMembers } from './object-pack-upload.js';
+import { AuthorityPinRefused, authorityPinRefusal } from './hosted-main-pin.js';
+import { randomUUID } from 'node:crypto';
+import { shellQuote } from './shell-quote.js';
 import type { StepTimer } from './sync-timing.js';
 import { operationWait } from './agent-operation-wait.js';
 import { parseHostedResponse } from './hosted-response.js';
@@ -94,11 +97,16 @@ export type SaveContract = {
   settleBackground?: boolean;
   /** upload-packs: several new small objects go up as one pack (one PUT). */
   uploadPacks?: boolean;
+  /** The source authority epoch this command discovered. A new request pins it, as sync, compose
+   * and finish requests do, instead of the epoch the Lane was opened under (review b1448b61 N3). */
+  authorityEpoch?: number;
 };
 export const saveContract = (capabilities: {
   overlapEvidenceVersion?: 1 | undefined;
   features?: readonly string[] | undefined;
+  authority?: { epoch: number } | undefined;
 }): SaveContract => ({
+  ...(capabilities.authority ? { authorityEpoch: capabilities.authority.epoch } : {}),
   overlapEvidence: overlapEvidenceLevel(capabilities),
   submitPage: capabilities.features?.includes('save-submit-page') ?? false,
   durations: capabilities.features?.includes('save-preflight-timing') ?? false,
@@ -176,18 +184,26 @@ export async function saveHostedLane(
       timing,
       observe,
     );
-  // A direct save refused for a recipe-only blob rebuilt its request the described way: once more.
-  let result = await once(true);
-  if (result === described) result = await once(true);
-  if (result === rebased) result = await once(false);
-  if (result === described) result = await once(false);
-  return result;
+  try {
+    // A direct save refused for a recipe-only blob rebuilt its request the described way: once more.
+    let result = await once(true);
+    // Refused for an older authority epoch: the dropped request is rebuilt at this command's epoch, once.
+    if (result === reauthorized) result = await once(true);
+    if (result === described) result = await once(true);
+    if (result === rebased) result = await once(false);
+    if (result === described) result = await once(false);
+    return result;
+  } catch (error) {
+    const epoch = typeof contract === 'object' ? contract.authorityEpoch : undefined;
+    throw staleEpochSaveRefusal(root, command.operationId, epoch, continuation, error);
+  }
 }
 /** Direct saves (prepare-upload-targets) send these many uploads to prepare at most; the input is the 100th. */
 const directUploads = 99;
 const rawLimit = 2 * 1024 * 1024;
 const rebased = Symbol('rebased');
 const described = Symbol('described');
+const reauthorized = Symbol('reauthorized');
 async function saveOnce(
   root: string,
   command: { operationId: string; message: string; supersedeFinish?: boolean },
@@ -338,7 +354,7 @@ async function saveOnce(
             ...(contract.session ? { session: contract.session } : {}),
           }
         : {}),
-      authorityEpoch: selection.authority.epoch,
+      authorityEpoch: contract.authorityEpoch ?? selection.authority.epoch,
       expected: {
         head: selection.head,
         version: selection.version,
@@ -355,6 +371,9 @@ async function saveOnce(
     request = workLocked(join(clientCacheRoot(root), 'lock'), () => {
       if (checkoutPathExists(requestPath))
         return saveRequestSchema.parse(JSON.parse(readFileSync(requestPath, 'utf8')));
+      // A described request stays described on every retry, even after this CLI or the server gains
+      // prepare-upload-targets: a direct retry would PUT its blobs raw again (review b1448b61 N5b).
+      if (!direct) durableReplace(describeMarker, '');
       durableReplace(join(directory, 'pages.json'), JSON.stringify(built.pages));
       durableReplace(requestPath, canonicalPayload(request));
       return request;
@@ -401,15 +420,9 @@ async function saveOnce(
     }
     // A refusal began no server operation. Drop the retained capture so a later
     // save reads the working files again instead of resuming these stale bytes.
-    if (refused.code === 'LANE_FINISH_ACTIVE' || refused.code === 'WORK_STALE') {
-      workLocked(join(clientCacheRoot(root), 'lock'), () => {
-        if (
-          checkoutPathExists(pending) &&
-          JSON.parse(readFileSync(pending, 'utf8')).operationId === command.operationId
-        )
-          rmSync(pending);
-        rmSync(directory, { recursive: true, force: true });
-      });
+    const authority = authorityPinRefusal(refused, 'save');
+    if (refused.code === 'LANE_FINISH_ACTIVE' || refused.code === 'WORK_STALE' || authority) {
+      dropRetainedSave(root, command.operationId, pending);
       if (refused.code === 'WORK_STALE') {
         // The server Lane moved past this checkout. Rebase once onto it, keeping
         // every local edit, and save the same operation from the new baseline.
@@ -421,6 +434,23 @@ async function saveOnce(
         );
         await rebaseHostedCheckout(root, exchange as Parameters<typeof rebaseHostedCheckout>[1]);
         return rebased;
+      }
+      // An epoch change (source cutover) after this request was retained: it could never begin, and
+      // every replay of it was refused again (review b1448b61 N3). Rebuild it at this command's epoch,
+      // unless it carries a resolve's `then`, which the resolve re-journals first.
+      if (
+        authority &&
+        !then &&
+        contract.authorityEpoch !== undefined &&
+        contract.authorityEpoch !== request.authorityEpoch
+      )
+        return reauthorized;
+      if (authority) {
+        const dropped = new ForgeError(
+          refused.code,
+          `${refused.message} Nothing was saved, and this save's request, pinned to source authority epoch ${request.authorityEpoch}, was dropped: replaying this same save rebuilds it at the current epoch.`,
+        );
+        throw then ? new AuthorityPinRefused(dropped) : dropped;
       }
       throw refused;
     }
@@ -909,4 +939,50 @@ export async function settleBackgroundSave(
     terminal,
   );
   reportBackgroundSave(root, prior, terminal);
+}
+
+/** Forget one retained save of this checkout: its staged request and capture, and the pending
+ * baseline record when it names this save, so no later save replays it first. */
+function dropRetainedSave(root: string, operationId: string, pending?: string) {
+  const directory = join(clientCacheRoot(root), `saves/${operationId}`);
+  workLocked(join(clientCacheRoot(root), 'lock'), () => {
+    if (
+      pending &&
+      checkoutPathExists(pending) &&
+      JSON.parse(readFileSync(pending, 'utf8')).operationId === operationId
+    )
+      rmSync(pending);
+    rmSync(directory, { recursive: true, force: true });
+  });
+}
+
+/** A save that began at an older source authority epoch can never finish: the server checks its
+ * pinned epoch on every later write to it (loadSave). Drop it here, so no later save of this checkout
+ * replays it first, and name the one next command: the same action under a fresh operation (review
+ * b1448b61 N3). Any other error, or an epoch this command cannot compare, is returned unchanged. */
+function staleEpochSaveRefusal(
+  root: string,
+  operationId: string,
+  epoch: number | undefined,
+  continuation: ConflictContinuation,
+  error: unknown,
+): unknown {
+  if (epoch === undefined || error instanceof AuthorityPinRefused || !authorityPinRefusal(error, 'save'))
+    return error;
+  root = realpathSync(root);
+  const requestPath = join(clientCacheRoot(root), `saves/${operationId}/request.json`);
+  if (!checkoutPathExists(requestPath)) return error;
+  const began = saveRequestSchema.parse(JSON.parse(readFileSync(requestPath, 'utf8'))).authorityEpoch;
+  if (began === epoch) return error;
+  const marker = readHostedLaneCheckout(root);
+  dropRetainedSave(root, operationId, marker ? pendingSavePath(root, marker) : undefined);
+  const next = { action: continuation.action, ...continuation.parameters, operationId: randomUUID() };
+  const { action, ...parameters } = next;
+  const command = `nforge agent ${shellQuote(root)} ${action} ${shellQuote(JSON.stringify(parameters))}`;
+  return new ForgeError(
+    hostedActionError(error, 'save').code,
+    `This ${action} began its save at source authority epoch ${began}, and the project is now at epoch ${epoch}, so that save can never finish. Nothing was published by it, and this checkout no longer replays it. Run it again as a new operation: ${command}`,
+    undefined,
+    { root, next, command },
+  );
 }

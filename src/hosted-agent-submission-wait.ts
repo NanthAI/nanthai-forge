@@ -91,7 +91,11 @@ export async function observeHostedSubmissions(
   let cursor = command.cursor ?? null,
     resnapshot = false,
     active = true;
+  // The latest board value any attempt saw: a budget or cancel stop still carries its conflict
+  // note (a peer flag an acceptance wait did not wake for, ad80e037).
+  const noted: { board?: unknown } = {};
   const pending = (status: 'timeout' | 'cancelled') => ({
+    ...boardConflictEnvelope(board?.laneId, noted.board),
     schema: 1 as const,
     transport: 'hosted' as const,
     action: 'observe' as const,
@@ -162,6 +166,7 @@ export async function observeHostedSubmissions(
           subscribe,
           current,
           board,
+          noted,
         ),
     });
     const entry = response.result.submissions.length === 1 ? response.result.submissions[0] : undefined;
@@ -194,6 +199,7 @@ async function observeHostedSubmissionsOnce(
   subscribe: () => HostedRunSubscription,
   previous: ReadonlyMap<string, z.infer<typeof eventSchema>>,
   board?: BoardWaitOption,
+  noted: { board?: unknown } = {},
 ) {
   const command = hostedSubmissionWaitSchema.parse(input);
   const operations = [...new Set(command.operationIds)];
@@ -544,7 +550,15 @@ async function observeHostedSubmissionsOnce(
         stop();
         return;
       }
-      if (boardWait) waker = boardWaker(boardWait, delivery => resolve(result('message', delivery)));
+      // A peer Lane's conflict flag cannot change the landing an acceptance wait waits on: it rides
+      // the reply as a note and the wait keeps going. Main conflicts and notes to this Lane still
+      // wake every wait (ad80e037).
+      if (boardWait)
+        waker = boardWaker(
+          boardWait,
+          delivery => resolve(result('message', delivery)),
+          command.until !== 'acceptance',
+        );
       // Board-only changes of the page value (a note arrived) wake the waker, never a page drain.
       let pageKey: string | undefined;
       const offer = (operationId: string, value: unknown) => {
@@ -565,7 +579,7 @@ async function observeHostedSubmissionsOnce(
         const decoded = waker ? decode(value) : undefined;
         if (waker && decoded && typeof decoded === 'object') {
           const { board: note, ...page } = decoded as { board?: unknown };
-          latestBoard = { board: note };
+          latestBoard = noted.board = { board: note };
           waker.offer(latestBoard);
           const key = JSON.stringify(page);
           if (key === pageKey) return;

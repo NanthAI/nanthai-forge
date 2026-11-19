@@ -9,7 +9,12 @@ import { getFunctionName } from 'convex/server';
 import { landingFixture } from './hosted-landing-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { observeHostedSubmissions } from '../dist/hosted-agent-submission-wait.js';
-import { boardWakeEnvelope, boardWakeTiming, readBoardWokeAt } from '../dist/hosted-board-wait.js';
+import {
+  boardWakeEnvelope,
+  boardWakeTiming,
+  boardWaker,
+  readBoardWokeAt,
+} from '../dist/hosted-board-wait.js';
 import { readBoardCursor, readBoardWaitCursor } from '../dist/board-local.js';
 const conflicts = await import(moduleUrl('../convex/projectHostedConflicts.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
@@ -210,6 +215,103 @@ test('83e6d0d3: a notice recorded during a landing wait wakes its existing subsc
   assert.equal(w.f.counts.at(-1).writes, 0, 'a retried record does not wake again');
 });
 
+test('ad80e037: an acceptance wait keeps waiting through a peer Lane conflict flag and carries it as a note', async t => {
+  const w = await fixture(),
+    subscriptions = [];
+  const root = mkdtempSync(join(tmpdir(), 'forge-conflict-acceptance-'));
+  t.after(() => {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(`${root}.forge-client`, { recursive: true, force: true });
+  });
+  const controller = new AbortController();
+  const timing = { ...boardWakeTiming };
+  boardWakeTiming.batchMs = 0;
+  t.after(() => Object.assign(boardWakeTiming, timing));
+  const transport = {
+    root,
+    address: { url: 'https://synthetic.invalid', projectId: w.f.projectId },
+    async dispatch() {
+      return { result: { actor: 'owner', features: ['board-wait'] } };
+    },
+    async query(name, args) {
+      return JSON.parse(await w.f.call('page', observe.page, { projectId: w.f.projectId, ...args }));
+    },
+  };
+  let subscribed;
+  const ready = new Promise(resolve => {
+    subscribed = resolve;
+  });
+  const subscribe = () => ({
+    onUpdate(ref, args, next) {
+      subscriptions.push({ args, next });
+      subscribed();
+      return () => {};
+    },
+    async close() {},
+  });
+  let settled = false;
+  const waiting = observeHostedSubmissions(
+    transport,
+    { operationIds: [w.request.operationId], timeoutSeconds: 30, until: 'acceptance' },
+    controller.signal,
+    () => {},
+    subscribe,
+    { laneId: w.laneId, after: 0, wokeAt: Date.now() },
+  ).finally(() => (settled = true));
+  await ready;
+  const [subscription] = subscriptions;
+  subscription.next(await w.page());
+  // The incident: a conflict flag on this Lane's saved head woke the acceptance wait (3 re-runs).
+  await w.record();
+  const page = JSON.parse(await w.page());
+  assert.equal(page.board.conflicts[0].with, w.peerId);
+  subscription.next(JSON.stringify(page));
+  assert.equal(settled, false, 'the flag does not affect the landing waited on: still waiting');
+  controller.abort();
+  const result = await waiting;
+  assert.equal(result.result.status, 'cancelled');
+  assert.equal(result.result.board, undefined, 'no wake delivery');
+  assert.equal(result.conflictNotice.items[0].file, 'src/service.ts', 'the flag rides the reply as a note');
+});
+
+test('ad80e037: the acceptance waker wakes for main and a Lane note, never for a peer Lane flag alone', t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const laneId = randomUUID(),
+    peer = randomUUID();
+  const flag = (withLane, generation) => ({
+    with: withLane,
+    goal: withLane === 'main' ? '' : 'Synthetic change',
+    flaggedAt: new Date(0).toISOString(),
+    generation,
+    files: [{ path: 'src/service.ts', mine: [[2, 2]], theirs: [[3, 3]], reason: 'text' }],
+  });
+  const board = (conflicts, messages = []) => ({ board: { conflicts, messages, cursor: 1, more: 0 } });
+  const woke = { acceptance: [], other: [] };
+  const option = { laneId, after: 0, wokeAt: 0 };
+  const acceptance = boardWaker(option, delivery => woke.acceptance.push(delivery), false);
+  const other = boardWaker(option, delivery => woke.other.push(delivery));
+  for (const waker of [acceptance, other]) waker.offer(board([flag(peer, 1)]));
+  t.mock.timers.tick(10 * boardWakeTiming.batchMs + 1);
+  assert.equal(woke.acceptance.length, 0, 'a peer Lane flag alone never wakes an acceptance wait');
+  assert.equal(woke.other.length, 1, 'other waits still wake for it (83e6d0d3)');
+  acceptance.offer(board([flag(peer, 1), flag('main', 2)]));
+  t.mock.timers.tick(boardWakeTiming.batchMs + 1);
+  assert.deepEqual(
+    woke.acceptance[0].conflicts.map(conflict => conflict.with),
+    [peer, 'main'],
+    'a main flag wakes it and the peer flag rides along',
+  );
+  const noted = boardWaker(option, delivery => woke.acceptance.push(delivery), false);
+  noted.offer(
+    board([flag(peer, 1)], [{ id: 'n1', at: 1, target: `lane:${laneId}`, text: 'hi', author: 'owner' }]),
+  );
+  t.mock.timers.tick(boardWakeTiming.windowMs + boardWakeTiming.batchMs + 1);
+  assert.equal(woke.acceptance.length, 2, 'a note addressed to this Lane still wakes it');
+  acceptance.stop();
+  other.stop();
+  noted.stop();
+});
+
 test('83e6d0d3: a healthy trial leaves wait bytes and reactive dependencies unchanged', async () => {
   const w = await fixture();
   const before = await w.page(),
@@ -313,7 +415,16 @@ for (const kind of ['operation', 'run']) {
       kind === 'run' ? subscription.args.board?.laneId : subscription.args.board?.laneId,
       w.laneId,
     );
-    await w.record();
+    // A run wait wakes for a peer Lane's flag; an acceptance wait only for main's (ad80e037).
+    if (kind === 'run') await w.record();
+    else
+      await w.record({
+        mainHead: 'main-head',
+        peers: [],
+        conflicts: [
+          { peer: 'main', path: 'src/service.ts', mine: [[2, 2]], theirs: [[3, 3]], reason: 'text' },
+        ],
+      });
     const delivery =
       kind === 'run'
         ? {
@@ -336,7 +447,7 @@ for (const kind of ['operation', 'run']) {
     const callCount = calls;
     subscription.next(JSON.stringify(delivery));
     const reply = await waiting;
-    assert.equal(reply.conflictNotice?.items[0].with, w.peerId);
+    assert.equal(reply.conflictNotice?.items[0].with, kind === 'run' ? w.peerId : 'main');
     assert.equal(reply.result.status, 'IN_PROGRESS');
     assert.equal(reply.result.reason, 'message');
     assert.equal(

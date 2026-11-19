@@ -91,13 +91,27 @@ export function freshBoardDelivery(option: BoardWaitOption, value: unknown): Boa
 /** Turns subscription values into at most one early return: waits batchMs for notes arriving
  * together, and no earlier than windowMs after this Lane's previous early return. Local timers
  * only; no call. */
-export function boardWaker(option: BoardWaitOption, wake: (delivery: BoardDelivery) => void) {
+export function boardWaker(
+  option: BoardWaitOption,
+  wake: (delivery: BoardDelivery) => void,
+  /** false (an acceptance wait): a conflict flag with another open Lane cannot change the landing
+   * waited on, so it never wakes; it rides the eventual reply as a note. A flag with main and a
+   * note addressed to this Lane still wake (ad80e037). */
+  peerConflictsWake = true,
+) {
   let latest: BoardDelivery | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let timerAt = Infinity;
+  const waking = (delivery: BoardDelivery) =>
+    (delivery.conflicts ?? []).filter(conflict => peerConflictsWake || conflict.with === 'main');
   return {
     offer(value: unknown) {
-      const delivery = freshBoardDelivery(option, value);
+      const fresh = freshBoardDelivery(option, value);
+      const delivery =
+        fresh &&
+        (waking(fresh).length || fresh.messages.some(message => message.target === `lane:${option.laneId}`))
+          ? fresh
+          : undefined;
       if (!delivery) {
         // A later subscription value revalidated the saved head and withdrew the queued conflict.
         if (latest?.conflicts?.length) {
@@ -112,7 +126,7 @@ export function boardWaker(option: BoardWaitOption, wake: (delivery: BoardDelive
       // A newly proven conflict uses the same batching timer, without the member-note cooldown.
       const at = Math.max(
         Date.now() + boardWakeTiming.batchMs,
-        delivery.conflicts?.length ? 0 : option.wokeAt + boardWakeTiming.windowMs,
+        waking(delivery).length ? 0 : option.wokeAt + boardWakeTiming.windowMs,
       );
       if (timer && timerAt <= at) return;
       if (timer) clearTimeout(timer);

@@ -33,6 +33,8 @@ import { chainSettle, resolveSyncRequest } from './hosted-resolve-chain.js';
 import { syncTiming } from './sync-timing.js';
 import { applyObservedSaveOutcome, saveContract, saveHostedLane } from './hosted-save-client.js';
 import { driveAgentSource, syncAgentSource } from './hosted-agent-source.js';
+import { AuthorityPinRefused, authorityPinRefusal } from './hosted-main-pin.js';
+import type { SaveThen } from './hosted-save.js';
 import { hostedRootLanePath } from './hosted-root-checkout.js';
 import { placeResolution } from './hosted-resolution-placement.js';
 import { applyHostedSync } from './hosted-sync-client.js';
@@ -327,15 +329,17 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
   // server starts it when the save completes; the CLI builds the identical request either way.
   // Retained before the save (review 0f10873e R3): a retry after an epoch or lifecycle change
   // still builds both requests from the one `then` the saved request carries.
-  const then = await session.journal.retain('resolve-then', async () => ({
+  const epoch = session.capabilities.authority.epoch;
+  const buildThen = () => ({
     kind: 'resolve' as const,
     ...(session.holderSessionId ? { holderSessionId: session.holderSessionId } : {}),
     operationId: session.journal.operationId,
-    authorityEpoch: session.capabilities.authority.epoch,
+    authorityEpoch: epoch,
     lifecycleVersion: marker.selection.lifecycleVersion,
     message: command.message,
     ...(command.keep ? { keep: [...new Set(command.keep)].sort() } : {}),
-  }));
+  });
+  let then = await session.journal.retain('resolve-then', buildThen);
   const chain = session.capabilities.features?.includes('save-then-resolve') ?? false;
   // source-run-publish: the save's own action replies with its outcome and, run there, the chain.
   let reply: unknown;
@@ -363,7 +367,24 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
         reply = value;
       },
     );
-  let saved = await save();
+  let saved: Awaited<ReturnType<typeof save>>;
+  try {
+    saved = await save();
+  } catch (error) {
+    // The save carrying `then` was refused for an older authority epoch before it began (the save
+    // dropped its request): no save holds this `then`, so it follows the current epoch, once
+    // (review b1448b61 N3). A refusal at the current epoch means the epoch moved after this
+    // command's discovery; a replay rediscovers it and rebuilds.
+    if (!(error instanceof AuthorityPinRefused)) throw error;
+    if (then.authorityEpoch === epoch) throw error.refusal;
+    session.journal.forget('resolve-then');
+    then = await session.journal.retain('resolve-then', buildThen);
+    try {
+      saved = await save();
+    } catch (again) {
+      throw again instanceof AuthorityPinRefused ? again.refusal : again;
+    }
+  }
   let chained: { terminal: unknown; state: unknown } | undefined;
   const direct = chain && completed(saved) && reply ? chainSettle(reply) : undefined;
   if (direct && 'value' in direct) chained = direct.value.chained;
@@ -407,9 +428,12 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
     saveTiming.mark('apply');
   }
   timing.nest(saveTiming.value());
-  const request = await session.journal.retain('resolve-request', async () =>
-    resolveSyncRequest(then, marker.selection.laneId, completed(saved)),
-  );
+  const resolveRequest = (pin: SaveThen) =>
+    session.journal.retain('resolve-request', async () =>
+      resolveSyncRequest(pin, marker.selection.laneId, completed(saved)),
+    );
+  const request = await resolveRequest(then);
+  let sent = request.authorityEpoch;
   const handoff = await retainSyncHandoff(session, 'resolve', command);
   timing.mark('save');
   let progress, observed: unknown;
@@ -420,7 +444,25 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
       timing.mark('hostedWait');
       timing.server({ state: chained.state });
     } else {
-      progress = await driveAgentSource(session, 'Sync', session.journal.operationId, request);
+      const drive = (value: typeof request) =>
+        driveAgentSource(session, 'Sync', session.journal.operationId, value, [], false, false, true);
+      try {
+        progress = await drive(request);
+      } catch (error) {
+        if (!(error instanceof AuthorityPinRefused)) throw error;
+        // Refused before the resolve sync began: its request (from a `then` an earlier save may still
+        // hold) can never begin at an older epoch, so a replay rebuilds it, never resends it (N3).
+        session.journal.forget('resolve-request');
+        if (request.authorityEpoch === epoch) throw error.refusal;
+        try {
+          sent = epoch;
+          progress = await drive(await resolveRequest({ ...then, authorityEpoch: epoch }));
+        } catch (again) {
+          if (!(again instanceof AuthorityPinRefused)) throw again;
+          session.journal.forget('resolve-request');
+          throw again.refusal;
+        }
+      }
       timing.mark('submit');
       progress = await session.waitSource(session.journal.operationId, progress, 'Sync', undefined, value => {
         observed = value;
@@ -432,6 +474,18 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
     if (error instanceof ForgeError && error.code === UNCHANGED_SIDE)
       throw unchangedSideRefusal(session.root, marker.selection.laneId, command, error.recovery);
     const safe = hostedActionError(error, 'resolution');
+    // The resolve sync began at an older epoch: every later write to it is refused, so only a new
+    // operation can finish (N3). Name it; a replay of this one would be refused the same way.
+    if (sent !== epoch && authorityPinRefusal(safe, 'resolution')) {
+      const fresh = { ...command, operationId: randomUUID() };
+      const next = hostedRecoveryCommand(session.root, 'resolve', fresh);
+      throw new ForgeError(
+        safe.code,
+        `This resolve's sync began at source authority epoch ${sent}, and the project is now at epoch ${epoch}, so it can never finish. Run the resolve again as a new operation: ${next}`,
+        undefined,
+        { root: session.root, next: { action: 'resolve', ...fresh }, command: next },
+      );
+    }
     if (safe.code !== 'HOSTED_ACTION_FAILED' || safe.recovery) throw safe;
     throw new ForgeError(
       safe.code,

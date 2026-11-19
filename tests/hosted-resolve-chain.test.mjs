@@ -407,3 +407,113 @@ test('a sync prepare asked for targets returns its input upload target, and a re
   );
   assert.equal(plain.targets, undefined);
 });
+
+/** A source cutover: the project and its main move to the next authority epoch. */
+function nextEpoch(f) {
+  const project = f.tables.hostedProjects.get(f.projectId);
+  project.sourceAuthority = { ...project.sourceAuthority, epoch: project.sourceAuthority.epoch + 1 };
+  const main = JSON.parse(f.tables.projectHostedChannels.get(f.mainId).selection);
+  f.patch('projectHostedChannels', f.mainId, {
+    selection: JSON.stringify({ ...main, authority: { ...main.authority, epoch: main.authority.epoch + 1 } }),
+  });
+  return project.sourceAuthority.epoch;
+}
+/** The client loses its connection on the first call to `name`, before the server runs it. */
+function dropFirst(c, name) {
+  const client = c.s.exchange.client,
+    mutation = client.mutation;
+  client.mutation = async (ref, args) => {
+    if (getFunctionName(ref) !== name) return mutation(ref, args);
+    client.mutation = mutation;
+    throw new TypeError('fetch failed');
+  };
+}
+test('a resolve whose save never began re-journals its then after an epoch change; the replay resolves (review b1448b61 N3)', async t => {
+  const c = await conflicted(t);
+  c.s.eagerSource(true);
+  dropFirst(c, 'projectHostedSaves:prepare');
+  const operationId = randomUUID(),
+    resolve = () => c.transport().dispatch('resolve', { laneId: c.conflict.laneId, operationId });
+  await assert.rejects(resolve(), { code: 'HOSTED_ACTION_FAILED' });
+  const epoch = nextEpoch(c.f);
+  // Before the fix every replay of this operation was refused SOURCE_AUTHORITY_CHANGED: the retained
+  // save request and its then kept the old epoch, and nothing began to reconcile with.
+  const result = await resolve();
+  assert.equal(result.result.source.outcome.result.status, 'resolved');
+  const save = [...c.f.tables.projectHostedSaves.values()].map(row => JSON.parse(row.value).request);
+  assert.equal(save.length, 1, 'one save began, at the current epoch');
+  assert.equal(save[0].authorityEpoch, epoch);
+  assert.equal(save[0].then.authorityEpoch, epoch);
+  assert.equal(newSyncs(c), 1, 'one resolve sync');
+});
+
+test('a resolve whose save completed but whose sync never began rebuilds the sync at the new epoch (review b1448b61 N3)', async t => {
+  const c = await conflicted(t);
+  c.s.eagerSource(true);
+  dropFirst(c, 'projectHostedSync:prepare');
+  const operationId = randomUUID(),
+    resolve = () => c.transport().dispatch('resolve', { laneId: c.conflict.laneId, operationId });
+  await assert.rejects(resolve());
+  assert.equal(newSyncs(c), 0, 'the resolve sync never began');
+  const epoch = nextEpoch(c.f);
+  const result = await resolve();
+  assert.equal(result.result.source.outcome.result.status, 'resolved');
+  assert.equal(newSyncs(c), 1);
+  const sync = [...c.f.tables.projectHostedSyncs.values()].at(-1);
+  assert.equal(JSON.parse(sync.value).request.authorityEpoch, epoch);
+  // A further replay answers from the receipt: the rebuilt request is the retained one now.
+  const again = await resolve();
+  assert.equal(again.result.source.outcome.result.status, 'resolved');
+  assert.equal(newSyncs(c), 1);
+});
+
+test('a plain save refused for an older authority epoch drops its request and rebuilds it at the current one (review b1448b61 N3)', async t => {
+  const c = await conflicted(t);
+  c.s.eagerSource(true);
+  dropFirst(c, 'projectHostedSaves:prepare');
+  const command = { message: 'Chosen side', operationId: randomUUID() },
+    save = () => c.transport().dispatch('save', command);
+  await assert.rejects(save(), { code: 'HOSTED_ACTION_FAILED' });
+  const epoch = nextEpoch(c.f);
+  const result = await save();
+  assert.equal(result.result.outcome?.status ?? result.result.terminal?.outcome?.status, 'completed');
+  const [request] = [...c.f.tables.projectHostedSaves.values()].map(row => JSON.parse(row.value).request);
+  assert.equal(request.authorityEpoch, epoch);
+});
+
+test('a resolve whose save began at an older epoch is refused with the one next command, and that command resolves (review b1448b61 N3)', async t => {
+  const c = await conflicted(t);
+  c.s.eagerSource(true);
+  dropFirst(c, 'projectHostedSaveJobs:submit');
+  const operationId = randomUUID(),
+    resolve = () => c.transport().dispatch('resolve', { laneId: c.conflict.laneId, operationId });
+  await assert.rejects(resolve());
+  assert.equal(c.f.tables.projectHostedSaves.size, 1, 'the save began at the old epoch');
+  nextEpoch(c.f);
+  const refused = await resolve().catch(error => error);
+  assert.match(refused.code, /^SOURCE_AUTHORITY_/);
+  const { next } = refused.recovery;
+  assert.equal(next.action, 'resolve');
+  assert.notEqual(next.operationId, operationId, 'a new operation, not a replay of this one');
+  const { action, ...parameters } = next;
+  const result = await c.transport().dispatch(action, parameters);
+  assert.equal(result.result.source.outcome.result.status, 'resolved');
+});
+
+test('a resolve whose sync began at an older epoch is refused with the one next command, and that command resolves (review b1448b61 N3)', async t => {
+  const c = await conflicted(t);
+  c.s.eagerSource(true);
+  dropFirst(c, 'projectHostedSyncJobs:submit');
+  const operationId = randomUUID(),
+    resolve = () => c.transport().dispatch('resolve', { laneId: c.conflict.laneId, operationId });
+  await assert.rejects(resolve());
+  assert.equal(newSyncs(c), 1, 'the resolve sync began at the old epoch');
+  nextEpoch(c.f);
+  const refused = await resolve().catch(error => error);
+  assert.match(refused.code, /^SOURCE_AUTHORITY_/);
+  const { action, ...parameters } = refused.recovery.next;
+  assert.equal(action, 'resolve');
+  assert.notEqual(parameters.operationId, operationId);
+  const result = await c.transport().dispatch(action, parameters);
+  assert.equal(result.result.source.outcome.result.status, 'resolved');
+});

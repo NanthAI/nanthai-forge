@@ -20,7 +20,13 @@ import { hostedRecordSchema } from './hosted-records.js';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { parseHostedResponse } from './hosted-response.js';
 import { advanceMarkerMetadata } from './hosted-marker-advance.js';
-import { MainPinRefused, mainPinRefusal, sendMainPinned } from './hosted-main-pin.js';
+import {
+  AuthorityPinRefused,
+  MainPinRefused,
+  authorityPinRefusal,
+  mainPinRefusal,
+  sendMainPinned,
+} from './hosted-main-pin.js';
 import { SELECT_LANE } from './hosted-lane-location.js';
 export type SourceProgress = {
   terminal?: { outcome: { status: string; result?: unknown } } | null;
@@ -67,6 +73,8 @@ export async function driveAgentSource(
   refusable = false,
   /** Report a CHANNEL_CHANGED prepare refusal as MainPinRefused (the caller rebuilds on main). */
   mainPinned = false,
+  /** Report an authority-epoch prepare refusal as AuthorityPinRefused (the caller rebuilds). */
+  authorityPinned = false,
 ) {
   const features = session.capabilities.features ?? [],
     // prepare-upload-targets: a sync prepare also returns its input's upload target, asked only
@@ -91,6 +99,8 @@ export async function driveAgentSource(
     if (refusable && hostedActionError(error, kind.toLowerCase()).code === 'WORK_STALE')
       throw new PrepareRefused(error);
     if (mainPinned && mainPinRefusal(error, kind.toLowerCase())) throw new MainPinRefused(error);
+    if (authorityPinned && authorityPinRefusal(error, kind.toLowerCase()))
+      throw new AuthorityPinRefused(error);
     throw error;
   }
   if (prepared.terminal) return prepared.terminal;

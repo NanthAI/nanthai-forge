@@ -121,10 +121,12 @@ test('hosted finish observation then save captures zero paths at dogfood size', 
   for (let i = 0; i < 84; i++) put(f.root, `queue-ahead-objects/objects/${i}`);
   const operationId = randomUUID();
   await transport.dispatch('save', { operationId, message: 'Save after observation' });
-  // A settled save keeps only its command, request and outcome; nothing was staged.
+  // A settled save keeps only its command, request (with its empty `describe` marker) and
+  // outcome; nothing was staged.
   assert.deepEqual(readdirSync(join(`${f.root}.forge-client`, 'saves', operationId)).sort(), [
     'acknowledged',
     'command.json',
+    'describe',
     'request.json',
     'terminal.json',
   ]);

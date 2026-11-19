@@ -159,9 +159,11 @@ test('dogfood-size Lane: 20 saves stage only changed blobs and keep no staging a
     assert.deepEqual(fake.calls.stagedAtPrepare.at(-1), [digest(bytes)]);
     assert.deepEqual(stagedBlobs(lane.client, operationId), []);
     // Settled: command, request and outcome answer a retry; the baseline capture is gone.
+    // `describe` (empty) keeps a retry of this described request described (review b1448b61 N5b).
     assert.deepEqual(readdirSync(join(lane.client, 'saves', operationId)).sort(), [
       'acknowledged',
       'command.json',
+      'describe',
       'request.json',
       'terminal.json',
     ]);
@@ -171,7 +173,8 @@ test('dogfood-size Lane: 20 saves stage only changed blobs and keep no staging a
   assert.equal(fake.calls.uploads, 20);
   assert.equal(fake.calls.prepare, 20);
   // Before this change each save kept a full copy of the tree (20 saves = 20x the tree).
-  // Each settled save holds a directory and four small files: at most five 4 KiB blocks.
+  // Each settled save holds a directory and four small files (plus the empty `describe`, 0 blocks):
+  // at most five 4 KiB blocks.
   assert(client <= 20 * 5 * 4096, `saves ${client} B vs tree ${tree} B`);
   // A retry of a settled save answers from its receipt without another server call.
   const settled = readdirSync(join(lane.client, 'saves'))[0];

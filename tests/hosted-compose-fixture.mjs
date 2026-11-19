@@ -274,7 +274,8 @@ export async function composeFixture({ baselineFiles = [] } = {}) {
       operationId: job.operationId,
       attempt: job.attempt,
       fence: job.fence,
-      authorityEpoch: 1,
+      // The job's own epoch, so a job begun after an epoch change reports the epoch it ran under.
+      authorityEpoch: job.authorityEpoch ?? 1,
       inputDigest: job.inputDigest,
       provider: job.control.provider,
       worker: job.control.worker,
