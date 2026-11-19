@@ -65,6 +65,10 @@ export class MemoryMergeSource extends LazyMergeSource {
     if (!bytes) throw new NeededObject(id);
     return bytes;
   }
+  override prefetch(ids: readonly string[]) {
+    const missing = [...new Set(ids)].filter(id => !this.objects.has(id));
+    if (missing.length) throw new NeededObject(missing[0]!, missing);
+  }
   override put(bytes: Buffer) {
     const id = digest(bytes);
     this.objects.set(id, bytes);
@@ -144,7 +148,7 @@ export class MemoryMergeSource extends LazyMergeSource {
     return value;
   }
   override async fetchMissing(reader: SourceWorkerReader, error: NeededObject) {
-    await reader.resolveMany([error.id]);
+    await reader.resolveMany(error.ids);
   }
   /** Parents this source already knows, as `state` would return them; undefined needs a read. */
   private knownParents(id: string): string[] | undefined {

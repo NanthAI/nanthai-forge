@@ -915,6 +915,56 @@ test('forge.json merge lists compose without a conflict and keep both entries in
   }
 });
 
+test('a declared split composes over a raw edit of the old doc in both hosted paths (Item 491ddd77)', async () => {
+  const DOC = 'docs/guide.md',
+    DIR = 'docs/guide.d/sections';
+  const base = '# Guide\n\n## One\n\nFirst.\n\n## Two\n\nSecond.\n';
+  const x = fixture(),
+    file = (path, text) => ({ path, mode: 'file', blob: x.put(text).sha256 });
+  const root = x.state([file(DOC, base)]);
+  const edited = x.state([file(DOC, base.replace('First.\n', 'First.\n\nRaw edit.\n'))], [root.sha256]);
+  const split = x.state(
+    [
+      file(DOC, '# Guide\n\nEntries: [guide.d/sections](guide.d/sections/)\n'),
+      file(`${DIR}/0100-one.md`, '## One\n\nFirst.\n'),
+      file(`${DIR}/0200-two.md`, '## Two\n\nSecond.\n'),
+    ],
+    [root.sha256],
+  );
+  const inputs = buildComposePages([
+      {
+        laneId: randomUUID(),
+        head: split.sha256,
+        version: 0,
+        sourceVersion: 0,
+        lifecycleVersion: 0,
+        state: { object: split, recipe: null },
+      },
+    ]),
+    dependencies = buildComposePages([]);
+  for (const page of [...inputs.pages, ...dependencies.pages]) x.json(page.value);
+  const input = x.json({
+    schema: 1,
+    kind: 'forge-hosted-compose-input',
+    base: { head: edited.sha256, receiptId: 'main' },
+    main: { object: edited, recipe: null },
+    inputs: inputs.manifest,
+    dependencies: dependencies.manifest,
+    algorithm: 'forge-native-compose-v1',
+    message: 'merge',
+    at,
+  });
+  const expected = await buildHostedSourceState(input, x.io),
+    actual = await drain(x, input, true);
+  assert.deepEqual(actual.cursor.output, expected.output, 'journaled equals fixed worker');
+  const { result } = JSON.parse(x.objects.get(actual.cursor.output.sha256));
+  assert.equal(result.status, 'clean');
+  assert.deepEqual(result.docs, { paths: [`${DIR}/0100-one.md`, DOC], rule: 'keep both sides, main first' });
+  const files = JSON.parse(x.objects.get(result.state.sha256)).files,
+    bytes = path => x.objects.get(files.find(f => f.path === path).blob).toString();
+  assert.equal(bytes(DOC), '# Guide\n\nEntries: [guide.d/sections](guide.d/sections/)\n');
+  assert.equal(bytes(`${DIR}/0100-one.md`), '## One\n\nFirst.\n\nRaw edit.\n');
+});
 test('V8 manifest-only composition is byte-identical to the fixed worker for fast-forwards, contained tips and sibling metadata merges on 4k files', async () => {
   for (const legacyPlan of [false, true])
     for (const kind of ['forward', 'contained', 'sibling', 'content', 'overlap', 'mode']) {

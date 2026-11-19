@@ -28,7 +28,7 @@ const relativeTarget = (target: string) => !/^(?:[a-z]+:|#|\/)/i.test(target);
 
 /** Rewrites relative inline links written from `from` so they resolve from `to` (both folders).
  * Code fences stay as written, split exactly as the foundation link check splits them. */
-function relinkMarkdown(text: string, from: string, to: string): string {
+export function relinkMarkdown(text: string, from: string, to: string): string {
   if (from === to) return text;
   return text
     .split(/(```[\s\S]*?```)/)
@@ -50,7 +50,7 @@ function relinkProse(line: string, from: string, to: string): string {
 
 /** An entry that is a table row continues the table the entry before it ended, so a table can
  * keep one row per file and still assemble whole. */
-const tableRow = (page: string, entry: string) =>
+export const tableRow = (page: string, entry: string) =>
   entry.startsWith('|') && page.slice(page.lastIndexOf('\n') + 1).startsWith('|');
 
 /** The entry folders a document names, repository-relative. */

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { attributionEdits as edits, attributionLines as lines } from './native-text-merge.js';
 import { overlappingPaths, type NativeFile, type NativeSource } from './native-source.js';
-import { nativeMergeMessage, type NativeMergeResolution } from './state/merge.js';
+import { nativeMergeMessage, type NativeMergeConflict, type NativeMergeResolution } from './state/merge.js';
 import type { NativeInsertionOrder } from './native-text-merge.js';
 import { conflictRule, markdownDoc, type ConflictRule } from './docs-resolution.js';
 import { declaredMergePaths, FORGE_CONFIG_FILE, type DeclaredMergePaths } from './project-config.js';
+import { remapSplitEdit, splitRecognised } from './doc-split-remap.js';
 export { DOCS_RULE, markdownDoc, conflictRule, type ConflictRule } from './docs-resolution.js';
 
 type Edit = { start: number; end: number; lines: string[]; side: 0 | 1 };
@@ -268,18 +269,33 @@ export function resolveDocsComposition(
       return null;
   }
   const files: NativeFile[] = [...merged.files];
-  const blobs = merged.conflicts.map((item, i) =>
-    source.docsContent
-      ? source.docsContent(item, order, rules[i]!)
-      : (() => {
-          const bytes = resolveListText(
-            item.base ? source.object(item.base.blob) : Buffer.alloc(0),
-            source.object(item[mainOf]!.blob),
-            source.object(item[laneOf]!.blob),
-            rules[i]!,
-          );
-          return bytes ? source.put(bytes) : null;
-        })(),
+  // A declared split of a doc (Item 491ddd77) takes the split remap, never the keep-both rule.
+  // Metadata decides which conflicts are splits; no bytes are read for any other conflict.
+  const trees = { left: () => source.state(left).files, right: () => source.state(right).files };
+  const splits = merged.conflicts.map((item, i) =>
+    rules[i] === 'docs' ? splitSide(item, trees) : undefined,
+  );
+  const remapped = new Map<number, { blob: string; paths: string[] }>();
+  for (const [i, side] of splits.entries()) {
+    if (!side) continue;
+    const result = remapSplitConflict(source, merged.conflicts[i]!, side, trees[side](), files);
+    if (result === null) return null;
+    if (result) remapped.set(i, result);
+  }
+  const blobs = merged.conflicts.map(
+    (item, i) =>
+      remapped.get(i)?.blob ??
+      (source.docsContent
+        ? source.docsContent(item, order, rules[i]!)
+        : (() => {
+            const bytes = resolveListText(
+              item.base ? source.object(item.base.blob) : Buffer.alloc(0),
+              source.object(item[mainOf]!.blob),
+              source.object(item[laneOf]!.blob),
+              rules[i]!,
+            );
+            return bytes ? source.put(bytes) : null;
+          })()),
   );
   if (blobs.some(blob => !blob)) return null;
   merged.conflicts.forEach((item, i) => {
@@ -295,6 +311,111 @@ export function resolveDocsComposition(
   return {
     head: source.writeState(files, [left, right], nativeMergeMessage(message, merged.resolutions), at),
     ...(merged.resolutions.length ? { resolutions: merged.resolutions } : {}),
-    paths: merged.conflicts.map(item => item.path).sort(),
+    paths: [
+      ...new Set([
+        ...merged.conflicts.map(item => item.path),
+        ...[...remapped.values()].flatMap(r => r.paths),
+      ]),
+    ].sort(),
   };
+}
+
+type Side = 'left' | 'right';
+/** The side that split this doc into fragments (Item 491ddd77): it alone has files under the
+ * doc's `NAME.d/` folder. State metadata only. */
+function splitSide(item: NativeMergeConflict, trees: Record<Side, () => NativeFile[]>): Side | undefined {
+  if (item.reason || !item.path.endsWith('.md')) return undefined;
+  if (![item.base, item.left, item.right].every(file => file?.mode === 'file')) return undefined;
+  const folder = `${item.path.slice(0, -3)}.d/`,
+    has = (side: Side) => trees[side]().some(file => file.path.startsWith(folder));
+  const left = has('left'),
+    right = has('right');
+  return left === right ? undefined : left ? 'left' : 'right';
+}
+/** Fragment files one split remap reads at most; past it the conflict stays. */
+export const SPLIT_FRAGMENTS_MAX = 500;
+/** Bytes one split remap reads at most (old doc, both sides and fragments): the text-merge bound. */
+export const SPLIT_BYTES_MAX = 4 * 1024 * 1024;
+/** The split side's skeleton blob, with raw edits moved into its fragments (replaced in `files`).
+ * Null keeps the conflict of a recognised split; undefined means this is no split, and the
+ * conflict takes the Markdown rule exactly as before. One batched read of the doc's three
+ * versions and the fragments, only after metadata matched. */
+function remapSplitConflict(
+  source: NativeSource,
+  item: NativeMergeConflict,
+  side: Side,
+  tree: NativeFile[],
+  files: NativeFile[],
+): { blob: string; paths: string[] } | null | undefined {
+  const folder = `${item.path.slice(0, -3)}.d/`,
+    fragments = tree.filter(file => file.path.startsWith(folder));
+  if (fragments.length > SPLIT_FRAGMENTS_MAX || fragments.some(file => file.mode !== 'file'))
+    return undefined;
+  const skeleton = item[side]!,
+    raw = item[side === 'left' ? 'right' : 'left']!,
+    base = item.base!;
+  source.prefetch([base.blob, raw.blob, skeleton.blob, ...fragments.map(file => file.blob)]);
+  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+  let bytes = 0;
+  const texts = new Map<string, string>();
+  const text = (blob: string) => {
+    let value = texts.get(blob);
+    if (value === undefined) {
+      const buffer = source.object(blob);
+      bytes += buffer.length;
+      if (bytes > SPLIT_BYTES_MAX) throw new RangeError('split too large');
+      texts.set(blob, (value = decoder.decode(buffer)));
+    }
+    return value;
+  };
+  // Binary or oversized input: a missing object is fetched and retried; anything else is no split.
+  const readable = <T>(read: () => T): T | undefined => {
+    try {
+      return read();
+    } catch (error) {
+      if (error instanceof TypeError || error instanceof RangeError) return undefined;
+      throw error;
+    }
+  };
+  const sides = {
+    base: readable(() => text(base.blob)),
+    raw: readable(() => text(raw.blob)),
+    skeleton: readable(() => text(skeleton.blob)),
+  };
+  if (sides.base === undefined || sides.raw === undefined || sides.skeleton === undefined) return undefined;
+  if (!splitRecognised(sides.base, sides.raw, sides.skeleton)) return undefined;
+  // A recognised split: from here on, anything the remap cannot prove stays a conflict.
+  // The composed tree must hold exactly the split side's fragments, or the remap's lines are stale.
+  const merged = files.filter(file => file.path.startsWith(folder));
+  if (
+    merged.length !== fragments.length ||
+    !fragments.every(file =>
+      merged.some(m => m.path === file.path && m.blob === file.blob && m.mode === file.mode),
+    )
+  )
+    return null;
+  const byPath = new Map(fragments.map(file => [file.path, file.blob]));
+  const remap = readable(() =>
+    remapSplitEdit({
+      path: item.path,
+      base: sides.base!,
+      raw: sides.raw!,
+      skeleton: sides.skeleton!,
+      reader: {
+        list: directory =>
+          [...byPath.keys()].flatMap(path =>
+            path.startsWith(`${directory}/`) && !path.slice(directory.length + 1).includes('/')
+              ? [path.slice(directory.length + 1)]
+              : [],
+          ),
+        read: path => text(byPath.get(path)!),
+      },
+    }),
+  );
+  if (!remap) return null;
+  for (const [path, value] of remap.fragments) {
+    const at = files.findIndex(file => file.path === path);
+    files[at] = { ...files[at]!, blob: source.put(Buffer.from(value)) };
+  }
+  return { blob: source.put(Buffer.from(remap.skeleton)), paths: [...remap.fragments.keys()] };
 }

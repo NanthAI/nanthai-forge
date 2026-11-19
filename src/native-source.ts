@@ -126,6 +126,9 @@ export class NativeSource {
     this.owner = owner === null ? '' : realpathSync(owner);
     this.directory = join(this.owner, '.forge', 'work', 'objects');
   }
+  /** Hosted lazy sources fetch every missing id of a known set in one window (a NeededObject
+   * naming them all); a local source already holds its objects. */
+  prefetch(_ids: readonly string[]): void {}
   object(id: string): Buffer {
     invariant(oid.safeParse(id).success, 'INVALID_NATIVE_SOURCE', 'Select an exact native object identity.');
     invariant(

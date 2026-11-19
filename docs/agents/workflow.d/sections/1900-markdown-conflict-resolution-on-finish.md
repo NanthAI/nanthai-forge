@@ -28,6 +28,15 @@ mode changes still conflict, and the result is plain text: a list whose syntax
 needs a separator on every entry but the last (a JSON array) can still need a
 fix after landing, which the landing check catches.
 
+**A split document keeps raw edits.** When one side splits a doc (`NAME.md` becomes
+headings plus `Entries:` lines over files in `NAME.d/`, see `src/doc-fragments.ts`) and
+the other side still edits the old `NAME.md`, each raw hunk moves into the file that now
+holds those lines, in either direction and wherever the Markdown rule applies. So the split
+lands in one round. A hunk across two entry files, on the blank line between entries,
+on an `Entries:` line, or touching a line the split itself changed stays a conflict. The
+merged entry files must assemble to exactly the split page with the raw hunks applied, or
+the conflict stays. The record lists `NAME.md` and the entry files that took the edits.
+
 The `Sync main` checkpoint records the resolved paths and rule in its automatic
 summary and undo instructions (`undo-sync`); the finish receipt's `sync` has
 `docsResolution:{paths,rule}`. A retried sync or finish replays the same bytes.

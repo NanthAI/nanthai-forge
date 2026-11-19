@@ -5,7 +5,11 @@ import { NativeSource } from './native-source.js';
 import type { SourceWorkerReader } from './hosted-source-worker-reader.js';
 export class NeededObject extends Error {
   state = false;
-  constructor(readonly id: string) {
+  constructor(
+    readonly id: string,
+    /** Every object of one known set that is missing, fetched in one window. */
+    readonly ids: readonly string[] = [id],
+  ) {
     super('Fetch exact immutable merge input.');
   }
 }
@@ -28,6 +32,10 @@ export class LazyMergeSource extends NativeSource {
   override object(id: string): Buffer {
     if (!existsSync(join(this.directory, id))) throw new NeededObject(id);
     return super.object(id);
+  }
+  override prefetch(ids: readonly string[]) {
+    const missing = [...new Set(ids)].filter(id => !existsSync(join(this.directory, id)));
+    if (missing.length) throw new NeededObject(missing[0]!, missing);
   }
   override put(bytes: Buffer): string {
     const id = super.put(bytes);
@@ -63,7 +71,7 @@ export class LazyMergeSource extends NativeSource {
         if (prior && prior !== file.blob) different.add(file.path);
         else if (!prior) first.set(file.path, file.blob);
       }
-    const needed = new Set([error.id]);
+    const needed = new Set([error.id, ...error.ids]);
     for (const id of this.states)
       for (const file of this.state(id).files)
         if (different.has(file.path) && !existsSync(join(this.directory, file.blob))) needed.add(file.blob);
