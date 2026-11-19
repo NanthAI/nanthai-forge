@@ -117,3 +117,65 @@ test('a row written for another head is not shown as this save; pages are bounde
   assert.equal(stale.files.current, false);
   assert.deepEqual(stale.files.items, []);
 });
+
+test('a landed Lane names its own time to main and stops, from its receipt and landing row only', async t => {
+  const { s, saved, read } = await lane([{ path: 'src/parser.ts', before: side('p0'), after: side('p1') }]);
+  const before = await read();
+  assert.equal(before.lane.landed, null, 'an open Lane carries no timing and reads no landing');
+  const receiptId = randomUUID(),
+    submissionId = randomUUID(),
+    landingAttempt = randomUUID();
+  const at = Date.parse('2026-11-18T10:00:00.000Z');
+  const iso = seconds => new Date(at + seconds * 1000).toISOString();
+  await s.transaction(
+    'seed',
+    {
+      _handler: async ctx => {
+        const row = await ctx.db
+          .query('projectHostedOverlapLanes')
+          .withIndex('by_project_and_lane', q => q.eq('projectId', s.projectId).eq('laneId', saved.id))
+          .unique();
+        await ctx.db.patch(row._id, {
+          landed: { receiptId, commit: digest('c1'), laneHead: saved.head, at: iso(477) },
+        });
+        await ctx.db.insert('projectHostedAcceptances', {
+          projectId: s.projectId,
+          receiptId,
+          submissionId,
+          attemptId: randomUUID(),
+          sequence: 1,
+          value: JSON.stringify({ id: receiptId, submissionId, at: iso(477) }),
+        });
+        await ctx.db.insert('projectHostedLandingRequests', {
+          projectId: s.projectId,
+          channel: 'main',
+          submissionId,
+          operationId: randomUUID(),
+          actor: 'owner',
+          sequence: 1,
+          runnable: false,
+          phase: 'landed',
+          runId: null,
+          attemptId: landingAttempt,
+          value: JSON.stringify({
+            id: submissionId,
+            attemptId: landingAttempt,
+            at: iso(0),
+            timing: {
+              submittedAt: iso(0),
+              checkReservedAt: iso(42),
+              ciEndedAt: iso(472),
+              committedAt: iso(477),
+            },
+          }),
+        });
+      },
+    },
+    {},
+  );
+  const reply = await read();
+  assert.deepEqual(reply.lane.landed.timing, { toMain: 477, queue: 42, check: 430, land: 5 });
+  const meter = s.counts.filter(c => c.name === 'projectLaneReview:read').at(-1);
+  t.diagnostic(`landed view: ${meter.documents} documents, ${meter.readBytes} bytes`);
+  assert(meter.documents <= 12, `reads ${meter.documents} documents`);
+});

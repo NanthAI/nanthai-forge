@@ -13,6 +13,7 @@ import { effectivePolicy, protectedMatches } from '../src/autonomy-policy';
 import type { OverlapChange } from '../src/hosted-overlap';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { landedTiming } from './projectLaneTiming';
 
 /** Changed paths per reply page. A 128 KB overlap row holds at most about 800, so one page is the usual case. */
 export const REVIEW_PAGE = 400;
@@ -96,6 +97,7 @@ export const read = query({
           };
         }),
       );
+      const timing = row?.landed ? await landedTiming(ctx, projectId, row.landed.receiptId) : null;
       return JSON.stringify({
         lane: {
           laneId,
@@ -106,7 +108,7 @@ export const read = query({
           state: lane.state,
           head: lane.head,
           base: lane.base,
-          landed: row?.landed ?? null,
+          landed: row?.landed ? { ...row.landed, timing } : null,
           ...(lane.earlyResolution ? { earlyResolution: lane.earlyResolution, ahead } : {}),
           ...(lane.resolution
             ? {

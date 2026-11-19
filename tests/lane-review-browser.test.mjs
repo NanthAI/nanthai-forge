@@ -214,6 +214,37 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
         }
     });
 
+    await t.test('a landed Lane names its time to main and each stop, at both widths and themes', async t => {
+      for (const viewport of [DESK, PHONE]) {
+        const page = await open(t, viewport, 's=landed');
+        // Theme switches below; reduced motion makes colours final at once, so axe never reads a colour mid-transition.
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        const row = page.locator('dt', { hasText: 'Time to main' }).locator('xpath=following-sibling::dd[1]');
+        assert.match(
+          await row.textContent(),
+          /^7:57 from “land”: in queue 0:42, checking 7:10, landing 0:05$/,
+          'the Lane page shows its own landing timing',
+        );
+        await page.addScriptTag({ path: axePath });
+        for (const theme of ['dark', 'light']) {
+          await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
+          const [scroll, inner] = await page.evaluate(() => [
+            document.documentElement.scrollWidth,
+            innerWidth,
+          ]);
+          assert.ok(scroll <= inner, `no sideways scroll at ${viewport.width} landed ${theme}`);
+          const violations = await page.evaluate(async () => {
+            const result = await window.axe.run(document, {
+              runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] },
+            });
+            return result.violations.map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`);
+          });
+          assert.deepEqual(violations, [], `axe at ${viewport.width} landed ${theme}`);
+          await shot(page, `lane-review-landed-${viewport.width}-${theme}`);
+        }
+      }
+    });
+
     await t.test('phone width holds with a wider fallback font (Linux CI metrics)', async t => {
       // 1dd4e095: Linux's fallback glyphs are wider than macOS's; the recommendation header once overflowed to 398 px.
       const page = await open(t, PHONE, 's=review');

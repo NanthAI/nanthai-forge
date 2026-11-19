@@ -54,6 +54,13 @@ export type Reply = {
       commit: string;
       at: string;
       revertedBy?: { receiptId: string; at: string };
+      /** Seconds from "land" to on main and at each stop; null when not recorded (convex/projectLaneTiming.ts). */
+      timing?: {
+        toMain: number | null;
+        queue: number | null;
+        check: number | null;
+        land: number | null;
+      } | null;
     } | null;
     earlyResolution?: EarlyResolution;
     ahead?: string | null;

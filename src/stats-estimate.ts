@@ -196,6 +196,14 @@ const sortedInts = (values: Array<number | null>) =>
     .sort((a, b) => a - b);
 const span = (from: number | null, to: number | null) =>
   known(from) && known(to) && to >= from ? (to - from) / 1000 : null;
+/** One landing's own stops, in seconds (null when not recorded), measured as a closed day measures them: what its
+ * Lane page shows beside the medians on Stats. */
+export const landingStops = (l: StatsLanding) => ({
+  toMain: span(l.submittedAt, l.landedAt),
+  queue: span(l.submittedAt, l.checkStartedAt),
+  check: span(l.checkStartedAt, l.checkEndedAt),
+  land: span(l.checkEndedAt, l.landedAt),
+});
 
 /** Close one UTC day: the landings that reached main that day, oldest first, and the replayed
  * queue's `freeAt` from the day before (0 for the first day). */

@@ -56,6 +56,14 @@ const kb = (bytes: number) =>
 const q = (value: unknown) => `'${JSON.stringify(value)}'`;
 const vars = (values: Record<string, string | number>) => values as CSSProperties;
 const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+/** A stop as m:ss (h:mm:ss from an hour), as Stats prints its medians. */
+const stopClock = (seconds: number | null) => {
+  if (seconds === null) return 'not recorded';
+  const h = Math.floor(seconds / 3600),
+    m = Math.floor((seconds % 3600) / 60),
+    s = String(seconds % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+};
 
 export default function LaneReview(props: Props) {
   const [attempt, setAttempt] = useState(0);
@@ -935,6 +943,18 @@ function Side({
           <dl className="kv">
             <dt>Landed</dt>
             <dd>{new Date(lane.landed.at).toLocaleString()}</dd>
+            {typeof lane.landed.timing?.toMain === 'number' ? (
+              <>
+                <dt>Time to main</dt>
+                <dd>
+                  <span className="num">{stopClock(lane.landed.timing.toMain)}</span>{' '}
+                  <span className="t3">
+                    from “land”: in queue {stopClock(lane.landed.timing.queue)}, checking{' '}
+                    {stopClock(lane.landed.timing.check)}, landing {stopClock(lane.landed.timing.land)}
+                  </span>
+                </dd>
+              </>
+            ) : null}
             <dt>Receipt</dt>
             <dd>
               <code>{short(lane.landed.receiptId)}</code>

@@ -146,7 +146,16 @@ async function reply(): Promise<Reply> {
       state: 'active',
       head: HEAD,
       base: { head: BASE },
-      landed: null,
+      // A landed Lane carries its own time to main and stops (Item a61d3c91).
+      landed:
+        scenario === 'landed'
+          ? {
+              receiptId: '7c6b5a49-3827-4160-9e8d-1a2b3c4d5e6f',
+              commit: 'c4'.repeat(32),
+              at: new Date(Date.now() - 3 * 60_000).toISOString(),
+              timing: { toMain: 477, queue: 42, check: 430, land: 5 },
+            }
+          : null,
       ...(combined
         ? {
             earlyResolution: {
