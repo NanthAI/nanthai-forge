@@ -703,6 +703,86 @@ test('687d1eda: a coverage landing on main is no reuse baseline until its prompt
   assert.notEqual((await f.current(state.id)).submission.phase, 'landed');
   assert(f.tables.projectHostedCheckRuns.size > 2, 'the Candidate is checked again on current main');
 });
+test('687d1eda review 3287896a: once its audit passed, a coverage landing is still no baseline; the audit run is', async t => {
+  // The coverage landing's own run used the old selection or executor. After its prompt audit
+  // passes on the same head, firstCheck stays pinned and lastGreen names the audit run. The
+  // reuse baseline must be that audit run. Before this fix, the receipt's own run was used.
+  const { f, state, parent } = await readyRace(t);
+  const main = f.currentMain();
+  const queued = await f.rawChecks.enqueue(
+    f.rawChecks.selection({
+      candidateId: parent.request.candidateId,
+      expectedHead: main.head,
+      expectedConfiguration: f.rawChecks.configuration.digest,
+    }),
+  );
+  const audited = await passWithSelection(f, queued.id, parent.plan.selection);
+  assert.notEqual(audited.id, parent.id);
+  const lastGreen = { sequence: main.sourceRevision, head: main.head, runId: audited.id };
+  const audit = [...f.tables.projectHostedMainAudits.values()][0];
+  if (audit) f.patch('projectHostedMainAudits', audit._id, { lastGreen, firstCheck: main.sourceRevision });
+  else
+    f.insert('projectHostedMainAudits', {
+      projectId: f.projectId,
+      lastGreen,
+      firstCheck: main.sourceRevision,
+    });
+  for (let n = 0; n < 80 && (await f.current(state.id)).submission.phase !== 'landed'; n++) {
+    if (!f.pending().length) break;
+    await f.execute();
+  }
+  assert.equal((await f.current(state.id)).submission.phase, 'landed');
+  assert.deepEqual(f.reuseDecisions, ['proof']);
+  const baseline = (await f.status(state.id)).attempt.crossHeadProof.audit;
+  assert.equal(baseline.runId, audited.id, "the audit's run, not the coverage landing's own run");
+  assert.equal(baseline.source, 'audit');
+});
+test('687d1eda review 0594f115 F1: with no lastGreen yet, a coverage landing is still no baseline', async t => {
+  // A new project, or one whose only full landing is the coverage landing: noteMainLanding pins
+  // firstCheck and leaves lastGreen unset. The decision must not fall back to the landing's own run.
+  const { f, state } = await readyRace(t);
+  const main = f.currentMain();
+  const audit = [...f.tables.projectHostedMainAudits.values()][0];
+  if (audit)
+    f.patch('projectHostedMainAudits', audit._id, { lastGreen: undefined, firstCheck: main.sourceRevision });
+  else f.insert('projectHostedMainAudits', { projectId: f.projectId, firstCheck: main.sourceRevision });
+  for (
+    let n = 0;
+    n < 80 && f.pending().length && (await f.current(state.id)).submission.phase !== 'landed';
+    n++
+  )
+    await f.execute();
+  assert.deepEqual(f.reuseDecisions, [], 'refused before any source analysis (audit-baseline)');
+  assert.notEqual((await f.current(state.id)).submission.phase, 'landed');
+  assert(f.tables.projectHostedCheckRuns.size > 2, 'the Candidate is checked again on current main');
+});
+test('687d1eda review 0594f115 F3: publication refuses a main-receipt baseline pinned as a coverage landing', async t => {
+  // Defence in depth: a proof installed before firstCheck was pinned (or by any decision-path
+  // regression) must not publish with the coverage landing's own run as main's full baseline.
+  const { f, state } = await readyRace(t);
+  const main = f.currentMain();
+  for (let n = 0; n < 80 && !(await f.status(state.id)).attempt?.crossHeadProof; n++) await f.execute();
+  const installed = (await f.status(state.id)).attempt.crossHeadProof;
+  assert.equal(installed.audit.source, 'main-receipt');
+  assert.equal(installed.audit.sequence, main.sourceRevision);
+  assert.notEqual((await f.current(state.id)).submission.phase, 'landed');
+  const audit = [...f.tables.projectHostedMainAudits.values()][0];
+  if (audit) f.patch('projectHostedMainAudits', audit._id, { firstCheck: main.sourceRevision });
+  else f.insert('projectHostedMainAudits', { projectId: f.projectId, firstCheck: main.sourceRevision });
+  for (
+    let n = 0;
+    n < 80 && f.pending().length && (await f.current(state.id)).submission.phase !== 'landed';
+    n++
+  )
+    await f.execute();
+  const receipt = [...f.tables.projectHostedAcceptances.values()]
+    .map(row => JSON.parse(row.value))
+    .find(value => value.submissionId === state.id);
+  assert(
+    !receipt?.crossHeadProof || receipt.crossHeadProof.audit.sequence !== main.sourceRevision,
+    'never published on the coverage landing own run',
+  );
+});
 test('a text conflict with main never lands on the first check', async t => {
   const { f, state } = await readyRace(t, {
     mainFiles: [['convex/projectConvexSourceOutput.ts', 'export const cost = 3;']],

@@ -5,13 +5,7 @@ import { loadLanding, loadLandingAttempt, type LandingIdentity } from './project
 import { loadCompose } from './projectHostedComposeStore';
 import { hostedWriteProject } from './projectHostedRecords';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
-import {
-  mainGate,
-  auditRow,
-  auditFreshness,
-  promptAudit,
-  VERIFIED_MAIN,
-} from './projectHostedMainAuditState';
+import { mainGate, auditRow, auditFreshness, VERIFIED_MAIN } from './projectHostedMainAuditState';
 import { fastEffective } from '../src/landing-mode';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
 import { loadHostedCheck } from './projectHostedCheckStore';
@@ -122,27 +116,28 @@ export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingI
     receiptId: value.pending.main.receiptId,
   });
   const receipt = parent ? hostedAcceptanceSchema.parse(JSON.parse(parent.value)) : null;
+  // A coverage landing (Item 687d1eda, fix C) never earns main green from its own full check:
+  // noteMainLanding pins firstCheck at its revision and leaves lastGreen behind until its prompt
+  // audit. Its own run, which ran under the old selection or executor, is never the baseline, so it
+  // is not even read (review 0594f115): the audit row's lastGreen and its debt decide while the
+  // audit is pending, the audit's own run once it passed on this head (review 3287896a), and with
+  // no lastGreen yet there is no baseline (audit-baseline). firstCheck stays pinned after the
+  // audit, and only a coverage landing or a cross-head first check (no receipt run) sets it.
+  const coverageReceipt = !!receipt && !!savedAudit && savedAudit.firstCheck === receipt.snapshot.revision;
   const currentRun =
-    receipt?.check && !receipt.crossHeadProof
+    receipt?.check && !receipt.crossHeadProof && !coverageReceipt
       ? (await loadHostedCheck(ctx, { projectId: input.projectId, runId: receipt.check.runId })).run
       : null;
   // A newer exact full main pass supersedes older audit debt, including legacy
   // full gates that predate audit bookkeeping. Reduced main receipts use the
   // existing full audit baseline and retain all intervening debt.
-  // A coverage landing (Item 687d1eda, fix C) never earns main green from its own full check:
-  // noteMainLanding pins firstCheck at its revision and leaves lastGreen behind until its prompt
-  // audit. Its own run is then no baseline either; use the audit row's lastGreen and its debt.
   // "Keep the run" (fa2c1383) builds on this decision: a receipt run is reusable main evidence
   // only when the audit row agrees. Zero extra reads: savedAudit and receipt are already loaded.
-  const coverageReceipt =
-    !!receipt &&
-    !!savedAudit &&
-    savedAudit.firstCheck === receipt.snapshot.revision &&
-    promptAudit(savedAudit);
-  const preferReceipt = currentRun && fullGate(currentRun) && !docsGate(currentRun) && !coverageReceipt;
+  const preferReceipt = currentRun && fullGate(currentRun) && !docsGate(currentRun);
   const green = preferReceipt ? undefined : savedAudit?.lastGreen;
   const sourceKind = green ? ('audit' as const) : ('main-receipt' as const);
-  const auditId = green?.runId ?? (!receipt?.crossHeadProof ? receipt?.check?.runId : null);
+  // currentRun is null for a coverage receipt, so it never falls back to its own run.
+  const auditId = green?.runId ?? currentRun?.id ?? null;
   if (!auditId) return no('audit-baseline');
   const auditRun =
     preferReceipt || currentRun?.id === auditId

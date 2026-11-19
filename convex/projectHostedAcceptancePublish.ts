@@ -8,7 +8,7 @@ import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
 import { trackHostedOverlapMain } from './projectHostedOverlapStore';
 import { hostedAcceptGate, holdMainRed, skippedContractTests } from './projectHostedGate';
 import { protectedGatePaths, protectedPathMatches, reducedEvidenceActor } from '../src/contract-gate-policy';
-import { noteMainLanding, mainGate, fastLanding } from './projectHostedMainAuditState';
+import { noteMainLanding, mainGate, fastLanding, auditRow } from './projectHostedMainAuditState';
 import { noteTrustLanding, trustGateReader } from './projectHostedTrust';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { enqueueGithubMirror } from './projectGithubMirrorQueue';
@@ -175,7 +175,8 @@ export async function publishAcceptance(
       'EVIDENCE_CHANGED',
       'The current acceptance does not match the cross-head proof.',
     );
-    const audit = await mainGate(ctx, claim.projectId);
+    const savedAudit = await auditRow(ctx, claim.projectId);
+    const audit = await mainGate(ctx, claim.projectId, savedAudit);
     invariant(
       !audit.debt && audit.status !== 'red',
       'CHECK_EVIDENCE_REFRESH',
@@ -195,6 +196,7 @@ export async function publishAcceptance(
       proof: reuse,
       main,
       check: attempt.check!,
+      savedAudit,
     });
   }
   const registered = await ctx.db
