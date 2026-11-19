@@ -204,16 +204,43 @@ async function drive(s, input) {
   let result,
     calls = 0,
     maxActionMs = 0,
-    maxHeapDelta = 0;
-  do {
-    const before = process.memoryUsage().heapUsed,
-      started = performance.now();
-    result = JSON.parse(await atOneInstant(() => cleanup.clean._handler(s.ctx, input)));
-    maxActionMs = Math.max(maxActionMs, performance.now() - started);
-    maxHeapDelta = Math.max(maxHeapDelta, process.memoryUsage().heapUsed - before);
-    assert(++calls < 10000, 'requested operation advances finitely');
-  } while (result.pending);
-  return { ...result, calls, maxActionMs, maxHeapDelta };
+    maxStepMs = 0,
+    maxStepCpuMs = 0,
+    maxHeapDelta = 0,
+    stepStarted = 0,
+    stepCpu = process.cpuUsage();
+  // Date.now is held still, so each action runs its twenty-step cap whatever the machine speed;
+  // the five-second window has its own test above. Time each step instead: a planning step ends
+  // when its planStep commit returns. The fake database is in memory, so a step's CPU time is its
+  // work; its wall time adds only the wait for a loaded runner's CPU, and is reported.
+  const mutate = s.ctx.runMutation;
+  s.ctx.runMutation = async (ref, args) => {
+    const value = await mutate(ref, args);
+    if (getFunctionName(ref) === 'projectCheckLogCleanupStore:planStep') {
+      const now = performance.now(),
+        cpu = process.cpuUsage(stepCpu);
+      maxStepMs = Math.max(maxStepMs, now - stepStarted);
+      maxStepCpuMs = Math.max(maxStepCpuMs, (cpu.user + cpu.system) / 1000);
+      stepStarted = now;
+      stepCpu = process.cpuUsage();
+    }
+    return value;
+  };
+  try {
+    do {
+      const before = process.memoryUsage().heapUsed,
+        started = performance.now();
+      stepStarted = started;
+      stepCpu = process.cpuUsage();
+      result = JSON.parse(await atOneInstant(() => cleanup.clean._handler(s.ctx, input)));
+      maxActionMs = Math.max(maxActionMs, performance.now() - started);
+      maxHeapDelta = Math.max(maxHeapDelta, process.memoryUsage().heapUsed - before);
+      assert(++calls < 10000, 'requested operation advances finitely');
+    } while (result.pending);
+  } finally {
+    s.ctx.runMutation = mutate;
+  }
+  return { ...result, calls, maxActionMs, maxStepMs, maxStepCpuMs, maxHeapDelta };
 }
 test('paged cleanup resumes after a lost durable step, applies only the reviewed plan, and replays completed deletes', async t => {
   const { s } = await seeded(t, 5),
@@ -324,7 +351,9 @@ test('dogfood-shaped synthetic inventory measures bounded actions, calls and mem
     dry = await drive(s, input);
   assert.equal(dry.objects, 2800);
   assert.equal(dry.bytes, logBytes);
-  assert(dry.maxActionMs < 10000, 'each finite metadata action stays well inside server time');
+  // Production stops an action at its 5 s window plus the step in flight, so a step under 5 s
+  // keeps every action inside 10 s of server time.
+  assert(dry.maxStepCpuMs < 5000, 'each finite metadata action stays well inside server time');
   assert(
     dry.maxHeapDelta < 128 * 1024 * 1024,
     'includes the in-memory fake database, rather than real server storage',
@@ -355,6 +384,8 @@ test('dogfood-shaped synthetic inventory measures bounded actions, calls and mem
       elapsedMs: planElapsedMs,
       actions: dry.calls,
       maxActionMs: dry.maxActionMs,
+      maxStepMs: dry.maxStepMs,
+      maxStepCpuMs: dry.maxStepCpuMs,
       maxHeapDeltaBytesIncludingFakeDB: dry.maxHeapDelta,
       peakRssBytesIncludingFakeDB: process.resourceUsage().maxRSS * 1024,
       calls: planningCalls,
