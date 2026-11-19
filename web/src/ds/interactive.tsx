@@ -188,7 +188,14 @@ export function Dock(props: DockProps) {
       {layer ? (
         <layer.Dock {...props} />
       ) : (
-        <div className="dock" role="group" aria-label={props.label}>
+        <div
+          className="dock"
+          role="group"
+          aria-label={props.label}
+          data-shut={
+            (['top', 'a', 'b'] as const).filter(zone => !props.layout[zone].length).join(' ') || undefined
+          }
+        >
           {(['top', 'a', 'b'] as const).map(zone => (
             <div key={zone} className="zone" data-zone={zone}>
               {props.layout[zone].map(id => {

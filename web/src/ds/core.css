@@ -74,6 +74,11 @@
   .zone[data-zone="top"] { grid-area: top; }
   .zone[data-zone="a"] { grid-area: a; border-right: var(--rule) solid var(--line); }
   .zone[data-zone="b"] { grid-area: b; }
+  /* An empty zone is not drawn at rest: the other column takes the full width, and the zone comes back as a drop
+     target only while a region is carried (Dock.tsx sets data-shut; Item 6ebb58ab). */
+  .dock[data-shut~="top"] .zone[data-zone="top"], .dock[data-shut~="a"] .zone[data-zone="a"], .dock[data-shut~="b"] .zone[data-zone="b"] { display: none; }
+  .dock[data-shut~="a"], .dock[data-shut~="b"] { grid-template: "top" auto "a" auto "b" auto / minmax(0, 1fr); }
+  .dock[data-shut~="b"] .zone[data-zone="a"] { border-right: 0; }
   .region { background: var(--surface); border-bottom: var(--rule) solid var(--line); min-width: 0; container-type: inline-size; position: relative; }
   .region.quiet { background: var(--bg); }
   .region.moved { animation: ds-settle var(--d-travel) var(--ease-out); }

@@ -2,6 +2,8 @@
 // The dock: a screen's regions in a full-width row on top and two columns below. A region moves by its handle with the
 // same model as a list (Enter picks up, arrow keys choose, Enter drops, Escape cancels; Tab reaches the other parts of
 // the dock while carrying it), or by the handle's menu: up, down, to the other column, full width, reset the layout.
+// An empty zone is not drawn at rest (the other column takes the full width); it comes back as a drop target, saying
+// "Drop a region here", only while a region is carried.
 import { useState, type ReactNode } from 'react';
 import {
   Button,
@@ -48,6 +50,10 @@ export function moveRegion(layout: DockLayout, id: string, zone: DockZone, index
   next[zone].splice(Math.max(0, Math.min(next[zone].length, index)), 0, id);
   return next;
 }
+
+/** The zones not drawn at rest: the empty ones, while no region is carried (a carried region needs every zone). */
+export const shutZones = (layout: DockLayout, carrying = false) =>
+  carrying ? undefined : ZONES.filter(zone => !layout[zone].length).join(' ') || undefined;
 
 export const zoneOf = (layout: DockLayout, id: string) => ZONES.find(z => layout[z].includes(id)) ?? 'a';
 
@@ -104,7 +110,13 @@ export function Dock({ label, regions, layout, onLayout, onReset }: DockProps) {
   };
   return (
     <EnglishOnly>
-      <div className="dock" role="group" aria-label={label} data-dock="">
+      <div
+        className="dock"
+        role="group"
+        aria-label={label}
+        data-dock=""
+        data-shut={shutZones(layout, moving !== null)}
+      >
         {ZONES.map(zone => (
           <Zone
             key={zone}

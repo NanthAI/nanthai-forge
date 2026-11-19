@@ -2,8 +2,9 @@
 // The design system's reference surface in a real browser (Item 6ebb58ab, lines moved from f97fb89d): the one reorder
 // model (Enter picks up, arrows choose, Enter drops, Escape cancels; the handle's menu on a phone) with the drawn drop
 // line, the screen and the announcement agreeing after every move; the dock moving a region between the full-width row
-// and both columns; a press made before the behaviour layer arrives is carried out and attaching it moves nothing; axe
-// and no sideways scroll at desk and phone width in both themes. Set FORGE_DS_SHOTS to a folder to also save the
+// and both columns, an empty zone drawn only while a region is carried; a press made before the behaviour layer
+// arrives is carried out and attaching it moves nothing; axe and no sideways scroll at desk and phone width in both
+// themes. Set FORGE_DS_SHOTS to a folder to also save the
 // screenshots the lead reviews (both themes, mid-drag included); nothing is written otherwise.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -341,6 +342,100 @@ test('the reference surface: reorder, dock, late layer, axe and widths in both t
       assert.equal(await menu('Plan, in order', 'Reset layout'), 'Layout reset.');
       assert.deepEqual(await zones(phone), LAYOUT);
     });
+
+    await t.test(
+      'an empty zone is not drawn at rest and comes back as the drop target while a region is carried',
+      async t => {
+        // Item 6ebb58ab (owner 2026-11-19): a column with no regions drew "Drop a region here" beside the other column
+        // on every docked screen. At rest the other column takes the full width; while a region is carried the empty
+        // zone is back, says so, and takes the drop.
+        // The region carried is first in its column: Tab reaches a column's first region (arrows reach the rest).
+        const ONE_COLUMN = { top: ['needs'], a: ['checks', 'plan', 'lanes', 'notes'], b: [] };
+        const drawn = page =>
+          page.evaluate(() => {
+            const shown = el => !!el && el.getClientRects().length > 0;
+            const dock = document.querySelector('.dock[data-dock]').getBoundingClientRect();
+            const a = document.querySelector('.zone[data-zone=a] > .ds-region').getBoundingClientRect();
+            return {
+              empty: [...document.querySelectorAll('.zone-empty')].filter(shown).map(el => el.textContent),
+              b: shown(document.querySelector('.zone[data-zone=b]')),
+              full: Math.abs(a.width - dock.width) < 1,
+            };
+          });
+        for (const [viewport, width] of [
+          [DESK, 'desk'],
+          [PHONE, 'phone'],
+        ]) {
+          const { page } = await open(t, viewport);
+          await page.evaluate(
+            layout => localStorage.setItem('forge.dock.reference', JSON.stringify(layout)),
+            ONE_COLUMN,
+          );
+          await page.reload();
+          await page.locator('.ds-list[role=grid]').waitFor();
+          assert.deepEqual(await zones(page), ONE_COLUMN);
+          assert.deepEqual(await drawn(page), { empty: [], b: false, full: true }, `${width}: at rest`);
+          await shot(page.locator(DOCK), `dock-one-column-${width}-dark`);
+          await theme(page, 'light');
+          assert.deepEqual(
+            await drawn(page),
+            { empty: [], b: false, full: true },
+            `${width}: at rest, light`,
+          );
+          await shot(page.locator(DOCK), `dock-one-column-${width}-light`);
+          if (viewport !== DESK) continue; // a phone moves regions by the handle's menu, never by carrying them
+          await tabTo(page, 'Move Checks');
+          await page.keyboard.press('Enter');
+          await waitForDropTarget(page);
+          const carried = await drawn(page);
+          assert.deepEqual(
+            carried.empty,
+            ['Drop a region here'],
+            'the empty zone is back while Checks is carried',
+          );
+          assert.equal(carried.b, true);
+          for (let i = 0; i < 6; i++) {
+            if (await page.evaluate(() => document.activeElement?.closest('.zone')?.dataset.zone === 'b'))
+              break;
+            await page.keyboard.press('Tab');
+          }
+          await shot(page.locator(DOCK), 'mid-drag-empty-zone-light');
+          const heard = await hear(page, DOCK, () => page.keyboard.press('Enter'));
+          assert.equal(heard, 'Moved Checks to the right column, position 1 of 1.');
+          assert.deepEqual(await zones(page), {
+            top: ['needs'],
+            a: ['plan', 'lanes', 'notes'],
+            b: ['checks'],
+          });
+          const after = await drawn(page);
+          assert.deepEqual(
+            [after.empty, after.b, after.full],
+            [[], true, false],
+            'two columns again, nothing empty',
+          );
+          // Carried and put back: the empty zone shuts again.
+          const notesFirst = { top: ['needs'], a: ['notes', 'plan', 'lanes', 'checks'], b: [] };
+          await page.evaluate(
+            layout => localStorage.setItem('forge.dock.reference', JSON.stringify(layout)),
+            notesFirst,
+          );
+          await page.reload();
+          await page.locator('.ds-list[role=grid]').waitFor();
+          assert.deepEqual(await drawn(page), { empty: [], b: false, full: true });
+          await tabTo(page, 'Move Notes');
+          await page.keyboard.press('Enter');
+          await waitForDropTarget(page);
+          assert.deepEqual((await drawn(page)).empty, ['Drop a region here']);
+          await page.keyboard.press('Escape');
+          await page.waitForFunction(() => !document.querySelector('.zone-empty')?.getClientRects().length);
+          assert.deepEqual(
+            await drawn(page),
+            { empty: [], b: false, full: true },
+            'at rest again after Escape',
+          );
+        }
+      },
+    );
 
     await t.test('a fold held by the screen starts folded and the screen sees it open', async t => {
       const { page } = await open(t);
