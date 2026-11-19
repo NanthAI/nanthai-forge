@@ -13,9 +13,13 @@ import { drainPostAccept } from '../dist/post-accept-main.js';
 import { bisectLandings } from '../dist/optimistic-bisect.js';
 import { agentPeers } from '../dist/agent-peers.js';
 import { failedAuditTests } from '../dist/optimistic-evidence.js';
+import { cleanupOwner } from './owner-cleanup.mjs';
 
 const now = () => new Date().toISOString();
-function fixture(t, { bad = [1], enabled = true, supervised = false, flaky = false, count = 4 } = {}) {
+function fixture(
+  t,
+  { bad = [1], enabled = true, supervised = false, flaky = false, count = 4, detached = true } = {},
+) {
   const savedWait = process.env.FORGE_WORK_LOCK_WAIT_MS;
   process.env.FORGE_WORK_LOCK_WAIT_MS = '10000';
   t.after(() => {
@@ -27,7 +31,13 @@ function fixture(t, { bad = [1], enabled = true, supervised = false, flaky = fal
   const { head: base } = initNative(root),
     store = new WorkStore(root),
     source = new NativeSource(root);
-  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }));
+  // Real post-accept audits run in detached check controllers that still release their queue
+  // slot and Work lock after the run is terminal: join them through their leases before removal.
+  t.after(() =>
+    detached
+      ? cleanupOwner(root)
+      : rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }),
+  );
   const marker = join(store.directory, 'flake-once');
   const check = {
     id: randomUUID(),
@@ -322,7 +332,7 @@ function interceptSpawn(t) {
 
 test('regression: optimistic recovery propagates MAIN_AUDIT_STALLED without a verdict', async t => {
   const calls = interceptSpawn(t);
-  const f = fixture(t, { count: 1, bad: [0] });
+  const f = fixture(t, { count: 1, bad: [0], detached: false });
   const { selectPostAccept } = await import('../dist/post-accept-edit.js');
   const { prepareRunRegistration } = await import('../dist/work-run-preparation.js');
   const { checkEnvironment } = await import('../dist/check-environment.js');
@@ -373,7 +383,7 @@ test('regression: optimistic recovery propagates MAIN_AUDIT_STALLED without a ve
 test('regression: recovery editing a pre-existing fix-main Intent preserves retained notes', async t => {
   const { randomUUID } = await import('node:crypto');
   interceptSpawn(t);
-  const f = fixture(t, { count: 1, bad: [0] });
+  const f = fixture(t, { count: 1, bad: [0], detached: false });
   const { selectPostAccept } = await import('../dist/post-accept-edit.js');
   const { prepareRunRegistration } = await import('../dist/work-run-preparation.js');
   const { checkEnvironment } = await import('../dist/check-environment.js');
