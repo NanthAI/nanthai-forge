@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { digest } from '../dist/hash.js';
 import { trialMerge, TrialUnavailable } from '../dist/hosted-trial-merge.js';
-import { nativeConflictRegions } from '../dist/native-text-merge.js';
+import { mergeNativeText, nativeConflictRegions } from '../dist/native-text-merge.js';
+import { resolveMarkdownText } from '../dist/native-docs-resolve.js';
 import { exactConflictNotice, exactConflictBanner } from '../dist/hosted-conflict-notice.js';
 import { state } from './hosted-fixture.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
@@ -620,4 +621,38 @@ test('b4e13aaf: a resolution that merged main has no conflict with main while ma
   const moved = task(mine, [], later);
   moved.mine.resolved = file(mainNow);
   assert.equal((await trialMerge([moved], read)).conflicts[0].peer, 'main');
+});
+
+test('491ddd77: a declared split plus a racing raw edit raises no notice, as compose remaps it', async () => {
+  // The same split as tests/doc-split-remap.test.mjs: the old doc, its skeleton, and a raw edit.
+  const path = 'docs/agents/guide.md';
+  const old = Buffer.from('# Guide\n\n## One\n\nFirst.\n\n## Two\n\nSecond.\n');
+  const skeleton = Buffer.from('# Guide\n\nEntries: [guide.d/sections](guide.d/sections/)\n');
+  // A mid-file edit: before this rule, both the text merge and the keep-both rule refused it.
+  const raw = Buffer.from('# Guide\n\n## One\n\nFirst, edited.\n\n## Two\n\nSecond.\n');
+  assert.equal(mergeNativeText(old, skeleton, raw, path), null);
+  assert.equal(resolveMarkdownText(old, skeleton, raw), null);
+  const read = store(old, skeleton, raw);
+  const doc = (mine, other, onMain) => ({
+    path,
+    mine: { before: file(old), after: file(mine) },
+    ...(onMain ? { main: file(other) } : {}),
+    peers: onMain ? [] : [{ laneId: 'peer', before: file(old), after: file(other) }],
+  });
+  for (const [mine, other, onMain, label] of [
+    [skeleton, raw, true, 'the split saves while main has the raw edit'],
+    [raw, skeleton, true, 'a raw edit saves after main landed the split'],
+    [skeleton, raw, false, 'the split against a peer with the raw edit'],
+    [raw, skeleton, false, 'a raw edit against a peer with the split'],
+  ])
+    assert.deepEqual((await trialMerge([doc(mine, other, onMain)], read)).conflicts, [], label);
+  // Without the split, the same two raw edits of one line still conflict.
+  const one = Buffer.from(old.toString().replace('Second.', 'Second, one.'));
+  const two = Buffer.from(old.toString().replace('Second.', 'Second, two.'));
+  assert.equal((await trialMerge([doc(one, two, true)], store(old, one, two))).conflicts.length, 1);
+  // A skeleton naming a folder outside its own NAME.d/ is a conflict at compose, so it is noticed.
+  const outside = Buffer.from(`${skeleton}\nEntries: [other.d/x](other.d/x/)\n`);
+  const noticed = await trialMerge([doc(outside, raw, true)], store(old, outside, raw));
+  assert.equal(noticed.conflicts.length, 1);
+  assert.match(noticed.conflicts[0].reason, /outside/);
 });

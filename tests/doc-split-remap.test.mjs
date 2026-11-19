@@ -11,7 +11,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { remapSplitEdit } from '../dist/doc-split-remap.js';
 import { assembleDocument } from '../dist/doc-fragments.js';
-import { resolveDocsComposition, resolveMarkdownText } from '../dist/native-docs-resolve.js';
+import {
+  resolveDocsComposition,
+  resolveMarkdownText,
+  SPLIT_BYTES_MAX,
+  SPLIT_FRAGMENTS_MAX,
+} from '../dist/native-docs-resolve.js';
 import { NativeSource } from '../dist/native-source.js';
 import { buildComposePages } from '../dist/hosted-compose.js';
 import { saveBytes } from '../dist/hosted-save.js';
@@ -329,4 +334,146 @@ test('hosted compose worker lands the split over a raw edit in one composition',
   assert.equal(text(DOC), skeleton);
   assert.equal(text(`${DIR}/0300-three.md`), '## Three\n\nThird paragraph.\n\nRaw edit landed meanwhile.\n');
   assert(!output.reads.some(p => p.sha256 === s.hidden.blob), 'unrelated bytes stay unread');
+});
+
+// Review 31156e54 follow-ups: a recognised split past a bound stays a conflict (never the keep-both
+// rule, which put raw text under the Entries line), only the files assembly reads are fetched, and
+// an Entries folder outside NAME.d/ is a conflict.
+test('a skeleton-only raw edit changes the skeleton and no fragment', t => {
+  const raw = base.replace('# Guide\n', '# The guide\n');
+  const result = remap(raw);
+  assert(result);
+  assert.equal(result.skeleton, skeleton.replace('# Guide\n', '# The guide\n'));
+  assert.equal(result.fragments.size, 0);
+  // Alone, that edit merges as plain text. With a fragment edit beside it the plain merge conflicts,
+  // and composition puts the heading in the skeleton and the edit in its fragment.
+  const both = raw.replace('Second paragraph.', 'Second paragraph, edited.');
+  const d = disk(t),
+    root = d.state([d.file(DOC, base)]);
+  const split = d.state(
+    [d.file(DOC, skeleton), ...Object.entries(fragments).map(([path, text]) => d.file(path, text))],
+    [root],
+  );
+  const edited = d.state([d.file(DOC, both)], [root]);
+  const composed = resolveDocsComposition(d.source, split, edited, 'Compose', at, { mainFirst: true });
+  assert(composed);
+  assert.deepEqual(composed.paths, [`${DIR}/0200-two.md`, DOC]);
+  assert.equal(bytesAt(d.source, composed.head, DOC), result.skeleton);
+  assert.equal(
+    bytesAt(d.source, composed.head, `${DIR}/0200-two.md`),
+    '## Two\n\nSecond paragraph, edited.\nSecond, line two.\n',
+  );
+});
+
+test('CRLF fragments and a fragment with no final newline keep their bytes', () => {
+  const crlf = Object.fromEntries(
+    Object.entries(fragments).map(([path, text]) => [path, text.replace(/\n/g, '\r\n')]),
+  );
+  const crlfBase = assembleDocument(DOC, skeleton, readerOf(crlf));
+  const crlfRaw = crlfBase.replace('Second paragraph.\r\n', 'Second paragraph, edited.\r\n');
+  const one = remap(crlfRaw, { base: crlfBase, fragments: crlf });
+  assert(one);
+  assert.equal(
+    one.fragments.get(`${DIR}/0200-two.md`),
+    '## Two\r\n\r\nSecond paragraph, edited.\r\nSecond, line two.\r\n',
+  );
+  assert.equal(
+    assembleDocument(DOC, one.skeleton, readerOf({ ...crlf, ...Object.fromEntries(one.fragments) })),
+    crlfRaw,
+  );
+  const bare = { ...fragments, [`${DIR}/0300-three.md`]: '## Three\n\nThird paragraph.' };
+  assert.equal(assembleDocument(DOC, skeleton, readerOf(bare)), base);
+  const raw = base.replace('Third paragraph.\n', 'Third paragraph.\n\nThe end.\n');
+  const two = remap(raw, { fragments: bare });
+  assert(two);
+  assert.equal(two.fragments.get(`${DIR}/0300-three.md`), '## Three\n\nThird paragraph.\n\nThe end.');
+  assert.equal(
+    assembleDocument(DOC, two.skeleton, readerOf({ ...bare, ...Object.fromEntries(two.fragments) })),
+    raw,
+  );
+});
+
+/** A split doc with `count` fragments of `size` bytes each, its pre-split text and a raw tail edit. */
+function many(d, count, size = 0) {
+  const files = {};
+  for (let i = 0; i < count; i++)
+    files[`${DIR}/${String(i).padStart(4, '0')}.md`] = `## S${i}\n\n${'x'.repeat(size)}Para ${i}.\n`;
+  const old = assembleDocument(DOC, skeleton, readerOf(files));
+  const root = d.state([d.file(DOC, old)]);
+  const split = d.state(
+    [d.file(DOC, skeleton), ...Object.entries(files).map(([path, text]) => d.file(path, text))],
+    [root],
+  );
+  const edited = d.state([d.file(DOC, `${old}\nRaw tail.\n`)], [root]);
+  return { split, edited, last: `${DIR}/${String(count - 1).padStart(4, '0')}.md` };
+}
+
+test('a split over the fragment cap stays a conflict instead of taking the keep-both rule', t => {
+  const d = disk(t);
+  const at500 = many(d, SPLIT_FRAGMENTS_MAX);
+  const fits = resolveDocsComposition(d.source, at500.split, at500.edited, 'Compose', at, {
+    mainFirst: true,
+  });
+  assert(fits, 'at the cap the remap runs');
+  assert.match(bytesAt(d.source, fits.head, at500.last), /Raw tail\.\n$/);
+  const over = many(d, SPLIT_FRAGMENTS_MAX + 1);
+  for (const [lane, main] of [
+    [over.split, over.edited],
+    [over.edited, over.split],
+  ])
+    assert.equal(resolveDocsComposition(d.source, lane, main, 'Compose', at, { mainFirst: true }), null);
+});
+
+test('a split whose fragments pass the byte cap stays a conflict', t => {
+  // A small old doc; the split also added sections whose fragments pass SPLIT_BYTES_MAX together.
+  // The raw edit renames the first heading, far from the split's own insertion.
+  const d = disk(t),
+    old = '# Guide\n\n## S0\n\nIntro.\n',
+    root = d.state([d.file(DOC, old)]);
+  const edited = d.state([d.file(DOC, old.replace('## S0', '## S0, renamed'))], [root]);
+  const compose = size => {
+    const files = [
+      d.file(`${DIR}/0.md`, '## S0\n\nIntro.\n'),
+      ...[1, 2, 3].map(i => d.file(`${DIR}/${i}.md`, `## S${i}\n\n${'x'.repeat(size)}\n`)),
+    ];
+    const split = d.state([d.file(DOC, skeleton), ...files], [root]);
+    return resolveDocsComposition(d.source, split, edited, 'Compose', at, { mainFirst: true });
+  };
+  const small = compose(10);
+  assert(small, 'under the cap the remap lands');
+  assert.equal(bytesAt(d.source, small.head, `${DIR}/0.md`), '## S0, renamed\n\nIntro.\n');
+  assert.equal(compose(Math.ceil(SPLIT_BYTES_MAX / 3)), null);
+});
+
+test('only the .md files directly inside the Entries folders are fetched', t => {
+  const d = disk(t),
+    { root, split, edited } = sides(d);
+  const extra = [
+    d.file('docs/agents/guide.d/notes.txt', 'not an entry\n'),
+    d.file(`${DIR}/deeper/0100-nested.md`, 'nested, not read by assembly\n'),
+    d.file('docs/agents/guide.d/unlisted/0100-a.md', 'no Entries line names this folder\n'),
+  ];
+  const withExtra = d.state([...d.source.state(split).files, ...extra], [root]);
+  const asked = [];
+  d.source.prefetch = ids => asked.push(...ids);
+  const result = resolveDocsComposition(d.source, withExtra, edited, 'Compose', at, { mainFirst: true });
+  assert(result, 'the remap still lands');
+  for (const file of extra) assert(!asked.includes(file.blob), `${file.path} is not fetched`);
+  assert.equal(new Set(asked).size, 3 + Object.keys(fragments).length);
+});
+
+test('an Entries folder outside NAME.d/ makes the split a conflict', t => {
+  const outside = `${skeleton}\nEntries: [other.d/x](other.d/x/)\n`;
+  const outsideFiles = { ...fragments, 'docs/agents/other.d/x/0100-a.md': 'Outside entry.\n' };
+  const old = assembleDocument(DOC, outside, readerOf(outsideFiles));
+  const raw = old.replace('Third paragraph.\n', 'Third paragraph, edited.\n');
+  assert.equal(remap(raw, { base: old, skeleton: outside, fragments: outsideFiles }), null);
+  const d = disk(t),
+    root = d.state([d.file(DOC, old)]);
+  const split = d.state(
+    [d.file(DOC, outside), ...Object.entries(outsideFiles).map(([path, text]) => d.file(path, text))],
+    [root],
+  );
+  const edited = d.state([d.file(DOC, raw)], [root]);
+  assert.equal(resolveDocsComposition(d.source, split, edited, 'Compose', at, { mainFirst: true }), null);
 });

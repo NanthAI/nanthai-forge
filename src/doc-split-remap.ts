@@ -23,6 +23,7 @@
 import {
   ENTRIES_LINE,
   assembleDocument,
+  documentFragmentFolders,
   relinkMarkdown,
   tableRow,
   type FragmentReader,
@@ -119,6 +120,26 @@ function touches(a: Edit, b: Edit) {
 export const splitRecognised = (base: string, raw: string, skeleton: string) =>
   !hasEntries(base) && !hasEntries(raw) && hasEntries(skeleton);
 
+/** How composition treats a docs conflict on `path` where `skeleton` may split the old file (base
+ * and raw are its other two versions). One decision for compose and the save-time trial merge, so a
+ * notice never predicts a conflict compose remaps:
+ * - undefined: no split; the Markdown rule decides as before;
+ * - 'conflict': a split compose keeps as a conflict (an `Entries:` folder outside `NAME.d/`, whose
+ *   bytes the remap's proof would not see);
+ * - 'remap': compose remaps the raw edits (its byte proof still has the last word). */
+export function splitConflict(
+  path: string,
+  base: string,
+  raw: string,
+  skeleton: string,
+): 'remap' | 'conflict' | undefined {
+  if (!path.endsWith('.md') || !splitRecognised(base, raw, skeleton)) return undefined;
+  const home = `${path.slice(0, -3)}.d/`;
+  return documentFragmentFolders(path, skeleton).every(folder => `${folder}/`.startsWith(home))
+    ? 'remap'
+    : 'conflict';
+}
+
 export interface SplitRemap {
   /** The split side's skeleton, with any hunk that fell between skeleton lines. */
   skeleton: string;
@@ -136,7 +157,7 @@ export function remapSplitEdit(input: {
   reader: FragmentReader;
 }): SplitRemap | null {
   const { path, base, raw, skeleton, reader } = input;
-  if (!splitRecognised(base, raw, skeleton)) return null;
+  if (splitConflict(path, base, raw, skeleton) !== 'remap') return null;
   const assembled = assembledLines(path, skeleton, reader);
   if (!assembled) return null;
   const page = assembled.lines.map(line => line.text),

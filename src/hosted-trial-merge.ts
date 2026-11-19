@@ -2,6 +2,7 @@
 import { mergeNativeText, nativeConflictRegions } from './native-text-merge.js';
 import { syntaxConflictReason } from './state/merge-syntax.js';
 import { conflictRule, resolveListText } from './native-docs-resolve.js';
+import { splitConflict } from './doc-split-remap.js';
 import type { DeclaredMergePaths } from './project-config.js';
 
 /** Exact conflicts at save (flip 4, Issue 853fcde3). A save trial-merges each file it shares with
@@ -44,6 +45,15 @@ const refuse = (reason: string, left: TrialRange[] = [], right: TrialRange[] = [
   right: right.slice(0, TRIAL_RANGES),
 });
 
+const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+const utf8 = (bytes: Buffer) => {
+  try {
+    return decoder.decode(bytes);
+  } catch {
+    return undefined;
+  }
+};
+
 /** Bytes of a file this trial needs but could not read (recipe-only, too large, or missing). */
 export class TrialUnavailable extends Error {}
 
@@ -79,6 +89,23 @@ async function entry(
   const [base, left, right] = [original, x, y].map(read) as [Buffer, Buffer, Buffer];
   const merged = mergeNativeText(base, left, right, path);
   if (!merged) {
+    // A declared split of a Markdown doc: compose remaps the other side's raw edits into the
+    // fragments (Item 491ddd77), deciding with the same splitConflict, so no notice predicts it.
+    // The doc keeps the split side's skeleton; the remap's byte proof runs at compose.
+    if (conflictRule(path, await declared()) === 'docs') {
+      const texts = [base, left, right].map(utf8);
+      if (texts.every(value => value !== undefined)) {
+        const [old, main, lane] = texts as [string, string, string];
+        for (const [skeleton, raw, file] of [
+          [main, lane, x],
+          [lane, main, y],
+        ] as const) {
+          const outcome = splitConflict(path, old, raw, skeleton);
+          if (outcome === 'remap') return { ok: true, file };
+          if (outcome === 'conflict') return refuse('split with an Entries folder outside its own NAME.d/');
+        }
+      }
+    }
     const resolved = await ruled();
     if (resolved) return resolved;
     const regions = nativeConflictRegions(base, left, right);

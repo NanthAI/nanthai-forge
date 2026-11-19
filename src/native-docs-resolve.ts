@@ -5,7 +5,8 @@ import { nativeMergeMessage, type NativeMergeConflict, type NativeMergeResolutio
 import type { NativeInsertionOrder } from './native-text-merge.js';
 import { conflictRule, markdownDoc, type ConflictRule } from './docs-resolution.js';
 import { declaredMergePaths, FORGE_CONFIG_FILE, type DeclaredMergePaths } from './project-config.js';
-import { remapSplitEdit, splitRecognised } from './doc-split-remap.js';
+import { remapSplitEdit, splitConflict } from './doc-split-remap.js';
+import { documentFragmentFolders } from './doc-fragments.js';
 export { DOCS_RULE, markdownDoc, conflictRule, type ConflictRule } from './docs-resolution.js';
 
 type Edit = { start: number; end: number; lines: string[]; side: 0 | 1 };
@@ -321,6 +322,8 @@ export function resolveDocsComposition(
 }
 
 type Side = 'left' | 'right';
+/** Split bytes that are binary or past SPLIT_BYTES_MAX. */
+class Unreadable extends Error {}
 /** The side that split this doc into fragments (Item 491ddd77): it alone has files under the
  * doc's `NAME.d/` folder. State metadata only. */
 function splitSide(item: NativeMergeConflict, trees: Record<Side, () => NativeFile[]>): Side | undefined {
@@ -332,14 +335,16 @@ function splitSide(item: NativeMergeConflict, trees: Record<Side, () => NativeFi
     right = has('right');
   return left === right ? undefined : left ? 'left' : 'right';
 }
-/** Fragment files one split remap reads at most; past it the conflict stays. */
+/** Fragment files one split remap reads at most; past it a recognised split stays a conflict. */
 export const SPLIT_FRAGMENTS_MAX = 500;
-/** Bytes one split remap reads at most (old doc, both sides and fragments): the text-merge bound. */
+/** Bytes one split remap reads at most (old doc, both sides and fragments): the text-merge bound.
+ * Past it a recognised split stays a conflict. */
 export const SPLIT_BYTES_MAX = 4 * 1024 * 1024;
 /** The split side's skeleton blob, with raw edits moved into its fragments (replaced in `files`).
  * Null keeps the conflict of a recognised split; undefined means this is no split, and the
- * conflict takes the Markdown rule exactly as before. One batched read of the doc's three
- * versions and the fragments, only after metadata matched. */
+ * conflict takes the Markdown rule exactly as before. Recognition reads only the doc's three
+ * versions (the merge that conflicted already read them); then one batched read of the `.md`
+ * fragments directly inside the skeleton's `Entries:` folders, the only files assembly reads. */
 function remapSplitConflict(
   source: NativeSource,
   item: NativeMergeConflict,
@@ -348,59 +353,75 @@ function remapSplitConflict(
   files: NativeFile[],
 ): { blob: string; paths: string[] } | null | undefined {
   const folder = `${item.path.slice(0, -3)}.d/`,
-    fragments = tree.filter(file => file.path.startsWith(folder));
-  if (fragments.length > SPLIT_FRAGMENTS_MAX || fragments.some(file => file.mode !== 'file'))
-    return undefined;
-  const skeleton = item[side]!,
+    skeleton = item[side]!,
     raw = item[side === 'left' ? 'right' : 'left']!,
     base = item.base!;
-  source.prefetch([base.blob, raw.blob, skeleton.blob, ...fragments.map(file => file.blob)]);
+  source.prefetch([base.blob, raw.blob, skeleton.blob]);
   const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   let bytes = 0;
   const texts = new Map<string, string>();
+  /** Decoded text, counted against SPLIT_BYTES_MAX once `capped`; binary or over the cap throws
+   * Unreadable. A missing object throws NeededObject, so the caller fetches it and retries. */
+  let capped = false;
   const text = (blob: string) => {
     let value = texts.get(blob);
     if (value === undefined) {
       const buffer = source.object(blob);
       bytes += buffer.length;
-      if (bytes > SPLIT_BYTES_MAX) throw new RangeError('split too large');
-      texts.set(blob, (value = decoder.decode(buffer)));
+      try {
+        value = decoder.decode(buffer);
+      } catch {
+        throw new Unreadable();
+      }
+      texts.set(blob, value);
     }
+    if (capped && bytes > SPLIT_BYTES_MAX) throw new Unreadable();
     return value;
   };
-  // Binary or oversized input: a missing object is fetched and retried; anything else is no split.
-  const readable = <T>(read: () => T): T | undefined => {
+  const read = <T>(run: () => T): T | undefined => {
     try {
-      return read();
+      return run();
     } catch (error) {
-      if (error instanceof TypeError || error instanceof RangeError) return undefined;
+      if (error instanceof Unreadable) return undefined;
       throw error;
     }
   };
-  const sides = {
-    base: readable(() => text(base.blob)),
-    raw: readable(() => text(raw.blob)),
-    skeleton: readable(() => text(skeleton.blob)),
-  };
-  if (sides.base === undefined || sides.raw === undefined || sides.skeleton === undefined) return undefined;
-  if (!splitRecognised(sides.base, sides.raw, sides.skeleton)) return undefined;
-  // A recognised split: from here on, anything the remap cannot prove stays a conflict.
-  // The composed tree must hold exactly the split side's fragments, or the remap's lines are stale.
-  const merged = files.filter(file => file.path.startsWith(folder));
+  const sides = read(() => ({ base: text(base.blob), raw: text(raw.blob), skeleton: text(skeleton.blob) }));
+  // Binary input is no split: the Markdown rule decides as before.
+  if (!sides) return undefined;
+  const outcome = splitConflict(item.path, sides.base, sides.raw, sides.skeleton);
+  if (!outcome) return undefined;
+  // A recognised split: from here on, anything the remap cannot prove or bound stays a conflict.
+  if (outcome === 'conflict' || bytes > SPLIT_BYTES_MAX) return null;
+  const inFolder = tree.filter(file => file.path.startsWith(folder));
+  if (inFolder.some(file => file.mode !== 'file')) return null;
+  const entries = new Set(documentFragmentFolders(item.path, sides.skeleton));
+  const fragments = inFolder.filter(
+    file => file.path.endsWith('.md') && entries.has(file.path.slice(0, file.path.lastIndexOf('/'))),
+  );
+  if (fragments.length > SPLIT_FRAGMENTS_MAX) return null;
+  // The composed tree must hold exactly the split side's folder, or the remap's lines are stale.
+  const merged = new Map(
+    files.filter(file => file.path.startsWith(folder)).map(file => [file.path, file] as const),
+  );
   if (
-    merged.length !== fragments.length ||
-    !fragments.every(file =>
-      merged.some(m => m.path === file.path && m.blob === file.blob && m.mode === file.mode),
-    )
+    merged.size !== inFolder.length ||
+    !inFolder.every(file => {
+      const m = merged.get(file.path);
+      return m?.blob === file.blob && m.mode === file.mode;
+    })
   )
     return null;
+  source.prefetch(fragments.map(file => file.blob));
+  capped = true;
   const byPath = new Map(fragments.map(file => [file.path, file.blob]));
-  const remap = readable(() =>
+  // A binary fragment, or fragments past the byte cap, keep the conflict.
+  const remap = read(() =>
     remapSplitEdit({
       path: item.path,
-      base: sides.base!,
-      raw: sides.raw!,
-      skeleton: sides.skeleton!,
+      base: sides.base,
+      raw: sides.raw,
+      skeleton: sides.skeleton,
       reader: {
         list: directory =>
           [...byPath.keys()].flatMap(path =>

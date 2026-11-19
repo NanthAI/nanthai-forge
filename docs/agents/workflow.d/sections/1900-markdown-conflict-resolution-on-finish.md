@@ -36,6 +36,14 @@ lands in one round. A hunk across two entry files, on the blank line between ent
 on an `Entries:` line, or touching a line the split itself changed stays a conflict. The
 merged entry files must assemble to exactly the split page with the raw hunks applied, or
 the conflict stays. The record lists `NAME.md` and the entry files that took the edits.
+A recognised split never falls back to the keep-both rule: more than 500 entry files, more
+than 4 MB of text, a non-file under `NAME.d/` or an `Entries:` folder outside `NAME.d/`
+also stay a conflict. Compose fetches only the `.md` files directly inside the `Entries:`
+folders. The save-time conflict notice decides with the same code (`splitConflict` in
+`src/doc-split-remap.ts`), so it does not warn about a split compose will remap; the
+remap's byte proof still runs only at compose. Conservative cases that stay a conflict:
+a `./x.md` link in added text, a link added inside an existing code fence, deleting a
+whole entry or the blank line between entries.
 
 The `Sync main` checkpoint records the resolved paths and rule in its automatic
 summary and undo instructions (`undo-sync`); the finish receipt's `sync` has
