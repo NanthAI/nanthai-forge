@@ -605,3 +605,19 @@ test('8c9b84fc: a resolution target suppresses contained peer edits but a later 
   changed.mine.resolved = file(prefix);
   assert.equal((await trialMerge([changed], read)).conflicts[0].peer, 'peer');
 });
+
+test('b4e13aaf: a resolution that merged main has no conflict with main while main still holds that file', async () => {
+  const mainNow = text(['a', 'b', 'c', 'main edit', 'e', 'f', 'g', 'h']);
+  const mine = text(['a', 'b', 'c', 'main edit', 'mine beside it', 'e', 'f', 'g', 'h']);
+  const later = text(['a', 'b', 'c', 'later main edit', 'e', 'f', 'g', 'h']);
+  const read = store(BASE, mainNow, mine, later);
+  // The incident: from the Lane's old base, main's edit and the resolution's look like one overlap.
+  assert.equal((await trialMerge([task(mine, [], mainNow)], read)).conflicts[0].peer, 'main');
+  const resolved = task(mine, [], mainNow);
+  resolved.mine.resolved = file(mainNow);
+  assert.deepEqual((await trialMerge([resolved], read)).conflicts, [], 'the resolve already merged it');
+  // A main edit after the resolve still conflicts.
+  const moved = task(mine, [], later);
+  moved.mine.resolved = file(mainNow);
+  assert.equal((await trialMerge([moved], read)).conflicts[0].peer, 'main');
+});

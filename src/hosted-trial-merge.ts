@@ -116,7 +116,12 @@ export async function trialMerge(
       // This Lane composed onto current main (compose: main is x, the Lane is y).
       let current: Held = after,
         mainConflict = false;
-      if (task.main !== undefined && !same(task.main, before)) {
+      // A resolution merged main's file `resolved` into this Lane. While main still holds that file,
+      // the Lane already contains main's side: the old Lane base would report main's own edit,
+      // beside the author's, as both changing the same lines (frictions b4e13aaf, da0001cf).
+      const mainMerged =
+        task.mine.resolved !== undefined && task.main !== undefined && same(task.main, task.mine.resolved);
+      if (task.main !== undefined && !same(task.main, before) && !mainMerged) {
         merges++;
         const onMain = await entry(task.path, before, task.main, after, bytes, mergePaths);
         if (onMain.ok) current = onMain.file;
