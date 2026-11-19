@@ -142,6 +142,29 @@ test('an allow entry with a reason overrides one finding by fingerprint, scoped 
   assert.equal(scan('not json').findings.length, 2);
 });
 
+test('the failure notice prints the exact allow entry per finding (0fd5f69f): pasted with a reason it allows that finding, unedited it allows nothing', () => {
+  const text = `TOKEN=${fake.github}\nOTHER=${fake.aws}\n`;
+  const read = files({ 'src/fixture.ts': text });
+  const found = scanSecretPaths(['src/fixture.ts'], read, { baseAllow: undefined });
+  const lines = secretScanNotice(found);
+  assert(!lines.join('\n').includes(fake.github) && !lines.join('\n').includes(fake.aws), 'never a value');
+  const entries = lines
+    .filter(line => line.startsWith('secret-scan: allow entry for '))
+    .map(line => JSON.parse(line.slice(line.indexOf('{'))));
+  assert.deepEqual(
+    entries.map(entry => [entry.path, entry.fingerprint, entry.reason]),
+    found.findings.map(item => ['src/fixture.ts', item.fingerprint, '']),
+  );
+  const rescan = allow =>
+    scanSecretPaths(['src/fixture.ts'], read, { baseAllow: Buffer.from(JSON.stringify({ allow })) });
+  assert.equal(rescan(entries).findings.length, 2, 'an unedited entry has no reason, so it allows nothing');
+  const filled = entries.slice(0, 1).map(entry => ({ ...entry, reason: 'Synthetic fixture.' }));
+  assert.deepEqual(
+    rescan(filled).findings.map(item => item.kind),
+    ['aws-access-key-id'],
+  );
+});
+
 test('findings are capped and counted', () => {
   const text = Array.from({ length: SECRET_SCAN_MAX_FINDINGS + 5 }, (_, i) =>
     join('gh', 'p_', `FORGEfake${String(i).padStart(2, '0')}TEST1never2REAL3token4XYZ`),

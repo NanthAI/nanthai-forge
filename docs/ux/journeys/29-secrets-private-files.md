@@ -19,7 +19,7 @@ See [secrets for checks](../../security.md#secrets-for-checks).
 | 1 | An agent saves a file that looks like credentials | A save leaves out "ignored files and credential names", counted as `notSaved`. | docs |
 | 2 | A change that contains a credential reaches a landing | "Every hosted landing check scans the paths its composed Candidate changes … before project code runs." It looks for known shapes (private keys, cloud, GitHub, GitLab, Slack, npm, Google, Anthropic and OpenAI tokens) and "a random-looking value assigned to a secret-named key". "A finding fails the check like a failing test: the landing stops with `CHECK_FAILED`, and the notice names the file, line, kind and a 16-character fingerprint, never the value." | docs |
 | 3 | It was a real secret | "Remove a real credential first, and rotate it at its provider: once it reached a Lane save it may be retained." | docs |
-| 4 | It was not a secret | Add `{"fingerprint":"…","path":"…","reason":"…"}` to `.forge-secret-allow.json`. "Entries count only from main … so a change cannot allow its own finding: land the entry on its own first, then land the change." The file is on the Forge project's protected list, so that first landing needs the owner. | docs, ran |
+| 4 | It was not a secret | The notice prints the exact `{"fingerprint":"…","path":"…","reason":""}` entry per finding; paste it into `.forge-secret-allow.json` and write the reason. "Entries count only from main … so a change cannot allow its own finding: land the entry on its own first, then land the change." The file is on the Forge project's protected list, so that first landing needs the owner. | docs, ran |
 | 5 | Who hears of an override | "Every landing that adds or edits an entry sends the project owners one alert on the landing alert channel (email or webhook, the same settings as stall alerts)", and the receipt carries `secretAllowAdded`. | docs |
 | 6 | What the scan misses | "It does not see encoded or split values, text in skipped files, history that landed before it, or local (not hosted) checks." Files over 1 MiB and binaries are skipped. With a bring-your-own check, an allow-file change is reported as "unknown". | docs |
 | 7 | A secret for a check | Names declared on the check; values live on the runner ([journey 13](13-connecting-ci.md)). | docs |
@@ -40,7 +40,7 @@ See [secrets for checks](../../security.md#secrets-for-checks).
 | J29-6 | S2 | **Private files are decided and unbuilt, and one detail is disputed.** Until then every file in a project has the project's visibility, including for the scan. A team with a private `.env.production` in a public repository has no answer but to keep it out of Forge. | docs |
 | J29-7 | S2 | **Nothing helps after someone leaves.** No list of what they could read, no rotate reminder. | docs |
 | J29-8 | S3 | **The scan does not run on local preflight.** "Local (not hosted) checks" are outside it, so an agent learns of a finding only after the hosted check starts. | docs |
-| J29-9 | S3 | **The finding names a fingerprint.** The agent must copy a 16-character value into a JSON file by hand. The notice could print the exact entry to add. | docs |
+| J29-9 | S3 | **Fixed (0fd5f69f).** The notice prints the exact allow entry for each finding, with an empty `reason` that the agent fills in; pasted unedited it allows nothing. | test |
 
 ## Dead ends
 

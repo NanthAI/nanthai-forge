@@ -332,7 +332,10 @@ export function secretScanNotice(
       item => `secret-scan: ${item.path}:${item.line} ${item.kind} (fingerprint ${item.fingerprint})`,
     ),
     'secret-scan: remove the credential from this change and rotate it at its provider; once it reached a Lane save it may be retained.',
-    `secret-scan: only if it is not a secret, add {"fingerprint","path","reason"} to ${SECRET_SCAN_ALLOW_FILE} in its own landing first. Allow entries count only once they are on main, and project owners are alerted.`,
+    `secret-scan: only if it is not a secret, add its entry below to the "allow" list of ${SECRET_SCAN_ALLOW_FILE} and write why in "reason" (an empty reason allows nothing), in its own landing first. Allow entries count only once they are on main, and project owners are alerted.`,
+    ...result.findings.map(
+      item => `secret-scan: allow entry for ${item.path}:${item.line} ${allowEntryText(item)}`,
+    ),
     ...(result.selfAllowed
       ? [
           `secret-scan: ${result.selfAllowed} finding(s) match an allow entry added in this same change; that entry does not count until it lands on its own.`,
@@ -340,6 +343,13 @@ export function secretScanNotice(
       : []),
     `SecretScanError: committed credential found in ${listed}${more}. Remove and rotate it first; an allow entry for a false positive needs its own landing.`,
   ];
+}
+
+/** The exact `.forge-secret-allow.json` entry for one finding (Issue 0fd5f69f), so an agent
+ * pastes it instead of copying the fingerprint by hand. Value-free: path and fingerprint
+ * only. The reason stays empty: pasted unedited it allows nothing (parseSecretAllowEntries). */
+function allowEntryText(item: Pick<SecretFinding, 'path' | 'fingerprint'>) {
+  return JSON.stringify({ fingerprint: item.fingerprint, path: item.path, reason: '' });
 }
 
 /** A Node command that prints the notice and fails, so the run fails like any check. */
