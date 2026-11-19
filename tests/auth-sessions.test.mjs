@@ -156,6 +156,7 @@ test('B-07: recipient lookup refuses ambiguous or unverified addresses and a pas
   const user = s.tables.users.get('user');
   user.email = 'invite@example.com';
   user.emailVerified = true;
+  user.emailConfirmedAt = Date.now();
   assert.equal(await s.call(users.verifiedRecipient, { email: ' INVITE@example.com ' }), s.owner);
   user.emailVerified = false;
   assert.equal(await s.call(users.verifiedRecipient, { email: user.email }), null);

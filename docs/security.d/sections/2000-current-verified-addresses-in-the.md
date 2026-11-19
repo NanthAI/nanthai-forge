@@ -2,8 +2,14 @@
 
 Each GitHub sign-in replaces both the address and verified flag from its current
 profile. If GitHub reports no verified address, Forge clears the old address and
-flag, including on the linking path. A passkey-only account has no email-based
-invitation authority. The browser identity resolver supplies these fields from
+flag, including on the linking path. Each such write also records when GitHub
+confirmed the address. The age applies only where access is granted (recipient lookup
+for invitations and team adds, and invitation acceptance): those ignore an address
+not confirmed in the last 90 days (counted from account creation for older rows)
+until the next GitHub sign-in or link refreshes it. Protections that grant nothing
+keep using the address at any age: invitation-mail suppression still finds the
+account's blocks and revocations, and blocking still records the address. A passkey-only account has no
+email-based invitation authority. The browser identity resolver supplies these fields from
 the already-read account row, never from a stale token claim.
 
 New-account recipient lookup uses an exact normalized verified address and refuses

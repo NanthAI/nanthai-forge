@@ -51,6 +51,9 @@ export const authTables = {
     ),
     email: v.optional(v.string()),
     emailVerified: v.boolean(),
+    /** When a provider last confirmed `email` (a GitHub sign-in or link). Missing on older rows,
+     * which count from their creation. Recipient lookup ignores an older address (16723708). */
+    emailConfirmedAt: v.optional(v.number()),
     githubToken: v.optional(
       v.object({ keyId: v.string(), nonce: v.string(), tag: v.string(), ciphertext: v.string() }),
     ),

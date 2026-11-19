@@ -8,9 +8,23 @@ import { ensureAccount } from './urlIdentity';
 
 const githubMethod = v.object({ name: v.literal('github'), profile: vGithubProfile });
 const passkeyMethod = v.object({ name: v.literal('usernamePasskey'), profile: v.object({}) });
+/** How long a provider-confirmed address stays good for recipient lookup and redemption without
+ * a new GitHub sign-in or link (16723708: the owner's recommended 90 days). */
+export const EMAIL_CONFIRMED_MAX_AGE_MS = 90 * 86_400_000;
+/** The address fields every GitHub sign-in, sign-up and link writes: verified, or cleared. */
+export const githubEmailFields = (profile: { email?: string | null; emailVerified?: boolean }) =>
+  profile.emailVerified && profile.email
+    ? { email: profile.email.trim().toLowerCase(), emailVerified: true, emailConfirmedAt: Date.now() }
+    : { email: undefined, emailVerified: false, emailConfirmedAt: undefined };
 async function insertUser(
   ctx: MutationCtx,
-  fields: { githubId?: string; githubLogin?: string; email?: string; emailVerified: boolean },
+  fields: {
+    githubId?: string;
+    githubLogin?: string;
+    email?: string;
+    emailVerified: boolean;
+    emailConfirmedAt?: number;
+  },
 ) {
   const id = await ctx.db.insert('users', {
     accountKey: 'pending',
@@ -41,11 +55,12 @@ export const createGithub = internalMutation({
       });
     const existing = matches[0];
     if (existing) return existing._id;
+    const { email, emailVerified, emailConfirmedAt } = githubEmailFields(profile);
     return insertUser(ctx, {
       githubId: profile.id,
       githubLogin: profile.login,
-      ...(profile.emailVerified && profile.email ? { email: profile.email.trim().toLowerCase() } : {}),
-      emailVerified: profile.emailVerified && Boolean(profile.email),
+      ...(email ? { email, emailConfirmedAt } : {}),
+      emailVerified,
     });
   },
 });
@@ -70,11 +85,7 @@ export const signedInGithub = internalMutation({
         code: 'GITHUB_ACCOUNT_MISMATCH',
         message: 'GitHub account does not match this user.',
       });
-    await ctx.db.patch(userId, {
-      githubLogin: profile.login,
-      email: profile.emailVerified && profile.email ? profile.email.trim().toLowerCase() : undefined,
-      emailVerified: Boolean(profile.emailVerified && profile.email),
-    });
+    await ctx.db.patch(userId, { githubLogin: profile.login, ...githubEmailFields(profile) });
     return null;
   },
 });
@@ -96,15 +107,29 @@ export const githubAccounts = internalQuery({
   },
 });
 
-/** Shared by account lookup and redemption; no provider fallback. */
-export async function findVerifiedRecipient(ctx: QueryCtx | MutationCtx, email: string) {
+/** Shared by account lookup and redemption; no provider fallback. For granting access (the
+ * default), an address a provider has not confirmed within EMAIL_CONFIRMED_MAX_AGE_MS (a
+ * passkey-only account keeps its old one) is no recipient until the next GitHub sign-in or link
+ * refreshes it. `anyAge` is for protections only (mail suppression, the block step's address):
+ * they keep working for an old address and never grant anything. */
+export async function findVerifiedRecipient(
+  ctx: QueryCtx | MutationCtx,
+  email: string,
+  { anyAge = false }: { anyAge?: boolean } = {},
+) {
   email = email.trim().toLowerCase();
   const rows = await ctx.db
     .query('users')
     .withIndex('by_email', q => q.eq('email', email))
     .take(2);
   invariant(rows.length <= 1, 'BAD_ARGUMENT', 'No unique account matches that address.');
-  return rows[0]?.emailVerified && rows[0].email === email ? rows[0].accountKey : null;
+  const row = rows[0];
+  const confirmed = row ? (row.emailConfirmedAt ?? row._creationTime) : 0;
+  return row?.emailVerified &&
+    row.email === email &&
+    (anyAge || Date.now() - confirmed <= EMAIL_CONFIRMED_MAX_AGE_MS)
+    ? row.accountKey
+    : null;
 }
 /** Internal recipient lookup: exact current verified address only. */
 export const verifiedRecipient = internalQuery({

@@ -91,7 +91,7 @@ export const answer = accountMutation('person')({
       if (input.choice === 'accept' && project.owner !== user.subject)
         await grant(ctx, row.projectId, user.subject, row.role ?? 'write');
       if (input.choice === 'block') {
-        const address = row.recipient ? await recipientEmail(ctx, user) : row.email;
+        const address = row.recipient ? await recipientEmail(ctx, user, { anyAge: true }) : row.email;
         const emailHash = address ? invitationEmailHash(address) : blocked?.emailHash;
         if (blocked)
           await ctx.db.patch(blocked._id, {

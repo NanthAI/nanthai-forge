@@ -7,6 +7,7 @@ import type { Doc } from './_generated/dataModel';
 import { githubSignIn } from './auth';
 import { authComponents as components } from './authComponents';
 import { invariant } from '../src/errors';
+import { githubEmailFields } from './authUsers';
 
 export function libraryCall<A extends DefaultFunctionArgs, R>(
   fn: RegisteredMutation<'public', A, R>,
@@ -66,8 +67,7 @@ export async function completeGithubLink(
         await ctx.db.patch(user._id, {
           githubId: profile.id,
           githubLogin: profile.login,
-          email: profile.emailVerified && profile.email ? profile.email.trim().toLowerCase() : undefined,
-          emailVerified: Boolean(profile.emailVerified && profile.email),
+          ...githubEmailFields(profile),
         });
       }
       if (address === signup) {

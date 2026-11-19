@@ -11,12 +11,17 @@ export async function invitationPerson(ctx: QueryCtx | MutationCtx) {
   invariant(user && !isDeviceIdentity(user), 'AUTH_REQUIRED', 'Sign in to answer your invitations in Forge.');
   return user;
 }
-export async function recipientEmail(ctx: QueryCtx | MutationCtx, user: UserIdentity) {
+/** `anyAge` only where nothing is granted (the block step); see findVerifiedRecipient. */
+export async function recipientEmail(
+  ctx: QueryCtx | MutationCtx,
+  user: UserIdentity,
+  options: { anyAge?: boolean } = {},
+) {
   if (!user.emailVerified || !user.email) return null;
   const email = user.email.trim().toLowerCase();
   // Ambiguous native bindings never authorize acceptance, including a legacy session.
   try {
-    const current = await findVerifiedRecipient(ctx, email);
+    const current = await findVerifiedRecipient(ctx, email, options);
     if ((current && current !== user.subject) || (user.forgeAuthUser && current !== user.subject))
       return null;
     return email;

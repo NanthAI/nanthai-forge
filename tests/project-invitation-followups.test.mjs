@@ -294,6 +294,7 @@ test('a removed recipient cannot receive an earlier queued invitation email', as
     accountKey: 'guest',
     email: 'guest@example.test',
     emailVerified: true,
+    emailConfirmedAt: Date.now(),
   });
   s.tables.projectContributors.set('member', {
     _id: 'member',

@@ -287,6 +287,7 @@ test('an inviter blocked by handle cannot mail a later current verified address 
     accountKey: 'guest',
     email: 'changed@example.test',
     emailVerified: true,
+    emailConfirmedAt: Date.now(),
   });
   const email = await s.invite('changed@example.test');
   const details = await mail.details._handler(s.ctx, {

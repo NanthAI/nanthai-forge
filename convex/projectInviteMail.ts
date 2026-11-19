@@ -144,7 +144,8 @@ export const details = internalQuery({
       .take(1);
     let recipient: string | null = null;
     try {
-      recipient = await findVerifiedRecipient(ctx, row.person);
+      // Suppression is a protection, not a grant: an old address still finds its blocks.
+      recipient = await findVerifiedRecipient(ctx, row.person, { anyAge: true });
     } catch (error) {
       if (!(error instanceof ForgeError && error.code === 'BAD_ARGUMENT')) throw error;
     }
