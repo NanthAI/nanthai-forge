@@ -69,8 +69,14 @@ export function sharedWatcher(directory: string) {
       if (stopped && value.pid === current.pid && current.connected) {
         // This client elected the owner and left before attaching. Release it now, not
         // after its startup window; startup completes when it has exited (removing its
-        // socket directory) or stayed for a peer that attached meanwhile.
-        current.once('disconnect', started);
+        // socket directory) or stayed for a peer that attached meanwhile. Its reply says which:
+        // an exiting helper closes its channel before its process is gone, so only 'exit' (wired
+        // above) proves it left; a staying one is done once it disconnects.
+        let staying = false;
+        current.on('message', (reply: { type?: string; exiting?: boolean }) => {
+          if (reply?.type === 'abandoned') staying = !reply.exiting;
+        });
+        current.once('disconnect', () => staying && started());
         current.send({ type: 'abandon' }, error => error && started());
         return;
       }

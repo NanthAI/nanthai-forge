@@ -110,8 +110,10 @@ export function startSharedWatcher(directory: string) {
   // The electing client left before attaching: exit unless a peer attached meanwhile.
   process.on('message', (message: { type?: string }) => {
     if (message?.type !== 'abandon') return;
-    if (!clients.size) process.exit(0);
-    else process.disconnect();
+    // Reply first (IPC delivers it before the channel closes), so the client knows whether
+    // to wait for this process to exit or only for the disconnect.
+    const exiting = !clients.size;
+    process.send?.({ type: 'abandoned', exiting }, () => (exiting ? process.exit(0) : process.disconnect()));
   });
   process.once('exit', () => {
     rmSync(dirname(lease.socket), { recursive: true, force: true });
