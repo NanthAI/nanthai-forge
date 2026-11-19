@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { hostedRootRequired } from './agent-root.js';
 import { validateHostedCliCommand } from './hosted-cli-validation.js';
-import { actionableNotFound, resolveShortLaneId } from './argument-errors.js';
+import { actionableNotFound, isShortLaneId, resolveShortLaneId } from './argument-errors.js';
 import { resolve } from 'node:path';
 import { hostedAgentHelp, hostedHelpFor } from './hosted-agent-help.js';
 import { helpTopicIndex, helpTopicText, isHelpTopic } from './help-topics.js';
@@ -274,6 +274,15 @@ async function runAgentCli(
     if (short.resolved) {
       process.stderr.write(`laneId ${String(selected.laneId)} resolved to ${short.resolved}\n`);
       selected = short.selected;
+    } else if (isShortLaneId(selected.laneId)) {
+      // A Lane this machine never opened (a reviewer reading another builder's Lane): one indexed read,
+      // only on this miss, so every other command keeps its calls (ad80e037).
+      const { resolveHostedLaneId, HostedAgentTransport } = await import('./hosted-agent-transport.js');
+      const full = await resolveHostedLaneId(new HostedAgentTransport(root, hosted), selected.laneId);
+      if (full) {
+        process.stderr.write(`laneId ${selected.laneId} resolved to ${full}\n`);
+        selected = { ...selected, laneId: full };
+      }
     }
     // An old Lane id whose folder became its resolution Lane after a sync conflict (9bc3775b): the
     // folder's files are the resolution's now, so save and preflight run on it, and say so.

@@ -41,10 +41,25 @@ function fixture() {
                 predicates.push(row => row[key] === value);
                 return bounds;
               },
+              // A range only on the next index field after the equalities.
+              gte(key, value) {
+                assert.equal(key, spec.fields[equality]);
+                predicates.push(row => row[key] >= value);
+                return bounds;
+              },
+              lt(key, value) {
+                assert.equal(key, spec.fields[equality]);
+                predicates.push(row => row[key] < value);
+                return bounds;
+              },
             };
             build(bounds);
             selected = tables[table].filter(row => predicates.every(p => p(row)));
             return q;
+          },
+          async take(n) {
+            meter.gets += Math.min(n, selected.length);
+            return structuredClone(selected.sort((x, y) => (x.key < y.key ? -1 : 1)).slice(0, n));
           },
           async unique() {
             assert(selected.length <= 1);
@@ -111,7 +126,12 @@ function fixture() {
     checkArgs(api.read, args, 'projectHostedLaneHistory:read');
     return JSON.parse(await api.read._handler(ctx, args));
   };
-  return { tables, meter, read, version, laneId, intentId };
+  const resolve = async prefix => {
+    const args = { projectId: 'project', prefix };
+    checkArgs(api.resolveLaneId, args, 'projectHostedLaneHistory:resolveLaneId');
+    return JSON.parse(await api.resolveLaneId._handler(ctx, args));
+  };
+  return { tables, meter, read, resolve, version, laneId, intentId, ctx };
 }
 const main = (c, r) => ({ head: hex(c), receiptId: r });
 
@@ -155,4 +175,34 @@ test('lane history: never-synced, never-landed and a version-0 Lane; unknown Lan
   assert.equal(history.state, 'abandoned');
   assert.equal(history.openedAt, history.lastActivityAt);
   await assert.rejects(f.read(randomUUID()), e => e.data?.code === 'NOT_FOUND');
+});
+
+test('ad80e037: a short Lane id resolves from the record heads by one bounded range read, for any Lane of the project', async () => {
+  const f = fixture();
+  f.version(0, { at: '2026-11-19T10:00:00.000Z', base: main('a', 'R1') });
+  const head = (key, kind = 'lane', projectId = 'project') =>
+    f.tables.projectHostedRecordHeads.push({
+      _id: `h-${key}-${kind}`,
+      _creationTime: 0,
+      projectId,
+      kind,
+      key,
+    });
+  head('b0000000-0000-4000-8000-000000000001');
+  head('b0000000-0000-4000-8000-000000000002');
+  head('c0000000-0000-4000-8000-000000000001', 'intent');
+  head('d0000000-0000-4000-8000-000000000001', 'lane', 'other-project');
+  const queries = f.meter.queries;
+  assert.deepEqual(await f.resolve(f.laneId.slice(0, 8)), { ids: [f.laneId], more: false });
+  assert.equal(f.meter.queries - queries, 1, 'one indexed range read');
+  assert.deepEqual((await f.resolve('b0000000')).ids.length, 2, 'ambiguous: both candidates');
+  assert.deepEqual(await f.resolve('c0000000'), { ids: [], more: false }, 'only Lanes, not other records');
+  assert.deepEqual(await f.resolve('d0000000'), { ids: [], more: false }, 'only this project');
+  for (let i = 3; i <= 8; i++) head(`b0000000-0000-4000-8000-00000000000${i}`);
+  assert.deepEqual(await f.resolve('b0000000'), {
+    ids: [1, 2, 3, 4, 5].map(i => `b0000000-0000-4000-8000-00000000000${i}`),
+    more: true,
+  });
+  await assert.rejects(f.resolve('b000'), e => e.data?.code === 'BAD_ARGUMENT', 'too short');
+  await assert.rejects(f.resolve('B0000000'), e => e.data?.code === 'BAD_ARGUMENT', 'lowercase only');
 });

@@ -11,7 +11,13 @@ import { checkFailureDetail, CHECK_FAILED_NEXT } from '../dist/check-failure-det
 import { failingStep } from '../dist/hosted-landing-suspect.js';
 import { executeHostedMetrics } from '../dist/hosted-agent-metrics.js';
 import { currentExchangeProgress } from '../dist/exchange-progress-hooks.js';
-import { actionableNotFound, describeIssues, resolveShortLaneId } from '../dist/argument-errors.js';
+import {
+  actionableNotFound,
+  describeIssues,
+  isShortLaneId,
+  resolveShortLaneId,
+} from '../dist/argument-errors.js';
+import { resolveHostedLaneId } from '../dist/hosted-agent-transport.js';
 import { validateHostedCliCommand } from '../dist/hosted-cli-validation.js';
 import { ForgeError } from '../dist/errors.js';
 import { HostedAgentJournal } from '../dist/hosted-agent-journal.js';
@@ -192,6 +198,44 @@ test('BAD_ARGUMENT names the field and a short laneId resolves from this machine
   assert.equal(resolveShortLaneId({ laneId: 'a355a44e' }, 'other').resolved, undefined);
   assert.equal(resolveShortLaneId({ laneId: 'b0000000' }, 'project').resolved, undefined, 'ambiguous');
   assert.equal(resolveShortLaneId({ laneId: 'a355' }, 'project').resolved, undefined, 'too short');
+});
+
+// ad80e037: a short id of a Lane this machine never opened (a reviewer's read of another Lane) resolves
+// by one hosted read; one unknown, ambiguous or on an older server stays a loud refusal.
+test('a short Lane id this machine never opened resolves by one hosted read', async () => {
+  const full = 'a355a44e-52e7-418b-8c7b-f115221e33f5';
+  assert.equal(isShortLaneId('a355a44e'), true);
+  assert.equal(isShortLaneId(full), false, 'a full id is used as given, with no read');
+  assert.equal(isShortLaneId('a355'), false);
+  const calls = [];
+  const transport = reply => ({
+    async query(name, args) {
+      calls.push({ name, args });
+      if (reply instanceof Error) throw reply;
+      return reply;
+    },
+  });
+  assert.equal(await resolveHostedLaneId(transport({ ids: [full], more: false }), 'A355A44E'), full);
+  assert.deepEqual(calls, [{ name: 'projectHostedLaneHistory:resolveLaneId', args: { prefix: 'a355a44e' } }]);
+  await assert.rejects(resolveHostedLaneId(transport({ ids: [], more: false }), 'a355a44e'), error => {
+    assert.equal(error.code, 'NOT_FOUND');
+    assert.match(error.message, /No Lane of this project starts with "a355a44e"\. nforge agent ROOT lanes/);
+    return true;
+  });
+  await assert.rejects(
+    resolveHostedLaneId(
+      transport(JSON.stringify({ ids: [full, `${full.slice(0, 35)}6`], more: false })),
+      'a355a44e',
+    ),
+    error => error.code === 'AMBIGUOUS_ID' && error.recovery?.candidates?.length === 2,
+  );
+  const old = new Error('Could not find public function for projectHostedLaneHistory:resolveLaneId');
+  assert.equal(
+    await resolveHostedLaneId(transport(old), 'a355a44e'),
+    undefined,
+    'older server: refusal as before',
+  );
+  await assert.rejects(resolveHostedLaneId(transport(new Error('network down')), 'a355a44e'), /network down/);
 });
 
 // Issue c7087e3b: NOT_FOUND names what was looked up and the next command.

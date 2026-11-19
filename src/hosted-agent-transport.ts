@@ -2244,3 +2244,44 @@ export type HostedAgentSession = {
   /** The `gates` argument for this finish's landing (feature land-gates); undefined when not sent. */
   landGates?: (composeOperationId: string) => string | undefined;
 };
+
+/** Most candidate ids an ambiguous prefix lists; the server read returns one more to say "more". Same
+ * value as planningIdMaxCandidates, kept local: this module already sits on every hosted command path.
+ * Loaded with the transport the caller builds next, so it adds no chunk (7b2ae8d8). */
+const MAX_CANDIDATES = 5;
+/** The full id of the one project Lane whose id starts with `prefix`, for a short id this machine has
+ * not opened (ad80e037). One indexed read, made only when the local lookup misses. A server without
+ * the read returns undefined, so the command refuses the short id as before. */
+export async function resolveHostedLaneId(
+  transport: Pick<HostedAgentTransport, 'query'>,
+  laneId: string,
+): Promise<string | undefined> {
+  const prefix = laneId.toLowerCase();
+  let found: { ids: string[]; more?: boolean };
+  try {
+    found = await transport.query('projectHostedLaneHistory:resolveLaneId', { prefix });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      /(?:Could not find (?:public )?function|No (?:public )?function found|Function .* not found)/i.test(
+        error.message,
+      )
+    )
+      return undefined;
+    throw error;
+  }
+  const { ids, more } = typeof found === 'string' ? JSON.parse(found) : found;
+  invariant(
+    ids.length > 0,
+    'NOT_FOUND',
+    `No Lane of this project starts with "${prefix}". nforge agent ROOT lanes '{}' lists your live Lanes with full ids.`,
+  );
+  if (ids.length > 1 || more)
+    throw new ForgeError(
+      'AMBIGUOUS_ID',
+      `"${prefix}" starts ${more ? `more than ${MAX_CANDIDATES}` : ids.length} Lanes: ${ids.join(', ')}${more ? ', …' : ''}. Pass more characters or the full id.`,
+      undefined,
+      { candidates: ids },
+    );
+  return ids[0]!;
+}

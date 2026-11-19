@@ -35,10 +35,12 @@ export function describeIssues(issues: readonly z.core.$ZodIssue[], input: unkno
 /** A unique short laneId prefix (8+ hex characters) of a Lane this machine opened
  * resolves to its full id from the local registry; anything else is left for the
  * schema to name. No network. */
+/** 8 to 35 hex characters (dashes allowed after the first 8): a Lane id prefix, not a full id. */
+export const isShortLaneId = (laneId: unknown): laneId is string =>
+  typeof laneId === 'string' && /^[0-9a-f]{8}[0-9a-f-]{0,27}$/i.test(laneId) && laneId.length !== 36;
 export function resolveShortLaneId(selected: Record<string, unknown>, projectId?: string) {
   const laneId = selected.laneId;
-  if (typeof laneId !== 'string' || !/^[0-9a-f]{8}[0-9a-f-]{0,27}$/i.test(laneId) || laneId.length === 36)
-    return { selected };
+  if (!isShortLaneId(laneId)) return { selected };
   const prefix = laneId.toLowerCase();
   const matches = listLanes().filter(
     entry =>

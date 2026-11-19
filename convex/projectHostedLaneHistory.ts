@@ -4,6 +4,9 @@ import { v } from 'convex/values';
 import type { Id } from './_generated/dataModel';
 import { query, type QueryCtx } from './cliServer';
 import { readHostedRecord } from './projectHostedRecords';
+import { accessibleProject } from './projectAuthority';
+import { canonicalPayload } from '../src/hosted-source-operation';
+import { isPlanningPrefix, planningIdMaxCandidates } from '../src/planning-id';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { invariant } from '../src/errors';
 import { report } from './errors';
@@ -15,6 +18,38 @@ export const read = query({
   args: { projectId: v.id('hostedProjects'), laneId: v.string() },
   returns: v.string(),
   handler: journalLaneHistoryRead,
+});
+
+/** Full ids of this project's Lanes whose id starts with `prefix` (8 to 35 lowercase hex), for a short
+ * Lane id the CLI could not resolve from the Lanes this machine opened (ad80e037). One range read on the
+ * existing record-heads index, at most one row past the candidate limit; no bodies, no writes. */
+export const resolveLaneId = query({
+  args: { projectId: v.id('hostedProjects'), prefix: v.string() },
+  returns: v.string(),
+  handler: async (ctx, { projectId, prefix }) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted work.');
+      await accessibleProject(ctx, projectId, user.subject);
+      invariant(
+        isPlanningPrefix(prefix) && prefix === prefix.toLowerCase(),
+        'BAD_ARGUMENT',
+        'prefix must be 8 to 35 lowercase hex characters.',
+      );
+      const rows = await ctx.db
+        .query('projectHostedRecordHeads')
+        .withIndex('by_project_and_kind_and_key', q =>
+          q.eq('projectId', projectId).eq('kind', 'lane').gte('key', prefix).lt('key', `${prefix}\uffff`),
+        )
+        .take(planningIdMaxCandidates + 1);
+      return canonicalPayload({
+        ids: rows.slice(0, planningIdMaxCandidates).map(row => row.key),
+        more: rows.length > planningIdMaxCandidates,
+      });
+    } catch (error) {
+      return report(error);
+    }
+  },
 });
 
 export async function journalLaneHistoryRead(

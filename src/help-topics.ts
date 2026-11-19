@@ -22,7 +22,7 @@ Receipts are brief: ids, heads, counts and next commands. CLI --detail returns e
     text: `Shape: nforge agent ROOT ACTION 'JSON' (or --command-file FILE, - for stdin). Operator actions run as nforge x ROOT ACTION 'JSON'.
 - ROOT is your Lane folder (the path start printed) or the clone root; . works from inside it.
 - JSON must be one object. Field names are exact; unknown fields are refused with their name.
-- Ids are full 36-character UUIDs. A unique 8+ character laneId prefix of a Lane this machine opened is resolved for you; other short ids are refused with where to find the full one.
+- Ids are full 36-character UUIDs. A unique 8+ character laneId prefix is resolved for you: from the Lanes this machine opened, else by one read of the project's Lanes. Item ids take the same prefix; other short ids are refused with where to find the full one.
 - lanes '{}' lists your live Lanes with full ids; planning '{"search":"words"}' returns full Issue ids; operation ids come from the receipt that printed them.
 - nforge agent ROOT ACTION --help prints a runnable example, then that action's schema (ids as format uuid); message text with quotes or newlines goes through --message-file FILE.
 NOT_FOUND names what was looked up: run from the Lane root start printed, or pass the full id.`,
