@@ -19,6 +19,15 @@ export function landingMessage(value: string) {
   );
   return clean;
 }
+/** A message the client supplies (land, finish, --message-file): empty text never reaches the server (friction 737e85cb). */
+export function suppliedLandingMessage(value: string) {
+  invariant(
+    value.trim() !== '',
+    'BAD_ARGUMENT',
+    'The landing message (the commit message) is empty; write the message and run the command again. A withdrawn landing replays its original message, so pass a fresh operationId to change it.',
+  );
+  return landingMessage(value);
+}
 function cleanMessage(value: string) {
   return value
     .replace(/\r\n?/g, '\n')

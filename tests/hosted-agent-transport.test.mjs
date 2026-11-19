@@ -658,6 +658,19 @@ test('an over-long landing message is refused before any server call (friction d
   assert.equal(s.calls.length, before, 'no capability read, save or compose');
 });
 
+test('an empty supplied landing message is refused before any server call (friction 737e85cb)', async t => {
+  const s = agentFixture(t);
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const before = s.calls.length;
+  for (const message of ['', ' \n\t '])
+    await assert.rejects(s.transport().dispatch('finish', { laneId: s.lane.laneId, message }), error => {
+      assert.equal(error.code, 'BAD_ARGUMENT');
+      assert.match(error.message, /empty.*fresh operationId/);
+      return true;
+    });
+  assert.equal(s.calls.length, before, 'no capability read, save or compose');
+});
+
 test('finish with explicit saved inputs preserves local drafts without starting a save', async t => {
   const s = agentFixture(t);
   await s.transport().dispatch('open', { laneId: s.lane.laneId });

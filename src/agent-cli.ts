@@ -207,11 +207,16 @@ async function runAgentCli(
     if (action === 'wait') selected = { ...selected, timeoutSeconds: client.budget };
   }
   // Any message text (apostrophes, newlines) arrives verbatim from a file or stdin, never through shell quoting.
-  if (client.messageFile !== undefined)
-    selected = {
-      ...selected,
-      message: read(client.messageFile, 'Message file').replace(/\r?\n$/, ''),
-    };
+  if (client.messageFile !== undefined) {
+    const message = read(client.messageFile, 'Message file').replace(/\r?\n$/, '');
+    // An empty file (a failed extraction script) never submits an empty commit message (friction 737e85cb).
+    invariant(
+      message.trim() !== '',
+      'BAD_ARGUMENT',
+      `Message file ${client.messageFile === '-' ? '(stdin)' : client.messageFile} is empty; write the landing message and run the command again.`,
+    );
+    selected = { ...selected, message };
+  }
   if (action === 'install-hooks' || action === 'uninstall-hooks') {
     if (
       options.beforeDispatch &&

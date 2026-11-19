@@ -99,6 +99,22 @@ test('missing cwd fails before hooks with command-specific cd advice and no stac
     assert(!result.stderr.includes('ENOENT'));
   }
 });
+test('land --message-file with an empty file is refused before any root lookup or server call (friction 737e85cb)', async t => {
+  const root = temporary(t);
+  t.mock.method(globalThis, 'fetch', () => assert.fail('No network call for an empty message'));
+  for (const [name, text] of [
+    ['empty.txt', ''],
+    ['blank.txt', '  \n\n'],
+  ]) {
+    const file = join(root, name);
+    fs.writeFileSync(file, text);
+    for (const action of [['land', '--save'], ['finish']])
+      await assert.rejects(
+        agentCli([join(root, 'missing'), ...action, '--message-file', file, '{}']),
+        error => error.code === 'BAD_ARGUMENT' && /is empty/.test(error.message),
+      );
+  }
+});
 test('a folder without a hosted marker is refused with its absolute path and nforge host, without network or Git', async t => {
   // One client mode (Issue 657d63ee): no native fallback for a Git or plain folder.
   const root = temporary(t);
