@@ -246,11 +246,16 @@ test('records discovers canonical saved work in one bounded call and reads exact
   assert.equal(after.writes, before.writes);
   assert.equal(
     after.reads - before.reads,
-    201,
-    'one project, 100 heads and 100 descriptors; no bodies or project hydration',
+    301,
+    'one project, 100 heads, 100 descriptors and 100 small save bodies for their State ids (17ea21ac); no project hydration',
   );
   assert.equal(first.items.length, 100);
-  assert(first.items.every(row => row.parentId === parentId && row.source.digest && !row.value));
+  // A Lane's save history names each saved State and its time (Issue 17ea21ac); no other body field.
+  assert(
+    first.items.every(
+      row => row.parentId === parentId && row.source.digest && !row.value && row.head === hash && row.at,
+    ),
+  );
   const second = (
     await s.transport.dispatch('records', { collection: 'saves', parentId, cursor: first.nextCursor })
   ).result;

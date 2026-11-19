@@ -121,7 +121,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `records` | `collection, parentId?, status?, id?, version?, cursor?` |
 | `log` | `runId, tail?, stream?, shard?, attempt?, laneId?` |
 | `lanes` | `planningItemId?, id?, itemId?, intentId?, state?, cursor?, limit?, view?` |
-| `diff` | `laneId?, paths?, byteBudget?, summary?, cursor?` |
+| `diff` | `laneId?, paths?, byteBudget?, summary?, from?, cursor?` |
 | `peers` | `laneId?, path?, detail?` |
 | `queue` | `limit?, laneId?` |
 | `landings` | `from?, to?, receiptId?, limit?, cursor?` |
@@ -158,7 +158,10 @@ MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
   Defaults: 48,000 source/hunk bytes plus path metadata, 50 paths/page. Continue
   `result.nextCursor` with the same Lane/paths, retaining the pair after saves.
   `omitted`/`requiredByteBudget` and `truncated` disclose shortened output;
-  increase the budget or use exact show for remaining bytes. `summary:true`
+  increase the budget or use exact show for remaining bytes. `from` compares an
+  older saved State with the saved head instead of the pinned base: a full State id
+  or a unique 8+ character prefix of the Lane's base or saved States (an ambiguous
+  prefix is refused with `AMBIGUOUS_ID`). `summary:true`
   answers "are this Lane's saved changes already on main": per changed path its
   `status` (added|deleted|modified) and `main` (`equal`: main holds the saved
   bytes and mode, or the Lane deleted a path main lacks; `absent`: main has no
@@ -175,7 +178,10 @@ MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
   `lastActivityAt` and `landing {receiptId,commit,head,at,current,revertedBy?}` (null
   when nothing landed or the Lane landed before the landing stamp). Once a
   compensating landing takes that landing off main, `current` is false and
-  `revertedBy {receiptId,at}` names the revert. No writes.
+  `revertedBy {receiptId,at}` names the revert. No writes. The Lane's save history
+  is `records {"collection":"saves","parentId":LANE_ID}`: each save with its full
+  saved State id (`head`) and time (`at`), oldest first, 100 per page (one small
+  body read per save).
 - `x revert {target}` makes a compensating Lane; landing it (`land --save`, the
   browser, or main-audit recovery) records `revertOf` on the landing (shown as
   compensating, with "Reverted by" on the original). When it lands, each Lane of the

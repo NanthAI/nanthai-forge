@@ -3,14 +3,16 @@ import type { Id } from './_generated/dataModel';
 import { JournalNeeded, journalReadReply } from './projectJournalStore';
 import { v } from 'convex/values';
 import { query, type QueryCtx } from './cliServer';
-import { hostedRecordPage, readHostedRecord } from './projectHostedRecords';
+import { hostedRecordBody, hostedRecordPage, readHostedRecord } from './projectHostedRecords';
 import { hostedRecordsReadSchema, recordCollectionKinds } from '../src/hosted-record-read';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 
 /** One indexed page or one exact version, using the same current access and lifecycle overlays as
  * source operations. 100 heads / 128 KiB of indexed rows per page; O(page) record descriptors,
- * no body hydration on a list, writes, worker wakes or idle calls. Source bytes remain in R2. */
+ * no writes, worker wakes or idle calls. Source bytes remain in R2. A list hydrates no bodies except
+ * saves: each save names its saved State (`head`, `at`), one small body read per row, so a Lane's save
+ * history lists its State ids in one call (Issue 17ea21ac). */
 export const read = query({
   args: { projectId: v.id('hostedProjects'), request: v.string() },
   returns: v.string(),
@@ -68,12 +70,14 @@ export async function journalRecordRead(
           'SOURCE_UNAVAILABLE',
           'A selected Work record descriptor is unavailable.',
         );
+        const saved = kind === 'save' ? savedState(await hostedRecordBody(ctx, row)) : {};
         return {
           id: head.key,
           kind,
           version: head.version,
           parentId: head.parent,
           status: head.status,
+          ...saved,
           source: { recordId: row._id, digest: row.digest, bytes: row.bytes },
         };
       }),
@@ -88,4 +92,11 @@ export async function journalRecordRead(
     if (error instanceof JournalNeeded) return journalReadReply(ctx, error, input.projectId);
     return report(error);
   }
+}
+
+/** The saved State and time of one save record; nothing else of the body leaves the server. */
+function savedState(value: string) {
+  const record = JSON.parse(value) as { head?: unknown; at?: unknown };
+  invariant(typeof record.head === 'string', 'SOURCE_UNAVAILABLE', 'A save record has no saved State.');
+  return { head: record.head, ...(typeof record.at === 'string' ? { at: record.at } : {}) };
 }

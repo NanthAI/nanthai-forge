@@ -7,6 +7,7 @@ import { showHostedSource } from '../dist/mcp-hosted-source.js';
 import { hostedShowCli } from '../dist/hosted-show-cli.js';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
+import { getFunctionName } from 'convex/server';
 function fixture(t, count = 3) {
   const f = agentFixture(t);
   const put = bytes => {
@@ -156,4 +157,71 @@ test('invalid hosted read parameters fail with a structured error before any ser
   ])
     await assert.rejects(transport.dispatch(action, command), error => error.code === 'BAD_ARGUMENT');
   assert.equal(f.calls.length, 0);
+});
+test('diff from a short saved State id compares that save with the head; ambiguity and misses are refused (Issue 17ea21ac)', async t => {
+  const f = fixture(t, 1);
+  const put = bytes => {
+    const id = digest(bytes);
+    f.objects.set(id, bytes);
+    return id;
+  };
+  const blob = put(Buffer.from("export const value0 = 'older';\n"));
+  const older = put(
+    Buffer.from(
+      JSON.stringify({
+        schema: 1,
+        kind: 'forge-source-state',
+        parents: [],
+        files: [{ path: 'src/00000.ts', blob, mode: 'file' }],
+        at: '2026-01-01T00:00:00.000Z',
+        message: 'Older save',
+      }),
+    ),
+  );
+  // The Lane's save history (records saves), as the server lists it: each save with its State.
+  let heads = [older, f.lane.head],
+    recordReads = 0;
+  const query = f.exchange.client.query;
+  f.exchange.client.query = async (ref, args) => {
+    if (getFunctionName(ref) !== 'projectHostedRecordReads:read') return query(ref, args);
+    recordReads++;
+    assert.deepEqual(JSON.parse(args.request), {
+      collection: 'saves',
+      parentId: f.lane.laneId,
+      cursor: null,
+    });
+    return JSON.stringify({
+      collection: 'saves',
+      items: heads.map((head, version) => ({ id: f.lane.laneId, kind: 'save', version, head })),
+      nextCursor: null,
+    });
+  };
+  const transport = f.transport();
+  const short = (await transport.dispatch('diff', { laneId: f.lane.laneId, from: older.slice(0, 8) })).result;
+  assert.equal(recordReads, 1, 'one save-history page');
+  assert.equal(short.base, older);
+  assert.equal(short.head, f.lane.head);
+  assert.equal(short.items.length, 1);
+  assert.match(JSON.stringify(short.items[0]), /older/);
+  const full = (await transport.dispatch('diff', { laneId: f.lane.laneId, from: older.toUpperCase() }))
+    .result;
+  assert.equal(full.base, older);
+  assert.equal(recordReads, 1, 'a full State id needs no save-history read');
+  heads = [older, `${older.slice(0, 10)}${'0'.repeat(54)}`];
+  await assert.rejects(transport.dispatch('diff', { laneId: f.lane.laneId, from: older.slice(0, 8) }), e => {
+    assert.equal(e.code, 'AMBIGUOUS_ID');
+    return true;
+  });
+  const miss = [...'0123456789abcdef'].find(
+    c => ![older, f.lane.head, f.lane.base.head].some(s => s[0] === c),
+  );
+  await assert.rejects(transport.dispatch('diff', { laneId: f.lane.laneId, from: miss.repeat(8) }), e => {
+    assert.equal(e.code, 'NOT_FOUND');
+    assert.match(e.message, /records/);
+    return true;
+  });
+  await assert.rejects(
+    transport.dispatch('diff', { laneId: f.lane.laneId, from: older.slice(0, 7) }),
+    e => e.code === 'BAD_ARGUMENT',
+  );
 });

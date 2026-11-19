@@ -25,8 +25,10 @@ const { encodePlanPage, planParent, planPageKey, PLAN_ROWS } = await import(
 );
 const { effectiveRank, legacyRank } = await import(moduleUrl('../src/planning-model.ts'));
 
+// Find matches a row's title and the first 8 characters of its id: a fixed digit-free prefix keeps a
+// random id from also matching a numeric search such as 'item 003' (about 0.4% of runs).
 const item = (fields, i) => ({
-  id: randomUUID(),
+  id: `feedface${randomUUID().slice(8)}`,
   kind: 'issue',
   status: 'open',
   version: 1,

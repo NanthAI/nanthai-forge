@@ -41,6 +41,12 @@ export const hostedDiffSchema = z
     byteBudget: z.number().int().min(1024).safe().default(48000),
     /** Per changed path: equal / absent / different against current main. No hunks, no blob reads. */
     summary: z.boolean().default(false),
+    /** Compare from this State instead of the pinned base: a full id, or a unique 8+ character prefix of
+     * the Lane's base or one of its saved States (`records {collection:"saves",parentId}` lists them). */
+    from: z
+      .string()
+      .regex(/^[0-9a-fA-F]{8,64}$/)
+      .optional(),
     cursor: z
       .object({
         base: hash,
@@ -149,10 +155,18 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
     'BAD_ARGUMENT',
     'Continue with the original Lane and paths.',
   );
-  const base = cursor?.base ?? lane.base.head,
+  invariant(
+    !(cursor && command.from),
+    'BAD_ARGUMENT',
+    'A diff cursor keeps its original from State; drop from.',
+  );
+  const from = command.from
+    ? await (await import('./hosted-saved-state.js')).resolveLaneState(transport, lane, command.from)
+    : undefined;
+  const base = cursor?.base ?? from ?? lane.base.head,
     head = cursor?.head ?? lane.head;
-  // Continuations retain the original pair even after a later save. Both must still belong to the project.
-  if (cursor) {
+  // Continuations and a chosen from State keep their pair after a later save. Both must still belong to the project.
+  if (cursor || from) {
     await transport.query('projectHostedLanes:source', { state: base });
     if (head !== base) await transport.query('projectHostedLanes:source', { state: head });
   }
