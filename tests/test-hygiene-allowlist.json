@@ -64,7 +64,6 @@
   "tests/metrics-deadline.test.mjs": {"sleep":3},
   "tests/mirrors.test.mjs": {"poll":1},
   "tests/native-artifact-alias.test.mjs": {"poll":1},
-  "tests/native-git-batch.test.mjs": {"poll":1},
   "tests/native-git-contributions.test.mjs": {"timeout":2},
   "tests/native-git-export-waits.test.mjs": {"poll":1},
   "tests/native-git.test.mjs": {"timeout":2,"poll":1},

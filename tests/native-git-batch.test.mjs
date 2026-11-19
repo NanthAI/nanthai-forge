@@ -3,13 +3,14 @@ import test from 'node:test';
 import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, watch } from 'node:fs';
+import { once } from 'node:events';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { NativeSource, nativeMarker } from '../dist/native-source.js';
 import { exportNativeGit } from '../dist/native-git.js';
 import { nativeGitBatch } from '../dist/native-git-batch.js';
-import { processAlive } from '../dist/local-process.js';
+import { processAlive, processIdentity } from '../dist/local-process.js';
 import { workGit } from '../dist/work-git.js';
 import { referenceExport } from './helpers/native-git-reference.mjs';
 
@@ -201,13 +202,22 @@ test('a stalled batch request times out and reaps a pipe-holding helper', async 
   `,
   );
   const prior = process.env.FORGE_GIT_TIMEOUT_MS;
+  let processes;
+  // The deadline is a controlled clock: a loaded runner cannot expire it before Git and its
+  // helper exist, and their start identities are taken while they run, so a recycled PID
+  // cannot read as a survivor.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   try {
     process.env.FORGE_GIT_TIMEOUT_MS = '1000';
     await withPath(tracking.PATH, async () => {
       const worker = nativeGitBatch(f.root, ['hash-object', '-w', '--stdin-paths'], () => {});
       try {
-        await assert.rejects(worker.request('unused\n'), e => e.code === 'WORK_GIT_TIMEOUT');
+        const timedOut = assert.rejects(worker.request('unused\n'), e => e.code === 'WORK_GIT_TIMEOUT');
+        processes = (await written(pids)).map(pid => processIdentity(pid));
+        t.mock.timers.tick(1000);
+        await timedOut;
       } finally {
+        // Resolves on close: every holder of the batch pipes has exited.
         await worker.abort();
       }
     });
@@ -215,11 +225,25 @@ test('a stalled batch request times out and reaps a pipe-holding helper', async 
     if (prior === undefined) delete process.env.FORGE_GIT_TIMEOUT_MS;
     else process.env.FORGE_GIT_TIMEOUT_MS = prior;
   }
-  const processes = JSON.parse(readFileSync(pids, 'utf8'));
-  for (let attempt = 0; attempt < 100 && processes.some(pid => processAlive({ pid })); attempt++)
-    await new Promise(resolve => setTimeout(resolve, 20));
-  assert.ok(processes.every(pid => !processAlive({ pid })));
+  assert.equal(processes.length, 2);
+  assert.ok(processes.every(identity => !processAlive(identity)));
 });
+/** A JSON file another process writes, read on its directory's change events. */
+async function written(path) {
+  const watcher = watch(join(path, '..'));
+  try {
+    for (;;) {
+      try {
+        return JSON.parse(readFileSync(path, 'utf8'));
+      } catch (error) {
+        if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+      }
+      await once(watcher, 'change');
+    }
+  } finally {
+    watcher.close();
+  }
+}
 
 test('global Git attributes cannot normalize raw blob or commit bytes', async t => {
   const f = fixture(t),
