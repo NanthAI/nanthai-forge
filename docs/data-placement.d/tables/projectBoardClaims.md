@@ -1,0 +1,1 @@
+| `projectBoardClaims` | Automatic file claims: one row per Lane and unsaved path written ("touching PATH"), at most 30 live per Lane, 14 days; hidden once the Lane saves the path or closes. | Activity, bounded by retention |

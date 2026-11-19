@@ -6,6 +6,8 @@ import ts from 'typescript';
 import { moduleUrl } from './convex-module.mjs';
 import { fakeSourceR2 } from './convex-source-r2-fixture.mjs';
 import { digest } from '../dist/hash.js';
+import { fileURLToPath } from 'node:url';
+import { readDocument } from '../scripts/package-documents.mjs';
 const { storeSourceBytes } = await import(moduleUrl('../convex/projectSourceBytes.ts'));
 const { mirrorSource } = await import(moduleUrl('../convex/projectGithubMirror.ts'));
 const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
@@ -186,7 +188,8 @@ test('the storage guard fails on a new write, read, handle or field and on expir
 });
 
 test('docs/data-placement.md lists every allowlisted file and every Convex table', () => {
-  const doc = readFileSync(new URL('../docs/data-placement.md', import.meta.url), 'utf8');
+  // One row file per table in docs/data-placement.d/tables/; read the assembled page (Item 491ddd77).
+  const doc = readDocument(fileURLToPath(new URL('..', import.meta.url)), 'docs/data-placement.md');
   for (const key of Object.keys(storageAllowlist)) {
     const file = key.split(' ')[0];
     assert(doc.includes(`convex/${file}`), `docs/data-placement.md must name convex/${file}`);

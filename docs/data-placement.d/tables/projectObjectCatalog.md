@@ -1,0 +1,1 @@
+| `projectObjectCatalog` | Sorted immutable object descriptors from imports or explicit compaction, 256 per row (digest, size, recipe or packed byte range; physical packs retain protected source pins), instead of one `projectObjects` row per object; `findObject` reads it. | Repo size / 256 |

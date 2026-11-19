@@ -1,0 +1,1 @@
+| `projectReadBudgets`, `projectStorageUsage`, `accountStorageUsage` | Abuse-limit counters (`convex/abuseLimits.ts`): signed-out read calls per public project in the current window, and reserved stored objects and bytes per project (sharded) and per owning account (added in roll-ups); fixed rows per scope, reset or updated in place. | Activity, bounded by shard count |

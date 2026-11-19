@@ -1,0 +1,1 @@
+| `projectObjectReceipts` | Original upload-id, nonce, size and digest pins after immutable descriptors move into catalog pages; current project access still gates replay. Bounded migration cursor receipts use the same table. See [storage compaction](../../operations/storage-compaction.md). | Compacted descriptor count |

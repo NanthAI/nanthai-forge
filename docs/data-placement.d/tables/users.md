@@ -1,0 +1,1 @@
+| `users` | One Convex Auth-to-Forge account mapping per account; numeric GitHub identity, verified email only, optional owner-bound encrypted GitHub App credential. No source bytes or session history. Component sessions/passkeys remain in their own components. The landing-storage guard permits zero bytes per landing for this table (Item de67c77d). | Fixed per account |

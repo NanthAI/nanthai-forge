@@ -1,0 +1,1 @@
+| `projectHostedFrictionHints` | Bounded duplicate-candidate replay receipts when inline hints would exceed a friction row. Written atomically with capture and removed on project deletion. | Overflow captures |

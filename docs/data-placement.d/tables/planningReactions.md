@@ -1,0 +1,1 @@
+| `planningReactions` | One row per person, comment and reaction kind (eight kinds); a toggle, not history. Reads return counts only, never who reacted. | Planning activity, at most 8 per person per comment |

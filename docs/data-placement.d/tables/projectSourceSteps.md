@@ -1,0 +1,1 @@
+| `projectSourceSteps`, `projectSourceTasks`, `projectSourceBatches`, `projectSourcePools` | Source-job steps, fan-out tasks and worker pools, including one bounded physical seed per project; cursors, membership pages and pack tails are `r2source:` pins. | Activity |

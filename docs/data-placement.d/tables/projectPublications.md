@@ -1,0 +1,1 @@
+| `projectPublications`, `projectPublicationAttempts`, `projectPublicationPages`, `projectGithubBindings`, `projectGithubMirrors`, `projectGithubMirrorJobs` | Publication and GitHub mirror state. | Activity |

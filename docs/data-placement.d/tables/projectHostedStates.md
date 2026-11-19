@@ -1,0 +1,1 @@
+| `projectHostedStates`, `projectHostedSaves`, `projectHostedSavePages`, `projectHostedSyncs`, `projectHostedSeeds`, `projectHostedSeedPages` | Saved States and their paged inputs/outputs. | Activity (pages, not files) |

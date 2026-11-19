@@ -1,0 +1,1 @@
+| `projectFailures` | Failure log (Item 2c420916): one row of about 300 bytes per failed operation or failed landing (kind, code, scrubbed message, time to fail), written only when it fails; read by `nforge metrics ROOT --failures`; 30-day expiry. The landing-storage guard permits zero bytes per healthy landing. | Failures |

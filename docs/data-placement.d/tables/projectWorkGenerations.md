@@ -1,0 +1,1 @@
+| `projectWorkGenerations`, `projectWorkHeads`, `projectWorkEvents`, `projectWorkDetailMigrations`, `projectReturnPages`, `projectReturnSupersessions` | Work projection generations, heads/events, migration and return pages; canonical history remains separately retained. | Activity |

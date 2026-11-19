@@ -1,0 +1,1 @@
+| `projectHostedRecords`, `projectHostedRecordHeads`, `projectHostedRecordBodies`, `projectHostedDisplayRecords`, `projectHostedSnapshots`, `projectHostedSnapshotHeads`, `projectHostedSnapshotPages`, `projectHostedDecisions`, `projectHostedDecisionMaintainers`, `projectHostedFriction` | Work records (Intents, Lanes, decisions), snapshots and display copies. | Activity |

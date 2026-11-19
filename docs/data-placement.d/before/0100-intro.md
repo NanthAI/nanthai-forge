@@ -1,0 +1,3 @@
+Source and artifact bytes go to R2. Convex holds records, read and written in pages, never per file. The approved bounded sealed-secret record exception is described below.
+
+This page lists every byte store and every Convex table: what it holds, and whether it grows with repository size (one row or object per file or physical object), with activity (per save, landing, run or event) or stays fixed (per project, account or setting). The guard in `tests/hot-storage-invariant.test.mjs` enforces the byte rule; its allowlist is reproduced below. Each row of the Convex tables list is its own file, [`data-placement.d/tables/<table>.md`](../tables/), named after the first table it lists; a new table adds a new file there.

@@ -1,0 +1,1 @@
+| `projectIntentLandingNotes` | Landing receipts on Items (Issue 3a733ee8): one row (about 0.5 KB) per landed or reverted Intent per receipt, written by the landing's completion tick or the revert notice, read as `system` comments on the Item whose Intent chain holds it. Derived from receipts; not exported or backed up. Removed with the project. | Grows per landing |

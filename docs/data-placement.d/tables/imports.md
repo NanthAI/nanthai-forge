@@ -1,0 +1,1 @@
+| `imports`, `importArtifacts`, `importReaders`, `importRemovalOperations`, `teamImports`, `sourceZones`, `zoneChanges`, `zoneReaders`, `derivedArtifacts`, `artifactBlobs` | Indexed public imports, Zones, derivatives and `r2blob:` metadata. | Repo size, per import |

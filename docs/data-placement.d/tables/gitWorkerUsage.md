@@ -1,0 +1,1 @@
+| `gitWorkerUsage` | Large-pack Worker use per UTC day: packs and bytes per project and for all projects ('*'), checked before a redirect and counted before bytes flow; rows older than 7 days are deleted when their scope is next written. | Git fetches served through the [large-pack Worker](../../git-serving.md#large-packs) |

@@ -1,0 +1,1 @@
+| `projectHostedConflictNotices` | Exact conflicts at save (flip 4): one row per Lane and other side (a Lane or main) with file paths, line ranges and the other Lane's goal (at most 160 characters); closed rows stay as the lead-time record. No file bytes. | Activity |

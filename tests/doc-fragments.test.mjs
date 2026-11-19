@@ -89,7 +89,12 @@ test('split shared documents hold only headings and entries lines, so new entrie
       .split('\n')
       .some(line => ENTRIES_LINE.test(line)),
   );
-  for (const path of ['docs/status.md', 'docs/security.md', 'docs/agents/workflow.md'])
+  for (const path of [
+    'docs/status.md',
+    'docs/security.md',
+    'docs/agents/workflow.md',
+    'docs/data-placement.md',
+  ])
     assert.ok(split.includes(path), `${path} is split`);
   for (const path of split) {
     for (const block of raw(path)

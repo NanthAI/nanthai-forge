@@ -24,7 +24,7 @@ test('new tables report all five registration gaps together before a landing che
       projectOwned:
         inventory.idPaths(name, 'hostedProjects').length > 0 || 'projectId' in (table.validator.fields ?? {}),
     })),
-    placement: read('docs/data-placement.md'),
+    placement: readDocument(repo, 'docs/data-placement.md'),
     purge: new Set([
       ...Object.keys(inventory.projectPurgeTables),
       ...Object.keys(inventory.projectPurgeSpecial),
@@ -49,11 +49,11 @@ test('one diagnostic includes every omitted table, budget phase, owner classific
     helpCurrent: false,
   });
   assert.deepEqual(gaps, [
-    'syntheticA: docs/data-placement.md',
+    'syntheticA: docs/data-placement.d/tables/syntheticA.md',
     'syntheticA: convex/projectPurgeInventory.ts',
     'syntheticA: tests/landing-storage-budget.d/syntheticA.json (fresh/immediate)',
     'syntheticA: tests/landing-storage-budget.d/syntheticA.json (fresh/retained)',
-    'syntheticB: docs/data-placement.md',
+    'syntheticB: docs/data-placement.d/tables/syntheticB.md',
     'syntheticB: tests/landing-storage-budget.d/syntheticB.json (fresh/immediate)',
     'syntheticB: tests/landing-storage-budget.d/syntheticB.json (fresh/retained)',
     'owner-only guard: synthetic.ts:write',

@@ -1,0 +1,1 @@
+| `projectPublic` | One row per public project for signed-out discovery (Item 8947a779): listed flag, star count, the owner's Lane-title opt-in, the fork's upstream pointer and a weekly activity summary written at most once per 10 minutes by the public read; no source, plan text or people. Deleted with the project. | Discovery |

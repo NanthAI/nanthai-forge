@@ -1,0 +1,1 @@
+| `projectHostedStackDependents` | One row per open Lane stacked on a parent Lane (parent Lane, pinned parent head, the parent's newest saved head and a conflicted automatic restack head, marks of the parent events already announced); written only by stacked Lane records, deleted when the Lane closes or unstacks and with the project. | Activity |

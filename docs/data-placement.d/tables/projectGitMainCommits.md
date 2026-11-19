@@ -1,0 +1,1 @@
+| `projectGitMainCommits` | [Git serving](../../git-serving.md) on a project without a GitHub mirror: one small row per Forge-built main commit (State, commit id, tree id, landing sequence), written with its Forge pack, so a Lane based on any landed State builds on that commit with one indexed read. No bytes. | Landings on unmirrored projects that Git requests reached |

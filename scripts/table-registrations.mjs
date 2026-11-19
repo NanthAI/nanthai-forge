@@ -3,7 +3,7 @@
 export function tableRegistrationFindings({ tables, placement, purge, budgets, owners = [], helpCurrent }) {
   const findings = [];
   for (const { name, projectOwned } of tables) {
-    if (!placement.includes(`\`${name}\``)) findings.push(`${name}: docs/data-placement.md`);
+    if (!placement.includes(`\`${name}\``)) findings.push(`${name}: docs/data-placement.d/tables/${name}.md`);
     if (projectOwned && !purge.has(name)) findings.push(`${name}: convex/projectPurgeInventory.ts`);
     for (const [scenario, phases] of Object.entries(budgets).filter(
       ([, value]) => value.immediate && value.retained,
