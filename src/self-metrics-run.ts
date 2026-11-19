@@ -23,6 +23,9 @@ export function metricRunRow(run: HostedCheckRun, reportFlakes?: unknown) {
           (run.gate ?? run.request.gate)!.effective === 'full'
         : null,
     ...(isScopedRecheck(run.gate) ? { scopedRecheck: true as const } : {}),
+    // A main audit, whatever its state: Stats leaves audits out of both sides (Item a61d3c91). auditRunnerSeconds
+    // below is set only for a terminal audit with execution seconds, so it cannot mark one on its own.
+    ...((run.gate ?? run.request.gate)?.mode === 'audit' ? { audit: true as const } : {}),
     flaky:
       typeof reportFlakes === 'string'
         ? (JSON.parse(reportFlakes) as RunFlakes | null)

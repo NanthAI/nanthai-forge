@@ -25,6 +25,14 @@ const fieldValue = (row, path) =>
 /** Snapshot transactions with indexed read-range OCC (including missing keys).
  * Concurrent commits retry only when a read document/range actually changed.
  * All counters describe matched provider ranges, never the fake's JS scans. */
+/** Documents one transaction may read. 4,096 by default, stricter than Convex's 32,000 documents scanned
+ * (docs.convex.dev/production/state/limits); a test that drives a reader at Convex's own limit raises it for its own
+ * transactions and restores it. Ranges (4,096) and bytes (16 MiB) are Convex's own. */
+export const readLimits = { documents: 4096 };
+/** The fixture wraps each handler's context in a body layer of its own, around the one convex/server.ts already
+ * adds, so a read that skips the production layer still gets body pages. A test that must see body-page reads as
+ * production does turns `outer` off for its own transactions and restores it. */
+export const fixtureLayers = { outer: true };
 export function lanesFixture({ legacyWorkRecords = false } = {}) {
   const wallClockTables = new Set(['projectHostedOperations']);
   const tables = Object.fromEntries(Object.keys(schema.tables).map(name => [name, new Map()]));
@@ -141,7 +149,10 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         const readBytes = rows.reduce((n, row) => n + bytes(row), 0);
         meter.readBytes += readBytes;
         meter.readBytesByTable[table] = (meter.readBytesByTable[table] ?? 0) + readBytes;
-        assert(meter.documents <= 4096 && meter.ranges <= 4096, `${name}: Convex read budget`);
+        assert(
+          meter.documents <= readLimits.documents && meter.ranges <= 4096,
+          `${name}: Convex read budget`,
+        );
         assert(meter.readBytes < 16 * 1024 * 1024, `${name}: Convex read bytes`);
         return structuredClone(rows);
       };
@@ -224,6 +235,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
           getRequestMetadata: async () => ({ scheduledFunctionId: null }),
           getTransactionMetrics: async () => ({
             databaseQueries: { used: meter.ranges, remaining: 4096 - meter.ranges },
+            documentsRead: { used: meter.documents, remaining: readLimits.documents - meter.documents },
             bytesRead: { used: meter.readBytes, remaining: 16 * 1024 * 1024 - meter.readBytes },
           }),
         },
@@ -250,7 +262,10 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
             if (!table) {
               meter.documents++;
               meter.ranges++;
-              assert(meter.documents <= 4096 && meter.ranges <= 4096, `${name}: Convex read budget`);
+              assert(
+                meter.documents <= readLimits.documents && meter.ranges <= 4096,
+                `${name}: Convex read budget`,
+              );
               return null;
             }
             return read(table, rows => [rows.get(id) ?? null])[0];
@@ -455,7 +470,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
       try {
         if (decorate) await decorate(ctx, input, name);
         const result = await fn._handler(
-          landingRequestBodies(fn.isQuery ? ctx : finishReadWriter(ctx)),
+          fixtureLayers.outer ? landingRequestBodies(fn.isQuery ? ctx : finishReadWriter(ctx)) : ctx,
           input,
         );
         // Convex rejects an oversized return value, which rolls the mutation back.

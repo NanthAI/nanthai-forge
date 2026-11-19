@@ -76,7 +76,7 @@ export const periodWords = (p: Period) =>
   p.kind === 'custom' && !p.error ? `from ${p.label}` : `in ${p.label}`;
 /** The closed days the figures cover, until the whole period has closed: "over 17–18 Nov 2026 (2 closed days)", never
  * "in November 2026" for two days. */
-export function coverWords(period: Period, perDay: Array<[string, number]>) {
+export function coverWords(period: Period, perDay: Array<[string, number | null]>) {
   if (!perDay.length) return periodWords(period);
   const first = perDay[0]![0],
     last = perDay.at(-1)![0];
@@ -92,14 +92,15 @@ export function coverWords(period: Period, perDay: Array<[string, number]>) {
 
 /** Every day from the first to the newest closed day of the read, a day with no row at zero: a day closes only
  * when it had landings and a later one landed, so a gap between closed days had none. Before the first closed day
- * nothing is drawn (Stats may not have been recording yet). */
-export function filledDays(perDay: Array<[string, number]>): Array<[string, number]> {
+ * nothing is drawn (Stats may not have been recording yet). A day whose close did not finish stays null: missing,
+ * never zero. */
+export function filledDays(perDay: Array<[string, number | null]>): Array<[string, number | null]> {
   if (!perDay.length) return [];
   const have = new Map(perDay),
-    out: Array<[string, number]> = [];
+    out: Array<[string, number | null]> = [];
   const end = Date.parse(`${perDay.at(-1)![0]}T00:00:00Z`);
   for (let t = Date.parse(`${perDay[0]![0]}T00:00:00Z`); t <= end; t += 86_400_000)
-    out.push([utc(t), have.get(utc(t)) ?? 0]);
+    out.push([utc(t), have.has(utc(t)) ? have.get(utc(t))! : 0]);
   return out;
 }
 
@@ -124,8 +125,65 @@ export const percent = (rate: number | null) =>
   rate === null ? 'not counted' : `${Math.round(rate * 100)}%`;
 export const plural = (n: number, one: string, many = `${one}s`) => `${int(n)} ${n === 1 ? one : many}`;
 
-/** Landings still needed before the replay is shown, or 0. */
-export const toGo = (data: StatsRead) => Math.max(0, data.compareFrom - data.window.landings);
+/** Why a window has no comparison, in the page's words (src/stats-estimate.ts#statsWindow `compare`): never "0
+ * landings to go" for days that simply were not recorded. */
+export function gapWords(w: Pick<StatsWindow, 'compare' | 'daysWithoutRuns'>) {
+  if (w.compare.gap === 'not-recorded')
+    return {
+      title: 'No comparison for these days',
+      text: `${plural(w.daysWithoutRuns, 'day')} here closed before Stats recorded every check run, so ${w.daysWithoutRuns === 1 ? 'its' : 'their'} CI figures are not recorded and there is nothing fair to compare.`,
+      short: 'not recorded',
+    };
+  if (w.compare.gap === 'no-solo')
+    return {
+      title: 'No comparison yet',
+      text: 'No change here has run the whole check on its own yet, so there is no price for one GitHub run of this project.',
+      short: 'no solo check yet',
+    };
+  return {
+    title: `${plural(w.compare.toGo, 'landing')} to go`,
+    text: 'Until then this page shows what was measured, with no comparison.',
+    short: `${plural(w.compare.toGo, 'landing')} to go`,
+  };
+}
+
+/** What a window with days read only in part may say (reviews b4dd69b4 finding 3, d6b0f1aa finding 1); null when every
+ * day was read in full. Runs not read leave counts and minutes short: a lower bound. Landings not read leave the landing
+ * count short and every run spread over fewer landings, so minutes per landing are an upper bound; rates and medians
+ * cover only the landings read, no bound either way. Saved minutes: runs not read leave Forge's minutes short (fewer
+ * saved than shown), landings not read leave the replays short (more saved than shown). */
+export function partialWords(w: Pick<StatsWindow, 'partial' | 'partialLandings' | 'partialRuns'>) {
+  if (!w.partial) return null;
+  const measured = [
+    w.partialRuns
+      ? 'Some days had more check runs than one day’s close reads, and the rest were not counted: runs and CI minutes are a lower bound.'
+      : '',
+    w.partialLandings
+      ? `Some days had more landings than one day’s close reads: landings are a lower bound, ${
+          w.partialRuns
+            ? 'CI minutes per landing may be more or fewer than shown'
+            : 'CI minutes per landing an upper bound (every run, over fewer landings)'
+        }, and first-try rate and times cover only the landings read.`
+      : '',
+  ];
+  return {
+    measured: measured.filter(Boolean).join(' '),
+    saved: savedWords(w),
+  };
+}
+const savedWords = (w: Pick<StatsWindow, 'partialLandings' | 'partialRuns'>) =>
+  w.partialRuns && w.partialLandings
+    ? 'Some days were read only in part, both their landings and their check runs, so the minutes saved may be more or fewer than shown.'
+    : w.partialRuns
+      ? 'Some days’ check runs were read only in part, so Forge used at least these minutes: the minutes saved are an upper bound.'
+      : 'Some days’ landings were read only in part, and the replays price only those read: the minutes saved are a lower bound.';
+/** A month read in part, by which way its replayed saving may be off (src/stats-period.ts month rows). */
+export const monthPartWords = (w: Pick<StatsWindow, 'partialLandings' | 'partialRuns'>) =>
+  w.partialRuns && w.partialLandings
+    ? 'read in part: saving may be more or fewer'
+    : w.partialRuns
+      ? 'read in part: saving is at most this'
+      : 'read in part: saving is at least this';
 
 /** Bar heights (percent of the tallest), so every bar in one chart shares one scale. */
 export function scale(values: number[]) {

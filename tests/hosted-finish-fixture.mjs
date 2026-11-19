@@ -230,7 +230,9 @@ export async function finishFixture(
   };
   const executingTasks = new AsyncLocalStorage();
   f.decorateContext(ctx => {
+    // Keep the transaction's read meter (getTransactionMetrics), as Convex does.
     ctx.meta = {
+      ...ctx.meta,
       getRequestMetadata: async () => ({ scheduledFunctionId: executingTasks.getStore()?.at(-1) ?? null }),
     };
     ctx.db.system = { get: ctx.db.get };

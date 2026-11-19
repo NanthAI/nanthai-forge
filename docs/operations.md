@@ -300,8 +300,11 @@ cancelled, and no earlier run of the head failed; earlier submissions that lande
 `after-fixer`: a failed submission ended before the head was saved by a builder (sync writes no save record,
 so a head made by sync after a failure is an `after-retry`). `after-retry`: a retry row, or a failed,
 interrupted or non-race superseded attempt of the same head. `after-recompose`: Forge's own recompose after
-main moved, not a builder retry. An attempt replaced in the instant it was created is an internal handoff and
-counts as neither. `reused-after-race` is as above. First-try mostly means main did not move under the
+main moved that threw a started check away, not a builder retry; a recompose before any check started discards
+nothing and stays `first-try`. An attempt replaced in the instant it was created is an internal handoff and
+counts as neither. `reused-after-race` is as above. `totals['5.1'].firstTryShare` and `firstTry` use Forge's
+one first-try rule, the same as Stats (`src/stats-estimate.ts#firstTry`): landed with no resubmission and no discarded check,
+so `first-try` and `reused-after-race` both count. First-try mostly means main did not move under the
 landing, so read it with the moved-main share, not as builder quality. `totals['5.1'].firstAttemptLandRate`
 is the Lane-level rate: Lanes whose first-ever land entry in the window was accepted.
 

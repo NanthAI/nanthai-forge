@@ -63,8 +63,8 @@ const priced = (l: StatsLanding) => l.runnerSeconds !== null && l.discardedRunne
 const contribution = (l: StatsLanding, field: 'runnerSeconds' | 'discardedRunnerSeconds') =>
   priced(l) ? l[field]! : 0;
 /** Additive correction only: retain the day's original queue replay, ordering,
- * medians and elapsed-time distributions. Its pending rerun contribution was
- * retained at close, so an unknown -> known price never needs a day rebuild. */
+ * medians and elapsed-time distributions, so an unknown -> known price never
+ * needs a day rebuild. */
 export function adjustClosedRunnerDay(
   day: StatsDay,
   before: StatsLanding,
@@ -74,39 +74,30 @@ export function adjustClosedRunnerDay(
   const deltaPriced = Number(priced(after)) - Number(priced(before));
   const deltaCounted = Number(after.attempts !== null) - Number(before.attempts !== null);
   const deltaFirst = Number(after.attempts === 1) - Number(before.attempts === 1);
-  const perRun = day.replay.fullCheck.runnerSeconds;
-  return {
-    ...day,
-    runner: {
-      ...day.runner,
-      priced: day.runner.priced + deltaPriced,
-      unknown: day.runner.unknown - deltaPriced,
-      acceptedSeconds:
-        day.runner.acceptedSeconds +
-        contribution(after, 'runnerSeconds') -
-        contribution(before, 'runnerSeconds'),
-      discardedSeconds:
-        day.runner.discardedSeconds +
-        contribution(after, 'discardedRunnerSeconds') -
-        contribution(before, 'discardedRunnerSeconds'),
-    },
-    firstTry: { counted: day.firstTry.counted + deltaCounted, first: day.firstTry.first + deltaFirst },
-    who: day.who.map(([who, n, first, counted]) =>
-      who === (after.who ?? '')
-        ? [who, n, first + deltaFirst, counted + deltaCounted]
-        : [who, n, first, counted],
-    ),
-    replay: {
-      ...day.replay,
-      runs: day.replay.runs + deltaPriced * 2,
-      reruns: day.replay.reruns + deltaPriced * reruns,
-      runnerSeconds:
-        day.replay.runnerSeconds && perRun !== null
-          ? {
-              low: day.replay.runnerSeconds.low + deltaPriced * 2 * perRun,
-              high: day.replay.runnerSeconds.high + deltaPriced * (2 + reruns) * perRun,
-            }
-          : day.replay.runnerSeconds,
-    },
+  const runner = {
+    ...day.runner,
+    priced: day.runner.priced + deltaPriced,
+    unknown: day.runner.unknown - deltaPriced,
+    acceptedSeconds:
+      day.runner.acceptedSeconds +
+      contribution(after, 'runnerSeconds') -
+      contribution(before, 'runnerSeconds'),
+    discardedSeconds:
+      day.runner.discardedSeconds +
+      contribution(after, 'discardedRunnerSeconds') -
+      contribution(before, 'discardedRunnerSeconds'),
   };
+  const firstTry = {
+    counted: day.firstTry.counted + deltaCounted,
+    first: day.firstTry.first + deltaFirst,
+  };
+  const who = day.who.map(([name, n, first, counted]) =>
+    name === (after.who ?? '')
+      ? ([name, n, first + deltaFirst, counted + deltaCounted] as [string, number, number, number])
+      : ([name, n, first, counted] as [string, number, number, number]),
+  );
+  // The GitHub side is priced per window from run counts (src/stats-estimate.ts#statsWindow), and Forge's side from
+  // every run's own row, so a late price changes only the landed-path tallies here; the replay stays as closed.
+  void reruns;
+  return { ...day, runner, firstTry, who };
 }

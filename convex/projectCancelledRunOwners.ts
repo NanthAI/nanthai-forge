@@ -5,7 +5,11 @@ import type { HostedCheckRun } from '../src/hosted-check';
 import type { HostedLandingState } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { pendingRunnerState } from './cancelledRunUsage';
-import { adjustCancelledRunDays, type CancelledOwnerChange } from './projectCancelledRunDay';
+import {
+  adjustCancelledRunDays,
+  adjustClosedRunCi,
+  type CancelledOwnerChange,
+} from './projectCancelledRunDay';
 import { correctLandingRunnerCosts } from './projectLandingSpeed';
 
 type Owner = Doc<'projectHostedLandingRequests'> | Doc<'projectHostedLandingDesired'>;
@@ -164,6 +168,7 @@ export async function correctCancelledRun(
     changes.push(updated);
   }
   await adjustCancelledRunDays(ctx, row.projectId, changes);
+  await adjustClosedRunCi(ctx, row.projectId, { id: run.id, startedAt: row._creationTime }, usage.seconds);
   await correctLandingRunnerCosts(ctx, row.projectId, corrected);
   run.cost = { status: 'observed', ...usage, estimatedCostUsd: null };
   await ctx.db.patch(row._id, {

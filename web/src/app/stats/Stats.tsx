@@ -23,6 +23,8 @@ import {
   dayName,
   duration,
   filledDays,
+  gapWords,
+  partialWords,
   int,
   minutes,
   coverWords,
@@ -173,13 +175,7 @@ export function StatsView({
         </Fold>
         {data.perDay[0]![0].slice(0, 7) !== data.perDay.at(-1)![0].slice(0, 7) ? (
           <Fold id="months" title="By month" hint="each month of this period">
-            {() => (
-              <Part
-                usePart={usePart}
-                part="months"
-                body={(r: StatsMonths) => <ByMonth r={r} compareFrom={data.compareFrom} />}
-              />
-            )}
+            {() => <Part usePart={usePart} part="months" body={(r: StatsMonths) => <ByMonth r={r} />} />}
           </Fold>
         ) : null}
       </div>
@@ -190,29 +186,35 @@ export function StatsView({
 function Sentence({ data, period }: { data: StatsRead; period: Period }) {
   const w = data.window,
     c = w.comparison,
-    when = coverWords(period, data.perDay);
+    when = coverWords(period, data.perDay),
+    part = partialWords(w);
   if (!c)
     return (
       <>
         <b>
           {plural(w.landings, 'landing')} {when}.
         </b>{' '}
-        The comparison with your own history starts at {int(data.compareFrom)} landings; what Forge measured
-        is exact from the first.
+        {w.compare.gap === 'landings'
+          ? `The comparison with your own history starts at ${int(data.compareFrom)} landings; ${part ? 'what Forge measured is shown as far as it was read.' : 'what Forge measured is exact from the first.'}`
+          : `${gapWords(w).text} What Forge measured is shown as it was recorded.`}
+        {part ? ` ${part.measured}` : ''}
       </>
     );
-  const saved = c.savedMinutes.atLeast;
+  // Headline against the merge queue (the setup a busy GitHub project uses); one at a time is the worst case.
+  const q = c.mergeQueue,
+    one = c.oneAtATime;
+  const ci = (saved: number) =>
+    saved >= 0 ? `${minutes(saved)} CI minutes fewer` : `${minutes(-saved)} CI minutes more`;
+  const time = (s: number | null) =>
+    s === null ? 'no replay' : s >= 0 ? `${duration(s)} sooner` : `${duration(-s)} later`;
   return (
     <>
       <b>
-        {saved > 0
-          ? `At least ${minutes(saved)} CI minutes fewer ${when}.`
-          : `${plural(w.landings, 'landing')} ${when}, about as many CI minutes as your own history replayed.`}
+        {ci(q.savedMinutes)} than your own history replayed through a merge queue building 5 at once, {when}.
       </b>{' '}
-      {saved > 0 ? `${plural(w.landings, 'landing')}. ` : ''}
-      {c.sooner !== null && c.sooner > 0
-        ? `The median change reached main ${duration(c.sooner)} sooner than the same arrivals through a one-at-a-time merge queue.`
-        : 'The median change reached main no sooner than the same arrivals through a one-at-a-time merge queue.'}
+      {plural(c.landings, 'landing')}. The median change reached main {time(q.sooner)} than through that
+      queue, and {time(one.sooner)} than one at a time, the worst case.
+      {part ? ` ${part.saved}` : ''}
     </>
   );
 }

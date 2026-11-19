@@ -1,10 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import {
+  DISCARD_CAUSES,
+  classifyRuns,
+  mergeQueueReplay,
+  type DiscardCause,
+  type QueueEntry,
+} from './stats-runs.js';
 
 /** Stats estimates contract (Issue a61d3c91; docs/run-evidence.md#stats). Owners compare what Forge measured in
- * their project with the same project's own history replayed through a GitHub-style flow: a pull
- * request check plus a merge-queue check per change, and one-at-a-time merging. Never a benchmark
- * ratio, and never a per-project token saving. Pure: no clock, no I/O, display-only. */
+ * their project with the same project's own history replayed through two GitHub setups: one change at a time on
+ * an up-to-date branch, and a merge queue building 5 at once. Never a benchmark ratio, and never a per-project token
+ * saving. Pure: no clock, no I/O, display-only. */
 
 /** One accepted landing, from fields its receipt and landing row already hold. Times are epoch ms. */
 export type StatsLanding = {
@@ -28,22 +35,10 @@ export type StatsLanding = {
 
 /** A replay of a window this small moves too much between days to be worth a headline. */
 export const STATS_COMPARE_MIN_LANDINGS = 50;
-/** Rows kept per day; a busier day is marked partial, never silently truncated. */
-export const STATS_DAY_MAX_LANDINGS = 2_000;
+/** Landings a day close reads; a busier day is marked partial, never silently truncated. */
+export const STATS_DAY_MAX_LANDINGS = 1_000;
 /** People and agents listed per day; the rest add up under `others`. */
 export const STATS_DAY_MAX_WHO = 40;
-
-/** The project's own full check: what one replayed pull-request or merge-queue run costs and takes. */
-export type FullCheck = {
-  /** Median billed runner seconds per run, and median wall seconds from check start to end. */
-  runnerSeconds: number | null;
-  wallSeconds: number | null;
-  /** `full`: medians of checks that ran the whole command. `scoped`: no full run in the window, so
-   * medians of the scoped checks Forge ran, which can only understate a GitHub run (lower bound stays
-   * a lower bound). */
-  basis: 'full' | 'scoped' | 'none';
-  runs: number;
-};
 
 export function median(values: readonly number[]) {
   if (!values.length) return null;
@@ -53,37 +48,6 @@ export function median(values: readonly number[]) {
 }
 
 const known = (n: number | null): n is number => n !== null && Number.isFinite(n) && n >= 0;
-const wall = (l: StatsLanding) =>
-  known(l.checkStartedAt) && known(l.checkEndedAt) && l.checkEndedAt >= l.checkStartedAt
-    ? (l.checkEndedAt - l.checkStartedAt) / 1000
-    : null;
-
-export function fullCheck(landings: readonly StatsLanding[]): FullCheck {
-  const full = landings.filter(l => l.ranInFull && known(l.runnerSeconds));
-  const pool = full.length ? full : landings.filter(l => known(l.runnerSeconds));
-  const walls = pool.map(wall).filter(known);
-  return {
-    runnerSeconds: median(pool.map(l => l.runnerSeconds!)),
-    wallSeconds: median(walls),
-    basis: full.length ? 'full' : pool.length ? 'scoped' : 'none',
-    runs: pool.length,
-  };
-}
-
-/** One-at-a-time merge queue over the same arrivals, each run taking `serviceSeconds`. `freeAt` carries
- * the queue across windows (the previous day's last finish); one pass, arrivals oldest first. */
-export function replayQueue(arrivals: readonly number[], serviceSeconds: number, freeAt = 0) {
-  const sorted = [...arrivals].sort((a, b) => a - b),
-    toMain: number[] = [];
-  let free = freeAt;
-  for (const at of sorted) {
-    const done = Math.max(at, free) + serviceSeconds * 1000;
-    toMain.push((done - at) / 1000);
-    free = done;
-  }
-  return { toMainSeconds: toMain, freeAt: free };
-}
-
 /** Landings that reached main while this one waited (between its "land" and its own arrival on
  * main), from Forge's recorded times: each is one rerun when branches must be up to date. */
 export function rerunsWhileWaiting(landings: readonly StatsLanding[]) {
@@ -102,49 +66,15 @@ export function rerunsWhileWaiting(landings: readonly StatsLanding[]) {
   return landings.map(l => Math.max(0, below(l.landedAt) - below(l.submittedAt + 1)));
 }
 
-/** The CI range and replayed time to main for one window of landings. Landings with unknown runner
- * minutes leave the CI figures (both measured and replayed) and are counted in `unknownRunner`. */
-export function replayEstimate(landings: readonly StatsLanding[], freeAt = 0) {
-  const priced = landings.filter(l => known(l.runnerSeconds) && known(l.discardedRunnerSeconds));
-  const check = fullCheck(landings);
-  const reruns = rerunsWhileWaiting(landings);
-  const pricedSet = new Set(priced);
-  const pricedReruns = landings.reduce((sum, l, i) => sum + (pricedSet.has(l) ? reruns[i]! : 0), 0);
-  const runs = priced.length * 2;
-  const perRun = check.runnerSeconds;
-  const queue =
-    check.wallSeconds === null
-      ? null
-      : replayQueue(
-          landings.map(l => l.submittedAt),
-          check.wallSeconds,
-          freeAt,
-        );
-  return {
-    landings: landings.length,
-    priced: priced.length,
-    unknownRunner: landings.length - priced.length,
-    fullCheck: check,
-    measuredRunnerSeconds: priced.reduce((s, l) => s + l.runnerSeconds! + l.discardedRunnerSeconds!, 0),
-    runs,
-    reruns: pricedReruns,
-    replayRunnerSeconds:
-      perRun === null ? null : { low: runs * perRun, high: (runs + pricedReruns) * perRun },
-    replayToMainSeconds: queue?.toMainSeconds ?? null,
-    freeAt: queue?.freeAt ?? freeAt,
-  };
-}
-
 const ints = z.array(z.number().int().nonnegative());
-/** One closed UTC day of a project, stored by the daily close (convex/projectStats.ts). */
-export const statsDaySchema = z
+/** A day closed by the first method (before the all-runs method, 2026-11-19): kept readable; its CI and replay figures
+ * are not shown, and a re-close (convex/projectStats.ts#recloseDays) rebuilds it. */
+const statsDayV1Schema = z
   .object({
     schema: z.literal(1),
     day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     landings: z.number().int().nonnegative(),
     partial: z.boolean(),
-    /** The close stopped counting people's planning work (Items closed, comments) at a cap, or some was already
-     * archived (convex/personWork.ts); the person-day entries it touched are marked too. */
     planningPartial: z.literal(true).optional(),
     runner: z
       .object({
@@ -157,37 +87,93 @@ export const statsDaySchema = z
     firstTry: z
       .object({ counted: z.number().int().nonnegative(), first: z.number().int().nonnegative() })
       .strict(),
-    /** Seconds, sorted: measured "land" to on main, and the stops on the way when recorded. */
     toMain: ints,
     stops: z.object({ queue: ints, check: ints, land: ints }).strict(),
-    replay: z
-      .object({
-        fullCheck: z
-          .object({
-            runnerSeconds: z.number().nonnegative().nullable(),
-            wallSeconds: z.number().nonnegative().nullable(),
-            basis: z.enum(['full', 'scoped', 'none']),
-            runs: z.number().int().nonnegative(),
-          })
-          .strict(),
-        runs: z.number().int().nonnegative(),
-        reruns: z.number().int().nonnegative(),
-        runnerSeconds: z
-          .object({ low: z.number().nonnegative(), high: z.number().nonnegative() })
-          .strict()
-          .nullable(),
-        /** Replayed seconds to main, sorted; null when no check time was recorded that day. */
-        toMain: ints.nullable(),
-        /** When the replayed queue frees up (epoch ms): the next day's replay starts behind it. */
-        freeAt: z.number().nonnegative(),
-      })
-      .strict(),
-    /** [who, landings, first tries, landings with an attempt count], most landings first. */
+    replay: z.object({}).passthrough(),
     who: z.array(z.tuple([z.string(), z.number().int(), z.number().int(), z.number().int()])),
     others: z.number().int().nonnegative(),
   })
   .strict();
+const tallySchema = z
+  .object({
+    runs: z.number().int().nonnegative(),
+    seconds: z.number().nonnegative(),
+    unknown: z.number().int().nonnegative(),
+  })
+  .strict();
+const tails = z
+  .object({ one: ints, queue: ints, fast: ints, slow: ints })
+  .strict()
+  .describe('Merge times of each replayed queue’s last entries (epoch ms): the next day starts behind them.');
+/** One closed UTC day of a project, stored by the daily close (convex/projectStats.ts). */
+const statsDayV2Schema = statsDayV1Schema
+  .extend({
+    schema: z.literal(2),
+    /** Every check run started this day (src/stats-runs.ts#classifyRuns); null when the close could not read them. */
+    ci: z
+      .object({
+        all: tallySchema,
+        accepted: tallySchema,
+        pending: tallySchema,
+        unlinked: tallySchema,
+        audits: tallySchema,
+        discarded: z
+          .object({
+            mainMoved: tallySchema,
+            failed: tallySchema,
+            cancelled: tallySchema,
+            superseded: tallySchema,
+          })
+          .strict(),
+        /** Of the failed runs: rechecks after main moved, which a GitHub merge queue meets as ejections. */
+        failedInQueue: tallySchema,
+        /** More runs, attempts or landing lookups than the close reads in one day. */
+        partial: z.boolean(),
+      })
+      .strict()
+      .nullable(),
+    /** Solo full checks this day, sorted: what one GitHub run of this project costs (runner s) and takes (wall s). */
+    solo: z.object({ runnerSeconds: ints, wallSeconds: ints }).strict(),
+    replay: z
+      .object({
+        /** The check time the replays used: the day's solo median, else the last day's. */
+        wallSeconds: z.number().nonnegative().nullable(),
+        /** Queue entries: the day's landings plus its failed rechecks (ejected). */
+        arrivals: z.number().int().nonnegative(),
+        failed: z.number().int().nonnegative(),
+        /** Landings that reached main while each waited: one rerun each when branches must be up to date. */
+        reruns: z.number().int().nonnegative(),
+        /** Merge-queue builds at 5 at a time, as full-build equivalents: restarts and failing builds count their
+         * share of a full check. */
+        builds: z.number().nonnegative(),
+        /** Replayed seconds to main, sorted, per setup; null with no check time. Fast/slow: check time -/+10%. */
+        oneAtATime: ints.nullable(),
+        mergeQueue: ints.nullable(),
+        mergeQueueFast: ints.nullable(),
+        mergeQueueSlow: ints.nullable(),
+        tails,
+      })
+      .strict(),
+    /** The close did not finish (convex/projectStats.ts#closeDay): the day is not measured. It holds no figures,
+     * only what the previous closed day hands on, and the page shows it as missing, never as zero. */
+    failed: z.object({ tries: z.number().int().positive(), reason: z.string() }).strict().optional(),
+  })
+  .strict();
+/** Forge's one "first try" (owner 2026-11-19, Item a61d3c91): a change landed with no resubmission and no discarded
+ * check. Stats (convex/projectStats.ts#statsLanding) and metrics 5.1 (src/self-metrics.ts#FIRST_TRY_PATHS) both use it.
+ * - Resubmission: an earlier submission of the same Intent ended without landing (failed, cancelled, interrupted or
+ *   replaced by a new save) before this one, or this one supersedes another.
+ * - Discarded check: a check of this change ran and was thrown away (main moved and Forge rechecked, or a recheck
+ *   replaced it). A batch join, or a recompose before any check ran, discards nothing.
+ * Returns the attempt count Stats stores: 1 for a first try, 2 for anything else, null when unknown. */
+export function firstTry(input: { resubmitted: boolean; discardedCheck: boolean; known: boolean }) {
+  if (input.resubmitted || input.discardedCheck) return 2;
+  return input.known ? 1 : null;
+}
+
+export const statsDaySchema = z.union([statsDayV2Schema, statsDayV1Schema]);
 export type StatsDay = z.infer<typeof statsDaySchema>;
+export type StatsDayV2 = z.infer<typeof statsDayV2Schema>;
 
 const sortedInts = (values: Array<number | null>) =>
   values
@@ -205,11 +191,41 @@ export const landingStops = (l: StatsLanding) => ({
   land: span(l.checkEndedAt, l.landedAt),
 });
 
-/** Close one UTC day: the landings that reached main that day, oldest first, and the replayed
- * queue's `freeAt` from the day before (0 for the first day). */
-export function statsDay(day: string, input: readonly StatsLanding[], freeAt = 0): StatsDay {
+/** Merge-queue replays build this many entries at once (owner 2026-11-19): a busy GitHub project's setting, not the
+ * one-at-a-time worst case. */
+export const MERGE_QUEUE_CONCURRENCY = 5;
+/** What the previous closed day hands on: its check time and where each replayed queue ended. */
+export type StatsCarry = { wallSeconds: number | null; tails: z.infer<typeof tails> };
+export const NO_CARRY: StatsCarry = { wallSeconds: null, tails: { one: [], queue: [], fast: [], slow: [] } };
+export function statsCarry(previous: StatsDay | null): StatsCarry {
+  if (!previous || previous.schema !== 2) return NO_CARRY;
+  return { wallSeconds: previous.replay.wallSeconds, tails: previous.replay.tails };
+}
+
+/** Tries a later day's close gives an earlier day whose close did not finish, before leaving it as not measured. */
+export const STATS_CLOSE_TRIES = 3;
+/** A day whose close has not finished: no figures, the previous day's carry handed on (src/stats-period.ts leaves it out
+ * of every figure and shows it as missing). */
+export function statsFailedDay(day: string, carry: StatsCarry, tries = 1): StatsDayV2 {
+  return {
+    ...statsDay(day, [], null, carry),
+    failed: { tries, reason: 'The day close did not finish, so this day is not measured.' },
+  };
+}
+
+/** Close one UTC day: the landings that reached main that day, every check run started that day (null when they
+ * could not be read) and what the previous closed day hands on.
+ * - One at a time: each change's own check is its run on an up-to-date branch; it joins at "land".
+ * - Merge queue: each change first runs its pull-request check (one check time), then joins the queue; its time to
+ *   main runs from the “land” request to merged. A failed recheck after main moved joins as a failing entry and is ejected; a
+ *   change's own failed check fails its pull-request run and never joins. */
+export function statsDay(
+  day: string,
+  input: readonly StatsLanding[],
+  runs: ReturnType<typeof classifyRuns> | null = null,
+  carry: StatsCarry = NO_CARRY,
+): StatsDayV2 {
   const landings = [...input].sort((a, b) => a.landedAt - b.landedAt).slice(0, STATS_DAY_MAX_LANDINGS);
-  const estimate = replayEstimate(landings, freeAt);
   const tally = new Map<string, [number, number, number]>();
   for (const l of landings) {
     const row = tally.get(l.who ?? '') ?? [0, 0, 0];
@@ -223,14 +239,45 @@ export function statsDay(day: string, input: readonly StatsLanding[], freeAt = 0
   const ranked = [...tally].sort((a, b) => b[1][0] - a[1][0] || a[0].localeCompare(b[0]));
   const counted = landings.filter(l => l.attempts !== null);
   const priced = landings.filter(l => known(l.runnerSeconds) && known(l.discardedRunnerSeconds));
+  const solo = runs?.solo ?? { runnerSeconds: [], wallSeconds: [] };
+  const wallSeconds = median(solo.wallSeconds) ?? carry.wallSeconds;
+  const failures = runs?.queueFailures ?? [];
+  const entries = (scale: number, pullRequestFirst: boolean): QueueEntry[] => [
+    ...landings.map(l => ({
+      at: l.submittedAt + (pullRequestFirst ? wallSeconds! * scale * 1000 : 0),
+      from: l.submittedAt,
+      fails: false,
+    })),
+    ...failures.map(f => ({ at: f.at, fails: true, seconds: f.seconds === null ? null : f.seconds * scale })),
+  ];
+  const replay = (concurrency: number, scale: number, tail: number[]) =>
+    wallSeconds === null
+      ? null
+      : mergeQueueReplay(entries(scale, concurrency > 1), wallSeconds * scale, concurrency, tail);
+  const one = replay(1, 1, carry.tails.one),
+    queue = replay(MERGE_QUEUE_CONCURRENCY, 1, carry.tails.queue),
+    fast = replay(MERGE_QUEUE_CONCURRENCY, 0.9, carry.tails.fast),
+    slow = replay(MERGE_QUEUE_CONCURRENCY, 1.1, carry.tails.slow);
+  const ci = runs
+    ? {
+        all: runs.all,
+        accepted: runs.accepted,
+        pending: runs.pending,
+        unlinked: runs.unlinked,
+        audits: runs.audits,
+        discarded: runs.discarded,
+        failedInQueue: runs.failedInQueue,
+        partial: runs.partial,
+      }
+    : null;
   return statsDaySchema.parse({
-    schema: 1,
+    schema: 2,
     day,
     landings: landings.length,
     partial: input.length > landings.length,
     runner: {
-      priced: estimate.priced,
-      unknown: estimate.unknownRunner,
+      priced: priced.length,
+      unknown: landings.length - priced.length,
       acceptedSeconds: priced.reduce((s, l) => s + l.runnerSeconds!, 0),
       discardedSeconds: priced.reduce((s, l) => s + l.discardedRunnerSeconds!, 0),
     },
@@ -241,78 +288,206 @@ export function statsDay(day: string, input: readonly StatsLanding[], freeAt = 0
       check: sortedInts(landings.map(l => span(l.checkStartedAt, l.checkEndedAt))),
       land: sortedInts(landings.map(l => span(l.checkEndedAt, l.landedAt))),
     },
+    ci,
+    solo,
     replay: {
-      fullCheck: estimate.fullCheck,
-      runs: estimate.runs,
-      reruns: estimate.reruns,
-      runnerSeconds: estimate.replayRunnerSeconds,
-      toMain: estimate.replayToMainSeconds === null ? null : sortedInts(estimate.replayToMainSeconds),
-      freeAt: estimate.freeAt,
+      wallSeconds,
+      arrivals: landings.length + failures.length,
+      failed: failures.length,
+      reruns: rerunsWhileWaiting(landings).reduce((s, n) => s + n, 0),
+      builds: queue?.builds ?? 0,
+      oneAtATime: one ? sortedInts(one.toMainSeconds) : null,
+      mergeQueue: queue ? sortedInts(queue.toMainSeconds) : null,
+      mergeQueueFast: fast ? sortedInts(fast.toMainSeconds) : null,
+      mergeQueueSlow: slow ? sortedInts(slow.toMainSeconds) : null,
+      tails: {
+        one: (one?.tail ?? carry.tails.one).map(Math.round),
+        queue: (queue?.tail ?? carry.tails.queue).map(Math.round),
+        fast: (fast?.tail ?? carry.tails.fast).map(Math.round),
+        slow: (slow?.tail ?? carry.tails.slow).map(Math.round),
+      },
     },
     who: ranked.slice(0, STATS_DAY_MAX_WHO).map(([who, [n, first, counted]]) => [who, n, first, counted]),
     others: ranked.slice(STATS_DAY_MAX_WHO).reduce((s, [, [n]]) => s + n, 0),
-  });
+  }) as StatsDayV2;
 }
 
-/** What Stats shows for a window of closed days. Measured figures are facts; `comparison` is the
- * own-history replay, null until the window holds STATS_COMPARE_MIN_LANDINGS landings. */
+const minutesOf = (t: { runs: number; seconds: number; unknown: number }) => ({
+  runs: t.runs,
+  minutes: t.seconds / 60,
+  unknown: t.unknown,
+});
+/** Why a window shows no comparison: too few landings yet, days closed before every run was recorded (or whose runs
+ * could not be read), or no solo full check to price a GitHub run. */
+export type CompareGap = 'landings' | 'not-recorded' | 'no-solo';
+/** What Stats shows for a window of closed days. Measured figures are facts. `comparison` replays the same days
+ * through two GitHub setups, null until the window holds STATS_COMPARE_MIN_LANDINGS landings on days closed by this
+ * method with a solo full check to price them (`compare` says why not):
+ * - One at a time ("Require branches to be up to date before merging"): one run per change plus a rerun each time
+ *   another change reached main while it waited; changes reach main one by one.
+ * - Merge queue, 5 at a time ("Require merge queue", "Build concurrency" 5, "Maximum pull requests to merge" 1): a
+ *   pull-request run per change plus every queue build, failed rechecks ejected and the builds behind them restarted.
+ * Runs are priced at the window's median solo full check. Work Forge ran that a GitHub flow runs the same way costs
+ * the same on both sides, at its recorded minutes: failed checks (on GitHub, pull-request runs; in a queue, failing
+ * builds instead), and checks of work that was replaced, withdrawn or stopped. Forge's side is every check run
+ * (audits apart); checks no landing attempt names are counted on Forge's side only. */
 export function statsWindow(days: readonly StatsDay[]) {
-  const sum = (pick: (d: StatsDay) => number) => days.reduce((s, d) => s + pick(d), 0);
-  const merged = (pick: (d: StatsDay) => number[] | null) => days.flatMap(d => pick(d) ?? []);
-  const landings = sum(d => d.landings);
-  const priced = sum(d => d.runner.priced);
-  const ciMinutes = (sum(d => d.runner.acceptedSeconds) + sum(d => d.runner.discardedSeconds)) / 60;
-  const counted = sum(d => d.firstTry.counted);
-  const toMain = median(merged(d => d.toMain));
-  const replayDays = days.filter(d => d.replay.runnerSeconds !== null);
-  // A day with no priced full check cannot be replayed; its landings are counted as unpriced.
-  const replayPriced = replayDays.reduce((s, d) => s + d.runner.priced, 0);
-  const measuredReplayed =
-    replayDays.reduce((s, d) => s + d.runner.acceptedSeconds + d.runner.discardedSeconds, 0) / 60;
-  const low = replayDays.reduce((s, d) => s + d.replay.runnerSeconds!.low, 0) / 60;
-  const high = replayDays.reduce((s, d) => s + d.replay.runnerSeconds!.high, 0) / 60;
-  const replayToMain = median(merged(d => d.replay.toMain));
+  const sum = <T>(list: readonly T[], pick: (d: T) => number) => list.reduce((s, d) => s + pick(d), 0);
+  const merged = <T>(list: readonly T[], pick: (d: T) => number[] | null) => list.flatMap(d => pick(d) ?? []);
+  const v2 = days.filter((d): d is StatsDayV2 => d.schema === 2);
+  const withCi = v2.filter(d => d.ci !== null);
+  const landings = sum(days, d => d.landings);
+  const counted = sum(days, d => d.firstTry.counted);
+  const toMain = median(merged(days, d => d.toMain));
+  type Ci = NonNullable<StatsDayV2['ci']>;
+  const tallyOf = (
+    list: readonly StatsDayV2[],
+    pick: (ci: Ci) => { runs: number; seconds: number; unknown: number },
+  ) => ({
+    runs: sum(list, d => pick(d.ci!).runs),
+    seconds: sum(list, d => pick(d.ci!).seconds),
+    unknown: sum(list, d => pick(d.ci!).unknown),
+  });
+  const all = tallyOf(withCi, ci => ci.all);
+  const ciLandings = sum(withCi, d => d.landings);
+  const causes = Object.fromEntries(
+    DISCARD_CAUSES.map(c => [c, minutesOf(tallyOf(withCi, ci => ci.discarded[c]))]),
+  ) as Record<DiscardCause, ReturnType<typeof minutesOf>>;
+  const discarded = {
+    runs: sum(DISCARD_CAUSES, c => causes[c].runs),
+    minutes: sum(DISCARD_CAUSES, c => causes[c].minutes),
+    unknown: sum(DISCARD_CAUSES, c => causes[c].unknown),
+    byCause: causes,
+  };
+  const priced = sum(days, d => d.runner.priced);
   const who = new Map<string, [number, number, number]>();
   for (const d of days)
     for (const [name, n, first, c] of d.who) {
       const row = who.get(name) ?? [0, 0, 0];
       who.set(name, [row[0] + n, row[1] + first, row[2] + c]);
     }
+  // The comparison: days closed by this method with every run read and a check time to replay.
+  const compared = withCi.filter(d => d.replay.wallSeconds !== null);
+  const perRun = median(merged(compared, d => d.solo.runnerSeconds));
+  const comparedLandings = sum(compared, d => d.landings);
+  const forgeMinutes = sum(compared, d => d.ci!.all.seconds) / 60;
+  const forgeToMain = median(merged(compared, d => d.toMain));
+  const failed = tallyOf(compared, ci => ci.discarded.failed);
+  const failedInQueue = tallyOf(compared, ci => ci.failedInQueue);
+  const notLanded = {
+    runs: sum(compared, d => d.ci!.discarded.superseded.runs + d.ci!.discarded.cancelled.runs),
+    seconds: sum(compared, d => d.ci!.discarded.superseded.seconds + d.ci!.discarded.cancelled.seconds),
+  };
+  const baseline = (runs: number, recorded: { runs: number; seconds: number }, replayed: number[]) => {
+    const ciMinutes = (runs * perRun! + recorded.seconds) / 60;
+    const toMainSeconds = median(replayed);
+    return {
+      /** Runs priced at the solo check (full-build equivalents), and runs taken at their recorded minutes. */
+      runs,
+      recordedRuns: recorded.runs,
+      ciMinutes,
+      /** Baseline minus Forge over the same days: positive is fewer with Forge. */
+      savedMinutes: ciMinutes - forgeMinutes,
+      toMainSeconds,
+      sooner: toMainSeconds === null || forgeToMain === null ? null : toMainSeconds - forgeToMain,
+    };
+  };
+  const daysWithoutRuns = days.length - withCi.length;
+  const daysWithoutSolo = withCi.length - compared.length;
+  const gap: CompareGap | null =
+    comparedLandings >= STATS_COMPARE_MIN_LANDINGS
+      ? perRun === null
+        ? 'no-solo'
+        : null
+      : landings >= STATS_COMPARE_MIN_LANDINGS
+        ? daysWithoutRuns
+          ? 'not-recorded'
+          : 'no-solo'
+        : 'landings';
   return {
     days: days.length,
     landings,
-    partial: days.some(d => d.partial),
+    partial: days.some(d => d.partial) || withCi.some(d => d.ci!.partial),
+    /** Some day's close read only part of its landings (the replays cover fewer than landed) or of its check runs
+     * (Forge's minutes are short): which way the comparison may be off depends on which (web/src/app/stats/model.ts). */
+    partialLandings: days.some(d => d.partial),
+    partialRuns: withCi.some(d => d.ci!.partial),
+    /** Days closed by the first method, or whose runs could not be read: left out of the CI figures. */
+    daysWithoutRuns,
+    /** Days with runs read but no solo full check yet (none that day or before): left out of the comparison. */
+    daysWithoutSolo,
+    /** Why `comparison` is null, and the landings still needed when it is only too few. */
+    compare: {
+      gap,
+      toGo: gap === 'landings' ? STATS_COMPARE_MIN_LANDINGS - comparedLandings : 0,
+    },
     measured: {
-      ciMinutes,
-      pricedLandings: priced,
-      unknownRunner: sum(d => d.runner.unknown),
-      ciMinutesPerLanding: priced ? ciMinutes / priced : null,
-      wastedMinutes: sum(d => d.runner.discardedSeconds) / 60,
-      firstTryRate: counted ? sum(d => d.firstTry.first) / counted : null,
+      /** Every check run started on these days, audits apart; null when no day recorded its runs. Runs with no
+       * recorded minutes are counted in `unknownRuns` and add nothing. */
+      ciMinutes: withCi.length ? all.seconds / 60 : null,
+      runs: all.runs,
+      unknownRuns: all.unknown,
+      ciMinutesPerLanding: ciLandings ? all.seconds / 60 / ciLandings : null,
+      /** The landed path alone: a landing's own accepted check and the checks it discarded. */
+      landedPathMinutesPerLanding: priced
+        ? (sum(days, d => d.runner.acceptedSeconds) + sum(days, d => d.runner.discardedSeconds)) / 60 / priced
+        : null,
+      /** Checks no landing attempt names: counted on Forge's side, never discarded. */
+      unlinked: minutesOf(tallyOf(withCi, ci => ci.unlinked)),
+      /** null when no day recorded its runs. */
+      discarded: withCi.length ? discarded : null,
+      firstTryRate: counted ? sum(days, d => d.firstTry.first) / counted : null,
       firstTryCounted: counted,
       toMainSeconds: toMain,
       stops: {
-        queue: median(merged(d => d.stops.queue)),
-        check: median(merged(d => d.stops.check)),
-        land: median(merged(d => d.stops.land)),
+        queue: median(merged(days, d => d.stops.queue)),
+        check: median(merged(days, d => d.stops.check)),
+        land: median(merged(days, d => d.stops.land)),
       },
     },
     comparison:
-      landings < STATS_COMPARE_MIN_LANDINGS || !replayDays.length
+      gap !== null
         ? null
         : {
-            pricedLandings: replayPriced,
-            runs: replayDays.reduce((s, d) => s + d.replay.runs, 0),
-            reruns: replayDays.reduce((s, d) => s + d.replay.reruns, 0),
-            ciMinutes: { low, high },
-            /** Replayed minus measured, over the same priced landings: positive is fewer with Forge. */
-            savedMinutes: { atLeast: low - measuredReplayed, upTo: high - measuredReplayed },
-            toMainSeconds: replayToMain,
-            sooner: toMain === null || replayToMain === null ? null : replayToMain - toMain,
-            fullCheck: {
-              runnerSeconds: median(replayDays.map(d => d.replay.fullCheck.runnerSeconds!).filter(known)),
-              wallSeconds: median(replayDays.map(d => d.replay.fullCheck.wallSeconds).filter(known)),
-              basis: replayDays.every(d => d.replay.fullCheck.basis === 'full') ? 'full' : 'scoped',
+            days: compared.length,
+            landings: comparedLandings,
+            forgeMinutes,
+            /** Forge's median over the same days as the replays. */
+            forgeToMainSeconds: forgeToMain,
+            unknownRuns: sum(compared, d => d.ci!.all.unknown),
+            check: {
+              runnerSeconds: perRun!,
+              wallSeconds: median(merged(compared, d => d.solo.wallSeconds)),
+              runs: sum(compared, d => d.solo.runnerSeconds.length),
+            },
+            /** Failed checks: rechecks after main moved fail in the queue; the rest fail pull-request runs. */
+            failed: { inQueue: failedInQueue.runs, pullRequest: failed.runs - failedInQueue.runs },
+            /** Checks of work that was replaced, withdrawn or stopped: the same on both sides. */
+            notLanded: { runs: notLanded.runs, minutes: notLanded.seconds / 60 },
+            unlinked: minutesOf(tallyOf(compared, ci => ci.unlinked)),
+            /** Check time asked of one queue as a share of the window: above 1, one at a time cannot keep up. */
+            load: sum(compared, d => d.replay.arrivals * d.replay.wallSeconds!) / (compared.length * 86_400),
+            oneAtATime: baseline(
+              sum(compared, d => d.landings + d.replay.reruns),
+              { runs: failed.runs + notLanded.runs, seconds: failed.seconds + notLanded.seconds },
+              merged(compared, d => d.replay.oneAtATime),
+            ),
+            mergeQueue: {
+              concurrency: MERGE_QUEUE_CONCURRENCY,
+              maxToMerge: 1,
+              ...baseline(
+                sum(compared, d => d.landings + d.replay.builds),
+                {
+                  runs: failed.runs - failedInQueue.runs + notLanded.runs,
+                  seconds: failed.seconds - failedInQueue.seconds + notLanded.seconds,
+                },
+                merged(compared, d => d.replay.mergeQueue),
+              ),
+              /** Replayed median with the check 10% faster and 10% slower, each carried day to day on its own. */
+              sensitivity: {
+                fast: median(merged(compared, d => d.replay.mergeQueueFast)),
+                slow: median(merged(compared, d => d.replay.mergeQueueSlow)),
+              },
             },
           },
     who: [...who]
@@ -322,6 +497,6 @@ export function statsWindow(days: readonly StatsDay[]) {
         landings: n,
         firstTryRate: c ? first / c : null,
       })),
-    others: sum(d => d.others),
+    others: sum(days, d => d.others),
   };
 }

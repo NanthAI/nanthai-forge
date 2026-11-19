@@ -356,6 +356,27 @@ test('a Lane landing again on an Intent that already landed is a first try, not 
   );
 });
 
+test('a failure before the Intent last landed never counts against its later landings (review 1240fe03 finding 4)', async () => {
+  const f = fixture(),
+    e = evidence(f);
+  const lane = randomUUID(),
+    intent = randomUUID();
+  e.fail('old-failed', at(1), at(2), e.input(lane, intent, head('a'), at(-10)));
+  e.landing('fixed', at(4), at(6), e.input(lane, intent, head('b'), at(3), 1));
+  e.landing('later', at(10), at(12), e.input(lane, intent, head('c'), at(8), 2));
+  f.run('fixed', at(4), at(6), 120);
+  f.run('later', at(10), at(12), 120);
+  const { records } = await readHostedMetricPages(f.query, period);
+  const paths = Object.fromEntries(
+    calculateSelfMetrics(records, period).metric1.rows.map(row => [row.submissionId ?? row.id, row.path]),
+  );
+  assert.deepEqual(
+    paths,
+    { fixed: 'after-fixer', later: 'first-try' },
+    'the landing after the fix is a first try',
+  );
+});
+
 test('a main race resolved by adopting the passing run is one reuse, not a recheck or a lost check', async () => {
   const f = fixture(),
     e = evidence(f);
@@ -706,4 +727,36 @@ test('P6 context fallback preserves an unlinked pre-window request that settles 
     [],
     'the request has no referenced identity in the window; zero context changes the required report',
   );
+});
+
+test('one first-try rule: a recompose after main moved counts against first try only when it threw a started check away', async () => {
+  // src/stats-estimate.ts#firstTry: landed with no resubmission and no discarded check. Two main races; only the second ran a check
+  // on the superseded attempt.
+  const f = fixture(),
+    e = evidence(f);
+  const race = (id, input, discardedRun) => {
+    e.landing(id, at(1), at(12), input, `${id}-recheck`);
+    e.attempt(id, at(1), input, discardedRun ?? null);
+    e.attempt(`${id}/child`, at(6), input, `${id}-recheck`, head('2'), id);
+    const request = f.tables.projectHostedLandingRequests.at(-1);
+    request.value = JSON.stringify({
+      id,
+      at: at(1),
+      attemptId: `${id}/child`,
+      actor: 'builder',
+      phase: 'landed',
+      error: null,
+    });
+    const move = f.tables.projectHostedAcceptances.at(-1);
+    move.value = JSON.stringify({ ...JSON.parse(move.value), attemptId: `${id}/child` });
+    if (discardedRun) f.run(discardedRun, at(1), at(5), 240);
+    f.run(`${id}-recheck`, at(6), at(11), 300);
+  };
+  race('early', e.input(randomUUID(), randomUUID(), head('e'), at(-10)));
+  race('late', e.input(randomUUID(), randomUUID(), head('f'), at(-10)), 'late-discarded');
+  const { records } = await readHostedMetricPages(f.query, period);
+  const result = calculateSelfMetrics(records, period);
+  // 'early' recomposed before any check ran (nothing discarded); 'late' threw its started check away.
+  assert.deepEqual(result.metric1.rows.map(row => row.path).sort(), ['after-recompose', 'first-try']);
+  assert.deepEqual(result.metric1.firstTry, { landings: 2, first: 1 });
 });

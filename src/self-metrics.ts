@@ -7,6 +7,11 @@ import { calculateBackstopMetrics } from './self-metrics-backstop.js';
 import { calculateStorageMetrics } from './self-metrics-storage.js';
 import { calculatePlacementMetrics } from './self-metrics-placement.js';
 import type { MetricInput, MetricPeriod, MetricRecords, SelfMetricsReader } from './self-metrics-types.js';
+
+/** Metrics 5.1 path names that count as a first try under the one rule (src/stats-estimate.ts#firstTry): a main race resolved by adopting the passing
+ * run discarded nothing, and a recompose after main moved counts only when it threw a started check away
+ * (src/self-metrics.ts#pathFor names that 'after-recompose'). */
+export const FIRST_TRY_PATHS = new Set(['first-try', 'reused-after-race']);
 export type { SelfMetricsReader, MetricRecords, MetricPeriod } from './self-metrics-types.js';
 const excluded = new Set(['start', 'checkpoint', 'finish', 'land']);
 const instant = (at: string) => Date.parse(at);
@@ -26,14 +31,25 @@ function pathFor(
   at: string,
   histories: Map<string, MetricRecords['submissions']>,
   badRuns: Map<string, MetricRecords['runs']>,
+  startedRuns: ReadonlySet<string> = new Set(),
 ) {
   // No resolved input Lanes (an unreadable compose page or a Lane outside the context window) is a
   // named gap of its own, never folded into the classification 'unknown'.
   if (!inputs.length) return 'unresolved';
   const paths = inputs.map(input => {
-    const all = (histories.get(input.intentId) ?? [])
+    const intentHistory = (histories.get(input.intentId) ?? [])
       .filter(s => instant(s.at) <= instant(at))
       .sort((a, b) => instant(a.at) - instant(b.at));
+    // The one first-try rule (src/stats-estimate.ts#firstTry) stops at the Intent's previous landing, as Stats does
+    // (convex/projectStats.ts#resubmittedBefore): what failed before other work of the Intent landed is not this
+    // landing's retry.
+    const sameHead = (s: (typeof intentHistory)[number]) =>
+      s.inputs.some(i => i.intentId === input.intentId && i.head === input.head);
+    const previousLanding = Math.max(
+      -Infinity,
+      ...intentHistory.filter(s => s.landedAt !== undefined && !sameHead(s)).map(s => instant(s.at)),
+    );
+    const all = intentHistory.filter(s => sameHead(s) || instant(s.at) > previousLanding);
     if (!all.length) return 'unknown';
     // A main race resolved by the replacement adopting the passing run is a reuse, not a retry (bcdd6e40).
     const raceReused = (s: (typeof all)[number]) => !!s.mainRace && !!s.raceReusedBy;
@@ -75,10 +91,18 @@ function pathFor(
       )
     )
       return 'after-retry';
-    // Forge's own recompose after main moved: the attempt was superseded by a main-race child (M3).
+    // Forge's own recompose after main moved: the attempt was superseded by a main-race child (M3) and a started
+    // check of it was thrown away. A recompose before any check started discards nothing: by the one first-try rule
+    // (src/stats-estimate.ts#firstTry) it stays a first try.
     if (
       history.some(
-        (s, index) => same(s) && s.status === 'superseded' && s.mainRace && lived(s) && laterSame(s, index),
+        (s, index) =>
+          same(s) &&
+          s.status === 'superseded' &&
+          s.mainRace &&
+          lived(s) &&
+          laterSame(s, index) &&
+          s.runIds.some(id => startedRuns.has(id)),
       )
     )
       return 'after-recompose';
@@ -158,10 +182,11 @@ export function calculateSelfMetrics(
       history.push(run);
       badRuns.set(key, history);
     }
+  const startedRuns = new Set(records.runs.filter(run => run.started !== false).map(run => run.id));
   const rows = landings.map(move => ({
     id: move.id,
     day: new Date(move.at).toISOString().slice(0, 10),
-    path: move.path ?? pathFor(move.inputs, move.at, histories, badRuns),
+    path: move.path ?? pathFor(move.inputs, move.at, histories, badRuns, startedRuns),
   }));
   const days = [...new Set(rows.map(row => row.day))].sort().map(day => ({
     day,
@@ -378,6 +403,12 @@ export function calculateSelfMetrics(
     ),
     metric1: {
       unresolved,
+      /** The one first-try rule (src/stats-estimate.ts#firstTry), as Stats shows it: landed with no resubmission and no discarded
+       * check. A main race resolved by adopting the passing run counts. */
+      firstTry: {
+        landings: rows.filter(r => r.path !== 'unresolved' && r.path !== 'unknown').length,
+        first: rows.filter(r => FIRST_TRY_PATHS.has(r.path)).length,
+      },
       partial:
         rows.some(r => r.path === 'unknown') ||
         unresolved > 0 ||

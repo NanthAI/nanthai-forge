@@ -94,12 +94,11 @@ test('a late correction adjusts a closed UTC day without rebuilding its queue re
   assert.equal(corrected.runner.discardedSeconds, 210);
   assert.equal(corrected.runner.priced, 1);
   assert.equal(corrected.runner.unknown, 0);
-  assert.equal(corrected.replay.runs, 2);
-  assert.equal(corrected.replay.reruns, 2);
+  // The GitHub side is priced per window from run counts, so the closed replay stays exactly as it was.
+  assert.deepEqual(corrected.replay, closed.replay);
   assert.deepEqual(corrected.toMain, closed.toMain);
   assert.deepEqual(corrected.stops, closed.stops);
-  assert.deepEqual(corrected.replay.toMain, closed.replay.toMain);
-  assert.equal(corrected.replay.freeAt, closed.replay.freeAt);
+  assert.equal(corrected.firstTry.first, 0, 'a discarded check found late is not a first try');
   assert.equal(closed.runner.acceptedSeconds, 0, 'unpriced landing contributes no accepted-only numerator');
   const unknownAccepted = landing({ runnerSeconds: null });
   const stillUnknown = landing({
@@ -123,7 +122,7 @@ test('a late correction adjusts a closed UTC day without rebuilding its queue re
   assert.equal(completedAfterClose.runner.unknown, 0);
   assert.equal(completedAfterClose.runner.discardedSeconds, 210);
   assert.equal(completedAfterClose.firstTry.first, 0);
-  assert.deepEqual(completedAfterClose.replay.toMain, pricedDay.replay.toMain);
+  assert.deepEqual(completedAfterClose.replay, pricedDay.replay);
 });
 
 async function cancelledFixture(t, accounting = true) {
@@ -213,6 +212,14 @@ test('cancelled usage stays pending until completion, is shared once, and correc
   const previousValue = previous.value;
   await f.tx('closeBeforeUsage', statsApi.closeDay, { projectId: f.projectId, day });
   const closed = [...f.tables.projectStatsDays.values()].find(r => r.day === day);
+  // Every check run (Item a61d3c91, review 1240fe03 finding 6): the cancelled run reported no minutes at close, so
+  // the day names it under its bucket, for the late report to add to.
+  const closedCi = JSON.parse(closed.value).ci;
+  assert.equal(closed.lateRuns?.length, 1, 'the run without minutes is named once');
+  const [{ runId: lateRunId, bucket }] = closed.lateRuns;
+  assert.equal(lateRunId, runId);
+  const bucketOf = ci => (bucket in ci.discarded ? ci.discarded[bucket] : ci[bucket]);
+  assert.equal(bucketOf(closedCi).unknown, 1);
   // Price the correction at the real day-close cap, without rebuilding that day
   // in product code. Unrelated original contributions must remain untouched.
   const actual = receipts.map(receiptRow => {
@@ -231,7 +238,7 @@ test('cancelled usage stays pending until completion, is shared once, and correc
     }),
   );
   f.patch('projectStatsDays', closed._id, {
-    value: JSON.stringify(statsDay(day, [...actual, ...synthetic])),
+    value: JSON.stringify({ ...statsDay(day, [...actual, ...synthetic]), ci: closedCi }),
     runnerContributions: [
       ...closed.runnerContributions,
       ...synthetic.map(l => ({ submissionId: l.id, reruns: 0 })),
@@ -263,6 +270,19 @@ test('cancelled usage stays pending until completion, is shared once, and correc
     210,
   );
   assert.deepEqual(JSON.parse(f.tables.projectStatsDays.get(closed._id).value).toMain, original.toMain);
+  // The day's every-run figures gain the run's minutes in its own bucket, and the run is no longer pending a report.
+  const correctedRow = f.tables.projectStatsDays.get(closed._id);
+  const correctedCi = JSON.parse(correctedRow.value).ci;
+  assert.deepEqual(
+    [correctedCi.all.seconds - closedCi.all.seconds, correctedCi.all.unknown, correctedCi.all.runs],
+    [210, closedCi.all.unknown - 1, closedCi.all.runs],
+  );
+  assert.deepEqual(
+    [bucketOf(correctedCi).seconds - bucketOf(closedCi).seconds, bucketOf(correctedCi).unknown],
+    [210, 0],
+  );
+  assert.deepEqual(correctedRow.lateRuns ?? [], [], 'the run is no longer waiting for its minutes');
+  assert.deepEqual(JSON.parse(correctedRow.value).replay, original.replay, 'the replay is not rebuilt');
   assert.equal(
     f.tables.projectStatsDays.get(previous._id).value,
     previousValue,
@@ -272,6 +292,11 @@ test('cancelled usage stays pending until completion, is shared once, and correc
   await f.tx('lateUsageReplay', usageApi.complete, input);
   assert.equal(JSON.stringify(after.map(r => [r.value, r.runnerAccounting])), snapshot);
   assert.equal(f.counts.at(-1).writes, 0, 'run id fences duplicate correction writes');
+  assert.equal(
+    f.tables.projectStatsDays.get(closed._id).value,
+    correctedRow.value,
+    'a replay adds nothing twice',
+  );
   await assert.rejects(
     f.tx('changedUsageReplay', usageApi.complete, { ...input, usage: { ...input.usage, seconds: 999 } }),
     e => (e.code ?? e.data?.code) === 'EVIDENCE_CHANGED',
@@ -564,4 +589,43 @@ test('unavailable accounting authority cannot change the completion decision, an
     await usageApi.cancelledUsageTarget(ctx, { ...selected, run: { ...selected.run, status: 'passed' } }),
     null,
   );
+});
+
+// Review b4dd69b4 finding 5: a resubmitted landing stays off the first-try count when its pending cancelled run reports
+// late, through the day correction itself, not only through statsLanding.
+test('a late cancelled-run report keeps a resubmitted landing off the first-try count', async () => {
+  const { adjustCancelledRunDays } = await import(moduleUrl('../convex/projectCancelledRunDay.ts'));
+  const day = '2026-11-18';
+  const at = Date.parse(`${day}T10:00:00.000Z`);
+  const iso = ms => new Date(ms).toISOString();
+  const receipt = { id: 'receipt-1', submissionId: 's1', at: iso(at), agentRun: 'amber-fox' };
+  const state = { id: 's1', phase: 'landed', at: iso(at - 600_000), acceptance: { receiptId: 'receipt-1' } };
+  state.timing = { submittedAt: iso(at - 600_000), committedAt: iso(at) };
+  // Before: the cancelled run's minutes are pending. After: it reported none, so no check was discarded; only the
+  // earlier failed submission of the Intent keeps this landing from being a first try.
+  const before = { ...state, counts: { runnerSeconds: 300 } };
+  const after = { ...state, counts: { runnerSeconds: 300, discardedRunnerSeconds: 0 } };
+  const closedDay = statsDay(day, [statsApi.statsLanding(receipt, before, 1, true)]);
+  const row = {
+    _id: 'day-row',
+    value: JSON.stringify(closedDay),
+    runnerContributions: [{ submissionId: 's1', reruns: 0, resubmitted: true }],
+  };
+  const patches = [];
+  const one = value => ({ withIndex: () => ({ unique: async () => value }) });
+  const ctx = {
+    db: {
+      query: table =>
+        table === 'projectHostedAcceptances'
+          ? one({ _creationTime: at, value: JSON.stringify(receipt) })
+          : one(row),
+      patch: async (id, value) => patches.push([id, value]),
+    },
+  };
+  assert.deepEqual(closedDay.firstTry, { counted: 1, first: 0 });
+  await adjustCancelledRunDays(ctx, 'p', [{ before, state: after, beforePending: 1, pending: 0 }]);
+  assert.equal(patches.length, 1);
+  const corrected = JSON.parse(patches[0][1].value);
+  assert.deepEqual(corrected.firstTry, { counted: 1, first: 0 }, 'still not a first try: it was resubmitted');
+  assert.equal(corrected.runner.unknown, 0, 'its minutes are now known');
 });

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { speedBudgets } from './speed-budgets.js';
 import { speedBudgetRows } from './speed-budgets-report.js';
-import { calculateSelfMetrics } from './self-metrics.js';
+import { FIRST_TRY_PATHS, calculateSelfMetrics } from './self-metrics.js';
 import { calculateWaste } from './self-metrics-waste.js';
 import { observations, during, percentile } from './self-metrics-joins.js';
 import { flakeList } from './self-metrics-flakes.js';
@@ -96,7 +96,8 @@ export function metricTotals(
         firstTryShare:
           result.landings &&
           !result.metric1.rows.some(row => row.path === 'unknown' || row.path === 'unresolved')
-            ? result.metric1.rows.filter(row => row.path === 'first-try').length / result.landings
+            ? // The one first-try rule (src/stats-estimate.ts#firstTry), the same as Stats.
+              result.metric1.rows.filter(row => FIRST_TRY_PATHS.has(row.path)).length / result.landings
             : null,
       },
       count(records.moves),

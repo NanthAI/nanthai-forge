@@ -62,22 +62,32 @@ keeps the complete original record, including zero counts.
 ## Stats
 
 Stats shows a project owner what Forge measured in their project, and compares it with the same
-project's own history replayed through a GitHub-style flow. The comparison never applies the
-published benchmark's ratios to a project: a project is not the benchmark.
+project's own history replayed through two GitHub setups, each named by how it merges. The comparison
+never applies the published benchmark's ratios to a project: a project is not the benchmark.
 
 ### Measured figures
 
-Facts from the project's accepted landings, each with its unit:
+Facts from the project's check runs and accepted landings, each with its unit:
 
 | Figure | Unit and source |
 | --- | --- |
-| CI minutes per landing | Runner minutes of the accepted check plus the checks its earlier attempts discarded, reported by your CI. A batch member carries its share of the shared check. |
-| First-try rate | Share of landings accepted on their first attempt. |
+| CI minutes per landing | Runner minutes of every check run started on the days shown, divided by the landings. Failed, cancelled and discarded runs count; main audits do not. Beside it, the landed path alone: a landing's accepted check plus the checks it discarded. |
+| First try | Share of landings that landed with no resubmission and no discarded check (`src/stats-estimate.ts#firstTry`, the one rule metrics 5.1 uses too). A resubmission is an earlier submission of the same Intent that ended without landing since the Intent's previous landing, or a `supersedes` link; a failure before that landing counts against that landing only. A discarded check whose minutes are not known yet still counts as discarded. |
 | Time to main | Median from "land" to on main, observed by Forge, with its stops: in queue, checking, landing. |
-| Wasted CI minutes | Runner minutes of discarded checks. |
+| Discarded checks | Runner minutes of every run that did not land, by cause: main moved (Forge rechecked the same save), failed, cancelled, superseded (replaced or withdrawn). A run still waiting when the day closed is counted, not discarded. A run no landing attempt names (run by hand, or a pre-queue check its landing did not reuse) is counted on Forge's side as "not tied to a landing", never discarded. |
 
-A landing whose runner minutes are unknown is left out of every CI figure and counted ("12 landings
-without runner minutes"); it is never priced as zero.
+A run whose runner minutes are unknown is counted and adds nothing ("12 runs without minutes", by
+cause); it is never priced as zero. A cancelled run whose minutes arrive after its day closed adds them
+to that day's every-run figures, in its own cause, once (`lateRuns` on the day row). A day whose runs
+could not be read (closed before every run was recorded) leaves the CI figures and is counted: a
+window of such days shows "not recorded" and why, never "landings to go". A day the close read only in
+part (past a cap) is marked `partial`, and the page says so wherever its figures show. Check runs left unread make
+runs and CI minutes a lower bound; landings left unread make landings a lower bound, CI minutes per landing an upper
+bound (every run, over fewer landings), and leave first-try rate and times covering only the landings read. The
+minutes saved are an upper bound when check runs went unread (Forge's minutes are short), a lower bound when landings
+did (the replays price only those read), or may go either way when both did. A month holding such a day is marked in
+By month with that direction. A day whose close did not finish is not measured: it is in no figure, the per-day chart
+draws it as missing (never zero), and By month counts it.
 
 A resubmission of the same declared Lane selection carries its predecessor's latest check seconds
 and earlier discarded seconds into its own discarded total. Replays and joins of a live submission
@@ -97,22 +107,48 @@ submission and predecessor checks were on the previous day. Previously closed da
 
 ### Own-history replay
 
-The contract is `src/stats-estimate.ts` (Issue `a61d3c91`). It is pure and display-only: never an
-input to a verdict, a queue or a bill.
+The contract is `src/stats-estimate.ts` with `src/stats-runs.ts` (Item `a61d3c91`). It is pure and
+display-only: never an input to a verdict, a queue or a bill.
 
-- **Full check.** One replayed run costs the median billed runner seconds, and takes the median
-  check time, of the day's checks that ran the whole command. With no full run that day it uses the
-  scoped checks Forge ran, which can only understate a GitHub run, and says so (`basis`).
-- **CI minutes, a range.** Lower bound: each change runs the full check once as a pull request and
-  once in a merge queue. Upper bound: plus one rerun for each landing that reached main while it
-  waited (between its "land" and its own arrival on main, from Forge's recorded times), as when
-  branches must be up to date. Stats headlines the lower bound ("at least ... fewer").
-- **Time to main.** The same arrival times through a merge queue that checks one change at a time,
-  each run taking the full-check time; one pass, oldest first. The queue carries across days.
-- **Tokens.** Shown only as a measured Forge figure with a link to the published benchmark; never a
-  per-project "saved" claim.
-- **Left out.** Review time, flaky reruns and conflicts found after CI, so the real GitHub figure is
-  likely above the lower bound.
+- **Price of a run.** The median billed runner seconds, and the median time, of the solo full checks
+  in the window: runs that checked one change, ran the whole command and passed. A batch share or a
+  scoped recheck would understate a GitHub run.
+- **One at a time** (like GitHub's "Require status checks to pass before merging" with "Require
+  branches to be up to date before merging"). One run per change, a rerun each time another change
+  reached main while it waited (from Forge's recorded times), and one run per failed check. Changes
+  reach main one by one, each taking the check time; the queue carries across days. When the check
+  time asked of the queue exceeds the day (the method states the load), this is a growing backlog:
+  shown only as the worst case.
+- **Merge queue, 5 at a time** (like GitHub's "Require merge queue" with "Build concurrency", the
+  maximum pull requests to build, 5 and "Maximum pull requests to merge" 1). Each change first runs
+  its pull-request check (one check time), then joins the queue: up to 5 entries build at once, each on
+  top of those ahead; an entry merges when its build passed and every entry ahead merged.
+  - A change's own failed check fails its pull-request run and never joins the queue. A recheck that
+    failed here because main moved after the change passed (the attempt records a main-race
+    `recheckReason`, and the same submission has an earlier passed run that day) fails in the queue at its
+    own time: it is ejected when its build ends (at most one check time; at once when it took none), and
+    the builds behind it restart. A child attempt alone is not enough: Forge also forks one to join a
+    batch, to fall back from one, or to restart a stopped check, none of which had passed.
+  - Builds are counted as full-check equivalents: a build cut short by a restart counts the share of a
+    check it ran, and a failing build its own failed time.
+  - A backlog carries into the next day slot by slot: the last 5 merge times hold the first slots.
+  - The headline uses this setup. Its median time to main is also stated with the check 10% faster
+    and slower, each replay carrying its own state from day to day.
+- **The same on both sides.** Checks of work that was replaced, withdrawn or stopped, and failed
+  checks, at the minutes they took here. Work abandoned before it would have reached a GitHub queue
+  costs GitHub nothing more than these.
+- **Forge's side.** Every check run started on the same days, audits apart (a run whose gate mode is
+  `audit`, whatever its state); runs without minutes are counted and named.
+- **Time to main.** From "land" to on main on both sides: on GitHub the pull-request check plus the
+  queue, on Forge the one check. Forge's median is over the same days as the replays.
+- **Tokens.** Not shown until agents report measured usage; never a per-project estimate.
+- **Left out.** Review time, and time spent before a change asks to land, on both sides. A failed
+  recheck after main moved counts as a queue ejection only when every change on it had passed that day
+  (a batch with one change that never passed fails that change's pull-request check on GitHub instead),
+  whatever failed it, a flaky test included, as on GitHub: a run's flake record names tests that passed
+  on retry, not why a run failed. Checks still running or waiting to
+  land when a day closed count on Forge's side that day; GitHub's side counts their change on the day it
+  lands. Days with no solo full check to price them leave the comparison, and the page says how many.
 
 The comparison starts at 50 landings in the window (`STATS_COMPARE_MIN_LANDINGS`); until then Stats
 shows only the measured figures.
@@ -122,13 +158,23 @@ shows only the measured figures.
 - `StatsLanding`: one accepted landing from fields its receipt and landing row already hold
   (`submittedAt`, `landedAt`, check start and end, `runnerSeconds`, `discardedRunnerSeconds`,
   `attempts`, `ranInFull`, `who`). `null` means unknown.
-- `replayEstimate(landings, freeAt)`: the CI range (`runs`, `reruns`, `replayRunnerSeconds`), the
-  replayed seconds to main and the full check it used, over priced landings only.
-- `statsDay(day, landings, freeAt)`: one closed UTC day as a `StatsDay` (`statsDaySchema`): counts,
-  sorted seconds for medians, the day's replay and its `freeAt` for the next day, and landings by
-  who (at most 40, the rest under `others`). A day past 2,000 landings is marked `partial`.
+- `classifyRuns({runs, attempts, landedAttemptIds, pendingSubmissionIds, unreadSubmissionIds, partial})`:
+  every run of a day by what became of it, its solo full checks (passed, the whole command or no gate,
+  one change, minutes known), its rechecks that failed after main moved and its runs without minutes.
+- `mergeQueueReplay(entries, wallSeconds, concurrency, tail)`: the queue replay over entries
+  `{at, fails, from?, seconds?}`; `tail` is the previous day's last merge times. It returns each passing
+  entry's time to main, the builds run as full-check equivalents, and this day's tail. Concurrency 1 is
+  one at a time.
+- `statsDay(day, landings, runs, carry)`: one closed UTC day as a `StatsDay` (`statsDaySchema`,
+  schema 2): counts, sorted seconds for medians, every run by cause, the solo checks, both replays
+  and what the next day starts behind, and landings by who (at most 40, the rest under `others`). A
+  day past 1,000 landings (`STATS_DAY_MAX_LANDINGS`), or past the runs the close reads, is marked
+  `partial`. Days closed by the
+  first method (schema 1) stay readable and leave the CI figures, counted (`daysWithoutRuns`);
+  `projectStats:recloseDays` rebuilds them.
 - `statsWindow(days)`: what Stats shows for a window of closed days: `measured`, `comparison`
-  (null under 50 landings), and `who`.
+  (null under 50 landings, when a day was not recorded, or with no solo full check to price it;
+  `compare.gap` names which), and `who`.
 
 Days are additive, so a month is the merge of its days and medians stay exact.
 
@@ -136,8 +182,36 @@ Days are additive, so a month is the merge of its days and medians stay exact.
 
 A day closes once, when the project's first landing of a later UTC day is recorded (`convex/projectStatsClose.ts`):
 one scheduled mutation per active project-day and nothing for an idle project, so the newest active day shows once the
-next one starts. The close reads each landing's receipt, landing row and body pages once (about four documents and
-10 KB per landing) and writes one `projectStatsDays` row.
+next one starts. A day with check runs and no landing is closed first, by the next landing day's close (two one-row
+probes, skipped when the previous closed day is the day before; then that day, then the landing day). Days before a
+project's first closed day are not closed. Such a day is first written as not measured (`failed`, try 1), so a close
+that throws leaves that mark: each later close tries it again first, up to `STATS_CLOSE_TRIES` (3), then goes past it,
+and one failing day never stops the days after it. The close reads, in this order:
+
+- the day's receipts (one range, at most 1,001);
+- a person's day (docs/people.md): the Lanes and planning work since the previous closed day, each under its own caps;
+- each landing's row, its own columns only, never its body pages (about three documents and 7 KB per landing with its
+  receipt);
+- the newest earlier submission of its Intent (one row, own columns only; up to `STATS_RESUBMIT_LOOKBACK`, 3, only
+  behind a submission still running);
+- the day's check runs from the compact metric rows (about 1 KB each; at most `STATS_CLOSE_RUNS`, 3,000, 200 a page)
+  and the run rows not projected yet (at most 200, one a page: one can be near Convex's 1 MiB document limit with a
+  shard pool's 4,096 pending paths);
+- the landing attempts around the day from the compact attempt rows, or the attempt rows themselves while the
+  project's compact index is being built (at most 6,000);
+- one compact landing row per submission whose passed run neither landed that day nor was rechecked (at most 300).
+
+Every read counts on the transaction's own meter (`ctx.meta.getTransactionMetrics`: Convex's 4,096 queries, 16 MiB
+and 32,000 documents). The landings stop while 1,000 queries, 5 MiB and 1,000 documents are left
+(`STATS_LANDINGS_KEEP`), so the person-day writes and the runs have room; the runs, attempts and lookups stop while 64
+queries, 2 MiB and 400 documents are left (`STATS_RUNS_KEEP`), room for one more page and the close's writes: a
+close reads at most 14 MiB and one page, about $0.0029 a day at $0.20 per GB. The person-day writes are not on the
+meter yet (one query and one write per person and day): a day with thousands of people's days fails whole, and is left
+not measured after its tries.
+`tests/stats-close.test.mjs` drives a day with every reader at its cap through one close at Convex's own limits.
+Anything past a cap or the meter is not guessed: the day is marked `partial`. The close then writes one
+`projectStatsDays` row.
+`projectStats:recloseDays` rebuilds closed days only (it refuses today and later).
 
 The Stats screen has one period picker (last 7 or 30 days, this month, last month, or a custom range of at most 92
 days), kept in the address. Opening the page makes one query (`projectStats.read`, part `head`) over the chosen

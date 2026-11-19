@@ -88,6 +88,25 @@ test('stats period: a range reply covers its own days, one part at a time', () =
       ['2026-11', 5],
     ],
   );
+  // A month with a day read only in part says so (review b4dd69b4 finding 3).
+  const partialOct = statsRangeReply(
+    [{ ...oct, partial: true }, nov],
+    { from: '2026-10-01', to: '2026-11-30' },
+    'months',
+  );
+  assert.deepEqual(
+    partialOct.months.map(m => [m.month, m.partial]),
+    [
+      ['2026-10', true],
+      ['2026-11', false],
+    ],
+  );
+  const head = statsRangeReply([{ ...oct, partial: true }, nov], { from: '2026-10-01', to: '2026-11-30' });
+  assert.deepEqual(
+    [head.window.partial, head.window.partialLandings, head.window.partialRuns],
+    [true, true, false],
+    'which part was read in part',
+  );
   const none = statsRangeReply([], { from: '2026-12-01', to: '2026-12-31' });
   assert.equal(none.through, null);
   assert.equal(none.window.landings, 0);

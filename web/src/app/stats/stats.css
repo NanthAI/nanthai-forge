@@ -27,6 +27,8 @@
   .stats-days button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
   .stats-days i { display: block; width: 100%; min-height: 2px; height: calc(var(--h) * .85%); background: var(--series); border-radius: var(--r-bar) var(--r-bar) 0 0; opacity: .55; transition: opacity var(--d-quick) var(--ease-out); }
   .stats-days button[aria-pressed='true'] i, .stats-days button:hover i { opacity: 1; }
+  /* A day whose close did not finish: an empty outline, never a zero bar. */
+  .stats-days button[data-missing] i { height: 24px; background: none; border: var(--rule) dashed var(--text-3); border-bottom: 0; }
   .stats-days .v { font: var(--w-strong) 11px/1.25 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); text-align: center; white-space: nowrap; padding-bottom: 2px; }
   .stats-days .d { position: absolute; top: 100%; left: 0; right: 0; padding-top: 3px; font: 11px/1.25 var(--font-mono); color: var(--text-2); text-align: center; white-space: nowrap; }
   /* Many days on a narrow chart: values only on the first, the newest, the tallest and the chosen bar; day numbers only
@@ -56,10 +58,20 @@
   @container (max-width: 720px) {
     .stats-pair { grid-template-columns: minmax(0, 1fr); }
     .stats-pair > .fig + .fig { border-left: 0; border-top: var(--rule) solid var(--line); }
+    /* The method reads as prose on a phone: each term above its explanation. */
+    .stats-how-body .kv { grid-template-columns: minmax(0, 1fr); row-gap: 2px; padding-inline: 0; }
+    .stats-how-body .kv dd { margin-bottom: var(--s-2); }
   }
   @media (max-width: 720px) {
     .stats-pair { grid-template-columns: minmax(0, 1fr); }
     .stats-pair > .fig + .fig { border-left: 0; border-top: var(--rule) solid var(--line); }
+    /* The method reads as prose on a phone: each term above its explanation. */
+    .stats-how-body .kv { grid-template-columns: minmax(0, 1fr); row-gap: 2px; padding-inline: 0; }
+    .stats-how-body .kv dd { margin-bottom: var(--s-2); }
   }
   @media (prefers-reduced-motion: reduce) { .stats-days i, .stats[aria-busy='true'] { transition: none; } }
+  /* Baselines named by mechanism, with their GitHub hint under the name; discarded checks by cause. */
+  .stats-vx3 small { display: block; color: var(--text-3); font-size: 11px; }
+  .stats-causes { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; }
+  .stats-causes li > span:first-child { display: inline-block; min-width: 92px; color: var(--text-2); }
 }

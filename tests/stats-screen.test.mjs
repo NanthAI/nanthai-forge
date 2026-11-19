@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Stats screen (Items 2cf30e0a, a61d3c91): the real StatsView in the project frame with synthetic closed days built by
-// the real contract (src/stats-estimate.ts). Guards: the headline is the lower bound ("at least"), the replay states
-// its assumptions behind "How this is worked out", landings without runner minutes are named as left out, a window
+// the real contract (src/stats-estimate.ts). Guards: the headline is against the merge queue building 5 at once, the
+// baselines are named by mechanism with GitHub's setting names, discarded checks are split by cause, the replay states
+// its assumptions behind "How this is worked out", runs without minutes are named, never zero, a window
 // under the minimum shows only measured figures, every chart has its table and prints its values, the period picker
 // re-aggregates the page (this month, last month, a custom range), per-day bars keep a fixed width from the left at 1,
 // 2 and 31 days, an empty month says so, agents come in four first-try buckets, and axe passes at 1440 and 390 in
@@ -28,7 +29,8 @@ async function fixture(out) {
     import {ConvexProvider, ConvexReactClient} from 'convex/react';
     import {StatsView} from ${JSON.stringify(join(root, 'web/src/app/stats/Stats.tsx'))};
     import {ProjectFrame} from ${JSON.stringify(join(root, 'web/src/app/frames.tsx'))};
-    import {statsDay} from ${JSON.stringify(join(root, 'src/stats-estimate.ts'))};
+    import {statsCarry, statsDay, statsFailedDay} from ${JSON.stringify(join(root, 'src/stats-estimate.ts'))};
+    import {classifyRuns} from ${JSON.stringify(join(root, 'src/stats-runs.ts'))};
     import {statsRangeReply} from ${JSON.stringify(join(root, 'src/stats-period.ts'))};
     import {periodOf} from ${JSON.stringify(join(root, 'web/src/app/stats/model.ts'))};
     import {useState} from 'react';
@@ -55,9 +57,57 @@ async function fixture(out) {
       month31: Array.from({length: 31}, (_, i) => [dayAt(2026, 9, 1 + i), 5 + ((i * 37) % 120)]),
       early: [[base, 4], [base + 86400000, 5]],
       none: [],
+      // 60 landings on days closed before every check run was recorded; the same with no solo full check; a day the
+      // close read only in part.
+      unrecorded: [[base, 30], [base + 86400000, 30]],
+      nosolo: [[base, 30], [base + 86400000, 30]],
+      partial: [[base, 30], [base + 86400000, 30]],
+      // Under 50 landings, read in part; and two months, read in part (review b4dd69b4 finding 3).
+      partialFew: [[base, 10]],
+      partialMonths: [[dayAt(2026, 9, 31), 30], [base, 30]],
+      // Landings read in part, every check run read (review d6b0f1aa finding 1); and a day whose close did not finish
+      // between two closed days (finding 5).
+      landingsCut: [[base, 30], [base + 86400000, 30]],
+      notMeasured: [[dayAt(2026, 9, 31), 30], [base, 30], [base + 86400000, 30]],
     }[sample ?? 'now'];
-    let freeAt = 0;
-    const all = plan.map(([start, n]) => { const d = statsDay(new Date(start).toISOString().slice(0, 10), day(start, n), freeAt); freeAt = d.replay.freeAt; return d; });
+    // Every check run of a day: each landing's own solo run, a recheck after main moved for every 11th, a failed earlier
+    // submission for every 9th, one cancelled run without minutes and one run by hand that no landing names.
+    function runsOf(landings) {
+      if (sample === 'unrecorded') return null;
+      const runs = [], attempts = [], landed = new Set();
+      landings.forEach((l, i) => {
+        runs.push({id: 'r' + l.id, at: l.checkStartedAt, endedAt: l.checkEndedAt, status: 'passed', runnerSeconds: 600, fullSuite: true, scopedRecheck: false, audit: false});
+        attempts.push({id: 'a' + l.id, submissionId: 's' + l.id, parentAttemptId: null, runId: 'r' + l.id, member: false});
+        landed.add('a' + l.id);
+        if (i % 11 === 0) {
+          runs.push({id: 'm' + l.id, at: l.submittedAt, endedAt: l.submittedAt + 302000, status: 'passed', runnerSeconds: 600, fullSuite: true, scopedRecheck: false, audit: false});
+          attempts.push({id: 'ma' + l.id, submissionId: 's' + l.id, parentAttemptId: null, runId: 'm' + l.id, member: false});
+          attempts.push({id: 'mc' + l.id, submissionId: 's' + l.id, parentAttemptId: 'ma' + l.id, runId: null, member: false});
+        }
+        if (i % 9 === 0) {
+          runs.push({id: 'f' + l.id, at: l.submittedAt, endedAt: l.submittedAt + 200000, status: 'failed', runnerSeconds: 300, fullSuite: true, scopedRecheck: false, audit: false});
+          attempts.push({id: 'fa' + l.id, submissionId: 'fs' + l.id, parentAttemptId: null, runId: 'f' + l.id, member: false});
+        }
+      });
+      if (landings.length) {
+        const first = landings[0];
+        runs.push({id: 'c' + first.id, at: first.submittedAt, endedAt: null, status: 'cancelled', runnerSeconds: null, fullSuite: true, scopedRecheck: false, audit: false});
+        attempts.push({id: 'ca' + first.id, submissionId: 'cs' + first.id, parentAttemptId: null, runId: 'c' + first.id, member: false});
+        runs.push({id: 'h' + first.id, at: first.submittedAt, endedAt: first.submittedAt + 300000, status: 'passed', runnerSeconds: 600, fullSuite: true, scopedRecheck: false, audit: false});
+      }
+      // No solo sample: every run checked a scoped selection, so none prices a full GitHub run.
+      if (sample === 'nosolo') for (const run of runs) run.fullSuite = false;
+      return classifyRuns({runs, attempts, landedAttemptIds: landed, pendingSubmissionIds: new Set(), partial: (sample ?? '').startsWith('partial')});
+    }
+    let carry = statsCarry(null);
+    const all = plan.map(([start, n], i) => {
+      const name = new Date(start).toISOString().slice(0, 10);
+      if (sample === 'notMeasured' && i === 1) return statsFailedDay(name, carry, 3);
+      const landings = day(start, n);
+      const d = statsDay(name, landings, runsOf(landings), carry);
+      carry = statsCarry(d);
+      return sample === 'landingsCut' ? {...d, partial: true} : d;
+    });
     const client = new ConvexReactClient('https://forge.test.convex.cloud');
     const route = {frame: 'project', handle: 'example', project: 'tidepool', place: 'stats', section: '', rest: ''};
     function Fixture() {
@@ -145,19 +195,62 @@ test('stats: own-history comparison headline, stated assumptions, left-out landi
   const sentence = await page.locator('.sit').textContent();
   assert.match(
     sentence,
-    /^At least [\d,.]+ CI minutes fewer over 1–15 Nov 2026 \(15 closed days\)\./,
-    'the lower bound leads, over the closed days only',
+    /^[\d,.]+ CI minutes (fewer|more) than your own history replayed through a merge queue building 5 at once, over 1–15 Nov 2026 \(15 closed days\)\./,
+    'the headline is against the merge queue, replayed, over the closed days only',
   );
-  assert.match(sentence, /sooner than the same arrivals through a one-at-a-time merge queue/);
+  assert.match(sentence, /than one at a time, the worst case\./);
   const main = await page.locator('main').textContent();
-  assert.match(main, /up to [\d,.]+ fewer/, 'the upper bound follows the lower bound');
-  assert.match(main, /without runner minutes left out/, 'unknown runner minutes are named, not zero');
+  // Baselines are named by how they merge, each with its GitHub hint, and the exact setting names on hover.
+  assert.match(main, /One at a time\(like GitHub with branches up to date\)/);
+  assert.match(main, /Merge queue, 5 at a time\(like GitHub merge queue\)/);
+  assert.match(
+    (await page.locator('.stats-vx3 span[title]').first().getAttribute('title')) ?? '',
+    /Require branches to be up to date before merging/,
+  );
+  // Discarded checks, every run, by cause; runs without minutes are named, never zero.
+  assert.match(main, /Discarded checks[\d,.]+ min [\d,]+ runs that did not land/);
+  assert.match(main, /main moved [\d,.]+ min [\d,]+ runs/);
+  assert.match(main, /failed [\d,.]+ min [\d,]+ runs/);
+  assert.match(
+    main,
+    /every check run, [\d,]+ runs, [\d,]+ without minutes, [\d,]+ not tied to a landing; [\d,.]+ min on the landed path alone/,
+  );
+  // Every cause names its runs; the cancelled run without minutes is named under its cause, never zero.
+  assert.match(main, /failed [1-9][\d,.]* min [1-9][\d,]* runs/);
+  assert.match(main, /cancelled 0 min [1-9][\d,]* runs?, [1-9][\d,]* without minutes/);
+  assert.doesNotMatch(
+    main,
+    /lower bound|upper bound|read in part/,
+    'a day read in full is not marked partial',
+  );
+  assert.doesNotMatch(main, /Wasted/, '"Wasted CI minutes" is now "Discarded checks"');
   assert.doesNotMatch(main, /Agent tokens/, 'no token tile until there is measured data');
   await page.getByRole('button', { name: 'How this is worked out' }).click();
   const how = await page.locator('#stats-how').textContent();
   assert.match(how, /Nothing here comes from a benchmark/);
-  assert.match(how, /once as a pull request and once in a merge queue/);
-  assert.match(how, /landings without runner minutes are left out of both CI figures/);
+  assert.match(how, /median of [\d,]+ solo full checks/);
+  assert.match(how, /“Require branches to be up to date before merging”/);
+  // GitHub's own setting names (review 1240fe03 finding 3), and every assumption of the replay stated.
+  assert.match(
+    how,
+    /“Build concurrency” \(maximum pull requests to build\) 5 and “Maximum pull requests to merge” 1/,
+  );
+  assert.match(how, /Each change runs its pull-request check, then joins the queue/);
+  assert.match(how, /fails its pull-request run on GitHub and never joins the queue/);
+  assert.match(how, /fails in the queue: it is ejected and the builds behind it start again/);
+  assert.match(how, /counts the share of a check it ran/);
+  assert.match(how, /A backlog carries into the next day slot by slot/);
+  assert.match(how, /on GitHub that is the pull-request check plus the queue, here the one check/);
+  assert.match(how, /no landing attempt names \([\d,.]+ min: run by hand/);
+  // A flaky failure on a recheck after a pass ejects on GitHub too; the page never claims it does not (review
+  // d6b0f1aa finding 3: the run rows cannot tell a flake-caused failure apart).
+  assert.match(
+    how,
+    /counts as a queue ejection only when every change on it had passed; whatever failed it, a flaky test included/,
+  );
+  assert.doesNotMatch(how, /never as queue ejections/);
+  assert.match(how, /10% faster or slower/);
+  assert.match(how, /runs? reported no minutes and add none/);
   // The page opens with the headline and landings per day; every other chart is a fold that reads only once opened.
   const foldReads = () => page.evaluate(() => [...(window.foldReads ?? [])].sort());
   assert.deepEqual(await foldReads(), [], 'an unopened fold reads nothing');
@@ -275,12 +368,75 @@ test('stats: own-history comparison headline, stated assumptions, left-out landi
     await early.locator('.sit').textContent(),
     /^9 landings over 1–2 Nov 2026 \(2 closed days\)\. The comparison/,
   );
+  // 60 landings on days closed before every check run was recorded: "not recorded" and why, never "0 landings to go".
+  const unrecorded = await open(390, 'unrecorded');
+  const unrecordedMain = await unrecorded.locator('main').textContent();
+  assert.match(unrecordedMain, /2 days here closed before Stats recorded every check run/);
+  assert.match(unrecordedMain, /CI minutes per landingNot recorded/);
+  assert.match(unrecordedMain, /Discarded checksNot recorded/);
+  assert.doesNotMatch(unrecordedMain, /landings? to go/);
+  // Every run recorded, none of them a solo full check: no price for a GitHub run, said so.
+  const nosolo = await open(390, 'nosolo');
+  const nosoloMain = await nosolo.locator('main').textContent();
+  assert.match(nosoloMain, /No change here has run the whole check on its own yet/);
+  assert.doesNotMatch(nosoloMain, /landings? to go|Not recorded/);
+  // A day the close read only in part says its counts are a lower bound, and, its check runs read in part, that the
+  // minutes saved are an upper bound: in the headline and beside the comparison (review b4dd69b4 finding 3).
+  const partial = await open(390, 'partial');
+  const partialMain = await partial.locator('main').textContent();
+  assert.match(partialMain, /runs and CI minutes are a lower bound/);
+  assert.doesNotMatch(partialMain, /CI minutes per landing an upper bound/, 'every landing was read');
+  assert.match(await partial.locator('.sit').textContent(), /the minutes saved are an upper bound/);
+  assert.match(
+    await partial.getByRole('region', { name: 'Against your own history' }).textContent(),
+    /the minutes saved are an upper bound/,
+  );
+  // Under 50 landings, read in part: never "exact from the first".
+  const partialFew = await open(390, 'partialFew');
+  const fewSentence = await partialFew.locator('.sit').textContent();
+  assert.match(fewSentence, /what Forge measured is shown as far as it was read/);
+  assert.doesNotMatch(fewSentence, /exact from the first/);
+  // A month with a day read in part is marked in the month table.
+  const partialMonths = await open(1440, 'partialMonths', 'dark', 'from=2026-10-31&to=2026-11-02');
+  await partialMonths.getByRole('button', { name: 'By month' }).click();
+  const monthRows = partialMonths.getByRole('table', { name: 'Stats by month' }).locator('tbody tr');
+  assert.match(await monthRows.first().textContent(), /October 2026 · read in part: saving is at most this/);
+  assert.match(
+    await partialMonths.getByRole('table', { name: 'Stats by month' }).textContent(),
+    /Fewer than a merge queue, replayed/,
+  );
+  // Landings read in part, every run read: every run's minutes over fewer landings, so minutes per landing are an upper
+  // bound, never a lower one; rates and times cover the landings read; saved minutes a lower bound (review d6b0f1aa
+  // finding 1).
+  const landingsCut = await open(390, 'landingsCut');
+  const cutMain = await landingsCut.locator('main').textContent();
+  assert.match(cutMain, /landings are a lower bound, CI minutes per landing an upper bound/);
+  assert.match(cutMain, /first-try rate and times cover only the landings read/);
+  assert.doesNotMatch(cutMain, /runs and CI minutes are a lower bound|counts and minutes are a lower bound/);
+  assert.match(await landingsCut.locator('.sit').textContent(), /the minutes saved are a lower bound/);
+  // A day whose close did not finish is missing, never zero: its bar says so, its table row says so, and it is in no
+  // figure (review d6b0f1aa finding 5).
+  const notMeasured = await open(1440, 'notMeasured', 'dark', 'from=2026-10-31&to=2026-11-02');
+  const missing = notMeasured.locator('.stats-days button[data-missing]');
+  assert.equal(await missing.count(), 1, 'one day drawn as missing');
+  assert.match(
+    (await missing.getAttribute('aria-label')) ?? '',
+    /Nov 1: not measured: its close did not finish/,
+  );
+  assert.equal(await notMeasured.locator('.stats-days button:not([data-missing])').count(), 2);
+  assert.match(await notMeasured.locator('.sit').textContent(), /60 landings/, 'the missing day adds none');
+  await notMeasured.getByRole('button', { name: 'By month' }).click();
+  assert.match(
+    await notMeasured.getByRole('table', { name: 'Stats by month' }).locator('tbody tr').nth(1).textContent(),
+    /November 2026 · 1 day not measured30/,
+  );
 
   for (const [sample, query] of [
     ['now', ''],
     ['month31', 'period=last'],
     ['two', ''],
     ['none', ''],
+    ['unrecorded', ''],
   ])
     for (const width of [1440, 390])
       for (const theme of ['dark', 'light']) {

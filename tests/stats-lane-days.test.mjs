@@ -62,7 +62,8 @@ function fakeDb(tables) {
     queries,
     db: {
       query,
-      normalizeId: (_table, id) => id,
+      // As Convex: an id normalizes only for the table that holds it (the finish-read writer asks per table).
+      normalizeId: (table, id) => ((tables[table] ?? []).some(row => row._id === id) ? id : null),
       get: async id =>
         Object.values(tables)
           .flat()
@@ -118,7 +119,15 @@ const personRows = tables =>
 
 async function close(tables, day) {
   const { db, queries } = fakeDb(tables);
-  await handler(closeDay)({ db }, { projectId: PROJECT, day });
+  // The transaction's read meter, as Convex gives every function (the close stops its readers on it): queries made.
+  const meta = {
+    getTransactionMetrics: async () => ({
+      databaseQueries: { used: queries.length, remaining: 4096 - queries.length },
+      bytesRead: { used: 0, remaining: 16 * 1024 * 1024 },
+      documentsRead: { used: 0, remaining: 32_000 },
+    }),
+  };
+  await handler(closeDay)({ db, meta }, { projectId: PROJECT, day });
   return queries;
 }
 

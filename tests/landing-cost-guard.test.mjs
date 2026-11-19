@@ -529,11 +529,23 @@ async function resubmissionJourney(t, mode, failedSeconds) {
   // Here: one person, one Lane started on the closed day.
   const people = new Set([...f.tables.personDays.values()].map(row => row.person)).size;
   assert.equal(people, 1, 'one person landed here');
+  // Every check run (Item a61d3c91, review 1240fe03 finding 5): the compact run rows of the day and the run rows not
+  // projected yet (one range each), the project's compact attempt index and the attempt rows around the day (one
+  // range), and the newest earlier submissions of the landing's Intent until one landed or failed (at most
+  // STATS_RESUBMIT_LOOKBACK; here the newest failed, so one). An empty range bills as one document.
+  const statsRuns = { projectFinishReadRows: 2, projectHostedCheckRuns: 1, projectHostedLandingAttempts: 1 };
   for (const close of closes) {
+    const docs = close.readDocumentsByTable;
     assert(
-      close.documents <= 6 + 1 + people + 1 + 1 + 1 && close.readBytes < 16_000,
-      'the close reads receipt and ticket/body pages, the Lane, the person row, the change range, the project and its writers',
+      close.documents <= 6 + 2 + people + 1 + 1 + 1 + 1 + 4 && close.readBytes < 16_000,
+      `the close reads receipt and ticket/body pages, the Lanes (open and closed), the person row, the change range, the project and its writers, one earlier submission and the day's runs: ${JSON.stringify(docs)}`,
     );
+    assert.equal(
+      docs.projectHostedLandingRequests,
+      1 + 1,
+      'the ticket and one earlier same-Intent submission',
+    );
+    for (const [table, n] of Object.entries(statsRuns)) assert.equal(docs[table] ?? 0, n, table);
     assert.equal(close.writes, 1 + people);
   }
   assert.equal(closed.landings, 1);

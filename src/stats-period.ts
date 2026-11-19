@@ -46,7 +46,10 @@ export const STATS_PARTS = ['head', 'waited', 'agents', 'months'] as const;
 export type StatsPart = (typeof STATS_PARTS)[number];
 
 /** The read's reply for one range of closed days (oldest first) and one part. */
-export function statsRangeReply(days: readonly StatsDay[], range: StatsRange, part: StatsPart = 'head') {
+export function statsRangeReply(rows: readonly StatsDay[], range: StatsRange, part: StatsPart = 'head') {
+  // A day whose close did not finish is in no figure: the per-day chart and By month show it as not measured.
+  const notMeasured = (d: StatsDay) => d.schema === 2 && d.failed !== undefined;
+  const days = rows.filter(d => !notMeasured(d));
   const { who, measured, ...window } = statsWindow(days);
   const { stops, ...headline } = measured;
   const base = {
@@ -55,14 +58,14 @@ export function statsRangeReply(days: readonly StatsDay[], range: StatsRange, pa
     from: range.from,
     to: range.to,
     /** The newest closed day in the range, or null when none has closed. */
-    through: days.at(-1)?.day ?? null,
+    through: rows.at(-1)?.day ?? null,
     landings: window.landings,
   };
   if (part === 'waited') return { ...base, stops };
   if (part === 'agents')
     return { ...base, agents: who.length, others: window.others, ...firstTryBuckets(who) };
   if (part === 'months') {
-    const months = [...new Set(days.map(d => d.day.slice(0, 7)))];
+    const months = [...new Set(rows.map(d => d.day.slice(0, 7)))];
     return {
       ...base,
       months: months.map(month => {
@@ -72,7 +75,15 @@ export function statsRangeReply(days: readonly StatsDay[], range: StatsRange, pa
           landings: m.landings,
           toMainSeconds: m.measured.toMainSeconds,
           ciMinutes: m.measured.ciMinutes,
-          savedAtLeast: m.comparison?.savedMinutes.atLeast ?? null,
+          savedVsQueue: m.comparison?.mergeQueue.savedMinutes ?? null,
+          compare: m.compare,
+          daysWithoutRuns: m.daysWithoutRuns,
+          /** A day of this month was read only in part (src/stats-estimate.ts#statsWindow), and which reads. */
+          partial: m.partial,
+          partialLandings: m.partialLandings,
+          partialRuns: m.partialRuns,
+          /** Days of this month whose close did not finish: left out of its figures. */
+          notMeasured: rows.filter(d => d.day.startsWith(month) && notMeasured(d)).length,
         };
       }),
     };
@@ -80,7 +91,8 @@ export function statsRangeReply(days: readonly StatsDay[], range: StatsRange, pa
   return {
     ...base,
     compareFrom: STATS_COMPARE_MIN_LANDINGS,
-    perDay: days.map(d => [d.day, d.landings] as [string, number]),
+    /** Landings per closed day; null for a day whose close did not finish (not measured, never zero). */
+    perDay: rows.map(d => [d.day, notMeasured(d) ? null : d.landings] as [string, number | null]),
     window: { ...window, measured: headline },
   };
 }

@@ -5,7 +5,18 @@
 import { useState, type CSSProperties, type ReactNode } from 'react';
 import { Key, Table } from '../../ds';
 import { A } from '../frames';
-import { clock, dayName, duration, int, minutes, monthName, plural, scale } from './model';
+import {
+  clock,
+  dayName,
+  duration,
+  gapWords,
+  int,
+  minutes,
+  monthName,
+  monthPartWords,
+  plural,
+  scale,
+} from './model';
 import type { StatsAgents, StatsMonths, StatsWaited } from '../../../../src/stats-period';
 
 /** A chart with its table one press away (every chart offers the same figures as a table). */
@@ -31,11 +42,14 @@ function ChartOr({ caption, chart, table }: { caption: string; chart: ReactNode;
 
 /** Landings per day: fixed-width bars from the left, each with its value on top (on a narrow screen with many days,
  * the tallest, the newest and the chosen one), the day of the month under it, and the full day in the readout. */
-export function PerDay({ days }: { days: Array<[string, number]> }) {
+const NOT_MEASURED = 'not measured: its close did not finish';
+/** Landings per day; a day whose close did not finish (null) is drawn as missing, never as zero. */
+export function PerDay({ days }: { days: Array<[string, number | null]> }) {
   const [at, setAt] = useState(days.length - 1);
-  const heights = scale(days.map(([, n]) => n));
-  const top = Math.max(0, ...days.map(([, n]) => n));
+  const heights = scale(days.map(([, n]) => n ?? 0));
+  const top = Math.max(0, ...days.map(([, n]) => n ?? 0));
   const shown = days[Math.min(at, days.length - 1)];
+  const said = (n: number | null) => (n === null ? NOT_MEASURED : plural(n, 'landing'));
   return (
     <ChartOr
       caption="Landings per day"
@@ -43,8 +57,13 @@ export function PerDay({ days }: { days: Array<[string, number]> }) {
         <Table
           caption="Landings per day"
           columns={[
-            { key: 'day', title: 'Day', cell: ([day]: [string, number]) => dayName(day) },
-            { key: 'n', title: 'Landings', numeric: true, cell: ([, n]: [string, number]) => int(n) },
+            { key: 'day', title: 'Day', cell: ([day]: [string, number | null]) => dayName(day) },
+            {
+              key: 'n',
+              title: 'Landings',
+              numeric: true,
+              cell: ([, n]: [string, number | null]) => (n === null ? 'not measured' : int(n)),
+            },
           ]}
           rows={days}
           rowKey={([day]) => day}
@@ -69,13 +88,14 @@ export function PerDay({ days }: { days: Array<[string, number]> }) {
                       .join(' ') || undefined
                   }
                   aria-pressed={i === at}
-                  aria-label={`${dayName(day)}: ${plural(n, 'landing')}`}
+                  aria-label={`${dayName(day)}: ${said(n)}`}
+                  data-missing={n === null || undefined}
                   onClick={() => setAt(i)}
                   onFocus={() => setAt(i)}
                   onPointerEnter={() => setAt(i)}
                 >
                   <span className="v" aria-hidden="true">
-                    {int(n)}
+                    {n === null ? '–' : int(n)}
                   </span>
                   <i style={{ '--h': heights[i] } as CSSProperties} />
                   <span className="d" aria-hidden="true">
@@ -88,7 +108,7 @@ export function PerDay({ days }: { days: Array<[string, number]> }) {
           <p className="stats-readout" aria-live="polite">
             {shown ? (
               <>
-                <b>{dayName(shown[0])}:</b> {plural(shown[1], 'landing')}.
+                <b>{dayName(shown[0])}:</b> {said(shown[1])}.
               </>
             ) : null}
           </p>
@@ -204,12 +224,24 @@ export function ByWho({ r, historyHref }: { r: StatsAgents; historyHref: string 
 }
 
 type MonthRow = StatsMonths['months'][number];
-export function ByMonth({ r, compareFrom }: { r: StatsMonths; compareFrom: number }) {
+export function ByMonth({ r }: { r: StatsMonths }) {
   return (
     <Table<MonthRow>
       caption="Stats by month"
       columns={[
-        { key: 'm', title: 'Month', cell: row => monthName(row.month) },
+        {
+          key: 'm',
+          title: 'Month',
+          cell: row => (
+            <>
+              {monthName(row.month)}
+              {row.partial ? <span className="t3"> · {monthPartWords(row)}</span> : null}
+              {row.notMeasured ? (
+                <span className="t3"> · {plural(row.notMeasured, 'day')} not measured</span>
+              ) : null}
+            </>
+          ),
+        },
         { key: 'n', title: 'Landings', numeric: true, cell: row => int(row.landings) },
         {
           key: 't',
@@ -217,13 +249,17 @@ export function ByMonth({ r, compareFrom }: { r: StatsMonths; compareFrom: numbe
           numeric: true,
           cell: row => (row.toMainSeconds === null ? '–' : clock(row.toMainSeconds)),
         },
-        { key: 'ci', title: 'CI min', numeric: true, cell: row => minutes(row.ciMinutes) },
+        {
+          key: 'ci',
+          title: 'CI min',
+          numeric: true,
+          cell: row => (row.ciMinutes === null ? 'not recorded' : minutes(row.ciMinutes)),
+        },
         {
           key: 's',
-          title: 'Fewer, at least',
+          title: 'Fewer than a merge queue, replayed',
           numeric: true,
-          cell: row =>
-            row.savedAtLeast === null ? `under ${int(compareFrom)} landings` : minutes(row.savedAtLeast),
+          cell: row => (row.savedVsQueue === null ? gapWords(row).short : minutes(row.savedVsQueue)),
         },
       ]}
       rows={r.months}
