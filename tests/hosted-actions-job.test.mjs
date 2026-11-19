@@ -35,7 +35,8 @@ import {
   verifySourceTree,
   actionsFileConcurrency,
 } from '../dist/hosted-actions-job-source.js';
-import { prepareActionsJob } from '../dist/hosted-actions-job-plan.js';
+import { prepareActionsJob, actionsGateSelection } from '../dist/hosted-actions-job-plan.js';
+import { browserSelection } from '../scripts/browser-test-policy.mjs';
 import { executeActionsJob, isolateCandidates } from '../dist/hosted-actions-job-run.js';
 import { directRequestSchema } from '../dist/hosted-actions-direct.js';
 import { savePin } from '../dist/hosted-save.js';
@@ -48,6 +49,7 @@ import { gzipSync, gunzipSync } from 'node:zlib';
 import { truncateSync } from 'node:fs';
 import { partitionTests, timedShards, shardDuration, checkCallBudget } from '../scripts/test-shards.mjs';
 import { poolUnits, keptFiles } from '../scripts/shard-pool.mjs';
+import { mountPlan } from '../scripts/candidate-sandbox-plan.mjs';
 function fixture(
   t,
   {
@@ -1275,6 +1277,138 @@ test('Issue 3b67363d: without a Candidate user a hosted check fails setup by nam
   );
   assert.match(result.log.failureSummary, /CANDIDATE_ISOLATION_UNAVAILABLE/);
 });
+
+test('1dd4e095: the hosted planner builds one graph and reuses it for browser selection', () => {
+  let builds = 0,
+    graph,
+    webReads = 0;
+  const graphCache = {
+    get graph() {
+      return graph;
+    },
+    set graph(value) {
+      builds++;
+      graph = value;
+    },
+  };
+  const browser = 'tests/app-plan-browser.test.mjs';
+  const files = new Map([
+    ['src/shared.ts', 'export const value = 1;'],
+    ['web/src/view.ts', `import {value} from '../../src/shared'; export {value};`],
+    [browser, `import '../web/src/view';`],
+    ['tests/ordinary.test.mjs', `import '../src/shared';`],
+  ]);
+  const get = files.get.bind(files);
+  files.get = path => {
+    if (path === 'web/src/view.ts') webReads++;
+    return get(path);
+  };
+  const run = { gate: { mode: 'contract', tests: [browser] }, check: {} };
+  const paths = ['src/shared.ts'];
+  const selected = actionsGateSelection(run, paths, files, true, null, null, graphCache);
+  assert.equal(browserSelection(selected, paths, files, graphCache).browser, true);
+  assert.equal(builds, 1);
+  assert.equal(webReads, 1);
+  files.get = () => assert.fail('the fallback must reuse the graph, not scan source again');
+  assert.equal(
+    browserSelection({ ...selected, tests: ['tests/ordinary.test.mjs'] }, paths, files, graphCache).browser,
+    true,
+  );
+  assert.equal(builds, 1);
+});
+
+test('1dd4e095: Linux Candidate home replacement binds the restored browser cache read-only', async t => {
+  const previous = { HOME: process.env.HOME, PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH };
+  const home = '/srv/ci-home',
+    cache = `${home}/work/_temp/forge-browsers`;
+  process.env.HOME = home;
+  process.env.PLAYWRIGHT_BROWSERS_PATH = cache;
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous))
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+  });
+  let launched = false;
+  const job = await isolationJob(t, {
+    mode: 'user',
+    user: 'forge-check',
+    remove(path) {
+      rmSync(path, { recursive: true, force: true });
+    },
+    command(argv, env, cwd, paths) {
+      launched = true;
+      assert.equal(env.PLAYWRIGHT_BROWSERS_PATH, cache);
+      assert(paths.readable.includes(cache), 'the real supervisor supplies the read grant');
+      assert(!paths.writable.includes(cache), 'the cache is never Candidate-owned');
+      const real = '/var/lib/forge-check/synthetic/real';
+      const source = `${real}/work/_temp/forge-browsers`;
+      const steps = mountPlan({
+        home,
+        real,
+        ...paths,
+        exists: path => path === home || path === source,
+        isDirectory: () => true,
+      });
+      assert(steps.some(step => step.step === 'bind' && step.path === cache && step.source === source));
+      assert(
+        steps.some(step => step.step === 'ro' && step.path === cache),
+        'Linux namespace remounts the grant read-only',
+      );
+      assert(
+        !steps.some(step => step.path?.startsWith(`${home}/.credentials`)),
+        'unlisted runner-home files stay hidden',
+      );
+      return argv;
+    },
+  });
+  assert.equal(await job.execute(), 0);
+  assert.equal(launched, true);
+});
+
+test('1dd4e095: empty browser metadata never restores or installs on shard zero; only control versions seed cache', async t => {
+  const s = fixture(t);
+  const prepared = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    join(s.directory, 'objects'),
+  );
+  assert.deepEqual(prepared.browser, {});
+  assert.equal(prepared.browserShard, '');
+  const workflow = readFileSync('.github/workflows/forge-check.yml', 'utf8');
+  const conditions = workflow
+    .split('\n')
+    .filter(line => /^\s+- if: .*needs.hosted-plan.outputs.browser_shard/.test(line))
+    .map(line => line.trim().slice(6));
+  assert.equal(conditions.length, 4);
+  // GitHub loose equality coerces differing types to numbers (including null to 0).
+  const equal = (a, b) => (typeof a === typeof b ? a === b : Number(a) === Number(b));
+  const enabled = (condition, browser, browserShard, shard, controlVersion) => {
+    const values = {
+      'needs.hosted-plan.outputs.browser_shard': browserShard,
+      'matrix.shard': shard,
+      'steps.browser-cache.outputs.cache-hit': 'false',
+      "fromJSON(needs.hosted-plan.outputs.browser || '{}').version": browser.version ?? null,
+      'steps.control-browser.outputs.version': controlVersion,
+      'github.ref': 'refs/heads/main',
+      "format('refs/heads/{0}', github.event.repository.default_branch)": 'refs/heads/main',
+    };
+    const value = text => (text.startsWith("'") ? text.slice(1, -1) : (values[text] ?? null));
+    return condition.split(' && ').every(term => {
+      const [, a, op, b] = /^(.*?) (==|!=) (.*)$/.exec(term);
+      return op === '==' ? equal(value(a), value(b)) : !equal(value(a), value(b));
+    });
+  };
+  assert(equal('0', null), 'negative control reproduces the reviewed Actions coercion');
+  for (const condition of conditions)
+    assert.equal(enabled(condition, {}, '', '0', '1.2.3'), false, condition);
+  for (const condition of conditions)
+    assert.equal(enabled(condition, { version: '1.2.3' }, '0', '0', '1.2.3'), true, condition);
+  assert.equal(
+    enabled(conditions.at(-1), { version: '9.9.9' }, '0', '0', '1.2.3'),
+    false,
+    'Candidate-selected versions install without saving',
+  );
+});
 test("Issue 3b67363d: the owner's runner configuration lets a non-Linux runner opt in to shared mode", async t => {
   const job = await isolationJob(t, { mode: 'shared', reason: 'darwin runner' });
   job.s.client.run.configuration = { ...job.s.client.run.configuration, isolation: 'shared' };
@@ -2347,9 +2481,9 @@ test('hosted workflow restores trusted dependencies and exact control build, fal
     if (name !== 'hosted-plan') {
       assert.match(job, /actions\/cache\/restore@/);
       assert.match(job, /tar -xf "\$RUNNER_TEMP\/control-dist.tar" -C control/);
-      // Only the planning job seeds control caches; a declared dependency cache saves its own paths.
+      // Only the planning job seeds control caches; the browser job seeds its pinned control version; a declared dependency cache saves its own paths.
       for (const save of job.matchAll(/uses: actions\/cache\/save@[^\n]*\n\s+with:\n\s+path: ([^\n]+)/g))
-        assert.match(save[1], /deps_cache/);
+        assert.match(save[1], /deps_cache|^\$\{\{ runner.temp \}\}\/forge-browsers$/);
     }
     if (name === 'hosted-pack') {
       // One CI-neutral key from the pinned control lockfile alone: no Candidate input, no prefix restore.
@@ -2390,6 +2524,17 @@ test('hosted workflow restores trusted dependencies and exact control build, fal
     assert(job.indexOf('runner.tool_cache') < job.indexOf('uses: actions/setup-node@'));
   }
   const check = jobs('hosted-check');
+  assert.match(check, /browser_shard != '' && matrix.shard == needs.hosted-plan.outputs.browser_shard/);
+  assert.match(check, /key: forge-playwright-v1-.*runner.os.*runner.arch.*version/);
+  assert(
+    check.indexOf('Install pinned Chromium cache') <
+      check.indexOf('- run: node control/scripts/hosted-actions-job.mjs run'),
+  );
+  assert(
+    check.lastIndexOf('uses: actions/cache/save@') <
+      check.indexOf('- run: node control/scripts/hosted-actions-job.mjs run'),
+  );
+
   assert.match(check, /if: needs.hosted-plan.outputs.npm_cache != 'true'\n\s+uses: actions\/cache\/restore@/);
   assert.match(
     check,

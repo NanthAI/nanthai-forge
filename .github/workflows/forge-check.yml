@@ -83,6 +83,8 @@ jobs:
       toolchains: ${{ steps.plan.outputs.toolchains }}
       deps_cache: ${{ steps.plan.outputs.deps_cache }}
       npm_cache: ${{ steps.plan.outputs.npm_cache }}
+      browser: ${{ steps.plan.outputs.browser }}
+      browser_shard: ${{ steps.plan.outputs.browser_shard }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
@@ -481,6 +483,33 @@ jobs:
         with:
           path: ${{ fromJSON(needs.hosted-plan.outputs.deps_cache || '{}').paths }}
           key: ${{ fromJSON(needs.hosted-plan.outputs.deps_cache || '{}').key }}
+      - if: needs.hosted-plan.outputs.browser_shard != '' && matrix.shard == needs.hosted-plan.outputs.browser_shard
+        id: control-browser
+        working-directory: control
+        run: node -e 'const fs=require("node:fs"); const v=JSON.parse(fs.readFileSync("package-lock.json")).packages?.["node_modules/playwright"]?.version; if(!/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(v || "")) throw Error("Expected pinned control Playwright version"); fs.appendFileSync(process.env.GITHUB_OUTPUT,`version=${v}\n`);'
+      # Restore only on the one pinned browser shard. Seed before Candidate code
+      # runs; an explicit save prevents a post-job upload of Candidate-modified bytes.
+      - if: needs.hosted-plan.outputs.browser_shard != '' && matrix.shard == needs.hosted-plan.outputs.browser_shard
+        id: browser-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
+        with:
+          path: ${{ runner.temp }}/forge-browsers
+          key: forge-playwright-v1-${{ runner.os }}-${{ runner.arch }}-${{ fromJSON(needs.hosted-plan.outputs.browser || '{}').version }}
+      - if: needs.hosted-plan.outputs.browser_shard != '' && matrix.shard == needs.hosted-plan.outputs.browser_shard && steps.browser-cache.outputs.cache-hit != 'true'
+        name: Install pinned Chromium cache
+        working-directory: control
+        timeout-minutes: 5
+        run: node scripts/control-browser-cache.mjs
+        env:
+          FORGE_BROWSER_VERSION: ${{ fromJSON(needs.hosted-plan.outputs.browser || '{}').version }}
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/forge-browsers
+      - if: needs.hosted-plan.outputs.browser_shard != '' && matrix.shard == needs.hosted-plan.outputs.browser_shard && steps.browser-cache.outputs.cache-hit != 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && fromJSON(needs.hosted-plan.outputs.browser || '{}').version == steps.control-browser.outputs.version
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/forge-browsers
+          key: forge-playwright-v1-${{ runner.os }}-${{ runner.arch }}-${{ fromJSON(needs.hosted-plan.outputs.browser || '{}').version }}
       - run: node control/scripts/hosted-actions-job.mjs run
         env:
           FORGE_CONVEX_SITE: ${{ inputs.deployment }}
@@ -488,6 +517,7 @@ jobs:
           FORGE_RUN_ID: ${{ inputs.runId }}
           FORGE_CANDIDATE: ${{ runner.temp }}/candidate
           FORGE_ACTIONS_SHARD: ${{ matrix.shard }}
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/forge-browsers
 
   hosted-pack:
     if: ${{ needs.hosted-plan.outputs.pack_refresh == 'true' }}

@@ -5,6 +5,7 @@
 // as not verified, a comment posts once with the server choosing its writer, and axe is clean with no sideways scroll
 // at desk and phone width in both themes. Set FORGE_DISCUSSION_SHOTS to a folder to also save the screenshots.
 import test from 'node:test';
+import { settleBrowserPage } from './browser-runtime.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -164,9 +165,7 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
           for (const theme of ['dark', 'light']) {
             await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
             // Colour transitions finish before axe reads the colours.
-            await page.evaluate(() =>
-              Promise.all(document.getAnimations().map(animation => animation.finished)),
-            );
+            await settleBrowserPage(page);
             const [scroll, inner] = await page.evaluate(() => [
               document.documentElement.scrollWidth,
               innerWidth,

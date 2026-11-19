@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { benchmarkPlan } from '../scripts/bench-landing-shard.mjs';
 import { sourceFiles } from '../scripts/test-impact.mjs';
+import { browserFiles, isBrowserTest } from '../scripts/browser-test-policy.mjs';
 import { publicVerify } from '../scripts/public-verify.mjs';
 
 test('public full-suite partitions are deterministic and cover every file exactly once', () => {
@@ -20,7 +21,7 @@ test('public full-suite partitions are deterministic and cover every file exactl
     assert.deepEqual(plan.selection.tests, expected);
     assert.deepEqual(plan.groups.flat().sort(), expected);
     assert.equal(new Set(plan.groups.flat()).size, expected.length);
-    assert.equal(plan.groups.length, Math.min(count, expected.length));
+    assert.equal(plan.groups.length, Math.min(count, expected.length - browserFiles(expected).length + 1));
     assert.deepEqual(plan.groups, benchmarkPlan(count, {}, new Map([...files].reverse())).groups);
   }
   const added = 'tests/zzz-new-public-test.test.mjs';
@@ -50,7 +51,7 @@ test('public shards prepare ignored Convex types before consuming shared builds'
       calls.push({ command, args, env: { ...options.env } }),
     );
     assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), expected);
-    assert.ok(calls.every(call => call.command === 'node'));
+    assert.ok(calls.every(call => call.command === 'node' || call.command === process.execPath));
     if (shard === 'static') {
       assert.equal(calls.length, 1);
       assert.deepEqual(calls[0].args, ['scripts/verify.mjs']);
@@ -58,7 +59,13 @@ test('public shards prepare ignored Convex types before consuming shared builds'
     } else {
       assert.deepEqual(
         calls.map(call => call.args),
-        [['scripts/prepare-convex-api.mjs'], ['scripts/test-files.mjs', ...expected.groups[Number(shard)]]],
+        [
+          ...(expected.groups[Number(shard)].some(isBrowserTest)
+            ? [[new URL('../scripts/check-browser-runtime.mjs', import.meta.url).pathname]]
+            : []),
+          ['scripts/prepare-convex-api.mjs'],
+          ['scripts/test-files.mjs', ...expected.groups[Number(shard)]],
+        ],
       );
     }
     assert.equal(calls[0].env.FORGE_TEST_WORKERS, '2');

@@ -148,7 +148,7 @@ test('CLI writes only a fixed scope value, including missing-input fallback', t 
     },
   );
   assert.equal(JSON.parse(stdout).scope, 'full');
-  assert.equal(readFileSync(output, 'utf8'), 'scope=full\n');
+  assert.equal(readFileSync(output, 'utf8'), 'scope=full\nbrowser_paths=null\n');
 });
 test('CLI uses supplied exact PR pins for documentation scope output', t => {
   const r = repository(t);
@@ -171,7 +171,7 @@ test('CLI uses supplied exact PR pins for documentation scope output', t => {
     },
   );
   assert.equal(JSON.parse(stdout).scope, 'docs');
-  assert.equal(readFileSync(output, 'utf8'), 'scope=docs\n');
+  assert.equal(readFileSync(output, 'utf8'), 'scope=docs\nbrowser_paths=["docs/notes.md"]\n');
 });
 
 test('docs checks preserve package inventory and original-notice validation without building', t => {

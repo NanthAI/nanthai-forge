@@ -158,6 +158,7 @@ test('owner decision routes filter, navigate and disclose locally in both themes
   }
   await page.goto(`${base}?surface=cache`);
   await page.getByTestId('cache-count').filter({ hasText: /^20$/ }).waitFor();
+  assert.equal(await page.getByTestId('cache-error').innerText(), '');
   assert.equal(await page.getByTestId('cache-reads').innerText(), '2');
   for (let i = 0; i < 3; i++)
     await page.getByRole('button', { name: 'Unrelated Work revision', exact: true }).click();

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Real billing components in the account frame, built once per test file with synthetic stub data and no session.
 import assert from 'node:assert/strict';
+import { settleBrowserPage } from './browser-runtime.mjs';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -88,6 +89,7 @@ export async function billingFixture(t) {
         body: asset ? readFileSync(file) : html,
       });
     });
+    await tab.addInitScript(value => localStorage.setItem('forge-theme', value), theme);
     await tab.goto(`https://forge.test/-/account/billing?${query}`);
     await tab.locator('h1').waitFor();
     await tab.evaluate(value => (document.documentElement.dataset.theme = value), theme);
@@ -98,7 +100,7 @@ export async function billingFixture(t) {
 
 /** axe (with contrast) is clean and the page never scrolls sideways. */
 export async function assertDrawn(tab, label) {
-  await tab.evaluate(() => document.fonts.ready);
+  await settleBrowserPage(tab);
   await tab.addScriptTag({ path: axe });
   const violations = await tab.evaluate(async () =>
     (await axe.run(document, { rules: { 'color-contrast': { enabled: true } } })).violations.map(v => ({

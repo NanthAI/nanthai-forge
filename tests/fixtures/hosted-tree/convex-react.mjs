@@ -12,9 +12,9 @@ export class ConvexReactClient {
 }
 const empty = args => (args?.paginationOpts ? { page: [], isDone: true, continueCursor: '' } : null);
 function read(reference,args){
- const page=args?.paginationOpts && tree().pages[name(reference)];
+ const page=args?.paginationOpts && tree().pages?.[name(reference)];
  if(page){const value=page(args);return Array.isArray(value)?{page:value,isDone:true,continueCursor:''}:value;}
- const answer=tree().queries[name(reference)];return answer?answer(args??{}):empty(args);
+ const answer=tree().queries?.[name(reference)];return answer?answer(args??{}):empty(args);
 }
 const client = {
   query: async (reference, args) => {
@@ -32,7 +32,7 @@ export const useConvexConnectionState = () => ({ isWebSocketConnected: true, has
 export const useQuery = (reference, args) =>
   args === 'skip' ? undefined : read(reference,args);
 export const usePaginatedQuery = (reference, args) => ({
-  results: args === 'skip' ? [] : (tree().pages[name(reference)]?.(args ?? {}) ?? []),
+  results: args === 'skip' ? [] : (tree().pages?.[name(reference)]?.(args ?? {}) ?? []),
   status: 'Exhausted',
   isLoading: false,
   loadMore() {},

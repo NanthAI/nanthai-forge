@@ -317,3 +317,47 @@ test('failure of an adopted exact probe yields to ordinary source without failin
   await drain(f);
   assert.equal(states(f)[0].phase, 'landed');
 });
+
+test('1dd4e095: a client operation using the Candidate UUID cannot collide with its derived source job', async t => {
+  const { hostedPayloadHash } = await import('../dist/hosted-source-operation.js');
+  const f = await batchesFixture(t, { count: 1, batching: false });
+  await probe(f);
+  const identity = { projectId: f.projectId, submissionId: f.entries[0].state.id };
+  await f.transaction(
+    'candidate-operation-namespace',
+    {
+      _handler: async ctx => {
+        const { value } = await finishStore.loadFinish(ctx, identity);
+        const source = await finishCompose.prepareFinishCompose(ctx, identity, value);
+        assert.notEqual(source.state.jobOperationId, source.state.candidateId);
+        const replay = await finishCompose.prepareFinishCompose(ctx, identity, value);
+        assert.equal(
+          replay.state.jobOperationId,
+          source.state.jobOperationId,
+          'retry keeps the original source identity',
+        );
+        const payload = { synthetic: 'client operation' };
+        const expected = source.operation.expected;
+        await operations.beginHostedOperation(ctx, {
+          projectId: f.projectId,
+          actor: source.row.actor,
+          payload,
+          request: {
+            schema: 1,
+            projectId: f.projectId,
+            actor: source.row.actor,
+            operationId: source.state.candidateId,
+            expected,
+            payloadHash: hostedPayloadHash(payload, expected),
+          },
+          firstAttempt: { ...source.operation.firstAttempt, operationId: source.state.candidateId },
+        });
+      },
+    },
+    {},
+  );
+  await drain(f);
+  await f.passChecks();
+  await drain(f);
+  assert.equal(states(f)[0].phase, 'landed');
+});

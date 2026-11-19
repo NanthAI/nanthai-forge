@@ -69,6 +69,8 @@ try {
         // Declared toolchains and dependency cache for the workflow's setup steps (single-line JSON).
         `toolchains=${JSON.stringify(result.toolchains)}\ndeps_cache=${JSON.stringify(result.depsCache)}\n` +
         `npm_cache=${npmCache}\n` +
+        `browser=${JSON.stringify(result.browser)}\n` +
+        `browser_shard=${result.browserShard}\n` +
         (result.proof ? 'proof=true\n' : ''),
     );
     // Keep source refresh out of the plan/artifact dependency path.

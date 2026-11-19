@@ -4,6 +4,7 @@
 // page pass axe with no sideways scroll at desk and phone width in both themes. Set FORGE_PROJECTS_SHOTS to a folder to
 // also save the screenshots.
 import test from 'node:test';
+import { settleBrowserPage } from './browser-runtime.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -109,10 +110,8 @@ test('account projects: the held project leads, rows link to projects, and every
     await page.goto(`https://forge.test/-/account?data=${data}`);
     await page.locator('main h1').first().waitFor();
     // Settle the theme switch's colour transitions before axe reads the colours.
-    await page.evaluate(async value => {
-      document.documentElement.dataset.theme = value;
-      await Promise.all(document.getAnimations().map(a => a.finished.catch(() => undefined)));
-    }, theme);
+    await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
+    await settleBrowserPage(page);
     return { page, errors, context };
   };
   const check = async (page, label) => {

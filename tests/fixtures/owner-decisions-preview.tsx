@@ -120,6 +120,7 @@ function DecisionCache() {
         {value.loading ? "Loading" : value.records.length}
       </p>
       <p data-testid="cache-reads">{decisionReads}</p>
+      <p data-testid="cache-error">{value.error}</p>
       <button onClick={() => setRevision(revision + 1)}>
         Unrelated Work revision
       </button>

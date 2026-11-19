@@ -24,6 +24,8 @@ export function standardSelection(input: {
   interaction?: unknown;
   mainCheck?: unknown;
   env?: Record<string, string | undefined>;
+  /** Caller-owned graph for this immutable inventory and comparison. */
+  graphCache?: object;
 }): TestSelection;
 
 /** Fail-closed wrapper used by every planner: a non-docs selection always has tests. */
@@ -104,6 +106,10 @@ export function fitPreflightBudget(input: {
   /** Protected tiers alone exceed the budget; the plan keeps them all, the run's wall clock stops them. */
   protectedOverBudget: boolean;
 };
-export function selectImpactPair(files: Map<string, string>, comparisons: string[][]): TestSelection[];
+export function selectImpactPair(
+  files: Map<string, string>,
+  comparisons: string[][],
+  graphCache?: object,
+): TestSelection[];
 export const smokeTests: string[];
 export function documentation(path: string): boolean;

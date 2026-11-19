@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Same scoped selection, static contracts and explicit shard membership as Forge Actions.
 import { pinnedComparison, standardSelection, sourceFiles } from './test-impact.mjs';
+import { browserSelection, browserGroups } from './browser-test-policy.mjs';
 import { runActionsCheck } from './github-actions-check.mjs';
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -13,8 +14,18 @@ export function benchmarkPlan(
   files = sourceFiles(),
   durations = timingDurations(readTimingHistory()),
 ) {
-  const selection = standardSelection({ ...comparison, files });
-  const groups = partitionTests(selection.tests, Number(count), durations);
+  const graphCache = {};
+  const selection = browserSelection(
+    standardSelection({ ...comparison, files, graphCache }),
+    process.env.FORGE_PUBLIC_BROWSER_TESTS === '0' ? [] : comparison?.paths,
+    files,
+    graphCache,
+  );
+  const groups = browserGroups(
+    partitionTests(selection.tests, Number(count), durations),
+    Boolean(selection.browser),
+    durations,
+  );
   return { standard: true, selection, groups, interaction: comparison?.interaction !== undefined };
 }
 

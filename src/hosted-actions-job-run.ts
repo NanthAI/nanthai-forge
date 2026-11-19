@@ -221,6 +221,8 @@ async function executeActiveActionsJob(
       // The packages list and runner: the Candidate reads and runs them, never changes them.
       ...(packages ? [packages.folder] : []),
       ...toolchainReadable(process.env, home),
+      // Restored before Candidate code; expose the browser under the hidden runner home read-only.
+      ...(process.env.PLAYWRIGHT_BROWSERS_PATH ? [resolve(process.env.PLAYWRIGHT_BROWSERS_PATH)] : []),
     ],
     // What the declared toolchains write into their own installs: private copies (src/ecosystems.ts).
     ...toolchainState(
@@ -241,7 +243,9 @@ async function executeActiveActionsJob(
   /** One executor process. `part` is the shard pool part: kept files, or one unit (tests only). */
   const spawnPart = (part?: string) => {
     const env: Record<string, string> = {
-      ...(childEnv({ allow: ['CI', 'PATH', ...toolchainEnvAllow()] }) as Record<string, string>),
+      ...(childEnv({
+        allow: ['CI', 'PATH', 'PLAYWRIGHT_BROWSERS_PATH', 'FORGE_UI_BROWSER', ...toolchainEnvAllow()],
+      }) as Record<string, string>),
       ...(sourceCache ? { FORGE_SOURCE_CACHE_DIR: sourceCache } : {}),
       FORGE_ACTIONS_PLAN: planPath,
       FORGE_ACTIONS_SHARD: shard,

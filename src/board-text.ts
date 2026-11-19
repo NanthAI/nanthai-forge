@@ -31,6 +31,21 @@ const secretShapes = [
 const emailShape = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/;
 /** Absolute, home and drive paths name a machine; repository paths are relative. */
 const machinePath = new RegExp(`${boundary}(?:/(?!-/)[A-Za-z0-9._-]|~/|[A-Za-z]:\\\\|file://)`);
+const appRoute = new RegExp(`${boundary}/-/([^\\s"'<>]*)`, 'g');
+const localRoots =
+  /^(?:users|home|private|volumes|tmp|var|etc|root|mnt|opt|srv|windows|program files|applications|library|system)$/i;
+function routeNamesMachinePath(text: string) {
+  for (const match of text.matchAll(appRoute)) {
+    // Decode valid escapes independently: one malformed escape cannot hide an
+    // encoded dot segment or machine root elsewhere in the route.
+    const path = match[1]!.replace(/%([0-9a-f]{2})/gi, (_, byte: string) =>
+      String.fromCharCode(Number.parseInt(byte, 16)),
+    );
+    const parts = path.split(/[/?#\\]/);
+    if (localRoots.test(parts[0]!) || parts.some(part => part === '.' || part === '..')) return true;
+  }
+  return false;
+}
 /** Control, line and bidirectional-override characters: one visible line only. */
 const controls = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
 
@@ -58,7 +73,7 @@ export function boardTextProblem(text: string): { code: string; message: string 
       code: 'BOARD_TEXT_EMAIL',
       message: 'Remove the email address: the board shows Forge handles only.',
     };
-  if (machinePath.test(text))
+  if (machinePath.test(text) || routeNamesMachinePath(text))
     return {
       code: 'BOARD_TEXT_PATH',
       message: 'Remove absolute or home paths; name repository files by relative path (src/x.ts).',

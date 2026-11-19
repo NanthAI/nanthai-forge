@@ -179,6 +179,9 @@ function executorSurface(t) {
   ]);
   // Contract 3: the fixed supervisor's private JUnit report directory reaches the check.
   process.env.FORGE_JUNIT_DIR = '/private/junit';
+  const browserEnv = ['PLAYWRIGHT_BROWSERS_PATH', 'FORGE_UI_BROWSER'].map(key => [key, process.env[key]]);
+  process.env.PLAYWRIGHT_BROWSERS_PATH = '/synthetic/browser-cache';
+  process.env.FORGE_UI_BROWSER = '/synthetic/browser';
   for (const [mode, shard, selection, groups, standard, part] of [
     [
       'standard-static',
@@ -192,6 +195,13 @@ function executorSurface(t) {
       '0',
       { scope: 'full', reason: 'x', tests: ['tests/a.test.mjs'] },
       [['tests/a.test.mjs']],
+      true,
+    ],
+    [
+      'browser-shard',
+      '0',
+      { scope: 'full', reason: 'x', tests: ['tests/app-plan-browser.test.mjs'], browser: true },
+      [['tests/app-plan-browser.test.mjs']],
       true,
     ],
     ['docs-static', 'static', { scope: 'docs', reason: 'x', tests: [] }, [], true],
@@ -227,11 +237,17 @@ function executorSurface(t) {
       runActionsCheck((command, args, options) => {
         const env = Object.fromEntries(
           Object.entries(options.env)
-            .filter(([name]) => /^FORGE_|^NODE_OPTIONS$/.test(name))
+            .filter(([name]) => /^FORGE_|^NODE_OPTIONS$|^PLAYWRIGHT_BROWSERS_PATH$/.test(name))
             .map(([name, value]) => [name, variable.has(name) ? null : value])
             .sort(([a], [b]) => (a < b ? -1 : 1)),
         );
-        calls.push({ command: command === process.execPath ? 'node' : command, args, env });
+        calls.push({
+          command: command === process.execPath ? 'node' : command,
+          args: args.map(arg =>
+            arg.endsWith('/scripts/check-browser-runtime.mjs') ? 'scripts/check-browser-runtime.mjs' : arg,
+          ),
+          env,
+        });
       });
     } catch (error) {
       if (mode !== 'docs-static') throw error;
@@ -240,6 +256,10 @@ function executorSurface(t) {
   }
   delete process.env.FORGE_ACTIONS_POOL_PART;
   delete process.env.FORGE_JUNIT_DIR;
+  for (const [key, value] of browserEnv) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
   return surface;
 }
 

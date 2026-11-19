@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // P8: the real import and mirror components preserve choices, confirm only disconnect, and work by keyboard in both themes.
 import test from 'node:test';
+import { settleBrowserPage } from './browser-runtime.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -139,10 +140,8 @@ test('import defaults to two-way; mirror pauses/resumes the retained link and co
   for (const width of [1440, 390])
     for (const theme of ['dark', 'light']) {
       await page.setViewportSize({ width, height: 1000 });
-      await page.evaluate(async t => {
-        document.documentElement.dataset.theme = t;
-        await Promise.all(document.getAnimations().map(a => a.finished.catch(() => undefined)));
-      }, theme);
+      await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
+      await settleBrowserPage(page);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
       await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
       const result = await page.evaluate(() =>
@@ -197,10 +196,8 @@ test('import defaults to two-way; mirror pauses/resumes the retained link and co
   for (const width of [1440, 390])
     for (const theme of ['dark', 'light']) {
       await page.setViewportSize({ width, height: 1000 });
-      await page.evaluate(async t => {
-        document.documentElement.dataset.theme = t;
-        await Promise.all(document.getAnimations().map(a => a.finished.catch(() => undefined)));
-      }, theme);
+      await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
+      await settleBrowserPage(page);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
       await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
       const audit = await page.evaluate(() =>

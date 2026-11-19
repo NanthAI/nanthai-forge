@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { candidateOwnerInputs } from './projectHostedProvenance';
 import { semanticPayload } from '../src/semantic-payload';
+import { finishChild } from '../src/finish-child';
 import { mainSemanticMembers, mergeSemanticMembers, semanticBaseSequence } from './projectSemanticContracts';
 import { readHostedRecord, hostedWriteProject } from './projectHostedRecords';
 import type { MutationCtx } from './_generated/server';
@@ -256,10 +257,11 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
     inputs: { next: null, pages: request.inputs.pages, count: request.inputs.count },
     dependencies: { next: null, pages: request.dependencies.pages, count: request.dependencies.count },
     candidateId: prepared.operation.firstAttempt.ids.candidate!,
-    // The Candidate UUID already names this unique source preparation. Reuse it
-    // for its job operation instead of retaining a second random reservation.
+    // Keep source jobs in a separate operation namespace from caller-supplied
+    // Candidate UUIDs, without retaining another random reservation.
     jobOperationId:
-      prepared.operation.firstAttempt.ids.jobOperation ?? prepared.operation.firstAttempt.ids.candidate!,
+      prepared.operation.firstAttempt.ids.jobOperation ??
+      finishChild(prepared.operation.firstAttempt.ids.candidate!, 'source-job'),
     status: 'ready',
   };
   const fields = {

@@ -3,6 +3,8 @@ import { childEnv, toolchainEnvAllow } from './child-env.mjs';
 // Shared executor for exported Forge snapshots and benchmark Git checkouts.
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { isBrowserTest } from './browser-test-policy.mjs';
 import { runDocumentationChecks } from './check-documentation.mjs';
 import { checkPhases } from './check-phases.mjs';
 import { keptFiles, poolUnits, validPool } from './shard-pool.mjs';
@@ -29,6 +31,8 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
     ...childEnv({
       allow: [
         'CI',
+        'PLAYWRIGHT_BROWSERS_PATH',
+        'FORGE_UI_BROWSER',
         'FORGE_ACTIONS_PLAN',
         'FORGE_ACTIONS_SHARD',
         'FORGE_SELECTED_TESTS',
@@ -54,6 +58,9 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
     // decides `plan.standard`). Any other command runs with the environment its project
     // gives it, as on plain GitHub Actions: no heap cap, no Forge worker variables.
     ...(plan.standard && {
+      ...(plan.selection.browser === undefined
+        ? {}
+        : { FORGE_BROWSER_TESTS: plan.selection.browser ? '1' : '0' }),
       FORGE_TEST_WORKERS: '2',
       FORGE_MAX_CONCURRENT_CHECKS: '2',
       FORGE_TEST_EVENTS: '1',
@@ -105,6 +112,12 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
       if (!Number.isInteger(index) || !plan.groups[index]) throw new Error('Unselected Actions shard.');
       if (!plan.groups[index].length) throw new Error('ZERO_SELECTION: this shard has no test file.');
       const files = poolPart(plan, index, part);
+      // Provider-stage guard: independent of whether this Candidate's fixtures have
+      // adopted strict skips. Runs inside the Candidate namespace, after install.
+      if (plan.selection.browser && files.some(isBrowserTest))
+        phases.time('browser', () =>
+          run(process.execPath, [fileURLToPath(new URL('./check-browser-runtime.mjs', import.meta.url))]),
+        );
       if (part !== undefined && part !== 'kept') {
         // A unit runs after this job's kept part: dependencies and build are already in place.
         if (plan.selection.scope === 'full') env.FORGE_TEST_COVERAGE_HEAD = plan.head;

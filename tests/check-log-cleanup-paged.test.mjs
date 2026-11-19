@@ -258,6 +258,30 @@ test('paged cleanup resumes after a lost durable step, applies only the reviewed
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'stranger' });
   await assert.rejects(drive(s, input), /PROJECT_UNAVAILABLE|unavailable/);
 });
+test('cleanup planning yields at its five-second deadline before the twenty-step cap and resumes the same operation', async t => {
+  const { s } = await seeded(t, 5);
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const mutate = s.ctx.runMutation;
+  s.ctx.runMutation = async (ref, args) => {
+    const result = await mutate(ref, args);
+    if (getFunctionName(ref) === 'projectCheckLogCleanupStore:planStep') {
+      now += 5001;
+    }
+    return result;
+  };
+  const input = { projectId: 'project', operationId: randomUUID() };
+  const first = JSON.parse(await cleanup.clean._handler(s.ctx, input));
+  assert.equal(first.pending, true);
+  assert.equal(JSON.parse(first.progress).step, 1, 'the persisted cursor yields after the costly step');
+  assert.equal(first.actionMs, 5001);
+  const second = JSON.parse(await cleanup.clean._handler(s.ctx, input));
+  assert.equal(second.pending, true);
+  assert.equal(JSON.parse(second.progress).step, 2);
+  assert.notEqual(second.progress, first.progress, 'the next invocation advances the retained operation');
+  assert.equal((await drive(s, input)).objects, 10);
+});
+
 test('dogfood-shaped synthetic inventory measures bounded actions, calls and memory without loading 4 GB of log bytes', async t => {
   const { s, logBytes } = await seeded(t, 1400, 32237),
     counts = new Map();

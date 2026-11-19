@@ -24,7 +24,7 @@ import {
   templateStrings,
 } from './convex-function-names.mjs';
 
-export function testImportGraph(files, scriptsChanged = []) {
+export function testImportGraph(files, scriptsChanged = [], { typeImports = false } = {}) {
   const reverse = new Map(),
     evidence = new Map();
   // `byName`: a by-name loader's closure edge (every module named anywhere the test's code can reach).
@@ -66,6 +66,7 @@ export function testImportGraph(files, scriptsChanged = []) {
       `${path}.js`,
       `${path}/index.ts`,
       `${path}/index.tsx`,
+      ...(typeImports ? [`${path}.d.ts`, `${path}/index.d.ts`] : []),
     ].find(candidate => files.has(candidate));
   }
   const packages = new Set(builtinModules);
@@ -149,7 +150,7 @@ export function testImportGraph(files, scriptsChanged = []) {
     functionReference(path, matches.length ? matches : convexModules, detail, 'dynamic');
   };
   for (const path of [...files.keys()].sort()) {
-    if (!/\.(?:[cm]?js|[cm]?tsx?)$/.test(path) || path.endsWith('.d.ts')) continue;
+    if (!/\.(?:[cm]?js|[cm]?tsx?)$/.test(path) || (!typeImports && path.endsWith('.d.ts'))) continue;
     const ast = ts.createSourceFile(path, files.get(path), ts.ScriptTarget.Latest, true);
     if (ast.parseDiagnostics.length)
       return { error: `Unparseable ${scriptPath(path) ? 'script' : 'module'}: ${path}` };
@@ -196,6 +197,20 @@ export function testImportGraph(files, scriptsChanged = []) {
           edge(candidate, path, 'dynamic', detail);
     };
     function visit(node) {
+      // Browser coverage also follows web-facing type contracts. Keep ordinary
+      // runtime test selection unchanged (type-only edits still have static checks).
+      if (typeImports) {
+        const value =
+          (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier
+            ? node.moduleSpecifier
+            : ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)
+              ? node.argument.literal
+              : undefined;
+        if (value && ts.isStringLiteralLike(value)) {
+          const target = resolve(path, value.text);
+          if (target) edge(target, path, 'import');
+        }
+      }
       if (ts.isImportDeclaration(node) && node.importClause?.isTypeOnly) return;
       if (ts.isExportDeclaration(node) && node.isTypeOnly) return;
       if (ts.isImportEqualsDeclaration(node) && node.isTypeOnly) return;

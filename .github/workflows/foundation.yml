@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       # A docs-only push can supersede an unfinished code audit; main always runs full.
+      browser_paths: ${{ steps.classify.outputs.browser_paths }}
       scope: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'full' || steps.classify.outputs.scope }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
@@ -96,12 +97,40 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci --ignore-scripts
+      - id: browser-plan
+        run: node --input-type=module -e 'import {appendFileSync} from "node:fs"; import {browserChange} from "./scripts/browser-test-policy.mjs"; import {sourceFiles} from "./scripts/test-impact.mjs"; const paths=JSON.parse(process.env.FORGE_BROWSER_PATHS); appendFileSync(process.env.GITHUB_OUTPUT,`browser=${browserChange(paths ?? undefined, sourceFiles())}\n`);'
+        env:
+          FORGE_BROWSER_PATHS: ${{ needs.scope.outputs.browser_paths || 'null' }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: verify-build-${{ matrix.node }}
           path: ${{ runner.temp }}
       - run: tar -xzf "$RUNNER_TEMP/verify-build.tgz"
+      - if: matrix.shard == 7 && steps.browser-plan.outputs.browser == 'true'
+        id: browser-version
+        run: node -e 'const fs=require("node:fs"); const v=JSON.parse(fs.readFileSync("package-lock.json")).packages["node_modules/playwright"].version; if(!/^\d+\.\d+\.\d+$/.test(v)) throw Error("Expected pinned Playwright version"); fs.appendFileSync(process.env.GITHUB_OUTPUT,`version=${v}\n`);'
+      - if: matrix.shard == 7 && steps.browser-plan.outputs.browser == 'true'
+        id: browser-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
+        with:
+          path: ${{ runner.temp }}/forge-browsers
+          key: forge-playwright-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.browser-version.outputs.version }}
+      - if: matrix.shard == 7 && steps.browser-plan.outputs.browser == 'true' && steps.browser-cache.outputs.cache-hit != 'true'
+        run: node scripts/control-browser-cache.mjs
+        env:
+          FORGE_BROWSER_VERSION: ${{ steps.browser-version.outputs.version }}
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/forge-browsers
+      - if: matrix.shard == 7 && steps.browser-plan.outputs.browser == 'true' && steps.browser-cache.outputs.cache-hit != 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/forge-browsers
+          key: forge-playwright-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.browser-version.outputs.version }}
       - run: node scripts/public-verify.mjs ${{ matrix.shard }} 8
+        env:
+          FORGE_PUBLIC_BROWSER_TESTS: ${{ steps.browser-plan.outputs.browser == 'true' && '1' || '0' }}
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/forge-browsers
 
   native-selfhost:
     needs: scope

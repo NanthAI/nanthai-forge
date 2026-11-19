@@ -54,11 +54,12 @@ export function selectTests(input, graphCache) {
 }
 /** Paired independence analysis parses one graph per immutable inventory.
  * Changed-script uncertainty is widened across both comparisons. */
-export function selectImpactPair(files, comparisons) {
+export function selectImpactPair(files, comparisons, graphCache) {
   const scripts = [...new Set(comparisons.flat())]
     .filter(path => scriptPath(path) && files.has(path))
     .map(path => ({ path }));
   const graph = testImportGraph(files, scripts);
+  if (graphCache) graphCache.graph = graph;
   return comparisons.map(paths =>
     paths.length
       ? selectWithGraph({ paths, files }, graph)
@@ -698,24 +699,28 @@ function baseStandardSelection({
   optimistic,
   recovery,
   coverage,
+  graphCache,
   env = process.env,
 }) {
   if (optimistic && !mainCheck) env = { ...env, FORGE_CHECK_SCOPED: '1', FORGE_CHECK_FULL: '0' };
   if (interaction !== undefined || env.FORGE_CHECK_INTERACTION === '1')
     return interactionSelection({ paths, files, mainCheck, interaction, env });
-  const selection = selectTests({
-    paths,
-    files,
-    forceFull:
-      !!mainCheck ||
-      env.FORGE_CHECK_FULL === '1' ||
-      (env.FORGE_CHECK_SCOPED !== '1' &&
-        !(
-          Array.isArray(paths) &&
-          paths.length &&
-          paths.every(path => safePath(path) && documentation(path))
-        )),
-  });
+  const selection = selectTests(
+    {
+      paths,
+      files,
+      forceFull:
+        !!mainCheck ||
+        env.FORGE_CHECK_FULL === '1' ||
+        (env.FORGE_CHECK_SCOPED !== '1' &&
+          !(
+            Array.isArray(paths) &&
+            paths.length &&
+            paths.every(path => safePath(path) && documentation(path))
+          )),
+    },
+    graphCache,
+  );
   withDocsReaders(selection, files, paths);
   if (mainCheck) selection.reason = `Pinned main audit View for ${mainCheck.channel}`;
   else if (env.FORGE_CHECK_FULL !== '1' && env.FORGE_CHECK_SCOPED !== '1' && selection.scope !== 'docs')

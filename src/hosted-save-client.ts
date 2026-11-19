@@ -283,6 +283,7 @@ async function saveOnce(
       );
       if (progress.terminal) {
         applyHostedSaveReceipt(root, capture, request, progress.terminal);
+        rmSync(join(directory, backgroundSaveName), { force: true });
         return progress.terminal;
       }
       const snapshot = sourceWaitSnapshot(progress) as { status?: string; jobId?: string } | null;

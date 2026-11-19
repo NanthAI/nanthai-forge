@@ -76,6 +76,8 @@ test('Code labels and activity follow file selection; work-map counts use singul
       await files.locator('button[title="src/export.ts"]').click();
       const changing = page.getByLabel('Changing this file', { exact: true });
       await changing.waitFor();
+      // The strip renders before its Lane link under load; wait for it, then require exactly one.
+      await changing.getByRole('link').first().waitFor();
       assert.equal(await page.getByLabel('Changing now', { exact: true }).count(), 0);
       assert.equal(await changing.getByRole('link').count(), 1);
       assert.match(await changing.innerText(), /claude-exports/);

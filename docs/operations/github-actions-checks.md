@@ -1538,3 +1538,37 @@ coverage differences; their individual contributions to that gap remain
 unmeasured. No live capture, export, import or load test is run by this guard.
 
 `configure-runner` receipts include the public-log consequence when `publicLogs:true` is selected or retained for that repository, including a held settings proposal. It uses the existing `checkLogs` notice; no extra confirmation is added.
+
+## Conditional browser fixtures
+
+Standard Forge checks classify browser fixtures in `scripts/browser-test-policy.mjs`.
+Any `tests/<name>-browser.test.mjs` is a browser fixture by name, in the Candidate's own
+inventory too, so a new browser test needs no registry edit; the policy lists only older
+fixtures without that suffix. Name new browser tests `*-browser.test.mjs`.
+Changes under `web/`, browser tests and fixtures, package manifests, the browser policy,
+or shared source in the web import closure (including type contracts) select them;
+other changes omit browser execution and browser cache restores. The static
+contracts in `docs-site.test.mjs` remain applicable independently of its browser
+subtest. A missing changed-path comparison selects browser coverage conservatively.
+
+Browser fixtures stay together on one existing test job, which also carries ordinary
+tests to balance the critical path, without increasing the job or Convex-call budget. That job keeps its browser files out of the work-stealing pool.
+The hosted and public workflows restore a Chromium cache keyed by the exact
+locked Playwright version, OS and architecture. A cache miss installs the pinned
+browser; an explicit cache save runs before Candidate execution, never as a
+post-job upload. Hosted saves require the Candidate version to match the control
+checkout’s pinned Playwright version. Other versions install without saving a cache.
+The Linux Candidate user reads the restored cache through a read-only mount.
+Failed installation fails the job, and the fixed executor checks for the executable
+inside the Candidate namespace before any selected browser fixture can skip.
+
+Executor contract 5 passes the browser cache path and the pinned browser-selection
+flag through the private check environment. It is an additive executor contract;
+the fixed executor already enforces CI failure for a missing selected browser.
+Individual fixtures adopt the shared CI-failure/local-skip rule after that executor
+is accepted. The helper reads the pinned `FORGE_BROWSER_TESTS` flag; excluded
+coverage never probes a browser.
+Browser fixture tests use synthetic data and start no hosted service. Cache bytes
+are runner files, not CLI dependencies or Convex records. Timing qualification and
+cache-size evidence are recorded on planning Item `1dd4e095`; restoring a browser
+cache and running its tests add no work to a non-web landing check.

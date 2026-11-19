@@ -49,6 +49,14 @@ test('incident 61a42597: app route patterns pass without admitting local paths',
     '/-private/work',
     '~/work',
     'file:///-/work',
+    '/-/../Users/synthetic',
+    '/-/Users/synthetic',
+    '/-/home/synthetic',
+    '/-/a/../settings',
+    '/-/%2e%2e/home/synthetic',
+    '/-/%55sers/synthetic',
+    '/-/%55sers/%zz',
+    '/-/a/%2e%2e/%zz',
   ])
     assert.equal(code(`See ${path}`), 'BOARD_TEXT_PATH', path);
   assert.equal(code('Route /-/settings plus /tmp/private'), 'BOARD_TEXT_PATH');

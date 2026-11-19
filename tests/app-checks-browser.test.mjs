@@ -6,6 +6,7 @@
 // whether it has decided a landing yet, and every layout passes axe in both themes at 1440 and 390 without sideways
 // scroll.
 import test from 'node:test';
+import { settleBrowserPage } from './browser-runtime.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -142,10 +143,8 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
     for (const width of [1440, 390])
       for (const theme of ['dark', 'light']) {
         await page.setViewportSize({ width, height: 1000 });
-        await page.evaluate(async t => {
-          document.documentElement.dataset.theme = t;
-          await Promise.all(document.getAnimations().map(a => a.finished.catch(() => undefined)));
-        }, theme);
+        await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
+        await settleBrowserPage(page);
         assert.equal(
           await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
           false,

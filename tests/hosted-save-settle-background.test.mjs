@@ -349,3 +349,18 @@ test('netlify incident: the first changed split save names approval before a ste
   const reverted = await agent.dispatch('save', { message: 'Revert protected configuration' });
   assert.equal(reverted.result.protectedPathNotice, undefined);
 });
+
+test('1dd4e095: replaying a completed split save removes its background flag without resubmitting', async t => {
+  const f = await setup(t);
+  const command = { operationId: randomUUID(), message: 'split replay' };
+  const returned = await saveHostedLane(f.root, command, f.exchange, contract);
+  const flag = join(clientCacheRoot(f.root), `saves/${command.operationId}/background`);
+  assert(existsSync(flag));
+  await f.settle(returned.jobId);
+  const before = f.c.calls.length;
+  const replayed = await saveHostedLane(f.root, command, f.exchange, contract);
+  assert.equal(replayed.outcome.status, 'completed');
+  assert.equal(existsSync(flag), false);
+  assert.notEqual(readHostedLaneCheckout(f.root).selection.head, f.entry.head);
+  assert.deepEqual(f.c.calls.slice(before), ['projectHostedSaves:progress']);
+});

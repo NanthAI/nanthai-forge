@@ -64,6 +64,12 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `scripts/test-impact.mjs` | `forge-folders` | 4 | Forge's selector inventory and product folders | the project runner and the generic import graph |
 | `scripts/test-impact.mjs` | `tests-folder` | 9 | Forge's selector reads `tests/*.test.mjs` | their runner's test globs |
 | `scripts/test-impact.mjs` | `npm-lockfile` | 2 | Forge's selector classifies installed packages from its npm lockfile | declared dependencies of every manifest (`src/js-import-graph.ts`) |
+| `scripts/browser-test-policy.mjs` | `tests-folder` | 2 | Forge's browser fixtures (`*-browser.test.mjs` by name, plus older registered ones) and mixed static/browser docs test; hosted use is behind `isStandardForgeCheck` | their own configured command and test runner; no browser annotation when these files are absent |
+| `scripts/browser-test-policy.mjs` | `forge-folders` | 2 | the web import closure in Forge's standard-check layout, reusing its import graph | their own configured command and test runner |
+| `scripts/browser-test-policy.mjs` | `npm-lockfile` | 1 | a change to Forge's Playwright lock selects its browser coverage | their own dependency and toolchain setup |
+| `scripts/browser-test-policy.mjs` | `package-json-config` | 1 | a change to Forge's package manifest selects its browser coverage | their own configured command and setup |
+| `scripts/check-browser-runtime.mjs` | `package-json-config` | 1 | the standard executor resolves Forge's installed Playwright from the Candidate package context before browser fixtures run | their own configured check command; this probe is not run |
+| `src/hosted-actions-job-plan.ts` | `npm-lockfile` | 2 | reads the exact Playwright version and names a missing pin only for a standard-check browser job | their own declared toolchains and check command |
 | `scripts/test-import-graph.mjs` | `forge-folders` | 4 | Forge's import graph: its folders, Convex names and loaders | the generic JS/TS import graph |
 | `scripts/test-import-graph.mjs` | `tests-folder` | 4 | Forge's import graph: test-to-test edges in `tests/` | the generic JS/TS import graph |
 | `scripts/test-import-graph.mjs` | `npm-lockfile` | 4 | Forge's import graph: external packages from its npm lockfile | declared dependencies of every manifest |

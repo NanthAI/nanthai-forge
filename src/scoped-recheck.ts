@@ -30,6 +30,7 @@ export function scopedRecheckSelection(input: {
   mainPaths: string[];
   files: Map<string, string>;
   semanticTests?: string[];
+  graphCache?: object | undefined;
 }): Selection {
   const all = suiteTests(input.files);
   const full = (reason: string, fallback: NonNullable<Selection['fallback']>): Selection => ({
@@ -40,10 +41,11 @@ export function scopedRecheckSelection(input: {
   });
   const root = rootConfig(input.lanePaths);
   if (root) return full(`root configuration ${root}`, 'scoped-root-config');
-  const [laneSide, mainSide] = selectImpactPair(input.files, [input.lanePaths, input.mainPaths]) as [
-    Side,
-    Side,
-  ];
+  const [laneSide, mainSide] = selectImpactPair(
+    input.files,
+    [input.lanePaths, input.mainPaths],
+    input.graphCache,
+  ) as [Side, Side];
   if (laneSide.scope === 'full') return full(laneSide.reason, 'scoped-unclassified');
   const affected = (side: Side, paths: string[]) =>
     side.scope === 'docs'
@@ -88,9 +90,15 @@ export function batchScopedRecheckSelection(input: {
   members: { lanePaths: string[]; mainPaths: string[] }[];
   files: Map<string, string>;
   semanticTests?: string[];
+  graphCache?: object | undefined;
 }): Selection {
   const selections = input.members.map(member =>
-    scopedRecheckSelection({ ...member, files: input.files, semanticTests: input.semanticTests ?? [] }),
+    scopedRecheckSelection({
+      ...member,
+      files: input.files,
+      semanticTests: input.semanticTests ?? [],
+      graphCache: input.graphCache,
+    }),
   );
   const full = selections.find(selection => selection.scope === 'full');
   if (full) return { ...full, reason: `Cohort member: ${full.reason}` };

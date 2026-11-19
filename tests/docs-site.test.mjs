@@ -10,6 +10,7 @@ import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 import { chromium } from 'playwright';
+import { browserExecutable } from './browser-runtime.mjs';
 import { hostedAgentHelpEntries } from '../dist/hosted-agent-help.js';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const axePath = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
@@ -65,6 +66,7 @@ test('docs are static, contract-generated and usable without account or backend 
   // Every docs link on the landing is an emitted page or Markdown asset, including first-run destinations.
   for (const [, url] of home.matchAll(/href="(\/docs\/[^"#]*)(?:#[^"]*)?"/g))
     assert.ok(existsSync(join(out, url.endsWith('/') ? `${url}index.html` : url)), url);
+  if (process.env.FORGE_BROWSER_TESTS === '0') return;
   const server = createServer((req, res) => {
     const path = new URL(req.url, 'http://localhost').pathname;
     const file = join(out, path.endsWith('/') ? `${path}index.html` : path);
@@ -90,9 +92,16 @@ test('docs are static, contract-generated and usable without account or backend 
   const origin = `http://127.0.0.1:${server.address().port}`;
   await t.test(
     'docs tree, copy, keyboard, accessibility and no-JavaScript reading in both themes and widths',
-    { skip: !existsSync(chromium.executablePath()) && 'Playwright Chromium is not installed.' },
+    {
+      skip:
+        process.env.FORGE_BROWSER_TESTS === undefined &&
+        !existsSync(chromium.executablePath()) &&
+        'Playwright Chromium is not installed.',
+    },
     async t => {
-      const browser = await chromium.launch({ headless: true });
+      const executablePath = browserExecutable(t);
+      if (!executablePath) return;
+      const browser = await chromium.launch({ headless: true, executablePath });
       t.after(() => browser.close());
       for (const width of [1440, 390])
         for (const theme of ['dark', 'light']) {

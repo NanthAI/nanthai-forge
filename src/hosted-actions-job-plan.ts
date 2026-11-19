@@ -10,6 +10,7 @@ import { checkPin } from './hosted-check.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { guardedSelection, standardSelection } from '../scripts/test-impact.mjs';
 import { describeShardPlan, timedShards } from '../scripts/test-shards.mjs';
+import { browserSelection, browserGroups, browserShard } from '../scripts/browser-test-policy.mjs';
 import { hostedActionsRecipeSchema } from './hosted-actions.js';
 import { actionsDeclaration } from './actions-toolchains.js';
 import {
@@ -115,7 +116,8 @@ export async function prepareActionsJob(
   const paths = changedPaths(base, state);
   const standard = isStandardForgeCheck(run.check);
   const files = new SourceFiles(new Map(state.files.map(file => [file.path, file.blob])), cache);
-  const selected = actionsGateSelection(
+  const graphCache = {};
+  const selectedBeforeBrowser = actionsGateSelection(
     run,
     paths,
     files,
@@ -126,7 +128,11 @@ export async function prepareActionsJob(
       lanePaths: changedPaths(pair.base, pair.checked),
       mainPaths: changedPaths(pair.checked, state),
     })) ?? null,
+    graphCache,
   );
+  const selected = standard
+    ? browserSelection(selectedBeforeBrowser, paths, files, graphCache)
+    : selectedBeforeBrowser;
   // Markdown that tests or scripts read: a clean merge of any other Markdown can
   // land on its first check (Issue 7fe54c7c). Absent means every Markdown is tested.
   // An opaque command has no Forge selector: only its declared docs paths say which Markdown is untested.
@@ -155,6 +161,7 @@ export async function prepareActionsJob(
     scope: selected.scope,
     reason: selected.reason,
     tests: selected.tests,
+    ...(standard ? { browser: Boolean('browser' in selected && selected.browser) } : {}),
     ...('fallback' in selected && selected.fallback ? { fallback: selected.fallback } : {}),
     ...(docs ? { testedDocs: docs } : {}),
     // The checked head's manifest package graph: the first-check proof places in-package manifests by it.
@@ -195,13 +202,24 @@ export async function prepareActionsJob(
   };
   // Another command shards only through its declared shard interface (FORGE_CHECK_SHARD);
   // a docs-scoped run of it runs no command, so it has no shards.
-  const groups = !standard
+  let groups = !standard
     ? selection.scope === 'docs'
       ? []
       : commandShardGroups(commandShardCount(run.check, { ...budget, jobCap: capacity?.jobCap }))
     : selection.scope !== 'docs' || selection.tests.length
       ? timedShards(selection.tests, client.timings, { ...budget, ...capacity })
       : [];
+  if (standard) groups = browserGroups(groups, Boolean(selection.browser), client.timings);
+  const browserIndex = standard ? browserShard(groups, Boolean(selection.browser)) : -1;
+  const playwrightVersion =
+    browserIndex < 0
+      ? null
+      : JSON.parse(files.get('package-lock.json') ?? '{}').packages?.['node_modules/playwright']?.version;
+  if (
+    browserIndex >= 0 &&
+    (typeof playwrightVersion !== 'string' || !/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(playwrightVersion))
+  )
+    throw new Error('Browser tests require a pinned Playwright package version in package-lock.json.');
   if (capacity)
     console.log(
       `Actions capacity: ${capacity.activeChecks} active checks, ${capacity.jobCap} slots; ${groups.length} test shards`,
@@ -214,13 +232,18 @@ export async function prepareActionsJob(
     );
   // Shard pool (scripts/shard-pool.mjs): only servers that sign claims receive one.
   const poolMode = process.env.FORGE_ACTIONS_POOL_MODE;
-  const pool =
+  let pool =
     standard &&
     groups.length >= 2 &&
     client.capabilities.includes(actionsPoolCapability) &&
     poolArm(poolMode, run.id)
       ? planPool(groups, client.timings)
       : undefined;
+  // A browser fixture cannot migrate onto a runner without its cache.
+  if (pool && browserIndex >= 0) {
+    pool[browserIndex] = [];
+    if (!pool.some(cuts => cuts.length)) pool = undefined;
+  }
   if (standard && groups.length >= 2)
     console.log(
       pool
@@ -320,6 +343,8 @@ export async function prepareActionsJob(
       os: process.env.RUNNER_OS,
       arch: process.env.RUNNER_ARCH,
     }),
+    browserShard: browserIndex < 0 ? '' : String(browserIndex),
+    browser: browserIndex < 0 ? {} : { shard: String(browserIndex), version: playwrightVersion as string },
     matrix: groups.length === 0 ? [] : [...groups.map((_, index) => String(index)), 'static'],
   };
 }
@@ -342,8 +367,9 @@ export function actionsGateSelection(
   standard: boolean,
   mainPaths: string[] | null = null,
   members: RecheckMembers = null,
+  graphCache: object = {},
 ) {
-  const raw = gateSelection(run, paths, files, standard, mainPaths, members);
+  const raw = gateSelection(run, paths, files, standard, mainPaths, members, graphCache);
   // Gate probes, contract unions and rechecks can select nothing; that must never pass.
   const selected = standard ? guardedSelection(raw, { files, paths }) : raw;
   // Why the command could not be narrowed or skipped, pinned with the selection (7c2e69e1).
@@ -370,6 +396,7 @@ function gateSelection(
   standard: boolean,
   mainPaths: string[] | null,
   members: RecheckMembers,
+  graphCache: object,
 ) {
   const gate = run.gate;
   const union = semanticTests(run.semanticPlan);
@@ -417,26 +444,28 @@ function gateSelection(
   }
   if (scopedRecheckBase(gate)) {
     if (mainPaths)
-      return scopedRecheckSelection({ lanePaths: paths, mainPaths, files, semanticTests: union });
+      return scopedRecheckSelection({ lanePaths: paths, mainPaths, files, semanticTests: union, graphCache });
     const selected = standardSelection({
       paths,
       files,
       semanticTests: union,
       env: { FORGE_CHECK_FULL: '1' },
+      graphCache,
     });
     return { ...selected, reason: `Scoped recheck base unavailable; ${selected.reason}` };
   }
   if (scopedRecheckPairs(gate)) {
-    if (members) return batchScopedRecheckSelection({ members, files, semanticTests: union });
+    if (members) return batchScopedRecheckSelection({ members, files, semanticTests: union, graphCache });
     const selected = standardSelection({
       paths,
       files,
       semanticTests: union,
       env: { FORGE_CHECK_FULL: '1' },
+      graphCache,
     });
     return { ...selected, reason: `Scoped recheck base unavailable; ${selected.reason}` };
   }
-  const selected = standardSelection({ paths, files, semanticTests: union, env });
+  const selected = standardSelection({ paths, files, semanticTests: union, env, graphCache });
   if (!gate || gate.mode !== 'contract' || selected.scope === 'full' || selected.scope === 'docs')
     return selected;
   const tests = [
