@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { documentation, selectImpactPair, smokeTests } from '../scripts/test-impact.mjs';
 import { docsReaders } from '../scripts/docs-readers.mjs';
+import { scopedRootConfig as rootConfig } from './scoped-root-config.js';
 
 /** `fallback` names why the recheck could not be scoped (src/fallback-reasons.ts). */
 type Selection = {
@@ -13,7 +14,6 @@ type Side = ReturnType<typeof selectImpactPair>[number];
 /** The standard plan's full suite in the composed Candidate (one rule, docs/forge-only-rules.md). */
 const suiteTests = (files: Map<string, string>) =>
   [...files.keys()].filter(path => /^tests\/[^/]+\.test\.mjs$/.test(path)).sort();
-const rootConfig = (paths: string[]) => paths.find(path => !path.includes('/') && !documentation(path));
 
 /** Runner-side selection on the exact recomposed Candidate, from one import graph: the tests that
  * can see both changes, affected(main delta) ∩ affected(this change), plus this change's own test

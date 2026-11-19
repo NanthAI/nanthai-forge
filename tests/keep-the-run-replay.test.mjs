@@ -1,0 +1,202 @@
+// SPDX-License-Identifier: Apache-2.0
+// Keep the run (Item fa2c1383): the recorded 11-17 window, where main moves threw running checks
+// away, replayed through today's sweep and the keep rule (tests/keep-the-run-replay.mjs). Recorded
+// queue waits are kept, so time to main moves only by the run wall the keep changes.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { replayKeepTheRun } from './keep-the-run-replay.mjs';
+
+const drop = (before, after) => 1 - after / before;
+const noRise = (baseline, keep) => {
+  const at = JSON.stringify({ baseline, keep });
+  assert(keep.runnerMinutes <= baseline.runnerMinutes, at);
+  assert(keep.runWallMinutes <= baseline.runWallMinutes, at);
+  assert(keep.timeToMainP50Minutes <= baseline.timeToMainP50Minutes, at);
+  assert(keep.timeToMainMeanMinutes <= baseline.timeToMainMeanMinutes, at);
+};
+
+test('incident fa2c1383: keeping runs where it pays cuts the 11-17 main-move waste by 30% or more without raising runner-minutes, run wall or time to main', t => {
+  const { calibration, reasons, outcomes, baseline, keep } = replayKeepTheRun();
+  t.diagnostic(JSON.stringify({ calibration, reasons, outcomes, baseline, keep }));
+  // Today's rule explains every recorded main-move cancel, so the baseline arm is the record.
+  assert(calibration.mainMoveCancels >= 50, JSON.stringify(calibration));
+  assert.equal(calibration.baselineAgrees, calibration.mainMoveCancels);
+  // Lane A alone, recorded waits kept: measured 35.0% of job-minutes and 33.3% of wall.
+  assert(
+    drop(baseline.cancelledJobMinutes, keep.cancelledJobMinutes) >= 0.3,
+    JSON.stringify({ baseline, keep }),
+  );
+  assert(
+    drop(baseline.cancelledWallMinutes, keep.cancelledWallMinutes) >= 0.3,
+    JSON.stringify({ baseline, keep }),
+  );
+  // Cancelled minutes can fall while total minutes rise (each kept pass that cannot carry pays a
+  // scoped recheck): the total, the run wall and time to main must not rise either.
+  noRise(baseline, keep);
+});
+
+test('incident fa2c1383: a scoped-recheck keep that does not pay retires as today', () => {
+  const { reasons, outcomes } = replayKeepTheRun();
+  // The payback condition refused runs kept before the review (13 at today's scoped share).
+  assert(reasons['scoped-costs-more'] > 0, JSON.stringify(reasons));
+  assert(outcomes['scoped-recheck'] > 0, JSON.stringify(outcomes));
+  // Shared docs are taken as tested on a strict main: none carries for free.
+  assert.equal(outcomes.carry ?? 0, 0, JSON.stringify(outcomes));
+});
+
+test('incident fa2c1383: the Item target of half needs Lane B and selector precision (5dcfce75)', t => {
+  const arms = Object.fromEntries(
+    Object.entries({
+      laneA: {},
+      laneB: { laneB: true },
+      precision: { scopedScale: 0.5 },
+      both: { laneB: true, scopedScale: 0.5 },
+    }).map(([name, options]) => [name, replayKeepTheRun(undefined, options)]),
+  );
+  const { baseline } = arms.laneA;
+  t.diagnostic(JSON.stringify(Object.fromEntries(Object.entries(arms).map(([k, v]) => [k, v.keep]))));
+  for (const arm of Object.values(arms)) noRise(baseline, arm.keep);
+  const job = arm => drop(baseline.cancelledJobMinutes, arms[arm].keep.cancelledJobMinutes);
+  // Each step only adds: Lane B 40.3%, precision 46.3%, both 61.5% of job-minutes.
+  assert(job('laneB') > job('laneA') && job('precision') > job('laneA') && job('both') > job('laneB'));
+  assert(job('laneB') < 0.5 && job('precision') < 0.5, 'neither step alone meets the target');
+  assert(job('both') >= 0.5);
+  assert(drop(baseline.cancelledWallMinutes, arms.both.keep.cancelledWallMinutes) >= 0.5);
+});
+
+test('fa2c1383 replay: coverage movers, red main and cohorts still retire their runs', () => {
+  const { calibration, reasons } = replayKeepTheRun();
+  // The window had all three; each must stay a cancel under the keep rule (687d1eda, main gate, cohorts).
+  for (const reason of ['coverage-mover', 'main-red', 'cohort']) assert(reasons[reason] > 0, reason);
+  assert.equal(calibration.redSpans, 3, 'main stays red across each failed audit until a green one');
+  assert.equal(reasons.unrelated ?? 0, 0, 'a recorded cancel is never re-read as unrelated');
+});
+
+test('fa2c1383 replay: recorded non-run waits are kept; time to main moves only by the run wall', () => {
+  const { rows } = replayKeepTheRun();
+  let changed = 0;
+  for (const [i, keep] of rows.keep.entries()) {
+    const base = rows.baseline[i];
+    if (keep === base) continue;
+    changed++;
+    const ttm = keep.timeToMainMinutes - base.timeToMainMinutes;
+    const runWall = keep.runWallMinutes - base.runWallMinutes;
+    assert(Math.abs(ttm - runWall) < 0.01, JSON.stringify({ base, keep }));
+  }
+  assert(changed > 0);
+});
+
+// A small synthetic trace for the model's own rules: full checks 800 s / 100 job-min, scoped
+// rechecks 600 s / 70 job-min (shares 0.7 and 0.75).
+const synthetic = ({ landings, runs }) => {
+  const reference = [
+    { id: 'ref-full', submittedAt: -5000, committedAt: -4000, paths: ['src/ref-a.ts'] },
+    { id: 'ref-scoped', submittedAt: -3000, committedAt: -2000, paths: ['src/ref-b.ts'] },
+  ];
+  const all = [...reference, ...landings];
+  const paths = [...new Set(all.flatMap(l => l.paths))];
+  const run = (id, landing, startedAt, seconds, status, gate, billedMinutes = null) => ({
+    id,
+    landings: [landing],
+    startedAt,
+    endedAt: startedAt + seconds,
+    status,
+    gate,
+    shards: 12,
+    billedMinutes,
+  });
+  return {
+    policy: {
+      mode: 'auto-on-pass',
+      landingMode: 'fast',
+      hostedCrossHeadReuse: true,
+      scopedRecheck: true,
+      protectedPaths: ['.github/**'],
+    },
+    paths,
+    landings: all.map(l => ({ ...l, paths: l.paths.map(path => paths.indexOf(path)) })),
+    runs: [
+      run('ref-1', 'ref-full', -4900, 800, 'passed', 'full', 100),
+      run('ref-2', 'ref-scoped', -2700, 600, 'passed', 'scoped', 70),
+      ...runs.map(r => run(...r)),
+    ],
+  };
+};
+// Landing x's first full run is cancelled by mover m1 (a sub-package manifest: carry), and its
+// replacement passes. `later` lands while the kept run would still be running.
+const carryThenLater = (laterPaths, { xPaths = ['src/x.ts'], laterAt = 700, auditFailed = false } = {}) =>
+  synthetic({
+    landings: [
+      { id: 'm1', submittedAt: -800, committedAt: 100, paths: ['packages/p/package.json'] },
+      { id: 'later', submittedAt: -100, committedAt: laterAt, paths: laterPaths, auditFailed },
+      { id: 'x', submittedAt: 0, committedAt: 1000, paths: xPaths },
+    ],
+    runs: [
+      ['m1-1', 'm1', -700, 800, 'passed', 'full', 100],
+      ['later-1', 'later', -50, 700, 'passed', 'full', 100],
+      ['x-1', 'x', 0, 102, 'cancelled', 'full'],
+      ['x-2', 'x', 110, 800, 'passed', 'full', 100],
+    ],
+  });
+
+test('fa2c1383 replay: a later mover that leaves only a scoped recheck downgrades a carry and pays it', () => {
+  const unrelated = replayKeepTheRun(carryThenLater(['src/y.ts']));
+  assert.deepEqual(unrelated.outcomes, { carry: 1 });
+  const downgraded = replayKeepTheRun(carryThenLater(['convex/schema.ts']));
+  assert.deepEqual(downgraded.outcomes, { 'carry-downgraded': 1 });
+  const row = result => result.rows.keep.find(r => r.id === 'x');
+  // The downgraded keep pays the recorded scoped recheck: 70 job-min and 10 min on top of the carry.
+  assert(Math.abs(row(downgraded).runnerMinutes - row(unrelated).runnerMinutes - 70) < 0.01);
+  assert(Math.abs(row(downgraded).runWallMinutes - row(unrelated).runWallMinutes - 10) < 0.01);
+  // Early in the run the scoped recheck does not pay: the kept run is retired at the later mover.
+  assert.deepEqual(replayKeepTheRun(carryThenLater(['convex/schema.ts'], { laterAt: 300 })).outcomes, {
+    'retired-later': 1,
+  });
+});
+
+test('fa2c1383 replay: a check input of the standard check is a protected path (no scoped recheck)', () => {
+  const xPaths = ['src/x.ts', 'scripts/test-x.mjs'];
+  const { reasons } = replayKeepTheRun(
+    synthetic({
+      landings: [
+        { id: 'm1', submittedAt: -800, committedAt: 700, paths: ['convex/schema.ts'] },
+        { id: 'x', submittedAt: 0, committedAt: 1600, paths: xPaths },
+      ],
+      runs: [
+        ['m1-1', 'm1', -100, 800, 'passed', 'full', 100],
+        ['x-1', 'x', 0, 702, 'cancelled', 'full'],
+        ['x-2', 'x', 710, 800, 'passed', 'full', 100],
+      ],
+    }),
+  );
+  assert.deepEqual(reasons, { 'cannot-scope': 1 });
+});
+
+test('fa2c1383 replay: main stays red after a failed audit, and a scoped recheck in that window is retired', () => {
+  // m1 (order-sensitive, late in x's run) keeps x for a scoped recheck that runs 800-1400 s; an
+  // unrelated mover whose audit failed lands at 1000 s, and main is red until the next green mover.
+  const trace = red =>
+    synthetic({
+      landings: [
+        { id: 'm1', submittedAt: -800, committedAt: 700, paths: ['convex/schema.ts'] },
+        { id: 'r', submittedAt: -100, committedAt: 1000, paths: ['src/r.ts'], auditFailed: red },
+        { id: 'g', submittedAt: -100, committedAt: 1300, paths: ['src/g.ts'] },
+        { id: 'x', submittedAt: 0, committedAt: 2000, paths: ['src/x.ts'] },
+      ],
+      runs: [
+        ['m1-1', 'm1', -100, 800, 'passed', 'full', 100],
+        ['r-1', 'r', 100, 800, 'passed', 'full', 100],
+        ['g-1', 'g', 400, 800, 'passed', 'full', 100],
+        ['x-1', 'x', 0, 702, 'cancelled', 'full'],
+        ['x-2', 'x', 710, 800, 'passed', 'full', 100],
+      ],
+    });
+  const green = replayKeepTheRun(trace(false));
+  const red = replayKeepTheRun(trace(true));
+  assert.equal(red.calibration.redSpans, 1);
+  const row = result => result.rows.keep.find(r => r.id === 'x');
+  assert.equal(row(green).cancelledJobMinutes, 0);
+  // Retired at 1000 s after 200 s of a 12-shard recheck, restarted after main is green again.
+  assert(row(red).cancelledJobMinutes > 0, JSON.stringify(row(red)));
+  assert(row(red).runWallMinutes > row(green).runWallMinutes);
+});
