@@ -64,6 +64,30 @@ test('incident fa2c1383: the Item target of half needs Lane B and selector preci
   assert(drop(baseline.cancelledWallMinutes, arms.both.keep.cancelledWallMinutes) >= 0.5);
 });
 
+test('incident fa2c1383 Lane B: a clean probe on every overlap, through the rule, cuts the waste by 40% or more', t => {
+  const laneA = replayKeepTheRun();
+  const laneB = replayKeepTheRun(undefined, { laneB: true });
+  t.diagnostic(JSON.stringify({ reasons: laneB.reasons, outcomes: laneB.outcomes, keep: laneB.keep }));
+  const { baseline } = laneB;
+  // Measured: 2,977 -> 1,776 cancelled job-min (-40.3%), 420 -> 256 wall-min (-39.0%).
+  assert(
+    drop(baseline.cancelledJobMinutes, laneB.keep.cancelledJobMinutes) >= 0.4,
+    JSON.stringify(laneB.keep),
+  );
+  assert(drop(baseline.cancelledWallMinutes, laneB.keep.cancelledWallMinutes) >= 0.38);
+  noRise(baseline, laneB.keep);
+  noRise(laneA.keep, laneB.keep);
+  // Every overlap is decided by the rest of the rule (payback, scope, cohort, red main), never by
+  // overlap alone; the window had no conflicting probe (every landing landed).
+  assert.equal(laneB.reasons['code-overlap'] ?? 0, 0, JSON.stringify(laneB.reasons));
+  assert.equal(laneB.reasons['compose-conflict'] ?? 0, 0);
+  assert(laneA.reasons['code-overlap'] > 0);
+  // The probe lifts only overlap retires: every other cause counts the same or more.
+  for (const [reason, n] of Object.entries(laneA.reasons))
+    if (reason !== 'code-overlap') assert((laneB.reasons[reason] ?? 0) >= n, reason);
+  assert(laneB.outcomes['scoped-recheck'] > laneA.outcomes['scoped-recheck']);
+});
+
 test('fa2c1383 replay: coverage movers, red main and cohorts still retire their runs', () => {
   const { calibration, reasons } = replayKeepTheRun();
   // The window had all three; each must stay a cancel under the keep rule (687d1eda, main gate, cohorts).
@@ -73,17 +97,36 @@ test('fa2c1383 replay: coverage movers, red main and cohorts still retire their 
 });
 
 test('fa2c1383 replay: recorded non-run waits are kept; time to main moves only by the run wall', () => {
-  const { rows } = replayKeepTheRun();
-  let changed = 0;
-  for (const [i, keep] of rows.keep.entries()) {
-    const base = rows.baseline[i];
-    if (keep === base) continue;
-    changed++;
-    const ttm = keep.timeToMainMinutes - base.timeToMainMinutes;
-    const runWall = keep.runWallMinutes - base.runWallMinutes;
-    assert(Math.abs(ttm - runWall) < 0.01, JSON.stringify({ base, keep }));
+  const changedBy = {};
+  for (const [arm, options] of [
+    ['laneA', {}],
+    ['laneB', { laneB: true }],
+  ]) {
+    const { rows } = replayKeepTheRun(undefined, options);
+    let changed = 0;
+    for (const [i, keep] of rows.keep.entries()) {
+      const base = rows.baseline[i];
+      if (keep === base) continue;
+      changed++;
+      const ttm = keep.timeToMainMinutes - base.timeToMainMinutes;
+      const runWall = keep.runWallMinutes - base.runWallMinutes;
+      assert(Math.abs(ttm - runWall) < 0.01, JSON.stringify({ arm, base, keep }));
+    }
+    changedBy[arm] = changed;
   }
-  assert(changed > 0);
+  assert(changedBy.laneA > 0 && changedBy.laneB > changedBy.laneA, JSON.stringify(changedBy));
+});
+
+test('fa2c1383 Lane B replay: the window probes 6 kept runs, with no second-mover probe to price', () => {
+  // Every probe is a first probe on a run kept to its end; the cost table floors second-mover
+  // probes at the cascade rate anyway (tests/keep-the-run-scenarios.mjs probeOverhead).
+  assert.deepEqual(replayKeepTheRun(undefined, { laneB: true }).probes, {
+    first: 6,
+    firstRetiredLater: 0,
+    again: 0,
+    stale: 0,
+  });
+  assert.equal(replayKeepTheRun().probes, undefined);
 });
 
 // A small synthetic trace for the model's own rules: full checks 800 s / 100 job-min, scoped
@@ -199,4 +242,60 @@ test('fa2c1383 replay: main stays red after a failed audit, and a scoped recheck
   // Retired at 1000 s after 200 s of a 12-shard recheck, restarted after main is green again.
   assert(row(red).cancelledJobMinutes > 0, JSON.stringify(row(red)));
   assert(row(red).runWallMinutes > row(green).runWallMinutes);
+});
+
+// Landing x's first full run is cancelled at 702 s by m1, which changes src/x.ts (an overlap), and
+// its replacement passes. `later` lands at 750 s, while a kept run would still be running.
+const overlapThenLater = (xPaths, laterPaths = null) =>
+  synthetic({
+    landings: [
+      { id: 'm1', submittedAt: -800, committedAt: 700, paths: ['src/x.ts'] },
+      ...(laterPaths ? [{ id: 'later', submittedAt: -100, committedAt: 750, paths: laterPaths }] : []),
+      { id: 'x', submittedAt: 0, committedAt: 1600, paths: xPaths },
+    ],
+    runs: [
+      ['m1-1', 'm1', -100, 800, 'passed', 'full', 100],
+      ...(laterPaths ? [['later-1', 'later', -50, 800, 'passed', 'full', 100]] : []),
+      ['x-1', 'x', 0, 702, 'cancelled', 'full'],
+      ['x-2', 'x', 710, 800, 'passed', 'full', 100],
+    ],
+  });
+
+test('fa2c1383 Lane B replay: an overlapping root-config or protected-path run still cancels through the rule', () => {
+  // Review 0c7f9440 finding 3: with no projection branch, a clean probe lifts only the overlap, and
+  // the rule's scope checks still refuse what today's recheck cannot scope.
+  for (const xPaths of [
+    ['src/x.ts', 'tsconfig.json'], // scoped-root-config: the recheck would run in full
+    ['src/x.ts', 'scripts/test-x.mjs'], // a check input of the standard check
+    ['src/x.ts', '.github/workflows/x.yml'], // the policy's protected paths
+  ]) {
+    const laneB = replayKeepTheRun(overlapThenLater(xPaths), { laneB: true });
+    assert.deepEqual(laneB.reasons, { 'cannot-scope': 1 }, JSON.stringify(xPaths));
+    assert.deepEqual(laneB.outcomes, {}, JSON.stringify(xPaths));
+    assert.deepEqual(laneB.probes, { first: 0, firstRetiredLater: 0, again: 0, stale: 0 });
+    assert.deepEqual(replayKeepTheRun(overlapThenLater(xPaths)).reasons, { 'code-overlap': 1 });
+  }
+  // The same overlap with scopable paths keeps for a scoped recheck, after one probe.
+  const scopable = replayKeepTheRun(overlapThenLater(['src/x.ts', 'src/y.ts']), { laneB: true });
+  assert.deepEqual(scopable.reasons, { 'scoped-recheck': 1 });
+  assert.deepEqual(scopable.outcomes, { 'scoped-recheck': 1 });
+  assert.equal(scopable.probes.first, 1);
+});
+
+test('fa2c1383 Lane B replay: a later mover re-probes a run that shares its path, and makes a probe stale otherwise', () => {
+  const xPaths = ['src/x.ts', 'src/y.ts'];
+  // A later mover on the same path probes again (the probe is sticky until clean on current main).
+  assert.deepEqual(replayKeepTheRun(overlapThenLater(xPaths, ['src/y.ts']), { laneB: true }).probes, {
+    first: 1,
+    firstRetiredLater: 0,
+    again: 1,
+    stale: 0,
+  });
+  // A disjoint later mover moves main past the probe: the finish composes again.
+  assert.deepEqual(replayKeepTheRun(overlapThenLater(xPaths, ['src/z.ts']), { laneB: true }).probes, {
+    first: 1,
+    firstRetiredLater: 0,
+    again: 0,
+    stale: 1,
+  });
 });

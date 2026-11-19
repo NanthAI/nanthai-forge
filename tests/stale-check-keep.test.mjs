@@ -15,6 +15,7 @@ import {
 } from '../dist/stale-check-keep.js';
 import { firstCheckRiskPaths, globalRiskBetween, orderSensitiveRisk } from '../dist/first-check-risk.js';
 import { placeableRisk } from '../dist/package-placement.js';
+import { pathsOverlap } from '../dist/hosted-cross-head-proof.js';
 import { scopedRecheckSelection } from '../dist/scoped-recheck.js';
 import { scopedRootConfig } from '../dist/scoped-root-config.js';
 import { ECONOMICS, STANDARD_ENTRIES, keepInput, todayKeeps } from './keep-the-run-baseline.mjs';
@@ -72,6 +73,84 @@ for (const mode of MODES) {
     expect(mode, { changed: ['src/b.ts'] }, 'cancel', 'code-overlap');
     expect(mode, { changed: ['src/b.ts', 'package.json'] }, 'cancel', 'code-overlap');
     expect(mode, { changed: ['src'], paths: ['src/b.ts'] }, 'cancel', 'code-overlap');
+  });
+
+  test(`fa2c1383 Lane B ${mode}: an overlapping run keeps for a scoped recheck only on a clean probe`, () => {
+    const late = { economics: { ...ECONOMICS, elapsed: 0.9 } };
+    for (const changed of [['src/b.ts'], ['src/b.ts', 'package.json'], ['src/b.ts', 'convex/schema.ts']]) {
+      expect(mode, { changed, ...late, overlapProbe: 'clean' }, 'keep', 'scoped-recheck');
+      // A conflicting probe ends the landing at once (COMPOSITION_CONFLICT), with no recheck.
+      expect(mode, { changed, ...late, overlapProbe: 'conflict' }, 'cancel', 'compose-conflict');
+    }
+    expect(mode, { changed: ['src'], paths: ['src/b.ts'], overlapProbe: 'clean' }, 'keep', 'scoped-recheck');
+    // Code overlap never carries, even where carry is on and the fast mode holds on main.
+    expect(
+      mode,
+      { changed: ['src/b.ts'], overlapProbe: 'clean', fastMain: true, run: { standard: false } },
+      'cancel',
+      'cannot-scope',
+    );
+    // A clean probe lifts only the overlap: payback and every other cancel still apply.
+    for (const [extra, reason] of [
+      [{ economics: { ...ECONOMICS, elapsed: 0.5 } }, 'scoped-costs-more'],
+      [{ economics: null }, 'scoped-unmeasured'],
+      [{ main: { status: 'red' } }, 'main-red'],
+      [{ run: { gate: 'partial' } }, 'partial-run'],
+      [{ landing: { cohort: true } }, 'cohort'],
+      [{ reducedEvidence: false }, 'actor'],
+      [{ protectedPaths: true }, 'cannot-scope'],
+      [{ paths: ['src/b.ts', 'package.json'] }, 'cannot-scope'],
+    ])
+      expect(mode, { changed: ['src/b.ts'], overlapProbe: 'clean', ...extra }, 'cancel', reason);
+    expect(
+      mode,
+      { changed: ['src/b.ts'], overlapProbe: 'clean', coverageMover: true },
+      'cancel',
+      'coverage-mover',
+    );
+  });
+
+  test(`fa2c1383 Lane B ${mode}: a pending probe keeps the run only until the precompose probe answers`, () => {
+    assert.deepEqual(decide(mode, { changed: ['src/b.ts'], overlapProbe: 'pending' }), {
+      action: 'keep',
+      reason: 'scoped-recheck',
+      holdOrder: true,
+      probe: true,
+    });
+    // A shared Markdown file can text-conflict too: under a pending probe it is probed before it carries.
+    const docs = { paths: ['docs/a.md', 'src/b.ts'], changed: ['docs/a.md'] };
+    assert.equal(decide(mode, { ...docs, overlapProbe: 'pending' }).probe, true);
+    expect(mode, { ...docs, overlapProbe: 'conflict' }, 'cancel', 'compose-conflict');
+    // A run that shares no path with the mover is never probed: a pending probe keeps it as before.
+    for (const changed of [['src/a.ts'], ['convex/schema.ts']])
+      assert.equal(
+        decide(mode, { changed, overlapProbe: 'pending' }).action,
+        'keep',
+        JSON.stringify({ changed }),
+      );
+    assert.equal(decide(mode, { changed: ['convex/schema.ts'], overlapProbe: 'pending' }).probe, false);
+    // A pending probe does not keep what a clean probe would not.
+    expect(
+      mode,
+      { changed: ['src/b.ts'], overlapProbe: 'pending', economics: null },
+      'cancel',
+      'scoped-unmeasured',
+    );
+  });
+
+  test(`fa2c1383 Lane B ${mode}: a conflict answer cancels even when the latest mover is disjoint`, () => {
+    // Review 0c7f9440 finding 1: the probe composes on cumulative main, so a disjoint mover that lands
+    // while it runs leaves the conflict standing. No earlier answer (unrelated, coverage, policy) keeps it.
+    for (const extra of [
+      {},
+      { changed: ['src/a.ts'] },
+      { changed: ['convex/schema.ts'] },
+      { changed: ['packages/x/package.json'] },
+      { changed: ['scripts/browser-test-policy.mjs'] },
+      { paths: null },
+      { acceptance: { mode: 'review' } },
+    ])
+      expect(mode, { ...extra, overlapProbe: 'conflict' }, 'cancel', 'compose-conflict');
   });
 
   test(`fa2c1383 ${mode}: a shared Markdown file alone is not code overlap`, () => {
@@ -188,16 +267,23 @@ for (const mode of MODES) {
   });
 
   test(`fa2c1383 ${mode}: a keep that replaces a retire holds queue order; today's unrelated keep does not`, () => {
-    assert.deepEqual(decide(mode, {}), { action: 'keep', reason: 'unrelated', holdOrder: false });
+    assert.deepEqual(decide(mode, {}), {
+      action: 'keep',
+      reason: 'unrelated',
+      holdOrder: false,
+      probe: false,
+    });
     assert.deepEqual(decide(mode, { changed: ['packages/x/package.json'] }), {
       action: 'keep',
       reason: 'carry',
       holdOrder: true,
+      probe: false,
     });
     assert.deepEqual(decide(mode, { changed: ['convex/schema.ts'] }), {
       action: 'keep',
       reason: 'scoped-recheck',
       holdOrder: true,
+      probe: false,
     });
   });
 }
@@ -293,49 +379,72 @@ const VARIANTS = [
   { economics: null },
   { economics: { ...ECONOMICS, elapsed: 0.3 } },
 ];
-const grid = function* () {
+const PROBES = [undefined, 'pending', 'clean', 'conflict'];
+const sameDecision = (a, b) =>
+  a.action === b.action && a.reason === b.reason && a.holdOrder === b.holdOrder && a.probe === b.probe;
+// The message is built only on failure: stringifying every grid row was most of this file's time.
+const fail = (input, message) => assert.fail(`${message}: ${JSON.stringify(input)}`);
+let cells;
+// Built once for every guard: each input with its decision, today's answer, whether it shares a path
+// with the mover, and the same row's answers with no probe and with a clean probe (probe is innermost).
+const grid = () => {
+  if (cells) return cells;
+  cells = [];
   for (const mode of MODES)
     for (const paths of SIDES)
       for (const changed of SIDES)
         for (const variant of VARIANTS)
-          for (const fastMain of [false, true])
-            yield keepInput({
+          for (const fastMain of [false, true]) {
+            const base = keepInput({
               ...variant,
               paths,
               changed,
               fastMain,
               acceptance: { landingMode: mode, ...variant.acceptance },
             });
+            const row = PROBES.map(overlapProbe => {
+              const input = { ...base, overlapProbe };
+              return { input, decided: staleCheckDisposition(input) };
+            });
+            const today = todayKeeps(base);
+            const shared = Boolean(base.paths?.length) && pathsOverlap([...base.paths], [...base.changed]);
+            for (const cell of row)
+              cells.push({ ...cell, without: row[0].decided, clean: row[2].decided, today, shared });
+          }
+  return cells;
 };
 
-test('fa2c1383 guard: every run today keeps is still kept, except under a coverage mover', () => {
+test('fa2c1383 guard: every run today keeps is still kept, except under a coverage mover or a conflict', () => {
   let kept = 0;
   let tightened = 0;
-  for (const input of grid()) {
-    const decided = staleCheckDisposition(input);
+  for (const { input, decided, today } of grid()) {
+    // A conflict answer on current main always ends the landing (review 0c7f9440; Lane B guard below).
+    if (input.overlapProbe === 'conflict') continue;
     if (input.coverageMover) {
       // Intended tightening (687d1eda): a coverage mover retires every running check.
-      assert.deepEqual(decided, { action: 'cancel', reason: 'coverage-mover' }, JSON.stringify(input));
-      if (todayKeeps(input)) tightened++;
-    } else if (todayKeeps(input)) {
+      if (decided.action !== 'cancel' || decided.reason !== 'coverage-mover')
+        fail(input, 'coverage mover kept');
+      if (today) tightened++;
+    } else if (today) {
       kept++;
-      assert.equal(decided.action, 'keep', JSON.stringify(input));
+      if (decided.action !== 'keep') fail(input, 'today keeps this run');
     }
   }
   assert(kept > 0 && tightened > 0);
 });
 
 test('fa2c1383 guard: strict and fast proof rules are never widened by a carry keep', () => {
-  for (const input of grid()) {
-    const { action, reason } = staleCheckDisposition(input);
-    if (action !== 'keep' || reason !== 'carry') continue;
+  let carried = 0;
+  for (const { input, decided } of grid()) {
+    if (decided.action !== 'keep' || decided.reason !== 'carry') continue;
+    carried++;
     const { paths, changed } = input;
     const fastOnMain = () => {
-      assert.equal(input.acceptance.landingMode, 'fast', JSON.stringify(input));
-      assert.equal(input.fastMain, true, JSON.stringify(input));
+      if (input.acceptance.landingMode !== 'fast' || input.fastMain !== true)
+        fail(input, 'carry needs a fast main');
     };
-    assert.equal(input.acceptance.hostedCrossHeadReuse === false, false, 'carry needs reuse on');
-    assert.equal(codeOverlap(paths, changed), false, 'carry never crosses code overlap');
+    if (input.acceptance.hostedCrossHeadReuse === false) fail(input, 'carry needs reuse on');
+    if (codeOverlap(paths, changed)) fail(input, 'carry never crosses code overlap');
     const oneSided = !(
       firstCheckRiskPaths(paths, STANDARD_ENTRIES).length &&
       firstCheckRiskPaths(changed, STANDARD_ENTRIES).length
@@ -346,31 +455,66 @@ test('fa2c1383 guard: strict and fast proof rules are never widened by a carry k
     ) {
       // Only the fast rule may relax global risk, never the order-sensitive part, and only on a fast main.
       fastOnMain();
-      assert.deepEqual(orderSensitiveRisk(paths, changed, STANDARD_ENTRIES), [], JSON.stringify(input));
+      if (orderSensitiveRisk(paths, changed, STANDARD_ENTRIES).length) fail(input, 'order-sensitive carry');
     }
     // A shared Markdown file may be a tested doc: only the fast proof relaxes it.
     if (sharedDocs(paths, changed).length) fastOnMain();
   }
+  assert(carried > 0);
 });
 
 test('fa2c1383 guard: a scoped-recheck keep is only for a basis today can scope, where it pays', () => {
-  for (const input of grid()) {
-    const { action, reason } = staleCheckDisposition(input);
-    if (action !== 'keep' || reason !== 'scoped-recheck') continue;
-    const at = JSON.stringify(input);
-    assert(input.run.gate === 'full' && input.run.standard && input.run.direct, at);
-    assert(!input.protectedPaths && input.paths?.length && !scopedRootConfig(input.paths), at);
-    assert(input.acceptance.scopedRecheck !== false && input.reducedEvidence, at);
-    assert(input.main.status === 'green' && !input.main.debt && !input.landing.cohort, at);
-    assert(input.economics && scopedRecheckPays(input.economics), at);
+  let scoped = 0;
+  for (const { input, decided } of grid()) {
+    if (decided.action !== 'keep' || decided.reason !== 'scoped-recheck') continue;
+    scoped++;
+    if (!(input.run.gate === 'full' && input.run.standard && input.run.direct)) fail(input, 'run');
+    if (!(!input.protectedPaths && input.paths?.length && !scopedRootConfig(input.paths)))
+      fail(input, 'paths');
+    if (!(input.acceptance.scopedRecheck !== false && input.reducedEvidence)) fail(input, 'policy');
+    if (!(input.main.status === 'green' && !input.main.debt && !input.landing.cohort)) fail(input, 'main');
+    if (!(input.economics && scopedRecheckPays(input.economics))) fail(input, 'payback');
+    // Lane B: code overlap keeps only on a clean or pending probe, and a pending one is flagged.
+    if (
+      codeOverlap(input.paths, input.changed) &&
+      input.overlapProbe !== 'clean' &&
+      input.overlapProbe !== 'pending'
+    )
+      fail(input, 'overlap keep without a probe');
   }
+  assert(scoped > 0);
+});
+
+test('fa2c1383 Lane B guard: the probe only ever lifts a code-overlap retire, and a conflict never keeps', () => {
+  let lifted = 0;
+  let conflicts = 0;
+  for (const { input, decided, without, clean, shared } of grid()) {
+    // Review 0c7f9440: a conflict cancels every run, shared paths or not.
+    if (input.overlapProbe === 'conflict') {
+      conflicts++;
+      if (decided.action !== 'cancel' || decided.reason !== 'compose-conflict') fail(input, 'conflict kept');
+      continue;
+    }
+    // Any other probe answer changes nothing for a run that shares no path with the mover.
+    if (!shared && !sameDecision(decided, without)) fail(input, 'probe changed a disjoint run');
+    // Wherever it lifts a retire, it was a code-overlap retire, and the keep is a scoped recheck.
+    if (decided.action === 'keep' && without.action === 'cancel') {
+      lifted++;
+      if (without.reason !== 'code-overlap' || decided.reason !== 'scoped-recheck') fail(input, 'lifted');
+    }
+    if (decided.action === 'keep' && decided.probe !== (input.overlapProbe === 'pending' && shared))
+      fail(input, 'probe flag');
+    // A pending probe never keeps what a clean probe would retire.
+    if (input.overlapProbe === 'pending' && decided.action === 'keep' && clean.action !== 'keep')
+      fail(input, 'pending keeps what clean retires');
+  }
+  assert(lifted > 0 && conflicts > 0);
 });
 
 test('fa2c1383 guard: every keep that replaces a retire holds queue order, and only those', () => {
-  for (const input of grid()) {
-    const decided = staleCheckDisposition(input);
+  for (const { input, decided, today } of grid()) {
     if (decided.action !== 'keep') continue;
-    assert.equal(decided.holdOrder, !todayKeeps(input), JSON.stringify(input));
-    assert.equal(decided.holdOrder, decided.reason !== 'unrelated', JSON.stringify(input));
+    if (decided.holdOrder !== !today) fail(input, 'holdOrder vs today');
+    if (decided.holdOrder !== (decided.reason !== 'unrelated')) fail(input, 'holdOrder vs reason');
   }
 });

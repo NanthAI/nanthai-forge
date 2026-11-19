@@ -75,12 +75,20 @@ export type StaleCheckInput = {
   /** The fast mode is in effect on current main (the sweep's memoised `currentFastMode`). Read it
    * only when `needsFastMain` says the answer depends on it. */
   fastMain?: boolean | undefined;
+  /** Lane B (probe first): the precompose probe of this Candidate on current main, for a run whose
+   * paths the mover also changed. Absent: no probe exists, so code overlap retires the run as today.
+   * `pending`: the sweep asks whether the run may keep until the probe answers (a keep then carries
+   * `probe: true`). `clean`: the probe composed without conflict. `conflict`: it did not, and the
+   * landing ends with COMPOSITION_CONFLICT, as a retired run's probe ends it today. A conflict is
+   * against cumulative main, so it cancels whatever the latest mover changed (review 0c7f9440). */
+  overlapProbe?: 'pending' | 'clean' | 'conflict' | undefined;
 };
 
 export type StaleCheckKeep = 'unrelated' | 'carry' | 'scoped-recheck';
 export type StaleCheckCancel =
   | 'unknown-paths'
   | 'code-overlap'
+  | 'compose-conflict'
   | 'policy'
   | 'actor'
   | 'recovery'
@@ -96,9 +104,10 @@ export type StaleCheckCancel =
   | 'scoped-costs-more';
 /** `holdOrder`: the keep replaces a retire, so the kept run must take queue order in the same write
  * the retire would have made (plan 82bf7c75 section 0). An unrelated keep is today's keep and leaves
- * the row as it is. */
+ * the row as it is. `probe`: the run shares a path with the mover and its probe has not answered;
+ * the precompose pass must probe it and decide again with the answer. Only a pending probe sets it. */
 export type StaleCheckDisposition =
-  | { action: 'keep'; reason: StaleCheckKeep; holdOrder: boolean }
+  | { action: 'keep'; reason: StaleCheckKeep; holdOrder: boolean; probe: boolean }
   | { action: 'cancel'; reason: StaleCheckCancel };
 
 /** Exact paths both sides changed that are Markdown: a docs merge the proof may still resolve. */
@@ -154,8 +163,8 @@ export const scopedRecheckPays = (economics: StaleCheckEconomics) =>
   economics.elapsed >
   (1 - economics.redShare) * Math.max(economics.scopedShare.jobs, economics.scopedShare.wall);
 
-const keep = (reason: StaleCheckKeep) =>
-  ({ action: 'keep', reason, holdOrder: reason !== 'unrelated' }) as const;
+const keep = (reason: StaleCheckKeep, probe = false) =>
+  ({ action: 'keep', reason, holdOrder: reason !== 'unrelated', probe }) as const;
 const cancel = (reason: StaleCheckCancel) => ({ action: 'cancel', reason }) as const;
 
 /** True when the decision reads `fastMain`; the caller loads it (memoised) only then. */
@@ -165,6 +174,9 @@ export const needsFastMain = (input: StaleCheckInput) =>
 
 export function staleCheckDisposition(input: StaleCheckInput): StaleCheckDisposition {
   const { paths, changed } = input;
+  // Lane B: the probe composed this Candidate on current main and it conflicts. Main is cumulative: a
+  // disjoint mover may have landed while the probe ran, so this never depends on the latest mover.
+  if (input.overlapProbe === 'conflict') return cancel('compose-conflict');
   // A coverage mover changes which tests exist or run, so no running check's selection still holds:
   // the interaction is not a path set, the kept pass could seed no narrow recheck, and its own run is
   // never main's baseline (687d1eda). This comes before today's unrelated keep on purpose: selection
@@ -175,8 +187,20 @@ export function staleCheckDisposition(input: StaleCheckInput): StaleCheckDisposi
   if (!input.globalMover && (!paths || !pathsOverlap([...paths], [...changed]))) return keep('unrelated');
   // An empty path list is refused by the proof (`analyzeCrossHeadReuse`) and the scoped recheck alike.
   if (!paths?.length) return cancel('unknown-paths');
-  // Lane B (probe first) is the change for overlapping movers; until then they retire as today.
-  if (codeOverlap(paths, changed)) return cancel('code-overlap');
+  // Lane B: a run that shares any path with the mover (code or a shared Markdown file) may meet a
+  // text conflict on current main, so it is probed. Without a probe, code overlap retires the run as
+  // today, so its retired row is composed in the queue.
+  const shared = pathsOverlap([...paths], [...changed]);
+  const probe = input.overlapProbe;
+  if (!probe && codeOverlap(paths, changed)) return cancel('code-overlap');
+  const decided = afterOverlap(input, paths);
+  // A pending probe keeps the run only until the probe answers.
+  return decided.action === 'keep' && shared && probe === 'pending' ? keep(decided.reason, true) : decided;
+}
+
+/** The rest of the rule, once overlap allows the run to go on. Code overlap can never carry
+ * (`carryBound`), so an overlapping run keeps only for a scoped recheck that pays. */
+function afterOverlap(input: StaleCheckInput, paths: readonly string[]): StaleCheckDisposition {
   const { acceptance } = input;
   if (
     acceptance.mode !== 'auto-on-pass' ||

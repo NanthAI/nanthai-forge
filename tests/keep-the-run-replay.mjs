@@ -12,9 +12,10 @@
 // - shared Markdown is taken as a tested doc and the fast mode as off on main, so docs overlaps
 //   never carry; red runs of submissions that never landed are not in the trace (no red-run credit).
 import recorded from './fixtures/keep-the-run-1117-trace.mjs';
-import { scopedRecheckPays, staleCheckDisposition } from '../dist/stale-check-keep.js';
+import { staleCheckDisposition } from '../dist/stale-check-keep.js';
 import { STANDARD_CHECK_INPUTS } from '../dist/standard-check.js';
 import { globPattern } from '../dist/autonomy-policy.js';
+import { pathsOverlap } from '../dist/hosted-cross-head-proof.js';
 import { STANDARD_ENTRIES, coverageMover, globalMover, todayKeeps } from './keep-the-run-baseline.mjs';
 
 export const trace = () => ({
@@ -43,10 +44,12 @@ const unionMinutes = runs => {
   return total / 60;
 };
 
-/** `laneB`: project Lane B (probe first) by keeping an overlapping run whose probe is clean, under the
- * same scoped-recheck payback. Every landing in the window landed, so none of its overlaps was a real
- * text conflict on its final base; this is a projection for the Item target, not the rule this Lane
- * ships. `scopedScale` projects selector precision (Item 5dcfce75) by scaling the recorded scoped
+/** `laneB`: Lane B (probe first) through the rule itself: every run that shares a path with its mover
+ * gets a clean precompose probe (`overlapProbe: 'clean'`). Every landing in the window landed, so none
+ * of its overlaps was a text conflict on its final base; the conflict branch is the rule's own table
+ * test. A probe that would have conflicted ends a landing that never landed, so it is not in the
+ * trace. A Lane B replay also counts the probe composes the wiring would run (`probes`), for the
+ * cost table: see `probeCounts` below. `scopedScale` projects selector precision (Item 5dcfce75) by scaling the recorded scoped
  * recheck's wall and job-minutes; 1 is the record. */
 export function replayKeepTheRun(t = trace(), { laneB = false, scopedScale = 1 } = {}) {
   const landings = t.landings.map(l => ({ ...l, paths: l.paths.map(i => t.paths[i]) }));
@@ -108,17 +111,12 @@ export function replayKeepTheRun(t = trace(), { laneB = false, scopedScale = 1 }
     redShare: 0,
   });
   const protectedPath = [...t.policy.protectedPaths, ...STANDARD_CHECK_INPUTS].map(globPattern);
+  const runPaths = run => [...new Set(run.landings.flatMap(id => byId.get(id).paths))];
+  // The wiring probes a kept run whenever it shares a path with the mover that kept it.
+  const shares = (run, mover) => pathsOverlap(runPaths(run), [...mover.paths]);
   const disposition = (run, mover) => {
-    const decided = ruleFor(run, mover);
-    if (!(laneB && decided.reason === 'code-overlap' && run.gate === 'full' && !redAt(mover.committedAt)))
-      return decided;
-    return scopedRecheckPays(economicsAt(run, mover.committedAt))
-      ? { action: 'keep', reason: 'scoped-recheck', holdOrder: true }
-      : { action: 'cancel', reason: 'scoped-costs-more' };
-  };
-  const ruleFor = (run, mover) => {
     const owners = run.landings.map(id => byId.get(id));
-    const paths = [...new Set(owners.flatMap(l => l.paths))];
+    const paths = runPaths(run);
     const changed = mover.paths;
     return staleCheckDisposition({
       acceptance: t.policy,
@@ -139,6 +137,7 @@ export function replayKeepTheRun(t = trace(), { laneB = false, scopedScale = 1 }
       protectedPaths: paths.some(path => protectedPath.some(glob => glob.test(path))),
       economics: economicsAt(run, mover.committedAt),
       fastMain: false, // the audit window is not in the trace; never assume the fast relaxation
+      overlapProbe: laneB ? 'clean' : undefined,
     });
   };
 
@@ -180,6 +179,16 @@ export function replayKeepTheRun(t = trace(), { laneB = false, scopedScale = 1 }
   };
 
   const arms = { baseline: [], keep: [] };
+  // Lane B probe composes, by what each one costs against today's retire:
+  // - `first`: the probe at the mover that kept the run. Today's retire recomposes the same selection
+  //   on the same main at that mover (projectHostedLandingStaleChecks reserveFinishRetry), so its
+  //   compose replaces that one; only its precompose and settlement mutations are extra.
+  // - `firstRetiredLater`: a first probe on a run a later mover retires after all: the retire then
+  //   recomposes anyway, so this compose is extra.
+  // - `again`: a re-probe at a later mover that shares a path (sticky until clean on current main).
+  // - `stale`: a probe whose main moved again before the kept run ended, so the finish composes again.
+  // The last three are priced whole, with no credit for the replacement chain's own recomposes.
+  const probes = { first: 0, firstRetiredLater: 0, again: 0, stale: 0 };
   const reasons = {};
   const outcomes = {};
   const count = (map, key) => (map[key] = (map[key] ?? 0) + 1);
@@ -214,6 +223,8 @@ export function replayKeepTheRun(t = trace(), { laneB = false, scopedScale = 1 }
       // all, and one that leaves only a scoped recheck downgrades a carry.
       let final = first.reason;
       let later = null;
+      let probedAt = laneB && shares(run, hit.mover) ? hit.mover : null;
+      let stale = false;
       for (const m of movers) {
         if (m.committedAt <= hit.mover.committedAt || m.committedAt >= end || m.id === landing.id) continue;
         const again = disposition(run, m);
@@ -222,7 +233,13 @@ export function replayKeepTheRun(t = trace(), { laneB = false, scopedScale = 1 }
           break;
         }
         if (again.reason === 'scoped-recheck') final = 'scoped-recheck';
+        if (laneB && shares(run, m)) {
+          probes.again++;
+          probedAt = m;
+        } else if (probedAt) stale = true;
       }
+      if (laneB && shares(run, hit.mover)) probes[later ? 'firstRetiredLater' : 'first']++;
+      if (stale && !later) probes.stale++;
       if (later) {
         // Retired later after all: it ran longer before the cancel, and (pessimistically) the whole
         // recorded replacement chain still runs, shifted by that extra time.
@@ -299,6 +316,7 @@ export function replayKeepTheRun(t = trace(), { laneB = false, scopedScale = 1 }
     reasons,
     outcomes,
     landings: landings.length,
+    ...(laneB ? { probes } : {}),
     baseline: totals(arms.baseline),
     keep: totals(arms.keep),
     rows: arms,

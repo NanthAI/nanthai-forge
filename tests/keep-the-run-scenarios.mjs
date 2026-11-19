@@ -62,6 +62,29 @@ export const INGEST = { calls: 6, readBytes: 288_826, writeBytes: 0, egressBytes
 export const RESOLVE = { calls: 11.4, readBytes: 1_384_800, writeBytes: 0 };
 /** cost-to-serve.md: `projectHostedReuse:prove`, 8 calls: 0.526 MB egress, 0.007953 GB-hours. */
 export const PROVE = { calls: 1, readBytes: 0, writeBytes: 0, egressBytes: 65_750, gbHours: 0.000994 };
+/** Lane B: one composition job, priced from cost-to-serve.md's per-landing families over its
+ * measured 2.4 composition jobs per landing (S6): `projectConvexSourceNode:step`, source control and
+ * V8, `projectConvexSourceObjects:resolve`, and save, sync, compose and conflict resolution. Those
+ * families also carry every save and check source delivery, so this is an upper bound per compose. */
+export const COMPOSE = {
+  calls: (7.6 + 24.4 + 29 + 11.7) / 2.4,
+  readBytes: (1_079_630.4 + 408_578.7 + 360_023.1) / 2.4,
+  writeBytes: (193_606.3 + 31_456.4) / 2.4,
+  egressBytes: (15_570_999.5 + 256.5) / 2.4,
+  gbHours: (18.0823 + 1.2964 + 0.0965) / 2.4 / 3600,
+};
+/** Lane B: what a probe adds in mutations: the sweep's precompose reserve, the precompose settlement
+ * that caches or fails it with its rule re-evaluation, and the finish reserve that adopts it, against
+ * the one reserve a retire writes. Bound: four `projectHostedFinishDriver:step`-sized mutations at
+ * twice the a6 mean (113 calls; 6.965 MB read, 1.268 MB written). */
+export const PROBE_SETTLE = {
+  calls: 4,
+  readBytes: 8 * (6_965_000 / 113),
+  writeBytes: 8 * (1_268_000 / 113),
+  egressBytes: 0,
+  gbHours: 0,
+};
+
 /** Professional rates (cost-to-serve.md). The serving proxy is DB I/O and egress; calls and action
  * compute are included in the plan, and priced only in the full-list figure. */
 export const RATES = { ioPerGb: 0.2, egressPerGb: 0.12, perCall: 2e-6, perGbHour: 0.3 };
@@ -147,8 +170,22 @@ export const TIERS = [
   { name: '10 agents', agents: 10 },
 ];
 
+/** Lane B probe Convex cost per landing at the trace's 10 agents, scaled to `scale` (agents / 10).
+ * A first probe on a run kept to its end replaces the retire's recompose and pays only its mutations;
+ * a first probe on a run retired later, a re-probe and a probe a later mover made stale each pay a
+ * whole compose too. Second-mover composes need two movers in one run, so they scale twice; the
+ * trace's count is floored at the cascade rate the saving side credits (`again` per probe). */
+export function probeOverhead(probes, landings, scale, again, price) {
+  if (!probes) return 0;
+  const first = probes.first + probes.firstRetiredLater;
+  const second = Math.max((probes.again + probes.stale) * scale * scale, first * scale * again);
+  const extraComposes = probes.firstRetiredLater * scale + second;
+  const settles = first * scale + second;
+  return (extraComposes * price(COMPOSE) + settles * price(PROBE_SETTLE)) / landings;
+}
+
 export function scenarioTable(replay = replayKeepTheRun()) {
-  const { calibration, outcomes, landings } = replay;
+  const { calibration, outcomes, landings, probes } = replay;
   const { full, scoped, scopedShare } = calibration;
   const kept = Object.values(outcomes).reduce((a, b) => a + b, 0) - (outcomes['retired-later'] ?? 0);
   const economics = e => ({ elapsed: e, scopedShare, redShare: 0 });
@@ -164,6 +201,9 @@ export function scenarioTable(replay = replayKeepTheRun()) {
     const scale = tier.agents / 10;
     const again = againAt10 * scale;
     const keptPerLanding = (kept / landings) * scale;
+    // Lane B's probes, spread over its kept runs so every row prices a kept run in full.
+    const probeServing = probeOverhead(probes, landings, scale, again, servingUsd);
+    const probeFullList = probeOverhead(probes, landings, scale, again, fullListUsd);
     const rows = Object.entries({
       carry: carryE,
       'carry, C1 follower': carryE,
@@ -184,8 +224,8 @@ export function scenarioTable(replay = replayKeepTheRun()) {
         savedJobMinutes: saved.jobs,
         savedWallMinutes: saved.wall,
         savedRunnerUsd: saved.jobs * RUNNER_MINUTE_USD,
-        convexServingUsd: servingUsd(convex),
-        convexFullListUsd: fullListUsd(convex),
+        convexServingUsd: servingUsd(convex) + probeServing / keptPerLanding,
+        convexFullListUsd: fullListUsd(convex) + probeFullList / keptPerLanding,
         convexBytes: convex.readBytes + convex.writeBytes + convex.egressBytes,
         convexCalls: convex.calls,
       };
@@ -195,6 +235,8 @@ export function scenarioTable(replay = replayKeepTheRun()) {
       ...tier,
       keptPerLanding,
       againPerReplacement: again,
+      probeServingUsdPer1000Landings: probeServing * 1000,
+      probeFullListUsdPer1000Landings: probeFullList * 1000,
       rows,
       // Every kept run priced at the costliest kind: the upper bound per 1,000 landings.
       servingUsdPer1000Landings: keptPerLanding * 1000 * worst,

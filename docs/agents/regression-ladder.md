@@ -102,7 +102,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `70a9bd2f` | Zoo timing: a build input and disjoint source arrived together; the admission pipeline must check a follower with its predecessor on the exact combined head and keep the 1.5x solo timing bar. The deleted O3 queue switch broke this replay (Item 026ce0cf) |
 | `2bf85ddf` | Core claim: the queue landed a parked Lane after its agent stopped and its Item heard nothing (2026-11-17); every landing now posts a system receipt comment to its Item |
 | `687d1eda` | Core claim: a landing turned on browser tests its own check skipped; the skip counted as a pass, unrelated landings were blamed and reverted, and a docs-only audit cleared red (2026-11-19). A skip is not a pass, full checks run every browser test, and a newly covered failure names the coverage landing and reverts nothing |
-| `fa2c1383` | Main moves threw away running checks that could still carry or seed a scoped recheck (2026-11-17: 57 cancels of landed work). The 11-17 trace replays today's sweep against the keep rule, recorded queue waits kept; wasted minutes fall and total runner-minutes, run wall and time to main do not rise |
+| `fa2c1383` | Main moves threw away running checks that could still carry or seed a scoped recheck (2026-11-17: 57 cancels of landed work). The 11-17 trace replays today's sweep against the keep rule, recorded queue waits kept, without and with Lane B's clean overlap probe; wasted minutes fall and total runner-minutes, run wall and time to main do not rise. A conflicting probe always cancels, and every probe's Convex cost is priced in the per-1,000-landings table |
 
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.
