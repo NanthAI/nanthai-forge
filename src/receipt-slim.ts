@@ -149,6 +149,14 @@ function briefSave(result: Json): Json | undefined {
       ...(typeof result.note === 'string' ? { note: result.note } : {}),
       ...(typeof totalMs === 'number' ? { totalMs } : {}),
     };
+  // A bare save with nothing new (ad80e037): the current head and the note, nothing else.
+  if (result.status === 'nothing-to-save' && typeof result.head === 'string')
+    return {
+      status: 'nothing-to-save',
+      head: result.head,
+      ...(typeof result.note === 'string' ? { note: result.note } : {}),
+      ...(result.notSaved !== undefined ? { notSaved: result.notSaved } : {}),
+    };
   if (!outcome || outcome.status !== 'completed' || !saved || typeof saved.head !== 'string')
     return undefined;
   return {

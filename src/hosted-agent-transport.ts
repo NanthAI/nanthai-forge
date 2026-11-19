@@ -1188,6 +1188,7 @@ export class HostedAgentTransport {
         exchange: this.exchange,
         capabilities,
         journal,
+        ...(operationId === undefined ? { autoAddressed: true as const } : {}),
         ...(sourceStamp ? { authorship: sourceStamp } : {}),
         ...(sourceStamp?.agentRun
           ? { agent: sourceStamp.agentRun }
@@ -2248,6 +2249,8 @@ export type HostedAgentSession = {
   exchange: HostedAgentExchange;
   capabilities: HostedAgentCapabilities;
   journal: HostedAgentJournal;
+  /** The caller named no operationId: the journal chose (or replays) the operation itself. */
+  autoAddressed?: true;
   /** This agent session's slug when the server takes it (feature agent-slug); absent for a person. */
   agent?: string;
   /** The same slug for landing submissions, when the server records it on receipts (feature

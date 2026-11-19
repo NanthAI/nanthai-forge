@@ -104,7 +104,16 @@ for (const [action, api] of [
     await assert.rejects(s.transport().dispatch(action, command), errorCode('HOSTED_ACTION_FAILED'));
     const firstCalls = structuredClone(s.calls);
     const first = await s.transport().dispatch(action, command);
-    const again = await s.transport().dispatch(action, command);
+    // A bare identical save with nothing new answers nothing-to-save with the saved head (ad80e037);
+    // the save's own operation still replays its original result.
+    if (action === 'save') {
+      const bare = await s.transport().dispatch(action, command);
+      assert.equal(bare.result.status, 'nothing-to-save');
+      assert.equal(bare.result.head, first.result.outcome.result.head);
+    }
+    const again = await s
+      .transport()
+      .dispatch(action, action === 'save' ? { ...command, operationId: first.operationId } : command);
     assert.equal(first.operationId, again.operationId);
     // A save answered from its settled receipt says it replayed (Issue ca49dc6c); all else is the same.
     if (action === 'save') {

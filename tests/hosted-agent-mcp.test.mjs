@@ -232,9 +232,19 @@ for (const action of [
     const response = await tool.call({ command: parsed });
     assert(!response.isError, response.content[0].text);
     const actual = body(response);
-    const replay = slimReceipt(await s.transport().dispatch(requested, input));
+    const saving = ['save', 'checkpoint'].includes(action);
+    // The same journal: the MCP save's own operation replays from the CLI. A bare identical save
+    // with nothing new now answers nothing-to-save instead (ad80e037), so the replay names it.
+    const replay = slimReceipt(
+      await s
+        .transport()
+        .dispatch(
+          requested,
+          saving && input.operationId === undefined ? { ...input, operationId: actual.operationId } : input,
+        ),
+    );
     // A save answered from its settled receipt says it replayed (Issue ca49dc6c); all else is the same.
-    if (['save', 'checkpoint'].includes(action)) {
+    if (saving) {
       const { replayed, ...rest } = replay.result;
       assert.equal(replayed, true);
       assert.deepEqual(actual, { ...replay, result: rest });

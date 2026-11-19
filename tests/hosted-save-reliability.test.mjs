@@ -653,11 +653,20 @@ test('incident replay 9694afff: a bare save after new edits saves them; an uncha
   assert.equal(first.result.replayed, undefined);
   assert.equal(first.result.unsavedEdits, undefined);
   const saved = readHostedLaneCheckout(s.root).selection;
-  // Nothing changed: the identical request replays the settled receipt, says so, and saves nothing.
+  // Nothing changed: the identical request says there is nothing to save, with the current head, and
+  // makes no call (ad80e037); it never replays the settled receipt as this call's result.
+  const calls = s.calls.length;
   const same = await s.transport().dispatch('save', {});
   assert.equal(same.operationId, first.operationId);
-  assert.equal(same.result.replayed, true);
-  assert.equal(same.result.unsavedEdits, undefined);
+  assert.equal(same.result.status, 'nothing-to-save');
+  assert.equal(same.result.head, saved.head);
+  assert.equal(same.result.outcome, undefined);
+  assert.equal(same.result.replayed, undefined);
+  assert.deepEqual(
+    s.calls.slice(calls).filter(call => /save|upload|object/i.test(call.name)),
+    [],
+    'answered locally: no save, upload or object call',
+  );
   assert.equal(readHostedLaneCheckout(s.root).selection.version, saved.version);
   // New edits: the earlier receipt no longer says what is saved, so the same bare save is new work.
   writeFileSync(join(s.root, 'second.txt'), 'second edit');
@@ -680,6 +689,85 @@ test('incident replay 9694afff: a bare save after new edits saves them; an uncha
   const brief = slimReceipt(explicit);
   assert.equal(brief.result.replayed, true);
   assert.equal(brief.result.unsavedEdits.saved, false);
+});
+
+test('ad80e037: a bare save with nothing new after a sync answers nothing to save with the synced head, exit 0', async t => {
+  const s = await resolutionFixture(t, { overlap: false }),
+    f = s.f;
+  await s.transport().dispatch('open', { laneId: f.lane.laneId });
+  writeFileSync(join(s.root, 'first.txt'), 'first edit');
+  const first = await s.transport().dispatch('save', {});
+  const before = first.result.outcome.result.head;
+  f.moveMain({ overlap: false });
+  await s.transport().dispatch('sync', { laneId: f.lane.laneId, apply: true });
+  const synced = readHostedLaneCheckout(s.root).selection.head;
+  assert.notEqual(synced, before, 'the incident state: the sync moved the Lane past the last save');
+  // The incident: this replayed the pre-sync receipt and head. Now: nothing to save, the synced head.
+  const calls = s.calls.length;
+  const same = await s.transport().dispatch('save', {});
+  assert.equal(same.result.status, 'nothing-to-save');
+  assert.equal(same.result.head, synced);
+  assert.equal(same.result.outcome, undefined, 'no older receipt is replayed as this result');
+  assert.match(same.result.note, /Nothing to save/);
+  assert.match(same.result.note, new RegExp(before.slice(0, 12)), 'names the earlier save it did not replay');
+  assert.deepEqual(
+    s.calls.slice(calls).filter(call => /save|upload|object/i.test(call.name)),
+    [],
+    'answered locally: no save, upload or object call (only the per-command capabilities read)',
+  );
+  assert.deepEqual(slimReceipt(same).result, {
+    status: 'nothing-to-save',
+    head: synced,
+    note: same.result.note,
+  });
+  // The CLI exits 0 on it.
+  process.exitCode = 0;
+  const quiet = t.mock.method(process.stderr, 'write', () => true);
+  const cli = await hostedAgentCli(s.root, 'save', {}, address, { dispatch: async () => same });
+  quiet.mock.restore();
+  assert.equal(process.exitCode, 0);
+  assert.equal(cli.result.status, 'nothing-to-save');
+  // A named operationId still answers from that save's own receipt.
+  const named = await s.transport().dispatch('save', { operationId: first.operationId });
+  assert.equal(named.result.replayed, true);
+  assert.equal(named.result.outcome.result.head, before);
+});
+
+test('ad80e037: a bare save on a clean checkout after a settled FAILED save answers nothing to save, exit 0, and keeps the not-saved warning', async t => {
+  const { clientCacheRoot } = await import('../dist/root-paths.js');
+  const s = await resolutionFixture(t, { overlap: false }),
+    f = s.f;
+  await s.transport().dispatch('open', { laneId: f.lane.laneId });
+  writeFileSync(join(s.root, 'first.txt'), 'first edit');
+  // A credential-named file the capture leaves out stays unsaved in this checkout.
+  writeFileSync(join(s.root, '.env.local'), 'A=1\n');
+  const first = await s.transport().dispatch('save', {});
+  assert.equal(first.result.outcome.status, 'completed');
+  assert.equal(first.result.notSaved.paths[0].path, '.env.local');
+  // That save's settled receipt says FAILED (the replay that used to exit 1); the checkout is clean.
+  const terminal = join(clientCacheRoot(realpathSync(s.root)), 'saves', first.operationId, 'terminal.json');
+  writeFileSync(
+    terminal,
+    JSON.stringify({ outcome: { status: 'failed', error: { code: 'SAVE_FIXTURE', message: 'stop' } } }),
+  );
+  const head = readHostedLaneCheckout(s.root).selection.head;
+  const same = await s.transport().dispatch('save', {});
+  assert.equal(same.operationId, first.operationId, 'the journal would have replayed the failed save');
+  assert.equal(same.result.status, 'nothing-to-save');
+  assert.equal(same.result.head, head);
+  assert.equal(same.result.outcome, undefined, 'the failure is not replayed as this result');
+  assert.match(same.result.note, /this checkout's saved head/);
+  assert.deepEqual(same.result.notSaved, first.result.notSaved, 'the unsaved .env.local is still named');
+  assert.deepEqual(slimReceipt(same).result.notSaved, first.result.notSaved);
+  // The real CLI path: exit 0.
+  process.exitCode = 0;
+  const quiet = t.mock.method(process.stderr, 'write', () => true);
+  const out = t.mock.method(process.stdout, 'write', () => true);
+  const cli = await hostedAgentCli(s.root, 'save', {}, s.address, s.transport());
+  out.mock.restore();
+  quiet.mock.restore();
+  assert.equal(process.exitCode, 0);
+  assert.equal(cli.result.status, 'nothing-to-save');
 });
 
 test('every hosted agent action declares how its replay binds to current state', () => {

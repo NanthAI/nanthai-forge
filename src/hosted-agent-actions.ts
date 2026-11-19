@@ -30,6 +30,7 @@ import {
 import { capturedNotSaved } from './save-not-saved.js';
 import {
   keptSaveTiming,
+  nothingToSave,
   saveSettledHere,
   saveStartedHere,
   unsavedAfterSave,
@@ -631,6 +632,16 @@ export async function executeHostedAgent(
     // A save already settled here answers from its receipt and captures nothing new: say so.
     const replayed = saveSettledHere(session.root, operationId),
       startedBefore = saveStartedHere(session.root, operationId);
+    // A bare save with nothing new (the journal would replay a settled save and the checkout matches
+    // its Lane head) answers that, with the head this checkout is on now: never the older receipt and
+    // head (a sync since moved it), and never a replayed failure (ad80e037). Local reads only, no call.
+    // A named operationId still answers from that save's receipt.
+    if (replayed && session.autoAddressed && !command.supersedeFinish) {
+      const nothing = nothingToSave(session.root, operationId);
+      // A file the capture left out by name (a credential-named .env.local) still sits unsaved: say so.
+      const notSaved = nothing && capturedNotSaved(session.root, operationId);
+      if (nothing) return { ...nothing, ...(notSaved ? { notSaved } : {}) };
+    }
     const settleBackground = session.capabilities.features?.includes('save-settle-background') ?? false;
     const saved = await saveHostedLane(
       session.root,
