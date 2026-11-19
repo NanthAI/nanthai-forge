@@ -12,6 +12,7 @@ import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixt
 import { api as acceptanceApi } from './hosted-acceptance-fixture.mjs';
 import { INCIDENTS, LANDING_STEPS, PERMANENT, SCENARIOS, runLanding } from './landing-fault-matrix.mjs';
 import { agentFixture } from './hosted-agent-fixture.mjs';
+import { CHECK_WALL_MS } from './queue-sim/invariants.mjs';
 import { LANDING_STALL_MS } from '../dist/landing-stall.js';
 import { normalizeHostedFinishResult } from '../dist/hosted-agent-finish-result.js';
 import { networkContinuation } from '../dist/network-continuation.js';
@@ -180,6 +181,187 @@ test('step x fault matrix: transient faults land once, permanent faults end type
       });
   t.diagnostic(JSON.stringify(rows));
 });
+
+// Review ba9ce962 L2 (Item 9a04d916): a double loss on the compose path. The action doing a
+// step's IO is lost (a deploy mid-action), then the next finish drive of the same entry is lost
+// too. The step's retained retry is a mutation that only hands IO to a drive, so every
+// scenario with that hop resumes within one check wall and the stall supervisor never runs.
+// Before L2 the retry was itself a drive: losing it left the entry to the 15-minute alarm.
+test('double loss: a lost IO drive and its lost retry resume without the stall supervisor', async t => {
+  let covered = 0;
+  for (const [scenario, options] of Object.entries(SCENARIOS)) {
+    const f = await batchesFixture(t, options);
+    let entry = null,
+      hits = 0;
+    const run = await runLanding(f, key => {
+      if (hits >= 2 || key !== 'projectHostedFinishDriver:drive@compose') return false;
+      const args = f.pending()[0].args[0];
+      if (hits === 0 ? !args.command : args.submissionId !== entry) return false;
+      entry = args.submissionId;
+      return ++hits > 0;
+    });
+    assertOutcome(f, run, [], `${scenario} double loss`);
+    if (!hits) continue;
+    covered++;
+    assert.equal(hits, 2, `${scenario}: both losses were injected`);
+    const supervisor = [...run.keys.keys()].filter(key => SUPERVISOR.some(p => key.startsWith(p)));
+    assert.deepEqual(supervisor, [], `${scenario}: a mutation owned the entry, not the 15-minute alarm`);
+    assert(run.elapsedMs < CHECK_WALL_MS, `${scenario}: resumed after ${run.elapsedMs / 1000} s`);
+    assert(
+      states(f).every(s => s.phase === 'landed'),
+      scenario,
+    );
+  }
+  assert(covered > 0, 'at least one scenario hands IO out of a mutation');
+  t.diagnostic(JSON.stringify({ covered }));
+});
+
+// Review d4f55e9f F1 (Item 9a04d916): the compose job's source action is lost (a deploy
+// mid-action), then the 120 s compose watchdog that owns it. The watchdog was a drive
+// action, so losing it too left the entry to the 15-minute alarm. It is the `retry`
+// mutation, which Convex runs exactly once: the entry resumes within one check wall and
+// the supervisor never runs.
+test('incident 9a04d916 F1: a lost source action and its lost 120 s watchdog resume without the stall supervisor', async t => {
+  let covered = 0;
+  for (const [scenario, options] of Object.entries(SCENARIOS))
+    for (const source of ['projectConvexSource:step@compose', 'projectConvexSource:dispatch@compose']) {
+      const f = await batchesFixture(t, options);
+      let lostAt = null,
+        watchdog = null;
+      const run = await runLanding(f, key => {
+        if (lostAt === null) {
+          if (key !== source) return false;
+          lostAt = Date.now();
+          return true;
+        }
+        // The finish wake due after the loss is the watchdog. An action can be lost; a
+        // mutation is not (Convex retries its internal errors).
+        if (watchdog || !key.startsWith('projectHostedFinishDriver:') || !key.endsWith('@compose'))
+          return false;
+        if (f.pending()[0].scheduledTime <= lostAt) return false;
+        watchdog = key;
+        return key.startsWith('projectHostedFinishDriver:drive@');
+      });
+      const label = `${scenario}, ${source} then its watchdog`;
+      assertOutcome(f, run, [], label);
+      if (lostAt === null) continue;
+      covered++;
+      assert(watchdog, `${label}: a watchdog owned the lost source action`);
+      const supervisor = [...run.keys.keys()].filter(key => SUPERVISOR.some(p => key.startsWith(p)));
+      assert.deepEqual(supervisor, [], `${label}: a mutation owned the entry, not the 15-minute alarm`);
+      assert(run.elapsedMs < CHECK_WALL_MS, `${label}: resumed after ${run.elapsedMs / 1000} s`);
+      assert.equal(
+        watchdog,
+        'projectHostedFinishDriver:retry@compose',
+        `${label}: the watchdog is a mutation`,
+      );
+      assert(
+        states(f).every(s => s.phase === 'landed'),
+        label,
+      );
+    }
+  assert(covered > 0, 'at least one scenario loses a source action');
+  t.diagnostic(JSON.stringify({ covered }));
+});
+
+// Review d4f55e9f F3: the claim retry. Another finish holds the Channel's lease for a
+// second while this step claims; the step re-tries the claim 250 ms later. On main that
+// retry was a drive action, so losing it left the entry to the 15-minute alarm. It is the
+// settle mutation (Item 9a04d916).
+test('single loss: a lost claim retry wake is a mutation, never the alarm', async t => {
+  const f = await batchesFixture(t, SCENARIOS['serial agent finish']);
+  let wake = null;
+  const run = await runLanding(f, key => {
+    if (wake || !key.startsWith('projectHostedFinishDriver:')) return false;
+    const task = f.pending()[0];
+    const queue = [...f.tables.projectHostedLandingQueues.values()][0];
+    const finish = [...f.tables.projectHostedFinishes.values()].find(
+      r => r.submissionId === task.args[0].submissionId,
+    );
+    // The claim retry: the step met the held Channel (no compose pending) and re-tries in 250 ms.
+    if (
+      task.scheduledTime - Date.now() === 250 &&
+      queue.lease?.owner === 'another-finish' &&
+      !JSON.parse(finish.value).pending
+    ) {
+      wake = key.split('@')[0];
+      return wake === 'projectHostedFinishDriver:drive';
+    }
+    if (key.endsWith('@publish')) {
+      f.patch('projectHostedLandingQueues', queue._id, {
+        lease: {
+          owner: 'another-finish',
+          token: (queue.lease?.token ?? 0) + 1,
+          until: Date.now() + 1000,
+          submissionId: 'another-submission',
+          attemptId: 'another-attempt',
+        },
+      });
+    }
+    return false;
+  });
+  assertOutcome(f, run, [], 'claim retry');
+  assert(wake, 'the step met a held Channel and re-tried its claim');
+  const supervisor = [...run.keys.keys()].filter(key => SUPERVISOR.some(p => key.startsWith(p)));
+  assert.deepEqual(supervisor, [], 'a mutation owned the claim retry, not the 15-minute alarm');
+  assert(run.elapsedMs < CHECK_WALL_MS, `resumed after ${run.elapsedMs / 1000} s`);
+  assert.equal(wake, 'projectHostedFinishDriver:settle');
+  assert(states(f).every(s => s.phase === 'landed'));
+});
+
+// Lead decision on 9a04d916 (option b, review d4f55e9f F3): the hops whose step does IO on a
+// healthy landing. Each `pick`ed hop is a finish wake with a new wake id at `step`, the n-th
+// of its entry. One run per hop loses the first drive action serving it: the drive its
+// settle mutation hands the IO to. A lost hop drive used to wait for the 15-minute alarm.
+// The hop is the settle mutation, which Convex runs exactly once, and its retry backstops
+// the drive.
+async function hopLost(t, step, pick) {
+  let covered = 0;
+  for (const [scenario, options] of Object.entries(SCENARIOS))
+    for (let j = 0; ; j++) {
+      const f = await batchesFixture(t, options);
+      const seen = new Set(),
+        per = new Map();
+      let target = null,
+        hops = 0,
+        lost = null;
+      const run = await runLanding(f, key => {
+        if (!key.startsWith('projectHostedFinishDriver:')) return false;
+        const { submissionId, wakeId } = f.pending()[0].args[0];
+        if (target === null && key.endsWith(`@${step}`) && !seen.has(wakeId)) {
+          seen.add(wakeId);
+          const n = per.get(submissionId) ?? 0;
+          per.set(submissionId, n + 1);
+          if (pick(n) && hops++ === j) target = wakeId;
+        }
+        if (lost || wakeId !== target || !key.startsWith('projectHostedFinishDriver:drive@')) return false;
+        lost = key;
+        return true;
+      });
+      const label = `${scenario}, ${step} hop ${j} (${lost ?? 'nothing'} lost)`;
+      assertOutcome(f, run, [], label);
+      if (target === null) break;
+      assert(j < 12, `${label}: bounded hops`);
+      if (!lost) continue; // a hop with no IO is the settle mutation alone: nothing to lose
+      covered++;
+      const supervisor = [...run.keys.keys()].filter(key => SUPERVISOR.some(p => key.startsWith(p)));
+      assert.deepEqual(supervisor, [], `${label}: a mutation owned the hop, not the 15-minute alarm`);
+      assert(run.elapsedMs < CHECK_WALL_MS, `${label}: resumed after ${run.elapsedMs / 1000} s`);
+      assert(
+        states(f).every(s => s.phase === 'landed'),
+        label,
+      );
+    }
+  assert(covered > 0, `a ${step} hop drives IO`);
+  t.diagnostic(JSON.stringify({ step, covered }));
+}
+test('single loss: a lost first acceptance step is a mutation, never the alarm', t =>
+  hopLost(t, 'publish', n => n === 0));
+test('single loss: a lost next acceptance page is a mutation, never the alarm', t =>
+  hopLost(t, 'publish', n => n === 1));
+// Every compose hop of every entry, the cohort's first compose step among them.
+test('single loss: a lost cohort first compose step is a mutation, never the alarm', t =>
+  hopLost(t, 'compose', () => true));
 
 test('receipt completion: a lost cohort tick replays its own arguments; failing again alerts the owner once', async t => {
   // Issue 13c63abe. Transient: the first tick of a cohort carries the precompose

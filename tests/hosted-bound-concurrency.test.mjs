@@ -19,6 +19,10 @@ const synthetic = {
   R2_ACCESS_KEY_ID: 'synthetic',
   R2_SECRET_ACCESS_KEY: 'synthetic',
 };
+// Steps of the longest drain, per concurrent finish count. 8: 100 -> 122 (Item 9a04d916, compose
+// settle; owner-approved +$0.02/1k): a settle mutation runs each finish wake with no IO in flight
+// and hands its IO to one drive, so a wake with IO is two scheduled tasks.
+const DRAIN_STEPS = { 2: 26, 8: 122 };
 // 5e3c3a3c: the new-run wake must not turn waiter handoffs into a claim cascade.
 for (const count of [2, 8])
   test(`${count} concurrent finishes on one main settle through hosted CAS with no native owner`, async t => {
@@ -79,12 +83,15 @@ for (const count of [2, 8])
     );
     assert.equal(new Set(queued.map(s => s.id)).size, count);
     const states = async () => Promise.all(queued.map(s => f.current(s.id)));
+    let drained = 0;
+    const drain = async () => (drained = Math.max(drained, await f.drain(DRAIN_STEPS[count])));
     for (let round = 0; round < count * 4; round++) {
-      await f.drain();
+      await drain();
       await f.passChecks();
-      await f.drain();
+      await drain();
       if ((await states()).every(s => s.submission.observation.state !== 'pending')) break;
     }
+    t.diagnostic(JSON.stringify({ count, drained }));
     const final = await states();
     assert(
       final.every(s => ['landed', 'terminal-failed'].includes(s.submission.observation.state)),

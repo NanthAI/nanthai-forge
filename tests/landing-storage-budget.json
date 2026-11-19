@@ -75,7 +75,7 @@
         "entries": 421,
         "keyBytes": 31803
       },
-      "written": 1539
+      "written": 1611
     }
   },
   "dogfood": {
@@ -154,7 +154,7 @@
         "entries": 25206,
         "keyBytes": 1713981
       },
-      "written": 2884
+      "written": 3028
     }
   },
   "journal": {
@@ -177,7 +177,7 @@
   },
   "tenLandingIndexes": {
     "landings": 10,
-    "written": 11736,
+    "written": 12864,
     "stored": [
       {
         "entries": 864,

@@ -7,6 +7,7 @@ import { attemptCarryRefusal, fallbackKind, landingCarryRefusal } from '../dist/
 import { batchesFixture, synthetic, states } from './hosted-landing-batches-fixture.mjs';
 import { fixture, current, drain, settle } from './hosted-stale-check-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { isFinishWake, runFinishWake } from './hosted-finish-fixture.mjs';
 const precompose = await import(moduleUrl('../convex/projectHostedLandingPrecompose.ts'));
 function withSynthetic(t) {
   const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
@@ -104,7 +105,11 @@ test('c3c69c57: a precomposed recompose after main moved records a named reason,
     { _handler: precompose.precomposeWaiting },
     { projectId: f.projectId, receiptIds: [main.receipt.id] },
   );
-  await f.execute(f.pending().find(task => task.name === 'projectHostedFinishDriver:drive'));
+  // The precompose wake has no IO in flight, so it is the settle mutation (Item 9a04d916).
+  await runFinishWake(
+    f,
+    f.pending().find(task => isFinishWake(task.name) && task.args[0].submissionId === id),
+  );
   assert(JSON.parse(f.row(id).value).pending.precompose, 'the advisory precompose owns the recompose');
   for (let wave = 0; states(f)[0].phase !== 'landed'; wave++) {
     assert(wave < 20, JSON.stringify(states(f)));

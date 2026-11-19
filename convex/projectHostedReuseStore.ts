@@ -11,7 +11,7 @@ import { installFinishCompose } from './projectHostedFinishCompose';
 import { crossHeadProofSchema } from '../src/hosted-cross-head-proof';
 import { invariant } from '../src/errors';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { scheduleFinish } from './projectHostedFinishWake';
+import { retryFinish } from './projectHostedFinishWake';
 import { reuseDecision, type ReuseReads } from './projectHostedReuseDecision';
 export { reuseDecision, type ReuseIneligible } from './projectHostedReuseDecision';
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() };
@@ -34,7 +34,7 @@ export const claim = internalMutation({
     const owner = input.owner;
     const reuseLease = { pendingId: input.pendingId, owner, until: Date.now() + 60_000 };
     await ctx.db.patch(row._id, { reuseLease });
-    await scheduleFinish(ctx, row, 60_000, true);
+    await retryFinish(ctx, row, {}, 60_000);
     return owner;
   },
 });

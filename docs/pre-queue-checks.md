@@ -444,14 +444,6 @@ their own admission evidence on the exact main receipt. Withdrawal groups the ot
 into one replacement check with the withdrawn source excluded. A replacement cohort can still
 use the existing scoped gate when every member has a valid full-pass basis.
 
-With `FORGE_QUEUE_COMPOSE_SETTLE=1` (Item 9a04d916; 25666d9b deletes it after its A/B), a
-cancelled check's recompose cannot wait for the 15-minute stall alarm. The finish step that
-submits the recompose and the one that consumes its result run in a scheduled mutation, which
-Convex runs exactly once, rather than an action, which runs at most once. IO stays in the action,
-owned by the step's retained 30-second retry. Task arguments never hold plan bytes or URLs: a
-solo plan carries its pin and compose identity, and the action re-reads the bytes in one indexed
-query. A solo stall keeps its owner diagnosis only while it is current.
-
 A file main changed that already holds the queued Candidate's bytes is not `SYNC_REQUIRED`
 advice: an early resolution carries its predecessor's own files, and the recompose takes
 either side. The would-conflict pass compares main's blob with the Candidate's stored file
@@ -461,6 +453,27 @@ Lane once and lands the new head. A sync conflict returns that sync's resolve gu
 sync still running returns its own resume command (exit 3). If the sync completes without moving
 the Lane, or the landing rejoins the same entry, it stops (exit 2) with the reason instead of
 offering `land --save` again.
+
+**Exactly-once finish wakes** (Item 9a04d916). A lost action on a cancelled check's
+recompose, once or twice, no longer waits for the 15-minute stall alarm. The finish step that
+submits the recompose, the one that consumes its result, and the 120-second compose watchdog run
+in a scheduled mutation, which Convex runs exactly once, rather than an action, which runs at most
+once. IO stays in the action. The step's retained retry for that IO (30 seconds; a proof's lease
+wait) is scheduled as that mutation too, using the same scheduler row, which resume cancels. So a
+lost IO action, even twice, is retried by a mutation within 30 seconds, and a lost source action
+is resumed by the watchdog mutation. After three mutation retries in a row the retry is an action
+again, so IO lost every time still ends typed through the stall supervisor; a lease wait spends
+none. The watchdog counts as the first of those three, so IO a watchdog step hands out gets two
+mutation retries. Task arguments never hold plan bytes or URLs: a solo plan carries its pin and compose
+identity, and the action re-reads the bytes in one indexed query. IO that cannot travel that way
+(an acceptance page, a cohort plan) gets one immediate action that runs the step again, with the
+mutation retry kept behind it. Every other finish wake that starts a new wake generation has no
+IO in flight, so it is that mutation too. That covers the first step into acceptance, each next
+acceptance page, a cohort's first compose step, an order-wait wake or expiry, a claim retry and a
+new-run follower. A mutation that fails outright (it throws) is not retried by Convex; the head's
+stall alarm, armed in the same transaction as the wake, stays its backstop. Recovery re-drives
+(the stall alarm's repair, an operator redrive and the dependency redrive) stay actions. A solo
+stall keeps its owner diagnosis only while it is current.
 
 ## Three test tiers
 

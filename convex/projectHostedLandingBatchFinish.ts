@@ -31,7 +31,7 @@ import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import type { FinishCommand } from '../src/hosted-finish';
 import { r2Key } from './r2';
-import { scheduleFinish, watchFinishCompose } from './projectHostedFinishWake';
+import { retryFinish, watchFinishCompose } from './projectHostedFinishWake';
 import { isStored } from './projectObjectFields';
 import { hostedStartMain } from './projectHostedChannels';
 import { invariant } from '../src/errors';
@@ -310,7 +310,7 @@ export async function batchFinishStep(
         location: 'r2',
         r2Key: objectKey,
       });
-    await scheduleFinish(ctx, originalRow, 30_000, true);
+    await retryFinish(ctx, originalRow, input);
     return {
       handled: true,
       command: {

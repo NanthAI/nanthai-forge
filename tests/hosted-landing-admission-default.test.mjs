@@ -33,14 +33,14 @@ for (const { cell, history } of [
       admissionQueueOnlySubmitOverServiceMs:
         result.submitMaxMs - Math.max(...cell.entries.map(e => e.checkMs)),
     };
+    // Every quantity over its budget is named at once, not only the first.
+    const over = [];
     for (const [metric, value] of Object.entries(metrics)) {
       const budget = budgets.find(b => b.metric === metric);
       assert(budget, `central budget for ${metric}`);
-      assert(
-        value <= budget.max,
-        `${metric}: ${value} exceeds ${budget.max}; ${JSON.stringify(result.callCounts)}`,
-      );
+      if (value > budget.max) over.push(`${metric}: ${value} exceeds ${budget.max}`);
     }
+    assert.deepEqual(over, [], JSON.stringify(result.callCounts));
     assert.equal(result.idle, 0);
     assert.equal(result.landed.length, 10);
     t.diagnostic(

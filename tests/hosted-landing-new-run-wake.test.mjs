@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 import { batchesFixture, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { parkedIncident } from './queue-sim/parked-incident.mjs';
+import { isFinishWake } from './hosted-finish-fixture.mjs';
 const { bindsNewRun } = await import(moduleUrl('../convex/projectHostedFinishWake.ts'));
 const { HOSTED_ORDER_WAITS } = await import(moduleUrl('../convex/projectHostedLandingOrder.ts'));
 const environment = { ...synthetic, FORGE_HOSTED_CHECK_KEY_SYNTHETIC: 'synthetic-queue-sim' };
@@ -111,13 +112,15 @@ test('5e3c3a3c new-run wake: disjoint passed followers take main while the head 
   assert(run.holder <= BEFORE_N1.holder + 0.1, 'the overtaken head is not delayed');
   // The head checked while main moved: it carries its pass with one proof (7d98c7da price).
   assert(run.proofs <= BEFORE_N1.proofs + 1, `proofs ${BEFORE_N1.proofs} -> ${run.proofs}`);
-  assert(run.calls <= BEFORE_N1.calls * 1.25, `calls ${BEFORE_N1.calls} -> ${run.calls}`);
+  // Calls: N1 bounded the wake at BEFORE_N1 x 1.25 (137.5), measured without compose settle;
+  // 148 measured, 147 or 148 run to run (Item 9a04d916, compose settle; owner-approved +$0.02/1k): every finish wake with no IO in flight is a settle mutation, and a
+  // step that needs IO hands it to one drive action.
+  assert(run.calls <= 148, `calls ${BEFORE_N1.calls} -> ${run.calls}`);
 });
 
 const requests = f => [...f.tables.projectHostedLandingRequests.values()];
 const request = (f, id) => requests(f).find(r => r.submissionId === id);
-const drives = f =>
-  [...f.tables._scheduled_functions.values()].filter(task => task.name === 'projectHostedFinishDriver:drive');
+const drives = f => [...f.tables._scheduled_functions.values()].filter(task => isFinishWake(task.name));
 
 // Review c6953f0b finding 1: followers that overtake a holder in successive generations must
 // each count toward its one lifetime re-check. Exact re-checks (no cross-head proof), so any
@@ -156,8 +159,7 @@ test('5e3c3a3c new-run wake: overtakes in successive generations re-check the ho
   const work = () => f.pending().filter(task => !/MainAudit:start|LandingStall/.test(task.name));
   const due = () => work().filter(task => task.scheduledTime <= Date.now());
   const phase = id => request(f, id)?.phase;
-  const ownDrive = (task, id) =>
-    task.name === 'projectHostedFinishDriver:drive' && task.args[0]?.submissionId === id;
+  const ownDrive = (task, id) => isFinishWake(task.name) && task.args[0]?.submissionId === id;
   // H lands; A passed on the old main and is still Ready (its own drive deferred).
   for (let i = 0; i < 400 && phase(h) !== 'landed'; i++) {
     await passRuns();
@@ -260,4 +262,22 @@ test('5e3c3a3c new-run wake: a bound run drives exactly one follower', async t =
   assert.deepEqual([...driven], [followers[0]], 'one follower drive for the bind');
   for (const id of followers.slice(1))
     assert.equal(request(f, id).orderWait, a, 'the rest stay on the holder');
+});
+
+// Review d4f55e9f F3 (Item 9a04d916): the follower's one wake has no IO in flight, so it is
+// the settle mutation, which Convex runs exactly once: no action on this hop to lose (a
+// drive action there left the follower to the 15-minute stall alarm armed beside it).
+test('5e3c3a3c new-run wake: the follower wake is the settle mutation', async t => {
+  let known;
+  const { f, followers } = await parkedIncident(t, {
+    seed(f) {
+      known = new Set(drives(f).map(task => task._id));
+    },
+  });
+  const woken = drives(f).filter(
+    task => !known.has(task._id) && followers.includes(task.args[0]?.submissionId),
+  );
+  assert.equal(woken.length, 1, 'one follower wake for the bind');
+  assert.equal(woken[0].name, 'projectHostedFinishDriver:settle');
+  assert(request(f, woken[0].args[0].submissionId).alarm, 'its stall alarm stays armed beside it');
 });

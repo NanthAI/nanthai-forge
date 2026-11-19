@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic, batchStore } from './hosted-landing-batches-fixture.mjs';
-import { landingApi, composeSettleSwitch } from './hosted-finish-fixture.mjs';
+import { landingApi } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { batchMemberDiagnostic, batchDiagnosticSchema } from '../dist/hosted-batch-diagnosis.js';
 const finishCompose = await import(moduleUrl('../convex/projectHostedFinishCompose.ts'));
@@ -160,10 +160,13 @@ for (const history of [0, 575, 1150])
     // Reads 4207 -> 4216 (ee9d5738): each of the 9 landing completion ticks reads one indexed range of open
     // overlap rows that predate lastActivityAt, to stamp them from their Lane record; empty here, so nothing
     // else is read or written. Calls and writes are unchanged.
+    // Calls 199 -> 204, reads 4216 -> 4411, writes 1236 -> 1376 (Item 9a04d916, compose settle;
+    // owner-approved +$0.02/1k): each finish wake with no IO in flight is the settle mutation, and a step that needs IO hands it to one drive action (an acceptance page or cohort plan steps once more there).
+    // Writes 1376 -> 1386: the always-on S1 writer (b149b16b, merged from main) arms one capsule wake per landed member; no call or read.
     assert(
-      budget.calls <= 199 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 4216 &&
-        source.reduce((n, c) => n + c.writes, 0) <= 1236,
+      budget.calls <= 204 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 4411 &&
+        source.reduce((n, c) => n + c.writes, 0) <= 1386,
       JSON.stringify({
         ...budget,
         sourceReads: source.reduce((n, c) => n + c.documents, 0),
@@ -190,78 +193,76 @@ for (const history of [0, 575, 1150])
     t.diagnostic(JSON.stringify(budget));
   });
 
-// Item 9a04d916: with FORGE_QUEUE_COMPOSE_SETTLE on, the completed shared compose is consumed by
-// the leader's settle mutation, not the drive action, so the race holds both hops back.
-for (const on of [false, true])
-  test(`member precompose terminal before shared compose consumption keeps clean survivors grouped (compose settle ${on ? 'on' : 'off'})`, async t => {
-    composeSettleSwitch(t, on);
-    const f = await batchesFixture(t, {
-      count: 6,
-      batching: 'default',
-      batchMaxSize: 3,
-      memberPaths: [
-        'independent-0',
-        'collision',
-        'independent-2',
-        'collision',
-        'independent-4',
-        'independent-5',
-      ],
-    });
-    let cohort,
-      steps = 0;
-    // Stop exactly when the shared source result is durable, before its finish consumes it.
-    for (;;) {
-      assert(++steps < 500);
-      const task = f.pending().find(task => !task.name.startsWith('projectHostedLandingStall:'));
-      assert(task);
-      await f.execute(task);
-      cohort = batches(f).find(batch => batch.predecessor);
-      if (!cohort) continue;
-      const op = [...f.tables.projectHostedOperations.values()]
-        .map(row => JSON.parse(row.value))
-        .find(op => op.operationId === cohort.composeOperationId);
-      if (op?.terminal) break;
-    }
-    const leader = cohort.leaderId;
-    const sharedFinish = task =>
-      (task.name === 'projectHostedFinishDriver:drive' || task.name === 'projectHostedFinishDriver:settle') &&
-      task.args[0].submissionId === leader;
-    await f.rawChecks.pass(await f.rawChecks.activate(f.runs()[0].id));
-    await drain(f, sharedFinish);
-    assert.equal(current(f, 1).phase, 'landed');
-    await f.transaction(
-      'member-probe-before-shared-result',
-      {
-        _handler: async ctx => {
-          const finish = await finishStore.loadFinish(ctx, { projectId: f.projectId, submissionId: leader });
-          if (!finish.value.pending)
-            await finishCompose.reserveFinishRetry(ctx, finish.row, finish.value, 'CHECK_EVIDENCE_REFRESH', {
-              peerLanes: [f.entries[1].lane.laneId],
-              paths: ['collision'],
-              runnable: false,
-            });
-        },
-      },
-      {},
-    );
-    await drain(f);
-    assert.equal(current(f, 3).phase, 'terminal-failed');
-    assert.equal(current(f, 4).phase, 'checking');
-    assert.equal(current(f, 5).phase, 'checking');
-    const retained = batches(f).find(batch => batch.id === cohort.id);
-    assert.equal(retained.phase, 'checking');
-    assert.equal(retained.composeOperationId, cohort.composeOperationId);
-    assert.equal(current(f, 4).batchSolo, undefined);
-    assert.equal(f.runs().length, 2);
-    assert.equal(
-      f.metrics.sourceJobs,
-      5,
-      'two shared jobs and three already-running legacy member probes, without fallback source',
-    );
-    await finish(f);
-    assert.equal(f.runs().length, 2);
+// Item 9a04d916: the completed shared compose is consumed by the leader's settle mutation,
+// not the drive action, so the race holds both hops back.
+test('member precompose terminal before shared compose consumption keeps clean survivors grouped', async t => {
+  const f = await batchesFixture(t, {
+    count: 6,
+    batching: 'default',
+    batchMaxSize: 3,
+    memberPaths: [
+      'independent-0',
+      'collision',
+      'independent-2',
+      'collision',
+      'independent-4',
+      'independent-5',
+    ],
   });
+  let cohort,
+    steps = 0;
+  // Stop exactly when the shared source result is durable, before its finish consumes it.
+  for (;;) {
+    assert(++steps < 500);
+    const task = f.pending().find(task => !task.name.startsWith('projectHostedLandingStall:'));
+    assert(task);
+    await f.execute(task);
+    cohort = batches(f).find(batch => batch.predecessor);
+    if (!cohort) continue;
+    const op = [...f.tables.projectHostedOperations.values()]
+      .map(row => JSON.parse(row.value))
+      .find(op => op.operationId === cohort.composeOperationId);
+    if (op?.terminal) break;
+  }
+  const leader = cohort.leaderId;
+  const sharedFinish = task =>
+    (task.name === 'projectHostedFinishDriver:drive' || task.name === 'projectHostedFinishDriver:settle') &&
+    task.args[0].submissionId === leader;
+  await f.rawChecks.pass(await f.rawChecks.activate(f.runs()[0].id));
+  await drain(f, sharedFinish);
+  assert.equal(current(f, 1).phase, 'landed');
+  await f.transaction(
+    'member-probe-before-shared-result',
+    {
+      _handler: async ctx => {
+        const finish = await finishStore.loadFinish(ctx, { projectId: f.projectId, submissionId: leader });
+        if (!finish.value.pending)
+          await finishCompose.reserveFinishRetry(ctx, finish.row, finish.value, 'CHECK_EVIDENCE_REFRESH', {
+            peerLanes: [f.entries[1].lane.laneId],
+            paths: ['collision'],
+            runnable: false,
+          });
+      },
+    },
+    {},
+  );
+  await drain(f);
+  assert.equal(current(f, 3).phase, 'terminal-failed');
+  assert.equal(current(f, 4).phase, 'checking');
+  assert.equal(current(f, 5).phase, 'checking');
+  const retained = batches(f).find(batch => batch.id === cohort.id);
+  assert.equal(retained.phase, 'checking');
+  assert.equal(retained.composeOperationId, cohort.composeOperationId);
+  assert.equal(current(f, 4).batchSolo, undefined);
+  assert.equal(f.runs().length, 2);
+  assert.equal(
+    f.metrics.sourceJobs,
+    5,
+    'two shared jobs and three already-running legacy member probes, without fallback source',
+  );
+  await finish(f);
+  assert.equal(f.runs().length, 2);
+});
 
 for (const outcome of ['passed', 'failed', 'cancelled'])
   test(`ready entries pipeline behind a fallback solo tail; ${outcome} preserves or invalidates exact successor evidence`, async t => {

@@ -93,7 +93,7 @@ export async function redriveLanding(
     // 19328518 (88-minute landing, 2026-11-05): a passed head whose settlement
     // step ended without scheduling the next one has no driver at all. Only the
     // finish publishes it, and every later passed entry waits for it in order.
-    if (act) await scheduleFinish(ctx, finish);
+    if (act) await scheduleFinish(ctx, finish, 0, false, 'drive');
     done.push('finish-idle');
   } else if (finish?.waiting && finish.parentSubmissionId) {
     // The parent's terminal event (FinishDriver:dependents) was lost.
@@ -104,7 +104,7 @@ export async function redriveLanding(
     if (parent && (parent.phase === 'landed' || parent.phase === 'terminal-failed')) {
       if (act) {
         await ctx.db.patch(finish._id, { waiting: false });
-        await scheduleFinish(ctx, { ...finish, waiting: false });
+        await scheduleFinish(ctx, { ...finish, waiting: false }, 0, false, 'drive');
       }
       done.push('dependency');
     }

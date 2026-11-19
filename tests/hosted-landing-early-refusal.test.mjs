@@ -42,7 +42,10 @@ const queueRuns = f => f.runs().filter(run => !isLane(f, run));
 // paths publish unconditional Candidate listings. The old serial baseline
 // (221 / 4,708 / 1,682) predates that representation; current main without
 // listings already writes 1,684 non-maintenance documents and cannot meet it.
-const BASELINE = { transactions: 210, documentsRead: 4815, documentsWritten: 1780 };
+// Transactions 210 -> 224, non-maintenance writes 1,780 -> 1,862 (Item 9a04d916, compose
+// settle; owner-approved +$0.02/1k): each finish wake with no IO in flight is the settle mutation, and a step that needs IO hands it to one drive action (an acceptance page or cohort plan steps once more there). Reads stay under the serial path.
+// Non-maintenance writes 1,862 -> 1,867: the always-on S1 writer (b149b16b, merged from main) arms one capsule wake per landed member; no call or read.
+const BASELINE = { transactions: 224, documentsRead: 4815, documentsWritten: 1867 };
 
 /** `count` changes pass their Lane checks together; the first lands on its own run
  * and moves main, the rest are refused. Records when each refused change's

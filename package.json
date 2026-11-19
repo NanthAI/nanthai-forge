@@ -93,6 +93,8 @@
             "tests/hosted-landing-admission-default.test.mjs",
             "tests/hosted-landing-cohort-isolation.test.mjs",
             "tests/hosted-precompose-ownership.test.mjs",
+            "tests/hosted-batch-reselection.test.mjs",
+            "tests/hosted-landing-prequeue.test.mjs",
             "tests/hosted-acceptance-scale.test.mjs"
           ],
           "inputs": [

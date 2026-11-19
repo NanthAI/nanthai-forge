@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { landingApi } from './hosted-finish-fixture.mjs';
+import { CHECK_WALL_MS } from './queue-sim/invariants.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const wake = await import(moduleUrl('../convex/projectHostedFinishWake.ts'));
 const store = await import(moduleUrl('../convex/projectHostedFinishStore.ts'));
@@ -91,3 +92,40 @@ for (const ending of ['failed', 'withdrawn'])
     await drainDue(f);
     assert.equal(states(f).filter(s => s.phase === 'landed').length, 5, 'the two later Lanes move too');
   });
+
+// Review d4f55e9f F3 (Item 9a04d916): the same parked cohort when nothing ends the reservation.
+// The leader's only wake is the order-wait expiry at the reservation bound (a parked waiter
+// owns no stall alarm). It is the settle mutation, never a drive action a deploy can lose:
+// Convex runs it exactly once, at the bound the leader re-claims, and the cohort lands
+// within one check wall.
+test('order-wait expiry: the reservation bound wakes the parked leader with the settle mutation', async t => {
+  const f = await batchesFixture(t, {
+    count: 3,
+    memberPaths: ['member-0', 'member-1', 'member-2', 'member-0'],
+  });
+  await f.drain();
+  const shared = f.runs()[0];
+  const holder = await f.add(3);
+  const holderRow = [...f.tables.projectHostedLandingRequests.values()].find(
+    r => r.submissionId === holder.id,
+  );
+  const until = Date.now() + 30 * 60_000;
+  f.patch('projectHostedLandingRequests', holderRow._id, { reservedUntil: until });
+  await f.rawChecks.pass(await f.rawChecks.activate(shared.id));
+  await drainDue(f);
+  const leader = states(f).find(s => s.id !== holder.id && s.phase === 'ready');
+  const finish = [...f.tables.projectHostedFinishes.values()].find(r => r.submissionId === leader.id);
+  assert.equal(finish.wake.at, until, 'the reservation bound owns a future fallback wake');
+  const expiry = f.pending().find(task => task._id === finish.wake.taskId);
+  assert.equal(expiry.name, 'projectHostedFinishDriver:settle');
+  f.advanceClock(until - Date.now());
+  await drainDue(f);
+  assert(
+    states(f)
+      .filter(s => s.id !== holder.id)
+      .every(s => s.phase === 'landed'),
+    'the cohort lands once the reservation bound passes',
+  );
+  // test-signal: allow Date.now is the fixture's injected scheduler clock
+  assert(Date.now() - until < CHECK_WALL_MS);
+});

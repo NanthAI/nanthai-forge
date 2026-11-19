@@ -319,9 +319,11 @@ test('own-command 5-change wave: clean overtakes keep their passed Lane run; the
   // 5e3c3a3c new-run wake: this wave re-pins carried passes (same run) behind landing
   // entries; waking there cost a proof and calls (G2, Rule 1). The wake adds no work here: the
   // same wave measured with the wake off (Item 48697ee7) ran 6 checks, 7 proofs, 64 calls a landing.
+  // Calls 64 -> 70.2 (Item 9a04d916, compose settle; owner-approved +$0.02/1k): every finish wake with no IO in flight is a settle mutation,
+  // and a step that needs IO hands it to one drive action.
   assert.deepEqual(
     { runs: after.runs, proofs: after.proofs, calls: after.convexCallsPerLanding },
-    { runs: 6, proofs: 7, calls: 64 },
+    { runs: 6, proofs: 7, calls: 70.2 },
     'new-run wake: same work on carry re-pins',
   );
 });

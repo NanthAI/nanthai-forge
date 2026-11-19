@@ -181,7 +181,7 @@ test('four poisoned slots reach six failed attempts, settle visibly, and release
       .find(x => x.name === 'projectConvexSourceTask:run' && x.args[0].jobId === step.jobId);
     assert(action);
     if (action.scheduledTime >= (await load()).control.workerUntil) {
-      await f.execute(f.pending().find(x => x.name === 'projectHostedFinishDriver:drive'));
+      await f.execute(f.pending().find(x => x.name === 'projectHostedFinishDriver:retry'));
       await f.execute(
         f.pending().find(x => x.name === 'projectConvexSource:dispatch' && x.args[0].jobId === step.jobId),
       );
@@ -258,7 +258,7 @@ for (const running of [false, true])
   test(`compose watch-window exhaustion settles retained work, running=${running}`, async t => {
     const { f, state, step, load } = await fixture(t),
       original = await load();
-    const watchdog = f.pending().find(x => x.name === 'projectHostedFinishDriver:drive');
+    const watchdog = f.pending().find(x => x.name === 'projectHostedFinishDriver:retry');
     assert(watchdog);
     if (running) {
       const action = f.pending().find(x => x.name === 'projectConvexSourceTask:run');
@@ -303,7 +303,7 @@ test('the compose watch retains the latest recorded cause independently of pool 
   const older = { stage: 'source-head', exception: 'Error', code: null, elapsedMs: 45, httpStatus: 503 };
   f.patch('projectSourceTasks', tasks[0]._id, { lastFailure: latest, lastFailureAt: Date.now() });
   f.patch('projectSourceTasks', tasks[1]._id, { lastFailure: older, lastFailureAt: Date.now() - 100 });
-  const watch = f.pending().find(x => x.name === 'projectHostedFinishDriver:drive');
+  const watch = f.pending().find(x => x.name === 'projectHostedFinishDriver:retry');
   f.advanceClock(HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS + 1);
   await f.execute(watch);
   assert.deepEqual((await load()).control.failureCause, latest);
@@ -343,7 +343,7 @@ test('the compose watch preserves a terminal job cause while an older physical s
     {},
   );
   assert.deepEqual((await load()).control.failureCause, cause);
-  const watch = f.pending().find(x => x.name === 'projectHostedFinishDriver:drive');
+  const watch = f.pending().find(x => x.name === 'projectHostedFinishDriver:retry');
   f.advanceClock(HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS + 1);
   await f.execute(watch);
   const settled = (await f.current(state.id)).submission;
@@ -437,7 +437,7 @@ test('serial source failures also stop at six attempts under the original finish
     const row = f.tables.projectSourceSteps.get(step._id);
     assert.equal(row.failedAttempts, attempt);
     if (attempt < 6) {
-      await f.execute(f.pending().find(x => x.name === 'projectHostedFinishDriver:drive'));
+      await f.execute(f.pending().find(x => x.name === 'projectHostedFinishDriver:retry'));
       await f.execute(f.pending().find(x => x.name === 'projectConvexSource:dispatch'));
       const before = JSON.stringify(f.tables.projectSourceSteps.get(step._id));
       assert.equal(await f.tx('lateSerialBegin', store.begin, firstArgs), null);
@@ -542,7 +542,7 @@ test('the watch settles a reserved source job before any provider step exists', 
     jobId = dispatch.args[0].jobId;
   assert.equal(f.tables.projectSourceSteps.size, 0);
   f.advanceClock(HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS + 1);
-  await f.execute(f.pending().find(x => x.name === 'projectHostedFinishDriver:drive'));
+  await f.execute(f.pending().find(x => x.name === 'projectHostedFinishDriver:retry'));
   await f.drain();
   const job = await f.tx(
     'reservedJobTerminal',

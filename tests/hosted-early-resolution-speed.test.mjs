@@ -46,9 +46,11 @@ for (const history of [0, 1150])
     // insert): +3 reads, +3 writes; equal in both arms.
     // b149b16b: the always-on S1 writer arms one terminal-plus-seven-day capsule wake per landed
     // member inside its existing settle mutation (+3 writes: the schedules; no call or read); equal in both arms.
+    // Calls 155 -> 165, reads 2987 -> 3193, writes 1032 -> 1126 (Item 9a04d916, compose settle; owner-approved +$0.02/1k): each finish wake with no IO in flight is the settle mutation, and a step that needs IO hands it to one drive action (an acceptance page or cohort plan steps once more there);
+    // equal in both arms.
     assert.deepEqual(
       [after.calls, after.reads, after.writes, after.lateTaskMs, after.idle],
-      [155, 2987, 1032, 180000, 0],
+      [165, 3193, 1126, 180000, 0],
       '8c9b84fc: disjoint baseline must not grow',
     );
     t.diagnostic(JSON.stringify({ history, before, after }));

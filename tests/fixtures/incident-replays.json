@@ -282,6 +282,18 @@
       "what": "Main went red after a landing turned on browser tests its own check skipped (2026-11-19); a skip counted as a pass, two unrelated landings were blamed and reverted, and a docs-only audit cleared the red",
       "file": "tests/hosted-culprit.test.mjs",
       "test": "incident 687d1eda: a newly covered failure names the coverage landing, reverts nothing and keeps main red"
+    },
+    {
+      "incident": "9a04d916",
+      "what": "Same incident, double loss (review ba9ce962 L2): the action uploading the recompose plan and its 30 s retry both lost (a deploy mid-action twice) left the entry to the 15-minute stall alarm",
+      "file": "tests/hosted-landing-stale-checks.test.mjs",
+      "test": "incident 9a04d916 L2: a lost plan upload and a lost retry still deliver the conflict within one check wall"
+    },
+    {
+      "incident": "9a04d916",
+      "what": "Same incident, compose double loss (review d4f55e9f F1): the recompose's source action and then its 120 s compose watchdog action both lost left the entry to the 15-minute stall alarm",
+      "file": "tests/landing-failure-injection.test.mjs",
+      "test": "incident 9a04d916 F1: a lost source action and its lost 120 s watchdog resume without the stall supervisor"
     }
   ]
 }

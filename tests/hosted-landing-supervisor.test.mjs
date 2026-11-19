@@ -156,7 +156,11 @@ test('incident replay 2026-10-30 13:23/14:20: a step that fails on every retry e
     endedAt - firstLoss <= 4 * LANDING_STALL_MS,
     `ended ${(endedAt - firstLoss) / 60_000} min after the fault`,
   );
-  assert(losses <= 3, `${losses} replays of the failing step`);
+  // Item 9a04d916 (compose settle): each stall re-drive's step arms its retry mutation, which
+  // re-steps and hands the IO to a fresh drive up to 3 times in a row (FINISH_SETTLE_RETRIES),
+  // so each of the 3 rounds loses up to 1 + 3 drives.
+  const bound = 3 * (1 + 3);
+  assert(losses <= bound, `${losses} replays of the failing step`);
   const operation = [...f.tables.projectHostedOperations.values()]
     .map(row => JSON.parse(row.value))
     .find(op => op.operationId === ended.operationId);

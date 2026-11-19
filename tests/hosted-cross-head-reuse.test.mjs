@@ -608,6 +608,36 @@ test('a slow proof has one renewable owner; watchdogs do not duplicate it and ex
   assert.equal((await f.status(state.id)).attempt.id, attempt);
 });
 
+// Review d4f55e9f F2 (Item 9a04d916): a lease wait is no loss, so it keeps the
+// mutation retry count instead of spending it. A healthy proof renewing past the budget
+// (three waits, about 3 min) used to turn its 4th wait into a drive action, which a lost
+// drive plus a lost proof left to the 15-minute alarm. The wait still ends with the lease.
+test('a proof renewing past the retry budget keeps every lease wait a mutation, then expiry falls back once', async t => {
+  const { f, state } = await readyRace(t),
+    args = await pendingProof(f, state);
+  const owner = await f.tx('proofClaim', reuse.claim, args);
+  assert(owner);
+  const wake = () => f.pending().filter(task => task.name.startsWith('projectHostedFinishDriver:'));
+  f.advanceClock(15_000);
+  assert.equal(await f.tx('proofRenew', reuse.renew, { ...args, owner }), true);
+  // Each wait wakes at the lease end it saw; the proof has renewed past it by then.
+  for (let wait = 1; wait <= 6; wait++) {
+    const [task] = wake();
+    assert.equal(task?.name, 'projectHostedFinishDriver:retry', `lease wait ${wait} is the retry mutation`);
+    assert.equal(task.args[0].attempt, undefined, 'a lease wait spends no retry');
+    await f.execute(task);
+    assert.equal(f.row(state.id).wake.at, f.row(state.id).reuseLease.until);
+    assert.equal(await f.tx('proofRenew', reuse.renew, { ...args, owner }), true);
+  }
+  f.advanceClock(60_001);
+  assert.equal(await f.tx('proofLateRenew', reuse.renew, { ...args, owner }), false);
+  await f.execute(wake()[0]);
+  assert.equal(f.row(state.id).reuseLease, undefined);
+  for (let n = 0; n < 20 && (await f.current(state.id)).submission.phase !== 'checking'; n++)
+    await f.execute();
+  assert.equal(f.tables.projectHostedCheckRuns.size, 3, 'only one fallback check');
+});
+
 test('cancellation during proof analysis fences completion and cannot revive a submission', async t => {
   const { f, state } = await readyRace(t),
     args = await pendingProof(f, state);

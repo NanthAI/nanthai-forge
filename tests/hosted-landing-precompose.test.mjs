@@ -8,7 +8,7 @@ import { hostedLandingStateSchema } from '../dist/hosted-landing.js';
 import { hostedRecordSchema } from '../dist/hosted-records.js';
 import { hostedFinishSchema } from '../dist/hosted-finish.js';
 import { moduleUrl } from './convex-module.mjs';
-import { compose, records } from './hosted-finish-fixture.mjs';
+import { compose, isFinishWake, records, runFinishWake } from './hosted-finish-fixture.mjs';
 const precompose = await import(moduleUrl('../convex/projectHostedLandingPrecompose.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 const conflictPeers = await import(moduleUrl('../convex/projectHostedLandingConflictPeers.ts'));
@@ -68,9 +68,7 @@ for (const grouped of [false, true, 'pipeline']) {
       // driver delay, never a queue/stall timeout.
       for (const task of f
         .pending()
-        .filter(
-          task => task.name === 'projectHostedFinishDriver:drive' && task.scheduledTime - Date.now() < 30000,
-        ))
+        .filter(task => isFinishWake(task.name) && task.scheduledTime - Date.now() < 30000))
         await f.execute(task);
       await drainReady();
     }
@@ -447,7 +445,10 @@ for (const notified of [false, true])
       { _handler: precompose.precomposeWaiting },
       { projectId: f.projectId, receiptIds: [moving.receipt.id] },
     );
-    await f.execute(f.pending().find(task => task.name === 'projectHostedFinishDriver:drive'));
+    await runFinishWake(
+      f,
+      f.pending().find(task => isFinishWake(task.name)),
+    );
     const isSource = task =>
       task.name.startsWith('projectConvexSource') ||
       /^projectHostedComposeJobs:(complete|publish)$/.test(task.name);

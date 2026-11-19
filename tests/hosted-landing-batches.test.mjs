@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { batchEligible } from '../dist/hosted-landing-batch.js';
-import { landingApi, compose } from './hosted-finish-fixture.mjs';
+import { landingApi, compose, isFinishWake } from './hosted-finish-fixture.mjs';
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -260,10 +260,14 @@ test('lost batch upload replies replay the same generation without duplicate sou
   const leader = retainedBatch.leaderId ?? retainedBatch.id;
   let lostReply = false;
   for (let step = 0; step < 12 && !lostReply; step++) {
-    const task = f
-      .pending()
-      .find(task => task.name === 'projectHostedFinishDriver:drive' && task.args[0].submissionId === leader);
+    const task = f.pending().find(task => isFinishWake(task.name) && task.args[0].submissionId === leader);
     assert(task, 'batch metadata step remains resumable');
+    // Item 9a04d916 option b (switch on): a settle or retry mutation has no reply to lose;
+    // it hands the upload to the drive whose reply is lost below.
+    if (task.name !== 'projectHostedFinishDriver:drive') {
+      await f.execute(task);
+      continue;
+    }
     try {
       await f.execute(task, 'before-resume');
     } catch (error) {

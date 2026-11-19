@@ -27,22 +27,27 @@ export const finishRow = (
       q.eq('projectId', input.projectId).eq('submissionId', input.submissionId),
     )
     .unique();
-/** Item 9a04d916 (switch FORGE_QUEUE_COMPOSE_SETTLE, off by default): the step that
- * submits a recompose and the step that consumes a completed compose run in a
- * scheduled mutation, which Convex runs exactly once, instead of the drive action,
- * which runs at most once. A lost drive there left a queued, non-runnable entry to
- * its 15-minute stall alarm. Any IO the step needs still runs in the action, owned
- * by the step's retained retry wake. */
-export const composeSettle = () => process.env.FORGE_QUEUE_COMPOSE_SETTLE === '1';
 /** Only pending work has a timer. Failed scheduling receipts can be repaired by
- * the original enqueue/resume; a running step retains its exact IO generation. */
+ * the original enqueue/resume; a running step retains its exact IO generation.
+ * Item 9a04d916 (compose settle): a finish wake with no IO in flight is the settle
+ * mutation, which Convex runs exactly once, not the drive action, which runs at most
+ * once (a deploy can lose it, leaving the entry to its 15-minute stall alarm). A fresh
+ * wake (new wake id) never has IO in flight: the step that submits a recompose, the one
+ * that consumes a completed compose, the first step into acceptance, each next
+ * acceptance page, a cohort's first compose step. A retained wake (the step's own IO
+ * generation) stays the drive unless the caller names `settle` or `retry`. Any IO a
+ * step needs still runs in the action, owned by the step's retained retry. Recovery
+ * re-drives (stall supervisor, operator redrive) pass 'drive' and keep the action path. */
 export async function scheduleFinish(
   ctx: MutationCtx,
   row: Doc<'projectHostedFinishes'>,
   delay = 0,
   retainId = false,
-  settle = false,
+  settle: boolean | 'retry' | 'drive' = false,
+  attempt?: number,
 ) {
+  const kind =
+    settle === 'drive' ? 'drive' : settle === 'retry' ? 'retry' : settle || !retainId ? 'settle' : 'drive';
   let task;
   if (row.wake && !retainId) {
     task = await ctx.db.system.get(row.wake.taskId);
@@ -52,20 +57,57 @@ export async function scheduleFinish(
   const id = retainId && row.wake ? row.wake.id : crypto.randomUUID();
   const taskId = await ctx.scheduler.runAfter(
     delay,
-    settle
-      ? makeFunctionReference<'mutation'>('projectHostedFinishDriver:settle')
-      : makeFunctionReference<'action'>('projectHostedFinishDriver:drive'),
+    kind === 'retry'
+      ? makeFunctionReference<'mutation'>('projectHostedFinishDriver:retry')
+      : kind === 'settle'
+        ? makeFunctionReference<'mutation'>('projectHostedFinishDriver:settle')
+        : makeFunctionReference<'action'>('projectHostedFinishDriver:drive'),
     {
       projectId: row.projectId,
       submissionId: row.submissionId,
       wakeId: id,
+      ...(attempt ? { attempt } : {}),
     },
   );
   await ctx.db.patch(row._id, { wake: { id, taskId, at: Date.now() + delay } });
 }
+/** Mutation retries in a row between two drive steps (review d4f55e9f F2). */
+export const FINISH_SETTLE_RETRIES = 3;
+/** Review ba9ce962 L2: a step's retained IO retry, or a lease wait for its proof. It
+ * owns the generation while the untracked IO runs, so it is the `retry` mutation (the
+ * settle step, counted): the same one scheduler row, cancelled at resume. Its name is as
+ * long as `drive` and the first retry carries no count, so a healthy step writes the same
+ * bytes as a drive retry did. As a drive, a lost IO action and a lost retry action
+ * together left the entry to its 15-minute stall alarm.
+ *
+ * The budget is FINISH_SETTLE_RETRIES mutation retries in a row, about 90 s, inside one
+ * check wall. After it the retry is a drive, and that drive's own step starts the count
+ * again (it carries none). A `wait` (a proof lease still held) is no loss: it keeps the
+ * count instead of spending it, and ends with the lease. Why the restart cannot loop: IO
+ * lost every time runs three mutations per drive retry, and the drive retry itself runs
+ * every 30 s, as it did before compose settle. While that drive keeps arming the next
+ * retry the entry is driven, and the supervisor never ends a queued entry something still
+ * drives (projectHostedLandingStall.ts, "A queued entry ends only through the drop
+ * repair"). A lost drive retry leaves no mutation behind, so the supervisor ends it typed
+ * (LANDING_DRIVER_EXHAUSTED; test "IO lost every time spends the retry mutation budget"). */
+export function retryFinish(
+  ctx: MutationCtx,
+  row: Doc<'projectHostedFinishes'>,
+  input: { attempt?: number },
+  delay = 30_000,
+  wait = false,
+) {
+  const attempt = wait ? (input.attempt ?? 1) : (input.attempt ?? 0) + 1;
+  if (attempt > FINISH_SETTLE_RETRIES) return scheduleFinish(ctx, row, delay, true);
+  return scheduleFinish(ctx, row, delay, true, 'retry', attempt > 1 ? attempt : undefined);
+}
 /** Incident 2026-10-30: a source step action that threw (fetch failed) left its
  * compose running with no owner wake; the whole train waited for the 15-minute
- * stall alarm. The wake replays submit, whose lookup resumes the same step. */
+ * stall alarm. The wake replays submit, whose lookup resumes the same step.
+ * Review d4f55e9f F1: the watchdog step does no IO of its own (it reconciles the
+ * compose, re-arms itself or exhausts), so it is the `retry` mutation: as a drive, a lost
+ * source action and then a lost watchdog action left the entry to the stall alarm.
+ * Cancelled when the compose completes. */
 export async function watchFinishCompose(
   ctx: MutationCtx,
   rowId: Id<'projectHostedFinishes'>,
@@ -78,7 +120,7 @@ export async function watchFinishCompose(
     await settle();
     return;
   }
-  await scheduleFinish(ctx, row, Math.min(HOSTED_FINISH_COMPOSE_WATCHDOG_MS, remaining));
+  await scheduleFinish(ctx, row, Math.min(HOSTED_FINISH_COMPOSE_WATCHDOG_MS, remaining), false, 'retry');
 }
 export async function notifyFinish(ctx: MutationCtx, state: HostedLandingState) {
   const projectId = state.projectId as Id<'hostedProjects'>;
@@ -196,7 +238,8 @@ export async function wakeNewRunFollower(ctx: MutationCtx, row: Doc<'projectHost
           hostedLandingProgressAt(hostedLandingStateSchema.parse(JSON.parse(waiter.value))),
         );
     await ctx.db.patch(waiter._id, { orderWait: undefined, ...(alarm ? { alarm } : {}) });
-    await scheduleFinish(ctx, finish, 0, true);
+    // Review d4f55e9f F3: a parked finish has no IO in flight, so its wake is a mutation.
+    await scheduleFinish(ctx, finish, 0, true, true);
     if (!waiter.orderLive) return;
     woken = waiter;
   }
@@ -267,7 +310,8 @@ export async function wakeLandingOrderWaiters(
       // Coalescing with that pending future task strands an already passed
       // cohort until the obsolete bound (stucktrain). A parked finish has no
       // IO in flight; keep its wake identity and cancel the old task atomically.
-      if (drive) await scheduleFinish(ctx, finish, 0, true);
+      // That wake is the settle mutation (review d4f55e9f F3).
+      if (drive) await scheduleFinish(ctx, finish, 0, true, true);
       // A waiter that no longer holds its place cannot wake others; wake the next one too.
       if (waiter.orderLive) next = waiter;
     }
@@ -286,8 +330,7 @@ export async function notifyFinishCompose(
     )
     .unique();
   // Completion replaces the compose watchdog; no IO is in flight while it waits.
-  const settle = composeSettle();
-  if (row) await scheduleFinish(ctx, row, 0, true, settle);
+  if (row) await scheduleFinish(ctx, row, 0, true, true);
   const batch = await ctx.db
     .query('projectHostedLandingBatches')
     .withIndex('by_project_and_compose', q =>
@@ -302,6 +345,6 @@ export async function notifyFinishCompose(
       projectId,
       submissionId: JSON.parse(batch.value).leaderId ?? batch.batchId,
     });
-    if (leader) await scheduleFinish(ctx, leader, 0, true, settle);
+    if (leader) await scheduleFinish(ctx, leader, 0, true, true);
   }
 }

@@ -4,6 +4,7 @@ import { landingBodyCounts } from './observer-projection-budget.mjs';
 import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { CHECK_WALL_MS } from './queue-sim/invariants.mjs';
 const redrive = await import(moduleUrl('../convex/projectHostedLandingRedrive.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
@@ -31,6 +32,7 @@ async function replay(t, { loseWake }) {
   const f = await batchesFixture(t, { count: 3, batching: false, requestCheck: true });
   const [older, head, behind] = f.entries.map(entry => entry.state.id);
   let parkedChecked = false,
+    headWake = null,
     dropped = false,
     alarmWhenDropped = null;
   for (let tick = 0; ; tick++) {
@@ -58,27 +60,32 @@ async function replay(t, { loseWake }) {
     const task = f.pending()[0];
     if (!task) break;
     if (
-      loseWake &&
-      !dropped &&
+      !headWake &&
       stateOf(f, older).phase === 'terminal-failed' &&
-      task.name === 'projectHostedFinishDriver:drive' &&
+      task.name.startsWith('projectHostedFinishDriver:') &&
       task.args[0].submissionId === head
     ) {
-      // The one wake that ends the wait fails: nothing of it commits.
-      f.patch('_scheduled_functions', task._id, {
-        state: { kind: 'failed', error: 'synthetic OCC exhaustion (incident c329d191)' },
-      });
-      dropped = true;
-      alarmWhenDropped = requestRow(f, head).alarm;
-      continue;
+      headWake = { name: task.name, at: Date.now() };
+      // The alarm is the backstop for a wake that fails outright (a settle mutation can still throw).
+      assert(requestRow(f, head).alarm, 'the wake armed the head stall alarm in the same transaction');
+      if (loseWake) {
+        // The one wake that ends the wait fails (the incident's OCC exhaustion): nothing of it commits.
+        f.patch('_scheduled_functions', task._id, {
+          state: { kind: 'failed', error: 'synthetic OCC exhaustion (incident c329d191)' },
+        });
+        dropped = true;
+        alarmWhenDropped = requestRow(f, head).alarm;
+        continue;
+      }
     }
     await f.execute(task);
     if (states(f).every(s => s.phase === 'landed' || s.phase === 'terminal-failed')) break;
   }
   assert(parkedChecked, 'the replay parked the passed head behind the older entry');
+  f.headWake = headWake;
   if (loseWake) {
     assert(dropped, 'the replay reached the lost wake');
-    assert(alarmWhenDropped, 'the wake armed the head stall alarm in the same transaction');
+    assert(alarmWhenDropped, 'the lost wake left the head stall alarm armed');
   }
   assert.equal(stateOf(f, older).phase, 'terminal-failed');
   assert.equal(stateOf(f, head).phase, 'landed', loseWake ? 'the stall alarm re-drives the passed head' : '');
@@ -88,12 +95,29 @@ async function replay(t, { loseWake }) {
   return f;
 }
 
+// The waiter's one wake has no IO in flight, so it is the settle mutation (Item 9a04d916), which
+// Convex runs exactly once; it can still fail outright, as the incident's step did. Then the
+// stall alarm, armed in the same transaction, is the backstop that re-drives the head.
 test('incident replay c329d191: a lost finish wake after an order wait never strands a passed head', async t => {
-  await replay(t, { loseWake: true });
+  const f = await replay(t, { loseWake: true });
+  assert.equal(
+    f.headWake?.name,
+    'projectHostedFinishDriver:settle',
+    'the lost waiter wake is the settle mutation',
+  );
 });
 
+// Review d4f55e9f F3 (Item 9a04d916): delivered, that settle lands the head within one check
+// wall and its 15-minute alarm never fires.
 test('incident c329d191: with the wake delivered the head lands at once and its alarm never fires', async t => {
   const f = await replay(t, { loseWake: false });
+  assert.equal(
+    f.headWake?.name,
+    'projectHostedFinishDriver:settle',
+    'the waiter wake is the settle mutation',
+  );
+  // test-signal: allow Date.now is the fixture's injected scheduler clock
+  assert(Date.now() - f.headWake.at < CHECK_WALL_MS, 'the head landed within one check wall of its wake');
   assert(!states(f).some(s => s.observation?.stall), 'no entry was marked stalled');
 });
 

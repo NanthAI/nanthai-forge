@@ -382,19 +382,11 @@ test('the acceptance cancellation pass stops at eight running entries', async t 
  * find the conflict at once. The entry is queued and not runnable, so the drive
  * actions on that path (submit the recompose, then consume its result) are its only
  * owners, and Convex runs a scheduled action at most once. When one was lost, only
- * the 15-minute stall alarm was left: 921 s of silence. FORGE_QUEUE_COMPOSE_SETTLE
- * runs both steps (submit, consume) in a scheduled mutation (exactly once); only
- * their IO stays in an action, owned by the step's retained 30 s retry. Each replay drops the drive action the platform may lose and
- * checks strict L5b (an owner due within one check wall) at every step, so on a
- * build without the fix it fails because the entry is stranded. */
-function composeSettleSwitch(t, on) {
-  const previous = process.env.FORGE_QUEUE_COMPOSE_SETTLE;
-  process.env.FORGE_QUEUE_COMPOSE_SETTLE = on ? '1' : '0';
-  t.after(() => {
-    if (previous === undefined) delete process.env.FORGE_QUEUE_COMPOSE_SETTLE;
-    else process.env.FORGE_QUEUE_COMPOSE_SETTLE = previous;
-  });
-}
+ * the 15-minute stall alarm was left: 921 s of silence. Compose settle runs both steps
+ * (submit, consume) in a scheduled mutation (exactly once); only their IO stays in an
+ * action, owned by the step's retained 30 s retry. Each replay drops the drive action the
+ * platform may lose and checks strict L5b (an owner due within one check wall) at every
+ * step, so on a build without the fix it fails because the entry is stranded. */
 async function threeWayOverlap(t) {
   const f = await fixture(t, {
     count: 3,
@@ -463,25 +455,14 @@ const recomposeSubmitHop = f => {
 };
 
 test("incident 9a04d916: a lost drive after a cancelled admission's recompose still delivers the conflict at once", async t => {
-  composeSettleSwitch(t, true);
   const f = await threeWayOverlap(t);
   await assertConflictAtOnce(f, await lossyRun(f, composeResultHop));
 });
-test("incident 9a04d916: a lost drive after a cancelled admission's recompose leaves only the stall alarm (switch off)", async t => {
-  composeSettleSwitch(t, false);
-  const f = await threeWayOverlap(t);
-  await assert.rejects(lossyRun(f, composeResultHop), /L5b: stranded/);
-  assert.equal(current(f, 2).phase, 'queued');
-  assert.equal(requestRow(f, 2).runnable, false);
-  await assertProgressOwners(f, { alarmOwns: true });
-});
 test('incident 9a04d916 F2: the step that submits the recompose cannot be lost', async t => {
-  composeSettleSwitch(t, true);
   const f = await threeWayOverlap(t);
   await assertConflictAtOnce(f, await lossyRun(f, recomposeSubmitHop));
 });
 test('incident 9a04d916 F2: a lost plan upload after a settled submit is owned by its 30 s retry', async t => {
-  composeSettleSwitch(t, true);
   const f = await threeWayOverlap(t);
   const id = current(f, 2).id;
   const lost = await lossyRun(f, f =>
@@ -502,13 +483,7 @@ test('incident 9a04d916 F2: a lost plan upload after a settled submit is owned b
   await assertConflictAtOnce(f, lost);
   assert(lost.endedAt - lost.at >= 30_000, 'the retained retry, not a second consumer, ran the upload');
 });
-test('incident 9a04d916 F2: a lost recompose submit leaves only the stall alarm (switch off)', async t => {
-  composeSettleSwitch(t, false);
-  const f = await threeWayOverlap(t);
-  await assert.rejects(lossyRun(f, recomposeSubmitHop), /L5b: stranded/);
-});
-test('incident 9a04d916 F1: a solo stall that recovered leaves no stall in the terminal state (switch on)', async t => {
-  composeSettleSwitch(t, true);
+test('incident 9a04d916 F1: a solo stall that recovered leaves no stall in the terminal state', async t => {
   const f = await threeWayOverlap(t);
   // A settle that fails every time (a mutation is never lost, but it can throw).
   let owner = null;
@@ -520,15 +495,15 @@ test('incident 9a04d916 F1: a solo stall that recovered leaves no stall in the t
   assert.equal(lost.name, 'projectHostedFinishDriver:settle');
   // The alarm's diagnosis is visible while the stall is current ...
   assert.deepEqual(owner, { finishWake: 'failed', compose: 'terminal' });
-  // ... and goes with it once progress resumes, exactly as with the switch off.
+  // ... and goes with it once progress resumes.
   assert.equal(current(f, 2).error?.code, 'COMPOSITION_CONFLICT');
   assert.equal(current(f, 2).observation.stall, undefined);
   assert.equal(requestRow(f, 2).phase, 'terminal-failed');
 });
 test('F3: strict L5b rejects a finish wake due later than one check wall', async t => {
-  composeSettleSwitch(t, false);
   const f = await threeWayOverlap(t);
-  await assert.rejects(lossyRun(f, composeResultHop), /L5b: stranded/);
+  // A settle that fails every time leaves the entry to the stall alarm alone.
+  await assert.rejects(lossyRun(f, composeResultHop, { failAny: true }), /L5b: stranded/);
   const task = wakeTask(f);
   // The lost wake comes back as a pending wake, first far in the future, then due soon.
   f.patch('_scheduled_functions', task._id, {
@@ -539,4 +514,78 @@ test('F3: strict L5b rejects a finish wake due later than one check wall', async
   await assertQueueProgress(f, { alarmOwns: true });
   f.patch('_scheduled_functions', task._id, { scheduledTime: Date.now() + CHECK_WALL_MS - 1 });
   await assertProgressOwners(f);
+});
+
+/** Review ba9ce962 L2 (owner 2026-11-18): the double loss. The action uploading the
+ * recompose's plan dies after its step committed (a deploy mid-action), and the finish
+ * drive due next for this entry is lost too. Both hops were actions, so the entry was
+ * left to the 15-minute alarm. The step's retained retry is a mutation (`retry`, never
+ * lost), so only its IO action can be lost again, and the next retry still delivers the
+ * conflict within one check wall. */
+async function doubleLossRun(f) {
+  const id = current(f, 2).id,
+    losses = [];
+  const finishDrive = task =>
+    task.name === 'projectHostedFinishDriver:drive' && task.args[0].submissionId === id;
+  for (let step = 0; !['landed', 'terminal-failed'].includes(current(f, 2).phase); step++) {
+    assert(step < 2000, JSON.stringify(states(f)));
+    const task = f.pending()[0];
+    if (!task) break;
+    // First loss: the upload, i.e. the drive handed the plan by a settle. Second loss: the
+    // next finish drive this entry gets, whatever owns it.
+    const upload = Boolean(task.args[0]?.command);
+    if (losses.length < 2 && finishDrive(task) && (losses.length || upload)) {
+      f.advanceClock(Math.max(0, task.scheduledTime - Date.now()));
+      f.patch('_scheduled_functions', task._id, { state: { kind: 'failed' } });
+      losses.push({ at: Date.now(), command: Boolean(task.args[0].command) });
+      // Owned right after the loss, not only once a later task (maybe the alarm) ran.
+      await assertProgressOwners(f);
+      continue;
+    }
+    await f.execute(task);
+    if (losses.length) await assertProgressOwners(f);
+  }
+  assert.equal(losses.length, 2, 'both the upload and its retry were lost');
+  return { at: losses[0].at, losses, endedAt: Date.now() };
+}
+test('incident 9a04d916 L2: a lost plan upload and a lost retry still deliver the conflict within one check wall', async t => {
+  const f = await threeWayOverlap(t);
+  const lost = await doubleLossRun(f);
+  // Both losses were IO actions handed out by mutations; no owner was an action.
+  assert.deepEqual(
+    lost.losses.map(loss => loss.command),
+    [true, true],
+  );
+  await assertConflictAtOnce(f, lost);
+});
+test('incident 9a04d916 L2: IO lost every time spends the retry mutation budget, then ends typed, not a 30 s loop', async t => {
+  const { FINISH_SETTLE_RETRIES } = await import(moduleUrl('../convex/projectHostedFinishWake.ts'));
+  const f = await threeWayOverlap(t);
+  const id = current(f, 2).id,
+    retries = [];
+  let lost = 0;
+  for (let step = 0; !['landed', 'terminal-failed'].includes(current(f, 2).phase); step++) {
+    assert(step < 400, `bounded: ${JSON.stringify(states(f))}`);
+    const task = f.pending()[0];
+    if (!task) break;
+    const own = task.args[0]?.submissionId === id && task.name.startsWith('projectHostedFinishDriver:');
+    if (own && task.name === 'projectHostedFinishDriver:retry') retries.push(task.args[0].attempt ?? 1);
+    // The platform loses every finish action of this entry once its recompose is reserved.
+    if (own && task.name === 'projectHostedFinishDriver:drive' && recompose(f).pending) {
+      f.advanceClock(Math.max(0, task.scheduledTime - Date.now()));
+      f.patch('_scheduled_functions', task._id, { state: { kind: 'failed' } });
+      lost++;
+      continue;
+    }
+    await f.execute(task);
+  }
+  assert.deepEqual(
+    retries,
+    Array.from({ length: FINISH_SETTLE_RETRIES }, (_, i) => i + 1),
+    'one mutation per budgeted retry, then the retry is a drive again',
+  );
+  assert(lost > FINISH_SETTLE_RETRIES, 'the drive retry after the budget was lost too');
+  assert.equal(current(f, 2).phase, 'terminal-failed');
+  assert.equal(current(f, 2).error.code, 'LANDING_DRIVER_EXHAUSTED');
+  assert.equal(f.pending().length, 0, 'no timer left');
 });

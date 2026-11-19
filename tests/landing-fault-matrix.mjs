@@ -29,7 +29,6 @@ export const SCENARIOS = {
  * without coverage, and fails the build. Transient faults must always land. */
 export const PERMANENT = {
   'projectHostedLandingDriver:drive@admission': ['LANDING_DRIVER_EXHAUSTED'],
-  'projectHostedFinishDriver:drive@admission': [],
   'projectHostedLandingDriver:checkWake@admission': ['LANDING_DRIVER_EXHAUSTED'],
   'projectHostedFinishDriver:drive@compose': ['LANDING_DRIVER_EXHAUSTED'],
   'projectConvexSource:dispatch@compose': ['SOURCE_RETRY_EXHAUSTED'],
@@ -43,20 +42,21 @@ export const PERMANENT = {
   // Accepted work is never rewound. A lost completion tick is replayed once by
   // its stall guard; failing again it ends as a typed status (Issue 13c63abe).
   'projectHostedAcceptance:complete@receipt': [],
-  'projectHostedFinishDriver:drive@receipt': [],
   'projectHostedLandingWouldConflict:mark@receipt': [],
   // Item 3d5d8839: the Account > Projects order update a landing schedules when it opens a new hour for its project.
   // It is an ordering hint only: the landing is already accepted, the list re-checks roles, and the next hour's
   // landing re-touches the rows, so a lost or failing touch ends nothing.
   'accountProjectOrder:touch@publish': [],
   'accountProjectOrder:touch@receipt': [],
-  // Item 9a04d916 (FORGE_QUEUE_COMPOSE_SETTLE): a completed compose is consumed by
-  // a scheduled mutation instead of the drive action. Convex retries a mutation's
-  // internal errors; one that still fails is re-driven by the stall alarm through
-  // the action path and lands. Deleted with the switch.
-  ...(process.env.FORGE_QUEUE_COMPOSE_SETTLE === '1'
-    ? { 'projectHostedFinishDriver:settle@compose': [] }
-    : {}),
+  // Item 9a04d916 (compose settle): every finish wake with no IO in flight is a scheduled
+  // mutation, so the admission and receipt wakes run no drive action at all. Convex retries
+  // a mutation's internal errors; one that still fails is re-driven by the stall alarm
+  // through the action path and lands, except the publish step, which fails the same way
+  // on every re-drive and ends typed.
+  'projectHostedFinishDriver:settle@admission': [],
+  'projectHostedFinishDriver:settle@compose': [],
+  'projectHostedFinishDriver:settle@publish': ['LANDING_DRIVER_EXHAUSTED'],
+  'projectHostedFinishDriver:settle@receipt': [],
 };
 
 /** Dogfood incidents, each replayed against the implementation (file, test name)

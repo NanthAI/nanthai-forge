@@ -73,7 +73,7 @@ for (const fenced of [false, true]) {
       'failed quanta own delayed replacement actions',
     );
     assert.equal([...f.tables.projectSourcePools.values()][0].active.length, 4);
-    const watchdog = f.pending().find(x => x.name === 'projectHostedFinishDriver:drive');
+    const watchdog = f.pending().find(x => x.name === 'projectHostedFinishDriver:retry');
     assert(watchdog);
     assert.equal(HOSTED_FINISH_COMPOSE_WATCHDOG_MS, 120000);
     if (fenced) {

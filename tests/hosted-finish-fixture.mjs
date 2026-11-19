@@ -59,27 +59,46 @@ function isTaskMutation(name) {
   }
   return taskMutations.get(name);
 }
-/** Item 9a04d916: run one test with FORGE_QUEUE_COMPOSE_SETTLE on or off, then restore it.
- * The switch is read at call time, so a test can run both modes in one process. */
-export function composeSettleSwitch(t, on) {
-  const previous = process.env.FORGE_QUEUE_COMPOSE_SETTLE;
-  process.env.FORGE_QUEUE_COMPOSE_SETTLE = on ? '1' : '0';
-  t.after(() => {
-    if (previous === undefined) delete process.env.FORGE_QUEUE_COMPOSE_SETTLE;
-    else process.env.FORGE_QUEUE_COMPOSE_SETTLE = previous;
-  });
-}
-/** The IO hop of the pending finish attempt: with the switch on, the scheduled settle
- * mutation runs the step and schedules the drive action with its command; off, the
- * drive action runs the step itself. Returns the task that performs the IO, and the
- * step's command when settle already ran it. */
-export async function finishIOTask(f, on) {
-  const drive = 'projectHostedFinishDriver:drive';
-  if (!on) {
-    const task = f.pending().find(task => task.name === drive);
-    assert(task, 'a pending drive');
-    return { task, command: null };
+const clocks = new WeakMap();
+/** Item 9a04d916: one fake clock per test, however many fixtures the test builds. Node
+ * restores stacked `t.mock.method` mocks in creation order, so a second fixture's own mock
+ * of Date.now outlived its test as a frozen clock that every later test in the file read. */
+function testClock(t) {
+  let clock = clocks.get(t);
+  if (!clock) {
+    clock = { now: Date.now() };
+    t.mock.method(Date, 'now', () => clock.now);
+    clocks.set(t, clock);
   }
+  return clock;
+}
+/** Review d4f55e9f F3: an entry's finish wake of any kind: the drive action while IO is in
+ * flight, else the settle or retry mutation (Item 9a04d916). */
+export const isFinishWake = name =>
+  name === 'projectHostedFinishDriver:drive' ||
+  name === 'projectHostedFinishDriver:settle' ||
+  name === 'projectHostedFinishDriver:retry';
+/** Item 9a04d916: run one finish wake to its IO. A settle or retry mutation runs the step;
+ * the IO it hands to a drive on the same wake id runs too. */
+export async function runFinishWake(f, task) {
+  assert(task && isFinishWake(task.name), 'a pending finish wake');
+  const { submissionId, wakeId } = task.args[0];
+  await f.execute(task);
+  if (task.name === 'projectHostedFinishDriver:drive') return;
+  const io = f
+    .pending()
+    .find(
+      t =>
+        t.name === 'projectHostedFinishDriver:drive' &&
+        t.args[0].submissionId === submissionId &&
+        t.args[0].wakeId === wakeId,
+    );
+  if (io) await f.execute(io);
+}
+/** The IO hop of the pending finish attempt: the scheduled settle mutation runs the step
+ * and schedules the drive action with its command. Returns that drive and the command. */
+export async function finishIOTask(f) {
+  const drive = 'projectHostedFinishDriver:drive';
   const settle = f.pending().find(task => task.name === 'projectHostedFinishDriver:settle');
   assert(settle, 'a pending settle');
   await f.execute(settle);
@@ -109,8 +128,7 @@ export async function finishFixture(
     admission = false,
   } = {},
 ) {
-  let now = Date.now();
-  t.mock.method(Date, 'now', () => now);
+  const clock = testClock(t);
   const c = await composeFixture({ baselineFiles });
   const extraBase = JSON.parse(c.objects.get(c.baseline.sha256)).files.filter(
     file => !['a.txt', 'hidden.bin'].includes(file.path),
@@ -218,7 +236,7 @@ export async function finishFixture(
         ctx.db.insert('_scheduled_functions', {
           name: getFunctionName(ref),
           args: [args],
-          scheduledTime: now + delay,
+          scheduledTime: clock.now + delay,
           state: { kind: 'pending' },
         }),
       cancel: async id => {
@@ -363,7 +381,7 @@ export async function finishFixture(
   };
   const executeTask = async (task, stop) => {
     assert(task, 'pending task');
-    now = Math.max(now, task.scheduledTime);
+    clock.now = Math.max(clock.now, task.scheduledTime);
     f.patch('_scheduled_functions', task._id, {
       // Convex mutations execute atomically while their row is still pending.
       state: { kind: (await isTaskMutation(task.name)) ? 'pending' : 'inProgress' },
@@ -416,6 +434,9 @@ export async function finishFixture(
       } else if (task.name === 'projectHostedFinishDriver:settle') {
         // Item 9a04d916: the exactly-once compose consumer (a mutation, retried by Convex).
         await tx('finishSettle', driver.settle, input);
+      } else if (task.name === 'projectHostedFinishDriver:retry') {
+        // Review ba9ce962 L2: a step's retained IO retry as a mutation (switch on).
+        await tx('finishRetry', driver.retry, input);
       } else if (task.name === 'projectHostedLandingStall:alarm') {
         await tx('landingAlarm', stallApi.alarm, input);
       } else if (task.name === 'projectHostedLandingStall:deadline') {
@@ -560,10 +581,10 @@ export async function finishFixture(
       throw error;
     }
   };
-  const drain = async () => {
+  const drain = async (max = 100) => {
     let steps = 0;
     while (pending().length) {
-      assert(++steps <= 100, 'no idle poller or busy loop');
+      assert(++steps <= max, 'no idle poller or busy loop');
       await execute();
     }
     return steps;
@@ -655,7 +676,7 @@ export async function finishFixture(
     metrics,
     reuseDecisions,
     advanceClock: ms => {
-      now += ms;
+      clock.now += ms;
     },
   };
 }

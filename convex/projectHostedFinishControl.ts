@@ -8,7 +8,7 @@ import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx } from './_generated/server';
 import { loadFinish, failFinish } from './projectHostedFinishStore';
 import { loadLanding, writeLanding, type LandingIdentity } from './projectHostedLandingStore';
-import { composeSettle, scheduleFinish, watchFinishCompose } from './projectHostedFinishWake';
+import { retryFinish, scheduleFinish, watchFinishCompose } from './projectHostedFinishWake';
 import { prepareFinishCompose, installFinishCompose, reserveFinishRetry } from './projectHostedFinishCompose';
 import { hostedComposeInput } from './projectHostedComposeStore';
 import { submitHostedCompose } from './projectHostedComposeJobs';
@@ -35,7 +35,7 @@ import { ForgeError, invariant } from '../src/errors';
 import { reuseDecision } from './projectHostedReuseStore';
 import { findObject, objectRow } from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
-export type FinishIdentity = LandingIdentity & { wakeId: string };
+export type FinishIdentity = LandingIdentity & { wakeId: string; attempt?: number };
 export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promise<FinishCommand | null> {
   const { row, value } = await loadFinish(ctx, input);
   if (row.wake?.id !== input.wakeId || row.wake.at > Date.now()) return null;
@@ -99,7 +99,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
       if (source.operation.terminal) {
         if (row.reuseLease?.pendingId === value.pending.id) {
           if (row.reuseLease.until > Date.now()) {
-            await scheduleFinish(ctx, row, row.reuseLease.until - Date.now(), true);
+            await retryFinish(ctx, row, input, row.reuseLease.until - Date.now(), true);
           } else {
             // Unknown proof outcome: one ordinary exact check, never a second
             // simultaneous analysis. Late callbacks are fenced by pending ID.
@@ -109,7 +109,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
         }
         const decision = value.pending.precompose ? null : await reuseDecision(ctx, input);
         if (decision && !('reason' in decision)) {
-          await scheduleFinish(ctx, row, 30_000, true);
+          await retryFinish(ctx, row, input);
           return { kind: 'reuse', pendingId: value.pending.id };
         }
         await installFinishCompose(ctx, row, value, undefined, source, decision?.reason);
@@ -162,18 +162,18 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
         );
         await ctx.db.patch((await objectRow(ctx, object))._id, { location: 'r2', r2Key: key });
       }
-      await scheduleFinish(ctx, row, 30_000, true);
+      await retryFinish(ctx, row, input);
       // Item 9a04d916: a settle hands the action this compose, never the plan bytes.
-      const settled = composeSettle()
-        ? {
-            source: {
-              actor: state.actor,
-              operationId: value.pending.operations.compose,
-              at: source.operation.firstAttempt.at,
-            },
-          }
-        : {};
-      return { kind: 'plan', value: plan, pin, ...settled };
+      return {
+        kind: 'plan',
+        value: plan,
+        pin,
+        source: {
+          actor: state.actor,
+          operationId: value.pending.operations.compose,
+          at: source.operation.firstAttempt.at,
+        },
+      };
     }
     if (state.phase !== 'ready') return null; // H13's run/queue events resume it
     if (
@@ -202,7 +202,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
             ? await blobStore(ctx).getUrl(object.storageId)
             : null;
       invariant(url, 'SOURCE_UNAVAILABLE', 'Exact acceptance metadata is unavailable.');
-      await scheduleFinish(ctx, row, 30_000, true);
+      await retryFinish(ctx, row, input);
       return {
         kind: 'page',
         url,

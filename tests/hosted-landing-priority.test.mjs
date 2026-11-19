@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { landingFixture, code } from './hosted-landing-fixture.mjs';
 import { batchesFixture, synthetic } from './hosted-landing-batches-fixture.mjs';
-import { api as finishApi } from './hosted-finish-fixture.mjs';
+import { api as finishApi, isFinishWake } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { hostedLandingStateSchema, hostedLandingRequestSchema } from '../dist/hosted-landing.js';
 import { api as landingApi } from './hosted-landing-fixture.mjs';
@@ -330,13 +330,7 @@ test('fallback priority keeps an in-flight solo preparation and reads only its b
     await f.execute(f.pending()[0]);
   }
   await f.execute(
-    f
-      .pending()
-      .find(
-        task =>
-          task.name === 'projectHostedFinishDriver:drive' &&
-          task.args[0].submissionId === f.entries[0].state.id,
-      ),
+    f.pending().find(task => isFinishWake(task.name) && task.args[0].submissionId === f.entries[0].state.id),
   );
   const finish = [...f.tables.projectHostedFinishes.values()].find(
     row => row.submissionId === f.entries[0].state.id,
@@ -355,13 +349,7 @@ test('fallback priority keeps an in-flight solo preparation and reads only its b
   await prioritize(f, command(f, f.entries[2].state.id));
   const before = f.counts.length;
   await f.execute(
-    f
-      .pending()
-      .find(
-        task =>
-          task.name === 'projectHostedFinishDriver:drive' &&
-          task.args[0].submissionId === f.entries[2].state.id,
-      ),
+    f.pending().find(task => isFinishWake(task.name) && task.args[0].submissionId === f.entries[2].state.id),
   );
   assert.equal(f.counts.length - before, 1);
   assert(f.counts.at(-1).documents <= 80, 'no unrelated finish history is loaded');

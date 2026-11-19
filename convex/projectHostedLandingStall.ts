@@ -20,7 +20,7 @@ import { loadBatch, writeBatch } from './projectHostedLandingBatchStore';
 import { advanceBatchFallback } from './projectHostedLandingBatchFallback';
 import { splitLandingBatch } from './projectHostedLandingBatchSplit';
 import { wakeLandingQueue } from './projectHostedLandingWake';
-import { composeSettle, finishRow, scheduleFinish } from './projectHostedFinishWake';
+import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 import { composeRow, composeStateSchema } from './projectHostedComposeStore';
 import { hostedFinishSchema } from '../src/hosted-finish';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
@@ -199,12 +199,12 @@ export async function raiseLandingAlarm(ctx: MutationCtx, input: Stalled, now = 
   return null;
 }
 
-/** Item 9a04d916 (switch FORGE_QUEUE_COMPOSE_SETTLE): the receipt names which owner
+/** Item 9a04d916 (compose settle): the receipt names which owner
  * a solo queued entry had when its stall fired: its finish wake's task state (a
  * failed drive, or none armed) and its pending compose. Read before the repair
  * replays them. Cohorts record the same in repairComposingBatch. Stall path only. */
 async function soloFinishOwner(ctx: MutationCtx, input: LandingIdentity, state: HostedLandingState) {
-  if (!composeSettle() || state.phase !== 'queued' || state.batchId || state.batchOriginId) return undefined;
+  if (state.phase !== 'queued' || state.batchId || state.batchOriginId) return undefined;
   const finish = await finishRow(ctx, input);
   if (!finish) return undefined;
   const task = finish.wake ? await ctx.db.system.get(finish.wake.taskId) : null;
@@ -493,7 +493,8 @@ async function redriveQueued(
       await writeBatch(ctx, key, batch);
       await advanceBatchFallback(ctx, key, batch, state.id);
       const finish = await finishRow(ctx, input);
-      if (finish) await scheduleFinish(ctx, finish);
+      // A recovery re-drive keeps the action path (9a04d916 option b).
+      if (finish) await scheduleFinish(ctx, finish, 0, false, 'drive');
     }
   } else if (state.observation.pendingReason !== 'waiting-for-dependency') {
     await ctx.db.patch(row._id, { runnable: true });

@@ -725,6 +725,7 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
     reads: solo.readDocuments,
   };
   // 1122c9c9: lead approved solo 492 -> 494 reads; measured +908 B/landing = +$0.0001816/1,000 for pending-only scheduler safety.
+  // 9a04d916: compose settle, solo 647 -> 685 reads (owner-approved +$0.02/1,000; ledger reason recorded).
   assertCommandWeight('landServerSolo', landServer);
   t.diagnostic(JSON.stringify({ landServerSolo: landServer }));
   const verdicts = judgeCosts(costs, costGuard, 'landing-fixture', baseline.measured);
@@ -755,6 +756,8 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
       stored: ten.map(s => s.storedIndexes),
     })}`,
   );
+  // Ten-landing index writes 11,736 -> 12,864 (Item 9a04d916, compose settle; owner-approved +$0.02/1k): the scheduler rows of the settle and
+  // retry mutations and the drive each one hands IO to.
   const indexBudget = storageBudgets.tenLandingIndexes;
   assert.equal(
     ten.reduce((n, s) => n + s.landings, 0),
@@ -774,7 +777,8 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   assert.equal(baseline.landings, 6);
   assert(
     // 167/6: +2 hour-bucket touch runs over 165/6, each fixture project seeding an owner and 150 members (Item 3d5d8839).
-    baseline.measured.mutations <= 167 / 6,
+    // 185/6 (Item 9a04d916, compose settle; owner-approved +$0.02/1k): every finish wake with no IO in flight is a settle mutation.
+    baseline.measured.mutations <= 185 / 6,
     'metrics read projections must share existing landing mutations (90-minute read-cost incident)',
   );
   assert(verdicts.length >= 10, 'every fixture quantity has a ledger entry');
@@ -822,7 +826,10 @@ test('ca19aec0: checksum-acknowledged PUTs remove fallback HEADs without changin
 
 test('unconditional Candidate listings keep the landing call ledger and zero legacy data-table access', () => {
   const unchangedCalls = {
-    queries: 0,
+    // Item 9a04d916 (compose settle; owner-approved +$0.02/1,000): a settled solo plan's drive
+    // re-reads its bytes in one indexed query (2 in the mix), and every finish wake with no IO in
+    // flight is a settle mutation (167 -> 185); V8 actions fall 59 -> 36.
+    queries: 2 / 6,
     observerQueries: 53 / 6,
     // +4 over the six-landing mix: each fixture project's first landing opens an hour bucket and schedules
     // accountProjectOrder:touch, one run per 100 stale person rows; the fixtures seed an owner and 150 members, so two
@@ -830,8 +837,8 @@ test('unconditional Candidate listings keep the landing call ledger and zero leg
     // Cost per project-hour = calls (ceil(people/100) x $2/M) + row I/O (each row read and rewritten, ~124 B each way,
     // $0.20/GB); per landing divide by landings per project-hour L. 151 people: $0.000004 + $0.0000075, so
     // $0.0115 per 1,000 landings at worst case L = 1 (0.68% of $1.688); see docs/data-placement.md.
-    mutations: 167 / 6,
-    v8Actions: 59 / 6,
+    mutations: 185 / 6,
+    v8Actions: 36 / 6,
     nodeActions: 3 / 6,
   };
   for (const [metric, limit] of Object.entries(unchangedCalls))
@@ -1037,9 +1044,14 @@ async function dogfoodControlTail(t, race) {
     await f.drain();
   }
   assert.equal((await f.current(state.id)).submission.phase, 'landed');
+  // Item 9a04d916: a finish step runs in the drive, the settle or the retry mutation; all three
+  // are finish steps here.
+  const steps = new Set(['finishStep', 'finishSettle', 'finishRetry']);
   return Object.fromEntries(
     ['finishStep', 'finishLandingAdvance', 'reuseComplete'].map(name => {
-      const rows = f.counts.slice(from).filter(c => c.name === name);
+      const rows = f.counts
+        .slice(from)
+        .filter(c => (name === 'finishStep' ? steps.has(c.name) : c.name === name));
       return [
         name,
         {
@@ -1061,7 +1073,10 @@ test('dogfood control tails budget finish reads across a completed solo landing 
     driverTailReadBytes:
       scenarios.reduce((sum, s) => sum + Object.values(s).reduce((n, c) => n + c.readBytes, 0), 0) / 2,
   };
-  assert.equal(total('finishStep', 'calls'), 13, 'no additional finish step at dogfood row sizes');
+  t.diagnostic(JSON.stringify({ finishSteps: total('finishStep', 'calls'), ...measured }));
+  // 13 -> 19 (Item 9a04d916, compose settle; owner-approved +$0.02/1k): a settle or retry mutation runs the step, and an acceptance page it
+  // cannot hand out is stepped once more by its immediate drive (two per landing here).
+  assert.equal(total('finishStep', 'calls'), 19, 'no additional finish step at dogfood row sizes');
   assert.equal(total('finishLandingAdvance', 'calls'), 3, 'no additional landing advance');
   assert.equal(total('reuseComplete', 'calls'), 1, 'one proof completion for the main race');
   for (const [metric, bytes] of Object.entries(measured)) {
@@ -1227,6 +1242,9 @@ test('storage per landing ratchets every table on fresh and dogfood-shaped check
     dogfood: await landingStorage(t, true, { capsules: true, journals: true }),
   };
   t.diagnostic(`storagePerLanding ${JSON.stringify(scenarios)}`);
+  // Index entries written 1,539 -> 1,611 fresh and 2,884 -> 3,028 dogfood (Item 9a04d916, compose
+  // settle; owner-approved +$0.02/1,000): the scheduler rows of the settle and retry mutations.
+  // Stored entries do not grow: a completed task row is not retained.
   for (const [name, scenario] of Object.entries(scenarios)) {
     const indexBudget = storageBudgets[name].indexes;
     assert(scenario.indexes.written <= indexBudget.written, `${name}: custom index write budget`);

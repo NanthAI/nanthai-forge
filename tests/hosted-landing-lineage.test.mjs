@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { batchesFixture, synthetic, states, batchStore } from './hosted-landing-batches-fixture.mjs';
 import { drainReady } from './early-resolution-replay.mjs';
 import { syncFixture } from './hosted-sync-fixture.mjs';
-import { compose } from './hosted-finish-fixture.mjs';
+import { compose, isFinishWake } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const desired = await import(moduleUrl('../convex/projectHostedLandingDesired.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
@@ -81,7 +81,7 @@ test('8c9b84fc: conflicting main sync supersedes an ownerless submission before 
       .find(
         t =>
           !/LandingStall|CheckLease:expire/.test(t.name) &&
-          !(t.name === 'projectHostedFinishDriver:drive' && t.args[0].submissionId === original.state.id),
+          !(isFinishWake(t.name) && t.args[0].submissionId === original.state.id),
       );
     if (!task) break;
     await f.execute(task);
@@ -218,8 +218,7 @@ test('8c9b84fc: full voided-cell replay retires every operation and maintains on
   };
   assertAlarmOwners('legacy setup');
   const active = await f.rawChecks.activate(run.id);
-  const skipChild = task =>
-    task.name === 'projectHostedFinishDriver:drive' && task.args[0].submissionId === state.id;
+  const skipChild = task => isFinishWake(task.name) && task.args[0].submissionId === state.id;
   for (const other of f.runs().filter(r => r.status === 'queued')) {
     await f.rawChecks.pass(await f.rawChecks.activate(other.id));
     await drainReady(f, skipChild);
@@ -348,8 +347,7 @@ test('8c9b84fc: full voided-cell replay retires every operation and maintains on
 test('8c9b84fc: an authorized peer main sync supersedes none of the Lane actor work', async t => {
   const { f, s } = await fixture(t, 'contributor');
   const original = f.entries[1];
-  const skip = task =>
-    task.name === 'projectHostedFinishDriver:drive' && task.args[0].submissionId === original.state.id;
+  const skip = task => isFinishWake(task.name) && task.args[0].submissionId === original.state.id;
   await f.rawChecks.pass(await f.rawChecks.activate(f.runs()[0].id));
   await drainReady(f, skip);
   const before = (await s.readLane(original.lane.laneId)).entry;
@@ -384,8 +382,7 @@ test('8c9b84fc: an authorized peer main sync supersedes none of the Lane actor w
 test('8c9b84fc: accepting a directly composed resolution supersedes the origin as a completion backstop', async t => {
   const { f, s } = await fixture(t);
   const original = f.entries[1];
-  const skip = task =>
-    task.name === 'projectHostedFinishDriver:drive' && task.args[0].submissionId === original.state.id;
+  const skip = task => isFinishWake(task.name) && task.args[0].submissionId === original.state.id;
   await f.rawChecks.pass(await f.rawChecks.activate(f.runs()[0].id));
   await drainReady(f, skip);
   const selection = f.c.selection([original.lane]);

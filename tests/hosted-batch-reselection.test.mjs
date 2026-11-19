@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { batchesFixture, batchStore, states, synthetic } from './hosted-landing-batches-fixture.mjs';
-import { compose } from './hosted-finish-fixture.mjs';
+import { compose, isFinishWake } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { LANDING_STALL_MS } from '../dist/landing-stall.js';
 import { HOSTED_TRAIN_HOLD_MS } from '../dist/hosted-landing-batch.js';
@@ -213,11 +213,7 @@ test('incident replay: fallback detaches and requeues all three members atomical
   // The original leader wake is lost. Another member must drive re-selection.
   const leaderWakes = f
     .pending()
-    .filter(
-      task =>
-        task.name === 'projectHostedFinishDriver:drive' &&
-        task.args[0].submissionId === (batch.leaderId ?? batch.id),
-    );
+    .filter(task => isFinishWake(task.name) && task.args[0].submissionId === (batch.leaderId ?? batch.id));
   assert(leaderWakes.length > 0, 'the original leader wake must actually be removed');
   for (const task of leaderWakes) f.patch('_scheduled_functions', task._id, { state: { kind: 'canceled' } });
   await f.drain();
@@ -251,10 +247,17 @@ test('incident replay: fallback detaches and requeues all three members atomical
       writes: sum(counts, 'writes') + sum(admission, 'writes'),
     },
   };
+  // Controller writes 1299 -> 1365 (Item 9a04d916, compose settle; owner-approved +$0.02/1k; 1364
+  // or 1365 run to run):
+  // each finish wake with no IO in flight is the settle mutation, and a step that needs IO hands it to one drive action (an acceptance page or cohort plan steps once more there). Calls and reads stay under their ceilings.
+  // Controller writes 1365 -> 1368: the always-on S1 writer (b149b16b, merged from main) arms one
+  // capsule wake per landed member; no call or read. 1367 or 1368 run to run: the high reading
+  // has one more transaction (+1 call, read and write), which points at a wall-clock bucket;
+  // b05d588e's fixed fixture start should remove it.
   assert(
     cost.calls < 220 &&
       cost.reads < 4500 &&
-      cost.writes - cost.liveLineWrites - cost.listingWriteAllowance - cost.stateSizeWrites < 1300,
+      cost.writes - cost.liveLineWrites - cost.listingWriteAllowance - cost.stateSizeWrites <= 1368,
     JSON.stringify(cost),
   );
   t.diagnostic(JSON.stringify({ members: 3, unrelatedIntents: 600, retainedReceipts: 575, ...cost }));
@@ -497,11 +500,7 @@ test('a queue claim racing individual source preparation cannot settle the obsol
   assert(claim);
   const task = f
     .pending()
-    .find(
-      task =>
-        task.name === 'projectHostedFinishDriver:drive' &&
-        task.args[0].submissionId === (batch.leaderId ?? batch.id),
-    );
+    .find(task => isFinishWake(task.name) && task.args[0].submissionId === (batch.leaderId ?? batch.id));
   assert(task, 'the batch leader owns a pending source-preparation wake');
   await f.execute(task);
   assert(states(f)[0].batchNeedsSoloCompose, 'guard survives until the new attempt is published');

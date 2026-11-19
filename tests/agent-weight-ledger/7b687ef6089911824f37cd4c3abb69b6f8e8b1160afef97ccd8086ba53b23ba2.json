@@ -1,0 +1,4 @@
+{
+  "issue": "9a04d916",
+  "reason": "Compose settle made permanent (Item 9a04d916, owner-approved +$0.02 per 1,000 landings): every finish wake with no IO in flight is a settle mutation, and a step that needs IO hands it to one drive action, which re-reads a solo plan in one indexed query; an acceptance page steps once more in that drive. Solo server landing: reads 647 -> 685 conservative document probes, calls unchanged at 37. Six-landing mix against main before it: calls 38.17 -> 37.67, read bytes +83,810 B and write bytes +17,757 B per landing (+$0.020 per 1,000 landings at $0.20/GB), action compute 2.85 -> 2.23 GB-s. Idle cost unchanged: nothing runs without a landing."
+}

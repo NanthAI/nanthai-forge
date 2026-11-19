@@ -20,7 +20,7 @@ const batchOf = f => JSON.parse([...f.tables.projectHostedLandingBatches.values(
 const finishWakes = (f, submissionId) =>
   f
     .pending()
-    .filter(t => t.name === 'projectHostedFinishDriver:drive' && t.args[0].submissionId === submissionId);
+    .filter(t => t.name === 'projectHostedFinishDriver:retry' && t.args[0].submissionId === submissionId);
 async function untilStep(f) {
   for (let tick = 0; f.pending()[0]?.name !== 'projectConvexSource:step'; tick++) {
     assert(tick < 100, 'the source step is reached');
@@ -113,7 +113,8 @@ test('a repeatedly failed step settles terminally instead of losing its last com
       await assert.rejects(f.execute(task, 'step-fetch-failed'), /fetch failed/);
       continue;
     }
-    if (task.name === 'projectHostedFinishDriver:drive') finishTicks++;
+    if (task.name === 'projectHostedFinishDriver:drive' || task.name === 'projectHostedFinishDriver:retry')
+      finishTicks++;
     await f.execute(task);
   }
   // 120 s ticks for 30 minutes, plus the one stall-alarm repair.

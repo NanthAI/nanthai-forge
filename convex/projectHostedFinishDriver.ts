@@ -2,6 +2,7 @@
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalMutation, internalAction, internalQuery } from './server';
+import type { MutationCtx } from './_generated/server';
 import { finishStep, resumeFinishIO, type FinishIdentity } from './projectHostedFinishControl';
 import { loadLanding } from './projectHostedLandingStore';
 import { finishRow, scheduleFinish } from './projectHostedFinishWake';
@@ -15,7 +16,9 @@ import { exchangeFetch } from '../src/exchange-request';
 import { invariant } from '../src/errors';
 import { readExactObject } from './projectR2ExactRead';
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() };
-const stepIdentity = { ...identity, wakeId: v.string() };
+// `attempt`: mutation retries in a row since the last drive step (L2 budget, retryFinish);
+// absent on a first retry.
+const stepIdentity = { ...identity, wakeId: v.string(), attempt: v.optional(v.number()) };
 export const step = internalMutation({
   args: stepIdentity,
   returns: v.union(v.string(), v.null()),
@@ -42,33 +45,52 @@ export const resume = internalMutation({
     return null;
   },
 });
-/** Item 9a04d916 (FORGE_QUEUE_COMPOSE_SETTLE): the finish step as a scheduled
- * mutation (exactly once), for a completed compose and for the recompose submit.
- * Only a step that needs IO hands its command to the drive action, untracked: the
- * retained retry wake the step armed owns that IO. Task args never carry IO bytes
- * or URLs: a solo plan travels as its pin and compose identity, and the action
- * re-reads its bytes; a cohort plan or an acceptance page (rare here) goes to an
- * immediate drive, as before the switch. */
+/** Item 9a04d916 (compose settle): the finish step as a scheduled mutation (exactly
+ * once), for every finish wake with no IO in flight (scheduleFinish). Only a step that
+ * needs IO hands its command to the drive action, untracked: the retained retry wake
+ * the step armed owns that IO. Task args never carry IO bytes or URLs: a solo plan
+ * travels as its pin and compose identity, and the action re-reads its bytes; a cohort
+ * plan or an acceptance page goes to an immediate drive that re-steps, backed by the
+ * step's retry mutation. */
 export const settle = internalMutation({
   args: stepIdentity,
   returns: v.null(),
-  handler: async (ctx, input) => {
-    const command = await finishStep(ctx, input);
-    if (!command) return null;
-    if (command.kind === 'page' || (command.kind === 'plan' && !command.source)) {
-      const row = await finishRow(ctx, input);
-      if (row) await scheduleFinish(ctx, row, 0, true);
-      return null;
-    }
-    await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedFinishDriver:drive'), {
-      ...input,
-      command: canonicalPayload(
-        command.kind === 'plan' ? { kind: 'plan', pin: command.pin, source: command.source } : command,
-      ),
-    });
-    return null;
-  },
+  handler: (ctx, input) => settleStep(ctx, input),
 });
+/** Review ba9ce962 L2: a step's retained IO retry (retryFinish). The
+ * settle step; a retry without a count is the generation's first. */
+export const retry = internalMutation({
+  args: stepIdentity,
+  returns: v.null(),
+  handler: (ctx, input) => settleStep(ctx, { ...input, attempt: input.attempt ?? 1 }),
+});
+async function settleStep(ctx: MutationCtx, input: FinishIdentity): Promise<null> {
+  const command = await finishStep(ctx, input);
+  if (!command) return null;
+  if (command.kind === 'page' || (command.kind === 'plan' && !command.source)) {
+    // Review ba9ce962 L2: the step armed its retained retry as a mutation (retryFinish);
+    // it stays as this generation's backstop. The wake is due now, so one
+    // untracked drive re-steps at once: its step mints the IO afresh and replaces the
+    // retry with its own. Losing that drive leaves the retry, never the alarm.
+    const row = await finishRow(ctx, input);
+    if (row?.wake?.id === input.wakeId) {
+      await ctx.db.patch(row._id, { wake: { ...row.wake, at: Date.now() } });
+      await ctx.scheduler.runAfter(
+        0,
+        makeFunctionReference<'action'>('projectHostedFinishDriver:drive'),
+        input,
+      );
+    }
+    return null;
+  }
+  await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedFinishDriver:drive'), {
+    ...input,
+    command: canonicalPayload(
+      command.kind === 'plan' ? { kind: 'plan', pin: command.pin, source: command.source } : command,
+    ),
+  });
+  return null;
+}
 /** The exact bytes of a settled solo plan: one indexed compose read, rebuilt the way
  * the step built them. The action checks them against the pin; resume checks again. */
 export const planValue = internalQuery({

@@ -11,8 +11,8 @@ import {
   records,
   code,
   maxima,
-  composeSettleSwitch,
   finishIOTask,
+  isFinishWake,
 } from './hosted-finish-fixture.mjs';
 import { hostedFinishBackoff } from '../dist/hosted-finish.js';
 import { moduleUrl } from './convex-module.mjs';
@@ -283,66 +283,47 @@ for (const crash of ['before-step', 'after-step', 'before-resume']) {
   });
 }
 
-// Item 9a04d916: with FORGE_QUEUE_COMPOSE_SETTLE on, the step runs in the settle mutation and
-// only its IO (the crash point here) is the drive action, carrying the step's command.
-for (const on of [false, true])
-  test(`crash after plan upload and after source publication does not create another source job, attempt or check (compose settle ${on ? 'on' : 'off'})`, async t => {
-    composeSettleSwitch(t, on);
-    const f = await finishFixture(t),
-      { state, request } = await begin(f);
-    f.moveMain();
-    await f.passChecks();
-    // Stop when the named pending attempt has been reserved, before source IO.
-    while (!(await f.current(state.id)).pendingAttempt) await f.execute();
-    const pending = (await f.current(state.id)).pendingAttempt;
-    const { task: io } = await finishIOTask(f, on);
-    await assert.rejects(f.execute(io, 'before-resume'), /synthetic crash/);
-    await f.tx('finishRepair', api.resume, { projectId: f.projectId, submissionId: state.id });
-    assert.equal((await f.current(state.id)).pendingAttempt.id, pending.id);
-    await f.drain();
-    assert.equal(f.metrics.sourceJobs, 1);
-    assert.equal((await f.status(state.id)).attempt.id, pending.id);
-    await complete(f);
-    const accepted = await f.current(state.id),
-      main = f.currentMain();
-    const { message, ...replayed } = await f.enqueue(request);
-    assert.equal(message, JSON.parse(f.row(state.id).value).source.message);
-    assert.deepEqual(replayed, accepted.submission);
-    assert.deepEqual(f.currentMain(), main);
-    assert.equal(f.tables.projectHostedCheckRuns.size, 2);
-    assert.equal(f.tables.projectHostedLandingAttempts.size, 2);
-  });
+// Item 9a04d916: the step runs in the settle mutation and only its IO (the crash point
+// here) is the drive action, carrying the step's command.
+test('crash after plan upload and after source publication does not create another source job, attempt or check', async t => {
+  const f = await finishFixture(t),
+    { state, request } = await begin(f);
+  f.moveMain();
+  await f.passChecks();
+  // Stop when the named pending attempt has been reserved, before source IO.
+  while (!(await f.current(state.id)).pendingAttempt) await f.execute();
+  const pending = (await f.current(state.id)).pendingAttempt;
+  const { task: io } = await finishIOTask(f);
+  await assert.rejects(f.execute(io, 'before-resume'), /synthetic crash/);
+  await f.tx('finishRepair', api.resume, { projectId: f.projectId, submissionId: state.id });
+  assert.equal((await f.current(state.id)).pendingAttempt.id, pending.id);
+  await f.drain();
+  assert.equal(f.metrics.sourceJobs, 1);
+  assert.equal((await f.status(state.id)).attempt.id, pending.id);
+  await complete(f);
+  const accepted = await f.current(state.id),
+    main = f.currentMain();
+  const { message, ...replayed } = await f.enqueue(request);
+  assert.equal(message, JSON.parse(f.row(state.id).value).source.message);
+  assert.deepEqual(replayed, accepted.submission);
+  assert.deepEqual(f.currentMain(), main);
+  assert.equal(f.tables.projectHostedCheckRuns.size, 2);
+  assert.equal(f.tables.projectHostedLandingAttempts.size, 2);
+});
 
-// Item 9a04d916 (review L3): a settle whose step needs IO that cannot travel in a task
-// (an acceptance page, or a plan without a compose source, which a cohort step returns)
-// re-arms one immediate drive under the retained wake id. That drive re-steps and owns the
-// IO with its own 30 s retry; the retry the settle's step armed is cancelled, never doubled.
-const settleFallback = {
-  'an acceptance page': {
-    on: true,
-    reach: async f => {
-      while (f.pending()[0]?.name !== 'projectHostedFinishDriver:drive') await f.execute();
-    },
-    kind: 'page',
-  },
-  'a plan without a compose source': {
-    // The solo step adds the source only with the switch on; a cohort step never does.
-    on: false,
-    reach: async (f, state) => {
-      f.moveMain();
-      await f.passChecks();
-      while (!(await f.current(state.id)).pendingAttempt) await f.execute();
-    },
-    kind: 'plan',
-  },
-};
-for (const [name, { on, reach, kind }] of Object.entries(settleFallback))
-  test(`settle falls back to one immediate drive without a command for ${name}`, async t => {
-    composeSettleSwitch(t, on);
+// Item 9a04d916 (review L3, then L2): a settle whose step needs IO that cannot travel in a
+// task (an acceptance page, or a plan without a compose source, which a cohort step returns)
+// starts one immediate drive under the retained wake id. That drive re-steps and owns the IO.
+// The retry the settle's step armed stays as the generation's backstop, so losing the
+// immediate drive is recovered within 30 s, never by the alarm. A solo plan always carries
+// its compose source; the cohort plan's fallback is the batched cohort's drive steps in the
+// landing fault matrix (landing-failure-injection.test.mjs).
+for (const lost of [false, true])
+  test(`settle falls back to one immediate drive without a command for an acceptance page${lost ? '; its retry owns a lost drive' : ''}`, async t => {
     const f = await finishFixture(t),
       { state } = await begin(f);
-    if (kind === 'page') await f.passChecks();
-    await reach(f, state);
+    await f.passChecks();
+    while (f.pending()[0]?.name !== 'projectHostedFinishDriver:drive') await f.execute();
     const submission = id => f.pending().filter(task => task.args?.[0]?.submissionId === id);
     const wake = submission(state.id)[0];
     assert.equal(wake.name, 'projectHostedFinishDriver:drive');
@@ -353,16 +334,34 @@ for (const [name, { on, reach, kind }] of Object.entries(settleFallback))
     const before = (await f.current(state.id)).pendingAttempt;
     await f.tx('finishSettle', driver.settle, input);
     const tasks = submission(state.id).filter(task => task.name.startsWith('projectHostedFinishDriver:'));
-    assert.equal(tasks.length, 1, "exactly one finish task: the step's own retry is cancelled");
-    assert.equal(tasks[0].name, 'projectHostedFinishDriver:drive');
-    assert.equal(tasks[0].args[0].command, undefined, 'the fallback drive carries no command');
-    assert.equal(tasks[0].args[0].wakeId, input.wakeId, 'under the retained wake id');
-    assert(tasks[0].scheduledTime <= Date.now(), 'immediate, not the 30 s retry');
+    const retry = f.tables._scheduled_functions.get(f.row(state.id).wake.taskId);
+    const [drive] = tasks.filter(task => task._id !== retry._id);
+    assert.equal(tasks.length, 2, 'one immediate drive and the step retry, nothing doubled');
+    assert.equal(drive.name, 'projectHostedFinishDriver:drive');
+    assert.equal(drive.args[0].command, undefined, 'the fallback drive carries no command');
+    assert.equal(drive.args[0].wakeId, input.wakeId, 'under the retained wake id');
+    assert(drive.scheduledTime <= Date.now(), 'immediate, not the 30 s retry');
+    // The step's own retry is the backstop: the retry mutation, same wake id.
+    assert.equal(retry.name, 'projectHostedFinishDriver:retry');
+    assert.equal(retry.args[0].wakeId, input.wakeId);
+    assert.equal(retry.scheduledTime - Date.now(), 30_000);
+    assert(f.row(state.id).wake.at <= Date.now(), 'the generation is due now, so the drive may re-step');
     assert.deepEqual((await f.current(state.id)).pendingAttempt, before);
+    if (lost) {
+      f.patch('_scheduled_functions', drive._id, { state: { kind: 'failed' } });
+      const at = Date.now();
+      assert.equal(f.pending()[0]._id, retry._id, 'only the backstop is left to run');
+      await f.execute(f.pending()[0]);
+      assert.equal(Date.now() - at, 30_000, 'the retry ran next, at 30 s');
+    } else {
+      await f.execute(drive);
+      const backstop = f.tables._scheduled_functions.get(retry._id).state.kind;
+      assert.notEqual(backstop, 'pending', 'the re-step replaced the retry; it never runs twice');
+    }
     await f.drain();
     await complete(f);
     assert.equal((await f.current(state.id)).submission.phase, 'landed');
-    assert.equal(f.metrics.sourceJobs, kind === 'plan' ? 1 : 0);
+    assert.equal(f.metrics.sourceJobs, 0);
   });
 
 test('stacked dependency waits own no idle timer and resume on the parent receipt', async t => {
@@ -576,52 +575,42 @@ test('landing cancellation stops its unused check, preserves its Lane and refuse
   assert.equal(f.pending().length, 0);
 });
 
-for (const on of [false, true])
-  test(`cancellation during metadata IO fences its delayed resume and retains pending source selection (compose settle ${on ? 'on' : 'off'})`, async t => {
-    composeSettleSwitch(t, on);
-    const f = await finishFixture(t),
-      { state } = await begin(f);
-    f.moveMain();
-    await f.passChecks();
-    while (!(await f.current(state.id)).pendingAttempt) await f.execute();
-    const first = f
-        .pending()
-        .find(task => task.name === `projectHostedFinishDriver:${on ? 'settle' : 'drive'}`),
-      input = first.args[0];
-    f.advanceClock(first.scheduledTime - Date.now());
-    let command;
-    if (on) {
-      // The settle mutation runs the step and hands its IO to the drive action, which
-      // rebuilds the plan bytes from the compose row before the IO.
-      ({ command } = await finishIOTask(f, on));
-      assert.equal(command.kind, 'plan');
-      const { source, ...plan } = command;
-      command = {
-        ...plan,
-        value: await f.tx('finishPlanValue', driver.planValue, { projectId: f.projectId, ...source }),
-      };
-    } else {
-      command = JSON.parse(await f.tx('finishStep', driver.step, input));
-      assert.equal(command.kind, 'plan');
-    }
-    const pending = (await f.current(state.id)).pendingAttempt;
-    await f.tx('finishLandingCancel', landingApi.cancel, {
-      projectId: f.projectId,
-      request: JSON.stringify({ operationId: randomUUID(), submissionId: state.id, authorityEpoch: 1 }),
-    });
-    await f.tx('finishLateIO', driver.resume, {
-      ...input,
-      command: JSON.stringify(command),
-      storageId: 'ignored-late-upload',
-    });
-    await f.drain();
-    const current = await f.current(state.id);
-    assert.equal(current.submission.error.code, 'LANDING_CANCELLED');
-    assert.deepEqual(current.pendingAttempt, pending);
-    assert.equal(f.metrics.sourceJobs, 0);
-    assert.equal(f.tables.projectHostedCheckRuns.size, 1);
-    assert.equal(f.tables.projectHostedAcceptances.size, 0);
+test('cancellation during metadata IO fences its delayed resume and retains pending source selection', async t => {
+  const f = await finishFixture(t),
+    { state } = await begin(f);
+  f.moveMain();
+  await f.passChecks();
+  while (!(await f.current(state.id)).pendingAttempt) await f.execute();
+  const first = f.pending().find(task => task.name === 'projectHostedFinishDriver:settle'),
+    input = first.args[0];
+  f.advanceClock(first.scheduledTime - Date.now());
+  // The settle mutation runs the step and hands its IO to the drive action, which
+  // rebuilds the plan bytes from the compose row before the IO.
+  let { command } = await finishIOTask(f);
+  assert.equal(command.kind, 'plan');
+  const { source, ...plan } = command;
+  command = {
+    ...plan,
+    value: await f.tx('finishPlanValue', driver.planValue, { projectId: f.projectId, ...source }),
+  };
+  const pending = (await f.current(state.id)).pendingAttempt;
+  await f.tx('finishLandingCancel', landingApi.cancel, {
+    projectId: f.projectId,
+    request: JSON.stringify({ operationId: randomUUID(), submissionId: state.id, authorityEpoch: 1 }),
   });
+  await f.tx('finishLateIO', driver.resume, {
+    ...input,
+    command: JSON.stringify(command),
+    storageId: 'ignored-late-upload',
+  });
+  await f.drain();
+  const current = await f.current(state.id);
+  assert.equal(current.submission.error.code, 'LANDING_CANCELLED');
+  assert.deepEqual(current.pendingAttempt, pending);
+  assert.equal(f.metrics.sourceJobs, 0);
+  assert.equal(f.tables.projectHostedCheckRuns.size, 1);
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
+});
 
 test('a source completion after landing cancellation cannot install a child attempt or check', async t => {
   const f = await finishFixture(t),
@@ -764,7 +753,11 @@ test('lost final publication reply is reconciled through the actual receipt with
     if (plan && plan.inputsNext === null && plan.dependenciesNext === null) break;
     await f.execute();
   }
-  await assert.rejects(f.execute(f.pending()[0], 'after-step'), /synthetic crash/);
+  const last = f.pending()[0];
+  // Item 9a04d916: the final publication step is the settle mutation, which commits
+  // atomically and has no reply to lose; the replay below still reconciles through the receipt.
+  assert.equal(last.name, 'projectHostedFinishDriver:settle');
+  await f.execute(last);
   assert.equal((await f.current(state.id)).submission.phase, 'landed');
   const main = f.currentMain();
   assert.equal((await f.enqueue(request)).acceptance.receiptId, main.receipt.id);
@@ -1073,7 +1066,7 @@ test('publication still releases a different live run retained on the landing ro
   f.patch('projectHostedLandingRequests', row._id, { runId: other.id });
   for (let n = 0; (await f.current(state.id)).submission.phase !== 'landed'; n++) {
     assert(n < 20, 'finite exact publication');
-    const task = f.pending().find(task => task.name === 'projectHostedFinishDriver:drive');
+    const task = f.pending().find(task => isFinishWake(task.name));
     assert(task);
     await f.execute(task);
   }

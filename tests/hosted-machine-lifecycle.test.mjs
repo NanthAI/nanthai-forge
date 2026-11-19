@@ -48,7 +48,10 @@ test('Q4 selected reconnect stays bounded with dogfood source and twice retained
   const result = JSON.parse(stdout);
   t.diagnostic(JSON.stringify(result));
   assert(result.functionTransactions <= 50, 'selected lifecycle transaction budget');
-  assert(result.documentsRead <= 500, 'no collection/history hydration');
+  // 500 -> 533 (Item 9a04d916, compose settle; owner-approved +$0.02/1k), measured after the new-run
+  // wake (5e3c3a3c) became permanent: the reconnect's finish wakes run as settle mutations and
+  // hand IO to one drive (30 -> 33 transactions), as the 3-file restart replay already measured.
+  assert(result.documentsRead <= 533, 'no collection/history hydration');
   assert(result.sourceDocumentsWritten <= 160, 'bounded selected lifecycle writes');
   // 60 -> 62 (435c7c2f): the largest transaction begins two operations, each first looking, through one indexed
   // range, for receipts older than 90 days to delete (the fixture counts an empty range as one document).

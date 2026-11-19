@@ -67,7 +67,7 @@ export type FinishCommand =
       pin: { sha256: string; size: number };
       batchId?: string;
       batchComposeOperationId?: string;
-      /** FORGE_QUEUE_COMPOSE_SETTLE only: the compose that rebuilds `value` in the action. */
+      /** A solo plan's compose, which rebuilds `value` in the action (Item 9a04d916). */
       source?: { actor: string; operationId: string; at: string };
     };
 

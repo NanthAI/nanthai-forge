@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic, batchStore } from './hosted-landing-batches-fixture.mjs';
-import { landingApi } from './hosted-finish-fixture.mjs';
+import { isFinishWake, landingApi } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { assertQueueProgress } from './queue-sim/invariants.mjs';
 const finishCompose = await import(moduleUrl('../convex/projectHostedFinishCompose.ts'));
@@ -513,12 +513,5 @@ test('re-pin wake preserves ordinary order waiters across pages and reaches the 
   assert.equal(pages, 2);
   for (const id of ordinary) assert.equal(rowOf(f, id).orderWait, predecessor);
   assert.equal(rowOf(f, current(f, 1).id).orderWait, undefined);
-  assert(
-    f
-      .pending()
-      .some(
-        task =>
-          task.name === 'projectHostedFinishDriver:drive' && task.args[0].submissionId === current(f, 1).id,
-      ),
-  );
+  assert(f.pending().some(task => isFinishWake(task.name) && task.args[0].submissionId === current(f, 1).id));
 });

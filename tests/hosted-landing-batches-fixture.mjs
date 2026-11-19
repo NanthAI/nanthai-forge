@@ -220,6 +220,22 @@ export async function batchesFixture(
       f.patch('_scheduled_functions', task._id, { state: { kind: 'success' } });
       return;
     }
+    if (task.name === 'projectHostedFinishDriver:settle' || task.name === 'projectHostedFinishDriver:retry') {
+      // Item 9a04d916 (compose settle): the finish step runs in the
+      // mutation, so a publication it makes is recorded the same way as the drive's.
+      const before = f.tables.projectHostedAcceptances.size,
+        mainBefore = f.currentMain().receipt.id;
+      const value = await f.execute(task, stop);
+      const receipts = f.tables.projectHostedAcceptances.size - before;
+      const mainMoves = Number(f.currentMain().receipt.id !== mainBefore);
+      if (receipts || mainMoves)
+        publications.push({
+          receipts,
+          mainMoves,
+          landed: states(f).filter(s => s.phase === 'landed').length,
+        });
+      return value;
+    }
     if (task.name !== 'projectHostedFinishDriver:drive') return f.execute(task, stop);
     f.advanceClock(Math.max(0, task.scheduledTime - Date.now()));
     f.patch('_scheduled_functions', task._id, { state: { kind: 'inProgress' } });

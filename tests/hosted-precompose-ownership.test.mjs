@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { batchesFixture, synthetic, states } from './hosted-landing-batches-fixture.mjs';
+import { isFinishWake, runFinishWake } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const precompose = await import(moduleUrl('../convex/projectHostedLandingPrecompose.ts'));
 const finishDriver = await import(moduleUrl('../convex/projectHostedFinishDriver.ts'));
@@ -36,7 +37,10 @@ async function probe(f) {
       receiptIds: [main.receipt.id],
     },
   );
-  await f.execute(f.pending().find(task => task.name === 'projectHostedFinishDriver:drive'));
+  await runFinishWake(
+    f,
+    f.pending().find(task => isFinishWake(task.name)),
+  );
   assert(JSON.parse(f.row(f.entries[0].state.id).value).pending.precompose);
 }
 
@@ -116,10 +120,13 @@ for (const history of [575, 1150])
     // Reads 1352 -> 1354 (750c5929): each of the 2 completion ticks first point-reads the landing's main path log row
     // to name it. On a real deployment that row exists and replaces the 140 KB main-row read. This fixture has
     // neither row, so the main-row lookup stays as well. Calls and writes unchanged.
+    // Reads 1354 -> 1364, writes 414 -> 446 (Item 9a04d916, compose settle; owner-approved
+    // +$0.02/1k): each finish wake with no IO in flight is the settle mutation, and a step that needs IO hands it to one drive action (an acceptance page or cohort plan steps once more there). Calls stay under their ceiling.
+    // Writes 446 -> 448: the always-on S1 writer (b149b16b, merged from main) arms one capsule wake per landed member; no call or read.
     assert(
       budget.calls <= 71 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 1354 &&
-        source.reduce((n, c) => n + c.writes, 0) <= 414,
+        source.reduce((n, c) => n + c.documents, 0) <= 1364 &&
+        source.reduce((n, c) => n + c.writes, 0) <= 448,
       JSON.stringify({
         ...budget,
         sourceReads: source.reduce((n, c) => n + c.documents, 0),
@@ -170,11 +177,7 @@ test('a delayed clean warmup cannot retake ownership from an already formed trai
   );
   const id = f.entries[0].state.id;
   assert.equal(JSON.parse(f.row(id).value).pending, null, 'formed groups retain their useful preparation');
-  await f.execute(
-    f
-      .pending()
-      .find(task => task.name === 'projectHostedFinishDriver:drive' && task.args[0].submissionId === id),
-  );
+  await f.execute(f.pending().find(task => isFinishWake(task.name) && task.args[0].submissionId === id));
   assert.equal(JSON.parse(f.row(id).value).pending, null, 'the shared source owns useful preparation');
   assert.equal(f.metrics.sourceJobs, 0, 'no advisory source job is needed to prepare the train');
   assert(
@@ -229,7 +232,7 @@ for (const outcome of ['clean', 'conflict'])
         receiptIds: [main.receipt.id],
       },
     );
-    const task = f.pending().find(task => task.name === 'projectHostedFinishDriver:drive');
+    const task = f.pending().find(task => isFinishWake(task.name));
     const command = JSON.parse(await f.transaction('old-plan-step', finishDriver.step, task.args[0]));
     assert.equal(command.kind, 'plan');
     const old = JSON.parse(f.row(f.entries[0].state.id).value).pending;

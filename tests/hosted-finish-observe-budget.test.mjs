@@ -292,7 +292,9 @@ test('one accepted landing budgets executions and aggregate read bytes with 100 
     const transactions = f.counts.slice(readStart);
     const otherCalls = transactions.filter(c => c.name !== 'observerBudgetPage').length;
     // 123 = 122 + one accountProjectOrder:touch when the landing opens an hour bucket (Item 3d5d8839).
-    assert(otherCalls <= 123, 'other functions do not grow to carry observation work');
+    // 123 -> 125 (Item 9a04d916, compose settle; owner-approved +$0.02/1k): the settle mutation runs a finish wake with no IO in flight, and an
+    // acceptance page it cannot hand out is stepped once more by its drive.
+    assert(otherCalls <= 125, `other functions do not grow to carry observation work: ${otherCalls}`);
     const totalCalls = {
       source: otherCalls + watchers[0].calls,
       projected: otherCalls + watchers[1].calls,

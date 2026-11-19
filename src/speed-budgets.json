@@ -76,9 +76,9 @@
       "measuredBy": "build-guard",
       "metric": "admissionQueueOnlyCalls",
       "unit": "ops",
-      "max": 507,
+      "max": 543,
       "source": "Issue 8c9b84fc: tests/hosted-landing-admission-default.test.mjs drives production queue and audit controllers on three relative synthetic timelines.",
-      "reason": "Queue-only defaults remove isolated-then-combined checks and their reuse audits. The largest measured clean-wave count is the ceiling; red sensitivity is a separate tradeoff, not a universal cost claim. 507 (3d5d8839): +1 accountProjectOrder:touch, the wave opening one hour bucket for its project.",
+      "reason": "Queue-only defaults remove isolated-then-combined checks and their reuse audits. The largest measured clean-wave count is the ceiling; red sensitivity is a separate tradeoff, not a universal cost claim. 507 (3d5d8839): +1 accountProjectOrder:touch, the wave opening one hour bucket for its project. 543 (Item 9a04d916, compose settle; owner-approved +$0.02 per 1,000 landings): every finish wake with no IO in flight is a settle mutation, and a step that needs IO hands it to one drive action; largest clean wave N=10.",
       "issue": "8c9b84fc"
     },
     {
@@ -87,9 +87,9 @@
       "measuredBy": "build-guard",
       "metric": "admissionQueueOnlyDocumentsRead",
       "unit": "ops",
-      "max": 11694,
+      "max": 12418,
       "source": "Issue 8c9b84fc: tests/hosted-landing-admission-default.test.mjs drives production queue and audit controllers on three relative synthetic timelines.",
-      "reason": "Queue-only defaults remove isolated-then-combined checks and their reuse audits. The largest measured clean-wave count is the ceiling; red sensitivity is a separate tradeoff, not a universal cost claim.",
+      "reason": "Queue-only defaults remove isolated-then-combined checks and their reuse audits. The largest measured clean-wave count is the ceiling; red sensitivity is a separate tradeoff, not a universal cost claim. Item 9a04d916 compose settle (owner-approved, +$0.02 per 1,000 landings): every finish wake with no IO in flight is a settle mutation, and a step that needs IO hands it to one drive action; 11694 -> 12418, largest clean wave.",
       "issue": "8c9b84fc"
     },
     {
@@ -98,9 +98,9 @@
       "measuredBy": "build-guard",
       "metric": "admissionQueueOnlyDocumentsWritten",
       "unit": "ops",
-      "max": 3585,
+      "max": 3910,
       "source": "Issue 8c9b84fc: tests/hosted-landing-admission-default.test.mjs drives production queue and audit controllers on three relative synthetic timelines.",
-      "reason": "Queue-only defaults remove isolated-then-combined checks and their reuse audits. The largest measured clean-wave count is the ceiling; red sensitivity is a separate tradeoff, not a universal cost claim.",
+      "reason": "Queue-only defaults remove isolated-then-combined checks and their reuse audits. The largest measured clean-wave count is the ceiling; red sensitivity is a separate tradeoff, not a universal cost claim. Item 9a04d916 compose settle (owner-approved, +$0.02 per 1,000 landings): every finish wake with no IO in flight is a settle mutation, and a step that needs IO hands it to one drive action; 3585 -> 3900, largest clean wave. 3900 -> 3910: the always-on S1 writer (b149b16b, merged from main) arms one capsule wake per landed member; no call or read.",
       "issue": "8c9b84fc"
     },
     {
@@ -703,11 +703,11 @@
       "measuredBy": "landing-fixture",
       "metric": "queries",
       "unit": "calls",
-      "value": 0,
+      "value": 0.33,
       "floor": 0.5,
       "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo accepted-Candidate submission (initial save/compose excluded), one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
       "issue": "74969509",
-      "reason": "Queries the server runs for a landing without a client read. The client wait and the finish observer are live-only (about 31 executions per landing in capture #2); slice 1 cut their bytes. An extra read per landing fails here."
+      "reason": "Queries the server runs for a landing without a client read. The client wait and the finish observer are live-only (about 31 executions per landing in capture #2); slice 1 cut their bytes. An extra read per landing fails here. Item 9a04d916 compose settle (owner-approved, +$0.02 per 1,000 landings): every finish wake with no IO in flight is a settle mutation, and only its IO goes to a drive action; the solo plan action re-reads its bytes in one query. Measured six-landing mix against main before it: queries 0 -> 0.33, mutations 27.83 -> 30.83, V8 actions 9.83 -> 6, calls 38.17 -> 37.67, read bytes 728817 -> 812627, write bytes 234142 -> 251899, action 2.85 -> 2.225 GB-s per landing."
     },
     {
       "id": "landing-mutations",
@@ -715,11 +715,11 @@
       "measuredBy": "landing-fixture",
       "metric": "mutations",
       "unit": "calls",
-      "value": 27.17,
+      "value": 30.83,
       "floor": 0.5,
       "source": "tests/landing-cost-guard.test.mjs, unchanged six-landing mix; Issue 71dbe458: manifest-only V8 composition and shared per-action descriptors/read cache. Synthetic counts, not billed usage.",
       "issue": "71dbe458",
-      "reason": "Controller wakes, driver steps, check callbacks and acceptance. Slice 2 skipped controller wakes that cannot change eligibility; one batched CI result path per run (65534f20) is the next cut. Source-step cut (71dbe458) ratchets 27.5 to 27.17; total calls 38 to 37.5 per landing, Node actions 4/6 to 3/6, V8 unchanged at 59/6. Starter modeled Convex subtotal includes $2.20/M calls, $0.22/GB DB I/O, $0.33/GB-h actions and $0.132/GB R2 upload egress; see hosted-source-worker.md for scope and arithmetic."
+      "reason": "Controller wakes, driver steps, check callbacks and acceptance. Slice 2 skipped controller wakes that cannot change eligibility; one batched CI result path per run (65534f20) is the next cut. Source-step cut (71dbe458) ratchets 27.5 to 27.17; total calls 38 to 37.5 per landing, Node actions 4/6 to 3/6, V8 unchanged at 59/6. Starter modeled Convex subtotal includes $2.20/M calls, $0.22/GB DB I/O, $0.33/GB-h actions and $0.132/GB R2 upload egress; see hosted-source-worker.md for scope and arithmetic. Item 9a04d916 compose settle (owner-approved, +$0.02 per 1,000 landings): every finish wake with no IO in flight is a settle mutation, and only its IO goes to a drive action; the solo plan action re-reads its bytes in one query. Measured six-landing mix against main before it: queries 0 -> 0.33, mutations 27.83 -> 30.83, V8 actions 9.83 -> 6, calls 38.17 -> 37.67, read bytes 728817 -> 812627, write bytes 234142 -> 251899, action 2.85 -> 2.225 GB-s per landing."
     },
     {
       "id": "landing-v8-actions",
@@ -727,11 +727,11 @@
       "measuredBy": "landing-fixture",
       "metric": "v8Actions",
       "unit": "calls",
-      "value": 9.83,
+      "value": 6,
       "floor": 0.25,
       "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo accepted-Candidate submission (initial save/compose excluded), one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
       "issue": "ee7ad4d8",
-      "reason": "Landing and finish drivers plus V8 source steps. Slice 3 routed eligible source work here from 512 MiB Node."
+      "reason": "Landing and finish drivers plus V8 source steps. Slice 3 routed eligible source work here from 512 MiB Node. Item 9a04d916 compose settle (owner-approved, +$0.02 per 1,000 landings): every finish wake with no IO in flight is a settle mutation, and only its IO goes to a drive action; the solo plan action re-reads its bytes in one query. Measured six-landing mix against main before it: queries 0 -> 0.33, mutations 27.83 -> 30.83, V8 actions 9.83 -> 6, calls 38.17 -> 37.67, read bytes 728817 -> 812627, write bytes 234142 -> 251899, action 2.85 -> 2.225 GB-s per landing."
     },
     {
       "id": "landing-node-actions",
@@ -751,11 +751,11 @@
       "measuredBy": "landing-fixture",
       "metric": "readBytes",
       "unit": "bytes",
-      "value": 714444,
+      "value": 812627,
       "floor": 2048,
       "source": "tests/landing-cost-guard.test.mjs, unchanged six-landing mix; Issue 71dbe458: manifest-only V8 composition and shared per-action descriptors/read cache. Synthetic counts, not billed usage. Merged metrics projection 1441a9bf plus CI batch 65534f20 qualification; includes compact metric-row metadata I/O. Remeasured with CI batch resolution on accepted proof/driver main 94bd1b20; all ledger ids retained (65534f20). CI batch qualification on refreshed merged code 020cc310: retained every ledger id and recorded measured combined reads (65534f20). S3 324f1d97 ticket/body split: unchanged six-landing fixture reads 713393 and writes 223370 B per landing; synthetic document I/O, not billed usage.",
       "issue": "71dbe458",
-      "reason": "Database bandwidth was the largest Convex part in capture #1 ($0.0037 of $0.0086 per landing). The last-shard CI result read cut is the latest decision. Source-step cut (71dbe458) ratchets 806895 to 803701; total calls 38 to 37.5 per landing, Node actions 4/6 to 3/6, V8 unchanged at 59/6. Starter modeled Convex subtotal includes $2.20/M calls, $0.22/GB DB I/O, $0.33/GB-h actions and $0.132/GB R2 upload egress; see hosted-source-worker.md for scope and arithmetic. Remeasured after syncing accepted main: 801924 bytes per landing (includes intervening accepted changes); every existing entry and reason is retained. CI batch merged qualification: 799340 B, reusing transaction-authorized project snapshots instead of duplicate reads (65534f20). Unindexed request/selection bodies remove cold bytes from phase writes without changing function calls or the observer ceiling. Lead-approved scheduler safety (1122c9c9): +908 measured B/landing (715683.5 -> 716591.5), modeled +$0.0001816/1,000; ledger 713500 -> 714408, calls/writes unchanged. Item landing notes (3a733ee8): one empty unique-index probe per landed Intent, +36 measured B/landing (main 728817 -> 728853); ledger 714408 -> 714444, calls unchanged."
+      "reason": "Database bandwidth was the largest Convex part in capture #1 ($0.0037 of $0.0086 per landing). The last-shard CI result read cut is the latest decision. Source-step cut (71dbe458) ratchets 806895 to 803701; total calls 38 to 37.5 per landing, Node actions 4/6 to 3/6, V8 unchanged at 59/6. Starter modeled Convex subtotal includes $2.20/M calls, $0.22/GB DB I/O, $0.33/GB-h actions and $0.132/GB R2 upload egress; see hosted-source-worker.md for scope and arithmetic. Remeasured after syncing accepted main: 801924 bytes per landing (includes intervening accepted changes); every existing entry and reason is retained. CI batch merged qualification: 799340 B, reusing transaction-authorized project snapshots instead of duplicate reads (65534f20). Unindexed request/selection bodies remove cold bytes from phase writes without changing function calls or the observer ceiling. Lead-approved scheduler safety (1122c9c9): +908 measured B/landing (715683.5 -> 716591.5), modeled +$0.0001816/1,000; ledger 713500 -> 714408, calls/writes unchanged. Item landing notes (3a733ee8): one empty unique-index probe per landed Intent, +36 measured B/landing (main 728817 -> 728853); ledger 714408 -> 714444, calls unchanged. Item 9a04d916 compose settle (owner-approved, +$0.02 per 1,000 landings): every finish wake with no IO in flight is a settle mutation, and only its IO goes to a drive action; the solo plan action re-reads its bytes in one query. Measured six-landing mix against main before it: queries 0 -> 0.33, mutations 27.83 -> 30.83, V8 actions 9.83 -> 6, calls 38.17 -> 37.67, read bytes 728817 -> 812627, write bytes 234142 -> 251899, action 2.85 -> 2.225 GB-s per landing. The ceilings move further (read bytes from 714444, write bytes from 223808) because main had already drifted by about 14 KB of reads and 10 KB of writes inside the ledger's tolerance before this change."
     },
     {
       "id": "landing-write-bytes",
@@ -763,11 +763,11 @@
       "measuredBy": "landing-fixture",
       "metric": "writeBytes",
       "unit": "bytes",
-      "value": 223808,
+      "value": 251899,
       "floor": 2048,
       "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo accepted-Candidate submission (initial save/compose excluded), one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings. Merged metrics projection 1441a9bf plus CI batch 65534f20 qualification; includes compact metric-row metadata I/O. S3 324f1d97 ticket/body split: unchanged six-landing fixture reads 713393 and writes 223370 B per landing; synthetic document I/O, not billed usage.",
       "issue": "9db58ca6",
-      "reason": "Written rows are database bandwidth too; bytes belong in R2, Convex keeps records read and written O(pages). Unindexed request/selection bodies remove cold bytes from phase writes without changing function calls or the observer ceiling. Item landing notes (3a733ee8): one ~0.44 KB system-note insert per landed Intent, +408 measured B/landing (main 234142 -> 234550); with the probe read +444 B DB I/O = +$0.0000888/1,000 at $0.20/GB (reference $1.682603 -> $1.682692); ledger 223400 -> 223808, calls and mutations unchanged."
+      "reason": "Written rows are database bandwidth too; bytes belong in R2, Convex keeps records read and written O(pages). Unindexed request/selection bodies remove cold bytes from phase writes without changing function calls or the observer ceiling. Item landing notes (3a733ee8): one ~0.44 KB system-note insert per landed Intent, +408 measured B/landing (main 234142 -> 234550); with the probe read +444 B DB I/O = +$0.0000888/1,000 at $0.20/GB (reference $1.682603 -> $1.682692); ledger 223400 -> 223808, calls and mutations unchanged. Item 9a04d916 compose settle (owner-approved, +$0.02 per 1,000 landings): every finish wake with no IO in flight is a settle mutation, and only its IO goes to a drive action; the solo plan action re-reads its bytes in one query. Measured six-landing mix against main before it: queries 0 -> 0.33, mutations 27.83 -> 30.83, V8 actions 9.83 -> 6, calls 38.17 -> 37.67, read bytes 728817 -> 812627, write bytes 234142 -> 251899, action 2.85 -> 2.225 GB-s per landing. The ceilings move further (read bytes from 714444, write bytes from 223808) because main had already drifted by about 14 KB of reads and 10 KB of writes inside the ledger's tolerance before this change."
     },
     {
       "id": "landing-action-gb-seconds",
@@ -775,11 +775,11 @@
       "measuredBy": "landing-fixture",
       "metric": "actionGbSeconds",
       "unit": "GB-s",
-      "value": 2.85,
+      "value": 2.225,
       "floor": 0.05,
       "source": "tests/landing-cost-guard.test.mjs, unchanged six-landing mix; Issue 71dbe458: manifest-only V8 composition and shared per-action descriptors/read cache. Synthetic counts, not billed usage.",
       "issue": "71dbe458",
-      "reason": "Executions by runtime times memory times the nominal durations in costGuard.actionModel: deterministic, so it moves only with the action mix. Live GB-seconds come from the captures. Source-step cut (71dbe458) ratchets 3.26 to 2.85; total calls 38 to 37.5 per landing, Node actions 4/6 to 3/6, V8 unchanged at 59/6. Starter modeled Convex subtotal includes $2.20/M calls, $0.22/GB DB I/O, $0.33/GB-h actions and $0.132/GB R2 upload egress; see hosted-source-worker.md for scope and arithmetic."
+      "reason": "Executions by runtime times memory times the nominal durations in costGuard.actionModel: deterministic, so it moves only with the action mix. Live GB-seconds come from the captures. Source-step cut (71dbe458) ratchets 3.26 to 2.85; total calls 38 to 37.5 per landing, Node actions 4/6 to 3/6, V8 unchanged at 59/6. Starter modeled Convex subtotal includes $2.20/M calls, $0.22/GB DB I/O, $0.33/GB-h actions and $0.132/GB R2 upload egress; see hosted-source-worker.md for scope and arithmetic. Item 9a04d916 compose settle (owner-approved, +$0.02 per 1,000 landings): every finish wake with no IO in flight is a settle mutation, and only its IO goes to a drive action; the solo plan action re-reads its bytes in one query. Measured six-landing mix against main before it: queries 0 -> 0.33, mutations 27.83 -> 30.83, V8 actions 9.83 -> 6, calls 38.17 -> 37.67, read bytes 728817 -> 812627, write bytes 234142 -> 251899, action 2.85 -> 2.225 GB-s per landing."
     },
     {
       "id": "landing-r2-class-a",
@@ -884,11 +884,11 @@
       "measuredBy": "github-inbound-fixture",
       "metric": "v8Actions",
       "unit": "calls",
-      "value": 7,
+      "value": 5,
       "floor": 0,
       "source": "tests/landing-cost-guard.test.mjs with hosted-github-inbound-cost-fixture.mjs: one 24-byte new blob on an already mirrored three-file main. Includes webhook receive, real Node inbound action, R2 prepare/PUT/HEAD/commit, composition, desired landing, one synthetic passed check and post-acceptance mirror drain. Bootstrap, real CI/provider delivery and client observers excluded; nominal action durations from costGuard.actionModel.",
       "issue": "3e3f9fe6",
-      "reason": "Ratchets the two-way GitHub path separately, preserving the six-Candidate denominator and its zero-query guard. An inbound change pays for object import plus a full Forge landing; dogfood outbound-only traffic cannot measure this share."
+      "reason": "Ratchets the two-way GitHub path separately, preserving the six-Candidate denominator and its zero-query guard. An inbound change pays for object import plus a full Forge landing; dogfood outbound-only traffic cannot measure this share. Item 9a04d916 compose settle ratchets 7 -> 5: the finish steps run as settle mutations."
     },
     {
       "id": "github-inbound-node-actions",

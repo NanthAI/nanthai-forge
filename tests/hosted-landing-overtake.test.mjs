@@ -398,7 +398,9 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // Early retirement now improves the unknown-risk arm too (102 calls), so it
   // no longer isolates the old path. Keep its original measured cost ceiling;
   // the live arm still guards latency, one exact check and zero idle work below.
-  const baseline = { calls: 121, readBytes: 1_822_710, writeBytes: 676_662 };
+  // DB reads 1,822,710 -> 1,896,315 (Item 9a04d916, compose settle; owner-approved +$0.02/1k): a settle mutation runs each finish wake with no
+  // IO in flight, and an acceptance page it cannot hand out is stepped once more by its drive.
+  const baseline = { calls: 121, readBytes: 1_896_315, writeBytes: 676_662 };
   assert(pair.calls <= baseline.calls, `Convex transactions ${baseline.calls} -> ${pair.calls}`);
   assert(pair.readBytes <= baseline.readBytes, `DB reads ${baseline.readBytes} -> ${pair.readBytes}`);
   assert(pair.writeBytes <= baseline.writeBytes, `DB writes ${baseline.writeBytes} -> ${pair.writeBytes}`);
@@ -426,7 +428,8 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   assert.deepEqual(after.runs, [1, 1]);
   // Same pre-cancellation control ceiling as the small replay, measured at 4000
   // files. The live unknown-risk arm now benefits from early retirement too.
-  const baseline = { calls: 121, readBytes: 1_827_467, writeBytes: 679_017 };
+  // DB reads 1,827,467 -> 1,901,561 (Item 9a04d916, compose settle; owner-approved +$0.02/1k), as in the small replay.
+  const baseline = { calls: 121, readBytes: 1_901_561, writeBytes: 679_017 };
   assert(after.calls <= baseline.calls, `transactions ${baseline.calls} -> ${after.calls}`);
   assert(after.readBytes <= baseline.readBytes, `DB reads ${baseline.readBytes} -> ${after.readBytes}`);
   assert(after.writeBytes <= baseline.writeBytes, `DB writes ${baseline.writeBytes} -> ${after.writeBytes}`);

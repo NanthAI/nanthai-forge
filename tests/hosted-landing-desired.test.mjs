@@ -565,7 +565,8 @@ test('desired preparation budget: one server goal lands with no idle tasks or re
   const counts = f.counts.slice(before);
   const sum = key => counts.reduce((total, count) => total + (count[key] ?? 0), 0);
   // 26 = 25 + one accountProjectOrder:touch: the landing opens an hour bucket for its project (Item 3d5d8839).
-  assert.equal(counts.length, 26, 'preparation retains the original server-call budget');
+  // 26 -> 28 (Item 9a04d916, compose settle; owner-approved +$0.02/1k): each finish wake with no IO in flight is the settle mutation, and a step that needs IO hands it to one drive action (an acceptance page or cohort plan steps once more there).
+  assert.equal(counts.length, 28, 'preparation retains the original server-call budget');
   assert.equal(f.pending().length, 0);
   assert.equal(f.tables.projectHostedAcceptances.size, 1);
   t.diagnostic(
