@@ -272,7 +272,8 @@ test('degraded mode retains no recurring timers, consumer wakes or network calls
 
 test('a synchronous native close hang is isolated in the shared helper', async t => {
   nativeFake(t, { hangClose: true });
-  const watcher = watching(t, { probeMs: 500, closeMs: 50 });
+  // Product close bound: under load the probe's close acknowledgement can pass 50 ms.
+  const watcher = watching(t, { probeMs: 500, closeMs: 250 });
   assert.deepEqual(await watcher.probe(), { status: 'healthy' });
   await watcher.close();
   assert.deepEqual(watcher.health, { status: 'degraded', code: 'WATCH_CLOSE_TIMEOUT' });
@@ -296,9 +297,11 @@ for (const userlandRecursive of [false, true])
     const event = new Promise(resolve => {
       resolveEvent = resolve;
     });
+    // Product close bound (250 ms): these waits need real timers, and a loaded
+    // machine's native close plus acknowledgement exceeds the 25 ms test default.
     const watcher = watching(
       t,
-      { probeMs: 3000, recursive: true },
+      { probeMs: 3000, closeMs: 250, recursive: true },
       (_event, name) => {
         if (name === 'source.txt') resolveEvent();
       },
@@ -327,23 +330,33 @@ for (const userlandRecursive of [false, true])
     assert.equal(existsSync(workers[0].received.find(m => m.type === 'probe-directory').directory), false);
   });
 
-test('20 real subscriptions share a healthy probe and cancelling its first subscriber preserves the others', async t => {
-  const workers = nativeFake(t, { real: true });
-  const directory = realpathSync(mkdtempSync('/tmp/forge-watcher-many-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  const watchers = Array.from({ length: 20 }, (_, i) => {
-    const path = join(directory, String(i));
-    mkdirSync(path);
-    return watching(t, { probeMs: 3000, recursive: true }, () => {}, path);
-  });
-  const probes = watchers.map(w => w.probe());
-  await messageFrom(workers[0], 'probe-directory');
-  await watchers[0].close();
-  assert.ok((await Promise.all(probes.slice(1))).every(h => h.status === 'healthy'));
-  assert.equal(workers.length, 1);
-  assert.equal(workers[0].received.filter(m => m.type === 'probe-directory').length, 1);
-  await Promise.all(watchers.map(w => w.close()));
-});
+// Sharing and cancellation are the claims here, not deadlines (fake-helper tests cover
+// those). Parent timers are held, so a loaded machine's close acknowledgement (68 ms
+// seen, 25 ms test bound, 250 ms product bound) cannot degrade the shared helper; a
+// lost probe fails on the test timeout. Timers are released before fixture teardown.
+test(
+  '20 real subscriptions share a healthy probe and cancelling its first subscriber preserves the others',
+  { timeout: 10_000 },
+  async t => {
+    t.after(() => t.mock.timers.reset());
+    const workers = nativeFake(t, { real: true });
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const directory = realpathSync(mkdtempSync('/tmp/forge-watcher-many-'));
+    t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+    const watchers = Array.from({ length: 20 }, (_, i) => {
+      const path = join(directory, String(i));
+      mkdirSync(path);
+      return watching(t, { probeMs: 3000, recursive: true }, () => {}, path);
+    });
+    const probes = watchers.map(w => w.probe());
+    await messageFrom(workers[0], 'probe-directory');
+    await watchers[0].close();
+    assert.deepEqual(await Promise.all(probes.slice(1)), Array(19).fill({ status: 'healthy' }));
+    assert.equal(workers.length, 1);
+    assert.equal(workers[0].received.filter(m => m.type === 'probe-directory').length, 1);
+    await Promise.all(watchers.map(w => w.close()));
+  },
+);
 
 test('doctor reports finite real native watching as healthy', async t => {
   clock(t);
