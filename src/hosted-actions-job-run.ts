@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { childEnv, toolchainEnvAllow } from '../scripts/child-env.mjs';
+import { childEnv, runnerEnvAllow, toolchainEnvAllow } from '../scripts/child-env.mjs';
 import { ContractTimingReader, unstoredReportsNote } from './contract-test-timings.js';
 import { HostedOutputRedactor } from './hosted-output-redactor.js';
 import { semanticCheckCommand } from './semantic-check-command.js';
@@ -244,8 +244,17 @@ async function executeActiveActionsJob(
   const spawnPart = (part?: string) => {
     const env: Record<string, string> = {
       ...(childEnv({
-        allow: ['CI', 'PATH', 'PLAYWRIGHT_BROWSERS_PATH', 'FORGE_UI_BROWSER', ...toolchainEnvAllow()],
+        allow: [
+          'CI',
+          'PATH',
+          'PLAYWRIGHT_BROWSERS_PATH',
+          'FORGE_UI_BROWSER',
+          ...toolchainEnvAllow(),
+          ...runnerEnvAllow(),
+        ],
       }) as Record<string, string>),
+      // On GitHub a step's GITHUB_WORKSPACE is its checkout: here, the Candidate.
+      ...(runnerEnvAllow().includes('GITHUB_WORKSPACE') ? { GITHUB_WORKSPACE: directory } : {}),
       ...(sourceCache ? { FORGE_SOURCE_CACHE_DIR: sourceCache } : {}),
       FORGE_ACTIONS_PLAN: planPath,
       FORGE_ACTIONS_SHARD: shard,

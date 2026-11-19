@@ -1367,6 +1367,25 @@ receives these locations, when the runner image or a setup step sets them: `JAVA
 name containing `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `AUTH` or `KEY` passes,
 whatever pattern it matches. Forge's standard check keeps its exact environment.
 
+#### Runner variables
+
+On GitHub Actions a configured command also sees GitHub's documented, non-secret default
+variables, so a test that reads them behaves as in the same job on plain Actions:
+`GITHUB_ACTIONS`, `GITHUB_ACTOR`, `GITHUB_ACTOR_ID`, `GITHUB_API_URL`, `GITHUB_EVENT_NAME`,
+`GITHUB_GRAPHQL_URL`, `GITHUB_JOB`, `GITHUB_REPOSITORY`, `GITHUB_REPOSITORY_ID`,
+`GITHUB_REPOSITORY_OWNER`, `GITHUB_REPOSITORY_OWNER_ID`, `GITHUB_RETENTION_DAYS`,
+`GITHUB_RUN_ATTEMPT`, `GITHUB_RUN_ID`, `GITHUB_RUN_NUMBER`, `GITHUB_SERVER_URL`,
+`GITHUB_TRIGGERING_ACTOR`, `GITHUB_WORKFLOW`, `RUNNER_ARCH`, `RUNNER_DEBUG`,
+`RUNNER_ENVIRONMENT`, `RUNNER_NAME` and `RUNNER_OS` (`runnerEnvNames` in
+`scripts/child-env.mjs`, one list per adapter). `GITHUB_WORKSPACE` names the Candidate checkout.
+Never passed: tokens and `ACTIONS_*`; the workflow command files (`GITHUB_ENV`,
+`GITHUB_OUTPUT`, `GITHUB_PATH`, `GITHUB_STATE`, `GITHUB_STEP_SUMMARY`), through which a step
+could change Forge's later steps; `GITHUB_EVENT_PATH`; `GITHUB_SHA`, `GITHUB_REF*` and the
+workflow ref, which describe Forge's dispatch rather than the Candidate; and the runner's own
+folders (`RUNNER_TEMP`, `RUNNER_TOOL_CACHE`). GitLab CI runs the project's own CI file
+([CI status checks](ci-status-checks.md)) with its own variables, so it needs no list. Forge's
+standard check keeps its exact environment.
+
 ### Hosted cancellation
 
 Cancelling a hosted landing releases its check in the same transaction. Abandoning

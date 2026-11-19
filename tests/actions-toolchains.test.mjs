@@ -26,7 +26,13 @@ import { hostedCheckDefinition } from '../dist/hosted-check.js';
 import { hostedActionsRecipeSchema } from '../dist/hosted-actions.js';
 import { digest } from '../dist/hash.js';
 import { actionPinFindings } from '../scripts/check-action-pins.mjs';
-import { toolchainEnvAllow, toolchainEnvNames, toolchainEnvPattern } from '../scripts/child-env.mjs';
+import {
+  runnerEnvAllow,
+  runnerEnvNames,
+  toolchainEnvAllow,
+  toolchainEnvNames,
+  toolchainEnvPattern,
+} from '../scripts/child-env.mjs';
 import { runActionsCheck } from '../scripts/github-actions-check.mjs';
 
 // Snapshots are reviewed bytes: UPDATE_ACTIONS_SNAPSHOTS=1 rewrites them after a deliberate change.
@@ -464,6 +470,64 @@ test('toolchain locations pass to configured commands; credential names never do
   // Forge's own suite keeps its exact environment.
   assert.equal(forge.env.JAVA_HOME_21_X64, undefined);
   assert.equal(existsSync(join(root, 'plan.json')), true);
+});
+
+test('Issue 6a345170: runner variables pass per adapter; tokens, command files and other CI never do', t => {
+  const github = {
+    GITHUB_ACTIONS: 'true',
+    RUNNER_OS: 'Linux',
+    GITHUB_RUN_ID: '1',
+    GITHUB_TOKEN: 'synthetic',
+    ACTIONS_RUNTIME_TOKEN: 'synthetic',
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'synthetic',
+    ACTIONS_ID_TOKEN_REQUEST_URL: 'synthetic',
+    GITHUB_ENV: '/runner/_temp/env',
+    GITHUB_OUTPUT: '/runner/_temp/output',
+    GITHUB_PATH: '/runner/_temp/path',
+    GITHUB_STEP_SUMMARY: '/runner/_temp/summary',
+    GITHUB_EVENT_PATH: '/runner/_temp/event.json',
+    GITHUB_SHA: 'a'.repeat(40),
+  };
+  assert.deepEqual(runnerEnvAllow(github).sort(), ['GITHUB_ACTIONS', 'GITHUB_RUN_ID', 'RUNNER_OS']);
+  // Not on GitHub Actions (a local run, or GitHub variables a user set by hand): nothing passes.
+  assert.deepEqual(runnerEnvAllow({ ...github, GITHUB_ACTIONS: undefined }), []);
+  assert.deepEqual(runnerEnvAllow({ ...github, GITHUB_ACTIONS: 'false' }), []);
+  for (const names of Object.values(runnerEnvNames))
+    for (const name of names) assert.doesNotMatch(name, /TOKEN|SECRET|PASSWORD|KEY|AUTH|CREDENTIAL/i);
+
+  const root = mkdtempSync(join(tmpdir(), 'forge-runner-env-'));
+  const planted = { ...github, FORGE_ACTIONS_SHARD: 'static', FORGE_ACTIONS_PLAN: join(root, 'plan.json') };
+  const saved = Object.fromEntries(Object.keys(planted).map(n => [n, process.env[n]]));
+  t.after(() => {
+    for (const [name, value] of Object.entries(saved))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    rmSync(root, { recursive: true, force: true });
+  });
+  Object.assign(process.env, planted);
+  const seen = [];
+  for (const standard of [false, true]) {
+    writeFileSync(
+      process.env.FORGE_ACTIONS_PLAN,
+      JSON.stringify({
+        standard,
+        command: ['gradle', 'test'],
+        groups: [],
+        selection: { scope: standard ? 'docs' : 'full', reason: 'x', tests: [] },
+      }),
+    );
+    runActionsCheck((_command, _args, { env }) => seen.push({ standard, env }), { install: false });
+  }
+  const opaque = seen.find(s => !s.standard).env,
+    forge = seen.find(s => s.standard).env;
+  assert.equal(opaque.GITHUB_ACTIONS, 'true');
+  assert.equal(opaque.RUNNER_OS, 'Linux');
+  for (const name of Object.keys(github).filter(
+    n => !['GITHUB_ACTIONS', 'RUNNER_OS', 'GITHUB_RUN_ID'].includes(n),
+  ))
+    assert.equal(opaque[name], undefined, name);
+  // Forge's own suite keeps its exact environment.
+  assert.equal(forge.GITHUB_ACTIONS, undefined);
 });
 
 test('declared-setup step check: undefined skips, a workflow needs every generated block', async () => {

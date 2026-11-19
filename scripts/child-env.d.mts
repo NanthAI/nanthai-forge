@@ -9,3 +9,5 @@ export function childEnv(options?: {
 export const toolchainEnvNames: readonly string[];
 export const toolchainEnvPattern: RegExp;
 export function toolchainEnvAllow(source?: NodeJS.ProcessEnv): string[];
+export const runnerEnvNames: Readonly<Record<'github-actions', readonly string[]>>;
+export function runnerEnvAllow(source?: NodeJS.ProcessEnv): string[];

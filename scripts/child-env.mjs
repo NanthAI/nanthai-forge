@@ -87,6 +87,51 @@ export const toolchainEnvNames = [
 export const toolchainEnvPattern =
   /^(?:(?:JAVA_HOME|GOROOT)_[0-9]+(?:_[0-9]+)*_(?:X64|ARM64)|INSTALL_DIR_FOR_[A-Z0-9]+)$/;
 const credentialName = /TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|KEY/i;
+/** Documented, non-secret variables the CI sets on every job, per adapter that runs Forge's fixed
+ * supervisor (docs/operations/github-actions-checks.md#runner-variables), so a configured command
+ * sees the same runner description as the same job on that CI. Left out on purpose: tokens and
+ * ACTIONS_*; the workflow command files (GITHUB_ENV, GITHUB_OUTPUT, GITHUB_PATH, GITHUB_STATE,
+ * GITHUB_STEP_SUMMARY), through which a step changes later steps; GITHUB_EVENT_PATH (the dispatch
+ * inputs); GITHUB_SHA, GITHUB_REF* and the workflow ref, which describe Forge's dispatch, not the
+ * Candidate; and runner-private folders (RUNNER_TEMP, RUNNER_TOOL_CACHE). The supervisor points
+ * GITHUB_WORKSPACE at the Candidate checkout. GitLab CI runs the project's own CI file
+ * (src/ci-status.ts), which keeps its own variables, so it needs no list. */
+export const runnerEnvNames = {
+  'github-actions': [
+    'GITHUB_ACTIONS',
+    'GITHUB_ACTOR',
+    'GITHUB_ACTOR_ID',
+    'GITHUB_API_URL',
+    'GITHUB_EVENT_NAME',
+    'GITHUB_GRAPHQL_URL',
+    'GITHUB_JOB',
+    'GITHUB_REPOSITORY',
+    'GITHUB_REPOSITORY_ID',
+    'GITHUB_REPOSITORY_OWNER',
+    'GITHUB_REPOSITORY_OWNER_ID',
+    'GITHUB_RETENTION_DAYS',
+    'GITHUB_RUN_ATTEMPT',
+    'GITHUB_RUN_ID',
+    'GITHUB_RUN_NUMBER',
+    'GITHUB_SERVER_URL',
+    'GITHUB_TRIGGERING_ACTOR',
+    'GITHUB_WORKFLOW',
+    'GITHUB_WORKSPACE',
+    'RUNNER_ARCH',
+    'RUNNER_DEBUG',
+    'RUNNER_ENVIRONMENT',
+    'RUNNER_NAME',
+    'RUNNER_OS',
+  ],
+};
+/** Runner variable names present in `source`, for `childEnv({ allow })`. */
+export function runnerEnvAllow(source = process.env) {
+  // The adapter whose runner this process is on.
+  const adapter = source.GITHUB_ACTIONS === 'true' ? 'github-actions' : null;
+  return (adapter ? runnerEnvNames[adapter] : []).filter(
+    name => source[name] !== undefined && !credentialName.test(name),
+  );
+}
 /** Toolchain variable names present in `source`, for `childEnv({ allow })`. */
 export function toolchainEnvAllow(source = process.env) {
   return Object.keys(source).filter(

@@ -3426,6 +3426,63 @@ async function preparedExit(s) {
   );
   return { prepared, exit };
 }
+test('Issue 6a345170: a configured command on GitHub Actions sees the runner variables, never a token or command file', async t => {
+  const runner = {
+    GITHUB_ACTIONS: 'true',
+    RUNNER_OS: 'Linux',
+    RUNNER_ARCH: 'X64',
+    GITHUB_RUN_ID: '424242',
+    GITHUB_REPOSITORY: 'synthetic/repo',
+    GITHUB_WORKSPACE: '/runner/work/synthetic',
+  };
+  // Tokens, the workflow command files, the dispatch event and Forge's dispatch ref: none may pass.
+  const withheld = [
+    'GITHUB_TOKEN',
+    'ACTIONS_RUNTIME_TOKEN',
+    'ACTIONS_ID_TOKEN_REQUEST_TOKEN',
+    'ACTIONS_ID_TOKEN_REQUEST_URL',
+    'ACTIONS_CACHE_URL',
+    'ACTIONS_RESULTS_URL',
+    'GITHUB_ENV',
+    'GITHUB_OUTPUT',
+    'GITHUB_PATH',
+    'GITHUB_STATE',
+    'GITHUB_STEP_SUMMARY',
+    'GITHUB_EVENT_PATH',
+    'GITHUB_SHA',
+    'GITHUB_REF',
+    'RUNNER_TEMP',
+    'NPM_TOKEN',
+    'CONVEX_DEPLOY_KEY',
+  ];
+  const planted = { ...runner, ...Object.fromEntries(withheld.map(name => [name, 'synthetic-withheld'])) };
+  const saved = Object.fromEntries(Object.keys(planted).map(name => [name, process.env[name]]));
+  Object.assign(process.env, planted);
+  t.after(() => {
+    for (const [name, value] of Object.entries(saved))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  });
+  t.mock.method(process.stdout, 'write', () => true);
+  const s = fixture(t),
+    candidate = join(s.directory, 'candidate');
+  // The project's own test: it records the environment it ran with.
+  const probe = "require('node:fs').writeFileSync('runner-env.json', JSON.stringify(process.env));";
+  s.run.check = { executable: process.execPath, args: ['--eval', probe], definition: 'c'.repeat(64) };
+  // No lockfile: the configured command runs without an npm install.
+  s.run.request.expectedHead = s.state(s.files.filter(file => file.path !== 'package-lock.json')).sha256;
+  const prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'cache'));
+  const planPath = join(s.directory, 'plan.json');
+  writeFileSync(planPath, JSON.stringify(prepared.recipe));
+  assert.equal(await executeActionsJob(s.client, candidate, planPath, prepared.singleShard), 0);
+  const seen = JSON.parse(readFileSync(join(candidate, 'runner-env.json'), 'utf8'));
+  for (const name of ['GITHUB_ACTIONS', 'RUNNER_OS', 'RUNNER_ARCH', 'GITHUB_RUN_ID', 'GITHUB_REPOSITORY'])
+    assert.equal(seen[name], runner[name], name);
+  // On GitHub a step's workspace is its checkout: here, the Candidate.
+  assert.equal(seen.GITHUB_WORKSPACE, candidate);
+  for (const name of withheld) assert.equal(seen[name], undefined, `${name} must not reach project code`);
+  assert(!Object.values(seen).includes('synthetic-withheld'));
+});
 test('secret scan R-01: a Candidate adding a token and its own allow entry still fails, flagged as self-allow', async t => {
   const s = fixture(t);
   s.run.request.expectedHead = s.state([
