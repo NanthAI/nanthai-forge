@@ -535,6 +535,26 @@ test('oversize ASCII, multibyte and escaped messages fail before acceptance; rec
   }
   const maximum = '\\'.repeat(LANDING_MESSAGE_BYTES);
   assert.equal(landingMessage(maximum), maximum);
-  assert.equal(Buffer.byteLength(JSON.stringify({ message: maximum })), 2062);
-  assert.equal(Buffer.byteLength(JSON.stringify({ cohortMessages: Array(8).fill(maximum) })), 16428);
+  // Every byte escapes to two in JSON: one message and an eight-message batch, exactly.
+  assert.equal(Buffer.byteLength(JSON.stringify({ message: maximum })), 2 * LANDING_MESSAGE_BYTES + 14);
+  const batch = Buffer.byteLength(JSON.stringify({ cohortMessages: Array(8).fill(maximum) }));
+  assert.equal(batch, 8 * (2 * LANDING_MESSAGE_BYTES + 2) + 28);
+  assert(
+    batch < (512 * 1024) / 4,
+    'eight worst-case messages stay a small part of the 512 KiB publication budget',
+  );
+});
+
+test('friction 330d1df6: an over-limit landing message names its exact byte count and the limit', () => {
+  for (const [over, bytes] of [
+    ['x'.repeat(LANDING_MESSAGE_BYTES + 3), LANDING_MESSAGE_BYTES + 3],
+    ['é'.repeat(LANDING_MESSAGE_BYTES), 2 * LANDING_MESSAGE_BYTES],
+  ])
+    assert.throws(
+      () => landingMessage(over),
+      e =>
+        e.code === 'LANDING_MESSAGE_TOO_LARGE' &&
+        e.message.includes(`has ${bytes} UTF-8 bytes`) &&
+        e.message.includes(`limit is ${LANDING_MESSAGE_BYTES}`),
+    );
 });

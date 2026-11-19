@@ -649,10 +649,14 @@ test('an over-long landing message is refused before any server call (friction d
   writeFileSync(join(s.root, 'draft.txt'), 'Unsaved draft');
   const before = s.calls.length;
   // 1,300 bytes, as in the dogfood case; multi-byte text counts in UTF-8 bytes.
-  for (const message of ['m'.repeat(1300), 'é'.repeat(600)])
+  for (const [message, bytes] of [
+    ['m'.repeat(1300), 1300],
+    ['é'.repeat(600), 1200],
+  ])
     await assert.rejects(s.transport().dispatch('finish', { laneId: s.lane.laneId, message }), error => {
       assert.equal(error.code, 'LANDING_MESSAGE_TOO_LARGE');
-      assert.match(error.message, /1024 UTF-8 bytes; this one has at least \d+/);
+      // The exact byte count and the limit (friction 330d1df6).
+      assert.match(error.message, new RegExp(`has ${bytes} UTF-8 bytes; the limit is 1024`));
       return true;
     });
   assert.equal(s.calls.length, before, 'no capability read, save or compose');

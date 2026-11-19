@@ -2,20 +2,21 @@
 import { z } from 'zod';
 import { invariant } from './errors.js';
 
-/** Keeps eight worst-case escaped messages within the existing 512 KiB publication budget. */
+/** Keeps eight worst-case escaped messages within the existing 512 KiB publication budget: an
+ * eight-member batch step writes about 264 bytes per message byte (478 KB at this limit). */
 export const LANDING_MESSAGE_BYTES = 1024;
 export function landingMessage(value: string) {
-  const size = value.length <= LANDING_MESSAGE_BYTES ? new TextEncoder().encode(value).length : value.length;
+  const size = new TextEncoder().encode(value).length;
   invariant(
     size <= LANDING_MESSAGE_BYTES,
     'LANDING_MESSAGE_TOO_LARGE',
-    `A landing message (the commit message) must fit in 1024 UTF-8 bytes; this one has at least ${size}. Shorten it and run the same command again.`,
+    `This landing message (the commit message) has ${size} UTF-8 bytes; the limit is ${LANDING_MESSAGE_BYTES}. Shorten it and run the same command again.`,
   );
   const clean = cleanMessage(value);
   invariant(
     new TextEncoder().encode(clean).length <= LANDING_MESSAGE_BYTES,
     'LANDING_MESSAGE_TOO_LARGE',
-    'The escaped landing message must fit in 1024 UTF-8 bytes.',
+    `The escaped landing message must fit in ${LANDING_MESSAGE_BYTES} UTF-8 bytes.`,
   );
   return clean;
 }
