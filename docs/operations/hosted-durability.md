@@ -49,6 +49,17 @@ Neither backfill nor purge is run automatically by this change. The manual
 cursor; it schedules no recurring or delayed sweep. New R2 derivatives and
 archives do not start `_storage` scans.
 
+## Code rollback limit
+
+Rolling Convex code back is not always a plain redeploy of older code. Save rows
+(`projectHostedSaves`) and sync rows are parsed with strict schemas, so a row
+written by newer code with a field the older code lacks (for example a save's
+`submittedAt` and `serverTiming`) fails to read on that older code, and every save
+written since then fails with it. Before rolling back past a change that added a
+stored field, ship a forward fix instead, or first land a reader that accepts the
+new field. Records keep their exact bytes either way; nothing is lost, only
+unreadable until the newer reader is back.
+
 ## Snapshot and backup
 
 Use the accepted Forge source and lockfile, Node 24.22.1+ (24.x), installed dependencies

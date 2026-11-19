@@ -28,7 +28,12 @@ import {
   settlePriorHostedSave,
 } from './hosted-save-client.js';
 import { capturedNotSaved } from './save-not-saved.js';
-import { saveSettledHere, unsavedAfterSave } from './hosted-save-receipt-state.js';
+import {
+  keptSaveTiming,
+  saveSettledHere,
+  saveStartedHere,
+  unsavedAfterSave,
+} from './hosted-save-receipt-state.js';
 import { transitionHostedLane } from './hosted-lifecycle-client.js';
 import { lifecycleApplied, recordLifecycleApplied } from './hosted-replay-holds.js';
 import { hostedLifecycleRequestSchema } from './hosted-lifecycle.js';
@@ -668,7 +673,8 @@ export async function executeHostedAgent(
     checkLocalLane(session, command.laneId);
     const timing = syncTiming();
     // A save already settled here answers from its receipt and captures nothing new: say so.
-    const replayed = saveSettledHere(session.root, operationId);
+    const replayed = saveSettledHere(session.root, operationId),
+      startedBefore = saveStartedHere(session.root, operationId);
     const settleBackground = session.capabilities.features?.includes('save-settle-background') ?? false;
     const saved = await saveHostedLane(
       session.root,
@@ -708,12 +714,13 @@ export async function executeHostedAgent(
     const outcome = await awaitSaveOutcome(session, operationId, saved, timing),
       split = timing.value();
     if (!outcome || typeof outcome !== 'object') return outcome;
-    // The invocation that saw the outcome keeps its split in the operation journal; a replay answered
-    // from the settled receipt did no save work and returns that original split.
-    const kept =
-      (outcome as { outcome?: unknown }).outcome && Object.keys(split.stepsMs).length
-        ? await session.journal.retain('save-timing', () => split)
-        : session.journal.get<typeof split>('save-timing');
+    // The invocation that saw the outcome keeps its split in the operation journal (marked when it was
+    // a replay of an unfinished save); a replay answered from the settled receipt returns that split.
+    const kept = await keptSaveTiming(session.journal, {
+      outcome: Boolean((outcome as { outcome?: unknown }).outcome),
+      split,
+      replay: startedBefore,
+    });
     // New paths the capture left out by name (credential names), bounded: the save says so.
     const notSaved = capturedNotSaved(session.root, operationId);
     // A save never reports success for edits it did not capture (Issue ca49dc6c): files that differ
