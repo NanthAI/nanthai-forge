@@ -18,7 +18,7 @@ production code), never the case.
 
 ## Running
 
-Fake side only, with no settings (about 1 s each):
+Fake side only, with no settings (about 1 s each). The suites import convex modules whose `src/` imports resolve to `dist/`, so run `npm run build:core` first:
 
 ```sh
 nforge heavy node --import ./tests/check-runtime.mjs --test --test-concurrency=1 tests/contracts/*.contract.test.mjs

@@ -30,6 +30,8 @@ jobs:
         with:
           node-version: '24.22.1'
       - run: npm ci --ignore-scripts
+      # The test loader maps src/ imports of convex modules to dist/.
+      - run: npm run build:core
       - name: Run every contract suite against its fake and the real system
         run: node --import ./tests/check-runtime.mjs --test --test-concurrency=1 tests/contracts/*.contract.test.mjs
         env:
