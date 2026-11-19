@@ -36,6 +36,14 @@ export async function executeHostedRecords(
     const marker = readHostedLaneCheckout(transport.root);
     if (marker) parameters.laneId = marker.selection.laneId;
   }
+  // A decision may name only this session's own agent (review R-08): when the client knows its
+  // session slug, any other slug is refused before a call, so one session cannot sign as another.
+  const session = action === 'decide' ? transport.agentSlug() : null;
+  invariant(
+    !session || parameters.actor === undefined || parameters.actor === session,
+    'BAD_ARGUMENT',
+    `A decision names this session's agent ${session}, not ${String(parameters.actor)}. Omit actor or send "${session}".`,
+  );
   const parsed = hostedRecordCommands[action].safeParse(parameters);
   invariant(
     parsed.success && (operationId === undefined || z.uuid().safeParse(operationId).success),

@@ -21,7 +21,8 @@ import { randomUUID } from 'node:crypto';
 import { initNative } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
 import { policyPreset, policyWriteSchema, editedPolicy } from '../dist/autonomy-policy.js';
-import { runLogRecord, portableCheckPath, DAY_MS } from '../dist/check-log-policy.js';
+import { runLogRecord, portableCheckPath, DAY_MS, logRecordSchema } from '../dist/check-log-policy.js';
+import { checkBackendSchema } from '../dist/check-backend.js';
 import { exportNativeWork, restoreNativeWork } from '../dist/native-backup.js';
 import { pullNativeExchange } from '../dist/native-exchange.js';
 import { prepareHostedSeed } from '../dist/hosted-seed-capture.js';
@@ -173,6 +174,32 @@ test('local upload defaults off; explicit setting defaults to 90 days and requir
   optIn(f);
   assert.equal(runLogRecord(f.store.load(), f.run, now + 90 * DAY_MS - 1).status, 'included');
   assert.equal(runLogRecord(f.store.load(), f.run, now + 90 * DAY_MS).status, 'expired');
+});
+test('review R-09: provider log links are https only in the stored record and the log policy', () => {
+  const run = { id: randomUUID(), startedAt: new Date(now).toISOString() };
+  const held = url =>
+    runLogRecord(
+      {},
+      { ...run, backend: { requested: 'github-actions', actual: 'github-actions', providerUrl: url } },
+    );
+  assert.equal(
+    held('https://github.com/acme/app/actions/runs/1').providerUrl,
+    'https://github.com/acme/app/actions/runs/1',
+  );
+  for (const unsafe of ['javascript:alert(1)', 'http://ci.example/run/1', 'data:text/html,x']) {
+    // A record stored before the rule still reads, with no link; the policy never returns it.
+    assert.equal(
+      checkBackendSchema.parse({ requested: 'github-actions', actual: 'github-actions', providerUrl: unsafe })
+        .providerUrl,
+      undefined,
+    );
+    // The run keeps the provider's own https link instead.
+    assert.equal(held(unsafe).providerUrl, 'https://github.com/actions');
+    assert.equal(
+      logRecordSchema.safeParse({ runId: run.id, status: 'provider-held', providerUrl: unsafe }).success,
+      false,
+    );
+  }
 });
 test('all capture routes share explicit local opt-in and suppress an expired old exchange baseline', async t => {
   const f = fixture(t, 'local');

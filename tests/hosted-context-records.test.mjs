@@ -5,6 +5,9 @@ import { randomUUID } from 'node:crypto';
 import { recordsFixture } from './hosted-context-records-fixture.mjs';
 import { decisionContext } from '../dist/decision-types.js';
 import { moduleUrl } from './convex-module.mjs';
+import { join } from 'node:path';
+import { temporaryDirectory } from '../scripts/test-temp.mjs';
+import { executeHostedRecords } from '../dist/hosted-agent-records.js';
 const { hostedBriefDecisions } = await import(moduleUrl('../convex/projectHostedDecisionsStore.ts'));
 const code = expected => error => error.data?.code === expected;
 const friction = (extra = {}) => ({
@@ -252,4 +255,37 @@ test('server friction validation names the field and expected shape, including n
   const result = await s.request('projectHostedFriction:capture', friction());
   assert.equal(result.laneId, undefined);
   assert.equal([...s.tables.projectHostedFriction.values()][0].actor, 'owner');
+});
+
+test("review R-08: a client that knows its agent session refuses a decision naming another session's slug", async t => {
+  const sent = [];
+  const transport = slug => ({
+    root: join(temporaryDirectory(t, 'forge-decide-slug-'), 'checkout'),
+    address: { url: 'https://forge.example', projectId: 'project' },
+    agentSlug: () => slug,
+    mutation: async (name, args) => {
+      sent.push({ name, request: JSON.parse(args.request) });
+      return {};
+    },
+  });
+  const input = decision();
+  delete input.operationId;
+  await assert.rejects(
+    executeHostedRecords(transport('quiet-otter'), 'decide', { ...input, actor: 'brave-fox' }),
+    error => error.code === 'BAD_ARGUMENT',
+  );
+  assert.equal(sent.length, 0, 'refused before any server call');
+  // The session's own slug, or none, is sent as given.
+  await executeHostedRecords(transport('quiet-otter'), 'decide', { ...input, actor: 'quiet-otter' });
+  await executeHostedRecords(transport('quiet-otter'), 'decide', { ...input, why: 'Unnamed' });
+  // A client with no known session keeps today's behaviour: the server names the caller.
+  await executeHostedRecords(transport(null), 'decide', { ...input, actor: 'brave-fox' });
+  assert.deepEqual(
+    sent.map(call => [call.name, call.request.actor]),
+    [
+      ['projectHostedDecisions:decide', 'quiet-otter'],
+      ['projectHostedDecisions:decide', undefined],
+      ['projectHostedDecisions:decide', 'brave-fox'],
+    ],
+  );
 });

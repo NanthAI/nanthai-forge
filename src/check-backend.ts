@@ -6,6 +6,7 @@ import { legacyCheckCredentialsRefSchema } from './legacy-check-credentials.js';
 import { checkCostSchema } from './check-cost.js';
 import type { CheckRun } from './work-types.js';
 import { partitionTests } from '../scripts/test-shards.mjs';
+import { httpsLink } from './check-log-policy.js';
 
 export const legacyCostUsageSchema = z.array(
   z.object({
@@ -20,7 +21,11 @@ export const legacyCostUsageSchema = z.array(
 );
 
 export const checkBackendSchema = z.object({
-  providerUrl: z.string().url().optional(),
+  // https only (review R-09). A stored record keeps reading; a non-https link reads as none.
+  providerUrl: z
+    .string()
+    .transform(url => httpsLink(url) ?? undefined)
+    .optional(),
   cost: checkCostSchema.optional(),
   credentialsRef: legacyCheckCredentialsRefSchema.nullable().optional(),
   retryable: z.boolean().optional(),

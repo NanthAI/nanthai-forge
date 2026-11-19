@@ -471,6 +471,15 @@ test('device-login start rejects device names longer than 80 characters', async 
   assert.equal((await start(s, { name: 'n'.repeat(80) })).row.name.length, 80);
 });
 
+test('review R-07: device-login start stores the device name trimmed, as it was checked', async t => {
+  const s = fixture(t);
+  const { row } = await start(s, { name: '  Synthetic CLI\t ' });
+  assert.equal(row.name, 'Synthetic CLI');
+  assert.equal(JSON.parse(row.request).name, 'Synthetic CLI');
+  // Padding never lets a name past the 80-character limit into storage.
+  assert.equal((await start(s, { name: ` ${'n'.repeat(80)} ` })).row.name, 'n'.repeat(80));
+});
+
 test('device starts honor the shared configured budget while retries keep the original flow', async t => {
   const previous = process.env.FORGE_PUBLIC_ABUSE_BUDGETS;
   process.env.FORGE_PUBLIC_ABUSE_BUDGETS = JSON.stringify({

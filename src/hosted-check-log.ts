@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { httpsLink } from './check-log-policy.js';
 import { verifyDownloadedOutput } from './hosted-output-reader.js';
 import { z } from 'zod';
 import { ForgeError, invariant } from './errors.js';
@@ -48,7 +49,8 @@ const manifestSchema = z.object({
   status: z.string(),
   complete: z.boolean(),
   fullLogs: z.string().optional(),
-  providerUrl: z.string().nullable().optional(),
+  // https only (review R-09); anything else reads as no link.
+  providerUrl: z.string().nullable().optional().transform(httpsLink),
 });
 const isNotFound = (error: unknown) =>
   (error as { code?: string; data?: { code?: string } })?.code === 'NOT_FOUND' ||
@@ -95,7 +97,7 @@ export async function hostedCheckLog(input: unknown, transport: CheckLogTranspor
   const base = {
     runId: command.runId,
     status: manifest.status,
-    providerUrl: manifest.providerUrl ?? null,
+    providerUrl: manifest.providerUrl,
     streams: chosen.map(row => ({
       shard: row.stream.shard,
       attempt: row.stream.attempt,

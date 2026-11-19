@@ -152,6 +152,21 @@ for (const [name, a] of Object.entries(adapters)) {
     assert.equal(verdict(a.record({ id: 101 }), bound({ executionId: '101' })).status, 'passed');
   });
 
+  test(`${name}: review R-09: a provider log link that is not https is dropped; a job's is refused`, () => {
+    assert.match(verdict(a.record()).link, /^https:\/\//);
+    for (const unsafe of ['javascript:alert(1)', 'http://ci.example/run/1', 'data:text/html,x']) {
+      const evidence = a.record();
+      const run = evidence.payload?.workflow_run ?? evidence.record;
+      if ('html_url' in run) run.html_url = unsafe;
+      else run.web_url = unsafe;
+      const v = verdict(evidence);
+      assert.equal(v.status, 'passed', 'the verdict itself is unchanged');
+      assert.equal(v.link, null, unsafe);
+    }
+    const plain = { ...passReport, link: 'http://ci.example/run/1' };
+    assert.equal(verdict({ source: 'job-report', claims: a.claims, status: plain }).outcome, 'refused');
+  });
+
   test(`${name}: the CI file is a protected check entry, so changing it needs the owner's review`, () => {
     const file = name === 'github-actions' ? '.github/workflows/test.yml' : '.gitlab-ci.yml';
     assert.deepEqual(ciStatusEntryPaths(a.provider), [file]);

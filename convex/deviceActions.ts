@@ -94,10 +94,11 @@ export async function beginDeviceLogin(
   const row = await ctx.runMutation(internal.deviceStore.start, {
     operationId: args.operationId,
     ...(args.forceApproval ? { forceApproval: true } : {}),
-    name: args.name,
+    // Stored as checked: trimmed (review R-07).
+    name,
     scope: args.scope,
     request: JSON.stringify({
-      name: args.name,
+      name,
       scope: args.scope,
       ...(args.stable
         ? { deviceVersion: 1, projectId: args.projectId ?? null, deviceKey: args.stable.key }

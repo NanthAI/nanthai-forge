@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { httpsLink, providerLinkSchema } from './check-log-policy.js';
 import { z } from 'zod';
 import { proofReportSchema } from './landing-proof.js';
 
@@ -64,7 +65,7 @@ export const reportedStatusSchema = z
   .object({
     name: z.string().min(1).max(100),
     state: z.enum(['pending', 'passed', 'failed', 'cancelled']),
-    link: z.url({ protocol: /^https$/ }).max(2048),
+    link: providerLinkSchema,
     summary: z.string().max(4000).default(''),
   })
   .strict();
@@ -117,7 +118,8 @@ function decide(
     outcome: 'terminal',
     status,
     executionId: run.executionId,
-    link: run.link,
+    // The provider record's own link, kept only when it is https (review R-09).
+    link: httpsLink(run.link),
     conclusion: run.conclusion,
   };
 }

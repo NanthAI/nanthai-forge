@@ -11,17 +11,25 @@ export const checkLogsSchema = z.object({
   uploadLocal: z.boolean().default(false),
   retentionDays: z.number().int().min(1).max(400).default(90),
 });
+/** A provider's log link: https only (review R-09), so no stored or provider-sent value can
+ * become a `javascript:`, `data:` or plain-http link in the app, CLI or receipts. */
+export const providerLinkSchema = z.url({ protocol: /^https$/ }).max(2048);
+/** The link when it is an https URL, otherwise none. */
+export const httpsLink = (url: string | null | undefined): string | null =>
+  url && providerLinkSchema.safeParse(url).success ? url : null;
 export const logRecordSchema = z.object({
   runId: z.string().uuid(),
   status: z.enum(['provider-held', 'local-only', 'included', 'expired']),
-  providerUrl: z.string().url().optional(),
+  providerUrl: providerLinkSchema.optional(),
   executionIds: z.array(z.string()).optional(),
   expiresAt: z.string().datetime().optional(),
 });
 export function providerLogUrl(run: Pick<CheckRun, 'backend'>): string | undefined {
   const backend = run.backend;
   if (!backend || backend.actual === 'local') return;
-  if (backend.providerUrl) return backend.providerUrl;
+  // A stored link counts only when it is https; otherwise the provider's own link below.
+  const stored = httpsLink(backend.providerUrl);
+  if (stored) return stored;
   if (backend.actual === 'github-actions') {
     const repo = /(?:^|;)repo:([^;]+)/.exec(backend.runtime ?? '')?.[1];
     if (repo && backend.executionIds?.[0])

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { isMachineRunner } from '../src/hosted-machine-runner';
+import { httpsLink } from '../src/check-log-policy';
 import { v } from 'convex/values';
 import { query, mutation, type QueryCtx, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -54,7 +55,7 @@ export const manifest = query({
             ? `https://github.com/${run.configuration.repository}/actions/runs/${run.executionId ?? ''}`
             : run.configuration.provider === 'modal'
               ? 'https://modal.com/apps'
-              : (run.ci?.link ?? null),
+              : httpsLink(run.ci?.link),
         complete: head?.final !== null && head?.final !== undefined,
         sealed: head?.sealed ?? 0,
         root: run.executionId ? rootForOutput(input, run.executionId, head) : null,
