@@ -1417,6 +1417,15 @@ recorded process id plus its start time, so a reused process id is not a live ob
 session id, and non-Forge background processes, are not covered. Turn it off with
 `nforge settings firstWriteHooks false`.
 
+Codex gap (Item 2f13b3cf). The guard is proven with synthetic homes and real hook
+processes, not yet in a live Codex session: nobody has observed `CODEX_THREAD_ID`
+reaching the shell commands a Codex agent runs, or Codex's `Stop` hook honouring
+`decision: "block"`. Without the variable the CLI records no turn work, and the hook
+allows the stop. So Codex agents must not rely on the guard: after `land --save`, run
+the printed `waitCommand` in the foreground (it blocks up to 540 s; run it again on
+IN PROGRESS) and end the turn only once the landing is terminal. Claude Code sets
+`CLAUDE_CODE_SESSION_ID` in the shells its agents run, so the guard covers them.
+
 Native waits can also select latest Lane work or several operations:
 
 ```sh
