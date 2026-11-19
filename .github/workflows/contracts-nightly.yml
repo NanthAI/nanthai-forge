@@ -1,0 +1,44 @@
+name: Nightly contract suites
+
+# Each fake of an outside system has a contract suite in tests/contracts/ that runs the same cases
+# against the fake and the real system. The real side needs test resources and secrets, so it runs
+# here once a night on a free public runner. Setup, cost and teardown:
+# docs/operations/contract-suites.md.
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contracts-nightly
+  cancel-in-progress: false
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Secrets live only in this environment; it deploys from main alone, so forks and PRs never see them.
+    environment: contracts
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.22.1'
+      - run: npm ci --ignore-scripts
+      - name: Run every contract suite against its fake and the real system
+        run: node --import ./tests/check-runtime.mjs --test --test-concurrency=1 tests/contracts/*.contract.test.mjs
+        env:
+          # A missing secret fails its suite instead of skipping it.
+          FORGE_CONTRACT_REQUIRE: r2,github
+          CONTRACT_R2_ACCOUNT_ID: ${{ secrets.CONTRACT_R2_ACCOUNT_ID }}
+          CONTRACT_R2_BUCKET: ${{ secrets.CONTRACT_R2_BUCKET }}
+          CONTRACT_R2_ACCESS_KEY_ID: ${{ secrets.CONTRACT_R2_ACCESS_KEY_ID }}
+          CONTRACT_R2_SECRET_ACCESS_KEY: ${{ secrets.CONTRACT_R2_SECRET_ACCESS_KEY }}
+          CONTRACT_GITHUB_REPO: ${{ secrets.CONTRACT_GITHUB_REPO }}
+          CONTRACT_GITHUB_APP_ID: ${{ secrets.CONTRACT_GITHUB_APP_ID }}
+          CONTRACT_GITHUB_APP_PRIVATE_KEY: ${{ secrets.CONTRACT_GITHUB_APP_PRIVATE_KEY }}
