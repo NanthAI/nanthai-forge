@@ -225,6 +225,10 @@ test("learned guards get only what declared guards and the change's own tests le
   assert.deepEqual(tight.local.guardSet.tests, []);
   assert.ok(tight.tests.includes('tests/a.test.mjs'));
   assert.ok(plan({ budgetSeconds: reserved + 3 }, changed).local.guardSet.tests.includes(GUARD));
+  // What is left is shown to a tenth of a second, never as a long fraction (seen live 2026-11-19).
+  const odd = plan({ budgetSeconds: reserved + 2.123456789 }, changed).local.guardSet;
+  assert.equal(odd.capSeconds, Math.round(odd.capSeconds * 10) / 10);
+  assert.doesNotMatch(odd.reason, /\d\.\d{2,} s budget/);
 });
 
 test('every checkout of a project finds its set: the clone, its Lanes and a Lane at a custom path', t => {
