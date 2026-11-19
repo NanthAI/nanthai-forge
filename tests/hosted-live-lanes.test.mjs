@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { recordsFixture } from './hosted-records-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
@@ -369,4 +370,80 @@ test('the CLI Loose ends view reads the reply the hosted transport already decod
     assert.deepEqual(result.result, reply);
     assert.deepEqual(calls, [['projectLooseEnds:read', {}]]);
   }
+});
+
+test('the Lanes page reads one page as wide as the line feed: bytes at 60 and at 100 open Lanes (6ebb58ab)', async t => {
+  // At 60 a busy project's older Lanes had no title or person on the page ("Lane <id> · not reported"). The page now
+  // reads the feed's 100; one bounded read, no extra call. Dogfood-shaped: each Lane saved once, one Intent each.
+  const s = await fixture();
+  for (let i = 0; i < 100; i++) {
+    const intentId = randomUUID();
+    await s.put({
+      kind: 'intent',
+      id: intentId,
+      version: 0,
+      at,
+      outcome: `Synthetic outcome ${i} `.padEnd(120, 'x'),
+      constraints: '',
+      creatorAccountId: 'owner',
+      assigneeAccountIds: [],
+      base: { head: hash, receiptId: randomUUID() },
+      status: 'active',
+    });
+    const lane = {
+      kind: 'lane',
+      id: randomUUID(),
+      version: 0,
+      at,
+      intentId,
+      actor: 'owner',
+      base: { head: hash, receiptId: randomUUID() },
+      head: hash,
+      sourceVersion: 0,
+      lifecycleVersion: 0,
+      state: 'active',
+      authorityEpoch: 1,
+    };
+    await s.put(lane);
+    await s.put({
+      kind: 'save',
+      id: randomUUID(),
+      version: 0,
+      at,
+      laneId: lane.id,
+      actor: 'owner',
+      operationId: randomUUID(),
+      expectedHead: hash,
+      expectedSourceVersion: 0,
+      head: hash,
+      sourceVersion: 1,
+      changes: { sha256: hash, size: 1 },
+    });
+  }
+  const source = path => readFileSync(new URL(path, import.meta.url), 'utf8');
+  const LANE_PAGE = Number(
+    /export const LANE_PAGE = (\d+);/.exec(source('../web/src/app/lanes/reads.ts'))[1],
+  );
+  const feedWindow = Number(/\.take\((\d+)\)/.exec(source('../convex/projectLiveLine.ts'))[1]);
+  assert.equal(LANE_PAGE, feedWindow - 1, 'the page is the line feed window, so every mark has its title');
+  const cost = {};
+  for (const limit of [60, LANE_PAGE]) {
+    const reply = await s.call(`list-${limit}`, api.list, {
+      projectId: s.auth.projectId,
+      cursor: null,
+      limit,
+    });
+    const page = JSON.parse(reply).page;
+    assert.equal(page.length, limit);
+    assert.ok(page.every(lane => lane.intent && lane.actor === 'synthetic-owner' && lane.lastSaveAt === at));
+    cost[limit] = { ...s.counts.at(-1), replyBytes: Buffer.byteLength(reply) };
+  }
+  t.diagnostic(JSON.stringify(cost));
+  console.log(`lanes page: ${JSON.stringify(cost)}`);
+  assert.equal(cost[LANE_PAGE].writes, 0);
+  assert.ok(
+    cost[LANE_PAGE].documents <= (cost[60].documents * LANE_PAGE) / 60 + 4,
+    'documents grow with the page only',
+  );
+  assert.ok(cost[LANE_PAGE].readBytes < 2 * 1024 * 1024, JSON.stringify(cost[LANE_PAGE]));
 });

@@ -3,7 +3,7 @@
 // known; none takes a clock-derived argument, so they re-run on server writes only and sleep with the tab
 // (live-reads.ts). The line feed is not read here: the project frame already holds it and passes it down.
 //
-// Per view, at 50 open Lanes: the Lane page (one execution, about 7 indexed reads per Lane), the queue view (at most
+// Per view, at 50 open Lanes: the Lane page (one execution, about 7 indexed reads per Lane, at most 100 Lanes), the queue view (at most
 // 20 entries, about 7 reads each) and, only while its region is open, the overlap view (20 KB budget); the
 // newest landings only on History (one page of 30 receipts, 3 rows each for the Lane and Item). Idle: zero.
 import { useState } from 'react';
@@ -13,8 +13,9 @@ import type { Id } from '../../../../convex/_generated/dataModel';
 import { useSafeQuery } from '../../safe-query';
 import type { LaneMeta, QueueView, SharedFiles } from './model';
 
-/** The same window the line feed shows (60), so every mark has its title. */
-export const LANE_PAGE = 60;
+/** The same window the line feed shows (convex/projectLiveLine.ts: 100 marks), so every mark has its title and person:
+ * at 60 a busy project's older Lanes read "Lane <id> · not reported" (owner 2026-11-19, Item 6ebb58ab). */
+export const LANE_PAGE = 100;
 
 const parse = <T>(value: string | undefined): T | undefined =>
   value === undefined ? undefined : (JSON.parse(value) as T);

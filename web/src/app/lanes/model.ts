@@ -197,13 +197,18 @@ export function buildYard(
   const rows = feed.lanes.map((mark): YardRow => {
     const lane = meta.get(mark.laneId);
     const entry = entries.get(mark.laneId);
-    const said = laneState(mark, entry ? landingOf(entry) : null);
+    // A Lane with no save is never "Saved" (owner 2026-11-19, Item 6ebb58ab): the line marks a Lane saved once its
+    // files differ from its base, which a start can do (a revert Lane starts with its change) with nothing saved. Its
+    // Lane read says whether a save exists; with none, the row says what is true: editing, no save yet.
+    const unsaved = mark.stage === 'saved' && !mark.held && !entry && lane !== undefined && !lane.lastSaveAt;
+    const shown = unsaved ? { ...mark, stage: 'editing' as const } : mark;
+    const said = laneState(shown, entry ? landingOf(entry) : null);
     const by = replaced.get(mark.laneId) ?? null;
     const base = {
       laneId: mark.laneId,
       mark: short(mark.laneId),
       intentId: lane?.intentId ?? null,
-      stage: mark.stage,
+      stage: shown.stage,
       title: lane?.intent ?? entry?.intentTitle ?? `Lane ${short(mark.laneId)}`,
       actor: lane?.actor ?? null,
       changedAt: mark.changedAt,
@@ -255,7 +260,10 @@ export function buildYard(
     return {
       ...base,
       band: mark.stage === 'checking' || mark.stage === 'ready' ? 'queue' : 'work',
-      why: said.why || (lane?.lastSaveAt ? `saved ${ago(now - Date.parse(lane.lastSaveAt))}` : 'no save yet'),
+      // "no save yet" only when the Lane read says so; a Lane outside that read says nothing it does not know.
+      why:
+        said.why ||
+        (lane ? (lane.lastSaveAt ? `saved ${ago(now - Date.parse(lane.lastSaveAt))}` : 'no save yet') : ''),
       ...left,
     };
   });

@@ -101,6 +101,34 @@ test('the yard puts every held Lane under Needs you, so its count equals the she
   });
 });
 
+test('a Lane with no save is never "Saved": its row says editing, no save yet (owner 2026-11-19, 6ebb58ab)', () => {
+  const lanes = [mark('started', 'saved'), mark('saved', 'saved'), mark('unread', 'saved')];
+  const yard = model.buildYard(
+    feed(lanes),
+    [
+      meta('started', 'Revert accepted change'),
+      { ...meta('saved', 'Saved work'), lastSaveAt: '1970-01-01T00:00:00.000Z' },
+    ],
+    undefined,
+    5 * 60_000,
+  );
+  const row = id => yard.rows.find(r => r.laneId === id);
+  assert.deepEqual(
+    [row('started').word, row('started').why, row('started').stage],
+    ['Editing', 'no save yet', 'editing'],
+  );
+  assert.deepEqual(
+    [row('saved').word, row('saved').why, row('saved').stage],
+    ['Saved', 'saved 5 min ago', 'saved'],
+  );
+  // Outside the Lane read nothing is known about saves: the line's own word, and no claim either way.
+  assert.deepEqual([row('unread').word, row('unread').why], ['Saved', '']);
+  assert.ok(
+    !yard.rows.some(r => r.word === 'Saved' && r.why === 'no save yet'),
+    'never "Saved" beside "no save yet"',
+  );
+});
+
 test('the yard says when the line feed holds more open Lanes than it lists', () => {
   const yard = model.buildYard(
     { ...feed([mark('a', 'editing')], 41), moreIsLowerBound: true },
