@@ -413,7 +413,7 @@ export async function publishAcceptance(
       automatic: receipt.automatic,
       ...(receipt.check ? { check: 'passed' } : {}),
     },
-    true,
+    1,
   );
   await ctx.db.insert('projectHostedAcceptanceSnapshots', {
     projectId: claim.projectId,

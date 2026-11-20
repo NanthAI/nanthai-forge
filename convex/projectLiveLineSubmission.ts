@@ -15,10 +15,15 @@ type LineState = Pick<HostedLandingState, 'id' | 'projectId' | 'phase'> &
   };
 const pageKind = 'projectLiveLineSubmissionPage';
 function selection(state: LineState) {
-  const stage = (state.phase === 'checking' ? 'checking' : state.phase === 'ready' ? 'ready' : 'saved') as
-    | 'checking'
-    | 'ready'
-    | 'saved';
+  const stage = (
+    state.phase === 'checking'
+      ? 'checking'
+      : state.phase === 'ready'
+        ? 'ready'
+        : state.phase === 'queued' || state.phase === 'composing'
+          ? 'queued'
+          : 'saved'
+  ) as 'checking' | 'ready' | 'queued' | 'saved';
   return {
     stage,
     // A landing withdrawn by its agent (or a person) waits on nobody: its Lane is back at Saved (Item 0cb9b064).

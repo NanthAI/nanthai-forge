@@ -110,10 +110,13 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
  * (carry, scoped recheck) and about 1 KB (red, which retires more source work) with the source repair wakes (e62d834b, review 308f217c): each scheduled source step arms a wake at its lease end that its commit cancels (a scheduler insert, a status read and a cancel), and a job that fails or is cancelled outside a commit reads its step row to cancel any wake left; no call. */
 // Item 85f456c1 (2026-11-20): carry and red moved -19 write bytes each: the line's Flow fields (summary day, check key)
 // grow slightly more on the retire's extra run than on the keep. Calls and reads unchanged.
+// Item 85f456c1, In-queue writer and batch truth gap (2026-11-20): each moved by one write byte (carry and scoped recheck +1, red -1, keep minus retire): a bound
+// Lane's mark now says 'queued', one byte longer than 'saved'.
+// Calls and reads unchanged.
 export const WIRED = {
-  carry: { calls: 7, readBytes: 404_022, writeBytes: 74_722 },
-  'scoped-recheck': { calls: 17, readBytes: 533_139, writeBytes: 143_001 },
-  red: { calls: -18, readBytes: -395_740, writeBytes: -144_158 },
+  carry: { calls: 7, readBytes: 404_022, writeBytes: 74_723 },
+  'scoped-recheck': { calls: 17, readBytes: 533_139, writeBytes: 143_002 },
+  red: { calls: -18, readBytes: -395_740, writeBytes: -144_159 },
 };
 
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */

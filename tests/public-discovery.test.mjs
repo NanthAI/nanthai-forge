@@ -148,7 +148,7 @@ test('public reads name no actor: only the owner handle that is already in the a
     s.ctx,
     'project',
     { head: 'a'.repeat(64), at: new Date(NOW - 3_600_000).toISOString() },
-    true,
+    1,
   );
   const body = await page(s);
   assert.equal(body.activity.landings, 1);

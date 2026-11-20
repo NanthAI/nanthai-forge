@@ -223,7 +223,7 @@ async function recovery(
   row: Doc<'projectHostedMainAudits'>,
   at: string,
   sequence: number,
-  reverted = Boolean(row.red?.culprit),
+  reverted = revertDecided(row.red),
 ) {
   if (!row.red) return { recovered: undefined, patch: {}, record: undefined };
   const drill = drillOf(row);
@@ -424,7 +424,7 @@ export async function noteMainLanding(
       row,
       receipt.at,
       receipt.snapshot.revision,
-      Boolean(run.gate?.reason?.startsWith('culprit-revert:') || row.red?.culprit),
+      Boolean(run.gate?.reason?.startsWith('culprit-revert:')) || revertDecided(row.red),
     );
     await ctx.db.patch(row._id, {
       ...ended.patch,
@@ -567,6 +567,12 @@ function redBranch(red: NonNullable<Doc<'projectHostedMainAudits'>['red']>) {
   if (red.intentId) return 'fix-forward' as const;
   return red.held ? ('reverse-held' as const) : ('reverting' as const);
 }
+/** The episode's newest decision is a revert still standing (Item 85f456c1): a culprit is named and neither a later
+ * fix-forward Intent (a failed reverse hands recovery to one) nor a held reverse replaced it. A green after that is
+ * 'reverted'; after a fix forward or a reverse that waits on a person it is 'fixed on top'. */
+function revertDecided(red: Doc<'projectHostedMainAudits'>['red']) {
+  return Boolean(red?.culprit) && redBranch(red!) === 'reverting';
+}
 function withoutTests(red: Doc<'projectHostedMainAudits'>['red']) {
   if (!red) return {};
   const { tests: _tests, moreTests: _more, ...kept } = red;
@@ -685,7 +691,19 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
       ),
       earned: undefined,
     });
-    await auditEvent(ctx, row, 'green', at, run.request.expectedHead, run.id, meta.sequence, ended.record);
+    // The recovery's own verdict: a green audit after a culprit revert is 'reverted', as on the landing path above
+    // (Item 85f456c1: the Flow day and Needs me's Main broke row read it).
+    await auditEvent(
+      ctx,
+      row,
+      'green',
+      at,
+      run.request.expectedHead,
+      run.id,
+      meta.sequence,
+      ended.record,
+      ended.recovered?.reverted,
+    );
     await releaseMainHolds(ctx, projectId);
     await clearFixedNotices(ctx, projectId, meta.sequence);
     if (count)

@@ -6,6 +6,8 @@ import { auditFixture, audit, state } from './hosted-main-audit-fixture.mjs';
 import { auditDebt, defaultMainAuditSettings, mainAuditKey } from '../dist/main-audit.js';
 import { checkArgs } from './convex-args.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
+import { moduleUrl } from './convex-module.mjs';
+const flowDay = await import(moduleUrl('../src/flow-day.ts'));
 const readGate = f => f.run('mainGate', ctx => state.mainGate(ctx, f.projectId));
 const readStatus = f => f.call('auditStatus', audit.status, { projectId: f.projectId }).then(JSON.parse);
 
@@ -991,4 +993,37 @@ test('687d1eda (analyst d975f2d7): the main-red reply says which branch runs, an
   } finally {
     delete process.env.FORGE_QUEUE_PARK_EXACT_ON_MAIN_RED;
   }
+});
+
+test('85f456c1: a green audit after a culprit revert records reverted, not fixed on top, for the Flow day and Main broke', async () => {
+  const ended = async (culprit, after = {}) => {
+    const f = await auditFixture();
+    await f.land('full');
+    await f.land();
+    await f.start();
+    await f.terminal('failed');
+    if (culprit)
+      f.patch('projectHostedMainAudits', f.row()._id, {
+        red: { ...f.row().red, culprit, reason: `Receipt ${culprit}: reverse only this change.`, ...after },
+      });
+    // The revert (or a fix on top) lands with a contract check; the next audit turns main green.
+    await f.land();
+    await f.start();
+    await f.terminal('passed');
+    assert.equal(f.row().red, undefined);
+    const green = [...f.tables.projectHostedMainAuditEvents.values()].find(e => e.kind === 'green');
+    const row = [...f.tables.projectFinishReadRows.values()].find(r => r.kind === 'projectLiveLineSummary');
+    const today = flowDay.flowToday(JSON.parse(row.value).flow, Date.now(), Date.now() - 3_600_000);
+    return { reverted: green.reverted, flow: [today.reverted, today.fixedOnTop] };
+  };
+  assert.deepEqual(
+    await ended('culprit-receipt'),
+    { reverted: true, flow: [1, 0] },
+    'Needs me and the Flow day agree',
+  );
+  assert.deepEqual(await ended(undefined), { reverted: false, flow: [0, 1] });
+  // Review P1: the reverse's check failed and recovery handed it to a fix-forward Intent (culprit still named), or
+  // the reverse waits on a person: the fix that lands is on top, not a revert.
+  assert.deepEqual(await ended('culprit-receipt', { intentId: 'fix-1' }), { reverted: false, flow: [0, 1] });
+  assert.deepEqual(await ended('culprit-receipt', { held: true }), { reverted: false, flow: [0, 1] });
 });

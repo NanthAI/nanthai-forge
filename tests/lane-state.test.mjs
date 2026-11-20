@@ -481,3 +481,29 @@ test('43b51a5e: a parked passed entry reads waiting-for-order on CLI replies, th
     'lands next',
   );
 });
+
+test('85f456c1: a Lane In queue whose saved files conflict with another Lane reads Conflict; without one, In queue', () => {
+  assert.equal(state.laneState(mark('q1', 'queued', { overlap: true })).kind, 'conflict');
+  const queued = state.laneState(mark('q2', 'queued'));
+  assert.deepEqual([queued.kind, queued.why], ['waiting', 'waits for its check']);
+});
+
+test('85f456c1 review: Lanes and the Flow view share one rule for a saved-file conflict on the way to main', () => {
+  for (const [stage, conflict] of [
+    ['editing', true],
+    ['saved', true],
+    ['queued', true],
+    ['checking', false],
+    ['ready', false],
+  ]) {
+    const mark = { stage, held: false, overlap: true };
+    assert.equal(state.unheldConflict(mark), conflict, stage);
+    assert.equal(state.laneState(mark, null).kind === 'conflict', conflict, stage);
+  }
+  assert.equal(state.unheldConflict({ stage: 'queued', held: false, overlap: false }), false);
+  assert.equal(
+    state.unheldConflict({ stage: 'queued', held: true, overlap: true }),
+    false,
+    'held: heldState decides',
+  );
+});

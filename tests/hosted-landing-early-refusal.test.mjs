@@ -46,7 +46,9 @@ const queueRuns = f => f.runs().filter(run => !isLane(f, run));
 // settle; owner-approved +$0.02/1k): each finish wake with no IO in flight is the settle mutation, and a step that needs IO hands it to one drive action (an acceptance page or cohort plan steps once more there). Reads stay under the serial path.
 // Non-maintenance writes 1,862 -> 1,867: the always-on S1 writer (b149b16b, merged from main) arms one capsule wake per landed member; no call or read.
 // Reads 4,815 -> 4,817, non-maintenance writes 1,867 -> 1,877: source repair wakes (e62d834b, review 308f217c): each scheduled source step arms a wake at its lease end that its commit cancels (a scheduler insert, a status read and a cancel), and a job that fails or is cancelled outside a commit reads its step row to cancel any wake left; no call.
-const BASELINE = { transactions: 224, documentsRead: 4817, documentsWritten: 1877 };
+// Reads 4,817 -> 4,818, non-maintenance writes 1,877 -> 1,878 (Item 85f456c1, In-queue writer and batch truth gap): the cohort's batch publish reads and
+// replaces the line summary so main's snapshot moves; no call.
+const BASELINE = { transactions: 224, documentsRead: 4818, documentsWritten: 1878 };
 
 /** `count` changes pass their Lane checks together; the first lands on its own run
  * and moves main, the rest are refused. Records when each refused change's

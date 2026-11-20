@@ -98,7 +98,10 @@ test('600 Intents and 575 retained receipts do not change bounded eight-member l
   assert(receipts.every(r => Buffer.byteLength(r.message) === LANDING_MESSAGE_BYTES));
   assert(Buffer.byteLength(JSON.stringify(published)) < 300 * 1024);
   // Transactions 100 -> 116 (Item 9a04d916, compose settle; owner-approved +$0.02/1k): each finish wake with no IO in flight is the settle mutation, and a step that needs IO hands it to one drive action (an acceptance page or cohort plan steps once more there).
-  assert(costs.transactions <= 116, 'Message retention must not add Convex calls: ' + JSON.stringify(costs));
+  // Transactions 116 -> 117 (Item 85f456c1, In-queue writer and batch truth gap): the batch publish now writes main's line snapshot, and as the project's first
+  // landing of the hour it schedules the person-order touch that a single landing already schedules (at most once per
+  // project per hour with landings; docs/data-placement.md).
+  assert(costs.transactions <= 117, 'Message retention must not add Convex calls: ' + JSON.stringify(costs));
   assert(costs.documentsRead < 4000, JSON.stringify(costs));
   assert(costs.documentsWritten < 1300, JSON.stringify(costs));
   assert(costs.peakRssBytes < 768 * 1024 * 1024, JSON.stringify(costs));

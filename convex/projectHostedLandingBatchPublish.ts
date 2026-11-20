@@ -33,6 +33,7 @@ import { scopedRecheckPairs } from '../src/scoped-recheck-policy';
 import { scheduleAcceptanceCompletion } from './projectHostedAcceptanceCompletion';
 import { landingPublisher } from './projectIntentLandingNotes';
 import { noteMainLanding } from './projectHostedMainAuditState';
+import { writeLineMain } from './projectLiveLineStore';
 import { enqueueGithubMirror } from './projectGithubMirrorQueue';
 import { hostedMainV2Schema } from '../src/hosted-main';
 import { hostedRecordSchema } from '../src/hosted-records';
@@ -463,6 +464,14 @@ export async function publishLandingBatch(
     receipts.push(receipt);
   }
   const last = receipts.at(-1)!;
+  // The line's main snapshot moves with main, as a single landing's publish moves it (Item 85f456c1): one summary
+  // write per batch, counting every member's receipt.
+  await writeLineMain(
+    ctx,
+    claim.projectId,
+    { head, at: last.at, actor: last.actor.id, automatic: true, check: 'passed' },
+    receipts.length,
+  );
   await ctx.db.patch(channel._id, {
     operationId: last.id,
     selection: canonicalPayload(

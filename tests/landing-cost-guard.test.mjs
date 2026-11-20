@@ -801,6 +801,12 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   );
   // Ten-landing index writes 11,736 -> 12,864 (Item 9a04d916, compose settle; owner-approved +$0.02/1k): the scheduler rows of the settle and
   // retry mutations and the drive each one hands IO to.
+  // Ten-landing index writes 12,864 -> 13,812 (Item 85f456c1, batch truth gap): the batch scenario's publish now
+  // writes main's line snapshot and, as its project's first landing of the hour, runs the person-order touch the single
+  // scenarios already run (151 seeded people rewritten once; at most once per project per hour with landings, priced
+  // in the mutations ledger below and docs/data-placement.md). The In-queue binding write adds a few entries.
+  // Stored keys in the two batch scenarios 150,180 -> 151,690 B: the touch stamps each of the 151 person rows with
+  // this hour (about 10 B of key each). Fixed per person and overwritten each hour, so it does not grow with history.
   const indexBudget = storageBudgets.tenLandingIndexes;
   assert.equal(
     ten.reduce((n, s) => n + s.landings, 0),
@@ -821,7 +827,8 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   assert(
     // 167/6: +2 hour-bucket touch runs over 165/6, each fixture project seeding an owner and 150 members (Item 3d5d8839).
     // 185/6 (Item 9a04d916, compose settle; owner-approved +$0.02/1k): every finish wake with no IO in flight is a settle mutation.
-    baseline.measured.mutations <= 185 / 6,
+    // 187/6 (Item 85f456c1, batch truth gap): the batch scenario's first landing of the hour runs the person-order touch.
+    baseline.measured.mutations <= 187 / 6,
     'metrics read projections must share existing landing mutations (90-minute read-cost incident)',
   );
   assert(verdicts.length >= 10, 'every fixture quantity has a ledger entry');
@@ -880,7 +887,9 @@ test('unconditional Candidate listings keep the landing call ledger and zero leg
     // Cost per project-hour = calls (ceil(people/100) x $2/M) + row I/O (each row read and rewritten, ~124 B each way,
     // $0.20/GB); per landing divide by landings per project-hour L. 151 people: $0.000004 + $0.0000075, so
     // $0.0115 per 1,000 landings at worst case L = 1 (0.68% of $1.688); see docs/data-placement.md.
-    mutations: 185 / 6,
+    // 185 -> 187 (Item 85f456c1, batch truth gap): the batch scenario's first landing of the hour now schedules the
+    // same person-order touch (two runs for 151 people), since a batch publish moves main's line snapshot too.
+    mutations: 187 / 6,
     v8Actions: 36 / 6,
     nodeActions: 3 / 6,
   };

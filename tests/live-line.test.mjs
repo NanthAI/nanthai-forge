@@ -38,7 +38,7 @@ test('live line follows a real landing atomically, deletes landed marks and reta
     });
   };
   await refresh();
-  assert.equal(latest.lanes[0].stage, 'saved');
+  assert.equal(latest.lanes[0].stage, 'queued', 'a submitted Lane waits In queue (Item 85f456c1)');
   const phases = new Set();
   const drain = async () => {
     while (f.pending().length) {
@@ -370,7 +370,7 @@ test('the first ordinary write installs a legacy Lane projection without scannin
   );
 });
 
-test('binding one saved Lane creates bounded transition ownership without moving its saved mark', async t => {
+test('binding one saved Lane creates bounded transition ownership and moves its mark to In queue', async t => {
   const f = await finishFixture(t);
   const before = structuredClone(marks(f));
   const state = {
@@ -391,7 +391,18 @@ test('binding one saved Lane creates bounded transition ownership without moving
     {},
   );
   const measured = f.counts.at(-1);
-  assert.deepEqual(marks(f), before, 'ownership writes do not change a mark');
+  // The one mark change binding makes: Saved to In queue (Item 85f456c1); held, check and the rest are untouched.
+  assert.deepEqual(
+    marks(f).map(({ stage, changedAt: _at, ...rest }) => rest),
+    before.map(({ stage, changedAt: _at, ...rest }) => rest),
+  );
+  assert.deepEqual(
+    marks(f).map(mark => mark.stage),
+    before.map(() => 'queued'),
+  );
+  // The owner accepted +1 write per submitted Lane for In queue (2 -> 3 writes, 762 -> 1007 B; Item 85f456c1).
+  assert(measured.writes <= 3, `binding writes ${measured.writes}, accepted ceiling 3`);
+  assert(measured.writeBytes <= 1100, `binding writes ${measured.writeBytes} B, accepted ceiling 1,100`);
   t.diagnostic(
     JSON.stringify({
       lineBinding: {

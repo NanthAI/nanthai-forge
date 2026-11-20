@@ -4,8 +4,9 @@
 // count here is the line's count for that stop (Line.tsx `lineStops`) and a held block's words are its Needs you row's.
 // No read, timer or clock of its own: "today" and elapsed times are worked out from the feed's timestamps against the
 // time the page was drawn. Pure.
-import { flowToday } from '../../../../src/flow-day';
+import { flowToday, utcDayStart } from '../../../../src/flow-day';
 import { lineStops, type LineFeed, type LineStop } from '../Line';
+import { unheldConflict } from '../lane-state';
 import type { StateWord } from '../../ds';
 
 /** A block's colour (the state tokens) and the glyph cut into its top. */
@@ -58,11 +59,9 @@ export function flowStations(feed: LineFeed | undefined, rows: readonly HeldRow[
         ? 'waiting'
         : row
           ? colourOf(row.word)
-          : lane.held
-            ? lane.overlap
-              ? 'conflict'
-              : 'waiting'
-            : lane.stage === 'queued'
+          : (lane.held && lane.overlap) || unheldConflict(lane)
+            ? 'conflict'
+            : lane.held || lane.stage === 'queued'
               ? 'waiting'
               : 'active';
       return {
@@ -101,11 +100,9 @@ export function flowStations(feed: LineFeed | undefined, rows: readonly HeldRow[
   });
 }
 
-/** The day's figures under the picture, in the reader's day. */
+/** The day's figures under the picture, in the project day (UTC, as the top bar and Stats count it). */
 export function flowFigures(feed: LineFeed | undefined, drawnAt: number) {
-  const midnight = new Date(drawnAt);
-  midnight.setHours(0, 0, 0, 0);
-  const today = flowToday(feed?.flow, drawnAt, midnight.getTime());
+  const today = flowToday(feed?.flow, drawnAt, utcDayStart(drawnAt));
   const main = feed?.flow?.main;
   return { ...today, red: main?.red === true, since: main ? main.since : null };
 }

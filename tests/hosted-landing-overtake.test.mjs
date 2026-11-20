@@ -331,10 +331,12 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // day and the marks' check key ride writes that already happen; no call or write added, about 120 B per landing.
   // Reads 1,895,409 -> 1,895,434 B, writes 607,326 -> 607,376 B (Item 32e8de50, top bar first try): the Flow day's
   // `first` row rides the landing's summary write; no call or write added, about 25 B per landing.
+  // Reads 1,895,434 -> 1,896,106 B, writes 607,376 -> 608,297 B (Item 85f456c1, In-queue writer and batch truth gap): the In-queue binding write (+1 write
+  // per submitted Lane, owner-accepted) and the batch publish's line-summary update; no call, about 0.8 KB per landing.
   const measured = { calls: pair.calls, readBytes: pair.readBytes, writeBytes: pair.writeBytes };
   assert.deepEqual(
     measured,
-    { calls: 111, readBytes: 1_895_434, writeBytes: 607_376 },
+    { calls: 111, readBytes: 1_896_106, writeBytes: 608_297 },
     'the 70a9bd2f pair cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
@@ -375,10 +377,12 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // replay; no call.
   // Reads 1,900,661 -> 1,900,686 B, writes 609,822 -> 609,872 B (Item 32e8de50): the `first` row, as in the small
   // replay; no call.
+  // Reads 1,900,686 -> 1,901,360 B, writes 609,872 -> 610,798 B (Item 85f456c1, In-queue writer and batch truth gap): the In-queue binding write, as in the
+  // small replay; no call.
   const measured = { calls: after.calls, readBytes: after.readBytes, writeBytes: after.writeBytes };
   assert.deepEqual(
     measured,
-    { calls: 111, readBytes: 1_900_686, writeBytes: 609_872 },
+    { calls: 111, readBytes: 1_901_360, writeBytes: 610_798 },
     'the 70a9bd2f 4,000-file cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(after.idle, 0);

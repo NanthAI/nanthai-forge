@@ -64,7 +64,7 @@ export async function dogfoodPublicFixture() {
       s.ctx,
       'project',
       { head: String(n).padStart(64, '0'), at: new Date(at).toISOString(), check: 'passed' },
-      true,
+      1,
     );
   }
   return s;
@@ -99,15 +99,15 @@ test('week totals share the existing main read/write and do not double-count ret
   const s = fixture();
   const io = meterWorkIO(s.ctx, s.tables);
   const main = { head: 'a'.repeat(64), at: new Date(NOW).toISOString(), check: 'passed' };
-  const first = await io.cost(() => writeLineMain(s.ctx, 'project', main, true));
+  const first = await io.cost(() => writeLineMain(s.ctx, 'project', main, 1));
   assert.equal(first.readDocuments, 0);
   assert.equal(first.writeDocuments, 1);
   assert.equal(
     (await read.projectPage._handler(s.ctx, { handle: 'ada', slug: 'atlas', now: NOW })).activity.landings,
     1,
   );
-  assert.equal((await io.cost(() => writeLineMain(s.ctx, 'project', main, true))).writeDocuments, 0);
-  await writeLineMain(s.ctx, 'project', { ...main, check: 'failed' }, true);
+  assert.equal((await io.cost(() => writeLineMain(s.ctx, 'project', main, 1))).writeDocuments, 0);
+  await writeLineMain(s.ctx, 'project', { ...main, check: 'failed' }, 1);
   await writeLineMain(s.ctx, 'project', { ...main, head: 'b'.repeat(64) });
   const body = await read.projectPage._handler(s.ctx, { handle: 'ada', slug: 'atlas', now: NOW });
   assert.equal(body.activity.landings, 1);
@@ -118,4 +118,15 @@ test('week totals share the existing main read/write and do not double-count ret
     now: NOW + 7 * 86_400_000,
   });
   assert.equal(later.activity.landings, 0);
+});
+
+test('a batch that lands under the same head still counts its receipts once (85f456c1 review)', async () => {
+  const s = fixture();
+  const main = { head: 'a'.repeat(64), at: new Date(NOW).toISOString(), check: 'passed' };
+  await writeLineMain(s.ctx, 'project', main, 1);
+  const again = { ...main, at: new Date(NOW + 60_000).toISOString(), automatic: true };
+  await writeLineMain(s.ctx, 'project', again, 2);
+  await writeLineMain(s.ctx, 'project', again, 2);
+  const body = await read.projectPage._handler(s.ctx, { handle: 'ada', slug: 'atlas', now: NOW + 60_000 });
+  assert.equal(body.activity.landings, 3, 'two fresh receipts under the old head count; the replay does not');
 });

@@ -109,6 +109,14 @@ export function heldState(landing: CurrentLanding | null | undefined, overlap = 
 }
 
 /** The one Lane state. `landing` is the current submission only (see `currentEntries`), or nothing. */
+/** A Lane on its way to main (not held) whose saved files conflict with another Lane's: before its check, not during
+ * or after it. Lanes and the Flow view both read this (one rule, Item 85f456c1). */
+export const unheldConflict = (mark: LaneMark) =>
+  !mark.held &&
+  mark.overlap === true &&
+  mark.stage !== 'checking' &&
+  mark.stage !== 'ready' &&
+  mark.stage !== 'main';
 export function laneState(mark: LaneMark, landing?: CurrentLanding | null): LaneState {
   const base = { stage: mark.stage, held: mark.held };
   if (mark.stage === 'main')
@@ -137,15 +145,6 @@ export function laneState(mark: LaneMark, landing?: CurrentLanding | null): Lane
             : 'its check is running',
       note: null,
     };
-  if (mark.stage === 'queued')
-    return {
-      ...base,
-      kind: 'waiting',
-      glyph: 'Waiting its turn',
-      word: stopWords.queued,
-      why: 'waits for its check',
-      note: null,
-    };
   if (mark.stage === 'ready')
     return {
       ...base,
@@ -156,7 +155,7 @@ export function laneState(mark: LaneMark, landing?: CurrentLanding | null): Lane
       why: landing?.state === 'waiting-for-order' ? 'waits for an older landing' : 'lands next',
       note: null,
     };
-  if (mark.overlap)
+  if (unheldConflict(mark))
     return {
       ...base,
       kind: 'conflict',
@@ -164,6 +163,16 @@ export function laneState(mark: LaneMark, landing?: CurrentLanding | null): Lane
       word: 'Conflict',
       why: 'its saved changes conflict with another Lane',
       note: 'conflict',
+    };
+  // In queue is still before the check: a conflict with another Lane's saved files reads first.
+  if (mark.stage === 'queued')
+    return {
+      ...base,
+      kind: 'waiting',
+      glyph: 'Waiting its turn',
+      word: stopWords.queued,
+      why: 'waits for its check',
+      note: null,
     };
   return { ...base, kind: 'active', glyph: 'Working', word: stopWords[mark.stage], why: '', note: null };
 }

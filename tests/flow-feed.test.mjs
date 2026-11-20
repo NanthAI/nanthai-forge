@@ -3,7 +3,7 @@
 // the summary write its exit already makes, a check key and a main-red hold ride the mark's stage/held patch.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { synthetic } from './hosted-landing-batches-fixture.mjs';
+import { batchesFixture, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { finishFixture } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const line = await import(moduleUrl('../convex/projectLiveLine.ts'));
@@ -223,6 +223,33 @@ test('main’s verdict reaches the summary only when it flips; a red ended witho
   feed = await read(f);
   assert.equal(feed.flow.main.red, false);
   assert.equal(day.flowToday(feed.flow, Date.now(), Date.now() - 3_600_000).fixedOnTop, 1);
+});
+
+test('a batch landing moves the line’s main snapshot and counts every member, as a single landing does (85f456c1)', async t => {
+  const f = await batchesFixture(t);
+  const summary = countSummaryWrites(f);
+  const before = (await read(f)).main?.head;
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  const head = f.currentMain().head;
+  assert.notEqual(head, before);
+  const feed = await read(f);
+  assert.equal(
+    feed.main.head,
+    head,
+    'the top bar and Flow view show the batch’s main, not the one before it',
+  );
+  assert.equal(feed.main.check, 'passed');
+  const row = [...f.tables.projectFinishReadRows.values()].find(r => r.kind === 'projectLiveLineSummary');
+  const week = JSON.parse(row.value).publicWeek;
+  assert.equal(
+    week.days.reduce((n, d) => n + d.count, 0),
+    4,
+    'four receipts under one head count four landings',
+  );
+  assert.equal(day.flowToday(feed.flow, Date.now(), Date.now() - 3_600_000).landed, 4);
+  t.diagnostic(JSON.stringify({ batchOfFour: { summaryWrites: summary.n } }));
 });
 
 test('the Flow day keeps one rolling day: old hours and samples drop, today follows the reader’s midnight', () => {

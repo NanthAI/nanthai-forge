@@ -52,9 +52,12 @@ for (const history of [0, 1150])
     // caller its own copy of the first read); equal in both arms.
     // Reads 3185 -> 3189, writes 1126 -> 1130: source repair wakes (e62d834b, review 308f217c): each scheduled source step arms a wake at its lease end that its commit cancels (a scheduler insert, a status read and a cancel), and a job that fails or is cancelled outside a commit reads its step row to cancel any wake left; no call (about 1.2 KB of DB I/O per landing, +$0.00024 per
     // 1,000 at $0.20/GB); equal in both arms.
+    // Reads 3189 -> 3191, writes 1130 -> 1135 (Item 85f456c1, In-queue writer and batch truth gap): binding moves each trio Lane's mark to In queue (+1 write
+    // per submitted Lane, owner-accepted: +3), and each of the two batch publishes reads and replaces the line summary
+    // so main's snapshot moves (+2 reads, +2 writes, inside finishSettle); no call. Equal in both arms.
     assert.deepEqual(
       [after.calls, after.reads, after.writes, after.lateTaskMs, after.idle],
-      [165, 3189, 1130, 180000, 0],
+      [165, 3191, 1135, 180000, 0],
       '8c9b84fc: disjoint baseline must not grow',
     );
     t.diagnostic(JSON.stringify({ history, before, after }));

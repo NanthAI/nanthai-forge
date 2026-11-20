@@ -167,10 +167,14 @@ for (const history of [0, 575, 1150])
     // live peer, so a batch whose members are all terminal settles. Only a failure of a batched member
     // pays it; calls and writes are unchanged.
     // Reads 4413 -> 4421, writes 1386 -> 1394: source repair wakes (e62d834b, review 308f217c): each scheduled source step arms a wake at its lease end that its commit cancels (a scheduler insert, a status read and a cancel), and a job that fails or is cancelled outside a commit reads its step row to cancel any wake left; no call.
+    // Calls 204 -> 205, reads 4421 -> 4422, writes 1394 -> 1395 (Item 85f456c1, batch truth gap): the batch publish,
+    // as its project's first landing of the hour, schedules the person-order touch a single landing already schedules
+    // (its scheduler write, its run and that run's read; at most once per project per hour with landings). The line
+    // summary's own read and write are projection I/O, outside these source counts.
     assert(
-      budget.calls <= 204 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 4421 &&
-        source.reduce((n, c) => n + c.writes, 0) <= 1394,
+      budget.calls <= 205 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 4422 &&
+        source.reduce((n, c) => n + c.writes, 0) <= 1395,
       JSON.stringify({
         ...budget,
         sourceReads: source.reduce((n, c) => n + c.documents, 0),

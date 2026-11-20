@@ -185,18 +185,21 @@ export async function patchLineLane(
 }
 /** Main's small display snapshot shares the exit row; no Work revision is copied. With a scheduler (acceptance), a
  * landing in a new hour bucket also records `hour` and schedules the person-order update once (Item 3d5d8839): no
- * read is added, and a replay finds the same hour and schedules nothing. */
+ * read is added, and a replay finds the same hour and schedules nothing. `landings` counts the receipts a new head
+ * carries (a batch publishes several under one head, Item 85f456c1); a replay of the same head counts none. */
 export async function writeLineMain(
   ctx: Pick<MutationCtx, 'db'> & Partial<Pick<MutationCtx, 'scheduler'>>,
   projectId: Id<'hostedProjects'>,
   main: { head: string; at?: string; actor?: string; automatic?: boolean; check?: string },
-  countLanding = false,
+  landings = 0,
 ) {
   const old = await lineSummary(ctx.db, projectId);
   const value = old ? JSON.parse(old.value) : {};
   if (JSON.stringify(value.main) === JSON.stringify(main)) return;
   // Seven UTC day buckets share this existing read/write. Replays and check-display patches do not count twice.
-  if (countLanding && value.main?.head !== main.head && main.at) {
+  // A new landing moves the head or, for a batch whose receipts leave main's tree as it was, the time: either counts.
+  // A replay sends the same snapshot and returned above; a check-display patch keeps head and time.
+  if (landings > 0 && main.at && (value.main?.head !== main.head || value.main?.at !== main.at)) {
     const at = Date.parse(main.at);
     if (Number.isFinite(at)) {
       const day = Math.floor(at / 86_400_000);
@@ -205,8 +208,8 @@ export async function writeLineMain(
         (row: { day: number }) => row.day >= day - 6 && row.day <= day,
       );
       const today = days.find(row => row.day === day);
-      if (today) today.count++;
-      else days.push({ day, count: 1 });
+      if (today) today.count += landings;
+      else days.push({ day, count: landings });
       value.publicWeek = { since: week.since, lastAt: at, days };
     }
   }
