@@ -11,6 +11,7 @@ import { A } from '../frames';
 import type { LineFeed } from '../Line';
 import { SizedPicture, type PictureFacts } from './Picture';
 import { Tag } from './labels';
+import { FlowChecks, FlowLegend } from './Checks';
 import { clock, duration, flowFigures, flowStations, type HeldRow, type Station } from './model';
 import './flow.css';
 
@@ -192,6 +193,7 @@ export function FlowRegion({
           </div>
         ) : null}
       </FlowMotion>
+      <FlowLegend />
       {feed ? (
         <>
           <nav className="flow-figs" aria-label="Today">
@@ -267,35 +269,14 @@ export function FlowRegion({
               </span>
             </A>
           </nav>
-          <button
-            type="button"
-            className="flow-chk"
-            aria-expanded={stop === 'checking'}
-            onClick={() => onOpen('checking')}
-          >
-            <b>Checks</b>
-            <span>
-              {checking.checks.length
-                ? `${checking.checks.length} running (${checking.checks.map(n => plural(n, 'Lane')).join(', ')})`
-                : 'none running'}
-              {checking.passed ? `, ${checking.passed} passed` : ''}
-            </span>
-            {checking.checks.length ? <span className="prop">Shards · proposed</span> : null}
-            <span className="ci">
-              <b title={partial.has('ciMinutes') ? 'Partial CI coverage' : undefined}>
-                {day.ciMinutes.toLocaleString('en')}
-              </b>{' '}
-              CI min today,{' '}
-              <b
-                title={
-                  partial.has('lostMinutes') ? 'Partial coverage of checks that did not land' : undefined
-                }
-              >
-                {day.lostMinutes.toLocaleString('en')}
-              </b>{' '}
-              on checks that did not land
-            </span>
-          </button>
+          <FlowChecks
+            checks={feed.checks}
+            day={day}
+            drawnAt={drawnAt}
+            passed={checking.passed}
+            open={stop === 'checking'}
+            onOpen={() => onOpen('checking')}
+          />
         </>
       ) : null}
     </Region>

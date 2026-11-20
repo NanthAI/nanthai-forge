@@ -388,6 +388,7 @@ const busyLanes: Mark[] = [
   moving(31, 'checking', 4, 'c0ffee01'),
   moving(32, 'checking', 2, 'c0ffee02'),
   moving(33, 'ready', 1),
+  moving(34, 'checking', 9, 'c0ffee00'),
 ];
 // 56 open Lanes: the held three among 53 moving ones across the stops.
 const worstLanes: Mark[] = [
@@ -421,6 +422,24 @@ const fixtureFeed: LineFeed = {
   moreIsLowerBound: false,
   main: variant === 'empty' ? null : { head: 'b'.repeat(64), at: new Date(ago(62)).toISOString() },
   ...(first || connect || variant === 'empty' ? {} : { flow }),
+  checks: quiet
+    ? { runs: [], free: 4 }
+    : worst
+      ? {
+          runs: [
+            { groups: ['c0ffee01'], lanes: 4, at: ago(4) },
+            { groups: ['c0ffee00'], lanes: 3, at: ago(3) },
+            { groups: ['c0ffee02'], lanes: 3, at: ago(2), reserved: true },
+          ],
+          free: 1,
+        }
+      : {
+          runs: [
+            { groups: ['c0ffee01'], lanes: 2, at: ago(4) },
+            { groups: ['c0ffee02'], lanes: 1, at: ago(2) },
+          ],
+          free: 2,
+        },
 };
 
 const route = {

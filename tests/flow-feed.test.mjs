@@ -3,12 +3,14 @@
 // the summary write its exit already makes, a check key and a main-red hold ride the mark's stage/held patch.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { batchesFixture, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { finishFixture } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const line = await import(moduleUrl('../convex/projectLiveLine.ts'));
 const landing = await import(moduleUrl('../convex/projectHostedLandingStore.ts'));
 const store = await import(moduleUrl('../convex/projectLiveLineStore.ts'));
+const { policyPreset } = await import(moduleUrl('../src/autonomy-policy.ts'));
 const day = await import(moduleUrl('../src/flow-day.ts'));
 const sub = await import(moduleUrl('../convex/projectLiveLineSubmission.ts'));
 const previousEnvironment = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
@@ -71,6 +73,185 @@ test('a landing steps the Flow day inside the summary write its exit already mak
       summaryBytes: feed.flow ? JSON.stringify(feed.flow).length : 0,
     }),
   );
+});
+
+test('the live line reports running checks, grouped Lane counts and configured queue room in one reply', async t => {
+  const f = await finishFixture(t);
+  const state = await f.enqueue(f.request());
+  const [source] = f.tables.projectHostedLandingRequests.values();
+  const { _id, _creationTime, requestBodyId: _body, selectionBodyId: _selection, ...landing } = source;
+  const { _id: _markId, _creationTime: _markAt, ...mark } = marks(f)[0];
+  const at = Date.parse('2026-11-01T10:02:00.000Z');
+  const reservedAt = '2026-11-01T10:00:00.000Z';
+  const policy = { ...policyPreset('trusted'), checks: { runner: 'github-actions', concurrency: 5 } };
+  f.insert('projectPolicyChanges', {
+    projectId: f.projectId,
+    operationId: randomUUID(),
+    actor: 'owner',
+    request: '',
+    at: reservedAt,
+    previous: policyPreset('trusted'),
+    policy,
+  });
+  const batchId = randomUUID();
+  const group = (phase, id = randomUUID(), fields = {}) => ({
+    id,
+    phase,
+    sequence: 10,
+    priority: 'normal',
+    ...fields,
+  });
+  const check = (status, shardStartedAt, batchId, hasLane = true) => {
+    const runId = randomUUID();
+    const checkId = f.insert('projectHostedCheckRuns', {
+      projectId: f.projectId,
+      runId,
+      candidateId: randomUUID(),
+      status,
+      ...(shardStartedAt === undefined ? {} : { shardStartedAt }),
+      value: JSON.stringify({
+        at: reservedAt,
+        status,
+        configuration: { description: 'recorded settings '.repeat(200) },
+      }),
+    });
+    if (!hasLane) return { checkId };
+    const submissionId = randomUUID();
+    const requestBodyId = batchId
+      ? f.insert('projectHostedLandingBodies', {
+          value: JSON.stringify({ projectId: f.projectId, submissionId, request: state.request }),
+        })
+      : undefined;
+    const rowId = f.insert('projectHostedLandingRequests', {
+      ...landing,
+      ...(requestBodyId ? { requestBodyId } : {}),
+      submissionId,
+      phase: 'checking',
+      operationId: randomUUID(),
+      runId,
+      value: JSON.stringify({ ...state, id: submissionId, batchId }),
+    });
+    return { runId, checkId, rowId, requestBodyId, submissionId, key: (batchId ?? submissionId).slice(0, 8) };
+  };
+  const shared = check('running', at, batchId);
+  const single = check('running');
+  const queued = check('queued');
+  const passed = check('passed');
+  const unrelated = check('running', at + 10_000, undefined, false); // A run whose work has no Lanes on Flow.
+  const [queue] = f.tables.projectHostedLandingQueues.values();
+  f.tables.projectHostedLandingQueues.set(queue._id, { ...queue, train: [shared.submissionId] });
+  const [attempt] = f.tables.projectHostedLandingAttempts.values();
+  f.tables.projectHostedLandingAttempts.set(attempt._id, {
+    ...attempt,
+    value: JSON.stringify({
+      ...JSON.parse(attempt.value),
+      policy: { ...policy, checks: { ...policy.checks, concurrency: 2 } },
+    }),
+  });
+  f.insert('projectHostedLandingQueueStatus', {
+    projectId: f.projectId,
+    page: 999,
+    value: JSON.stringify([
+      group('checking', shared.submissionId, { batchId }),
+      group('checking', single.submissionId), // Separate admission check, outside the train.
+      group('ready'),
+      group('queued'),
+    ]),
+  });
+  const lane = (check, stage = 'checking', held = false) =>
+    f.insert('projectLiveLineLanes', { ...mark, laneId: randomUUID(), stage, held, check });
+
+  lane(shared.key);
+  lane(shared.key);
+  lane(single.key);
+  lane(queued.key);
+  lane(passed.key, 'ready');
+  lane(shared.key, 'checking', true);
+  for (let i = 7; i < 56; i++) lane(undefined, 'editing');
+
+  const started = performance.now();
+  const { checks, ...baseline } = await read(f);
+  const wallMs = performance.now() - started;
+  assert.equal(baseline.lanes.length, 56);
+  assert.deepEqual(
+    checks.runs.sort((a, b) => a.at - b.at),
+    [
+      { groups: [single.key], lanes: 1, at: Date.parse(reservedAt), reserved: true },
+      { groups: [shared.key], lanes: 2, at },
+    ],
+  );
+  assert.equal(checks.free, 1, 'use the train and its pinned width, excluding independent admission checks');
+  assert.equal(checks.partial, undefined);
+  assert.ok(
+    baseline.lanes.some(lane => lane.check === shared.key),
+    'the picture keeps compact check keys',
+  );
+  const before = Buffer.byteLength(JSON.stringify(baseline));
+  const after = Buffer.byteLength(JSON.stringify({ ...baseline, checks }));
+  assert.ok(after - before < 180, 'only the check summaries cross the feed');
+  t.diagnostic(
+    JSON.stringify({
+      before,
+      after,
+      wallMs,
+      fixturePeakRssKiB: process.resourceUsage().maxRSS,
+      queryReadBytes: f.counts.at(-1).readBytes,
+      queryDocuments: f.counts.at(-1).documents,
+    }),
+  );
+
+  const skipsColdBodies = f.readSet();
+  const cold = f.tables.projectHostedLandingBodies.get(shared.requestBodyId);
+  await f.tx(
+    'coldVerificationClaim',
+    {
+      _handler: ctx =>
+        ctx.db.patch(cold._id, {
+          value: JSON.stringify({ ...JSON.parse(cold.value), request: { notVerified: ['Synthetic claim'] } }),
+        }),
+    },
+    {},
+  );
+  assert(skipsColdBodies(), 'reading run identities does not hydrate the archived landing request');
+  const replacement = check('running', at + 20_000);
+  const original = f.tables.projectHostedCheckRuns.values();
+  for (const run of original)
+    if (run.runId === single.runId)
+      f.tables.projectHostedCheckRuns.set(run._id, { ...run, status: 'interrupted' });
+  const originalLanding = f.tables.projectHostedLandingRequests.get(single.rowId);
+  f.tables.projectHostedLandingRequests.set(single.rowId, { ...originalLanding, runId: replacement.runId });
+  assert.deepEqual(
+    (await read(f)).checks.runs.sort((a, b) => a.at - b.at),
+    [
+      { groups: [shared.key], lanes: 2, at },
+      { groups: [single.key], lanes: 1, at: at + 20_000 },
+    ],
+    'a retry in the same check stage uses the current run without patching its marks',
+  );
+
+  const beforeProgress = (await read(f)).checks;
+  const readSet = f.readSet();
+  const unrelatedRun = f.tables.projectHostedCheckRuns.get(unrelated.checkId);
+  await f.tx(
+    'unrelatedCheckProgress',
+    {
+      _handler: ctx =>
+        ctx.db.patch(unrelatedRun._id, {
+          value: JSON.stringify({ ...JSON.parse(unrelatedRun.value), counts: { completed: 1 } }),
+        }),
+    },
+    {},
+  );
+  assert.equal(readSet(), false, 'a canonical run update can wake this bounded read while work is active');
+  assert.deepEqual((await read(f)).checks, beforeProgress, 'unrelated progress publishes no new strip data');
+
+  for (let i = 0; i < 9; i++) check('running', at + 60_000, undefined, false);
+  const capped = (await read(f)).checks;
+  assert.equal(capped.partial, true, 'an overfull page states that some runs could not be read');
+  assert.equal(capped.free, 1, 'a capped check list does not change train occupancy');
+  const { documents, readBytes } = f.counts.at(-1);
+  t.diagnostic(JSON.stringify({ cappedRunCase: { documents, readBytes } }));
+  assert.ok(readBytes < 75_000, 'the canonical run page stays bounded with other active checks');
 });
 
 test('a failed check counts once for needs fix, a main-red hold rides the held patch and clears with it', async t => {

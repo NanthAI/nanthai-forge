@@ -27,8 +27,10 @@ test('proof screen distinguishes missing, empty and many claims, preserves attri
     `import React, {useState} from ${JSON.stringify(join(root, 'node_modules/react/index.js'))};
 import {createRoot} from ${JSON.stringify(join(root, 'node_modules/react-dom/client.js'))};
 import {ConvexProvider,ConvexReactClient} from 'convex/react';
+import {getFunctionName} from 'convex/server';
 import {ReportFiles} from ${JSON.stringify(join(root, 'web/src/app/proof/ReportFiles.tsx'))};
 import {ProofView} from ${JSON.stringify(join(root, 'web/src/app/proof/ProofView.tsx'))};
+import ProofPage from ${JSON.stringify(join(root, 'web/src/app/proof/ProofPage.tsx'))};
 import {ProjectFrame} from ${JSON.stringify(join(root, 'web/src/app/frames.tsx'))};
 import ${JSON.stringify(join(root, 'web/src/app/app.css'))};
 const source='a'.repeat(64);
@@ -36,7 +38,55 @@ let reportPhase='passed';
 const client=new ConvexReactClient('https://forge.test.convex.cloud');
 client.action=async(_,args)=>JSON.stringify({contractReports:reportPhase==='running'?{}:Object.fromEntries(Array.from({length:args.cursor?9:8},(_,i)=>['tests/source-'+(i+(args.cursor?8:0))+'.test.mjs',{failed:false,durationMs:1250}])),nextCursor:reportPhase==='running'||args.cursor?null:'next'});
 const original={agentClient:'test-editor:test-model',lane:{id:'lane',intentId:'item',head:source,state:'active'},save:{id:'save',head:source,at:'2026-11-01T10:00:00.000Z',author:'builder/steady-fox',notVerified:['The optional adapter was not checked.','Transport timeout recovery was not checked on this platform.']},check:{runId:'run',head:source,status:'passed',check:'verify',files:{total:17,failed:0,flaky:0},selection:{mode:'contract',effective:'full',tests:Array.from({length:24},(_,i)=>'tests/requested-'+i+'.test.mjs'),reason:'The runner used the full command.'},skipped:null,ciMinutes:1.25,wallSeconds:86,shards:{completed:3,passed:3,failed:0,total:3},at:'2026-11-01T10:00:00.000Z',endedAt:'2026-11-01T10:01:26.000Z',providerLink:null},claimMatchesCheck:true,currentHead:source,stale:false,afterLandingCheck:null};
-function Fixture(){const[data,setData]=useState(original);const[message,setMessage]=useState('');window.proofState=(kind)=>{setMessage('');reportPhase=kind==='running'||kind==='unreported'?'running':'passed';setData({...original,save:kind==='hiddenauthor'?{...original.save,author:undefined}:kind==='none'?{...original.save,notVerified:undefined}:kind==='empty'?{...original.save,notVerified:[]}:kind==='many'?{...original.save,notVerified:Array.from({length:37},(_,i)=>'Unverified line '+(i+1)+' '+('verylongtext'.repeat(20)))}:original.save,landing:kind==='different'||kind==='accepted'?{receiptId:'receipt',candidateId:'candidate',head:kind==='different'?'b'.repeat(64):source,acceptedBy:{kind:'auto',note:'Project landing policy'}}:null,declaration:kind==='landing'?{kind:'landing',id:'submission',head:source,at:original.save.at,author:original.save.author,notVerified:['The landing claim remains distinct.']}:null,check:kind==='nocheck'?null:kind==='newScope'?{...original.check,selection:{mode:'future-mode'},shards:{completed:1,passed:0,failed:1,total:1}}:kind==='running'||kind==='queued'||kind==='unknown'?{...original.check,status:kind,endedAt:null,shards:{completed:0,passed:0,failed:0,total:null}}:kind==='unreported'?{...original.check,files:null,ciMinutes:null}:original.check});};return <ConvexProvider client={client}><ProjectFrame route={{frame:'project',handle:'example',project:'workspace',place:'lanes',section:'',rest:'lane/checked'}} name="Workspace" projects={[]} controls={{onPalette(){},onKeys(){},onPicker(){},viewerHandle:'example'}}><ProofView data={data} reportDetails={data.check?<ReportFiles projectId="project" runId="run" version={data.check.endedAt?[data.check.endedAt,data.check.files?.total,data.check.files?.failed,data.check.files?.flaky].join(':'):null}/>:null} lanesHref="#lanes" changeHref="#change" recoveryHref="#check" message={message} onRunAll={()=>setMessage('A full check was requested on this exact source.')} onRevert={data.landing?()=>setMessage('Taking it out of main as a new landing.'):undefined} onFollowups={(line)=>setMessage(line===undefined?'37 linked Items in Plan.':'1 linked Item in Plan.')} /></ProjectFrame></ConvexProvider>};createRoot(document.getElementById('root')).render(<Fixture/>);`,
+// These source relationships come from real single, shared-batch and retried
+// landing receipts. Identifiers and saved claim text are synthetic.
+const receiptSources = {
+  single: ['a', 'a'],
+  batch: ['b', 'c'],
+  retry: ['d', 'e'],
+};
+function receiptFixture(kind) {
+  const [input, landed] = receiptSources[kind];
+  const saved = input.repeat(64), accepted = landed.repeat(64);
+  return {
+    ...original,
+    lane: {...original.lane, head: saved},
+    save: {...original.save, id: 'save-' + kind, head: saved},
+    landing: {receiptId: 'receipt-' + kind, candidateId: 'candidate-' + kind, head: accepted, acceptedBy: {kind:'auto', note:'Project landing policy'}},
+    check: {...original.check, runId: 'accepted-run-' + kind, head: accepted},
+    currentHead: accepted,
+    claimMatchesCheck: saved === accepted,
+  };
+}
+const route = {frame:'project',handle:'example',project:'workspace',place:'lanes',section:'',rest:'lane/checked'};
+let receiptData;
+window.followupRequests = [];
+client.watchQuery = (reference) => ({
+  localQueryResult: () => getFunctionName(reference) === 'projectRunProof:read'
+    ? JSON.stringify(receiptData)
+    : undefined,
+  onUpdate: () => () => {},
+});
+client.mutation = async (reference, args) => {
+  if (getFunctionName(reference) !== 'projectRunProofActions:followups') throw Error('Unexpected mutation');
+  window.followupRequests.push(args);
+  const source = receiptData.declaration ?? receiptData.save;
+  const start = args.line ?? args.offset;
+  const end = args.line === undefined ? Math.min(start + 100, source.notVerified.length) : start + 1;
+  return JSON.stringify({
+    items: source.notVerified.slice(start, end).map((_, index) => ({id: source.id + '-' + (start + index)})),
+    nextOffset: args.line === undefined && end < source.notVerified.length ? end : null,
+  });
+};
+function Fixture(){const[data,setData]=useState(original);const[receipt,setReceipt]=useState(null);const[message,setMessage]=useState('');window.proofState=(kind)=>{setMessage('');reportPhase=kind==='running'||kind==='unreported'?'running':'passed';if (Object.hasOwn(receiptSources,kind) || kind === 'declared') {
+  receiptData = receiptFixture(kind === 'declared' ? 'retry' : kind);
+  if (kind === 'declared') receiptData.declaration = {kind:'landing',id:'submission-declared', head:receiptData.landing.head, at:original.save.at,author:original.save.author,notVerified:Array.from({length:101},(_,index)=>'Unverified check '+index)};
+  if (kind === 'declared') receiptData.claimMatchesCheck = true;
+  setReceipt(kind);
+  return;
+}
+setReceipt(null);
+setData({...original,save:kind==='hiddenauthor'?{...original.save,author:undefined}:kind==='none'?{...original.save,notVerified:undefined}:kind==='empty'?{...original.save,notVerified:[]}:kind==='many'?{...original.save,notVerified:Array.from({length:37},(_,i)=>'Unverified line '+(i+1)+' '+('verylongtext'.repeat(20)))}:original.save,landing:kind==='different'||kind==='accepted'?{receiptId:'receipt',candidateId:'candidate',head:kind==='different'?'b'.repeat(64):source,acceptedBy:{kind:'auto',note:'Project landing policy'}}:null,declaration:kind==='landing'?{kind:'landing',id:'submission',head:source,at:original.save.at,author:original.save.author,notVerified:['The landing claim remains distinct.']}:null,check:kind==='nocheck'?null:kind==='newScope'?{...original.check,selection:{mode:'future-mode'},shards:{completed:1,passed:0,failed:1,total:1}}:kind==='running'||kind==='queued'||kind==='unknown'?{...original.check,status:kind,endedAt:null,shards:{completed:0,passed:0,failed:0,total:null}}:kind==='unreported'?{...original.check,files:null,ciMinutes:null}:original.check});};return <ConvexProvider client={client}><ProjectFrame route={route} name="Workspace" projects={[]} controls={{onPalette(){},onKeys(){},onPicker(){},viewerHandle:'example'}}>{receipt ? <ProofPage key={receipt} route={route} projectId="project" /> : <ProofView data={data} reportDetails={data.check?<ReportFiles projectId="project" runId="run" version={data.check.endedAt?[data.check.endedAt,data.check.files?.total,data.check.files?.failed,data.check.files?.flaky].join(':'):null}/>:null} lanesHref="#lanes" changeHref="#change" recoveryHref="#check" message={message} onRunAll={()=>setMessage('A full check was requested on this exact source.')} onRevert={data.landing?()=>setMessage('Taking it out of main as a new landing.'):undefined} onFollowups={(line)=>setMessage(line === undefined ? '37 linked Items in Plan.' : '1 linked Item in Plan.')} />}</ProjectFrame></ConvexProvider>};createRoot(document.getElementById('root')).render(<Fixture/>);`,
   );
   const { build } = await import('vite');
   const out = join(temp, 'out');
@@ -56,6 +106,7 @@ function Fixture(){const[data,setData]=useState(original);const[message,setMessa
         react: join(root, 'node_modules/react'),
         'react-dom': join(root, 'node_modules/react-dom'),
         'convex/react': join(root, 'node_modules/convex/dist/esm/react/index.js'),
+        'convex/server': join(root, 'node_modules/convex/dist/esm/server/index.js'),
       },
     },
     logLevel: 'error',
@@ -175,6 +226,49 @@ function Fixture(){const[data,setData]=useState(original);const[message,setMessa
       assert.equal(await page.getByRole('button', { name: 'Make it an Item', exact: true }).count(), 37);
     }
   }
+  await t.test('single, batch and retried receipts retain the source of a follow-up claim', async () => {
+    for (const kind of ['single', 'batch', 'retry']) {
+      await page.evaluate(value => window.proofState(value), kind);
+      const mismatch = page.getByText('Its coverage of the composed check source is not established.', {
+        exact: false,
+      });
+      if (kind === 'single') await mismatch.waitFor({ state: 'hidden' });
+      else await mismatch.waitFor();
+      await page.getByRole('button', { name: 'Make it an Item', exact: true }).first().click();
+      await page.getByText('1 linked Item in Plan.', { exact: false }).waitFor();
+      const batch = page.getByRole('button', { name: 'Make all 2 Items' });
+      await batch.click();
+      await page.getByText('2 linked Items in Plan.', { exact: false }).waitFor();
+      await batch.click();
+      await page.getByText('2 linked Items in Plan.', { exact: false }).waitFor();
+      assert.deepEqual(await page.evaluate(() => window.followupRequests.slice(-3)), [
+        { projectId: 'project', saveId: `save-${kind}`, line: 0 },
+        { projectId: 'project', saveId: `save-${kind}`, offset: 0 },
+        { projectId: 'project', saveId: `save-${kind}`, offset: 0 },
+      ]);
+    }
+  });
+  await t.test(
+    'a landing declaration owns every page of its follow-up batch, including retries',
+    async () => {
+      await page.evaluate(() => window.proofState('declared'));
+      await page.getByRole('button', { name: 'Make it an Item', exact: true }).first().click();
+      await page.getByText('1 linked Item in Plan.', { exact: false }).waitFor();
+      const batch = page.getByRole('button', { name: 'Make all 101 Items' });
+      for (let i = 0; i < 2; i++) {
+        await batch.click();
+        await page.getByText('101 linked Items in Plan.', { exact: false }).waitFor();
+      }
+      assert.deepEqual(
+        await page.evaluate(() => window.followupRequests.slice(-5)),
+        [{ line: 0 }, { offset: 0 }, { offset: 100 }, { offset: 0 }, { offset: 100 }].map(input => ({
+          projectId: 'project',
+          submissionId: 'submission-declared',
+          ...input,
+        })),
+      );
+    },
+  );
   await page.evaluate(() => window.proofState('running'));
   await ran.getByText('0 shards completed · total not reported', { exact: false }).waitFor();
   assert.equal(await ran.locator('.stick').count(), 0);

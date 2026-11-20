@@ -7,6 +7,7 @@ import { retainedMainVerdict } from './projectLiveLineRecovery';
 import { legacyLineMain } from './projectLiveLineLegacy';
 import { finishReadSourceDb } from './projectFinishReadReader';
 import { liveLineStage } from './projectLiveLineFields';
+import { lineChecks, lineChecksView } from './projectLiveLineChecks';
 import { report } from './errors';
 import { invariant } from '../src/errors';
 import { flowDay } from '../src/flow-day';
@@ -42,6 +43,7 @@ export const liveLineResult = v.object({
     }),
     v.null(),
   ),
+  checks: v.optional(lineChecksView),
   /** The Flow view's running day (src/flow-day.ts), from the same summary row; absent until its first step. */
   flow: v.optional(
     v.object({
@@ -121,7 +123,9 @@ export const read = finishQuery({
       const flow = flowDay(value.flow);
       if (!flow.main && !flow.audit && main)
         Object.assign(flow, await retainedMainVerdict(ctx.db, projectId));
+      const checks = await lineChecks(finishReadSourceDb(ctx), project, marks);
       return {
+        checks,
         lanes: marks.slice(0, 60).map(({ laneId, stage, held, overlap, changedAt, check, mainRed }) => ({
           laneId,
           stage,

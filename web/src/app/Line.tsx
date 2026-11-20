@@ -31,6 +31,12 @@ export type LineFeed = {
   exit?: { laneId: string; kind: 'landed' | 'set-aside'; at: number } | null;
   /** The Flow view's running day (src/flow-day.ts `FlowDay`); read it with `flowToday`. */
   flow?: FlowDayFeed;
+  /** Recorded runs for open Lanes and available room in the check pipeline. */
+  checks?: {
+    runs: readonly { groups: readonly string[]; lanes: number; at: number; reserved?: true }[];
+    free?: number;
+    partial?: true;
+  };
 };
 
 /** The line's stops in order, each with the stages it counts. One list for the top bar, the Flow picture and the

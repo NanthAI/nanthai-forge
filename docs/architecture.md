@@ -2188,7 +2188,14 @@ are deleted; the summary keeps main and the latest explicit exit. Starts write
 no shared counter.
 
 The Flow view's fields ride the same writes. A mark carries a short check key
-while it is checked (Lanes checked together share it) and `mainRed` while the
+while it is checked (Lanes checked together share it). For checking marks,
+the line read joins bounded pages of active landing headers and running check
+records. A matching run reports its Lane count and first recorded shard start,
+or the reservation time when the shard start was not recorded. The retained train,
+the compact queue directory and the tail attempt’s pinned policy supply free
+speculative slots where those records cover the train. The check strip uses this same subscription and
+renders elapsed time against the existing draw time. A mark carries `mainRed`
+while the
 gate parks it for a red main; both go in the stage/held patch that already
 happens. The summary's `flow` field (`src/flow-day.ts`) keeps one rolling day of
 hour buckets (landed, needs fix, reverted, fixed on top, CI seconds, seconds on

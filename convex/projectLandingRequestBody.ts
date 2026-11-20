@@ -8,7 +8,20 @@ type Row = Record<string, unknown> & { _id?: string; value?: string; requestBody
 type Port = QueryCtx['db'];
 const tag = Symbol('landingRequestBodies');
 const originals = new WeakMap<object, () => Port>();
-export const landingRequestOriginalDb = <D extends Port>(db: D): D => (originals.get(db)?.() ?? db) as D;
+export function landingRequestOriginalDb<D extends Port>(db: D): D {
+  const source = originals.get(db);
+  return source ? (landingRequestOriginalDb(source()) as D) : db;
+}
+/** Keep cold-body bypass reads observed when an outer query maps its DB port. */
+export function mapLandingRequestPort(db: Port, map: (db: Port) => Port) {
+  const mapped = map(db);
+  const source = originals.get(db);
+  if (source) {
+    let original: Port | undefined;
+    originals.set(mapped, () => (original ??= map(landingRequestOriginalDb(source()))));
+  }
+  return mapped;
+}
 /** Permanent/orphan purge bypasses ordinary writers; both use this same parent-owned cleanup. */
 export async function deleteLandingRequestBodies(db: MutationCtx['db'], row: Row) {
   const bodies = [];

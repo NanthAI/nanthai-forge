@@ -98,14 +98,27 @@ export function laneDrawer(
   if (needs.length) groups.push({ key: 'needs', title: 'Needs you', hint: null, check: null, rows: needs });
   const rest = all.filter(r => !r.needsYou);
   if (stop === 'checking') {
-    const checks = new Map<string, RiverRow[]>();
+    const running = feed?.checks?.runs ?? [];
+    const runIndices = new Map(running.flatMap((run, index) => run.groups.map(key => [key, index] as const)));
+    const checking = new Map<number, LaneGroup>();
+    let next = running.length;
     for (const r of rest) {
-      const key = station.allBlocks.find(b => b.laneId === r.id)?.check;
-      if (key) checks.set(key, [...(checks.get(key) ?? []), r]);
+      const check = station.allBlocks.find(b => b.laneId === r.id)?.check;
+      if (!check) continue;
+      const index = runIndices.get(check) ?? next++;
+      runIndices.set(check, index);
+      const group = checking.get(index) ?? {
+        key: running[index]?.groups.join(':') ?? check,
+        title: `Check ${index + 1}`,
+        hint: null,
+        check,
+        rows: [],
+      };
+      group.rows.push(r);
+      checking.set(index, group);
     }
-    [...checks.entries()].forEach(([key, list], i) =>
-      groups.push({ key, title: `Check ${i + 1}`, hint: null, check: key, rows: list.sort(oldest) }),
-    );
+    for (const [, group] of [...checking].sort(([a], [b]) => a - b))
+      groups.push({ ...group, rows: group.rows.sort(oldest) });
     const loose = rest.filter(r => !station.allBlocks.find(b => b.laneId === r.id)?.check).sort(oldest);
     if (loose.length)
       groups.push({

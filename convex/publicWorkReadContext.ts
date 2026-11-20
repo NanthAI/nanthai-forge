@@ -2,6 +2,7 @@
 import type { PublicPlanRoot } from './publicWorkPlan';
 import type { QueryCtx } from './_generated/server';
 import { mapFinishReadPort } from './projectFinishReadReader';
+import { mapLandingRequestPort } from './projectLandingRequestBody';
 import { shareQueryRoles } from './projectRole';
 import { planCounter } from './projectPlanCountsStore';
 import type { Id } from './_generated/dataModel';
@@ -122,7 +123,9 @@ export function publicWorkReadContext(ctx: QueryCtx) {
     ctx: new Proxy(ctx, {
       // Retired handlers must retain their upgrade error without opening any runtime port.
       get: (target, key, receiver) =>
-        key === 'db' ? (db ??= mapFinishReadPort(target.db, observeDb)) : Reflect.get(target, key, receiver),
+        key === 'db'
+          ? (db ??= mapFinishReadPort(target.db, source => mapLandingRequestPort(source, observeDb)))
+          : Reflect.get(target, key, receiver),
     }),
     scope: () => ({ planning, lanes, roots, internalPlan }),
   };

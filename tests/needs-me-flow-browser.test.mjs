@@ -97,6 +97,7 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
       layout && JSON.stringify(layout),
     );
     const page = await context.newPage();
+    await page.clock.setFixedTime(new Date(2026, 10, 17, 15));
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => message.type() === 'error' && errors.push(message.text()));
@@ -143,6 +144,70 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
       }
       const phone = await open(t, 390, 'partial-empty');
       assert.match(await phone.locator('.flow-rows > li').last().textContent(), /Passing/);
+    });
+
+    await t.test('the Flow state legend and recorded checks render at reference weight', async t => {
+      for (const width of [1440, 390]) {
+        const page = await open(t, width, 'busy');
+        const legend = page.getByRole('list', { name: 'Lane states' });
+        assert.deepEqual(await legend.getByRole('listitem').allTextContents(), [
+          'Working',
+          'Waiting its turn',
+          'Needs you',
+          'Conflict',
+          'Check failed',
+        ]);
+        assert.match(await page.locator('.flow-check').nth(0).textContent(), /Check 1\s*2 Lanes\s*4 min/);
+        assert.match(await page.locator('.flow-check').nth(1).textContent(), /Check 2\s*1 Lane\s*2 min/);
+        assert.equal(
+          await page.locator('.flow-free').isVisible(),
+          width === 1440,
+          'the phone keeps only the running checks and CI minutes',
+        );
+        assert.match(await page.locator('.flow-free').textContent(), /2 slots in the check queue/);
+        assert.match(
+          await page.locator('.flow-ci').textContent(),
+          /CI minutes today.+min, 20 on checks that did not land/,
+        );
+        assert.equal(await idleTimers(page), 0);
+        await page.getByRole('button', { name: /^Checks/ }).click();
+        const drawer = page.getByRole(width === 390 ? 'dialog' : 'region', { name: 'Checking' });
+        await drawer.waitFor();
+        const checkOne = drawer.locator('.grp').filter({ has: page.getByText('Check 1', { exact: true }) });
+        await checkOne.waitFor();
+        assert.equal(await checkOne.locator('a.fv-rrow').count(), 2);
+        assert.deepEqual(
+          (
+            await checkOne
+              .locator('a.fv-rrow')
+              .evaluateAll(links => links.map(a => a.getAttribute('href')?.slice(-3)))
+          ).sort(),
+          ['430', '431'],
+          'the older queued group cannot take the running Check 1 label',
+        );
+      }
+    });
+
+    await t.test('the main count stays on one line on Needs me with the shared figure styles', async t => {
+      for (const width of [390, 861, 1440]) {
+        const page = await open(t, width, 'busy');
+        const main = page.locator('.line:visible .tomain');
+        assert.equal(await main.getAttribute('title'), 'Main passing');
+        const { text, height, fontSize } = await main.evaluate(link => {
+          const parts = [...link.querySelectorAll('span.g')].flatMap(span => {
+            const range = document.createRange();
+            range.selectNodeContents(span);
+            return [...range.getClientRects()];
+          });
+          return {
+            text: link.innerText,
+            height: Math.max(...parts.map(r => r.bottom)) - Math.min(...parts.map(r => r.top)),
+            fontSize: parseFloat(getComputedStyle(link).fontSize),
+          };
+        });
+        assert.match(text, /main · 92/);
+        assert.ok(Number.isFinite(height) && height < fontSize * 2, `main fits on one line at ${width}px`);
+      }
     });
 
     await t.test('every stop counts what the top bar counts, block for block (one source)', async t => {
@@ -195,8 +260,28 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
       assert.ok(Math.abs((await ratio(calm)) - 1.6) < 0.05, 'nothing waits: the picture has 1.6 : 1');
       assert.equal(await calm.locator('.fv-pic').getAttribute('data-tier'), '1');
       const busy = await open(t, 1440, 'busy');
-      assert.ok(Math.abs((await ratio(busy)) - 1 / 1.1) < 0.05, 'something waits: Needs you gets 1.1 : 1');
-      assert.equal(await busy.locator('.fv-pic').getAttribute('data-tier'), '0', 'the picture drops a size');
+      for (const [data, page] of [
+        ['busy', busy],
+        ['worst', await open(t, 1440, 'worst')],
+        ['over', await open(t, 1440, 'over')],
+      ]) {
+        const [picture, needsYou, fyi] = [
+          await box(page, 'On the way to main'),
+          await box(page, 'Needs you'),
+          await box(page, 'FYI'),
+        ];
+        assert.ok(
+          picture.x < needsYou.x && Math.abs(picture.y - needsYou.y) < 2,
+          `Needs you stays at the top right for ${data}`,
+        );
+        assert.ok(needsYou.y < fyi.y, 'FYI never comes before Needs you');
+        assert.ok(Math.abs((await ratio(page)) - 1 / 1.1) < 0.05, 'something waits: Needs you gets 1.1 : 1');
+        assert.equal(
+          await page.locator('.fv-pic').getAttribute('data-tier'),
+          '0',
+          'the picture drops a size',
+        );
+      }
       const phone = await open(t, 390, 'busy');
       const order = await phone.evaluate(() =>
         [...document.querySelectorAll('section.region')].map(section => section.getAttribute('aria-label')),
@@ -516,7 +601,7 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
       'empty, quiet, moving, loading and stale at both widths and themes; Loose ends action stays readable',
       async t => {
         for (const width of [1440, 390]) {
-          for (const data of ['empty', 'quiet', 'calm', 'loading', 'error', 'over']) {
+          for (const data of ['empty', 'quiet', 'calm', 'busy', 'loading', 'error', 'over']) {
             const page = await open(t, width, data);
             const flow = region(page, 'On the way to main');
             assert.equal(await flow.locator('.flow-figs').count(), data === 'loading' ? 0 : 1);
@@ -532,7 +617,7 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
               if (shots)
                 await page.screenshot({
                   path: join(shots, `flow-${data === 'calm' ? 'moving' : data}-${width}-${theme}.png`),
-                  fullPage: true,
+                  fullPage: data === 'busy' || width === 390,
                 });
             }
           }
@@ -591,8 +676,11 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
         );
         assert.equal(await needs.locator('h3[dir="auto"]').count(), await needs.locator('h3').count());
         assert.equal(await needs.locator('details.sumdec').count(), 1, 'the request asked ahead is listed');
-        for (const width of [1440, 390]) {
-          const page = width === 1440 ? wide : await open(t, width, 'worst');
+        const defaults = [
+          [1440, await open(t, 1440, 'worst')],
+          [390, await open(t, 390, 'worst')],
+        ];
+        for (const [width, page] of [[1440, wide], ...defaults]) {
           await page.addScriptTag({ path: axePath });
           for (const theme of ['dark', 'light']) {
             await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
@@ -617,10 +705,10 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
                 .map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`);
             });
             assert.deepEqual(violations, [], `axe at ${width} ${theme} worst`);
-            if (shots)
+            if (shots && page !== wide)
               await page.screenshot({
                 path: join(shots, `flow-worst-${width}-${theme}.png`),
-                fullPage: width === 390,
+                fullPage: true,
               });
           }
         }

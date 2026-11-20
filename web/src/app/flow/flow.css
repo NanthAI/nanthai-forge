@@ -88,7 +88,6 @@
     .flow-figs > :nth-child(n + 4) { grid-column: span 3; border-top: var(--rule) solid var(--line); }
     .flow-figs > :nth-child(4) { border-left: 0; }
     .flow-spark { display: none; }
-    .flow-chk .ci { margin-left: 0; flex-basis: 100%; }
   }
   @container (max-width: 420px) {
     .flow-figs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -99,10 +98,25 @@
     .flow-figs > :nth-child(4) { border-left: var(--rule) solid var(--line); }
     .flow-figs > :last-child { grid-column: 1 / -1; }
   }
-  .flow-chk { width: 100%; text-align: start; border: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--s-3); min-height: var(--row-h); padding: var(--s-2) var(--gut); border-top: var(--rule) solid var(--line); background: var(--surface); color: var(--text-2); font-size: var(--t-meta); }
-  .flow-chk > b { color: var(--text); font-size: var(--t-small); font-weight: var(--w-strong); }
-  .flow-chk .ci { margin-left: auto; }
-  .flow-chk .ci b { color: var(--text); font-family: var(--font-mono); font-size: calc(1em * var(--mono-scale)); font-weight: var(--w-strong); }
+  .flow-legend { margin: 0; list-style: none; background: var(--surface); }
+  .flow-legend li { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .flow-legend li > span { display: block; width: 12px; height: 12px; background: var(--st); }
+  .flow-legend .dot, .flow-legend .ring { border-radius: 50%; }
+  .flow-legend .ring { background: transparent; border: 3px solid var(--st); }
+  .flow-legend .diamond { width: 9px; height: 9px; margin-inline: 1.5px; transform: rotate(45deg); }
+
+  .flow-chk { border-top: var(--rule) solid var(--line); background: var(--surface); }
+  .flow-check-title { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--s-3); width: 100%; min-height: var(--row-h); padding: var(--s-2) var(--gut); border: 0; background: transparent; text-align: start; color: var(--text-2); font-size: var(--t-meta); }
+  .flow-check-title > b, .flow-check > b { color: var(--text); font-size: var(--t-small); font-weight: var(--w-strong); }
+  .flow-checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 136px), 1fr)); }
+  .flow-check { display: grid; align-content: start; gap: 5px; min-width: 0; padding: var(--s-3) var(--gut); box-shadow: inset var(--rule) 0 var(--line), inset 0 var(--rule) var(--line); color: var(--text-2); font-size: var(--t-meta); overflow-wrap: anywhere; }
+  .flow-check > b { display: inline-flex; align-items: center; gap: var(--s-2); }
+  .flow-check strong { color: var(--text); font-family: var(--font-mono); font-size: calc(1em * var(--mono-scale)); }
+  .flow-ci-split { display: flex; height: 9px; }
+  .flow-ci-split i { background: var(--text-3); }
+  .flow-ci-split i:first-child { background: var(--text-2); }
+  @container (max-width: 650px) { .flow-ci { grid-column: 1 / -1; } }
+  @media (max-width: 860px) { .flow-check.flow-free { display: none; } }
 
   /* below desk width the stops are flat rows (the phone's picture) */
   .flow-rows { display: none; margin: 0; padding: 0; list-style: none; }
@@ -116,7 +130,6 @@
   @media (max-width: 860px) {
     .flow-desk { display: none; }
     .flow-rows { display: block; }
-    .flow-chk .ci { margin-left: 0; flex-basis: 100%; }
   }
 
   .flow-error, .flow-backrows { padding: var(--s-2) var(--gut); font-size: var(--t-meta); }
@@ -127,9 +140,9 @@
   .flow-marks { display: flex; gap: 4px; flex-wrap: wrap; }
   .flow-marks > span { display: inline-flex; color: var(--st); }
   .flow-marks:empty { display: none; }
-  .flow-stop:focus-visible, .flow-chk:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .flow-stop:focus-visible, .flow-check-title:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   @media (hover: hover) and (pointer: fine) {
-    .flow-chk:hover { background: var(--hover); }
+    .flow-check-title:hover { background: var(--hover); }
     .flow-stop:hover .n { text-decoration: underline; }
   }
 
@@ -221,7 +234,7 @@
   .fv-rrow .bar i { position: absolute; top: 50%; height: 8px; margin-top: -4px; min-width: 3px; background: var(--st, var(--text-3)); }
   .fv-rrow .bar i.past { margin-top: -6px; height: 12px; background: var(--passed); }
   .fv-rrow .d { padding: 0 var(--gut) 0 var(--s-2); text-align: right; color: var(--text-2); font: var(--t-meta)/1.2 var(--font-mono); }
-  .flow-chk .prop, .fv-drawer .prop { color: var(--text-2); }
+  .fv-drawer .prop { color: var(--text-2); }
 }
 
 @keyframes fv-clock { from, to { opacity: 0; } }
