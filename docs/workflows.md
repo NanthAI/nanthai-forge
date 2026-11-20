@@ -596,7 +596,7 @@ The default is `--dry-run`: it reads the remote and prints JSON with the target 
 
 The first push records the repository, branch, adopted commit and State → Git commit mappings in Work. It creates one `Adopt Forge native main <state>` commit with the accepted tree and current GitHub head as parent. Later pushes follow native `main` acceptance order. Unchanged States or identical exported trees get no empty commit: dry-run lists them under `skipped`, and push advances the binding's `cursor`. Each commit keeps the accepted tree, supplied landing message (or Intent outcome), acceptance/Candidate ids and previous synced parent. Only accepted capture membership enters the tree, including retained tracked files that match capture heuristics; unaccepted edits and capture-excluded files do not.
 
-Incremental commits use H8's accepting actor name when recorded and the configured Git email; older acceptances use the configured Git identity. Agent contributors/acceptors receive `Co-authored-by` trailers (local attribution is a declaration, not verified GitHub identity). A repository's lead co-author convention can be supplied through `FORGE_GITHUB_SYNC_COAUTHOR` or Git config `forge.githubSync.coAuthor`, in `Name <email>` form. For this MVP, configure `user.name`/`user.email` (or the sync identity below) and use your existing Git credential helper or `gh auth` login. Phase 3 will use the Forge GitHub App.
+Incremental commits use H8's accepting actor name when recorded and the configured Git email; older acceptances use the configured Git identity. Agent contributors/acceptors receive `Co-authored-by` trailers (local attribution is a declaration, not verified GitHub identity) at the vendor noreply address the hosted mirror uses (`noreply@anthropic.com` for Claude, `noreply@openai.com` for Codex/OpenAI/GPT, otherwise `forge@localhost`). A repository's lead co-author convention can be supplied through `FORGE_GITHUB_SYNC_COAUTHOR` or Git config `forge.githubSync.coAuthor`, in `Name <email>` form. For this MVP, configure `user.name`/`user.email` (or the sync identity below) and use your existing Git credential helper or `gh auth` login. Phase 3 will use the Forge GitHub App.
 
 **Empty repositories.** If the destination branch does not exist (an empty repository or a new branch), the first push writes the `Adopt Forge native main <state>` commit as a root commit with no parent. The branch is created with an exact "must not exist" lease; if someone creates it first, Forge reports **GitHub changed outside Forge** and overwrites nothing. The binding records an empty adopted commit; later acceptances fast-forward from the root commit as usual.
 
@@ -680,7 +680,9 @@ App and Git Data API. It reads exact hosted/R2 source, creates only changed
 blobs in windows of at most 100 and 8 MiB (or one larger file), then creates a
 tree with `base_tree`, a deterministic commit and a non-forced fast-forward
 update of `main`. The commit keeps the supplied landing message and trailers, falling back to the
-Intent outcome when no message was supplied, and uses the existing noreply sync identity. A source-unchanged landing
+Intent outcome when no message was supplied, and uses the existing noreply sync identity. Its last
+paragraph is one trailer block: every message's trailers, a `Co-Authored-By:` credit for each covered
+landing's declared agent client unless its own message names a co-author, then Forge's trailers. A source-unchanged landing
 advances its mapping without an empty commit.
 
 Git LFS paths (`filter=lfs` in the target State's `.gitattributes`) are

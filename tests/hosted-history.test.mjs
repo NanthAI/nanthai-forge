@@ -2189,7 +2189,7 @@ test('an unmirrored project serves its landings as Git commits on the imported h
     'src/app.go': old,
     'src/forge.go': 'package forge\n',
   });
-  land(s, projectId, first, second, 'Add forge.go, restore app');
+  land(s, projectId, first, second, 'Add forge.go, restore app', { agentClient: 'codex:gpt-6.1-sol' });
   let before = host.snapshot();
   const one = join(work, 'one');
   const cloned = await client(['-c', 'transfer.fsckObjects=true', 'clone', url(host, projectId), one]);
@@ -2209,6 +2209,18 @@ test('an unmirrored project serves its landings as Git commits on the imported h
   assert.equal(forgePack.objects, 2 + 3 + 3, 'two commits; root+src trees twice less one; two new blobs');
   const commitText = git(one, ['cat-file', 'commit', 'HEAD']).toString();
   assert.match(commitText, /^author synthetic-owner\/quiet-otter <synthetic-owner@users\.noreply\.forge> /m);
+  assert.match(commitText, /^Co-Authored-By: gpt-6\.1-sol \(codex\) <noreply@openai\.com>\nForge-State: /m);
+  // Item 3968a655: git itself reads the credit and Forge's trailers as one trailer block.
+  assert.equal(
+    git(one, [
+      'log',
+      '-1',
+      '--format=%(trailers:key=Co-Authored-By,valueonly)%(trailers:key=Forge-State,valueonly)',
+    ])
+      .toString()
+      .trim(),
+    `gpt-6.1-sol (codex) <noreply@openai.com>\n${second}`,
+  );
   assert.match(commitText, new RegExp(`Forge-State: ${second}\n`));
   await client(['fsck', '--full', '--strict'], one);
   const tip = git(one, ['rev-parse', 'HEAD']).toString().trim();
@@ -2239,13 +2251,98 @@ test('an unmirrored project serves its landings as Git commits on the imported h
   }
   assert.equal(git(one, ['rev-parse', 'origin/main~4']).toString().trim(), tip);
   assert.ok(historyPacks(s, projectId).length <= packsBefore + 2, 'Forge packs merge geometrically');
+
+  // Item 3968a655: a batch's members share one State; it is one commit carrying every member's
+  // message, and each member's own agent is credited in the one trailer block.
+  const stepTip = git(one, ['rev-parse', 'origin/main']).toString().trim();
+  const batched = storeState(s, projectId, source.repo, source.head, {
+    'src/app.go': old,
+    'src/forge.go': 'package forge // batch\n',
+  });
+  const batchId = crypto.randomUUID();
+  const from = lastState(s, projectId);
+  land(s, projectId, from, batched, 'Batch one', { batchId, agentClient: 'claude-code:claude-opus-5-5' });
+  land(s, projectId, from, batched, 'Batch two', {
+    batchId,
+    agentClient: 'codex:gpt-6.1-sol',
+    cohortMessages: ['Batch one', 'Batch two'],
+  });
+  await client(['-c', 'transfer.fsckObjects=true', 'fetch', '-q', 'origin'], one);
+  assert.equal(git(one, ['rev-parse', 'origin/main~1']).toString().trim(), stepTip, 'one commit per batch');
+  assert.equal(
+    git(one, ['log', '-1', '--format=%s%n%b', 'origin/main']).toString().split('\n\n')[0],
+    'Batch one\nBatch two',
+  );
+  assert.equal(
+    git(one, ['log', '-1', '--format=%(trailers:key=Co-Authored-By,valueonly)', 'origin/main'])
+      .toString()
+      .trim(),
+    'claude-opus-5-5 (claude-code) <noreply@anthropic.com>\ngpt-6.1-sol (codex) <noreply@openai.com>',
+  );
   const three = join(work, 'three');
   await client(['-c', 'transfer.fsckObjects=true', 'clone', '-q', url(host, projectId), three]);
   assert.equal(
     git(three, ['rev-list', '--count', 'HEAD']).toString().trim(),
-    String(Number(git(source.repo, ['rev-list', '--count', 'HEAD']).toString()) + 6),
+    String(Number(git(source.repo, ['rev-list', '--count', 'HEAD']).toString()) + 7),
   );
   await client(['fsck', '--full', '--strict'], three);
+});
+// Item 3968a655: a build page never ends inside a batch, so the batch's last receipt (every
+// member's message) is the one commit; the next page starts at the batch and credits each member.
+test('a Forge-built main page that would end inside a batch stops before it; the next page commits it once', async t => {
+  const source = sourceRepository(t),
+    f = fixture(t, source),
+    { s } = f;
+  for (const table of ['projectHostedChannels', 'projectHostedAcceptances']) s.tables[table] ??= new Map();
+  const projectId = await importedProject(f, source.head);
+  publish(s, projectId);
+  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
+  const imported = storeState(s, projectId, source.repo, source.head);
+  historyRow(s, projectId).importState = imported;
+  const { mainBatch } = modules.gitServeMainStore;
+  const fake = i => createHash('sha256').update(`state ${i}`).digest('hex');
+  let previous = imported;
+  for (let i = 0; i < mainBatch - 2; i++) land(s, projectId, previous, (previous = fake(i)), `Step ${i}`);
+  const batchId = crypto.randomUUID(),
+    batched = fake('batch'),
+    clients = ['claude-code:claude-opus-5-5', 'codex:gpt-6.1-sol', 'pi'];
+  for (const [i, agentClient] of clients.entries())
+    land(s, projectId, previous, batched, `Member ${i}`, {
+      batchId,
+      agentClient,
+      ...(i === 2 ? { cohortMessages: ['Member 0', 'Member 1', 'Member 2'] } : {}),
+    });
+  const plan = () => modules.gitServeMainStore.plan._handler(s.ctx, { projectId });
+  const first = await plan();
+  assert.equal(first.landings.length, mainBatch - 2, 'the page stops before the batch that crosses its end');
+  assert.equal(first.landings.at(-1).message, `Step ${mainBatch - 3}`);
+  const rows = [...s.tables.projectHostedAcceptances.values()].filter(row => row.projectId === projectId);
+  await s.ctx.db.insert('projectHistoryPacks', {
+    projectId,
+    tip: 'b'.repeat(40),
+    haves: [],
+    chunks: [],
+    bytes: 0,
+    objects: 0,
+    packSha1: 'c'.repeat(40),
+    source: 'forge',
+    main: {
+      state: previous,
+      tree: 'd'.repeat(40),
+      sequence: rows[mainBatch - 3].sequence,
+      listing: { sha256: 'e'.repeat(64), size: 1 },
+    },
+    at: 0,
+  });
+  const next = await plan();
+  assert.equal(next.landings.length, 1, 'the batch is one commit');
+  const [landing] = next.landings;
+  assert.deepEqual(landing.cohortMessages, ['Member 0', 'Member 1', 'Member 2']);
+  assert.deepEqual(
+    landing.members.map(member => member.agentClient),
+    clients,
+    'every member is credited, read past the page start',
+  );
 });
 // Incident (Issue 3bd4a8e9, 2026-11-09): on an imported project with no mirror, a member's Lane
 // fetch answered GIT_HISTORY_PREPARING forever, because Lane refs waited for a mirror commit.

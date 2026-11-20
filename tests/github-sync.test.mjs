@@ -1597,7 +1597,20 @@ for (const cohort of [false, true])
     await assert.rejects(f.sync({ push: true }), code('GITHUB_SYNC_GIT_FAILED'));
     const result = await f.sync({ push: true });
     const message = git(f.remote, ['log', '-1', '--format=%B']);
-    assert(message.startsWith((cohort ? messages.join('\n\n') : supplied) + '\n\n'));
+    // Item 3968a655: prose in order, then every supplied trailer, in order, in git's one trailer block.
+    const prose = ['Supplied native subject\n\nNative body.', 'Supplied peer subject\n\nPeer body.'];
+    assert(message.startsWith((cohort ? prose.join('\n\n') : prose[0]) + '\n\n'));
+    const parsed = git(f.remote, ['log', '-1', '--format=%(trailers:only,unfold)']).split('\n');
+    const own = (cohort ? messages : [supplied]).flatMap(m => m.split('\n\n').at(-1).split('\n'));
+    assert.deepEqual(
+      parsed.filter(line => own.includes(line)),
+      own,
+      'git parses every supplied trailer, in order',
+    );
+    assert(
+      parsed.some(line => line.startsWith('Forge-State: ')),
+      'Forge trailers are in the same block',
+    );
     assert.equal(message.match(/^Forge-State:/gm).length, 1);
     assert(message.includes(`Forge-Acceptance: ${accepted.move.id}`));
     assert.equal(git(f.remote, ['rev-parse', 'main^']).trim(), previous);

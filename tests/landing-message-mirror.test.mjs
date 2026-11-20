@@ -36,6 +36,18 @@ const supplied = i =>
   `Supplied subject ${i}\n\nBody ${i}.\n\nReviewed-by: Reviewer ${i} <review@example.invalid>\nCo-Authored-By: Synthetic Sol ${i} <noreply@openai.com>`;
 const trailers = r =>
   `Forge-State: ${r.candidate.head}\nForge-Acceptance: ${r.id}\nForge-View: ${r.candidate.id}`;
+/** The mirror shape for supplied(i) members: prose in order, then one trailer block. */
+const singleBlock = (members, forgeTrailers) =>
+  members.map(i => `Supplied subject ${i}\n\nBody ${i}.`).join('\n\n') +
+  '\n\n' +
+  members
+    .map(
+      i =>
+        `Reviewed-by: Reviewer ${i} <review@example.invalid>\nCo-Authored-By: Synthetic Sol ${i} <noreply@openai.com>`,
+    )
+    .join('\n') +
+  '\n' +
+  forgeTrailers;
 
 test('released strict wait and stack readers keep working while canonical messages stay frozen', async () => {
   const f = await acceptanceFixture();
@@ -93,6 +105,9 @@ for (const [batching, legacy] of [
         delete value.request.message;
         patchTicketState(f, row, value);
       }
+    if (!legacy)
+      for (const row of f.tables.projectHostedLandingRequests.values())
+        f.patch('projectHostedLandingRequests', row._id, { agentClient: 'codex:gpt-6.1-sol' });
     // Mirror on before acceptance: publication enqueues exactly the jobs production does.
     const project = f.tables.hostedProjects.get(f.projectId);
     f.patch('hostedProjects', f.projectId, {
@@ -153,7 +168,11 @@ for (const [batching, legacy] of [
       'concurrent/unknown begin outcomes retain exact commit bytes',
     );
     const { seed } = JSON.parse(seeds[0]);
-    const expected = (batching ? messages : [first.message]).join('\n\n') + '\n\n' + trailers(first);
+    if (!legacy) assert.equal(first.agentClient, 'codex:gpt-6.1-sol');
+    // Each supplied message already names its co-author, so the receipt's client adds no credit;
+    // every member's trailers join Forge's in one final block.
+    const members = batching ? [0, 1, 2] : [messages.indexOf(first.message)];
+    const expected = singleBlock(members, trailers(first));
     assert.equal(seed.message, expected);
     const io = {
       ...github.io,
@@ -187,7 +206,7 @@ for (const [batching, legacy] of [
       const next = JSON.parse(await run('mirrorBegin', store.begin._handler, nextIdentity)).seed;
       assert.equal(
         next.message,
-        receipt.message + '\n\n' + trailers(receipt),
+        singleBlock([messages.indexOf(receipt.message)], trailers(receipt)),
         'jobs never borrow a peer message',
       );
       let continuation = await prepareMirror(next, io);
@@ -436,7 +455,8 @@ async function batchConflictMessages(t, recomposed, choice) {
       { jobId: jobs[0]._id, step: jobs[0].step },
     ),
   );
-  assert.equal(seed.message, `${normal}\n\n${conflicted}\n\n${trailers(mirrored)}`);
+  // The footer ends `conflicted`, so it opens the one final trailer block (Item 3968a655).
+  assert.equal(seed.message, `${normal}\n\n${conflicted}\n${trailers(mirrored)}`);
   for (const message of [normal, conflicted])
     assert.deepEqual(lostTrailers(message, seed.message), [], 'mirror commit keeps every finish trailer');
   // The f233bf1c commit shape itself fails the check.
@@ -557,4 +577,180 @@ test('friction 330d1df6: an over-limit landing message names its exact byte coun
         e.message.includes(`has ${bytes} UTF-8 bytes`) &&
         e.message.includes(`limit is ${LANDING_MESSAGE_BYTES}`),
     );
+});
+
+// Item 3968a655: mirror commits credit the agent the receipt declares, in one git trailer block.
+const base = { fallback: 'A recorded landing', state: 's', acceptanceId: 'a', viewId: 'v' };
+const forgeBlock = 'Forge-State: s\nForge-Acceptance: a\nForge-View: v';
+
+test('single landing: the receipt agent client becomes a generic co-author credit, nothing invented', () => {
+  for (const [agentClient, credit] of [
+    ['claude-code:claude-opus-5-5', 'claude-opus-5-5 (claude-code) <noreply@anthropic.com>'],
+    ['codex:gpt-6.1-sol', 'gpt-6.1-sol (codex) <noreply@openai.com>'],
+    ['t3-code:claude-sonnet-5-5', 'claude-sonnet-5-5 (t3-code) <noreply@anthropic.com>'],
+    ['gemini:gemini-neon', 'gemini-neon (gemini) <forge@localhost>'],
+    ['aider', 'aider <forge@localhost>'],
+  ]) {
+    const message = mirrorMessage({ ...base, message: 'Change the thing\n\nWhy it changed.', agentClient });
+    assert.equal(
+      message,
+      `Change the thing\n\nWhy it changed.\n\nCo-Authored-By: ${credit}\n${forgeBlock}`,
+      'credit sits in the one final block, after a single blank line',
+    );
+    assert.equal(
+      mirrorMessage({ ...base, message: 'Change the thing\n\nWhy it changed.', agentClient }),
+      message,
+    );
+  }
+  assert.equal(mirrorMessage(base), `A recorded landing\n\n${forgeBlock}`, 'no declared client, no credit');
+  for (const agentClient of ['codex:bad\nForged: trailer', 'codex:bad<identity>', 'not a harness'])
+    assert(
+      !mirrorMessage({ ...base, agentClient }).includes('Co-Authored-By:'),
+      'malformed metadata cannot inject a trailer',
+    );
+});
+
+test('existing trailers: a supplied co-author suppresses the credit, keeps every trailer once, one block', () => {
+  const signed =
+    'Fix: the parser\n\nBody line.\n\nReviewed-by: Synthetic Reviewer <review@example.invalid>\nCo-authored-by: Claude Opus 5.5 <noreply@anthropic.com>';
+  const message = mirrorMessage({
+    ...base,
+    message: signed,
+    agentClient: 'claude-code:claude-opus-5-5',
+    trailers: ['Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>'],
+  });
+  assert.equal(
+    message,
+    `Fix: the parser\n\nBody line.\n\nReviewed-by: Synthetic Reviewer <review@example.invalid>\nCo-authored-by: Claude Opus 5.5 <noreply@anthropic.com>\n${forgeBlock}`,
+  );
+  assert.deepEqual(lostTrailers(signed, message), [], 'no supplied trailer is lost');
+  assert.equal(message.split('\n\n').length, 3, 'subject, body, one trailer block');
+  // A subject-only message that looks like a trailer stays the subject.
+  assert.equal(
+    mirrorMessage({ ...base, message: 'Fix: the parser', agentClient: 'codex' }),
+    `Fix: the parser\n\nCo-Authored-By: codex <noreply@openai.com>\n${forgeBlock}`,
+  );
+  // A folded trailer value stays with its trailer.
+  assert.equal(
+    mirrorMessage({ ...base, message: 'Subject\n\nNote: first line\n  continued' }),
+    `Subject\n\nNote: first line\n  continued\n${forgeBlock}`,
+  );
+});
+
+test('batch with two agents: each member credits its own agent unless its own message names one', () => {
+  const cohortMessages = [
+    'First member\n\nReviewed-by: Synthetic Reviewer <review@example.invalid>',
+    'Second member\n\nCo-Authored-By: GPT-6.1 (Codex) <noreply@openai.com>',
+    'Third member',
+  ];
+  const members = [
+    { message: cohortMessages[0], agentClient: 'claude-code:claude-opus-5-5' },
+    { message: cohortMessages[1], agentClient: 'codex:gpt-6.1-sol' },
+    { message: cohortMessages[2], agentClient: 'claude-code:claude-opus-5-5' },
+    { agentClient: 'codex:gpt-6.1-sol' },
+  ];
+  assert.equal(
+    mirrorMessage({ ...base, message: cohortMessages[2], cohortMessages, members }),
+    [
+      'First member\n\nSecond member\n\nThird member',
+      '',
+      'Reviewed-by: Synthetic Reviewer <review@example.invalid>',
+      'Co-Authored-By: GPT-6.1 (Codex) <noreply@openai.com>',
+      'Co-Authored-By: claude-opus-5-5 (claude-code) <noreply@anthropic.com>',
+      'Co-Authored-By: gpt-6.1-sol (codex) <noreply@openai.com>',
+      forgeBlock,
+    ].join('\n'),
+    'members without a message are still credited; repeated credits appear once',
+  );
+});
+
+test('catch-up commit: a covered landing whose prose is summarised keeps its own co-author', () => {
+  const members = [
+    {
+      message: 'Signed\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>',
+      agentClient: 'claude-code',
+    },
+    { message: 'Unsigned', agentClient: 'codex:gpt-6.1-sol' },
+  ];
+  assert.equal(
+    mirrorMessage({
+      ...base,
+      fallback: 'Catch up 2 Forge landings\n\n- Signed (a)\n- Unsigned (b)',
+      members,
+    }),
+    [
+      'Catch up 2 Forge landings\n\n- Signed (a)\n- Unsigned (b)',
+      '',
+      'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>',
+      'Co-Authored-By: gpt-6.1-sol (codex) <noreply@openai.com>',
+      forgeBlock,
+    ].join('\n'),
+  );
+});
+
+test('a message at the 1,024-byte limit keeps its exact prose, its credit and the Forge trailers', () => {
+  const [head, tail] = ['Near the limit\n\n', '\n\nReviewed-by: R <r@example.invalid>'];
+  const atLimit = head + 'x'.repeat(LANDING_MESSAGE_BYTES - Buffer.byteLength(head + tail)) + tail;
+  assert.equal(Buffer.byteLength(atLimit), LANDING_MESSAGE_BYTES);
+  const mirrored = mirrorMessage({ ...base, message: atLimit, agentClient: 'claude-code:claude-opus-5-5' });
+  assert.equal(
+    mirrored,
+    `${atLimit}\nCo-Authored-By: claude-opus-5-5 (claude-code) <noreply@anthropic.com>\n${forgeBlock}`,
+    'the credit is added after the limit check, so a full message never loses bytes or fails',
+  );
+  assert.equal(landingMessage(atLimit), atLimit);
+});
+
+test('batch with two agents end to end: the mirror seed credits each member from its own receipt', async t => {
+  const memberMessages = ['Member one\n\nBody one.', 'Member two\n\nBody two.'];
+  const clients = ['claude-code:claude-opus-5-5', 'codex:gpt-6.1-sol'];
+  const f = await batchesFixture(t, { count: 2, batching: true, memberMessages, concurrency: 2 });
+  for (const [i, entry] of f.entries.entries()) {
+    const row = [...f.tables.projectHostedLandingRequests.values()].find(
+      r => r.submissionId === entry.state.id,
+    );
+    f.patch('projectHostedLandingRequests', row._id, { agentClient: clients[i] });
+  }
+  const project = f.tables.hostedProjects.get(f.projectId);
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: {
+      ...project.autonomyPolicy,
+      githubMirror: { repo: 'synthetic/mirror', autoPush: true, laneRefs: false },
+    },
+  });
+  for (
+    let tick = 0;
+    [...f.tables.projectHostedLandingRequests.values()].some(r => JSON.parse(r.value).phase !== 'landed');
+    tick++
+  ) {
+    assert(tick < 300, 'both members reach acceptance');
+    if (f.runs().some(r => r.status === 'queued')) await f.passChecks();
+    const task = f.pending()[0];
+    if (task.name === 'projectGithubMirror:step')
+      f.patch('_scheduled_functions', task._id, { state: { kind: 'canceled' } });
+    else await f.execute(task);
+  }
+  const receipts = [...f.tables.projectHostedAcceptances.values()].map(r => JSON.parse(r.value));
+  assert.equal(new Set(receipts.map(r => r.batchId)).size, 1, 'one batch');
+  const [job] = [...f.tables.projectGithubMirrorJobs.values()];
+  const main = receipts.find(r => r.id === job.receiptId);
+  assert.deepEqual(main.cohortMessages, memberMessages);
+  const mapping = [...f.tables.projectGithubMirrors.values()][0];
+  f.patch('projectGithubMirrors', mapping._id, {
+    mapping: JSON.stringify({ ...mirrorFixture({ before: {}, after: {} }).root, state: main.previous.head }),
+  });
+  const identity = { jobId: job._id, step: job.step };
+  const begin = () => f.transaction('mirrorBegin', { _handler: store.begin._handler }, identity);
+  const { seed } = JSON.parse(await begin());
+  assert.equal(
+    seed.message,
+    [
+      'Member one\n\nBody one.\n\nMember two\n\nBody two.',
+      '',
+      'Co-Authored-By: claude-opus-5-5 (claude-code) <noreply@anthropic.com>',
+      'Co-Authored-By: gpt-6.1-sol (codex) <noreply@openai.com>',
+      trailers(main),
+    ].join('\n'),
+  );
+  assert.equal(JSON.parse(await begin()).seed.message, seed.message, 'a replayed begin pins the same bytes');
 });

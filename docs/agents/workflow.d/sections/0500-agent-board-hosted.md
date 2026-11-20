@@ -43,7 +43,7 @@ Issue (`issue:ISSUE_ID`), or to the whole project (`project`).
   `agentRun`; older receipts and person landings have none. It also sends the agent client
   (contract feature `landing-agent-client`): the selected harness and, when the
   launcher set `FORGE_AGENT_MODEL` (for example `claude-opus-5-5`), the model, recorded as
-  `agentClient` (`claude-code:claude-opus-5-5`). Set this variable where you start a builder; the value is declared, never verified.
+  `agentClient` (`claude-code:claude-opus-5-5`). Set this variable where you start a builder; the value is declared, never verified. GitHub mirror and Forge-built Git commits credit it as `Co-Authored-By: <model> (<app>) <noreply address>` (vendor noreply for Claude or GPT/Codex clients, `forge@localhost` otherwise), one per covered landing (each batch member, each landing a catch-up commit covers) unless that landing's own message already names a co-author. Every message's trailers and Forge's join one final trailer block; a receipt with no declared client adds no credit.
 - Read state stays on your machine (`ROOT.forge-client/board/LANE_ID.json`, one file
   per Lane whether the action ran at the project root or inside the Lane checkout);
   Forge never records who read what, so a second machine on the same Lane sees the

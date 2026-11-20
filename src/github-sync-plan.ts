@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mirrorMessage } from './landing-message.js';
+import { agentNoreplyEmail, mirrorMessage } from './landing-message.js';
 import { publicationExclusion } from './files.js';
 import { invariant } from './errors.js';
 import { NativeSource } from './native-source.js';
@@ -23,15 +23,7 @@ function trailers(data: WorkData, move: ChannelMove, configured: string) {
     ];
   const names = actors
     .filter(actor => actor.kind === 'agent')
-    .map(actor => {
-      const tool = `${actor.tool ?? ''} ${actor.name}`.toLowerCase();
-      const email = /claude|anthropic/.test(tool)
-        ? 'noreply@anthropic.com'
-        : /codex|openai/.test(tool)
-          ? 'noreply@openai.com'
-          : 'forge@localhost';
-      return `${label(actor.name)} <${email}>`;
-    });
+    .map(actor => `${label(actor.name)} <${agentNoreplyEmail(`${actor.tool ?? ''} ${actor.name}`)}>`);
   if (configured) {
     invariant(
       /^[^<>\r\n\0]+ <[^<>\r\n\0]+>$/.test(configured),

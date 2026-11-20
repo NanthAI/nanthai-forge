@@ -423,7 +423,8 @@ for (const { files, gitlinks = false } of [
     assert.equal(JSON.parse(job.mapping).message, JSON.parse(job.seed).message);
     assert.equal(
       JSON.parse(job.seed).message,
-      `${supplied ?? 'An accepted outcome'}\n\nForge-State: ${github.head}\nForge-Acceptance: ${accepted.receipt.id}\nForge-View: ${accepted.receipt.candidate.id}`,
+      // A supplied message ends in its trailers: Forge's join them as one block (Item 3968a655).
+      `${supplied ?? 'An accepted outcome'}${supplied ? '\n' : '\n\n'}Forge-State: ${github.head}\nForge-Acceptance: ${accepted.receipt.id}\nForge-View: ${accepted.receipt.candidate.id}`,
     );
     if (files) assert.equal(github.commits.get(github.remote()).message, JSON.parse(job.seed).message);
     const steps = Math.max(1, Math.ceil(files / 100));

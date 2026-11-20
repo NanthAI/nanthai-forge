@@ -12,7 +12,7 @@ import { digest } from '../src/state/hash';
 import { ForgeError, invariant } from '../src/errors';
 import { published } from '../src/hosted-github-mirror';
 import { gitHash, gitMode } from '../src/hosted-github-git';
-import { mirrorMessage } from '../src/landing-message';
+import { mirrorMessage, type MirrorMember } from '../src/landing-message';
 import { commitBytes, joinPacks, writePack, type PackObject } from '../src/git-lane-objects';
 import {
   PackTrees,
@@ -45,6 +45,8 @@ type Landing = {
   at: string;
   message?: string;
   cohortMessages?: string[];
+  agentClient?: string;
+  members?: MirrorMember[];
   author: { name: string; email: string };
 };
 type Plan = {
@@ -155,6 +157,8 @@ export async function buildMain(ctx: ActionCtx, projectId: Id<'hostedProjects'>,
         message: mirrorMessage({
           message: landing.message,
           cohortMessages: landing.cohortMessages,
+          agentClient: landing.agentClient,
+          members: landing.members,
           fallback: 'Forge landing',
           state: landing.state,
           acceptanceId: landing.receiptId,

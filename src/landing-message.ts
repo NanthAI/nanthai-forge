@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { invariant } from './errors.js';
+import { AGENT_CLIENT } from './agent-slug.js';
 
 /** Keeps eight worst-case escaped messages within the existing 512 KiB publication budget: an
  * eight-member batch step writes about 264 bytes per message byte (478 KB at this limit). */
@@ -38,7 +39,53 @@ function cleanMessage(value: string) {
 export const landingMessageSchema = z.string().transform(landingMessage);
 export const cohortMessagesSchema = z.array(landingMessageSchema).max(8);
 
-/** Supplied messages stay ordered; only Forge creates its identity trailers. */
+const trailerLine = /^[A-Za-z][A-Za-z0-9-]*: \S/;
+
+/** The noreply address a co-author trailer uses for an agent, from its declared client or tool
+ * name: the vendor's public noreply address, or Forge's neutral one. Never a person's address. */
+export function agentNoreplyEmail(declared: string) {
+  const text = declared.toLowerCase();
+  return /claude|anthropic/.test(text)
+    ? 'noreply@anthropic.com'
+    : /codex|openai|gpt/.test(text)
+      ? 'noreply@openai.com'
+      : 'forge@localhost';
+}
+
+/** `Co-Authored-By` for a receipt's declared `agentClient` (`app` or `app:model`), in public words
+ * only: the model and app as declared. Malformed or absent declarations credit nothing. */
+function agentCredit(client: string | undefined) {
+  if (!client || !AGENT_CLIENT.test(client)) return undefined;
+  const [app, model] = client.split(':', 2);
+  return `Co-Authored-By: ${model ? `${model} (${app})` : app} <${agentNoreplyEmail(client)}>`;
+}
+
+/** Git's trailer rule: the last paragraph, never the subject, whose lines are all `Key: value`
+ * trailers or indented continuations of one. Returns the prose before it and each trailer. */
+function splitTrailers(message: string) {
+  const text = message.replace(/\n+$/, '');
+  const at = text.lastIndexOf('\n\n');
+  const lines = at < 0 ? [] : text.slice(at + 2).split('\n');
+  if (
+    !lines.length ||
+    !trailerLine.test(lines[0]!) ||
+    !lines.every(l => trailerLine.test(l) || /^[ \t]+\S/.test(l))
+  )
+    return { prose: text, trailers: [] as string[] };
+  const trailers: string[] = [];
+  for (const line of lines)
+    if (trailerLine.test(line)) trailers.push(line);
+    else trailers[trailers.length - 1] += `\n${line}`;
+  return { prose: text.slice(0, at).replace(/\n+$/, ''), trailers };
+}
+
+/** One landing a mirror commit covers: its own message and declared agent client. */
+export type MirrorMember = { message?: string | undefined; agentClient?: string | undefined };
+
+/** Supplied messages stay ordered. Every message's trailers move into one final block, then each
+ * covered landing's own co-authors, or a credit for its declared agent when it names none, then
+ * Forge's trailers;
+ * an exactly repeated trailer appears once. Only Forge creates its identity trailers. */
 export function mirrorMessage(input: {
   message?: string | undefined;
   cohortMessages?: string[] | undefined;
@@ -47,13 +94,32 @@ export function mirrorMessage(input: {
   acceptanceId: string;
   viewId: string;
   trailers?: string[] | undefined;
+  agentClient?: string | undefined;
+  /** The landings this commit covers (batch members or a catch-up's landings); default: this one. */
+  members?: MirrorMember[] | undefined;
 }) {
   const messages = input.cohortMessages ?? (input.message === undefined ? [] : [input.message]);
-  const prose = messages.length ? messages.map(landingMessage).join('\n\n') : cleanMessage(input.fallback);
+  const parts = (messages.length ? messages.map(landingMessage) : [cleanMessage(input.fallback)]).map(
+    splitTrailers,
+  );
+  const credits = (input.members ?? [{ message: input.message, agentClient: input.agentClient }]).flatMap(
+    member => {
+      // A landing's own co-authors stand for it, also where its prose is not in the commit (catch-up).
+      const own = (
+        member.message === undefined ? [] : splitTrailers(cleanMessage(member.message)).trailers
+      ).filter(line => /^co-authored-by:/i.test(line));
+      const credit = own.length ? [] : [agentCredit(member.agentClient)];
+      return [...own, ...credit].filter((line): line is string => !!line);
+    },
+  );
+  const seen = new Set<string>();
+  const block = [...parts.flatMap(part => part.trailers), ...credits, ...(input.trailers ?? [])].filter(
+    line => !seen.has(line) && !!seen.add(line),
+  );
   return [
-    prose.replace(/\n+$/, ''),
+    parts.map(part => part.prose).join('\n\n'),
     '',
-    ...(input.trailers ?? []),
+    ...block,
     `Forge-State: ${input.state}`,
     `Forge-Acceptance: ${input.acceptanceId}`,
     `Forge-View: ${input.viewId}`,
@@ -66,7 +132,6 @@ export function noteMessage(message: string, note: string) {
   return split < 0 ? `${message}\n\n${note}` : `${message.slice(0, split)}\n\n${note}${message.slice(split)}`;
 }
 
-const trailerLine = /^[A-Za-z][A-Za-z0-9-]*: \S/;
 /** Trailers (last paragraph of `Key: value` lines) of a finish message that a mirror commit message lacks. */
 export function lostTrailers(finishMessage: string, commitMessage: string) {
   const paragraphs = cleanMessage(finishMessage)

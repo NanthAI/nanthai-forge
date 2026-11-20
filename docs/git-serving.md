@@ -93,13 +93,15 @@ The packs are the project's stored Git history: the Git host's own pack bytes in
 ### Main landings without a mirror
 
 On an imported project whose main has no GitHub mirror, Forge makes main's landings Git
-commits itself, on top of the imported history: one commit per landing, oldest first, built
+commits itself, on top of the imported history: one commit per landing (one per batch, from its
+last receipt, which carries every member's message), oldest first, built
 on the first ref listing after the landings (nothing runs at landing time). Each commit's
 tree is the landing's State published as the mirror would; its parent is the previous
 landing's commit (the import commit for the first); its author is the lander's public Forge
 handle (`handle/agent-run` for an agent) at `<handle>@users.noreply.forge`, at the landing
-time; its message is the landing message with `Forge-State:`, `Forge-Acceptance:` and
-`Forge-View:` trailers. A built commit is stored and never rebuilt, so its id is stable.
+time; its message is the landing message with its trailers, a `Co-Authored-By:` credit for each
+landing's declared agent client, and `Forge-State:`, `Forge-Acceptance:` and `Forge-View:` in one
+final trailer block, as on the mirror ([agent clients](agents/workflow.d/sections/0500-agent-board-hosted.md)). A built commit is stored and never rebuilt, so its id is stable.
 
 A build reads only the files the landings changed: the first lists the import commit's tree
 from the stored pack, later ones the previous build's tree listing. Its pack holds the new
