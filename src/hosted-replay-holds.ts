@@ -6,6 +6,7 @@ import { checkoutPathExists } from './hosted-checkout-files.js';
 import { HostedAgentJournal, hostedAgentDirectory } from './hosted-agent-journal.js';
 import { durableReplace } from './state/durability.js';
 import { hostedLaneDirty } from './hosted-lane-dirty.js';
+import { capturedTree, unsavedPaths } from './hosted-save-receipt-state.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { hostedRootLanePath } from './hosted-root-checkout.js';
 import { supersededSync } from './hosted-sync-retained.js';
@@ -34,7 +35,10 @@ const server = { kind: 'server' } as const,
 
 /** A save already settled here whose Lane files have changed since: its receipt no longer says what
  * is saved, so the identical request saves the new edits (friction 9694afff). A save still pending
- * here keeps replaying, so a lost reply resumes it rather than starting a second save. */
+ * here keeps replaying while the folder still equals what it captured, so a lost reply resumes it
+ * rather than starting a second save. Once files differ from that capture (edited after it), the
+ * replay would report the old capture as saved (Issue 48835eea): the call takes a fresh id, whose
+ * save settles the pending one first and then captures the new edits. */
 export function supersededSave({ root, address, actor, command }: Context): boolean {
   try {
     const previous = HostedAgentJournal.previous(root, address, actor, 'save', command);
@@ -43,8 +47,10 @@ export function supersededSave({ root, address, actor, command }: Context): bool
     if (
       checkoutPathExists(join(directory, 'command.json')) &&
       !checkoutPathExists(join(directory, 'terminal.json'))
-    )
-      return false;
+    ) {
+      const expected = capturedTree(root, previous.operationId);
+      return expected !== null && (unsavedPaths(root, expected)?.length ?? 0) > 0;
+    }
     return hostedLaneDirty(root);
   } catch {
     return false;

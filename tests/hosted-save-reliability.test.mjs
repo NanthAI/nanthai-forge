@@ -651,7 +651,6 @@ test('incident replay 9694afff: a bare save after new edits saves them; an uncha
   const first = await s.transport().dispatch('save', {});
   assert.equal(first.result.outcome.status, 'completed');
   assert.equal(first.result.replayed, undefined);
-  assert.equal(first.result.unsavedEdits, undefined);
   const saved = readHostedLaneCheckout(s.root).selection;
   // Nothing changed: the identical request says there is nothing to save, with the current head, and
   // makes no call (ad80e037); it never replays the settled receipt as this call's result.
@@ -674,21 +673,20 @@ test('incident replay 9694afff: a bare save after new edits saves them; an uncha
   assert.notEqual(second.operationId, first.operationId, 'a new save, not a replay of the earlier one');
   assert.equal(second.result.outcome.status, 'completed');
   assert.equal(second.result.replayed, undefined);
-  assert.equal(second.result.unsavedEdits, undefined, 'the new edits are in this save');
   const after = readHostedLaneCheckout(s.root);
   assert.notEqual(after.selection.head, saved.head);
   assert(after.state.files.some(file => file.path === 'second.txt'));
   assert.equal((await f.readLane(f.lane.laneId)).head, after.selection.head);
-  // An explicit replay of the first operation answers from its receipt, and names the edits that
-  // differ from the head it reports instead of implying they are saved.
+  // An explicit replay of the first operation answers from its receipt, and is no success while edits
+  // differ from the head it reports (48835eea): UNSAVED_LANE_EDITS names them and keeps the replay.
   writeFileSync(join(s.root, 'third.txt'), 'third edit');
-  const explicit = await s.transport().dispatch('save', { operationId: first.operationId });
-  assert.equal(explicit.result.replayed, true);
-  assert.equal(explicit.result.unsavedEdits.saved, false);
-  // The brief receipt keeps both facts.
-  const brief = slimReceipt(explicit);
-  assert.equal(brief.result.replayed, true);
-  assert.equal(brief.result.unsavedEdits.saved, false);
+  await assert.rejects(s.transport().dispatch('save', { operationId: first.operationId }), error => {
+    assert.equal(error.code, 'UNSAVED_LANE_EDITS');
+    assert.deepEqual(error.recovery.unsaved.paths, ['third.txt']);
+    assert.equal(error.recovery.completed.replayed, true);
+    assert.match(error.message, /third\.txt/);
+    return true;
+  });
 });
 
 test('ad80e037: a bare save with nothing new after a sync answers nothing to save with the synced head, exit 0', async t => {

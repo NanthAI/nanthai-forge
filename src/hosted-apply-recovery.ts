@@ -35,7 +35,7 @@ import type { CheckoutChange } from './hosted-checkout-clean.js';
 import {
   clearKept,
   installBaseline,
-  listKeptApply,
+  keptApplyEntry,
   liveState,
   misplacedCacheContent,
   preserveChanges,
@@ -450,7 +450,7 @@ async function recoverApply(root: string, id: string, transport: LaneTransport) 
           ? 'The Lane changed after this sync completed, so its pinned result was not installed. Your checkout is at its previous baseline and local changes are kept; open the Lane to install its current head.'
           : 'The Lane changed after this sync completed, so its pinned result was not installed. Nothing in your checkout was moved or changed; open the Lane to install its current head.',
         ...(receipt ? { preservedAt: backup, undo: receipt.undo } : { preservedAt: null }),
-        kept: listKeptApply(root).entries.find(entry => entry.id === id),
+        kept: keptApplyEntry(root, id),
         next,
         command: hostedRecoveryCommand(root, action, command),
       };
@@ -478,7 +478,7 @@ async function recoverApply(root: string, id: string, transport: LaneTransport) 
       ...(receipt
         ? { preservedAt: backup, undo: receipt.undo }
         : { preservedAt: null, note: 'Nothing in your checkout was moved or changed.' }),
-      kept: listKeptApply(root).entries.find(entry => entry.id === id),
+      kept: keptApplyEntry(root, id),
       ...(receipt?.additionalPreservedAt?.length
         ? { additionalPreservedAt: receipt.additionalPreservedAt }
         : {}),

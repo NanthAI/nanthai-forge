@@ -1136,9 +1136,13 @@ watcher resources and event delivery.
 
 `nforge doctor ROOT` also runs this finite target-volume diagnostic and returns
 `filesystemEvents` with the health evidence and an exact diagnostic next command.
-Ordinary diagnostics create their transient pulses under the target’s existing
-private `.forge` metadata namespace on the same volume, so concurrent source
-capture cannot save a probe signal; no new source exclusion is added.
+Ordinary diagnostics create their transient pulses in a folder of their own in the
+target’s client cache sibling (`ROOT.forge-client/event-probe/RUN_ID`) on the same
+volume, outside the checkout, so concurrent source capture cannot save a probe
+signal and a probe killed mid-attempt leaves nothing a clean or apply sees. The
+caller removes its run folder afterwards, plus run folders and `.forge/.forge-event-probe-*`
+folders (left by older clients) older than a minute; a concurrent run's folder is
+kept. Checkout clean ignores such a `.forge` leftover and disposal removes it.
 Ordinary agent preflight always runs its local tests (they use the saved file
 list, not file events) and probes only after a failed test process. Unhealthy
 delivery then records an `environment` receipt with

@@ -3,8 +3,12 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { clientCacheRoot } from './root-paths.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
-import { hostedLaneDirty } from './hosted-lane-dirty.js';
+import { hostedLaneDirty, laneChanges } from './hosted-lane-dirty.js';
+import { deltaApplyPending } from './hosted-checkout-delta-pending.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
+import { ForgeError } from './errors.js';
+import { shellQuote } from './shell-quote.js';
+import type { NativeFile } from './state/format.js';
 
 /** True when this checkout already settled the save with this operation id: its receipt replays
  * and the call captures nothing new. Local read only. */
@@ -40,18 +44,110 @@ export async function keptSaveTiming<T extends { stepsMs: Record<string, number>
   );
 }
 
-/** A save never reports success for edits it did not capture (Issue ca49dc6c). Once its outcome
- * completed, the Lane binding names the head it saved; files that differ from it (edited after the
- * capture, or present when an earlier save's receipt was replayed) are reported as unsaved with the
- * next step. A local digest pass that reads only files the stat index cannot vouch for; no call. */
-export function unsavedAfterSave(root: string, outcome: object) {
-  if ((outcome as { outcome?: { status?: unknown } }).outcome?.status !== 'completed') return null;
-  return hostedLaneDirty(root)
-    ? {
-        saved: false,
-        note: 'Files in this checkout differ from the head this save reports: those edits are not in it. Run save again (without operationId) to save them.',
+/** The tree a save captured, as its receipt will install it: the baseline's files and materialized
+ * paths with the captured changes applied (as applyHostedSaveReceipt does, so a scoped checkout's
+ * paths outside its scope stay unmaterialized). Null once the save settled (capture.json is dropped
+ * then) or when it cannot be read. Local read only. */
+export function capturedTree(root: string, operationId: string): CapturedTree | null {
+  try {
+    const capture = JSON.parse(
+      readFileSync(join(clientCacheRoot(realpathSync(root)), 'saves', operationId, 'capture.json'), 'utf8'),
+    ) as {
+      marker: { state: { files: NativeFile[] }; materialized: string[] };
+      changes: { path: string; after: { blob: string; mode: NativeFile['mode'] } | null }[];
+    };
+    const files = new Map(capture.marker.state.files.map(file => [file.path, file])),
+      materialized = new Set(capture.marker.materialized);
+    for (const change of capture.changes)
+      if (change.after) {
+        files.set(change.path, { path: change.path, blob: change.after.blob, mode: change.after.mode });
+        materialized.add(change.path);
+      } else {
+        files.delete(change.path);
+        materialized.delete(change.path);
       }
-    : null;
+    return { files: [...files.values()], materialized: [...materialized] };
+  } catch {
+    return null;
+  }
+}
+type CapturedTree = { files: NativeFile[]; materialized: string[] };
+
+/** Paths in this checkout that differ from the head its marker names (or from `expected`, a tree a
+ * settling save captured): hostedLaneDirty's comparison, listing every path. One lstat pass that
+ * reads only files the stat index cannot vouch for. Null when the folder is not a Lane checkout or an
+ * in-place apply is pending; throws when a file cannot be read. No call. */
+export function unsavedPaths(root: string, expected?: CapturedTree): string[] | null {
+  const marker = readHostedLaneCheckout(root);
+  if (!marker || deltaApplyPending(root)) return null;
+  return [...new Set(laneChanges(root, marker, expected ? { expected } : {}))].sort();
+}
+
+const SHOWN = 20;
+/** Local edits a command moved out of the checkout (kept-apply, a displaced prior copy): not in the head. */
+export type KeptOut = { directories: string[]; count: number; paths: string[] };
+/** The final check of every reply that claims a save: save (completed and settling), sync and
+ * `save --sync`, `land --save` and recover-apply (Issues ca49dc6c, 48835eea). A reply that names a
+ * save holds only while this checkout equals the head it saved (or, for a save still settling, the
+ * tree it captured) and the command moved no local edit out of the checkout (`kept`). Otherwise it
+ * is not a success: UNSAVED_LANE_EDITS (non-zero exit) names the files and the next step, and
+ * `recovery.completed` keeps what the command did finish. One local lstat pass; no call. A scan that
+ * cannot finish (a file changed while it was read) also refuses: nothing then proves the edits were
+ * taken. */
+export function assertSavedCheckout(
+  root: string,
+  said: {
+    what: string;
+    completed?: unknown;
+    /** What a settling save captured; omitted: the head the marker names. */
+    expected?: CapturedTree | null;
+    /** False when the reply names no head this checkout should equal (nothing was installed). */
+    scan?: false;
+    kept?: KeptOut | null;
+    /** The step that continues this one (a retained handoff): named instead of a bare save. */
+    then?: { next: unknown; command: string };
+  },
+) {
+  let paths: string[] = [],
+    unread = false;
+  if (said.scan !== false)
+    try {
+      const found = unsavedPaths(root, said.expected ?? undefined);
+      // A pending in-place apply means the marker may not describe the bytes yet: nothing proves them.
+      if (found === null) unread = !!readHostedLaneCheckout(root);
+      else paths = found;
+    } catch {
+      unread = true;
+    }
+  const kept = said.kept && (said.kept.count || said.kept.directories.length) ? said.kept : null;
+  if (!paths.length && !unread && !kept) return;
+  const command = said.then?.command ?? `nforge agent ${shellQuote(root)} save '{}'`;
+  const listed = paths.slice(0, SHOWN),
+    more = paths.length - listed.length,
+    one = paths.length === 1;
+  const sentences = [
+    unread
+      ? 'this checkout could not be compared with the head it reports (a file changed while it was read, or an install is unfinished), so nothing proves its edits are saved.'
+      : paths.length
+        ? `${paths.length} file${one ? '' : 's'} in this checkout differ${one ? 's' : ''} from the head it reports, so ${one ? 'it is' : 'they are'} not saved: ${listed.join(', ')}${more ? ` (+${more} more)` : ''}.`
+        : '',
+    kept
+      ? `${kept.count ? `${kept.count} local change${kept.count === 1 ? '' : 's'}` : 'Local bytes'} that clashed with it ${kept.count === 1 ? 'was' : 'were'} moved out of the checkout to ${kept.directories.join(', ')} and ${kept.count === 1 ? 'is' : 'are'} not in the Lane head${kept.paths.length ? `: ${kept.paths.slice(0, SHOWN).join(', ')}` : ''}. Copy back what you need.`
+      : '',
+  ].filter(Boolean);
+  throw new ForgeError(
+    'UNSAVED_LANE_EDITS',
+    `${said.what}, but ${sentences.join(' ')} Then run: ${command}`,
+    undefined,
+    {
+      status: 'needs-action',
+      unsaved: { count: paths.length, paths: listed, ...(more ? { more } : {}) },
+      ...(kept ? { kept: { ...kept, paths: kept.paths.slice(0, SHOWN) } } : {}),
+      ...(said.completed !== undefined ? { completed: said.completed } : {}),
+      next: said.then?.next ?? { action: 'save' },
+      command,
+    },
+  );
 }
 
 /** A bare save whose settled receipt would replay while this checkout matches its saved head: there is

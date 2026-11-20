@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { getFunctionName } from 'convex/server';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync, readFileSync, symlinkSync, readlinkSync, rmSync } from 'node:fs';
@@ -28,16 +29,29 @@ test('hosted sync after a build preserves output; remote advance/local conflict 
   const check = build(s.root),
     before = readHostedLaneCheckout(s.root);
   f.moveMain({ overlap: false });
-  // main brings accepted.txt; an unsaved local file of that name is what the sync would replace.
-  writeFileSync(join(s.root, 'accepted.txt'), 'unsaved local draft');
+  // main brings accepted.txt; an unsaved local file of that name is what the sync would replace. Sync
+  // saves first (48835eea), so only a file written while the sync runs reaches the local apply.
+  const original = s.exchange.client.mutation;
+  s.exchange.client.mutation = async (ref, args) => {
+    const result = await original(ref, args);
+    if (getFunctionName(ref) === 'projectHostedSyncJobs:submit')
+      writeFileSync(join(s.root, 'accepted.txt'), 'unsaved local draft');
+    return result;
+  };
   const command = { laneId: f.lane.laneId, operationId: randomUUID(), apply: true };
-  await assert.rejects(s.transport().dispatch('sync', command), error => {
-    assert.equal(error.code, 'WORK_CONFLICT');
-    assert.equal(error.recovery.sourceCompleted, true);
-    assert.equal(error.recovery.blockers[0].path, 'accepted.txt');
-    assert.equal(error.recovery.next.action, 'recover-apply');
-    return true;
-  });
+  await assert.rejects(
+    s
+      .transport()
+      .dispatch('sync', command)
+      .finally(() => (s.exchange.client.mutation = original)),
+    error => {
+      assert.equal(error.code, 'WORK_CONFLICT');
+      assert.equal(error.recovery.sourceCompleted, true);
+      assert.equal(error.recovery.blockers[0].path, 'accepted.txt');
+      assert.equal(error.recovery.next.action, 'recover-apply');
+      return true;
+    },
+  );
   const remote = await f.readLane(f.lane.laneId);
   assert.notEqual(remote.head, before.selection.head);
   assert.equal(readHostedLaneCheckout(s.root).selection.head, before.selection.head);

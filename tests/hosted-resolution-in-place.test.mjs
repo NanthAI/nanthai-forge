@@ -19,7 +19,7 @@ import { laneChangeBase } from '../dist/hosted-conflict-precheck.js';
 
 const strip = ({ action, ...parameters }) => [action, parameters];
 
-test('mid-work sync conflict resolves in the same folder, keeps unsaved edits, then lands', async t => {
+test('mid-work sync conflict saves the edits first, resolves in the same folder, then lands', async t => {
   const s = await resolutionFixture(t, { overlap: true }),
     f = s.f;
   f.moveMain({ overlap: true });
@@ -30,6 +30,8 @@ test('mid-work sync conflict resolves in the same folder, keeps unsaved edits, t
   writeFileSync(join(root, 'a.txt'), 'mine\nb\nc\n');
   const before = s.calls.length;
   const synced = await s.transport(root).dispatch('sync', { laneId: f.lane.laneId });
+  // 48835eea: save --sync saves first, so both edits are in the Lane head before the merge meets main.
+  assert.equal(synced.result.saved?.status, 'completed', JSON.stringify(synced.result.saved));
   const conflict = synced.result.conflict;
   assert.equal(conflict.root, canonicalRoot(root), 'the same folder');
   // One read of the resolution Lane: the in-place rebase reuses the access recheck's selection.
@@ -45,26 +47,14 @@ test('mid-work sync conflict resolves in the same folder, keeps unsaved edits, t
   assert.equal((await f.readLane(conflict.laneId)).resolution.origin.laneId, f.lane.laneId);
   assert(!existsSync(`${canonicalRoot(root)}.forge-client/lanes/${conflict.laneId}`), 'nothing nested');
   assert.equal(readFileSync(join(root, 'notes.txt'), 'utf8'), 'unsaved notes\n', 'untouched edit stays');
-  assert.match(readFileSync(join(root, 'a.txt'), 'utf8'), /<<<<<<< lane/);
-  assert.deepEqual(conflict.kept.paths, ['a.txt']);
-  assert.equal(
-    readFileSync(join(conflict.kept.at, 'a.txt'), 'utf8'),
-    'mine\nb\nc\n',
-    'overlapping edit kept',
-  );
-  assert(!conflict.kept.at.startsWith(`${canonicalRoot(root)}/`), 'kept outside the source tree');
-  assert.match(conflict.workIn, /\(same folder\).*a\.txt also changed on main; copies are in /);
-  // ad80e037: the stop says what was saved (the merged Lane head), what was not, and the next step.
+  const marked = readFileSync(join(root, 'a.txt'), 'utf8');
+  assert.match(marked, /<<<<<<< lane/);
+  assert.match(marked, /mine/, 'the saved edit is the Lane side of the conflict');
+  assert.equal(conflict.kept, undefined, 'nothing set aside: the edits were saved first');
+  // ad80e037: the stop says what was saved (the merged Lane head) and the next step.
   const savedHead = (await f.readLane(conflict.laneId)).resolution.origin.head;
   assert.match(conflict.workIn, new RegExp(`Saved: the Lane's saved head ${savedHead.slice(0, 12)} `));
-  assert.match(conflict.workIn, /NOT saved: unsaved edits to a\.txt also changed on main; copies are in /);
-  assert.match(conflict.workIn, /Other unsaved edits stay in place, still unsaved\./);
-  assert.match(
-    conflict.instruction,
-    /^Unsaved edits to a\.txt were not saved; copies are in .+\. Merge each back into the same path first\. Edit a\.txt .* then run: nforge agent .* resolve /,
-  );
-  // The list comes from the folder itself, so a run that died after setting copies aside still names them.
-  assert.deepEqual(keptCopies(root, conflict.laneId), conflict.kept);
+  assert.doesNotMatch(conflict.workIn, /NOT saved/);
   // Resolve and land from the same folder; the original Lane completes with it.
   writeFileSync(join(root, 'a.txt'), 'chosen\nb\nc\n');
   const [resolve, parameters] = strip(conflict.next);
@@ -76,7 +66,7 @@ test('mid-work sync conflict resolves in the same folder, keeps unsaved edits, t
   await f.drain();
   assert.equal((await f.current(submitted.result.submission.id)).submission.phase, 'landed');
   assert.equal(f.text(f.currentMain().head, 'a.txt'), 'chosen\nb\nc\n');
-  assert.equal(f.text(f.currentMain().head, 'notes.txt'), 'unsaved notes\n', 'the carried edit landed');
+  assert.equal(f.text(f.currentMain().head, 'notes.txt'), 'unsaved notes\n', 'the saved edit landed');
   assert.equal((await f.readLane(f.lane.laneId)).state, 'completed');
   // The handoff's original Lane id, used from this folder, reports the settled resolution.
   const replay = await s.transport(root).dispatch('finish', { laneId: f.lane.laneId });
@@ -105,19 +95,40 @@ test('593fc2d7: a sync conflict records the merged head, so the resolution Lane 
   assert.equal(laneChangeBase(root, selection), resolution.right);
 });
 
+// An edit written while the sync runs (after its save-first) meets the merge unsaved: it is set aside.
+function editDuringSync(t, s, edit) {
+  const mutation = s.exchange.client.mutation;
+  let done = false;
+  s.exchange.client.mutation = async (ref, args) => {
+    const result = await mutation(ref, args);
+    if (!done && getFunctionName(ref) === 'projectHostedSyncJobs:submit') {
+      done = true;
+      edit();
+    }
+    return result;
+  };
+  t.after(() => (s.exchange.client.mutation = mutation));
+}
+
 test('ad80e037: a sync rerun from a folder that is already the resolution Lane still names the set-aside copies', async t => {
   const s = await resolutionFixture(t, { overlap: true }),
     f = s.f;
   f.moveMain({ overlap: true });
   const root = s.root;
   await s.transport(root).dispatch('open', { laneId: f.lane.laneId });
-  writeFileSync(join(root, 'a.txt'), 'mine\nb\nc\n');
+  editDuringSync(t, s, () => writeFileSync(join(root, 'a.txt'), 'mine\nb\nc\n'));
   const first = (await s.transport(root).dispatch('sync', { laneId: f.lane.laneId })).result.conflict;
+  assert.deepEqual(first.kept.paths, ['a.txt']);
   // The rerun takes the already-the-resolution branch (as after a crash before the first reply).
   const again = (await s.transport(root).dispatch('sync', { laneId: f.lane.laneId })).result.conflict;
   assert.deepEqual(again.kept, first.kept);
   assert.match(again.workIn, /NOT saved: unsaved edits to a\.txt also changed on main; copies are in /);
   assert.match(again.instruction, /^Unsaved edits to a\.txt were not saved; copies are in /);
+  // The list comes from the folder itself, so a run that died after setting copies aside still names them.
+  assert.deepEqual(
+    keptCopies(root, again.laneId ?? readHostedLaneCheckout(root).selection.laneId),
+    again.kept,
+  );
 });
 
 test('ad80e037: an unsaved deletion of a file the merge changed is reported as restored, never as left in place', async t => {
@@ -126,7 +137,7 @@ test('ad80e037: an unsaved deletion of a file the merge changed is reported as r
   f.moveMain({ overlap: true });
   const root = s.root;
   await s.transport(root).dispatch('open', { laneId: f.lane.laneId });
-  rmSync(join(root, 'a.txt'));
+  editDuringSync(t, s, () => rmSync(join(root, 'a.txt')));
   const synced = await s.transport(root).dispatch('sync', { laneId: f.lane.laneId });
   const conflict = synced.result.conflict;
   assert.deepEqual(conflict.restored, ['a.txt']);
@@ -305,7 +316,7 @@ test('593fc2d7: save --sync that merges main leaves the folder equal to the save
   assert.equal(again.result.saved, undefined);
 });
 
-test('593fc2d7: a refused save after a merged sync leaves the merge installed and the sync successful', async t => {
+test('48835eea: a refused save before a sync leaves main uninstalled, the edit in place, and says the sync did not run', async t => {
   const s = await resolutionFixture(t),
     f = s.f;
   const root = s.root;
@@ -319,13 +330,13 @@ test('593fc2d7: a refused save after a merged sync leaves the merge installed an
     return mutation(ref, args);
   };
   t.after(() => (s.exchange.client.mutation = mutation));
-  const synced = await s.transport(root).dispatch('sync', { laneId: f.lane.laneId });
-  assert.equal(synced.result.source.outcome.result.status, 'merged');
-  assert.equal(readFileSync(join(root, 'accepted.txt'), 'utf8'), 'already accepted\n', 'main installed');
+  await assert.rejects(s.transport(root).dispatch('sync', { laneId: f.lane.laneId }), error => {
+    assert.match(error.message, /^The sync did not run: /);
+    return true;
+  });
+  assert(!existsSync(join(root, 'accepted.txt')), 'main not installed: the sync did not run');
   assert.equal(readFileSync(join(root, 'notes.txt'), 'utf8'), 'unsaved notes\n', 'edit kept');
-  assert.equal(synced.result.saved.status, 'failed');
-  assert.equal(synced.result.saved.code, 'WORK_STALE');
-  assert.match(synced.result.saved.note, /The merge is installed; .* save '\{\}'/);
+  assert.equal(hostedLaneDirty(root, { refresh: true }), true, 'still unsaved, and nothing claims otherwise');
 });
 
 test('a Lane opened from another Lane folder is its sibling under lanes/, never nested', async t => {

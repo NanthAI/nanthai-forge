@@ -1,27 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 import { isMainModule } from './main-module.mjs';
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm, mkdir, lstat, stat as volumeStat } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, lstat, realpath, stat as volumeStat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { childEnv } from './child-env.mjs';
 
 const run = promisify(execFile);
+/** Probe folders start with this name (src/forge-cache-paths.ts keeps the same constant). */
+const EVENT_PROBE_PREFIX = '.forge-event-probe-';
 // Healthy local delivery is normally milliseconds. One second allows stream arming/load
 // headroom while detecting delays large enough to distort ordinary source operations.
 export const FILESYSTEM_EVENT_DEADLINE_MS = 1000;
 // Optional ordinary diagnostics use the shared watcher's existing close bound.
 export const FILESYSTEM_EVENT_CLOSE_DEADLINE_MS = 250;
 
-/** Existing private metadata stays on the target volume and outside source capture. */
-export async function filesystemDiagnosticDirectory(root) {
-  const directory = join(root, '.forge');
-  try {
-    await mkdir(directory, { mode: 0o700 });
-  } catch (error) {
-    if (error.code !== 'EEXIST') throw error;
-  }
+/** The probe's private folder: in the target's client cache sibling (ROOT.forge-client), on the
+ * target volume and outside the checkout, so a killed probe never leaves a file in it that a save,
+ * clean or apply sees (Issue 48835eea). `id` names this run's own folder, which its caller removes. */
+export async function filesystemDiagnosticDirectory(root, id = '') {
+  if (id && !/^[0-9a-f-]{36}$/.test(id))
+    throw Object.assign(new Error('Probe id must be a UUID'), { code: 'BAD_ARGUMENT' });
+  const directory = join(`${await realpath(root)}.forge-client`, 'event-probe', id);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
   const stat = await lstat(directory);
   if (!stat.isDirectory() || stat.isSymbolicLink())
     throw Object.assign(new Error('Diagnostic metadata directory must be real'), { code: 'UNSAFE_PATH' });
@@ -64,7 +66,7 @@ export async function filesystemEventAttempt(
 ) {
   let directory;
   try {
-    directory = await mkdtemp(join(targetDirectory, '.forge-event-probe-'));
+    directory = await mkdtemp(join(targetDirectory, EVENT_PROBE_PREFIX));
     const { stdout } = await execute(
       process.execPath,
       [
@@ -145,7 +147,10 @@ if (isMainModule(import.meta.url)) {
   try {
     const root = process.argv[2] ?? process.cwd();
     const directory = process.argv.includes('--private-root')
-      ? await filesystemDiagnosticDirectory(root)
+      ? await filesystemDiagnosticDirectory(
+          root,
+          process.argv.find(value => value.startsWith('--probe-id='))?.slice('--probe-id='.length),
+        )
       : root;
     result = await probeFilesystemEvents(directory, {
       requireCloseAck: process.argv.includes('--watcher-close-health'),

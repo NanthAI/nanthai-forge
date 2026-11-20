@@ -11,6 +11,7 @@ import { assertAgentResponseShape } from './agent-response-shape.mjs';
 import { describeFailure } from '../dist/system-errors.js';
 import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 import { digest } from '../dist/hash.js';
+import { listKeptApply } from '../dist/hosted-apply-kept.js';
 
 // Production wrapper path: the CLI (hostedAgentCli) and MCP (forge_task) both reach these actions
 // through HostedAgentTransport, and both print describeFailure(error) for a refusal. Each B2 case
@@ -136,18 +137,18 @@ for (const wrapper of ['cli', 'mcp'])
   });
 
 // Dogfood 2026-11-07 (118a5539 comment): `save --sync` with one unsaved edit stopped with source
-// done and the local apply pending; getting out took recover-apply, redoing the edit and syncing
-// again. An edit the sync does not touch is now carried, as Git carries it; since 593fc2d7 the same
-// `save --sync` then saves it on top of the merge (the verb is save), so no second save is needed.
-test('dogfood replay: sync --apply carries one unsaved edit in a file main did not change, and saves it on top of the merge', async t => {
+// done and the local apply pending. Incident 48835eea: a sync that saved only after a merge left
+// edits unsaved on an up-to-date sync and sent clashing ones to kept-apply. `save --sync` now saves
+// first (Git's commit-before-pull), so the merge carries the edit and the folder equals the result.
+test('48835eea: save --sync saves an unsaved edit before it syncs, so the merge carries it and nothing stays unsaved', async t => {
   const { s, f, root } = await opened(t, 'cli');
   f.moveMain({ overlap: false }); // main adds accepted.txt only
   fs.writeFileSync(join(root, 'a.txt'), 'unsaved local edit\n');
   const command = { laneId: f.lane.laneId, operationId: randomUUID(), apply: true };
   const synced = await s.transport().dispatch('sync', command);
   const remote = await f.readLane(f.lane.laneId);
-  assert.notEqual(synced.result.applied.head, remote.head, 'the carried edit was saved on top of the merge');
   assert.equal(synced.result.saved.status, 'completed');
+  assert.equal(synced.result.applied.head, remote.head, 'the merge is the last head: no save on top');
   assert.equal(readHostedLaneCheckout(root).selection.head, remote.head);
   assert.equal(fs.readFileSync(join(root, 'a.txt'), 'utf8'), 'unsaved local edit\n', 'edit kept in place');
   assert(fs.existsSync(join(root, 'accepted.txt')), 'main change installed');
@@ -156,24 +157,18 @@ test('dogfood replay: sync --apply carries one unsaved edit in a file main did n
   assert.equal(saved.blob, digest(Buffer.from('unsaved local edit\n')));
 });
 
-test('dogfood replay: an unsaved edit on a file main changed refuses before installing and one named command finishes', async t => {
+test('48835eea: an unsaved edit on a file main changed is saved first, so the clash is a conflict to resolve and nothing goes to kept-apply', async t => {
   const { s, f, root } = await opened(t, 'cli');
   f.moveMain({ overlap: true }); // main changes a.txt
   fs.writeFileSync(join(root, 'a.txt'), 'unsaved local edit\n');
-  const command = { laneId: f.lane.laneId, operationId: randomUUID(), apply: true };
-  let retained;
-  await assert.rejects(s.transport().dispatch('sync', command), error => {
-    retained = error.recovery;
-    assert.equal(retained.blockers[0].path, 'a.txt');
-    assertAgentResponseShape({ error: describeFailure(error) }, s.root, { sourceCompleted: true });
-    assert.match(error.message, /recover-apply/);
-    return true;
+  const before = (await f.readLane(f.lane.laneId)).head;
+  const synced = await s.transport().dispatch('sync', {
+    laneId: f.lane.laneId,
+    operationId: randomUUID(),
+    apply: true,
   });
-  assert.equal(fs.readFileSync(join(root, 'a.txt'), 'utf8'), 'unsaved local edit\n', 'nothing installed');
-  const { action, ...next } = retained.next;
-  const recovered = await s.transport().dispatch(action, next);
-  assert.equal(recovered.result.status, 'applied');
-  assert.equal(fs.readFileSync(join(recovered.result.preservedAt, 'a.txt'), 'utf8'), 'unsaved local edit\n');
-  const remote = await f.readLane(f.lane.laneId);
-  assert.equal(readHostedLaneCheckout(root).selection.head, remote.head);
+  assert.equal(synced.result.saved.status, 'completed');
+  assert(synced.result.conflict, 'the clash is reported as a conflict');
+  assert.notEqual((await f.readLane(f.lane.laneId)).head, before, 'the edit is in the saved Lane head');
+  assert.deepEqual(listKeptApply(root).entries, [], 'nothing was moved to kept-apply');
 });

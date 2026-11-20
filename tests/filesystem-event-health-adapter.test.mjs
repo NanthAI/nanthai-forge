@@ -18,8 +18,12 @@ test('native diagnostic adapter executes installed code with a finite outer enve
     assert.equal(executable, process.execPath);
     assert.ok(args[0].endsWith('/scripts/filesystem-event-health.mjs'));
     assert.equal(args[1], '/synthetic/target');
-    assert.deepEqual(args.slice(2), ['--watcher-close-health', '--private-root']);
-    assert.equal(options.timeout, 7000);
+    assert.deepEqual(args.slice(2, 4), ['--watcher-close-health', '--private-root']);
+    // Each run probes in its own folder (48835eea), so a concurrent run's cleanup never removes it.
+    assert.match(args[4], /^--probe-id=[0-9a-f-]{36}$/);
+    assert.equal(args.length, 5);
+    // Above the probe's own budget (3 x 2 s attempts + 500 ms stats), so it finishes its cleanup (48835eea).
+    assert.equal(options.timeout, 9000);
     assert.equal(options.killSignal, 'SIGKILL');
     assert.equal(options.maxBuffer, 16384);
     return { status: 0, stdout: JSON.stringify(healthy) };

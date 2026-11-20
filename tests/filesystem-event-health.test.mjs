@@ -2,7 +2,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, readdirSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
+import {
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  mkdirSync,
+  writeFileSync,
+  symlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -249,12 +257,14 @@ test('native attempt forwards the optional close-health mode to the isolated chi
   }
 });
 
-test('ordinary diagnostic pulses remain outside source capture on the target volume', async t => {
-  const root = mkdtempSync(join(tmpdir(), 'forge-private-event-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+test('48835eea: ordinary diagnostic pulses live outside the checkout, in its client cache sibling on the target volume', async t => {
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), 'forge-private-event-')));
+  t.after(() => rmSync(parent, { recursive: true, force: true }));
+  const root = join(parent, 'checkout');
+  mkdirSync(root);
   writeFileSync(join(root, 'source.ts'), 'export const value = 1;');
   const directory = await filesystemDiagnosticDirectory(root);
-  assert.equal(directory, join(root, '.forge'));
+  assert.equal(directory, join(`${root}.forge-client`, 'event-probe'));
   const health = await probeFilesystemEvents(directory, {
     stats: noStats,
     attempt: async target => {
@@ -268,14 +278,18 @@ test('ordinary diagnostic pulses remain outside source capture on the target vol
   });
   assert.equal(health.ok, true);
   assert.deepEqual(readdirSync(directory), []);
+  assert.deepEqual(readdirSync(root), ['source.ts'], 'nothing was written inside the checkout');
 });
 
 test('ordinary diagnostic never follows a metadata symlink to another directory', async t => {
-  const root = mkdtempSync(join(tmpdir(), 'forge-private-event-link-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const outside = join(root, 'outside');
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), 'forge-private-event-link-')));
+  t.after(() => rmSync(parent, { recursive: true, force: true }));
+  const root = join(parent, 'checkout'),
+    outside = join(parent, 'outside');
+  mkdirSync(root);
   mkdirSync(outside);
-  symlinkSync(outside, join(root, '.forge'));
+  mkdirSync(`${root}.forge-client`);
+  symlinkSync(outside, join(`${root}.forge-client`, 'event-probe'));
   await assert.rejects(filesystemDiagnosticDirectory(root), { code: 'UNSAFE_PATH' });
   assert.deepEqual(readdirSync(outside), []);
 });

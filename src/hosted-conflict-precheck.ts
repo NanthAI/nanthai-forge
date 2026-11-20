@@ -13,7 +13,7 @@ import { conflictFinishOptions, type ConflictFinishOptions } from './hosted-conf
 
 const pathFor = (root: string) => join(clientCacheRoot(root), 'conflict-paths.json');
 export type ConflictContinuation = {
-  action: 'save' | 'finish' | 'resolve' | 'abandon';
+  action: 'save' | 'sync' | 'finish' | 'resolve' | 'abandon';
   parameters: Record<string, unknown>;
 };
 type ResolveParameters = { laneId?: string | undefined; message?: string | undefined; operationId: string };

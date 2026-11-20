@@ -6,7 +6,15 @@ import { testDeploymentOrigin } from './trusted-origin.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getFunctionName, makeFunctionReference } from 'convex/server';
@@ -524,4 +532,83 @@ test('a save that parks but comes back stalled (retryable) sends no park', async
   assert.match(saved.result.parkNotSent ?? '', /not sent/);
   assert.equal(count(f.c.calls, 'projectHostedLanePark:set'), 0, 'no park on a stalled save');
   assert.equal(f.overlap().park, undefined);
+});
+
+// Incident 48835eea: a save still settling here replayed its old capture as "Saved" over newer edits.
+test('48835eea: a bare save after an edit made while the last one settles takes a fresh id and captures the edit', async t => {
+  const f = await setup(t),
+    address = { url: 'https://fixture.invalid', projectId: f.s.projectId },
+    agent = new HostedAgentTransport(f.root, address, f.exchange);
+  const first = await agent.dispatch('save', { message: 'split save' });
+  assert.equal(first.result.status, 'settling');
+  writeFileSync(join(f.root, 'f05'), 'edited while the save settled\n');
+  // The server settles the first save only once the next command asks about it (load): the identical
+  // save must not answer from the older capture, and it waits on the first save instead of a deadline.
+  const original = f.c.client.query;
+  let settled = false;
+  f.c.client.query = async (ref, args) => {
+    if (
+      !settled &&
+      getFunctionName(ref) === 'projectHostedSaves:progress' &&
+      args.operationId === first.operationId
+    ) {
+      settled = true;
+      await f.settle(f.scheduled.find(item => item.name === 'projectConvexSource:dispatch').args.jobId);
+    }
+    return original(ref, args);
+  };
+  t.after(() => (f.c.client.query = original));
+  const third = await agent.dispatch('save', { message: 'split save' });
+  assert(settled, 'the second save asked about the first one before saving');
+  assert.notEqual(third.operationId, first.operationId, 'never a replay of the older capture');
+  const capture = JSON.parse(
+    readFileSync(join(clientCacheRoot(f.root), 'saves', third.operationId, 'capture.json'), 'utf8'),
+  );
+  assert.deepEqual(
+    capture.changes.map(change => change.path),
+    ['f05'],
+    'the new save captures the edit on top of the settled one',
+  );
+});
+
+test('48835eea: a settling save reply is refused when a file changed after its capture, naming the file', async t => {
+  const f = await setup(t),
+    address = { url: 'https://fixture.invalid', projectId: f.s.projectId },
+    agent = new HostedAgentTransport(f.root, address, f.exchange);
+  const original = f.c.client.mutation;
+  let edited = false;
+  // An edit lands while the upload runs, after the capture was taken.
+  f.c.client.mutation = async (ref, args) => {
+    const saves = join(clientCacheRoot(f.root), 'saves');
+    if (
+      !edited &&
+      existsSync(saves) &&
+      readdirSync(saves).some(name => existsSync(join(saves, name, 'capture.json')))
+    ) {
+      edited = true;
+      writeFileSync(join(f.root, 'f07'), 'edited during the upload\n');
+    }
+    return original(ref, args);
+  };
+  t.after(() => (f.c.client.mutation = original));
+  await assert.rejects(agent.dispatch('save', { message: 'split save' }), error => {
+    assert.equal(error.code, 'UNSAVED_LANE_EDITS');
+    assert.deepEqual(error.recovery.unsaved.paths, ['f07']);
+    assert.equal(error.recovery.completed.status, 'settling');
+    return true;
+  });
+});
+
+test('48835eea review: a settling save in a scoped checkout does not name files outside its scope', async t => {
+  const f = await setup(t),
+    address = { url: 'https://fixture.invalid', projectId: f.s.projectId },
+    agent = new HostedAgentTransport(f.root, address, f.exchange);
+  // Scope the checkout: f19 is not materialized here, so its absence is never a deletion.
+  const markerPath = join(f.root, '.forge/hosted-lane.json'),
+    marker = JSON.parse(readFileSync(markerPath, 'utf8'));
+  marker.materialized = marker.materialized.filter(path => path !== 'f19');
+  writeFileSync(markerPath, JSON.stringify(marker));
+  rmSync(join(f.root, 'f19'));
+  const saved = await agent.dispatch('save', { message: 'scoped split save' });
+  assert.equal(saved.result.status, 'settling');
 });

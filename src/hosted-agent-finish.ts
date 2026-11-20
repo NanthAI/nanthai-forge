@@ -10,6 +10,7 @@ import { hostedCheckRequestSchema, hostedCheckTerminal, type HostedCheckRun } fr
 import { hostedRecordSchema } from './hosted-records.js';
 import { saveContract, saveHostedLane } from './hosted-save-client.js';
 import { capturedNotSaved, type NotSaved } from './save-not-saved.js';
+import { assertSavedCheckout } from './hosted-save-receipt-state.js';
 import { composeAgentSource, composedRevertOf, selectAgentLane } from './hosted-agent-source.js';
 import { recoverHostedCandidate } from './hosted-agent-resolution.js';
 import { settleCheckOnlyCompose } from './hosted-check-only-compose.js';
@@ -699,6 +700,12 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         return { phase: 'save', saveOperationId, progress: saved };
       }
       markLandStep('saved');
+      // Nothing lands while this folder holds edits the save did not take (a replayed save answered from
+      // an older receipt, or an edit during it): UNSAVED_LANE_EDITS ends this land unsubmitted (48835eea).
+      assertSavedCheckout(session.root, {
+        what: 'land --save saved this checkout and submitted nothing',
+        completed: { phase: 'save', saveOperationId, progress: saved },
+      });
       const notSaved = capturedNotSaved(session.root, saveOperationId);
       if (notSaved) await session.journal.retain(finishNotSavedKey, () => notSaved);
     }

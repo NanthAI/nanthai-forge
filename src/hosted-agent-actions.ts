@@ -34,7 +34,8 @@ import {
   nothingToSave,
   saveSettledHere,
   saveStartedHere,
-  unsavedAfterSave,
+  assertSavedCheckout,
+  capturedTree,
 } from './hosted-save-receipt-state.js';
 import { transitionHostedLane } from './hosted-lifecycle-client.js';
 import { lifecycleApplied, recordLifecycleApplied } from './hosted-replay-holds.js';
@@ -60,7 +61,9 @@ import {
   SyncPinsStale,
 } from './hosted-agent-source.js';
 import { ForgeError, invariant } from './errors.js';
-import { shellQuote } from './shell-quote.js';
+import { retainedDeltaBackups } from './hosted-checkout-delta-settle.js';
+import { clientCacheRoot } from './root-paths.js';
+import { keptOut } from './hosted-apply-kept.js';
 import { plannedIntent } from './hosted-agent-planning.js';
 import { unadvertisedActionError } from './hosted-agent-version.js';
 import { hostedActionError } from './hosted-action-error.js';
@@ -462,11 +465,26 @@ export async function executeHostedAgent(
 ): Promise<unknown> {
   if (action === 'recover-apply') {
     const command = hostedAgentCommandSchemas['recover-apply'].parse(input);
-    return recoverLocalApply(
+    const recovered = await recoverLocalApply(
       session.root,
       command.applyOperationId,
       new ConvexLaneTransport(session.exchange),
     );
+    // Edits it moved out to kept-apply are not in the Lane head: needs action, never a success (48835eea).
+    // A superseded apply installed nothing. A retained sync replay runs its own final check, and a
+    // resolve replay is followed by finish, whose save does: then only edits moved out count, and the
+    // reply keeps the handoff as its next step. A restack's cleanOnly sync makes no final check, so its
+    // recovery scans here.
+    const handoff =
+      recovered.next.action !== 'open' && !(recovered.next as { cleanOnly?: unknown }).cleanOnly;
+    assertSavedCheckout(session.root, {
+      what: recovered.status === 'superseded' ? 'The local apply was superseded' : 'The local apply finished',
+      completed: recovered,
+      kept: keptOut(session.root, recovered),
+      ...(recovered.status === 'superseded' || handoff ? { scan: false as const } : {}),
+      ...(handoff ? { then: { next: recovered.next, command: recovered.command } } : {}),
+    });
+    return recovered;
   }
 
   if (action === 'metrics') return executeHostedMetrics(session, input);
@@ -715,14 +733,21 @@ export async function executeHostedAgent(
     );
     // Split save (fea47345 C): the upload is in and the save is submitted; the server settles it
     // now and this checkout's next command reads the outcome (reporting a failure), so no wait here.
-    if (settleBackground && savePending(saved))
-      return {
+    if (settleBackground && savePending(saved)) {
+      const settling = {
         status: 'settling',
         operationId,
         laneId: session.marker()?.selection.laneId,
         note: 'Saved: the server is finishing this save now. Your next command here reports its outcome, including any failure.',
         timing: timing.value(),
       };
+      // The marker still names the old head: the files must equal what this save captured. A replay of
+      // an older capture over newer edits is refused here, and the next bare save takes a fresh id.
+      const expected = capturedTree(session.root, operationId);
+      if (expected)
+        assertSavedCheckout(session.root, { what: 'This save is settling', completed: settling, expected });
+      return settling;
+    }
     const outcome = await awaitSaveOutcome(session, operationId, saved, timing),
       split = timing.value();
     if (!outcome || typeof outcome !== 'object') return outcome;
@@ -744,18 +769,19 @@ export async function executeHostedAgent(
     });
     // New paths the capture left out by name (credential names), bounded: the save says so.
     const notSaved = capturedNotSaved(session.root, operationId);
-    // A save never reports success for edits it did not capture (Issue ca49dc6c): files that differ
-    // from the head it saved (edited after its capture, or a replay of an earlier save) are named as
-    // unsaved, with the next step. Local digest pass over stat-index misses; no call.
-    const unsaved = unsavedAfterSave(session.root, outcome);
-    return {
+    const reply = {
       ...outcome,
       ...(replayed ? { replayed: true } : {}),
       ...(kept ? { timing: kept } : {}),
       ...(notSaved ? { notSaved } : {}),
-      ...(unsaved ? { unsavedEdits: unsaved } : {}),
       ...parked,
     };
+    // A save never reports success for edits it did not capture (Issues ca49dc6c, 48835eea): files that
+    // differ from the head it saved (edited after its capture, or a replay of an earlier save) fail the
+    // reply with UNSAVED_LANE_EDITS. Local pass over stat-index misses; no call.
+    if (agentSourceOutcome(outcome)?.status === 'completed')
+      assertSavedCheckout(session.root, { what: 'This save completed', completed: reply });
+    return reply;
   }
   if (action === 'compose')
     return composeAgentSource(session, hostedAgentCommandSchemas.compose.parse(input), operationId);
@@ -793,6 +819,8 @@ export async function executeHostedAgent(
       session.journal.get(`sync:${operationId}`) === undefined
         ? autoStackPeer(command.laneId ?? session.marker()?.selection.laneId ?? '')
         : undefined;
+    // What the caller asked, before an automatic stack pins a peer: a refused save-first names this.
+    const asked = { ...command };
     if (autoPeer) command.stackOn = autoPeer;
     const timing = syncTiming();
     // A save this client returned unfinished still pins the marker's old head: settle it (its own
@@ -811,6 +839,19 @@ export async function executeHostedAgent(
         session.capabilities.authority.epoch,
         saveContract(session.capabilities),
       );
+    // Save before sync (Issue 48835eea, Git's commit-before-pull): the edits go into the Lane head first,
+    // so the merge carries them, a clash goes to resolve (never to kept-apply) and an up-to-date sync
+    // still leaves nothing unsaved. Only a sync that has not begun: a retained one replays its own pins.
+    const savedFirst =
+      command.apply &&
+      !command.candidateId &&
+      !command.cleanOnly &&
+      session.journal.get(`sync:${operationId}`) === undefined &&
+      session.marker() &&
+      (!command.laneId || command.laneId === session.marker()!.selection.laneId)
+        ? await saveBeforeSync(session, asked)
+        : undefined;
+    if (savedFirst) timing.mark('save');
     if (command.apply && !markerAt(session.root)) {
       const blocked = retainedLocalApplyBlocked(
         session.root,
@@ -871,6 +912,7 @@ export async function executeHostedAgent(
         if (handoff) clearSyncHandoff(session.root, operationId);
         return {
           source: result,
+          ...(savedFirst ? { saved: savedFirst } : {}),
           timing: timing.value(),
           note: 'The pinned State merged cleanly with this Lane, so it was not an early-resolution target. The Lane head and original landing are unchanged; no early pin was recorded.',
         };
@@ -878,6 +920,7 @@ export async function executeHostedAgent(
       // A retained handoff owns this install even if the marker vanished during the source wait:
       // the apply then refuses with typed recovery instead of the result silently skipping it.
       if (command.apply && (handoff || session.marker()) && source.status !== 'conflict' && source.from) {
+        const displacedBefore = new Set(retainedDeltaBackups(clientCacheRoot(session.root)));
         const applied = await applyHostedSync(
           session.root,
           {
@@ -893,11 +936,27 @@ export async function executeHostedAgent(
         );
         clearSyncHandoff(session.root, operationId);
         timing.mark('apply');
-        const saved =
-          source.status === 'merged' && !command.cleanOnly
-            ? await saveAfterSync(session, command)
-            : undefined;
-        return { source: result, applied, ...(saved ? { saved } : {}), timing: timing.value() };
+        const reply = {
+          source: result,
+          applied,
+          ...(savedFirst ? { saved: savedFirst } : {}),
+          timing: timing.value(),
+        };
+        // The final check (one lstat pass, no call): an edit this sync did not take (made while it ran,
+        // or kept by a replay that began before it saved) fails the reply instead of passing as synced.
+        // Bytes this install moved out of the checkout are not in the head either: a delta apply's backups
+        // and a whole-tree install's held prior copy (disposePriorCheckout) both join this retained list.
+        const displaced = retainedDeltaBackups(clientCacheRoot(session.root)).filter(
+          path => !displacedBefore.has(path),
+        );
+        // An automatic restack runs right after a save that made this check; its own reply says nothing saved.
+        if (!command.cleanOnly)
+          assertSavedCheckout(session.root, {
+            what: `This sync completed (${source.status})`,
+            completed: reply,
+            kept: displaced.length ? { directories: displaced, count: 0, paths: [] } : null,
+          });
+        return reply;
       }
     }
     if (completed && handoff) clearSyncHandoff(session.root, operationId);
@@ -906,7 +965,8 @@ export async function executeHostedAgent(
     const guided = await guideHostedSync(session, result, command.apply);
     if (guided === result) return guided;
     timing.mark('conflict');
-    return { ...(guided as object), timing: timing.value() };
+    // A clash with main is a conflict to resolve against the saved head; the edits are in it.
+    return { ...(guided as object), ...(savedFirst ? { saved: savedFirst } : {}), timing: timing.value() };
   }
   if (action === 'revert') {
     const command = hostedAgentCommandSchemas.revert.parse(input);
@@ -1095,47 +1155,56 @@ async function waitSaveUntil(
     return pending;
   }
 }
-/** A clean sync keeps unsaved edits in files it did not change. `save --sync` then saves them on top of
- * the merge, so the folder equals the saved head and preflight runs without another save (593fc2d7).
- * A local digest check first: a clean folder makes no call. Retained by the sync's operation, so a
- * replay reaches the same save. Undo: edit and save again, as after any save. */
-async function saveAfterSync(session: HostedAgentSession, command: { message?: string | undefined }) {
+/** `save --sync` saves first (Issue 48835eea): a dirty checkout's edits are saved under a fresh id
+ * before the sync pins the Lane, so the sync merges the saved head and the folder equals the result.
+ * A fresh id every time, never a retained one: an earlier save left unfinished is settled first by
+ * saveHostedLane itself, so no stale capture is replayed. A clean folder makes no call. Anything but a
+ * completed save stops the sync (nothing synced, edits still in the checkout). Undo: as after any save. */
+async function saveBeforeSync(
+  session: HostedAgentSession,
+  command: z.infer<(typeof hostedAgentCommandSchemas)['sync']>,
+) {
   if (!markerAt(session.root) || !hostedLaneDirty(session.root, { refresh: true })) return undefined;
-  const operationId = await session.journal.id('sync-save');
-  let status: string | undefined;
+  const operationId = randomUUID();
+  let saved: unknown;
   try {
-    const saved = await saveHostedLane(
+    saved = await saveHostedLane(
       session.root,
-      { operationId, message: command.message ?? 'Save the edits kept by sync' },
+      { operationId, message: command.message ?? 'Save before sync' },
       session.exchange,
       {
         ...saveContract(session.capabilities),
         authorship: session.authorship,
-        ...(session.holderSessionId ? { holderSessionId: session.holderSessionId } : {}),
+        ...(session.holderSessionId
+          ? {
+              holderSessionId: session.holderSessionId,
+              ...(session.sessionClaim ? { session: session.sessionClaim } : {}),
+            }
+          : {}),
         onCapture: session.saveNotice,
       },
       false,
-      undefined,
+      // A refusal names the same sync to run again, never a bare save that would skip the sync.
+      { action: 'sync', parameters: command },
       (id, pending) => waitSaveUntil(session, id, pending),
     );
-    status = agentSourceOutcome(await awaitSaveOutcome(session, operationId, saved))?.status;
   } catch (error) {
-    // The merge is installed either way: a refused save leaves the edits unsaved, never fails the sync.
-    const { code } = hostedActionError(error, 'save');
-    return {
-      operationId,
-      status: 'failed',
-      ...(typeof code === 'string' ? { code } : {}),
-      note: `The merge is installed; saving the unsaved edits it kept failed. Run: nforge agent ${shellQuote(session.root)} save '{}'`,
-    };
+    if (!(error instanceof ForgeError)) throw error;
+    throw new ForgeError(error.code, `The sync did not run: ${error.message}`, error.retryAt, error.recovery);
   }
-  return status === 'completed'
-    ? { operationId, status, note: 'Saved the unsaved edits this sync kept, on top of the merged head.' }
-    : {
-        operationId,
-        status: status ?? 'pending',
-        note: `The save of the unsaved edits this sync kept is ${status ?? 'still running'}; run save before preflight.`,
-      };
+  const settled = await awaitSaveOutcome(session, operationId, saved),
+    outcome = agentSourceOutcome(settled);
+  if (outcome?.status === 'completed')
+    return { operationId, status: 'completed', note: 'Saved your edits first, so this sync merged them.' };
+  const code = (settled as { outcome?: { error?: { code?: unknown } } } | null)?.outcome?.error?.code;
+  throw new ForgeError(
+    outcome?.status === 'failed' && typeof code === 'string' ? code : 'LANE_DIRTY',
+    outcome?.status === 'failed'
+      ? `The sync did not run: saving your edits first failed${typeof code === 'string' ? ` (${code})` : ''}. Your edits are still in this checkout. Fix the cause, then run the same sync again.`
+      : `The sync did not run: the save of your edits (operation ${operationId}) is still settling. Run the same sync again; it waits for that save first.`,
+    undefined,
+    { save: { operationId, status: outcome?.status ?? 'pending' } },
+  );
 }
 /** A save waits for its own outcome within the agent budget: the job's progress subscription
  * delivers the receipt and the Lane binding advances from it, with no replay or extra call. A save

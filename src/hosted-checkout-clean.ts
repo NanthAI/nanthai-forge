@@ -2,6 +2,7 @@
 import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, type Stats } from 'node:fs';
 import { join } from 'node:path';
 import { digest } from './hash.js';
+import { EVENT_PROBE_PREFIX } from './forge-cache-paths.js';
 import { ForgeError, invariant } from './errors.js';
 import type { NativeFile } from './state/format.js';
 import { captureExclusion, readSource } from './files.js';
@@ -100,7 +101,14 @@ export function cleanHostedCheckout(
           );
         }
         for (const name of readdirSync(join(root, path)))
-          if (!(name === markerName || (name === 'cache-use.json' && preserveLegacyCacheUse(root)))) {
+          if (
+            !(
+              name === markerName ||
+              (name === 'cache-use.json' && preserveLegacyCacheUse(root)) ||
+              // An older client's event probe killed mid-attempt: Forge-owned and empty of work (48835eea).
+              name.startsWith(EVENT_PROBE_PREFIX)
+            )
+          ) {
             if (options.collect) {
               options.collect.push({ path: `${path}/${name}`, kind: 'extra' });
               continue;

@@ -8,11 +8,13 @@ import {
   readlinkSync,
   renameSync,
   rmdirSync,
+  rmSync,
   unlinkSync,
   type Stats,
 } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { EVENT_PROBE_PREFIX } from './forge-cache-paths.js';
 import { ForgeError } from './errors.js';
 import type { NativeFile } from './state/format.js';
 import { durableReplace, syncDirectory } from './state/durability.js';
@@ -117,6 +119,9 @@ export function disposePriorCheckout(input: {
         for (const entry of readdirSync(at)) {
           if (entry === markerName) continue;
           if (owned.has(entry)) unlinkSync(join(at, entry));
+          // An older client's killed event probe: Forge-owned, removed like the other metadata (48835eea).
+          else if (entry.startsWith(EVENT_PROBE_PREFIX))
+            rmSync(join(at, entry), { recursive: true, force: true });
           else {
             kept.push({ path: `.forge/${entry}`, kind: 'extra', digest: null });
             empty = false;

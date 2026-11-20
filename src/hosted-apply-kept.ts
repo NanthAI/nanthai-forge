@@ -10,7 +10,7 @@ import {
   rmdirSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { z } from 'zod';
 import { ForgeError, invariant } from './errors.js';
 import { digest } from './hash.js';
@@ -310,13 +310,68 @@ function summarize(cache: string, id: string, hideEmpty = false): KeptApplySumma
       : {}),
     ...counts,
     paths,
+    // Kept bytes are not in the Lane head: the note says so, as the reply that kept them fails (48835eea).
     note: receipt.held
-      ? 'Local bytes found in the previous checkout after an apply are kept here until you delete this folder. Copy back what you need.'
+      ? 'Local bytes found in the previous checkout after an apply are kept here, not in the Lane head, until you delete this folder. Copy back what you need, then save.'
       : receipt.confirmedAt
-        ? 'Your local changes are kept here until the expiry time. Copy back what you need.'
-        : 'Your local changes are kept here until the apply is confirmed, then for seven days. Copy back what you need.',
+        ? 'Your local changes are kept here, not in the Lane head, until the expiry time. Copy back what you need, then save.'
+        : 'Your local changes are kept here, not in the Lane head, until the apply is confirmed, then for seven days. Copy back what you need, then save.',
   };
 }
+
+/** The local edits a recover-apply reply moved out of the checkout: this apply's own kept entry,
+ * read from its receipt (never the capped listing), plus prior-checkout copies (checkout-*) and an
+ * interrupted install's backup (delta-*). files-* rounds are counted through the receipt. Bytes under
+ * .forge/ are Forge metadata that capture never takes at any depth, so they are kept but are not
+ * edits missing from the head. A kept folder whose receipt cannot be read counts as moved-out bytes. */
+export function keptOut(
+  root: string,
+  reply: { applyOperationId?: unknown; priorPreservedAt?: unknown; additionalPreservedAt?: unknown },
+) {
+  const id = typeof reply.applyOperationId === 'string' ? reply.applyOperationId : '';
+  const own = uuid.test(id) ? keptLaneEdits(join(keptApplyRoot(root), id)) : null;
+  const extra = Array.isArray(reply.additionalPreservedAt)
+    ? reply.additionalPreservedAt.filter(
+        (path): path is string => typeof path === 'string' && /^(checkout|delta)-/.test(basename(path)),
+      )
+    : [];
+  const prior = [...(typeof reply.priorPreservedAt === 'string' ? [reply.priorPreservedAt] : []), ...extra];
+  const count = own?.count ?? 0;
+  if (!count && !own?.held && !prior.length) return null;
+  return {
+    directories: [...(own && (count || own.held) ? [own.directory] : []), ...prior],
+    count,
+    paths: own?.paths ?? [],
+  };
+}
+function keptLaneEdits(directory: string) {
+  const unread = { directory, count: 0, paths: [] as string[], held: true };
+  try {
+    // No folder: this apply moved nothing (an already-applied or superseded recovery skips it).
+    if (!real(directory)) return null;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? null : unread;
+  }
+  let receipt;
+  try {
+    receipt = receiptShape.parse(JSON.parse(readFileSync(join(directory, 'receipt.json'), 'utf8')));
+  } catch {
+    return unread;
+  }
+  const paths: string[] = [];
+  let count = 0;
+  for (const entries of Object.values(receipt.rounds ?? {}))
+    for (const entry of entries) {
+      if (entry.path === '.forge' || entry.path.startsWith('.forge/')) continue;
+      count++;
+      if (paths.length < PATHS_SHOWN) paths.push(entry.path);
+    }
+  return { directory, count, paths, held: !!receipt.held };
+}
+
+/** One apply's kept entry by id: a direct read, never the capped listing (48835eea). */
+export const keptApplyEntry = (root: string, id: string) =>
+  uuid.test(id) ? (summarize(keptApplyRoot(root), id, true) ?? undefined) : undefined;
 
 /** Status view: one small receipt read per kept entry, newest listing capped. No Convex calls. */
 export function listKeptApply(root: string) {
