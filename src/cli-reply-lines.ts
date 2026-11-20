@@ -123,7 +123,7 @@ export function cliReplyLines(args: string[], output: unknown): string[] {
     const list = result.item ? [row(result.item)] : rows(result.page ?? result.items);
     return list.length
       ? list.map(item =>
-          ` ${action === 'lanes' ? 'Lane' : 'Item'} ${short(item.laneId ?? item.id)}: ${text(item.title ?? item.intent) || 'title unavailable'} · ${state(item.state ?? item.status)}.`.trim(),
+          ` ${action === 'lanes' ? 'Lane' : 'Item'} ${short(item.laneId ?? item.id)}: ${text(item.title ?? item.intent) || 'title unavailable'} · ${state(item.state ?? item.status)}${item.saving ? ' · save still settling' : ''}.`.trim(),
         )
       : [`No ${action === 'lanes' ? 'Lanes' : 'Items'} in this page.`];
   }

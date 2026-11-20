@@ -10,6 +10,7 @@ import { isPlanningRef, isPlanningUuid, planningIdHelp } from './planning-id.js'
 const issueRef = z.string().refine(isPlanningRef, `expected ${planningIdHelp}`);
 import { shellQuote } from './shell-quote.js';
 import { hostedAgentRoot } from './hosted-agent-journal.js';
+import { backgroundSave } from './hosted-save-pending.js';
 export const liveLanesInput = z
   .object({
     planningItemId: issueRef
@@ -96,6 +97,33 @@ async function laneTree(transport: HostedAgentTransport, input: Record<string, u
   return { tree: renderLaneTree(page), page, isDone: reply.isDone, continueCursor: reply.continueCursor };
 }
 
+/** This checkout's save that returned before its settle (593fc2d7): the server lists the Lane's old head until the
+ * save finishes, so its row says so and names the wait. Local files only, no call. */
+function markSaving<T>(root: string, result: T): T {
+  const page = (result as { page?: unknown }).page;
+  if (!Array.isArray(page)) return result;
+  let saving: { operationId: string; laneId: string } | undefined;
+  try {
+    saving = backgroundSave(root);
+  } catch {
+    return result; // A note on the reply never fails the read; the next write reports the save.
+  }
+  if (!saving) return result;
+  const { operationId, laneId } = saving;
+  const next = `nforge agent ${shellQuote(hostedAgentRoot(root))} wait '${JSON.stringify({ operationIds: [operationId] })}'`;
+  return {
+    ...result,
+    page: page.map(row =>
+      (row as { laneId?: unknown }).laneId === laneId
+        ? {
+            ...(row as object),
+            saving: { operationId, note: 'Your save is still settling; head is the one before it.', next },
+          }
+        : row,
+    ),
+  };
+}
+
 export async function liveLanes(transport: HostedAgentTransport, input: Record<string, unknown>) {
   const parsed = liveLanesInput.safeParse(planningIssueArguments('lanes', input));
   invariant(
@@ -115,7 +143,8 @@ export async function liveLanes(transport: HostedAgentTransport, input: Record<s
       action: 'lanes' as const,
       operationId: null,
       resolved: null,
-      result:
+      result: markSaving(
+        transport.root,
         state === 'all'
           ? await itemLanes(transport, input.planningItemId!, input)
           : input.view === 'loose-ends'
@@ -130,6 +159,7 @@ export async function liveLanes(transport: HostedAgentTransport, input: Record<s
                   // A Lane whose folder or land operation id is gone recovers its landing by laneId (7da396ed).
                   recover: `nforge agent ${shellQuote(hostedAgentRoot(transport.root))} status '{"laneId":"LANE_ID"}' names a Lane's landing in flight and its wait, even without its folder.`,
                 },
+      ),
     };
   } catch (error) {
     if (

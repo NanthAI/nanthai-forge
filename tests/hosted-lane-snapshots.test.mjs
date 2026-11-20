@@ -233,6 +233,155 @@ test('undo and redo walk the operation log; nothing is deleted', async t => {
   assert.equal((await x.f.read(x.f.laneId)).head, x.f.expected.head, 'moves never move the head');
 });
 
+// ad80e037 line "restore-one-file": git checkout -- FILE is snapshots {restore:"saved",paths}, undoable.
+test('restore saved puts named files back to the saved head, leaves the rest, and undo brings them back', async t => {
+  const x = await fixture(t);
+  writeFileSync(join(x.root, 'a.txt'), 'edited');
+  writeFileSync(join(x.root, 'new.txt'), 'unsaved new file');
+  const one = await x.run({ restore: 'saved', paths: ['./a.txt'] });
+  assert.equal(one.target, 'saved');
+  assert.equal(one.written, 1);
+  assert.equal(one.removed, 0);
+  assert.deepEqual(one.paths, ['a.txt']);
+  assert.equal(text(x.root, 'a.txt'), 'original');
+  assert.equal(text(x.root, 'new.txt'), 'unsaved new file', 'a file not named is untouched');
+  assert.match(one.next, /x snapshots \{"undo":1\} brings them back/);
+  const undo = await x.run({ undo: 1 });
+  assert.equal(undo.target, one.snapshot, 'undo goes back to the snapshot taken just before');
+  assert.equal(text(x.root, 'a.txt'), 'edited');
+  // "." is every file: an edit goes back and a new file the head lacks is removed (undoably).
+  const all = await x.run({ restore: 'saved', paths: ['.'] });
+  assert.equal(all.written, 1);
+  assert.equal(all.removed, 1);
+  assert.equal(text(x.root, 'a.txt'), 'original');
+  assert(!existsSync(join(x.root, 'new.txt')));
+  await x.run({ undo: 1 });
+  assert.equal(text(x.root, 'a.txt'), 'edited');
+  assert.equal(text(x.root, 'new.txt'), 'unsaved new file');
+  assert.equal(x.f.tables.projectHostedSaves.size, 0, 'a restore never saves');
+  assert.equal((await x.f.read(x.f.laneId)).head, x.f.expected.head, 'nor moves the head');
+  // A file already equal to the saved head costs no call and changes nothing.
+  writeFileSync(join(x.root, 'a.txt'), 'original');
+  x.calls.length = 0;
+  const same = await x.run({ restore: 'saved', paths: ['a.txt'] });
+  assert.equal(same.written, 0);
+  assert.equal(x.calls.length, 0);
+});
+
+test('restore saved refuses a path no snapshot could hold, and a refused snapshot; nothing changes', async t => {
+  const x = await fixture(t);
+  // Synthetic credential-shaped value, built at run time (never a real key).
+  const key = `AKIA${'QX7ZB2MNV4KT9WRD'}`;
+  writeFileSync(join(x.root, 'config.ini'), `aws_access_key_id = "${key}"\n`);
+  writeFileSync(join(x.root, '.env'), 'SYNTHETIC_TOKEN=not-a-real-value\n');
+  writeFileSync(join(x.root, 'a.txt'), 'edited');
+  const refused = async (paths, expected, pattern) => {
+    await assert.rejects(x.run({ restore: 'saved', paths }), error => {
+      code(expected)(error);
+      assert.match(error.message, pattern);
+      return true;
+    });
+    assert.equal(text(x.root, 'a.txt'), 'edited', 'a refused restore changes nothing');
+  };
+  await refused(['config.ini', 'a.txt'], 'BAD_ARGUMENT', /left out of snapshots .*could not be undone/);
+  assert(existsSync(join(x.root, 'config.ini')));
+  await refused(['.env'], 'BAD_ARGUMENT', /not in the saved head/);
+  assert(existsSync(join(x.root, '.env')));
+  await refused(['missing.txt'], 'NOT_FOUND', /status \{"files":true\}/);
+  await refused(['../a.txt'], 'BAD_ARGUMENT', /relative to the Lane root/);
+  rmSync(join(x.root, 'config.ini'));
+  // The Lane snapshot store is full: the current files cannot be kept, so nothing is put back.
+  await x.snap();
+  const meta = x.rows().find(row => row.seq === 0);
+  x.f.tables.projectLaneSnapshots.set(meta._id, { ...meta, laneBytes: LANE_SNAPSHOT.laneBytes });
+  writeFileSync(join(x.root, 'a.txt'), 'edited twice');
+  await assert.rejects(x.run({ restore: 'saved', paths: ['a.txt'] }), code('QUOTA_EXCEEDED'));
+  assert.equal(text(x.root, 'a.txt'), 'edited twice');
+  // The same tree again: the snapshot reports "unchanged" (refused once), still nothing is put back.
+  await assert.rejects(x.run({ restore: 'saved', paths: ['a.txt'] }), code('WORK_BUSY'));
+  assert.equal(text(x.root, 'a.txt'), 'edited twice');
+  const schema = hostedAgentCommandSchemas.snapshots;
+  assert.equal(schema.safeParse({ restore: 'saved' }).success, false, 'saved needs paths');
+  assert.equal(schema.safeParse({ restore: 1, paths: ['a.txt'] }).success, false, 'paths go only with saved');
+});
+
+// Review 7d11fb81: an unchanged tree makes no snapshot call and trusts this checkout's ledger, but
+// the server drops a Lane's snapshots 14 days after its latest one (or a purge elsewhere does).
+test('restore saved snapshots again when the server dropped the recorded snapshot; undo still works', async t => {
+  const x = await fixture(t);
+  writeFileSync(join(x.root, 'a.txt'), 'edited long ago');
+  await x.snap();
+  // Retention (or another checkout's purge) dropped every snapshot of the Lane.
+  for (const row of x.rows()) x.f.tables.projectLaneSnapshots.delete(row._id);
+  assert.equal(x.rows().length, 0);
+  const one = await x.run({ restore: 'saved', paths: ['a.txt'] });
+  assert.equal(text(x.root, 'a.txt'), 'original');
+  assert(
+    x.rows().some(row => row.seq === one.snapshot),
+    'the snapshot the reply names is on the server',
+  );
+  await x.run({ undo: 1 });
+  assert.equal(text(x.root, 'a.txt'), 'edited long ago', 'the edits came back');
+  // The same for undo/redo/restore SEQ: a dropped snapshot is taken again before the move.
+  await x.run({ restore: 'saved', paths: ['a.txt'] });
+  writeFileSync(join(x.root, 'a.txt'), 'edited again');
+  await x.snap();
+  for (const row of x.rows()) x.f.tables.projectLaneSnapshots.delete(row._id);
+  await assert.rejects(x.run({ undo: 1 }), code('NOT_FOUND'));
+  assert.equal(text(x.root, 'a.txt'), 'edited again', 'nothing to move to: nothing changed');
+  assert(x.rows().length > 0, 'the current files were snapshotted again before the move was judged');
+});
+
+// Review d01db0d7: after a drop seq numbers start again, so another checkout's new snapshot can
+// carry the seq this checkout's ledger names. Only the same tree counts as this checkout's snapshot.
+test('restore saved snapshots again when another checkout reused the recorded seq after a purge', async t => {
+  const x = await fixture(t);
+  writeFileSync(join(x.root, 'a.txt'), 'edits of checkout A');
+  await x.snap();
+  const ledger = join(snapshotDirectory(x.root), 'ledger.json');
+  const mine = readFileSync(ledger);
+  const seq = JSON.parse(mine).seq;
+  // Checkout B purges the Lane, then snapshots its own files: the same seq, another tree.
+  for (const row of x.rows()) x.f.tables.projectLaneSnapshots.delete(row._id);
+  writeFileSync(join(x.root, 'a.txt'), 'files of checkout B');
+  rmSync(ledger);
+  await x.snap();
+  assert(
+    x.rows().some(row => row.seq === seq),
+    'B reused the seq',
+  );
+  // Back to checkout A's files and ledger.
+  writeFileSync(join(x.root, 'a.txt'), 'edits of checkout A');
+  writeFileSync(ledger, mine);
+  await x.run({ restore: 'saved', paths: ['a.txt'] });
+  assert.equal(text(x.root, 'a.txt'), 'original');
+  await x.run({ undo: 1 });
+  assert.equal(text(x.root, 'a.txt'), 'edits of checkout A', "undo brings A's edits back, not B's files");
+});
+
+test('restore saved puts a file back where a folder now stands, unless the folder holds more', async t => {
+  const x = await fixture(t);
+  rmSync(join(x.root, 'a.txt'));
+  mkdirSync(join(x.root, 'a.txt', 'deep'), { recursive: true });
+  writeFileSync(join(x.root, 'a.txt', 'deep', 'x.txt'), 'inside');
+  writeFileSync(join(x.root, 'a.txt', '.env'), 'SYNTHETIC_TOKEN=not-a-real-value\n');
+  // .env is left out of snapshots, so removing the folder could not be undone: refused.
+  await assert.rejects(x.run({ restore: 'saved', paths: ['a.txt'] }), error => {
+    code('BAD_ARGUMENT')(error);
+    assert.match(
+      error.message,
+      /is a folder now and holds files this restore does not remove \(a\.txt\/\.env\)/,
+    );
+    return true;
+  });
+  assert.equal(text(x.root, 'a.txt/deep/x.txt'), 'inside');
+  rmSync(join(x.root, 'a.txt', '.env'));
+  const one = await x.run({ restore: 'saved', paths: ['a.txt'] });
+  assert.equal(one.written, 1);
+  assert.equal(one.removed, 1);
+  assert.equal(text(x.root, 'a.txt'), 'original');
+});
+
 test('kill the machine: a new checkout restores the unsaved files byte for byte', async t => {
   const x = await fixture(t);
   const bytes = Buffer.from([0, 1, 2, 255, 10, 13]);

@@ -227,7 +227,13 @@ The whole `metrics` action, capability discovery included, ends within 100 s. `f
 for 90 minutes. Keep the context needed by the question: prior failed submissions, check
 reuse, Lane saves and billing history can affect the report. The coverage gap names the
 actual horizon and leaves missing evidence unknown. `--limit` pages the reply, not the read.
-A read that cannot finish returns `METRICS_TIMEOUT` with its existing narrower-window command.
+A read that cannot finish within the 100 s returns `METRICS_TIMEOUT`; the same command
+(same window and horizon) asked again within the hour continues it. Every server call the
+read answered is kept in the project's agent cache on this machine (mode 0600, one hour);
+the next call answers those from the file and asks the server only for the rest, so no page
+is read twice and a window of any size costs the DB I/O of one read, split across calls.
+Repeat it until it answers (the reply says `resumed`, with the recorded and new call counts).
+A finished read deletes its file, so a later read of the same window starts fresh.
 
 Receipt counters need only in-window rows, plus the first receipt of each kind for collection
 coverage; their context is zero. Lane/save streams are read only when immutable input pins

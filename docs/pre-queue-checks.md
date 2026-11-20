@@ -418,6 +418,14 @@ failing tests (first 20), the reason, the fix Intent, and the named culprit or c
 landing. Landing replies mark `culprit` only on the receipt the culprit event names; other
 receipts in the red range show `in-red-range`.
 
+With `FORGE_NEEDS_FIX_CLEAR_ON_GREEN=1` (Item 593fc2d7, off by default), a **Fix needed** notice
+clears itself once main passes a full check (a full audit or a full-gated landing) at or after the
+landing its failure was recorded on: the fix-forward is on main. A **Reverted from main** notice
+stays until its Intent lands again. The cleared Intent completes again unless one of its Lanes is
+still open. Off, or with no notice open, a green costs nothing more; on, it schedules one hop that
+reads at most 20 Fix needed notices. A notice recorded after that green (its bisect still ran) waits
+for the next full green.
+
 With `FORGE_QUEUE_PARK_ON_MAIN_RED=1` (Item 687d1eda fix D, off by default), a landing whose
 admission check fails only on tests main's red audit fails too, none of them explained by its own
 paths or its own contract tests, is not failed: it waits under the main-red hold (`MAIN_RED`) and

@@ -238,6 +238,40 @@ for (const fromBase of [false, true])
     assert.equal(f.c.calls.length, idle);
   });
 
+test('593fc2d7: lanes run in a checkout whose save is still settling marks that Lane row and names the wait', async t => {
+  const f = await setup(t);
+  const { liveLanes } = await import('../dist/hosted-live-lanes.js');
+  const other = randomUUID();
+  const list = () =>
+    liveLanes(
+      {
+        root: f.root,
+        query: async () => ({
+          page: [
+            { laneId: f.entry.laneId, head: f.entry.head },
+            { laneId: other, head: f.entry.head },
+          ],
+          isDone: true,
+          continueCursor: null,
+        }),
+      },
+      {},
+    );
+  const command = { operationId: randomUUID(), message: 'split save' };
+  const returned = await saveHostedLane(f.root, command, f.exchange, contract);
+  assert.equal(returned.status, 'submitted');
+  const before = f.c.calls.length;
+  const [own, peer] = (await list()).result.page;
+  assert.equal(f.c.calls.length, before, 'the mark reads local files only');
+  assert.equal(own.saving.operationId, command.operationId);
+  assert.match(own.saving.note, /still settling; head is the one before it/);
+  assert.match(own.saving.next, new RegExp(`wait '\\{"operationIds":\\["${command.operationId}"\\]\\}'`));
+  assert.equal(peer.saving, undefined, "only this checkout's Lane");
+  await f.settle(returned.jobId);
+  await settleBackgroundSave(f.root, f.exchange);
+  assert.equal((await list()).result.page[0].saving, undefined, 'a settled save leaves no mark');
+});
+
 test('a settle that fails after the save returned is reported by the next command, once', async t => {
   const f = await setup(t);
   const command = { operationId: randomUUID(), message: 'split save' };

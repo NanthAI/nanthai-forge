@@ -26,6 +26,41 @@ test('Issue 1018d0f8: consecutive docs passes extend coverage without changing t
   assert.equal(f.row().lastGreen.coveredHead, undefined, 'a new full pass replaces docs coverage');
 });
 
+test('593fc2d7 switch FORGE_NEEDS_FIX_CLEAR_ON_GREEN: a full green main schedules the notice clear, only when on and a notice exists', async t => {
+  const prior = process.env.FORGE_NEEDS_FIX_CLEAR_ON_GREEN;
+  t.after(() => {
+    if (prior === undefined) delete process.env.FORGE_NEEDS_FIX_CLEAR_ON_GREEN;
+    else process.env.FORGE_NEEDS_FIX_CLEAR_ON_GREEN = prior;
+  });
+  for (const on of [false, true]) {
+    if (on) process.env.FORGE_NEEDS_FIX_CLEAR_ON_GREEN = '1';
+    else delete process.env.FORGE_NEEDS_FIX_CLEAR_ON_GREEN;
+    const f = await auditFixture();
+    const clears = () => f.pending('projectHostedCulprit:clearFixed').map(task => task.args[0]);
+    await f.land('full');
+    assert.deepEqual(clears(), [], 'no notice: a green schedules nothing');
+    f.patch('hostedProjects', f.projectId, {
+      needsFix: { [randomUUID()]: JSON.stringify({ state: 'needs-fix' }) },
+    });
+    await f.land('docs');
+    assert.deepEqual(clears(), [], 'a docs-only landing is no full green');
+    const gated = await f.land('full');
+    await f.land('contract');
+    await f.start();
+    const audited = await f.terminal('passed');
+    assert.equal(f.row().lastGreen.runId, audited.id);
+    assert.deepEqual(
+      clears(),
+      on
+        ? [
+            { projectId: f.projectId, sequence: gated.receipt.snapshot.revision },
+            { projectId: f.projectId, sequence: f.row().lastGreen.sequence },
+          ]
+        : [],
+    );
+  }
+});
+
 test('docs coverage cannot bridge an unaudited code landing', async () => {
   const f = await auditFixture();
   await f.land('full');

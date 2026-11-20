@@ -14,10 +14,12 @@ import { detachCheckReports, hydrateCheckReports } from './projectHostedCheckRep
 import { beginCheckOperation, loadHostedCheck } from './projectHostedCheckStore';
 import { insertHostedCheckRun } from './projectHostedChecks';
 import { hostedWriteProject, readHostedRecord, writeHostedRecord } from './projectHostedRecords';
+import { completeIntentWhenLanesDone } from './projectHostedIntentCompletion';
 import { prepareHostedRevert } from './projectHostedRevert';
 import {
   armAudit,
   auditSettings,
+  clearFixOnGreen,
   closeDrill,
   coverageLanding,
   noteRedCause,
@@ -1812,6 +1814,57 @@ export const accepted = internalMutation({
     const row = await acceptanceRow(ctx, input);
     invariant(row, 'NOT_FOUND', 'An actual accepted receipt is required.');
     await onRecoveryAccepted(ctx, hostedAcceptanceSchema.parse(JSON.parse(row.value)));
+    return null;
+  },
+});
+
+/** Scheduled by a full green main (switch FORGE_NEEDS_FIX_CLEAR_ON_GREEN): clears each needs-fix notice whose failed
+ * sequence that green covers. A reverted notice stays: its work is off main until it re-lands. At most 20 notices. */
+export const clearFixed = internalMutation({
+  args: { projectId: v.id('hostedProjects'), sequence: v.number() },
+  returns: v.null(),
+  handler: async (ctx, input) => {
+    const project = await ctx.db.get(input.projectId);
+    if (!clearFixOnGreen() || !project?.needsFix || !project.sourceAuthority) return null;
+    // Reverted notices stay in the map; filter before the cap so they never crowd out the clearable ones.
+    const open = Object.entries(project.needsFix)
+      .filter(([, value]) => (JSON.parse(value) as { state?: string }).state === 'needs-fix')
+      .slice(0, 20);
+    for (const [intentId] of open) {
+      const row = await readHostedRecord(ctx, {
+        projectId: project._id,
+        actor: project.owner,
+        kind: 'intent',
+        key: intentId,
+      });
+      const intent = row ? hostedRecordSchema.options[0].parse(JSON.parse(row.value)) : null;
+      const fix = intent?.needsFix;
+      if (
+        !intent ||
+        fix?.state !== 'needs-fix' ||
+        fix.sequence === undefined ||
+        fix.sequence > input.sequence
+      )
+        continue;
+      await clearNeedsFix(ctx, project._id, intentId);
+      const { needsFix: cleared, ...rest } = intent;
+      void cleared;
+      await writeHostedRecord(ctx, {
+        projectId: project._id,
+        actor: project.owner,
+        authorityEpoch: project.sourceAuthority.epoch,
+        expectedVersion: intent.version,
+        record: { ...rest, version: intent.version + 1 },
+      });
+      // The notice reopened a landed Intent; with the fix on main it completes again unless a Lane is still open.
+      await completeIntentWhenLanesDone(ctx, {
+        projectId: project._id,
+        actor: project.owner,
+        authorityEpoch: project.sourceAuthority.epoch,
+        intentId,
+        at: new Date().toISOString(),
+      });
+    }
     return null;
   },
 });

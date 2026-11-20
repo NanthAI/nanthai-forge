@@ -401,6 +401,7 @@ export async function noteMainLanding(
       ),
       earned: undefined,
     });
+    await clearFixedNotices(ctx, projectId, receipt.snapshot.revision);
     if (row.red) {
       await auditEvent(
         ctx,
@@ -509,6 +510,17 @@ export const parkOnMainRed = () => process.env.FORGE_QUEUE_PARK_ON_MAIN_RED === 
 /** Switch FORGE_QUEUE_PARK_EXACT_ON_MAIN_RED (Item 687d1eda: queue checks, not only admission, park
  * on main's red; off by default; queue-regression guard). */
 export const parkExactOnMainRed = () => process.env.FORGE_QUEUE_PARK_EXACT_ON_MAIN_RED === '1';
+/** Switch FORGE_NEEDS_FIX_CLEAR_ON_GREEN (Item 593fc2d7, off by default): a full green main at or after a
+ * needs-fix notice's failed sequence means its fix landed, so the notice clears itself in one scheduled hop.
+ * Off, or with no notice, a green costs nothing more. */
+export const clearFixOnGreen = () => process.env.FORGE_NEEDS_FIX_CLEAR_ON_GREEN === '1';
+async function clearFixedNotices(ctx: MutationCtx, projectId: Id<'hostedProjects'>, sequence: number) {
+  if (!clearFixOnGreen() || !(await ctx.db.get(projectId))?.needsFix) return;
+  await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedCulprit:clearFixed'), {
+    projectId,
+    sequence,
+  });
+}
 /** Records why main is red on the current episode's row, once recovery decides (Item 687d1eda). */
 export async function noteRedCause(
   ctx: MutationCtx,
@@ -591,6 +603,7 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
     });
     await auditEvent(ctx, row, 'green', at, run.request.expectedHead, run.id, meta.sequence, ended.record);
     await releaseMainHolds(ctx, projectId);
+    await clearFixedNotices(ctx, projectId, meta.sequence);
     if (count)
       await armAudit(
         ctx,

@@ -39,6 +39,15 @@ test('terminal read lines identify the actual Lane, Item and selected source wit
     ['Item abcdefgh: Fix reader · Done.'],
   );
   assert.deepEqual(agent('lanes', { page: [] }), ['No Lanes in this page.']);
+  assert.deepEqual(
+    agent('lanes', {
+      page: [
+        { laneId: 'abcdefgh-full', intent: 'Fix reader', state: 'active', saving: { operationId: 'x' } },
+      ],
+    }),
+    ['Lane abcdefgh: Fix reader · active · save still settling.'],
+    '593fc2d7: a Lane whose save is settling says so',
+  );
   assert.match(
     agent('status', { head: 'b'.repeat(64), lastActivityAt: '2026-11-17T00:00:00Z' })[0],
     /Saved State bbbbbbbb · last activity 2026-11-17 00:00:00 UTC/,

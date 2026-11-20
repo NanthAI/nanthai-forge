@@ -176,6 +176,9 @@ and preserves disjoint ignored output/dependency links. Re-run after interruptio
 to resume. Agent equivalents: `pull {}` and root `status {}`. No GitHub mirror
 read is needed; the installed CLI updater is separate. See the
 [refresh and cost reference](operations/source-exchange.md#hosted-main-client-checkout).
+In a Lane folder, `nforge agent . status '{"files":true}'` is the `git status` of
+your edits, and `nforge x . snapshots '{"restore":"saved","paths":["FILE"]}'` is
+`git checkout -- FILE` (undo it with `{"undo":1}`).
 
 ## Configure the first hosted check
 

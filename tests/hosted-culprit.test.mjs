@@ -1706,6 +1706,68 @@ test('every single culprit position stays within the logarithmic probe budget', 
   t.diagnostic(JSON.stringify({ boundaries: measurements }));
 });
 
+test('593fc2d7 switch FORGE_NEEDS_FIX_CLEAR_ON_GREEN: a full green at or after a needs-fix notice clears it; an older green or a reverted notice keeps it', async t => {
+  const prior = process.env.FORGE_NEEDS_FIX_CLEAR_ON_GREEN;
+  t.after(() => {
+    if (prior === undefined) delete process.env.FORGE_NEEDS_FIX_CLEAR_ON_GREEN;
+    else process.env.FORGE_NEEDS_FIX_CLEAR_ON_GREEN = prior;
+  });
+  const f = await fixture();
+  await f.runCulprit();
+  const run = f.probes()[0];
+  await f.transaction(
+    'unclear',
+    {
+      _handler: ctx =>
+        culprit.onCulpritRunTerminal(ctx, {
+          ...run,
+          status: 'failed',
+          endedAt: at,
+          terminalDigest: hash,
+          contractReports: {},
+        }),
+    },
+    {},
+  );
+  await f.runCulprit();
+  const { intentId } = JSON.parse(f.recovery().recovery);
+  const notice = (await f.readIntent(intentId)).needsFix;
+  assert.equal(notice.state, 'needs-fix');
+  const reverted = Array.from({ length: 21 }, () => randomUUID());
+  const project = () => f.tables.hostedProjects.get(f.projectId);
+  // Reverted notices recorded first (insertion order) never crowd the clearable one out of the 20 read.
+  f.patch('hostedProjects', f.projectId, {
+    needsFix: {
+      ...Object.fromEntries(reverted.map(id => [id, JSON.stringify({ state: 'reverted' })])),
+      ...project().needsFix,
+    },
+  });
+  const clear = sequence =>
+    f.transaction('clearFixed', culprit.clearFixed, { projectId: f.projectId, sequence });
+  delete process.env.FORGE_NEEDS_FIX_CLEAR_ON_GREEN;
+  await clear(notice.sequence);
+  assert.equal(culprit.needsFix(project()).length, 22, 'switch off: nothing clears');
+  process.env.FORGE_NEEDS_FIX_CLEAR_ON_GREEN = '1';
+  await clear(notice.sequence - 1);
+  assert.equal(culprit.needsFix(project()).length, 22, 'a green before the failed sequence proves no fix');
+  await clear(notice.sequence);
+  assert.deepEqual(
+    culprit
+      .needsFix(project())
+      .map(n => n.intentId)
+      .sort(),
+    [...reverted].sort(),
+    'the reverted notices stay until their work re-lands',
+  );
+  const cleared = await f.readIntent(intentId);
+  assert.equal(cleared.needsFix, undefined);
+  assert.equal(
+    cleared.status,
+    'completed',
+    'the notice reopened a landed Intent; its fix on main completes it',
+  );
+});
+
 test('static/missing failures and incomparable predecessor evidence use fix-forward without probes', async () => {
   for (const kind of ['static', 'environment', 'configuration', 'missing-range']) {
     const f = await fixture(1);

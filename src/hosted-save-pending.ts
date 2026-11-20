@@ -38,12 +38,16 @@ export const backgroundSaveName = 'background';
 /** The operation id of this checkout's pending save when it returned before its settle (local
  * files only, no call). */
 export function backgroundSaveOperation(root: string): string | undefined {
+  return backgroundSave(root)?.operationId;
+}
+/** The same pending save with the Lane it belongs to, from one marker read. */
+export function backgroundSave(root: string): { operationId: string; laneId: string } | undefined {
   const marker = readHostedLaneCheckout(root);
   if (!marker) return undefined;
   const pending = pendingSavePath(root, marker);
   if (!checkoutPathExists(pending)) return undefined;
   const prior = saveCommandSchema.parse(JSON.parse(readFileSync(pending, 'utf8')));
   return checkoutPathExists(join(clientCacheRoot(root), `saves/${prior.operationId}`, backgroundSaveName))
-    ? prior.operationId
+    ? { operationId: prior.operationId, laneId: marker.selection.laneId }
     : undefined;
 }

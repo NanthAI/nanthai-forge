@@ -173,7 +173,7 @@ export function unsavedFiles(root: string, laneId?: string) {
       ...(rows.length > 50 ? { more: rows.length - 50 } : {}),
     },
     note: rows.length
-      ? 'Unsaved: save records these files; land --save saves and lands them.'
+      ? 'Unsaved: save records these files; land --save saves and lands them. Undo one file (git checkout -- FILE): x snapshots {"restore":"saved","paths":["FILE"]}.'
       : 'This folder matches its saved head.',
   };
 }

@@ -2,15 +2,18 @@
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
+  rmdirSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
-import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
+import { readHostedLaneCheckout, type HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 import { captureSnapshot } from './hosted-lane-snapshot-capture.js';
 import { snapshotDirectory } from './lane-snapshot-hint.js';
 import {
@@ -231,7 +234,7 @@ export async function executeSnapshots(
       phase: 'list',
       ...log,
       next: log.entries.length
-        ? 'Undo with x snapshots {"undo":1}, redo with {"redo":1}, or restore one with {"restore":SEQ|"latest"} in the Lane checkout.'
+        ? 'Undo with x snapshots {"undo":1}, redo with {"redo":1}, or restore one with {"restore":SEQ|"latest"} in the Lane checkout; {"restore":"saved","paths":[FILE]} puts files back to the saved head (git checkout -- FILE).'
         : 'No snapshots yet: one is taken at each Forge command when files changed (policy autoSnapshot).',
     };
   }
@@ -241,14 +244,11 @@ export async function executeSnapshots(
     'Run undo, redo or restore with the Lane checkout as ROOT (start --open {laneId} opens one).',
   );
   root = realpathSync(root);
+  if (command.restore === 'saved')
+    return restoreSaved(root, projectId, client, marker, command.paths!, listed);
   // The current files first: the move itself must be undoable.
-  const before = await snapshotLaneCheckout(root, projectId, client);
-  if (before.status === 'skipped')
-    throw new ForgeError(
-      before.code ?? 'WORK_BUSY',
-      `Could not snapshot the current files before moving them (${before.reason}). Nothing was changed.`,
-    );
-  const log = await listed();
+  const current = captureSnapshot(root, marker);
+  const log = await protectCurrentFiles(root, laneId, projectId, client, listed, current, 'moving them');
   let seq = snapshotTarget(log.entries, {
     ...(command.undo ? { undo: command.undo } : {}),
     ...(command.redo ? { redo: command.redo } : {}),
@@ -359,4 +359,204 @@ export async function executeSnapshots(
   } finally {
     rmSync(stage, { recursive: true, force: true });
   }
+}
+
+/** A `restore:"saved"` path: relative to the Lane root, never outside it; "." selects every file. */
+function restorePath(path: string) {
+  const value = path.replace(/^(?:\.\/)+/, '').replace(/\/+$/, '') || '.';
+  invariant(
+    !value.startsWith('/') && !value.includes('\\') && !value.split('/').some(part => part === '..' || !part),
+    'BAD_ARGUMENT',
+    `restore:"saved" paths are relative to the Lane root, with no .. or empty segment: ${JSON.stringify(path)}.`,
+  );
+  return value;
+}
+const under = (file: string, path: string) => path === '.' || file === path || file.startsWith(`${path}/`);
+
+/**
+ * Snapshot the current files before a move or restore overwrites them, and confirm the snapshot
+ * is still on the server (ad80e037 review 7d11fb81): an unchanged tree makes no call and trusts
+ * this checkout's ledger, but the server drops a Lane's snapshots 14 days after its latest one,
+ * and a purge from another checkout drops them too. When the ledger names a snapshot the log no
+ * longer holds, the ledger is reset and the files are snapshotted again. A tree the server
+ * refused (quota) is never taken for snapshotted. Files equal to the saved head need no snapshot.
+ * Calls: the snapshot's own (none when unchanged) and the one log read the move needs anyway.
+ */
+async function protectCurrentFiles<Log extends { entries: { seq: number; kind: string; tree: string }[] }>(
+  root: string,
+  laneId: string,
+  projectId: string,
+  client: SnapshotClient,
+  listed: () => Promise<Log>,
+  capture: { tree: string; changes: unknown[] },
+  doing: string,
+): Promise<Log> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const before = await snapshotLaneCheckout(root, projectId, client);
+    if (before.status === 'skipped')
+      throw new ForgeError(
+        before.code ?? 'WORK_BUSY',
+        `Could not snapshot the current files before ${doing} (${before.reason}). Nothing was changed.`,
+      );
+    const log = await listed();
+    if (!capture.changes.length) return log;
+    const kept = readSnapshotLedger(root, laneId);
+    invariant(
+      kept.tree === capture.tree,
+      'WORK_BUSY',
+      `Could not snapshot the current files before ${doing} (the files changed or the snapshot was refused). Nothing was changed.`,
+    );
+    // Seq numbers start again after a drop (review d01db0d7): the entry must hold this very tree.
+    if (
+      log.entries.some(
+        entry => entry.seq === kept.seq && entry.kind === 'snapshot' && entry.tree === kept.tree,
+      )
+    )
+      return log;
+    // The server dropped the snapshot this checkout recorded: take it again, sending every object.
+    writeSnapshotLedger(root, { laneId, tree: null, seq: null, uploaded: [] });
+  }
+  throw new ForgeError(
+    'WORK_BUSY',
+    `Could not confirm a snapshot of the current files on the server before ${doing}. Nothing was changed.`,
+  );
+}
+
+/**
+ * `x snapshots {restore:"saved",paths}`: `git checkout -- FILE` (ad80e037). The named files (or
+ * every file under a named folder) go back to the Lane's saved head; other files are untouched.
+ * Like every move, the current files are snapshotted first and the result is recorded as a new
+ * snapshot whose parent is that one, so `{"undo":1}` brings the edits back. A path whose current
+ * bytes no snapshot can hold (secret-flagged, over the new-file cap, or left out like a save
+ * leaves out credentials) is refused, since putting it back could not be undone. No save; the
+ * head never moves. Calls: none when nothing differs; else the two snapshots (1-2 each) and one
+ * signed download per 100 head files the machine cache lacks.
+ */
+async function restoreSaved(
+  root: string,
+  projectId: string,
+  client: SnapshotClient,
+  marker: HostedLaneCheckoutMarker,
+  requested: string[],
+  listed: () => Promise<{ entries: { seq: number; kind: string; tree: string }[] }>,
+) {
+  const laneId = marker.selection.laneId;
+  const paths = [...new Set(requested.map(restorePath))];
+  const head = new Map<string, NativeFile>(marker.state.files.map(file => [file.path, file]));
+  const capture = captureSnapshot(root, marker);
+  const matched = (file: string) => paths.some(path => under(file, path));
+  const changes = capture.changes.filter(change => matched(change.path));
+  const unsafe = [...capture.notSaved.capped, ...capture.notSaved.held].filter(matched);
+  invariant(
+    !unsafe.length,
+    'BAD_ARGUMENT',
+    `Not restored: ${unsafe.slice(0, 5).join(', ')}${unsafe.length > 5 ? ` and ${unsafe.length - 5} more` : ''} ${unsafe.length === 1 ? 'is' : 'are'} left out of snapshots (secret scan or new-file size cap), so putting the saved bytes back could not be undone. Nothing was changed; edit or remove ${unsafe.length === 1 ? 'it' : 'them'} yourself.`,
+  );
+  for (const path of paths) {
+    if (changes.some(change => under(change.path, path)) || [...head.keys()].some(file => under(file, path)))
+      continue;
+    let present = false;
+    try {
+      lstatSync(join(root, path));
+      present = true;
+    } catch {
+      present = false;
+    }
+    throw new ForgeError(
+      present ? 'BAD_ARGUMENT' : 'NOT_FOUND',
+      present
+        ? `Not restored: ${path} is not in the saved head and is left out of snapshots like a save leaves out credentials and installs, so removing it could not be undone. Nothing was changed.`
+        : `Not restored: ${path} is in neither the saved head nor this folder. Nothing was changed; status {"files":true} lists the files that differ from the saved head.`,
+    );
+  }
+  invariant(
+    changes.every(change => change.after?.mode !== 'gitlink' && head.get(change.path)?.mode !== 'gitlink'),
+    'BAD_ARGUMENT',
+    'A named path is a submodule pointer; restore it with a sync instead. Nothing was changed.',
+  );
+  if (!changes.length)
+    return {
+      phase: 'restore',
+      laneId,
+      target: 'saved',
+      written: 0,
+      removed: 0,
+      // The left-out lists hold 20 each; a named file past them is never restored either.
+      next:
+        capture.notSaved.capped.length < 20 && capture.notSaved.held.length < 20
+          ? 'These files already match the saved head. Nothing was changed.'
+          : 'These files match the saved head or are left out of snapshots (secret scan or new-file size cap), which a restore never touches. Nothing was changed.',
+    };
+  const writes = changes.flatMap(change => {
+    const file = head.get(change.path);
+    return file ? [file] : [];
+  });
+  const removals = changes.filter(change => !head.has(change.path)).map(change => change.path);
+  // A saved file that is a folder now: restorable only when the restore removes everything in it.
+  const removing = new Set(removals);
+  const folders = writes
+    .map(file => file.path)
+    .filter(path => {
+      try {
+        return lstatSync(join(root, path)).isDirectory();
+      } catch {
+        return false;
+      }
+    });
+  for (const folder of folders) {
+    const left = (readdirSync(join(root, folder), { recursive: true }) as string[])
+      .map(entry => `${folder}/${entry}`)
+      .filter(path => !lstatSync(join(root, path)).isDirectory() && !removing.has(path));
+    invariant(
+      !left.length,
+      'BAD_ARGUMENT',
+      `Not restored: ${folder} is a folder now and holds files this restore does not remove (${left.slice(0, 3).join(', ')}${left.length > 3 ? ` and ${left.length - 3} more` : ''}); name the folder or move them aside first. Nothing was changed.`,
+    );
+  }
+  // The current files first, confirmed on the server: the restore must be undoable.
+  await protectCurrentFiles(root, laneId, projectId, client, listed, capture, 'restoring them');
+  const kept = readSnapshotLedger(root, laneId);
+  const stage = join(snapshotDirectory(root), `restore-${randomUUID()}`);
+  mkdirSync(stage, { recursive: true, mode: 0o700 });
+  try {
+    await headObjects(
+      client,
+      projectId,
+      writes.map(file => file.blob),
+      stage,
+    );
+    for (const path of removals) rmSync(join(root, path), { force: true });
+    // Only empty folders are left in them now (checked above); removed bottom-up without
+    // recursion, so a file written there meanwhile stops the restore instead of being deleted.
+    for (const folder of folders) {
+      const inner = (readdirSync(join(root, folder), { recursive: true }) as string[])
+        .map(entry => join(root, folder, entry))
+        .sort((a, b) => b.length - a.length);
+      try {
+        for (const path of [...inner, join(root, folder)]) rmdirSync(path);
+      } catch {
+        throw new ForgeError(
+          'WORK_BUSY',
+          `Not restored: ${folder} gained files during the restore. Your edits were snapshotted first: x snapshots {"restore":${kept.seq ?? '"latest"'}} brings this folder back as it was.`,
+        );
+      }
+    }
+    rebuildCheckoutFiles(root, stage, writes, worktreeText(root, marker.state.files));
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+  }
+  // Recorded in the same operation log: a snapshot whose parent is the one just taken.
+  const after = await snapshotLaneCheckout(root, projectId, client);
+  const from = kept.seq;
+  return {
+    phase: 'restore',
+    laneId,
+    target: 'saved',
+    written: writes.length,
+    removed: removals.length,
+    paths: changes.slice(0, 50).map(change => change.path),
+    ...(changes.length > 50 ? { more: changes.length - 50 } : {}),
+    ...(from !== null ? { snapshot: from } : {}),
+    next: `${changes.length} file${changes.length === 1 ? '' : 's'} back to the saved head. Your edits were snapshotted first${from !== null ? ` (snapshot ${from})` : ''}: ${after.status === 'saved' ? 'x snapshots {"undo":1} brings them back' : `x snapshots {"restore":${from ?? '"latest"'}} brings them back`}. Nothing was saved.`,
+  };
 }

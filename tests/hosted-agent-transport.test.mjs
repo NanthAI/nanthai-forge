@@ -955,6 +955,8 @@ test('ad80e037: status {files:true} lists the files that differ from the saved h
       { path: 'new.txt', change: 'added' },
     ],
   });
+  // The git checkout -- FILE of a Lane is named where the differing files are listed.
+  assert.match(reply.result.note, /x snapshots \{"restore":"saved","paths":\["FILE"\]\}/);
   await assert.rejects(
     s.transport().dispatch('status', { files: true, laneId: randomUUID() }),
     error => error.code === 'HOSTED_CHECKOUT_REQUIRED',

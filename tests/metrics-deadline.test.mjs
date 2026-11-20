@@ -98,3 +98,51 @@ test('a slow discovery that alone exceeds the budget still ends at the deadline'
     'no page read after the budget ran out',
   );
 });
+
+// ad80e037 line "8-day metrics": a read stopped by its deadline resumes; no page is read twice.
+test('a metrics read stopped at its deadline resumes from the recorded calls and reads no page twice', async t => {
+  const s = agentFixture(t);
+  const original = s.exchange.client.query;
+  const answered = [];
+  let hangFrom = 4;
+  s.exchange.client.query = async (ref, args) => {
+    const name = getFunctionName(ref);
+    if (name === 'projectSelfMetricBills:page') return { page: [], isDone: true, continueCursor: '' };
+    if (name !== 'projectSelfMetrics:page') return original(ref, args);
+    const at = Number(args.cursor ?? 0);
+    // The first call's server stalls at page 4 of every stream: the deadline ends that call.
+    if (at >= hangFrom) await new Promise(() => {});
+    answered.push(JSON.stringify([args.stream, args.cursor, args.from, args.to, args.contextDays]));
+    return {
+      page: [],
+      isDone: at >= 9,
+      continueCursor: String(at + 1),
+      cutover: null,
+      authority: { mode: 'server', epoch: 1 },
+    };
+  };
+  const transport = () => Object.assign(s.transport(), { metricsDeadlineMs: 400 });
+  const asked = { from: '2026-11-12', to: '2026-11-20' };
+  let next;
+  await assert.rejects(transport().dispatch('metrics', asked), error => {
+    assert.equal(error.code, 'METRICS_TIMEOUT');
+    assert.match(error.message, /calls answered so far are kept on this machine/);
+    next = JSON.parse(/metrics '([^']+)' \(the same window\) continues the read/.exec(error.message)[1]);
+    return true;
+  });
+  // The printed command is the same window, resolved; no token or new field.
+  assert.deepEqual(Object.keys(next), ['from', 'to', 'contextDays']);
+  assert.equal(next.from, '2026-11-12T00:00:00.000Z');
+  const first = answered.length;
+  assert(first > 0, 'the stopped call read some pages');
+  hangFrom = Infinity;
+  // The same command, as first typed, continues the stopped read.
+  const done = await transport().dispatch('metrics', asked);
+  assert.equal(done.result.resumed.recordedCalls >= first, true, 'the recorded pages were reused');
+  assert.equal(new Set(answered).size, answered.length, 'no page was read twice across the two calls');
+  // A finished read deletes its record: the next read of the window is fresh.
+  const before = answered.length;
+  const fresh = await transport().dispatch('metrics', next);
+  assert.equal(fresh.result.resumed, undefined);
+  assert(answered.length > before, 'a fresh read asks the server again');
+});

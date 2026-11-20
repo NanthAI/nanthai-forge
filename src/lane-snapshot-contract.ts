@@ -128,13 +128,26 @@ export const snapshotPrepareResultSchema = z
   })
   .strict();
 
-/** `x snapshots`: bare lists the Lane's operation log; one move or purge at a time. */
+/** Paths one `restore:"saved"` may name (files or folders). */
+export const SNAPSHOT_RESTORE_PATHS = 200;
+/** `x snapshots`: bare lists the Lane's operation log; one move or purge at a time.
+ * `{restore:"saved",paths}` is `git checkout -- FILE`: those files go back to the saved head,
+ * after a snapshot of the current files, so it is undoable like every move (ad80e037). */
 export const snapshotsCommandSchema = z
   .object({
     laneId: z.uuid().optional(),
     undo: z.number().int().min(1).max(100).optional(),
     redo: z.number().int().min(1).max(100).optional(),
-    restore: z.union([z.number().int().min(1), z.literal('latest')]).optional(),
+    restore: z
+      .union([z.number().int().min(1), z.literal('latest'), z.literal('saved')])
+      .optional()
+      .describe('SEQ or "latest": a snapshot. "saved" with paths: those files back to the saved head.'),
+    paths: z
+      .array(z.string().min(1).max(4096))
+      .min(1)
+      .max(SNAPSHOT_RESTORE_PATHS)
+      .optional()
+      .describe('With restore:"saved": files or folders, relative to the Lane root ("." is all).'),
     purge: z.literal(true).optional(),
   })
   .strict()
@@ -142,6 +155,10 @@ export const snapshotsCommandSchema = z
     value =>
       [value.undo, value.redo, value.restore, value.purge].filter(item => item !== undefined).length <= 1,
     'Choose one of undo, redo, restore or purge.',
+  )
+  .refine(
+    value => (value.restore === 'saved') === (value.paths !== undefined),
+    'restore:"saved" takes paths (files to put back to the saved head); paths go only with it.',
   );
 export type SnapshotsCommand = z.infer<typeof snapshotsCommandSchema>;
 
