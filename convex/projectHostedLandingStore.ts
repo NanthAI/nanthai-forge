@@ -44,6 +44,7 @@ import { PASS_HELD, keepsPassStamp } from '../src/landing-speed-alerts';
 import { recordFailure } from './projectFailureLog';
 import { bindRunnerAccounting, bindSupersededCheck } from './projectHostedLandingRunnerCosts';
 import { invariant } from '../src/errors';
+import { settleEndedBatch } from './projectHostedLandingBatchSettle';
 export type { LandingChannel } from './projectHostedLandingEvents';
 export { landingQueue, ensureLandingQueue, recordLandingObservation } from './projectHostedLandingEvents';
 import { recordLandingObservation } from './projectHostedLandingEvents';
@@ -484,6 +485,10 @@ export async function writeLanding(
       operationId: state.operationId,
       ...(state.error?.code ? { code: state.error.code } : {}),
     });
+  // A batch settles once no member is live (ab5c0017). Last, after this write's own effects:
+  // settling may release this member through writeBatch.
+  if (ended && previous.phase !== 'landed' && previous.phase !== 'terminal-failed')
+    await settleEndedBatch(ctx, state);
   return state;
 }
 /** Internal queue bookkeeping can retain a rejected outcome after actor revocation.

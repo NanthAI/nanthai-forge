@@ -273,6 +273,17 @@ Rejected members leave the train even when every member conflicts. A retried
 cohort restores its live members in their original order before successors can
 pin its new tail. Terminal solo rows leave the train after invalidation, so
 later queue events do not repeat it.
+A batch never outlives its members. When a member ends (cancelled,
+superseded, dropped or failed on any path, or landed alone after leaving the
+cohort), the same write checks its batch: if it is still composing, checking
+or in fallback and no member is live, it settles `landed` through the ordinary
+batch write, which releases its capsule waits. That reads the batch and member
+rows up to the first live one, at most eight. A composing or checking batch
+first retires the successors stacked on a member that ended failed; one
+stacked on a member that landed keeps its check, since its publish still
+compares the pinned head. The shared publish skips the check: it settles its
+batch in the same transaction. Late compose or check results for a settled
+batch change nothing.
 Early-resolution advice distinguishes conflicts against the outer base from
 conflicts between cohort members. Internal conflicts are exposed after the
 survivor check is installed and pin its exact checked State and reserved

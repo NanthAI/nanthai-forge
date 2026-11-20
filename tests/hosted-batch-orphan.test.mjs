@@ -98,6 +98,8 @@ test('replay 108a24e3: cancelling the member holding the fallback turn hands the
   for (const s of waiting) assert.equal(stateOf(f, s.id).phase, 'landed');
   assert.equal(stateOf(f, runner.id).error.code, 'LANDING_CANCELLED');
   assert.equal(f.pending().length, 0);
+  // ab5c0017: when the last member ends by landing, its own path settles the batch.
+  assert.equal(retained(f).phase, 'landed', 'a fallback batch settles when its last member lands');
 });
 
 /** The order of events behind 321d3b71: the member's one-shot alarm fires while
@@ -309,4 +311,319 @@ test('stall deadline and cancel hand-on stay within constant DB I/O budgets', as
       !cost(name).touched.some(k => /Pages|Shards|WorkRecords|Backups/.test(k)),
       `${name}: no history fan-in`,
     );
+});
+
+// Replays Issue ab5c0017 (2026-11-20): 15 dev batches stayed composing, checking or fallback
+// after every member was terminal, so their capsule waits were never released. Each member ended
+// on a path that never re-entered the batch (a cancel or supersede of a rejected member, failFinish).
+const finishStore = await import(moduleUrl('../convex/projectHostedFinishStore.ts'));
+const cancelApi = await import(moduleUrl('../convex/projectHostedLandingCancel.ts'));
+const finishWake = await import(moduleUrl('../convex/projectHostedFinishWake.ts'));
+const batchRowOf = f => [...f.tables.projectHostedLandingBatches.values()][0];
+// f.pending() hides capsule packs; a released wait is the pack scheduled with the wait's own dueAt.
+const heldDueAt = 1_700_000_000_000;
+const releasedWaits = (f, id) =>
+  [...f.tables._scheduled_functions.values()].filter(
+    task =>
+      task.name === 'projectLandingCapsuleRun:pack' &&
+      task.args[0].submissionId === id &&
+      task.args[0].dueAt === heldDueAt,
+  );
+/** The batch in `shape`, holding one capsule wait per member, as the 7-day packer leaves it. */
+function leak(f, shape) {
+  const row = batchRowOf(f);
+  f.patch('projectHostedLandingBatches', row._id, {
+    value: JSON.stringify({ ...retained(f), ...shape }),
+    capsuleWaits: retained(f).members.map(m => ({ submissionId: m.submissionId, dueAt: heldDueAt })),
+  });
+}
+const failFinish = (f, submissionId, code, message) =>
+  f.transaction(
+    `fail-finish-${code}`,
+    { _handler: ctx => finishStore.failFinish(ctx, { projectId: f.projectId, submissionId }, code, message) },
+    {},
+  );
+const supersede = (f, submissionId) =>
+  f.transaction(
+    'supersede-rejected-member',
+    {
+      _handler: ctx =>
+        cancelApi.cancelHostedLanding(ctx, {
+          projectId: f.projectId,
+          actor: stateOf(f, submissionId).actor,
+          request: { operationId: randomUUID(), authorityEpoch: 1, submissionId },
+          supersede: { laneId: randomUUID(), head: 'a'.repeat(40) },
+        }),
+    },
+    {},
+  );
+/** Late compose and check results for a settled batch change nothing and schedule nothing new. */
+async function lateIoIsNoOp(f) {
+  const before = JSON.stringify([...f.tables.projectHostedLandingBatches.values()].map(r => r.value));
+  const tickets = JSON.stringify(states(f));
+  const batch = retained(f);
+  await f.transaction(
+    'late-compose-result',
+    { _handler: ctx => finishWake.notifyFinishCompose(ctx, f.projectId, batch.composeOperationId) },
+    {},
+  );
+  await f.passChecks();
+  await drainLive(f);
+  assert.equal(
+    JSON.stringify([...f.tables.projectHostedLandingBatches.values()].map(r => r.value)),
+    before,
+    'the settled batch stays settled',
+  );
+  assert.equal(JSON.stringify(states(f)), tickets, 'no member is revived or rewritten');
+}
+function assertSettled(f) {
+  const row = batchRowOf(f);
+  assert.equal(retained(f).phase, 'landed', 'a batch with no live member settles terminal');
+  assert.equal(row.capsuleWaits, undefined, 'its capsule waits are released');
+  for (const member of retained(f).members)
+    assert.equal(releasedWaits(f, member.submissionId).length, 1, 'each held landing gets its pack wake');
+}
+
+test('replay ab5c0017: a parked rejected-all cohort (composing, included: []) whose only member is superseded by a Lane re-save settles terminal and releases its capsule waits', async t => {
+  const f = await batchesFixture(t, { count: 2 });
+  await drainLive(f);
+  // The shared compose dropped every member against a pending predecessor; each waits parked on it.
+  leak(f, { phase: 'composing', included: [] });
+  for (const s of states(f))
+    f.patch('projectHostedLandingRequests', rowOf(f, s.id)._id, {
+      phase: 'queued',
+      runnable: false,
+      value: JSON.stringify({
+        ...s,
+        phase: 'queued',
+        observation: { state: 'pending', cause: null, pendingReason: 'queued' },
+      }),
+    });
+  const [first, last] = states(f);
+  await supersede(f, first.id);
+  assert.equal(retained(f).phase, 'composing', 'a live member keeps the cohort open');
+  await supersede(f, last.id);
+  for (const s of states(f)) assert.equal(s.error.code, 'LANDING_SUPERSEDED');
+  assertSettled(f);
+  await lateIoIsNoOp(f);
+});
+
+test('replay ab5c0017: a checking batch whose included member ends through failFinish (a precompose conflict) settles terminal', async t => {
+  const f = await batchesFixture(t, { count: 2 });
+  await drainLive(f);
+  const [included, rejected] = states(f);
+  leak(f, { phase: 'checking', included: [included.id] });
+  // The rejected member is cancelled first; cancel skips the batch write for a rejected member.
+  await cancel(f, rejected.id);
+  assert.equal(retained(f).phase, 'checking');
+  await failFinish(f, included.id, 'COMPOSITION_CONFLICT', 'Synthetic precompose conflict against main.');
+  assert.equal(stateOf(f, included.id).error.code, 'COMPOSITION_CONFLICT');
+  assertSettled(f);
+  await lateIoIsNoOp(f);
+});
+
+test('replay ab5c0017: a fallback batch whose last member ends through failFinish settles terminal', async t => {
+  const { f, runner, waiting } = await fallbackWithRunner(t);
+  leak(f, {});
+  for (const s of waiting) await cancel(f, s.id);
+  assert.equal(retained(f).phase, 'fallback', 'the individual runner is still live');
+  await failFinish(f, runner.id, 'CHECK_FAILED', 'Synthetic individual check failure.');
+  assertSettled(f);
+  await lateIoIsNoOp(f);
+});
+
+const settlePass = await import(moduleUrl('../convex/projectHostedLandingBatchSettle.ts'));
+/** The operator pass over batches that leaked before the hook existed (dev, ab5c0017). */
+const runPass = (f, action) =>
+  settlePass[action]
+    ._handler(
+      {
+        runQuery: (_ref, args) => f.transaction('settle-pass-page', settlePass.leakedPage, args),
+        runMutation: (_ref, args) => f.transaction('settle-pass-apply', settlePass.settle, args),
+      },
+      { projectId: f.projectId },
+    )
+    .then(JSON.parse);
+
+test('ab5c0017 one-time pass: the dry run counts leaked batches and writes nothing; the run settles only those', async t => {
+  const f = await batchesFixture(t, { count: 2 });
+  await drainLive(f);
+  // The pre-hook leak: both members ended without any write reaching the hook.
+  leak(f, { phase: 'composing', included: [] });
+  for (const s of states(f))
+    f.patch('projectHostedLandingRequests', rowOf(f, s.id)._id, {
+      phase: 'terminal-failed',
+      runnable: false,
+      value: JSON.stringify({
+        ...s,
+        phase: 'terminal-failed',
+        observation: { state: 'superseded', pendingReason: null, cause: null },
+        error: { code: 'LANDING_SUPERSEDED', message: 'Synthetic pre-hook supersede' },
+      }),
+    });
+  f.advanceClock(2 * 86_400_000);
+  const before = JSON.stringify([...f.tables.projectHostedLandingBatches.values()]);
+  const dry = await runPass(f, 'dryRun');
+  assert.deepEqual(
+    {
+      scanned: dry.scanned,
+      open: dry.open,
+      leaked: dry.leaked,
+      over24h: dry.leakedOver24h,
+      waits: dry.capsuleWaits,
+    },
+    { scanned: 1, open: 1, leaked: 1, over24h: 1, waits: 2 },
+  );
+  assert.equal(dry.settled, 0);
+  assert.equal(
+    JSON.stringify([...f.tables.projectHostedLandingBatches.values()]),
+    before,
+    'the dry run writes nothing',
+  );
+  assert.equal(f.counts.filter(c => c.name.startsWith('settle-pass-apply')).length, 0);
+  const applied = await runPass(f, 'run');
+  assert.equal(applied.settled, 1);
+  assertSettled(f);
+  const again = await runPass(f, 'dryRun');
+  assert.equal(again.leaked, 0, 'a settled batch is not counted again');
+  assert.equal((await runPass(f, 'run')).settled, 0, 'a re-run changes nothing');
+});
+
+test('ab5c0017 one-time pass: a batch with a live member is counted open and left as it is', async t => {
+  const f = await batchesFixture(t, { count: 2 });
+  await drainLive(f);
+  const before = retained(f).phase;
+  const dry = await runPass(f, 'dryRun');
+  assert.equal(dry.open, 1);
+  assert.equal(dry.leaked, 0);
+  assert.equal((await runPass(f, 'run')).settled, 0);
+  assert.equal(retained(f).phase, before);
+});
+
+const landingStore = await import(moduleUrl('../convex/projectHostedLandingStore.ts'));
+const { landingObservation } = await import('../dist/hosted-landing.js');
+/** One synthetic ticket transition through the real writer (the version and identity rules apply). */
+const writeTicket = (f, name, id, change) =>
+  f.transaction(
+    name,
+    {
+      _handler: async ctx => {
+        const { row, state } = await landingStore.loadLanding(ctx, {
+          projectId: f.projectId,
+          submissionId: id,
+        });
+        await landingStore.writeLanding(ctx, row, { ...change(state), version: state.version + 1 }, false);
+      },
+    },
+    {},
+  );
+
+test('review 000e2d4f: the rejected member that recomposes solo and lands last settles its still-checking batch', async t => {
+  const f = await batchesFixture(t, { count: 2 });
+  await drainLive(f);
+  const [included, rejected] = states(f);
+  leak(f, { phase: 'checking', included: [included.id] });
+  await failFinish(f, included.id, 'COMPOSITION_CONFLICT', 'Synthetic precompose conflict against main.');
+  assert.equal(retained(f).phase, 'checking', 'the rejected member is still live');
+  // settleBatchConflicts on a moved main: the rejected member leaves the cohort and recomposes alone.
+  await writeTicket(f, 'recompose-rejected-solo', rejected.id, ({ batchId, ...state }) => ({
+    ...state,
+    batchOriginId: batchId,
+    batchSolo: true,
+  }));
+  assert.equal(retained(f).phase, 'checking');
+  await writeTicket(f, 'solo-landing', rejected.id, state => ({
+    ...state,
+    phase: 'landed',
+    observation: landingObservation('accepted'),
+    error: null,
+  }));
+  assertSettled(f);
+});
+
+for (const end of ['cancel', 'failFinish'])
+  test(`review 000e2d4f: the last live member of a predecessor cohort ending (${end}) still retires its pipelined successor`, async t => {
+    const f = await batchesFixture(t, { count: 10, batching: 'default', batchMaxSize: null });
+    await drainLive(f);
+    const batches = () =>
+      [...f.tables.projectHostedLandingBatches.values()].map(row => JSON.parse(row.value));
+    const successor = batches().find(b => b.predecessor);
+    assert(successor, 'cohorts check stacked on their predecessor cohort');
+    const pin = successor.predecessor.submissionId;
+    const predecessor = batches().find(b => b.members.some(m => m.submissionId === pin));
+    assert(predecessor.members.length > 1);
+    // The others were rejected by the shared compose and ended first; a rejected member's end skips the batch.
+    leak(f, {});
+    const row = [...f.tables.projectHostedLandingBatches.values()].find(
+      r => JSON.parse(r.value).id === predecessor.id,
+    );
+    f.patch('projectHostedLandingBatches', row._id, {
+      value: JSON.stringify({ ...JSON.parse(row.value), included: [pin] }),
+    });
+    for (const member of predecessor.members)
+      if (member.submissionId !== pin) await cancel(f, member.submissionId);
+    const after = id => batches().find(b => b.id === id);
+    assert.equal(after(successor.id).phase, successor.phase, 'rejected ends leave the successor alone');
+    // The successor's own check passed first: its members wait Ready on the pinned predecessor.
+    await f.rawChecks.pass(await f.rawChecks.activate(successor.runId));
+    await drainLive(f);
+    for (const member of successor.members) assert.equal(stateOf(f, member.submissionId).phase, 'ready');
+    if (end === 'cancel') await cancel(f, pin);
+    else await failFinish(f, pin, 'COMPOSITION_CONFLICT', 'Synthetic precompose conflict against main.');
+    assert.equal(
+      after(predecessor.id).phase,
+      'landed',
+      'the predecessor cohort has no live member and settles',
+    );
+    assert.equal(after(successor.id).phase, 'superseded', 'its speculative successor generation is retired');
+    for (const member of successor.members)
+      assert.notEqual(
+        stateOf(f, member.submissionId).batchId,
+        successor.id,
+        'the successor member re-selects',
+      );
+  });
+
+test('review 2a9d4b2e: settling keeps the successor pinned on a member that landed; only failed members retire successors', async t => {
+  const f = await batchesFixture(t, { count: 10, batching: 'default', batchMaxSize: null });
+  await drainLive(f);
+  const batches = () => [...f.tables.projectHostedLandingBatches.values()].map(row => JSON.parse(row.value));
+  const successor = batches().find(b => b.predecessor);
+  assert(successor, 'cohorts check stacked on their predecessor cohort');
+  const pin = successor.predecessor.submissionId;
+  const predecessor = batches().find(b => b.members.some(m => m.submissionId === pin));
+  const others = predecessor.members.map(m => m.submissionId).filter(id => id !== pin);
+  assert(others.length > 0);
+  await f.rawChecks.pass(await f.rawChecks.activate(successor.runId));
+  await drainLive(f);
+  for (const member of successor.members) assert.equal(stateOf(f, member.submissionId).phase, 'ready');
+  // The pinned member left the cohort, recomposed alone and landed; its peers are still live.
+  await writeTicket(f, 'recompose-pin-solo', pin, ({ batchId, ...state }) => ({
+    ...state,
+    batchOriginId: batchId,
+    batchSolo: true,
+  }));
+  await writeTicket(f, 'pin-solo-landing', pin, state => ({
+    ...state,
+    phase: 'landed',
+    observation: landingObservation('accepted'),
+    error: null,
+  }));
+  const after = id => batches().find(b => b.id === id);
+  assert.equal(after(predecessor.id).phase, predecessor.phase, 'live peers keep the cohort open');
+  for (const id of others) await failFinish(f, id, 'COMPOSITION_CONFLICT', 'Synthetic precompose conflict.');
+  assert.equal(after(predecessor.id).phase, 'landed', 'the cohort has no live member and settles');
+  assert.equal(
+    after(successor.id).phase,
+    successor.phase,
+    'the successor stacked on the landed member keeps its check',
+  );
+  for (const member of successor.members) {
+    assert.equal(
+      stateOf(f, member.submissionId).batchId,
+      successor.id,
+      'the successor member stays in its cohort',
+    );
+    assert.equal(stateOf(f, member.submissionId).phase, 'ready');
+  }
 });

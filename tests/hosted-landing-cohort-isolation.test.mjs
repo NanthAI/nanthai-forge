@@ -163,9 +163,12 @@ for (const history of [0, 575, 1150])
     // Calls 199 -> 204, reads 4216 -> 4411, writes 1236 -> 1376 (Item 9a04d916, compose settle;
     // owner-approved +$0.02/1k): each finish wake with no IO in flight is the settle mutation, and a step that needs IO hands it to one drive action (an acceptance page or cohort plan steps once more there).
     // Writes 1376 -> 1386: the always-on S1 writer (b149b16b, merged from main) arms one capsule wake per landed member; no call or read.
+    // Reads 4411 -> 4413 (ab5c0017): the conflicted member that ends failed reads its batch and the first
+    // live peer, so a batch whose members are all terminal settles. Only a failure of a batched member
+    // pays it; calls and writes are unchanged.
     assert(
       budget.calls <= 204 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 4411 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 4413 &&
         source.reduce((n, c) => n + c.writes, 0) <= 1386,
       JSON.stringify({
         ...budget,
