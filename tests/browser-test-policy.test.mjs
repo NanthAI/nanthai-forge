@@ -164,6 +164,7 @@ for (const path of [
   'package.json',
   'package-lock.json',
   'scripts/browser-test-policy.mjs',
+  'scripts/test-browser-names.mjs',
   'web/vite.config.ts',
 ])
   test(`1dd4e095: browser coverage follows changed browser input ${path}`, () => {

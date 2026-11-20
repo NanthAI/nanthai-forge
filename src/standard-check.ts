@@ -32,6 +32,7 @@ export const STANDARD_CHECK_INPUTS: readonly string[] = [
  * (src/first-check-risk.ts coverageChangePaths), not entries the governance list protects. */
 export const STANDARD_SELECTION_INPUTS: readonly string[] = [
   'scripts/browser-test-policy.mjs',
+  'scripts/test-browser-names.mjs',
   'scripts/check-browser-runtime.mjs',
   'tests/browser-runtime.mjs',
 ];

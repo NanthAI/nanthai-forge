@@ -7,12 +7,17 @@ import { shellQuote } from './shell-quote.js';
 export type PreflightIncomplete = {
   /** Must-run (protected: changed, learned, direct) files the wall-time budget did not start. */
   mustRun: number;
+  /** Planned test files that skipped because a runtime they need (a browser) is not installed here:
+   * a skip proves nothing, so it is never a pass (Item ad80e037 fix 5). */
+  needs?: PreflightNeeds | undefined;
   /** The one command that runs exactly the files this run did not start, with no time budget;
    * offered only when its estimate fits one agent wait (otherwise the landing check runs them). */
   finish?: string | undefined;
   /** About how long `finish` takes here, at the speed this run observed. */
   estimateMinutes: number;
 };
+
+export type PreflightNeeds = { runtime: string; files: string[]; next: string };
 
 /** Must-run files among those a run did not start. Protected tiers are the tests the plan never
  * trims because they exercise the change itself; when the wall clock stops one, the run proved
@@ -27,8 +32,8 @@ export function mustRunNotRun(tierTests: Record<string, string[]> | undefined, n
   return notRun.filter(test => guarded.has(test));
 }
 
-/** NOT COMPLETE details when a clean run left must-run files unstarted; undefined otherwise, so a
- * run whose protected tier fits its budget is unchanged. The finish command is `retry` (exactly the
+/** NOT COMPLETE details when a clean run left must-run files unstarted or skipped planned files for a
+ * missing runtime (NEEDS); undefined otherwise, so a run whose protected tier fits its budget is unchanged. The finish command is `retry` (exactly the
  * stopped files, passes reused) with `trim:false` (no wall-time cap), so one run finishes them. It is
  * offered only when it fits one agent wait (`waitSeconds`): a longer one outlives the agent's own
  * command timeout, so the next step is to land and let the landing check run them. */
@@ -39,13 +44,16 @@ export function incompletePreflight(input: {
   notRun: string[];
   secondsPerFile: number;
   waitSeconds?: number;
+  needs?: PreflightNeeds | undefined;
 }): PreflightIncomplete | undefined {
   const mustRun = mustRunNotRun(input.tierTests, input.notRun).length;
-  if (!mustRun) return undefined;
+  if (!mustRun && !input.needs) return undefined;
   const seconds = input.notRun.length * input.secondsPerFile;
   return {
     mustRun,
-    ...(seconds <= (input.waitSeconds ?? AGENT_WAIT_SECONDS)
+    ...(input.needs ? { needs: input.needs } : {}),
+    // Rerunning does not install a missing runtime: finish is for files the budget did not start.
+    ...(mustRun && seconds <= (input.waitSeconds ?? AGENT_WAIT_SECONDS)
       ? {
           finish: `nforge agent ${shellQuote(input.root)} preflight ${shellQuote(
             JSON.stringify({ laneId: input.laneId, retry: true, trim: false }),

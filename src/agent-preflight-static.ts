@@ -18,6 +18,7 @@ import { safeRelative } from './safe-relative.js';
 import { linkDirectory, writeSourceLink } from './source-links.js';
 import { globRegExp } from './path-glob.js';
 import { declaredPreflight } from './project-config.js';
+import { typecheckChecks, type TypecheckStep } from './preflight-typecheck.js';
 
 export { globRegExp };
 
@@ -27,13 +28,17 @@ export { globRegExp };
  * `{ name?, script? | command?: string[], inputs?: glob[] }`. `inputs` limits the check to changes
  * touching them; without it any change triggers the check. Absent a declaration, only formatter
  * checks the project already names conventionally run. Nothing else is guessed: an unknown
- * `check` script may be a full verification. */
+ * `check` script may be a full verification. Either way, the compiler steps of the project's own
+ * typecheck script follow (src/preflight-typecheck.ts), unless a declaration already runs it. */
 export type StaticCheck = {
   name: string;
   command: string[];
   fix?: string[];
   inputs: string[] | null;
-  source: 'declared' | 'conventional';
+  /** `derived`: read from the project's own typecheck script (src/preflight-typecheck.ts); judged as declared. */
+  source: 'declared' | 'conventional' | 'derived';
+  /** Set on the typecheck script's steps: what to run first and which program to list. */
+  typecheck?: TypecheckStep;
 };
 /** `failed` blocks the landing; every other outcome is reported and never blocks. `pre-existing`: the
  * check fails only in files the Lane does not change, or fails the same way on the Lane's base.
@@ -119,10 +124,13 @@ export function staticChecks(packageJson: string | undefined, forgeJson?: string
         source: 'declared',
       });
     }
-    return checks;
+    return [...checks, ...typecheckChecks(scripts, checks, true)];
   }
   const script = CONVENTIONAL_FORMAT_SCRIPTS.find(name => typeof scripts[name] === 'string');
-  return script ? [{ name: script, command: npm(script), inputs: CODE_INPUTS, source: 'conventional' }] : [];
+  const format: StaticCheck[] = script
+    ? [{ name: script, command: npm(script), inputs: CODE_INPUTS, source: 'conventional' }]
+    : [];
+  return [...format, ...typecheckChecks(scripts, format, false)];
 }
 
 /** A cheap guard test the project always wants run first when a change touches its `inputs`

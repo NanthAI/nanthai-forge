@@ -2,26 +2,8 @@
 // Browser work shares one existing test job; the other jobs need no browser cache.
 import { createRequire } from 'node:module';
 import { testDuration } from './test-shards.mjs';
-// A test file named `tests/<name>-browser.test.mjs` is a browser fixture by name, in
-// control and Candidate inventories alike, so a new one needs no registry edit. Only
-// older browser fixtures without that suffix are listed here.
-const browserName = /^tests\/[^/]+-browser\.test\.mjs$/;
-export const browserTests = [
-  'billing-home',
-  'billing-screens',
-  'docs-site',
-  'ds-reference',
-  'public-discovery-web',
-  'run-proof-screen',
-  'secrets-screen',
-  'stats-screen',
-  'ui-account-sessions',
-  'ui-agent-sessions',
-  'ui-code-index',
-  'ui-code-labels',
-].map(name => `tests/${name}.test.mjs`);
-const browserSet = new Set(browserTests);
-export const isBrowserTest = file => browserSet.has(file) || browserName.test(file);
+import { browserTests, isBrowserTest } from './test-browser-names.mjs';
+export { browserTests, isBrowserTest };
 /** Browser fixtures present in an inventory (Map, Set or array of paths). */
 export function browserFiles(files) {
   return [...(files instanceof Map ? files.keys() : files)].filter(isBrowserTest).sort();
@@ -40,6 +22,7 @@ export function browserChange(paths, files, graphCache = {}) {
           'tests/browser-runtime.mjs',
           'scripts/check-browser-runtime.mjs',
           'scripts/browser-test-policy.mjs',
+          'scripts/test-browser-names.mjs',
         ].includes(path),
     )
   )

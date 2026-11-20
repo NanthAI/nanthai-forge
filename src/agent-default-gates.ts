@@ -80,7 +80,9 @@ export function finishGates(
         // retained land payload, so land itself refused (friction ad80e037, 2026-11-19).
         ...(receipt.incomplete.finish ? { finish: receipt.incomplete.finish } : {}),
         estimateMinutes: receipt.incomplete.estimateMinutes,
-        reason: `NOT COMPLETE: ${receipt.incomplete.mustRun} must-run test file(s) did not run locally; only the landing check runs them unless you finish them first.`,
+        reason: receipt.incomplete.mustRun
+          ? `NOT COMPLETE: ${receipt.incomplete.mustRun} must-run test file(s) did not run locally; only the landing check runs them unless you finish them first.`
+          : `NOT COMPLETE: ${receipt.incomplete.needs?.files.length ?? 0} test file(s) skipped: needs ${receipt.incomplete.needs?.runtime ?? 'a runtime'}; only the landing check runs them unless you install it (${receipt.incomplete.needs?.next ?? 'see the receipt'}).`,
         deferredTests: receipt.deferredTests ?? 0,
         at: receipt.at,
       };

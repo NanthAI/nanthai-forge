@@ -164,9 +164,17 @@ test('Intent contract tests for Go, Python and Java test files are proposed and 
 test("Forge's own package.json preflight config reads unchanged", () => {
   const manifest = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
   const declared = JSON.parse(manifest).forge.preflight;
+  const checks = staticChecks(manifest);
   assert.deepEqual(
-    staticChecks(manifest).map(check => check.name),
+    checks.filter(check => check.source === 'declared').map(check => check.name),
     declared.static.map(check => check.name),
+  );
+  // Then the compiler steps of the project's own typecheck script (ad80e037 fix 6), and nothing else.
+  assert.deepEqual(
+    checks.filter(check => check.source !== 'declared').map(check => check.name),
+    ['tsconfig.json', 'web/tsconfig.json', 'convex/tsconfig.json', 'netlify/tsconfig.json'].map(
+      project => `typecheck ${project}`,
+    ),
   );
   assert.deepEqual(
     preflightGuards(manifest, () => true).map(guard => guard.name),

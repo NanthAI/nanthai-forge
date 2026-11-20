@@ -40,6 +40,7 @@ import {
 } from './preflight-dependencies.js';
 import {
   runStaticChecks,
+  STATIC_CHECK_TIMEOUT_MS,
   selectGuards,
   selectStaticChecks,
   preflightGuards,
@@ -48,11 +49,18 @@ import {
   type StaticCheck,
   type StaticScope,
 } from './agent-preflight-static.js';
+import { isTypecheck, runTypecheckSetup, selectTypechecks, typecheckEnv } from './preflight-typecheck.js';
 import { baseStateFiles, cachedObject } from './hosted-changed-paths.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import type { NativeFile } from './state/format.js';
 import { sourceTree } from './source-tree.js';
 import { incompletePreflight, preflightOutcome, preflightVerdict } from './agent-preflight-incomplete.js';
+import {
+  missingBrowserTests,
+  NEEDS_CHROMIUM,
+  preflightBrowserEnv,
+  skippedBrowserTests,
+} from './preflight-browser.js';
 import {
   deltaPaths,
   preflightDefinition,
@@ -207,9 +215,14 @@ export const preflightReceiptSchema = z
      * failed), with the one command that finishes them. */
     incomplete: z
       .object({
-        mustRun: z.number().int().positive(),
+        mustRun: z.number().int().nonnegative(),
         finish: z.string().optional(),
         estimateMinutes: z.number().int().positive(),
+        /** Test files that skipped because a runtime they need is not installed here (fix 5). */
+        needs: z
+          .object({ runtime: z.string(), files: z.array(z.string()).min(1), next: z.string() })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),
@@ -257,7 +270,7 @@ export type LocalSelection = {
   summary: string;
 };
 type StaticSelection = {
-  selected: Pick<StaticCheck, 'name' | 'command' | 'fix' | 'source'>[];
+  selected: Pick<StaticCheck, 'name' | 'command' | 'fix' | 'source' | 'typecheck'>[];
   untouched: string[];
 };
 export type PreflightPlan =
@@ -539,11 +552,12 @@ function runnerPlan(
     checks.selected.length || checks.untouched.length
       ? {
           static: {
-            selected: checks.selected.map(({ name, command, fix, source }) => ({
+            selected: checks.selected.map(({ name, command, fix, source, typecheck }) => ({
               name,
               command,
               ...(fix ? { fix } : {}),
               source,
+              ...(typecheck ? { typecheck } : {}),
             })),
             untouched: checks.untouched,
           },
@@ -1145,11 +1159,12 @@ function planTests(
       ...(checks.selected.length || checks.untouched.length
         ? {
             static: {
-              selected: checks.selected.map(({ name, command, fix, source }) => ({
+              selected: checks.selected.map(({ name, command, fix, source, typecheck }) => ({
                 name,
                 command,
                 ...(fix ? { fix } : {}),
                 source,
+                ...(typecheck ? { typecheck } : {}),
               })),
               untouched: checks.untouched,
             },
@@ -1371,14 +1386,18 @@ function localSelection(input: {
 }
 
 const observationSchema = z.union([
-  z
-    .array(z.string())
-    .transform(passed => ({ passed, failed: [] as string[], ms: {} as Record<string, number> })),
+  z.array(z.string()).transform(passed => ({
+    passed,
+    failed: [] as string[],
+    ms: {} as Record<string, number>,
+    skipped: {} as Record<string, string>,
+  })),
   z
     .object({
       passed: z.array(z.string()),
       failed: z.array(z.string()),
       ms: z.record(z.string(), z.number()),
+      skipped: z.record(z.string(), z.string()).default({}),
     })
     .strict(),
 ]);
@@ -1462,21 +1481,46 @@ export function runPreflight(
   // Seconds per test file this run observed; prices the finish command of an incomplete run.
   let secondsPerFile = plan.local?.secondsPerFile ?? PREFLIGHT_SECONDS_PER_FILE;
   let staticResults: StaticCheckResult[] = [];
+  let typecheckUntouched: string[] = [];
   // Every repository-declared command (static checks, the build, package commands, the runner) runs
   // in one clean environment per run, as checks do: private HOME/XDG/temp and npm config, allowlisted
   // variables only. Built only when something runs; removed when the run ends.
   let clean: ReturnType<typeof cleanCommandEnvironment> | undefined;
-  const cleanEnv = () => (clean ??= cleanCommandEnvironment('preflight')).env;
+  // Plus the browser settings the landing check's test jobs get (fix 5), resolved before the isolation.
+  const cleanEnv = () => {
+    if (clean) return clean.env;
+    const built = cleanCommandEnvironment('preflight');
+    Object.assign(built.env, preflightBrowserEnv());
+    return (clean = built).env;
+  };
+  // Browser test files that did not run their browser (not installed here, or a skip): NOT COMPLETE.
+  const needsBrowser: string[] = [];
   let heavy: HeldHeavySlot | null = null;
   try {
     if (plan.static?.selected.length) {
+      const checks = plan.static.selected.map(check => ({ ...check, inputs: null }));
+      const scope = changed === undefined ? undefined : staticScope(root, changed);
       staticResults = runStaticChecks(
         root,
-        plan.static.selected.map(check => ({ ...check, inputs: null })),
+        checks.filter(check => !isTypecheck(check)),
         cleanEnv(),
         undefined,
-        changed === undefined ? undefined : staticScope(root, changed),
+        scope,
       );
+      // The typecheck script's compiler steps (fix 6): only those whose program holds a changed path.
+      const typechecks = checks.filter(isTypecheck);
+      if (typechecks.length) {
+        const env = typecheckEnv(root, cleanEnv());
+        const narrowed = selectTypechecks(root, typechecks, changed, env, command =>
+          runTypecheckSetup(root, command, env, STATIC_CHECK_TIMEOUT_MS),
+        );
+        typecheckUntouched = narrowed.untouched;
+        if (narrowed.untouched.length)
+          process.stderr.write(
+            `preflight: not run here, no changed file is in its program (the landing check still runs it): ${narrowed.untouched.join(', ')}\n`,
+          );
+        staticResults.push(...runStaticChecks(root, narrowed.selected, env, undefined, scope));
+      }
       if (staticResults.some(result => result.outcome === 'failed')) exitCode = 1;
     }
     if (!staticOnly && plan.tests.length && exitCode === 0) {
@@ -1525,7 +1569,14 @@ export function runPreflight(
         // machine gets small groups. No file starts once the budget is spent; near the end groups shrink
         // to one file, so the run ends within the budget plus about one file. Every file it did not
         // start is named in the receipt with a one-command rerun of exactly those.
-        const queue = [...plan.tests];
+        const absentBrowser = new Set(missingBrowserTests(root, plan.tests, env));
+        if (absentBrowser.size) {
+          needsBrowser.push(...absentBrowser);
+          process.stderr.write(
+            `preflight: ${absentBrowser.size} browser test file(s) skipped: needs ${NEEDS_CHROMIUM.runtime}; ${NEEDS_CHROMIUM.next}\n`,
+          );
+        }
+        const queue = plan.tests.filter(test => !absentBrowser.has(test));
         // Declared guards are never stopped for time (docs/workflows.md#local-preflight-guards).
         const guardTests = new Set(plan.local?.guards?.flatMap(guard => guard.tests) ?? []);
         let ran = 0;
@@ -1615,7 +1666,17 @@ export function runPreflight(
           }
           try {
             const observed = observationSchema.parse(JSON.parse(readFileSync(report, 'utf8')));
-            passedTests.push(...group.filter(test => observed.passed.includes(test)));
+            // A browser test that skipped never drove its browser: no pass, no timing sample.
+            const skippedBrowser = new Set(
+              skippedBrowserTests(observed.skipped).filter(test => group.includes(test)),
+            );
+            for (const test of skippedBrowser) {
+              needsBrowser.push(test);
+              delete observed.ms[test];
+            }
+            passedTests.push(
+              ...group.filter(test => observed.passed.includes(test) && !skippedBrowser.has(test)),
+            );
             failedFiles.push(...group.filter(test => observed.failed.includes(test)));
             Object.assign(fileMs, observed.ms);
           } catch {
@@ -1704,14 +1765,21 @@ export function runPreflight(
     .slice(0, 3)
     .map(([file, ms]) => ({ file, ms: Math.round(ms) }));
   const evidence = preparedEvidence.get(plan);
-  const skipped = notRun.length + stopped.length + environmentUnits.length;
+  const skipped = notRun.length + stopped.length + environmentUnits.length + needsBrowser.length;
   const skippedFiles = [...(plan.local?.trimmedTests ?? []), ...notRun].sort();
   const rerun = skippedFiles.length ? (plan.local?.rerun ?? rerunCommand(root, laneId)) : undefined;
   const stoppedRerun = notRun.length ? stoppedCommand(root, laneId) : undefined;
   // A clean run that left must-run files unstarted proved nothing about them: NOT COMPLETE.
   const incomplete =
     exitCode === 0 && !environment
-      ? incompletePreflight({ root, laneId, tierTests: plan.local?.tierTests, notRun, secondsPerFile })
+      ? incompletePreflight({
+          root,
+          laneId,
+          tierTests: plan.local?.tierTests,
+          notRun,
+          secondsPerFile,
+          ...(needsBrowser.length ? { needs: { ...NEEDS_CHROMIUM, files: [...needsBrowser].sort() } } : {}),
+        })
       : undefined;
   const receipt: PreflightReceipt = {
     schema: 1,
@@ -1778,7 +1846,7 @@ export function runPreflight(
         )
       : 0;
   writePreflightReceipt(root, receipt);
-  process.stderr.write(`${runSummary(receipt, plan)}\n`);
+  process.stderr.write(`${runSummary(receipt, plan, typecheckUntouched)}\n`);
   // An incomplete run is still a clean timing sample; only a pass seeds the fallback estimate.
   if (receipt.incomplete && receipt.tests > 0) recordTiming(root, receipt);
   if (receipt.passed && receipt.tests > 0) {
@@ -1797,7 +1865,11 @@ export function runPreflight(
 /** Longest skipped list the closing line spells out; the receipt always names every file. */
 const SKIPPED_NAMED = 20;
 /** The builder's closing line: what ran, how long it took, and what waits for the pre-queue check. */
-function runSummary(receipt: PreflightReceipt, plan: PreflightPlan & { status: 'planned' }) {
+function runSummary(
+  receipt: PreflightReceipt,
+  plan: PreflightPlan & { status: 'planned' },
+  typecheckUntouched: string[] = [],
+) {
   const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
   const timing = [
     receipt.buildMs !== undefined ? `build ${seconds(receipt.buildMs)}` : '',
@@ -1805,12 +1877,22 @@ function runSummary(receipt: PreflightReceipt, plan: PreflightPlan & { status: '
     receipt.peakRssMb !== undefined ? `peak RSS ${receipt.peakRssMb} MB` : 'peak RSS unmeasured',
   ].filter(Boolean);
   const deferred = receipt.deferredTests ?? 0;
+  const needs = receipt.incomplete?.needs;
   const stopped = receipt.incomplete
-    ? ` ${receipt.incomplete.mustRun} must-run test file(s) (changed, learned or direct) not started, 0 failed: the ${receipt.budgetSeconds} s local budget ran out` +
-      ` (receipt.stopped names them, first). Next: land --save; the landing check runs them.` +
-      (receipt.incomplete.finish
-        ? ` To finish them here first (about ${receipt.incomplete.estimateMinutes} min): ${receipt.incomplete.finish}.`
-        : ` Finishing them here takes about ${receipt.incomplete.estimateMinutes} min, longer than one agent wait (${AGENT_WAIT_SECONDS / 60} min).`)
+    ? (receipt.incomplete.mustRun
+        ? ` ${receipt.incomplete.mustRun} must-run test file(s) (changed, learned or direct) not started, 0 failed: the ${receipt.budgetSeconds} s local budget ran out` +
+          ` (receipt.stopped names them, first). Next: land --save; the landing check runs them.` +
+          (receipt.incomplete.finish
+            ? ` To finish them here first (about ${receipt.incomplete.estimateMinutes} min): ${receipt.incomplete.finish}.`
+            : ` Finishing them here takes about ${receipt.incomplete.estimateMinutes} min, longer than one agent wait (${AGENT_WAIT_SECONDS / 60} min).`)
+        : '') +
+      (needs
+        ? ` ${needs.files.length} test file(s) skipped: needs ${needs.runtime}, so they are not a pass (${
+            needs.files.length <= SKIPPED_NAMED
+              ? needs.files.join(' ')
+              : 'receipt.incomplete.needs names them'
+          }). To run them here: ${needs.next}; the landing check runs them either way.`
+        : '')
     : receipt.stoppedForTime
       ? ` The ${receipt.budgetSeconds} s local budget ran out, so ${receipt.stoppedForTime} planned test file(s) were not started` +
         ` (receipt.stopped names them${
@@ -1832,8 +1914,9 @@ function runSummary(receipt: PreflightReceipt, plan: PreflightPlan & { status: '
         .map(item => ` ${item.name}: ${item.advisory}`)
         .join('')
     : '';
-  const untouched = plan.static?.untouched.length
-    ? ` Static checks not triggered by this change: ${plan.static.untouched.join(', ')}.`
+  const notTriggered = [...(plan.static?.untouched ?? []), ...typecheckUntouched];
+  const untouched = notTriggered.length
+    ? ` Static checks not triggered by this change: ${notTriggered.join(', ')}.`
     : '';
   const slow = receipt.slowest?.length
     ? ` Slowest: ${receipt.slowest.map(item => `${item.file} ${seconds(item.ms)}`).join(', ')}.`
