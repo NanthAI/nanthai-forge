@@ -13,7 +13,12 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { moduleInventory, moduleFindings } from './agent-weight-modules.mjs';
+import {
+  moduleInventory,
+  moduleFindings,
+  startupSample,
+  agentCeilingFindings,
+} from './agent-weight-modules.mjs';
 import { childEnv } from './child-env.mjs';
 import { agentCommands, firstNetworkSamples } from './perf/cli-first-network.mjs';
 import { measurement } from './perf/report.mjs';
@@ -91,16 +96,9 @@ export function measureAgentWeight(prefix, count = 5, enforceBoundary = true) {
         encoding: 'utf8',
         timeout: 15_000,
       });
-      const line = /FORGE_STARTUP (\{.*\})/.exec(child.stderr ?? '')?.[1];
-      if (child.status !== 0 || !line)
+      if (child.status !== 0)
         throw new Error('Startup fixture failed or returned incomplete evidence (diagnostics redacted).');
-      const sample = JSON.parse(line);
-      if (sample.code !== 0) throw new Error('Startup probe failed.');
-      return {
-        ...sample,
-        moduleUrls: JSON.parse(readFileSync(env.FORGE_PROBE_MODULES_FILE, 'utf8')),
-        stdout: child.stdout,
-      };
+      return startupSample(child, env.FORGE_PROBE_MODULES_FILE);
     };
     // One calibration sample before each measured batch, so the calibration sees the same load. Its own
     // compile cache keeps it independent of how many Forge modules the other batches cached.
@@ -180,14 +178,10 @@ function runnerScale(report, baseline) {
   return measured > 0 && reference > 0 ? Math.max(1, measured / reference) : 1;
 }
 export function agentWeightFindings(report, baseline) {
-  const cpuCeilings = {},
-    exactCeilings = {};
-  for (const [name, limit] of Object.entries(baseline.ceilings))
-    (name.endsWith('Ms') ? cpuCeilings : exactCeilings)[name] = limit;
-  const exact = [
-    ...weightFindings(report.actual, { ceilings: exactCeilings }),
-    ...agentSurfaceFindings(report, baseline),
-  ];
+  const cpuCeilings = Object.fromEntries(
+    Object.entries(baseline.ceilings).filter(([name]) => name.endsWith('Ms')),
+  );
+  const exact = [...agentCeilingFindings(report.actual, baseline), ...agentSurfaceFindings(report, baseline)];
   // CPU is judged at reference-runner speed: every CPU number divided by the runner scale.
   const scale = runnerScale(report, baseline);
   const atReference = value => (Number.isFinite(value) ? Math.round((value / scale) * 1000) / 1000 : value);

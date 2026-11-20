@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Standard code verification: installs and exercises the actual local npm archive.
 import assert from 'node:assert/strict';
-import { checkAgentWeight } from './check-agent-weight.mjs';
+import { checkAgentWeight, measureAgentWeight } from './check-agent-weight.mjs';
+import { cacheInstalledBytes, packageKey } from './package-installed-bytes.mjs';
 import { cleanupOwner } from '../tests/owner-cleanup.mjs';
 import { Worker } from 'node:worker_threads';
 import { spawnSync } from 'node:child_process';
@@ -21,6 +22,7 @@ import {
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { packageNpm } from './package-npm.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { componentManifestSha256 } from './selfhost-notices.mjs';
 import { packageDocuments, packageDocumentData, packageDocumentFragments } from './package-documents.mjs';
@@ -42,7 +44,7 @@ if (kept) {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
 }
 directory = realpathSync(directory);
-const npm = process.env.npm_execpath || createRequire(import.meta.url).resolve('npm/bin/npm-cli.js');
+const npm = packageNpm();
 const buildEnv = { ...process.env, PATH: `${dirname(process.execPath)}:${process.env.PATH ?? ''}` };
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const originalPath = process.env.PATH;
@@ -63,6 +65,8 @@ const run = (executable, argv, options = {}) => {
   return reply.stdout;
 };
 try {
+  const sourceManifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  const sourceKey = packageKey(root, sourceManifest);
   // Clean generated outputs, preventing an earlier hosted build or stray private file entering the package.
   rmSync(join(root, 'dist'), { recursive: true, force: true });
   run(process.execPath, [npm, 'run', 'build:core'], { cwd: root });
@@ -136,7 +140,13 @@ try {
     '--no-fund',
     archive,
   ]);
-  const weight = checkAgentWeight(prefix);
+  const weight = checkAgentWeight(prefix, {
+    measure(install) {
+      const report = measureAgentWeight(install);
+      cacheInstalledBytes(root, sourceManifest, report.actual.installedBytes, sourceKey);
+      return report;
+    },
+  });
   const installed = join(prefix, 'node_modules', '@nanthai', 'forge'),
     manifest = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8')),
     cli = join(installed, manifest.bin.nforge);

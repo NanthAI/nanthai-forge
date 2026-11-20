@@ -388,6 +388,12 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   them so that a source-only change skips the Convex runtime guard unless a changed path can touch its
   graph and the graph's files still match the last full pass, scans only the changed files for the
   per-file foundation rules and the format and lint tools, and runs the cross-file rules in full.
+  A declaration can use `packageFiles: true` to include the manifest's `files` paths alongside its
+  `inputs`. Forge uses it for installed bytes on changes to packaged files, using exact matching
+  local smoke evidence when available and checking a guaranteed lower bound otherwise. The
+  package runtime guard runs MCP/CLI module and chunk probes on preflight's existing core build
+  when runtime inputs change. Both reuse package smoke's counters. The landing check exercises
+  the complete archive and installation and measures CPU.
 - **Quick head run on large sets.** Under `require`, when the estimate is over `preflightMaxMinutes`
   so the gate would run no test, `land --save` runs the top of the same run order (fast repo-wide
   guards, declared and learned guards, the change's own tests, then the tests that load a changed

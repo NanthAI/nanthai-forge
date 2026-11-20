@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readFileSync } from 'node:fs';
 import { relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { weightFindings } from './agent-weight.mjs';
 
 /** Portable identities: no private install roots, and content-hash churn is not a new chunk. */
 export function moduleInventory(urls, root) {
@@ -49,4 +51,23 @@ export function moduleFindings(report, baseline) {
     ...[...byPaths].map(([paths, names]) => `${paths}: added modules/chunks: ${names.join(', ')}`),
     ...unknown,
   ];
+}
+
+/** Samples from the same startup preload in package smoke and the preflight probes. */
+export function startupSample({ stderr, stdout }, modulesFile) {
+  const line = /FORGE_STARTUP (\{.*\})/.exec(stderr ?? '')?.[1];
+  if (!line) throw new Error('Startup fixture returned incomplete evidence.');
+  const sample = JSON.parse(line);
+  if (sample.code !== 0) throw new Error('Startup probe failed.');
+  return { ...sample, moduleUrls: JSON.parse(readFileSync(modulesFile, 'utf8')), stdout };
+}
+
+/** Package ceilings whose verdict depends on counts or bytes. A local probe may have partial evidence. */
+export function agentCeilingFindings(actual, baseline, { partial = false } = {}) {
+  const ceilings = Object.fromEntries(
+    Object.entries(baseline.ceilings).filter(
+      ([name]) => !name.endsWith('Ms') && (!partial || name in actual),
+    ),
+  );
+  return weightFindings(actual, { ceilings });
 }

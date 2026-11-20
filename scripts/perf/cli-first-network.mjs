@@ -21,6 +21,53 @@ export const agentCommands = {
 const preload = fileURLToPath(new URL('./first-network-preload.mjs', import.meta.url));
 const root = fileURLToPath(new URL('../..', import.meta.url));
 
+function firstNetworkProbe(name, cli, modules, warm) {
+  const command = agentCommands[name];
+  const state = mkdtempSync(join(tmpdir(), 'forge-first-network-'));
+  return {
+    args: [
+      '--import',
+      preload,
+      cli,
+      'agent',
+      state,
+      ...command.args,
+      JSON.stringify({ url: PROBE, projectId: 'probe', ...command.input }),
+    ],
+    options: {
+      encoding: 'utf8',
+      env: childEnv({
+        extra: {
+          FORGE_AUTH_TOKEN: 'probe-not-a-token',
+          FORGE_DEPLOYMENT_URL: PROBE,
+          HOME: state,
+          XDG_STATE_HOME: state,
+          XDG_CONFIG_HOME: state,
+          XDG_CACHE_HOME: state,
+          ...(warm ? { NODE_COMPILE_CACHE: join(state, 'compile-cache') } : {}),
+          ...(modules ? { FORGE_PROBE_MODULES: '1' } : {}),
+        },
+      }),
+      timeout: 60_000,
+      cwd: root,
+    },
+    dispose() {
+      for (const path of [state, `${state}.forge-client`, `${state}.forge-metrics.jsonl`])
+        rmSync(path, { recursive: true, force: true });
+    },
+  };
+}
+
+function firstNetworkSample(stderr, passed) {
+  const line = /FORGE_FIRST_NETWORK (\{.*\})/.exec(stderr ?? '')?.[1];
+  const seen = line ? JSON.parse(line) : null;
+  return {
+    durationMs: seen && passed ? seen.cpuMs : NaN,
+    ...(seen ? { reason: seen.reason, maxRssKiB: seen.maxRssKiB } : {}),
+    ...(seen?.modules ? { modules: seen.modules.filter(url => url.startsWith('file:')) } : {}),
+  };
+}
+
 /** One sample per run: durationMs is the CPU before the first network call (NaN when the run never
  * reached one), with the loaded module count when `modules` is set. A compile cache, as the installed
  * launcher enables for every command, is warmed by one unmeasured run. */
@@ -29,48 +76,29 @@ export function firstNetworkSamples(
   name,
   { cli = join(root, 'dist', 'cli-entry.js'), modules = false } = {},
 ) {
-  const command = agentCommands[name];
-  const state = mkdtempSync(join(tmpdir(), 'forge-first-network-'));
+  const { args, options, dispose } = firstNetworkProbe(name, cli, modules, true);
+  const run = () => spawnSync(process.execPath, args, options);
   try {
-    const env = childEnv({
-      extra: {
-        FORGE_AUTH_TOKEN: 'probe-not-a-token',
-        FORGE_DEPLOYMENT_URL: PROBE,
-        HOME: state,
-        XDG_STATE_HOME: state,
-        XDG_CONFIG_HOME: state,
-        XDG_CACHE_HOME: state,
-        NODE_COMPILE_CACHE: join(state, 'compile-cache'),
-        ...(modules ? { FORGE_PROBE_MODULES: '1' } : {}),
-      },
-    });
-    const run = () =>
-      spawnSync(
-        process.execPath,
-        [
-          '--import',
-          preload,
-          cli,
-          'agent',
-          state,
-          ...command.args,
-          JSON.stringify({ url: PROBE, projectId: 'probe', ...command.input }),
-        ],
-        { encoding: 'utf8', env, timeout: 60_000, cwd: root },
-      );
     run();
     return Array.from({ length: count }, () => {
       const child = run();
-      const line = /FORGE_FIRST_NETWORK (\{.*\})/.exec(child.stderr ?? '')?.[1];
-      const seen = line ? JSON.parse(line) : null;
-      return {
-        durationMs: seen && child.status === 0 ? seen.cpuMs : NaN,
-        ...(seen ? { reason: seen.reason, maxRssKiB: seen.maxRssKiB } : {}),
-        ...(seen?.modules ? { modules: seen.modules.filter(url => url.startsWith('file:')) } : {}),
-      };
+      return firstNetworkSample(child.stderr, child.status === 0);
     });
   } finally {
-    for (const path of [state, `${state}.forge-client`, `${state}.forge-metrics.jsonl`])
-      rmSync(path, { recursive: true, force: true });
+    dispose();
+  }
+}
+
+/** Deterministic loads from one process per command; no warm-up or CPU verdict in preflight. */
+export async function firstNetworkModules(name, cli, run) {
+  const { args, options, dispose } = firstNetworkProbe(name, cli, true, false);
+  try {
+    const { stderr } = await run(args, options);
+    const sample = firstNetworkSample(stderr, true);
+    if (!sample.modules || !Number.isFinite(sample.durationMs))
+      throw new Error('Incomplete first-call probe.');
+    return sample.modules;
+  } finally {
+    dispose();
   }
 }

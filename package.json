@@ -45,6 +45,29 @@
           ]
         },
         {
+          "name": "package installed-byte ceiling",
+          "command": ["node", "scripts/package-ceilings.mjs", "--installed-bytes"],
+          "packageFiles": true,
+          "inputs": [
+            "src/**",
+            "package.json",
+            "package-lock.json",
+            "tsconfig.json",
+            "scripts/package-*.mjs",
+            "scripts/package-documents/**",
+            "scripts/agent-weight*.mjs",
+            "scripts/check-agent-weight.mjs",
+            "scripts/build-cli-bundle.mjs",
+            "scripts/build-edit-hook.mjs",
+            "scripts/control-build-key.mjs",
+            "scripts/prepare-convex-api.mjs",
+            "scripts/*.d.mts",
+            "scripts/perf/{mcp-*,startup-preload,cli-first-network,first-network-preload}.mjs",
+            "tests/agent-weight-baseline.json",
+            "tests/agent-weight-ledger/**"
+          ]
+        },
+        {
           "name": "packaged scripts",
           "command": [
             "node",
@@ -86,13 +109,17 @@
       ],
       "guards": [
         {
-          "name": "agent weight",
+          "name": "package runtime ceilings (MCP/CLI modules and chunks)",
           "tests": [
             "tests/perf-harness.test.mjs"
           ],
           "inputs": [
             "src/**",
             "scripts/perf/**",
+            "scripts/package-*.mjs",
+            "scripts/control-build-key.mjs",
+            "scripts/prepare-convex-api.mjs",
+            "scripts/*.d.mts",
             "scripts/agent-weight*.mjs",
             "scripts/agent-default-lines.mjs",
             "scripts/agent-verb-forms.mjs",

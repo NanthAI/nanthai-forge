@@ -25,7 +25,7 @@ export { globRegExp };
 /** A cheap, repository-wide check the landing check also runs. Declared as `preflight.static` in a
  * root forge.json (any language) or as `forge.preflight.static` in package.json; each entry is a
  * package.json script name or an object:
- * `{ name?, script? | command?: string[], inputs?: glob[] }`. `inputs` limits the check to changes
+ * `{ name?, script? | command?: string[], inputs?: glob[], packageFiles?: true }`. `inputs` limits the check to changes
  * touching them; without it any change triggers the check. Absent a declaration, only formatter
  * checks the project already names conventionally run. Nothing else is guessed: an unknown
  * `check` script may be a full verification. Either way, the compiler steps of the project's own
@@ -113,6 +113,8 @@ export function staticChecks(packageJson: string | undefined, forgeJson?: string
         throw new Error(
           `${found!.label} names a check that cannot run: ${JSON.stringify(item).slice(0, 120)}`,
         );
+      const inputs = strings(entry.inputs);
+      const packageFiles = entry.packageFiles === true && record(manifest) ? strings(manifest.files) : null;
       checks.push({
         name:
           typeof entry.name === 'string' && entry.name
@@ -120,7 +122,9 @@ export function staticChecks(packageJson: string | undefined, forgeJson?: string
             : String(entry.script ?? command.join(' ')),
         command,
         ...(strings(entry.fix) ? { fix: strings(entry.fix)! } : {}),
-        inputs: strings(entry.inputs),
+        inputs: packageFiles
+          ? [...(inputs ?? []), ...packageFiles.flatMap(path => [path, `${path}/**`])]
+          : inputs,
         source: 'declared',
       });
     }

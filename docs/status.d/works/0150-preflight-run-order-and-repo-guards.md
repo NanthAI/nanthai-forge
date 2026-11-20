@@ -8,3 +8,7 @@
   and explicit coverage last, so a long plan's time budget stops the files least likely to fail; a
   test that walks a relative folder or reads every file an import walk reaches is a consumer of that
   folder ([pre-queue checks](../../pre-queue-checks.md)).
+- Changes to packaged runtime inputs run the MCP/CLI module and chunk ceilings on preflight's
+  existing core build. Changes to any packaged file trigger the installed-byte check. It uses matching
+  local package-smoke evidence for exact installed bytes and a lower bound on a cold run. Full archive,
+  installation and CPU checks run at landing ([preflight](../../parallel-work-defaults.md#preflight)).

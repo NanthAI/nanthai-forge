@@ -7,9 +7,9 @@ const packageEnv = () =>
 // Bundle the existing locked production dependencies only in disposable staging.
 import { spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { packageNpm } from './package-npm.mjs';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -32,7 +32,7 @@ try {
     throw new Error('Package and locked runtime identities differ.');
   writeFileSync(join(stage, 'package-lock.json'), lock);
   writeFileSync(join(stage, 'forge-package-lock.json'), lock);
-  const npm = process.env.npm_execpath || createRequire(import.meta.url).resolve('npm/bin/npm-cli.js');
+  const npm = packageNpm();
   const install = spawnSync(
     process.execPath,
     [npm, 'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'],

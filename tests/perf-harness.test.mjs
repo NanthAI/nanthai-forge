@@ -5,7 +5,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { budgets, measurement, eagerFiles, landingTiming } from '../scripts/perf/report.mjs';
 import { cliColdStartSamples, cpuMs, options } from '../scripts/perf-harness.mjs';
 import { agentCommands, firstNetworkSamples } from '../scripts/perf/cli-first-network.mjs';
@@ -13,7 +13,6 @@ import { agentSurfaceFindings, readWeightBaseline } from '../scripts/agent-weigh
 import { agentActionNames } from '../scripts/check-growth.mjs';
 import { lifecycleVerbs } from '../scripts/agent-verb-forms.mjs';
 import { successfulSample } from '../scripts/perf/browser.mjs';
-import { childEnv } from '../scripts/child-env.mjs';
 
 test('budget medians include the boundary, and an empty or incomplete run never passes', () => {
   assert.equal(measurement('now', [{ durationMs: 1500 }]).status, 'pass');
@@ -84,39 +83,22 @@ test('381c62df: --version, --help and an idle turn-end hook stay on a minimal im
   }
 });
 
-test('ad80e037: the MCP listing stays within its module and tool-list byte ceilings on the source build', () => {
-  // Package smoke measures the installed archive; this is the same probe on the Lane's own build, so the
-  // preflight guard that runs this file on src/ changes finds an added MCP import or a longer tool text
-  // before the landing check does. Exact counts only; CPU is not judged from a local number.
+test('package smoke ceilings and before-network import boundaries apply to the core build used by preflight', () => {
   const root = fileURLToPath(new URL('..', import.meta.url));
-  const state = mkdtempSync(join(tmpdir(), 'forge-mcp-weight-'));
-  const run = spawnSync(
-    process.execPath,
-    [
-      '--import',
-      join(root, 'scripts/perf/startup-preload.mjs'),
-      join(root, 'scripts/perf/mcp-startup.mjs'),
-      pathToFileURL(`${root}/`).href,
-    ],
-    {
-      encoding: 'utf8',
-      timeout: 15_000,
-      env: childEnv({ extra: { HOME: state, XDG_CONFIG_HOME: state, XDG_STATE_HOME: state, TMPDIR: state } }),
-    },
-  );
-  rmSync(state, { recursive: true, force: true });
-  const sample = JSON.parse(/FORGE_STARTUP (\{.*\})/.exec(run.stderr)?.[1] ?? '{}');
-  assert.equal(sample.code, 0, run.stderr.slice(-2000));
-  const { ceilings } = readWeightBaseline('.');
-  assert.ok(
-    sample.modules <= ceilings.mcpModules,
-    `mcpModules: ${sample.modules}, ceiling ${ceilings.mcpModules}`,
-  );
-  const { toolListBytes } = JSON.parse(run.stdout);
-  assert.ok(
-    toolListBytes <= ceilings.toolListBytes,
-    `toolListBytes: ${toolListBytes}, ceiling ${ceilings.toolListBytes}`,
-  );
+  const run = spawnSync(process.execPath, ['scripts/package-ceilings.mjs', '--runtime', '--inventory'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  assert.equal(run.status, 0, run.stderr || run.stdout);
+  const inventory = JSON.parse(/^Package module inventory: (.+)$/m.exec(run.stdout)[1]);
+  for (const name of Object.keys(agentCommands)) {
+    assert.ok(inventory[name]?.length, `${name} never reached its first network call`);
+    assert.deepEqual(
+      inventory[name].filter(path => /\/(?:typescript\/|zod\/v4\/locales\/)/.test(path)),
+      [],
+      `${name} loaded the TypeScript compiler or zod locales`,
+    );
+  }
 });
 
 test('ad80e037: the agent actions and runtime dependencies on this source match the weight baseline', () => {
@@ -127,24 +109,6 @@ test('ad80e037: the agent actions and runtime dependencies on this source match 
     agentActions: [...agentActionNames(readFileSync('src/agent-verbs.ts', 'utf8'), lifecycleVerbs)].sort(),
   };
   assert.deepEqual(agentSurfaceFindings(report, baseline), []);
-});
-
-test('7b2ae8d8: agent status, planning, save and land reach their first network call without the TypeScript compiler, zod locales or the command graph', () => {
-  // The bundled CLI loads about 150 chunks for each (700 modules before); a ceiling with margin keeps
-  // the schemas and the executors from sliding back into one eager graph. No timing is asserted.
-  for (const name of Object.keys(agentCommands)) {
-    const [sample] = firstNetworkSamples(1, name, { modules: true });
-    assert.ok(Number.isFinite(sample.durationMs), `${name} never reached its first network call`);
-    assert.ok(
-      sample.modules.length <= readWeightBaseline('.').ceilings[`${name}Modules`],
-      `${name} loaded ${sample.modules.length} modules`,
-    );
-    assert.deepEqual(
-      sample.modules.filter(url => /\/typescript\/|\/zod\/v4\/locales\//.test(url)),
-      [],
-      `${name} loaded the TypeScript compiler or zod locales`,
-    );
-  }
 });
 
 test('7b2ae8d8: a run that never reaches a network call, or fails, is a failed sample and never passes', () => {
@@ -320,7 +284,7 @@ test('requested live setup failure still writes JSON and returns a failure, neve
 test('ad80e037: preflight runs this file as the agent weight guard for build inputs, never for a docs- or test-only Lane', async () => {
   const { preflightGuards, selectGuards } = await import('../dist/agent-preflight-static.js');
   const guards = preflightGuards(readFileSync('package.json', 'utf8'), path => existsSync(path));
-  const weight = guards.find(guard => guard.name === 'agent weight');
+  const weight = guards.find(guard => guard.name === 'package runtime ceilings (MCP/CLI modules and chunks)');
   assert.deepEqual(weight?.tests, ['tests/perf-harness.test.mjs']);
   for (const path of ['src/mcp-hosted-agent.ts', 'scripts/build-cli-bundle.mjs', 'package-lock.json'])
     assert.ok(selectGuards([weight], [path]).selected.length, path);
@@ -337,7 +301,7 @@ test('ad80e037: the agent weight guard triggers on every script the built CLI or
   const { preflightGuards } = await import('../dist/agent-preflight-static.js');
   const { globRegExp } = await import('../dist/path-glob.js');
   const weight = preflightGuards(readFileSync('package.json', 'utf8'), path => existsSync(path)).find(
-    guard => guard.name === 'agent weight',
+    guard => guard.name === 'package runtime ceilings (MCP/CLI modules and chunks)',
   );
   const patterns = weight.inputs.map(globRegExp);
   const spec = /(?:from|import\()\s*['"](\.{1,2}\/[^'"]+)['"]/g;
