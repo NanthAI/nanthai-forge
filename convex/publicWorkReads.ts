@@ -31,7 +31,7 @@ const object = (value: unknown): ObjectValue =>
   value && typeof value === 'object' && !Array.isArray(value) ? (value as ObjectValue) : {};
 /** A read's `request` argument decoded exactly as its reader decodes it (JSON.parse): an object, `{}` when there is
  * none, or null when the reader would see something other than an object. */
-const decodeRequest = (value: unknown): ObjectValue | null => {
+export const decodeRequest = (value: unknown): ObjectValue | null => {
   if (value === undefined) return {};
   let decoded = value;
   if (typeof value === 'string')

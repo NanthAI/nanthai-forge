@@ -127,6 +127,11 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   - Preflight's own slot gives its build and tests the same variables (so its tests see a
     `NODE_OPTIONS` preload the landing check's do not); its tests run `--test-concurrency=1`.
   - The full `npm test` is the landing check's.
+- A `node --test` that leaves out a preload the project's own `test` script passes (`--import`,
+  `--require`, `-r`) is refused before heavy takes a slot, builds or runs anything. This covers a
+  direct `node --test` and a node segment inside one `sh -c`/`bash -c` string (a `&&`, `||`, `;` or
+  `|` separated command list). The message names the missing flags and the corrected command; heavy
+  never rewrites the command. Only the project's package.json `test` script is read.
 - Heavy gives its command one compiled-test-module cache (`FORGE_TEST_MODULE_DIRECTORY`, under the
   OS temp folder) unless one is already set, and removes it when the command ends: every test file
   the command runs reuses modules earlier files compiled. Preflight does the same for all its

@@ -32,9 +32,10 @@ export function publicWorkPlan(
     }
     return read;
   };
-  const allowed = async (id: unknown) => {
+  type Row = Pick<PublicPlanRoot, 'hidden' | 'initiativeId' | 'parentId'> & { status?: string | undefined };
+  /** The one rule for a row this read holds, its Initiative and parent looked up (cached). */
+  const rowAllowed = async (item: Row | null) => {
     if (project.visibility !== 'public' || project.planVisibility === 'members') return false;
-    const item = await lookup(id);
     if (!item) return false;
     const [initiative, parent] = await Promise.all([lookup(item.initiativeId), lookup(item.parentId)]);
     const parentInitiative = await lookup(parent?.initiativeId);
@@ -46,6 +47,10 @@ export function publicWorkPlan(
       parent: parent ?? undefined,
       parentInitiative: parentInitiative ?? undefined,
     });
+  };
+  const allowed = async (id: unknown) => {
+    if (project.visibility !== 'public' || project.planVisibility === 'members') return false;
+    return rowAllowed(await lookup(id));
   };
   let chains: Map<string, string> | undefined;
   /** The Item an Intent belongs to, when the read can tie it: the Intent is that Item (one cached indexed lookup), or a
@@ -88,6 +93,7 @@ export function publicWorkPlan(
   };
   return {
     allowed,
+    rowAllowed,
     intentHidden,
     workHidden,
     selectionVisible,

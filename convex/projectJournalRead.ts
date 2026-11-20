@@ -12,7 +12,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { v } from 'convex/values';
 import { internalQuery } from './server';
 import { guard } from './cliServer';
-import { publicWorkResult, publicWorkSelected } from './publicWorkReads';
+import { decodeRequest, publicWorkResult, publicWorkSelected } from './publicWorkReads';
 import { journalRecordRead } from './projectHostedRecordReads';
 import { journalProvenanceRead } from './projectHostedProvenanceRead';
 import { journalSegmentSchema } from '../src/journal-segment';
@@ -29,7 +29,9 @@ export const read = internalQuery({
   handler: async (ctx, input) => {
     // Only the record and provenance readers read a nested `request` (a JSON string); every other reader reads the
     // flat fields, so a nested one is dropped before the selection check and the projection see it.
-    const command = JSON.parse(input.request) as Record<string, unknown>;
+    // Decoded as the readers decode it; anything but a JSON object is the caller's error, never a TypeError.
+    const command = decodeRequest(input.request);
+    invariant(command, 'BAD_ARGUMENT', 'A journal request must be a JSON object.');
     if (NESTED_READERS.has(input.query))
       invariant(
         command.request === undefined || typeof command.request === 'string',

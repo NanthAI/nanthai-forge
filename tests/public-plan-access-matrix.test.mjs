@@ -3,7 +3,8 @@
 // against every plan policy (a hidden Item, a hidden Initiative with its Items, a members-only plan) on every read
 // surface: the public project page (web, signed out), the Plan screen read, CLI planning reads (list, one Item with
 // its comments and landing notes, search, counts, short ids) and People (Latest and counts). Members see everything;
-// a viewer without a role sees only what the one visibility rule allows, signed in or not.
+// a viewer without a role sees only what the one visibility rule allows, signed in or not. An Archived and a Deleted
+// Item sit in every policy's plan: they are never public, whatever the policy (src/planning-model.ts `concealed`).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -45,10 +46,12 @@ const VIEWERS = ['signed-out', 'stranger', 'reader', 'writer', 'owner'];
 const MEMBERS = new Set(['reader', 'writer', 'owner']);
 const POLICIES = ['hidden-item', 'hidden-initiative', 'members-only'];
 /** Each plan row carries a token in its title, body, comment and landing note, so any leak names its row. */
-const ROWS = ['initiative', 'under', 'done', 'loose', 'lone'];
+const ROWS = ['initiative', 'under', 'done', 'loose', 'lone', 'archived', 'deleted'];
+/** Archived and Deleted Items: plan rows a status hides, not a flag. */
+const SHELVED = ['archived', 'deleted'];
 const SECRET = {
-  'hidden-item': ['lone'],
-  'hidden-initiative': ['initiative', 'under', 'done'],
+  'hidden-item': ['lone', ...SHELVED],
+  'hidden-initiative': ['initiative', 'under', 'done', ...SHELVED],
   'members-only': ROWS,
 };
 const token = row => `tok${row}x`;
@@ -108,6 +111,8 @@ async function world(t, policy) {
   items.done = s.item({ initiativeId: items.initiative.itemId, status: 'closed' });
   items.loose = s.item({});
   items.lone = s.item({ status: 'proposed' });
+  items.archived = s.item({});
+  items.deleted = s.item({});
   for (const row of ROWS) {
     Object.assign(items[row], {
       title: `${row} ${token(row)}`,
@@ -173,6 +178,8 @@ async function world(t, policy) {
   }
   const hide = async row =>
     s.send({ ...items[row], operationId: randomUUID(), expectedVersion: 1, hidden: true });
+  for (const row of SHELVED)
+    await s.send({ ...items[row], operationId: randomUUID(), expectedVersion: 1, status: row });
   if (policy === 'hidden-item') await hide('lone');
   if (policy === 'hidden-initiative') await hide('initiative');
   if (policy === 'members-only') project.planVisibility = 'members';
@@ -454,12 +461,13 @@ for (const policy of POLICIES)
         const done = JSON.stringify(surfaces['web Plan settled page'].ok ?? null).includes(token('done'));
         assert.equal(done, member || shown.includes('done'), cell('web Plan settled page'));
       }
-      // Plan counts: members read the stored totals; a viewer without a role counts only visible Items.
+      // Plan counts: members read the stored totals; a viewer without a role counts only visible Items. No count
+      // includes an Archived or Deleted Item.
       if (viewer !== 'signed-out') {
         const counts = surfaces['web Plan counts'].ok;
         assert.ok(counts, cell(`web Plan counts answers (${surfaces['web Plan counts'].error ?? ''})`));
         const total = Object.values(counts.issue).reduce((a, b) => a + b, 0);
-        const issues = ROWS.filter(row => row !== 'initiative');
+        const issues = ROWS.filter(row => row !== 'initiative' && !SHELVED.includes(row));
         assert.equal(
           total,
           member ? issues.length : issues.filter(row => shown.includes(row)).length,
@@ -899,6 +907,22 @@ for (const [name, setting] of [
     s.caller('owner');
     assert.match(await read({ collection: 'checks' }), /tok5x/, 'members');
   });
+
+// Opus review e2c5fa57 NIT-1: a journal history request that is not a JSON object (null, a bare string, an array, a
+// number or not JSON at all) is the caller's error: BAD_ARGUMENT for every viewer, never a TypeError.
+test('a journal request that is not a JSON object answers BAD_ARGUMENT, not a TypeError', async () => {
+  const s = fixture({ hidden: [id(5)] });
+  for (const viewer of ['signed-in-stranger', 'owner']) {
+    s.caller(viewer);
+    for (const request of ['null', '"text"', '[1]', '7', 'not json'])
+      for (const query of ['projectWorkIndex:records', 'projectHostedRecordReads:read'])
+        await assert.rejects(
+          journalRead.read._handler(s.ctx, { projectId: 'project', query, request, segments: [] }),
+          error => !(error instanceof TypeError) && error.code === 'BAD_ARGUMENT',
+          `${viewer} ${query} ${request}`,
+        );
+  }
+});
 
 // A read takes its selection flat or inside `request`: each is checked on its own, and a request the boundary cannot
 // read as its reader would is refused for a visitor.

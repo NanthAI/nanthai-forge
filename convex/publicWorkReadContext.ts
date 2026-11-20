@@ -3,6 +3,8 @@ import type { PublicPlanRoot } from './publicWorkPlan';
 import type { QueryCtx } from './_generated/server';
 import { mapFinishReadPort } from './projectFinishReadReader';
 import { shareQueryRoles } from './projectRole';
+import { planCounter } from './projectPlanCountsStore';
+import type { Id } from './_generated/dataModel';
 
 // A Convex value: plain objects and arrays are copied, bytes are copied, scalars are shared.
 const copy = <T>(value: T): T =>
@@ -13,6 +15,12 @@ const copy = <T>(value: T): T =>
       : value && typeof value === 'object'
         ? (Object.fromEntries(Object.entries(value).map(([key, item]) => [key, copy(item)])) as T)
         : value;
+const sources = new WeakMap<object, QueryCtx['db']>();
+/** The stored planning counter, read past this observation for one handler only: a visitor's Plan counts, which reduce
+ * the member-only row to what the visitor rule shows (projectPlanCounts.ts). Every other read stays observed, so the
+ * internal-plan refusal below still guards them. */
+export const visitorPlanCounter = (db: QueryCtx['db'], partition: Id<'projectWorkGenerations'>) =>
+  planCounter(sources.get(db) ?? db, partition);
 /** Track canonical Work rows already read by a handler. Source bytes never select a visibility policy.
  * This adds no DB operation and keeps the query's ordinary reactive dependencies. */
 export function publicWorkReadContext(ctx: QueryCtx) {
@@ -80,8 +88,8 @@ export function publicWorkReadContext(ctx: QueryCtx) {
         return typeof value === 'function' ? value.bind(original) : value;
       },
     });
-  const observeDb = (source: QueryCtx['db'], gets = new Map<string, Promise<unknown>>()) =>
-    new Proxy(source, {
+  const observeDb = (source: QueryCtx['db'], gets = new Map<string, Promise<unknown>>()) => {
+    const observed = new Proxy(source, {
       get(target, key) {
         if (key === 'query')
           return (table: Parameters<QueryCtx['db']['query']>[0]) => chain(target.query(table));
@@ -106,6 +114,9 @@ export function publicWorkReadContext(ctx: QueryCtx) {
         return typeof value === 'function' ? value.bind(target) : value;
       },
     });
+    sources.set(observed, source);
+    return observed;
+  };
   let db: QueryCtx['db'] | undefined;
   return {
     ctx: new Proxy(ctx, {

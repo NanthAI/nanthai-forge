@@ -187,7 +187,8 @@ up an Item's Initiative or parent treats it as hidden.
 
 "Public" means every viewer without a project role, signed in or not; readers, writers and the owner see the whole
 plan. The rule covers the public project page, the Plan screen (its open rows, its Done and dropped pages and its
-counts, which for a viewer without a role count only the Items they may see), CLI and MCP planning reads (lists, one
+counts, which for a viewer without a role count only the Items they may see, from the stored counter's visibility
+groups: one row plus the Initiatives and parents it names, never the Items), CLI and MCP planning reads (lists, one
 Item with its comments and landing receipts, search, counts and short ids; a search's read statistics are zero), the
 Lanes list, queue, conflict notices and History (each names a hidden Item nowhere: a Lane row of a hidden Item carries
 a stand-in Intent id) and People: on a members-only plan a viewer without a role sees no Items-closed or comment
@@ -206,7 +207,8 @@ cannot be tied to its Item without reading the plan, so a filter by one answers 
 On a public plan, a hidden Item still leaves a visitor's settled, list or search page shorter than asked, and a
 search cursor can show that a term matched more than one page, and its Lanes stay listed without title, under a
 stand-in Intent id, so they can be counted; no Item, title or id of it reaches the reply, and a page left empty is
-finished. A request such a viewer sends that is not a JSON object is refused. Only the project owner switches the plan between
+finished. A request such a viewer sends that is not a JSON object is refused; so is a journal history request that
+is not one, for every viewer (`BAD_ARGUMENT`). Archived and Deleted Items are never public, under any setting. Only the project owner switches the plan between
 public and members-only (`publicDiscovery:setSettings`, next to the Lane-title opt-in); there is no web control for
 it yet.
 `tests/public-plan-access-matrix.test.mjs` checks every viewer against every setting on these reads.

@@ -14,8 +14,10 @@ separate values. Existing CLI credentials remain usable while this expands.
 A Lane is the work identity. Its saved head stays fixed across a holder change;
 the transition records both holders, actor, time, reason (at most 280 characters) and exact saved head in
 the Lane record. The project activity feed, which readers and signed-in visitors of a public project can read,
-records only the change's kind and the Lane version. Feed entries written before that rule may still name the
-holders and carry the reason.
+records only the change's kind and the Lane version. Entries written before that rule named the holders and carried
+the reason; a one-time scrub (`convex/holderFeedScrub.ts`: `dryRun`, then `apply`) rewrites live ones to kind and
+version and changes nothing else. While the journal writer runs, entries old enough for journal history (13 days)
+are counted, not rewritten, and keep their text.
 Resuming the same app thread keeps its session name. A new thread or process
 fallback receives its own name and explicitly takes over an existing Lane.
 Holder transitions do not change the landing stop or create a Needs-you request.

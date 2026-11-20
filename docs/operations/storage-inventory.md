@@ -118,7 +118,7 @@ fragmentation. Replacement first clears old leaves in 32-document/1 MB batches b
 only ids/progress; it is removed on success, or retained as blocked until a relevant edit/retirement. Scheduled
 task references follow the existing schema-derived purge inventory. No source bodies or new history are retained.
 
-The `_workStorePlanCounts` row (one per partition, about 520 bytes; [data placement](../data-placement.md#planning-progress-counter))
+The `_workStorePlanCounts` row (one per partition, about 520 bytes plus at most 100 Initiative/parent visibility groups of 50 to 90 bytes; [data placement](../data-placement.md#planning-progress-counter))
 shares the same table, purge inventory and snapshot exclusion. It adds one row per partition and no per-Item storage.
 
 Plan authority and generation headers reuse `projectFinishReadRows`: one fixed row per active Work project, one companion per generation, with the existing project purge and generation deletion lifetime. Empty projects and removal tombstones retain no Plan project header. The Plan fixture caps their combined JSON storage at 4 KB for a project plus two generations. The landing storage ledger separates the fixed project header from per-landing growth and counts its nine index entries; no new table or retention period is added.

@@ -8,7 +8,7 @@ import { heavySlots, readClientSettings } from './client-settings.js';
 import { watchLocal, type LocalWatcher } from './local-watcher.js';
 import { invariant } from './errors.js';
 import { ensureCoreBuild } from './heavy-build.js';
-import { missingTestPreloads, preloadNotice } from './heavy-test-preloads.js';
+import { preloadRefusal } from './heavy-test-preloads.js';
 import { processAlive } from './local-process.js';
 import {
   estimateWaitMs,
@@ -456,6 +456,10 @@ export async function heavyCli(
     'BAD_ARGUMENT',
     'heavy: node --test received no test file paths, so Node would run the whole suite. Pass the selected files as separate arguments (zsh does not word-split a plain $VAR: use an array with "${files[@]}" or ${=VAR}), or run nforge heavy npm test for the full suite on purpose.',
   );
+  // Before a slot, the build or any command: a test missing the project's preloads fails only in its
+  // own process, after the work before it ran (friction dfb2a8d6). Refuse, never rewrite.
+  const preloadProblem = preloadRefusal(args, process.cwd());
+  invariant(!preloadProblem, 'BAD_ARGUMENT', preloadProblem ?? '');
   const slotLimit = () => heavySlots(readClientSettings().localHeavySlots);
   const slots = slotLimit();
   if (!endOfOptions && args[0] === '--status') {
@@ -515,8 +519,6 @@ export async function heavyCli(
     if (nodeTestPathCount(args) && !noBuild) {
       const built = await ensureCoreBuild(process.cwd());
       if (built !== 0) return built;
-      const missing = missingTestPreloads(args, process.cwd());
-      if (missing.length) process.stderr.write(preloadNotice(missing));
       // The bound runs from the command's start: a waiter's overdue clock restarts with it.
       writeHolder();
     }

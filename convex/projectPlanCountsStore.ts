@@ -12,7 +12,8 @@ type Kind = 'issue' | 'initiative';
 export type Tally = Record<Status, number>;
 /** The stored row. `after` is the backfill cursor: roots keyed at or before it are counted; null once complete. */
 export type PlanCounts = {
-  v: 1;
+  /** 2: `g` is kept. A version 1 row is complete for members but has no groups; its backfill rebuilds it. */
+  v: 1 | 2;
   done: boolean;
   after: string | null;
   issue: Tally;
@@ -20,11 +21,19 @@ export type PlanCounts = {
   /** The UTC day `closedToday` counts Issues closed on. */
   day: string;
   closedToday: number;
+  /** Version 2: counted Issues by what decides their public visibility besides their status (Item 76be0714), as
+   * tallies in PLAN_STATUSES order: `h` for an Issue hidden itself, else `initiativeId|parentId`. An Issue with none
+   * of the three is in no group (members' totals minus every group), so a plain plan's row keeps its bytes. */
+  g?: Record<string, number[]>;
+  /** Version 2: grouped Issues kept in no `g` entry once `g` held PLAN_GROUPS entries. Visitors never count them. */
+  x?: number[];
 };
+/** At most this many `g` entries (each about 50 to 90 bytes); later groups go to `x`, so the row stays bounded. */
+export const PLAN_GROUPS = 100;
 
 export const zeroTally = (): Tally => ({ proposed: 0, open: 0, 'in-progress': 0, closed: 0, abandoned: 0 });
 export const emptyPlanCounts = (done: boolean): PlanCounts => ({
-  v: 1,
+  v: 2,
   done,
   after: done ? null : '',
   issue: zeroTally(),
@@ -54,7 +63,21 @@ function rootWords(root: Root | null) {
     }
   return { key: root.key, kind, status };
 }
-/** A counted root's kind and status; null for Archived and Deleted roots, which no count includes. */
+/** An Issue root's visibility group (PlanCounts.g); null for none. The fields publicPlanVisible reads. */
+function rootGroup(root: Root) {
+  let row: { hidden?: unknown; initiativeId?: unknown; parentId?: unknown };
+  try {
+    row = JSON.parse(root.value) as typeof row;
+  } catch {
+    return 'h'; // An unreadable root is never counted as public.
+  }
+  if (row.hidden) return 'h';
+  const initiative = row.initiativeId ? String(row.initiativeId) : '';
+  const parent = row.parentId ? String(row.parentId) : '';
+  return initiative || parent ? `${initiative}|${parent}` : null;
+}
+/** A counted root's kind, status and (Issues) visibility group; null for Archived and Deleted roots, which no count
+ * includes. */
 export function planRootFacts(root: Root | null) {
   const words = rootWords(root);
   if (
@@ -63,7 +86,35 @@ export function planRootFacts(root: Root | null) {
     !(PLAN_STATUSES as readonly string[]).includes(words.status!)
   )
     return null;
-  return { key: words.key, kind: words.kind as Kind, status: words.status as Status };
+  const kind = words.kind as Kind;
+  return {
+    key: words.key,
+    kind,
+    status: words.status as Status,
+    group: kind === 'issue' ? rootGroup(root!) : null,
+  };
+}
+/** Move one Issue in or out of its group. An Issue joins its group's entry, or `x` when the entry is missing and
+ * either `g` is full or `x` holds any Issue: no entry is created while `x` is in use, so an Issue that went to `x` can
+ * only leave through `x`, never through an entry it was not counted in. Emptied entries stay until `pruneGroups`, so a
+ * status move inside one group (its -1, then its +1) keeps the Issue in its entry. */
+export function tallyGroup(counts: PlanCounts, group: string | null, status: Status, sign: 1 | -1) {
+  if (group === null) return;
+  const g = (counts.g ??= {});
+  const entry =
+    g[group] ??
+    (sign > 0 && !counts.x?.some(n => n > 0) && Object.keys(g).length < PLAN_GROUPS
+      ? (g[group] = PLAN_STATUSES.map(() => 0))
+      : (counts.x ??= PLAN_STATUSES.map(() => 0)));
+  const index = PLAN_STATUSES.indexOf(status);
+  entry[index] = Math.max(0, entry[index]! + sign);
+}
+/** Remove empty entries, `g` and `x` once a transaction's moves are applied: an empty one counts no Issue. */
+export function pruneGroups(counts: PlanCounts) {
+  for (const [group, tally] of Object.entries(counts.g ?? {}))
+    if (tally.every(n => n === 0)) delete counts.g![group];
+  if (counts.g && !Object.keys(counts.g).length) delete counts.g;
+  if (counts.x?.every(n => n === 0)) delete counts.x;
 }
 /** Unarchive or Restore puts back the status an Item left: bringing back an Item that left as closed is not a
  * closing; closing a shelved Item that left as anything else is. */
@@ -99,16 +150,23 @@ export const planCountsBirth = (
   value: JSON.stringify(emptyPlanCounts(true)),
 });
 
-type Change = { key: string; kind: Kind; status: Status; sign: 1 | -1; closing: boolean };
-/** Collects status moves in one transaction; `flush` reads and writes each touched counter once, and only when a
- * count moved (a title or body edit costs nothing). A partition with no counter row is left to its backfill. */
+type Change = {
+  key: string;
+  kind: Kind;
+  status: Status;
+  group: string | null;
+  sign: 1 | -1;
+  closing: boolean;
+};
+/** Collects status and visibility-group moves in one transaction; `flush` reads and writes each touched counter
+ * once, and only when a count moved (a title or body edit costs nothing). A partition with no counter row is left to its backfill. */
 export function planCountsWriter(db: MutationCtx['db']) {
   const changes = new Map<Id<'projectWorkGenerations'>, Change[]>();
   return {
     change(before: Root | null, after: Root | null) {
       const was = planRootFacts(before),
         now = planRootFacts(after);
-      if (was && now && was.kind === now.kind && was.status === now.status) return;
+      if (was && now && was.kind === now.kind && was.status === now.status && was.group === now.group) return;
       const list = (generationId: Id<'projectWorkGenerations'>) => {
         let entries = changes.get(generationId);
         if (!entries) changes.set(generationId, (entries = []));
@@ -138,7 +196,9 @@ export function planCountsWriter(db: MutationCtx['db']) {
           // Mid-backfill, a root past the cursor is counted when the backfill reaches it, with its status then.
           if (!counts.done && (counts.after === null || change.key > counts.after)) continue;
           counts[change.kind][change.status] = Math.max(0, counts[change.kind][change.status] + change.sign);
+          if (counts.v === 2) tallyGroup(counts, change.group, change.status, change.sign);
         }
+        pruneGroups(counts);
         const value = JSON.stringify(counts);
         if (value !== row.value) await db.patch(row._id, { value });
       }
