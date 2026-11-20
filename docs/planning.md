@@ -74,6 +74,8 @@ Items. The Deleted view reads deadlines in one indexed range per page, independe
 The purge append checks the selected Deleted version atomically, so a restore that lands first keeps
 the Item whole. A completed request retains its original completion time for retries.
 
+Forge permanently removes the Item's text, versions and comments from search, history and rebuilds. Landing receipts, Lane records and accepted source remain. Earlier backups and exports, and copies in commit messages or landing notes, stay as they were.
+
 A `purge-planning-item` Work command turns the current Deleted version into an id-only tombstone titled
 "Deleted Item". The tombstone carries the purge operation, the Deleted version's time and who purged it.
 The executor appends it with its projection in one mutation. Clients call the owner action for early
@@ -104,7 +106,7 @@ chunks), the work store's issue, comment and lifecycle versions, bodies and head
 Intent and every successor Intent a later start continued it on: the head becomes a new 'Deleted Item' version that
 keeps status and Lane pin, and every older version is purged; the chain ends at a successor id that names an Issue of
 its own), the outcome copy on each of their Lanes' overlap rows, lifecycle plan reasons and their copies in
-lifecycle events, and the store fingerprints. Lane records, receipts and accepted source retain their bytes.
+lifecycle events, and the store fingerprints.
 The purge checkpoints its archived command selection by page and reads one verified segment at a time. It replaces only segments
 that contain affected rows, keeps their logical positions, and deletes their superseded R2 objects and fragments
 before reporting completion. The completion revision invalidates Work exports and recovery selections that carried
