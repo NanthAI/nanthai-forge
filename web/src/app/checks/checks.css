@@ -1,0 +1,18 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Settings > Landing and checks (web/src/app/checks): the folded line of one landing setting. Every value is a
+   design-system token; scoped to [data-ds] like the system itself. */
+[data-ds] {
+  details.lset { border-bottom: var(--rule) solid var(--line); }
+  details.lset > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto 16px; gap: var(--s-3); align-items: center; min-height: var(--row-h); padding: 7px var(--gut); }
+  details.lset > summary .sub { display: block; color: var(--text-2); font-size: var(--t-meta); font-weight: var(--w-regular); }
+  details.lset > summary .val { display: flex; gap: var(--s-2); align-items: baseline; min-width: 0; font-size: var(--t-small); }
+  details.lset > summary .val > .t3 { font-size: var(--t-meta); }
+  details.lset > .pad { padding-top: 0; max-width: var(--m-prose); }
+  details.lset p { margin: 0; }
+  @media (hover: hover) and (pointer: fine) { details.lset > summary:hover { background: var(--hover); } details.lset > summary:hover .tw { color: var(--text); } }
+  @container (max-width: 620px) {
+    details.lset > summary { grid-template-columns: minmax(0, 1fr) 28px; row-gap: 2px; }
+    details.lset > summary .val { grid-column: 1; grid-row: 2; }
+    details.lset > summary .tw { grid-column: 2; grid-row: 1 / span 2; }
+  }
+}

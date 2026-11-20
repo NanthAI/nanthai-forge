@@ -5,7 +5,8 @@
 // tab holds no subscription. While the owner chooses a check, CheckRoutes starts from the CI the project has (the CI
 // files on main, use-workflows.ts). With a check chosen, one more read says whether it has decided a landing yet
 // (FirstLanding.tsx), because a saved setting alone is not a connected CI. Settings that have no effect are not
-// offered as choices; Automatic settings appear once their engine (Item bd0f850e) is on main.
+// offered as choices. How a landing is checked is one folded line per setting, from the policy already read
+// (LandingSettings.tsx); the Automatic and Manual switch appears once its engine (Item bd0f850e) is on main.
 import { useEffect, useState } from 'react';
 import { useConvex } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
@@ -19,6 +20,7 @@ import { landedAt } from '../code/code-words';
 import { checkWords, type SetupView } from '../start/setup-model';
 import type { PlaceProps } from '../screen-route';
 import { CheckRoutes } from './CheckRoutes';
+import { LandingSettings } from './LandingSettings';
 import { AwaitingFirstLanding, useFirstChecked } from './FirstLanding';
 import '../start/start.css';
 
@@ -226,19 +228,7 @@ export default function LandingChecks({ projectId, route, projectName, feed }: P
         ) : null}
       </Region>
       <Approvals facts={facts} projectId={projectId} onDone={refresh} />
-      {landing ? (
-        <Region
-          title="Landing mode"
-          hint={landing.mode === landing.effective ? undefined : `set to ${landing.mode}`}
-        >
-          <Row cols="minmax(0, 1fr)">
-            <div>
-              <div className="ttl">{landing.label}</div>
-              {landing.reason ? <div className="meta">{landing.reason}</div> : null}
-            </div>
-          </Row>
-        </Region>
-      ) : null}
+      <LandingSettings policy={facts.policy} landing={landing} owner={owner} />
     </div>
   );
 }

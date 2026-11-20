@@ -185,3 +185,147 @@ test('the prompt for an agent names the file, the exact line and that the owner 
   });
   assert.match(added, /below line 5/);
 });
+
+const ls = await import(moduleUrl('../web/src/app/checks/landing-settings.ts'));
+const policyOf = (acceptance = {}, checks) => ({
+  acceptance: { mode: 'auto-on-pass', protectedPaths: [], ...acceptance },
+  ...(checks ? { checks } : {}),
+});
+const row = (policy, id) => ls.landingSettings(policy).find(setting => setting.id === id);
+
+test('each landing setting shows the value in effect and whether the owner set it', () => {
+  const fresh = policyOf();
+  assert.deepEqual(
+    ls.landingSettings(fresh).map(setting => [setting.id, setting.value, setting.source]),
+    [
+      ['mode', 'Strict', 'default'],
+      ['pre-queue', 'Off', 'default'],
+      ['group', 'Up to 8', 'Automatic'],
+      ['early', 'On', 'default'],
+      ['revert', 'On', 'default'],
+    ],
+  );
+  const set = policyOf({
+    landingMode: 'fast',
+    admissionCheck: 'full',
+    earlyResolve: 'off',
+    autoRevert: false,
+  });
+  assert.deepEqual(
+    ['mode', 'pre-queue', 'early', 'revert'].map(id => [row(set, id).value, row(set, id).source]),
+    [
+      ['Fast', 'set by the owner'],
+      ['On', 'set by the owner'],
+      ['Off', 'set by the owner'],
+      ['Off', 'set by the owner'],
+    ],
+  );
+  assert.equal(row(policyOf({ admissionCheck: true }), 'pre-queue').value, 'On, affected tests only');
+  assert.equal(row(policyOf({ admissionCheck: false }), 'pre-queue').source, 'set by the owner');
+});
+
+test('Automatic is said only where Forge picks from the project’s own data', () => {
+  const automatic = ls.landingSettings(policyOf()).filter(setting => setting.source === 'Automatic');
+  assert.deepEqual(
+    automatic.map(setting => setting.id),
+    ['group'],
+  );
+  assert.deepEqual(
+    [row(policyOf({ batchMaxSize: 3 }), 'group').value, row(policyOf({ batchMaxSize: 3 }), 'group').source],
+    ['Up to 3', 'set by the owner'],
+  );
+  assert.deepEqual(
+    [
+      row(policyOf({ landing: 'serial' }), 'group').value,
+      row(policyOf({ landing: 'serial' }), 'group').source,
+    ],
+    ['One at a time', 'set by the owner'],
+  );
+});
+
+test('a setting with no effect on the project is not listed', () => {
+  assert.equal(
+    row(policyOf(), 'width'),
+    undefined,
+    'unset, the width is a fixed 6 the project did not choose, so it is not a row',
+  );
+  assert.equal(row(policyOf({}, { runner: 'github-actions', concurrency: 4 }), 'width').value, '4');
+});
+
+test('every setting explains itself and names the owner’s command that changes it', () => {
+  for (const setting of ls.landingSettings(policyOf({}, { runner: 'github-actions', concurrency: 4 }))) {
+    assert.ok(setting.does.length > 40 && setting.costs.length > 40, setting.id);
+    assert.match(setting.docs, /^\/docs\//);
+    assert.doesNotMatch(setting.values, /leave it out/, 'set-policy merges fields: leaving one out keeps it');
+    const [group, name] = setting.key.split('.');
+    assert.equal(ls.settingCommand(setting), `nforge x . set-policy '{"${group}":{"${name}":VALUE}}'`);
+  }
+});
+
+test('a paused fast mode says so on its line, with the recorded reason', () => {
+  const landing = { state: 'suspended', reason: 'main is red' };
+  const mode = row(policyOf({ landingMode: 'fast' }), 'mode');
+  assert.equal(mode.note, undefined);
+  const paused = ls.landingSettings(policyOf({ landingMode: 'fast' }), landing)[0];
+  assert.deepEqual([paused.value, paused.note], ['Fast, paused', 'Landing strictly for now: main is red']);
+});
+
+test('grouping rows appear only where grouping has an effect, by the engine’s own rule', async () => {
+  const { hostedBatching } = await import(moduleUrl('../src/hosted-landing-batch.ts'));
+  for (const mode of ['review', 'auto-on-pass'])
+    for (const landing of [undefined, 'batched', 'optimistic', 'serial']) {
+      const policy = policyOf(
+        { mode, ...(landing ? { landing } : {}) },
+        { runner: 'github-actions', concurrency: 4 },
+      );
+      const grouped = hostedBatching(policy);
+      assert.equal(ls.groupsChanges(policy.acceptance), grouped, `${mode} ${landing}`);
+      const ids = ls.landingSettings(policy).map(setting => setting.id);
+      assert.equal(ids.includes('pre-queue'), grouped, `pre-queue ${mode} ${landing}`);
+      assert.equal(ids.includes('width'), grouped, `width ${mode} ${landing}`);
+      assert.equal(ids.includes('group'), mode === 'auto-on-pass', `group ${mode} ${landing}`);
+    }
+  assert.deepEqual(
+    ls.landingSettings(policyOf({ mode: 'review' })).map(setting => setting.id),
+    ['mode', 'early', 'revert'],
+    'a person approves each landing: nothing is grouped, so no grouping setting is shown',
+  );
+  assert.deepEqual(
+    [row(policyOf({ landing: 'serial' }), 'group').value, row(policyOf({ landing: 'serial' }), 'pre-queue')],
+    ['One at a time', undefined],
+  );
+  // One at a time, the group size has no effect, so the command turns grouping on instead.
+  assert.equal(row(policyOf({ landing: 'serial' }), 'group').key, 'acceptance.landing');
+  assert.equal(row(policyOf(), 'group').key, 'acceptance.batchMaxSize');
+});
+
+test('how a change applies matches the owner gate and the pinned landing policy', async () => {
+  const { OWNER_GATE, acceptancePolicyDigest, ownerGated } = await import(
+    moduleUrl('../src/policy-digest.ts')
+  );
+  const grouped = policyOf({}, { runner: 'github-actions', concurrency: 4 });
+  const serial = policyOf({ landing: 'serial' });
+  const other = { mode: 'fast', 'pre-queue': 'full', group: 3, width: 2, early: 'off', revert: false };
+  const values = { 'acceptance.landing': 'batched' };
+  for (const [base, setting] of [grouped, serial].flatMap(base =>
+    ls.landingSettings(base).map(setting => [base, setting]),
+  )) {
+    const [group, name] = setting.key.split('.');
+    const next = structuredClone(base);
+    next[group][name] = values[setting.key] ?? other[setting.id];
+    const restarts = acceptancePolicyDigest(next) !== acceptancePolicyDigest(base);
+    const held = ownerGated(base, next);
+    const rule = OWNER_GATE[setting.key];
+    if (setting.change === 'held') {
+      assert.equal(rule, 'gated', setting.key);
+      assert.deepEqual([held, restarts], [true, true], setting.key);
+    } else if (setting.change === 'fast-held') {
+      assert.ok(rule && typeof rule === 'object' && 'relax' in rule, setting.key);
+      assert.deepEqual([held, restarts, ownerGated(next, base)], [true, false, false], setting.key);
+    } else {
+      assert.ok(rule && typeof rule === 'object' && 'exempt' in rule, setting.key);
+      assert.deepEqual([held, restarts], [false, false], setting.key);
+    }
+    assert.ok(ls.changeWords[setting.change].length > 40, setting.key);
+  }
+});

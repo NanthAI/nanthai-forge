@@ -61,7 +61,7 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
     if (q.has('covered')) files['.github/workflows/ci.yml'] = "on:\\n  push:\\n    branches: [main, 'forge/candidates/**']\\n";
     const landings = q.has('landed') ? [{ title: 'Add the trigger line', committedAt: '2027-01-15T10:09:00.000Z', checkRunIds: ['run-1'] }] : [];
     const setup = { owner: 'ada', viewerIsOwner: true, created: { at: 1800000000000, by: 'ada' }, repository: { fullName: 'example/parser', at: 1800000000000, by: 'ada' }, mirror, check, firstLanding: null, approvalsAnswered: false };
-    const policy = { acceptance: { mode: 'review', protectedPaths: ['.github/workflows/**'], autoActors: [] } };
+    const policy = { acceptance: { mode: q.has('auto') ? 'auto-on-pass' : 'review', protectedPaths: ['.github/workflows/**'], autoActors: [] } };
     const main = { schema: 2, projectId: 'p', snapshotId: 's', sourceRevision: 1, authority: { mode: 'server', epoch: 3 }, channel: 'main', head: HEAD, receipt: { id: 'r', kind: 'hosted', previousHead: null, previousReceiptId: null } };
     window.calls = [];
     window.client = {
@@ -248,6 +248,46 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
     'a connected check reads no source',
   );
   await layouts('checks-landed');
+
+  // How a landing is checked: one shut line per setting with its value and source; the explanation opens in place.
+  // While a person approves each landing nothing is grouped, so no grouping setting is listed.
+  const settings = page.getByRole('region', { name: 'How a landing is checked' });
+  const values = () =>
+    settings.locator('details').evaluateAll(rows => rows.map(row => row.querySelector('.val').textContent));
+  assert.deepEqual(await values(), ['Strictdefault', 'Ondefault', 'Ondefault']);
+  await page.goto('https://forge.test/-/example/parser/settings/checks?chosen=1&landed=1&auto=1');
+  await page.getByText(/First landing checked:/).waitFor();
+  assert.deepEqual(
+    await settings
+      .locator('details')
+      .evaluateAll(rows => rows.map(row => [row.open, row.querySelector('.val').textContent])),
+    [
+      [false, 'Strictdefault'],
+      [false, 'Offdefault'],
+      [false, 'Up to 8Automatic'],
+      [false, 'Ondefault'],
+      [false, 'Ondefault'],
+    ],
+    'shut by default: a value and where it comes from, no standing explanation',
+  );
+  assert.equal(
+    await settings
+      .getByText(/set-policy/)
+      .first()
+      .isVisible(),
+    false,
+  );
+  await settings.getByText('Check before the queue').click();
+  await settings.getByText(/pays one more check per change/).waitFor();
+  assert.match(
+    await settings.getByLabel('The command that changes Check before the queue').textContent(),
+    /set-policy '\{"acceptance":\{"admissionCheck":VALUE\}\}'/,
+  );
+  await settings
+    .locator('details[open]')
+    .getByText(/the change waits for your approval on the web\. Once it applies, landings waiting/)
+    .waitFor();
+  await layouts('checks-settings-open');
 
   await page.goto('https://forge.test/-/example/parser/settings/checks?nomirror=1');
   await page.getByRole('link', { name: 'Turn on the mirror' }).waitFor();

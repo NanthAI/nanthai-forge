@@ -774,7 +774,10 @@ layer out of both first paints.
   choice) to say whether a landing has been checked by it
   (`checks/FirstLanding.tsx`); while none has and the check is a CI file, it
   reads the first page of that one file. Non-owners make none of the chooser's
-  reads, and a check that has decided a landing reads no source.
+  reads, and a check that has decided a landing reads no source. "How a landing
+  is checked" (`checks/LandingSettings.tsx`, `checks/landing-settings.ts`) draws
+  one folded line per landing setting from the policy and landing view already
+  read: no call of its own.
 - Keys: `Mod+K` palette, `?` all keys, `1`–`6` project places; never inside
   fields or dialogs.
 - The top-bar mark (`web/src/app/mark.ts`) follows the line feed the project
