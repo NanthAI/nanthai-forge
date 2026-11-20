@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { changeItemRetention } from './projectItemRetentionStore';
 import { wakeJournal, journalGraceMs } from './projectJournalWake';
 import { JournalNeeded } from './projectJournalStore';
 import type { QueryCtx } from './_generated/server';
@@ -356,6 +357,19 @@ export async function appendWork(
       );
       for (const entry of input.projection.entries) {
         const old = await record(ctx, recordPartition(generation), entry.collection, entry.key);
+        if (
+          entry.collection === 'planningItems' &&
+          (action === 'put-planning-item' ||
+            action === 'comment-planning-item' ||
+            action === 'purge-planning-item')
+        )
+          await changeItemRetention(
+            ctx,
+            project._id,
+            old ? JSON.parse(old.value) : null,
+            JSON.parse(entry.value),
+            entry.position,
+          );
         if (old) {
           if (!entry.collection.endsWith(':payload')) {
             const payloadKey = JSON.parse(old.value).payloadKey;

@@ -24,10 +24,13 @@ const shots = process.env.FORGE_PLAN_SHOTS;
 const fixture = `
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { ConvexProvider } from ${JSON.stringify(join(root, 'node_modules/convex/dist/esm/react/index.js'))};
+import { fakeConvex } from ${JSON.stringify(join(root, 'tests/convex-fake.mjs'))};
 // Loaded lazily, as the app loads the screen with its route (the first-paint chunk never carries it).
 const PlanScreenView = React.lazy(() =>
   import(${JSON.stringify(join(root, 'web/src/app/plan/Plan.tsx'))}).then(m => ({ default: m.PlanScreenView })),
 );
+const LivePlan = React.lazy(() => import(${JSON.stringify(join(root, 'web/src/app/plan/Plan.tsx'))}));
 import { readQuery, writeQuery } from ${JSON.stringify(join(root, 'web/src/app/plan/query.ts'))};
 import { ProjectFrame } from ${JSON.stringify(join(root, 'web/src/app/frames.tsx'))};
 import { navigate, useSearch } from ${JSON.stringify(join(root, 'web/src/app/router.ts'))};
@@ -56,8 +59,24 @@ const settled = { rows: settledRows, more: false, loading: false, failed: false,
 // Archive and Deleted (Item 4c9e961e): each row says when it went and the status it left.
 const shelfRows = {
   archived: [item(30, { title: 'Browser bundle size budget', status: 'archived', was: 'proposed', at: '2026-10-02T09:00:00.000Z', version: 4 })],
-  deleted: [item(31, { title: 'Benchmark against the v1 parser', status: 'deleted', was: 'in-progress', at: '2026-11-01T09:00:00.000Z', version: 3 })],
+  deleted: [item(31, { title: 'Benchmark against the v1 parser', status: 'deleted', was: 'in-progress', at: '2026-11-01T09:00:00.000Z', purgeAt: Date.parse('2026-12-01T09:00:00.000Z'), version: 3 })],
 };
+const linkedOpen = rows.find(row => row.id === uuid(10));
+const linkedDeleted = shelfRows.deleted[0];
+const linkBackend = fakeConvex({
+  resolve(name, args) {
+    if (name === 'projectPlanView:read') return { ...read, rows: JSON.stringify([linkedOpen]) };
+    if (name === 'projectPlanSettled:item') {
+      const candidates = [linkedOpen, linkedDeleted].filter(row => row.id.startsWith(args.id));
+      if (candidates.length !== 1) return null;
+      const row = candidates[0];
+      return { id: row.id, row: row.status === 'deleted' ? JSON.stringify(row) : null };
+    }
+    if (name === 'projectPlanWorkers:read') return '{"lanes":[]}';
+    if (args.paginationOpts) return { page: [], isDone: true, continueCursor: '' };
+    return null;
+  },
+});
 window.calls = [];
 const run = async writes => {
   window.calls.push(writes);
@@ -66,6 +85,8 @@ const run = async writes => {
     : { index, itemId: write.itemId, action: write.action, outcome: 'applied', version: (write.expectedVersion || 0) + 1, before: { owner: null, status: 'open', type: null, initiativeId: null } });
   return { results, ...batchUndo(writes, results) };
 };
+window.purges = [];
+const purge = async input => { window.purges.push(input); return Date.now(); };
 window.puts = [];
 window.doneFor = [];
 const put = async command => { window.puts.push(command); };
@@ -90,11 +111,14 @@ function Fixture() {
   return <ProjectFrame route={route} name="Synthetic project" feed={feed}
     needs={window.heldFeed ? { n: 1, atLeast: false } : undefined} projects={null}
     controls={{ viewerHandle: 'example-builder', onPicker() {}, onPalette() {}, onKeys() {} }}>
-    <React.Suspense fallback={<h1>Loading</h1>}><PlanScreenView route={route} projectId={rest === uuid(16) ? undefined : "synthetic"} projectName="Synthetic project" feed={undefined} read={read}
-      put={put} run={run} reads={reads} query={query} go={go} viewer="example-builder"
+    <React.Suspense fallback={<h1>Loading</h1>}>{window.livePlan ?
+      <ConvexProvider client={linkBackend.client}><LivePlan route={route} projectId="synthetic"
+        projectName="Synthetic project" viewerHandle="example-builder" /></ConvexProvider> :
+      <PlanScreenView route={route} projectId={rest === uuid(16) ? undefined : "synthetic"} projectName="Synthetic project" feed={undefined} read={read}
+      put={put} run={run} purge={purge} reads={reads} query={query} go={go} viewer="example-builder"
       closed={query.scope === 'open' && !rest ? undefined : settled}
       shelved={shelfRows[query.scope] ? { ...settled, rows: shelfRows[query.scope] } : undefined}
-      shelvedItem={[...shelfRows.archived, ...shelfRows.deleted].find(row => row.id === rest) ?? null} showDone={id => window.doneFor.push(id)} /></React.Suspense>
+      shelvedItem={[...shelfRows.archived, ...shelfRows.deleted].find(row => row.id === rest) ?? null} showDone={id => window.doneFor.push(id)} />}</React.Suspense>
   </ProjectFrame>;
 }
 createRoot(document.getElementById('root')).render(<Fixture />);
@@ -132,13 +156,14 @@ test('plan views and bulk bar: real components keep the view in the address and 
     await browser.close();
     rmSync(temp, { recursive: true, force: true });
   });
-  const open = async (width, theme, search = '', held = false) => {
+  const open = async (width, theme, search = '', held = false, livePlan = false) => {
     // One locale on every machine, so dates read the same locally and on the runner ("1 Nov", never "Nov 1" or "1 ott").
     const context = await browser.newContext({
       locale: 'en-GB',
       viewport: { width, height: width === 390 ? 844 : 1000 },
     });
     if (held) await context.addInitScript(() => (window.heldFeed = true));
+    if (livePlan) await context.addInitScript(() => (window.livePlan = true));
     // Every layout shift from the first paint on, for the no-shift check below.
     await context.addInitScript(() => {
       window.shifts = [];
@@ -649,6 +674,9 @@ test('plan views and bulk bar: real components keep the view in the address and 
       await list.textContent(),
       /Benchmark against the v1 parser.*deleted 1 nov.*was In progress/i,
     );
+    const date = list.locator('time');
+    assert.equal(await date.textContent(), 'Purges from 1 Dec 2026');
+    assert.equal(await date.getAttribute('datetime'), '2026-12-01T09:00:00.000Z');
     const before = await page.evaluate(() => window.calls.length);
     await list.getByRole('button', { name: 'Restore' }).click();
     await page.waitForFunction(n => window.calls.length === n + 1, before);
@@ -693,9 +721,20 @@ test('plan views and bulk bar: real components keep the view in the address and 
     assert.match(await page.locator('.quietline[role=status]').textContent(), /is deleted, was In progress/);
     await page.getByRole('button', { name: 'More actions' }).click();
     const menu = page.getByRole('menuitem');
-    assert.deepEqual(await menu.allTextContents(), ['Restore']);
+    assert.deepEqual(await menu.allTextContents(), ['Restore', 'Delete forever']);
+    await page.getByRole('menuitem', { name: 'Delete forever' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Delete forever' });
+    const confirm = dialog.getByRole('button', { name: 'Delete forever' });
+    assert.equal(await confirm.isDisabled(), true);
+    await dialog.getByLabel('Type DELETE to confirm').fill('DELETE');
+    await confirm.click();
+    await dialog.waitFor({ state: 'hidden' });
+    assert.deepEqual(await page.evaluate(() => window.purges), [
+      { itemId: gone, version: 3, confirmation: 'DELETE' },
+    ]);
+    await page.getByRole('button', { name: 'More actions' }).click();
     const before = await page.evaluate(() => window.calls.length);
-    await menu.click();
+    await page.getByRole('menuitem', { name: 'Restore' }).click();
     await page.waitForFunction(n => window.calls.length === n + 1, before);
     assert.deepEqual(await page.evaluate(() => window.calls.at(-1)), [
       {
@@ -705,6 +744,17 @@ test('plan views and bulk bar: real components keep the view in the address and 
         status: 'in-progress',
       },
     ]);
+    assert.deepEqual(errors, []);
+    await context.close();
+  }
+  // A one-row open plan does not make its short address unique when a Deleted Item has the same prefix.
+  for (const [address, words] of [
+    ['00000000', 'This Item is not in open work.'],
+    ['00000000-0000-4000-8000-000000000010', 'Stream parser: preserve split bytes across reads'],
+    ['00000000-0000-4000-8000-000000000031', 'Benchmark against the v1 parser Deleted.'],
+  ]) {
+    const { page, context, errors } = await open(1440, 'light', `/${address}`, false, true);
+    await page.locator('main .head .sit').filter({ hasText: words }).waitFor();
     assert.deepEqual(errors, []);
     await context.close();
   }

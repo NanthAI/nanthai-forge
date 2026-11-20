@@ -1,6 +1,4 @@
 {
-  "actions": [
-    "page"
-  ],
-  "reason": "Read-only done and dropped plan rows, one bounded page; no write."
+  "actions": ["page", "item"],
+  "reason": "Read-only plan pages and owner-only shelf Item lookup."
 }

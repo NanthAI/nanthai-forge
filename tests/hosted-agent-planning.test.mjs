@@ -179,6 +179,34 @@ const run = (p, action, input, operationId) =>
 const put = (p, input) => run(p, 'put-planning-item', input);
 const list = (p, input = {}) => run(p, 'planning', input).then(response => response.result);
 
+test('the Closed view status list returns both Done and dropped Items, including in ranked search', async t => {
+  const s = await setup(t);
+  const p = port(s);
+  for (const status of ['open', 'closed', 'abandoned', 'archived', 'deleted']) {
+    const row = s.item({ title: `Parser fixture ${status}` });
+    await s.send(row);
+    if (status !== 'open')
+      await s.send(s.item({ itemId: row.itemId, expectedVersion: 1, status, title: row.title }));
+  }
+  for (const search of [undefined, 'parser']) {
+    const result = await list(p, { status: ['closed', 'abandoned'], search, reconcile: false });
+    assert.deepEqual(result.items.map(item => item.status).sort(), ['abandoned', 'closed']);
+  }
+  const first = await list(p, { status: ['closed', 'abandoned'], search: 'parser', limit: 1 });
+  assert.ok(first.nextCursor);
+  await assert.rejects(
+    list(p, { status: ['open', 'closed'], search: 'parser', limit: 1, cursor: first.nextCursor }),
+    code('WORK_STALE'),
+  );
+  const more = await list(p, {
+    status: ['abandoned', 'closed'],
+    search: 'parser',
+    limit: 1,
+    cursor: first.nextCursor,
+  });
+  assert.ok(more.items.every(item => item.status === 'closed' || item.status === 'abandoned'));
+});
+
 test('a server without the V8 command receives the same original operation on the Node command', async t => {
   const s = await setup(t),
     p = port(

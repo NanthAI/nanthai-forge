@@ -52,21 +52,32 @@ status, or `"active"`, leaves them out; the Everything view's copyable command i
 with no status returns open work only, so with Find it says `"all"` and notes that this adds both shelves). The Plan
 screen has Archive and Deleted views, one bounded page of 50 at a time from the search roots
 (`projectPlanSettled:page`), read only while the view is open. An archived or deleted Item's own page (opened by its
-link) reads that Item's root (one point read, re-run only by writes to it), for the owner only, and offers Unarchive or Restore instead of Archive and Delete.
+full id or unique short id) reads its current version for the owner. A short id adds one bounded
+prefix lookup. The page offers Unarchive or Restore on the matching shelf.
 Bringing back a closed Item does not add to today's closed count. An Issue whose Initiative is archived or deleted
 stays in members' views under No Initiative, marked "Initiative archived or deleted"; public reads hide it.
 
-Storage: no new table, index or row kind. A move costs what a status change costs today: one version row and one
-search-root rewrite. `was` adds about 15 bytes to that version and its root, and only on shelved Items.
+A move adds one version row and rewrites one search root. `was` adds about 15 bytes to a shelved version
+and its root. A move into or out of Deleted also updates its deadline record in the same transaction.
 
-### Permanent deletion (primitive only)
+### Permanent deletion
 
-Nothing can trigger a permanent deletion yet: no timer, executor or web action exists, and Deleted makes no
-30-day promise. The Work journal already reads the form one will take. A `purge-planning-item` Work command
-turns a Deleted Item at its version into an id-only tombstone: the next version, titled "Deleted Item", with no body
-or links and `purged` naming the purge operation, the deletion time and who purged it. Only the server's purge step
-appends it (`projectWorkCommand.purgeFromServer`, with its projection in the same mutation); no client entry accepts
-it. Every later put, comment or restore on the tombstone is refused with `PLANNING_ITEM_PURGED`.
+Delete starts a 30-day recovery window. Deleted shows the date from which each Item is eligible for the
+daily purge. Restore or Undo cancels that deadline. Deleting the Item again starts a new window.
+Items already in Deleted before deadlines were recorded remain available for Restore and Delete forever.
+
+The project owner can choose **Delete forever** on a Deleted Item's page or in the Deleted list and type
+`DELETE` to confirm. The same purge executor handles early and scheduled removal. A daily sweep reads one
+bounded index range of due entries across projects and dispatches up to ten in a run. It reads no projects
+that have nothing due. An unfinished attempt backs off between sweeps, leaving room for newly eligible
+Items. The Deleted view reads deadlines in one indexed range per page, independently of retry updates.
+The purge append checks the selected Deleted version atomically, so a restore that lands first keeps
+the Item whole. A completed request retains its original completion time for retries.
+
+A `purge-planning-item` Work command turns the current Deleted version into an id-only tombstone titled
+"Deleted Item". The tombstone carries the purge operation, the Deleted version's time and who purged it.
+The executor appends it with its projection in one mutation. Clients call the owner action for early
+removal. Every later put, comment or restore on the tombstone is refused with `PLANNING_ITEM_PURGED`.
 
 A purge lists every journal row of its Item (`rows`: operation id and the digest of the row's redacted facts),
 recorded while the rows are still whole. That covers the Item's puts and comments, writes made through an alias or
@@ -84,8 +95,7 @@ Anything else is `INVALID_WORK_JOURNAL`, so a row cannot vouch for its own struc
 redacted command and the purge as the tombstone, with the same checks as the first run, so a rebuild keeps every
 Item that names the purged one and cannot bring the text back; in a full replay (load, export, recovery) the purge also replaces
 the words of every earlier version and comment of the Item, including those from the base checkpoint; the hosted
-index keeps them until the purge executor redacts its records. The executor (`projectPlanningPurge.run`, internal;
-purge Lane 4 calls it) runs a read-only preflight, selects every journal row of the Item under any of its ids (notes
+index keeps them until the purge executor redacts its records. The executor (`projectPlanningPurge.run`, internal) runs a read-only preflight, selects every journal row of the Item under any of its ids (notes
 included, at most 1,000 rows, else refused with nothing written), appends the purge and the tombstone in one mutation
 (refused if a row of the Item was appended after the selection read), then redacts in bounded pages: journal rows,
 the Work index of every record partition, kept or retired ones included (events, versions, comments, notes,
@@ -194,7 +204,10 @@ Reads filter by type, owner and relation with one rule ([`src/planning-filter.ts
 well as by kind, status and Initiative. `owner: "none"` matches Items with no owner, and a person's handle also
 matches the agents working for them (`handle/agent`). `relation` is a relation kind (`depends-on`, `duplicate-of`,
 `related`) or `"none"`. `status: "active"` is open work (Proposed, Planned and In progress), the Plan screen's
-default scope; `"all"` adds done, dropped, archived and deleted Items. The web Plan screen keeps the same fields in its address, and a
+default scope. `"all"` adds done, dropped, archived and deleted Items. For a list or a search, pass an array
+of stored statuses to match any of them. The Closed view copies `"status":["closed","abandoned"]` with `"kind":"issue"`.
+An indexed search with multiple statuses filters each bounded search page, so continue with its cursor
+even when that page has no matching Items. The web Plan screen keeps the same fields in its address, and a
 saved view is a personal shortcut to them.
 
 ## Progress

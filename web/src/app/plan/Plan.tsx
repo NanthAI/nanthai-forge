@@ -7,13 +7,12 @@
 // Everything scopes add one bounded page each of done and dropped Items, and the Archive and Deleted views one page of
 // theirs (projectPlanSettled:page); who works on an unowned Item is one bounded one-shot read by Intent
 // (projectPlanWorkers:read, workers.ts), again only when the in-progress Items change or a hidden tab is shown again.
-// An owner on the page of an Item the plan rows leave out reads that Item's root (projectWorkIndex:detail, one point
-// read) to show an Archived or Deleted Item with Unarchive or Restore.
+// An owner on the page of an Item the plan rows leave out reads that Item's root (projectPlanSettled:item, indexed read) to show an Archived or Deleted Item with Unarchive or Restore.
 // Writes:
 // projectWorkCommand:command for one row, projectPlanningBatch:apply for a selection, each retry-safe by its
 // operation id.
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useConvex, useMutation } from 'convex/react';
+import { useAction, useConvex, useMutation } from 'convex/react';
 import { makeFunctionReference, type PaginationResult } from 'convex/server';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
@@ -40,8 +39,8 @@ import { useWorkers, type ActiveLane, type Workers } from './workers';
 import { Tick, type Ticker } from './Tick';
 import { Versions } from './Versions';
 import { isShelf, shelfWords, shelve, shelvedRowOf, ShelfList, unshelve, type Shelf } from './Shelf';
-import { workIndex } from '../../hosted-work-index';
-import { isPlanningUuid } from '../../../../src/planning-id';
+import { isPlanningPrefix, isPlanningUuid } from '../../../../src/planning-id';
+import { DeleteForever, type PurgeItem } from './DeleteForever';
 import type { BatchPut } from '../../../../src/planning-batch';
 import { BulkBar, SplitSheet, UndoToast, outcomeWords, type Reads } from './Bulk';
 import {
@@ -124,25 +123,6 @@ function useSettled(
 }
 export type Settled = ReturnType<typeof useSettled>;
 
-/** The root of one Item the plan rows leave out, read only for an owner on that Item's page (one indexed point read,
- * re-run by writes to that root): the row when it is Archived or Deleted, else null, and 'loading' meanwhile. A
- * refused or failed read is null: the page says the Item is not in open work, as before. */
-function useShelvedRow(projectId: Id<'hostedProjects'> | undefined, id: string | null) {
-  const result = useSafeQuery(
-    workIndex.detail,
-    projectId && id ? { projectId, collection: 'planningItems', id } : 'skip',
-  );
-  return useMemo(
-    (): PlanRow | null | 'loading' =>
-      !id || result.error
-        ? null
-        : result.value === undefined
-          ? 'loading'
-          : shelvedRowOf(result.value.value, id),
-    [id, result.value, result.error],
-  );
-}
-
 function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: PlaceProps) {
   const search = useSearch();
   const query = useMemo(() => readQuery(search), [search.toString()]);
@@ -160,14 +140,27 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
   const dropped = useSettled(projectId, 'abandoned', settledOn, settledIn);
   const shelfScope = isShelf(query.scope) ? query.scope : null;
   const shelved = useSettled(projectId, shelfScope ?? 'archived', shelfScope !== null, undefined);
-  // An owner opening an Item the plan rows leave out (Archived or Deleted) reads its root, to offer the way back.
-  const rowIds = useMemo(() => new Set(read ? parseRows(read).map(row => row.id) : []), [read]);
+  // A short link must resolve across both the open plan and the shelves before a row can be selected.
   const lookupId = route.rest.toLowerCase();
-  const shelvedItem = useShelvedRow(
-    projectId,
-    read?.canEdit && isPlanningUuid(lookupId) && !rowIds.has(lookupId) ? lookupId : null,
+  const shortLink = Boolean(read?.canEdit && isPlanningPrefix(lookupId));
+  const lookup = useMemo(
+    () =>
+      shortLink ||
+      (read?.canEdit && isPlanningUuid(lookupId) && !parseRows(read).some(row => row.id === lookupId)),
+    [shortLink, read, lookupId],
+  );
+  const linked = useSafeQuery(api.projectPlanSettled.item, lookup ? { projectId, id: lookupId } : 'skip');
+  const shelvedItem = useMemo(
+    () =>
+      lookup && !linked.error && linked.value === undefined
+        ? ('loading' as const)
+        : linked.value?.row
+          ? shelvedRowOf(linked.value.row, linked.value.id)
+          : null,
+    [lookup, linked.error, linked.value],
   );
   const mutate = useMutation(api.projectWorkCommand.command);
+  const deleteForever = useAction(api.projectItemRetention.deleteForever);
   const apply = useMutation(batchApply);
   const client = useConvex();
   const put: Put = command => {
@@ -206,6 +199,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
       stale={Boolean(live.error) && Boolean(last.current)}
       put={put}
       run={run}
+      purge={input => deleteForever({ projectId, ...input })}
       reads={reads}
       query={query}
       go={go}
@@ -214,6 +208,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle }: Place
       dropped={dropped}
       shelved={shelved}
       shelvedItem={shelvedItem}
+      resolvedShortId={shortLink ? (linked.value?.id ?? null) : undefined}
       showDone={showDone}
       progress={counts.value}
     />
@@ -246,6 +241,7 @@ export function PlanScreenView({
   stale = false,
   put,
   run,
+  purge,
   reads,
   query = readQuery(new URLSearchParams()),
   go = () => undefined,
@@ -254,6 +250,7 @@ export function PlanScreenView({
   dropped = noSettled,
   shelved = noSettled,
   shelvedItem = null,
+  resolvedShortId,
   showDone = () => undefined,
   progress: progressRead,
 }: Pick<PlaceProps, 'route' | 'projectName' | 'feed'> & {
@@ -261,12 +258,14 @@ export function PlanScreenView({
   progress?: PlanCountsRead | undefined;
   /** The Item page's Item when the plan rows leave it out because it is Archived or Deleted (owner only). */
   shelvedItem?: PlanRow | null | 'loading';
+  resolvedShortId?: string | null | undefined;
   /** Hosted reads for the Item page's comments and versions; without it the page draws neither. */
   projectId?: Id<'hostedProjects'> | undefined;
   read: PlanRead | undefined;
   stale?: boolean;
   put: Put;
   run?: RunBatch;
+  purge?: PurgeItem;
   reads?: Reads;
   query?: PlanQuery;
   go?: (patch: Partial<PlanQuery>) => void;
@@ -282,6 +281,7 @@ export function PlanScreenView({
   const [capture, setCapture] = useState(false);
   const [split, setSplit] = useState(false);
   const [versions, setVersions] = useState(false);
+  const [purging, setPurging] = useState<PlanRow | null>(null);
   const [error, setError] = useState('');
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const [toast, setToast] = useState<{ outcome: BatchOutcome; words: string } | null>(null);
@@ -297,9 +297,10 @@ export function PlanScreenView({
     [read, find, orders, keep],
   );
   const at = (patch: Partial<PlaceProps['route']>) => hrefFor({ ...route, section: '', rest: '', ...patch });
-  const initiativeRow = route.rest
+  const itemKey = resolvedShortId === undefined ? route.rest.toLowerCase() : resolvedShortId;
+  const initiativeRow = itemKey
     ? [...(view?.byId.values() ?? [])].find(
-        entry => entry.kind === 'initiative' && entry.id.startsWith(route.rest),
+        entry => entry.kind === 'initiative' && entry.id.startsWith(itemKey),
       )
     : undefined;
   const canCapture = Boolean(view?.canEdit) && (!route.rest || Boolean(initiativeRow));
@@ -351,23 +352,42 @@ export function PlanScreenView({
     }
   };
   const here =
-    route.rest &&
+    itemKey &&
     shelvedItem &&
     shelvedItem !== 'loading' &&
-    shelvedItem.id.startsWith(route.rest.toLowerCase()) &&
+    shelvedItem.id.startsWith(itemKey) &&
     isShelf(shelvedItem.status)
       ? { row: shelvedItem, shelf: shelvedItem.status, back: unshelve(shelvedItem) }
-      : sent && sent.row.id.startsWith(route.rest)
+      : itemKey && sent && sent.row.id.startsWith(itemKey)
         ? {
             row: sent.row,
             shelf: sent.shelf,
             back: unshelve({ ...sent.row, version: sent.version, was: sent.row.status }),
           }
         : null;
+  const purgeDialog =
+    whole?.canEdit && purging && purge ? (
+      <DeleteForever
+        row={purging}
+        purge={purge}
+        close={() => setPurging(null)}
+        onDone={() => {
+          setPurging(null);
+          setSent(current => (current?.row.id === purging.id ? null : current));
+          setToast(current =>
+            current?.outcome.results.length === 1 && current.outcome.results[0]?.itemId === purging.id
+              ? null
+              : current,
+          );
+          announce('Item deleted permanently.');
+        }}
+      />
+    ) : null;
   if (route.rest && !initiativeRow)
     return (
       <ItemPage
         route={route}
+        itemKey={itemKey}
         projectName={projectName}
         view={whole}
         workers={workers}
@@ -379,13 +399,22 @@ export function PlanScreenView({
         shelved={here}
         looking={shelvedItem === 'loading' && !here}
         onBack={here && run ? () => void shelfMove([here.back], here.row, null) : undefined}
+        onPurge={
+          whole?.canEdit && here?.shelf === 'deleted' && purge
+            ? () => setPurging({ ...here.row, version: here.back.expectedVersion })
+            : undefined
+        }
+        purgeDialog={purgeDialog}
+        announcement={<Announcer message={message} />}
         error={error}
         versions={
           versions && projectId ? (
             <Versions
               projectId={projectId}
               itemId={
-                [...(whole?.byId.values() ?? [])].find(entry => entry.id.startsWith(route.rest))?.id ??
+                here?.row.id ??
+                [...(whole?.byId.values() ?? [])].find(entry => itemKey && entry.id.startsWith(itemKey))
+                  ?.id ??
                 route.rest
               }
               restore={
@@ -410,7 +439,7 @@ export function PlanScreenView({
             <SplitSheet
               onOpenChange={setSplit}
               row={
-                [...(whole?.byId.values() ?? [])].find(entry => entry.id.startsWith(route.rest)) ?? {
+                [...(whole?.byId.values() ?? [])].find(entry => itemKey && entry.id.startsWith(itemKey)) ?? {
                   id: route.rest,
                   title: route.rest.slice(0, 8),
                 }
@@ -693,6 +722,7 @@ export function PlanScreenView({
               rows={shelfRows}
               at={at}
               run={canEdit ? run : undefined}
+              onPurge={whole?.canEdit && shelfScope === 'deleted' && purge ? setPurging : undefined}
               onDone={done}
             />
           ) : query.layout === 'board' ? (
@@ -766,6 +796,7 @@ export function PlanScreenView({
         </Region>
       </div>
       {captureSheet}
+      {purgeDialog}
       {toast && run ? (
         <UndoToast
           {...toast}
@@ -866,6 +897,7 @@ function SettledPager({
  * until the Item page is rebuilt. */
 function ItemPage({
   route,
+  itemKey,
   projectName,
   view,
   workers,
@@ -876,6 +908,9 @@ function ItemPage({
   onShelve,
   shelved,
   onBack,
+  onPurge,
+  purgeDialog,
+  announcement,
   error,
   split,
   versions,
@@ -883,6 +918,7 @@ function ItemPage({
   looking = false,
 }: {
   route: PlaceProps['route'];
+  itemKey: string | null;
   projectName: string;
   view: PlanView | null;
   workers: Workers;
@@ -897,13 +933,17 @@ function ItemPage({
   /** Its root is still being read: the page says it is loading, not that the Item is missing. */
   looking?: boolean;
   onBack?: (() => void) | undefined;
+  onPurge?: (() => void) | undefined;
+  purgeDialog?: ReactNode;
+  announcement?: ReactNode;
   error?: string;
   versions?: ReactNode;
   split?: ReactNode;
   toast?: ReactNode;
 }) {
   const row = view
-    ? ([...view.byId.values()].find(entry => entry.id.startsWith(route.rest)) ?? (looking ? undefined : null))
+    ? ((itemKey ? [...view.byId.values()].find(entry => entry.id.startsWith(itemKey)) : undefined) ??
+      (looking ? undefined : null))
     : undefined;
   const legacy = currentScreenHref(route);
   const full = legacy && row ? `${legacy}?planningItem=${encodeURIComponent(row.id)}` : legacy;
@@ -971,7 +1011,10 @@ function ItemPage({
           <Menu
             label="More actions"
             className="btn ghost sm"
-            items={[{ id: 'back', label: shelfWords[shelved.shelf].back, onAction: onBack }]}
+            items={[
+              { id: 'back', label: shelfWords[shelved.shelf].back, onAction: onBack },
+              ...(onPurge ? [{ id: 'purge', label: 'Delete forever', danger: true, onAction: onPurge }] : []),
+            ]}
           >
             ⋯
           </Menu>
@@ -994,6 +1037,8 @@ function ItemPage({
           {error}
         </div>
       ) : null}
+      {purgeDialog}
+      {announcement}
       {split}
       {versions}
       {toast}

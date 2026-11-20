@@ -582,23 +582,43 @@ async function readPlanning(
 ) {
   if (input.initiativeId)
     input = { ...input, initiativeId: await resolvePlanningId(port, input.initiativeId) };
+  const statuses = input.status;
+  const status = Array.isArray(statuses) && statuses.length === 1 ? statuses[0] : statuses;
+  const multiple = Array.isArray(status) ? new Set(status) : null;
+  // The old server only understands scalar filters. Pin the client-side union to each continuation.
+  const prefix = multiple ? `${[...multiple].sort().join(',')}:` : '';
+  const readCursor = () => {
+    if (!prefix || input.cursor === null) return input.cursor;
+    invariant(
+      input.cursor.startsWith(prefix),
+      'WORK_STALE',
+      'Status selection changed. Restart this planning read.',
+    );
+    return input.cursor.slice(prefix.length);
+  };
   if (input.search !== undefined) {
     const terms = planningSearchTerms(input.search);
     try {
-      const found = await port.query<{ items?: { id: string; kind?: string }[] }>(
-        'projectHostedPlanningSearch:search',
-        {
-          ...terms,
-          status: input.status ?? 'active',
-          ...(input.kind ? { kind: input.kind } : {}),
-          ...(input.initiativeId ? { initiativeId: input.initiativeId } : {}),
-          cursor: input.cursor,
-          limit: input.limit,
-        },
-      );
+      const found = await port.query<{
+        items?: { id: string; kind?: string; status: PlanningItem['status'] }[];
+        nextCursor?: string | null;
+      }>('projectHostedPlanningSearch:search', {
+        ...terms,
+        status: Array.isArray(status) ? 'all' : (status ?? 'active'),
+        ...(input.kind ? { kind: input.kind } : {}),
+        ...(input.initiativeId ? { initiativeId: input.initiativeId } : {}),
+        cursor: readCursor(),
+        limit: input.limit,
+      });
       const keep = await rowFilter(input);
       return Array.isArray(found?.items)
-        ? { ...found, items: found.items.filter(keep).map(withPlannedLink) }
+        ? {
+            ...found,
+            ...(prefix && found.nextCursor ? { nextCursor: prefix + found.nextCursor } : {}),
+            items: found.items
+              .filter(item => (!multiple || multiple.has(item.status)) && keep(item))
+              .map(withPlannedLink),
+          }
         : found;
     } catch (error) {
       if (
@@ -617,7 +637,7 @@ async function readPlanning(
   const filtered = port.serverFeatures?.includes('planning-filtered-reads');
   const planningFilter = {
     ...(input.kind ? { kind: input.kind } : {}),
-    ...(input.status && input.status !== 'all' && input.status !== 'active' ? { status: input.status } : {}),
+    ...(typeof status === 'string' && status !== 'all' && status !== 'active' ? { status } : {}),
     ...(input.initiativeId ? { initiativeId: input.initiativeId } : {}),
   };
   if (input.counts) {
@@ -716,7 +736,7 @@ async function readPlanning(
     };
   }
   const keep = await rowFilter(input);
-  let cursor = decode(input.cursor, ws);
+  let cursor = decode(readCursor(), ws);
   let scanned = 0;
   let done = false;
   let matches: PlanningItem[] = [];
@@ -744,7 +764,9 @@ async function readPlanning(
               ? !isShelved(item.status)
               : input.status === 'active'
                 ? open.includes(item.status)
-                : item.status === input.status)) &&
+                : multiple
+                  ? multiple.has(item.status)
+                  : item.status === status)) &&
           (!input.initiativeId || item.initiativeId === input.initiativeId) &&
           keep(item),
       ),
@@ -791,7 +813,7 @@ async function readPlanning(
           },
         }
       : {}),
-    nextCursor: done ? null : encode(ws, cursor!),
+    nextCursor: done ? null : prefix + encode(ws, cursor!),
     ...(sync?.changed.length || sync?.failed || sync?.held?.length ? { reconciled: sync } : {}),
   };
 }

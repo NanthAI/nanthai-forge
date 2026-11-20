@@ -101,6 +101,10 @@ test('Archive and Deleted are views in the address with the matching agent read'
   assert.equal(query.scope, 'deleted');
   assert.equal(agentRead(query), `nforge agent . planning '{"status":"deleted"}'`);
   assert.equal(readQuery(new URLSearchParams('scope=archived')).scope, 'archived');
+  assert.equal(
+    agentRead(readQuery(new URLSearchParams('scope=closed&q=parser'))),
+    `nforge agent . planning '{"status":["closed","abandoned"],"kind":"issue","search":"parser"}'`,
+  );
 });
 
 test('the Everything view copies the agent read that leaves Archived and Deleted out, as the view does', () => {

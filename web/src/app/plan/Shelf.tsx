@@ -43,9 +43,10 @@ export const unshelve = (row: Pick<PlanRow, 'id' | 'version' | 'was'>): BatchPut
 export function shelvedRowOf(value: string | null, id: string): PlanRow | null {
   try {
     const item = value ? (JSON.parse(value) as Partial<PlanRow>) : null;
-    if (!item || item.id !== id || !isShelf(item.status ?? '')) return null;
+    if (!item || typeof item.id !== 'string' || !item.id.startsWith(id) || !isShelf(item.status ?? ''))
+      return null;
     return {
-      id,
+      id: item.id,
       kind: item.kind === 'initiative' ? 'initiative' : 'issue',
       title: typeof item.title === 'string' && item.title ? item.title : id.slice(0, 8),
       status: item.status as Shelf,
@@ -68,12 +69,14 @@ export function ShelfList({
   rows,
   at,
   run,
+  onPurge,
   onDone,
 }: {
   shelf: Shelf;
   rows: readonly PlanRow[];
   at: (patch: Partial<PlaceProps['route']>) => string;
   run: RunBatch | undefined;
+  onPurge?: ((row: PlanRow) => void) | undefined;
   onDone: (outcome: BatchOutcome, extra: string) => void;
 }) {
   const words = shelfWords[shelf];
@@ -117,14 +120,31 @@ export function ShelfList({
                 {words.done.toLowerCase()} {day(row.at)}
                 {row.was ? `, was ${itemStatusLabel[itemStatus[row.was]]}` : ''}
               </span>
-              <span />
-              {run ? (
-                <Key size="sm" onClick={() => void back(row)} disabled={busy}>
-                  {words.back}
-                </Key>
-              ) : (
-                <span />
-              )}
+              <span className="t3">
+                {shelf === 'deleted' && row.purgeAt !== undefined ? (
+                  <time dateTime={new Date(row.purgeAt).toISOString()}>
+                    Purges from{' '}
+                    {new Date(row.purgeAt).toLocaleDateString(undefined, {
+                      day: 'numeric',
+                      month: 'short',
+                      year: 'numeric',
+                      timeZone: 'UTC',
+                    })}
+                  </time>
+                ) : null}
+              </span>
+              <span>
+                {run ? (
+                  <Key size="sm" onClick={() => void back(row)} disabled={busy}>
+                    {words.back}
+                  </Key>
+                ) : null}
+                {onPurge && row.version !== undefined ? (
+                  <Key size="sm" kind="danger" onClick={() => onPurge(row)} disabled={busy}>
+                    Delete forever
+                  </Key>
+                ) : null}
+              </span>
             </div>
           ))}
         </div>

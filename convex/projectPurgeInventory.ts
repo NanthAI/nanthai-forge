@@ -54,6 +54,7 @@ export const projectPurgeTables = {
   projectWorkGenerations: 'by_project_and_backup_and_revision_and_format_and_work_schema',
   projectWorkRecords: 'by_project',
   projectPlanningRecords: 'by_project',
+  projectItemRetention: 'by_project_and_item_and_kind',
   projectWorkDataRecords: 'by_project',
   projectHostedRecordBodies: 'by_project_and_revision',
   projectHostedRecords: 'by_project',

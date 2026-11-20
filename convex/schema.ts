@@ -785,6 +785,29 @@ export default defineSchema({
     .index('by_project', ['projectId'])
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_storage', ['storageId']),
+  projectItemRetention: defineTable({
+    projectId: v.id('hostedProjects'),
+    itemId: v.string(),
+    kind: v.union(v.literal('deadline'), v.literal('attempt')),
+    version: v.optional(v.number()),
+    purgeAt: v.optional(v.number()),
+    position: v.optional(v.number()),
+    itemKind: v.optional(v.union(v.literal('issue'), v.literal('initiative'))),
+    initiativeId: v.optional(v.string()),
+    attemptAt: v.optional(v.number()),
+    attempts: v.optional(v.number()),
+    purgedAt: v.optional(v.number()),
+  })
+    .index('by_project_and_item_and_kind', ['projectId', 'itemId', 'kind'])
+    .index('by_project_and_kind_and_position', ['projectId', 'kind', 'itemKind', 'position'])
+    .index('by_project_and_kind_and_initiative_and_position', [
+      'projectId',
+      'kind',
+      'itemKind',
+      'initiativeId',
+      'position',
+    ])
+    .index('by_attempt_at', ['attemptAt']),
   projectWorkHeads: defineTable({
     projectId: v.id('hostedProjects'),
     backupId: v.id('projectBackups'),

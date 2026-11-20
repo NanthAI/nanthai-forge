@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { workRecordTable } from './projectWorkRecordTables';
 import { v } from 'convex/values';
-import { query } from './cliServer';
+import { query, type QueryCtx } from './cliServer';
+import type { Id } from './_generated/dataModel';
 import { recordCaller } from './projectHostedFrictionStore';
 import { recordHead } from './projectHostedRecords';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
@@ -60,16 +61,12 @@ export const resolveId = query({
       );
       const generation = await selectedGeneration(ctx, project);
       invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'The Work index is unavailable.');
-      const rows = await ctx.db
-        .query(await workRecordTable(ctx, recordPartition(generation), 'planningItems'))
-        .withIndex('by_generation_and_collection_and_key', q =>
-          q
-            .eq('generationId', recordPartition(generation))
-            .eq('collection', 'planningItems')
-            .gte('key', prefix)
-            .lt('key', `${prefix}\uffff`),
-        )
-        .take(planningIdMaxCandidates + 1);
+      const rows = await planningRootsWithPrefix(
+        ctx,
+        recordPartition(generation),
+        prefix,
+        planningIdMaxCandidates + 1,
+      );
       return canonicalPayload({
         ids: rows.slice(0, planningIdMaxCandidates).map(row => row.key),
         more: rows.length > planningIdMaxCandidates,
@@ -79,3 +76,22 @@ export const resolveId = query({
     }
   },
 });
+
+/** The same exact, bounded prefix lookup serves planning commands and the shelved Item page. */
+export async function planningRootsWithPrefix(
+  ctx: QueryCtx,
+  partition: Id<'projectWorkGenerations'>,
+  prefix: string,
+  limit: number,
+) {
+  return ctx.db
+    .query(await workRecordTable(ctx, partition, 'planningItems'))
+    .withIndex('by_generation_and_collection_and_key', q =>
+      q
+        .eq('generationId', partition)
+        .eq('collection', 'planningItems')
+        .gte('key', prefix)
+        .lt('key', `${prefix}\uffff`),
+    )
+    .take(limit);
+}

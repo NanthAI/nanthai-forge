@@ -9,12 +9,16 @@ import { paginationOptsValidator, type PaginationOptions } from 'convex/server';
 import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { query } from './cliServer';
-import { accessibleProject } from './projectAuthority';
-import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
+import { accessibleProject, ownedProject } from './projectAuthority';
+import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { planningRecordTable } from './projectWorkRecordTables';
 import { planViewRow } from './projectPlanView';
 import { report } from './errors';
 import { invariant } from '../src/errors';
+import { itemDeadlines } from './projectItemRetentionStore';
+import { planningRootsWithPrefix } from './projectHostedPlanning';
+import { isPlanningPrefix, isPlanningUuid } from '../src/planning-id';
+import { commandPayloadRows, commandValues } from './projectWorkCommandRows';
 
 /** Rows per page: about 55 KB of root values on the dogfood board. */
 export const PLAN_SETTLED_PAGE = 50;
@@ -63,15 +67,28 @@ export async function settledPage(
     ...paginationOpts,
     numItems: Math.max(1, Math.min(paginationOpts.numItems, PLAN_SETTLED_PAGE)),
   });
+  const deadlines =
+    status === 'deleted' && result.page.length
+      ? await itemDeadlines(
+          ctx,
+          projectId,
+          result.page.at(-1)!.position,
+          result.page[0]!.position,
+          result.page.length,
+          initiativeId,
+        )
+      : undefined;
   const rows: string[] = [];
   for (const root of result.page) {
     try {
-      const row = planViewRow(
-        JSON.parse(root.value),
-        root.position,
-        status === 'archived' || status === 'deleted',
-      );
-      if (row) rows.push(JSON.stringify(row));
+      const value = JSON.parse(root.value);
+      if (value.purged) continue;
+      const row = planViewRow(value, root.position, status === 'archived' || status === 'deleted');
+      if (row) {
+        const deadline = deadlines?.get(row.id);
+        if (deadline !== undefined) row.purgeAt = deadline;
+        rows.push(JSON.stringify(row));
+      }
     } catch {
       /* A root that does not parse is skipped, as in the open read. */
     }
@@ -90,6 +107,40 @@ export const page = query({
   handler: async (ctx, { projectId, status, initiativeId, paginationOpts }) => {
     try {
       return await settledPage(ctx, projectId, status, paginationOpts, initiativeId);
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+/** A linked shelf Item, only for the owner. Resolve a prefix in the same read, and leave ambiguous prefixes alone. */
+export const item = query({
+  args: { projectId: v.id('hostedProjects'), id: v.string() },
+  returns: v.union(v.object({ id: v.string(), row: v.union(v.string(), v.null()) }), v.null()),
+  handler: async (ctx, { projectId, id }) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read your Forge project.');
+      const project = await ownedProject(ctx, projectId, user.subject);
+      const generation = await selectedGeneration(ctx, project);
+      if (!generation) return null;
+      const partition = recordPartition(generation);
+      const roots = isPlanningUuid(id)
+        ? [await record(ctx, partition, 'planningItems', id)]
+        : isPlanningPrefix(id)
+          ? await planningRootsWithPrefix(ctx, partition, id, 2)
+          : [];
+      const root = roots.length === 1 ? roots[0] : null;
+      if (!root) return null;
+      const header = JSON.parse(root.value);
+      if (header.purged || (header.status !== 'archived' && header.status !== 'deleted'))
+        return { id: root.key, row: null };
+      const rows = [root];
+      await commandPayloadRows(rows, keys =>
+        Promise.all(keys.map(({ collection, key }) => record(ctx, partition, collection, key))),
+      );
+      const row = planViewRow(commandValues(rows, 'planningItems')[0], root.position, true);
+      return { id: root.key, row: row ? JSON.stringify(row) : null };
     } catch (error) {
       return report(error);
     }

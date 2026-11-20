@@ -562,7 +562,9 @@ export const hostedAgentCommandSchemas = {
       transfer: z.unknown().optional(),
       search: z.string().trim().min(1).optional(),
       kind: z.enum(['issue', 'initiative']).optional(),
-      status: z.enum([...planningStatuses, 'active', 'all']).optional(),
+      status: z
+        .union([z.enum([...planningStatuses, 'active', 'all']), z.array(z.enum(planningStatuses)).nonempty()])
+        .optional(),
       initiativeId: planningRef.optional(),
       /** Same filters as the web Plan views (src/planning-filter.ts); owner/relation "none" = without one. */
       type: z.string().trim().min(1).max(32).optional(),
@@ -596,7 +598,8 @@ export const hostedAgentCommandSchemas = {
             input.type ||
             input.owner ||
             input.relation ||
-            input.status === 'active')
+            input.status === 'active' ||
+            Array.isArray(input.status))
         ),
       'Use counts with a list read (kind, one stored status and initiativeId filters only).',
     )

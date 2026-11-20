@@ -144,6 +144,7 @@ export type PlanRow = {
   /** Archived and Deleted rows only (Item 4c9e961e): the status it left, and when this version was written. */
   was?: StoredStatus;
   at?: string;
+  purgeAt?: number;
 };
 
 const live = (status: StoredStatus) => status === 'proposed' || status === 'open' || status === 'in-progress';

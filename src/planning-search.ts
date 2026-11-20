@@ -92,6 +92,7 @@ export function planningSearchEntry(item: PlanningItem, position: number): Index
       id: item.id,
       kind: item.kind,
       status: item.status,
+      ...(item.purged ? { purged: true } : {}),
       version: item.version,
       initiativeId: item.initiativeId ?? null,
       ...(item.author ? { author: item.author } : {}),

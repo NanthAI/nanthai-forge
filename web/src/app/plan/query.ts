@@ -67,7 +67,15 @@ export function agentRead(query: PlanQuery) {
   const input: Record<string, unknown> =
     query.scope === 'all' && !everythingSearch(query)
       ? {}
-      : { status: query.scope === 'open' ? 'active' : query.scope };
+      : {
+          status:
+            query.scope === 'open'
+              ? 'active'
+              : query.scope === 'closed'
+                ? ['closed', 'abandoned']
+                : query.scope,
+        };
+  if (query.scope === 'closed') input.kind = 'issue';
   if (query.type) input.type = query.type;
   if (query.owner) input.owner = query.owner;
   if (query.relation) input.relation = query.relation;

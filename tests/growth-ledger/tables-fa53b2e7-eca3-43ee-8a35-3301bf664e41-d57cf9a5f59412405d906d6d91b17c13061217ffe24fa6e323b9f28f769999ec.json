@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "Reuse one purge command for automatic and owner-initiated removal. Preserve due deadlines across index rebuilds with a compact project-owned schedule, indexed globally so idle projects are untouched.",
+  "date": "2026-11-20"
+}

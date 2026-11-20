@@ -22,6 +22,7 @@ import { commandKeys, commandProjection, commandAliasRows } from './projectWorkP
 import { appendWork } from './projectWork';
 import { commutativeCommand } from './projectWorkCommandRun';
 import { internalMutation } from './server';
+import { isItemRetentionOperation, itemRetentionOperation } from './projectItemRetentionStore';
 
 /** Commands this revision-free mutation runs. A planning put (flip 5 S5) checks only its item version
  * (ITEM_CHANGED); the project revision is read in the same transaction, so an unrelated write never
@@ -73,6 +74,13 @@ export async function executeCommand(
   } else if (project.owner !== user.subject && command.action !== 'intent' && 'intentId' in command) {
     await intentAuthority(ctx, input.projectId, user.subject, command.intentId);
   }
+  if (command.action === 'purge-planning-item' && isItemRetentionOperation(command.operationId))
+    invariant(
+      command.operationId ===
+        itemRetentionOperation(input.projectId, command.itemId, command.expectedVersion),
+      'ITEM_CHANGED',
+      'The Deleted Item changed after this purge was selected.',
+    );
   const request = metadataRequest(command);
   const original = await findWorkEvent(ctx, input.projectId, input.operationId, {
     command: JSON.stringify(command),
