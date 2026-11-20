@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 1,
+  "reason": "ab5c0017 guard: LANDING_BATCH_LEAKED names a leaked landing batch in the failure log so the health report groups it apart from member failures; this Lane removes the one-time settle pass (leakedPage/settle/dryRun/run, about 125 lines), and no existing code means 'a batch outlived its members'",
+  "date": "2026-11-20"
+}

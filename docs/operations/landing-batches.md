@@ -283,7 +283,12 @@ first retires the successors stacked on a member that ended failed; one
 stacked on a member that landed keeps its check, since its publish still
 compares the pinned head. The shared publish skips the check: it settles its
 batch in the same transaction. Late compose or check results for a settled
-batch change nothing.
+batch change nothing. As a backstop, the capsule pack step, which already
+reads the batch of a landing that ended at least 7 days ago, applies the same
+rule when it finds that batch still open: if no member is live it settles the
+batch, packs the landing and writes one `LANDING_BATCH_LEAKED` failure-log row
+naming the batch (`nforge metrics ROOT --failures`). A healthy batch is
+terminal long before then, so this adds no calls or reads to the healthy path.
 Early-resolution advice distinguishes conflicts against the outer base from
 conflicts between cohort members. Internal conflicts are exposed after the
 survivor check is installed and pin its exact checked State and reserved

@@ -8,6 +8,7 @@ import { acceptanceRow, acceptancePlan } from './projectHostedAcceptanceStore';
 import { finishRow } from './projectHostedFinishWake';
 import { batchRow, batchSchema } from './projectHostedLandingBatchState';
 import { loadLanding } from './projectHostedLandingStore';
+import { settleLeakedBatch } from './projectHostedLandingBatchSettle';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { LANDING_CAPSULE_TABLES } from '../src/hosted-landing';
 import { capsuleOwnerKind, capsuleControlKey, capsuleControlRow } from './projectLandingCapsuleLedger';
@@ -261,23 +262,30 @@ export const begin = internalMutation({
   args: capsuleRunArgs,
   returns: v.string(),
   handler: async (ctx, input) => {
-    const { row, state } = await loadLanding(ctx, input);
+    let { row, state } = await loadLanding(ctx, input);
     if (row.capsule) return canonicalPayload({ pointer: row.capsule });
     if (!isCapsuleTerminal(state.phase)) return canonicalPayload({ kept: true, reason: 'active' });
     const dueAt = Math.max(input.dueAt, landingCapsuleDueAt(state));
     if (Date.now() < dueAt) return canonicalPayload({ kept: true, reason: 'grace', dueAt });
     const batchId = state.batchOriginId ?? state.batchId;
     if (batchId) {
-      const row = await batchRow(ctx, { projectId: input.projectId, batchId });
+      const key = { projectId: input.projectId, batchId };
+      const batch = await batchRow(ctx, key);
       if (
-        row &&
-        !['landed', 'superseded', 'split', 'failed'].includes(batchSchema.parse(JSON.parse(row.value)).phase)
+        batch &&
+        !['landed', 'superseded', 'split', 'failed'].includes(
+          batchSchema.parse(JSON.parse(batch.value)).phase,
+        )
       ) {
-        if (!row.capsuleWaits?.some(wait => wait.submissionId === state.id))
-          await ctx.db.patch(row._id, {
-            capsuleWaits: [...(row.capsuleWaits ?? []), { submissionId: state.id, dueAt }],
-          });
-        return canonicalPayload({ deferred: 'batch' });
+        // ab5c0017 guard: a batch whose members all ended settles here; settling may rewrite this row.
+        if (await settleLeakedBatch(ctx, key, batch)) ({ row, state } = await loadLanding(ctx, input));
+        else {
+          if (!batch.capsuleWaits?.some(wait => wait.submissionId === state.id))
+            await ctx.db.patch(batch._id, {
+              capsuleWaits: [...(batch.capsuleWaits ?? []), { submissionId: state.id, dueAt }],
+            });
+          return canonicalPayload({ deferred: 'batch' });
+        }
       }
     }
     const receipt = state.acceptance

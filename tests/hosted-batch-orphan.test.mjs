@@ -432,23 +432,18 @@ test('replay ab5c0017: a fallback batch whose last member ends through failFinis
   await lateIoIsNoOp(f);
 });
 
-const settlePass = await import(moduleUrl('../convex/projectHostedLandingBatchSettle.ts'));
-/** The operator pass over batches that leaked before the hook existed (dev, ab5c0017). */
-const runPass = (f, action) =>
-  settlePass[action]
-    ._handler(
-      {
-        runQuery: (_ref, args) => f.transaction('settle-pass-page', settlePass.leakedPage, args),
-        runMutation: (_ref, args) => f.transaction('settle-pass-apply', settlePass.settle, args),
-      },
-      { projectId: f.projectId },
-    )
+const capture = await import(moduleUrl('../convex/projectLandingCapsuleCapture.ts'));
+const { landingCapsuleGraceMs } = await import(moduleUrl('../convex/projectLandingCapsuleWake.ts'));
+const failureRows = f =>
+  [...(f.tables.projectFailures?.values() ?? [])].filter(
+    row => JSON.parse(row.value).code === 'LANDING_BATCH_LEAKED',
+  );
+const begin = (f, submissionId) =>
+  f
+    .transaction('capsule-begin', capture.begin, { projectId: f.projectId, submissionId, dueAt: 0 })
     .then(JSON.parse);
-
-test('ab5c0017 one-time pass: the dry run counts leaked batches and writes nothing; the run settles only those', async t => {
-  const f = await batchesFixture(t, { count: 2 });
-  await drainLive(f);
-  // The pre-hook leak: both members ended without any write reaching the hook.
+/** A leak no write reaches: both members already ended while the batch stayed composing. */
+function endedWithoutHook(f) {
   leak(f, { phase: 'composing', included: [] });
   for (const s of states(f))
     f.patch('projectHostedLandingRequests', rowOf(f, s.id)._id, {
@@ -458,46 +453,46 @@ test('ab5c0017 one-time pass: the dry run counts leaked batches and writes nothi
         ...s,
         phase: 'terminal-failed',
         observation: { state: 'superseded', pendingReason: null, cause: null },
-        error: { code: 'LANDING_SUPERSEDED', message: 'Synthetic pre-hook supersede' },
+        error: { code: 'LANDING_SUPERSEDED', message: 'Synthetic missed-hook supersede' },
       }),
     });
-  f.advanceClock(2 * 86_400_000);
-  const before = JSON.stringify([...f.tables.projectHostedLandingBatches.values()]);
-  const dry = await runPass(f, 'dryRun');
-  assert.deepEqual(
-    {
-      scanned: dry.scanned,
-      open: dry.open,
-      leaked: dry.leaked,
-      over24h: dry.leakedOver24h,
-      waits: dry.capsuleWaits,
-    },
-    { scanned: 1, open: 1, leaked: 1, over24h: 1, waits: 2 },
-  );
-  assert.equal(dry.settled, 0);
-  assert.equal(
-    JSON.stringify([...f.tables.projectHostedLandingBatches.values()]),
-    before,
-    'the dry run writes nothing',
-  );
-  assert.equal(f.counts.filter(c => c.name.startsWith('settle-pass-apply')).length, 0);
-  const applied = await runPass(f, 'run');
-  assert.equal(applied.settled, 1);
-  assertSettled(f);
-  const again = await runPass(f, 'dryRun');
-  assert.equal(again.leaked, 0, 'a settled batch is not counted again');
-  assert.equal((await runPass(f, 'run')).settled, 0, 'a re-run changes nothing');
-});
+}
 
-test('ab5c0017 one-time pass: a batch with a live member is counted open and left as it is', async t => {
+test('guard ab5c0017: the capsule pass settles a batch still open after every member ended, flags it once in the failure log and packs', async t => {
   const f = await batchesFixture(t, { count: 2 });
   await drainLive(f);
-  const before = retained(f).phase;
-  const dry = await runPass(f, 'dryRun');
-  assert.equal(dry.open, 1);
-  assert.equal(dry.leaked, 0);
-  assert.equal((await runPass(f, 'run')).settled, 0);
-  assert.equal(retained(f).phase, before);
+  endedWithoutHook(f);
+  f.advanceClock(landingCapsuleGraceMs + 86_400_000);
+  const [first, second] = states(f);
+  const answer = await begin(f, first.id);
+  assert.equal(answer.deferred, undefined, 'the landing packs instead of waiting on the batch forever');
+  assert.equal(answer.anchor.id, first.id);
+  assert.equal(answer.anchor.version, stateOf(f, first.id).version, 'the pack anchors the row as settled');
+  assertSettled(f);
+  const flags = failureRows(f);
+  assert.equal(flags.length, 1, 'one failure-log row names the leaked batch');
+  assert.equal(flags[0].operationId, `landing-batch-leak:${retained(f).id}`);
+  assert.equal((await begin(f, second.id)).deferred, undefined);
+  assert.equal(failureRows(f).length, 1, 'a settled batch is not flagged again');
+});
+
+test('guard ab5c0017: a batch with a live member stays open and the capsule pass keeps waiting on it', async t => {
+  const f = await batchesFixture(t, { count: 2 });
+  await drainLive(f);
+  const [ended, live] = states(f);
+  leak(f, { phase: 'checking', included: [ended.id, live.id] });
+  f.patch('projectHostedLandingRequests', rowOf(f, ended.id)._id, {
+    phase: 'terminal-failed',
+    value: JSON.stringify({
+      ...ended,
+      phase: 'terminal-failed',
+      error: { code: 'CHECK_FAILED', message: 'x' },
+    }),
+  });
+  f.advanceClock(landingCapsuleGraceMs + 86_400_000);
+  assert.equal((await begin(f, ended.id)).deferred, 'batch');
+  assert.equal(retained(f).phase, 'checking', 'a live member keeps its batch open');
+  assert.equal(failureRows(f).length, 0, 'nothing is flagged');
 });
 
 const landingStore = await import(moduleUrl('../convex/projectHostedLandingStore.ts'));
