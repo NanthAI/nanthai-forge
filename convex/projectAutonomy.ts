@@ -149,10 +149,11 @@ async function writePolicy(
   // (one indexed read, only when this edit sets the mirror).
   if (command.githubMirror && policy.githubMirror?.autoPush)
     await retargetGithubMirror(ctx, project._id, policy.githubMirror.repo);
-  // Un-pause is atomic: a lost web reply cannot leave a retained job and catch-up asleep.
+  // Un-pause is atomic: a lost web reply cannot leave a retained job and catch-up asleep. An
+  // un-pause that also changes the repository has just retargeted the queue (no mapping), so
+  // the same call queues current main for the new repository.
   if (
     project.sourceAuthority?.mode === 'server' &&
-    sameMirror &&
     previous.githubMirror?.autoPush === false &&
     mirror?.autoPush
   )

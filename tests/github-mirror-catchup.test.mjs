@@ -303,3 +303,32 @@ for (const failure of ['missing-receipt', 'changed-authority'])
       receipt.id,
     );
   });
+
+test('un-pause that also changes the repository queues current main for the new repository in the same edit', async () => {
+  const f = fixture(true, 'synthetic/old'),
+    github = mirrorFixture();
+  const receipt = accept(f, github.head, github.root.state, 1);
+  f.patch('projectGithubMirrors', f.mirrorId, {
+    mapping: JSON.stringify({ ...github.root, state: github.head, acceptanceId: receipt.id }),
+  });
+  await f.call('pause', policies.set, f.change(false));
+  f.insert('projectGithubBindings', { ...f.bound, repoId: 43, fullName: 'synthetic/new' });
+  await f.call('unpause-and-retarget', policies.set, {
+    projectId: f.projectId,
+    command: JSON.stringify({
+      action: 'set-policy',
+      operationId: randomUUID(),
+      githubMirror: { repo: 'synthetic/new', autoPush: true, inbound: true, laneRefs: false },
+    }),
+  });
+  const queueRow = f.tables.projectGithubMirrors.get(f.mirrorId);
+  assert.equal(queueRow.repository, 'synthetic/new');
+  const jobs = [...f.tables.projectGithubMirrorJobs.values()];
+  assert.equal(jobs.length, 1, 'the edit itself queues one catch-up, no recovery command needed');
+  assert.equal(jobs[0].receiptId, receipt.id);
+  assert.equal(jobs[0].repository, 'synthetic/new');
+  assert.equal(queueRow.activeId, jobs[0]._id);
+  assert.equal(f.scheduled.length, 1);
+  const read = await f.read();
+  assert.notEqual(read.next?.includes('nforge github resume'), true, 'status no longer asks for recovery');
+});

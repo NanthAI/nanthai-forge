@@ -460,6 +460,10 @@
                 "failedJobs": {
                   "type": "number"
                 },
+                "kept": {
+                  "type": "boolean",
+                  "const": true
+                },
                 "nextStep": {
                   "type": [
                     "string",

@@ -84,6 +84,14 @@ export function mirrorSummary(
     next: status.nextStep ?? null,
   });
   if (status.status === 'failed') {
+    if (status.error === 'GITHUB_INBOUND_FAILED' && status.kept)
+      return {
+        ...stopped(
+          'moved',
+          `The GitHub commit chosen for Forge failed its check here; GitHub’s main keeps it and the mirror to ${repo} stays stopped.`,
+        ),
+        next: `fix and land the Lane named in the detail to keep that change, then reset GitHub main to the commit Forge pushed last, and nforge github resume ${project} pushes it on top`,
+      };
     if (status.error === 'GITHUB_INBOUND_FAILED')
       return {
         ...base,
@@ -94,7 +102,10 @@ export function mirrorSummary(
         next: 'fix and land the Lane named in the detail to keep that change, or let it drop',
       };
     if (status.error === 'GITHUB_SYNC_CHANGED')
-      return stopped('moved', `GitHub’s main moved without Forge, so the mirror to ${repo} stopped.`);
+      return {
+        ...stopped('moved', `GitHub’s main moved without Forge, so the mirror to ${repo} stopped.`),
+        next: `the owner person brings GitHub’s commit into Forge in Settings → GitHub mirror; or reset GitHub main to the commit Forge pushed last, and nforge github resume ${project} restarts the mirror`,
+      };
     if (status.error === 'GITHUB_SYNC_API')
       return stopped('refused', `GitHub refused Forge’s push to ${repo}, so the mirror stopped.`);
     return stopped('stopped', `The mirror to ${repo} stopped (${status.error ?? 'failed'}).`);

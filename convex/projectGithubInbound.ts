@@ -21,7 +21,7 @@ import { buildComposePages } from '../src/hosted-compose';
 import { savePin } from '../src/hosted-save';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { inboundMessage, type InboundJob } from '../src/github-inbound-job';
-import { finish, parseInbound, twoWay } from './projectGithubInboundQueue';
+import { finish, mirrorOn, parseInbound, twoWay } from './projectGithubInboundQueue';
 import { checkPull, checkRequest } from './projectGithubPull';
 import { projectLink } from './projectGithubPullQueue';
 import { pullMessage, pullOperationId } from '../src/github-pull-check';
@@ -38,8 +38,13 @@ export async function inboundBegin(
   const active = await mirrorJob(ctx, input);
   if (!active) return null;
   const { job, queue, project } = active;
-  invariant(twoWay(project), 'GITHUB_SYNC_DISABLED', 'Two-way sync is off for this mirror.');
   const inbound = parseInbound(job);
+  // One-way mirrors take GitHub's commit only when the owner person asked for it (bringIn).
+  invariant(
+    twoWay(project) || (inbound.requested && mirrorOn(project)),
+    'GITHUB_SYNC_DISABLED',
+    'Two-way sync is off for this mirror.',
+  );
   if (inbound.phase === 'landing') return null;
   invariant(
     queue.mapping,
@@ -289,6 +294,7 @@ export const submit = internalMutation({
     const next: InboundJob = {
       phase: 'compose',
       ...(pull ? { pull } : {}),
+      ...(inbound.requested ? { requested: true } : {}),
       commit: input.commit,
       tree: input.tree,
       message: input.message.slice(0, 4000),

@@ -19,6 +19,8 @@ export const hostedMirrorStatusSchema = z.object({
   /** Failed publish jobs that are not the active job (a retargeted mirror's stranded publishes;
    * absent from older servers). */
   failedJobs: z.number().optional(),
+  /** Item c63c2171: the GitHub commit the owner chose to bring in failed to land; GitHub's main keeps it. */
+  kept: z.literal(true).optional(),
   /** The one action that clears a stopped mirror (absent from older servers). */
   nextStep: z.string().nullable().optional(),
 });

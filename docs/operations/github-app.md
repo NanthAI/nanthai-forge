@@ -301,7 +301,16 @@ All of these must hold:
   matches none of those States (`GITHUB_SYNC_BOOTSTRAP_TREE`). Both messages say
   that Forge never rewrites GitHub history and name the choice: land GitHub's
   change in Forge, or reset GitHub `main` yourself; the owner then runs
-  `nforge github resume`. GitHub's own
+  `nforge github resume`. On a one-way mirror stopped by `GITHUB_SYNC_CHANGED`,
+  the owner person can land GitHub's change with one press, **Bring GitHub's
+  commit into Forge** in Settings → GitHub mirror: it queues the same inbound job
+  two-way sync queues by itself (below), for GitHub's current `main` only, and the
+  stopped publish re-seeds on top of it. The direction stays one-way and the press
+  writes nothing to GitHub. It takes GitHub's `main` as it is when the job runs.
+  If that landing fails, Forge leaves GitHub `main` as it is (no note, no
+  take-out commit), status and the web say so, and the mirror stops as moved
+  again. To keep that change, fix and land its Lane, then reset GitHub `main` to
+  the commit Forge pushed last and resume: Forge pushes the change on top. GitHub's own
   branch protection on `main` also applies to the `PATCH`; a block surfaces as a
   retained `GITHUB_SYNC_API` failure. That last point is GitHub behavior this
   repository does not test.
@@ -495,8 +504,9 @@ mirror only fast-forwards.
   retained earlier State as a person); the mirror adds a fast-forward commit and
   history stays. Drilled the same way.
 - **GitHub `main` moved outside Forge** (`GITHUB_SYNC_CHANGED`). Forge keeps its
-  accepted `main` and sync stops without overwriting. Bring a wanted change in through a
-  contribution Lane and accept it. To drop an unwanted one, only the repository owner
+  accepted `main` and sync stops without overwriting. Bring a wanted change in with
+  **Bring GitHub's commit into Forge** (owner person, Settings → GitHub mirror), or
+  through a contribution Lane. To drop an unwanted one, only the repository owner
   can: set the ruleset `enforcement` to `disabled`, force-move `main` to the newest
   commit whose `Forge-State` trailer is an accepted State, set it back to `active`
   straight away, then the owner runs `nforge github resume PROJECT`. Keep that window to minutes and record the SHAs

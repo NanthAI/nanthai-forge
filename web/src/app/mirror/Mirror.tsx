@@ -48,6 +48,7 @@ export default function Mirror({ projectId, route, projectName }: PlaceProps) {
       location.assign(approval);
     });
   const resume = () => run(() => client.mutation(api.projectGithubMirrorResume.resume, { projectId }));
+  const bringIn = () => run(() => client.mutation(api.projectGithubMirrorResume.bringIn, { projectId }));
   if (mirror === undefined)
     return <Head trail={crumbsFor(route, projectName)} sentence="Reading the mirror…" />;
   const mark = mirrorStateMark(mirror.state);
@@ -92,7 +93,21 @@ export default function Mirror({ projectId, route, projectName }: PlaceProps) {
         {command && mirror.weight === 'act' && mirror.state !== 'inbound-failed' && mirror.owner ? (
           <div className="pad gs-stack">
             <div className="btns">
-              <Key kind="primary" disabled={busy} onClick={() => void resume()}>
+              {mirror.state === 'moved' ? (
+                <Key
+                  kind="primary"
+                  disabled={busy}
+                  onClick={() => void bringIn()}
+                  title="GitHub’s commit lands here through the usual check; the mirror then pushes on top of it."
+                >
+                  Bring GitHub’s commit into Forge
+                </Key>
+              ) : null}
+              <Key
+                kind={mirror.state === 'moved' ? undefined : 'primary'}
+                disabled={busy}
+                onClick={() => void resume()}
+              >
                 Resume the mirror
               </Key>
             </div>

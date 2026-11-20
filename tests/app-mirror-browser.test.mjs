@@ -52,7 +52,9 @@ test('import defaults to two-way; mirror pauses/resumes the retained link and co
     let legacy = new URLSearchParams(location.search).has('legacy');
     let policy = { githubMirror: { repo: 'example/parser', autoPush: !legacy, inbound: !legacy, laneRefs: false } };
     let pausedInbound = false;
-    const status = { repository: 'example/parser', status: 'synced', lagging: false, targetHead: 'a'.repeat(64), mirroredHead: 'a'.repeat(64), gitHead: 'b'.repeat(40), mirroredAt: 1800000000000 };
+    const moved = new URLSearchParams(location.search).has('moved');
+    if (moved) policy.githubMirror.inbound = false;
+    const status = { repository: 'example/parser', status: moved ? 'failed' : 'synced', error: moved ? 'GITHUB_SYNC_CHANGED' : null, lagging: moved, targetHead: 'a'.repeat(64), mirroredHead: 'a'.repeat(64), gitHead: 'b'.repeat(40), mirroredAt: 1800000000000 };
     const refresh = () => { window.mirror = { ...mirrorSummary(policy.githubMirror ? { ...policy.githubMirror, paused: !legacy && !policy.githubMirror.autoPush } : null, status), owner: true, repoId: policy.githubMirror && !new URLSearchParams(location.search).has('unbound') ? 42 : null, inbound: policy.githubMirror?.autoPush === false ? (legacy || pausedInbound) : policy.githubMirror?.inbound === true, ends: policy.githubMirror ? { forgeHead: status.targetHead, mirroredHead: status.mirroredHead, gitHead: status.gitHead, mirroredAt: status.mirroredAt } : null }; listeners.forEach(f => f()); };
     window.client = {
       query: async () => policy,
@@ -60,6 +62,7 @@ test('import defaults to two-way; mirror pauses/resumes the retained link and co
         const name = getFunctionName(ref); window.calls.push({ name, args });
         if (name === 'projectAutonomy:set') { const next = JSON.parse(args.command).githubMirror; if (policy.githubMirror?.autoPush && !next.autoPush) pausedInbound = policy.githubMirror.inbound; policy = { githubMirror: next }; if (next.autoPush) legacy = false; }
         if (name === 'githubBindingStore:remove') policy = {};
+        if (name === 'projectGithubMirrorResume:bringIn') Object.assign(status, { status: 'syncing', error: null });
         refresh();
       },
       action: async () => ({ repository: 'example/parser', origin: 'public', choices: ['public', 'private'], ref: 'main', commit: 'c'.repeat(40), files: 2914, bytes: 8300000, submodules: 0, lfs: 'No LFS objects.', warnings: [] }),
@@ -183,6 +186,36 @@ test('import defaults to two-way; mirror pauses/resumes the retained link and co
   assert.equal(named.name, 'githubBindingStore:remove');
   assert.equal(named.args.repoId, 0);
   assert.equal(named.args.repository, 'example/parser');
+  // Item c63c2171: a one-way mirror stopped on a moved GitHub main offers GitHub's commit as one press.
+  await page.goto('https://forge.test/-/example/parser/settings/mirror?moved=1');
+  const bring = page.getByRole('button', { name: 'Bring GitHub’s commit into Forge', exact: true });
+  await bring.waitFor();
+  assert.match(await page.locator('.mr').textContent(), /brings GitHub’s commit into Forge/);
+  for (const theme of ['dark', 'light']) {
+    await page.setViewportSize({ width: 390, height: 1000 });
+    await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
+    await settleBrowserPage(page);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
+    const result = await page.evaluate(() =>
+      window.axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] } }),
+    );
+    assert.deepEqual(
+      result.violations.map(v => v.id),
+      [],
+    );
+    if (shots) await page.screenshot({ path: join(shots, `mirror-moved-390-${theme}.png`), fullPage: true });
+  }
+  await bring.click();
+  await bring.waitFor({ state: 'hidden' });
+  const pressed = (await page.evaluate(() => window.calls)).filter(c =>
+    c.name.startsWith('projectGithubMirrorResume:'),
+  );
+  assert.deepEqual(
+    pressed.map(c => c.name),
+    ['projectGithubMirrorResume:bringIn'],
+    'one press, one call',
+  );
   await page.goto('https://forge.test/-/new/import?import=1');
   await page.getByLabel('Address', { exact: true }).fill('https://github.com/example/parser');
   await page.getByRole('button', { name: 'Check it', exact: true }).click();

@@ -12,6 +12,8 @@ const pin = z.object({ sha256: hash, size: z.number().int().nonnegative() }).str
 export const inboundJobSchema = z
   .object({
     phase: z.enum(['pending', 'compose', 'landing', 'checking']),
+    /** The owner person asked to bring GitHub's commit into Forge on a one-way mirror (c63c2171). */
+    requested: z.literal(true).optional(),
     pull: pullJobSchema.optional(),
     commit: z
       .string()

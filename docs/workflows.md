@@ -630,7 +630,9 @@ recorded history and direction, then **Resume** it later. Pause sets
 existing CLIs; the project retains its chosen direction. Un-pausing restores that
 direction and, in the same policy mutation, wakes a retained job and queues one
 catch-up job for the current accepted main if GitHub is behind. The retained job
-keeps its cursor and runs first. No further landing is needed.
+keeps its cursor and runs first. No further landing is needed. An un-pause that
+also names another repository re-points the mirror and queues current main for
+the new repository in the same edit, with no recovery command afterwards.
 
 **Paused landings remain separate in Forge. Their combined source changes reach
 GitHub in one catch-up commit**, naming each covered landing's subject and short

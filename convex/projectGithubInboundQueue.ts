@@ -117,17 +117,23 @@ export async function settleInbound(
         });
   }
   const lane = inbound.laneId!.slice(0, 8);
+  // Item c63c2171: the owner chose to keep this GitHub commit. If it fails to land, Forge never takes it out of
+  // GitHub main: the mapping stays on Forge's last push and no note is set, so the mirror stops as "moved" again.
+  const kept = !landed && inbound.requested === true;
   await finish(
     ctx,
     job,
     queue,
-    mapping,
+    // Nothing was pushed: the mapping and its mirrored time stay as they are.
+    kept ? null : mapping,
     landed ? 'done' : 'failed',
     landed
       ? undefined
       : {
           error: 'GITHUB_INBOUND_FAILED',
-          detail: `GitHub ${inbound.commit!.slice(0, 12)} did not land on Forge (Lane ${lane}; ${settled.error ?? 'failed'}). The next Forge landing publishes Forge main over it on GitHub; fix and land Lane ${lane} to keep the change.`,
+          detail: kept
+            ? `GitHub ${inbound.commit!.slice(0, 12)} did not land on Forge (Lane ${lane}; ${settled.error ?? 'failed'}). GitHub main keeps it and the mirror stays stopped; fix and land Lane ${lane} to keep the change, then reset GitHub main to the commit Forge pushed last and resume; Forge then pushes the change on top.`
+            : `GitHub ${inbound.commit!.slice(0, 12)} did not land on Forge (Lane ${lane}; ${settled.error ?? 'failed'}). The next Forge landing publishes Forge main over it on GitHub; fix and land Lane ${lane} to keep the change.`,
         },
   );
   await ctx.db.patch(queue._id, {
@@ -135,7 +141,7 @@ export async function settleInbound(
       commit: inbound.commit,
       laneId: inbound.laneId,
       outcome: settled.phase,
-      ...(landed ? {} : { note: true, error: settled.error }),
+      ...(landed ? {} : kept ? { error: settled.error } : { note: true, error: settled.error }),
     }),
   });
   return landed ? 'landed' : 'failed';
@@ -149,6 +155,11 @@ export const inboundOutcomeSchema = z
     error: z.string().nullable().optional(),
   })
   .strict();
+/** The mirror is on (either direction) for a server-authority project. */
+export const mirrorOn = (project: Doc<'hostedProjects'> | null) => {
+  const policy = project ? effectivePolicy(project).githubMirror : undefined;
+  return project?.sourceAuthority?.mode === 'server' && !project.removal && policy?.autoPush ? policy : null;
+};
 export const twoWay = (project: Doc<'hostedProjects'> | null) => {
   const policy = project ? effectivePolicy(project).githubMirror : undefined;
   return project?.sourceAuthority?.mode === 'server' && !project.removal && policy?.autoPush && policy.inbound
@@ -157,11 +168,23 @@ export const twoWay = (project: Doc<'hostedProjects'> | null) => {
 };
 
 /** Queue one inbound job unless one already waits: it reads GitHub main when it runs, so later
- * pushes coalesce. Sequence 0 sorts it before every queued publish. Runs at once when idle. */
-export async function ensureInbound(ctx: MutationCtx, project: Doc<'hostedProjects'>, queue: Queue) {
+ * pushes coalesce. Sequence 0 sorts it before every queued publish. Runs at once when idle.
+ * `requested`: the owner person asked for this one GitHub commit on a one-way mirror. */
+export async function ensureInbound(
+  ctx: MutationCtx,
+  project: Doc<'hostedProjects'>,
+  queue: Queue,
+  requested = false,
+) {
   const [first] = await queuedJobs(ctx, project._id, 1);
   // A queued push job sorts first (sequence 0); a pull request job (0.5) is not one.
-  if (first?.inbound && !first.pullKey) return first._id;
+  if (first?.inbound && !first.pullKey) {
+    if (requested && !parseInbound(first).requested)
+      await ctx.db.patch(first._id, {
+        inbound: canonicalPayload({ ...parseInbound(first), requested: true } satisfies InboundJob),
+      });
+    return first._id;
+  }
   const id = await ctx.db.insert('projectGithubMirrorJobs', {
     projectId: project._id,
     receiptId: `inbound:${crypto.randomUUID()}`,
@@ -172,7 +195,10 @@ export async function ensureInbound(ctx: MutationCtx, project: Doc<'hostedProjec
     step: 0,
     cursor: null,
     state: '0'.repeat(64),
-    inbound: canonicalPayload({ phase: 'pending' } satisfies InboundJob),
+    inbound: canonicalPayload({
+      phase: 'pending',
+      ...(requested ? { requested: true } : {}),
+    } satisfies InboundJob),
   });
   if (!queue.activeId) {
     await ctx.db.patch(queue._id, { activeId: id });
@@ -210,6 +236,7 @@ export async function yieldToInbound(
   project: Doc<'hostedProjects'>,
   queue: Queue,
   job: Doc<'projectGithubMirrorJobs'>,
+  requested = false,
 ) {
   await ctx.db.patch(job._id, {
     status: 'queued',
@@ -225,10 +252,11 @@ export async function yieldToInbound(
     requestBytes: undefined,
   });
   await ctx.db.patch(queue._id, { activeId: null });
-  const inbound = await ensureInbound(ctx, project, { ...queue, activeId: null });
+  const inbound = await ensureInbound(ctx, project, { ...queue, activeId: null }, requested);
   const step = (await ctx.db.get(inbound))!.step;
   if ((await mirrorRow(ctx, project._id))?.activeId !== inbound) {
     await ctx.db.patch(queue._id, { activeId: inbound });
     await scheduleMirror(ctx, { _id: inbound, step });
   }
+  return inbound;
 }

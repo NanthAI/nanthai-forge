@@ -36,11 +36,13 @@ export async function githubMirrorStatus(
   const inboundDetail = inbound?.pull
     ? `Checking GitHub PR #${inbound.pull.number} at ${inbound.pull.head.slice(0, 12)} for forge/verify.`
     : inbound
-      ? settled?.phase === 'terminal-failed'
-        ? `GitHub ${inbound.commit!.slice(0, 12)} did not land on Forge (Lane ${inbound.laneId!.slice(0, 8)}; ${settled.error ?? 'failed'}). The next Forge landing publishes Forge main over it on GitHub; fix and land that Lane to keep the change.`
-        : inbound.commit
-          ? `Bringing in GitHub ${inbound.commit.slice(0, 12)} as Lane ${inbound.laneId!.slice(0, 8)} (${inbound.changes ?? 0} changed paths).`
-          : 'Reading GitHub main for two-way sync.'
+      ? settled?.phase === 'terminal-failed' && inbound.requested
+        ? `GitHub ${inbound.commit!.slice(0, 12)} did not land on Forge (Lane ${inbound.laneId!.slice(0, 8)}; ${settled.error ?? 'failed'}). GitHub main keeps it and the mirror stays stopped; fix and land that Lane to keep the change, then reset GitHub main to the commit Forge pushed last and resume.`
+        : settled?.phase === 'terminal-failed'
+          ? `GitHub ${inbound.commit!.slice(0, 12)} did not land on Forge (Lane ${inbound.laneId!.slice(0, 8)}; ${settled.error ?? 'failed'}). The next Forge landing publishes Forge main over it on GitHub; fix and land that Lane to keep the change.`
+          : inbound.commit
+            ? `Bringing in GitHub ${inbound.commit.slice(0, 12)} as Lane ${inbound.laneId!.slice(0, 8)} (${inbound.changes ?? 0} changed paths).`
+            : 'Reading GitHub main for two-way sync.'
       : last?.note
         ? `GitHub ${last.commit.slice(0, 12)} did not land on Forge (Lane ${last.laneId.slice(0, 8)}${last.error ? `; ${last.error}` : ''}); the next publish takes it out on GitHub.`
         : null;
@@ -102,6 +104,8 @@ export async function githubMirrorStatus(
           : inboundDetail,
     jobId: hold?._id ?? job?._id ?? null,
     ...(stranded.length ? { failedJobs: stranded.length } : {}),
+    // Item c63c2171: the owner's chosen GitHub commit failed to land; Forge leaves it on GitHub (no extra read).
+    ...(inbound?.requested && settled?.phase === 'terminal-failed' ? { kept: true as const } : {}),
   };
   return { ...result, nextStep: hostedMirrorNextStep(result) };
 }
