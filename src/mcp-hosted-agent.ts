@@ -143,7 +143,7 @@ export function registerHostedAgentWorkflow(
         'help',
       ],
       description:
-        'Read paged metrics/decisions/friction-list, capabilities or one Lane/run/operation/submission. board: unread notes. Decisions: target?, cursor?. friction-list: status?(default open),area?,laneId?,search?,limit?,cursor?; friction-triage (forge_task) dismisses (dropped+reason) or links an Issue (planned+planningItemId). records: collection, parentId/status or id/version; cursor pages pin immutable versions; saves list each saved State (head). No Work hydration, wakes or idle observer.',
+        'Read paged metrics/decisions/friction-list, capabilities or one Lane/run/operation/submission; status main:true|N says why main failed. board: unread notes. Decisions: target?, cursor?. friction-list: status?(default open),area?,laneId?,search?,limit?,cursor?; friction-triage (forge_task) dismisses (dropped+reason) or links an Issue (planned+planningItemId). records: collection, parentId/status or id/version; cursor pages pin immutable versions; saves list each saved State (head). No Work hydration, wakes or idle observer.',
     },
   ];
   // Project rules: defaults until the first call reads the live policy, then regenerated from it.

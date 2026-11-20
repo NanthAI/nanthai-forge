@@ -33,6 +33,8 @@ const everyRoute = [
   project('plan', '', 'i-AbCdEfGhIjKlMnOpQrStUv'),
   project('code', 'files', 'src/a b/ünï.ts'),
   project('code', '', '0f8d2c1e-5b7a-4c3d-9e21-6a4b8f0c7d35'),
+  // One main red's view, the address a Main broke row's Why opens (ae068e0c).
+  project('code', '', 'red/1234'),
   { frame: 'project', handle: 'a-b', project: 'x~y', place: 'settings', section: 'you', rest: '' },
 ];
 

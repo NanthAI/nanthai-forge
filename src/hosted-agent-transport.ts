@@ -2274,7 +2274,18 @@ export class HostedAgentTransport {
     };
   }
   private async observe(command: z.infer<typeof hostedAgentCommandSchemas.status>) {
-    const { laneId, operationId, submissionId, runId, kind, version, summary, reports, cursor } = command;
+    const { laneId, operationId, submissionId, runId, kind, version, summary, reports, cursor, main } =
+      command;
+    if (main !== undefined) {
+      invariant(
+        [laneId, operationId, submissionId, runId, kind, version, summary, reports, cursor].every(
+          value => value === undefined,
+        ),
+        'BAD_ARGUMENT',
+        'main reads one main red alone: pass main:true or main:N (its audit event sequence) without other fields.',
+      );
+      return this.query('projectMainRed:read', main === true ? {} : { sequence: main });
+    }
     invariant(!summary || runId, 'BAD_ARGUMENT', 'summary:true reads one check run: pass runId.');
     invariant(
       [laneId, operationId, submissionId, runId].filter(Boolean).length === 1,

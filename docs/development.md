@@ -815,8 +815,17 @@ layer out of both first paints.
   applies the same rule, so the two always agree. FYI adds
   `projectNeedsFyi:read` (landings, main breaking, settings and access changes,
   messages that ask nothing; each bounded) and writes only on Dismiss or Clear
-  all (`projectNeedsFyi:dismiss`, one row per account and project). Loose ends
-  reads `projectLooseEnds:read` only while unfolded. Idle costs nothing.
+  all (`projectNeedsFyi:dismiss`, one row per account and project). A Main
+  broke or Drill row names the culprit the bisect proved (from the audit events
+  the read already holds) and its Why opens that red at `code/red/<sequence>`
+  (`web/src/app/red/`): what failed, the log one press away, main's head, the
+  landings since the last pass (candidates until the bisect proves one) and how
+  it ended, from one read on open (`projectMainRed:read`, bounded: one event at
+  the sequence, two pages of at most 20 events, the audit and run rows, at most
+  21 receipts, and once it passed again at most 10 receipts and their landing
+  rows to find a revert). Every Review and Why on Needs me opens the thing it
+  names. Loose ends reads `projectLooseEnds:read` only while unfolded. Idle
+  costs nothing.
 - Plan (`web/src/app/plan/`) is the hand-ordered list grouped by Initiative
   ([planning model](planning.md)). It adds one read, `projectPlanView:read`:
   the Initiatives, every live Item (at most 500 per status) and each live

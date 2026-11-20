@@ -36,7 +36,8 @@ export type AppRoute =
       place: ProjectPlace;
       /** A section of the place (a strip entry), or '' for the place itself. */
       section: string;
-      /** What the section shows: a Lane or Item id; for Code a landing's receipt id, or under files a path. */
+      /** What the section shows: a Lane or Item id; for Code a landing's receipt id or red/<sequence> (one main
+       * red), or under files a path. */
       rest: string;
     }
   | { frame: 'missing'; path: string };
@@ -124,6 +125,10 @@ export function parseAppPath(pathname: string): AppRoute {
     // What landed, or one landing's receipt; files/… is a folder or a file. A bare path (an older link) is a file.
     if (tail[0] === 'files') return project(first, second, 'code', 'files', tail.slice(1).join('/'));
     if (tail.length === 1 && receiptShape.test(tail[0]!)) return project(first, second, 'code', '', tail[0]!);
+    // One main red (ae068e0c): red/<audit event sequence>, the view a Main broke row's Why opens. An old bare file
+    // link to a file at red/<digits> opens this view instead; file links have used files/ since that form.
+    if (tail.length === 2 && tail[0] === 'red' && /^\d{1,15}$/.test(tail[1]!))
+      return project(first, second, 'code', '', `red/${tail[1]}`);
     return project(first, second, 'code', tail.length ? 'files' : '', tail.join('/'));
   }
   const [named = '', ...detail] = tail;

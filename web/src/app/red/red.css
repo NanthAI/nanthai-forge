@@ -1,0 +1,17 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* One main red (Item ae068e0c): the check page's frame (../check/check.css) with the landings since the last pass as
+   rows on the right. Every value is a design-system token. */
+[data-ds] {
+  .red-end { display: inline-flex; align-items: center; margin-right: var(--s-2); }
+  .chk-p .row.red-landing {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: var(--s-3);
+    align-items: start;
+    color: inherit;
+    text-decoration: none;
+  }
+  .chk-p .red-landing .any { display: grid; gap: 2px; min-width: 0; }
+  .chk-p .red-landing .ttl { overflow-wrap: anywhere; }
+  .chk-p .red-landing .meta { color: var(--text-2); font-size: var(--t-meta); overflow-wrap: anywhere; }
+}

@@ -140,6 +140,14 @@ function heldRows(held: readonly NowRow[]): FyiRow[] {
   }));
 }
 
+/** The address of one main red's view (web/src/app/red): its audit event's sequence. */
+const mainRedLink = (sequence: number) => ({ place: 'code', rest: `red/${sequence}` });
+/** The culprit by its landing's title when the read holds it, else by its receipt's short id. */
+function culpritName(receiptId: string, titles: ReadonlyMap<string, string | null>) {
+  const title = titles.get(receiptId);
+  return title ? `“${title}”` : `landing ${receiptId.slice(0, 8)}`;
+}
+
 function readRows(read: FyiRead): FyiRow[] {
   const rows: FyiRow[] = [];
   for (const landing of read.landings) {
@@ -148,9 +156,11 @@ function readRows(read: FyiRead): FyiRow[] {
       : landing.redone
         ? `checked again after main moved${landing.thrown ? `, ${minutes(landing.thrown)} of CI time thrown away` : landing.thrown === null ? ', CI time thrown away not reported' : ''}`
         : 'landed, checked';
+    // Every Review and Why opens the thing it names (ae068e0c): the Lane's evidence, else this landing's receipt.
+    const receipt = { place: 'code', rest: landing.receiptId };
     const review: Link = landing.laneId
       ? { label: 'Review', to: { place: 'lanes', rest: `${landing.laneId}/checked` } }
-      : { label: 'Review', to: { place: 'code' } };
+      : { label: 'Review', to: receipt };
     rows.push({
       key: `landing:${landing.receiptId}@1`,
       at: landing.at,
@@ -161,9 +171,11 @@ function readRows(read: FyiRead): FyiRow[] {
       title: landing.title || 'A landing without a message',
       who: landing.actor ? (landing.agent ? landing.actor : whoOf(landing.actor, null)) : null,
       fact: how,
-      links: landing.redone ? [review, { label: 'Why', to: { place: 'needs', section: 'held' } }] : [review],
+      // Why it was checked again is on its receipt ("Checked again on top of main").
+      links: landing.redone ? [review, { label: 'Why', to: receipt }] : [review],
     });
   }
+  const titles = new Map(read.landings.map(landing => [landing.receiptId, landing.title]));
   for (const red of read.broke)
     rows.push({
       key: `broke:${red.sequence}@1`,
@@ -174,8 +186,9 @@ function readRows(read: FyiRead): FyiRow[] {
       tag: red.drill ? 'Drill' : 'Main broke',
       title: red.drill ? 'A main-break drill ran' : 'The check on main failed',
       who: null,
-      fact: red.culprit ? `at ${red.head}; the landing that broke it is known` : `at ${red.head}`,
-      links: [{ label: 'Why', to: { place: 'code' } }],
+      fact: red.culprit ? `at ${red.head}; broken by ${culpritName(red.culprit, titles)}` : `at ${red.head}`,
+      // Why opens this red (code/red/<sequence>), never the bare Code page.
+      links: [{ label: 'Why', to: mainRedLink(red.sequence) }],
     });
   for (const change of read.settings)
     rows.push({

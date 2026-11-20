@@ -5,7 +5,7 @@
 // the page already holds; this read adds what is not state on the line:
 //   - landings, newest FYI_LANDINGS above the clear line (the receipt, plus two small rows for its Lane, plus the
 //     landing row only when it was checked again, for the CI time thrown away);
-//   - main breaking (main-audit red verdicts, newest FYI_EVENTS);
+//   - main breaking (main-audit red verdicts and the culprit named after one, newest FYI_EVENTS);
 //   - settings and access changes, for the owner only (newest FYI_EVENTS policy edits and invitations, no address);
 //   - coordination messages addressed to the reader that ask nothing (one receipt and one presence row each, so an
 //     acknowledged message, or one whose Lane landed or was abandoned, drops out). A message with choices waits on
@@ -19,6 +19,7 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
 import { finishRow } from './projectHostedFinishWake';
+import { culpritOf } from './projectMainRed';
 import { landingRow } from './projectHostedLandingStore';
 import { session } from './coordinationWrite';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
@@ -188,13 +189,16 @@ export const read = query({
           laneId: lane?.key ?? null,
         });
       }
+      // The culprit the bisect named after a red is its own event in the same page (convex/projectMainRed.ts reads
+      // the whole episode on open); named here from the rows in hand, never with another read. A culprit event sorts
+      // below its red, so a red at the edge of this page can show here without the culprit its view names.
       const broke = audits
         .filter(row => row.kind === 'red')
         .map(row => ({
           sequence: row.sequence,
           at: Date.parse(row.at),
           head: row.head.slice(0, 12),
-          culprit: row.culprit ?? null,
+          culprit: culpritOf(row, audits),
           drill: Boolean(row.drill),
         }));
       // Settings and access are the owner's: other readers never see who was invited or what changed.

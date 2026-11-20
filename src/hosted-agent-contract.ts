@@ -458,6 +458,9 @@ export const hostedAgentCommandSchemas = {
         ])
         .optional(),
       cursor: z.string().nullable().optional(),
+      /** Why main failed (ae068e0c): the newest red (true) or the red at this audit event sequence, with its failed
+       * run, the landings since the last pass, the culprit when proven and how it ended. */
+      main: z.union([z.literal(true), z.number().int().nonnegative()]).optional(),
       /** From a Lane folder: the files that differ from its saved head (git status), answered
        * locally with no server call (ad80e037). */
       files: z.literal(true).optional(),

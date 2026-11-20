@@ -428,6 +428,16 @@ under `more`), timings (wall, execution, shards, five slowest files) and the sel
 (gate mode, requested tests, reported files, planned tests, shards), under 8 KB instead of
 the full run (about 80 KB).
 
+`status {"main":true}` (the newest red among main's newest 20 audit events) or `{"main":N}`
+(the red at audit event sequence N, the one a Main broke row names; `projectMainRed:read`) says why main failed: the red (head, run, time), the failed run's
+summary, a link to the full log at the CI when it has one, the last pass (main's own record while
+the red is open; once it ended, the newest audit pass, `audited:true`, so landings that passed a
+full check after it can still be listed), the landings since
+it (newest 20; `landingsMore` when there were more), the `culprit` receipt when the bisect
+proved one (otherwise those landings are only candidates), and `end`: `red` (with the live
+reason and failing files), `flaky`, `recovered` (by a `revert` or a `fix`, with its receipt)
+or `not-reported`. It reads only on request and writes nothing.
+
 `lane-history {laneId?}` is the matching per-Lane read: one query, six indexed reads
 (Lane head and record, its first version, the overlap row), a few hundred bytes, no
 writes. It gives `openedAt`, `startBase` and `lastSyncedBase` (main at start and main now),

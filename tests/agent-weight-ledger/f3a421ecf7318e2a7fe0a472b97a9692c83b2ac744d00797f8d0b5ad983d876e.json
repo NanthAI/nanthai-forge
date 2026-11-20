@@ -1,0 +1,4 @@
+{
+  "issue": "ae068e0c",
+  "reason": "MCP tool-list ceiling 5723 -> 5728 (+5 bytes): forge_work_overview lists the new status field `main` (why main failed, Item ae068e0c), so agents can find a main red without Convex access. Measured 5725 on the source build. Modules, CPU and installed-byte ceilings are unchanged."
+}
