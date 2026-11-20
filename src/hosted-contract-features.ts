@@ -195,6 +195,10 @@ export const hostedContractFeatures = [
   /** Explicit Lane holds (e1633718): projectHostedLanePark:set parks a Lane on a holder with a reason, or clears it.
    * Without it the CLI refuses `save {park}` before saving. */
   'lane-park',
+  /** projectHostedLanding:enqueue and projectHostedLandingDesired:submit take `maxChecks` and the
+   * queue answers projectHostedQueueRoom:room (ad80e037); the switch FORGE_QUEUE_LAND_WHEN_ROOM decides
+   * whether it is honoured. Without the feature the CLI refuses `land {maxChecks}` itself. */
+  'land-when-room',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

@@ -123,7 +123,7 @@ export function registerHostedAgentWorkflow(
     },
     {
       name: 'forge_check',
-      short: 'Check a Candidate, confirm tests, read runs and retained logs.',
+      short: 'Check a Candidate, confirm tests, read runs and logs.',
       actions: ['check', 'run', 'observe', 'tests', 'confirm-tests', 'log'],
       description:
         'save modes check|contract use check/confirm-tests fields; old names work, run=check. tests proposes proving tests; confirm-tests stores a <90s contract from complete exact-Candidate timings (runId,expectedHead,expectedVersion). Optional tests replaces that list; gates unchanged. Check a pinned Candidate or finitely read a run/source operation/submission. Reads start no compute/subscription; log: runId, tail/stream/shard/attempt reads retained redacted output; full logs remain at the provider. forge_wait observes live.',

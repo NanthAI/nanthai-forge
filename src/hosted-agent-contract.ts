@@ -324,6 +324,17 @@ export const hostedAgentCommandSchemas = {
         ),
       /** Land a Lane whose saved head changes nothing against its base (otherwise refused). */
       allowEmpty: z.boolean().optional(),
+      /** Submit only while the queue holds fewer than N checks; judged by the server with the submit,
+       * and a land without room waits for it on a live query, never polling (ad80e037). */
+      maxChecks: z
+        .number()
+        .int()
+        .min(1)
+        .max(64)
+        .optional()
+        .describe(
+          'Submit only while fewer than N checks run or wait, so at most N with this one (held entries out, preparing landings in); a land without room waits for one.',
+        ),
       retry: z.boolean().optional(),
       reason: finishRetryReasonSchema.optional(),
     })
@@ -331,6 +342,10 @@ export const hostedAgentCommandSchemas = {
     .refine(
       command => !command.retry || Boolean(command.reason),
       'A retry records its reason: add "reason" (flake, main-moved, infra or other; a failed check names it next.retryReason).',
+    )
+    .refine(
+      command => command.maxChecks === undefined || command.accept !== false,
+      'maxChecks limits a land that queues; a check-only run (accept:false) never queues, so drop maxChecks.',
     ),
   /** asOwner: the project owner is issuing this, not an agent acting alone (urgentRoles). */
   prioritize: z

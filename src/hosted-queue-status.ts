@@ -102,3 +102,13 @@ export type HostedQueueStatus = {
   eta: { milliseconds: number; approximate: true; basis: 'recent-service' | 'initial-estimate' };
   message: string;
 };
+
+/** Most checks a land's `maxChecks` may name (ad80e037). */
+export const QUEUE_ROOM_MAX = 64;
+/** Checks the queue holds, as `land {maxChecks}` judges them: its service groups (a batch
+ * checks as one, the dispatcher's identity), held entries left out, plus landings still preparing
+ * their source (each joins the queue as one). */
+export function queueRoomCount(keys: readonly QueueStatusKey[], preparing: number) {
+  const groups = new Set(keys.filter(key => !key.held).map(key => key.batchId ?? key.id)).size;
+  return { checks: groups + preparing, groups, preparing };
+}

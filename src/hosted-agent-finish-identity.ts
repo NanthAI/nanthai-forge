@@ -194,7 +194,7 @@ export async function selectHostedFinish(
   const directory = hostedAgentDirectory(root);
   const source = Object.fromEntries(
     Object.entries(command).filter(
-      ([key]) => !['accept', 'message', 'retry', 'reason', 'priority', 'tokens'].includes(key),
+      ([key]) => !['accept', 'message', 'retry', 'reason', 'priority', 'tokens', 'maxChecks'].includes(key),
     ),
   );
   const index = join(directory, `finish-${digest(canonicalPayload({ root, address, actor, source }))}.json`);
@@ -251,12 +251,23 @@ export async function selectHostedFinish(
       (readAgentJson(path) as { values: Record<string, unknown> }).values[finishRefusedKey] === 'WORK_STALE'
     );
   };
+  // Refused over maxChecks before it submitted: another maxChecks (or none) is new work (ad80e037).
+  const roomRefused = (prior: FinishSelection) => {
+    const path = join(directory, `${prior.operationId}.json`);
+    const refused =
+      checkoutPathExists(path) &&
+      (readAgentJson(path) as { values: Record<string, unknown> }).values[finishRefusedKey];
+    return (
+      (refused === 'NO_QUEUE_ROOM' || refused === 'MAX_CHECKS_UNSUPPORTED') &&
+      prior.command.maxChecks !== command.maxChecks
+    );
+  };
   let selected = operationId;
   if (!selected && previous && !sameSource && !(await terminal(previous))) selected = previous.operationId;
   if (!selected && previous && sameSource && previous.command.accept === command.accept) {
     // A pre-submit WORK_STALE pinned that operation to Lane pins that moved on: never replay it.
     if (!command.retry) {
-      if (!staleRefused(previous)) selected = previous.operationId;
+      if (!staleRefused(previous) && !roomRefused(previous)) selected = previous.operationId;
     } else if (canonicalPayload(previous.command) === canonicalPayload(command)) {
       if (!(await terminal(previous))) selected = previous.operationId;
     }
@@ -272,7 +283,8 @@ export async function selectHostedFinish(
       latest.operationId !== previous?.operationId &&
       latest.fingerprint === fingerprint &&
       latest.command.accept === command.accept &&
-      latest.command.priority === command.priority
+      latest.command.priority === command.priority &&
+      latest.command.maxChecks === command.maxChecks
     )
       return latest;
     const retainedCommand =

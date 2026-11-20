@@ -71,7 +71,9 @@ test('the hosted tool list stays inside its context budget', async t => {
   // lanes action and its fields (MCP lanes names id/intentId/view; view is a checked string, so its values stay in help).
   // 490 -> 472 (a61d3c91): forge_task drops 'Help: forge_task.' (every listing already ends 'forge_work_overview help'),
   // paying for land's optional `tokens:n` field.
-  assert.equal(descriptionBytes, 472, 'cost fixes preserve the per-session MCP description bytes');
+  // 472 -> 463 (ad80e037): forge_check says 'read runs and logs' (help names retained logs), paying with the
+  // shorter name for land's new `maxChecks:n` field (tools/list 5712 -> 5715, under its 5723 ceiling).
+  assert.equal(descriptionBytes, 463, 'cost fixes preserve the per-session MCP description bytes');
   t.diagnostic(`tools/list ${chars} chars (~${Math.ceil(chars / 4)} tokens); descriptions ${descriptions}`);
   assert(chars <= LIST_CHARS, `tool list characters: ${chars}`);
   // Codex sends each tool as a function definition under a server-prefixed name: same budget.

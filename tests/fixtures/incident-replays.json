@@ -470,6 +470,12 @@
       "test": "incident fa2c1383 wiring: the guards fail on the incident, stranded followers, a parked kept run, a stale-base restart and a dropped conflict"
     },
     {
+      "incident": "ad80e037",
+      "what": "Queue-cap race (Item 593fc2d7 friction): two builders read the queue, both saw room under the project's check cap and both submitted; with land {maxChecks:N} the server judges each submit inside its mutation, counting the other one still preparing",
+      "file": "tests/land-when-room.test.mjs",
+      "test": "incident replay ad80e037: two submits that both saw room cannot both pass the cap"
+    },
+    {
       "incident": "43b51a5e",
       "what": "Review 01a38b28 F1: a normal Ready entry gave way forever to an urgent Ready entry parked on it (handed by an urgent holder's exit, or made urgent while parked) and re-polled every 250 ms; it drives that entry instead",
       "file": "tests/hosted-landing-urgent-yield.test.mjs",

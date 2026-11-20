@@ -1302,6 +1302,8 @@ export class HostedAgentTransport {
           return result;
         },
         waitUntil: this.waitUntil ?? dispatchedAt + AGENT_WAIT_SECONDS * 1000,
+        landWhenRoom: this.serverFeatures?.includes('land-when-room') ?? false,
+        ...(signal ? { signal } : {}),
         pathNotice: this.protectedPaths.bind(this),
         saveNotice: async capture => {
           if (!this.protectedPolicy) return;
@@ -2355,6 +2357,10 @@ export type HostedAgentSession = {
   ) => Promise<unknown>;
   /** Epoch ms by which an action that waits for its own outcome (save) returns IN_PROGRESS. */
   waitUntil: number;
+  /** The server takes `land {maxChecks}` (feature land-when-room, ad80e037). */
+  landWhenRoom?: boolean;
+  /** The command's cancel (SIGINT/SIGTERM, MCP cancel): a land waiting for queue room stops on it. */
+  signal?: AbortSignal;
   query: <T = unknown>(name: string, args: Record<string, unknown>) => Promise<T>;
   mutation: <T = unknown>(name: string, args: Record<string, unknown>) => Promise<T>;
   /** A project action (the project id is added), for calls that run work as well as write. */

@@ -25,6 +25,7 @@ import { landingAlias } from './projectHostedLandingIdentity';
 import { failedLanding, landingRow } from './projectHostedLandingStore';
 import { notifyStackedLandingEnded } from './projectHostedStackNotice';
 import { enforceLandGates } from './projectHostedLandGates';
+import { requireQueueRoom } from './projectHostedQueueRoom';
 import { hostedLandingDesiredSchema } from '../src/hosted-landing-desired';
 import { hostedLandingStateSchema, landingObservation, landingTokensColumn } from '../src/hosted-landing';
 import { hostedRecordSchema } from '../src/hosted-records';
@@ -49,6 +50,9 @@ export const submit = receiptMutation({
     gates: v.optional(v.string()),
     /** The agent's own reported tokens (feature landing-tokens, Item a61d3c91); not part of the request. */
     tokens: v.optional(v.number()),
+    /** Land only while the queue holds fewer checks (feature land-when-room, ad80e037); judged here,
+     * for a new submission only, and not part of the request. */
+    maxChecks: v.optional(v.number()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -65,6 +69,7 @@ export const submit = receiptMutation({
         input.agentClient,
         { value: input.gates },
         tokens.agentTokens,
+        input.maxChecks,
       );
     } catch (error) {
       return report(error);
@@ -84,6 +89,8 @@ export async function submitDesiredLanding(
   gates?: { value: string | undefined },
   /** Public submit only: the agent's reported tokens, already range-checked (landingTokensColumn). */
   agentTokens?: number,
+  /** Public submit only: `land {maxChecks}` (convex/projectHostedQueueRoom.ts). */
+  maxChecks?: number,
 ): Promise<string> {
   if (command.outside !== undefined) command = { ...command, outside: sanitizeOutside(command.outside) };
   const input = { projectId, agent, agentClient };
@@ -205,6 +212,7 @@ export async function submitDesiredLanding(
     return existingCanonical?.value ?? existing.value;
   }
   // A new desired landing only: replays and joins of a live landing above return unjudged.
+  await requireQueueRoom(ctx, input.projectId, maxChecks);
   if (gates)
     await enforceLandGates(ctx, {
       projectId: input.projectId,

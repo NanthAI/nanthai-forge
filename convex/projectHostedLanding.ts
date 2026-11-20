@@ -70,6 +70,7 @@ import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
 import { enforceLandGates } from './projectHostedLandGates';
+import { requireQueueRoom } from './projectHostedQueueRoom';
 
 /** Cancel a submission without changing Lane lifecycle; release its unneeded check. */
 export const cancel = mutation({
@@ -103,6 +104,9 @@ export const enqueue = receiptMutation({
     gates: v.optional(v.string()),
     /** The agent's own reported tokens (feature landing-tokens, Item a61d3c91); not part of the request. */
     tokens: v.optional(v.number()),
+    /** Land only while the queue holds fewer checks (feature land-when-room, ad80e037); judged here,
+     * for a new operation only, and not part of the request. */
+    maxChecks: v.optional(v.number()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -119,6 +123,7 @@ export const enqueue = receiptMutation({
             ...landingAgentClient(input.agentClient),
             ...tokens,
             gates: { value: input.gates },
+            ...(input.maxChecks === undefined ? {} : { maxChecks: input.maxChecks }),
           },
           request,
           actor,
@@ -315,6 +320,8 @@ export async function enqueueHostedLanding(
     preflightRuns?: number | undefined;
     /** Public entry point only: judge the project land gates (internal re-landings are not). */
     gates?: { value: string | undefined };
+    /** Public entry point only: `land {maxChecks}` (convex/projectHostedQueueRoom.ts). */
+    maxChecks?: number;
   },
   request: import('../src/hosted-landing').HostedLandingRequest,
   actor: import('../src/autonomy-policy').AcceptanceActor,
@@ -392,6 +399,7 @@ export async function enqueueHostedLanding(
     return state;
   }
   // A new operation only: a replay above returns its retained landing unjudged.
+  await requireQueueRoom(ctx, input.projectId, input.maxChecks);
   if (input.gates)
     await enforceLandGates(ctx, {
       projectId: input.projectId,

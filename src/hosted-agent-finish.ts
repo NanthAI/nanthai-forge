@@ -52,6 +52,8 @@ import {
   mainPinRefusal,
   olderEpochRefusal,
 } from './hosted-main-pin.js';
+import { hostedRunSubscription } from './hosted-agent-observe.js';
+import { makeFunctionReference } from 'convex/server';
 
 const finishNotSavedKey = 'finish-not-saved';
 
@@ -104,15 +106,123 @@ function forgetFinishSource(session: HostedAgentSession, request: string) {
 const olderEpochPin = (session: HostedAgentSession, error: unknown, request: unknown) =>
   authorityPinRefusal(error, 'finish') &&
   (request as { authorityEpoch?: number }).authorityEpoch !== session.capabilities.authority.epoch;
+/** `land {maxChecks:N}` (ad80e037), retained with the operation so a replay keeps it. */
+const whenRoomKey = 'finish-when-checks-below';
+/** finishRefusedKey values for a land refused over maxChecks before it submitted (selection reads them). */
+const NO_QUEUE_ROOM = 'NO_QUEUE_ROOM',
+  MAX_CHECKS_UNSUPPORTED = 'MAX_CHECKS_UNSUPPORTED';
+const roomSchema = z.object({ checks: z.number(), groups: z.number(), preparing: z.number() });
+/**
+ * Submit with the land's queue-room condition. The server admits the submission only while the
+ * queue holds fewer than N checks, judged in the submitting mutation (convex/projectHostedQueueRoom.ts),
+ * so a builder's queue read and its submit cannot race past a project's check cap. Refused for room
+ * (WORK_BUSY, nothing written), the land subscribes to the queue's room query: the server re-runs it
+ * only when the queue's order, phases or holds change and pushes the count, so a waiting land wakes
+ * when a check ends, with no polling and no 240 s loop. It submits again on room; past the command's
+ * wait budget it refuses with the replay that keeps waiting. A WORK_BUSY while the count already
+ * showed room twice running is some other refusal, reported as it came.
+ */
+const unmark = (session: HostedAgentSession) => {
+  if (session.journal.get(finishRefusedKey) !== undefined) session.journal.forget(finishRefusedKey);
+};
+async function submitWhenRoom<T>(
+  session: HostedAgentSession,
+  submit: (room: { maxChecks?: number }) => Promise<T>,
+): Promise<T> {
+  // From a submit attempt on, this operation may run on the server (a lost reply, a crash): no
+  // earlier pre-submit refusal mark survives it, so new source is never a second landing. Only a
+  // refusal the server just answered marks it again.
+  unmark(session);
+  const limit = session.journal.get<number | null>(whenRoomKey) ?? undefined;
+  if (limit === undefined) return submit({});
+  const refused = async (mark: string) => {
+    unmark(session);
+    await session.journal.retain(finishRefusedKey, () => mark);
+  };
+  for (let open = 0; ;) {
+    try {
+      return await submit({ maxChecks: limit });
+    } catch (error) {
+      const code = hostedActionError(error, 'finish').code;
+      // The server's switch is off: refused before anything was written.
+      if (code === 'HOSTED_ACTION_UNSUPPORTED') await refused(MAX_CHECKS_UNSUPPORTED);
+      if (code !== 'WORK_BUSY') throw error;
+      // Nothing was submitted: new source or another maxChecks is new work, not this replay.
+      await refused(NO_QUEUE_ROOM);
+      const room = await waitForQueueRoom(session, limit);
+      open = room.immediate ? open + 1 : 0;
+      if (open > 1) throw error;
+      unmark(session);
+    }
+  }
+}
+async function waitForQueueRoom(session: HostedAgentSession, limit: number) {
+  const refuse = (checks: number | undefined) =>
+    new ForgeError(
+      'WORK_BUSY',
+      `No queue room within this command's wait: ${checks ?? `at least ${limit}`} checks are running or waiting, so maxChecks ${limit} admits no more. Nothing was submitted. Replay the same land command (same operationId) to keep waiting; it wakes when a check ends. Landing with another maxChecks, without it, or on new saved source is new work.`,
+    );
+  const cancelled = () =>
+    new ForgeError(
+      'CANCELLED',
+      `Cancelled while waiting for queue room (maxChecks ${limit}). Nothing was submitted. Replay the same land command (same operationId) to keep waiting.`,
+    );
+  const signal = session.signal;
+  if (signal?.aborted) throw cancelled();
+  const remaining = session.waitUntil - Date.now();
+  if (remaining <= 0) throw refuse(undefined);
+  const client = hostedRunSubscription(session.address);
+  let unsubscribe: (() => void) | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stop: (() => void) | undefined;
+  try {
+    const room = await new Promise<{ immediate: boolean; checks: number }>((resolve, reject) => {
+      let first = true,
+        last: number | undefined;
+      stop = () => reject(cancelled());
+      signal?.addEventListener('abort', stop, { once: true });
+      timer = setTimeout(() => reject(refuse(last)), remaining);
+      unsubscribe = client.onUpdate(
+        makeFunctionReference<'query'>('projectHostedQueueRoom:room'),
+        { projectId: session.address.projectId, limit },
+        value => {
+          try {
+            const room = roomSchema.parse(typeof value === 'string' ? JSON.parse(value) : value);
+            last = room.checks;
+            if (room.checks < limit) resolve({ immediate: first, checks: room.checks });
+            first = false;
+          } catch (error) {
+            reject(error);
+          }
+        },
+        error => reject(hostedActionError(error, 'finish')),
+      );
+    });
+    // Room showed as the command was cancelled: never submit after a cancel.
+    if (signal?.aborted) throw cancelled();
+    return room;
+  } finally {
+    clearTimeout(timer);
+    if (stop) signal?.removeEventListener('abort', stop);
+    try {
+      unsubscribe?.();
+    } finally {
+      await client.close();
+    }
+  }
+}
 async function enqueueLanding(session: HostedAgentSession, request: unknown, pinnedCandidate: boolean) {
   try {
-    return await session.mutation<HostedLandingState>('projectHostedLanding:enqueue', {
-      request: canonicalPayload({ ...(request as object), governanceVersion: 1 }),
-      ...(session.landingAgent ? { agent: session.landingAgent } : {}),
-      ...(session.landingClient ? { agentClient: session.landingClient } : {}),
-      ...landGatesArg(session),
-      ...tokensArg(session),
-    });
+    return await submitWhenRoom(session, room =>
+      session.mutation<HostedLandingState>('projectHostedLanding:enqueue', {
+        request: canonicalPayload({ ...(request as object), governanceVersion: 1 }),
+        ...(session.landingAgent ? { agent: session.landingAgent } : {}),
+        ...(session.landingClient ? { agentClient: session.landingClient } : {}),
+        ...landGatesArg(session),
+        ...tokensArg(session),
+        ...room,
+      }),
+    );
   } catch (error) {
     // An older epoch: the request rebuilds at this command's epoch; one this finish composed is
     // composed again first, so the landing and its Candidate share an epoch (a named one is kept).
@@ -150,13 +260,16 @@ async function replayFinish(session: HostedAgentSession, pinnedCandidate: boolea
   if (desired) {
     let submission: HostedLandingState;
     try {
-      submission = await session.mutation<HostedLandingState>('projectHostedLandingDesired:submit', {
-        request: canonicalPayload(desired),
-        ...(session.landingAgent ? { agent: session.landingAgent } : {}),
-        ...(session.landingClient ? { agentClient: session.landingClient } : {}),
-        ...landGatesArg(session),
-        ...tokensArg(session),
-      });
+      submission = await submitWhenRoom(session, room =>
+        session.mutation<HostedLandingState>('projectHostedLandingDesired:submit', {
+          request: canonicalPayload(desired),
+          ...(session.landingAgent ? { agent: session.landingAgent } : {}),
+          ...(session.landingClient ? { agentClient: session.landingClient } : {}),
+          ...landGatesArg(session),
+          ...tokensArg(session),
+          ...room,
+        }),
+      );
     } catch (error) {
       if (!olderEpochPin(session, error, desired)) throw error;
       // Never began, and its compose shares its older epoch: this pass composes again (N3).
@@ -448,6 +561,21 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
   const pinnedCandidate = command.candidateId !== undefined;
   if (command.tokens !== undefined && session.landingTokens)
     await session.journal.retain('finish-tokens', async () => command.tokens!);
+  // First run only (the condition is not yet retained): a replay of an admitted landing is never
+  // told "nothing was submitted" by an older server.
+  if (
+    command.maxChecks !== undefined &&
+    !session.landWhenRoom &&
+    session.journal.get(whenRoomKey) === undefined
+  ) {
+    await session.journal.retain(finishRefusedKey, () => MAX_CHECKS_UNSUPPORTED);
+    throw new ForgeError(
+      'HOSTED_ACTION_UNSUPPORTED',
+      'This Forge server does not take maxChecks yet. Nothing was submitted; land without it.',
+    );
+  }
+  // First run only: a replay keeps the condition its operation began with.
+  await session.journal.retain(whenRoomKey, async () => command.maxChecks ?? null);
   const replayed = await replayFinish(session, pinnedCandidate, command);
   if (replayed) return replayed;
   // A new landing of the origin Lane after an edited, unsaved in-place resolution: refuse before
@@ -666,14 +794,17 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         }),
       );
       await retainLandGates(session, composeOperationId);
-      const submission = await session.mutation('projectHostedLandingDesired:submit', {
-        request: canonicalPayload({ ...desired, governanceVersion: 1 }),
-        // The receipt records the agent run that landed it (d730121f); outside the replayed request.
-        ...(session.landingAgent ? { agent: session.landingAgent } : {}),
-        ...(session.landingClient ? { agentClient: session.landingClient } : {}),
-        ...landGatesArg(session),
-        ...tokensArg(session),
-      });
+      const submission = await submitWhenRoom(session, room =>
+        session.mutation('projectHostedLandingDesired:submit', {
+          request: canonicalPayload({ ...desired, governanceVersion: 1 }),
+          // The receipt records the agent run that landed it (d730121f); outside the replayed request.
+          ...(session.landingAgent ? { agent: session.landingAgent } : {}),
+          ...(session.landingClient ? { agentClient: session.landingClient } : {}),
+          ...landGatesArg(session),
+          ...tokensArg(session),
+          ...room,
+        }),
+      );
       markLandStep('submitted');
       return {
         phase: 'finish',
