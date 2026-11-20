@@ -21,17 +21,21 @@ export type FailureDetail = {
   more?: number;
   /** A failed check that named no test file: its failing job and line. */
   step?: string;
-  /** The first failing file's first error, clipped. */
+  /** The first failing file's first error, or a static step's first error line, clipped. */
   error?: string;
 };
 export const FAILURE_FILES_KEPT = 5;
 export const FAILURE_FILE_CHARS = 100;
 export const FAILURE_ERROR_CHARS = 120;
 export const FAILURE_STEP_CHARS = 100;
+/** A static step's first error line is the only cause the row keeps (no files), so it may run longer. */
+export const FAILURE_STEP_ERROR_CHARS = 200;
 /** Landing codes that are a check that did not pass. Others are not listed by `--checks`. */
 export const checkFailureCodes = new Set(['CHECK_FAILED', 'CHECK_NOT_PASSED', 'CONTRACT_OVER_BUDGET']);
 
-const BUDGET = /budget|CpuMs|over limit|exceed(?:s|ed)? (?:the )?(?:limit|cap)|slower than/i;
+// A time, CPU or size bar a measurement crossed (agent weight `cliAgentLandCpuMs`, perf-harness timing bars).
+const BUDGET =
+  /budget|CpuMs|\bCPU\b|timing bar|ceiling|over limit|exceed(?:s|ed)? (?:the )?(?:limit|cap)|slower than/i;
 const RUNNER =
   /ENOSPC|No space left|ECONNRESET|EAI_AGAIN|socket hang up|runner|lost communication|shutdown signal|was canceled|terminated|out of memory|\bkilled\b|rate limit/i;
 const FLAKE = /timed? ?out|timeout|EADDRINUSE|ECONNREFUSED|Target closed|browser has been closed|page\.goto/i;
@@ -69,5 +73,26 @@ export function messageDetail(message: string): FailureDetail {
   const step = /Failing ([^:]{1,60}): (.+?)(?:\.? Flaky, passed on retry:| Fix it in this Lane|$)/s.exec(
     message,
   );
-  return step ? { step: `${step[1]}: ${step[2]}`.slice(0, FAILURE_STEP_CHARS) } : {};
+  return step ? stepDetail(step[1]!, step[2]!) : {};
+}
+
+/** The escape sequences a colored tool prints; they say nothing and fill the row. */
+const ansi = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, 'g');
+export const stripAnsi = (text: string) => text.replace(ansi, '');
+
+/**
+ * A failed static step as `step` (the job and the step's name) and `error` (its first error line). The
+ * settled excerpt reads `NAME (reproduce: COMMAND)[ (also failed: ...)]: LINE ; LINE` when verify named the
+ * failing step, else it is one line, which is the error. A reproduce command is not a cause (smoke:package rows
+ * held only that), so it is dropped; the lines are ranked cause-first, so the first one is kept.
+ */
+export function stepDetail(job: string, excerpt: string): FailureDetail {
+  const text = stripAnsi(excerpt);
+  const named = /^(.+?) \(reproduce: .*?\)(?: \(also failed: [^)]*\))?(?:: ?(.*))?$/s.exec(text);
+  // An excerpt clipped inside its reproduce command or also-failed list still names the step, and no cause.
+  const clipped = named ? null : /^(.+?) \(reproduce: /s.exec(text);
+  const name = named?.[1] ?? clipped?.[1] ?? '';
+  const error = (named ? (named[2] ?? '') : clipped ? '' : text).split(' ; ')[0]!.trim();
+  const step = `${stripAnsi(job)}${name ? `: ${name}` : ''}`.slice(0, FAILURE_STEP_CHARS);
+  return { step, ...(error ? { error: error.slice(0, FAILURE_STEP_ERROR_CHARS) } : {}) };
 }

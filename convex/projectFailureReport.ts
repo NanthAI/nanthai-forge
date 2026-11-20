@@ -7,7 +7,13 @@ import { metricsReader } from './projectSelfMetrics';
 import { report as reportError } from './errors';
 import { invariant } from '../src/errors';
 import type { FailureRecord } from './projectFailureLog';
-import { checkFailureCodes, failureNoise, failureNoises, messageDetail } from '../src/failure-noise';
+import {
+  checkFailureCodes,
+  failureNoise,
+  failureNoises,
+  messageDetail,
+  stripAnsi,
+} from '../src/failure-noise';
 
 /** Most rows one report reads: about 300 bytes each (a failed check up to about 1 KB), so at most about 500 KB. */
 export const FAILURE_REPORT_ROWS = 500;
@@ -116,9 +122,13 @@ export function failedChecks(
 function checkRow(row: Row) {
   const record = JSON.parse(row.value) as FailureRecord;
   if (record.kind !== 'landing' || !checkFailureCodes.has(record.code)) return null;
-  // Rows from before the detail fields carry it only in their clipped message.
-  const detail = record.files || record.step ? record : { ...record, ...messageDetail(record.message) };
-  const { files, more, step, error } = detail;
+  // Rows from before the detail fields carry it only in their clipped message, and a static step stored before
+  // its first error line was kept (the 11-17.. smoke:package rows) is re-read from that message too.
+  const old = !record.files && (!record.step || !record.error);
+  const detail = old ? { ...record, ...messageDetail(record.message) } : record;
+  const { files, more } = detail;
+  const step = detail.step && stripAnsi(detail.step);
+  const error = detail.error && stripAnsi(detail.error);
   return {
     at: new Date(row._creationTime).toISOString(),
     operationId: row.operationId,

@@ -152,7 +152,7 @@ test('a failed check keeps its failing files, first error and step, not just the
       message: `The original exact check settled as failed. ${checkFailureDetail({}, { job: 'static', excerpt: 'error TS2322 in src/x.ts' })} ${CHECK_FAILED_NEXT}`,
     },
   });
-  assert.deepEqual(step, { step: 'static: error TS2322 in src/x.ts' });
+  assert.deepEqual(step, { step: 'static', error: 'error TS2322 in src/x.ts' });
   assert.deepEqual(
     log.failureDetail({ error: { code: 'SOURCE_RETRY_EXHAUSTED', message: 'Failing: a.ts' } }),
     {},
@@ -184,7 +184,7 @@ test('the message reader returns what the formatter wrote: files, first error an
     noise.messageDetail(
       `The exact check settled as failed. ${checkFailureDetail({}, { job: 'static', excerpt: 'lint: no-unused' })} Fix it in this Lane, save`,
     ),
-    { step: 'static: lint: no-unused' },
+    { step: 'static', error: 'lint: no-unused' },
   );
   // The settled message names one file: what follows is the next step or a flaky note, never a second file.
   const next = 'Fix it in this Lane, save, then run land --save again';
@@ -227,7 +227,7 @@ test('the message reader returns what the formatter wrote: files, first error an
       { job: 'test (ubuntu-latest)', excerpt: 'Error: lint failed in src/a.ts' },
     )} ${next}`,
   );
-  assert.deepEqual(stepAndFlaky, { step: 'test (ubuntu-latest): Error: lint failed in src/a.ts' });
+  assert.deepEqual(stepAndFlaky, { step: 'test (ubuntu-latest)', error: 'Error: lint failed in src/a.ts' });
   assert.equal(noise.failureNoise({ code: 'CHECK_FAILED', ...stepAndFlaky }), 'real');
   assert.deepEqual(noise.messageDetail('The admission check settled; nothing named.'), {});
 });
@@ -249,9 +249,80 @@ test('noise tags: runner, budget, flake, real, and unknown when nothing names a 
     'flake',
     'the app-id-palette-browser flakes',
   );
-  assert.equal(tag('CHECK_FAILED', { step: 'static: ENOSPC: no space left on device' }), 'runner');
+  assert.equal(tag('CHECK_FAILED', { step: 'static', error: 'ENOSPC: no space left on device' }), 'runner');
+  // 44f2b109 line 4: agent-weight CPU and perf-harness timing bars are budgets, not real failures.
+  assert.equal(
+    tag('CHECK_FAILED', {
+      step: 'job 11 (static): smoke:package',
+      error: 'cliAgentLandCpuMs: 612, ceiling 500',
+    }),
+    'budget',
+  );
+  assert.equal(
+    tag('CHECK_FAILED', {
+      files: ['tests/hosted-landing-overtake.test.mjs'],
+      error: 'incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5x solo timing bar',
+    }),
+    'budget',
+  );
+  assert.equal(
+    tag('CHECK_FAILED', { step: 'job 11 (static): lint (oxlint)', error: 'Found 0 warnings and 1 error.' }),
+    'real',
+    'a lint error stays real',
+  );
   assert.equal(tag('CHECK_FAILED', { files: ['tests/x.test.mjs'], error: 'expected 1, got 2' }), 'real');
   assert.equal(tag('CHECK_FAILED', {}), 'unknown');
+});
+
+test('a static step keeps its name and first error line, not the reproduce command (the empty smoke:package rows)', () => {
+  const excerpt = (name, command, lines) =>
+    `Failing job 11 (static): ${name} (reproduce: ${command}): ${lines.join(' ; ')}`;
+  const message = lines =>
+    `The original exact check settled as failed. ${excerpt('smoke:package', 'npm run smoke:package (node scripts/package-smoke.mjs)', lines)} Fix it in this Lane, save`;
+  const ours = log.failureDetail({
+    error: {
+      code: 'CHECK_FAILED',
+      message: message(['AssertionError: cliAgentLandCpuMs: 612, ceiling 500', 'at stack frame']),
+    },
+  });
+  assert.deepEqual(ours, {
+    step: 'job 11 (static): smoke:package',
+    error: 'AssertionError: cliAgentLandCpuMs: 612, ceiling 500',
+  });
+  assert.equal(noise.failureNoise({ code: 'CHECK_FAILED', ...ours }), 'budget');
+  // Colored output and a second failed step: neither the escapes nor the also-failed list reach the row.
+  const colored = noise.messageDetail(
+    `settled as failed. Failing job 3 (static): lint (oxlint) (reproduce: node scripts/oxc.mjs lint) (also failed: check): \u001b[38;2;225;80;80;1m×\u001b[0m no-unused-vars ; Found 1 error. Fix it in this Lane`,
+  );
+  assert.deepEqual(colored, { step: 'job 3 (static): lint (oxlint)', error: '× no-unused-vars' });
+  // A step with no digest (one printed line) is its own error; a reproduce line clipped at the budget names no cause.
+  assert.deepEqual(noise.stepDetail('job 2', 'llms-full.txt is 409868 bytes; the budget is 409600'), {
+    step: 'job 2',
+    error: 'llms-full.txt is 409868 bytes; the budget is 409600',
+  });
+  assert.deepEqual(noise.stepDetail('job 2', 'smoke:package (reproduce: npm run smoke:package (node scr'), {
+    step: 'job 2: smoke:package',
+  });
+  assert(Buffer.byteLength(JSON.stringify(noise.stepDetail('job 11 (static)', 'x'.repeat(5000)))) < 400);
+});
+
+test('a smoke:package row stored without its error is re-read from its message, so the 11-17.. read splits right', () => {
+  const stored = {
+    schema: 1,
+    kind: 'landing',
+    code: 'CHECK_FAILED',
+    message:
+      'The original exact check settled as failed. Failing job 11 (static): smoke:package (reproduce: npm run smoke:package (node scripts/package-smoke.mjs)): AssertionError: cliAgentLandCpuMs: 612, ceiling 500 ; npm…',
+    elapsedMs: 5,
+    step: 'job 11 (static): smoke:package (reproduce: npm run smoke:package (node scripts/package-smoke.mjs)): ',
+  };
+  const out = health.failedChecks([{ _creationTime: 1, operationId: 'old', value: JSON.stringify(stored) }], {
+    limit: 5,
+    more: false,
+  });
+  assert.equal(out.checks[0].step, 'job 11 (static): smoke:package');
+  assert.equal(out.checks[0].error, 'AssertionError: cliAgentLandCpuMs: 612, ceiling 500');
+  assert.equal(out.checks[0].noise, 'budget');
 });
 
 test('failed checks page newest first with a cursor that loses and repeats nothing, and filter by tag', () => {

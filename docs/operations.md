@@ -217,12 +217,14 @@ URL query string, token-shaped value or home folder name (the shared
 
 `nforge metrics ROOT --failures --checks [--limit N] [--cursor C] [--noise TAG]` lists failed
 checks instead (Item 44f2b109): newest first, each with its operation id, code, failing test
-files (at most five, `more` counts the rest) or the failing static step, the first error and one
+files (at most five, `more` counts the rest) or the failing static step (its job and name), the first
+error (for a static step, the step's first error line, never its reproduce command) and one
 noise tag, so a flaky gate and a real failure are told apart in one read. The tags are `runner`
-(the CI or machine, or a check that never ran), `budget` (a time or size budget), `flake` (a
+(the CI or machine, or a check that never ran), `budget` (a time, CPU or size budget: agent-weight `cliAgentLandCpuMs`, perf-harness timing bars, byte ceilings), `flake` (a
 timeout, browser or port signature), `real` (a named file or step with none of those) and
 `unknown` (nothing retained names a cause). The tag is read from the stored row, so rows written
-before the detail fields exist are tagged from their clipped message and may list fewer files.
+before the detail fields exist, and static-step rows stored before their first error line was kept, are
+read again from their clipped message (colour escapes removed) and may list fewer files or a shorter error.
 `--noise TAG` keeps one tag. A page is `--limit` rows (default 20, at most 100, up to about 1 KB
 each, so at most about 100 KB) with the tag counts and the files that failed more than once on
 the page; follow `nextCursor` with `--cursor` for the next page of the same window. It is one

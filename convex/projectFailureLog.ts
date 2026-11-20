@@ -11,8 +11,10 @@ import {
   FAILURE_FILES_KEPT,
   FAILURE_FILE_CHARS,
   FAILURE_STEP_CHARS,
+  FAILURE_STEP_ERROR_CHARS,
   checkFailureCodes,
   messageDetail,
+  stripAnsi,
   type FailureDetail,
 } from '../src/failure-noise';
 
@@ -40,7 +42,7 @@ const chosenEndings = new Set([
 
 const sanitize = (text: string, max: number) =>
   scrubText(
-    text
+    stripAnsi(text)
       .replace(/\s+/g, ' ')
       .replace(/\/(?:Users|home)\/[^/\s]+/g, '~')
       .trim(),
@@ -73,8 +75,11 @@ export function failureDetail(state: {
     };
   }
   // A run that named no file: its job and line, as the message sentence carries them.
-  const step = messageDetail(state.error.message).step;
-  return step ? { step: sanitize(step, FAILURE_STEP_CHARS) } : {};
+  const { step, error } = messageDetail(state.error.message);
+  return {
+    ...(step ? { step: sanitize(step, FAILURE_STEP_CHARS) } : {}),
+    ...(error ? { error: sanitize(error, FAILURE_STEP_ERROR_CHARS) } : {}),
+  };
 }
 
 /**
