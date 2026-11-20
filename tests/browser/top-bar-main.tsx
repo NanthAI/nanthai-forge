@@ -4,7 +4,7 @@
 import { createRoot } from 'react-dom/client';
 import '../../web/src/ds';
 import '../../web/src/app/app.css';
-import { ProjectFrame } from '../../web/src/app/frames';
+import { AccountFrame, ProjectFrame } from '../../web/src/app/frames';
 import type { LineFeed } from '../../web/src/app/Line';
 
 const params = new URLSearchParams(location.search);
@@ -50,17 +50,28 @@ const route = {
   section: '',
   rest: '',
 };
+const projectHref = '/sample-one/tidepool-ingest';
+const controls = { onPalette: () => {}, onKeys: () => {}, viewerHandle: 'sample-one' };
+const content = (
+  <section className="region" aria-label="Page">
+    <h1>Top bar fixture</h1>
+  </section>
+);
 createRoot(document.getElementById('root')!).render(
-  <ProjectFrame
-    route={route}
-    name="tidepool-ingest"
-    feed={feed}
-    needs={{ n: 3, atLeast: false }}
-    projects={null}
-    controls={{ onPalette: () => {}, onKeys: () => {}, viewerHandle: 'sample-one', onPicker: () => {} }}
-  >
-    <section className="region" aria-label="Page">
-      <h1>Top bar fixture</h1>
-    </section>
-  </ProjectFrame>,
+  params.get('frame') === 'account' ? (
+    <AccountFrame place="projects" back={{ href: projectHref, name: 'tidepool-ingest' }} controls={controls}>
+      {content}
+    </AccountFrame>
+  ) : (
+    <ProjectFrame
+      route={route}
+      name="tidepool-ingest"
+      feed={feed}
+      needs={{ n: 3, atLeast: false }}
+      projects={null}
+      controls={{ ...controls, onPicker: () => {} }}
+    >
+      {content}
+    </ProjectFrame>
+  ),
 );

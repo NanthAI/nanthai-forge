@@ -210,7 +210,7 @@ export function ProjectFrame({
             aria-keyshortcuts={String(index + 1)}
           >
             <PlaceIcon name={place} />
-            <span>{projectPlaceLabels[place]}</span>
+            <span className="rail-label">{projectPlaceLabels[place]}</span>
             {place === 'needs' && held ? <Count n={held} hot /> : <kbd aria-hidden="true">{index + 1}</kbd>}
           </A>
         ))}
@@ -279,13 +279,13 @@ export function AccountFrame({
             aria-current={place === name ? 'page' : undefined}
           >
             <PlaceIcon name={name} />
-            <span>{accountPlaceLabels[name]}</span>
+            <span className="rail-label">{accountPlaceLabels[name]}</span>
           </A>
         ))}
         {back ? (
           <A className="back" href={back.href} style={{ marginTop: 'auto' }}>
             <PlaceIcon name="back" />
-            <span className="cut" translate="no">
+            <span className="rail-label cut" translate="no">
               {back.name}
             </span>
           </A>

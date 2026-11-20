@@ -188,7 +188,8 @@
   @media (max-width: 1240px) {
     .shell { grid-template-columns: var(--rail-w-min) minmax(0, 1fr); }
     .shell > .rail a { grid-template-columns: 18px; justify-content: center; padding: 0; }
-    .shell > .rail a span, .shell > .rail a kbd, .shell > .rail a .cnt, .shell > .rail .grp, .shell > .rail .foot { display: none; }
+    .shell > .rail .rail-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .shell > .rail a kbd, .shell > .rail a .cnt, .shell > .rail .grp, .shell > .rail .foot { display: none; }
     .shell > .top .brand { width: var(--rail-w-min); justify-content: center; padding: 0; } .shell > .top .brand span { display: none; }
   }
   @media (max-width: 860px) {
