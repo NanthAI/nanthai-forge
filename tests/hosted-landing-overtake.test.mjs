@@ -321,10 +321,12 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // drop fails too: ratchet it with the change that earned it. On this clock the pair measures
   // 111 calls, 1,899,135 read / 606,570 write B (wall clock: 111 calls, about 1,900,046 / 607,524 B),
   // below the ceilings above (121 calls, 1,900,085 / 676,662 B), which this exact row replaces.
+  // DB reads 1,899,135 -> 1,894,559 (Item 76be0714, public plan visibility): a query reads a document by id once and
+  // hands each caller its own copy (convex/publicWorkReadContext.ts); no call or write changes.
   const measured = { calls: pair.calls, readBytes: pair.readBytes, writeBytes: pair.writeBytes };
   assert.deepEqual(
     measured,
-    { calls: 111, readBytes: 1_899_135, writeBytes: 606_570 },
+    { calls: 111, readBytes: 1_894_559, writeBytes: 606_570 },
     'the 70a9bd2f pair cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
@@ -358,10 +360,11 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // DB reads 1,902,970 -> 1,905,313 (Item fa2c1383, recorded check kind), as in the small replay.
   // Exact on the fixed clock, as in the small replay (ceilings 121 calls, 1,905,313 / 679,017 B; wall
   // clock about 1,905,292 / 610,020 B).
+  // DB reads 1,904,377 -> 1,899,801 (Item 76be0714, one get per document per query), as in the small replay.
   const measured = { calls: after.calls, readBytes: after.readBytes, writeBytes: after.writeBytes };
   assert.deepEqual(
     measured,
-    { calls: 111, readBytes: 1_904_377, writeBytes: 609_061 },
+    { calls: 111, readBytes: 1_899_801, writeBytes: 609_061 },
     'the 70a9bd2f 4,000-file cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(after.idle, 0);

@@ -90,6 +90,16 @@ export function fixture({ projectVisibility = 'public', laneTitles, planVisibili
       overlap: false,
       changedAt: NOW,
     });
+  // Each Lane's hosted head names its Intent: here the visible loose Item's.
+  for (const n of [1, 2])
+    s.tables.projectHostedRecordHeads.set(`laneHead${n}`, {
+      _id: `laneHead${n}`,
+      projectId: 'project',
+      kind: 'lane',
+      key: `lane-${n}`,
+      parent: id(4),
+      status: 'active',
+    });
   s.tables.projectWorkRecords.set('laneRecord1', {
     _id: 'laneRecord1',
     projectId: 'project',
@@ -98,7 +108,7 @@ export function fixture({ projectVisibility = 'public', laneTitles, planVisibili
     key: 'lane-1',
     parent: '',
     position: 0,
-    value: JSON.stringify({ id: 'lane-1', name: 'Secret Lane title' }),
+    value: JSON.stringify({ id: 'lane-1', name: 'Secret Lane title', intentId: id(4) }),
   });
   s.ctx.runQuery = s.ctx.runMutation = (ref, args) => {
     const [module, fn] = getFunctionName(ref).split(':');

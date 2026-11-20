@@ -7,7 +7,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import type { ProjectRole } from './projectAccessContract';
 
 type Project = Pick<Doc<'hostedProjects'>, '_id' | 'owner'>;
-// Evidence for a query's final public projection only. Authorization below always reads current membership.
+// Roles a transaction checked. Authorization reads current membership; one query reuses its own check (one snapshot).
 const checkedRoles = new WeakMap<object, Map<string, ProjectRole | null>>();
 const roleKey = (project: Project, actor: string) => `${project._id}:${actor}`;
 export function checkedProjectRole(ctx: QueryCtx, project: Project, actor: string) {
@@ -21,9 +21,21 @@ function checked(ctx: QueryCtx | MutationCtx, project: Project, actor: string, r
   return role;
 }
 
+const queryAuths = new WeakSet<object>();
+/** The public query boundary marks its query: a role it checked is reused for the rest of that query (one snapshot).
+ * Mutations are never marked, since one can change membership in its own transaction. */
+export function shareQueryRoles(ctx: QueryCtx) {
+  if (ctx.auth) queryAuths.add(ctx.auth);
+}
+/** A role this query already checked: no second membership read. */
+const checkedInQuery = (ctx: QueryCtx | MutationCtx, project: Project, actor: string) =>
+  ctx.auth && queryAuths.has(ctx.auth) ? checkedProjectRole(ctx as QueryCtx, project, actor) : undefined;
+
 /** Write membership only (one indexed read; the owner none). */
 export async function hasWriteRole(ctx: QueryCtx | MutationCtx, project: Project, actor: string) {
   if (project.owner === actor) return true;
+  const known = checkedInQuery(ctx, project, actor);
+  if (known !== undefined) return known === 'write';
   const granted = !!(await contributorRow(ctx, project._id, actor));
   if (granted) checked(ctx, project, actor, 'write');
   return granted;
@@ -36,6 +48,8 @@ export async function projectRole(
   actor: string,
 ): Promise<ProjectRole | null> {
   if (project.owner === actor) return 'owner';
+  const known = checkedInQuery(ctx, project, actor);
+  if (known !== undefined) return known;
   if (await contributorRow(ctx, project._id, actor)) return checked(ctx, project, actor, 'write');
   const reader = await ctx.db
     .query('projectReaders')

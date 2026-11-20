@@ -31,6 +31,7 @@ import { autonomyPolicySchema, policyWriteObject } from './autonomy-policy.js';
 import { hostedCheckCommandSchema, hostedCheckRunnerSchema } from './hosted-check.js';
 import { submoduleAllowChangesSchema } from './submodule-allowlist.js';
 import { metricContextField, metricPagingFields } from './self-metrics-page.js';
+import { HOLDER_REASON_MAX } from './hosted-lane.js';
 export const hostedAgentActions = [
   'tests',
   'confirm-tests',
@@ -232,7 +233,7 @@ export const hostedAgentCommandSchemas = {
       laneId: uuid,
       takeover: z.literal(true).optional(),
       acceptHandoff: z.uuid().optional(),
-      reason: z.string().trim().min(1).optional(),
+      reason: z.string().trim().min(1).max(HOLDER_REASON_MAX).optional(),
       handoff: z
         .object({
           sessionId: z.string().regex(/^[0-9a-f]{64}$/),

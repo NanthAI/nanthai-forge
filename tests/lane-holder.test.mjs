@@ -137,6 +137,44 @@ test('only the Lane person or project owner takes over; a handover records both 
   );
 });
 
+test('SI-04: a holder change writes only its kind to the activity feed that readers and signed-in visitors read, and its reason is capped', async () => {
+  const f = await setup();
+  f.insert('projectContributors', { projectId: f.projectId, contributor: 'writer' });
+  f.insert('forgeAccounts', { owner: 'writer', handle: 'synthetic-writer' });
+  const lane = await f.addLane({ actor: 'writer' });
+  await f.take(f.request(sessionA, { laneId: lane.id }), 'writer');
+  const reason = 'Owner continues tokReasonx';
+  await f.take(f.request(sessionB, { laneId: lane.id, takeover: true, reason }));
+  const offered = await f.take(
+    f.request(sessionB, {
+      laneId: lane.id,
+      reason: 'Hand over tokOfferx',
+      handoff: { sessionId: sessionA.sessionId, agent: sessionA.name },
+    }),
+  );
+  await f.take(f.request(sessionA, { laneId: lane.id, acceptHandoff: offered.result.offerId }));
+  const feed = [...f.tables.projectCoordinationEvents.values()]
+    .map(e => e.command.action ?? '')
+    .filter(action => action.startsWith('holder '));
+  assert.deepEqual(
+    [...new Set(feed.map(action => action.split(':')[0]))],
+    ['holder takeover', 'holder handoff offered', 'holder handoff'],
+  );
+  for (const action of feed)
+    assert.match(action, /^holder (resume|takeover|take-back|handoff offered|handoff): v\d+$/, 'kind only');
+  for (const leak of ['synthetic-writer', 'tokReasonx', 'tokOfferx', sessionA.name, sessionB.name])
+    assert(!JSON.stringify(feed).includes(leak), `feed names ${leak}`);
+  // The detail stays in the protected Lane record, for those who may read the holder.
+  assert.equal((await f.read(lane.id)).holder.change.previous.actor, 'owner');
+  const long = 'x'.repeat(281);
+  await assert.rejects(
+    f.take(f.request(sessionA, { laneId: lane.id, takeover: true, reason: long })),
+    error => code('BAD_ARGUMENT')(error) && /reason/.test(error.data?.message ?? error.message),
+  );
+  await f.take(f.request(sessionB, { laneId: lane.id, takeover: true, reason: 'y'.repeat(280) }));
+  assert.equal((await f.read(lane.id)).holder.change.reason.length, 280);
+});
+
 test('a takeover during an upload refuses the old publication and retains the original captured delta', async () => {
   const f = await setup();
   await f.take(f.request());

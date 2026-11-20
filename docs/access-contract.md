@@ -12,7 +12,10 @@ rights. The stable device code and the short-lived typed approval code are
 separate values. Existing CLI credentials remain usable while this expands.
 
 A Lane is the work identity. Its saved head stays fixed across a holder change;
-the transition records both holders, actor, time, reason and exact saved head.
+the transition records both holders, actor, time, reason (at most 280 characters) and exact saved head in
+the Lane record. The project activity feed, which readers and signed-in visitors of a public project can read,
+records only the change's kind and the Lane version. Feed entries written before that rule may still name the
+holders and carry the reason.
 Resuming the same app thread keeps its session name. A new thread or process
 fallback receives its own name and explicitly takes over an existing Lane.
 Holder transitions do not change the landing stop or create a Needs-you request.

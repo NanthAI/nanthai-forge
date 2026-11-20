@@ -217,9 +217,50 @@ test('owner, teammate, reader and public visitors see the Lanes by the people ru
   await assert.rejects(s.read({}, 'stranger'), forbidden);
   s.as(null);
   assert.deepEqual(await s.read({}, 'signed-out'), { role: false });
-  // A public project: any signed-in visitor reads the Lanes, with no person named.
+  // A public project: any signed-in visitor reads the Lanes of a public Item, with no person named.
   await s.ctx.db.patch(s.auth.projectId, { visibility: 'public' });
   s.as('visitor');
+  // The Intent has no plan Item yet: a visitor's selection the plan rule cannot tie to a visible Item answers as
+  // absent (Item 76be0714).
+  assert.equal((await s.read({}, 'visitor')).total, 0, 'an Intent with no visible plan Item');
+  const project = await s.ctx.db.get(s.auth.projectId);
+  const backupId = project.work?.backupId ?? 'backup';
+  const generationId = await s.ctx.db.insert('projectWorkGenerations', {
+    projectId: s.auth.projectId,
+    backupId,
+    format: 11,
+    status: 'ready',
+    initialRevision: 0,
+    revision: 0,
+    nextBatch: 0,
+    metadata: '{"schema":24}',
+  });
+  await s.ctx.db.patch(s.auth.projectId, {
+    work: {
+      operationId: randomUUID(),
+      initialRevision: 0,
+      revision: 0,
+      ...project.work,
+      generationId,
+      backupId,
+    },
+  });
+  await s.ctx.db.insert('projectPlanningRecords', {
+    projectId: s.auth.projectId,
+    generationId,
+    collection: 'planningSearch',
+    key: s.itemId,
+    parent: '',
+    position: 0,
+    value: JSON.stringify({
+      id: s.itemId,
+      kind: 'issue',
+      status: 'open',
+      title: 'Synthetic outcome',
+      initiativeId: null,
+    }),
+    planning: { text: 'Synthetic outcome', kind: 'issue', status: 'open', initiativeId: '', open: true },
+  });
   const visitor = await s.read({}, 'visitor');
   assert.equal(visitor.total, 4);
   assert.ok(!JSON.stringify(visitor).includes('owner'));

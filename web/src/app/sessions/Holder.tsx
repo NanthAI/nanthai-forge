@@ -209,6 +209,7 @@ export function HolderView({
                 <input
                   className="inp"
                   value={reason}
+                  maxLength={280 /* HOLDER_REASON_MAX, src/hosted-lane.ts */}
                   onChange={e => setReason(e.target.value)}
                   required={mode === 'take' && data?.needsReason && !mine}
                 />

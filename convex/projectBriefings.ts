@@ -6,7 +6,7 @@ import { trustBrief } from './projectHostedTrust';
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { briefArgs, briefingResult } from './agentBriefFields';
-import { accessibleProject } from './projectAuthority';
+import { accessibleProject, readProjectRole } from './projectAuthority';
 import { hostedBriefRecords, readBriefState, readBriefParents } from './projectBriefingContext';
 import { briefInputSchema, type BriefState } from '../src/agent-brief-types';
 import { briefingContext, selectBrief } from '../src/agent-brief-context';
@@ -21,6 +21,13 @@ export const brief = query({
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read agent briefings.');
       const project = await accessibleProject(ctx, input.projectId, user.subject);
+      // A briefing is member context: it renders Lane names, its Intent's Item, and the project's recent messages and
+      // handoffs. A viewer without a role reads the public Plan and Lanes views instead (Item 76be0714).
+      invariant(
+        await readProjectRole(ctx, project, user.subject),
+        'PROJECT_UNAVAILABLE',
+        'Agent briefings are for project members.',
+      );
       const parsed = briefInputSchema.safeParse(input);
       invariant(parsed.success, 'BAD_ARGUMENT', 'Choose a briefing situation, records and agent variant.');
       const { records, generation, coverage } = await hostedBriefRecords(ctx, project, parsed.data);

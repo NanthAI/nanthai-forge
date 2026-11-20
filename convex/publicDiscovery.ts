@@ -148,9 +148,12 @@ export const stargazers = query({
   },
 });
 
-const settingsResult = v.object({ laneTitles: v.boolean(), stars: v.number() });
-/** What visitors see of this project that this Lane owns: the Lane-titles opt-in, and the star count. The plan's
- * public settings are the planning contract's (an Item's `hidden`, the project's `planVisibility`; d3357f40). */
+const planVisibility = v.union(v.literal('public'), v.literal('members'));
+const settingsResult = v.object({ laneTitles: v.boolean(), planVisibility, stars: v.number() });
+const planOf = (project: { planVisibility?: unknown }) =>
+  project.planVisibility === 'members' ? ('members' as const) : ('public' as const);
+/** What visitors see of this project: the Lane-titles opt-in, whether the plan is public or members-only (Item
+ * 76be0714; an Item's own `hidden` is set on the Item), and the star count. */
 export const settings = query({
   args: { projectId: v.id('hostedProjects') },
   returns: settingsResult,
@@ -158,26 +161,39 @@ export const settings = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'This Forge project is unavailable with the current account.');
-      await ownedProject(ctx, projectId, user.subject);
+      const project = await ownedProject(ctx, projectId, user.subject);
       const row = await publicRow(ctx, projectId);
-      return { laneTitles: row?.laneTitles === true, stars: row?.stars ?? 0 };
+      return {
+        laneTitles: row?.laneTitles === true,
+        planVisibility: planOf(project),
+        stars: row?.stars ?? 0,
+      };
     } catch (error) {
       return report(error);
     }
   },
 });
 
-/** Show open Lane titles to visitors ("show work in progress", D.3): the owner person only; reversible. */
+/** Show open Lane titles to visitors ("show work in progress", D.3) and keep the plan public or members-only
+ * (76be0714): the owner person only; each is reversible, and an omitted field keeps its value. */
 export const setSettings = mutation({
-  args: { projectId: v.id('hostedProjects'), laneTitles: v.boolean() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    laneTitles: v.optional(v.boolean()),
+    planVisibility: v.optional(planVisibility),
+  },
   returns: settingsResult,
-  handler: async (ctx, { projectId, laneTitles }) => {
+  handler: async (ctx, { projectId, laneTitles: requested, planVisibility: plan }) => {
     try {
       const user = await requireOwnerPerson(ctx, 'change what visitors see');
       const project = await ownedProject(ctx, projectId, user.subject);
       const row = await ensurePublicRow(ctx, project);
+      const laneTitles = requested ?? row.laneTitles === true;
       if (row.laneTitles !== laneTitles) await ctx.db.patch(row._id, { laneTitles });
-      return { laneTitles, stars: row.stars };
+      const current = planOf(project);
+      if (plan && plan !== current)
+        await ctx.db.patch(project._id, { planVisibility: plan === 'members' ? 'members' : undefined });
+      return { laneTitles, planVisibility: plan ?? current, stars: row.stars };
     } catch (error) {
       return report(error);
     }

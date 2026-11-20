@@ -18,7 +18,6 @@ import { mayTakeLane, takeoverNeedsReason } from './accessPolicy';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { sessionIdentity } from './projectSessionIdentity';
-import { accountFor } from './urlIdentity';
 import { acceptedHandoff } from './projectLaneHandoff';
 function selection(projectId: string, lane: z.infer<typeof hostedLaneSchema>, authority: SourceAuthority) {
   return hostedLaneSelectionSchema.parse({
@@ -44,7 +43,11 @@ export const take = mutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      const request = holderRequestSchema.parse(JSON.parse(input.request));
+      const parsed = holderRequestSchema.safeParse(JSON.parse(input.request));
+      // A refused field (such as a reason over HOLDER_REASON_MAX) is the caller's to fix, not a retry.
+      const issue = parsed.error?.issues[0];
+      invariant(parsed.success, 'BAD_ARGUMENT', `${issue?.path.join('.') || 'request'}: ${issue?.message}.`);
+      const request = parsed.data;
       const identity = await ctx.auth.getUserIdentity();
       invariant(identity, 'PROJECT_UNAVAILABLE', 'Sign in to take over a Lane.');
       const actor = identity.subject;
@@ -159,10 +162,6 @@ export const take = mutation({
         );
         nextActor = account.owner;
       }
-      const previousPerson = old && old.actor !== actor ? (await accountFor(ctx, old.actor))?.handle : null;
-      const previousLabel = old
-        ? `${previousPerson ? '@' + previousPerson + '/' : ''}${old.agent ?? 'person'}`
-        : 'not recorded';
       const target = request.handoff ?? request;
       const previous = old
         ? {
@@ -199,7 +198,9 @@ export const take = mutation({
         await emitChange(ctx, {
           ...auth,
           source: 'work',
-          action: `holder handoff offered: ${previousLabel} → ${offer.to.agent ?? 'person'}${reason ? ' · ' + reason : ''}`,
+          // The feed is readable by readers and, on a public project, by any signed-in account: kind only. Who held
+          // the Lane, who takes it and why stay in the protected Lane record and offer receipt (SI-04).
+          action: `holder handoff offered: v${lane.version}`,
           laneId: lane.id,
           intentId: lane.intentId,
           head: lane.head,
@@ -259,7 +260,7 @@ export const take = mutation({
       await emitChange(ctx, {
         ...auth,
         source: 'work',
-        action: `holder ${kind}: ${previousLabel} → ${holder.agent ?? 'person'} (v${next.version})${reason ? ' · ' + reason : ''}`,
+        action: `holder ${kind}: v${next.version}`, // Kind only, as above (SI-04).
         intentId: lane.intentId,
         laneId: lane.id,
         head: lane.head,

@@ -12,10 +12,11 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { v } from 'convex/values';
 import { internalQuery } from './server';
 import { guard } from './cliServer';
-import { publicWorkResult } from './publicWorkReads';
+import { publicWorkResult, publicWorkSelected } from './publicWorkReads';
 import { journalRecordRead } from './projectHostedRecordReads';
 import { journalProvenanceRead } from './projectHostedProvenanceRead';
 import { journalSegmentSchema } from '../src/journal-segment';
+const NESTED_READERS = new Set(['projectHostedRecordReads:read', 'projectHostedProvenanceRead:read']);
 /** Raw verified rows travel only across the private server boundary. The action maps current identities. */
 export const read = internalQuery({
   args: {
@@ -26,12 +27,28 @@ export const read = internalQuery({
   },
   returns: v.string(),
   handler: async (ctx, input) => {
-    const result = await journalResult(ctx, input);
-    return (await publicWorkResult(
-      ctx,
-      { ...JSON.parse(input.request), projectId: input.projectId },
-      result,
-    )) as string;
+    // Only the record and provenance readers read a nested `request` (a JSON string); every other reader reads the
+    // flat fields, so a nested one is dropped before the selection check and the projection see it.
+    const command = JSON.parse(input.request) as Record<string, unknown>;
+    if (NESTED_READERS.has(input.query))
+      invariant(
+        command.request === undefined || typeof command.request === 'string',
+        'BAD_ARGUMENT',
+        'A nested request must be a JSON string.',
+      );
+    else if ('request' in command) {
+      delete command.request;
+      input = { ...input, request: JSON.stringify(command) };
+    }
+    // The same boundary as a live read: a role-less viewer's selection of hidden plan work runs as an absent one.
+    const args = { ...command, projectId: input.projectId };
+    const result = await publicWorkSelected(ctx, args, selected => {
+      if (selected === args) return journalResult(ctx, input);
+      const request = { ...(selected as Record<string, unknown>) };
+      delete request.projectId;
+      return journalResult(ctx, { ...input, request: JSON.stringify(request) });
+    });
+    return (await publicWorkResult(ctx, args, result)) as string;
   },
 });
 

@@ -75,6 +75,9 @@ export async function readProfile(
   // Private projects where the viewer may write (owner or writer): only there does Latest show the person's open Lanes
   // and comments, as presence and the agent page do. A reader gets landings only.
   const writes = new Set<string>();
+  // Public projects whose plan is members-only, for a viewer without a role there: their planning counts (Items
+  // closed, comments) stay with the plan (Item 76be0714). One role read per such project, only for them.
+  const planHidden = new Set<string>();
   const tried = new Set<string>();
   let probed = 0,
     leftOut = 0;
@@ -90,8 +93,11 @@ export async function readProfile(
     const project = projectId ? await ctx.db.get(projectId) : null;
     if (!project || project.removal || !project.slug) return;
     const open = isPublicProject(project);
-    const role = !self && !open && input.viewer ? await projectRole(ctx, project, input.viewer) : null;
-    const shared = role !== null;
+    const membersPlan = open && project.planVisibility === 'members';
+    const role =
+      !self && (!open || membersPlan) && input.viewer ? await projectRole(ctx, project, input.viewer) : null;
+    if (membersPlan && !self && role === null) planHidden.add(id);
+    const shared = !open && role !== null;
     if (!self && !open && !shared) return;
     if (!handles.has(project.owner))
       handles.set(project.owner, (await accountFor(ctx, project.owner))?.handle ?? null);
@@ -115,6 +121,15 @@ export async function readProfile(
       const value = personDaySchema.parse(JSON.parse(row.value)) as PersonDay;
       const ids = Object.keys(value.p);
       for (const id of ids) await resolve(id);
+      for (const id of ids)
+        if (planHidden.has(id)) {
+          const entry = { ...value.p[id]! };
+          delete entry.c;
+          delete entry.m;
+          delete entry.rc;
+          delete entry.pp;
+          value.p[id] = entry;
+        }
       if (ids.some(id => seen.has(id))) parsed.push({ day: row.day, value });
       if (parsed.length >= PERSON_DAYS_READ) break scan;
     }

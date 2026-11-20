@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { sessionClaimSchema } from './hosted-lane.js';
 import { isAgentSlug } from './agent-slug.js';
-import { hostedLaneSchema } from './hosted-lane.js';
+import { HOLDER_REASON_MAX, hostedLaneSchema } from './hosted-lane.js';
 export const holderRequestSchema = z
   .object({
     operationId: z.uuid(),
@@ -17,7 +17,7 @@ export const holderRequestSchema = z
     session: sessionClaimSchema.optional(),
     sessionId: z.string().regex(/^[0-9a-f]{64}$/),
     agent: z.string().refine(isAgentSlug).optional(),
-    reason: z.string().trim().min(1).optional(),
+    reason: z.string().trim().min(1).max(HOLDER_REASON_MAX).optional(),
     handoff: z
       .object({
         sessionId: z.string().regex(/^[0-9a-f]{64}$/),

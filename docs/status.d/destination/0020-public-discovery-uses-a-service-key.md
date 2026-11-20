@@ -7,6 +7,6 @@ empty platform 404 before any function operation; application-controlled missing
 Populated public-project share metadata remains open in follow-up Issue 43d2f68d until a public project exists on dev. Public-read failures
 serve the bundled plain app shell, and function security headers are enforced directly. Share addresses use configured origins and cached visibility changes expire after 30
 seconds without stale serving. Role-less signed-in readers follow the public plan and Lane-title rule at query
-registration. Public weekly counts read seven compact day totals instead of full landing receipts; initial
+registration, including an Item's work list; the members-only plan is an owner-only server setting with no web control yet. Public weekly counts read seven compact day totals instead of full landing receipts; initial
 coverage is labelled “recorded this week”. See [security](../../security.md) and
 [development configuration](../../development.md#public-discovery-configuration).

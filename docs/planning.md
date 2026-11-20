@@ -170,6 +170,32 @@ Initiative together with every Item in it; hiding is reversible. Every public re
 one rule `publicPlanVisible`: a hidden Item never appears or counts anywhere public, and a read that has not looked
 up an Item's Initiative or parent treats it as hidden.
 
+"Public" means every viewer without a project role, signed in or not; readers, writers and the owner see the whole
+plan. The rule covers the public project page, the Plan screen (its open rows, its Done and dropped pages and its
+counts, which for a viewer without a role count only the Items they may see), CLI and MCP planning reads (lists, one
+Item with its comments and landing receipts, search, counts and short ids; a search's read statistics are zero), the
+Lanes list, queue, conflict notices and History (each names a hidden Item nowhere: a Lane row of a hidden Item carries
+a stand-in Intent id) and People: on a members-only plan a viewer without a role sees no Items-closed or comment
+counts. A members-only plan's pages are empty and finished for such a viewer. Agent briefings are for members: they
+render Lane names and the project's recent messages. With the Lane-title opt-in on, a viewer without a role sees a Lane's title only
+when the read ties its Intent to a visible Item: the Intent is that Item, or a follow-up Intent of an Item the read
+loaded (the public project page loads the open ones). A Lane on a hidden Item, one the read cannot tie to a visible
+Item (including Lanes started without an Item) and every Lane of a members-only plan shows no title. An Intent's
+constraints (the Item body a planned start copies) never reach a viewer without a role. A read that selects plan work
+by Item, Initiative or Intent (an Item and its comments, its work as `planning {id}` and the Item page read it,
+`lanes {planningItemId|intentId}`, History by Item, a Plan page by Initiative, Work records of an Intent or of its
+Lanes, each Intent of a list such as the related coordination feed), live or from journal history, runs for a viewer
+without a role as for an id no record has, cursors, totals and errors included, unless the id is a visible Item (an
+Item's first Intent shares its id). A Lane row names a hidden Item by no field: a stand-in id takes its place. A follow-up Intent
+cannot be tied to its Item without reading the plan, so a filter by one answers as absent: filter by the Item instead.
+On a public plan, a hidden Item still leaves a visitor's settled, list or search page shorter than asked, and a
+search cursor can show that a term matched more than one page, and its Lanes stay listed without title, under a
+stand-in Intent id, so they can be counted; no Item, title or id of it reaches the reply, and a page left empty is
+finished. A request such a viewer sends that is not a JSON object is refused. Only the project owner switches the plan between
+public and members-only (`publicDiscovery:setSettings`, next to the Lane-title opt-in); there is no web control for
+it yet.
+`tests/public-plan-access-matrix.test.mjs` checks every viewer against every setting on these reads.
+
 Who wrote a comment comes from the sign-in, never from typed text: a browser sign-in is the person, a device
 credential is an agent run (its session slug, and the model its launcher declared in `FORGE_AGENT_MODEL`, stored as
 `agentClient` beside the slug; declared, not verified). Members see `@handle` and "person", or `handle/run`, "agent"

@@ -592,7 +592,8 @@ test('peer wait (server): the peer latest landing ends the wait through three bo
     request('terminal-failed', { code: 'CHECK_NOT_PASSED' }),
   );
   const failed = await peer({ peer: f.lanes.B });
-  assert.equal(f.invoke.reads, 10, `peer reads with a landing ${f.invoke.reads}`);
+  // 76be0714: 10 -> 8: the query checks the caller's role once and reuses it (convex/projectRole.ts).
+  assert.equal(f.invoke.reads, 8, `peer reads with a landing ${f.invoke.reads}`);
   assert.equal(failed.peer.state, 'failed');
   assert.equal(failed.peer.terminal, true);
   assert.deepEqual(failed.peer.landing, {

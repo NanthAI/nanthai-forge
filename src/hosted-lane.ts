@@ -84,6 +84,8 @@ export const hostedStartSchema = z
     'A person stamp has no model or run.',
   );
 export const hostedIntentSchema = hostedRecordSchema.options[0];
+/** A holder change's reason is stored in the protected Lane record and shown to members; capped (SI-04). */
+export const HOLDER_REASON_MAX = 280;
 export const hostedLaneSchema = hostedRecordSchema.options[1];
 /** A source pin is independent of uploaded backups and display generations. */
 export const hostedLaneSelectionSchema = z

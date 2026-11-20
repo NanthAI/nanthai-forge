@@ -19,8 +19,9 @@ import {
 import { internal } from './_generated/api';
 import { planQuery as query } from './cliServer';
 import { internalMutation } from './server';
-import { finishReadReader } from './projectFinishReadReader';
-import { accessibleProject } from './projectAuthority';
+import { finishReadReader, finishReadSourceDb } from './projectFinishReadReader';
+import { accessibleProject, readProjectRole } from './projectAuthority';
+import { publicWorkPlan, type PublicPlanRoot } from './publicWorkPlan';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { planningRecordTable } from './projectWorkRecordTables';
 import { planningPage } from './projectPlanningList';
@@ -67,6 +68,38 @@ export async function planCounts(ctx: QueryCtx, projectId: Id<'hostedProjects'>)
   const project = await accessibleProject(ctx, projectId, user.subject);
   const generation = await selectedGeneration(ctx, project);
   if (!generation) return { exact: true, issue: reply({}), initiative: reply({}), closedToday: null };
+  // A viewer without a role (a signed-in visitor of a public project) counts only the Items the one public rule
+  // shows (Item 76be0714): the same capped root page as the fallback below, filtered; never the stored totals.
+  if (!(await readProjectRole(ctx, project, user.subject))) {
+    // The compact Plan header omits planning policy: the rule reads the current project row (one read).
+    const current = await finishReadSourceDb(ctx).get(project._id);
+    invariant(current, 'PROJECT_UNAVAILABLE', 'This project is unavailable.');
+    // A members-only plan shows a visitor no Item: nothing to read.
+    if (current.planVisibility === 'members')
+      return { exact: true, issue: reply({}), initiative: null, closedToday: null };
+    const page = await planningPage(ctx, project, generation, {
+      planningFilter: { kind: 'issue' },
+      counts: true,
+      roots: true,
+      paginationOpts: { numItems: 1000, cursor: null },
+    });
+    const loaded = new Map<string, PublicPlanRoot>();
+    for (const value of page.roots ?? []) {
+      const root = JSON.parse(value) as PublicPlanRoot;
+      if (typeof root.id === 'string') loaded.set(root.id, root);
+    }
+    const plan = publicWorkPlan(ctx, current, loaded);
+    const counts: Record<string, number> = {};
+    for (const [id, root] of loaded)
+      if (typeof root.status === 'string' && (await plan.allowed(id)))
+        counts[root.status] = (counts[root.status] ?? 0) + 1;
+    return {
+      exact: page.isDone && !page.coverage,
+      issue: reply(counts as Partial<Tally>),
+      initiative: null,
+      closedToday: null,
+    };
+  }
   const row = await counter(ctx.db, recordPartition(generation));
   const counts = row ? (JSON.parse(row.value) as PlanCounts) : null;
   if (counts?.done)

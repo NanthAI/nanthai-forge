@@ -264,7 +264,7 @@ test('only the owner person changes what visitors see, and only the owner sees w
   });
   assert.deepEqual(gazers.page, [{ handle: 'wren' }]);
   const settings = await discovery.setSettings._handler(s.ctx, { projectId: 'project', laneTitles: true });
-  assert.deepEqual(settings, { laneTitles: true, stars: 1 });
+  assert.deepEqual(settings, { laneTitles: true, planVisibility: 'public', stars: 1 });
   assert.equal((await page(s)).lanes.titles[0].title, 'Secret Lane title');
   await discovery.setSettings._handler(s.ctx, { projectId: 'project', laneTitles: false });
   assert.deepEqual((await page(s)).lanes.titles, []);

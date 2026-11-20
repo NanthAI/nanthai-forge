@@ -94,6 +94,8 @@ export async function planningPage(
   input: {
     planningFilter: Filter;
     counts?: boolean;
+    /** With `counts`: also return the roots counted (their stored values), for a per-row visibility count. */
+    roots?: boolean;
     newestFirst?: boolean;
     paginationOpts: PaginationOptions;
   },
@@ -111,10 +113,12 @@ export async function planningPage(
     });
   const counts = { proposed: 0, open: 0, 'in-progress': 0, closed: 0, abandoned: 0, archived: 0, deleted: 0 };
   const rows: { id: string; position: number; value: unknown }[] = [];
+  const roots: string[] = [];
   for (const root of page.page) {
     if (input.counts) {
       const status = root.planning!.status as keyof typeof counts;
       counts[status]++;
+      if (input.roots) roots.push(root.value);
       continue;
     }
     const stored = readsStore(project, 'planningItems');
@@ -128,6 +132,7 @@ export async function planningPage(
   }
   return {
     ...page,
+    ...(input.counts && input.roots ? { roots } : {}),
     page: rows,
     ...(input.counts
       ? {
