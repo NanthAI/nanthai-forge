@@ -272,6 +272,9 @@ export async function holdMainRed(ctx: MutationCtx, row: LandingRow, next: Hoste
     alarm: null,
     orderLive: undefined,
     orderWaited: undefined,
+    // Its alarm and wake are gone: a reservation it kept would park later landings of the
+    // same files on a row nothing drives, as Fix D's park already clears (review e7137e30 4b).
+    reservedUntil: undefined,
     value: semanticPayload(next),
   });
   // A held entry gives up its submission-order place; the next waiter re-reads the gate.

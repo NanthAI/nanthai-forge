@@ -303,6 +303,15 @@ export async function writeLanding(
       state,
     );
   const deciding = decidingSince(row, state, attempt, orderLive);
+  // An admission keeps the entries parked on it only while it still holds its place: once it
+  // stalls, fails or waits for review it gives that place up, as any entry does, and its exit
+  // wake runs in this write rather than when the admission run ends (review e7137e30 4c).
+  const admissionHolds =
+    admitting &&
+    holdsLandingOrder(
+      { phase: state.phase as LandingRow['phase'], hold: parked ? 'main-red' : row.hold },
+      state,
+    );
   // A landing reservation (10d253c6) lasts until this landing lands or fails; while it lasts its
   // waiters stay parked on it even during the pre-queue check, and its exit wakes them once.
   const reserving =
@@ -377,12 +386,12 @@ export async function writeLanding(
       (speculative && !retireAdvice)
         ? row.orderWait
         : undefined,
-    orderWaited: orderLive || reserving || admitting ? row.orderWaited : undefined,
+    orderWaited: orderLive || reserving || admissionHolds ? row.orderWaited : undefined,
     value: semanticPayload(state),
   });
   if (row.admitting && !admitting) await releaseAdmissionWaiters(ctx, row.projectId);
   if (row.deciding !== undefined && deciding === undefined) await releaseCohortHolds(ctx, row.projectId);
-  if (row.orderWaited && ((!orderLive && !reserving && !admitting) || retiresSolo))
+  if (row.orderWaited && ((!orderLive && !reserving && !admissionHolds) || retiresSolo))
     await wakeLandingOrderWaiters(ctx, row, orderLive);
   if (bindsNewRun(row, previous, state, runId, orderLive)) await wakeNewRunFollower(ctx, row);
   if (

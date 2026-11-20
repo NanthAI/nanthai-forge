@@ -98,6 +98,8 @@ export async function reservationAhead(
   for (const holder of holders) {
     const value = hostedLandingStateSchema.parse(JSON.parse(holder.value));
     if (
+      // A landing held for red main owns no alarm or wake, so it holds nothing (review e7137e30 4b).
+      holder.hold ||
       !value.request.finish ||
       value.observation.stall ||
       value.observation.pendingReason === 'waiting-for-review'

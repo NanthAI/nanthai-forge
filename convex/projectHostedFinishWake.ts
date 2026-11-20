@@ -291,9 +291,11 @@ export async function wakeLandingOrderWaiters(
       const drive = finish && !JSON.parse(finish.value).pending;
       // Incident c329d191 (2026-11-05): this one scheduled drive is the waiter's
       // only wake and it can fail (OCC exhaustion). Arm the waiter's stall alarm
-      // in this same transaction; landing or a later park cancels it.
+      // in this same transaction; landing or a later park cancels it. A queued
+      // waiter (a speculative-conflict member, whose alarm went to the predecessor)
+      // needs it as much as a ready one (687d1eda review e7137e30 4a).
       const alarm =
-        drive && !waiter.alarm && waiter.phase === 'ready'
+        drive && !waiter.alarm
           ? await armLandingAlarm(
               ctx,
               waiter,
@@ -313,7 +315,9 @@ export async function wakeLandingOrderWaiters(
       // That wake is the settle mutation (review d4f55e9f F3).
       if (drive) await scheduleFinish(ctx, finish, 0, true, true);
       // A waiter that no longer holds its place cannot wake others; wake the next one too.
-      if (waiter.orderLive) next = waiter;
+      // Nor can one nothing drives (a manual request with no finish controller): the
+      // followers handed to it would wait on a row nothing writes again (review e7137e30 4a).
+      if (waiter.orderLive && (drive || early)) next = waiter;
     }
     if (waiters.length < 32) return;
   }
