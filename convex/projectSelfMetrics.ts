@@ -396,7 +396,13 @@ export const page = query({
               // The admission run, when one ran: the submission's first check, decided by that run's row (9ce2ee79).
               admissionRun:
                 'admission' in row && row.admission
-                  ? { runId: row.admission.runId, status: row.admission.status }
+                  ? {
+                      runId: row.admission.runId,
+                      status: row.admission.status,
+                      ...(row.admission.status === 'failed' && request.counts?.runnerSeconds !== undefined
+                        ? { runnerSeconds: request.counts.runnerSeconds }
+                        : {}),
+                    }
                   : null,
               sharedBatch: request.batchDiagnostic?.sharedRunId
                 ? {

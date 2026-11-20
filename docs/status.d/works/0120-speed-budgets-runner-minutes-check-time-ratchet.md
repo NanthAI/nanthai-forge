@@ -6,3 +6,5 @@
   line undoes it with a message, never a P0, and `nforge metrics` shows the
   automatic line beside the file line
   ([speed budgets](../../agents/speed-budgets.md#ratchet)).
+- Failed admission checks retain reported runner seconds, and the waste meter
+  includes those runs in check-failure waste ([metrics](../../operations.md)).

@@ -243,6 +243,9 @@ export async function settleLandingAdmission(
           version: state.version + 1,
           phase: 'terminal-failed' as const,
           ...(run.testFiles ? { testFiles: run.testFiles } : {}),
+          ...(run.endedAt && run.execution
+            ? { counts: { ...state.counts, runnerSeconds: Math.round(run.execution.seconds) } }
+            : {}),
           observation: landingObservation('failed', 'CHECK_FAILED'),
           error: {
             code: 'CHECK_FAILED',

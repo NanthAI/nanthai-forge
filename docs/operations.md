@@ -309,6 +309,11 @@ windows can retain canonical costs until ordinary writes cover their runs. The p
 90-minute dogfood read measured 38,457,450 database bytes over 88 metric-page calls; no broad
 live before/after read or preparation pass is needed to run this guard.
 
+Waste counts the runner minutes of a failed admission check against the terminal attempt when
+the run has execution timing. New failed admissions retain reported runner seconds in the
+landing result. The waste meter includes that recorded time when some shards omit timing and
+marks the run's total as incomplete.
+
 Waste counts a main race by what it cost. When the replacement attempt adopts the superseded
 attempt's passing run (a reuse, no new check run), that run is not a re-check run, the raced
 row's elapsed time is the race-to-acceptance gap with no runner minutes

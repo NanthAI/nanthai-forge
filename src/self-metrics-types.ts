@@ -38,6 +38,8 @@ export type MetricSubmission = {
   entryId: string;
   entryAt?: string | undefined;
   entryStatus?: string | undefined;
+  /** The request's selected attempt for failed admission accounting. */
+  entryAttemptId?: string | undefined;
   retryCause?: import('./first-attempt-land-rate.js').LandRateEntry['cause'] | undefined;
   at: string;
   inputs: MetricInput[];
@@ -68,7 +70,11 @@ export type MetricSubmission = {
   compensating?: boolean | undefined;
   /** The admission run, when one ran: the submission's first check (9ce2ee79). */
   admissionRun?:
-    | { runId: string; status: 'checking' | 'passed' | 'failed' | 'unavailable' }
+    | {
+        runId: string;
+        status: 'checking' | 'passed' | 'failed' | 'unavailable';
+        runnerSeconds?: number | undefined;
+      }
     | null
     | undefined;
   /** The shared cohort check that failed before this member fell back to its own check. */

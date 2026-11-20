@@ -71,7 +71,11 @@ const rowSchemas = {
     endedAt: nullableStamp.optional(),
     firstCheckRecheck: z.string().min(1).max(64).nullable().optional(),
     admissionRun: z
-      .object({ runId: z.string(), status: z.enum(['checking', 'passed', 'failed', 'unavailable']) })
+      .object({
+        runId: z.string(),
+        status: z.enum(['checking', 'passed', 'failed', 'unavailable']),
+        runnerSeconds: z.number().nonnegative().optional(),
+      })
       .nullable()
       .optional(),
     sharedBatch: z
@@ -396,6 +400,7 @@ export async function readHostedMetricPages(
               entryId: row.id,
               entryAt: row.at,
               entryStatus: row.status,
+              ...(row.admissionRun?.status === 'failed' ? { entryAttemptId: row.attemptId } : {}),
               inputs: [],
               endedAt: row.endedAt ?? undefined,
               ...(row.retry ? { supersedes: row.retry.supersedes, retryReason: row.retry.reason } : {}),

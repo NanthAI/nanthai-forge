@@ -377,6 +377,49 @@ test('a failure before the Intent last landed never counts against its later lan
   );
 });
 
+for (const { name, partialSeconds, terminalVisible = true, expected } of [
+  { name: 'counts a run inside the window against the terminal attempt', expected: [[59, 0]] },
+  {
+    name: 'counts reported seconds and flags missing shard timing',
+    partialSeconds: 90,
+    expected: [[1.5, 1]],
+  },
+  {
+    name: 'keeps a missing terminal attempt from charging the visible parent',
+    terminalVisible: false,
+    expected: [],
+  },
+])
+  test(`failed admission waste ${name}`, async () => {
+    const f = fixture();
+    const e = evidence(f);
+    const pin = e.input(randomUUID(), randomUUID(), head('a'), at(-10));
+    const period = { from: at(0), to: at(5) };
+    e.fail('failed-admission', at(-2), at(6), pin);
+    e.attempt('failed-admission', at(-2), pin, null);
+    if (terminalVisible)
+      e.attempt('failed-admission/child', at(-1), pin, null, head('2'), 'failed-admission');
+    const [request] = f.tables.projectHostedLandingRequests;
+    request.attemptId = 'failed-admission/child';
+    request.value = JSON.stringify({
+      ...JSON.parse(request.value),
+      attemptId: request.attemptId,
+      ...(partialSeconds === undefined ? {} : { counts: { runnerSeconds: partialSeconds } }),
+    });
+    request.admission = { runId: 'admission-run', status: 'failed', endedAt: Date.parse(at(4)) };
+    f.run('admission-run', at(1), at(4), 3540, {
+      status: 'failed',
+      ...(partialSeconds === undefined ? {} : { cost: { status: 'unknown' } }),
+    });
+
+    const { records } = await readHostedMetricPages(f.query, period);
+    const waste = calculateWaste(records, period);
+    assert.deepEqual(
+      waste.rows.map(row => [row.id, row.cause, row.runnerMinutes, row.unknownRunnerRuns]),
+      expected.map(([minutes, unknown]) => ['failed-admission/child', 'check-failed', minutes, unknown]),
+    );
+  });
+
 test('a main race resolved by adopting the passing run is one reuse, not a recheck or a lost check', async () => {
   const f = fixture(),
     e = evidence(f);

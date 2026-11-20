@@ -22,10 +22,18 @@ export function calculateWaste(records: MetricRecords, period: MetricPeriod) {
   const rows = [...records.submissions]
     .sort((a, b) => Number(!!b.mainRace) - Number(!!a.mainRace))
     .flatMap(row => {
+      // The request's admission fields survive the join even if its selected attempt is missing.
+      const admission =
+        row.status === 'failed' &&
+        row.attemptId === row.entryAttemptId &&
+        row.admissionRun?.status === 'failed'
+          ? row.admissionRun
+          : undefined;
+      const runIds = admission ? [...row.runIds, admission.runId] : row.runIds;
       if (
         !inside(row.at) &&
         !inside(row.endedAt ?? '') &&
-        !row.runIds.some(id => inside(runIndex.get(id)?.at ?? ''))
+        !runIds.some(id => inside(runIndex.get(id)?.at ?? ''))
       )
         return [];
       const request = submissions.get(row.entryId) ?? row;
@@ -54,13 +62,16 @@ export function calculateWaste(records: MetricRecords, period: MetricPeriod) {
       let runnerMinutes = 0,
         discardedPassedRunnerMinutes = 0,
         unknownRunnerRuns = 0;
-      for (const id of row.runIds) {
+      for (const id of runIds) {
         if (seen.has(id) || acceptedRuns.has(id)) continue;
         seen.add(id);
         const run = runIndex.get(id);
         if (!run || !inside(run.at)) continue;
         if (run.runnerMinutes === undefined) {
           unknownRunnerRuns++;
+          // The request retains reported shard time even when the run total is incomplete.
+          if (admission?.runId === id && admission.runnerSeconds !== undefined)
+            runnerMinutes += admission.runnerSeconds / 60;
           continue;
         }
         runnerMinutes += run.runnerMinutes;

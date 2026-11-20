@@ -106,6 +106,23 @@ test('an admitted member waits for peers still admitting, then joins their cohor
   assert.equal(f.runs().length, 5);
 });
 
+test('a failed admission retains the runner seconds without a queue check', async t => {
+  const f = await batchesFixture(t, { ...admitted, count: 1 });
+  const [run] = f.runs();
+  // The provider's result fold already put the shard aggregate on the run before settlement.
+  const row = [...f.tables.projectHostedCheckRuns.values()].find(row => row.runId === run.id);
+  f.patch('projectHostedCheckRuns', row._id, {
+    value: JSON.stringify({ ...run, execution: { seconds: 3540.4, shards: 1 } }),
+  });
+  await f.fail(run.id);
+  await f.drain();
+  const [failed] = states(f);
+  assert.equal(failed.phase, 'terminal-failed');
+  assert.match(failed.error.message, /admission check of this change alone failed/);
+  assert.equal(failed.counts?.runnerSeconds, 3540);
+  assert.equal(f.runs().length, 1);
+});
+
 test('a lone admitted member lands on its admission proof with no second run', async t => {
   const f = await batchesFixture(t, { ...admitted, count: 1 });
   await settle(f);
