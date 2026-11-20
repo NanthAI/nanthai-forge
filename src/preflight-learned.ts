@@ -115,6 +115,17 @@ export function recentFailedTests(root: string, now = Date.now(), windowMs = REC
   return [...tests].sort();
 }
 
+/** How many separate failures this record holds per test file (landing checks and local preflights,
+ * within the record's age bound): one failure teaches every changed path at the same time, so it
+ * counts once. Ranks the protected tiers' run order (src/preflight-run-order.ts). */
+export function recordedFailures(root: string, now = Date.now()): Map<string, number> {
+  const times = new Map<string, Set<number>>();
+  for (const failures of Object.values(read(root).learned))
+    for (const [test, at] of Object.entries(failures))
+      if (now - at <= MAX_AGE_MS) (times.get(test) ?? times.set(test, new Set()).get(test)!).add(at);
+  return new Map([...times].map(([test, at]) => [test, at.size]));
+}
+
 /** Remembers the changed paths of the landing a Lane is submitting (finish gates already read
  * them), so a later check failure for that Lane, seen by land or wait, can be learned. */
 export function rememberLandingPaths(root: string, laneId: string, paths: string[], now = Date.now()) {

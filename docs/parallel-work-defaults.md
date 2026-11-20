@@ -617,7 +617,21 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   phase, protected tiers included: the run goes in groups of about 30 estimated seconds, each sized
   from known file times or the speed this run has observed and never past the time left, starts no
   file once the budget is spent (the first file always runs), and so ends within the budget plus
-  about one file. Files it did not start are `stopped` in the receipt (`stoppedForTime` counts them)
+  about one file. Because the clock can stop protected files, they run in this order: files this
+  machine timed at about 2 s or less, repo-wide guard tests for the change first, then files whose
+  learned saving beats their seconds (ahead of the declared guards, which are never stopped, so they
+  always start): the first 10 s of them always (so nothing after them starts more than 10 s later),
+  up to 30 s while the guards, the change's own test files and the files that failed before still fit
+  the budget; declared and learned guards; the change's own
+  test files; files that failed before (the learned tier, and any other protected file that failed a
+  landing check for these paths or this machine's last run), most saving per second first; fast files
+  the room left out; tests named for
+  a changed module (failed here last time first, then cheapest); repo-wide guards this machine never
+  timed (the run measures them); the other protected files, those whose learned saving `p x C / r`
+  beats their seconds first, most saving per second first (the guard set's formula: p from the guard set's server counts
+  or this clone's learned failures over the window's landing outcomes, C and r from the server), the
+  rest closest first; smoke and explicit coverage (document readers, slower scans, path rules) last.
+  The order never adds or drops a file. Files it did not start are `stopped` in the receipt (`stoppedForTime` counts them)
   and join the deferred set; `stoppedRerun` is `preflight '{"laneId":"…","retry":true}'`, which
   plans exactly those files (passes are reused, no filler). When a stopped file is must-run
   (changed, learned or direct), the run is **NOT COMPLETE**: not passed (`passed: false`) and not

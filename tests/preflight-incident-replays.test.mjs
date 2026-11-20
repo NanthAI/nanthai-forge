@@ -289,7 +289,12 @@ test('0f3d44e1: a docs-only change runs only the tests that read those documents
   for (const test of [at('tests', 'check-brief.test.mjs'), at('tests', 'planning-search.test.mjs')])
     assert.ok(plan.tests.includes(test), `${test} reads a changed document`);
   for (const test of plan.tests) assert.ok(docs.includes(plan.docsReaders[test].doc), test);
-  assert.ok(plan.tests.length <= 6, `${plan.tests.length} readers`);
+  // The retired-wording guard walks docs/agents/ by relative path (preflight-miss fix 4, d3357f40): a
+  // reader of every document there. The bound on the other readers stays.
+  const walker = at('tests', 'approve-land-wording.test.mjs');
+  assert.ok(plan.tests.includes(walker), `${walker} walks docs/agents/`);
+  const others = plan.tests.filter(test => test !== walker);
+  assert.ok(others.length <= 6, `${others.length} readers`);
   assert.deepEqual(plan.tiers, [{ tier: 'mandatory', tests: plan.tests }]);
   t.diagnostic(`readers ${plan.tests.join(' ')}; selection ${ms.toFixed(0)} ms`);
 });

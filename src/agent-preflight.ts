@@ -28,7 +28,9 @@ import {
   selectPreflightTests,
   selectionSourcePath,
 } from '../scripts/test-impact.mjs';
-import { learnFailures, learnedTests, recentFailedTests } from './preflight-learned.js';
+import { learnFailures, learnedTests, recentFailedTests, recordedFailures } from './preflight-learned.js';
+import { protectedRunOrder } from './preflight-run-order.js';
+import { cachedGuardCandidates } from './preflight-guard-cache.js';
 import { type GuardSetReport, planGuardSet, recordPreflightRun } from './preflight-guard-set.js';
 export { guardGateFields } from './preflight-guard-set.js';
 import { commentOnlyPaths } from './preflight-comment-only.js';
@@ -1025,11 +1027,14 @@ function planTests(
           path => files.get(path) ?? laneText(root, path),
         )
       : [];
+    const learnedForPaths = learnedTests(root, changed.paths, undefined, test =>
+      runnerTestPath(resolved.runner, test),
+    );
     const selection = selectPreflightTests({
       files,
       paths: changed.paths,
       guards: guardTests,
-      learned: learnedTests(root, changed.paths, undefined, test => runnerTestPath(resolved.runner, test)),
+      learned: learnedForPaths,
       recent: recentFailedTests(root),
       ...(commentOnly.length ? { commentOnly } : {}),
       // Direct tests of the most specific changed modules are protected while they fit the budget.
@@ -1045,7 +1050,34 @@ function planTests(
       ),
       guardTests,
     );
-    selection.tests = selection.tiers.flatMap(item => item.tests);
+    // Protected tiers run fast repo-wide guards and fast files with a learned saving (10 s always, up to
+    // 30 s while the guards, the change's own tests and the files that failed before fit), guards, the change's own
+    // tests, files that failed before (learned tier, failed for these paths or last run here), fast files
+    // the room left out, named tests, then the rest by learned saving per second, smoke and explicit
+    // coverage last (Item 5dcfce75 fixes 3, 4).
+    // Saving is the 13ea93bf formula from the project's own record: p = failures of the file in the
+    // window's landing outcomes, C and r from the server's candidates; 0 (keep the order) without them.
+    const candidates = cachedGuardCandidates(root);
+    const serverFailures = new Map((candidates?.files ?? []).map(item => [item.file, item.failures]));
+    const localFailures = recordedFailures(root);
+    const outcomes = candidates?.outcomes ?? 0;
+    const perFailure = outcomes && candidates ? candidates.C / Math.max(1, candidates.r) / outcomes : 0;
+    selection.tests = protectedRunOrder({
+      tiers: selection.tiers,
+      isProtected: tier => protectedTiers.has(tier),
+      guards: new Set(guardTests),
+      treeGuards: selection.treeGuards ?? [],
+      leadTests: selection.leadTests ?? [],
+      ownTests: changed.paths.filter(isTest),
+      // Files that failed for these paths (also when another tier holds them) or in this machine's last run.
+      failing: new Set([...learnedForPaths, ...Object.keys(stats).filter(test => stats[test]!.failed)]),
+      budgetSeconds,
+      measuredSeconds: test => (stats[test] ? stats[test].ms / 1000 : undefined),
+      secondsFor,
+      failureSeconds: test =>
+        Math.min(outcomes, Math.max(serverFailures.get(test) ?? 0, localFailures.get(test) ?? 0)) *
+        perFailure,
+    });
     let tests = [...new Set(selection.tests)];
     let reusedTests: string[] = [];
     let delta: string[] | undefined;
@@ -1370,7 +1402,7 @@ function localSelection(input: {
   const over = !input.trim
     ? ' trim:false: every ranked local tier runs, no time budget.'
     : fit.protectedOverBudget
-      ? ` Protected tests (changed, learned, direct) alone exceed the ${budgetSeconds} s budget: they run first, closest first; the wall clock stops the rest by name, and the run is then NOT COMPLETE with one command to finish them.`
+      ? ` Protected tests (changed, learned, direct) alone exceed the ${budgetSeconds} s budget: they run first (fast repo-wide guards, guards, the change's own tests, files that failed for these paths, named tests, then most learned saving per second; smoke and explicit coverage last); the wall clock stops the rest by name, and the run is then NOT COMPLETE with one command to finish them.`
       : '';
   const skippedNote = input.trimmedTests.length
     ? ` ${input.trimmedTests.length} trimmed file(s) are named in trimmedTests${input.rerun ? `; run them: ${input.rerun}` : ''}.`

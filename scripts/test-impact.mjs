@@ -161,10 +161,24 @@ export function selectPreflightTests(input, graphCache = {}) {
   const kind = test => consumers.reasons?.[test]?.kind;
   const distance = test => consumers.reasons?.[test]?.edges?.length ?? Infinity;
   const guards = new Set((input.guards ?? []).filter(test => input.files.has(test)));
-  const mandatory = test =>
-    changed.has(test) || smokeTests.includes(test) || guards.has(test) || kind(test) === 'explicit';
-  const learned = new Set((input.learned ?? []).filter(test => input.files.has(test) && !mandatory(test)));
   const covered = new Set(selection.tests);
+  // Repo-wide guards (a test that scans a folder holding a changed file) read every file there,
+  // comments included, so a comment-only edit keeps them local too (Item 5dcfce75 fix 4).
+  const scanning = new Set(
+    [
+      ...scanReaders(
+        input.files,
+        input.paths.filter(path => !documentation(path)),
+      ).keys(),
+    ].filter(test => covered.has(test)),
+  );
+  const mandatory = test =>
+    changed.has(test) ||
+    smokeTests.includes(test) ||
+    guards.has(test) ||
+    kind(test) === 'explicit' ||
+    scanning.has(test);
+  const learned = new Set((input.learned ?? []).filter(test => input.files.has(test) && !mandatory(test)));
   const named = new Set(
     behavioural
       .filter(path => !testFile(path) && !documentation(path))
@@ -318,10 +332,18 @@ export function selectPreflightTests(input, graphCache = {}) {
     tests: ranked(tier),
   }));
   const local = new Set(tiers.flatMap(item => item.tests));
+  // Run-order hints for preflight (src/preflight-run-order.ts); tier membership never depends on them.
+  const protectedTests = tiers.filter(item => protectedTiers.has(item.tier)).flatMap(item => item.tests);
   return {
     ...selection,
     tests: tiers.flatMap(item => item.tests),
     tiers,
+    /** The change's own test files, then tests named for a changed module. */
+    leadTests: protectedTests
+      .filter(test => changed.has(test) && testFile(test))
+      .concat(protectedTests.filter(test => !changed.has(test) && namedFor(test, named))),
+    /** Repo-wide guards: tests that scan a folder holding a changed file (test-tree-scanners.mjs). */
+    treeGuards: protectedTests.filter(test => scanning.has(test)),
     broadModules: broad,
     ...(commentOnly.size ? { commentOnly: [...commentOnly].sort() } : {}),
     /** Rank of each direct and wide test ([product hops, carrier fan-in, helper hops]). */

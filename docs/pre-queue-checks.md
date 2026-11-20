@@ -587,6 +587,15 @@ Each tier answers a different question. None depends on a particular CI provider
    code and documents alike: `scripts/test-tree-scanners.mjs` finds tests whose
    `readdir`, `opendir` or `glob` argument is built from the repository base
    (`import.meta` or `process.cwd()`) and takes the folder names that flow into it.
+   `scripts/test-tree-readers.mjs` adds the two shapes that base misses: a listing
+   or walk of a plain relative path (tests run from the repository root, so
+   `readdirSync('src')` lists the repository's `src/`), and a recursive reader, a
+   function that reads the file its parameter names and calls itself on paths found
+   there (an import walk), which covers every code file below its start but no
+   Markdown document. Only values whose every piece is known count: a temporary
+   folder, a helper's return value or an unbound name drops that alternative, and a
+   test that changes its working directory is skipped. A comment-only edit keeps
+   these guards in preflight, since they read comments too.
    Literal Vite `import.meta.glob` loaders narrow to their matched files only for
    supported relative patterns (`*`, recursive `**/` and trailing `**`) and literal
    `base`, `eager` and `import` options. A relative base starts at the importer.

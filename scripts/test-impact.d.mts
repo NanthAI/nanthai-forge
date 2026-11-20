@@ -85,6 +85,10 @@ export function selectPreflightTests(
   /** The `recent` input tests that qualified (consumers within two product modules). */
   recentFailed: string[];
   commentOnly?: string[];
+  /** Protected tests that are the change's own test files, then tests named for a changed module. */
+  leadTests?: string[];
+  /** Protected tests that scan a folder holding a changed file (repo-wide guards). */
+  treeGuards?: string[];
 };
 export function fitPreflightBudget(input: {
   tiers: PreflightTier[];

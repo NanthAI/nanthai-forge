@@ -8,6 +8,7 @@
 // only: no file read, no process, no server call.
 import ts from 'typescript';
 import { posix } from 'node:path';
+import { treeReaders } from './test-tree-readers.mjs';
 
 const testFile = path => /^tests\/[^/]+\.test\.mjs$/.test(path);
 const ENUMERATE = /^(?:readdir|readdirSync|opendir|opendirSync|glob|globSync)$/;
@@ -170,7 +171,8 @@ function analyse(path, text) {
 }
 
 const memo = new WeakMap();
-/** Test file -> the folders it scans ({folder, recursive}; folder '' is the repository root).
+/** Test file -> the folders it scans ({folder, recursive}; folder '' is the repository root), from
+ * a rooted listing here or a plain relative walk or recursive reader (test-tree-readers.mjs).
  * Memoized per inventory. */
 export function treeScanners(files) {
   if (memo.has(files)) return memo.get(files);
@@ -185,13 +187,17 @@ export function treeScanners(files) {
     }
     if (scans.length) found.set(path, scans);
   }
+  // A walk from a plain relative path, or a recursive reader, scans too (test-tree-readers.mjs).
+  for (const [path, scans] of treeReaders(files, testFile, new Set(found.keys()))) found.set(path, scans);
   memo.set(files, found);
   return found;
 }
 
-/** A scan covers a path inside its folder (anywhere below it when recursive, directly in it when not). */
-export const scanCovers = ({ folder, recursive }, path) => {
+/** A scan covers a path inside its folder (anywhere below it when recursive, directly in it when not);
+ * an import walk (`code`) covers no Markdown document. */
+export const scanCovers = ({ folder, recursive, code }, path) => {
   if (folder && !path.startsWith(`${folder}/`)) return false;
+  if (code && /\.md$/.test(path)) return false;
   return recursive || !path.slice(folder ? folder.length + 1 : 0).includes('/');
 };
 
