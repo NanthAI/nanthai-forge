@@ -21,6 +21,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { WIRED } from './keep-the-run-scenarios.mjs';
 import { storageClock } from './storage-clock.mjs';
 const stale = await import(moduleUrl('../convex/projectHostedLandingStaleChecks.ts'));
+const mainAudit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
 const SWITCH = 'FORGE_QUEUE_KEEP_THE_RUN';
 const prior = Object.fromEntries([...Object.keys(synthetic), SWITCH].map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic, { [SWITCH]: '1' }));
@@ -241,25 +242,163 @@ test('A2: a kept run holds order: an overlapping follower composes behind it bef
   assert.equal(runOf(f, runs[1].id).status, 'running');
 });
 
-test('A2: with the pipeline full, an overlapping follower checks on its own as today', async t => {
-  const { f, runs } = await mainMoves(t, { paths: [...ORDER_SENSITIVE, 'src/b.ts'] });
-  assert.equal(requestRow(f, 1).admission.kept, true);
-  await f.add(2);
-  await drain(f);
-  assert.equal(f.runs().length, 3, 'one admission run of its own, never a strand behind the kept run');
-  assert.equal(requestRow(f, 2).admission?.status, 'checking');
-  assert.equal(runOf(f, runs[1].id).status, 'running');
-  // Review a09af93a finding 1: the common timing, the follower's check passes first. The kept run
-  // keeps its place (no cohort hold parks it), so it lands and the follower conflicts, as today.
-  await passRun(f, f.runs()[2].id);
-  await drain(f);
-  await passRun(f, runs[1].id);
-  await settle(f);
-  assert.equal(current(f, 1).phase, 'landed', 'the kept entry lands in its queue place');
-  assert.equal(current(f, 2).phase, 'terminal-failed');
-  assert.equal(current(f, 2).error.code, 'COMPOSITION_CONFLICT');
-  assert.equal(requestRow(f, 1).admission.hold, undefined, 'a kept run is never parked for peers');
-});
+/** Review a09af93a finding 1 and 379d19f5 nit 3: every order of the two passes. The kept entry keeps
+ * its place (no cohort hold parks it), so it lands and the follower conflicts, as today. */
+const A2_FULL = 'A2: with the pipeline full, an overlapping follower checks on its own as today';
+for (const timing of ['follower passes first', 'both pass together', 'kept run passes first'])
+  test(`${A2_FULL} (${timing})`, async t => {
+    const { f, runs } = await mainMoves(t, { paths: [...ORDER_SENSITIVE, 'src/b.ts'] });
+    assert.equal(requestRow(f, 1).admission.kept, true);
+    await f.add(2);
+    await drain(f);
+    assert.equal(f.runs().length, 3, 'one admission run of its own, never a strand behind the kept run');
+    assert.equal(requestRow(f, 2).admission?.status, 'checking');
+    assert.equal(runOf(f, runs[1].id).status, 'running');
+    const follower = f.runs()[2].id;
+    const order = {
+      'follower passes first': [[follower], [runs[1].id]],
+      'both pass together': [[follower, runs[1].id]],
+      'kept run passes first': [[runs[1].id], [follower]],
+    }[timing];
+    for (const wave of order) {
+      for (const id of wave) await passRun(f, id);
+      await drain(f);
+    }
+    await settle(f);
+    assert.equal(current(f, 1).phase, 'landed', 'the kept entry lands in its queue place');
+    assert.equal(current(f, 2).phase, 'terminal-failed');
+    assert.equal(current(f, 2).error.code, 'COMPOSITION_CONFLICT');
+    assert.equal(requestRow(f, 1).admission.hold, undefined, 'a kept run is never parked for peers');
+  });
+
+/** Review a09af93a nit 6: fast seeds from its train, which holds the kept row, so with the pipeline full
+ * an overlapping follower stacks behind the kept run exactly as it stacks behind today's retired entry
+ * (switch off: the same rows, the same outcome). It has no run of its own: the kept run's settle is
+ * its owner. Static L5b cannot see that capacity wait (it has no recorded holder; the reviewer's
+ * switch-off scratch flagged the same), so this row proves the owner by running: every entry reaches
+ * its end with the stall alarm never run, whether the kept run passes, goes red, or parks on main's
+ * own red tests (review 018569e9 finding 1: that park released the place but woke no queue). */
+const MAIN_RED_TEST = 'tests/main-red.test.mjs';
+for (const end of ['passes', 'red', 'parks on main red'])
+  test(`A2 fast: with the pipeline full, a follower stacked on a kept run is driven by its settle (kept run ${end})`, async t => {
+    if (end === 'parks on main red') {
+      process.env.FORGE_QUEUE_PARK_ON_MAIN_RED = '1';
+      t.after(() => delete process.env.FORGE_QUEUE_PARK_ON_MAIN_RED);
+    }
+    const { f, runs } = await mainMoves(t, { paths: [...ORDER_SENSITIVE, 'src/b.ts'], mode: 'fast' });
+    assert.equal(requestRow(f, 1).admission.kept, true);
+    assert.equal(requestRow(f, 1).orderLive, true);
+    // Every scheduled task but the stall alarm, release pages included, as the scheduler would run them.
+    const owned = async () => {
+      for (let step = 0; ; step++) {
+        const task = pendingTasks(f)[0];
+        if (!task) return;
+        assert(step < 1000, JSON.stringify(states(f)));
+        if (task.name === 'projectHostedMainAudit:releaseHeld') {
+          f.patch('_scheduled_functions', task._id, { state: { kind: 'success' } });
+          await f.transaction('release', mainAudit.releaseHeld, task.args[0]);
+        } else await f.execute(task);
+      }
+    };
+    await f.add(2);
+    await owned();
+    assert.equal(f.runs().length, 2, 'the follower stacks: no run of its own');
+    assert.equal(current(f, 2).phase, 'queued');
+    const audit = [...f.tables.projectHostedMainAudits.values()].find(r => r.projectId === f.projectId);
+    if (end === 'passes') await passRun(f, runs[1].id);
+    else if (end === 'red') await failRun(f, runs[1].id);
+    else {
+      // Main is red on one test; the kept run fails on that test alone.
+      f.patch('projectHostedMainAudits', audit._id, {
+        red: {
+          since: new Date().toISOString(),
+          head: f.currentMain().head,
+          runId: 'red-audit',
+          tests: [MAIN_RED_TEST],
+        },
+      });
+      const run = runOf(f, runs[1].id);
+      await f.rawChecks.callback(f.rawChecks.shard(run, 0, 'failed'));
+      await f.rawChecks.callback(f.rawChecks.shard(run, 1, 'passed'));
+      await f.rawChecks.callback(
+        f.rawChecks.complete(run, 'failed', {
+          contractReports: { [MAIN_RED_TEST]: { failed: true, durationMs: 1, firstError: 'synthetic' } },
+        }),
+      );
+    }
+    await owned();
+    if (end === 'parks on main red') {
+      assert.equal(current(f, 1).error?.code, 'MAIN_RED', 'the kept entry parks under the main-red hold');
+      assert.equal(f.runs().length, 3, 'the follower is not left behind the parked place: it checks');
+    }
+    for (let wave = 0; f.runs().some(r => ['queued', 'running'].includes(r.status)); wave++) {
+      assert(wave < 10, JSON.stringify(states(f)));
+      for (const run of f.runs().filter(r => ['queued', 'running'].includes(r.status)))
+        await passRun(f, run.id);
+      await owned();
+    }
+    assert(
+      states(f).every(s => s.observation.state !== 'pending'),
+      `stranded without the stall alarm: ${JSON.stringify(states(f))}`,
+    );
+    if (end === 'passes') {
+      assert.equal(current(f, 1).phase, 'landed', 'the kept entry lands in its queue place');
+      assert.equal(current(f, 2).error.code, 'COMPOSITION_CONFLICT');
+    } else {
+      assert.equal(current(f, 2).phase, 'landed', 'the follower lands once the kept entry leaves its place');
+      // Red: the kept entry fails. Parked: main's green release recomposes it on the follower's change.
+      assert.equal(current(f, 1).error.code, end === 'red' ? 'CHECK_FAILED' : 'COMPOSITION_CONFLICT');
+    }
+    assert.equal(f.runs().length, 3);
+    assert.equal(pendingTasks(f).length, 0);
+  });
+
+/** Review a09af93a nit 4 / 379d19f5 nit 5: a kept run that ends without a failing test (the platform)
+ * has lost the elapsed share the keep was for. Restarting it would pay a whole fresh run on its old
+ * base plus the scoped recheck; it retires as the main move would have, onto current main, so the
+ * entry pays what today's retire pays and no more. */
+for (const [name, options] of [
+  ['strict', { paths: ORDER_SENSITIVE }],
+  ['fast', { paths: ['package.json', 'src/b.ts'], mode: 'fast' }],
+  [
+    'probe running',
+    {
+      paths: ['src/shared.ts', 'src/shared.ts'],
+      contents: ['A\nb\nc\n', 'a\nb\nC\n'],
+      stop: f => Boolean(finishPending(f, 1)?.precompose),
+    },
+  ],
+])
+  test(`platform restart (${name}): a kept run without a test result retires onto current main, never a fresh run on its old base`, async t => {
+    const { f, runs, before } = await mainMoves(t, options);
+    const b = runs[1];
+    assert.equal(requestRow(f, 1).admission.kept, true);
+    if (options.stop)
+      assert(finishPending(f, 1)?.precompose, 'the platform ends the run while its probe runs');
+    // Actions completed (failure) without complete job evidence: no test failed.
+    await f.rawChecks.callback(f.rawChecks.complete(runOf(f, b.id), 'runner-unavailable'));
+    await drain(f);
+    const fresh = f.runs().filter(r => r.id !== runs[0].id && r.id !== b.id);
+    assert.equal(fresh.length, 1, 'one replacement run');
+    const bound = attempts(f, 1).find(a => a.candidate.id === fresh[0].request.candidateId);
+    assert(bound, 'the replacement checks an attempt of this entry');
+    assert.notEqual(bound.main.head, before.main.head, 'never a fresh run on the old base');
+    assert.equal(bound.main.head, f.currentMain().head, 'the replacement checks current main');
+    assert.notEqual(requestRow(f, 1).admission.kept, true, 'a retired run is no longer kept');
+    assert.equal(requestRow(f, 1).admission.recheck, 'main-moved');
+    await settle(f);
+    assert.equal(current(f, 1).phase, 'landed');
+    assert.equal(f.runs().length, 3, "the platform-ended run plus one exact replacement, as today's retire");
+    assert.equal(pendingTasks(f).length, 0);
+    const costs = f.counts.slice(before.calls).filter(cost => cost.name !== 'queueInvariantRead');
+    t.diagnostic(
+      JSON.stringify({
+        calls: costs.length,
+        readBytes: costs.reduce((n, c) => n + c.readBytes, 0),
+        writeBytes: costs.reduce((n, c) => n + c.writeBytes, 0),
+      }),
+    );
+  });
 
 test('A3: a fast kept run carries only through the cross-head proof', async t => {
   const { f, runs } = await mainMoves(t, { paths: ['package.json', 'src/b.ts'], mode: 'fast' });
@@ -486,7 +625,7 @@ test('A5: an empty sweep with the switch on reads zero DB bytes and schedules no
 /** Done-when line 3 (lead reading 2026-11-19 17:50Z): carry and red keeps cost no more Convex calls
  * than the retire they replace; a scoped-recheck keep may add calls within the owner's cap. Measured
  * from the mover's pass until every landing settles, on the same scenario with the switch off and on,
- * and held to the measured `WIRED` deltas the scenario table prices (calls exact, bytes +1%). The
+ * and held exactly to the measured `WIRED` deltas the scenario table prices (calls and bytes). The
  * fixture's runner reports in few calls: the carry's saved replacement run would also have paid the real
  * runner's ingest and source resolve (17.4 calls), which the table credits. */
 async function lifecycle(t, { paths, mode, red, on }) {
@@ -519,9 +658,9 @@ for (const [name, options, kind] of [
   ['scoped recheck', { paths: ORDER_SENSITIVE, mode: 'strict' }, 'scoped-recheck'],
 ])
   test(`line 3: a ${name} keep against the retire it replaces`, async t => {
-    // One clock for ISO stamps and scheduler time, as the storage ratchets use: the deltas are exact
-    // bytes, not a wall-clock-dependent spread (review a09af93a finding 3).
-    storageClock(t);
+    // One clock for ISO stamps, scheduler time and measured step durations, as the storage ratchets
+    // use: the deltas are exact bytes, not a wall-clock-dependent spread (review a09af93a finding 3).
+    storageClock(t, { elapsed: true });
     const retire = await lifecycle(t, { ...options, on: false });
     const keep = await lifecycle(t, { ...options, on: true });
     t.diagnostic(JSON.stringify({ name, retire, keep }));
@@ -537,18 +676,20 @@ for (const [name, options, kind] of [
       writeBytes: keep.writeBytes - retire.writeBytes,
     };
     t.diagnostic(JSON.stringify({ kind, delta }));
-    assert(delta.calls <= WIRED[kind].calls, `calls ${delta.calls} > ${WIRED[kind].calls}`);
-    for (const metric of ['readBytes', 'writeBytes'])
-      assert(
-        delta[metric] <= WIRED[kind][metric] + Math.abs(WIRED[kind][metric]) * 0.01,
-        `${metric} ${delta[metric]} > ${WIRED[kind][metric]}`,
-      );
+    // Exact, both ways (review 379d19f5 nit 4): a drop fails too, so WIRED and the prices built on it
+    // (keep-the-run-scenarios.mjs) ratchet down with the change that earned it, instead of drifting.
+    assert.deepEqual(
+      delta,
+      WIRED[kind],
+      `${kind}: the keep's Convex delta moved; set WIRED.${kind} to the measured delta, with the reason`,
+    );
   });
 
 /** Incident fa2c1383 replay (regression ladder rung 3): the guards above catch the wiring's own
  * regressions. A child runs this file on mutant source: once with the sweep's keep switched off (the
  * 11-17 incident: the kept run is thrown away), once with a follower stacked on a kept run when the
- * pipeline is full (it then strands, L5b). Each named guard must fail there, by name. */
+ * pipeline is full (it then strands, L5b), and once per review finding below. Each named guard must
+ * fail there, by name. */
 const MUTANTS = [
   {
     name: 'A3/F3: a strict kept run holds order, keeps its attempt, and lands only after a scoped recheck',
@@ -561,7 +702,7 @@ const MUTANTS = [
     ],
   },
   {
-    name: 'A2: with the pipeline full, an overlapping follower checks on its own as today',
+    name: `${A2_FULL} (follower passes first)`,
     patches: [
       {
         file: 'convex/projectHostedLandingAdmissionPipeline.ts',
@@ -570,14 +711,55 @@ const MUTANTS = [
       },
     ],
   },
-  // Review a09af93a finding 1: the cohort hold parks the kept entry and the follower lands first.
-  {
-    name: 'A2: with the pipeline full, an overlapping follower checks on its own as today',
+  // Review a09af93a finding 1: the cohort hold parks the kept entry and the follower lands first, in
+  // both timings the review named (379d19f5 nit 3).
+  ...['follower passes first', 'both pass together'].map(timing => ({
+    name: `${A2_FULL} (${timing})`,
     patches: [
       {
         file: 'convex/projectHostedLandingCohortHold.ts',
         find: '    admission.kept ||\n',
         replace: '',
+      },
+    ],
+  })),
+  // Review a09af93a nit 4: a kept run's platform end restarts a whole run on its old base.
+  {
+    name: 'platform restart (strict): a kept run without a test result retires onto current main, never a fresh run on its old base',
+    patches: [
+      {
+        file: 'convex/projectHostedLandingAdmission.ts',
+        find: "if (row.admission.kept && kind === 'platform') {",
+        replace: 'if (false) {',
+      },
+      {
+        file: 'convex/projectHostedLandingAdmission.ts',
+        find: 'row.admission.full && !row.admission.kept && kind',
+        replace: 'row.admission.full && kind',
+      },
+    ],
+  },
+  // Review a09af93a nit 6: a kept run's settle wakes no queue tick, so the fast follower stacked on it
+  // strands.
+  {
+    name: 'A2 fast: with the pipeline full, a follower stacked on a kept run is driven by its settle (kept run passes)',
+    patches: [
+      {
+        file: 'convex/projectHostedLandingAdmission.ts',
+        find: "  if (kind === 'tests') await settleLandingOperation(ctx, next);\n  return true;\n}",
+        replace:
+          "  if (kind === 'tests') await settleLandingOperation(ctx, next);\n  return !admission.kept;\n}",
+      },
+    ],
+  },
+  // Review 018569e9 finding 1: a kept run's main-red park releases its place but wakes no queue.
+  {
+    name: 'A2 fast: with the pipeline full, a follower stacked on a kept run is driven by its settle (kept run parks on main red)',
+    patches: [
+      {
+        file: 'convex/projectHostedLandingAdmission.ts',
+        find: 'return Boolean(row.admission.kept);',
+        replace: 'return false;',
       },
     ],
   },
@@ -594,7 +776,7 @@ const MUTANTS = [
   },
 ];
 if (!process.env.FORGE_TEST_SOURCE_PATCHES)
-  test('incident fa2c1383 wiring: the guards fail on the incident, a stranded follower, a parked kept run and a dropped conflict', async () => {
+  test('incident fa2c1383 wiring: the guards fail on the incident, stranded followers, a parked kept run, a stale-base restart and a dropped conflict', async () => {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
     for (const mutant of MUTANTS) {

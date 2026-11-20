@@ -12,6 +12,7 @@ import {
   forkLandingAttempt,
   insertLandingAttempt,
   writeLanding,
+  type LandingRow,
 } from './projectHostedLandingStore';
 import { loadFinish } from './projectHostedFinishStore';
 import { reserveFinishRetry } from './projectHostedFinishCompose';
@@ -20,7 +21,11 @@ import { loadHostedCheck } from './projectHostedCheckStore';
 import { cancelHostedCheck } from './projectHostedCheckCancel';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { hostedCheckTerminal } from '../src/hosted-check';
-import { landingObservation } from '../src/hosted-landing';
+import {
+  landingObservation,
+  type HostedLandingAttempt,
+  type HostedLandingState,
+} from '../src/hosted-landing';
 import { pathsOverlap } from '../src/hosted-cross-head-proof';
 import { HOSTED_BATCH_MEMBERS } from '../src/hosted-landing-batch';
 import { keepTheRunOn } from './projectHostedKeepSwitch';
@@ -186,61 +191,78 @@ export async function cancelStaleLandingChecks(
     } else {
       const finish = await loadFinish(ctx, { projectId: input.projectId, submissionId: state.id });
       if (finish.value.pending) continue;
-      // A kept run the sweep now retires drops its `kept` marker (review a09af93a nit 5).
-      const { kept: _kept, ...retired } = row.admission ?? {};
-      void _kept;
-      const admission =
-        row.admission?.status === 'checking'
-          ? {
-              ...(retired as NonNullable<typeof row.admission>),
-              status: 'unavailable' as const,
-              reuse: 'tried' as const,
-              recheck: 'main-moved',
-            }
-          : row.admission;
-      if (admission !== row.admission) await ctx.db.patch(row._id, { admission });
-      let attemptId = state.attemptId;
-      if (attempt.check) {
-        const { crossHeadProof: _proof, check: _check, ...pins } = attempt;
-        void [_proof, _check];
-        const next = {
-          ...pins,
-          ...(await forkLandingAttempt(ctx, state)),
-          check: null,
-          deferredCheck: true as const,
-          operations: { check: crypto.randomUUID(), accept: crypto.randomUUID() },
-        };
-        await insertLandingAttempt(ctx, next);
-        attemptId = next.id;
-      }
-      // A solo fallback member still owns its serial cohort. Keep that identity
-      // so its terminal transition wakes the next member after recomposition.
-      await writeLanding(
-        ctx,
-        { ...row, admission },
-        {
-          ...state,
-          attemptId,
-          version: state.version + 1,
-          phase: 'queued',
-          batchSolo: true,
-          batchNeedsSoloCompose: true,
-          observation: landingObservation('queued'),
-          error: null,
-        },
-        false,
-        false,
-      );
-      // Publication of the replacement's durable wake and cancellation share
-      // this transaction. A throw rolls both back; no process owns rescheduling.
-      if (finish.row.wake) {
-        await cancelPendingTask(ctx, finish.row.wake?.taskId);
-        await ctx.db.patch(finish.row._id, { wake: null });
-      }
-      await reserveFinishRetry(ctx, finish.row, finish.value, 'CHECK_EVIDENCE_REFRESH', undefined, main);
+      await retireSoloCheck(ctx, { row, state, attempt, finish, main });
     }
     await cancelHostedCheck(ctx, { projectId: input.projectId, runId });
     retired.add(runId);
   }
   return retired.size;
+}
+
+/** Today's retire of a solo run checked on an older main: the entry goes back to the queue to
+ * recompose on current main, and its finish retries there. The caller owns the run (the sweep
+ * cancels it; a kept run's platform end is already terminal). No run, cancel or compose here. */
+export async function retireSoloCheck(
+  ctx: MutationCtx,
+  input: {
+    row: LandingRow;
+    state: HostedLandingState;
+    attempt: HostedLandingAttempt;
+    finish: Awaited<ReturnType<typeof loadFinish>>;
+    main: Awaited<ReturnType<typeof hostedStartMain>>;
+  },
+) {
+  const { row, state, attempt, finish, main } = input;
+  // A kept run the sweep now retires drops its `kept` marker (review a09af93a nit 5).
+  const { kept: _kept, ...retired } = row.admission ?? {};
+  void _kept;
+  const admission =
+    row.admission?.status === 'checking'
+      ? {
+          ...(retired as NonNullable<typeof row.admission>),
+          status: 'unavailable' as const,
+          reuse: 'tried' as const,
+          recheck: 'main-moved',
+        }
+      : row.admission;
+  if (admission !== row.admission) await ctx.db.patch(row._id, { admission });
+  let attemptId = state.attemptId;
+  if (attempt.check) {
+    const { crossHeadProof: _proof, check: _check, ...pins } = attempt;
+    void [_proof, _check];
+    const next = {
+      ...pins,
+      ...(await forkLandingAttempt(ctx, state)),
+      check: null,
+      deferredCheck: true as const,
+      operations: { check: crypto.randomUUID(), accept: crypto.randomUUID() },
+    };
+    await insertLandingAttempt(ctx, next);
+    attemptId = next.id;
+  }
+  // A solo fallback member still owns its serial cohort. Keep that identity
+  // so its terminal transition wakes the next member after recomposition.
+  await writeLanding(
+    ctx,
+    { ...row, admission },
+    {
+      ...state,
+      attemptId,
+      version: state.version + 1,
+      phase: 'queued',
+      batchSolo: true,
+      batchNeedsSoloCompose: true,
+      observation: landingObservation('queued'),
+      error: null,
+    },
+    false,
+    false,
+  );
+  // Publication of the replacement's durable wake and cancellation share
+  // this transaction. A throw rolls both back; no process owns rescheduling.
+  if (finish.row.wake) {
+    await cancelPendingTask(ctx, finish.row.wake?.taskId);
+    await ctx.db.patch(finish.row._id, { wake: null });
+  }
+  await reserveFinishRetry(ctx, finish.row, finish.value, 'CHECK_EVIDENCE_REFRESH', undefined, main);
 }

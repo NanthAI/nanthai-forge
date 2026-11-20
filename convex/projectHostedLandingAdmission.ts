@@ -10,6 +10,9 @@ import { parkLanding, parkOnMainRed, parkedMessage, redOnlyFailure } from './pro
 import { hostedStartMain } from './projectHostedChannels';
 import { readHostedRecord } from './projectHostedRecords';
 import { describeCheckFailure } from './projectHostedCheckFailure';
+import { loadFinish } from './projectHostedFinishStore';
+import { claimFinishPrecompose } from './projectHostedFinishPrecompose';
+import { retireSoloCheck } from './projectHostedLandingStaleChecks';
 import { CHECK_FAILED_NEXT } from '../src/check-failure-detail';
 import {
   forkLandingAttempt,
@@ -104,7 +107,8 @@ async function recordFirstCheck(ctx: MutationCtx, projectId: Id<'hostedProjects'
 }
 /** Check-completion wake for an admission run. A failing test ejects only this
  * member; a run without a failing test (platform) lets it join unadmitted. False only when it
- * parked the entry (fix D): nothing became runnable, so the queue needs no wake for it. */
+ * parked an entry that held no queue order (fix D): nothing became runnable, so the queue needs no
+ * wake for it. */
 export async function settleLandingAdmission(
   ctx: MutationCtx,
   original: LandingRow,
@@ -118,7 +122,28 @@ export async function settleLandingAdmission(
     return true;
   const kind = checkFailureKind(run, { conflicts: [] });
   const retries = row.admission.retries ?? 0;
-  if (row.admission.full && kind === 'platform' && retries < HOSTED_PLATFORM_RETRIES) {
+  // Keep the run (fa2c1383, review a09af93a nit 4): a kept run checked an older main, and the elapsed
+  // share the keep was for is lost with the platform's result. A restart there would pay a whole fresh
+  // run plus the scoped recheck, so it retires as the main move would have, onto current main.
+  if (row.admission.kept && kind === 'platform') {
+    let finish = await loadFinish(ctx, { projectId: row.projectId, submissionId: state.id });
+    // A running probe is detached, as the sweep's own retire does (its exact-main result stays cached).
+    if (finish.value.pending?.precompose) {
+      await claimFinishPrecompose(ctx, finish.row);
+      finish = await loadFinish(ctx, { projectId: row.projectId, submissionId: state.id });
+    }
+    if (!finish.value.pending) {
+      await retireSoloCheck(ctx, {
+        row,
+        state,
+        attempt: await loadLandingAttempt(ctx, { projectId: row.projectId, attemptId: state.attemptId }),
+        finish,
+        main: await hostedStartMain(ctx, row.projectId),
+      });
+      return true;
+    }
+  }
+  if (row.admission.full && !row.admission.kept && kind === 'platform' && retries < HOSTED_PLATFORM_RETRIES) {
     // Unknown is not red: the same Candidate checks again, still before the queue.
     const attempt = await loadLandingAttempt(ctx, { projectId: row.projectId, attemptId: state.attemptId });
     const reason = providerRetryDelay(run.failureReason);
@@ -133,14 +158,7 @@ export async function settleLandingAdmission(
       retries + 1,
     );
     if (runId) {
-      // A kept run (fa2c1383) keeps holding queue order through its platform restart.
-      const admission = {
-        runId,
-        status: 'checking' as const,
-        full: true as const,
-        retries: retries + 1,
-        ...(row.admission.kept ? { kept: true as const } : {}),
-      };
+      const admission = { runId, status: 'checking' as const, full: true as const, retries: retries + 1 };
       await ctx.db.patch(row._id, { admission });
       await writeLanding(
         ctx,
@@ -188,7 +206,9 @@ export async function settleLandingAdmission(
       error: { code: 'MAIN_RED', message: parkedMessage(parked) },
     };
     await parkLanding(ctx, { ...row, admission }, next);
-    return false;
+    // A kept run (fa2c1383) held queue order, so a follower may be stacked behind it with no run of
+    // its own: the park releases that place, and the queue tick lets the follower go on.
+    return Boolean(row.admission.kept);
   }
   // A kept run settles here like any admission (review 563c595b F3c): its first check is recorded
   // below, and installFinishCompose names why it did not carry. `kept` stays for the receipt.

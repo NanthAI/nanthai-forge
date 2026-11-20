@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { drive, overlapBase, overlapEdits } from './queue-sim/overtake-drive.mjs';
+import { storageClock } from './storage-clock.mjs';
 const { overtakeOlder, overtakeMark, sealedOlder, unsealedBy, olderRiskOnly } = await import(
   moduleUrl('../src/landing-overtake.ts')
 );
@@ -288,6 +289,7 @@ test('c6b81429: an accepting wait ends when that entry re-checks instead', async
 // Zoo timing incident 70a9bd2f: a build input and disjoint source arrive together.
 // The required combined check must fit within 1.5 solo check durations.
 test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5x solo timing bar', async t => {
+  storageClock(t, { elapsed: true });
   const CHECK = 1000;
   const solo = await drive(t, {
     memberPaths: ['src/feature.ts'],
@@ -302,7 +304,7 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   assert(before.landedAt[1] > 1.5 * solo.landedAt[0], 'the original path reproduces the miss');
   // Accepted pre-cancellation control: 121 calls, 1,822,710 read / 676,662 write B.
   // Early retirement now improves the unknown-risk arm too (102 calls), so it
-  // no longer isolates the old path. Keep its original measured cost ceiling;
+  // no longer isolates the old path. Its ceiling held until the exact row below;
   // the live arm still guards latency, one exact check and zero idle work below.
   // DB reads 1,822,710 -> 1,896,315 (Item 9a04d916, compose settle; owner-approved +$0.02/1k): a settle mutation runs each finish wake with no
   // IO in flight, and an acceptance page it cannot hand out is stepped once more by its drive.
@@ -314,11 +316,17 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // DB reads 1,897,704 -> 1,900,085 (Item fa2c1383, keep the run: the check's kind recorded on the
   // landing row for admission and first checks too, the record the scoped-share measure reads):
   // `"checkKind":"full"` on every later row read, no new call or write, under $0.001 per 1,000 landings.
-  // The highest of six runs (1,900,065-1,900,085): this replay's reads vary by up to 20 B run to run.
-  const baseline = { calls: 121, readBytes: 1_900_085, writeBytes: 676_662 };
-  assert(pair.calls <= baseline.calls, `Convex transactions ${baseline.calls} -> ${pair.calls}`);
-  assert(pair.readBytes <= baseline.readBytes, `DB reads ${baseline.readBytes} -> ${pair.readBytes}`);
-  assert(pair.writeBytes <= baseline.writeBytes, `DB writes ${baseline.writeBytes} -> ${pair.writeBytes}`);
+  // Exact on the fixed clock (Item fa2c1383 follow-up f): ISO stamps, scheduler time and measured
+  // step durations (`callMs`, the old 20 B spread) are frozen, so the replay's cost is one number and a
+  // drop fails too: ratchet it with the change that earned it. On this clock the pair measures
+  // 111 calls, 1,899,135 read / 606,570 write B (wall clock: 111 calls, about 1,900,046 / 607,524 B),
+  // below the ceilings above (121 calls, 1,900,085 / 676,662 B), which this exact row replaces.
+  const measured = { calls: pair.calls, readBytes: pair.readBytes, writeBytes: pair.writeBytes };
+  assert.deepEqual(
+    measured,
+    { calls: 111, readBytes: 1_899_135, writeBytes: 606_570 },
+    'the 70a9bd2f pair cost moved; ratchet this row to the measured cost, with the reason',
+  );
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
   assert.equal(pair.runs[0], 1);
   assert.equal(pair.runs[1], 1, 'C runs the exact combined tree instead of a wasted solo admission');
@@ -329,6 +337,7 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
 });
 
 test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000 source files', async t => {
+  storageClock(t, { elapsed: true });
   const input = {
     memberPaths: ['build.rs', 'src/feature.ts'],
     baselineFiles: Array.from({ length: 4000 }, (_, i) => [
@@ -346,12 +355,15 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // DB reads 1,827,467 -> 1,901,561 (Item 9a04d916, compose settle; owner-approved +$0.02/1k), as in the small replay.
   // DB reads 1,901,561 -> 1,902,948 (Item 42200ce4, pass-to-land stamp on landing rows), as in the small replay.
   // DB reads 1,902,948 -> 1,902,970 (Item 43b51a5e, queue-stall fix), as in the small replay.
-  // DB reads 1,902,970 -> 1,905,313 (Item fa2c1383, recorded check kind), as in the small replay;
-  // the highest of six runs (1,905,311-1,905,313).
-  const baseline = { calls: 121, readBytes: 1_905_313, writeBytes: 679_017 };
-  assert(after.calls <= baseline.calls, `transactions ${baseline.calls} -> ${after.calls}`);
-  assert(after.readBytes <= baseline.readBytes, `DB reads ${baseline.readBytes} -> ${after.readBytes}`);
-  assert(after.writeBytes <= baseline.writeBytes, `DB writes ${baseline.writeBytes} -> ${after.writeBytes}`);
+  // DB reads 1,902,970 -> 1,905,313 (Item fa2c1383, recorded check kind), as in the small replay.
+  // Exact on the fixed clock, as in the small replay (ceilings 121 calls, 1,905,313 / 679,017 B; wall
+  // clock about 1,905,292 / 610,020 B).
+  const measured = { calls: after.calls, readBytes: after.readBytes, writeBytes: after.writeBytes };
+  assert.deepEqual(
+    measured,
+    { calls: 111, readBytes: 1_904_377, writeBytes: 609_061 },
+    'the 70a9bd2f 4,000-file cost moved; ratchet this row to the measured cost, with the reason',
+  );
   assert.equal(after.idle, 0);
 });
 

@@ -288,7 +288,7 @@ async function wakeLandingCheckPage(
       // admission, and an unsettled admission costs no queue tick.
       run ??= (await loadHostedCheck(ctx, input)).run;
       if (hostedCheckTerminal(run)) {
-        // A parked entry (fix D) is an event wait: it needs no queue tick.
+        // A parked entry (fix D) is an event wait: it needs no queue tick, unless it held order.
         if (await settleLandingAdmission(ctx, row, run)) woken = true;
       } else if (
         run.failureReason?.startsWith('provider-delayed:') ||
