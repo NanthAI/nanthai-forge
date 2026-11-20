@@ -7,7 +7,7 @@ import { z } from 'zod';
 import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx } from './server';
 import { composeRow } from './projectHostedComposeStore';
-import { landingAttemptRow, loadLandingAttempt } from './projectHostedLandingAttemptRead';
+import { deferredOrigin, landingAttemptRow, loadLandingAttempt } from './projectHostedLandingAttemptRead';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { checkFailureStep } from './projectHostedCheckFailure';
 import { auditRow, parkExactOnMainRed, parkOnMainRed } from './projectHostedMainAuditState';
@@ -94,13 +94,15 @@ export async function landingRun(
   const summary = loaded ? summarizeCheckRun(loaded.run) : null;
   const step =
     loaded && loaded.run.status === 'failed' ? await checkFailureStep(ctx, projectId, loaded.run) : null;
-  return { summary, step, reDefers: await reDefers(ctx, projectId, state, attempt) };
+  // Only a failed run gets re-land advice: a passing or running check reads nothing more.
+  const parks = loaded?.run.status === 'failed' && (await reDefers(ctx, projectId, state, attempt));
+  return { summary, step, reDefers: parks };
 }
 
 /** Whether a fresh land of this change would be deferred again, so a check failing only on main's
- * red parks it (Item 687d1eda): its request could be deferred and its attempt chain was. Free
- * request fields first; then at most one parent-attempt read, only while both park switches are
- * on. Unknown means no: the advice falls back to landing again once main passes. */
+ * red parks it (Item 687d1eda): its request could be deferred and its attempt chain was. Failed
+ * runs only; free request fields first; then the attempt chain past platform retries (at most
+ * three reads), only while both park switches are on. Unknown means no: the advice falls back to landing again once main passes. */
 async function reDefers(
   ctx: QueryCtx,
   projectId: Project,
@@ -112,9 +114,7 @@ async function reDefers(
   if (!request.finish || request.finish.after || request.revertOf || request.check?.kind !== 'request')
     return false;
   if (attempt.deferredCheck) return true;
-  if (!attempt.parentAttemptId) return false;
-  const parent = await loadLandingAttempt(ctx, { projectId, attemptId: attempt.parentAttemptId });
-  return parent.deferredCheck === true;
+  return (await deferredOrigin(ctx, projectId, attempt)) !== null;
 }
 
 type Evidence = {

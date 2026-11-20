@@ -8,6 +8,8 @@ import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixt
 import { moduleUrl } from './convex-module.mjs';
 import { api } from './hosted-finish-fixture.mjs';
 const mainAudit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
+const screen = await import(moduleUrl('../convex/projectFailureCause.ts'));
+const attemptRead = await import(moduleUrl('../convex/projectHostedLandingAttemptRead.ts'));
 const SWITCH = 'FORGE_QUEUE_PARK_EXACT_ON_MAIN_RED';
 const ADMISSION = 'FORGE_QUEUE_PARK_ON_MAIN_RED';
 const prior = Object.fromEntries(
@@ -168,6 +170,77 @@ test('687d1eda: one deferred entry whose own exact check fails only on main red 
   assert.equal(f.runs().length, 2, 'one re-check on green main');
 });
 
+test('687d1eda: a deferred entry whose check needed a platform retry still parks on main red', async t => {
+  process.env[SWITCH] = '1';
+  const f = await fixture(t, { count: 1 });
+  f.setRed();
+  await f.drain();
+  // The runner was unavailable: one platform retry, a child attempt of the first check attempt.
+  const first = await f.rawChecks.activate(f.runs()[0].id);
+  await f.rawChecks.callback(f.rawChecks.complete(first, 'runner-unavailable'));
+  await f.drain();
+  const retries = f.queued();
+  assert.equal(retries.length, 1, 'the platform retry runs');
+  await failRun(f, retries[0].id);
+  await f.drain();
+  assert.equal(parked(f).length, 1, JSON.stringify(states(f).map(s => [s.phase, s.error?.code])));
+  await f.green();
+  await passAll(f);
+  assert.equal(states(f)[0].phase, 'landed');
+});
+
+test('687d1eda: the deferred origin of a check is its nearest deferred parent, past platform retries only', async () => {
+  const projectId = 'project';
+  const ctx = {};
+  const chain = attempts => {
+    const pins = attemptRead.pinsFor(ctx);
+    pins.clear();
+    for (const attempt of attempts) pins.set(`${projectId}:${attempt.id}`, attempt);
+    return attempts.at(-1);
+  };
+  const origin = async attempt => (await attemptRead.deferredOrigin(ctx, projectId, attempt))?.id ?? null;
+  const check = { runId: 'run' };
+  const deferred = (id, extra = {}) => ({
+    id,
+    parentAttemptId: null,
+    deferredCheck: true,
+    check: null,
+    ...extra,
+  });
+  const checked = (id, parentAttemptId, extra = {}) => ({ id, parentAttemptId, check, ...extra });
+  // Deferred, then its check, then two platform retries of that check.
+  assert.equal(
+    await origin(
+      chain([
+        deferred('d'),
+        checked('c0', 'd'),
+        checked('c1', 'c0', { platformRetries: 1 }),
+        checked('c2', 'c1', { platformRetries: 2 }),
+      ]),
+    ),
+    'd',
+  );
+  // A retry that main moved under: the stale-check re-queue re-deferred it and kept its count, and
+  // the next check copied that count without being retried itself. Its parent is the origin.
+  assert.equal(
+    await origin(
+      chain([
+        deferred('d'),
+        checked('c0', 'd'),
+        checked('c1', 'c0', { platformRetries: 1 }),
+        deferred('d2', { parentAttemptId: 'c1', platformRetries: 1 }),
+        checked('c3', 'd2', { platformRetries: 1 }),
+      ]),
+    ),
+    'd2',
+  );
+  // Never deferred: an exact check with no deferred parent, retried or not.
+  assert.equal(await origin(chain([checked('e0', null)])), null);
+  assert.equal(await origin(chain([checked('e0', null), checked('e1', 'e0', { platformRetries: 1 })])), null);
+  // A check whose parent is a check of another kind (not a retry of it) stops there.
+  assert.equal(await origin(chain([deferred('d'), checked('x', 'd'), checked('y', 'x')])), null);
+});
+
 test('687d1eda: an exact check its submission never deferred (no owner provenance) fails as before, never parks', async t => {
   process.env[SWITCH] = '1';
   const f = await fixture(t, { count: 1, requestCheck: true });
@@ -285,6 +358,22 @@ test('687d1eda: only a landing whose fresh land would park is told to land again
   assert.equal(fails.recovery, 'wait-for-main', JSON.stringify(fails));
   assert.doesNotMatch(fails.next, /again now/);
   assert.match(fails.next, /once main passes/);
+});
+
+test('687d1eda: the Lane check screen reads nothing more for a passed check with both park switches on', async t => {
+  const f = await fixture(t, { count: 1 });
+  await f.drain();
+  await passAll(f);
+  assert.equal(states(f)[0].phase, 'landed');
+  const { laneId } = f.entries[0].lane;
+  const reads = async name => {
+    await f.tx(name, screen.forLane, { projectId: f.projectId, laneId });
+    return f.counts.filter(count => count.name === name).map(count => count.documents);
+  };
+  const off = await reads('screen-off');
+  process.env[SWITCH] = '1';
+  process.env[ADMISSION] = '1';
+  assert.deepEqual(await reads('screen-on'), off, 'the re-land advice reads only for a failed run');
 });
 
 test('687d1eda: split cohorts after a run that failed before main was marked red park on the same red test', async t => {

@@ -4,6 +4,7 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id, Doc } from './_generated/dataModel';
 import { hostedLandingAttemptSchema, type HostedLandingAttempt } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
+import { HOSTED_PLATFORM_RETRIES } from '../src/hosted-landing-admission';
 export const landingAttemptRow = (
   ctx: QueryCtx | MutationCtx,
   input: { projectId: Id<'hostedProjects'>; attemptId: string },
@@ -50,4 +51,24 @@ export async function loadLandingAttempt(
   );
   pins.set(key, attempt);
   return attempt;
+}
+
+/** The deferred attempt an exact check came from (Item 687d1eda): its nearest deferred parent,
+ * past the platform retries of that same check (each one a child of the previous check attempt,
+ * at most HOSTED_PLATFORM_RETRIES), or null. A deferred attempt may itself carry a retry count
+ * (the stale-check re-queue keeps it), so the walk stops at the first deferred parent and only
+ * continues upward from a retry. Failure path only: at most three attempt reads. */
+export async function deferredOrigin(
+  ctx: QueryCtx | MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  attempt: HostedLandingAttempt,
+) {
+  let current = attempt;
+  for (let hop = 0; hop <= HOSTED_PLATFORM_RETRIES && current.parentAttemptId; hop++) {
+    const parent = await loadLandingAttempt(ctx, { projectId, attemptId: current.parentAttemptId });
+    if (parent.deferredCheck && !parent.check) return parent;
+    if (!current.platformRetries) return null;
+    current = parent;
+  }
+  return null;
 }

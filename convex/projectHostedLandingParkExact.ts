@@ -18,9 +18,9 @@ import {
   forkLandingAttempt,
   insertLandingAttempt,
   landingQueue,
-  loadLandingAttempt,
   type LandingRow,
 } from './projectHostedLandingStore';
+import { deferredOrigin } from './projectHostedLandingAttemptRead';
 import type { Id } from './_generated/dataModel';
 import { parkLanding, parkedMessage, redOnlyFailure } from './projectHostedLandingPark';
 import {
@@ -126,9 +126,10 @@ export async function parkFailedBatch(
 /** One entry's own exact check failed only on main's red tests and on nothing its own paths or
  * contract tests explain: it parks instead of failing, and true. Only an entry whose check came
  * from a deferred attempt parks (its cohort original when it came from a cohort in any phase, or
- * the deferred parent of a solo cohort check); any other exact check fails as before. A fallback member leaves
+ * the deferred parent of a solo cohort check, past its platform retries); any other exact check
+ * fails as before. A fallback member leaves
  * the line, which moves on to its next member at once. Red path only: the batch row or parent
- * attempt, then the audit-row and Candidate reads of redOnlyFailure. */
+ * attempt chain (at most three reads), then the audit-row and Candidate reads of redOnlyFailure. */
 export async function parkRedOnlyEntry(
   ctx: MutationCtx,
   claim: { projectId: Id<'hostedProjects'> },
@@ -149,11 +150,8 @@ export async function parkRedOnlyEntry(
     // lone single, a member released from a landed cohort or re-composed after a conflict.
     if (batch.phase === 'fallback') line = { key, batch };
     own = batch.members.find(member => member.submissionId === entry.state.id);
-  } else if (entry.attempt.parentAttemptId) {
-    own = await loadLandingAttempt(ctx, {
-      projectId: claim.projectId,
-      attemptId: entry.attempt.parentAttemptId,
-    });
+  } else {
+    own = (await deferredOrigin(ctx, claim.projectId, entry.attempt)) ?? undefined;
   }
   if (!own?.deferredCheck || own.check) return false;
   const files = await redOnlyFailure(ctx, claim.projectId, entry.attempt, run);

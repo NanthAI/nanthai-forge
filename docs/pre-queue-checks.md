@@ -460,7 +460,7 @@ deferred attempt for its own Candidate instead of splitting into solo re-checks 
 entry's own exact check that fails only on main's red tests, explained by none of its own paths or
 contract tests, parks too, but only when that check came from a deferred attempt (its cohort
 original when it came from a cohort in any phase, such as a fallback line member or a split's lone
-single, or the deferred parent of a solo cohort check). A check its submission was
+single, or the deferred parent of a solo cohort check, past that check's platform retries). A check its submission was
 never deferred (no owner provenance, a revert, a recovery gate, a stacked or own-run request) fails as
 before, so parking never grants a deferral. A fallback member leaves the line, which moves on to its
 next member at once; it stays out of that line once released. Parked entries leave the speculative
@@ -469,7 +469,8 @@ nothing lands unchecked. A failed queue check costs one audit-row read (a lone e
 row or parent attempt and its Candidate) and, when it parks, one queue read and patch; each parked
 entry writes one attempt and one landing row instead of the solo re-checks it would have started. With both switches on, a landing that already
 failed on main's red is told to land again now when a fresh land would be deferred again (its request
-could be and its attempt chain was; at most one parent-attempt read): its check fails only on main's
+could be and its attempt chain was, past platform retries; failed runs only, at most three
+attempt reads): its check fails only on main's
 tests, so it waits and lands once main passes. Any other landing is told to land again once main
 passes.
 
