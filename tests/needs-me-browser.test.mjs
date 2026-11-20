@@ -25,6 +25,7 @@ const PHONE = { width: 390, height: 844 };
 const FIXTURES = {
   '/needs.html': 'tests/browser/needs-me.tsx',
   '/dock-subscription.html': 'tests/browser/dock-subscription.tsx',
+  '/progress.html': 'tests/browser/progress-parity.tsx',
 };
 
 async function buildFixture(out) {
@@ -77,9 +78,16 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
     viewport,
     data = 'busy',
     theme = 'dark',
-    { engine = browser, hasTouch = false, fixture = '/needs.html' } = {},
+    {
+      engine = browser,
+      hasTouch = false,
+      fixture = '/needs.html',
+      query = {},
+      locale,
+      ready = '.dock[data-dock] .region',
+    } = {},
   ) {
-    const context = await engine.newContext({ viewport, hasTouch });
+    const context = await engine.newContext({ viewport, hasTouch, locale });
     await context.addInitScript(() => {
       // Idle costs nothing: count every repeating timer the page sets.
       window.intervals = 0;
@@ -121,10 +129,11 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
           : 'text/html';
       return route.fulfill({ contentType, body: readFileSync(file) });
     });
-    await page.goto(`https://forge.test${fixture}?data=${data}&theme=${theme}`);
-    // Wait until the grips have attached, so a test can start an actual drag or click a move option.
+    const search = new URLSearchParams({ data, theme, ...query });
+    await page.goto(`https://forge.test${fixture}?${search}`);
+    // The dock fixture is ready when its grips attach; other fixtures supply their own ready marker.
     await page
-      .locator('.dock[data-dock] .region')
+      .locator(ready)
       .first()
       .waitFor({ timeout: 10_000 })
       .catch(error => assert.fail(`${error.message}\n${errors.join('\n')}`));
@@ -136,6 +145,55 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
   }
   const region = (page, name) => page.locator(`section.region[aria-label="${name}"]`);
   try {
+    for (const { name, query, count, proposed, unit } of [
+      { name: 'exact', query: {}, count: ['1,207', '1', '3'], proposed: '2 proposed', unit: 'Item' },
+      {
+        name: 'capped',
+        query: { capped: '1' },
+        count: ['989+', '1+', '3+'],
+        proposed: '2+ proposed',
+        unit: 'Items',
+      },
+    ]) {
+      await t.test(
+        `3fa3187d: Needs me and Plan render the same ${name} project counts with an Initiative filter`,
+        async t => {
+          const initiative = '00000000-0000-4000-8000-000000000001';
+          // The Left detail appears when the project counts arrive.
+          const options = {
+            fixture: '/progress.html',
+            locale: 'en-US',
+            ready: '.pstate .ps:last-child .more',
+          };
+          const needs = await open(t, DESK, 'needs', 'dark', { ...options, query });
+          const plan = await open(t, DESK, 'plan', 'dark', { ...options, query: { ...query, initiative } });
+          const standing = page =>
+            page
+              .getByRole('navigation', { name: 'Where the project stands' })
+              .locator('.ps')
+              .evaluateAll(cells =>
+                cells.map(cell => [...cell.children].map(part => part.textContent.trim())),
+              );
+          const expected = [
+            ['Done', count[0], 'Items'],
+            ['In progress', count[1], unit],
+            ['Left', count[2], 'Items', `· ${proposed}`],
+          ];
+          assert.deepEqual(await standing(needs), expected, 'Needs me project labels, units and figures');
+          assert.deepEqual(await standing(plan), expected, 'Plan project labels, units and figures');
+          const header = plan.locator('.plan-gh').filter({ hasText: 'Parser release' });
+          const breakdown = header.locator('.plan-pl');
+          await breakdown.waitFor();
+          assert.equal(await header.locator('.cnt').textContent(), '6');
+          assert.equal(
+            (await breakdown.innerText()).replace(/\s+/g, ' ').trim(),
+            '4 done · 1 in progress · 0 open · 1 removed',
+            'the filtered Initiative keeps its own breakdown',
+          );
+          assert.equal(await plan.getByText('Write the changelog', { exact: true }).count(), 0);
+        },
+      );
+    }
     for (const type of [chromium, webkit, firefox]) {
       if (type !== chromium && !existsSync(type.executablePath())) {
         t.diagnostic(`Playwright ${type.name()} is absent; the hosted cache supplies Chromium.`);
