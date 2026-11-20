@@ -156,7 +156,9 @@ test('pending source and finish steps return promptly and retain all child opera
     command = {
       laneId: s.lane.laneId,
       message: 'Pending subject\n\nCo-Authored-By: Synthetic Sol <noreply@openai.com>',
+      notVerified: ['The Windows adapter was not checked'],
     };
+  s.caps.features = ['save-declarations'];
   s.pending(true);
   const first = await s.transport().dispatch('finish', command);
   assert.equal(first.result.phase, 'finish');
@@ -164,6 +166,8 @@ test('pending source and finish steps return promptly and retain all child opera
   assert.equal(first.result.submission.preparing, true);
   const desired = s.calls.find(c => c.name === 'projectHostedLandingDesired:submit');
   assert.equal(JSON.parse(desired.args.request).message, command.message);
+  assert.deepEqual(JSON.parse(desired.args.request).notVerified, command.notVerified);
+  assert.deepEqual(first.result.submission.request.notVerified, command.notVerified);
   const count = s.calls.length;
   assert(!s.calls.some(call => call.name === 'projectHostedLanding:enqueue'));
   s.pending(false);

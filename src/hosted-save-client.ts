@@ -69,6 +69,7 @@ type SaveExchange = Pick<ConvexExchange, 'client' | 'projectId' | 'uploadFile' |
       | 'prepareDownloads'
     >
   >;
+type SaveCommand = z.infer<typeof saveCommandSchema> & Pick<SaveRequest, 'notVerified'>;
 /** What the server's strict save pages accept: nothing, ranges, or ranges plus cross-file facts. */
 type OverlapEvidenceLevel = boolean | 'symbol-links';
 export const overlapEvidenceLevel = (capabilities: {
@@ -199,7 +200,7 @@ function dropAcknowledgedSaves(client: string, current: string) {
  * progress later without keeping a tab, coding host or owner process alive. */
 export async function saveHostedLane(
   root: string,
-  command: { operationId: string; message: string; supersedeFinish?: boolean },
+  command: SaveCommand,
   exchange: SaveExchange,
   /** Server save features: a SaveContract, or only the overlap evidence level (older callers). */
   contract: OverlapEvidenceLevel | SaveContract = false,
@@ -248,7 +249,7 @@ const described = Symbol('described');
 const reauthorized = Symbol('reauthorized');
 async function saveOnce(
   root: string,
-  command: { operationId: string; message: string; supersedeFinish?: boolean },
+  command: SaveCommand,
   exchange: SaveExchange,
   repair: boolean,
   contract: SaveContract,
@@ -261,7 +262,10 @@ async function saveOnce(
   const started = performance.now();
   const { overlapEvidence, submitPage, submitRun, then, prepareTargets, runPublish } = contract,
     pack = contract.uploadPacks === true;
-  saveCommandSchema.parse(command);
+  // Older CLIs read the pending marker before every command. The exact request and agent journal
+  // retain the claim, so the local reconciliation keys need no new fields.
+  const { notVerified, ...commandPin } = command;
+  saveCommandSchema.parse(commandPin);
   invariant(!lstatSync(root).isSymbolicLink(), 'UNSAFE_PATH', 'Checkout directory must be real.');
   root = realpathSync(root);
   const directory = join(clientCacheRoot(root), `saves/${command.operationId}`);
@@ -277,7 +281,7 @@ async function saveOnce(
     dropAcknowledgedSaves(clientCacheRoot(root), command.operationId),
   );
   const original = join(directory, 'command.json'),
-    identity = { root, projectId: exchange.projectId, ...command };
+    identity = { root, projectId: exchange.projectId, ...commandPin };
   workLocked(join(clientCacheRoot(root), 'lock'), () => {
     if (checkoutPathExists(original))
       invariant(
@@ -463,6 +467,7 @@ async function saveOnce(
         lifecycleVersion: selection.lifecycleVersion,
       },
       message: command.message,
+      ...(notVerified === undefined ? {} : { notVerified }),
       ...(command.supersedeFinish ? { supersedeFinish: true } : {}),
       pages: built.root,
       pageCount: built.pages.length,
@@ -483,7 +488,7 @@ async function saveOnce(
   markLandStep('uploaded');
   const pending = pendingSavePath(root, capture.marker);
   workLocked(join(clientCacheRoot(root), 'lock'), () => {
-    if (!checkoutPathExists(pending)) durableReplace(pending, canonicalPayload(command));
+    if (!checkoutPathExists(pending)) durableReplace(pending, canonicalPayload(commandPin));
   });
   const objects = hostedObjectWriter(exchange);
   const args = { projectId: exchange.projectId, operationId: command.operationId };
@@ -917,7 +922,13 @@ export async function reconcileHostedSave(
   }
   // The checkpoint may have stopped before preparation or job submission.
   // Resume its retained bytes and operation rather than waiting for an unscheduled job.
-  const resumed = await resumeRetainedSave(root, command, exchange, epoch, features);
+  const resumed = await resumeRetainedSave(
+    root,
+    { ...command, notVerified: request.notVerified },
+    exchange,
+    epoch,
+    features,
+  );
   if (!resumed || resumed.outcome) return null;
   return { phase: 'save', saveOperationId: command.operationId, progress: resumed };
 }
@@ -972,7 +983,13 @@ export async function settlePriorHostedSave(
     reportBackgroundSave(root, prior.operationId, progress.terminal);
     return;
   }
-  const resumed = await resumeRetainedSave(root, prior, exchange, epoch, features);
+  const resumed = await resumeRetainedSave(
+    root,
+    { ...prior, notVerified: request.notVerified },
+    exchange,
+    epoch,
+    features,
+  );
   if (!resumed) return;
   if (resumed.outcome) {
     reportBackgroundSave(root, prior.operationId, resumed);
@@ -998,7 +1015,7 @@ export async function settlePriorHostedSave(
  * checkout) instead of every later command replaying it. The same-epoch path reads nothing more. */
 async function resumeRetainedSave(
   root: string,
-  prior: { operationId: string; message: string; supersedeFinish?: boolean | undefined },
+  prior: SaveCommand,
   exchange: SaveExchange,
   epoch: number | undefined,
   /** The settling command's advertised features: its retained pages are checked against them, nothing more. */
@@ -1014,11 +1031,7 @@ async function resumeRetainedSave(
   try {
     return await saveHostedLane(
       root,
-      {
-        operationId: prior.operationId,
-        message: prior.message,
-        ...(prior.supersedeFinish ? { supersedeFinish: true } : {}),
-      },
+      prior,
       exchange,
       epoch === undefined && !features?.advertised
         ? false

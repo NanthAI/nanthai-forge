@@ -19,6 +19,7 @@ import { hostedAgentAddress, hostedAgentCli } from '../dist/hosted-agent-cli.js'
 import { canonicalRoot } from '../dist/root-paths.js';
 import { ForgeError } from '../dist/errors.js';
 import { agentCli } from '../dist/agent-cli.js';
+import { LAND_CHILD_ENV } from '../dist/hosted-land-child-env.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 const errorCode = expected => error => error.code === expected;
 /** One client session for this test (as Claude Code sets it): an identical start replays only within it. */
@@ -132,6 +133,75 @@ test('native symlink roots and read-only address detection preserve native routi
   const absent = join(s.root, 'missing', 'nested');
   assert.equal(hostedAgentAddress(absent, {}), null);
   assert(!existsSync(s.root));
+});
+
+test('hosted CLI save distinguishes an absent claim from empty and nonempty claims on unchanged source', async t => {
+  const s = agentFixture(t);
+  http(t, s);
+  s.caps.features = ['save-declarations'];
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const saves = () => s.calls.filter(call => call.name === 'projectHostedSaves:prepare');
+  for (const claim of [undefined, [], ['The Windows adapter was not checked']]) {
+    const command = claim === undefined ? {} : { notVerified: claim };
+    const first = await agentCli([s.root, 'save', JSON.stringify(command)]);
+    const wire = JSON.parse(saves().at(-1).args.request);
+    assert.equal(Object.hasOwn(wire, 'notVerified'), claim !== undefined);
+    assert.deepEqual(wire.notVerified, claim);
+    assert.deepEqual(first.result.outcome.result.notVerified, claim);
+    const count = saves().length;
+    const retry = await agentCli([
+      s.root,
+      'save',
+      JSON.stringify({ ...command, operationId: first.operationId }),
+    ]);
+    assert.deepEqual(retry.result.outcome.result, first.result.outcome.result);
+    await assert.rejects(
+      agentCli([
+        s.root,
+        'save',
+        JSON.stringify({ operationId: first.operationId, notVerified: ['A different claim'] }),
+      ]),
+      errorCode('WORK_OPERATION_CHANGED'),
+    );
+    assert.equal(saves().length, count);
+  }
+  assert.equal(saves().length, 3);
+});
+
+test('hosted CLI land --save attaches a claim to an exact Candidate landing without another save', async t => {
+  const s = agentFixture(t);
+  http(t, s);
+  // Keep the real submitter in this process so it uses the synthetic HTTP transport.
+  process.env[LAND_CHILD_ENV] = '1';
+  t.after(() => delete process.env[LAND_CHILD_ENV]);
+  s.caps.features = ['save-declarations'];
+  const command = {
+    ...s.address,
+    candidateId: s.candidate.id,
+    composeOperationId: randomUUID(),
+    notVerified: [],
+  };
+  const landed = await agentCli([s.root, 'land', '--save', '--no-wait', JSON.stringify(command)]);
+  assert.deepEqual(landed.result.submission.request.notVerified, []);
+  const submission = s.calls.find(call => call.name === 'projectHostedLanding:enqueue');
+  assert.deepEqual(JSON.parse(submission.args.request).notVerified, []);
+  assert(!s.calls.some(call => call.name === 'projectHostedSaves:prepare'));
+});
+
+test('hosted CLI refuses a verification claim explicitly when the server lacks its capability', async t => {
+  const s = agentFixture(t);
+  http(t, s);
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  for (const verb of [['save'], ['land', '--save', '--no-wait']])
+    await assert.rejects(
+      agentCli([s.root, ...verb, '{"notVerified":[]}']),
+      errorCode('HOSTED_ACTION_UNSUPPORTED'),
+    );
+  assert(
+    !s.calls.some(
+      call => /:(prepare|enqueue|submit)$/.test(call.name) && /Saves|Compose|Landing/.test(call.name),
+    ),
+  );
 });
 
 test('hosted CLI forwards urgent finish and retained queued Candidate reprioritisation', async t => {

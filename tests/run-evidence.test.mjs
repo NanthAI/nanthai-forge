@@ -5,6 +5,7 @@ import { saveResultSchema } from '../dist/hosted-save.js';
 import { checkEvidence, outsideSummary, proofFollowupId } from '../dist/run-evidence.js';
 import { exactHostedCheckEvidence, hostedVerdictKey } from '../dist/hosted-check-evidence.js';
 import { saveFixture } from './hosted-saves-fixture.mjs';
+import { hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
 
 for (const lines of [undefined, [], ['Windows paths were not run']]) {
   test(`an exact save retains ${lines === undefined ? 'not reported' : lines.length ? 'unverified lines' : 'an explicit empty claim'} across retry`, async () => {
@@ -22,6 +23,19 @@ for (const lines of [undefined, [], ['Windows paths were not run']]) {
     assert.equal(saved.actor, 'owner');
   });
 }
+
+test('command inputs and the hosted save reject claims beyond 200 lines or 256 UTF-8 bytes per line', async () => {
+  const s = await saveFixture();
+  for (const notVerified of [Array(201).fill('unchecked'), ['é'.repeat(129)]]) {
+    for (const schema of [hostedAgentCommandSchemas.save, hostedAgentCommandSchemas.finish])
+      assert.equal(schema.safeParse({ notVerified }).success, false);
+    await assert.rejects(s.prepare([], { notVerified }), /notVerified/);
+  }
+  const notVerified = Array(200).fill('é'.repeat(128));
+  const atLimit = await s.prepare([], { notVerified });
+  const result = await s.submit(atLimit);
+  assert.deepEqual(result.outcome.result.notVerified, notVerified);
+});
 
 test('outside claims strip credential-shaped values, signed links, private paths and device hostnames', () => {
   // forge-path-fixture: synthetic

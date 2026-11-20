@@ -731,6 +731,24 @@ test('ad80e037: a bare save with nothing new after a sync answers nothing to sav
   assert.equal(named.result.outcome.result.head, before);
 });
 
+test('an identical shorthand save with a claim reports the current head after sync', async t => {
+  const s = await resolutionFixture(t, { overlap: false }),
+    f = s.f;
+  await s.transport().dispatch('open', { laneId: f.lane.laneId });
+  const command = { notVerified: [] };
+  const first = await s.transport().dispatch('save', command);
+  assert.deepEqual(first.result.outcome.result.notVerified, []);
+  f.moveMain({ overlap: false });
+  await s.transport().dispatch('sync', { laneId: f.lane.laneId, apply: true });
+  const head = readHostedLaneCheckout(s.root).selection.head;
+  assert.notEqual(head, first.result.outcome.result.head, 'sync advanced the exact source');
+  const calls = s.calls.length;
+  const same = await s.transport().dispatch('save', command);
+  assert.equal(same.result.status, 'nothing-to-save');
+  assert.equal(same.result.head, head);
+  assert(!s.calls.slice(calls).some(call => call.name === 'projectHostedSaves:prepare'));
+});
+
 test('ad80e037: a bare save on a clean checkout after a settled FAILED save answers nothing to save, exit 0, and keeps the not-saved warning', async t => {
   const { clientCacheRoot } = await import('../dist/root-paths.js');
   const s = await resolutionFixture(t, { overlap: false }),

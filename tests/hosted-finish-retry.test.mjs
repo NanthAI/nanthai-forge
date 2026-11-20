@@ -160,9 +160,14 @@ test('a real edit after a retained composition conflict is the resolution: the s
   assert.equal(f.text(f.currentMain().head, 'a.txt'), 'theirs\nb\nc\n');
 });
 
-for (const priority of [undefined, 'urgent'])
+for (const [priority, notVerified] of [
+  [undefined, undefined],
+  ['urgent', []],
+  ['normal', ['The Windows adapter was not checked']],
+])
   test(`accept after a passed check-only finish reuses the exact Candidate and run (${priority ?? 'default'} priority); changed bytes get a new check`, async t => {
     const s = agentFixture(t);
+    s.caps.features = ['save-declarations'];
     await s.transport().dispatch('open', { laneId: s.lane.laneId });
     const first = await s.transport().dispatch('finish', { laneId: s.lane.laneId, accept: false });
     const query = s.exchange.client.query;
@@ -178,7 +183,9 @@ for (const priority of [undefined, 'urgent'])
       laneId: s.lane.laneId,
       accept: true,
       ...(priority ? { priority } : {}),
+      ...(notVerified === undefined ? {} : { notVerified }),
     });
+    assert.deepEqual(accepting.result.submission.request.notVerified, notVerified);
     assert.equal(accepting.result.submission.request.priority, priority);
     assert.deepEqual(accepting.result.submission.request.check, { kind: 'run', runId: first.result.run.id });
     assert.equal(accepting.result.submission.request.candidateId, s.candidate.id);
@@ -209,6 +216,23 @@ for (const priority of [undefined, 'urgent'])
     assert.equal(changedFinish.result.progress.outcome.status, 'failed');
     assert.equal(s.calls.filter(c => c.name === 'projectHostedChecks:enqueue').length, 1);
   });
+
+test('a changed claim on a live shorthand finish preserves the original landing and its receipt', async t => {
+  const s = agentFixture(t);
+  s.caps.features = ['save-declarations'];
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const command = { laneId: s.lane.laneId, notVerified: [] };
+  const first = await s.transport().dispatch('finish', command);
+  const mutationCount = s.calls.filter(call => call.name === 'projectHostedLanding:enqueue').length;
+  for (const changed of [undefined, ['The Windows adapter was not checked']])
+    await assert.rejects(s.transport().dispatch('finish', { ...command, notVerified: changed }), {
+      code: 'WORK_OPERATION_CHANGED',
+    });
+  assert.equal(s.calls.filter(call => call.name === 'projectHostedLanding:enqueue').length, mutationCount);
+  const replay = await s.transport().dispatch('finish', { ...command, operationId: first.operationId });
+  assert.equal(replay.result.submission.id, first.result.submission.id);
+  assert.deepEqual(replay.result.submission.request.notVerified, []);
+});
 
 test('finish reconciles a completed async checkpoint before capturing and never uploads the saved bytes again', async t => {
   const s = agentFixture(t);

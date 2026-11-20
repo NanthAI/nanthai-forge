@@ -20,7 +20,7 @@ import { SourceFileReader } from './source-file-reader.js';
 import { digest } from './hash.js';
 import { gitlinkDirectoryPointer } from './gitlink-workspace.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { ForgeError } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { readHostedLaneCheckout, type HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 import { hostedAgentDirectory, readAgentJson, HostedAgentJournal } from './hosted-agent-journal.js';
@@ -237,7 +237,10 @@ export async function selectHostedFinish(
   const directory = hostedAgentDirectory(root);
   const source = Object.fromEntries(
     Object.entries(command).filter(
-      ([key]) => !['accept', 'message', 'retry', 'reason', 'priority', 'tokens', 'maxChecks'].includes(key),
+      ([key]) =>
+        !['accept', 'message', 'retry', 'reason', 'priority', 'tokens', 'maxChecks', 'notVerified'].includes(
+          key,
+        ),
     ),
   );
   const index = join(directory, `finish-${digest(canonicalPayload({ root, address, actor, source }))}.json`);
@@ -316,6 +319,13 @@ export async function selectHostedFinish(
     }
   }
   selected ??= randomUUID();
+  // A claim belongs to the operation, not the source lookup used to find a prior check.
+  const sameClaim = (retained: FinishSelection) =>
+    invariant(
+      JSON.stringify(retained.command.notVerified) === JSON.stringify(command.notVerified),
+      'WORK_OPERATION_CHANGED',
+      `Landing operation ${retained.operationId} already has its original notVerified value. Replay its original request, or use a fresh operationId once it ends.`,
+    );
   const reservation = workLocked(join(directory, 'lock'), () => {
     const latest = checkoutPathExists(index) ? selectionSchema.parse(readAgentJson(index)) : undefined;
     // Another caller may have reserved the next generation while terminality
@@ -328,8 +338,11 @@ export async function selectHostedFinish(
       latest.command.accept === command.accept &&
       latest.command.priority === command.priority &&
       latest.command.maxChecks === command.maxChecks
-    )
+    ) {
+      sameClaim(latest);
       return latest;
+    }
+    if (!operationId && previous && selected === previous.operationId) sameClaim(previous);
     const retainedCommand =
       !operationId && previous && selected === previous.operationId ? previous.command : command;
     const value = {

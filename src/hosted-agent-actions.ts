@@ -690,6 +690,12 @@ export async function executeHostedAgent(
     // A save already settled here answers from its receipt and captures nothing new: say so.
     const replayed = saveSettledHere(session.root, operationId),
       startedBefore = saveStartedHere(session.root, operationId);
+    if (
+      command.notVerified !== undefined &&
+      !startedBefore &&
+      !session.capabilities.features?.includes('save-declarations')
+    )
+      throw unadvertisedActionError('save notVerified');
     // A bare save with nothing new (the journal would replay a settled save and the checkout matches
     // its Lane head) answers that, with the head this checkout is on now: never the older receipt and
     // head (a sync since moved it), and never a replayed failure (ad80e037). Local reads only, no call.
@@ -711,6 +717,7 @@ export async function executeHostedAgent(
       {
         operationId,
         message: command.message,
+        ...(command.notVerified === undefined ? {} : { notVerified: command.notVerified }),
         ...(command.supersedeFinish ? { supersedeFinish: true } : {}),
       },
       session.exchange,

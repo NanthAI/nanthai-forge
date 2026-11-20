@@ -77,6 +77,9 @@ merges (or why nothing can go).
    comes back as `conflictNotice` (nothing to answer: coordinate, stack or split).
    Saved-path windows exclude unsaved peer edits; no notice never proves
    independence. Record conflicts. Missing alerts mean friction, not independence.
+   Use optional `notVerified` on `save` or `land --save` to report verification limits
+   on that operation. Omit the field if you have no report. Send `[]` only if you
+   verified everything you changed. This claim is separate from [run evidence](../run-evidence.md).
 8. Add a test only for a behaviour, contract or incident you can name, and put that name in the test (a brief
    asks for the guarded behaviour, not for "tests"; [test signal](lint-rules.md#test-signal)).
    Save then `preflight {laneId}`. Run all affected tests: tests you add, direct and

@@ -11,13 +11,13 @@
 | `save --contract` | `candidateId, runId?, timingBasis?, tests?, expectedHead?, expectedVersion?, operationId?` |
 | `start` | `model?, outcome?, constraints?, intentId?, initialHead?, stackOn?, stackEntry?, planningItemId?, id?, itemId?, scope?, path?, open?, installScripts?, operationId?` |
 | `start --open` | `laneId, takeover?, acceptHandoff?, reason?, handoff?, expected?, paths?, operationId?` |
-| `save` | `laneId?, message?, model?, supersedeFinish?, park?, operationId?` |
+| `save` | `laneId?, message?, model?, supersedeFinish?, park?, notVerified?, operationId?` |
 | `save --candidate` | `laneId?, message?, intentId?, inputs?, dependencies?, operationId?` |
 | `save --sync` | `laneId?, message?, candidateId?, target?, ontoMain?, stackOn?, predecessor?, apply?, cleanOnly?, operationId?` |
 | `recover-apply` | `applyOperationId, operationId?` |
 | `resolve` | `laneId?, message?, keep?, operationId?` |
 | `save --check` | `checkId, expectedDefinition?, expectedConfiguration?, expectedEnvironment?, candidateId, expectedHead?, operationId?` |
-| `land --save` | `model?, laneId?, message?, intentId?, inputs?, dependencies?, check?, candidateId?, composeOperationId?, after?, accept?, keepOpen?, closes?, priority?, tokens?, allowEmpty?, maxChecks?, retry?, reason?, operationId?` |
+| `land --save` | `model?, laneId?, message?, intentId?, inputs?, dependencies?, check?, candidateId?, composeOperationId?, after?, accept?, notVerified?, keepOpen?, closes?, priority?, tokens?, allowEmpty?, maxChecks?, retry?, reason?, operationId?` |
 | `x prioritize` | `submissionId, priority, asOwner?, operationId?` |
 | `preflight` | `laneId?, run?, budgetSeconds?, trim?, retry?, message?, operationId?` |
 | `x source-pack` | `operationId?` |

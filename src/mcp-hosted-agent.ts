@@ -92,7 +92,7 @@ export function registerHostedAgentWorkflow(
   const groups = [
     {
       name: 'forge_task',
-      short: 'Lane writes/setup. Land: wait until terminal. Unknown reply: replay same UUID.',
+      short: 'Lane writes. Wait for land. Lost reply: replay same UUID.',
       actions: [
         'start',
         'open',
@@ -158,17 +158,19 @@ export function registerHostedAgentWorkflow(
   const prose: Record<string, string> = Object.fromEntries(
     groups.map(group => [group.name, group.description]),
   );
+  const verificationClaim =
+    ' Save and land mode save accept optional notVerified (verification limits on that exact operation). Omit it for no report. [] claims full verification. Check evidence is recorded separately.';
   let fullTools: () => Promise<Parameters<typeof toolHelp>[0]> = async () => [];
   const help: ToolHelp = { prose };
   const refreshRules = <T>(value: T) => {
     const live = transport.agentDefaults;
     if (live && canonicalPayload(live) !== applied) {
       applied = canonicalPayload(live);
-      prose.forge_task = `${groups[0]!.description}${rules(live)}`;
+      prose.forge_task = `${groups[0]!.description}${verificationClaim}${rules(live)}`;
     }
     return value;
   };
-  prose.forge_task += rules(effectiveAgentDefaults(undefined));
+  prose.forge_task += verificationClaim + rules(effectiveAgentDefaults(undefined));
   for (const group of groups)
     prose[group.name] +=
       ' command.replyDetail:true returns the full receipt, including available inline bodies; replay mutations with their original operationId.';

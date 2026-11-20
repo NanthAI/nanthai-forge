@@ -155,6 +155,33 @@ function registry(t, s) {
   return tools;
 }
 const body = response => JSON.parse(response.content[0].text);
+
+test('MCP forge_task carries the claim for an exact save and for the land save mode', async t => {
+  const s = agentFixture(t);
+  s.caps.features = ['save-declarations'];
+  const tools = registry(t, s);
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const tool = tools.get('forge_task');
+  const input = z.object(tool.inputSchema);
+  for (const command of [
+    { action: 'save', notVerified: [] },
+    { action: 'land', mode: 'save', notVerified: ['Browser checks were not run'] },
+  ]) {
+    const response = await tool.call(input.parse({ command: { ...command, replyDetail: true } }));
+    assert(!response.isError, response.content[0].text);
+    const receipt = body(response).result;
+    assert.deepEqual(
+      command.action === 'save' ? receipt.outcome.result.notVerified : receipt.submission.request.notVerified,
+      command.notVerified,
+    );
+  }
+  assert.equal(s.calls.filter(call => call.name === 'projectHostedSaves:prepare').length, 1);
+  const response = await tool.call(
+    input.parse({ command: { action: 'land', mode: 'save', notVerified: Array(201).fill('Too many') } }),
+  );
+  assert(response.isError, 'the land verb validates against the same command schema after lowering');
+});
+
 /** One client session for this test (as Claude Code sets it): an identical start replays only within it. */
 function agentSession(t, id) {
   const previous = {

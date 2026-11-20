@@ -6,6 +6,9 @@
 // full queue wait) or stopping for one more command. Local reads only until the agent's edit is
 // clean; then one resolve (its retained operationId) and the finish it hands out.
 import { z } from 'zod';
+import { invariant } from './errors.js';
+import { retainedHostedOperation } from './hosted-agent-journal.js';
+import { validateNotVerified } from './agent-handoff-types.js';
 import {
   inPlaceResolution,
   markedPendingPaths,
@@ -20,7 +23,7 @@ import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 type Command = Record<string, unknown>;
 type Dispatch = (action: string, command: Command) => Promise<{ result?: unknown } | undefined>;
 /** Fields of the agent's land that ride on the resolution's landing; identity fields never do. */
-const CARRIED = ['message', 'priority', 'check', 'accept', 'tokens'] as const;
+const CARRIED = ['message', 'priority', 'check', 'accept', 'tokens', 'notVerified'] as const;
 
 function resolutionHere(root: string, named: string | undefined) {
   const marker = readHostedLaneCheckout(root);
@@ -58,8 +61,25 @@ export async function landEditedResolution(
   // Resolved already, and the land names the origin (which would land its old head): land the
   // resolution's retained finish instead. Naming the resolution Lane (or none) lands it as before.
   const resolved = named && named !== here.laneId ? resolvedFinishContinuation(root, here.laneId) : undefined;
-  if (resolved) return { finish: parametersOf(resolved.next) };
+  if (resolved) {
+    const finish = parametersOf(resolved.next);
+    if (
+      command.notVerified !== undefined &&
+      JSON.stringify(command.notVerified) !== JSON.stringify(finish.notVerified)
+    ) {
+      invariant(
+        !retainedHostedOperation(root, String(finish.operationId)),
+        'WORK_OPERATION_CHANGED',
+        `Landing operation ${String(finish.operationId)} already has its original notVerified value. Replay it, or land the resolution Lane with a fresh operationId once it ends.`,
+      );
+      validateNotVerified(command.notVerified);
+      finish.notVerified = command.notVerified;
+      rememberResolutionFinish(root, here.laneId, finish);
+    }
+    return { finish };
+  }
   if (!here.pending || !edited(root, here.laneId)) return undefined;
+  validateNotVerified(command.notVerified);
   const parameters = parametersOf(resolutionContinuation(root, here.laneId, []).next);
   const message = typeof command.message === 'string' ? { message: command.message } : {};
   const response = await dispatch('resolve', { ...parameters, ...message });

@@ -27,6 +27,7 @@ import { notifyStackedLandingEnded } from './projectHostedStackNotice';
 import { enforceLandGates } from './projectHostedLandGates';
 import { requireQueueRoom } from './projectHostedQueueRoom';
 import { hostedLandingDesiredSchema } from '../src/hosted-landing-desired';
+import { validateNotVerified } from '../src/agent-handoff-types';
 import { hostedLandingStateSchema, landingObservation, landingTokensColumn } from '../src/hosted-landing';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { sanitizeOutside, declarationIdentity } from '../src/run-evidence';
@@ -60,6 +61,7 @@ export const submit = receiptMutation({
     try {
       const tokens = landingTokensColumn(input.tokens);
       const command = hostedLandingDesiredSchema.parse(JSON.parse(input.request));
+      validateNotVerified(command.notVerified);
       const actor = await acceptanceActor(ctx, true);
       return await submitDesiredLanding(
         ctx,

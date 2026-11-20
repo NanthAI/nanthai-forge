@@ -4,6 +4,7 @@ import { reconcileSourceRequest } from './hosted-source-request.js';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
+import { unadvertisedActionError } from './hosted-agent-version.js';
 import { hostedLandingDesiredSchema } from './hosted-landing-desired.js';
 import { hostedLandingRequestSchema, type HostedLandingState } from './hosted-landing.js';
 import { sourceWaitSnapshot } from './hosted-agent-source-wait.js';
@@ -586,6 +587,9 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
   await session.journal.retain(whenRoomKey, async () => command.maxChecks ?? null);
   const replayed = await replayFinish(session, pinnedCandidate, command);
   if (replayed) return replayed;
+  const declaration = command.notVerified === undefined ? {} : { notVerified: command.notVerified };
+  if (command.notVerified !== undefined && !session.capabilities.features?.includes('save-declarations'))
+    throw unadvertisedActionError('land --save notVerified');
   // A new landing of the origin Lane after an edited, unsaved in-place resolution: refuse before
   // any hosted call (41fc0c29). An operation that already ran keeps following its own recovery.
   if (
@@ -797,6 +801,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
           operationId,
           authorityEpoch: epoch,
           composeOperationId,
+          ...declaration,
           ...(session.capabilities.landingMessageVersion === 1 ? { message: command.message ?? null } : {}),
           after: command.after,
           ...(command.priority ? { priority: command.priority } : {}),
@@ -868,6 +873,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       operationId,
       authorityEpoch: epoch,
       channel: 'main',
+      ...declaration,
       ...(session.capabilities.landingMessageVersion === 1 ? { message: command.message ?? null } : {}),
       expectedMain: candidate.base,
       candidateId,

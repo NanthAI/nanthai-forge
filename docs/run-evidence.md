@@ -14,8 +14,18 @@ from CI’s test-file reports. A full check selects the configured command. The 
 report establishes only which files the checked code reported. The header also
 summarizes the verification limits the agent declared on the selected save or landing.
 
-Saves accept optional `notVerified` and `outside` declarations in the hosted save
-request. They are retained on the immutable save and its original terminal receipt,
+Use `nforge agent . save '{"notVerified":["Windows tests were not run"]}'` to report
+verification limits on an exact save. Use `nforge agent . land --save` with the
+same JSON field to attach the claim to the landing request, including when the
+checkout is already saved. For MCP `forge_task`, put the field in `command`
+with `action:"save"` or `action:"land", mode:"save"`. Send up to 200 lines,
+each up to 256 UTF-8 bytes. For check-only work, report the claim with `save`.
+Read the full receipt with CLI `--detail` or MCP `replyDetail:true`.
+Replay with the original claim and operation ID. For a new landing after
+resolving a conflict, report verification limits on the resolved work.
+
+Saves retain `notVerified` and any `outside` declarations on the immutable
+save and its original terminal receipt,
 with the authenticated author and exact source head on the save. The receipt links
 to that immutable save through `saveId`. Retrying the original request
 returns the same claim. They add no approval or landing block.
@@ -46,9 +56,8 @@ existing receipt-based revert operation directly: it creates a new checked landi
 that removes the selected change and preserves later work. A lost reply retries
 the same operation; no additional review step is introduced.
 
-Landing requests accept the same optional declarations. The original landing request can
-retain them without forcing a redundant save. The CLI/MCP writer is a separate
-rollout after these readers; its capability is `save-declarations`.
+The original landing request retains its own declarations without forcing a
+redundant save. CLI and MCP send claims to servers advertising `save-declarations`.
 The proof page gives that request's declaration precedence, binds it to the
 accepted source, and links follow-up Items to the immutable landing identity.
 Older requests continue to mean “not reported”. Outside summaries are sanitized

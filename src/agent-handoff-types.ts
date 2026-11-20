@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { invariant } from './errors.js';
 const id = z.string().uuid();
 const head = z.string().regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/);
 const count = z.number().int().nonnegative().safe();
@@ -85,7 +86,24 @@ export function handoffSummary(handoff: DeliveryHandoff | null) {
   };
 }
 
-/** Optional is deliberate: absent is not reported; [] is an attributed claim of complete verification. */
+const verificationLineBytes = 256;
+export const notVerifiedInput = z
+  .array(
+    z.string().refine(line => new TextEncoder().encode(line).length <= verificationLineBytes, {
+      message: `Each notVerified line must fit in ${verificationLineBytes} UTF-8 bytes.`,
+    }),
+  )
+  .max(200, 'notVerified accepts at most 200 lines.')
+  .optional();
+
+export function validateNotVerified(value: unknown) {
+  if (value === undefined) return;
+  const result = notVerifiedInput.safeParse(value);
+  invariant(result.success, 'BAD_ARGUMENT', result.error?.issues[0]?.message ?? 'Invalid notVerified claim.');
+}
+
+/** Optional is deliberate: absent is not reported; [] is an attributed claim of complete verification.
+ * Readers accept retained claims that were written before the input limits. */
 export const saveDeclarations = {
   notVerified: z.array(z.string()).optional(),
   outside: z

@@ -15,6 +15,8 @@ Before picking what to land next, `lanes {"view":"tree"}` shows stacks, overlaps
 
 Optionally send `tokens` with `land --save`: a whole number, the tokens your own work on this landing used as your harness counts them. Stats shows the measured figure from the landings that report it; it is never billed.
 
+Report verification limits in the optional `notVerified` array on `save` or `land --save` (MCP `forge_task` takes the same field). Omit it if you have no report. Use `[]` only to claim you verified everything you changed. The claim belongs to that operation, separate from recorded checks. See [Run evidence](../../docs/run-evidence.md).
+
 ## Hosted checkouts
 
 - Start with a fresh operation id; edit only its returned Lane path. A new Lane that replaces one of the Issue's `openLanes` (for example a resolution Lane) abandons the old one: `x abandon {laneId,reason:"Replaced by Lane NEW"}`. Save after meaningful steps. Read `behindMain`, presence and `conflictNotice`: saves trial-merge against main and peers, but unsaved peer edits are excluded. `peers {laneId,path?,detail?}` reads saved overlap evidence; missing evidence never proves independence.

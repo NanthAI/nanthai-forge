@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { finishRetryReasonSchema, landingTokensSchema } from './hosted-landing.js';
+import { notVerifiedInput } from './agent-handoff-types.js';
 import { effectiveAgentDefaultsWireSchema } from './agent-parallel-defaults.js';
 import { hostedRecordCommands } from './hosted-record-input.js';
 import { hostedMirrorStatusSchema } from './hosted-github-mirror-status.js';
@@ -257,6 +258,7 @@ export const hostedAgentCommandSchemas = {
       model: z.string().optional(),
       supersedeFinish: z.boolean().optional(),
       park: parkInputSchema.optional(),
+      notVerified: notVerifiedInput,
     })
     .strict(),
   compose: z.object(selection).strict(),
@@ -312,6 +314,7 @@ export const hostedAgentCommandSchemas = {
       composeOperationId: uuid.optional(),
       after: uuid.nullable().default(null),
       accept: z.boolean().optional(),
+      notVerified: notVerifiedInput,
       keepOpen: z.boolean().optional(),
       closes: z
         .boolean()
@@ -349,7 +352,11 @@ export const hostedAgentCommandSchemas = {
     .refine(
       command => command.maxChecks === undefined || command.accept !== false,
       'maxChecks limits a land that queues; a check-only run (accept:false) never queues, so drop maxChecks.',
-    ),
+    )
+    .refine(command => command.notVerified === undefined || command.accept !== false, {
+      path: ['notVerified'],
+      message: 'Use save to report notVerified on source that will only be checked.',
+    }),
   /** asOwner: the project owner is issuing this, not an agent acting alone (urgentRoles). */
   prioritize: z
     .object({

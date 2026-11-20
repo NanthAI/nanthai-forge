@@ -225,6 +225,7 @@ export function agentFixture(t, source) {
           version: 0,
           sourceVersion: 0,
           unchanged: true,
+          ...(request.notVerified === undefined ? {} : { notVerified: request.notVerified }),
           at,
         }),
       }));
@@ -301,6 +302,7 @@ export function agentFixture(t, source) {
             agent: true,
             check: request.check,
             finish: { composeOperationId: request.composeOperationId, after: request.after },
+            ...(request.notVerified === undefined ? {} : { notVerified: request.notVerified }),
             ...(request.keepOpen === undefined ? {} : { keepOpen: request.keepOpen }),
           },
         };

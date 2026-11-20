@@ -231,7 +231,11 @@ test('land --save after editing the conflict files saves the resolution and land
   writeFileSync(join(root, 'a.txt'), 'chosen\nb\nc\n');
   // What the agent's prompt says: resolve the markers, run land --save again (naming the Lane it
   // started with). One resolve, then the resolution Lane's landing; never the origin's old head.
-  const command = { laneId: f.lane.laneId, message: 'fix: keep both' };
+  const command = {
+    laneId: f.lane.laneId,
+    message: 'fix: keep both',
+    notVerified: ['Windows tests were not run'],
+  };
   const notes = [];
   const write = process.stderr.write;
   process.stderr.write = line => (notes.push(String(line)), true);
@@ -246,6 +250,7 @@ test('land --save after editing the conflict files saves the resolution and land
     /saved your edited conflict files as the resolution of Lane .*Undo: land --withdraw/,
   );
   assert.equal(submitted.result.submission.request.message ?? 'fix: keep both', 'fix: keep both');
+  assert.deepEqual(submitted.result.submission.request.notVerified, command.notVerified);
   await f.drain();
   await f.passChecks();
   await f.drain();
@@ -260,7 +265,28 @@ test('land --save after editing the conflict files saves the resolution and land
   // Running the same land again reaches the same landing, never a second one.
   const again = await submitHostedLand(root, command, s.address, s.transport(root));
   assert.notEqual(again.result.submission?.phase, 'queued');
+  assert.deepEqual(again.result.submission?.request.notVerified, command.notVerified);
   assert.equal(f.text(f.currentMain().head, 'a.txt'), 'chosen\nb\nc\n');
+});
+
+test('land --save can report a claim on an already saved resolution before its landing starts', async t => {
+  const s = await resolutionFixture(t, { overlap: true }),
+    f = s.f;
+  f.moveMain({ overlap: true });
+  await s.transport().dispatch('open', { laneId: f.lane.laneId });
+  const { conflict } = (await s.transport().dispatch('sync', { laneId: f.lane.laneId })).result;
+  writeFileSync(join(s.root, 'a.txt'), 'chosen\nb\nc\n');
+  const [action, params] = strip(conflict.next);
+  const resolved = await s.transport().dispatch(action, params);
+  assert.equal(resolved.result.next.action, 'finish');
+  const command = { laneId: f.lane.laneId, notVerified: [] };
+  const submitted = await submitHostedLand(s.root, command, s.address, s.transport());
+  assert.equal(submitted.operationId, resolved.result.next.operationId);
+  assert.deepEqual(submitted.result.submission.request.notVerified, []);
+  await assert.rejects(
+    submitHostedLand(s.root, { ...command, notVerified: ['A different claim'] }, s.address, s.transport()),
+    { code: 'WORK_OPERATION_CHANGED' },
+  );
 });
 
 test('593fc2d7: land --save on an edited resolution prints the landing operation id first, not the resolve id', async t => {
@@ -278,7 +304,7 @@ test('593fc2d7: land --save on an edited resolution prints the landing operation
   try {
     submitted = await submitHostedLand(
       root,
-      { laneId: f.lane.laneId, message: 'fix' },
+      { laneId: f.lane.laneId, message: 'fix', notVerified: [] },
       s.address,
       s.transport(root),
     );
@@ -287,6 +313,7 @@ test('593fc2d7: land --save on an edited resolution prints the landing operation
   }
   // A script that takes the first printed id must get the one to wait on.
   const text = notes.join('');
+  assert.deepEqual(submitted.result.submission.request.notVerified, []);
   const lanes = [f.lane.laneId, conflict.laneId];
   const ids = (text.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g) ?? []).filter(
     id => !lanes.includes(id),
