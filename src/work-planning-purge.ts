@@ -1,0 +1,88 @@
+// SPDX-License-Identifier: Apache-2.0
+// Pure: the reducer half of permanent deletion (Item 4c9e961e, purge Lane 1). Also runs in the Convex runtime.
+import { invariant, itemChanged } from './errors.js';
+import { refusePurged } from './work-planning-put.js';
+import {
+  PURGED_ITEM_TITLE,
+  planningModelPutKeys,
+  type PlanningItem,
+  type PlanningPurge,
+} from './work-planning-types.js';
+import type { HostedEvent, WorkData } from './work-types.js';
+import { isUnifiedWork } from './work-unified-types.js';
+import { planningTarget, type UnifiedPlanningData } from './work-planning-unified.js';
+
+/**
+ * Append the id-only tombstone for a purge. The Item must exist, be Deleted and be at `expectedVersion`, on the
+ * first run and on every replay: a replay (index rebuild, export, local recovery) runs the Item's purged rows as
+ * their redacted commands, so its versions, links and Intent are all there and only the words are gone. An Intent
+ * copy of the Item is left alone here (purge Lane 3).
+ */
+export function applyPlanningPurge(
+  data: WorkData,
+  command: PlanningPurge,
+  event: { id: string; at: string; actor: string; request: string },
+) {
+  const unified = isUnifiedWork(data) ? (data as unknown as UnifiedPlanningData) : undefined;
+  const target = unified ? planningTarget(unified, command.itemId) : undefined;
+  const historyId = target?.historyId ?? command.itemId;
+  const current = data.planningItems.filter(item => item.id === historyId).at(-1);
+  refusePurged(current);
+  invariant(current, 'NOT_FOUND', 'Select an existing Item.');
+  if (current.version !== command.expectedVersion)
+    throw itemChanged({
+      kind: command.kind,
+      id: command.itemId,
+      expectedVersion: command.expectedVersion,
+      currentVersion: current.version,
+    });
+  invariant(
+    current.status === 'deleted' && current.kind === command.kind,
+    'BAD_ARGUMENT',
+    'Only a Deleted Item can be deleted permanently. Delete it first; its text stays until then.',
+  );
+  const tombstone: PlanningItem = {
+    id: historyId,
+    operationId: event.id,
+    request: event.request,
+    version: command.expectedVersion + 1,
+    previousVersion: command.expectedVersion,
+    kind: command.kind,
+    title: PURGED_ITEM_TITLE,
+    body: '',
+    status: 'deleted',
+    intentIds: [],
+    at: event.at,
+    provenance: 'user-declared-local',
+    purged: { operationId: event.id, deletedAt: command.deletedAt, by: event.actor },
+  };
+  data.planningItems.push(tombstone);
+  const initiative = target?.initiative;
+  if (initiative) {
+    // Same in-place update a put makes, so selected-record callers see the tombstone and no stale field survives.
+    for (const key of planningModelPutKeys) delete (initiative as Partial<PlanningItem>)[key];
+    for (const key of ['was', 'reason', 'initiativeId', 'author'] as const)
+      delete (initiative as Partial<PlanningItem>)[key];
+    Object.assign(initiative, tombstone, { kind: 'initiative' });
+  }
+  return tombstone;
+}
+
+/** The journal half of the one reader rule, for a whole journal in memory (export, local recovery): every purged
+ * row names a purge of the same Item that comes later. The server's page readers also check each against its row. */
+export function checkPurgedJournal(events: readonly HostedEvent[]) {
+  const purges = new Map<string, { at: number; itemId: string }>();
+  events.forEach((event, at) => {
+    if (event.command.action === 'purge-planning-item')
+      purges.set(event.id, { at, itemId: event.command.itemId });
+  });
+  events.forEach((event, at) => {
+    if (event.command.action !== 'purged-planning-row') return;
+    const purge = purges.get(event.command.purgeOperationId);
+    invariant(
+      purge && purge.at > at && purge.itemId === event.command.command.itemId,
+      'INVALID_WORK_JOURNAL',
+      'A purged Work row names no later purge of its Item.',
+    );
+  });
+}

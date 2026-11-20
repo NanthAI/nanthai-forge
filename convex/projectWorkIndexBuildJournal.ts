@@ -12,6 +12,18 @@ import { buildLookups } from './projectWorkIndexBuildLookup';
 import { invariant } from '../src/errors';
 import { commandKeys, commandAliasRows, commandProjection } from './projectWorkProjection';
 import { commandPayloadRows, commandPlanningRows } from './projectWorkCommandRows';
+import type { HostedEvent } from '../src/work-types';
+
+/** The command a journal row replays: its own, or for a purged row its redacted copy. */
+const replayed = (event: HostedEvent) => {
+  const command = event.command.action === 'purged-planning-row' ? event.command.command : event.command;
+  invariant(
+    command.action !== 'source-return',
+    'INVALID_WORK_JOURNAL',
+    'Replay the returned source by its pin.',
+  );
+  return command;
+};
 /** Ordered reducers share one bounded event page and exact-key lookup windows.
  * Overlay reads see preceding events before rows and continuation commit together. */
 export async function replayStep(
@@ -58,7 +70,7 @@ export async function replayStep(
     events.flatMap(event =>
       event.command.action === 'source-return'
         ? [{ collection: 'events', key: event.id }]
-        : commandKeys(event.command, { operationId: event.id }),
+        : commandKeys(replayed(event), { operationId: event.id }),
     ),
   );
   await lookup(
@@ -70,8 +82,9 @@ export async function replayStep(
   );
   let metadata = generation.metadata;
   for (const event of events) {
+    // A purged row keeps its request hash without the command; its page reader checked the purge it names.
     invariant(
-      event.request === metadataRequest(event.command),
+      event.command.action === 'purged-planning-row' || event.request === metadataRequest(event.command),
       'INVALID_WORK_JOURNAL',
       'The retained journal request differs from its command.',
     );
@@ -97,11 +110,14 @@ export async function replayStep(
       if (event.automatic && JSON.parse(metadata).schema < 16)
         metadata = JSON.stringify({ ...JSON.parse(metadata), schema: 11 });
     } else {
-      const rows = await lookup(commandKeys(event.command, { operationId: event.id }));
+      // A purged row replays as its redacted command (same records, its words replaced), so no text comes back
+      // and every later row that names the Item still finds it.
+      const command = replayed(event);
+      const rows = await lookup(commandKeys(command, { operationId: event.id }));
       await commandAliasRows(rows, async (collection, key) => (await lookup([{ collection, key }]))[0]!);
       if ([16, 18, 20].includes(JSON.parse(metadata).schema)) {
         await commandPayloadRows(rows, lookup);
-        await commandPlanningRows(rows, event.command, lookup);
+        await commandPlanningRows(rows, command, lookup);
       }
       const projection = commandProjection(
         project,
@@ -109,7 +125,7 @@ export async function replayStep(
         backup,
         { operationId: event.id, revision: event.previousRevision },
         event.actor,
-        event.command,
+        command,
         event.request,
         rows,
         undefined,

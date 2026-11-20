@@ -241,6 +241,66 @@ test('record rebuild replays journal events with original identities and timesta
   assert.equal(intent.noteCount, 1);
 });
 
+test('record rebuild replays purged rows as their redacted commands and keeps the Items that name them', async t => {
+  const f = await setup(t);
+  const { purgeFromServer } = await import(moduleUrl('../convex/projectWorkCommand.ts'));
+  const { planningWriteSchema, redactPlanningWrite } = await import('../dist/work-planning-types.js');
+  const ensure = () =>
+    continueLongAction('Synthetic index', randomUUID(), continuation =>
+      actions.ensure._handler(f.s.ctx, { rebuild: true, projectId: 'project', continuation }),
+    );
+  const first = await ensure();
+  const send = async command =>
+    modules.projectWorkActions.command._handler(f.s.ctx, {
+      projectId: 'project',
+      operationId: command.operationId,
+      revision: await index.revision._handler(f.s.ctx, { projectId: 'project' }),
+      command: JSON.stringify(command),
+    });
+  const put = patch => ({ action: 'put-planning-item', operationId: randomUUID(), ...patch });
+  const secret = 'walrus-purge-fixture';
+  const initiative = put({ itemId: randomUUID(), expectedVersion: 0, kind: 'initiative', title: secret });
+  await send(initiative);
+  const child = put({ itemId: randomUUID(), expectedVersion: 0, kind: 'issue', title: 'Child' });
+  child.initiativeId = initiative.itemId;
+  await send(child);
+  await send(put({ itemId: initiative.itemId, expectedVersion: 1, status: 'deleted' }));
+  const purge = {
+    action: 'purge-planning-item',
+    operationId: randomUUID(),
+    itemId: initiative.itemId,
+    kind: 'initiative',
+    expectedVersion: 2,
+    deletedAt: '2026-11-20T00:00:00.000Z',
+  };
+  await purgeFromServer._handler(f.s.ctx, {
+    projectId: 'project',
+    operationId: purge.operationId,
+    command: JSON.stringify(purge),
+    owner: 'owner',
+  });
+  // The rows Lane 2 will write: the Initiative's words gone, its structure and envelope kept.
+  for (const row of f.s.tables.projectWorkEvents.values()) {
+    const command = planningWriteSchema.safeParse(JSON.parse(row.command));
+    if (!command.success || command.data.itemId !== initiative.itemId) continue;
+    row.command = JSON.stringify(redactPlanningWrite(command.data));
+    row.purged = purge.operationId;
+  }
+  f.s.tables.projectWorkGenerations.get(first).format = 3;
+  const second = await ensure();
+  assert.notEqual(first, second);
+  const rows = workRecordRows(f.s.tables).filter(row => row.generationId === second);
+  assert.equal(rows.filter(row => row.value.includes(secret)).length, 0, 'no purged word is rebuilt');
+  const detail = async (collection, id) =>
+    JSON.parse((await index.detail._handler(f.s.ctx, { projectId: 'project', collection, id })).value);
+  const head = await detail('planningItems', initiative.itemId);
+  assert.deepEqual(
+    [head.title, head.version, head.purged.operationId],
+    ['Deleted Item', 3, purge.operationId],
+  );
+  assert.equal((await detail('planningItems', child.itemId)).initiativeId, initiative.itemId);
+});
+
 test('a moving snapshot cannot publish an incomplete record generation', async t => {
   const f = await setup(t);
   const mutate = f.s.ctx.runMutation;

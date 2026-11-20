@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 1,
+  "reason": "Adds PLANNING_ITEM_PURGED (Item 4c9e961e, purge Lane 1): the one refusal for writes, comments, restores and retries on a permanently deleted Item and for its purged record versions. Nothing can go: no existing code means 'this text was deleted on purpose', and reusing SOURCE_UNAVAILABLE or NOT_FOUND would let a purge hide corruption or make a purge look like corruption.",
+  "date": "2026-11-20"
+}

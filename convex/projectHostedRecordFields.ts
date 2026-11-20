@@ -55,6 +55,9 @@ export const hostedRecordFields = {
     }),
   ),
   lifecyclePlanId: v.optional(v.id('projectHostedLifecyclePlans')),
+  /** A purged issue, comment or Intent version (Item 4c9e961e): the purge operation id. Header and digest stay, the
+   * body goes; hostedRecordBody answers PLANNING_ITEM_PURGED for it, never a digest failure. */
+  purged: v.optional(v.string()),
 };
 export const hostedRecordTables = {
   projectHostedRecordBodies: defineTable({
@@ -68,6 +71,10 @@ export const hostedRecordTables = {
     command: v.optional(v.string()),
     journalSegment: v.optional(v.string()),
     journalCommand: v.optional(v.string()),
+    /** Purged journal row (Item 4c9e961e): the purge operation id. Like an archived row it keeps its envelope and
+     * `journalCommand` facts (its own command, every word replaced) and has no `command`; unlike one it has no
+     * segment, so its words are nowhere. */
+    purged: v.optional(v.string()),
     baseBackupId: v.optional(v.id('projectBackups')),
   })
     .index('by_project_and_revision', ['projectId', 'revision'])

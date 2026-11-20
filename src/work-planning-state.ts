@@ -9,6 +9,7 @@ import {
   bodyWithDecision,
   decisionOperationId,
   discussionFields,
+  refusePurged,
   resolvePlanningPut,
 } from './work-planning-put.js';
 import { applyUnifiedPlanning, type UnifiedPlanningData } from './work-planning-unified.js';
@@ -29,20 +30,24 @@ export function retainedPlanning(data: WorkData, command: PlanningWrite) {
   const retained =
     data.planningItems.find(item => item.operationId === command.operationId) ??
     data.planningComments.find(item => item.id === command.operationId);
-  if (retained)
+  if (retained) {
     invariant(
       retained.request === planningRequest(command),
       'WORK_OPERATION_CHANGED',
       'This planning operation has different inputs. Reconcile its original request.',
     );
+    // A retry of a write on a since-purged Item answers purged, never its retained words.
+    const itemId = 'itemId' in retained ? retained.itemId : retained.id;
+    refusePurged(data.planningItems.filter(item => item.id === itemId).at(-1));
+  }
   return retained;
 }
 /** Data-only reducer shared by local Work and the original hosted journal replay. A decision comment also appends
  * its line to the Item body as the next version, in the same write (src/work-planning-put.ts). */
-export function applyPlanningMetadata(data: WorkData, command: PlanningWrite, at: string) {
+export function applyPlanningMetadata(data: WorkData, command: PlanningWrite, at: string, request?: string) {
   const retained = retainedPlanning(data, command);
   if (retained) return retained;
-  const written = applyPlanningWrite(data, command, at);
+  const written = applyPlanningWrite(data, command, at, request ?? planningRequest(command));
   if (command.action !== 'comment-planning-item' || !command.decision) return written;
   const latest = data.planningItems
     .filter(item => item.id === (written as { itemId: string }).itemId)
@@ -65,17 +70,12 @@ export function applyPlanningMetadata(data: WorkData, command: PlanningWrite, at
   );
   return written;
 }
-function applyPlanningWrite(data: WorkData, command: PlanningWrite, at: string) {
+function applyPlanningWrite(data: WorkData, command: PlanningWrite, at: string, request: string) {
   if (isUnifiedWork(data))
-    return applyUnifiedPlanning(
-      data as unknown as UnifiedPlanningData,
-      command,
-      at,
-      planningRequest(command),
-    );
+    return applyUnifiedPlanning(data as unknown as UnifiedPlanningData, command, at, request);
   const current = currentPlanning(data).find(item => item.id === command.itemId),
-    request = planningRequest(command),
     provenance = 'user-declared-local' as const;
+  refusePurged(current);
   if (command.action === 'comment-planning-item') {
     invariant(current, 'NOT_FOUND', 'Select an existing Issue or Initiative.');
     const comment = {

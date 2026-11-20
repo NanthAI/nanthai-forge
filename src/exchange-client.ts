@@ -551,9 +551,26 @@ export class ConvexExchange implements ExchangeTransport {
     });
   }
   async journal(): Promise<string> {
-    return retryExchange('Work journal read', this.operationId, () =>
-      this.client.action(action('projectWorkActions:exportJournal'), { projectId: this.projectId }),
-    );
+    const read = (purgedRows?: true) =>
+      this.client.action(action('projectWorkActions:exportJournal'), {
+        projectId: this.projectId,
+        ...(purgedRows ? { purgedRows } : {}),
+      });
+    return retryExchange('Work journal read', this.operationId, async () => {
+      try {
+        // planning-purge-v1: this CLI replays purged rows, so it says so up front (one call). Only a server older
+        // than the feature refuses the argument, and then has no purged rows to send.
+        return await read(true);
+      } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          !error.message.includes('ArgumentValidationError') ||
+          !error.message.includes('purgedRows')
+        )
+          throw error;
+        return read();
+      }
+    });
   }
 }
 

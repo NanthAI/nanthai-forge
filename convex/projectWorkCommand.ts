@@ -8,6 +8,7 @@ import { mutation, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { hostedWorkEventDocument } from './schema';
 import { metadataCommandSchema } from '../src/work-intent-types';
+import { planningPurgeSchema } from '../src/work-planning-types';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { metadataRequest, validateMetadataSource } from '../src/work-metadata';
 import { invariant } from '../src/errors';
@@ -29,6 +30,7 @@ export async function executeCommand(
   ctx: MutationCtx,
   input: { projectId: Id<'hostedProjects'>; operationId: string; command: string },
   actor?: string,
+  options: { purge?: true } = {},
 ) {
   // Only trusted internal actions supply actor (scheduled budget Issues have no user session).
   const user = actor ? { subject: actor } : await ctx.auth.getUserIdentity();
@@ -36,7 +38,10 @@ export async function executeCommand(
   const project = await activeProject(ctx, input.projectId, user.subject);
   let parsed;
   try {
-    parsed = metadataCommandSchema.safeParse(JSON.parse(input.command));
+    // The server's purge step sends only a purge; every other caller only client commands, never a purge.
+    parsed = (options.purge ? planningPurgeSchema : metadataCommandSchema).safeParse(
+      JSON.parse(input.command),
+    );
   } catch {
     invariant(false, 'BAD_ARGUMENT', 'Send a supported hosted Work command.');
   }
@@ -48,7 +53,11 @@ export async function executeCommand(
     'BAD_ARGUMENT',
     'Use an original Work operation UUID.',
   );
-  if (command.action === 'comment-planning-item' || command.action === 'put-planning-item') {
+  if (
+    command.action === 'comment-planning-item' ||
+    command.action === 'put-planning-item' ||
+    command.action === 'purge-planning-item'
+  ) {
     invariant(
       project.owner === user.subject,
       'PROJECT_UNAVAILABLE',
@@ -216,6 +225,25 @@ export const command = mutation({
   handler: async (ctx, input) => {
     try {
       return await executeCommand(ctx, input);
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+/** The server's purge step (Item 4c9e961e): appends a purge-planning-item and the Item's id-only tombstone in one
+ * mutation, as the project owner. Internal only: no client entry accepts a purge. */
+export const purgeFromServer = internalMutation({
+  args: {
+    projectId: v.id('hostedProjects'),
+    operationId: v.string(),
+    command: v.string(),
+    owner: v.string(),
+  },
+  returns: hostedWorkEventDocument,
+  handler: async (ctx, { owner, ...input }) => {
+    try {
+      return await executeCommand(ctx, input, owner, { purge: true });
     } catch (error) {
       return report(error);
     }

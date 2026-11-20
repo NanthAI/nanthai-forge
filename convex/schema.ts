@@ -301,6 +301,10 @@ export const hostedWorkEventFields = {
   at: v.string(),
   command: v.string(),
   baseBackupId: v.optional(v.id('projectBackups')),
+  /** A purged row (Item 4c9e961e): the purge operation that removed its words. `command` then holds the row's own
+   * command with every word replaced; readers accept it only when that purge exists, comes later and names the same
+   * Item. */
+  purged: v.optional(v.string()),
 };
 export const hostedWorkEventDocument = v.object({
   _id: v.union(v.id('projectWorkEvents'), v.id('projectHostedRecordBodies')),

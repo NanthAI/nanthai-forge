@@ -25,7 +25,7 @@ export class NodeCommandRequired extends Error {
 /** Row text one V8 command may hold. Live commands read under 100 KB; 4 MiB leaves 64 MiB isolates ample
  * headroom for parsing and the reducer copies, and anything larger runs in Node. */
 export const V8_COMMAND_ROW_BYTES = 4 * 1024 * 1024;
-type Command = Exclude<HostedEvent['command'], { action: 'source-return' }>;
+type Command = Exclude<HostedEvent['command'], { action: 'source-return' | 'purged-planning-row' }>;
 export type IndexedCommandHooks = {
   acceptance: typeof hostedAcceptance;
   sourceReview: typeof readSourceReview;

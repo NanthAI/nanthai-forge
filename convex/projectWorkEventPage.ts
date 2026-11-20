@@ -4,6 +4,7 @@ import type { QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { eventDocument, type StoredWorkEvent } from './projectWorkEventStore';
 import { invariant } from '../src/errors';
+import { verifyPurgedEvents } from './projectWorkPurgedRows';
 /** Read the unbounded command side first. The other side contains bounded metadata commands.
  * Fill across migration epochs inside this one query, so a flag change adds no client page call. */
 export async function retainedEventPage(
@@ -97,6 +98,7 @@ export async function retainedEventPage(
       'INVALID_WORK_JOURNAL',
       'Hosted Work operation coverage is incomplete.',
     );
+    await verifyPurgedEvents(ctx, project._id, batch);
     page.push(...batch);
     bytes += batch.reduce((total, row) => total + new TextEncoder().encode(JSON.stringify(row)).length, 0);
     after = end;

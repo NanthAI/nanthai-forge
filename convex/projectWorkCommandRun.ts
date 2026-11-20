@@ -14,6 +14,7 @@ export const commutativeCommand = (command: { action: string; anchor?: unknown }
   command.action === 'intent-status' ||
   command.action === 'comment-planning-item' ||
   command.action === 'put-planning-item' ||
+  command.action === 'purge-planning-item' ||
   (command.action === 'note' && !command.anchor);
 
 export async function caller(ctx: ActionCtx) {
@@ -35,7 +36,7 @@ export async function runWorkCommand(
   input: WorkCommandInput,
   owner: string,
   indexed: (
-    command: Exclude<HostedEvent['command'], { action: 'source-return' }>,
+    command: Exclude<HostedEvent['command'], { action: 'source-return' | 'purged-planning-row' }>,
     request: string,
   ) => Promise<Awaited<ReturnType<typeof indexedCommand>>>,
 ): Promise<StoredWorkEvent> {

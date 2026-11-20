@@ -46,6 +46,7 @@ import {
   workSourcePins,
 } from './work-archive-metadata.js';
 import { type WorkData } from './work-types.js';
+import { checkPurgedJournal } from './work-planning-purge.js';
 import { publishDirectory } from './state/durability.js';
 
 type StoreAccess = Pick<
@@ -305,6 +306,7 @@ export function overlayHostedJournal(directory: string, archiveSha256: string, i
     'INVALID_WORK_JOURNAL',
     'Select this journal’s exact original source/Work archive. Existing source is preserved.',
   );
+  checkPurgedJournal(journal.events);
   let data = parseWorkBytes(original);
   // Journal commands never introduce a new source pin: even a new Intent must
   // select a base already retained here. Keep the first lookup at the original

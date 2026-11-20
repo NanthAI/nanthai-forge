@@ -5,6 +5,7 @@ import type { QueryCtx } from './_generated/server';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { findWorkEvent, type StoredWorkEvent } from './projectWorkEventStore';
 import { retainedEventPage } from './projectWorkEventPage';
+import { verifyPurgedEvents } from './projectWorkPurgedRows';
 import { requireSourceAuthority } from '../src/hosted-source-authority';
 import { indexActivity } from '../src/work-hosted-index';
 import type { MutationCtx } from './_generated/server';
@@ -25,6 +26,7 @@ import { projectDocument, hostedWorkEventDocument } from './schema';
 import { ownedProject, accessibleProject, activeOwnedProject, activeProject } from './projectAuthority';
 import { intentAuthority } from './projectContributors';
 import { metadataCommandSchema } from '../src/work-intent-types';
+import { planningPurgeSchema } from '../src/work-planning-types';
 import { invariant } from '../src/errors';
 import { acceptancePolicyDigest } from '../src/policy-digest';
 import { indexEntry } from './projectWorkIndexFields';
@@ -224,15 +226,25 @@ export async function appendWork(
     if (channelCommand.success)
       requireSourceAuthority(project, { mode: 'native-owner', epoch: input.authorityEpoch ?? 0 });
     const parsed = metadataCommandSchema.safeParse(JSON.parse(input.command));
+    // A purge is never a client command: only the server's purge step appends it, with its projection, so the
+    // tombstone and its live checks (Deleted, expected version) land in the same mutation (Item 4c9e961e).
+    const purge = parsed.success ? undefined : planningPurgeSchema.safeParse(JSON.parse(input.command));
+    if (purge?.success)
+      invariant(
+        project.owner === input.owner && purge.data.operationId === input.operationId && input.projection,
+        'BAD_ARGUMENT',
+        'Append a permanent deletion only from the server’s purge step, with its projection.',
+      );
+    const action = parsed.success ? parsed.data.action : purge?.success ? purge.data.action : undefined;
     const frozen =
-      parsed.success &&
+      action !== undefined &&
       project.workStoreWriters?.some(
-        action =>
-          action === parsed.data.action ||
-          (action === 'planning' &&
-            ['put-planning-item', 'comment-planning-item'].includes(parsed.data.action)),
+        writer =>
+          writer === action ||
+          (writer === 'planning' &&
+            ['put-planning-item', 'comment-planning-item', 'purge-planning-item'].includes(action)),
       ) &&
-      (parsed.data.action !== 'note' || !parsed.data.anchor);
+      (!parsed.success || parsed.data.action !== 'note' || !parsed.data.anchor);
     if (
       parsed.success &&
       (parsed.data.action === 'put-planning-item' || parsed.data.action === 'comment-planning-item')
@@ -472,13 +484,15 @@ export async function journalWorkEvents(
     const project = await accessibleProject(ctx, projectId, owner);
     if (project.workStoreCutoverRevision !== undefined && revision > project.workStoreCutoverRevision)
       return await retainedEventPage(ctx, project, { initialRevision, revision, paginationOpts });
-    return await ctx.db
+    const page = await ctx.db
       .query('projectWorkEvents')
       .withIndex('by_project_and_revision', q =>
         q.eq('projectId', projectId).gt('revision', initialRevision).lte('revision', revision),
       )
       .order('asc')
       .paginate(paginationOpts);
+    await verifyPurgedEvents(ctx, projectId, page.page);
+    return page;
   } catch (error) {
     if (error instanceof JournalNeeded)
       return { journalHistory: true as const, index: canonicalPayload(error.index) };

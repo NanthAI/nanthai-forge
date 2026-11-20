@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { planningIntentStatus } from './work-planning-lifecycle.js';
 import { invariant, itemChanged } from './errors.js';
-import { discussionFields, resolvePlanningPut } from './work-planning-put.js';
+import { discussionFields, refusePurged, resolvePlanningPut } from './work-planning-put.js';
 import { resolveIntentId, type IntentAlias } from './work-intent-local.js';
 import {
   isShelved,
@@ -75,6 +75,8 @@ export function applyUnifiedPlanning(
   request: string,
 ) {
   const target = planningTarget(data, command.itemId);
+  // A tombstone refuses every later put, restore and comment (src/work-planning-purge.ts).
+  refusePurged(data.planningItems.filter(item => item.id === target.historyId).at(-1));
   if (command.action === 'comment-planning-item') {
     invariant(target.initiative || target.intent, 'NOT_FOUND', 'Select an existing Intent or Initiative.');
     const comment = {

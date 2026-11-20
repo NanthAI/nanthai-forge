@@ -274,7 +274,7 @@ export async function storeProjection(
           ? entries.some(e => e.collection === 'lifecycle')
             ? 'lifecycle'
             : 'intents'
-          : command.action === 'put-planning-item'
+          : command.action === 'put-planning-item' || command.action === 'purge-planning-item'
             ? 'planningVersions'
             : 'planningComments';
   for (const entry of entries) {

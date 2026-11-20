@@ -3,14 +3,46 @@
 import { journalIndexAt, requireJournal } from './projectJournalStore';
 import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
-import { metadataCommandSchema } from '../src/work-intent-types';
+import { journalCommandSchema } from '../src/work-intent-types';
 import { metadataRequest } from '../src/work-metadata';
 import { invariant } from '../src/errors';
+import { planningPurged } from '../src/work-planning-put';
+import { purgedFacts, verifyPurgedRow } from './projectWorkPurgedRows';
 export type StoredWorkEvent = Omit<Doc<'projectWorkEvents'>, '_id'> & {
   _id: Id<'projectWorkEvents'> | Id<'projectHostedRecordBodies'>;
 };
 export type WorkProvenance = Omit<StoredWorkEvent, '_id' | '_creationTime' | 'previousRevision'>;
 export function eventDocument(row: Doc<'projectHostedRecordBodies'>): StoredWorkEvent {
+  if (row.purged !== undefined) {
+    // The archived command-less envelope with a purge marker and no segment. Its purge is checked separately
+    // (convex/projectWorkPurgedRows.ts), because that needs a read.
+    invariant(
+      row.operationId !== undefined &&
+        row.revision !== undefined &&
+        row.request !== undefined &&
+        row.actor !== undefined &&
+        row.at !== undefined &&
+        row.command === undefined &&
+        row.journalSegment === undefined &&
+        row.journalCommand !== undefined,
+      'INVALID_WORK_JOURNAL',
+      'A purged Work row has an invalid envelope.',
+    );
+    purgedFacts(row.journalCommand, row.purged);
+    return {
+      _id: row._id,
+      _creationTime: row._creationTime,
+      projectId: row.projectId,
+      operationId: row.operationId,
+      request: row.request,
+      previousRevision: row.revision - 1,
+      revision: row.revision,
+      actor: row.actor,
+      at: row.at,
+      command: row.journalCommand,
+      purged: row.purged,
+    };
+  }
   invariant(
     row.operationId !== undefined &&
       row.revision !== undefined &&
@@ -21,7 +53,7 @@ export function eventDocument(row: Doc<'projectHostedRecordBodies'>): StoredWork
     'SOURCE_UNAVAILABLE',
     'Exact Work operation provenance is unavailable.',
   );
-  const command = metadataCommandSchema.parse(JSON.parse(row.command));
+  const command = journalCommandSchema.parse(JSON.parse(row.command));
   invariant(
     metadataRequest(command) === row.request,
     'SOURCE_UNAVAILABLE',
@@ -51,15 +83,17 @@ export async function findWorkEvent(
     .query('projectWorkEvents')
     .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
     .unique();
+  if (old?.purged !== undefined) return purgedReplay(ctx, projectId, old, replay);
   if (old) return old;
   const body = await ctx.db
     .query('projectHostedRecordBodies')
     .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
     .unique();
   if (!body) return null;
+  if (body.purged !== undefined) return purgedReplay(ctx, projectId, eventDocument(body), replay);
   if (!body.journalSegment) return eventDocument(body);
   if (replay && 'command' in replay) {
-    const command = metadataCommandSchema.parse(JSON.parse(replay.command));
+    const command = journalCommandSchema.parse(JSON.parse(replay.command));
     invariant(
       metadataRequest(command) === body.request,
       'WORK_OPERATION_CHANGED',
@@ -83,4 +117,24 @@ export async function findWorkEvent(
     .find(row => row._id === body._id);
   invariant(original, 'SOURCE_UNAVAILABLE', 'Exact Work operation provenance is unavailable.');
   return eventDocument(original);
+}
+/** An operation whose row was purged. A retry of the same inputs answers PLANNING_ITEM_PURGED; different inputs
+ * under that operation id stay WORK_OPERATION_CHANGED. Only the authority read gets the envelope back. */
+async function purgedReplay(
+  ctx: QueryCtx | MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  event: StoredWorkEvent,
+  replay?: { command: string } | { authority: true },
+): Promise<StoredWorkEvent> {
+  const facts = await verifyPurgedRow(ctx, projectId, { ...event, purged: event.purged! });
+  if (replay && 'command' in replay) {
+    const command = journalCommandSchema.parse(JSON.parse(replay.command));
+    invariant(
+      metadataRequest(command) === event.request,
+      'WORK_OPERATION_CHANGED',
+      'Reconcile this operation’s original command.',
+    );
+  }
+  if (replay && 'authority' in replay) return event;
+  throw planningPurged(facts.itemId, event.purged);
 }

@@ -10,6 +10,8 @@ import { activeProject, accessibleProject } from './projectAuthority';
 import { sourceAuthority } from '../src/hosted-source-authority';
 import { hostedRecordValue, hostedRecordIndex, type HostedRecordKind } from '../src/hosted-records';
 import { invariant } from '../src/errors';
+import { planningPurged } from '../src/work-planning-put';
+import { verifiedPurgedRecord } from './projectWorkPurgedRows';
 import { digest } from '../src/state/hash';
 import {
   effectiveLifecycleRecord,
@@ -87,6 +89,15 @@ export async function recordVersion(
 
 /** Immutable header/body integrity, shared by authoritative reads and rebuilds. */
 export async function hostedRecordBody(ctx: QueryCtx | MutationCtx, row: Doc<'projectHostedRecords'>) {
+  // A purged version answers purged, never a digest failure; a marker naming no purge of its Item stays a failure.
+  if (row.purged !== undefined) {
+    invariant(
+      await verifiedPurgedRecord(ctx, { ...row, purged: row.purged }),
+      'SOURCE_UNAVAILABLE',
+      'Exact canonical record bytes are unavailable.',
+    );
+    throw planningPurged(row.kind === 'comment' ? row.parent : row.key, row.purged);
+  }
   if (row.inline !== undefined) {
     invariant(
       digest(row.inline) === row.digest && new TextEncoder().encode(row.inline).length === row.bytes,

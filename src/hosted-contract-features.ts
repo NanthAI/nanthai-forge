@@ -75,6 +75,11 @@ export const hostedContractFeatures = [
   /** Terminal history is read through an authorized, redacting server action; capsuleProtocol:1. */
   'landing-capsules-v1',
   'journal-segments-v1',
+  /** Purged Work journal rows (Item 4c9e961e): event pages and exportJournal may carry a purge-planning-item
+   * tombstone and purged rows (envelope plus their own command with every word replaced) that name it. exportJournal
+   * refuses a journal with either unless the caller sends `purgedRows: true`, so an older CLI's local recovery gets
+   * CLI_UPGRADE_REQUIRED instead of a row form it cannot replay. */
+  'planning-purge-v1',
   /** Revert provenance on CLI landings (Issue 8dbccdfb): projectHostedComposeSelection:page names a
    * revert Lane's `revertOf`, and projectHostedLandingDesired:submit takes `revertOf`, so a landed
    * revert is recorded as compensating and tells the reverted Lane. Without it the CLI sends none. */

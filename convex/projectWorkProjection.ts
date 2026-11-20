@@ -7,7 +7,7 @@ import { applyHostedEvent } from '../src/work-metadata';
 import { indexedRecord, intentHeader, type IndexEntry, type IndexMetadata } from '../src/work-hosted-index';
 import type { hostedAcceptance } from './projectAcceptance';
 
-type Command = Exclude<HostedEvent['command'], { action: 'source-return' }>;
+type Command = Exclude<HostedEvent['command'], { action: 'source-return' | 'purged-planning-row' }>;
 export function commandKeys(command: Command, input: { operationId: string }) {
   const keys: { collection: string; key: string }[] = [],
     add = (collection: string, key: string) => keys.push({ collection, key });
@@ -220,7 +220,9 @@ export function commandProjection(
   }
   if (
     [16, 18, 20, 22, 24].includes(data.schema) &&
-    (command.action === 'put-planning-item' || command.action === 'comment-planning-item')
+    (command.action === 'put-planning-item' ||
+      command.action === 'comment-planning-item' ||
+      command.action === 'purge-planning-item')
   ) {
     for (const intent of data.intents)
       if (beforeIntents.get(intent.id) !== JSON.stringify(intent)) {

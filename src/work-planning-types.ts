@@ -112,6 +112,9 @@ export const planningItemSchema = z.object({
   author: z.string().min(1).max(200).optional(),
   at: z.string(),
   provenance: z.literal('user-declared-local'),
+  /** Only on the id-only tombstone a purge writes (src/work-planning-purge.ts): the purge operation, when the Item
+   * was deleted and who purged it. Every later put, comment or restore on it is refused (PLANNING_ITEM_PURGED). */
+  purged: z.object({ operationId: id, deletedAt: z.string(), by: z.string().min(1).max(200) }).optional(),
 });
 /** Discussion fields (Item 9a3d6f5f), all optional so older rows and readers stay valid. `author` is the account the
  * hosted replay observed (public reads map it to a Forge handle); `agent` is the writing agent session's slug from the
@@ -160,10 +163,52 @@ export const planningCommentCommandSchema = z.object({
   /** Set by the hosted server for a decision: the writer's public label for the body line. */
   decidedBy: z.string().max(80).optional(),
 });
+/** Permanent deletion of a Deleted Item (Item 4c9e961e, purge Lane 1). Written only by the server's purge step,
+ * never accepted from a client: it is absent from metadataCommandSchema, which every client entry parses. The
+ * reducer turns it into an id-only tombstone at `expectedVersion + 1`. It carries ids and times only, never text. */
+export const planningPurgeSchema = z.object({
+  action: z.literal('purge-planning-item'),
+  operationId: id,
+  itemId: id,
+  kind: z.enum(['issue', 'initiative']),
+  expectedVersion: z.number().int().positive(),
+  deletedAt: z.string(),
+});
 export const planningWriteSchema = z.discriminatedUnion('action', [
   planningPutSchema,
   planningCommentCommandSchema,
 ]);
+/** The fixed words a purged Item and its comments show in place of their own. */
+export const PURGED_ITEM_TITLE = 'Deleted Item';
+const PURGED_COMMENT_TEXT = 'Deleted comment';
+/** A purged row's facts: its own command with every word replaced (title, body, reason, comment text) and every
+ * structural field kept (kind, status, version, links, Initiative, parent, thread), so a replay rebuilds the Item's
+ * history, links and Intent exactly and only its words are gone. A fixed point: redacting it again changes nothing. */
+export function redactPlanningWrite(command: PlanningWrite): PlanningWrite {
+  if (command.action === 'comment-planning-item') return { ...command, text: PURGED_COMMENT_TEXT };
+  const redacted = {
+    ...command,
+    ...(command.title !== undefined ? { title: PURGED_ITEM_TITLE } : {}),
+    ...(command.body !== undefined ? { body: '' } : {}),
+  };
+  delete redacted.reason;
+  return redacted;
+}
+/** What a journal reader hands the reducer for a purged row: the purge it names and the row's redacted command
+ * (its envelope and request hash stay on the row). Readers build it from the row's purged marker after checking
+ * that the purge exists, is whole, comes later and names the same Item (convex/projectWorkPurgedRows.ts). */
+export const purgedPlanningRowSchema = z
+  .object({
+    action: z.literal('purged-planning-row'),
+    purgeOperationId: id,
+    command: planningWriteSchema,
+  })
+  .refine(
+    row => JSON.stringify(redactPlanningWrite(row.command)) === JSON.stringify(row.command),
+    'A purged Work row still holds words.',
+  );
+export type PlanningPurge = z.infer<typeof planningPurgeSchema>;
+export type PurgedPlanningRow = z.infer<typeof purgedPlanningRowSchema>;
 export const planningCommandSchema = z.discriminatedUnion('action', [
   planningPutSchema,
   planningCommentCommandSchema,

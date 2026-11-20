@@ -3,12 +3,14 @@
 import { readJournalEvents } from './projectJournalEvents';
 import type { StoredWorkEvent } from './projectWorkEventStore';
 import { archiveRef } from './r2ArchiveSource';
+import { purgedHostedCommand } from './projectWorkPurgedRows';
 import { migratedWork } from './projectWorkDetailLoad';
 import type { ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { invariant, ForgeError } from '../src/errors';
 import { migrateHostedIntents } from '../src/work-hosted-intents';
+import { checkPurgedJournal } from '../src/work-planning-purge';
 import { digest } from '../src/hash';
 import { hostedCommandSchema, type HostedEvent, type WorkData } from '../src/work-types';
 import { applyHostedEvent, parseWorkBytes, validateWorkSize, validateParsedWork } from '../src/work-metadata';
@@ -128,16 +130,30 @@ export const journalEvent = (
   previousRevision: item.previousRevision,
   actor: item.actor,
   at: item.at,
-  command: hostedCommandSchema.parse(JSON.parse(item.command)),
+  // A purged row reaches the reducer as its redacted command (its page reader checked the purge it names). The
+  // purged form is never a stored command: a row holding it without its marker would skip every purge check.
+  command:
+    item.purged !== undefined
+      ? purgedHostedCommand({ command: item.command, purged: item.purged })
+      : storedCommand(item.command),
   ...(item.automatic ? { automatic: item.automatic } : {}),
 });
+function storedCommand(text: string) {
+  const command = hostedCommandSchema.parse(JSON.parse(text));
+  invariant(
+    command.action !== 'purged-planning-row',
+    'INVALID_WORK_JOURNAL',
+    'A Work row holds the purged form without its purge marker.',
+  );
+  return command;
+}
 export async function load(
   ctx: ActionCtx,
   projectId: Id<'hostedProjects'>,
   owner: string,
   reader?: ExchangeObjectReader,
   options: { requireCurrent?: boolean; cacheMetadata?: boolean } = {},
-): Promise<SourceSnapshot & { events: HostedEvent[] }> {
+): Promise<SourceSnapshot & { events: HostedEvent[]; envelopeOnly: number }> {
   const project: Doc<'hostedProjects'> = await ctx.runQuery(internal.projectWork.get, { projectId, owner });
   invariant(project.work, 'PROJECT_WORK_MISSING', 'Start hosted Work from a stored source backup.');
   const unchanged = async () => {
@@ -159,7 +175,8 @@ export async function load(
       project.work.recordDetails?.backupId === project.work.backupId
         ? project.work.recordDetails.revision
         : project.work.initialRevision;
-    let cursor: string | null = null;
+    let cursor: string | null = null,
+      envelopeOnly = 0;
     invariant(
       snapshot.project._id === projectId && snapshot.data.revision === migratedRevision,
       'INVALID_WORK_JOURNAL',
@@ -179,7 +196,7 @@ export async function load(
         const operation = journalEvent(project.key, snapshot.backup.digest, item);
         if (item.previousRevision >= migratedRevision) {
           snapshot.data = migrateHostedIntents(snapshot.data, project.work.intentMigration);
-          applyHostedEvent(snapshot.data, operation);
+          if (applyHostedEvent(snapshot.data, operation) === 'envelope-continuity') envelopeOnly++;
         }
         events.push(operation);
       }
@@ -191,6 +208,7 @@ export async function load(
       'INVALID_WORK_JOURNAL',
       'Hosted Work operation coverage is incomplete.',
     );
+    checkPurgedJournal(events);
     snapshot.data = migrateHostedIntents(snapshot.data, project.work.intentMigration);
     validateWorkSize(snapshot.data);
     const current = await unchanged();
@@ -199,7 +217,8 @@ export async function load(
       'WORK_CHANGED_DURING_PUSH',
       'Hosted Work changed while reading its checkpoint and journal. Retry the original operation to read a consistent snapshot.',
     );
-    return { ...snapshot, project, events };
+    // envelopeOnly: legacy source-returns after a purged row, checked by envelope continuity only.
+    return { ...snapshot, project, events, envelopeOnly };
   } catch (error) {
     // Recheck authority before identifying a race; corruption under a stable
     // head remains the original validation failure. Never disguise access denial.

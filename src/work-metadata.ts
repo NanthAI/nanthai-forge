@@ -8,6 +8,7 @@ import { validateAnchorView } from './work-source-anchor.js';
 import { intentLifecycle } from './work-lifecycle.js';
 import type { IntentMetadataCommand } from './work-intent-types.js';
 import { applyPlanningMetadata, planningRequest, stampPlanningAuthor } from './work-planning-state.js';
+import { applyPlanningPurge } from './work-planning-purge.js';
 import { digest, digestChunks } from './state/hash.js';
 import { jsonChunks } from './json-chunks.js';
 import { invariant } from './errors.js';
@@ -82,7 +83,11 @@ export function applyIntentMetadata(
   }
   return intent;
 }
-export function validateMetadataSource(data: WorkData, command: MetadataCommand, source: ArchiveSource) {
+export function validateMetadataSource(
+  data: WorkData,
+  command: MetadataCommand | Extract<HostedEvent['command'], { action: `${string}-planning-${string}` }>,
+  source: ArchiveSource,
+) {
   if (command.action !== 'intent') return;
   invariant(
     retainedSource(source, command.base),
@@ -160,26 +165,34 @@ export function parseWorkBytes(bytes: Uint8Array): WorkData {
   // Preserve uninterpreted fields in an imported journal; validation is not permission to discard them.
   return { ...parseWork(raw), ...raw };
 }
+/** Applies one journal event. Returns 'envelope-continuity' when a legacy source-return's pinned Work digest could
+ * not be reproduced because a purged row came before it: that check then holds only the envelope (archive pin,
+ * revision chain), and the caller says so in its reply. */
 export function applyHostedEvent(
   data: WorkData,
   event: HostedEvent,
   options: { noteIndex?: number; sourceReturnDigest?: string } = {},
-) {
+): 'envelope-continuity' | undefined {
   event = hostedEventSchema.parse(event);
   // Legacy journal digests retain their original replay format; schema 16 never downgrades.
   if (event.automatic && data.schema < 16) data.schema = 11;
+  // A purged row keeps its request hash but not the command it hashed (only its redacted copy); its reader checked
+  // the purge it names. It replays as that redacted command.
+  const purgedRow = event.command.action === 'purged-planning-row';
+  const planning = event.command.action === 'purged-planning-row' ? event.command.command : event.command;
   invariant(
     data.revision === event.previousRevision &&
       !data.hostedEvents.some(item => item.id === event.id) &&
-      metadataRequest(event.command) === event.request,
+      (purgedRow || metadataRequest(event.command) === event.request),
     'INVALID_WORK_JOURNAL',
     'Hosted Work operation lineage differs from its original inputs.',
   );
+  let check: 'envelope-continuity' | undefined;
   const planningIntentId =
-    event.command.action === 'put-planning-item' && event.command.kind === 'issue'
+    planning.action === 'put-planning-item' && planning.kind === 'issue'
       ? resolveIntentId(
           (data as WorkData & { intentAliases?: { aliasId: string; intentId: string }[] }).intentAliases,
-          event.command.itemId,
+          planning.itemId,
         )
       : undefined;
   const creatingId =
@@ -190,9 +203,14 @@ export function applyHostedEvent(
         : undefined;
   if (event.command.action === 'source-return') {
     const actual = options.sourceReturnDigest ?? workDigest(data);
+    if (
+      actual !== event.command.workSha256 &&
+      data.hostedEvents.some(item => item.command.action === 'purged-planning-row')
+    )
+      check = 'envelope-continuity';
     invariant(
       event.archiveSha256 === event.command.archiveSha256 &&
-        actual === event.command.workSha256 &&
+        (check !== undefined || actual === event.command.workSha256) &&
         data.revision >= event.command.previousRevision,
       'INVALID_WORK_JOURNAL',
       `Returned source/Work differs from its original checkpoint: event ${event.id}, revision ${event.previousRevision + 1}, action ${event.command.action}, expected Work ${event.command.workSha256.slice(0, 12)}, actual ${actual.slice(0, 12)}.`,
@@ -220,19 +238,29 @@ export function applyHostedEvent(
       provenance: 'signed-in-owner-selection',
       ...(event.automatic ? { automatic: event.automatic } : {}),
     });
-  } else if (
-    event.command.action === 'put-planning-item' ||
-    event.command.action === 'comment-planning-item'
-  ) {
+  } else if (event.command.action === 'purge-planning-item') {
     invariant(
       event.command.operationId === event.id,
       'INVALID_WORK_JOURNAL',
       'Planning identity differs from its original hosted operation.',
     );
+    applyPlanningPurge(data, event.command, event);
+  } else if (
+    event.command.action === 'purged-planning-row' ||
+    event.command.action === 'put-planning-item' ||
+    event.command.action === 'comment-planning-item'
+  ) {
+    const write = event.command.action === 'purged-planning-row' ? event.command.command : event.command;
+    invariant(
+      write.operationId === event.id,
+      'INVALID_WORK_JOURNAL',
+      'Planning identity differs from its original hosted operation.',
+    );
     const count = data.planningItems.length,
       comments = data.planningComments.length;
-    applyPlanningMetadata(data, event.command, event.at);
-    stampPlanningAuthor(data, count, event.command, event.actor, comments);
+    // A purged row's version keeps the original request hash, as the live write recorded it.
+    applyPlanningMetadata(data, write, event.at, purgedRow ? event.request : undefined);
+    stampPlanningAuthor(data, count, write, event.actor, comments);
   } else applyIntentMetadata(data, event.command, { id: event.id, at: event.at, ...options });
   if (isUnifiedWork(data) && creatingId) {
     const created = data.intents.find(intent => intent.id === creatingId);
@@ -240,6 +268,7 @@ export function applyHostedEvent(
   }
   data.hostedEvents.push(event);
   data.revision++;
+  return check;
 }
 export function validateWorkSize(data: WorkData) {
   // The version refinements are per record plus scalar metadata. Validate a

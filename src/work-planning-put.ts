@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Pure: also runs in the Convex non-Node runtime.
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import {
   isShelved,
   planningModelPutKeys,
@@ -14,6 +14,22 @@ import { digest } from './state/hash.js';
 export function planningImportId(key: string) {
   const hex = digest(JSON.stringify(['forge-planning-import', key]));
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+/** The one refusal for anything that would change, restore or read the text of a purged Item, including a retry of
+ * an operation whose row was purged. `recovery` names the Item and, when known, the purge operation. */
+export function planningPurged(itemId: string, purgeOperationId?: string) {
+  return new ForgeError(
+    'PLANNING_ITEM_PURGED',
+    `The Item ${itemId} was deleted permanently: its text, versions and comments are gone, and it cannot be changed, restored or commented on.`,
+    undefined,
+    { itemId, ...(purgeOperationId ? { purgeOperationId } : {}) },
+  );
+}
+
+/** Refuse a planning write whose latest version is a tombstone. */
+export function refusePurged(item: Pick<PlanningItem, 'id' | 'purged'> | undefined) {
+  if (item?.purged) throw planningPurged(item.id, item.purged.operationId);
 }
 
 export type PlanningPut = Extract<PlanningWrite, { action: 'put-planning-item' }>;

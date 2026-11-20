@@ -51,10 +51,15 @@ export async function commandPayloadRows(rows: Rows, lookup: CommandLookup) {
 /** Planning replacement also updates old reciprocal links and source memberships. */
 export async function commandPlanningRows(
   rows: Rows,
-  command: Exclude<HostedEvent['command'], { action: 'source-return' }>,
+  command: Exclude<HostedEvent['command'], { action: 'source-return' | 'purged-planning-row' }>,
   lookup: CommandLookup,
 ) {
-  if (command.action !== 'put-planning-item' && command.action !== 'comment-planning-item') return;
+  if (
+    command.action !== 'put-planning-item' &&
+    command.action !== 'comment-planning-item' &&
+    command.action !== 'purge-planning-item'
+  )
+    return;
   const aliases = commandValues(rows, 'intentAliases'),
     targetId = aliases.find(alias => alias.aliasId === command.itemId)?.intentId ?? command.itemId;
   const target = commandValues(rows, 'intents').find(intent => intent.id === targetId);

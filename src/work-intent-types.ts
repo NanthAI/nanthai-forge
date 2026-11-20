@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Shared Intent metadata is also validated in the Convex non-Node runtime.
 import { z } from 'zod';
-import { planningPutSchema, planningCommentCommandSchema } from './work-planning-types.js';
+import {
+  planningPutSchema,
+  planningCommentCommandSchema,
+  planningPurgeSchema,
+} from './work-planning-types.js';
 const id = z.string().uuid();
 const oid = z.string().regex(/^[0-9a-f]{40,64}$/);
 export const channelBaseSchema = z.object({ name: z.string().trim().min(1), head: oid, acceptanceId: id });
@@ -43,5 +47,7 @@ export const metadataCommandSchema = z.union([
   planningPutSchema,
   planningCommentCommandSchema,
 ]);
+/** Every command a stored Work journal row may hold: client commands plus the server-only purge. */
+export const journalCommandSchema = z.union([metadataCommandSchema, planningPurgeSchema]);
 export type IntentMetadataCommand = z.infer<typeof intentMetadataCommandSchema>;
 export type MetadataCommand = z.infer<typeof metadataCommandSchema>;

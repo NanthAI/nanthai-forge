@@ -59,6 +59,30 @@ stays in members' views under No Initiative, marked "Initiative archived or dele
 Storage: no new table, index or row kind. A move costs what a status change costs today: one version row and one
 search-root rewrite. `was` adds about 15 bytes to that version and its root, and only on shelved Items.
 
+### Permanent deletion (primitive only)
+
+Nothing can trigger a permanent deletion yet: no timer, executor or web action exists, and Deleted makes no
+30-day promise. The Work journal already reads the form one will take. A `purge-planning-item` Work command
+turns a Deleted Item at its version into an id-only tombstone: the next version, titled "Deleted Item", with no body
+or links and `purged` naming the purge operation, the deletion time and who purged it. Only the server's purge step
+appends it (`projectWorkCommand.purgeFromServer`, with its projection in the same mutation); no client entry accepts
+it. Every later put, comment or restore on the tombstone is refused with `PLANNING_ITEM_PURGED`.
+
+A purged journal row keeps its envelope (operation id, revision, actor, time, request hash) and, as its facts, its
+own command with every word replaced (`redactPlanningWrite`: title "Deleted Item", empty body, no reason, comment
+text "Deleted comment") and every structural field kept (kind, status, versions, links, Initiative, thread). It has
+no segment. A purged issue, comment or Intent version keeps its header and digest. Readers accept a journal row under
+one rule: it hashes to its request, or it names a purge command that exists, is itself whole, comes later and names
+the same Item, and its facts are its own operation's command with no words left. Anything else is
+`INVALID_WORK_JOURNAL`. Replay runs a purged row as its redacted command and the purge as the tombstone, with the
+same checks as the first run, so a rebuild keeps every Item that names the purged one and cannot bring the text
+back. A retry of a purged operation answers `PLANNING_ITEM_PURGED`; the same operation id with other inputs stays
+`WORK_OPERATION_CHANGED`. A purged record version answers `PLANNING_ITEM_PURGED` instead of a digest failure.
+`exportJournal` refuses a journal with purged rows to a CLI without the `planning-purge-v1` contract feature
+(`CLI_UPGRADE_REQUIRED`); a legacy source-return whose pinned Work digest a purged row makes unreproducible is
+checked by envelope continuity only, and the export's coverage says so. Healthy rows cost nothing extra; a page with
+purged rows looks each distinct purge up once (up to two indexed reads).
+
 ### Versions
 
 The Item page compares any two versions by line, marking the changed words inside a rewritten line, and restores one
