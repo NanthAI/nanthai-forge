@@ -38,7 +38,7 @@ test('the rebuilt ⌘K palette finds an Item by a pasted id with one lookup, and
   writeFileSync(
     join(temp, 'fixture.tsx'),
     `
-    import React, { useState } from 'react';
+    import React, { useEffect, useState } from 'react';
     import { createRoot } from 'react-dom/client';
     import { getFunctionName } from 'convex/server';
     import { ConvexError } from 'convex/values';
@@ -75,6 +75,10 @@ test('the rebuilt ⌘K palette finds an Item by a pasted id with one lookup, and
       const [keys, setKeys] = useState(false);
       const go = { route: parseAppPath('/-/example/parser'), openPalette: () => setPalette(true), openKeys: () => setKeys(true), signOut() {} };
       useFrameKeys(go);
+      // useFrameKeys adds the ⌘K listener in an effect after the first paint; this later effect in the same component
+      // runs after it, so the test presses ⌘K only once the palette can hear it (Item 6a18b123: on loaded runners the
+      // first press came before the listener and the palette never opened).
+      useEffect(() => { document.documentElement.dataset.keysReady = ''; }, []);
       return <Keys go={go} palette={palette} setPalette={setPalette} keys={keys} setKeys={setKeys} projectId="synthetic" />;
     }
     createRoot(document.getElementById('app')).render(<Fixture />);
@@ -127,6 +131,7 @@ test('the rebuilt ⌘K palette finds an Item by a pasted id with one lookup, and
     });
   });
   await page.goto('https://forge.test/-/example/parser');
+  await page.waitForFunction(() => 'keysReady' in document.documentElement.dataset);
   const calls = () => page.evaluate(() => window.calls);
   const input = page.getByRole('searchbox', { name: 'Search' });
   const open = async () => {
